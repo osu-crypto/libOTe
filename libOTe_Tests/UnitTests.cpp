@@ -178,6 +178,7 @@ namespace tests_libOTe
 			tc.add("RegularPprf_ByLeafIndex_test             ", RegularPprf_ByLeafIndex_test);
 			tc.add("RegularPprf_ByTreeIndex_test             ", RegularPprf_ByTreeIndex_test);
 			tc.add("RegularPprf_callback_test                ", RegularPprf_callback_test);
+			tc.add("Pprf_Audit_Test                           ", Pprf_Audit_Test);
 			tc.add("StationaryPprf_inter_test                ", StationaryPprf_inter_test);
 
 			tc.add("RegularDpf_Multiply_Test                 ", RegularDpf_Multiply_Test);

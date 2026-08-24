@@ -1,8 +1,14 @@
 #pragma once
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/Aligned.h"
+#include "cryptoTools/Crypto/PRNG.h"
 #include <mutex>
 #include <list>
+#include <limits>
+
+#if defined(_MSC_VER) && defined(_M_X64)
+#include <intrin.h>
+#endif
 
 namespace osuCrypto
 {
@@ -127,6 +133,95 @@ namespace osuCrypto
     namespace pprf
     {
 
+        inline u64 checkedAdd(u64 a, u64 b)
+        {
+            if (b > std::numeric_limits<u64>::max() - a)
+                throw std::invalid_argument("PPRF dimension addition overflow. " LOCATION);
+            return a + b;
+        }
+
+        inline u64 checkedMul(u64 a, u64 b)
+        {
+            if (a && b > std::numeric_limits<u64>::max() / a)
+                throw std::invalid_argument("PPRF dimension multiplication overflow. " LOCATION);
+            return a * b;
+        }
+
+        inline u64 checkedRoundUpTo(u64 value, u64 step)
+        {
+            if (step == 0)
+                throw std::invalid_argument("PPRF round-up step must be nonzero. " LOCATION);
+
+            auto remainder = value % step;
+            return remainder ? checkedAdd(value, step - remainder) : value;
+        }
+
+        inline std::size_t checkedSize(u64 value)
+        {
+            if (value > std::numeric_limits<std::size_t>::max())
+                throw std::invalid_argument("PPRF allocation exceeds size_t. " LOCATION);
+            return static_cast<std::size_t>(value);
+        }
+
+        inline u64 validateConfigure(u64 domainSize, u64 pointCount)
+        {
+            if (domainSize & 1)
+                throw std::invalid_argument("PPRF domain must be even. " LOCATION);
+            if (domainSize < 2)
+                throw std::invalid_argument("PPRF domain must be at least 2. " LOCATION);
+            if (pointCount == 0)
+                throw std::invalid_argument("PPRF point count must be nonzero. " LOCATION);
+
+            auto depth = log2ceil(domainSize);
+            if (depth >= 64)
+                throw std::invalid_argument("PPRF domain depth must be less than 64. " LOCATION);
+
+            checkedSize(checkedMul(domainSize, pointCount));
+            checkedSize(checkedMul(depth, pointCount));
+            checkedRoundUpTo(pointCount, 8);
+            return depth;
+        }
+
+        inline u64 reduce128Mod(u64 low, u64 high, u64 modulus)
+        {
+            if (modulus == 0)
+                throw std::invalid_argument("PPRF sampling modulus must be nonzero. " LOCATION);
+
+#if defined(__SIZEOF_INT128__)
+            using uint128 = unsigned __int128;
+            auto value = (static_cast<uint128>(high) << 64) | low;
+            return static_cast<u64>(value % modulus);
+#elif defined(_MSC_VER) && defined(_M_X64)
+            u64 remainder = 0;
+            auto reducedHigh = high % modulus;
+            (void)_udiv128(reducedHigh, low, modulus, &remainder);
+            return remainder;
+#else
+            // Portable fixed-work reduction of a two-limb integer. The
+            // conditional subtraction form avoids overflowing a u64 when
+            // doubling the current remainder.
+            u64 remainder = 0;
+            for (u64 i = 128; i-- > 0;)
+            {
+                auto bit = i < 64 ? ((low >> i) & 1) : ((high >> (i - 64)) & 1);
+                if (remainder >= modulus - remainder)
+                    remainder -= modulus - remainder;
+                else
+                    remainder += remainder;
+
+                if (bit)
+                    remainder = remainder == modulus - 1 ? 0 : remainder + 1;
+            }
+            return remainder;
+#endif
+        }
+
+        inline u64 sampleMod(PRNG& prng, u64 modulus)
+        {
+            auto sample = prng.get<std::array<u64, 2>>();
+            return reduce128Mod(sample[0], sample[1], modulus);
+        }
+
         template<typename VecF, typename CoeffCtx>
         void copyOut(
             VecF& leaf,
@@ -220,17 +315,17 @@ namespace osuCrypto
             u64 elementSize = ctx.template byteSize<F>();
 
             // num of bytes they will take up.
-            u64 numBytes =
-                depth * numTrees * sizeof(std::array<block, 2>) +  // each internal level of the tree has two sums
-                elementSize * numTrees * 2 +          // we must program numTrees inactive F leaves
-                elementSize * numTrees * 2 * programPuncturedPoint; // if we are programing the active lead, then we have numTrees more.
+            auto sumCount = checkedMul(depth, numTrees);
+            auto sumBytes = checkedMul(sumCount, sizeof(std::array<block, 2>));
+            auto leafFactor = 2 + 2 * static_cast<u64>(programPuncturedPoint);
+            auto leafBytes = checkedMul(checkedMul(elementSize, numTrees), leafFactor);
+            auto numBytes = checkedAdd(sumBytes, leafBytes);
 
             // allocate the buffer and partition them.
-            buff.resize(numBytes);
-            sums = span<std::array<block, 2>>((std::array<block, 2>*)buff.data(), depth * numTrees);
+            buff.resize(checkedSize(numBytes));
+            sums = span<std::array<block, 2>>((std::array<block, 2>*)buff.data(), sumCount);
             leaf = span<u8>((u8*)(sums.data() + sums.size()),
-                elementSize * numTrees * 2 +
-                elementSize * numTrees * 2 * programPuncturedPoint
+                leafBytes
             );
 
             void* sEnd = sums.data() + sums.size();
@@ -256,7 +351,7 @@ namespace osuCrypto
             case osuCrypto::PprfOutputFormat::ByLeafIndex:
             case osuCrypto::PprfOutputFormat::ByTreeIndex:
             case osuCrypto::PprfOutputFormat::Interleaved:
-                if (output.size() != domain * pntCount)
+                if (output.size() != checkedMul(domain, pntCount))
                     throw RTE_LOC;
                 break;
             case osuCrypto::PprfOutputFormat::Callback:
@@ -277,19 +372,23 @@ namespace osuCrypto
             std::vector<span<AlignedArray<block, 8>>>& levels,
             bool reuseLevel = true)
         {
+            if (domainSize == 0)
+                throw std::invalid_argument("Invalid PPRF expansion-tree domain. " LOCATION);
             auto depth = log2ceil(domainSize);
+            if (depth >= 64)
+                throw std::invalid_argument("Invalid PPRF expansion-tree domain. " LOCATION);
             levels.resize(depth + 1);
 
             if (reuseLevel)
             {
-                auto secondLast = roundUpTo((domainSize + 1) / 2,2);
-                auto size = roundUpTo((domainSize + secondLast),2);
+                auto secondLast = checkedRoundUpTo(checkedAdd(domainSize, 1) / 2, 2);
+                auto size = checkedRoundUpTo(checkedAdd(domainSize, secondLast), 2);
 
                 // we will allocate the last twoo levels of the tree. 
                 // these levels will be used for the smaller levels as
                 // well. We will alternate between the two.
                 alloc.clear();
-                alloc.resize(size * 8);
+                alloc.resize(checkedSize(checkedMul(size, 8)));
 
                 std::array<span<AlignedArray<block, 8>>, 2>  buffs;
                 buffs[0] = { (AlignedArray<block, 8>*)alloc.data(), secondLast };
@@ -318,11 +417,11 @@ namespace osuCrypto
                 for (u64 i = 0; i < levels.size(); ++i)
                 {
                     auto width = divCeil(domainSize, 1ull << (depth - i));
-                    totalSize += roundUpTo(width, 2);
+                    totalSize = checkedAdd(totalSize, checkedRoundUpTo(width, 2));
                 }
 
                 alloc.clear();
-                alloc.resize(totalSize * 8);
+                alloc.resize(checkedSize(checkedMul(totalSize, 8)));
                 span<AlignedArray<block, 8>> buff((AlignedArray<block, 8>*)alloc.data(), totalSize);
 
                 levels.back() = buff.subspan(0, domainSize);

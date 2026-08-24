@@ -523,11 +523,15 @@ Resolution:
 The receiver validates every base-correlation dimension before mutation. Its
 readiness check now covers the PPRF, malicious check, and both stationary VOLE
 vectors. PPRF point encodings are also validated before active paths change.
+The direct stationary generator removes its base-VOLE choice suffix together
+with the corresponding messages before installing the PPRF base state.
 
 Verification:
 
 - `OtExt_Silent_AuditState_Test` supplies a malicious base-choice vector that
   omits the 128 check choices. The call fails without making the receiver ready.
+- `OtExt_Silent_baseOT_Test` generates stationary base correlations through
+  both the direct base-OT and OT-extension paths.
 
 ## AUD-016: Silent VOLE checksum derandomization omitted the correlation
 
@@ -1071,3 +1075,196 @@ Verification:
 
 - `Dpf_Audit_Test` installs base OTs, clears the Sum DMPF, and checks every
   protocol and configuration field.
+
+## AUD-034: Regular PPRF trusted incomplete expansion state
+
+Status: fixed
+
+Affected code:
+
+- Configuration, readiness, point recovery, and expansion in `RegularPprf`.
+
+Concern:
+
+Expansion indexed the base-OT matrices without verifying that they were set.
+Receiver expansion and point recovery also indexed the active-path matrix
+without verifying its dimensions. Reconfiguration removed the base OTs but
+retained the prior active paths.
+
+Impact:
+
+An incomplete or reconfigured public PPRF object could access storage outside
+its matrices or silently reuse punctures from a prior configuration.
+
+Resolution:
+
+Readiness now requires the exact sender or padded receiver base-OT dimensions.
+Receiver point recovery and expansion require a complete active-path matrix.
+Configuration clears old paths, and callback output requires an installed
+callback before protocol work.
+
+Verification:
+
+- `Pprf_Audit_Test` checks stale choices, absent base state, and a missing
+  callback.
+
+## AUD-035: Failed PPRF expansion retained one-time base OTs
+
+Status: fixed
+
+Affected code:
+
+- Sender and receiver expansion in `RegularPprf`.
+- Initial expansion through `StationaryPprf`.
+
+Concern:
+
+Base OTs were cleared only after successful expansion. An eager expansion
+could expose correction messages for one or more batches and then fail while
+retaining every OT for a retry.
+
+Impact:
+
+Retrying the object could reuse masks already exposed on the wire. This reuse
+violates the one-time correlation requirement and falls outside the PPRF
+security argument.
+
+Resolution:
+
+Expansion performs all local preflight checks before reserving its base OTs.
+Once reserved, the complete set is cleared on both successful and exceptional
+exits. Stationary initial expansion inherits the same lifecycle from its
+embedded Regular PPRF.
+
+Verification:
+
+- `Pprf_Audit_Test` checks that a preflight failure preserves unused OTs.
+- The test checks that callback and malformed-message failures consume the
+  reserved sender and receiver state.
+
+## AUD-036: PPRF dimension arithmetic could wrap
+
+Status: fixed
+
+Affected code:
+
+- PPRF configuration and output validation.
+- Expansion-tree, correction-buffer, and temporary-leaf allocation.
+
+Concern:
+
+Configuration accepted zero point counts, depth-64 domains, and dimensions
+whose products were not representable. Later code could divide by zero, shift
+by 64, or allocate a wrapped buffer before writing the unwrapped logical
+output.
+
+Impact:
+
+Invalid public dimensions could cause undefined behavior, undersized
+allocations followed by out-of-bounds access, or excessive protocol work.
+
+Resolution:
+
+Shared PPRF validation now requires a nonzero point count and a tree depth
+below 64. Checked addition, multiplication, and round-up helpers protect every
+derived allocation and output dimension.
+
+Verification:
+
+- `Pprf_Audit_Test` rejects zero point counts, a depth-64 domain, and wrapped
+  dimensions.
+
+## AUD-037: Stationary PPRF omitted public vector validation
+
+Status: fixed
+
+Affected code:
+
+- Sender and receiver expansion in `StationaryPprf`.
+
+Concern:
+
+Both parties wrote one output for every tree leaf without validating the
+output length. The sender also read one programming value per tree without
+validating the value count.
+
+Impact:
+
+An undersized public vector caused out-of-bounds reads or writes before the
+stationary correlation was returned.
+
+Resolution:
+
+Stationary expansion now uses the shared output-format validator. The sender
+also requires exactly one programming value per tree, and its serialized
+message allocation uses checked arithmetic.
+
+Verification:
+
+- `Pprf_Audit_Test` rejects missing values and undersized stationary output.
+
+## AUD-038: PPRF puncture sampling used biased 64-bit reduction
+
+Status: fixed
+
+Affected code:
+
+- Active-point sampling in `RegularPprfReceiver`.
+
+Concern:
+
+The receiver sampled a 64-bit integer and reduced it modulo the domain. This
+distribution is uniform only when the domain divides `2^64`, while the
+syndrome-decoding analysis assumes uniform positions.
+
+Impact:
+
+The sampling distribution introduced a statistical deviation larger than the
+intended statistical-security allowance for common non-power-of-two domains.
+
+Resolution:
+
+Each point is now obtained by reducing a full 128-bit PRNG sample modulo the
+true domain. Configuration requires `domain * pointCount` to fit in 64 bits,
+so the aggregate statistical distance over every sampled point is below
+`2^-66`, exceeding the selected 40-bit statistical target. Native GCC, Clang,
+and MSVC reductions have a portable fixed-work fallback.
+
+Verification:
+
+- `Pprf_Audit_Test` uses a reduction vector whose result depends on the high
+  64-bit limb.
+- Existing non-power-of-two PPRF tests pass with the new sampler.
+
+## AUD-039: Stationary PPRF allowed puncture mutation after expansion
+
+Status: fixed
+
+Affected code:
+
+- Choice installation and lifecycle reset in `StationaryPprfReceiver`.
+- Lifecycle reset in `StationaryPprfSender`.
+
+Concern:
+
+The receiver could replace its active paths after the retained PPRF share had
+been generated for the old paths. Receiver clear also retained the share and
+both clear operations retained the expansion counter.
+
+Impact:
+
+Later stationary expansions could apply their correction at coordinates that
+did not match the retained share and return an invalid correlation. Cleared
+objects also retained active expansion material.
+
+Resolution:
+
+Nonempty choice updates are rejected after initial expansion. Empty base-state
+updates are no-ops once expansion makes new base OTs unnecessary. Configure
+and clear remove retained shares and reset the expansion counter on both
+parties.
+
+Verification:
+
+- `Pprf_Audit_Test` completes an initial stationary expansion, rejects a later
+  choice update, and checks complete sender and receiver clear state.

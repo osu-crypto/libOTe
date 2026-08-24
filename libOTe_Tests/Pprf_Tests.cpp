@@ -167,6 +167,182 @@ void RegularPprf_expandOne_test(const oc::CLP& cmd)
 #endif
 }
 
+void Pprf_Audit_Test(const oc::CLP&)
+{
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
+	auto expectThrow = [](auto&& fn, const char* message) {
+		bool rejected = false;
+		try { fn(); }
+		catch (const std::exception&) { rejected = true; }
+		if (!rejected)
+			throw UnitTestFail(message);
+	};
+
+	// Configuration must reject dimensions that make later products or
+	// shifts invalid.
+	{
+		RegularPprfSender<block> sender;
+		RegularPprfReceiver<block> receiver;
+		expectThrow([&] { sender.configure(4, 0); },
+			"PPRF sender accepted zero points");
+		expectThrow([&] { receiver.configure(4, 0); },
+			"PPRF receiver accepted zero points");
+		expectThrow([&] { sender.configure(std::numeric_limits<u64>::max() - 1, 1); },
+			"PPRF sender accepted a depth-64 domain");
+		expectThrow([&] { receiver.configure(2, std::numeric_limits<u64>::max()); },
+			"PPRF receiver accepted wrapped dimensions");
+	}
+
+	// The high half of the oversized sample must affect modular reduction.
+	if (pprf::reduce128Mod(0, 1, 3) != 1)
+		throw UnitTestFail("PPRF 128-bit modular reduction ignored its high limb");
+
+	PRNG prng(CCBlock);
+
+	// Reconfiguration removes the prior active paths, and incomplete state is
+	// rejected before raw matrix indexing.
+	{
+		RegularPprfReceiver<block> receiver;
+		receiver.configure(8, 1);
+		receiver.sampleChoiceBits(prng);
+		receiver.configure(8, 1);
+		expectThrow([&] { (void)receiver.getPoints(PprfOutputFormat::ByTreeIndex); },
+			"PPRF receiver retained choices across configuration");
+
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		AlignedUnVector<block> output(8);
+		auto protocol = receiver.expand(
+			sockets[1], output, PprfOutputFormat::ByTreeIndex, false, 1);
+		expectThrow([&] { macoro::sync_wait(std::move(protocol)); },
+			"PPRF receiver expanded without base OTs or choices");
+	}
+
+	// Local preflight failures do not consume unused OTs, while a failure
+	// after expansion begins consumes the complete reserved set.
+	{
+		RegularPprfSender<block> sender;
+		sender.configure(4, 1);
+		std::vector<std::array<block, 2>> base(sender.baseOtCount());
+		prng.get(base.data(), base.size());
+		sender.setBase(base);
+
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		AlignedUnVector<block> output;
+		auto missingCallback = sender.expand(
+			sockets[0], {}, prng.get(), output,
+			PprfOutputFormat::Callback, false, 1);
+		expectThrow([&] { macoro::sync_wait(std::move(missingCallback)); },
+			"PPRF sender accepted callback output without a callback");
+		if (!sender.hasBaseOts())
+			throw UnitTestFail("PPRF preflight failure consumed unused base OTs");
+
+		auto callbackSockets = cp::LocalAsyncSocket::makePair();
+		sender.mOutputFn = [](u64, AlignedUnVector<block>&) {
+			throw std::runtime_error("intentional callback failure");
+		};
+		auto failingCallback = sender.expand(
+			callbackSockets[0], {}, prng.get(), output,
+			PprfOutputFormat::Callback, false, 1);
+		expectThrow([&] { macoro::sync_wait(std::move(failingCallback)); },
+			"PPRF sender callback failure did not propagate");
+		if (sender.hasBaseOts())
+			throw UnitTestFail("PPRF sender retained used base OTs after failure");
+	}
+
+	// A malformed correction message consumes receiver OTs on the exception
+	// path instead of leaving a retryable partially used set.
+	{
+		RegularPprfReceiver<block> receiver;
+		receiver.configure(4, 1);
+		receiver.sampleChoiceBits(prng);
+		std::vector<block> base(receiver.baseOtCount());
+		prng.get(base.data(), base.size());
+		receiver.setBase(base);
+
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		AlignedUnVector<block> output(4);
+		auto honest = receiver.expand(
+			sockets[1], output, PprfOutputFormat::ByTreeIndex, false, 1);
+		auto malformedProtocol = [&]() -> task<> {
+			std::vector<u8> malformed(1);
+			co_await sockets[0].send(std::move(malformed));
+		};
+		auto malformed = malformedProtocol();
+		expectThrow([&] { eval(honest, malformed); },
+			"PPRF receiver accepted a malformed correction message");
+		if (receiver.hasBaseOts())
+			throw UnitTestFail("PPRF receiver retained used base OTs after failure");
+	}
+
+	// Stationary expansion validates both public vectors before it writes or
+	// initializes retained protocol state.
+	{
+		StationaryPprfSender<block> sender;
+		sender.configure(4, 1);
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		AlignedUnVector<block> output(4);
+		auto missingValue = sender.expand(
+			sockets[0], {}, prng.get(), output,
+			PprfOutputFormat::ByTreeIndex, true, 1);
+		expectThrow([&] { macoro::sync_wait(std::move(missingValue)); },
+			"Stationary PPRF sender accepted a missing value");
+
+		AlignedUnVector<block> value(1);
+		AlignedUnVector<block> shortOutput(3);
+		auto shortExpansion = sender.expand(
+			sockets[0], value, prng.get(), shortOutput,
+			PprfOutputFormat::ByTreeIndex, true, 1);
+		expectThrow([&] { macoro::sync_wait(std::move(shortExpansion)); },
+			"Stationary PPRF sender accepted a short output");
+
+		StationaryPprfReceiver<block> receiver;
+		receiver.configure(4, 1);
+		auto shortReceive = receiver.expand(
+			sockets[1], shortOutput,
+			PprfOutputFormat::ByTreeIndex, true, 1);
+		expectThrow([&] { macoro::sync_wait(std::move(shortReceive)); },
+			"Stationary PPRF receiver accepted a short output");
+	}
+
+	// Once stationary shares have been fixed, the receiver cannot replace
+	// their punctures. Clear removes both retained shares and counters.
+	{
+		StationaryPprfSender<block> sender;
+		StationaryPprfReceiver<block> receiver;
+		sender.configure(4, 1);
+		receiver.configure(4, 1);
+		auto choices = receiver.sampleChoiceBits(prng);
+		std::vector<std::array<block, 2>> sendBase(sender.baseOtCount());
+		std::vector<block> recvBase(receiver.baseOtCount());
+		prng.get(sendBase.data(), sendBase.size());
+		for (u64 i = 0; i < recvBase.size(); ++i)
+			recvBase[i] = sendBase[i][choices[i]];
+		sender.setBase(sendBase);
+		receiver.setBase(recvBase);
+
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		AlignedUnVector<block> value(1), senderOutput(4), receiverOutput(4);
+		auto send = sender.expand(
+			sockets[0], value, prng.get(), senderOutput,
+			PprfOutputFormat::ByTreeIndex, true, 1);
+		auto recv = receiver.expand(
+			sockets[1], receiverOutput,
+			PprfOutputFormat::ByTreeIndex, true, 1);
+		eval(send, recv);
+
+		expectThrow([&] { receiver.setChoiceBits(choices); },
+			"Stationary PPRF receiver changed fixed punctures");
+		sender.clear();
+		receiver.clear();
+		if (sender.mShare.size() || receiver.mShare.size() ||
+			sender.mExpandCounter || receiver.mExpandCounter)
+			throw UnitTestFail("Stationary PPRF clear retained expansion state");
+	}
+#else
+	throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
+
 
 template<
 	typename S, typename R,
@@ -744,6 +920,7 @@ void RegularPprf_inter_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_ByLeafIndex_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_ByTreeIndex_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_callback_test(const oc::CLP& cmd) { throwDisabled(); }
+void Pprf_Audit_Test(const oc::CLP& cmd) { throwDisabled(); }
 void StationaryPprf_inter_test(const oc::CLP& cmd) { throwDisabled(); }
 
 #endif

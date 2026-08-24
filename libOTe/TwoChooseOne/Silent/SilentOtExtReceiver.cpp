@@ -232,6 +232,7 @@ namespace osuCrypto
 			// Extract base VOLE A values
 			std::copy(msg.begin() + msg.size() - baseA.size(), msg.end(), baseA.begin());
 			msg.resize(msg.size() - baseA.size());
+			choice.resize(msg.size());
 
 			// For stationary noise, we need to generate base VOLEs
 			if (baseA.size())
