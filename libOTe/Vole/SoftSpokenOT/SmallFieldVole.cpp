@@ -202,7 +202,7 @@ namespace osuCrypto
 			constexpr u64 fieldsPerSuperBlk = volePerSuperBlk << fieldBits_;
 
 			for (u64 nVole = 0; nVole < This.mNumVoles; nVole += volePerSuperBlk,
-				correction += volePerSuperBlk, deltaPtr += fieldBits * volePerSuperBlk)
+				deltaPtr += fieldBits * volePerSuperBlk)
 			{
 				block input[aesPerSuperBlk], hashes[aesPerSuperBlk], xorHashes[fieldsPerSuperBlk];
 				for (u64 i = 0; i < aesPerSuperBlk; ++i, ++seeds)
@@ -227,6 +227,9 @@ namespace osuCrypto
 					for (u64 i = 0; i < volePerSuperBlk; ++i)
 						for (u64 j = 0; j < fieldBits; ++j, ++outW)
 							*outW = xorHashes[i * fieldSize + j + 1];
+
+				if (correctionPresent)
+					correction += volePerSuperBlk;
 			}
 		}
 		else

@@ -180,12 +180,10 @@ namespace osuCrypto
 
 		void generate(u64 blockIdx, const AES& aes, span<block> outU, span<block> outV) const
 		{
-#ifndef NDEBUG
 			if ((u64)outU.size() != uPadded())
 				throw RTE_LOC;
 			if ((u64)outV.size() != vPadded())
 				throw RTE_LOC;
-#endif
 
 			return generate(blockIdx, aes, outU.data(), outV.data());
 		}
@@ -278,12 +276,10 @@ namespace osuCrypto
 		void generate(u64 blockIdx, const AES& aes,
 			span<block> outW, span<const block> correction = span<block>()) const
 		{
-#ifndef NDEBUG
 			if ((u64)outW.size() != wPadded())
 				throw RTE_LOC;
 			if (correction.data() && (u64)correction.size() != uPadded())
 				throw RTE_LOC;
-#endif
 
 			generate(blockIdx, aes, outW.data(), correction.data());
 		}
@@ -302,12 +298,10 @@ namespace osuCrypto
 		template<typename T>
 		void sharedFunctionXor(span<const T> u, span<T> product)
 		{
-#ifndef NDEBUG
 			if ((u64)u.size() != mNumVoles)
 				throw RTE_LOC;
 			if ((u64)product.size() != wPadded())
 				throw RTE_LOC;
-#endif
 			sharedFunctionXor(u.data(), product.data());
 		}
 
@@ -353,7 +347,8 @@ namespace osuCrypto
 	template<typename T>
 	void SmallFieldVoleReceiver::sharedFunctionXor(const T* u, T* product)
 	{
-		for (u64 nVole = 0; nVole < mNumVoles; nVole += 4)
+		u64 nVole = 0;
+		for (; nVole + 4 <= mNumVoles; nVole += 4)
 		{
 			T uBlock[4];
 			for (u64 i = 0; i < 4; ++i)
@@ -362,7 +357,15 @@ namespace osuCrypto
 			for (u64 bit = 0; bit < mFieldBits; ++bit)
 				for (u64 i = 0; i < 4; ++i)
 					product[(nVole + i) * mFieldBits + bit] ^=
-					uBlock[i] & allSame<T>(mDeltaUnpacked[(nVole + i) * mFieldBits + bit]);
+						uBlock[i] & allSame<T>(mDeltaUnpacked[(nVole + i) * mFieldBits + bit]);
+		}
+
+		for (; nVole < mNumVoles; ++nVole)
+		{
+			const T uValue = u[nVole];
+			for (u64 bit = 0; bit < mFieldBits; ++bit)
+				product[nVole * mFieldBits + bit] ^=
+					uValue & allSame<T>(mDeltaUnpacked[nVole * mFieldBits + bit]);
 		}
 	}
 

@@ -587,3 +587,121 @@ Verification:
 
 - `Vole_Silent_Clear_test` populates active sender and receiver state, clears
   both objects, and checks their complete inactive state.
+
+## AUD-018: Optional base-OT receivers accepted mismatched output counts
+
+Status: fixed
+
+Affected code:
+
+- `MasnyRindalKyber::receive()`.
+- `INSECURE_MOCK_OT::receive()`.
+
+Concern:
+
+Each receiver used one caller-provided length to control the protocol and the
+other length to access output or choice storage. Neither receiver required the
+two lengths to agree.
+
+Impact:
+
+A mismatched local API call could read a choice bit or write an output block
+outside the corresponding caller-provided range.
+
+Resolution:
+
+Both receivers now require equal choice and output counts before protocol I/O.
+
+Verification:
+
+- `Bot_MasnyRindal_Kyber_Test` rejects mismatched spans when Kyber OT is
+  available.
+- `Bot_Mock_Test` rejects mismatched spans without starting the mock protocol.
+
+## AUD-019: Small-field VOLE advanced a null correction pointer
+
+Status: fixed
+
+Affected code:
+
+- The low-field receiver kernel in `SmallFieldVole.cpp`.
+
+Concern:
+
+The loop advanced the optional correction pointer after every batch, including
+when the pointer was null. Pointer arithmetic on a null pointer has undefined
+behavior in C++.
+
+Impact:
+
+The ordinary receiver path without corrections executed undefined behavior.
+An optimizing compiler could therefore miscompile the kernel even though the
+advanced pointer was not dereferenced.
+
+Resolution:
+
+The kernel now advances the correction pointer only when corrections are
+present. Its fixed-size batching and memory-access pattern are unchanged.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Test` exercises receiver generation without a
+  correction.
+
+## AUD-020: Small-field VOLE read past a nonmultiple-of-four input
+
+Status: fixed
+
+Affected code:
+
+- `SmallFieldVoleReceiver::sharedFunctionXor()`.
+
+Concern:
+
+The implementation loaded four input elements per iteration even when fewer
+than four logical VOLEs remained.
+
+Impact:
+
+A valid input span whose length was not divisible by four could be read past
+its end. Values found there could also affect padded output blocks.
+
+Resolution:
+
+Complete groups still use the existing four-at-a-time kernel. A scalar tail
+now handles the remaining zero to three logical VOLEs.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` supplies one declared input followed by
+  nonzero sentinels and checks that only the logical output changes.
+
+## AUD-021: Small-field VOLE span validation was debug-only
+
+Status: fixed
+
+Affected code:
+
+- The span overloads of the small-field VOLE sender and receiver generation
+  functions.
+- The span overload of `SmallFieldVoleReceiver::sharedFunctionXor()`.
+
+Concern:
+
+Public span lengths were validated only when `NDEBUG` was absent. Release
+builds passed invalid spans directly to raw-pointer kernels.
+
+Impact:
+
+An invalid local API call in a release build could cause an out-of-bounds read
+or write instead of a deterministic exception.
+
+Resolution:
+
+The public span overloads now validate every required length in all builds.
+The raw-pointer kernels and their hot loops are unchanged.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` checks every affected span dimension and
+  is run in the release test configuration.

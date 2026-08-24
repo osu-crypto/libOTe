@@ -163,8 +163,10 @@ namespace tests_libOTe
 
 			tc.add("Bot_MasnyRindal_Test                    ", Bot_MasnyRindal_Test);
 			tc.add("Bot_MasnyRindal_Kyber_Test              ", Bot_MasnyRindal_Kyber_Test);
+			tc.add("Bot_Mock_Test                             ", Bot_Mock_Test);
 
 			tc.add("Vole_SoftSpokenSmall_Test               ", Vole_SoftSpokenSmall_Test);
+			tc.add("Vole_SoftSpokenSmall_Audit_Test         ", Vole_SoftSpokenSmall_Audit_Test);
 			tc.add("DotExt_Kos_Test                         ", DotExt_Kos_Test);
 			tc.add("DotExt_Iknp_Test                        ", DotExt_Iknp_Test);
 			tc.add("BlkAccCode_mtx_test                      ", BlkAccCode_mtx_test);

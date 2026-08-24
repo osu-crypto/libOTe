@@ -13,6 +13,7 @@ namespace tests_libOTe
     void Bot_Simplest_Test();
     void Bot_MasnyRindal_Test();
     void Bot_MasnyRindal_Kyber_Test();
+    void Bot_Mock_Test();
 
     void Bot_McQuoidRR_Moeller_EKE_Test();
     void Bot_McQuoidRR_Moeller_MR_Test();

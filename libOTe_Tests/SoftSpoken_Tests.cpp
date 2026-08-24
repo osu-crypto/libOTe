@@ -155,6 +155,74 @@ namespace tests_libOTe
 #endif
     }
 
+    void Vole_SoftSpokenSmall_Audit_Test(const oc::CLP&)
+    {
+#ifdef ENABLE_SOFTSPOKEN_OT
+        SmallFieldVoleSender sender;
+        SmallFieldVoleReceiver receiver;
+        sender.init((u64)1, (u64)1, false);
+        receiver.init((u64)1, (u64)1, false);
+
+        std::vector<block> u(sender.uPadded());
+        std::vector<block> v(sender.vPadded());
+        std::vector<block> w(receiver.wPadded());
+        std::vector<block> correction(receiver.uPadded());
+
+        auto expectRejected = [](auto&& fn, const char* message) {
+            bool rejected = false;
+            try { fn(); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail(message);
+        };
+
+        expectRejected([&] {
+            sender.generate(0, mAesFixedKey,
+                span<block>(u.data(), u.size() - 1), span<block>(v));
+        }, "SmallField VOLE sender accepted an undersized u span");
+        expectRejected([&] {
+            sender.generate(0, mAesFixedKey,
+                span<block>(u), span<block>(v.data(), v.size() - 1));
+        }, "SmallField VOLE sender accepted an undersized v span");
+        expectRejected([&] {
+            receiver.generate(0, mAesFixedKey,
+                span<block>(w.data(), w.size() - 1));
+        }, "SmallField VOLE receiver accepted an undersized w span");
+        expectRejected([&] {
+            receiver.generate(0, mAesFixedKey, span<block>(w),
+                span<const block>(correction.data(), correction.size() - 1));
+        }, "SmallField VOLE receiver accepted an undersized correction span");
+        expectRejected([&] {
+            receiver.sharedFunctionXor(
+                span<const block>(u.data(), 0), span<block>(w));
+        }, "SmallField VOLE receiver accepted an undersized input span");
+        expectRejected([&] {
+            receiver.sharedFunctionXor(span<const block>(u.data(), 1),
+                span<block>(w.data(), w.size() - 1));
+        }, "SmallField VOLE receiver accepted an undersized product span");
+
+        // Keep readable nonzero values after the declared one-element input.
+        // The old four-at-a-time implementation consumed all four values and
+        // changed the padded output even though only the first value was valid.
+        std::array<block, 4> tailInput{
+            OneBlock, block::allSame(0x11), block::allSame(0x22), block::allSame(0x44) };
+        std::fill(w.begin(), w.end(), ZeroBlock);
+        receiver.mDeltaUnpacked.resize(receiver.wPadded());
+        std::fill(receiver.mDeltaUnpacked.begin(),
+            receiver.mDeltaUnpacked.end(), 0xff);
+        receiver.sharedFunctionXor(
+            span<const block>(tailInput.data(), 1), span<block>(w));
+
+        if (w[0] != OneBlock)
+            throw UnitTestFail("SmallField VOLE tail omitted the valid input");
+        for (u64 i = 1; i < w.size(); ++i)
+            if (w[i] != ZeroBlock)
+                throw UnitTestFail("SmallField VOLE tail consumed padded input");
+#else
+        throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+    }
+
     void OtExt_SoftSpokenSemiHonest_Test(const oc::CLP& cmd)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT

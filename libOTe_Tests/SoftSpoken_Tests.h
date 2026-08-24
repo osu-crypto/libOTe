@@ -11,6 +11,7 @@
 namespace tests_libOTe
 {
 	void Vole_SoftSpokenSmall_Test(const oc::CLP& cmd);
+	void Vole_SoftSpokenSmall_Audit_Test(const oc::CLP& cmd);
 	void OtExt_SoftSpokenSemiHonest_Test(const oc::CLP& cmd);
 	void OtExt_SoftSpokenSemiHonest_Split_Test(const oc::CLP& cmd);
 	//void OtExt_SoftSpokenSemiHonest21_Test(const oc::CLP& cmd);
