@@ -1952,6 +1952,25 @@ void TernaryDpf_Proto_Test_(const oc::CLP& cmd)
 		dpf[0].expand(points0, values0, [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t; }, prng, sock[0]),
 		dpf[1].expand(points1, values1, [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t; }, prng, sock[1])
 	));
+	for (auto& instance : dpf)
+	{
+		if (instance.hasBaseOts() || instance.mBaseSendOts.size() ||
+			instance.mBaseRecvOts.size() || instance.mBaseChoice.size())
+			throw UnitTestFail("Ternary DPF retained consumed base OTs");
+	}
+	bool rejectedReuse = false;
+	try
+	{
+		coproto::Socket emptySock;
+		macoro::sync_wait(dpf[0].expand(points0, values0,
+			[](auto, auto, auto, auto) {}, prng, emptySock));
+	}
+	catch (const std::exception&)
+	{
+		rejectedReuse = true;
+	}
+	if (!rejectedReuse)
+		throw UnitTestFail("Ternary DPF reused consumed base OTs");
 
 
 	for (u64 i = 0; i < domain; ++i)
@@ -1988,6 +2007,114 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 {
 	TernaryDpf_Proto_Test_<block, CoeffCtxGF2>(cmd);
 	TernaryDpf_Proto_Test_<u8, CoeffCtxGF2>(cmd);
+}
+
+void Dpf_Audit_Test(const oc::CLP&)
+{
+	auto expectRejected = [](auto&& fn, const char* message) {
+		bool rejected = false;
+		try { fn(); }
+		catch (const std::exception&) { rejected = true; }
+		if (!rejected)
+			throw UnitTestFail(message);
+	};
+
+#ifdef ENABLE_REGULAR_DPF
+	{
+		PRNG prng(block(0x4155442d303238ull, 0x4155442d303239ull));
+		constexpr u64 domain = 8;
+		std::vector<u64> points{ 1, 5 };
+		std::vector<block> values{ prng.get(), prng.get() };
+		std::array<RegularDpfKey, 2> keys;
+
+		RegularDpf<block>::keyGen(domain, points, values, prng, keys);
+		values = { prng.get(), prng.get() };
+		RegularDpf<block>::keyGen(domain, points, values, prng, keys);
+		if (keys[0].mLeafVals.size() != points.size() * sizeof(block) ||
+			keys[1].mLeafVals.size() != points.size() * sizeof(block))
+			throw UnitTestFail("Regular DPF appended reused leaf programming");
+
+		auto oversizedLeaf = keys[0];
+		oversizedLeaf.mLeafVals.push_back(0);
+		expectRejected([&] {
+			RegularDpf<block>::expand(0, domain, oversizedLeaf,
+				[](auto, auto, auto, auto) {});
+		}, "Regular DPF accepted an oversized leaf buffer");
+
+		auto shortWords = keys[0];
+		shortWords.mCorrectionWords.resize(log2ceil(domain) - 1, points.size());
+		expectRejected([&] {
+			RegularDpf<block>::expand(0, domain, shortWords,
+				[](auto, auto, auto, auto) {});
+		}, "Regular DPF accepted inconsistent correction dimensions");
+
+		std::array<RegularDpfKey, 2> puncturedKeys;
+		std::vector<block> noValues;
+		RegularDpf<block>::keyGen(domain, points, noValues, prng, puncturedKeys);
+		if (puncturedKeys[0].mCorrectionBits.cols() != points.size() ||
+			puncturedKeys[0].mLeafVals.size())
+			throw UnitTestFail("Regular DPF ignored punctured-key points");
+
+		std::vector<u64> invalidPoint{ domain };
+		std::vector<block> invalidValue{ prng.get() };
+		expectRejected([&] {
+			RegularDpf<block>::keyGen(domain, invalidPoint, invalidValue, prng, keys);
+		}, "Regular DPF accepted a point outside its domain");
+
+		SumDmpf<block> sum;
+		sum.init(0, domain, 2, 1);
+		auto count = sum.baseOtCount().mRecvCount;
+		std::vector<std::array<block, 2>> sendOts(count);
+		std::vector<block> recvOts(count);
+		BitVector choices(count);
+		sum.setBaseOts(sendOts, recvOts, choices);
+		sum.mPoints = points;
+		sum.clear();
+		if (sum.hasBaseOts() || sum.mPartyIdx || sum.mDomain || sum.mNumSets ||
+			sum.mNumPointsPerSet || sum.mPoints.size() ||
+			sum.mDpf.mMultiplier.mSendOts.size())
+			throw UnitTestFail("Sum DMPF clear retained protocol state");
+	}
+#endif
+
+#ifdef ENABLE_SPARSE_DPF
+	{
+		PRNG prng(block(0x4155442d303331ull, 0x4155442d303332ull));
+		coproto::Socket sock;
+		std::vector<block> noValues;
+
+		SparseDpf wrongRows;
+		wrongRows.init(0, 2, 8, 0);
+		std::vector<u64> onePoint{ 1 };
+		std::vector<std::vector<u32>> oneSet{ { 1 } };
+		expectRejected([&] {
+			macoro::sync_wait(wrongRows.expand(onePoint, noValues,
+				[](auto, auto, auto, auto) {}, prng, oneSet, sock));
+		}, "Sparse DPF accepted the wrong row count");
+
+		auto rejectSet = [&](std::vector<u32> set, const char* message) {
+			SparseDpf sparse;
+			sparse.init(0, 1, 8, 0);
+			std::vector<std::vector<u32>> sets{ std::move(set) };
+			expectRejected([&] {
+				macoro::sync_wait(sparse.expand(onePoint, noValues,
+					[](auto, auto, auto, auto) {}, prng, sets, sock));
+			}, message);
+		};
+		rejectSet({}, "Sparse DPF accepted an empty sparse set");
+		rejectSet({ 2, 1 }, "Sparse DPF accepted an unsorted sparse set");
+		rejectSet({ 1, 1 }, "Sparse DPF accepted duplicate sparse points");
+		rejectSet({ 1, 8 }, "Sparse DPF accepted an out-of-domain sparse point");
+
+		SparseDpf singleton;
+		singleton.init(0, 1, 8, 0);
+		u64 outputs = 0;
+		macoro::sync_wait(singleton.expand(onePoint, noValues,
+			[&](auto, auto, auto, auto) { ++outputs; }, prng, oneSet, sock));
+		if (outputs != 1)
+			throw UnitTestFail("Sparse DPF did not expand a singleton sparse set");
+	}
+#endif
 }
 
 

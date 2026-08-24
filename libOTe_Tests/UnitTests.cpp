@@ -89,6 +89,7 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Vec_Test                      ", SparseDpf_Vec_Test);
 			tc.add("SparseDpf_Punct_Test                    ", SparseDpf_Punct_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
+			tc.add("Dpf_Audit_Test                          ", Dpf_Audit_Test);
 
 			tc.add("BinSolver_multiply_test                 ", BinSolver_multiply_test);
 			tc.add("BinSolver_multiplyMtx_test              ", BinSolver_multiplyMtx_test);
@@ -191,6 +192,7 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Punct_Test                     ", SparseDpf_Punct_Test);
 			
 			tc.add("TritDpf_Proto_Test                       ", TritDpf_Proto_Test);
+			tc.add("Dpf_Audit_Test                           ", Dpf_Audit_Test);
 														   
 														   
 														   

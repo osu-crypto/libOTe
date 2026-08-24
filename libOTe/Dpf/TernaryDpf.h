@@ -13,6 +13,7 @@
 #include "DpfMult.h"
 #include "libOTe/Triple/Foleage/FoleageUtils.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include <limits>
 
 namespace osuCrypto
 {
@@ -52,10 +53,32 @@ namespace osuCrypto
 			if (!numPoints)
 				throw RTE_LOC;
 
-			mDepth = log3ceil(domain);
+			auto depth = log3ceil(domain);
+			if (depth > 32 ||
+				(depth && numPoints > std::numeric_limits<u64>::max() / (2 * depth)))
+				throw RTE_LOC;
+
+			clearBaseOts();
+			mDepth = depth;
 			mPartyIdx = partyIdx;
 			mDomain = domain;
 			mNumPointsPerSet = numPoints;
+		}
+
+		bool hasBaseOts() const
+		{
+			auto count = baseOtCount();
+			return count != 0 && mOtIdx == 0 &&
+				mBaseSendOts.size() == count &&
+				mBaseRecvOts.size() == count &&
+				mBaseChoice.size() == count;
+		}
+
+		void clearBaseOts()
+		{
+			mBaseSendOts.clear();
+			mBaseRecvOts.clear();
+			mBaseChoice.clear();
 			mOtIdx = 0;
 		}
 
@@ -137,6 +160,14 @@ namespace osuCrypto
 				if (v)
 					throw std::runtime_error("TernaryDpf: invalid point sharing. point is larger than 3^D " LOCATION);
 			}
+
+			if (!hasBaseOts())
+				throw std::runtime_error("TernaryDpf requires a fresh base-OT set. " LOCATION);
+			struct ClearBaseOtsOnExit
+			{
+				TernaryDpf* mThis;
+				~ClearBaseOtsOnExit() { mThis->clearBaseOts(); }
+			} clearBaseOtsOnExit{ this };
 
 			u64 numPoints8 = mNumPointsPerSet / 8 * 8;
 			auto pow3 = ipow(3, mDepth);

@@ -4,6 +4,7 @@
 #include "cryptoTools/Common/Timer.h"
 #include "RegularDpf.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include <limits>
 
 namespace osuCrypto
 {
@@ -34,11 +35,15 @@ namespace osuCrypto
 			u64 pointsPerSet,
 			u64 numSets)
 		{
+			if (pointsPerSet && numSets > std::numeric_limits<u64>::max() / pointsPerSet)
+				throw RTE_LOC;
+			auto numPoints = pointsPerSet * numSets;
+			mDpf.init(partyIdx, domain, numPoints);
 			mPartyIdx = partyIdx;
 			mNumPointsPerSet = pointsPerSet;
 			mDomain = domain;
 			mNumSets = numSets;
-			mDpf.init(partyIdx, domain, pointsPerSet * numSets);
+			mPoints.clear();
 		}
 
 		struct BaseCorCount
@@ -113,8 +118,15 @@ namespace osuCrypto
 			co_return;
 		}
 
-		void clear() {
+		void clear()
+		{
 			mPoints.clear();
+			mDpf.clear();
+			mPartyIdx = 0;
+			mNumPointsPerSet = 0;
+			mNumSets = 0;
+			mDomain = 0;
+			mPrint = false;
 		}
 
 	};

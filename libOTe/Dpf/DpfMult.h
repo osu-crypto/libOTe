@@ -30,7 +30,13 @@ namespace osuCrypto
 
 		u64 mOtIdx = 0;
 
-		bool hasBaseOts() const { return mChoiceBits.size(); }
+		bool hasBaseOts() const
+		{
+			return mOtIdx < mTotalMults &&
+				mChoiceBits.size() == mTotalMults &&
+				mRecvOts.size() == mTotalMults &&
+				mSendOts.size() == mTotalMults;
+		}
 
 		u8 lsb(const block& b)
 		{
@@ -1130,5 +1136,4 @@ namespace osuCrypto
 
 
 #endif // defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
-
 

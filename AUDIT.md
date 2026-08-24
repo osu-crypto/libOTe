@@ -891,3 +891,183 @@ Verification:
 
 - `SilentOtTriple_Audit_test` checks the default initialization and base-OT
   state.
+
+## AUD-028: Reused Regular-DPF keys retained old leaf programming
+
+Status: fixed
+
+Affected code:
+
+- Static key generation and leaf deserialization in `RegularDpf`.
+
+Concern:
+
+Static key generation resized the correction matrices without clearing the
+serialized leaf values. It then appended the new values. Reusing a key object
+therefore produced a leaf buffer containing every prior generation.
+
+Impact:
+
+Expansion allocated one field element per tree but deserialized the complete
+retained buffer. A reused key could overwrite the destination allocation.
+
+Resolution:
+
+Resizing a key without programmed leaves now clears its leaf buffer. Static
+key generation consequently produces one canonical leaf buffer.
+
+Verification:
+
+- `Dpf_Audit_Test` generates twice into the same keys and checks the resulting
+  leaf-buffer length.
+
+## AUD-029: Regular-DPF expansion trusted inconsistent key dimensions
+
+Status: fixed
+
+Affected code:
+
+- Static key generation and noninteractive expansion in `RegularDpf`.
+
+Concern:
+
+Expansion derived its tree count from one correction matrix. It did not check
+the other matrix dimensions or the serialized leaf length. Static punctured
+key generation also used the empty value count instead of the point count.
+
+Impact:
+
+An inconsistent key could cause out-of-bounds matrix access or an oversized
+deserialization. Static punctured key generation silently omitted every tree.
+
+Resolution:
+
+Expansion now requires matching correction dimensions and either zero or one
+serialized leaf value per tree. Static generation uses the point count and
+rejects empty point sets, unsupported domains, and plaintext points outside
+the domain.
+
+Verification:
+
+- `Dpf_Audit_Test` rejects short correction matrices and oversized leaf
+  buffers. It also checks punctured key generation and point bounds.
+
+## AUD-030: Direct Ternary-DPF reuse read consumed base OTs
+
+Status: fixed
+
+Affected code:
+
+- Base-OT state and expansion in `TernaryDpf`.
+- Base-OT readiness in `DpfMult`.
+
+Concern:
+
+Ternary expansion advanced its OT index without checking that a complete
+unused set remained. A second direct expansion indexed beyond the installed
+vectors. Readiness checks also treated exhausted OT vectors as available.
+
+Impact:
+
+Reusing a public DPF instance could cause out-of-bounds reads. A failed
+protocol could leave partially consumed correlation state available to a
+retry.
+
+Resolution:
+
+Ternary expansion now reserves one complete fresh set before protocol work.
+It clears that set on every exit. DPF multiplier readiness now includes exact
+vector dimensions and the current consumption index.
+
+Verification:
+
+- `TritDpf_Proto_Test` checks that expansion clears all Ternary base OTs and
+  rejects a second expansion.
+- The Foleage protocol tests pass with the strengthened Ternary lifecycle.
+
+## AUD-031: Sparse-DPF expansion accepted a different tree count
+
+Status: fixed
+
+Affected code:
+
+- Input validation in `SparseDpf::expand()`.
+
+Concern:
+
+Expansion compared the point count with the supplied sparse-set row count.
+It did not compare either count with the tree count fixed by `init()`.
+
+Impact:
+
+Too few rows caused out-of-bounds access while initializing the trees. Extra
+rows could index beyond the tree array during dense expansion.
+
+Resolution:
+
+The point count and sparse-set row count must now equal the initialized tree
+count before allocation or protocol work.
+
+Verification:
+
+- `Dpf_Audit_Test` supplies fewer rows than the initialized tree count and
+  checks rejection.
+
+## AUD-032: Sparse-DPF set invariants were not enforced in release builds
+
+Status: fixed
+
+Affected code:
+
+- Sparse-set validation and partitioning in `SparseDpf`.
+
+Concern:
+
+Empty, duplicate, unsorted, and out-of-domain sparse sets reached the tree
+partitioner. Its principal safety checks were debug-only. A singleton set at
+zero dense depth also passed an empty child to the partitioner.
+
+Impact:
+
+Invalid sets could underflow a bit index, violate the ordering precondition of
+`upper_bound`, or index beyond a dense seed matrix.
+
+Resolution:
+
+Expansion now validates every public sparse set before allocation. The
+partitioner rejects empty ranges and exhausted bit prefixes in every build.
+The zero-dense-depth path handles a singleton directly.
+
+Verification:
+
+- `Dpf_Audit_Test` rejects each invalid set form and expands a singleton set
+  at zero dense depth.
+
+## AUD-033: Sum DMPF clear retained protocol and base-OT state
+
+Status: fixed
+
+Affected code:
+
+- Initialization and `clear()` in `SumDmpf`.
+
+Concern:
+
+The clear operation removed only the point shares. The embedded Regular DPF,
+its base OTs, dimensions, and readiness state remained active.
+
+Impact:
+
+An object reported cleared could retain secret correlation material and could
+be reused under its prior configuration.
+
+Resolution:
+
+The clear operation now clears the embedded DPF and resets every configuration
+field. Initialization also rejects a wrapped product of set dimensions and
+removes point state from a prior configuration.
+
+Verification:
+
+- `Dpf_Audit_Test` installs base OTs, clears the Sum DMPF, and checks every
+  protocol and configuration field.

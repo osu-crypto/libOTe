@@ -17,3 +17,4 @@ void SparseDpf_Mtx_Test(const oc::CLP& cmd);
 void SparseDpf_Vec_Test(const oc::CLP& cmd);
 void SparseDpf_Punct_Test(const oc::CLP& cmd);
 void TritDpf_Proto_Test(const oc::CLP& cmd);
+void Dpf_Audit_Test(const oc::CLP& cmd);
