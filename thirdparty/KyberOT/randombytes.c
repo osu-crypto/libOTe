@@ -46,10 +46,10 @@ void randombytes_kyber(unsigned char *buf,size_t buflen)
   {
     errno = 0;
     r = syscall(SYS_getrandom, buf, buflen - d, 0); 
-    if(r < 0) 
+    if(r <= 0)
     {
-      if (errno == EINTR) continue;
-      randombytes_fallback(buf, buflen);
+      if (r < 0 && errno == EINTR) continue;
+      randombytes_fallback(buf, buflen - d);
       return;
     }
     buf += r;

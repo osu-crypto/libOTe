@@ -59,6 +59,11 @@ namespace osuCrypto
 			refillBuffer();
 		}
 
+		bool hasSeed() const
+		{
+			return mIndex != ~0ull;
+		}
+
 		const AES& get() const
 		{
 			assert(mIndex != ~0ull);
@@ -82,7 +87,12 @@ namespace osuCrypto
 		// Both can be used independently.
 		AESStream split()
 		{
-			return mPrng.ecbEncBlock(block(23142341234234ull, mIndex++));
+			if (!hasSeed())
+				throw RTE_LOC;
+
+			auto seed = mPrng.ecbEncBlock(block(23142341234234ull, mIndex));
+			next();
+			return seed;
 		}
 	};
 
@@ -115,12 +125,14 @@ namespace osuCrypto
 			if (mAesKeyUseCount == ~0ull)
 				throw RTE_LOC;
 
-			mAesKeyUseCount += n;
-			if (mAesKeyUseCount > maxAESKeyUsage)
+			if (mAesKeyUseCount > maxAESKeyUsage ||
+				n > maxAESKeyUsage - mAesKeyUseCount)
 			{
-				mAesKeyUseCount = 0;
 				mAESs.next();
+				mAesKeyUseCount = n;
 			}
+			else
+				mAesKeyUseCount += n;
 
 			return mAESs.get();
 		}
@@ -136,8 +148,12 @@ namespace osuCrypto
 		AESRekeyManager split()
 		{
 			AESRekeyManager r;
+			if (!mAESs.hasSeed())
+				return r;
+
 			r.mAESs = mAESs.split();
 			r.mAesKeyUseCount = 0;
+			mAesKeyUseCount = 0;
 			return r;
 		}
 

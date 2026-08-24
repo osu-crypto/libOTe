@@ -1268,3 +1268,130 @@ Verification:
 
 - `Pprf_Audit_Test` completes an initial stationary expansion, rejects a later
   choice update, and checks complete sender and receiver clear state.
+
+## AUD-040: Kyber entropy fallback could overwrite its destination
+
+Status: fixed
+
+Affected code:
+
+- `thirdparty/KyberOT/randombytes.c`, in `randombytes_kyber()`.
+
+Concern:
+
+After a partial `getrandom()` result, the function advanced its output pointer.
+If a later call failed, the fallback received the original byte count at the
+advanced pointer. The fallback could therefore write past the destination.
+
+Impact:
+
+The optional MR-Kyber backend could corrupt adjacent memory when the operating
+system returned partial entropy and a later entropy request failed.
+
+Resolution:
+
+The fallback now receives only the unfilled suffix. A zero-byte system call
+also enters the fallback instead of leaving the entropy loop without progress.
+
+Verification:
+
+- The Linux-only MR-Kyber entropy source compiles with the corrected remaining
+  length and zero-progress branch.
+
+## AUD-041: Unseeded SoftSpoken splitting read an invalid AES schedule
+
+Status: fixed
+
+Affected code:
+
+- `AESStream::split()` and `AESRekeyManager::split()` in
+  `SoftSpokenShOtExt.h`.
+
+Concern:
+
+An extender can be split after base OTs are installed but before the protocol
+seed is exchanged. The split path evaluated the default-constructed AES
+object, whose key schedule was not initialized, and marked the child stream as
+seeded.
+
+Impact:
+
+Pre-expansion splitting read indeterminate state. This ordering is used by the
+multithreaded frontend and could produce undefined behavior before the child
+installed its protocol seed.
+
+Resolution:
+
+AES streams now expose their seeded state and reject direct unseeded splits.
+The rekey manager preserves unseeded parent and child states without evaluating
+AES.
+
+Verification:
+
+- `OtExt_SoftSpoken_AesState_Audit_Test` checks direct rejection and confirms
+  that both managers remain unseeded.
+
+## AUD-042: SoftSpoken rekey accounting omitted the triggering batch
+
+Status: fixed
+
+Affected code:
+
+- `AESRekeyManager::useAES()` in `SoftSpokenShOtExt.h`.
+
+Concern:
+
+When a batch exceeded the remaining use allowance, the manager selected a new
+key and reset its counter to zero. The current batch then used the new key but
+was absent from that key's counter.
+
+Impact:
+
+Beyond an indivisible caller batch's own size, the key could process the next
+1,024 secret blocks without rekeying. This weakened the configured computation
+and security tradeoff.
+
+Resolution:
+
+The triggering batch becomes the new key's initial use count. An indivisible
+batch larger than the nominal allowance retains its supported behavior: it gets
+a fresh key to itself and forces another rekey before subsequent use. A checked
+comparison avoids counter overflow.
+
+Verification:
+
+- `OtExt_SoftSpoken_AesState_Audit_Test` crosses two consecutive rekey
+  boundaries and confirms that an oversized batch cannot accumulate later use
+  on the same key.
+
+## AUD-043: SoftSpoken splitting could resurrect an expired cached AES key
+
+Status: fixed
+
+Affected code:
+
+- `AESStream::split()` and `AESRekeyManager::split()` in
+  `SoftSpokenShOtExt.h`.
+
+Concern:
+
+`AESStream` caches eight derived keys. Splitting incremented the logical index
+without invoking the cache-refill path. A split at index seven advanced the
+parent to index eight but selected stale cache slot zero.
+
+Impact:
+
+The parent reused a key that had already reached its usage limit. Repeated
+splits could bypass the rekey policy and extend the lifetime of expired keys.
+
+Resolution:
+
+Splitting now advances through `next()`, which refills the cache at its
+boundary. The parent usage count resets because the parent also advances to a
+fresh key.
+
+Verification:
+
+- `OtExt_SoftSpoken_AesState_Audit_Test` checks the index-seven split against
+  independently derived key eight and exercises the parent usage limit after
+  a seeded split.

@@ -223,6 +223,92 @@ namespace tests_libOTe
 #endif
     }
 
+    void OtExt_SoftSpoken_AesState_Audit_Test(const oc::CLP&)
+    {
+#ifdef ENABLE_SOFTSPOKEN_OT
+        const auto expectRejected = [](auto&& fn, const char* message) {
+            bool rejected = false;
+            try { fn(); }
+            catch (const std::exception&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail(message);
+        };
+
+        // Splitting before the protocol seed is installed must preserve the
+        // unseeded state. The old path evaluated an uninitialized AES object
+        // and treated the resulting child as seeded.
+        AESStream unseededStream;
+        expectRejected([&] { (void)unseededStream.split(); },
+            "SoftSpoken split an unseeded AES stream");
+
+        AESRekeyManager unseededManager;
+        auto unseededChild = unseededManager.split();
+        expectRejected([&] { (void)unseededManager.useAES(1); },
+            "SoftSpoken seeded the parent during an unseeded split");
+        expectRejected([&] { (void)unseededChild.useAES(1); },
+            "SoftSpoken seeded the child during an unseeded split");
+
+        const block seed(0x4155442d303433ull, 0x53504c49542d4145ull);
+        AES expectedPrng(seed);
+        std::array<block, AESStream::chunkSize + 1> expectedKeys;
+        expectedPrng.ecbEncCounterMode(0, expectedKeys);
+
+        AESStream stream(seed);
+        for (u64 i = 0; i != AESStream::chunkSize; ++i)
+        {
+            if (stream.get().getKey() != expectedKeys[i])
+                throw UnitTestFail(
+                    "SoftSpoken AES stream selected the wrong cached key");
+            if (i + 1 != AESStream::chunkSize)
+                stream.next();
+        }
+        auto childStream = stream.split();
+        if (stream.get().getKey() != expectedKeys[AESStream::chunkSize])
+            throw UnitTestFail(
+                "SoftSpoken AES split reused a stale cache entry");
+        if (!childStream.hasSeed())
+            throw UnitTestFail("SoftSpoken AES split returned an unseeded child");
+
+        // A batch that triggers a rekey is the first use of the new key and
+        // must count against that key's limit.
+        AESRekeyManager manager;
+        manager.setSeed(seed);
+        const auto key0 = manager.useAES(
+            AESRekeyManager::maxAESKeyUsage).getKey();
+        const auto key1 = manager.useAES(1).getKey();
+        const auto key2 = manager.useAES(
+            AESRekeyManager::maxAESKeyUsage).getKey();
+        if (key0 == key1 || key1 == key2)
+            throw UnitTestFail(
+                "SoftSpoken AES rekey accounting omitted a triggering batch");
+
+        // A seeded split advances the parent to a fresh key. Its usage count
+        // therefore starts at zero, independently of the previous key.
+        manager.setSeed(seed);
+        (void)manager.useAES(AESRekeyManager::maxAESKeyUsage / 2);
+        auto childManager = manager.split();
+        const auto parentAfterSplit = manager.useAES(
+            AESRekeyManager::maxAESKeyUsage).getKey();
+        const auto parentAfterLimit = manager.useAES(1).getKey();
+        if (parentAfterSplit == parentAfterLimit)
+            throw UnitTestFail(
+                "SoftSpoken AES split retained the previous key's usage count");
+        (void)childManager.useAES(1);
+
+        // Some callers submit an indivisible batch larger than the nominal
+        // limit. It gets a key to itself and forces a rekey before later use.
+        manager.setSeed(seed);
+        const auto oversizedKey = manager.useAES(
+            AESRekeyManager::maxAESKeyUsage + 128).getKey();
+        const auto afterOversizedKey = manager.useAES(1).getKey();
+        if (oversizedKey == afterOversizedKey)
+            throw UnitTestFail(
+                "SoftSpoken accumulated use after an oversized AES batch");
+#else
+        throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+    }
+
     void OtExt_SoftSpokenSemiHonest_Test(const oc::CLP& cmd)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
