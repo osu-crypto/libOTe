@@ -14,6 +14,7 @@
 #include <cryptoTools/Common/Matrix.h>
 #include <cryptoTools/Common/Timer.h>
 #include <list>
+#include <limits>
 #include <vector>
 #include "libOTe/Tools/Coproto.h"
 #ifdef ENABLE_CIRCUITS
@@ -27,6 +28,8 @@ namespace osuCrypto
 	class Gmw final : public TimerAdapter
 	{
 	public:
+		static constexpr u64 MaxOleDimension =
+			std::numeric_limits<u32>::max() / 2;
 
 		struct Debug
 		{
@@ -82,7 +85,6 @@ namespace osuCrypto
 
 		void clear()
 		{
-			//mTriples.clear();
 			mPrint = {};
 			mCir = {};
 			mGates = {};
@@ -95,6 +97,9 @@ namespace osuCrypto
 			mN128 = 0;
 			mRemainingMappings = 0;
 			mRole = ~0ull;
+			mOleIndex = 0;
+			mOleMult = {};
+			mOleAdd = {};
 		}
 
 		// init should be called first. 
@@ -154,7 +159,7 @@ namespace osuCrypto
 				throw std::runtime_error("GMW mapOutput called with incorrect number of wires. " LOCATION);
 			if (divCeil(mN, 8) > d.cols())
 				throw std::runtime_error("GMW mapOutput called with incorrect number of inputs. " LOCATION);
-			if (d.rows() % sizeof(block))
+			if (d.cols() % sizeof(block))
 				throw std::runtime_error("the alignment of the data must be at least sizeof(block). " LOCATION);
 
 			for (u64 j = 0; j < d.rows(); ++j)
@@ -163,6 +168,9 @@ namespace osuCrypto
 
 		u64 oleCount() const
 		{
+			if (mN > MaxOleDimension ||
+				mCir.mNonlinearGateCount > MaxOleDimension)
+				throw std::invalid_argument("GMW OLE dimensions exceed the supported range. " LOCATION);
 			return 2 * mCir.mNonlinearGateCount * roundUpTo(mN, 128);
 		}
 

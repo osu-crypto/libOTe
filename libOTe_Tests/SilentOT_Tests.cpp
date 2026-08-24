@@ -1208,6 +1208,93 @@ void OtExt_Silent_AuditState_Test(const oc::CLP& cmd)
 
 	if (!rejectedMismatch || mismatchedReceiver.isConfigured())
 		throw RTE_LOC;
+
+	SilentOtExtSender lifecycleSender;
+	SilentOtExtReceiver lifecycleReceiver;
+	lifecycleSender.configure(128, 2, 3, SilentSecType::Malicious,
+		SdNoiseDistribution::Stationary, MultType::ExConv21x24);
+	lifecycleReceiver.configure(128, 2, 3, SilentSecType::Malicious,
+		SdNoiseDistribution::Stationary, MultType::ExConv21x24);
+
+	auto senderCount = lifecycleSender.baseCount();
+	std::vector<std::array<block, 2>> silentSendBase(senderCount.mBaseOtCount);
+	std::vector<block> silentBaseB(senderCount.mBaseVoleCount);
+	prng.get(silentSendBase.data(), silentSendBase.size());
+	prng.get(silentBaseB.data(), silentBaseB.size());
+	lifecycleSender.setBaseCors(silentSendBase, silentBaseB, prng.get());
+
+	auto receiverCount = lifecycleReceiver.baseCount();
+	auto silentChoices = lifecycleReceiver.sampleBaseChoiceBits(prng);
+	silentChoices.resize(receiverCount.mBaseOtCount);
+	std::vector<block> silentRecvBase(receiverCount.mBaseOtCount);
+	std::vector<block> silentBaseA(receiverCount.mBaseVoleCount);
+	BitVector silentBaseC(receiverCount.mBaseVoleCount);
+	prng.get(silentRecvBase.data(), silentRecvBase.size());
+	prng.get(silentBaseA.data(), silentBaseA.size());
+	silentBaseC.randomize(prng);
+	lifecycleReceiver.setBaseCors(
+		silentRecvBase, silentChoices, silentBaseA, silentBaseC);
+
+	auto invalidMult = static_cast<MultType>(255);
+	bool senderConfigThrew = false;
+	bool receiverConfigThrew = false;
+	try
+	{
+		lifecycleSender.configure(256, 2, 1, SilentSecType::SemiHonest,
+			SdNoiseDistribution::Regular, invalidMult);
+	}
+	catch (const std::exception&)
+	{
+		senderConfigThrew = true;
+	}
+	try
+	{
+		lifecycleReceiver.configure(256, 2, 1, SilentSecType::SemiHonest,
+			SdNoiseDistribution::Regular, invalidMult);
+	}
+	catch (const std::exception&)
+	{
+		receiverConfigThrew = true;
+	}
+
+	if (!senderConfigThrew || !receiverConfigThrew ||
+		lifecycleSender.mRequestNumOts != 128 ||
+		lifecycleReceiver.mRequestNumOts != 128 ||
+		lifecycleSender.mSecurityType != SilentSecType::Malicious ||
+		lifecycleReceiver.mSecurityType != SilentSecType::Malicious ||
+		lifecycleSender.mNoiseDist != SdNoiseDistribution::Stationary ||
+		lifecycleReceiver.mNoiseDist != SdNoiseDistribution::Stationary ||
+		!lifecycleSender.hasBaseCors() || !lifecycleReceiver.hasBaseCors())
+		throw RTE_LOC;
+
+	lifecycleSender.mB.resize(1);
+	lifecycleSender.mEncodeTemp.resize(1);
+	lifecycleReceiver.mA.resize(1);
+	lifecycleReceiver.mC.resize(1);
+	lifecycleReceiver.mEncodeTemp.resize(1);
+	lifecycleSender.clear();
+	lifecycleReceiver.clear();
+
+	auto senderGenHasBase = std::visit(
+		[](const auto& gen) { return gen.hasBaseOts(); }, lifecycleSender.mGenVar);
+	auto receiverGenHasBase = std::visit(
+		[](const auto& gen) { return gen.hasBaseOts(); }, lifecycleReceiver.mGenVar);
+	if (lifecycleSender.isConfigured() || lifecycleReceiver.isConfigured() ||
+		senderGenHasBase || receiverGenHasBase ||
+		lifecycleSender.mNumPartitions || lifecycleReceiver.mNumPartitions ||
+		!lifecycleSender.mB.empty() || !lifecycleReceiver.mA.empty() ||
+		!lifecycleReceiver.mC.empty() ||
+		!lifecycleSender.mEncodeTemp.empty() ||
+		!lifecycleReceiver.mEncodeTemp.empty() ||
+		lifecycleSender.mDelta.has_value() ||
+		!lifecycleSender.mMalCheckOts.empty() ||
+		!lifecycleReceiver.mMalCheckOts.empty() ||
+		lifecycleReceiver.mMalCheckChoice.size() ||
+		!lifecycleSender.mBaseB.empty() ||
+		!lifecycleReceiver.mBaseA.empty() || lifecycleReceiver.mBaseC.size() ||
+		lifecycleSender.mCodeSeed != ZeroBlock ||
+		lifecycleReceiver.mCodeSeed != ZeroBlock)
+		throw RTE_LOC;
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT and ENABLE_SOFTSPOKEN_OT are required.");
 #endif

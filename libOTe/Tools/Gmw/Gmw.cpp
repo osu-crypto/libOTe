@@ -18,6 +18,10 @@ namespace osuCrypto
 		u64 n,
 		const BetaCircuit& cir)
 	{
+		if (n > MaxOleDimension ||
+			cir.mNonlinearGateCount > MaxOleDimension)
+			throw std::invalid_argument("GMW OLE dimensions exceed the supported range. " LOCATION);
+
 		mN = n;
 
 		mCir = cir;
@@ -224,8 +228,10 @@ namespace osuCrypto
 		auto buff = AlignedUnVector<block>{};
 		auto buffIter = (block*)nullptr;
 		//auto triple = BinOle{};
-		auto mult = span<block>{mOleMult};
-		auto add = span<block>{mOleAdd};
+		auto oleMult = std::vector<block>{};
+		auto oleAdd = std::vector<block>{};
+		auto mult = span<block>{};
+		auto add = span<block>{};
 		auto j = u64{};
 		auto roundIdx = u64{};
 		auto roundRem = u64{};
@@ -235,8 +241,19 @@ namespace osuCrypto
 			std::terminate();
 		if (mCir.mGates.size() == 0ull)
 			throw std::runtime_error("Gmw::init(...) was not called");
+		auto expectedOleBlocks = oleCount() / 128;
+		if (mOleMult.size() != expectedOleBlocks ||
+			mOleAdd.size() != expectedOleBlocks)
+			throw std::invalid_argument("GMW requires a complete set of OLE correlations. " LOCATION);
 
 		finalizeMapping();
+		oleMult = std::move(mOleMult);
+		oleAdd = std::move(mOleAdd);
+		mOleMult = {};
+		mOleAdd = {};
+		mOleIndex = 0;
+		mult = oleMult;
+		add = oleAdd;
 		if (mO.mDebug)
 		{
 			mO.mWords.resize(mWords.size(), mN128);

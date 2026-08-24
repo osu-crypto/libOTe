@@ -490,44 +490,49 @@ namespace osuCrypto
 		u64 secParam,
 		Ctx ctx)
 	{
+		if (noiseType != SdNoiseDistribution::Regular &&
+			noiseType != SdNoiseDistribution::Stationary)
+			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
+
+		u64 bitCount = 1;
+		if (ctx.template isField<F>())
+			bitCount = ctx.template bitSize<G>();
+
+		auto config = syndromeDecodingConfigure(
+			secParam, requestSize, mult, noiseType, bitCount);
+		auto format = PprfOutputFormat{};
+		if (SdNoiseDistribution::Regular == noiseType)
+		{
+			format = PprfOutputFormat::Interleaved;
+		}
+		else
+		{
+			format = PprfOutputFormat::ByTreeIndex;
+		}
+		pprf::validateConfigure(config.mSizePer, config.mNumPartitions);
+
 		mCtx = std::move(ctx);
+		if (SdNoiseDistribution::Regular == noiseType)
+			mGenVar.template emplace<0>();
+		else
+			mGenVar.template emplace<1>();
+		std::visit([&](auto& gen) {
+			gen.configure(config.mSizePer, config.mNumPartitions);
+			}, mGenVar);
 		mSecParam = secParam;
 		mRequestSize = requestSize;
 		mBaseType = type;
 		mLpnMultType = mult;
 		mSecurityType = malType;
-
-		// Calculate the bit size for the field elements
-		u64 bitCount = 1;
-		if (mCtx.template isField<F>())
-			bitCount = mCtx.template bitSize<G>();
-
-		// Configure parameters for syndrome decoding
-		auto config = syndromeDecodingConfigure(
-			mSecParam, mRequestSize, mLpnMultType, noiseType, bitCount);
 		mNumPartitions = config.mNumPartitions;
 		mSizePer = config.mSizePer;
 		mNoiseVecSize = config.mNoiseVectorSize;
+		mPprfFormat = format;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
-
-		// Initialize the appropriate PPRF based on noise distribution
-		if (SdNoiseDistribution::Regular == noiseType)
-		{
-			mGenVar.template emplace<0>();  // Use RegularPprfSender
-			mPprfFormat = PprfOutputFormat::Interleaved;
-		}
-		else if (SdNoiseDistribution::Stationary == noiseType)
-		{
-			mGenVar.template emplace<1>();  // Use StationaryPprfSender
-			mPprfFormat = PprfOutputFormat::ByTreeIndex;
-		}
-		else
-		{
-			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
-		}
-
+		mB = {};
+		mBaseB = {};
+		mDerandomizeMalCheck = false;
 		mState = State::Configured;
-		gen().configure(mSizePer, mNumPartitions);
 	}
 
 	template<typename F, typename G, typename Ctx>

@@ -25,6 +25,7 @@ set(SRCS
     RingLpn_Tests.cpp
     BinarySolver_Tests.cpp
     Goldilocks_Tests.cpp
+    Gmw_Tests.cpp
     UInt_Tests.cpp
     Permutation_Tests.cpp
     BlkAccCode_Tests.cpp

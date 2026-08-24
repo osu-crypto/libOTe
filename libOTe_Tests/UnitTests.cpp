@@ -29,6 +29,7 @@
 #include "libOTe_Tests/BinarySolver_Tests.h"
 #include "libOTe_Tests/RingLpn_Tests.h"
 #include "libOTe_Tests/Goldilocks_Tests.h"
+#include "libOTe_Tests/Gmw_Tests.h"
 #include "libOTe_Tests/UInt_Tests.h"
 #include "libOTe_Tests/Permutation_Tests.h"
 #include "libOTe_Tests/BlkAccCode_Tests.h"
@@ -291,6 +292,7 @@ namespace tests_libOTe
 			tc.add("RingLpn_Triple_test                     ", RingLpn_Triple_test);
 			tc.add("RingLpn_GenBase_test                    ", RingLpn_GenBase_test);
 			tc.add("RingLpn_stationary_test                 ", RingLpn_stationary_test);
+			tc.add("Gmw_Audit_Test                           ", Gmw_Audit_Test);
 
 #ifdef ENABLE_LOGVOLE
 #define LIBOTE_LOGVOLE_ADD_TEST(suite, name) \

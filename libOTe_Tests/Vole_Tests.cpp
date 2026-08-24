@@ -525,6 +525,42 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 	receiver.mMalCheckSeed = OneBlock;
 	receiver.mDerandomizeMalCheck = true;
 
+	auto invalidMult = static_cast<MultType>(255);
+	bool senderConfigThrew = false;
+	bool receiverConfigThrew = false;
+	try
+	{
+		sender.configure(256, SilentSecType::SemiHonest, invalidMult,
+			SilentBaseType::Base, SdNoiseDistribution::Regular);
+	}
+	catch (const std::exception&)
+	{
+		senderConfigThrew = true;
+	}
+	try
+	{
+		receiver.configure(256, SilentSecType::SemiHonest, invalidMult,
+			SilentBaseType::Base, SdNoiseDistribution::Regular);
+	}
+	catch (const std::exception&)
+	{
+		receiverConfigThrew = true;
+	}
+
+	if (!senderConfigThrew || !receiverConfigThrew ||
+		sender.mState != Sender::State::Configured ||
+		receiver.mState != Receiver::State::Configured ||
+		sender.mRequestSize != 128 || receiver.mRequestSize != 128 ||
+		sender.mSecurityType != SilentSecType::Malicious ||
+		receiver.mSecurityType != SilentSecType::Malicious ||
+		sender.mLpnMultType != DefaultMultType ||
+		receiver.mLpnMultType != DefaultMultType ||
+		sender.mB.size() != 1 || sender.mBaseB.size() != 1 ||
+		receiver.mA.size() != 1 || receiver.mC.size() != 1 ||
+		receiver.mBaseA.size() != 1 || receiver.mBaseC.size() != 1 ||
+		!receiver.mMalCheckSeed.has_value())
+		throw RTE_LOC;
+
 	sender.clear();
 	receiver.clear();
 

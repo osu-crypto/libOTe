@@ -1709,3 +1709,167 @@ cases and keep every derived dimension representable as `u64`.
 Verification:
 
 - `Vole_Noisy_Audit_Test` checks each configuration limit independently.
+
+## AUD-054: Silent OT clear operations retained active correlations
+
+Status: fixed
+
+Affected code:
+
+- `SilentOtExtSender::clear()` and `SilentOtExtReceiver::clear()`.
+
+Concern:
+
+Each clear operation reset the request count before it tested
+`isConfigured()`. The test was therefore false, and the operation never cleared
+the selected PPRF generator. Both parties also retained base correlations,
+malicious-check OTs, and encoding state.
+
+Impact:
+
+An explicit clear retained secret protocol material and did not restore the
+documented empty state. A later successful configuration replaced the PPRF
+generator, so the ordinary automatic execution path did not directly reuse the
+retained PPRF OTs.
+
+Resolution:
+
+Both clear operations now reset the selected generator without consulting the
+request count. They also remove every correlation and temporary buffer owned by
+Silent OT and reset the code seed.
+
+Verification:
+
+- `OtExt_Silent_AuditState_Test` installs malicious stationary correlations,
+  clears both parties, and checks the complete empty state.
+
+## AUD-055: Failed Silent configuration could mix protocol states
+
+Status: fixed
+
+Affected code:
+
+- Silent OT sender and receiver configuration.
+- Silent VOLE sender and receiver configuration.
+
+Concern:
+
+Each configuration operation assigned public dimensions and security policy
+before validating the requested compression and noise parameters. A rejected
+reconfiguration could therefore retain the old generator while exposing new
+dimensions or policy through the same object.
+
+Impact:
+
+A local caller that caught the configuration exception could continue with an
+internally inconsistent object. Subsequent base-correlation accounting or
+protocol execution could fail or use state associated with the previous
+configuration.
+
+Resolution:
+
+Configuration now validates the noise model, syndrome-decoding parameters, and
+PPRF dimensions before mutating the object. A successful reconfiguration
+reconstructs the selected generator and discards correlations tied to the old
+dimensions.
+
+Verification:
+
+- `OtExt_Silent_AuditState_Test` rejects invalid reconfiguration and checks
+  that both Silent OT parties retain their complete prior state.
+- `Vole_Silent_Clear_test` performs the same check for both Silent VOLE
+  parties.
+
+## AUD-056: GMW output mapping checked the wrong dimension
+
+Status: fixed
+
+Affected code:
+
+- `Gmw::mapOutput()`.
+
+Concern:
+
+The output mapper checked whether the number of output wires was divisible by
+the block size. It needed to check the byte count in each mapped row. For 129
+parallel evaluations, a 17-byte row could therefore be accepted even though
+the evaluator accesses two complete blocks, or 32 bytes, per row.
+
+Impact:
+
+An invalid local output view could make adjacent mapped rows overlap. Access to
+the last row could continue beyond the caller's matrix allocation.
+
+Resolution:
+
+The mapper now applies the block-stride requirement to the column count, as the
+corresponding input mapper does.
+
+Verification:
+
+- `Gmw_Audit_Test` rejects a 17-byte output row for 129 parallel evaluations.
+
+## AUD-057: GMW retained consumed one-time OLE correlations
+
+Status: fixed
+
+Affected code:
+
+- OLE handling in `Gmw::run()` and `Gmw::clear()`.
+
+Concern:
+
+`run()` advanced spans that referred to the member OLE vectors but never
+changed the vectors themselves. `clear()` also retained both vectors.
+Reinitializing the object could therefore evaluate another circuit with the
+same OLE masks.
+
+Impact:
+
+For repeated evaluations, the other party could cancel a reused mask between
+two protocol messages. The resulting value reveals the XOR of the corresponding
+wire shares from those evaluations.
+
+Resolution:
+
+After local preflight succeeds, `run()` moves the complete OLE vectors into
+coroutine-local storage and explicitly clears the member vectors. Every later
+success or failure consumes that state. `clear()` also removes retained OLE
+state.
+
+Verification:
+
+- `Gmw_Audit_Test` completes an evaluation and confirms that neither party
+  retains its OLE vectors.
+- The test also confirms that an explicit clear removes unconsumed OLE state.
+
+## AUD-058: Missing GMW OLE correlations caused an infinite loop
+
+Status: fixed
+
+Affected code:
+
+- OLE batching in `Gmw::run()`.
+
+Concern:
+
+For a nonlinear circuit without enough OLE blocks, the batching loop selected
+zero correlations and did not advance its output index. The coroutine remained
+in the local loop and never reached network communication or an error.
+
+Impact:
+
+An invalid local call could consume a worker indefinitely. The peer did not
+control the OLE vector dimensions through the GMW protocol.
+
+Resolution:
+
+`run()` now requires the exact OLE block count before mapping finalization or
+communication. GMW also bounds the evaluation count and nonlinear gate count
+individually to keep the OLE count representable.
+
+Verification:
+
+- `Gmw_Audit_Test` confirms that a second nonlinear evaluation without fresh
+  OLE correlations is rejected. It also checks both individual dimension
+  limits.

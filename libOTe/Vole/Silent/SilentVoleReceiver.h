@@ -593,45 +593,51 @@ namespace osuCrypto
 		u64 secParam,
 		Ctx ctx)
 	{
+		if (noiseType != SdNoiseDistribution::Regular &&
+			noiseType != SdNoiseDistribution::Stationary)
+			throw std::invalid_argument("Unknown noise type. " LOCATION);
+
+		u64 bitCount = 1;
+		if (ctx.template isField<F>())
+			bitCount = ctx.template bitSize<G>();
+
+		auto param = syndromeDecodingConfigure(secParam, requestSize, mult, noiseType, bitCount);
+		auto format = PprfOutputFormat{};
+		if (noiseType == SdNoiseDistribution::Regular)
+		{
+			format = PprfOutputFormat::Interleaved;
+		}
+		else
+		{
+			format = PprfOutputFormat::ByTreeIndex;
+		}
+		pprf::validateConfigure(param.mSizePer, param.mNumPartitions);
+
 		mCtx = std::move(ctx);
+		if (SdNoiseDistribution::Regular == noiseType)
+			mGenVar.template emplace<0>();
+		else
+			mGenVar.template emplace<1>();
+		std::visit([&](auto& gen) {
+			gen.configure(param.mSizePer, param.mNumPartitions);
+			}, mGenVar);
 		mSecParam = secParam;
 		mRequestSize = requestSize;
 		mBaseType = type;
 		mLpnMultType = mult;
 		mSecurityType = malType;
-
-		// Calculate the bit size for the subfield elements
-		// for non-fields we assume 1 which gives worse parameters for stationary.
-		u64 bitCount = 1;
-		if (mCtx.template isField<F>())
-			bitCount = mCtx.template bitSize<G>();
-
-		// Configure parameters for syndrome decoding
-		auto param = syndromeDecodingConfigure(secParam, requestSize, mLpnMultType, noiseType, bitCount);
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNoiseVectorSize;
+		mPprfFormat = format;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
-
-
-		// Initialize the appropriate PPRF based on noise distribution
-		if (noiseType == SdNoiseDistribution::Regular)
-		{
-			mGenVar.template emplace<0>();// = RegularPprfReceiver<F, Ctx>{};
-			mPprfFormat = PprfOutputFormat::Interleaved;
-		}
-		else if (noiseType == SdNoiseDistribution::Stationary)
-		{
-			mGenVar.template emplace<1>();// = StationaryPprfReceiver<F, Ctx>{};
-			mPprfFormat = PprfOutputFormat::ByTreeIndex;
-		}
-		else
-		{
-			throw std::runtime_error("Unknown noise type. " LOCATION);
-		}
-
+		mA = {};
+		mC = {};
+		mBaseA = {};
+		mBaseC = {};
+		mMalCheckSeed.reset();
+		mDerandomizeMalCheck = false;
 		mState = State::Configured;
-		gen().configure(mSizePer, mNumPartitions);
 	}
 
 	template< typename F, typename G, typename Ctx >

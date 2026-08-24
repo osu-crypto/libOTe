@@ -252,38 +252,47 @@ namespace osuCrypto
 		SdNoiseDistribution noiseType,
 		MultType mult)
 	{
-		mLpnMultType = mult;
-		mSecurityType = malType;
-		mNumThreads = numThreads;
-		u64 secParam = 128;
-		mRequestNumOts = numOTs;
-		mNoiseDist = noiseType;
+		(void)scaler;
+		constexpr u64 secParam = 128;
+		auto param = syndromeDecodingConfigure(secParam, numOTs, mult, noiseType, 1);
+		auto format = PprfOutputFormat{};
 
-		// Configure based on syndrome decoding parameters
-		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mLpnMultType, mNoiseDist, 1);
-		mNumPartitions = param.mNumPartitions;
-		mSizePer = param.mSizePer;
-		mNoiseVecSize = param.mNoiseVectorSize;
-		mCodeSeed = block(12528943721987127, 98743297823479812);
-
-		// Initialize the appropriate PPRF based on noise distribution
 		if (SdNoiseDistribution::Regular == noiseType)
 		{
-			mGenVar.template emplace<0>();  // Use RegularPprfSender
-			mPprfFormat = PprfOutputFormat::Interleaved;
+			format = PprfOutputFormat::Interleaved;
 		}
 		else if (SdNoiseDistribution::Stationary == noiseType)
 		{
-			mGenVar.template emplace<1>();  // Use StationaryPprfSender
-			mPprfFormat = PprfOutputFormat::ByTreeIndex;
+			format = PprfOutputFormat::ByTreeIndex;
 		}
 		else
 		{
 			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
 		}
+		pprf::validateConfigure(param.mSizePer, param.mNumPartitions);
 
-		// Configure the PPRF generator
-		gen().configure(mSizePer, mNumPartitions);
+		if (SdNoiseDistribution::Regular == noiseType)
+			mGenVar.template emplace<0>();
+		else
+			mGenVar.template emplace<1>();
+		std::visit([&](auto& gen) {
+			gen.configure(param.mSizePer, param.mNumPartitions);
+			}, mGenVar);
+		mLpnMultType = mult;
+		mSecurityType = malType;
+		mNumThreads = numThreads;
+		mRequestNumOts = numOTs;
+		mNoiseDist = noiseType;
+		mNumPartitions = param.mNumPartitions;
+		mSizePer = param.mSizePer;
+		mNoiseVecSize = param.mNoiseVectorSize;
+		mPprfFormat = format;
+		mCodeSeed = block(12528943721987127, 98743297823479812);
+		mB = {};
+		mEncodeTemp = {};
+		mDelta.reset();
+		mMalCheckOts = {};
+		mBaseB = {};
 	}
 
 	// Debug function to verify correctness with receiver
@@ -298,18 +307,17 @@ namespace osuCrypto
 	// Clears internal buffers and state
 	void SilentOtExtSender::clear()
 	{
+		std::visit([](auto& gen) { gen.clear(); }, mGenVar);
 		mNoiseVecSize = 0;
 		mRequestNumOts = 0;
 		mSizePer = 0;
 		mNumPartitions = 0;
-
 		mB = {};
 		mEncodeTemp = {};
-
 		mDelta.reset();
-
-		if (isConfigured())
-			gen().clear();
+		mMalCheckOts = {};
+		mBaseB = {};
+		mCodeSeed = ZeroBlock;
 	}
 
 	// Standard OT extension interface - receiver specifies choice bits
