@@ -4,6 +4,7 @@
 
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
+#include "libOTe/Tools/RepetitionCode.h"
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Network/Session.h>
 #include <cryptoTools/Network/IOService.h>
@@ -30,6 +31,8 @@
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#include <cstring>
+#include <sstream>
 
 using namespace osuCrypto;
 
@@ -846,5 +849,98 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
                 throw UnitTestFail(LOCATION);
         }
     }
+
+	void Tools_LinearCode_Audit_Test()
+	{
+		auto expectThrow = [](auto&& fn) {
+			bool threw = false;
+			try
+			{
+				fn();
+			}
+			catch (const std::exception&)
+			{
+				threw = true;
+			}
+			if (!threw)
+				throw UnitTestFail("expected validation failure");
+		};
+
+		LinearCode code;
+		std::stringstream valid;
+		valid << "1 8\n1 0 1 0 1 0 1 0";
+		code.loadTxtFile(valid);
+		const auto oldPlaintextBits = code.plaintextBitSize();
+		const auto oldCodewordBits = code.codewordBitSize();
+
+		std::stringstream shortRow;
+		shortRow << "2 8\n1 0 1\n0 1 0 1 0 1 0 1";
+		expectThrow([&] { code.loadTxtFile(shortRow); });
+		if (code.plaintextBitSize() != oldPlaintextBits || code.codewordBitSize() != oldCodewordBits)
+			throw UnitTestFail("failed text load changed LinearCode state");
+
+		std::stringstream invalidBit;
+		invalidBit << "1 8\n1 0 1 x 1 0 1 0";
+		expectThrow([&] { code.loadTxtFile(invalidBit); });
+
+		std::stringstream oversized;
+		oversized << "513 8\n";
+		expectThrow([&] { code.loadTxtFile(oversized); });
+
+		u64 blocks = 1;
+		u64 codewordBits = 128;
+		std::stringstream truncated(std::ios::in | std::ios::out | std::ios::binary);
+		truncated.write(reinterpret_cast<const char*>(&blocks), sizeof(blocks));
+		truncated.write(reinterpret_cast<const char*>(&codewordBits), sizeof(codewordBits));
+		truncated.seekg(0);
+		expectThrow([&] { code.loadBinFile(truncated); });
+
+		u64 inconsistentBlocks = 3;
+		codewordBits = 129;
+		std::stringstream inconsistent(std::ios::in | std::ios::out | std::ios::binary);
+		inconsistent.write(reinterpret_cast<const char*>(&inconsistentBlocks), sizeof(inconsistentBlocks));
+		inconsistent.write(reinterpret_cast<const char*>(&codewordBits), sizeof(codewordBits));
+		std::array<block, 3> binaryRows{};
+		inconsistent.write(reinterpret_cast<const char*>(binaryRows.data()), sizeof(binaryRows));
+		inconsistent.seekg(0);
+		expectThrow([&] { code.loadBinFile(inconsistent); });
+
+		PRNG prng(block(0x1A2B3C4D, 0));
+		for (u64 inputBits : { 1ull, 9ull, 17ull, 31ull, 57ull })
+		{
+			LinearCode randomCode;
+			randomCode.random(prng, inputBits, 129);
+			std::vector<u8> input(randomCode.plaintextU8Size());
+			prng.get(input.data(), input.size());
+			std::vector<u8> actual(randomCode.codewordU8Size());
+			randomCode.encode(span<const u8>(input), span<u8>(actual));
+
+			std::vector<block> expectedBlocks(randomCode.codewordBlkSize(), ZeroBlock);
+			for (u64 bit = 0; bit < inputBits; ++bit)
+			{
+				if ((input[bit / 8] >> (bit % 8)) & 1)
+				{
+					for (u64 j = 0; j < randomCode.codewordBlkSize(); ++j)
+						expectedBlocks[j] = expectedBlocks[j] ^
+							randomCode.mG[bit * randomCode.codewordBlkSize() + j];
+				}
+			}
+			if (std::memcmp(actual.data(), expectedBlocks.data(), actual.size()) != 0)
+				throw UnitTestFail("LinearCode padded encode disagrees with scalar matrix encode");
+		}
+
+		std::array<u8, 1> message{ 1 };
+		std::array<u8, 4> word{};
+		RepetitionCode repetition(4);
+		expectThrow([&] {
+			repetition.encode(span<const u8>(message.data(), 0), span<u8>(word));
+		});
+		expectThrow([&] {
+			repetition.encode(span<const u8>(message), span<u8>(word.data(), 3));
+		});
+		expectThrow([&] { RepetitionCode invalid(0); });
+		RepetitionCode unconfigured;
+		expectThrow([&] { unconfigured.encodeSyndrome(message.data(), word.data()); });
+	}
 
 }

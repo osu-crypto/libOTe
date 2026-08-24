@@ -48,13 +48,14 @@ namespace osuCrypto::LogVole
             }
         }
 
-        task<Buffer> recvFrame(Socket& sock)
+        task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize)
         {
             std::array<u8, kFrameHeaderSize> header{};
             co_await sock.recv(header);
 
             const auto size = readU64(header);
-            if (size > static_cast<u64>(std::numeric_limits<std::size_t>::max()))
+            if (size > maxPayloadSize ||
+				size > static_cast<u64>(std::numeric_limits<std::size_t>::max()))
             {
                 throw std::length_error("LogVole frame is too large");
             }
@@ -72,6 +73,13 @@ namespace osuCrypto::LogVole
         {
             return kFrameHeaderSize + static_cast<u64>(payload.size());
         }
+
+		u64 requirePayloadSize(bool valid, u64 size)
+		{
+			if (!valid)
+				throw std::length_error("LogVole could not derive a frame size bound");
+			return size;
+		}
 
         bool computeTauHi(const Params& params, u32& out)
         {
@@ -265,7 +273,11 @@ namespace osuCrypto::LogVole
                 Buffer responsePayload;
                 {
                     auto rootSock = sock.fork();
-                    digestPayload = co_await recvFrame(rootSock);
+					u64 maxPayload = 0;
+					const bool validPayloadSize =
+						rootDigestPayloadSize(state.mParams.mShrinkExpand.mRing, maxPayload);
+					digestPayload =
+						co_await recvFrame(rootSock, requirePayloadSize(validPayloadSize, maxPayload));
 
                     RootDigestMessage digest{};
                     if (!decode(digestPayload, digest))
@@ -337,7 +349,13 @@ namespace osuCrypto::LogVole
         KeyDeriveSenderOutput& output,
         Socket& sock)
     {
-        const auto requestPayload = co_await recvFrame(sock);
+		u64 maxPayload = 0;
+		if (input.mSk1.size() > std::numeric_limits<u32>::max())
+			throw std::length_error("LogVole key-derive dimension is too large");
+		const bool validPayloadSize =
+			keyDerivePayloadSize(input.mParams, static_cast<u32>(input.mSk1.size()), maxPayload);
+		const auto requestPayload =
+			co_await recvFrame(sock, requirePayloadSize(validPayloadSize, maxPayload));
 
         KeyDeriveRequest request{};
         if (!decode(requestPayload, request))
@@ -417,7 +435,10 @@ namespace osuCrypto::LogVole
         ShrinkExpandSenderExpandOutput& output,
         Socket& sock)
     {
-        const auto digestPayload = co_await recvFrame(sock);
+		u64 maxPayload = 0;
+		const bool validPayloadSize = polyPayloadSize(state.mParams.mRing, maxPayload);
+		const auto digestPayload =
+			co_await recvFrame(sock, requirePayloadSize(validPayloadSize, maxPayload));
 
         PolyMessage digestMessage{};
         if (!decode(digestPayload, digestMessage))

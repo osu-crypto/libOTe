@@ -10,11 +10,39 @@
 #include <string>
 #include <sstream>
 #include <cassert>
+#include <limits>
+#include <utility>
 
 namespace osuCrypto
 {
     // must be a multiple of 8...
     const u16 LinearCode::sLinearCodePlainTextMaxSize(64);
+	const u64 LinearCode::sLinearCodeCodewordBitMaxSize(1ull << 16);
+
+	namespace
+	{
+		void validateDimensions(u64 plaintextBits, u64 codewordBits)
+		{
+			if (plaintextBits == 0 ||
+				plaintextBits > LinearCode::sLinearCodePlainTextMaxSize * 8ull ||
+				codewordBits == 0 ||
+				codewordBits > LinearCode::sLinearCodeCodewordBitMaxSize)
+			{
+				throw std::length_error("LinearCode dimensions are unsupported");
+			}
+		}
+
+		void commitCode(LinearCode& dst, LinearCode& src)
+		{
+			using std::swap;
+			swap(dst.mU8RowCount, src.mU8RowCount);
+			swap(dst.mPow2CodeSize, src.mPow2CodeSize);
+			swap(dst.mPlaintextU8Size, src.mPlaintextU8Size);
+			swap(dst.mCodewordBitSize, src.mCodewordBitSize);
+			swap(dst.mG, src.mG);
+			swap(dst.mG8, src.mG8);
+		}
+	}
 
     LinearCode::LinearCode()
     {
@@ -51,14 +79,19 @@ namespace osuCrypto
 
     void LinearCode::loadTxtFile(std::istream & in)
     {
-        u64 numRows, numCols;
-        in >> numRows >> numCols;
-        mCodewordBitSize = numCols;
+        u64 numRows = 0, numCols = 0;
+        if (!(in >> numRows >> numCols))
+			throw std::runtime_error("LinearCode text header is malformed");
+		validateDimensions(numRows, numCols);
 
-        mG.resize(numRows * ((numCols + 127) / 128));
+		LinearCode next;
+		next.mCodewordBitSize = numCols;
+
+        const u64 blocksPerRow = (numCols + 127) / 128;
+        next.mG.resize(numRows * blocksPerRow);
         //mG1.resize(numRows * ((numCols + 127) / 128));
 
-        auto iter = mG.begin();
+        auto iter = next.mG.begin();
         //auto iter1 = mG1.begin();
 
         BitVector buff;
@@ -72,20 +105,18 @@ namespace osuCrypto
         for (u64 i = 0; i < numRows; ++i)
         {
             memset(buff.data(), 0, buff.sizeBytes());
-            std::getline(in, line);
-
-#ifndef NDEBUG
-            if (line.size() != 2 * numCols - 1)
-                throw std::runtime_error("");
-#endif
+            if (!std::getline(in, line))
+				throw std::runtime_error("LinearCode text row is missing");
+			if (!line.empty() && line.back() == '\r')
+				line.pop_back();
+			if (line.size() != 2 * numCols - 1)
+				throw std::runtime_error("LinearCode text row has the wrong length");
             for (u64 j = 0; j < numCols; ++j)
             {
-
-#ifndef NDEBUG
-                if (line[j * 2] - '0' > 1)
-                    throw std::runtime_error("");
-#endif
-                buff[j] = line[j * 2] - '0';;
+				const char bit = line[j * 2];
+				if ((bit != '0' && bit != '1') || (j + 1 < numCols && line[j * 2 + 1] != ' '))
+					throw std::runtime_error("LinearCode text row is malformed");
+				buff[j] = bit - '0';
             }
 
             block* blkView = (block*)buff.data();
@@ -96,13 +127,25 @@ namespace osuCrypto
         }
 
 
-        generateMod8Table();
+		in >> std::ws;
+		if (in.peek() != std::char_traits<char>::eof())
+			throw std::runtime_error("LinearCode text input has trailing data");
+
+		next.generateMod8Table();
+		commitCode(*this, next);
     }
 
     void LinearCode::load(const unsigned char * data, u64 size)
     {
+		const u64 maxBlocks =
+			(sLinearCodePlainTextMaxSize * 8ull) * ((sLinearCodeCodewordBitMaxSize + 127) / 128);
+		const u64 maxBytes = 2 * sizeof(u64) + maxBlocks * sizeof(block);
+		if (data == nullptr || size < 2 * sizeof(u64) || size > maxBytes ||
+			size > static_cast<u64>(std::numeric_limits<std::streamsize>::max()))
+			throw std::length_error("LinearCode binary input size is unsupported");
         std::stringstream ss(std::stringstream::out | std::stringstream::in | std::stringstream::binary);
-        ss.write((char*)data, size);
+		ss.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
+		ss.seekg(0);
         loadBinFile(ss);
     }
 
@@ -150,25 +193,34 @@ namespace osuCrypto
         loadBinFile(in);
 
     }
-    void LinearCode::loadBinFile(std::istream & out)
+    void LinearCode::loadBinFile(std::istream & in)
     {
-
         u64 size = 0;
+		u64 codewordBits = 0;
+		if (!in.read(reinterpret_cast<char*>(&size), sizeof(size)) ||
+			!in.read(reinterpret_cast<char*>(&codewordBits), sizeof(codewordBits)))
+			throw std::runtime_error("LinearCode binary header is truncated");
 
-        out.read((char *)&size, sizeof(u64));
-        out.read((char *)&mCodewordBitSize, sizeof(u64));
+		if (codewordBits == 0 || codewordBits > sLinearCodeCodewordBitMaxSize)
+			throw std::length_error("LinearCode codeword dimension is unsupported");
+		const u64 blocksPerRow = (codewordBits + 127) / 128;
+		if (size == 0 || size % blocksPerRow != 0)
+			throw std::runtime_error("LinearCode binary dimensions are inconsistent");
+		const u64 plaintextBits = size / blocksPerRow;
+		validateDimensions(plaintextBits, codewordBits);
 
-        if (mCodewordBitSize == 0)
-        {
-            std::cout << "bad code " << std::endl;
-            throw std::runtime_error(LOCATION);
-        }
+		LinearCode next;
+		next.mCodewordBitSize = codewordBits;
+		next.mG.resize(size);
+		const u64 byteSize = size * sizeof(block);
+		if (byteSize > static_cast<u64>(std::numeric_limits<std::streamsize>::max()) ||
+			!in.read(reinterpret_cast<char*>(next.mG.data()), static_cast<std::streamsize>(byteSize)))
+			throw std::runtime_error("LinearCode binary payload is truncated");
+		if (in.peek() != std::char_traits<char>::eof())
+			throw std::runtime_error("LinearCode binary input has trailing data");
 
-        mG.resize(size);
-
-        out.read((char *)mG.data(), mG.size() * sizeof(block));
-
-        generateMod8Table();
+		next.generateMod8Table();
+		commitCode(*this, next);
 
     }
 
@@ -217,6 +269,7 @@ namespace osuCrypto
 
     void LinearCode::random(PRNG & prng, u64 inputSize, u64 outputSize)
     {
+		validateDimensions(inputSize, outputSize);
         mCodewordBitSize = outputSize;
         mG.resize(inputSize * codewordBlkSize());
 
@@ -317,11 +370,9 @@ namespace osuCrypto
         const span<const block>& plaintxt,
         const span<block>& codeword)
     {
-#ifndef NDEBUG
-        if (static_cast<u64>(plaintxt.size()) != plaintextBlkSize() ||
+		if (mG8.empty() || static_cast<u64>(plaintxt.size()) != plaintextBlkSize() ||
             static_cast<u64>(codeword.size()) < codewordBlkSize())
             throw std::runtime_error(LOCATION);
-#endif
 
         //span<u8> pp((u8*)plaintxt.data(), plaintextU8Size(), false);
         //span<u8> cc((u8*)codeword.data(), codewordU8Size(), false);
@@ -426,11 +477,9 @@ namespace osuCrypto
         const span<const u8>& plaintxt,
         const span<u8>& codeword)
     {
-#ifndef NDEBUG
-        if (static_cast<u64>(plaintxt.size()) != plaintextU8Size() ||
+		if (mG8.empty() || static_cast<u64>(plaintxt.size()) != plaintextU8Size() ||
             static_cast<u64>(codeword.size()) < codewordU8Size())
             throw std::runtime_error(LOCATION);
-#endif
         encode(plaintxt.data(), codeword.data());
     }
 
@@ -452,6 +501,8 @@ namespace osuCrypto
         u8 _byteView[sLinearCodePlainTextMaxSize];
         u8* byteView = _byteView;
         memcpy(byteView, input, mPlaintextU8Size);
+		const u64 paddedInputSize = roundUpTo(mPlaintextU8Size, 8);
+		memset(byteView + mPlaintextU8Size, 0, paddedInputSize - mPlaintextU8Size);
 
 
         // create a local to store the partial codeword

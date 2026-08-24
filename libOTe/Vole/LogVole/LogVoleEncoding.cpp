@@ -1,6 +1,7 @@
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
@@ -370,7 +371,157 @@ namespace osuCrypto::LogVole
             params.mLeafInputsAreGadget = leafInputsAreGadget != 0;
             return readShrinkExpandMode(mode, params.mMode);
         }
+
+		bool checkedAdd(u64 a, u64 b, u64& out)
+		{
+			if (a > std::numeric_limits<u64>::max() - b)
+				return false;
+			out = a + b;
+			return true;
+		}
+
+		bool checkedMul(u64 a, u64 b, u64& out)
+		{
+			if (a != 0 && b > std::numeric_limits<u64>::max() / a)
+				return false;
+			out = a * b;
+			return true;
+		}
+
+		bool nextPowerOfTwoAndLog(u32 value, u64& width, u64& levels)
+		{
+			if (value == 0)
+				return false;
+			width = 1;
+			levels = 0;
+			while (width < value)
+			{
+				if (width >= (u64(1) << 31))
+					return false;
+				width <<= 1;
+				++levels;
+			}
+			return true;
+		}
+
+		bool ringCoeffByteSize(const RingParams& params, u64& out)
+		{
+			u64 count = 0;
+			return params.mPolyModulusDegree != 0 &&
+				!params.mCoeffModulusBits.empty() &&
+				checkedMul(params.mPolyModulusDegree, params.mCoeffModulusBits.size(), count) &&
+				checkedMul(count, sizeof(u64), out);
+		}
+
+		bool payloadFromPolyCount(u64 fixedBytes, u64 polyCount, const RingParams& params, u64& out)
+		{
+			u64 polyBytes = 0;
+			u64 coeffBytes = 0;
+			return ringCoeffByteSize(params, polyBytes) &&
+				checkedMul(polyCount, polyBytes, coeffBytes) &&
+				checkedAdd(fixedBytes, coeffBytes, out);
+		}
     }
+
+	bool keyDerivePayloadSize(const RingParams& params, u32 tau, u64& out)
+	{
+		return tau != 0 && payloadFromPolyCount(4u * sizeof(u32), tau, params, out);
+	}
+
+	bool polyPayloadSize(const RingParams& params, u64& out)
+	{
+		return payloadFromPolyCount(3u * sizeof(u32), 1, params, out);
+	}
+
+	bool rootDigestPayloadSize(const RingParams& params, u64& out)
+	{
+		return payloadFromPolyCount(sizeof(u32), 1, params, out);
+	}
+
+	bool rootResponsePayloadSize(const RingParams& params, u64& out)
+	{
+		constexpr u64 seedBytes = 16;
+		return payloadFromPolyCount(2u * sizeof(u32) + seedBytes, 1, params, out);
+	}
+
+	bool shrinkExpandOfflinePayloadSize(const ShrinkExpandParams& params, u64& out)
+	{
+		u64 width = 0;
+		u64 levels = 0;
+		if (!nextPowerOfTwoAndLog(params.mMu, width, levels))
+			return false;
+
+		const u64 tauMax = static_cast<u64>(params.mTau) +
+			(params.mTruncateOneGadgetDigit ? 1u : 0u);
+		u64 ct1Polys = 0;
+		u64 lacctPolys = 0;
+		u64 temp = 0;
+		u64 polyCount = 0;
+		if (!checkedMul(params.mMu, params.mTau, ct1Polys) ||
+			!checkedMul(levels, width, temp) ||
+			!checkedMul(temp, 2u, temp) ||
+			!checkedMul(temp, tauMax, lacctPolys) ||
+			!checkedAdd(ct1Polys, lacctPolys, polyCount))
+			return false;
+
+		u64 ringParamsBytes = 0;
+		if (!checkedMul(params.mRing.mCoeffModulusBits.size(), sizeof(u16), ringParamsBytes) ||
+			!checkedAdd(ringParamsBytes, 8u, ringParamsBytes))
+			return false;
+		u64 fixedBytes = 0;
+		if (!checkedAdd(
+				ringParamsBytes,
+				5u * sizeof(u32) + 3u * sizeof(u8) + sizeof(i64) + 32u,
+				fixedBytes))
+			return false;
+		return payloadFromPolyCount(fixedBytes, polyCount, params.mRing, out);
+	}
+
+	bool rootOfflinePayloadSize(const ShrinkExpandParams& params, u32 tauHi, u64& out)
+	{
+		if (tauHi == 0 || params.mRing.mCoeffModulusBits.empty() ||
+			params.mRing.mPolyModulusDegree == 0 || params.mGadgetLogBase == 0)
+			return false;
+
+		u64 leftWidth = 0;
+		if (!checkedMul(tauHi, params.mRing.mCoeffModulusBits.size(), leftWidth) ||
+			leftWidth == 0 || leftWidth > std::numeric_limits<u32>::max())
+			return false;
+		u64 width = 0;
+		u64 levels = 0;
+		if (!nextPowerOfTwoAndLog(static_cast<u32>(leftWidth), width, levels))
+			return false;
+
+		constexpr u64 statSec = 40;
+		const u64 logN = static_cast<u64>(std::ceil(std::log2(static_cast<double>(params.mRing.mPolyModulusDegree))));
+		const u64 slackNumerator = 2u * statSec + logN + 1u;
+		const u64 slack = std::max<u64>(1, (slackNumerator + params.mGadgetLogBase - 1u) / params.mGadgetLogBase);
+		const u64 randomizer = static_cast<u64>(params.mTau) + slack;
+
+		u64 ctRPolys = 0;
+		u64 lacctPolys = 0;
+		u64 topPolys = 0;
+		u64 temp = 0;
+		u64 polyCount = 0;
+		if (!checkedMul(leftWidth, tauHi, ctRPolys) ||
+			!checkedMul(levels, width, temp) ||
+			!checkedMul(temp, 2u, temp) ||
+			!checkedMul(temp, static_cast<u64>(tauHi) + 1u, lacctPolys) ||
+			!checkedAdd(tauHi, randomizer, temp) ||
+			!checkedMul(leftWidth, temp, topPolys) ||
+			!checkedAdd(ctRPolys, lacctPolys, polyCount) ||
+			!checkedAdd(polyCount, topPolys, polyCount) ||
+			!checkedAdd(polyCount, randomizer, polyCount))
+			return false;
+
+		u64 ringParamsBytes = 0;
+		if (!checkedMul(params.mRing.mCoeffModulusBits.size(), sizeof(u16), ringParamsBytes) ||
+			!checkedAdd(ringParamsBytes, 8u, ringParamsBytes))
+			return false;
+		u64 fixedBytes = 0;
+		return checkedAdd(ringParamsBytes, 72u, fixedBytes) &&
+			payloadFromPolyCount(fixedBytes, polyCount, params.mRing, out);
+	}
 
     Buffer encode(const KeyDeriveRequest& message)
     {

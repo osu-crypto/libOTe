@@ -64,6 +64,13 @@ namespace osuCrypto::LogVole
     bool decode(std::span<const u8> payload, RootDigestMessage& message);
     bool decode(std::span<const u8> payload, RootResponseMessage& message);
 
+    bool keyDerivePayloadSize(const RingParams& params, u32 tau, u64& out);
+    bool shrinkExpandOfflinePayloadSize(const ShrinkExpandParams& params, u64& out);
+    bool rootOfflinePayloadSize(const ShrinkExpandParams& params, u32 tauHi, u64& out);
+    bool polyPayloadSize(const RingParams& params, u64& out);
+    bool rootDigestPayloadSize(const RingParams& params, u64& out);
+    bool rootResponsePayloadSize(const RingParams& params, u64& out);
+
     PolyMessage makePolyMessage(const RingParams& params, const RnsPoly& poly);
     bool readPolyMessage(const RingParams& params, PolyMessage& message, RnsPoly& out);
 }

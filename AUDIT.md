@@ -1873,3 +1873,157 @@ Verification:
 - `Gmw_Audit_Test` confirms that a second nonlinear evaluation without fresh
   OLE correlations is rejected. It also checks both individual dimension
   limits.
+
+## AUD-059: Log VOLE frame lengths permitted peer-driven allocation
+
+Status: fixed
+
+Affected code:
+
+- Ring-protocol framing in `LogVoleRingSender` and `LogVoleRingReceiver`.
+
+Concern:
+
+Each receive operation allocated the peer-supplied 64-bit payload length before
+parsing or validating the message. On 64-bit platforms, its only limit was
+`size_t::max`.
+
+Impact:
+
+Even though Log VOLE assumes semi-honest parties, a malformed peer value could
+trigger an enormous allocation attempt and terminate the process. Basic bounds
+on values received from the peer are appropriate independently of the protocol
+security model.
+
+Resolution:
+
+Each receive site now supplies a checked maximum derived from the local ring
+parameters and the message type expected at that protocol step. The frame
+header is rejected before payload allocation when it exceeds that bound.
+
+Verification:
+
+- `LogVole_KeyDeriveCoproto_OversizedFramesRejectedBeforeAllocation` exercises
+  both framing implementations with a header one byte above the expected size.
+- The complete Log VOLE suite exercises legitimate direct and recursive frames.
+
+## AUD-060: LinearCode loaders accepted malformed dimensions and payloads
+
+Status: fixed
+
+Affected code:
+
+- Text, binary-stream, and byte-buffer loading in `LinearCode`.
+
+Concern:
+
+The loaders trusted dimensions and stream reads. Release text parsing indexed
+short rows without validation, and binary dimensions could be inconsistent,
+truncated, or large enough to wrap derived sizes.
+
+Impact:
+
+Malformed local input could cause an out-of-bounds read, divide by zero,
+integer wraparound, or excessive allocation. Protocol use normally loads
+trusted embedded code descriptions.
+
+Resolution:
+
+The parser now limits plaintext dimensions to 512 bits and codewords to 65,536
+bits. It validates all reads, text separators and bits, binary matrix shape,
+payload completion, and trailing data. Parsing and table generation occur in a
+temporary object and commit only after success.
+
+Verification:
+
+- `Tools_LinearCode_Audit_Test` covers short and malformed text, oversized
+  dimensions, truncated and inconsistent binary input, and transactional
+  failure.
+
+## AUD-061: Linear-code span validation was debug-only
+
+Status: fixed
+
+Affected code:
+
+- Span overloads in `GenericLinearCode` and `LinearCode`.
+
+Concern:
+
+Release builds omitted dimension and buffer-length checks before forwarding raw
+pointers to the encoding implementation.
+
+Impact:
+
+An undersized local span could cause an out-of-bounds read or write. Existing
+protocol callers ordinarily construct exact internal dimensions.
+
+Resolution:
+
+Span overloads now perform always-on dimension and buffer checks before entering
+the encoding kernels. Raw pointer overloads remain the explicitly unchecked
+buffer interface. No inner loop changed.
+
+Verification:
+
+- `Tools_LinearCode_Audit_Test` rejects undersized message and output spans in a
+  Release build.
+
+## AUD-062: LinearCode encode read uninitialized padding
+
+Status: fixed
+
+Affected code:
+
+- The optimized byte encoder in `LinearCode`.
+
+Concern:
+
+The unrolled lookup kernels process input bytes in padded groups but copied only
+the caller's logical bytes into their stack staging buffer. The final group
+therefore used indeterminate bytes as lookup-table indices.
+
+Impact:
+
+The corresponding generator rows were zero, so the intended result was stable,
+but the indeterminate reads were undefined behavior on valid code dimensions.
+
+Resolution:
+
+The encoder initializes only the unused tail of the final eight-byte group. The
+unrolled kernels and their memory-access structure are unchanged.
+
+Verification:
+
+- `Tools_LinearCode_Audit_Test` compares encodings for several non-byte-aligned
+  plaintext dimensions against a scalar generator-matrix oracle.
+
+## AUD-063: Zero-length RepetitionCode underflowed its operations
+
+Status: fixed
+
+Affected code:
+
+- Construction and encoding operations in `RepetitionCode`.
+- Dimension arithmetic in `GenericLinearCode`.
+
+Concern:
+
+A zero-length code reported dimension one. Its codimension underflowed, and
+syndrome encoding and decoding indexed element `n - 1`.
+
+Impact:
+
+An invalid local configuration could cause an out-of-bounds access. Ordinary
+Subspace VOLE configurations use a nonzero repetition length.
+
+Resolution:
+
+The explicit zero-length constructor and every raw operation now reject the
+unconfigured state. Generic wrappers also reject any code whose length is less
+than its dimension before subtracting or dispatching.
+
+Verification:
+
+- `Tools_LinearCode_Audit_Test` checks explicit and default-constructed
+  zero-length rejection.

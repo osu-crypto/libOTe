@@ -17,6 +17,7 @@
     X(KeyDeriveCore, DeterministicRegressionSeeds) \
     X(KeyDeriveCore, MetadataMismatchRejected) \
     X(KeyDeriveCoproto, HappyPathAndAlgebraicRelation) \
+	X(KeyDeriveCoproto, OversizedFramesRejectedBeforeAllocation) \
     X(Core, RepOfflineSenderInputGammaTauUnbundlesResidues) \
     X(Core, RecursiveLiftOracleKeepsSenderResiduesUnscaled) \
     X(LheOps, PublicADeterministic) \

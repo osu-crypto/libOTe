@@ -1369,13 +1369,21 @@ as `zpLabelCount / slots + (zpLabelCount % slots != 0)`, avoiding the overflowin
 `LogVole_Core_ZpRingLabelCountCeilNoOverflow` covers ordinary boundaries and
 `U64_MAX`.
 
+Update 2026-08-24:
+
+The length-prefixed allocation path is fixed. Every `recvFrame` call now
+receives a maximum derived from the locally configured ring and the message
+type expected at that protocol step. It rejects a larger peer-supplied header
+before allocating the payload. The sender and receiver key-derive paths have a
+regression test that supplies a header one byte above the expected bound.
+
 Concern:
 
 Three transport/robustness gaps against a non-honest peer or transport. All are
 non-issues in the stated semi-honest threat model (both parties honest) but are
 hardening gaps if the transport is untrusted:
 
-1. **Length-prefixed allocation DoS.** `recvFrame` reads an 8-byte
+1. **Length-prefixed allocation DoS (fixed).** `recvFrame` reads an 8-byte
    little-endian length header and immediately allocates `Buffer(size)` before the
    payload arrives. The only sanity check is `size > size_t::max`, a no-op on
    64-bit. A peer/MITM can announce a multi-GB/EB frame and force a large
@@ -1422,15 +1430,12 @@ Relevant files:
 
 Evidence:
 
-- `recvFrame` allocates from the header before `recv`; `zpRingLabelCount` no
-  longer has the overflowing ceil-div; `mUsedSids` is append-only with a linear
-  membership scan.
+- `recvFrame` now validates the header against a protocol-derived bound before
+  allocation; `zpRingLabelCount` no longer has the overflowing ceil-div;
+  `mUsedSids` is append-only with a linear membership scan.
 
 What would close it:
 
-- Clamp the frame length to a protocol-derived maximum (a small multiple of the
-  largest legitimate message size from the configured params) before allocating,
-  and reject larger frames.
 - Have `civoleReceiverOffline` validate `meta.mLabelCount` against an expected
   bound rather than trusting it unconditionally.
 - Optional: replace `mUsedSids` with a hash set, or track a monotonic-SID
@@ -1439,9 +1444,9 @@ What would close it:
 
 Recommended targeted test:
 
-- A negative/robustness test feeding an oversized frame header and an
-  out-of-range `meta.mLabelCount` and asserting graceful rejection rather than
-  allocation/overflow (kept out of normal CI).
+- A negative/robustness test feeding an out-of-range `meta.mLabelCount` and
+  asserting graceful rejection (kept out of normal CI). Oversized ring-frame
+  headers are now covered by the default key-derive coproto test.
 
 ## LV-AUDIT-027: Wide-arithmetic precision and ring add/sub canonicalization hardening
 
@@ -1671,8 +1676,8 @@ Recommended next work items (incorporating the recommended oracle tests):
      lieu of explicit `chi_lenc` smudging.
    - LV-AUDIT-018 / LV-AUDIT-019: confirm `EstimateNoiseBound`/`B_lhe` were
      derived with the `sqrt(width)`-scaled LHE noise (not fixed `s=8`).
-5. **LV-AUDIT-026, -027 (defensive hardening, lower priority):** add the
-   `recvFrame` length clamp, bounded `meta.mLabelCount` validation, and the
-   `ringAdd`/`ringSub` canonical-input precondition.
+5. **LV-AUDIT-026, -027 (defensive hardening, lower priority):** add bounded
+   `meta.mLabelCount` validation and the `ringAdd`/`ringSub` canonical-input
+   precondition. The `recvFrame` length clamp is complete.
 6. Re-run the default LogVole suite and the extended build after each batch of
    tests/cleanups lands.

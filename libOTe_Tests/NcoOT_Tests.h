@@ -21,4 +21,5 @@ namespace tests_libOTe
     void Tools_LinearCode_Test();
     void Tools_LinearCode_sub_Test();
     void Tools_LinearCode_rep_Test();
+	void Tools_LinearCode_Audit_Test();
 }

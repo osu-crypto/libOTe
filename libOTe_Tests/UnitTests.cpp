@@ -50,6 +50,7 @@ namespace tests_libOTe
 			tc.add("Tools_LinearCode_Test                   ", Tools_LinearCode_Test);
 			tc.add("Tools_LinearCode_sub_Test               ", Tools_LinearCode_sub_Test);
 			tc.add("Tools_LinearCode_rep_Test               ", Tools_LinearCode_rep_Test);
+			tc.add("Tools_LinearCode_Audit_Test             ", Tools_LinearCode_Audit_Test);
 
 			tc.add("Tools_bitShift_test                     ", Tools_bitShift_test);
 			tc.add("Tools_modp_test                         ", Tools_modp_test);
