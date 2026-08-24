@@ -81,6 +81,8 @@ namespace osuCrypto
 		NttOrder outputOrder)
 	{
 		u64 n = a.size();
+		if (aHat.size() != n)
+			throw std::invalid_argument("NTT input and output spans must have equal lengths. " LOCATION);
 		auto ln = log2ceil(n);
 		auto qq = F::order() - 1;
 		auto q = static_cast<std::conditional_t<(sizeof(decltype(qq)) < sizeof(u64)), u64, decltype(qq)>>(qq);
@@ -384,6 +386,8 @@ namespace osuCrypto
 		NttOrder inputOrder)
 	{
 		auto n = a.size();
+		if (aHat.size() != n)
+			throw std::invalid_argument("inverse NTT input and output spans must have equal lengths. " LOCATION);
 		auto ln = log2ceil(n);
 		auto qq = F::order() - 1;
 

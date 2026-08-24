@@ -5,6 +5,7 @@
 #include "TungstenCode_Tests.h"
 #include "ExConvCode_Tests.h"
 #include "cryptoTools/Common/Log.h"
+#include "cryptoTools/Common/TestCollection.h"
 #include "libOTe/Tools/ExConvCode/ExConvChecker.h"
 #include <cmath>
 
@@ -12,6 +13,41 @@ using namespace oc;
 using namespace oc::experimental;
 namespace tests_libOTe
 {
+	void TungstenCode_Audit_Test(const CLP&)
+	{
+		TungstenCode encoder;
+		encoder.config(8, 16, block(1, 2));
+		const auto oldMessageSize = encoder.mMessageSize;
+		const auto oldCodeSize = encoder.mCodeSize;
+		const auto oldPerm = encoder.mPerm.mPerm;
+
+		auto expectInvalid = [](auto&& fn)
+		{
+			bool rejected = false;
+			try
+			{
+				fn();
+			}
+			catch (const std::invalid_argument&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw UnitTestFail("invalid Tungsten configuration was accepted" LOCATION);
+		};
+
+		expectInvalid([&] { encoder.config(0, 16); });
+		expectInvalid([&] { encoder.config(16, 8); });
+		expectInvalid([&] { encoder.config(16, 24); });
+		constexpr u64 oversizedDifference = ((1ull << 32) + 1) * TungstenCode::ChunkSize;
+		expectInvalid([&] { encoder.config(8, oversizedDifference + 8); });
+
+		if (encoder.mMessageSize != oldMessageSize ||
+			encoder.mCodeSize != oldCodeSize ||
+			encoder.mPerm.mPerm.size() != oldPerm.size() ||
+			!std::equal(encoder.mPerm.mPerm.begin(), encoder.mPerm.mPerm.end(), oldPerm.begin()))
+			throw UnitTestFail("failed Tungsten configuration changed live state" LOCATION);
+	}
 
 
     template<

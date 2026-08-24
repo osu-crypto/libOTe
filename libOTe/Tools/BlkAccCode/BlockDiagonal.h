@@ -80,8 +80,14 @@ namespace osuCrypto
 		BlockDiagonal(u64 k, u64 n, oc::u64 sigma, block seed = block(2325612597802098727, 245619238745623702))
 			: mK(k), mN(n), mSigma(sigma), mSeed(seed)
 		{
+			if (sigma == 0)
+				throw std::invalid_argument("BlockDiagonal block size must be nonzero. " LOCATION);
 			if (sigma % 8)
-				throw RTE_LOC;
+				throw std::invalid_argument("BlockDiagonal block size must be a multiple of eight. " LOCATION);
+			if (n < k)
+				throw std::invalid_argument("BlockDiagonal input size must be at least its output size. " LOCATION);
+			if (n - k < k)
+				throw std::invalid_argument("BlockDiagonal requires at least twice as many inputs as outputs. " LOCATION);
 		}
 
 		/**
@@ -133,7 +139,32 @@ namespace osuCrypto
 
 				for (auto xx = xBegin; xx < xEnd; ++xx)
 				{
-					for (auto yy = yBegin; yy < yEnd; yy += 8)
+					auto yy = yBegin;
+
+					// Keep the random-bit cursor aligned before entering the
+					// eight-way kernel. A preceding logical block can have a
+					// scalar tail.
+					for (; yy < yEnd && (idx & 7); ++yy)
+					{
+						if (idx == 128)
+						{
+							if (count++ == 128)
+							{
+								seed = mAesFixedKey.hashBlock(seed);
+								rand = Rand(seed);
+								count = 0;
+							}
+							idx = 0;
+							bitIter = rand();
+						}
+
+						ctx.template mask<F>(v[0], yy[0], zeroOne[*bitIter]);
+						++bitIter;
+						++idx;
+						ctx.plus(*xx, *xx, v[0]);
+					}
+
+					for (; yEnd - yy >= 8; yy += 8)
 					{
 						if (idx == 128)
 						{
@@ -176,6 +207,28 @@ namespace osuCrypto
 						ctx.plus(*xx, *xx, v[0]);
 						//ctx.mulConst(*yy, v[0]);
 
+					}
+
+					// Do not let the SIMD kernel consume columns from the next
+					// logical diagonal block.
+					for (; yy < yEnd; ++yy)
+					{
+						if (idx == 128)
+						{
+							if (count++ == 128)
+							{
+								seed = mAesFixedKey.hashBlock(seed);
+								rand = Rand(seed);
+								count = 0;
+							}
+							idx = 0;
+							bitIter = rand();
+						}
+
+						ctx.template mask<F>(v[0], yy[0], zeroOne[*bitIter]);
+						++bitIter;
+						++idx;
+						ctx.plus(*xx, *xx, v[0]);
 					}
 				}
 			}
@@ -228,13 +281,15 @@ namespace osuCrypto
 			{
 				pl.push_back(i, i);
 			}
+			if (mK == 0)
+				return pl;
 
 			auto xSize = mK;
 			auto ySize = mN - mK;
 
 			auto sigmaK = mSigma;
 			//auto sigmaN = roundUpTo(mSigma * (ySize / xSize), 8);
-			auto numBlock = xSize / sigmaK;
+			auto numBlock = divCeil(xSize, sigmaK);
 
 			auto seed = mSeed;
 			Rand rand(seed);

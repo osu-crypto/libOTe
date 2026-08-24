@@ -37,6 +37,8 @@ namespace osuCrypto {
 			{
 
 				u64 n = divCeil(size, chunkSize);
+				if (n > (1ull << 32))
+					throw std::invalid_argument("Tungsten permutation chunk count exceeds its u32 index domain. " LOCATION);
 				mPerm.resize(n);
 				std::iota(mPerm.begin(), mPerm.end(), 0);
 
@@ -142,14 +144,25 @@ namespace osuCrypto {
 
 			void config(u64 messageSize, u64 codeSize, block seed = block(452345234, 6756754363))
 			{
+				if (messageSize == 0)
+					throw std::invalid_argument("Tungsten message size must be nonzero. " LOCATION);
+				if (codeSize == 0)
+					throw std::invalid_argument("Tungsten code size must be nonzero. " LOCATION);
 				if (messageSize % ChunkSize)
 					throw std::runtime_error("messageSize " + std::to_string(messageSize) + " must be a multiple of ChunkSize " + std::to_string(ChunkSize) + ". " LOCATION);
 				if (codeSize % ChunkSize)
 					throw std::runtime_error("codeSize must be a multiple of ChunkSize. " LOCATION);
+				if (codeSize < messageSize)
+					throw std::invalid_argument("Tungsten code size must be at least the message size. " LOCATION);
+				if (codeSize - messageSize < messageSize)
+					throw std::invalid_argument("Tungsten requires code size to be at least twice the message size. " LOCATION);
 
+				TungstenPerm<ChunkSize> perm;
+				perm.init(codeSize - messageSize, seed);
+				mPerm.mPerm = std::move(perm.mPerm);
+				mPerm.reset();
 				mMessageSize = messageSize;
 				mCodeSize = codeSize;
-				mPerm.init(mCodeSize - mMessageSize, seed);
 			}
 
 			template<

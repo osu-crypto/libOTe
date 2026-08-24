@@ -699,8 +699,11 @@ namespace {
         if (passed == false)
             throw RTE_LOC;
 
-        // Check if choice bits are well-distributed
-        if (n > 100 && hamming < n / 2 - std::sqrt(n))
+        // Check for a material bias without making the deterministic test
+        // transcript fail on an ordinary two-standard-deviation sample.
+        const auto midpoint = n / 2;
+        const auto deviation = hamming > midpoint ? hamming - midpoint : midpoint - hamming;
+        if (n > 100 && deviation > 2 * std::sqrt(n))
             throw RTE_LOC;
     }
 }

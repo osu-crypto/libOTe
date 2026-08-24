@@ -25,6 +25,8 @@ namespace osuCrypto
         bool verbose = false)
     {
         u64 n = a.size();
+		if (aHat.size() != n)
+			throw std::invalid_argument("matrix NTT input and output spans must have equal lengths. " LOCATION);
         auto ln = log2ceil(n);
         auto qq = F::order(); qq = qq - 1;
 
@@ -91,6 +93,8 @@ namespace osuCrypto
         bool verbose = false)
     {
         auto n = a.size();
+		if (aHat_.size() != n)
+			throw std::invalid_argument("matrix inverse NTT input and output spans must have equal lengths. " LOCATION);
         auto ln = log2ceil(n);
         auto qq = F::order(); qq = qq - 1;
 

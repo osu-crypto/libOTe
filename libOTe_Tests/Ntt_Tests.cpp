@@ -12,6 +12,33 @@ using namespace oc;
 
 namespace tests_libOTe
 {
+	void Ntt_Audit_Test()
+	{
+		using F = F7681;
+		constexpr u64 n = 8;
+		auto psi = primRootOfUnity<F>(2 * n);
+		std::vector<F> full(n), shortSpan(n - 1);
+
+		auto expectInvalid = [](auto&& fn)
+		{
+			bool rejected = false;
+			try
+			{
+				fn();
+			}
+			catch (const std::invalid_argument&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw UnitTestFail("mismatched NTT spans were accepted" LOCATION);
+		};
+
+		expectInvalid([&] { nttNegWrapCt<F>(shortSpan, full, psi, NttOrder::NormalOrder); });
+		expectInvalid([&] { inttNegWrapGs<F>(full, shortSpan, psi, NttOrder::BitReversedOrder); });
+		expectInvalid([&] { nttNegWrapMatrix<F>(shortSpan, full, psi, NttOrder::NormalOrder); });
+		expectInvalid([&] { inttNegWrapMatrix<F>(full, shortSpan, psi, NttOrder::NormalOrder); });
+	}
 
 	void Ntt_nttNegWrapMatrix_normal_Test()
 	{

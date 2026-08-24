@@ -56,11 +56,32 @@ namespace osuCrypto
 			u64 depth = 3,
 			block seed = block(239478123692759237ull, 256237497312390762ull))
 		{
+			if (msgSize == 0)
+				throw std::invalid_argument("BlkAccCode message size must be nonzero. " LOCATION);
+
+			if (codeSize == 0)
+				throw std::invalid_argument("BlkAccCode code size must be nonzero. " LOCATION);
+
 			if (codeSize < msgSize)
-				throw RTE_LOC;
+				throw std::invalid_argument("BlkAccCode code size must be at least the message size. " LOCATION);
+
+			if (codeSize - msgSize < msgSize)
+				throw std::invalid_argument("BlkAccCode requires code size to be at least twice the message size. " LOCATION);
+
+			if (codeSize % Feistel2KPerm::chunkSize)
+				throw std::invalid_argument("BlkAccCode code size must be a multiple of eight. " LOCATION);
+
+			if (codeSize > (1ull << 32))
+				throw std::invalid_argument("BlkAccCode code size exceeds its u32 permutation domain. " LOCATION);
+
+			if (blockSize == 0)
+				throw std::invalid_argument("BlkAccCode block size must be nonzero. " LOCATION);
+
+			if (blockSize % 8)
+				throw std::invalid_argument("BlkAccCode block size must be a multiple of eight. " LOCATION);
 
 			if (depth < 3)
-				throw RTE_LOC; // Depth must be at least 3 for linear distance.
+				throw std::invalid_argument("BlkAccCode depth must be at least three. " LOCATION);
 
 			mN = codeSize;
 			mK = msgSize;

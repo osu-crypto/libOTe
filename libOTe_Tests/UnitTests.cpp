@@ -39,6 +39,8 @@
 using namespace osuCrypto;
 namespace tests_libOTe
 {
+	void TungstenCode_Audit_Test(const CLP& cmd);
+
 	TestCollection Tests([](TestCollection& tc)
 		{
 
@@ -70,10 +72,12 @@ namespace tests_libOTe
 
 			tc.add("TungstenCode_encode_test                ", TungstenCode_encode_test);
 			tc.add("TungstenCode_weight_test                ", TungstenCode_weight_test);
+			tc.add("TungstenCode_Audit_Test                 ", TungstenCode_Audit_Test);
 
 			tc.add("Permutation_bijection                    ", Permutation_bijection_test);
 			tc.add("Permutation_data                         ", Permutation_data_test);
 			tc.add("Permutation_chunk                        ", Permutation_chunk_test);
+			tc.add("Permutation_Audit_Test                  ", Permutation_Audit_Test);
 
 			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
 			tc.add("RegularDpf_MultByte_Test                ", RegularDpf_MultByte_Test);
@@ -152,6 +156,7 @@ namespace tests_libOTe
 			tc.add("Ntt_bitReverse_SIMD_Test                ", Ntt_bitReverse_SIMD_Test);
 			tc.add("Ntt_nttNegWrapMatrix_normal_Test        ", Ntt_nttNegWrapMatrix_normal_Test);
 			tc.add("Ntt_nttNegWrapMatrix_Test               ", Ntt_nttNegWrapMatrix_Test);
+			tc.add("Ntt_Audit_Test                          ", Ntt_Audit_Test);
 			//tc.add("Ntt_nttNegWrapBatch_Test                ", Ntt_nttNegWrapBatch_Test);
 			
 			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
@@ -174,6 +179,7 @@ namespace tests_libOTe
 			tc.add("DotExt_Iknp_Test                        ", DotExt_Iknp_Test);
 			tc.add("BlkAccCode_mtx_test                      ", BlkAccCode_mtx_test);
 			tc.add("BlkAccCode_paramSweep_test               ", BlkAccCode_paramSweep_test);
+			tc.add("BlkAccCode_Audit_Test                   ", BlkAccCode_Audit_Test);
 			
 			tc.add("RegularPprf_expandOne_test               ", RegularPprf_expandOne_test);
 			tc.add("RegularPprf_inter_test                   ", RegularPprf_inter_test);

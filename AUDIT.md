@@ -2027,3 +2027,207 @@ Verification:
 
 - `Tools_LinearCode_Audit_Test` checks explicit and default-constructed
   zero-length rejection.
+
+## AUD-064: BlkAcc discarded its seeded accumulator permutations
+
+Status: fixed
+
+Affected code:
+
+- Permutation handling in `Accumulator::dualEncode()` and
+  `Accumulator::getMtx()`.
+- The default BlkAcc compression path in Silent OT and Silent VOLE.
+
+Concern:
+
+`BlkAccCode` constructed each accumulator with a distinct permutation seed,
+but `Accumulator` immediately reinitialized that permutation using its default
+seed. Every accumulator round therefore used the same fixed permutation, and
+the accumulator portion of the matrix did not change when the code seed
+changed.
+
+Impact:
+
+The parties still computed correlated outputs, so ordinary relation tests did
+not detect the issue. However, the implemented default compression matrix did
+not have the independently seeded permutation structure on which its estimated
+minimum distance and Silent-protocol security parameters are based.
+
+Resolution:
+
+`Accumulator` now preserves the initialized permutation supplied by its
+caller. Beginning a `FeistelPerm` iteration still resets only its traversal
+buffer; it does not regenerate its round keys. No permutation or accumulation
+inner loop changed.
+
+Verification:
+
+- `BlkAccCode_Audit_Test` checks both power-of-two and arbitrary domains and
+  confirms that encoding preserves the caller's Feistel round keys.
+- The default Silent OT/VOLE and explicit BlkAcc protocol tests exercise the
+  corrected matrix while checking the protocol relation.
+
+## AUD-065: FeistelPerm's iterator never reached its end
+
+Status: fixed
+
+Affected code:
+
+- `FeistelPerm::Iterator::operator++()`.
+
+Concern:
+
+Incrementing the iterator advanced the permutation buffer but did not advance
+the index used by iterator comparison. A conventional loop that compared the
+iterator with `end()` therefore never terminated.
+
+Impact:
+
+Use of the public iterator interface could loop indefinitely and continue
+returning stale buffered indices. Internal encoding loops used an explicit
+domain count and were not affected.
+
+Resolution:
+
+The iterator now advances its logical index together with the permutation
+buffer. Feistel iterator indices are 64-bit so the endpoint of a full 32-bit
+domain remains representable.
+
+Verification:
+
+- `Permutation_Audit_Test` iterates to `end()` and checks exact, unique
+  coverage of a non-power-of-two domain.
+
+## AUD-066: BlkAcc accepted unsupported dimensions
+
+Status: fixed
+
+Affected code:
+
+- Configuration in `BlkAccCode`, `BlockDiagonal`, `Feistel2KPerm`, and
+  `FeistelPerm`.
+
+Concern:
+
+Configuration accepted zero block sizes, undersized compression domains,
+non-vector-aligned code sizes, and domains larger than the permutation index
+type. These inputs failed only after initialization, divided by zero, or could
+truncate permutation indices.
+
+Impact:
+
+An invalid local configuration could cause undefined behavior, excessive work,
+or a late protocol failure. Normal Silent configuration selects supported
+parameters, but the code classes are also public interfaces.
+
+Resolution:
+
+Initialization now individually requires nonzero message, code, and block
+sizes; a code size at least twice the message size; eight-element code and
+block granularity; a representable 32-bit permutation domain; and depth at
+least three. `BlockDiagonal` and the permutation classes enforce their own
+direct-construction invariants as well.
+
+Verification:
+
+- `BlkAccCode_Audit_Test` covers every rejected dimension class before running
+  a valid non-power-of-two configuration.
+
+## AUD-067: BlockDiagonal's SIMD tail crossed logical blocks
+
+Status: fixed
+
+Affected code:
+
+- The eight-way kernel and matrix oracle in `BlockDiagonal`.
+
+Concern:
+
+For non-final logical blocks, the optimized loop processed eight inputs whenever
+at least one remained. A short tail therefore incorporated columns belonging
+to the following diagonal block. The matrix oracle also used floor division
+where the encoder used ceiling division when the output size was not a block
+multiple.
+
+Impact:
+
+Supported allocations remained in bounds, but some locally selected dimensions
+produced an overlapping matrix rather than the intended block-diagonal code.
+The encoder and its matrix oracle disagreed, so the stated code construction
+and its distance analysis did not apply to those dimensions.
+
+Resolution:
+
+Each logical block now processes an aligned scalar prefix, unchanged eight-way
+full chunks, and a scalar tail. Random-bit consumption remains sequential
+across all three portions. The oracle now uses the same ceiling block count and
+handles the empty matrix explicitly.
+
+Verification:
+
+- `BlkAccCode_Audit_Test` compares the optimized encoder with the sparse-matrix
+  oracle for both an unaligned input partition and a partial final output
+  block.
+
+## AUD-068: Paired NTT spans could have different lengths
+
+Status: fixed
+
+Affected code:
+
+- Recursive forward and inverse negacyclic NTT entry points.
+- Reference matrix forward and inverse NTT entry points.
+
+Concern:
+
+These functions derived the transform size from one span and indexed the paired
+span as though it had the same length.
+
+Impact:
+
+An undersized local input or output span could cause an out-of-bounds read or
+write in Release builds. Ring-LPN callers construct equal internal spans.
+
+Resolution:
+
+Every paired-span entry point now requires equal lengths before transform
+validation or indexing. The optimized in-place transform and all arithmetic
+kernels are unchanged.
+
+Verification:
+
+- `Ntt_Audit_Test` supplies mismatched spans to all four paired-span APIs and
+  requires an `invalid_argument` rejection.
+
+## AUD-069: Tungsten dimensions could underflow permutation allocation
+
+Status: fixed
+
+Affected code:
+
+- `TungstenCode::config()` and `TungstenPerm::init()`.
+
+Concern:
+
+Configuration subtracted the message size from the code size without first
+establishing their order. It also accepted rates that the encoder later
+rejected and permutation chunk counts larger than its 32-bit indices.
+
+Impact:
+
+An invalid local configuration could underflow into an enormous allocation
+attempt, fail after partially changing object state, or truncate permutation
+indices. Tungsten remains an explicitly experimental compression option.
+
+Resolution:
+
+Configuration now individually validates nonzero and chunk-aligned dimensions,
+the implemented rate of at least two, and the permutation index domain before
+allocation. It constructs the new permutation temporarily and commits all live
+state only after successful initialization.
+
+Verification:
+
+- `TungstenCode_Audit_Test` covers reversed and unsupported dimensions, an
+  oversized chunk domain, and transactional preservation of a prior valid
+  configuration.

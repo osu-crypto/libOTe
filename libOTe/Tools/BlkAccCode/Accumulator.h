@@ -80,8 +80,6 @@ namespace osuCrypto
 		template<typename F, typename InIter, typename OutIter, typename CoeffCtx>
 		void dualEncode(InIter inIter, OutIter outIter, CoeffCtx ctx)
 		{
-			mPerm.init(mN);
-
 			if constexpr (HasChunkSize<Perm>::value == false)
 			{
 
@@ -206,7 +204,6 @@ namespace osuCrypto
 
 		SparseMtx getMtx()
 		{
-			mPerm.init(mN);
 			PointList pl(mN, mN);
 			auto iter = mPerm.begin();
 			for (u64 i = 0; i < mN; ++i)
