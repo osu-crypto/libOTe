@@ -118,7 +118,10 @@ namespace osuCrypto {
 				prng.SetSeed(otMsg[i][0], a.size());
 
 				// t1 = 2^i
-				ctx.powerOfTwo(temp[1], i);
+				if constexpr (requires { ctx.powerOfTwoUnchecked(temp[1], i); })
+					ctx.powerOfTwoUnchecked(temp[1], i);
+				else
+					ctx.powerOfTwo(temp[1], i);
 				//std::cout << "2^i " << ctx.str(temp[1]) << "\n";
 
 				for (size_t j = 0; j < c.size(); ++j, ++k)

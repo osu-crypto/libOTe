@@ -2019,6 +2019,69 @@ void Dpf_Audit_Test(const oc::CLP&)
 			throw UnitTestFail(message);
 	};
 
+#if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
+	{
+		Matrix<u8> unpacked(2, 3);
+		std::fill(unpacked.begin(), unpacked.end(), 0xff);
+		std::vector<u8> packed{ 1, 2, 3, 4 };
+		DpfMult::unpackBits(unpacked, packed, 16);
+		if (unpacked(0, 0) != 1 || unpacked(0, 1) != 2 ||
+			unpacked(1, 0) != 3 || unpacked(1, 1) != 4 ||
+			unpacked(0, 2) != 0xff || unpacked(1, 2) != 0xff)
+			throw UnitTestFail("DPF byte unpacking used the physical row stride");
+
+		Matrix<u8> source(2, 3);
+		source(0, 0) = 5;
+		source(0, 1) = 6;
+		source(0, 2) = 0xee;
+		source(1, 0) = 7;
+		source(1, 1) = 8;
+		source(1, 2) = 0xee;
+		packed.assign(4, 0xff);
+		DpfMult::packBits(packed, source, 16);
+		if (packed != std::vector<u8>{ 5, 6, 7, 8 })
+			throw UnitTestFail("DPF byte packing used the physical row stride");
+
+		Matrix<u8> partialSource(1, 1);
+		partialSource(0, 0) = 0x15;
+		packed.assign(1, 0xff);
+		DpfMult::packBits(packed, partialSource, 5);
+		if (packed[0] != 0x15)
+			throw UnitTestFail("DPF bit packing retained stale padding bits");
+		Matrix<u8> partialDest(1, 1);
+		partialDest(0, 0) = 0xff;
+		DpfMult::unpackBits(partialDest, packed, 5);
+		if (partialDest(0, 0) != 0x15)
+			throw UnitTestFail("DPF bit unpacking retained stale padding bits");
+
+		Matrix<u8> narrow(1, 1);
+		std::vector<u8> twoBytes(2);
+		expectRejected([&] {
+			DpfMult::packBits(twoBytes, narrow, 9);
+		}, "DPF bit packing accepted an undersized row");
+
+		DpfMult multiplier;
+		coproto::Socket socket;
+		std::vector<u8> noChoices;
+		std::vector<block> noInput, noOutput;
+		macoro::sync_wait(multiplier.multiply<block, CoeffCtxGF2>(
+			noChoices, noInput, noOutput, socket, CoeffCtxGF2{}));
+
+		std::vector<u8> oneChoice(1);
+		std::vector<block> oneInput(1);
+		expectRejected([&] {
+			macoro::sync_wait(multiplier.multiply<block, CoeffCtxGF2>(
+				oneChoice, oneInput, noOutput, socket, CoeffCtxGF2{}));
+		}, "DPF multiplication accepted an undersized output");
+
+		multiplier.mTotalMults = std::numeric_limits<u64>::max();
+		multiplier.mOtIdx = multiplier.mTotalMults - 1;
+		expectRejected([&] {
+			macoro::sync_wait(multiplier.setupMultiply(2, oneChoice, socket));
+		}, "DPF multiplication OT bounds wrapped");
+	}
+#endif
+
 #ifdef ENABLE_REGULAR_DPF
 	{
 		PRNG prng(block(0x4155442d303238ull, 0x4155442d303239ull));

@@ -4,6 +4,9 @@
 #include "cryptoTools/Common/BitVector.h"
 #include <sstream>
 #include <cryptoTools/Common/block.h>
+#include <iterator>
+#include <limits>
+#include <stdexcept>
 
 namespace osuCrypto {
 
@@ -17,6 +20,36 @@ namespace osuCrypto {
 	 */
 	struct CoeffCtxInteger
 	{
+	private:
+		template<typename Iter>
+		static std::size_t checkedRangeSize(Iter begin, Iter end)
+		{
+			auto count = std::distance(begin, end);
+			if constexpr (std::is_signed_v<decltype(count)>)
+			{
+				if (count < 0)
+					throw std::invalid_argument(
+						"Coefficient range must not be reversed. " LOCATION);
+			}
+
+			using Count = std::make_unsigned_t<decltype(count)>;
+			if (static_cast<Count>(count) >
+				static_cast<Count>(std::numeric_limits<std::size_t>::max()))
+				throw std::length_error(
+					"Coefficient range exceeds the addressable size. " LOCATION);
+			return static_cast<std::size_t>(count);
+		}
+
+		template<typename T>
+		static std::size_t checkedRangeBytes(std::size_t count)
+		{
+			if (count > std::numeric_limits<std::size_t>::max() / sizeof(T))
+				throw std::length_error(
+					"Coefficient range byte size overflows. " LOCATION);
+			return count * sizeof(T);
+		}
+
+	public:
 		template<typename R, typename F1, typename F2>
 		OC_FORCEINLINE void plus(R&& ret, F1&& lhs, F2&& rhs)const {
 			ret = lhs + rhs;
@@ -123,12 +156,22 @@ namespace osuCrypto {
             }
         }
 
-		// return the F element with value 2^power
+		// Return the F element with value 2^power. The unchecked form is for
+		// callers that validate a whole decomposition domain before a hot loop.
 		template<typename F>
-		OC_FORCEINLINE void powerOfTwo(F& ret, u64 power)const {
+		OC_FORCEINLINE void powerOfTwoUnchecked(F& ret, u64 power)const {
 			static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
 			memset(&ret, 0, sizeof(F));
 			*BitIterator((u8*)&ret, power) = 1;
+		}
+
+		template<typename F>
+		OC_FORCEINLINE void powerOfTwo(F& ret, u64 power)const {
+			constexpr u64 storageBits = std::is_same_v<F, bool> ? 1 : sizeof(F) * 8;
+			if (power >= storageBits)
+				throw std::out_of_range(
+					"Power-of-two index exceeds coefficient storage. " LOCATION);
+			powerOfTwoUnchecked(ret, power);
 		}
 
 		// A vector like type that can be used to store
@@ -191,9 +234,10 @@ namespace osuCrypto {
 			static_assert(std::is_trivially_copyable<F1>::value, "memcpy is used so must be trivially_copyable.");
 			static_assert(std::is_same_v<F1, F2>, "src and destication types are not the same.");
 
-			auto n = std::distance(begin, end);
+			auto n = checkedRangeSize(begin, end);
 			if (n)
-				memcpy((F2 * __restrict) & *dstBegin, (F1 * __restrict) & *begin, n * sizeof(F1));
+				memcpy((F2 * __restrict) & *dstBegin, (F1 * __restrict) & *begin,
+					checkedRangeBytes<F1>(n));
 			//std::copy(begin, end, dstBegin);
 		}
 
@@ -211,17 +255,17 @@ namespace osuCrypto {
 			static_assert(std::is_trivially_copyable<DstType>::value, "destination serialization types must be trivially_copyable.");
 
 			// how many source elem do we have?
-			auto srcN = std::distance(begin, end);
+			auto srcN = checkedRangeSize(begin, end);
 			if (srcN)
 			{
 				// the source size in bytes
-				auto n = srcN * sizeof(SrcType);
+				auto n = checkedRangeBytes<SrcType>(srcN);
 
 				// The byte size must be a multiple of the destination element byte size.
 				if (n % sizeof(DstType))
 				{
-					std::cout << "bad buffer size. the source buffer (byte) size is not a multiple of the distination value type size." LOCATION << std::endl;
-					std::terminate();
+					throw std::invalid_argument(
+						"Serialized coefficient byte size is not a multiple of the destination element size. " LOCATION);
 				}
 				// the number of destination elements.
 				auto dstN = n / sizeof(DstType);
@@ -237,8 +281,8 @@ namespace osuCrypto {
 				// And check that the pointer math works
 				if (dstBackPtr != (u8*)&*dstBackIter)
 				{
-					std::cout << "bad destination iterator type. pointer arithemtic not correct. " LOCATION << std::endl;
-					std::terminate();
+					throw std::invalid_argument(
+						"Destination coefficient iterator is not contiguous. " LOCATION);
 				}
 
 				auto srcBackPtr = beginU8 + (n - sizeof(SrcType));
@@ -248,8 +292,8 @@ namespace osuCrypto {
 				// And check that the pointer math works
 				if (srcBackPtr != (u8*)&*srcBackIter)
 				{
-					std::cout << "bad source iterator type. pointer arithemtic not correct. " LOCATION << std::endl;
-					std::terminate();
+					throw std::invalid_argument(
+						"Source coefficient iterator is not contiguous. " LOCATION);
 				}
 
 				// memcpy the bytes
@@ -292,9 +336,8 @@ namespace osuCrypto {
 
 			if (begin != end)
 			{
-				auto n = std::distance(begin, end);
-				assert(n > 0);
-				memset(&*begin, 0, n * sizeof(F));
+				auto n = checkedRangeSize(begin, end);
+				memset(&*begin, 0, checkedRangeBytes<F>(n));
 			}
 		}
 
@@ -320,19 +363,18 @@ namespace osuCrypto {
 
 			if (begin != end)
 			{
-				auto n = std::distance(begin, end);
-				assert(n > 0);
+				auto n = checkedRangeSize(begin, end);
 
 				if constexpr (requires(F x) { F::one(); })
 				{
-					for (u64 i = 0; i < n; ++i)
+					for (std::size_t i = 0; i < n; ++i)
 						begin[i] = F::one();
 				}
 				else
 				{
 					static_assert(std::is_trivially_copyable<F>::value, "memset is used so must be trivially_copyable.");
 
-					memset(&*begin, 0, n * sizeof(F));
+					memset(&*begin, 0, checkedRangeBytes<F>(n));
 					while (begin != end)
 					{
 						auto& v = *begin++;

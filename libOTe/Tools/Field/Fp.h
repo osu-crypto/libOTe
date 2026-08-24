@@ -14,8 +14,15 @@ namespace osuCrypto
 	template<u64 modulus, typename T, typename TT = T>
 	struct Fp
 	{
+		static_assert(std::is_unsigned_v<T>, "Fp storage must be unsigned.");
+		static_assert(std::is_unsigned_v<TT>, "Fp wide storage must be unsigned.");
+		static_assert(modulus >= 2, "Fp modulus must be at least two.");
+		static_assert(modulus <= std::numeric_limits<T>::max(),
+			"Fp modulus must fit in its storage type.");
 		static constexpr T mMod = modulus;
 		static_assert(log2ceil(mMod) * 2 <= 8 * sizeof(TT), "a double sized value must fit in TT ");
+		static constexpr bool mNarrowAddSub =
+			mMod <= std::numeric_limits<T>::max() / 2 + 1;
 		T mVal;
 
 
@@ -41,9 +48,20 @@ namespace osuCrypto
 		{
 
 			assert(mVal < mMod && o.mVal < mMod);
-			T r = mVal + o.mVal;
-			if (r >= mMod)
-				r -= mMod;
+			T r;
+			if constexpr (mNarrowAddSub)
+			{
+				r = mVal + o.mVal;
+				if (r >= mMod)
+					r -= mMod;
+			}
+			else
+			{
+				TT wide = TT(mVal) + TT(o.mVal);
+				if (wide >= TT(mMod))
+					wide -= TT(mMod);
+				r = static_cast<T>(wide);
+			}
 
 			assert(r == (TT(mVal) + TT(o.mVal)) % TT(mMod));
 
@@ -54,9 +72,19 @@ namespace osuCrypto
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			Fp r;
-			r.mVal = mVal + o.mVal;
-			if (r.mVal >= mMod)
-				r.mVal -= mMod;
+			if constexpr (mNarrowAddSub)
+			{
+				r.mVal = mVal + o.mVal;
+				if (r.mVal >= mMod)
+					r.mVal -= mMod;
+			}
+			else
+			{
+				TT wide = TT(mVal) + TT(o.mVal);
+				if (wide >= TT(mMod))
+					wide -= TT(mMod);
+				r.mVal = static_cast<T>(wide);
+			}
 
 			assert(r.mVal == (TT(mVal) + TT(o.mVal)) % TT(mMod));
 			return r;
@@ -65,10 +93,20 @@ namespace osuCrypto
 		constexpr Fp& operator-=(const Fp& o)
 		{
 			assert(mVal < mMod && o.mVal < mMod);
-			T r = mVal - o.mVal;
-			if (r >= mMod)
-				r += mMod;
-			assert(r == (TT(mVal) - TT(o.mVal) + mMod) % TT(mMod));
+			T r;
+			if constexpr (mNarrowAddSub)
+			{
+				r = mVal - o.mVal;
+				if (r >= mMod)
+					r += mMod;
+			}
+			else
+			{
+				r = mVal >= o.mVal ?
+					static_cast<T>(mVal - o.mVal) :
+					static_cast<T>(TT(mVal) + TT(mMod) - TT(o.mVal));
+			}
+			assert(r == (TT(mVal) + TT(mMod) - TT(o.mVal)) % TT(mMod));
 
 			mVal = r;
 			return *this;
@@ -77,11 +115,20 @@ namespace osuCrypto
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			Fp r;
-			r.mVal = mVal - o.mVal;
-			if (r.mVal >= mMod)
-				r.mVal += mMod;
+			if constexpr (mNarrowAddSub)
+			{
+				r.mVal = mVal - o.mVal;
+				if (r.mVal >= mMod)
+					r.mVal += mMod;
+			}
+			else
+			{
+				r.mVal = mVal >= o.mVal ?
+					static_cast<T>(mVal - o.mVal) :
+					static_cast<T>(TT(mVal) + TT(mMod) - TT(o.mVal));
+			}
 
-			assert(r.mVal == (TT(mVal) - TT(o.mVal) + mMod) % TT(mMod));
+			assert(r.mVal == (TT(mVal) + TT(mMod) - TT(o.mVal)) % TT(mMod));
 
 			return r;
 		};

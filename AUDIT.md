@@ -2946,3 +2946,194 @@ Verification:
 - `Mtx_Audit_Test` checks invalid parity-check and generator dimensions,
   invalid swap indices, and preservation of the swap output on conversion
   failure.
+
+## AUD-092: Coefficient powers admitted out-of-object bit indices
+
+Status: fixed
+
+Affected code:
+
+- `CoeffCtxInteger::powerOfTwo()`.
+
+Concern:
+
+The helper wrote through a `BitIterator` without checking that the requested
+bit belonged to the coefficient object.
+
+Impact:
+
+An invalid direct power could write past the coefficient and corrupt adjacent
+memory.
+
+Resolution:
+
+The public helper now validates the storage bit index. An explicitly named
+unchecked helper retains the original instructions for callers that validate
+the complete domain before entering a hot loop; Noisy VOLE uses that path
+after its existing field-width validation.
+
+Verification:
+
+- `Field_Audit_Test` checks the highest valid `u8` power and rejection of the
+  first out-of-range power.
+
+## AUD-093: Coefficient range helpers accepted reversed ranges
+
+Status: fixed
+
+Affected code:
+
+- Coefficient copy, serialization, deserialization, zero-fill, and one-fill
+  helpers.
+
+Concern:
+
+Negative iterator distances reached byte-count multiplication and then
+`memcpy()` or `memset()`. Malformed serialization domains also terminated the
+process instead of reporting an input error.
+
+Impact:
+
+A reversed direct range could become an enormous memory operation in Release,
+while a malformed serialization range could unconditionally abort the
+process.
+
+Resolution:
+
+Each bulk entry point now validates the range once before its existing bulk
+operation and checks byte-count multiplication. Serialization failures throw
+exceptions. The element-processing loops and bulk memory operations are
+unchanged.
+
+Verification:
+
+- `Field_Audit_Test` checks reversed copy and fill ranges and a serialization
+  length that is not divisible by the destination element size.
+
+## AUD-094: Fp accepted moduli unsupported by narrow addition and subtraction
+
+Status: fixed
+
+Affected code:
+
+- `Fp` template constraints and its addition and subtraction operators.
+
+Concern:
+
+The type allowed a modulus larger than half the storage range, but addition
+and subtraction relied on narrow unsigned wrap followed by one modular
+correction. It also allowed moduli that narrowed to zero or otherwise did not
+fit the storage type.
+
+Impact:
+
+Valid field operands could produce incorrect results. For example,
+`Fp<32769, u16, u32>` computed both addition and subtraction incorrectly near
+the top of the field, invalidating algebra and any protocol using it.
+
+Resolution:
+
+The template now requires an unsigned, representable modulus of at least two.
+Moduli supported by narrow arithmetic retain the original compile-time path;
+only larger moduli use the already-required wide type for addition and
+subtraction.
+
+Verification:
+
+- `Field_Audit_Test` checks ordinary and compound addition and subtraction at
+  the boundary of `Fp<32769, u16, u32>`.
+
+## AUD-095: Generic DPF multiplication did not validate its output length
+
+Status: fixed
+
+Affected code:
+
+- `DpfMult::multiply()` and `DpfMult::MultSession::multiply()`.
+
+Concern:
+
+The public wrapper passed only `xy.begin()` into the session and never checked
+the output container size. The session also probed `xyBegin + (n - 1)` when
+`n` was zero.
+
+Impact:
+
+An undersized direct output caused out-of-bounds writes after interactive
+state had been consumed, and an empty multiplication underflowed its output
+iterator.
+
+Resolution:
+
+The sized public wrapper validates input and output counts before setup.
+Empty multiplications return before communication, OT-state checks, or
+iterator arithmetic, including in direct multiplication sessions.
+
+Verification:
+
+- `Dpf_Audit_Test` checks rejection of an undersized output and successful
+  empty multiplication without configured OTs.
+
+## AUD-096: DPF multiplication dimensions could wrap OT and message bounds
+
+Status: fixed
+
+Affected code:
+
+- DPF multiplication, setup, random-session, bit-multiplication, and generic
+  message allocation paths.
+
+Concern:
+
+OT availability was checked with `count + current`, and generic message sizes
+were formed with unchecked element-count multiplication. The shared
+ceiling-division idiom could also overflow when converting maximum bit counts
+to bytes.
+
+Impact:
+
+Wrapped direct dimensions could pass validation and then index beyond the OT
+vectors or underallocate a serialized protocol message.
+
+Resolution:
+
+OT counts are bounded individually against the remaining count, message byte
+sizes are checked before setup and allocation, and bit-to-byte conversion uses
+division plus a remainder bit. All checks occur outside the arithmetic and
+serialization kernels.
+
+Verification:
+
+- `Dpf_Audit_Test` checks an OT request that would wrap the former addition.
+
+## AUD-097: DPF bit packing trusted row widths and physical strides
+
+Status: fixed
+
+Affected code:
+
+- `DpfMult::packBits()` and `DpfMult::unpackBits()`.
+
+Concern:
+
+The helpers did not validate row width or checked total-bit multiplication.
+For byte-aligned inputs they advanced the packed stream by the physical matrix
+row width instead of the logical encoded width. Non-byte-aligned packing left
+unused output padding unchanged.
+
+Impact:
+
+Matrices with padded or undersized rows could be serialized incorrectly or
+accessed out of bounds, and stale padding bits could leak into a serialized
+buffer.
+
+Resolution:
+
+The helpers validate logical row widths and total dimensions once, advance by
+the logical byte width, and normalize partial-byte padding. Their per-bit and
+per-byte copy loops retain the existing structure.
+
+Verification:
+
+- `Dpf_Audit_Test` checks padded physical rows, undersized rows, and
+  normalization of partial-byte padding in both directions.

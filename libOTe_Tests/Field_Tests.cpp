@@ -194,6 +194,20 @@ namespace tests_libOTe
 			if (!rejected)
 				throw RTE_LOC;
 		};
+		auto expectRejected = [](auto&& fn)
+		{
+			bool rejected = false;
+			try
+			{
+				fn();
+			}
+			catch (const std::exception&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw RTE_LOC;
+		};
 
 		F a = 3;
 		if (a.pow(F::order() + 1) != a * a)
@@ -223,6 +237,38 @@ namespace tests_libOTe
 		expectInvalid([&] { (void)primRootOfUnity<F>(7, F(2)); });
 		expectInvalid([&] { (void)primRootOfUnity<Fp31>(u64{ 1 } << 28); });
 		expectInvalid([&] { (void)primRootOfUnity<Goldilocks>(u64{ 1 } << 33); });
+
+		using WideFp = Fp<32769, u16, u32>;
+		const WideFp wideMax = 32768;
+		if (wideMax + wideMax != WideFp(32767) ||
+			WideFp(0) - wideMax != WideFp(1))
+			throw RTE_LOC;
+		auto wideAccum = wideMax;
+		wideAccum += wideMax;
+		if (wideAccum != WideFp(32767))
+			throw RTE_LOC;
+		wideAccum = 0;
+		wideAccum -= wideMax;
+		if (wideAccum != WideFp(1))
+			throw RTE_LOC;
+
+		CoeffCtxInteger ctx;
+		u8 coefficient = 0;
+		expectRejected([&] { ctx.powerOfTwo(coefficient, 8); });
+		ctx.powerOfTwo(coefficient, 7);
+		if (coefficient != 0x80)
+			throw RTE_LOC;
+
+		std::array<u8, 3> bytes{ 1, 2, 3 };
+		std::array<u8, 3> copy{};
+		expectRejected([&] { ctx.copy(bytes.end(), bytes.begin(), copy.begin()); });
+		expectRejected([&] { ctx.zero(bytes.end(), bytes.begin()); });
+		expectRejected([&] { ctx.one(bytes.end(), bytes.begin()); });
+		u16 decoded = 0;
+		auto byteBegin = bytes.begin();
+		auto byteEnd = bytes.end();
+		auto decodedBegin = &decoded;
+		expectRejected([&] { ctx.deserialize(byteBegin, byteEnd, decodedBegin); });
 	}
 
 }
