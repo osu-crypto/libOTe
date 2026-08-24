@@ -2661,3 +2661,288 @@ Verification:
 
 - `Ntt_Audit_Test` covers empty forward, inverse, matrix, precomputation, and
   twiddle calls, plus an extreme size outside the supported domain.
+
+## AUD-083: Sparse-matrix copies retained views into the source object
+
+Status: fixed
+
+Affected code:
+
+- `SparseMtx` copy construction and copy assignment.
+
+Concern:
+
+The default copy operations independently copied the owned flat vectors and
+the row and column spans. The copied spans therefore continued to reference
+the source vectors rather than the copied storage.
+
+Impact:
+
+Copies aliased source mutations and became dangling views after the source was
+destroyed, permitting use-after-free through ordinary value semantics.
+
+Resolution:
+
+Copy construction now copies the flat storage, verifies that every nonempty
+source view is backed by that storage, and rebinds all destination views.
+Copy assignment uses a checked temporary followed by move assignment.
+
+Verification:
+
+- `Mtx_Audit_Test` checks independent row and column addresses, copy
+  assignment across source destruction, and rejection of an externally
+  rebound view.
+
+## AUD-084: Polynomial coefficient growth could wrap before resizing
+
+Status: fixed
+
+Affected code:
+
+- `Poly::setCoeff()` and mutable `Poly::operator[]()`.
+
+Concern:
+
+Both entry points formed `index + 1` without first excluding the maximum
+64-bit index. At `UINT64_MAX`, the requested size wrapped to zero and the
+subsequent coefficient access was out of bounds.
+
+Impact:
+
+An invalid direct coefficient index could cause memory corruption without
+first attempting an unrepresentably large allocation.
+
+Resolution:
+
+Each growth entry point now rejects addition overflow and indices beyond the
+coefficient vector's individual maximum size before resizing.
+
+Verification:
+
+- `Poly_Audit_Test` checks both maximum-index mutation paths.
+
+## AUD-085: Minimum-distance adapter used an unsafe fixed temporary file
+
+Status: fixed
+
+Affected code:
+
+- `minDist()` and `minDist2()` in the LDPC utility layer.
+
+Concern:
+
+`minDist2()` truncated the fixed relative path `./deleteMe`, followed existing
+links, and removed the file only on success. The Algo994 adapter continued
+after a failed matrix parse with an uninitialized pointer and dimensions,
+narrowed an unchecked thread count into `int`, and mutated backend globals
+without synchronization.
+
+Impact:
+
+Calling the helper could clobber a file selected through the working
+directory, leak temporary data, pass invalid state into the C backend, or race
+with another call.
+
+Resolution:
+
+The adapter now serializes backend-global access, validates the thread count
+and parsed dimensions, and stops immediately on parse failure. The matrix is
+written to an exclusively created, unpredictable file in the system temporary
+directory and removed by an RAII guard on every exit. Builds without Algo994
+reject the operation before creating a file.
+
+Verification:
+
+- `Mtx_Audit_Test` verifies the feature-disabled early rejection. The
+  Algo994-only code is compile-guarded because that optional backend is not
+  present in the audited build configurations.
+
+## AUD-086: Const dense-matrix operations could mutate their source
+
+Status: fixed
+
+Affected code:
+
+- Dense bit and row accessors, `upperTriangular()`, and
+  `gausianElimination()`.
+
+Concern:
+
+Const accessors returned mutable proxy objects. Both elimination methods used
+those proxies to modify `*this` despite advertising a const, result-returning
+interface. A matrix with rows but no columns was also indexed before its width
+was checked.
+
+Impact:
+
+A nominally read-only calculation changed caller state and could race with
+other readers. A zero-width direct input caused out-of-bounds access in
+Release.
+
+Resolution:
+
+Const access now returns bit values and a read-only row view. Elimination is
+performed on a local copy and handles zero width before indexing. Existing
+elimination and row-arithmetic loops are unchanged.
+
+Verification:
+
+- `Mtx_Audit_Test` checks source preservation, the returned triangular and
+  reduced matrices, const reads, and nonempty zero-width inputs.
+
+## AUD-087: Combination utilities admitted invalid domains and overflow
+
+Status: fixed
+
+Affected code:
+
+- `choose()`, `ithCombination()`, and `NChooseK`.
+
+Concern:
+
+Binomial coefficients were computed recursively with unchecked products.
+Invalid combination sizes and indices were not rejected. Incrementing the
+valid `k = 0` combination indexed an empty vector, and iterator exhaustion was
+assertion-only.
+
+Impact:
+
+Malformed direct parameters could produce incorrect enumeration, division by
+zero, out-of-bounds access, or assertion-dependent process termination.
+
+Resolution:
+
+Binomial coefficients now use reduced, overflow-checked multiplication.
+Combination unranking validates its domain and uses bounded combinatorial
+search. The iterator explicitly handles the empty combination and rejects
+construction, increment, or dereference outside its range.
+
+Verification:
+
+- `Mtx_Audit_Test` checks known counts and enumeration, count overflow,
+  invalid sizes and indices, empty-combination iteration, and exhausted
+  iterator operations.
+
+## AUD-088: Polynomial replacement and equality retained stale state
+
+Status: fixed
+
+Affected code:
+
+- Span assignment, polynomial equality, addition, and multiplication.
+
+Concern:
+
+Assigning a shorter or empty coefficient span did not remove old high
+coefficients. Comparing two empty zero polynomials indexed coefficient zero
+and threw. Arithmetic could retain ineffective trailing zeros and terminate
+under a Debug-only multiplication assertion.
+
+Impact:
+
+Reusing a polynomial could silently compute with stale coefficients, while
+equivalent zero-padded representations behaved differently across operations
+and build modes.
+
+Resolution:
+
+Span assignment now replaces the exact range through an alias-safe temporary.
+Equality compares zero-extended coefficients, and algebraic results discard
+ineffective trailing zeros. Multiplication derives checked output dimensions
+from effective operand sizes while retaining its existing coefficient loops.
+
+Verification:
+
+- `Poly_Audit_Test` covers shorter, empty, and self-overlapping assignment;
+  empty and padded-zero equality; cancellation; and multiplication of padded
+  operands.
+
+## AUD-089: Polynomial scalar division silently accepted zero
+
+Status: fixed
+
+Affected code:
+
+- `Poly::operator/(const F&)`.
+
+Concern:
+
+Scalar division called `inverse()` directly. The field layer intentionally
+defines `inverse(0)` as zero for vector-friendly inversion, so this bypassed
+the strict zero check in field division.
+
+Impact:
+
+Dividing a polynomial by zero silently returned the zero polynomial and could
+hide invalid algebraic state.
+
+Resolution:
+
+Polynomial scalar division now rejects a zero divisor before computing the
+single inverse used to scale all coefficients.
+
+Verification:
+
+- `Poly_Audit_Test` checks scalar division-by-zero rejection; the existing
+  scalar test checks nonzero division.
+
+## AUD-090: Sparse-matrix validation ignored trailing column entries
+
+Status: fixed
+
+Affected code:
+
+- `SparseMtx::validate()`.
+
+Concern:
+
+Validation consumed column entries corresponding to row entries but never
+required the column iterators to reach their ends. It also did not reject
+duplicate adjacency or views detached from the owned flat vectors.
+
+Impact:
+
+A malformed one-sided adjacency representation could be reported as valid and
+then produce inconsistent results depending on whether an operation traversed
+rows or columns.
+
+Resolution:
+
+Validation now checks owned-storage coverage, view backing, ordering,
+duplicates, reciprocal adjacency, and complete consumption of every column.
+
+Verification:
+
+- `Mtx_Audit_Test` injects an extra externally backed column entry and checks
+  that validation and copying both reject the malformed representation.
+
+## AUD-091: LDPC generator utilities trusted assertion-only dimensions
+
+Status: fixed
+
+Affected code:
+
+- `computeGen()`, `computeSysGen()`, and `colSwap()`.
+
+Concern:
+
+Invalid matrix dimensions and swap indices were assertion-only or unchecked,
+allowing Release out-of-bounds access. A failed systematic conversion also
+left a partially modified caller-provided swap list.
+
+Impact:
+
+Invalid direct inputs could access outside matrix storage or expose partial
+output state as if it described a completed conversion.
+
+Resolution:
+
+Each utility now validates its own matrix dimensions and swap indices before
+indexing. Column swaps are accumulated separately and committed to the caller
+only after generator construction succeeds.
+
+Verification:
+
+- `Mtx_Audit_Test` checks invalid parity-check and generator dimensions,
+  invalid swap indices, and preservation of the swap output on conversion
+  failure.

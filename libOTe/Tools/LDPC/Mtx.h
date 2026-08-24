@@ -115,9 +115,9 @@ namespace osuCrypto
         };
 
         SparseMtx() = default;
-        SparseMtx(const SparseMtx&) = default;
+        SparseMtx(const SparseMtx&);
         SparseMtx(SparseMtx&&) = default;
-        SparseMtx& operator=(const SparseMtx&) = default;
+        SparseMtx& operator=(const SparseMtx&);
         SparseMtx& operator=(SparseMtx&&) = default;
 
 
@@ -337,12 +337,21 @@ namespace osuCrypto
         // the number of columns.
         u64 cols() const { return mData.rows(); }
 
-        // returns a refernce to the given bit.
-        oc::BitReference operator()(u64 row, u64 col) const
+        // returns a reference to the given bit.
+        oc::BitReference operator()(u64 row, u64 col)
         {
             assert(row < rows());
             assert(col < cols());
             return oc::BitReference((u8*)&mData(col, 0), row);
+        }
+
+        // returns the value of the given bit.
+        bool operator()(u64 row, u64 col) const
+        {
+            assert(row < rows());
+            assert(col < cols());
+            auto data = reinterpret_cast<const u8*>(&mData(col, 0));
+            return (data[row / 8] >> (row % 8)) & 1;
         }
 
         bool operator==(const DenseMtx& m) const
@@ -368,10 +377,26 @@ namespace osuCrypto
             void operator^=(const Row& r);
         };
 
-        // returns a refernce to the given row.
-        Row row(u64 i) const
+        // A const reference to the given row.
+        struct ConstRow
         {
-            return Row{ i, (DenseMtx&)*this };
+            u64 mIdx;
+            const DenseMtx& mMtx;
+
+            // returns true if the row is zero.
+            bool isZero() const;
+        };
+
+        // returns a refernce to the given row.
+        Row row(u64 i)
+        {
+            return Row{ i, *this };
+        }
+
+        // returns a const reference to the given row.
+        ConstRow row(u64 i) const
+        {
+            return ConstRow{ i, *this };
         }
 
         // returns a refernce to the given column.

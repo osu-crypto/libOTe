@@ -6,6 +6,61 @@
 namespace osuCrypto
 {
 
+    SparseMtx::SparseMtx(const SparseMtx& o)
+        : mDataRow(o.mDataRow)
+        , mDataCol(o.mDataCol)
+        , mRows(o.mRows.size())
+        , mCols(o.mCols.size())
+    {
+        u64 offset = 0;
+        for (u64 i = 0; i < mRows.size(); ++i)
+        {
+            auto size = static_cast<u64>(o.mRows[i].size());
+            if (size > mDataRow.size() - offset)
+                throw std::invalid_argument("Sparse matrix row views exceed owned storage. " LOCATION);
+
+            auto sourceData = o.mDataRow.data();
+            auto expectedSource = sourceData ? sourceData + offset : nullptr;
+            if (size && o.mRows[i].data() != expectedSource)
+                throw std::invalid_argument("Sparse matrix row view is not backed by owned storage. " LOCATION);
+
+            auto data = mDataRow.data();
+            mRows[i] = Row(span<u64>(data ? data + offset : nullptr, size));
+            offset += size;
+        }
+        if (offset != mDataRow.size())
+            throw std::invalid_argument("Sparse matrix row views do not cover owned storage. " LOCATION);
+
+        offset = 0;
+        for (u64 i = 0; i < mCols.size(); ++i)
+        {
+            auto size = static_cast<u64>(o.mCols[i].size());
+            if (size > mDataCol.size() - offset)
+                throw std::invalid_argument("Sparse matrix column views exceed owned storage. " LOCATION);
+
+            auto sourceData = o.mDataCol.data();
+            auto expectedSource = sourceData ? sourceData + offset : nullptr;
+            if (size && o.mCols[i].data() != expectedSource)
+                throw std::invalid_argument("Sparse matrix column view is not backed by owned storage. " LOCATION);
+
+            auto data = mDataCol.data();
+            mCols[i] = Col(span<u64>(data ? data + offset : nullptr, size));
+            offset += size;
+        }
+        if (offset != mDataCol.size())
+            throw std::invalid_argument("Sparse matrix column views do not cover owned storage. " LOCATION);
+    }
+
+    SparseMtx& SparseMtx::operator=(const SparseMtx& o)
+    {
+        if (this != &o)
+        {
+            SparseMtx copy(o);
+            *this = std::move(copy);
+        }
+        return *this;
+    }
+
 
     // add the given point. SHould not have previously been added.
     PointList::PointList(u64 r, u64 c, span<const Point> pp)
@@ -154,16 +209,32 @@ namespace osuCrypto
 
     bool SparseMtx::validate()
     {
+        if (mDataRow.size() != mDataCol.size())
+            return false;
+
         std::vector<span<u64>::iterator> colIters(cols());
         for (u64 i = 0; i < cols(); ++i)
         {
+            if (!std::is_sorted(mCols[i].begin(), mCols[i].end()) ||
+                std::adjacent_find(mCols[i].begin(), mCols[i].end()) != mCols[i].end())
+                return false;
             colIters[i] = mCols[i].begin();
         }
 
+        u64 rowEntries = 0;
         for (u64 i = 0; i < rows(); ++i)
         {
-            if (!std::is_sorted(mRows[i].begin(), mRows[i].end()))
+            if (!std::is_sorted(mRows[i].begin(), mRows[i].end()) ||
+                std::adjacent_find(mRows[i].begin(), mRows[i].end()) != mRows[i].end())
                 return false;
+
+            if (mRows[i].size() > mDataRow.size() - rowEntries)
+                return false;
+            auto data = mDataRow.data();
+            auto expected = data ? data + rowEntries : nullptr;
+            if (mRows[i].size() && mRows[i].data() != expected)
+                return false;
+            rowEntries += mRows[i].size();
 
             for (auto cc : mRows[i])
             {
@@ -179,7 +250,24 @@ namespace osuCrypto
             }
         }
 
-        return true;
+        if (rowEntries != mDataRow.size())
+            return false;
+
+        u64 colEntries = 0;
+        for (u64 i = 0; i < cols(); ++i)
+        {
+            auto data = mDataCol.data();
+            auto expected = data ? data + colEntries : nullptr;
+            if (mCols[i].size() && mCols[i].data() != expected)
+                return false;
+            if (colIters[i] != mCols[i].end())
+                return false;
+            if (mCols[i].size() > mDataCol.size() - colEntries)
+                return false;
+            colEntries += mCols[i].size();
+        }
+
+        return colEntries == mDataCol.size();
     }
 
     // vertically concatinate this matrix and the parameter.
@@ -588,6 +676,16 @@ namespace osuCrypto
         return true;
     }
 
+    bool DenseMtx::ConstRow::isZero() const
+    {
+        for (u64 colIdx = 0; colIdx < mMtx.cols(); ++colIdx)
+        {
+            if (mMtx(mIdx, colIdx))
+                return false;
+        }
+        return true;
+    }
+
     void DenseMtx::Row::operator^=(const Row& r)
     {
         for (u64 colIdx = 0; colIdx < mMtx.cols(); ++colIdx)
@@ -696,7 +794,7 @@ namespace osuCrypto
                 u8 v = 0;
                 for (u64 k = 0; k < cols(); ++k)
                 {
-                    v = v ^ ((*this)(i, k) & m(k, j));
+                    v ^= static_cast<u8>((*this)(i, k)) & static_cast<u8>(m(k, j));
                 }
 
                 ret(i, j) = v;
@@ -737,9 +835,12 @@ namespace osuCrypto
 
     DenseMtx DenseMtx::upperTriangular() const
     {
-        auto& mtx = *this;
+        auto mtx = *this;
         auto rows = mtx.rows();
         auto cols = mtx.cols();
+
+        if (cols == 0)
+            return mtx;
 
         u64 colIdx = 0ull;
         for (u64 i = 0; i < rows; ++i)
@@ -782,9 +883,12 @@ namespace osuCrypto
     // Perform gausian elimination and return the result.
     DenseMtx DenseMtx::gausianElimination() const
     {
-        auto& mtx = *this;
+        auto mtx = *this;
         auto rows = mtx.rows();
         auto cols = mtx.cols();
+
+        if (cols == 0)
+            return mtx;
 
         u64 colIdx = 0ull;
         for (u64 i = 0; i < rows; ++i)
@@ -1600,8 +1704,61 @@ namespace osuCrypto
                 throw RTE_LOC;
         };
 
+        auto expectOutOfRange = [](auto&& fn)
+        {
+            bool rejected = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::out_of_range&)
+            {
+                rejected = true;
+            }
+            if (!rejected)
+                throw RTE_LOC;
+        };
+
+        auto expectOverflow = [](auto&& fn)
+        {
+            bool rejected = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::overflow_error&)
+            {
+                rejected = true;
+            }
+            if (!rejected)
+                throw RTE_LOC;
+        };
+
         std::vector<Point> points{ { 0, 0 }, { 1, 1 } };
         SparseMtx sparse(2, 2, points);
+
+        SparseMtx copied(sparse);
+        if (copied.row(0).data() == sparse.row(0).data() ||
+            copied.col(0).data() == sparse.col(0).data() || !copied.validate())
+            throw RTE_LOC;
+
+        SparseMtx assigned;
+        {
+            SparseMtx source(2, 2, points);
+            assigned = source;
+            if (assigned.row(0).data() == source.row(0).data() ||
+                assigned.col(0).data() == source.col(0).data())
+                throw RTE_LOC;
+        }
+        if (!assigned.validate() || !assigned(0, 0) || !assigned(1, 1))
+            throw RTE_LOC;
+
+        auto inconsistent = copied;
+        std::array<u64, 2> extraColumn{ 0, 0 };
+        inconsistent.mCols[0] = SparseMtx::Col(span<u64>(extraColumn));
+        if (inconsistent.validate())
+            throw RTE_LOC;
+        expectInvalid([&] { SparseMtx invalidCopy(inconsistent); });
 
         std::vector<u8> shortInput(1), output(2);
         expectInvalid([&] { sparse.multAdd(shortInput, output); });
@@ -1662,6 +1819,77 @@ namespace osuCrypto
                 DenseMtx invalid;
                 invalid.resize(std::numeric_limits<u64>::max(), 1);
             });
+
+        DenseMtx elimination(2, 2);
+        elimination(0, 1) = 1;
+        elimination(1, 0) = 1;
+        auto original = elimination;
+        auto upper = elimination.upperTriangular();
+        auto reduced = elimination.gausianElimination();
+        if (elimination != original || upper != DenseMtx::Identity(2) ||
+            reduced != DenseMtx::Identity(2))
+            throw RTE_LOC;
+
+        DenseMtx zeroWidth(2, 0);
+        if (zeroWidth.upperTriangular().rows() != 2 ||
+            zeroWidth.gausianElimination().rows() != 2)
+            throw RTE_LOC;
+
+        const DenseMtx& constElimination = elimination;
+        if (constElimination(0, 1) != 1 || constElimination.row(0).isZero())
+            throw RTE_LOC;
+
+        if (choose(5, 2) != 10)
+            throw RTE_LOC;
+        expectInvalid([&] { (void)choose(2, 3); });
+        expectOverflow([&] { (void)choose(68, 34); });
+        expectOutOfRange([&] { (void)ithCombination(10, 5, 2); });
+
+        u64 combinationIndex = 0;
+        for (NChooseK combinations(5, 2); combinations; ++combinations, ++combinationIndex)
+        {
+            if (*combinations != ithCombination(combinationIndex, 5, 2))
+                throw RTE_LOC;
+        }
+        if (combinationIndex != 10)
+            throw RTE_LOC;
+
+        NChooseK emptyCombination(5, 0);
+        if (!emptyCombination || !(*emptyCombination).empty())
+            throw RTE_LOC;
+        ++emptyCombination;
+        if (emptyCombination)
+            throw RTE_LOC;
+        expectOutOfRange([&] { (void)*emptyCombination; });
+        expectOutOfRange([&] { ++emptyCombination; });
+        expectInvalid([&] { NChooseK invalid(5, 2, 11); });
+
+        DenseMtx invalidParityCheck(2, 2);
+        expectInvalid([&] { (void)computeGen(invalidParityCheck); });
+        expectInvalid([&] { (void)computeSysGen(DenseMtx(2, 1)); });
+
+        std::vector<std::pair<u64, u64>> invalidSwaps{ { 0, 1 } };
+        expectInvalid([&] { (void)colSwap(DenseMtx(1, 1), invalidSwaps); });
+
+        DenseMtx singularParityCheck(1, 2);
+        std::vector<std::pair<u64, u64>> preservedSwaps{ { 7, 9 } };
+        auto noGenerator = computeGen(singularParityCheck, preservedSwaps);
+        if (noGenerator.rows() || preservedSwaps != std::vector<std::pair<u64, u64>>{ { 7, 9 } })
+            throw RTE_LOC;
+
+#ifndef ENABLE_ALGO994
+        bool unavailable = false;
+        try
+        {
+            (void)minDist2(singularParityCheck, 1, false);
+        }
+        catch (const std::runtime_error&)
+        {
+            unavailable = true;
+        }
+        if (!unavailable)
+            throw RTE_LOC;
+#endif
     }
 
     void tests::Mtx_block_test()

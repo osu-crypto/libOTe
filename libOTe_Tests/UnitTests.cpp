@@ -155,6 +155,7 @@ namespace tests_libOTe
 			tc.add("Poly_basics_Tests                       ", Poly_basics_Tests);
 			tc.add("Poly_eval_root_test                     ", Poly_eval_root_test);
 			tc.add("Poly_scalar_test                        ", Poly_scalar_test);
+			tc.add("Poly_Audit_Test                         ", Poly_Audit_Test);
 
 			tc.add("Ntt_bitReverse_SIMD_Test                ", Ntt_bitReverse_SIMD_Test);
 			tc.add("Ntt_nttNegWrapMatrix_normal_Test        ", Ntt_nttNegWrapMatrix_normal_Test);

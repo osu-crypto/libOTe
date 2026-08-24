@@ -8,6 +8,12 @@
 #include <iomanip>
 #include <future>
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <sstream>
 
 #include "Mtx.h"
 #include <deque>
@@ -20,10 +26,90 @@ extern "C" {
 }
 #endif
 
-#include <fstream>
-
 namespace osuCrypto
 {
+
+    namespace
+    {
+        // Computes C(n, k) when it is at most limit. If it is larger than
+        // limit, returns true without overflowing the intermediate product.
+        bool chooseExceeds(u64 n, u64 k, u64 limit, u64& value)
+        {
+            if (k > n)
+            {
+                value = 0;
+                return false;
+            }
+
+            k = std::min(k, n - k);
+            value = 1;
+            if (k == 0)
+                return value > limit;
+
+            for (u64 i = 1; i <= k; ++i)
+            {
+                auto numerator = n - k + i;
+                auto denominator = i;
+
+                auto g = std::gcd(numerator, denominator);
+                numerator /= g;
+                denominator /= g;
+
+                g = std::gcd(value, denominator);
+                value /= g;
+                denominator /= g;
+
+                if (denominator != 1)
+                    throw std::logic_error("Invalid binomial reduction. " LOCATION);
+                if (numerator && value > limit / numerator)
+                    return true;
+
+                value *= numerator;
+            }
+            return false;
+        }
+
+#ifdef ENABLE_ALGO994
+        struct TempFileCleanup
+        {
+            std::filesystem::path mPath;
+
+            ~TempFileCleanup()
+            {
+                std::error_code ec;
+                std::filesystem::remove(mPath, ec);
+            }
+        };
+
+        using FilePtr = std::unique_ptr<std::FILE, decltype(&std::fclose)>;
+
+        std::pair<std::filesystem::path, FilePtr> openUniqueTempFile()
+        {
+            PRNG prng(sysRandomSeed());
+            auto dir = std::filesystem::temp_directory_path();
+
+            for (u64 attempt = 0; attempt < 32; ++attempt)
+            {
+                std::ostringstream name;
+                name << "libote-min-dist-" << std::hex << std::setfill('0')
+                    << std::setw(16) << prng.get<u64>()
+                    << std::setw(16) << prng.get<u64>() << ".txt";
+                auto path = dir / name.str();
+
+                std::FILE* raw = nullptr;
+#ifdef _WIN32
+                if (fopen_s(&raw, path.string().c_str(), "wbx") == 0)
+#else
+                raw = std::fopen(path.string().c_str(), "wbx");
+                if (raw)
+#endif
+                    return std::make_pair(std::move(path), FilePtr(raw, &std::fclose));
+            }
+
+            throw std::runtime_error("Failed to create a unique minimum-distance input file. " LOCATION);
+        }
+#endif
+    }
 
 
 
@@ -42,37 +128,48 @@ namespace osuCrypto
     {
 #ifdef ENABLE_ALGO994
 
-        char* inputMatrix;
-        int   info, k, n, dist;
-        num_cores = numTHreads;
+        if (numTHreads == 0 || numTHreads > static_cast<u64>(std::numeric_limits<int>::max()))
+            throw std::invalid_argument("Minimum-distance thread count is out of range. " LOCATION);
+
+        static std::mutex backendMutex;
+        std::lock_guard<std::mutex> lock(backendMutex);
+
+        char* inputMatrix = nullptr;
+        int   info, k = 0, n = 0, dist;
+        num_cores = static_cast<int>(numTHreads);
+        print_matrices = verbose ? 1 : 0;
 
         // Read input matrix.
         info = read_char_matrix((char*)path.c_str(), &inputMatrix, &k, &n);
         if (info != 0) {
-            fprintf(stderr, "\n");
-            fprintf(stderr, "ERROR in read_char_matrix: ");
-            fprintf(stderr, "Error while reading input file with matrix.\n\n\n");
+            std::free(inputMatrix);
+            throw std::runtime_error("Failed to read the minimum-distance input matrix. " LOCATION);
+        }
+        if (inputMatrix == nullptr || k < 0 || n < 0 || k > n)
+        {
+            std::free(inputMatrix);
+            throw std::runtime_error("Minimum-distance input matrix has invalid dimensions. " LOCATION);
         }
 
-        assert(
+        std::unique_ptr<char, decltype(&std::free)> matrix(inputMatrix, &std::free);
+
+        if (!(
             alg994 == ALG_BASIC || // 1
             alg994 == ALG_OPTIMIZED || // 2
             alg994 == ALG_STACK || // 3
             alg994 == ALG_SAVED || // 4
             alg994 == ALG_SAVED_UNROLLED || // 5
             alg994 == ALG_GRAY  // 10
-        );
+            ))
+            throw std::invalid_argument("Unsupported minimum-distance algorithm. " LOCATION);
 
         // Compute distance of input matrix.
-        dist = compute_distance_of_matrix_impl(inputMatrix, k, n,
+        dist = compute_distance_of_matrix_impl(matrix.get(), k, n,
             alg994,
             num_saved_generators,
             num_cores,
             num_permutations,
             print_matrices);
-
-        // Remove matrices.
-        free(inputMatrix);
 
         return dist;
 #else
@@ -82,29 +179,32 @@ namespace osuCrypto
 
     int minDist2(const DenseMtx& mtx, u64 nt, bool verbose)
     {
-        std::string outPath("./deleteMe");
-        std::fstream out(outPath, std::fstream::trunc | std::fstream::out);
-
-        if (out.is_open() == false)
-        {
-            std::cout << "failed to open: " << outPath << std::endl;
-            return 0;
-        }
-
+#ifdef ENABLE_ALGO994
         std::vector<std::pair<u64, u64>> swaps;
         auto G = computeGen(mtx, swaps);
+        if (G.rows() == 0)
+            throw std::invalid_argument("Matrix cannot be converted to generator form. " LOCATION);
 
-        out << G.rows() << " " << G.cols() << " matrix dimensions\n"
+        std::ostringstream encoded;
+        encoded << G.rows() << " " << G.cols() << " matrix dimensions\n"
             << G << std::endl;
+        auto payload = encoded.str();
 
-        out.close();
+        auto opened = openUniqueTempFile();
+        TempFileCleanup cleanup{ opened.first };
+        auto file = std::move(opened.second);
+        if (std::fwrite(payload.data(), 1, payload.size(), file.get()) != payload.size())
+            throw std::runtime_error("Failed to write the minimum-distance input matrix. " LOCATION);
+        if (std::fclose(file.release()) != 0)
+            throw std::runtime_error("Failed to close the minimum-distance input matrix. " LOCATION);
 
-        u64 d;
-
-        d = minDist(outPath, nt, false);
-
-        std::remove(outPath.c_str());
-        return (int)d;
+        return minDist(opened.first.string(), nt, verbose);
+#else
+        (void)mtx;
+        (void)nt;
+        (void)verbose;
+        throw std::runtime_error("algo 994 not enabled. " LOCATION);
+#endif
     }
 
 
@@ -128,42 +228,43 @@ namespace osuCrypto
 
     void ithCombination(u64 index, u64 n, std::vector<u64>& set)
     {
-        //'''Yields the items of the single combination that would be at the provided
-        //(0-based) index in a lexicographically sorted list of combinations of choices
-        //of k items from n items [0,n), given the combinations were sorted in 
-        //descending order. Yields in descending order.
-        //'''
-        u64 nCk = 1;
-        u64 nMinusI = n;
-        u64 iPlus1 = 1;
+        auto k = static_cast<u64>(set.size());
+        if (k > n)
+            throw std::invalid_argument("Combination size exceeds its domain. " LOCATION);
 
-        auto k = set.size();
+        auto total = choose(n, k);
+        if (index >= total)
+            throw std::out_of_range("Combination index is out of range. " LOCATION);
 
-        // nMinusI, iPlus1 in zip(range(n, n - k, -1), range(1, k + 1)):
-        for (; nMinusI != n - k; --nMinusI, ++iPlus1)
+        auto remaining = index;
+        auto upper = n;
+        for (u64 kk = k; kk != 0; --kk)
         {
-            nCk *= nMinusI;
-            nCk /= iPlus1;
-        }
+            if (upper < kk)
+                throw std::logic_error("Invalid combination decomposition. " LOCATION);
 
-        //std::cout << "nCk " << nCk << std::endl;
-
-        auto curIndex = nCk;
-        for (auto kk = k; kk != 0ull; --kk)//in range(k, 0, -1):
-        {
-            //std::cout << "kk " << kk << " " <<  nCk << std::endl;
-            nCk *= kk;
-            nCk /= n;
-            while (curIndex - nCk > index) {
-                curIndex -= nCk;
-                nCk *= (n - kk);
-                nCk -= nCk % kk;
-                n -= 1;
-                nCk /= n;
+            auto low = kk - 1;
+            auto high = upper - 1;
+            while (low < high)
+            {
+                auto mid = low + (high - low + 1) / 2;
+                u64 candidate = 0;
+                auto exceeds = chooseExceeds(mid, kk, remaining, candidate);
+                if (!exceeds)
+                    low = mid;
+                else
+                    high = mid - 1;
             }
-            n -= 1;
 
-            set[kk - 1] = n;
+            u64 contribution = 0;
+            if (low >= kk)
+            {
+                if (chooseExceeds(low, kk, remaining, contribution))
+                    throw std::logic_error("Invalid combination decomposition. " LOCATION);
+            }
+            set[kk - 1] = low;
+            remaining -= contribution;
+            upper = low;
         }
     }
 
@@ -177,15 +278,21 @@ namespace osuCrypto
 
     u64 choose(u64 n, u64 k)
     {
-        if (k == 0) return 1;
-        return (n * choose(n - 1, k - 1)) / k;
+        if (k > n)
+            throw std::invalid_argument("Combination size exceeds its domain. " LOCATION);
+
+        u64 value = 0;
+        if (chooseExceeds(n, k, std::numeric_limits<u64>::max(), value))
+            throw std::overflow_error("Binomial coefficient exceeds 64 bits. " LOCATION);
+        return value;
     }
 
 
 
     DenseMtx computeGen(DenseMtx& H)
     {
-        assert(H.rows() < H.cols());
+        if (H.rows() >= H.cols())
+            throw std::invalid_argument("Parity-check matrix must have fewer rows than columns. " LOCATION);
 
         auto n = H.cols();
         auto m = H.rows();
@@ -253,12 +360,13 @@ namespace osuCrypto
 
     DenseMtx computeGen(DenseMtx H, std::vector<std::pair<u64, u64>>& colSwaps)
     {
-        assert(H.rows() < H.cols());
+        if (H.rows() >= H.cols())
+            throw std::invalid_argument("Parity-check matrix must have fewer rows than columns. " LOCATION);
 
         auto n = H.cols();
         auto m = H.rows();
         auto k = n - m;
-        colSwaps.clear();
+        std::vector<std::pair<u64, u64>> swaps;
 
         for (u64 row = 0, col = k; row < m; ++row, ++col)
         {
@@ -291,7 +399,7 @@ namespace osuCrypto
                                 H.row(row).swap(H.row(row2));
 
                                 // swap columns.
-                                colSwaps.push_back({ col,col2 });
+                                swaps.push_back({ col,col2 });
                                 auto c0 = H.col(col);
                                 auto c1 = H.col(col2);
                                 std::swap_ranges(c0.begin(), c0.end(), c1.begin());
@@ -341,11 +449,18 @@ namespace osuCrypto
         }
 
 
+        colSwaps = std::move(swaps);
         return G;
     }
 
     DenseMtx colSwap(DenseMtx G, std::vector<std::pair<u64, u64>>& swaps)
     {
+        for (auto s : swaps)
+        {
+            if (s.first >= G.cols() || s.second >= G.cols())
+                throw std::invalid_argument("Generator column swap index is out of range. " LOCATION);
+        }
+
         for (auto s : swaps)
         {
             auto col = s.first;
@@ -362,6 +477,8 @@ namespace osuCrypto
     {
         auto n = G.cols();
         auto k = G.rows();
+        if (k > n)
+            throw std::invalid_argument("Generator matrix has more rows than columns. " LOCATION);
         //auto m = n - k;
 
         for (u64 row = 0, col = 0; row < k; ++row, ++col)
