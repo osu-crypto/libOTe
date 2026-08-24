@@ -2,6 +2,8 @@
 #include "libOTe/config.h"
 #include "cryptoTools/Common/Defines.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
+#include <limits>
+#include <stdexcept>
 
 namespace osuCrypto
 {
@@ -209,6 +211,16 @@ namespace osuCrypto
         SdNoiseDistribution noiseType,
         u64 groupBitCount)
     {
+		constexpr u64 maxSecurityParameter = 1024;
+		constexpr u64 maxRequestSize = std::numeric_limits<u32>::max();
+		constexpr u64 maxGroupBitCount = std::numeric_limits<u16>::max();
+
+		if (secParam > maxSecurityParameter)
+			throw std::invalid_argument("Syndrome-decoding security parameter exceeds the supported range. " LOCATION);
+		if (requestSize > maxRequestSize)
+			throw std::invalid_argument("Syndrome-decoding request size exceeds the supported range. " LOCATION);
+		if (groupBitCount > maxGroupBitCount)
+			throw std::invalid_argument("Syndrome-decoding group bit count exceeds the supported range. " LOCATION);
 
         double minDist = 0;
         u64 scaler = 0;

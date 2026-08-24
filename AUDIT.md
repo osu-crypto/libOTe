@@ -111,8 +111,9 @@ Resolution:
 
 The shared chosen and correlated adapters now reject unequal lengths before
 network activity. KOS, KOS-Dot, and both SoftSpoken receivers enforce the same
-invariant for direct calls. Silent OT and the base-OT implementations already
-performed this check.
+invariant for direct calls. The lower-level Silent OT interface and the base-OT
+implementations already performed this check. AUD-052 covers the chosen Silent
+OT adapter.
 
 Verification:
 
@@ -1579,3 +1580,132 @@ Verification:
 - Existing malicious SoftSpoken tests exercise the corrected batching path.
 - The reservation checks in `OtExt_SoftSpoken_BufferState_Audit_Test` cover the
   shared correction-buffer accounting.
+
+## AUD-050: Invalid Noisy VOLE calls consumed OT state before failing
+
+Status: fixed
+
+Affected code:
+
+- Public `NoisyVoleSender::send()` and `NoisyVoleReceiver::receive()`
+  overloads that generate their own OTs.
+
+Concern:
+
+The receiver generated OTs before checking that its input and output counts
+matched or were nonzero. The sender also generated OTs before rejecting an
+empty output batch. The lower-level overloads performed some checks only after
+the outer overload had advanced the OT provider.
+
+Impact:
+
+Invalid local API input could consume one-time OT state without completing the
+VOLE. Reusing either endpoint after the failure could desynchronize its OT
+state from the peer.
+
+Resolution:
+
+Both public entry points now validate the batch and field dimensions before
+invoking the OT provider. The lower-level overloads retain the same validation
+for callers that supply OTs directly.
+
+Verification:
+
+- `Vole_Noisy_Audit_Test` submits empty and mismatched batches through the
+  public overloads and confirms that the OT provider is not invoked.
+
+## AUD-051: Noisy VOLE allocation dimensions could wrap
+
+Status: fixed
+
+Affected code:
+
+- Message and serialization-buffer allocation in `NoisyVoleSender` and
+  `NoisyVoleReceiver`.
+
+Concern:
+
+The implementations multiplied the field bit count, correlation count, and
+serialized element size without bounding any term. A wrapped product could
+allocate a buffer smaller than the subsequent loops expected.
+
+Impact:
+
+Ordinary `std::vector` inputs cannot reach the problematic sizes on current
+machines. A custom vector-like input with an invalid logical size, or a future
+large field context, could cause out-of-bounds access. This layer does not take
+these dimensions from the peer.
+
+Resolution:
+
+The entry points now limit correlation counts to `u32`, and field bit and byte
+sizes to `u16`. They also reject zero dimensions and inconsistent binary
+decompositions. The allocation products are evaluated as `u64`; the individual
+limits make their maximum product smaller than `2^64`.
+
+Verification:
+
+- `Vole_Noisy_Audit_Test` uses oversized vector-like inputs and confirms that
+  both parties reject them before invoking the OT provider.
+- Existing `Vole_Noisy_test` cases cover the accepted field contexts.
+
+## AUD-052: Chosen Silent OT validated choices after consuming random OT state
+
+Status: fixed
+
+Affected code:
+
+- `SilentOtExtReceiver::receive()`.
+
+Concern:
+
+The chosen-OT adapter first completed a random Silent OT using an internally
+sized choice vector. It compared the caller's choice length only when XORing
+the correction bits afterward. Regular-noise execution had already cleared
+its one-time protocol state at that point.
+
+Impact:
+
+A mismatched local call consumed the receiver's Silent OT state and network
+transcript before failing. The peer could retain the corresponding completed
+sender state, leaving the endpoints inconsistent.
+
+Resolution:
+
+The chosen receiver now checks the caller's choice and output lengths before
+configuration, base generation, expansion, or communication.
+
+Verification:
+
+- `OtExt_Silent_AuditState_Test` submits mismatched lengths and confirms that
+  the receiver remains unconfigured.
+
+## AUD-053: Syndrome-decoding configuration accepted unbounded dimensions
+
+Status: fixed
+
+Affected code:
+
+- `syndromeDecodingConfigure()`.
+
+Concern:
+
+The configuration routine accepted arbitrary `u64` request sizes, security
+parameters, and group bit counts. Derived rounding and dimension products
+could therefore wrap before later allocations used the configuration.
+
+Impact:
+
+This was a local caller-size bug. Extreme inputs could produce a small,
+internally inconsistent configuration and later cause protocol failure or an
+out-of-bounds access. The protocol does not receive these values from its peer.
+
+Resolution:
+
+The routine now limits the security parameter to 1,024 bits, the request size
+to `u32`, and the group bit count to `u16`. These limits cover the supported use
+cases and keep every derived dimension representable as `u64`.
+
+Verification:
+
+- `Vole_Noisy_Audit_Test` checks each configuration limit independently.

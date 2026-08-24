@@ -402,6 +402,9 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
+		if (choices.size() != messages.size())
+			throw std::invalid_argument("Silent OT choices and messages must have the same size. " LOCATION);
+
 		MACORO_TRY{
 			// First perform random OT
 			auto randChoice = BitVector(messages.size());

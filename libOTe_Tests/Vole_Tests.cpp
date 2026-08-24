@@ -3,6 +3,7 @@
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Vole/Silent/SilentVoleSender.h"
 #include "libOTe/Vole/Silent/SilentVoleReceiver.h"
+#include "libOTe/TwoChooseOne/ConfigureCode.h"
 #include "cryptoTools/Network/Session.h"
 #include "cryptoTools/Network/IOService.h"
 #include "cryptoTools/Common/BitVector.h"
@@ -248,6 +249,151 @@ void Vole_Silent_test_impl(
 		}
 	}
 
+}
+
+namespace
+{
+	struct CountingOtReceiver final : OtReceiver
+	{
+		u64 mCalls = 0;
+
+		task<> receive(const BitVector&, span<block>, PRNG&, Socket&) override
+		{
+			++mCalls;
+			throw std::runtime_error("unexpected OT receive");
+			co_return;
+		}
+	};
+
+	struct CountingOtSender final : OtSender
+	{
+		u64 mCalls = 0;
+
+		task<> send(span<std::array<block, 2>>, PRNG&, Socket&) override
+		{
+			++mCalls;
+			throw std::runtime_error("unexpected OT send");
+			co_return;
+		}
+	};
+
+	template<typename T>
+	struct OversizedVector
+	{
+		T mValue{};
+
+		u64 size() const { return static_cast<u64>(std::numeric_limits<u32>::max()) + 1; }
+		void resize(u64) {}
+		T* begin() { return &mValue; }
+		T* end() { return &mValue; }
+		const T* begin() const { return &mValue; }
+		const T* end() const { return &mValue; }
+		T& operator[](std::size_t) { return mValue; }
+		const T& operator[](std::size_t) const { return mValue; }
+	};
+
+	void expectTaskFailure(task<>&& operation)
+	{
+		bool threw = false;
+		try
+		{
+			macoro::sync_wait(std::move(operation));
+		}
+		catch (const std::exception&)
+		{
+			threw = true;
+		}
+		if (!threw)
+			throw RTE_LOC;
+	}
+
+	template<typename Fn>
+	void expectInvalidArgument(Fn&& fn)
+	{
+		bool threw = false;
+		try
+		{
+			fn();
+		}
+		catch (const std::invalid_argument&)
+		{
+			threw = true;
+		}
+		if (!threw)
+			throw RTE_LOC;
+	}
+}
+
+void Vole_Noisy_Audit_Test(const oc::CLP&)
+{
+	PRNG prng(CCBlock);
+	CoeffCtxInteger ctx;
+	u8 delta = 0;
+
+	{
+		CountingOtReceiver ot;
+		std::vector<u8> output;
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleSender<u8, u8, CoeffCtxInteger>::send(
+			delta, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	{
+		CountingOtSender ot;
+		std::vector<u8> input(2), output(1);
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleReceiver<u8, u8, CoeffCtxInteger>::receive(
+			input, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	{
+		CountingOtSender ot;
+		std::vector<u8> input, output;
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleReceiver<u8, u8, CoeffCtxInteger>::receive(
+			input, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	{
+		CountingOtReceiver ot;
+		OversizedVector<u8> output;
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleSender<u8, u8, CoeffCtxInteger>::send(
+			delta, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	{
+		CountingOtSender ot;
+		OversizedVector<u8> input, output;
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleReceiver<u8, u8, CoeffCtxInteger>::receive(
+			input, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	expectInvalidArgument([] {
+		syndromeDecodingConfigure(1025, 1, DefaultMultType,
+			SdNoiseDistribution::Regular, 1);
+	});
+	expectInvalidArgument([] {
+		syndromeDecodingConfigure(128,
+			static_cast<u64>(std::numeric_limits<u32>::max()) + 1,
+			DefaultMultType, SdNoiseDistribution::Regular, 1);
+	});
+	expectInvalidArgument([] {
+		syndromeDecodingConfigure(128, 1, DefaultMultType,
+			SdNoiseDistribution::Regular,
+			static_cast<u64>(std::numeric_limits<u16>::max()) + 1);
+	});
 }
 
 
@@ -575,6 +721,7 @@ void Vole_Silent_BlkAcc_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_stationary_test(const oc::CLP& cmd) { throwDisabled(); }
 
 void Vole_Noisy_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Noisy_Audit_Test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_defaultMatrixRank_test(const oc::CLP& cmd) { throwDisabled(); }

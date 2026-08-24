@@ -11,6 +11,7 @@
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "Common.h"
 #include "libOTe/Triple/SilentOtTriple/SilentOtTriple.h"
+#include "coproto/Socket/BufferingSocket.h"
 
 using namespace oc;
 using namespace tests_libOTe;
@@ -1188,6 +1189,25 @@ void OtExt_Silent_AuditState_Test(const oc::CLP& cmd)
 
     if (!threw || invalidReceiver.hasBaseCors())
         throw RTE_LOC;
+
+	SilentOtExtReceiver mismatchedReceiver;
+	BitVector mismatchedChoices(2);
+	AlignedUnVector<block> mismatchedMessages(1);
+	cp::BufferingSocket closedSocket;
+	macoro::sync_wait(closedSocket.close());
+	bool rejectedMismatch = false;
+	try
+	{
+		macoro::sync_wait(mismatchedReceiver.receive(
+			mismatchedChoices, mismatchedMessages, prng, closedSocket));
+	}
+	catch (const std::invalid_argument&)
+	{
+		rejectedMismatch = true;
+	}
+
+	if (!rejectedMismatch || mismatchedReceiver.isConfigured())
+		throw RTE_LOC;
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT and ENABLE_SOFTSPOKEN_OT are required.");
 #endif

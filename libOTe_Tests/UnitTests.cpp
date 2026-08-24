@@ -250,6 +250,7 @@ namespace tests_libOTe
 			tc.add("DotExt_SoftSpokenMaliciousLeaky_Test    ", DotExt_SoftSpokenMaliciousLeaky_Test);
 
 			tc.add("Vole_Noisy_test                         ", Vole_Noisy_test);
+			tc.add("Vole_Noisy_Audit_Test                   ", Vole_Noisy_Audit_Test);
 			tc.add("Vole_Silent_paramSweep_test             ", Vole_Silent_paramSweep_test);
 			tc.add("Vole_Silent_defaultMatrixRank_test      ", Vole_Silent_defaultMatrixRank_test);
 			tc.add("Vole_Silent_stationary_test             ", Vole_Silent_stationary_test);

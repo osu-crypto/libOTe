@@ -9,6 +9,7 @@
 #include <cryptoTools/Common/CLP.h>
 
 void Vole_Noisy_test(const oc::CLP& cmd);
+void Vole_Noisy_Audit_Test(const oc::CLP& cmd);
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd);
 void Vole_Silent_defaultMatrixRank_test(const oc::CLP& cmd);
 void Vole_Silent_stationary_test(const oc::CLP& cmd);
