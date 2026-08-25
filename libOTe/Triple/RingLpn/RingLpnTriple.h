@@ -461,7 +461,14 @@ namespace osuCrypto
 	{
 		BaseCorCount counts;
 
-		if (hasDpf() == false && proto != Protocol::Expand)
+		const auto sumNeedsFreshBase =
+			hasDpf() &&
+			proto != Protocol::GenDpf &&
+			std::holds_alternative<SumDmpf<F, CoeffCtx>>(mDpf) &&
+			!std::get<SumDmpf<F, CoeffCtx>>(mDpf).hasBaseOts();
+		const auto needsInitialDpf = !hasDpf() && proto != Protocol::Expand;
+
+		if (needsInitialDpf || sumNeedsFreshBase)
 		{
 			std::visit([&](auto& dpf) {
 				auto c = dpf.baseOtCount();
@@ -469,7 +476,8 @@ namespace osuCrypto
 				counts.mRecvOtCount = c.mRecvCount;
 				}, mDpf);
 
-			counts.mOleCount = mGmw.oleCount();
+			if (needsInitialDpf)
+				counts.mOleCount = mGmw.oleCount();
 		}
 
 		if (hasTensor() == false &&
@@ -525,19 +533,25 @@ namespace osuCrypto
 		auto sendIter = baseSendOts;
 		//auto& choiceIter = baseChoices;
 		u64 recvIdx = 0, sendIdx = 0;
-		std::visit([&](auto& dpf) {
-			auto count = dpf.baseOtCount();
-			recvIdx += count.mRecvCount;
-			sendIdx += count.mSendCount;
-			if (count.mRecvCount || count.mSendCount)
-			{
-				dpf.setBaseOts(
-					sendIter.subspan(0, sendIdx),
-					recvIter.subspan(0, recvIdx),
-					baseChoices.subvec(0, recvIdx)
-				);
-			}
-			}, mDpf);
+		const auto installDpfBase =
+			!hasDpf() ||
+			(std::holds_alternative<SumDmpf<F, CoeffCtx>>(mDpf) &&
+				!std::get<SumDmpf<F, CoeffCtx>>(mDpf).hasBaseOts());
+		if (installDpfBase)
+		{
+			std::visit([&](auto& dpf) {
+				auto count = dpf.baseOtCount();
+				recvIdx = count.mRecvCount;
+				sendIdx = count.mSendCount;
+				if (recvIdx || sendIdx)
+				{
+					dpf.setBaseOts(
+						sendIter.subspan(0, sendIdx),
+						recvIter.subspan(0, recvIdx),
+						baseChoices.subvec(0, recvIdx));
+				}
+				}, mDpf);
+		}
 
 		mTensorRecvOts.assign(
 			recvIter.subspan(recvIdx).begin(),

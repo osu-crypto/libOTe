@@ -4529,3 +4529,145 @@ Verification:
 
 - `RingLpn_Audit_test` supplies mismatched triple outputs and requires
   rejection before the tensor state or socket changes.
+
+## AUD-142: Scalar RingLPN conversion removed GMW masks
+
+Status: fixed
+
+Affected code:
+
+- The non-SSE SIMD emulation used by RingLPN OT-to-OLE conversion.
+
+Concern:
+
+The scalar movemask read byte zero in every iteration and placed no input
+most-significant bit in the result. The preceding lane shift therefore always
+produced a zero packed mask. The scalar shuffle and shift also used signed
+operations whose behavior did not match the unsigned SIMD instructions.
+
+Impact:
+
+The OT sender obtained zero multiplication and addition shares. RingLPN still
+produced algebraically valid correlations, so correctness tests passed. The
+sender's GMW messages were nevertheless unmasked and exposed its input-wire
+shares to the peer.
+
+Resolution:
+
+The non-SSE shuffle, lane shift, and movemask now use the fixed-width scalar
+implementation shared in structure with Silent-triple conversion. The SSE
+path and the conversion loops are unchanged.
+
+Verification:
+
+- `RingLpn_conversion_test` checks every packed sender and receiver bit
+  against the source OT messages in both SSE and non-SSE builds.
+
+## AUD-143: Stationary Sum DMPF omitted refreshed base OTs
+
+Status: fixed
+
+Affected code:
+
+- RingLPN base-correlation counting and installation after a Sum-DMPF
+  expansion.
+
+Concern:
+
+A successful expansion retained the programmed Sum-DMPF points and set
+`mHasDpf`. The embedded Regular DPF consumed its multiplication OTs during the
+same expansion. `baseCorCount()` treated `mHasDpf` as proof that no further DPF
+correlations were required.
+
+Impact:
+
+A stationary reuse supplied only fresh tensor correlations. The next
+expansion then failed after accepting those correlations because the DPF
+multiplier had no OTs.
+
+Resolution:
+
+RingLPN now distinguishes programmed points from available Sum-DMPF base OTs.
+It requests and installs fresh DPF OTs after each Sum-DMPF expansion without
+requesting a second set of GMW OLEs. RevCuckoo accounting is unchanged.
+
+Verification:
+
+- `RingLpn_Audit_test` exhausts the embedded Sum-DMPF multiplier and checks
+  the refreshed correlation counts and installation.
+- `RingLpn_stationary_test` completes two Sum-DMPF expansions with fresh base
+  correlations for the second expansion.
+
+## AUD-144: Prime-field sampling used one 64-bit candidate
+
+Status: fixed
+
+Affected code:
+
+- PRNG assignment for `Fp` and Goldilocks elements.
+- Block-to-field mapping in prime-field coefficient contexts.
+- Scalar fallback mapping for vector fields.
+
+Concern:
+
+The samplers reduced one 64-bit value modulo the field order. Block mapping
+also ignored the upper 64-bit limb. The resulting statistical distance per
+sample was approximately `2^-35` for Fp31 and `2^-32` for Goldilocks.
+
+Impact:
+
+RingLPN and field-based DPF or VOLE protocols sample many field elements.
+Their aggregate sampling distance could exceed the selected 40-bit
+statistical-security allowance.
+
+Resolution:
+
+PRNG assignment now rejection-samples complete 64-bit candidates. Block
+mapping tries both limbs before rehashing the block after a double rejection.
+The supported scalar fields reject with negligible probability. Fp retains
+its existing modular reduction on the common path. Goldilocks uses a compare
+and conditional subtraction instead of division.
+
+Verification:
+
+- `Field_Audit_Test` uses Fp31 and Goldilocks vectors whose low limb is
+  rejected and requires the mapper to consume the high limb.
+- RingLPN, DPF, noisy-VOLE, and field regression tests pass with the new
+  mapping.
+
+## AUD-145: Silent VOLE inferred subgroup size from field status
+
+Status: fixed
+
+Affected code:
+
+- Silent-VOLE syndrome-decoding configuration.
+- Default contexts for vector fields and Goldilocks.
+
+Concern:
+
+Silent VOLE used `isField()` to infer the smallest nonzero additive subgroup.
+A product of prime fields is not a field, but its smallest additive subgroup
+has the scalar field's characteristic. The generic Goldilocks context also
+reported that its scalar coefficient type was not a field. Both cases were
+therefore configured as if they contained an order-two subgroup.
+
+Impact:
+
+Stationary-noise sessions over these types used the less conservative
+binary-group parameter calculation instead of the calculation required for
+their odd-characteristic additive groups.
+
+Resolution:
+
+Coefficient contexts now expose the additive-group bit count independently
+of field status. Vector contexts delegate this value to their scalar context.
+Goldilocks has a field-specific context that reports its 64-bit characteristic.
+Legacy custom contexts retain the previous field-based fallback.
+
+Verification:
+
+- `Field_Audit_Test` checks the subgroup metadata for Fp31 vectors and
+  Goldilocks.
+- `Vole_Silent_Clear_test` checks the resulting conservative parameters for
+  both coefficient types.

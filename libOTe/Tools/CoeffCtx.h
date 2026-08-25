@@ -9,6 +9,54 @@
 #include <stdexcept>
 
 namespace osuCrypto {
+	namespace fieldSampling
+	{
+		// Return the first exact uniform residue available in the candidate
+		// stream. Rejection is negligible for the prime fields used by libOTe.
+		OC_FORCEINLINE u64 reduceAccepted(u64 value, u64 modulus)
+		{
+			if (modulus > std::numeric_limits<u64>::max() / 2)
+				return value >= modulus ? value - modulus : value;
+			return value % modulus;
+		}
+
+		OC_FORCEINLINE u64 rejectionThreshold(u64 modulus)
+		{
+			if (modulus < 2)
+				throw std::invalid_argument(
+					"Field sampling modulus must be at least two. " LOCATION);
+			return (u64{ 0 } - modulus) % modulus;
+		}
+
+		OC_FORCEINLINE u64 sample(PRNG& prng, u64 modulus)
+		{
+			const auto threshold = rejectionThreshold(modulus);
+			u64 value;
+			do
+				value = prng.get<u64>();
+			while (value < threshold);
+			return reduceAccepted(value, modulus);
+		}
+
+		OC_FORCEINLINE u64 fromBlock(block sample, u64 modulus)
+		{
+			const auto threshold = rejectionThreshold(modulus);
+			for (;;)
+			{
+				const auto lo = sample.get<u64>(0);
+				if (lo >= threshold)
+					return reduceAccepted(lo, modulus);
+
+				const auto hi = sample.get<u64>(1);
+				if (hi >= threshold)
+					return reduceAccepted(hi, modulus);
+
+				// Both candidates were rejected. This path is negligible for the
+				// supported fields and does not affect the common leaf-expansion path.
+				sample = mAesFixedKey.hashBlock(sample);
+			}
+		}
+	}
 
 	/*
 	 * Primitive CoeffCtx for integers-like types
@@ -72,6 +120,14 @@ namespace osuCrypto {
 		template<typename G>
 		OC_FORCEINLINE bool isField() const {
 			return false; // default.
+		}
+
+		// Bit length of the smallest nonzero additive subgroup. Integer-like
+		// coefficient rings contain an order-two subgroup by default.
+		template<typename G>
+		constexpr u64 additiveGroupBitCount() const
+		{
+			return 1;
 		}
 
 		// is G characteristic 2 where x+x = 0?
@@ -649,4 +705,15 @@ namespace osuCrypto {
 
 	template<typename F, typename G = F>
 	using DefaultCoeffCtx = typename DefaultCoeffCtx_t<F, G>::type;
+
+	// Preserve compatibility with custom coefficient contexts that predate the
+	// explicit additive-group interface.
+	template<typename G, typename Ctx>
+	constexpr u64 coefficientGroupBitCount(const Ctx& ctx)
+	{
+		if constexpr (requires { ctx.template additiveGroupBitCount<G>(); })
+			return ctx.template additiveGroupBitCount<G>();
+		else
+			return ctx.template isField<G>() ? ctx.template bitSize<G>() : 1;
+	}
 }

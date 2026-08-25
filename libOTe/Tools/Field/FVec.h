@@ -354,6 +354,13 @@ namespace osuCrypto
             return N == 1 && mScalarCtx.template isField<F>();
         }
 
+		template<typename V>
+		constexpr u64 additiveGroupBitCount() const
+		{
+			requireVector<V>();
+			return mScalarCtx.template additiveGroupBitCount<F>();
+		}
+
         // Retain the scalar storage width so binary decomposition can remain
         // an allocation-free view. Unused high bits of canonical scalar
         // encodings are zero; powerOfTwoUnchecked maps those rows to zero.
@@ -449,9 +456,9 @@ namespace osuCrypto
 				}
 			}
 
-            // Scalar Fp sampling consumes 64 random bits. Using at least eight
-            // bytes per lane preserves that negligible reduction bias while
-            // still batching expansion for the complete vector.
+			// The scalar context performs exact rejection sampling. Using at least
+			// eight bytes per lane lets it try both halves of each lane seed before
+			// entering its negligible rehash path.
             constexpr std::size_t seedBytesPerLane =
                 sizeof(F) < sizeof(u64) ? sizeof(u64) : sizeof(F);
             constexpr std::size_t seedBlocks =

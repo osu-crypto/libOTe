@@ -295,6 +295,30 @@ namespace tests_libOTe
 		if (canonicalRoundTrip != canonical)
 			throw RTE_LOC;
 
+		block fpSample = ZeroBlock;
+		const auto fpThreshold = fieldSampling::rejectionThreshold(Fp31::mMod);
+		fpSample.set<u64>(0, fpThreshold - 1);
+		fpSample.set<u64>(1, fpThreshold + 7);
+		Fp31 mappedFp;
+		fpCtx.fromBlock(mappedFp, fpSample);
+		if (mappedFp.mVal != (fpThreshold + 7) % Fp31::mMod)
+			throw RTE_LOC;
+
+		using GoldCtx = DefaultCoeffCtx<Goldilocks>;
+		static_assert(std::is_same_v<GoldCtx, CoeffCtxGoldilocks>);
+		GoldCtx goldCtx;
+		block goldSample = ZeroBlock;
+		const auto goldThreshold =
+			fieldSampling::rejectionThreshold(Goldilocks::mModulus);
+		goldSample.set<u64>(0, goldThreshold - 1);
+		goldSample.set<u64>(1, goldThreshold + 11);
+		Goldilocks mappedGold;
+		goldCtx.fromBlock(mappedGold, goldSample);
+		if (mappedGold.mVal != goldThreshold + 11 ||
+			!goldCtx.template isField<Goldilocks>() ||
+			goldCtx.template additiveGroupBitCount<Goldilocks>() != 64)
+			throw RTE_LOC;
+
 		using VF2 = FVec<Fp31, 2>;
 		using VF4 = FVec<Fp31, 4>;
 		using VCtx = DefaultCoeffCtx<VF4>;
@@ -302,7 +326,8 @@ namespace tests_libOTe
 
 		CoeffCtxFVec<Fp31, 2> vec2Ctx;
 		if (vec2Ctx.template byteSize<VF2>() != 2 * sizeof(Fp31) ||
-			vec2Ctx.template bitSize<VF2>() != 2 * sizeof(Fp31) * 8)
+			vec2Ctx.template bitSize<VF2>() != 2 * sizeof(Fp31) * 8 ||
+			vec2Ctx.template additiveGroupBitCount<VF2>() != log2ceil(Fp31::mMod))
 			throw RTE_LOC;
 
 		VF2 vec2{ Fp31(11), Fp31(29) };

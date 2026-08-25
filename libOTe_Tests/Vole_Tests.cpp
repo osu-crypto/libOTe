@@ -19,6 +19,7 @@ using namespace oc;
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Tools/Field/FVec.h"
+#include "libOTe/Tools/Field/Goldilocks.h"
 
 using namespace tests_libOTe;
 #ifdef ENABLE_SILENT_VOLE
@@ -583,6 +584,35 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 		!receiver.mBaseC.empty() || receiver.mMalCheckSeed.has_value() ||
 		receiver.mDerandomizeMalCheck)
 		throw RTE_LOC;
+
+	using Product = FVec<Fp31, 2>;
+	SilentVoleSender<Product> productSender;
+	SilentVoleReceiver<Product> productReceiver;
+	productSender.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+		SilentBaseType::Base, SdNoiseDistribution::Stationary);
+	productReceiver.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+		SilentBaseType::Base, SdNoiseDistribution::Stationary);
+	const auto productConfig = syndromeDecodingConfigure(
+		128, 128, DefaultMultType, SdNoiseDistribution::Stationary,
+		log2ceil(Fp31::mMod));
+	if (productSender.mNumPartitions != productConfig.mNumPartitions ||
+		productSender.mSizePer != productConfig.mSizePer ||
+		productSender.mNoiseVecSize != productConfig.mNoiseVectorSize ||
+		productReceiver.mNumPartitions != productConfig.mNumPartitions ||
+		productReceiver.mSizePer != productConfig.mSizePer ||
+		productReceiver.mNoiseVecSize != productConfig.mNoiseVectorSize)
+		throw UnitTestFail(
+			"Silent VOLE used binary-group parameters for an odd-characteristic product group");
+
+	SilentVoleSender<Goldilocks> goldSender;
+	goldSender.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+		SilentBaseType::Base, SdNoiseDistribution::Stationary);
+	const auto goldConfig = syndromeDecodingConfigure(
+		128, 128, DefaultMultType, SdNoiseDistribution::Stationary, 64);
+	if (goldSender.mNumPartitions != goldConfig.mNumPartitions ||
+		goldSender.mSizePer != goldConfig.mSizePer ||
+		goldSender.mNoiseVecSize != goldConfig.mNoiseVectorSize)
+		throw UnitTestFail("Silent VOLE misclassified the Goldilocks additive group");
 }
 
 

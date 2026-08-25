@@ -1,6 +1,8 @@
 #pragma once
 
 #include "cryptoTools/Common/Defines.h"
+#include "cryptoTools/Crypto/PRNG.h"
+#include "libOTe/Tools/CoeffCtx.h"
 #include <array>
 #include <iostream>
 #include <assert.h>
@@ -72,6 +74,17 @@ namespace osuCrypto
 
 		// Enable construction from u64 (and int via standard conversion)
 		constexpr explicit Goldilocks(u64 v) noexcept : mVal(v) {}
+
+		Goldilocks(PRNG::Any prng)
+			: mVal(fieldSampling::sample(prng.mPrng, mModulus))
+		{
+		}
+
+		Goldilocks& operator=(PRNG::Any prng)
+		{
+			mVal = fieldSampling::sample(prng.mPrng, mModulus);
+			return *this;
+		}
 
 		// Returns the canonical representative in [0, p-1].
 		constexpr Goldilocks canonical() const noexcept
@@ -365,6 +378,50 @@ namespace osuCrypto
 	static_assert(sizeof(Goldilocks) == 8, "Expected size");
 	static_assert(std::is_constructible_v<Goldilocks, u64>, "Constructible from u64");
 	static_assert(std::is_constructible_v<Goldilocks, decltype(1)>, "Constructible from int");
+
+	struct CoeffCtxGoldilocks : CoeffCtxInteger
+	{
+		template<typename G>
+		constexpr bool characteristicTwo() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			return false;
+		}
+
+		template<typename G>
+		constexpr bool isField() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			return true;
+		}
+
+		template<typename G>
+		constexpr u64 additiveGroupBitCount() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			return 64;
+		}
+
+		template<typename G>
+		constexpr u64 bitSize() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			return 64;
+		}
+
+		template<typename G>
+		OC_FORCEINLINE void fromBlock(G& ret, const block& seed) const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			ret.mVal = fieldSampling::fromBlock(seed, Goldilocks::mModulus);
+		}
+	};
+
+	template<>
+	struct DefaultCoeffCtx_t<Goldilocks, Goldilocks>
+	{
+		using type = CoeffCtxGoldilocks;
+	};
 
 
 

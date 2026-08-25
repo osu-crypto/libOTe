@@ -38,7 +38,7 @@ namespace osuCrypto
 		}
 		Fp& operator=(PRNG::Any prng)
 		{
-			mVal = prng.mPrng.get<u64>() % mMod;
+			mVal = static_cast<T>(fieldSampling::sample(prng.mPrng, mMod));
 			return *this;
 		}
 
@@ -579,6 +579,14 @@ namespace osuCrypto
 			return true;
 		}
 
+		template<typename G>
+		constexpr u64 additiveGroupBitCount() const
+		{
+			using traits = FpTraits<G>;
+			static_assert(traits::is_fp, "G must be an Fp type.");
+			return log2ceil(traits::modulus_value);
+		}
+
 		// the bit size require to prepresent F
 		// the protocol will perform binary decomposition
 		// of F using this many bits
@@ -606,7 +614,8 @@ namespace osuCrypto
 
 			using traits = FpTraits<F>;
 			static_assert(traits::is_fp, "G must be an Fp type.");
-			ret.mVal = b.get<u64>(0) % traits::modulus_value;
+			ret.mVal = static_cast<typename traits::value_type>(
+				fieldSampling::fromBlock(b, traits::modulus_value));
 		}
 
 
