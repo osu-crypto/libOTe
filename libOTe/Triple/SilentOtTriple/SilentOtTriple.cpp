@@ -87,20 +87,20 @@ namespace osuCrypto
 
 		if (B.size())
 		{
-			if (C.size() * 256 != X.size())
+			if (X.size() % 256 || C.size() != X.size() / 256)
 				throw RTE_LOC;
-			if (A.size() * 256 != X.size())
+			if (A.size() != X.size() / 256)
 				throw RTE_LOC;
-			if (A.size() * 256 != X.size())
+			if (B.size() != X.size() / 256)
 				throw RTE_LOC;
 
 		}
 		else
 		{
 
-			if (C.size() * 128 != X.size())
+			if (X.size() % 128 || C.size() != X.size() / 128)
 				throw RTE_LOC;
-			if (A.size() * 128 != X.size())
+			if (A.size() != X.size() / 128)
 				throw RTE_LOC;
 		}
 
@@ -113,7 +113,7 @@ namespace osuCrypto
 		auto AllOneBlock = block(~0ull, ~0ull);
 		block mask = OneBlock ^ AllOneBlock;
 
-		auto m = &X[0];
+		auto m = X.data();
 
 		for (u64 i = 0; i < X.size(); i += 16)
 		{
@@ -254,20 +254,20 @@ namespace osuCrypto
 
 		if (B.size())
 		{
-			if (C.size() * 256 != Y.size())
+			if (Y.size() % 256 || C.size() != Y.size() / 256)
 				throw RTE_LOC;
-			if (A.size() * 256 != Y.size())
+			if (A.size() != Y.size() / 256)
 				throw RTE_LOC;
-			if (A.size() * 256 != Y.size())
+			if (B.size() != Y.size() / 256)
 				throw RTE_LOC;
 
 		}
 		else
 		{
 
-		if (C.size() * 128 != Y.size())
+		if (Y.size() % 128 || C.size() != Y.size() / 128)
 			throw RTE_LOC;
-		if (A.size() * 128 != Y.size())
+		if (A.size() != Y.size() / 128)
 			throw RTE_LOC;
 		}
 		using block = oc::block;
@@ -459,22 +459,50 @@ namespace osuCrypto
 
 	void SilentOtTriple::init(u64 partyIdx, u64 n, SilentSecType mal, Type type)
 	{
-		mPartyIdx = partyIdx;
-		if (type == Type::Triple)
-			mN = 2 * roundUpTo(n, 128);
-		else
-			mN = roundUpTo(n, 128);;
+		constexpr u64 maxRequest = std::numeric_limits<u32>::max();
+		constexpr u64 maxOleCount = maxRequest / 128 * 128;
+		constexpr u64 maxTripleCount = maxRequest / 256 * 128;
 
-		if (mPartyIdx)
+		if (partyIdx > 1)
+			throw std::invalid_argument("SilentOtTriple party index must be zero or one. " LOCATION);
+		if (n == 0)
+			throw std::invalid_argument("SilentOtTriple request size must be nonzero. " LOCATION);
+		if (type != Type::Triple && type != Type::OLE)
+			throw std::invalid_argument("SilentOtTriple type is invalid. " LOCATION);
+		if ((type == Type::Triple && n > maxTripleCount) ||
+			(type == Type::OLE && n > maxOleCount))
+			throw std::invalid_argument("SilentOtTriple request size exceeds the supported range. " LOCATION);
+
+		auto nextN = roundUpTo(n, 128);
+		if (type == Type::Triple)
+			nextN *= 2;
+
+		try
 		{
-			mSendRecv.emplace<0>();
-			std::get<0>(mSendRecv).configure(mN, 2, 1, mal);
+			if (partyIdx)
+			{
+				mSendRecv.emplace<0>();
+				std::get<0>(mSendRecv).configure(nextN, 2, 1, mal);
+			}
+			else
+			{
+				mSendRecv.emplace<1>();
+				std::get<1>(mSendRecv).configure(nextN, 2, 1, mal);
+			}
 		}
-		else
+		catch (...)
 		{
-			mSendRecv.emplace<1>();
-			std::get<1>(mSendRecv).configure(mN, 2, 1, mal);
+			mPartyIdx = 0;
+			mN = 0;
+			mType = Type::Triple;
+			mChoice = {};
+			throw;
 		}
+
+		mPartyIdx = partyIdx;
+		mN = nextN;
+		mType = type;
+		mChoice = {};
 	}
 
 
@@ -550,6 +578,8 @@ namespace osuCrypto
 	{
 		if (!isInitialized())
 			throw std::runtime_error("SilentOtTriple::init must be called first");
+		if (mType != Type::OLE)
+			throw std::invalid_argument("SilentOtTriple was not initialized for OLE expansion. " LOCATION);
 
 		if (A.size() != divCeil(mN, 128))
 			throw RTE_LOC;
@@ -615,6 +645,8 @@ namespace osuCrypto
 	{
 		if (!isInitialized())
 			throw std::runtime_error("SilentOtTriple::init must be called first");
+		if (mType != Type::Triple)
+			throw std::invalid_argument("SilentOtTriple was not initialized for triple expansion. " LOCATION);
 
 		if (A.size() != divCeil(mN, 256))
 			throw RTE_LOC;

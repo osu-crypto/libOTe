@@ -3320,3 +3320,164 @@ Verification:
 
 - `Tools_Arithmetic_Audit_Test` compares `mul190()` against the low three limbs
   of `mul256()` with nonzero high input limbs.
+
+## AUD-104: Silent-triple initialization could wrap and mix configurations
+
+Status: fixed
+
+Affected code:
+
+- `SilentOtTriple::init()`.
+
+Concern:
+
+The requested count was rounded and, for triples, doubled before its supported
+domain was validated. The wrapper also assigned its party and count before the
+underlying Silent OT configuration succeeded.
+
+Impact:
+
+An invalid local request could wrap to a smaller count. A rejected
+reconfiguration could also expose new wrapper metadata alongside the previous
+or partially replaced OT configuration.
+
+Resolution:
+
+Initialization now individually validates the party, nonzero count, enum value,
+and type-specific count bound before deriving dimensions. Wrapper metadata is
+committed only after Silent OT configuration succeeds. A later configuration
+failure leaves the wrapper inactive rather than exposing mixed state, and a new
+configuration clears cached base choices.
+
+Verification:
+
+- `SilentOtTriple_Audit_test` rejects every invalid input class and confirms
+  that a parameter rejection preserves the prior live configuration.
+
+## AUD-105: Silent triples forgot their configured correlation type
+
+Status: fixed
+
+Affected code:
+
+- Both `SilentOtTriple::expand()` overloads.
+- The internal Silent-triple compression boundary checks.
+
+Concern:
+
+Initialization accepted either triple or OLE mode but did not store it. Either
+expansion overload could therefore be called afterward. The triple compression
+helpers also checked the `A` output twice and never checked `B`.
+
+Impact:
+
+The wrong overload could consume one-time protocol state before failing or
+return a correlation count different from the initialized request. The public
+wrapper's equal-length checks prevented the missing internal `B` check from
+currently becoming an out-of-bounds write.
+
+Resolution:
+
+The configured type is retained and the wrong overload is rejected before
+dimension checks, randomness consumption, or communication. Compression now
+validates all three outputs with division-based, overflow-safe boundary checks.
+The fixed-width compression loops are unchanged.
+
+Verification:
+
+- `SilentOtTriple_Audit_test` initializes each mode and requires the opposite
+  overload to fail without entering the protocol.
+- The existing Silent OLE and triple tests cover both valid modes, including
+  the scalar no-SSE compression implementation.
+
+## AUD-106: Goldilocks reported twice the intended field range
+
+Status: fixed
+
+Affected code:
+
+- `Goldilocks::order()`.
+
+Concern:
+
+The stored modulus already represented `2^64 - 2^32 + 1`, but `order()` added
+another `2^64` after widening it to 128 bits.
+
+Impact:
+
+Public field metadata and generic root-of-unity or NTT validation used a value
+larger than the actual field order. The specialized power-of-two Goldilocks root
+table remained correct.
+
+Resolution:
+
+`order()` now widens and returns the stored modulus directly.
+
+Verification:
+
+- `Goldilocks_Inverse_Test` requires the reported order to equal the exact
+  Goldilocks modulus as a 128-bit integer.
+
+## AUD-107: Goldilocks unary operations mishandled noncanonical representatives
+
+Status: fixed
+
+Affected code:
+
+- `Goldilocks::inv()` and `Goldilocks::increment()`.
+
+Concern:
+
+The field permits every `u64` as a representative, but inversion recognized
+only literal zero. The valid noncanonical zero `mModulus` was therefore assigned
+an inverse of one. Increment also lost the Goldilocks carry correction when its
+input was `UINT64_MAX`.
+
+Impact:
+
+Division by a valid representation of zero returned the numerator instead of
+the documented zero convention. Incrementing the maximum representative
+returned zero instead of `2^32 - 1`.
+
+Resolution:
+
+Inversion canonicalizes once at its API boundary before the Euclidean loop.
+Increment applies the Goldilocks carry correction to the single overflowing
+representative. Multiplication, reduction, and NTT loops are unchanged.
+
+Verification:
+
+- `Goldilocks_Inverse_Test` covers inversion and division by noncanonical zero,
+  and increment of `UINT64_MAX`.
+
+## AUD-108: Silent-VOLE debug receive allowed a peer-sized copy
+
+Status: fixed
+
+Affected code:
+
+- `SilentVoleReceiver::checkRT()`.
+
+Concern:
+
+The receiver allocated exact storage for the sender's noisy base values but
+used `recvResize()` for their serialized frame. Deserialization then copied the
+entire peer-selected frame into the fixed-size destination without a destination
+end iterator.
+
+Impact:
+
+When insecure debug checking was enabled, a malicious peer could request an
+excessive allocation or send an oversized aligned frame that overflowed the
+destination vector.
+
+Resolution:
+
+The debug path now performs a fixed-length receive into the already-sized
+buffer. Coproto rejects a frame whose transmitted length differs from the
+expected length before deserialization. No protocol or arithmetic loop changed.
+
+Verification:
+
+- `Vole_Silent_baseOT_test` runs successfully with debug checking enabled in
+  the primary, base, and no-SSE Release configurations.

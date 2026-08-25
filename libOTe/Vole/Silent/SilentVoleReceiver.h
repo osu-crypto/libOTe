@@ -980,7 +980,7 @@ namespace osuCrypto
 		// recv the noisy values.
 		buffer.resize(mCtx.template byteSize<F>() * mBaseA.size());
 		mCtx.resize(baseB, mBaseA.size());
-		co_await chl.recvResize(buffer);
+		co_await chl.recv(buffer);
 		mCtx.deserialize(buffer.begin(), buffer.end(), baseB.begin());
 
 		auto points = gen().getPoints(mPprfFormat);

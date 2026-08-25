@@ -12,6 +12,7 @@
 #include "Common.h"
 #include "libOTe/Triple/SilentOtTriple/SilentOtTriple.h"
 #include "coproto/Socket/BufferingSocket.h"
+#include <limits>
 
 using namespace oc;
 using namespace tests_libOTe;
@@ -367,11 +368,59 @@ void SilentOtTriple_ole_test(const oc::CLP& cmd)
 void SilentOtTriple_Audit_test(const oc::CLP&)
 {
 #ifdef ENABLE_SILENTOT
+	auto expectRejected = [](auto&& fn)
+	{
+		bool rejected = false;
+		try
+		{
+			fn();
+		}
+		catch (const std::invalid_argument&)
+		{
+			rejected = true;
+		}
+		if (!rejected)
+			throw UnitTestFail("SilentOtTriple accepted an invalid request");
+	};
+
     SilentOtTriple triple;
     if (triple.isInitialized())
         throw UnitTestFail("Default SilentOtTriple reported initialized state");
     if (triple.hasBaseOts())
         throw UnitTestFail("Default SilentOtTriple reported available base OTs");
+
+	expectRejected([&] { triple.init(0, 0); });
+	expectRejected([&] { triple.init(2, 128); });
+	expectRejected([&] {
+		triple.init(0, 128, SilentSecType::SemiHonest,
+			static_cast<SilentOtTriple::Type>(2));
+	});
+
+	triple.init(0, 128, SilentSecType::SemiHonest, SilentOtTriple::Type::OLE);
+	const auto oldN = triple.mN;
+	const auto oldPartyIdx = triple.mPartyIdx;
+	const auto oldType = triple.mType;
+	expectRejected([&] {
+		triple.init(1, static_cast<u64>(std::numeric_limits<u32>::max()) + 1,
+			SilentSecType::SemiHonest, SilentOtTriple::Type::OLE);
+	});
+	if (triple.mN != oldN || triple.mPartyIdx != oldPartyIdx ||
+		triple.mType != oldType || !triple.isInitialized())
+		throw UnitTestFail("Rejected SilentOtTriple reconfiguration changed live state");
+
+	PRNG prng(CCBlock);
+	auto sockets = coproto::LocalAsyncSocket::makePair();
+	std::vector<block> A(1), B(1), C(1);
+	expectRejected([&] {
+		macoro::sync_wait(triple.expand(A, B, C, prng, sockets[0]));
+	});
+
+	SilentOtTriple triples;
+	triples.init(0, 128, SilentSecType::SemiHonest, SilentOtTriple::Type::Triple);
+	std::vector<block> oleA(2), oleC(2);
+	expectRejected([&] {
+		macoro::sync_wait(triples.expand(oleA, oleC, prng, sockets[1]));
+	});
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif

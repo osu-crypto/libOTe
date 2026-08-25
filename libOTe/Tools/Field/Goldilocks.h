@@ -60,7 +60,7 @@ namespace osuCrypto
 		static constexpr u64 mModulus = -(1ull << 32) + 1;
 
 		// Alias for the modulus, useful for generic code treating "order" as the field size.
-		static constexpr u128 order() { return (u128(1) << 64) + u128(mModulus); }
+		static constexpr u128 order() { return u128(mModulus); }
 
 		// Internal value (unreduced). Any u64 is accepted; interpreted modulo mModulus.
 		// Invariant: all arithmetic maintains a correct representative modulo p.
@@ -320,7 +320,9 @@ namespace osuCrypto
 			Goldilocks& result,
 			Goldilocks in1)
 		{
+			constexpr u64 reducer = (1ull << 32) - 1;
 			auto v = in1.mVal + 1;
+			v += reducer & (0 - static_cast<u64>(v == 0));
 			result.mVal = v < mModulus ? v : v - mModulus;
 		}
 
@@ -382,6 +384,7 @@ namespace osuCrypto
 		Goldilocks in)
 	{
 		// Extended Euclidean algorithm to find modular inverse
+		in = in.canonical();
 		if (in.mVal == 0)
 		{
 			result.mVal = 0; // Handle zero case gracefully

@@ -2,6 +2,7 @@
 #include "libOTe/Tools/Field/UInt.h"
 #include <stdexcept>
 #include <string>
+#include <limits>
 #include "cryptoTools/Common/TestCollection.h"
 #include "cryptoTools/Crypto/PRNG.h"
 
@@ -506,6 +507,8 @@ namespace osuCrypto
 	void Goldilocks_Inverse_Test()
 	{
 		using namespace osuCrypto;
+		if (Goldilocks::order() != u128(Goldilocks::mModulus))
+			throw UnitTestFail("Goldilocks field order is incorrect");
 
 		// Test values to use
 		u64 a_val = 5;
@@ -559,6 +562,15 @@ namespace osuCrypto
 		Goldilocks inv_zero;
 		Goldilocks::inv(inv_zero, zero);
 		ThrowIfNotEqual((u64)inv_zero, 0, "Inverse of zero"); // Inverse of zero should be defined as zero
+		Goldilocks::inv(inv_zero, Goldilocks{ Goldilocks::mModulus });
+		ThrowIfNotEqual((u64)inv_zero, 0, "Inverse of non-canonical zero");
+		ThrowIfNotEqual((u64)(a / Goldilocks{ Goldilocks::mModulus }), 0,
+			"Division by non-canonical zero");
+
+		Goldilocks maxValue{ std::numeric_limits<u64>::max() };
+		++maxValue;
+		ThrowIfNotEqual((u64)maxValue, (1ull << 32) - 1,
+			"Increment of maximum non-canonical representative");
 
 		// Test inverse of modulus - 1
 		Goldilocks p_minus_1{ Goldilocks::mModulus - 1 };
