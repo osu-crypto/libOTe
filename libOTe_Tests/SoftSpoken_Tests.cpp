@@ -179,6 +179,17 @@ namespace tests_libOTe
                 throw UnitTestFail(message);
         };
 
+		expectRejected([&] {
+			sender.generate(0, mAesFixedKey, span<block>(u), span<block>(v));
+		}, "SmallField VOLE sender generated without expanded seeds");
+		expectRejected([&] {
+			receiver.generate(0, mAesFixedKey, span<block>(w));
+		}, "SmallField VOLE receiver generated without expanded seeds");
+		std::vector<block> directSenderSeeds(2);
+		std::vector<block> directReceiverSeeds(1);
+		sender.setSeed(directSenderSeeds);
+		receiver.setSeeds(directReceiverSeeds);
+
 		SmallFieldVoleSender seededSender;
 		SmallFieldVoleReceiver seededReceiver;
 		seededSender.init(2, 4, false);
@@ -187,6 +198,37 @@ namespace tests_libOTe
 		std::vector<block> receiverSeeds(4 * 3);
 		seededSender.setSeed(senderSeeds);
 		seededReceiver.setSeeds(receiverSeeds);
+
+		SmallFieldVoleSender moveSenderSource;
+		moveSenderSource.init(2, 4, false);
+		moveSenderSource.setSeed(senderSeeds);
+		SmallFieldVoleSender moveSenderDestination(std::move(moveSenderSource));
+		if (moveSenderSource.mInit || moveSenderSource.mFieldBits ||
+			moveSenderSource.mNumVoles || moveSenderSource.mNumVolesPadded ||
+			moveSenderSource.hasSeed() || moveSenderSource.hasBaseOts() ||
+			moveSenderSource.mPprf)
+			throw UnitTestFail("SmallField VOLE sender move left active source state");
+		expectRejected([&] {
+			std::vector<block> empty;
+			moveSenderSource.generate(
+				0, mAesFixedKey, span<block>(empty), span<block>(empty));
+		}, "Moved-from SmallField VOLE sender remained usable");
+
+		SmallFieldVoleReceiver moveReceiverSource;
+		moveReceiverSource.init(2, 4, false);
+		moveReceiverSource.setSeeds(receiverSeeds);
+		SmallFieldVoleReceiver moveReceiverDestination;
+		moveReceiverDestination = std::move(moveReceiverSource);
+		if (moveReceiverSource.mInit || moveReceiverSource.mFieldBits ||
+			moveReceiverSource.mNumVoles || moveReceiverSource.mNumVolesPadded ||
+			moveReceiverSource.hasSeed() || moveReceiverSource.hasBaseOts() ||
+			moveReceiverSource.mPprf || moveReceiverSource.mDelta.size() ||
+			!moveReceiverSource.mDeltaUnpacked.empty())
+			throw UnitTestFail("SmallField VOLE receiver move left active source state");
+		expectRejected([&] {
+			std::vector<block> empty;
+			moveReceiverSource.generate(0, mAesFixedKey, span<block>(empty));
+		}, "Moved-from SmallField VOLE receiver remained usable");
 
 		expectRejected([&] { seededSender.init(0, 1, false); },
 			"SmallField VOLE accepted a zero field width");
@@ -215,6 +257,59 @@ namespace tests_libOTe
 			"Malicious subspace VOLE sender divided by a zero field width");
 		expectRejected([&] { maliciousReceiver.init(0, 1); },
 			"Malicious subspace VOLE receiver divided by a zero field width");
+
+		constexpr u64 maliciousFieldBits = 1;
+		const u64 maliciousNumVoles =
+			divCeil(gOtExtBaseOtCount, maliciousFieldBits);
+		maliciousSender.init(maliciousFieldBits, maliciousNumVoles);
+		maliciousReceiver.init(maliciousFieldBits, maliciousNumVoles);
+		std::vector<block> maliciousU(maliciousSender.code().dimension());
+		std::vector<block> maliciousV(maliciousSender.vPadded());
+		std::vector<block> maliciousW(maliciousReceiver.wPadded());
+
+		expectRejected([&] {
+			maliciousSender.generateRandom(
+				0, mAesFixedKey, span<block>(maliciousU), span<block>(maliciousV));
+		}, "Malicious subspace VOLE sender generated without seeds");
+		expectRejected([&] {
+			maliciousSender.generateRandom(0, mAesFixedKey,
+				span<block>(maliciousU),
+				span<block>(maliciousV.data(), maliciousV.size() - 1));
+		}, "Malicious subspace VOLE sender accepted an undersized v span");
+		expectRejected([&] {
+			maliciousSender.generateChosen(0, mAesFixedKey,
+				span<const block>(maliciousU.data(), maliciousU.size() - 1),
+				span<block>(maliciousV));
+		}, "Malicious subspace VOLE sender accepted an undersized u span");
+		expectRejected([&] {
+			maliciousReceiver.generateRandom(0, mAesFixedKey,
+				span<block>(maliciousW.data(), maliciousW.size() - 1));
+		}, "Malicious subspace VOLE receiver accepted an undersized w span");
+
+		expectRejected([&] {
+			maliciousSender.hash(
+				span<const block>(maliciousU), span<const block>(maliciousV));
+		}, "Malicious subspace VOLE sender hashed without a challenge");
+		expectRejected([&] {
+			maliciousReceiver.hash(span<const block>(maliciousW));
+		}, "Malicious subspace VOLE receiver hashed without a challenge");
+		maliciousSender.setChallenge(block::allSame(0x124));
+		expectRejected([&] {
+			maliciousSender.hash(span<const block>(maliciousU),
+				span<const block>(maliciousV.data(), maliciousV.size() - 1));
+		}, "Malicious subspace VOLE hash accepted an undersized v span");
+
+		SubspaceVoleMaliciousSender<RepetitionCode> maliciousMoveDestination(
+			std::move(maliciousSender));
+		if (maliciousSender.hasChallenge() || maliciousSender.hasSeed() ||
+			!maliciousSender.hashU.empty() || !maliciousSender.subtotalU.empty() ||
+			!maliciousSender.hashV.empty() || !maliciousSender.subtotalV.empty())
+			throw UnitTestFail(
+				"Malicious subspace VOLE move left active source state");
+		expectRejected([&] {
+			maliciousSender.hash(
+				span<const block>(maliciousU), span<const block>(maliciousV));
+		}, "Moved-from malicious subspace VOLE sender retained its challenge");
 
         expectRejected([&] {
             sender.generate(0, mAesFixedKey,

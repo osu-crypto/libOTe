@@ -64,7 +64,7 @@ namespace osuCrypto
 
 		// Low half is x^2 in GF(2^64) and high half is x^2 * a^64, where a is the generator of GF(2^64)
 		// over GF(2), and x is the universal hash key.
-		block hashKeySqAndA64;
+		block hashKeySqAndA64 = ZeroBlock;
 
 		// Universal hash key.
 		u64 hashKey = 0;
@@ -75,8 +75,35 @@ namespace osuCrypto
 
 
 		SubspaceVoleMaliciousBase() = default;
-		SubspaceVoleMaliciousBase(SubspaceVoleMaliciousBase&& o) = default;
-		SubspaceVoleMaliciousBase& operator=(SubspaceVoleMaliciousBase&& o) = default;
+		SubspaceVoleMaliciousBase(SubspaceVoleMaliciousBase&& o)
+			: hashKeyPrng(std::move(o.hashKeyPrng))
+			, hashKeySqAndA64(std::exchange(o.hashKeySqAndA64, ZeroBlock))
+			, hashKey(std::exchange(o.hashKey, 0))
+			, hashKeyUseCount(std::exchange(o.hashKeyUseCount, ~0ull))
+		{}
+
+		SubspaceVoleMaliciousBase& operator=(SubspaceVoleMaliciousBase&& o)
+		{
+			if (this != &o)
+			{
+				hashKeyPrng = std::move(o.hashKeyPrng);
+				hashKeySqAndA64 = std::exchange(o.hashKeySqAndA64, ZeroBlock);
+				hashKey = std::exchange(o.hashKey, 0);
+				hashKeyUseCount = std::exchange(o.hashKeyUseCount, ~0ull);
+			}
+			return *this;
+		}
+
+		bool hasChallenge() const
+		{
+			return hashKeyUseCount != ~0ull;
+		}
+
+		void requireChallenge() const
+		{
+			if (!hasChallenge())
+				throw std::logic_error("Malicious subspace VOLE challenge is not initialized. " LOCATION);
+		}
 
 		// inHalf == 0 => input in low 64 bits. High 64 bits of output should be ignored.
 		template <int inHalf>
@@ -236,8 +263,37 @@ namespace osuCrypto
 
 		SubspaceVoleMaliciousSender() = default;
 
-		SubspaceVoleMaliciousSender(SubspaceVoleMaliciousSender&& o) = default;
-		SubspaceVoleMaliciousSender&operator=(SubspaceVoleMaliciousSender&& o) = default;
+		SubspaceVoleMaliciousSender(SubspaceVoleMaliciousSender&& o)
+			: Sender(std::move(o))
+			, Base(std::move(o))
+			, hashU(std::move(o.hashU))
+			, subtotalU(std::move(o.subtotalU))
+			, hashV(std::move(o.hashV))
+			, subtotalV(std::move(o.subtotalV))
+		{
+			o.hashU.clear();
+			o.subtotalU.clear();
+			o.hashV.clear();
+			o.subtotalV.clear();
+		}
+
+		SubspaceVoleMaliciousSender& operator=(SubspaceVoleMaliciousSender&& o)
+		{
+			if (this != &o)
+			{
+				Sender::operator=(std::move(o));
+				Base::operator=(std::move(o));
+				hashU = std::move(o.hashU);
+				subtotalU = std::move(o.subtotalU);
+				hashV = std::move(o.hashV);
+				subtotalV = std::move(o.subtotalV);
+				o.hashU.clear();
+				o.subtotalU.clear();
+				o.hashV.clear();
+				o.subtotalV.clear();
+			}
+			return *this;
+		}
 
 		void init(u64 fieldBits, u64 numVoles)
 		{
@@ -279,13 +335,33 @@ namespace osuCrypto
 
 		u64 vPadded() const { return roundUpTo(Sender::vPadded(), 4); }
 
+		void requireHashState() const
+		{
+			if (!Sender::mVole.mInit ||
+				(u64)hashU.size() != code().dimension() ||
+				(u64)subtotalU.size() != code().dimension() ||
+				(u64)hashV.size() != vPadded() ||
+				(u64)subtotalV.size() != vPadded())
+				throw std::logic_error("Malicious subspace VOLE sender hash state is not initialized. " LOCATION);
+		}
+
 		void generateRandom(u64 blockIdx, const AES& aes, span<block> randomU, span<block> outV)
 		{
+			if ((u64)randomU.size() != code().dimension() ||
+				(u64)outV.size() != vPadded())
+				throw RTE_LOC;
+			if (!hasSeed())
+				throw std::logic_error("Malicious subspace VOLE sender is not ready to generate. " LOCATION);
 			Sender::generateRandom(blockIdx, aes, randomU, outV.subspan(0, Sender::vPadded()));
 		}
 
 		void generateChosen(u64 blockIdx, const AES& aes, span<const block> chosenU, span<block> outV)
 		{
+			if ((u64)chosenU.size() != code().dimension() ||
+				(u64)outV.size() != vPadded())
+				throw RTE_LOC;
+			if (!hasSeed())
+				throw std::logic_error("Malicious subspace VOLE sender is not ready to generate. " LOCATION);
 			Sender::generateChosen(blockIdx, aes, chosenU, outV.subspan(0, Sender::vPadded()));
 		}
 
@@ -299,6 +375,11 @@ namespace osuCrypto
 
 		void hash(span<const block> u, span<const block> v)
 		{
+			requireChallenge();
+			requireHashState();
+			if ((u64)u.size() != code().dimension() ||
+				(u64)v.size() != vPadded())
+				throw RTE_LOC;
 			for (u64 i = 0; i < code().dimension(); ++i)
 				updateHash(hashU[i], u[i]);
 			for (u64 i = 0; i < Sender::vSize(); i += 4)
@@ -328,6 +409,8 @@ namespace osuCrypto
 		[[nodiscard]]
 		auto sendResponse(Socket& chl)
 		{
+			requireChallenge();
+			requireHashState();
 			u64 fieldBits = Sender::mVole.mFieldBits;
 			u64 numVoles = Sender::mVole.mNumVoles;
 
@@ -388,8 +471,29 @@ namespace osuCrypto
 		
 
 		SubspaceVoleMaliciousReceiver() = default;
-		SubspaceVoleMaliciousReceiver(SubspaceVoleMaliciousReceiver&& o) = default;
-		SubspaceVoleMaliciousReceiver& operator=(SubspaceVoleMaliciousReceiver&& o) = default;
+		SubspaceVoleMaliciousReceiver(SubspaceVoleMaliciousReceiver&& o)
+			: Receiver(std::move(o))
+			, Base(std::move(o))
+			, mHashW(std::move(o.mHashW))
+			, mSubtotalW(std::move(o.mSubtotalW))
+		{
+			o.mHashW.clear();
+			o.mSubtotalW.clear();
+		}
+
+		SubspaceVoleMaliciousReceiver& operator=(SubspaceVoleMaliciousReceiver&& o)
+		{
+			if (this != &o)
+			{
+				Receiver::operator=(std::move(o));
+				Base::operator=(std::move(o));
+				mHashW = std::move(o.mHashW);
+				mSubtotalW = std::move(o.mSubtotalW);
+				o.mHashW.clear();
+				o.mSubtotalW.clear();
+			}
+			return *this;
+		}
 
 
 		SubspaceVoleMaliciousReceiver copy() const
@@ -427,13 +531,29 @@ namespace osuCrypto
 
 		u64 wPadded() const { return roundUpTo(Receiver::wPadded(), 4); }
 
+		void requireHashState() const
+		{
+			if (!Receiver::mVole.mInit ||
+				(u64)mHashW.size() != wPadded() ||
+				(u64)mSubtotalW.size() != wPadded())
+				throw std::logic_error("Malicious subspace VOLE receiver hash state is not initialized. " LOCATION);
+		}
+
 		void generateRandom(u64 blockIdx, const AES& aes, span<block> outW)
 		{
+			if ((u64)outW.size() != wPadded())
+				throw RTE_LOC;
+			if (!hasSeed())
+				throw std::logic_error("Malicious subspace VOLE receiver is not ready to generate. " LOCATION);
 			Receiver::generateRandom(blockIdx, aes, outW.subspan(0, Receiver::wPadded()));
 		}
 
 		void generateChosen(u64 blockIdx, const AES& aes, span<block> outW)
 		{
+			if ((u64)outW.size() != wPadded())
+				throw RTE_LOC;
+			if (!hasSeed())
+				throw std::logic_error("Malicious subspace VOLE receiver is not ready to generate. " LOCATION);
 			Receiver::generateChosen(blockIdx, aes, outW.subspan(0, Receiver::wPadded()));
 		}
 
@@ -448,6 +568,10 @@ namespace osuCrypto
 
 		void hash(span<const block> w)
 		{
+			requireChallenge();
+			requireHashState();
+			if ((u64)w.size() != wPadded())
+				throw RTE_LOC;
 			for (u64 i = 0; i < Receiver::wSize(); i += 4)
 				// Unrolled for ILP.
 				for (u64 j = 0; j < 4; ++j)
@@ -474,6 +598,8 @@ namespace osuCrypto
 
 		task<> checkResponse(Socket& chl)
 		{
+			requireChallenge();
+			requireHashState();
 			auto fieldBits = u64{};
 			auto numVoles = u64{};
 			auto rows = u64{};

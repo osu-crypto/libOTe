@@ -1189,6 +1189,13 @@ void OtExt_Silent_AuditState_Test(const oc::CLP& cmd)
 {
 #if defined(ENABLE_SILENTOT) && defined(ENABLE_SOFTSPOKEN_OT)
     PRNG prng(toBlock(cmd.getOr("seed", 0)));
+	const auto expectRejected = [](auto&& fn, const char* message) {
+		bool rejected = false;
+		try { fn(); }
+		catch (const std::exception&) { rejected = true; }
+		if (!rejected)
+			throw UnitTestFail(message);
+	};
 
     SilentOtExtSender sender;
     SilentOtExtReceiver receiver;
@@ -1260,6 +1267,23 @@ void OtExt_Silent_AuditState_Test(const oc::CLP& cmd)
 
 	if (!rejectedMismatch || mismatchedReceiver.isConfigured())
 		throw RTE_LOC;
+
+	SilentOtExtSender unreadyHashSender;
+	unreadyHashSender.configure(128, 2, 1, SilentSecType::SemiHonest);
+	std::vector<std::array<block, 2>> unreadySenderMessages(128);
+	expectRejected([&] {
+		unreadyHashSender.hash(
+			unreadySenderMessages, ChoiceBitPacking::True);
+	}, "Silent OT sender hashed unavailable internal state");
+
+	SilentOtExtReceiver unreadyHashReceiver;
+	unreadyHashReceiver.configure(128, 2, 1, SilentSecType::SemiHonest);
+	BitVector unreadyChoices(128);
+	std::vector<block> unreadyReceiverMessages(128);
+	expectRejected([&] {
+		unreadyHashReceiver.hash(
+			unreadyChoices, unreadyReceiverMessages, ChoiceBitPacking::True);
+	}, "Silent OT receiver hashed unavailable internal state");
 
 	SilentOtExtSender lifecycleSender;
 	SilentOtExtReceiver lifecycleReceiver;

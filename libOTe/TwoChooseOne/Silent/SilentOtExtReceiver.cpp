@@ -644,11 +644,13 @@ namespace osuCrypto
 			throw RTE_LOC;
 		if ((u64)messages.size() != mRequestNumOts)
 			throw RTE_LOC;
+		if ((u64)mA.size() != mRequestNumOts)
+			throw std::logic_error("Silent OT receiver hash state is not ready. " LOCATION);
 
 		auto cIter = choices.begin();
 		auto n8 = mRequestNumOts / 8 * 8;
-		auto m = &messages[0];
-		auto r = &mA[0];
+		auto m = messages.data();
+		auto r = mA.data();
 
 		if (type == ChoiceBitPacking::True)
 		{

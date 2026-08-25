@@ -384,6 +384,11 @@ namespace osuCrypto
 	{
 		if (type == ChoiceBitPacking::True)
 		{
+			if ((u64)messages.size() != mRequestNumOts)
+				throw RTE_LOC;
+			if ((u64)mB.size() != mRequestNumOts || !mDelta)
+				throw std::logic_error("Silent OT sender hash state is not ready. " LOCATION);
+
 			// Mask to clear the least significant bit (used for choice bit)
 			block mask = OneBlock ^ AllOneBlock;
 			auto d = *mDelta & mask;

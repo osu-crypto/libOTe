@@ -15,6 +15,7 @@
 #include <cryptoTools/Common/MatrixView.h>
 #include <cryptoTools/Network/Channel.h>
 #include <limits>
+#include <utility>
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/Tools/Pprf/RegularPprf.h"
@@ -50,8 +51,31 @@ namespace osuCrypto
 		AlignedUnVector<block> mSeeds;
 
 		SmallFieldVoleBase() = default;
-		SmallFieldVoleBase(SmallFieldVoleBase&&) = default;
-		SmallFieldVoleBase& operator=(SmallFieldVoleBase&&) = default;
+		SmallFieldVoleBase(SmallFieldVoleBase&& o)
+			: mFieldBits(std::exchange(o.mFieldBits, 0))
+			, mNumVoles(std::exchange(o.mNumVoles, 0))
+			, mNumVolesPadded(std::exchange(o.mNumVolesPadded, 0))
+			, mMalicious(std::exchange(o.mMalicious, false))
+			, mInit(std::exchange(o.mInit, false))
+			, mSeeds(std::move(o.mSeeds))
+		{
+			o.mSeeds.clear();
+		}
+
+		SmallFieldVoleBase& operator=(SmallFieldVoleBase&& o)
+		{
+			if (this != &o)
+			{
+				mFieldBits = std::exchange(o.mFieldBits, 0);
+				mNumVoles = std::exchange(o.mNumVoles, 0);
+				mNumVolesPadded = std::exchange(o.mNumVolesPadded, 0);
+				mMalicious = std::exchange(o.mMalicious, false);
+				mInit = std::exchange(o.mInit, false);
+				mSeeds = std::move(o.mSeeds);
+				o.mSeeds.clear();
+			}
+			return *this;
+		}
 
 
 		SmallFieldVoleBase copy() const
@@ -147,8 +171,22 @@ namespace osuCrypto
 		std::unique_ptr<PprfSender> mPprf;
 
 		SmallFieldVoleSender() = default;
-		SmallFieldVoleSender(SmallFieldVoleSender&&) = default;
-		SmallFieldVoleSender& operator=(SmallFieldVoleSender&&) = default;
+		SmallFieldVoleSender(SmallFieldVoleSender&& o)
+			: SmallFieldVoleBase(std::move(o))
+			, mPprf(std::move(o.mPprf))
+			, mGenerateFn(std::exchange(o.mGenerateFn, nullptr))
+		{}
+
+		SmallFieldVoleSender& operator=(SmallFieldVoleSender&& o)
+		{
+			if (this != &o)
+			{
+				SmallFieldVoleBase::operator=(std::move(o));
+				mPprf = std::move(o.mPprf);
+				mGenerateFn = std::exchange(o.mGenerateFn, nullptr);
+			}
+			return *this;
+		}
 
 		// copy the vole seeds but not the pprf/base-OTs
 		SmallFieldVoleSender copy()const
@@ -185,6 +223,8 @@ namespace osuCrypto
 
 		void generate(u64 blockIdx, const AES& aes, span<block> outU, span<block> outV) const
 		{
+			if (!mInit || !mGenerateFn || !hasSeed())
+				throw std::logic_error("SmallField VOLE sender is not ready to generate. " LOCATION);
 			if ((u64)outU.size() != uPadded())
 				throw RTE_LOC;
 			if ((u64)outV.size() != vPadded())
@@ -229,8 +269,31 @@ namespace osuCrypto
 		AlignedUnVector<u8> mDeltaUnpacked; // Each bit of delta becomes a byte, either 0 or 0xff.
 
 		SmallFieldVoleReceiver() = default;
-		SmallFieldVoleReceiver(SmallFieldVoleReceiver&&) = default;
-		SmallFieldVoleReceiver& operator=(SmallFieldVoleReceiver&&) = default;
+		SmallFieldVoleReceiver(SmallFieldVoleReceiver&& o)
+			: SmallFieldVoleBase(std::move(o))
+			, mPprf(std::move(o.mPprf))
+			, mDelta(std::move(o.mDelta))
+			, mDeltaUnpacked(std::move(o.mDeltaUnpacked))
+			, mGenerateFn(std::exchange(o.mGenerateFn, nullptr))
+		{
+			o.mDelta.resize(0);
+			o.mDeltaUnpacked.clear();
+		}
+
+		SmallFieldVoleReceiver& operator=(SmallFieldVoleReceiver&& o)
+		{
+			if (this != &o)
+			{
+				SmallFieldVoleBase::operator=(std::move(o));
+				mPprf = std::move(o.mPprf);
+				mDelta = std::move(o.mDelta);
+				mDeltaUnpacked = std::move(o.mDeltaUnpacked);
+				mGenerateFn = std::exchange(o.mGenerateFn, nullptr);
+				o.mDelta.resize(0);
+				o.mDeltaUnpacked.clear();
+			}
+			return *this;
+		}
 
 
 		// copy the vole seeds but not the pprf/base-OTs
@@ -281,6 +344,8 @@ namespace osuCrypto
 		void generate(u64 blockIdx, const AES& aes,
 			span<block> outW, span<const block> correction = span<block>()) const
 		{
+			if (!mInit || !mGenerateFn || !hasSeed())
+				throw std::logic_error("SmallField VOLE receiver is not ready to generate. " LOCATION);
 			if ((u64)outW.size() != wPadded())
 				throw RTE_LOC;
 			if (correction.data() && (u64)correction.size() != uPadded())

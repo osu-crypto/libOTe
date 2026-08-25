@@ -3952,3 +3952,157 @@ Verification:
 
 - `Tools_bitpolymul_test` checks allocator overflow rejection and atomic
   rejection of an unsupported FFT size in a bitpolymul-enabled build.
+
+## AUD-124: Small-field VOLE generation trusted unexpanded seed state
+
+Status: fixed
+
+Affected code:
+
+- Checked `SmallFieldVoleSender::generate()` and
+  `SmallFieldVoleReceiver::generate()` overloads.
+
+Concern:
+
+Initialization installs dimensions and generation dispatch before PPRF seeds
+are expanded. Generation guarded the required seed storage only with an
+assertion inside the specialized kernel.
+
+Impact:
+
+In release builds, generating from an initialized but unexpanded object could
+read an empty seed table out of bounds.
+
+Resolution:
+
+The checked span entry points now require initialized dimensions, a selected
+dispatch function, and expanded seeds before entering the generation kernel.
+Raw pointer kernels and their inner AES loops remain unchanged.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` requires both roles to reject generation
+  before seeds are installed.
+
+## AUD-125: Malicious subspace VOLE wrappers formed unchecked subspans
+
+Status: fixed
+
+Affected code:
+
+- Malicious sender and receiver generation and hash wrappers.
+
+Concern:
+
+Generation formed padded subspans before validating the supplied storage, and
+hash entry points indexed caller spans according to protocol dimensions
+without checking their lengths.
+
+Impact:
+
+Short caller buffers could cause out-of-bounds reads or writes before a lower
+layer had an opportunity to reject the request.
+
+Resolution:
+
+Each batch wrapper now validates its individual input and output dimensions
+before constructing subspans or entering the unrolled hash loop. Generation
+also requires expanded seed state. No check was added inside a hot loop.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` covers short random, chosen, sender-hash,
+  and receiver output spans.
+
+## AUD-126: Malicious subspace VOLE challenge sequencing was assertion-only
+
+Status: fixed
+
+Affected code:
+
+- Sender and receiver hash entry points, response generation, and response
+  checking.
+
+Concern:
+
+The universal-hash update kernel asserted that a challenge was installed, but
+release builds could hash or finalize using the default key and an unseeded
+PRNG.
+
+Impact:
+
+Incorrect protocol sequencing could bypass the intended randomized
+consistency-check state or access invalid PRNG state.
+
+Resolution:
+
+Challenge readiness is now checked once at each public hash or response state
+transition. The per-block universal-hash kernel remains unchanged.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` requires both roles to reject hashing
+  before challenge setup.
+
+## AUD-127: SoftSpoken VOLE moves left active source metadata
+
+Status: fixed
+
+Affected code:
+
+- Small-field VOLE sender and receiver move operations.
+- Malicious subspace VOLE base, sender, and receiver move operations.
+
+Concern:
+
+Default moves transferred owning storage but copied primitive dimensions,
+dispatch pointers, and challenge counters. A moved-from object could therefore
+still appear initialized while its backing storage had been transferred.
+
+Impact:
+
+Accidental reuse of a moved-from protocol object could dispatch generation or
+hashing against empty storage, causing out-of-bounds access or invalid
+challenge use.
+
+Resolution:
+
+Custom moves transfer state and deterministically clear the source dimensions,
+dispatch pointers, seed and delta storage, challenge material, counters, and
+hash buffers. Moved-from objects are valid but inert.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` checks move construction and assignment,
+  cleared source state, and rejection of source reuse.
+
+## AUD-128: Silent OT hash helpers trusted unavailable internal state
+
+Status: fixed
+
+Affected code:
+
+- `SilentOtExtSender::hash()` and `SilentOtExtReceiver::hash()`.
+
+Concern:
+
+The internal-by-convention hash helpers trusted expanded message vectors and,
+for the sender, the correlation delta. The receiver also formed element-zero
+addresses even for empty spans.
+
+Impact:
+
+Direct or incorrectly sequenced calls could dereference absent internal state
+or trigger undefined behavior on an empty request.
+
+Resolution:
+
+The helpers now perform cheap entry checks for exact expanded-state sizes and
+the sender delta before entering their eight-at-a-time loops. The receiver uses
+`data()` so the empty case does not form an invalid element reference. Hash
+loops are unchanged.
+
+Verification:
+
+- `OtExt_Silent_AuditState_Test` requires both roles to reject hashing after
+  configuration but before internal expansion.
