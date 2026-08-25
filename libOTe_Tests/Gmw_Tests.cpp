@@ -46,6 +46,12 @@ namespace osuCrypto
 			!gmw[1].mOleMult.empty() || !gmw[1].mOleAdd.empty())
 			throw UnitTestFail("GMW retained consumed OLE correlations");
 
+		bool consumedOleRejected = false;
+		try { gmw[0].setOle(mult[0], add[0]); }
+		catch (const std::logic_error&) { consumedOleRejected = true; }
+		if (!consumedOleRejected)
+			throw UnitTestFail("GMW accepted fresh OLEs after consuming its gate schedule");
+
 		bool missingOleRejected = false;
 		try
 		{
@@ -120,6 +126,66 @@ namespace osuCrypto
 		badLevels.mLevelAndCounts = { 0 };
 		expectInitRejected(badLevels, 0, 128,
 			"GMW accepted levels extending beyond the gate list");
+
+		BetaCircuit dependentCircuit;
+		BetaBundle dependentInput(3), dependentOutput(1);
+		BetaWire dependentTemp;
+		dependentCircuit.addInputBundle(dependentInput);
+		dependentCircuit.addOutputBundle(dependentOutput);
+		dependentCircuit.addTempWire(dependentTemp);
+		dependentCircuit.addGate(
+			dependentInput[0], dependentInput[1], GateType::And, dependentTemp);
+		dependentCircuit.addGate(
+			dependentTemp, dependentInput[2], GateType::And, dependentOutput[0]);
+		dependentCircuit.mLevelCounts = { 2 };
+		dependentCircuit.mLevelAndCounts = { 2 };
+		expectInitRejected(dependentCircuit, 0, 128,
+			"GMW accepted a same-round nonlinear dependency");
+
+		BetaCircuit flaggedCircuit;
+		BetaBundle flaggedInput(2), flaggedOutput(3);
+		flaggedCircuit.addInputBundle(flaggedInput);
+		flaggedCircuit.addOutputBundle(flaggedOutput);
+		flaggedCircuit.addGate(
+			flaggedInput[0], flaggedInput[1], GateType::Xor, flaggedOutput[0]);
+		flaggedCircuit.addConst(flaggedOutput[1], 1);
+		flaggedCircuit.addCopy(flaggedInput[0], flaggedOutput[2]);
+		flaggedCircuit.addInvert(flaggedOutput[2]);
+
+		std::array<Gmw, 2> flaggedGmw;
+		flaggedGmw[0].init(0, 3, flaggedCircuit);
+		flaggedGmw[1].init(1, 3, flaggedCircuit);
+		Matrix<u8> flaggedInput0(3, 1), flaggedInput1(3, 1);
+		flaggedInput0(0, 0) = 1;
+		flaggedInput0(1, 0) = 2;
+		flaggedInput0(2, 0) = 3;
+		std::fill(flaggedInput1.begin(), flaggedInput1.end(), 0);
+		flaggedGmw[0].setInput<u8>(0, flaggedInput0);
+		flaggedGmw[1].setInput<u8>(0, flaggedInput1);
+
+		auto flaggedSockets = coproto::LocalAsyncSocket::makePair();
+		auto flaggedResult = macoro::sync_wait(macoro::when_all_ready(
+			flaggedGmw[0].run(flaggedSockets[0]),
+			flaggedGmw[1].run(flaggedSockets[1])));
+		std::get<0>(flaggedResult).result();
+		std::get<1>(flaggedResult).result();
+
+		Matrix<u8> flaggedOutput0(3, 1), flaggedOutput1(3, 1);
+		flaggedGmw[0].getOutput<u8>(0, flaggedOutput0);
+		flaggedGmw[1].getOutput<u8>(0, flaggedOutput1);
+		const std::array<u8, 3> expectedFlaggedOutput{ 3, 7, 2 };
+		for (u64 i = 0; i < expectedFlaggedOutput.size(); ++i)
+		{
+			if (((flaggedOutput0(i, 0) ^ flaggedOutput1(i, 0)) & 7) !=
+				expectedFlaggedOutput[i])
+				throw UnitTestFail("GMW did not materialize a flagged output");
+		}
+
+		bool linearRerunRejected = false;
+		try { macoro::sync_wait(flaggedGmw[0].run(flaggedSockets[0])); }
+		catch (const std::logic_error&) { linearRerunRejected = true; }
+		if (!linearRerunRejected)
+			throw UnitTestFail("GMW reran a consumed linear gate schedule");
 
 		auto emptyBundleCircuit = *add2;
 		emptyBundleCircuit.mInputs.emplace_back();

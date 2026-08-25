@@ -4338,3 +4338,97 @@ Verification:
 
 - `Dpf_Audit_Test` injects set padding bits from a peer and requires the
   one-bit multiplication result to retain zero padding.
+
+## AUD-136: GMW ignored constant and inverted output flags
+
+Status: fixed
+
+Affected code:
+
+- GMW circuit initialization, evaluation setup, and output extraction.
+
+Concern:
+
+GMW exported the raw storage associated with each output wire without applying
+the circuit's `Zero`, `One`, or `InvWire` metadata. Constant output wires had
+never been written, while inverted wires represented the underlying value
+rather than its complement. Circuit levelization could also rewrite the wire
+flags before output extraction.
+
+Impact:
+
+Constant or inverted outputs were incorrect. Reconstructing a constant MPC
+output could disclose stale allocator contents contained in the uninitialized
+output share.
+
+Resolution:
+
+Initialization captures logical output flags before levelization. Evaluation
+materializes constant output shares after wire allocation, and extraction
+flips only the inverted output bits belonging to party one. Ordinary outputs
+and the gate-evaluation loops are unchanged.
+
+Verification:
+
+- `Gmw_Audit_Test` evaluates a circuit with ordinary, constant-one, and
+  inverted outputs and reconstructs all three across a partial SIMD batch.
+
+## AUD-137: GMW accepted same-round nonlinear data dependencies
+
+Status: fixed
+
+Affected code:
+
+- GMW validation of caller-supplied and generated circuit levels.
+
+Concern:
+
+Level metadata was checked for total gate and nonlinear-gate counts, but not
+for data hazards within a round. A gate could consume a nonlinear output before
+the peer's response had produced it, or overwrite an input that an earlier
+nonlinear gate needed again during response processing.
+
+Impact:
+
+Malformed level metadata could make the protocol read unwritten wire storage
+and silently evaluate a different circuit.
+
+Resolution:
+
+Initialization now rejects both same-round hazards. Per-wire epoch markers
+make the validation linear in the circuit size without adding checks to the
+evaluation loops.
+
+Verification:
+
+- `Gmw_Audit_Test` rejects two dependent AND gates placed in one round.
+
+## AUD-138: GMW could rerun a consumed gate schedule
+
+Status: fixed
+
+Affected code:
+
+- GMW initialization, OLE installation, and run preconditions.
+
+Concern:
+
+Successful evaluation advanced `mGates` to an empty span. Installing a fresh
+set of OLE correlations then allowed another run to form nonempty subspans
+from that consumed span.
+
+Impact:
+
+A second evaluation could access beyond the circuit's gate vector in Release
+builds.
+
+Resolution:
+
+Evaluation now marks the instance consumed when it commits its one-time OLE
+state. Both OLE installation and the run precondition reject consumed
+instances, while `init()` establishes fresh state and discards any prior OLEs.
+
+Verification:
+
+- `Gmw_Audit_Test` requires fresh OLE installation and a second zero-OLE
+  linear evaluation on a consumed evaluator to fail before state changes.

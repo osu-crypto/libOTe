@@ -72,6 +72,13 @@ namespace osuCrypto
 		// the remaining gates to be evaluated.
 		span<BetaGate> mGates;
 
+		// The logical flags for each output, captured before circuit
+		// levelization rewrites the wire metadata.
+		std::vector<std::vector<BetaWireFlag>> mOutputFlags;
+
+		// GMW evaluation consumes both the gate schedule and its OLEs.
+		bool mConsumed = false;
+
 		// the index of the circuit to print if debugging is enabled.
 		u64 mDebugPrintIdx = ~0ull;
 
@@ -88,6 +95,8 @@ namespace osuCrypto
 			mPrint = {};
 			mCir = {};
 			mGates = {};
+			mOutputFlags = {};
+			mConsumed = false;
 			mNumRounds = 0;
 			mMem = {};
 			mWords = {};
@@ -178,6 +187,9 @@ namespace osuCrypto
 		// party i will hold ai,ci such that mult0 * mult1 = add0 + add0
 		void setOle(span<block> mult, span<block> add)
 		{
+			if (mConsumed)
+				throw std::logic_error("GMW must be reinitialized before installing new OLE correlations. " LOCATION);
+
 			auto count = oleCount();
 			if (count / 128 != mult.size() || mult.size() != add.size())
 				throw RTE_LOC;

@@ -15,6 +15,46 @@ namespace osuCrypto
 
 	namespace
 	{
+		void validateGmwLevels(const BetaCircuit& cir)
+		{
+			if (cir.mLevelCounts.size() != cir.mLevelAndCounts.size())
+				throw std::invalid_argument("GMW circuit level metadata is inconsistent. " LOCATION);
+
+			std::vector<u32> dirty(cir.mWireCount, 0);
+			std::vector<u32> pinned(cir.mWireCount, 0);
+			u64 gateOffset = 0;
+			for (u64 level = 0; level < cir.mLevelCounts.size(); ++level)
+			{
+				const auto epoch = static_cast<u32>(level + 1);
+				const auto count = cir.mLevelCounts[level];
+				if (count > cir.mGates.size() - gateOffset)
+					throw std::invalid_argument("GMW circuit level exceeds the gate count. " LOCATION);
+
+				u64 andCount = 0;
+				for (u64 i = 0; i < count; ++i)
+				{
+					const auto& gate = cir.mGates[gateOffset + i];
+					if (dirty[gate.mInput[0]] == epoch ||
+						(gate.mType != GateType::a && dirty[gate.mInput[1]] == epoch) ||
+						pinned[gate.mOutput] == epoch)
+						throw std::invalid_argument("GMW circuit level contains a same-round data dependency. " LOCATION);
+
+					if (!isLinear(gate.mType))
+					{
+						pinned[gate.mInput[0]] = epoch;
+						pinned[gate.mInput[1]] = epoch;
+						dirty[gate.mOutput] = epoch;
+						++andCount;
+					}
+				}
+				if (andCount != cir.mLevelAndCounts[level])
+					throw std::invalid_argument("GMW circuit level gate count is inconsistent. " LOCATION);
+				gateOffset += count;
+			}
+			if (gateOffset != cir.mGates.size())
+				throw std::invalid_argument("GMW circuit levels do not cover all gates. " LOCATION);
+		}
+
 		void validateGmwCircuit(const BetaCircuit& cir)
 		{
 			if (cir.mWireCount == 0 || cir.mGates.empty())
@@ -80,27 +120,7 @@ namespace osuCrypto
 						throw std::invalid_argument("GMW circuit output wires are invalid. " LOCATION);
 
 			if (!cir.mLevelCounts.empty())
-			{
-				if (cir.mLevelCounts.size() != cir.mLevelAndCounts.size())
-					throw std::invalid_argument("GMW circuit level metadata is inconsistent. " LOCATION);
-
-				u64 gateOffset = 0;
-				for (u64 level = 0; level < cir.mLevelCounts.size(); ++level)
-				{
-					const auto count = cir.mLevelCounts[level];
-					if (count > cir.mGates.size() - gateOffset)
-						throw std::invalid_argument("GMW circuit level exceeds the gate count. " LOCATION);
-
-					u64 andCount = 0;
-					for (u64 i = 0; i < count; ++i)
-						andCount += !isLinear(cir.mGates[gateOffset + i].mType);
-					if (andCount != cir.mLevelAndCounts[level])
-						throw std::invalid_argument("GMW circuit level gate count is inconsistent. " LOCATION);
-					gateOffset += count;
-				}
-				if (gateOffset != cir.mGates.size())
-					throw std::invalid_argument("GMW circuit levels do not cover all gates. " LOCATION);
-			}
+				validateGmwLevels(cir);
 		}
 	}
 
@@ -119,10 +139,18 @@ namespace osuCrypto
 		mN = n;
 
 		mCir = cir;
+		mOutputFlags.resize(cir.mOutputs.size());
+		for (u64 i = 0; i < cir.mOutputs.size(); ++i)
+		{
+			mOutputFlags[i].resize(cir.mOutputs[i].size());
+			for (u64 j = 0; j < cir.mOutputs[i].size(); ++j)
+				mOutputFlags[i][j] = cir.mWireFlags[cir.mOutputs[i][j]];
+		}
 		mN128 = divCeil(mN, 128);
 
 		if (mCir.mLevelCounts.size() == 0)
 			mCir.levelByAndDepth(mLevelize);
+		validateGmwLevels(mCir);
 
 		mNumRounds = mCir.mLevelCounts.size();
 		mGates = mCir.mGates;
@@ -131,6 +159,10 @@ namespace osuCrypto
 		mRemainingMappings = mCir.mWireCount;
 		mMem.clear();
 		mPrint = mCir.mPrints.begin();
+		mConsumed = false;
+		mOleIndex = 0;
+		mOleMult = {};
+		mOleAdd = {};
 
 
 		mRole = partyIdx;// gen.partyIdx();
@@ -182,6 +214,19 @@ namespace osuCrypto
 			throw RTE_LOC;
 
 		transpose(memView, out);
+
+		if (mRole && i < mOutputFlags.size())
+		{
+			for (u64 wire = 0; wire < mOutputFlags[i].size(); ++wire)
+			{
+				if (mOutputFlags[i][wire] == BetaWireFlag::InvWire)
+				{
+					const auto mask = u8(1) << (wire & 7);
+					for (u64 row = 0; row < mN; ++row)
+						out(row, wire >> 3) ^= mask;
+				}
+			}
+		}
 	}
 
 	MatrixView<u8> Gmw::getInputView(u64 i)
@@ -344,13 +389,28 @@ namespace osuCrypto
 		if (mOleMult.size() != expectedOleBlocks ||
 			mOleAdd.size() != expectedOleBlocks)
 			throw std::invalid_argument("GMW requires a complete set of OLE correlations. " LOCATION);
+		if (mConsumed)
+			throw std::logic_error("GMW evaluation state has already been consumed. " LOCATION);
 
 		finalizeMapping();
+		for (u64 i = 0; i < mCir.mOutputs.size(); ++i)
+		{
+			for (u64 j = 0; j < mCir.mOutputs[i].size(); ++j)
+			{
+				const auto flag = mOutputFlags[i][j];
+				if (flag == BetaWireFlag::Zero || flag == BetaWireFlag::One)
+				{
+					const auto value = flag == BetaWireFlag::One && mRole ? AllOneBlock : ZeroBlock;
+					std::fill_n(mWords[mCir.mOutputs[i][j]], mN128, value);
+				}
+			}
+		}
 		oleMult = std::move(mOleMult);
 		oleAdd = std::move(mOleAdd);
 		mOleMult = {};
 		mOleAdd = {};
 		mOleIndex = 0;
+		mConsumed = true;
 		mult = oleMult;
 		add = oleAdd;
 		if (mO.mDebug)
