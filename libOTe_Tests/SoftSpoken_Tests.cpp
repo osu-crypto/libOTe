@@ -353,6 +353,52 @@ namespace tests_libOTe
         for (u64 i = 1; i < w.size(); ++i)
             if (w[i] != ZeroBlock)
                 throw UnitTestFail("SmallField VOLE tail consumed padded input");
+
+		PRNG auditPrng(block::allSame(0x129));
+		SmallFieldVoleSender failedSender;
+		failedSender.init(1, 1, false);
+		auto failedSenderSockets = cp::LocalAsyncSocket::makePair();
+		expectRejected([&] {
+			cp::sync_wait(failedSender.expand(failedSenderSockets[0], auditPrng, 1));
+		}, "Failed SmallField VOLE sender expansion did not throw");
+		if (failedSender.hasSeed())
+			throw UnitTestFail("Failed SmallField VOLE sender expansion retained seed state");
+
+		SmallFieldVoleReceiver failedReceiver;
+		failedReceiver.init(1, 1, false);
+		auto failedReceiverSockets = cp::LocalAsyncSocket::makePair();
+		expectRejected([&] {
+			cp::sync_wait(failedReceiver.expand(failedReceiverSockets[0], auditPrng, 1));
+		}, "Failed SmallField VOLE receiver expansion did not throw");
+		if (failedReceiver.hasSeed() || failedReceiver.mConsistencyFailed)
+			throw UnitTestFail("Failed SmallField VOLE receiver expansion retained seed state");
+
+		SubspaceVoleMaliciousSender<RepetitionCode> deferredSender;
+		SubspaceVoleMaliciousReceiver<RepetitionCode> deferredReceiver;
+		deferredSender.init(maliciousFieldBits, maliciousNumVoles);
+		deferredReceiver.init(maliciousFieldBits, maliciousNumVoles);
+		const auto deferredBaseCount = deferredReceiver.mVole.baseOtCount();
+		std::vector<block> deferredBase(deferredBaseCount, ZeroBlock);
+		BitVector deferredChoices(deferredBaseCount);
+		deferredReceiver.mVole.setBaseOts(deferredBase, deferredChoices);
+		std::vector<block> deferredSeeds(
+			maliciousNumVoles * (deferredReceiver.mVole.fieldSize() - 1), ZeroBlock);
+		deferredReceiver.mVole.setSeeds(deferredSeeds);
+		deferredReceiver.mVole.mConsistencyFailed = true;
+
+		auto deferredSockets = cp::LocalAsyncSocket::makePair();
+		block deferredChallenge;
+		cp::sync_wait(cp::when_all_ready(
+			deferredReceiver.sendChallenge(auditPrng, deferredSockets[0]),
+			deferredSockets[1].recv(deferredChallenge)));
+		deferredSender.setChallenge(deferredChallenge);
+		cp::sync_wait(deferredSender.sendResponse(deferredSockets[1]));
+		expectRejected([&] {
+			cp::sync_wait(deferredReceiver.checkResponse(deferredSockets[0]));
+		}, "Deferred SmallField VOLE failure was not folded into the final check");
+		if (deferredReceiver.hasSeed() ||
+			deferredReceiver.hasDeferredConsistencyFailure())
+			throw UnitTestFail("Final malicious VOLE failure retained seed state");
 #else
         throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
 #endif

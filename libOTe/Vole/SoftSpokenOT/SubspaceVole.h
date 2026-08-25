@@ -94,6 +94,11 @@ namespace osuCrypto
 			return mVole.hasSeed();
 		}
 
+		void clearSeed()
+		{
+			mVole.clearSeed();
+		}
+
 		bool hasBaseOts() const
 		{
 			return mVole.hasBaseOts();
@@ -256,6 +261,11 @@ namespace osuCrypto
 		bool hasSeed() const
 		{
 			return mVole.hasSeed();
+		}
+
+		void clearSeed()
+		{
+			mVole.clearSeed();
 		}
 
 		bool hasBaseOts() const

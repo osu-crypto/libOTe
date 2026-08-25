@@ -70,6 +70,8 @@ namespace osuCrypto
 		co_await(mBase.mSubVole.checkResponse(chl));
 
 	} MACORO_CATCH(eptr) {
+		if (mBase.mSubVole.hasDeferredConsistencyFailure())
+			mBase.mSubVole.clearSeed();
 		co_await chl.close();
 		std::rethrow_exception(eptr);
 	}

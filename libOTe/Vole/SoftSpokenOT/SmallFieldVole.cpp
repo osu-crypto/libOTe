@@ -328,6 +328,7 @@ namespace osuCrypto
 	void SmallFieldVoleReceiver::init(u64 fieldBits_, u64 numVoles_, bool malicious)
 	{
 		SmallFieldVoleBase::init(fieldBits_, numVoles_, malicious);
+		mConsistencyFailed = false;
 		mGenerateFn = (selectGenerateImpl(mFieldBits));
 		if (!mPprf)
 			mPprf.reset(new PprfReceiver);
@@ -352,6 +353,7 @@ namespace osuCrypto
 		assert(mNumVoles <= mNumVolesPadded);
 		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
+		mConsistencyFailed = false;
 	}
 
 	void SmallFieldVoleReceiver::setBaseOts(span<const block> baseMessages, const BitVector& choices)
@@ -438,13 +440,15 @@ namespace osuCrypto
 		}
 
 	} MACORO_CATCH(eptr) {
+		clearSeed();
 		if (!chl.closed()) co_await chl.close();
 		std::rethrow_exception(eptr);
 	}
 	}
 
 
-	task<> SmallFieldVoleReceiver::expand(Socket& chl, PRNG& prng, u64 numThreads)
+	task<> SmallFieldVoleReceiver::expand(
+		Socket& chl, PRNG& prng, u64 numThreads, bool deferConsistencyFailure)
 	{
 		MACORO_TRY{
 		auto seeds = AlignedUnVector<block>{};
@@ -456,6 +460,7 @@ namespace osuCrypto
 			auto seedMatrix = (block*)nullptr;
 
 		assert(mSeeds.size() == 0 && mNumVoles && mNumVoles <= mNumVolesPadded);
+		mConsistencyFailed = false;
 		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
 		std::fill(mSeeds.begin(), mSeeds.end(), block(0, 0));
 
@@ -521,9 +526,8 @@ namespace osuCrypto
 						eq &= (hash[i] == hashes[row][i]);
 				}
 
-				// TODO: Should delay abort until the VOLE consistency check, to stop the two events from
-				// being distinguished.
-				if (!eq)
+				mConsistencyFailed = !eq;
+				if (mConsistencyFailed && !deferConsistencyFailure)
 					throw std::runtime_error("PPRF failed consistency check.");
 			}
 		}
@@ -557,6 +561,7 @@ namespace osuCrypto
 		}
 
 		} MACORO_CATCH(eptr) {
+			clearSeed();
 			if (!chl.closed()) co_await chl.close();
 			std::rethrow_exception(eptr);
 		}

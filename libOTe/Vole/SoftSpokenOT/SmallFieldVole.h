@@ -113,6 +113,11 @@ namespace osuCrypto
 			return mSeeds.size();
 		}
 
+		void clearSeed()
+		{
+			mSeeds.clear();
+		}
+
 
 		// The number of useful blocks in u, v.
 		u64 uSize() const { return mNumVoles; }
@@ -260,6 +265,7 @@ namespace osuCrypto
 			, mPprf(new PprfReceiver)
 			, mDelta(b.mDelta)
 			, mDeltaUnpacked(b.mDeltaUnpacked)
+			, mConsistencyFailed(b.mConsistencyFailed)
 			, mGenerateFn(b.mGenerateFn)
 		{}
 
@@ -267,6 +273,7 @@ namespace osuCrypto
 		std::unique_ptr<PprfReceiver> mPprf;
 		BitVector mDelta;
 		AlignedUnVector<u8> mDeltaUnpacked; // Each bit of delta becomes a byte, either 0 or 0xff.
+		bool mConsistencyFailed = false;
 
 		SmallFieldVoleReceiver() = default;
 		SmallFieldVoleReceiver(SmallFieldVoleReceiver&& o)
@@ -274,6 +281,7 @@ namespace osuCrypto
 			, mPprf(std::move(o.mPprf))
 			, mDelta(std::move(o.mDelta))
 			, mDeltaUnpacked(std::move(o.mDeltaUnpacked))
+			, mConsistencyFailed(std::exchange(o.mConsistencyFailed, false))
 			, mGenerateFn(std::exchange(o.mGenerateFn, nullptr))
 		{
 			o.mDelta.resize(0);
@@ -288,6 +296,7 @@ namespace osuCrypto
 				mPprf = std::move(o.mPprf);
 				mDelta = std::move(o.mDelta);
 				mDeltaUnpacked = std::move(o.mDeltaUnpacked);
+				mConsistencyFailed = std::exchange(o.mConsistencyFailed, false);
 				mGenerateFn = std::exchange(o.mGenerateFn, nullptr);
 				o.mDelta.resize(0);
 				o.mDeltaUnpacked.clear();
@@ -330,7 +339,14 @@ namespace osuCrypto
 		// Uses a PPRF to implement the 2**mFieldBits - 1 of 2**mFieldBits OTs out of 1 of 2 base OTs. The
 		// messages and choice bits (which must be uniformly random) of the base OTs must be in
 		// baseMessages and choices.
-		task<> expand(Socket& chl, PRNG& prng, u64 numThreads);
+		task<> expand(Socket& chl, PRNG& prng, u64 numThreads,
+			bool deferConsistencyFailure = false);
+
+		void clearSeed()
+		{
+			SmallFieldVoleBase::clearSeed();
+			mConsistencyFailed = false;
+		}
 
 
 		// outW outputs the values for w, i.e. xor_x x * PRG(seed[x]). If correction is passed, its

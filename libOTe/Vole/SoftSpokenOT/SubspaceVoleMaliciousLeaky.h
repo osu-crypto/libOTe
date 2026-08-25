@@ -529,6 +529,16 @@ namespace osuCrypto
 			clearHashes();
 		}
 
+		task<> expand(Socket& chl, PRNG& prng, u64 numThreads)
+		{
+			return Receiver::mVole.expand(chl, prng, numThreads, true);
+		}
+
+		bool hasDeferredConsistencyFailure() const
+		{
+			return Receiver::mVole.mConsistencyFailed;
+		}
+
 		u64 wPadded() const { return roundUpTo(Receiver::wPadded(), 4); }
 
 		void requireHashState() const
@@ -676,8 +686,13 @@ namespace osuCrypto
 				const u64* finalHashV = &senderFinalHashes[numVoles * fieldBits];
 
 				Receiver::mVole.sharedFunctionXorGF(finalHashU, finalHashW.data(), gfMods[fieldBits]);
-				if (!std::equal(finalHashW.data(), finalHashW.data() + numVoles * fieldBits, finalHashV))
-					throw std::runtime_error("Failed subspace VOLE consistency check");;
+				const bool consistent = std::equal(
+					finalHashW.data(), finalHashW.data() + numVoles * fieldBits, finalHashV);
+				if (!consistent || Receiver::mVole.mConsistencyFailed)
+				{
+					Receiver::mVole.clearSeed();
+					throw std::runtime_error("Failed subspace VOLE consistency check");
+				}
 			}
 
 		}

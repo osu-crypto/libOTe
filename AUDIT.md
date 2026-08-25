@@ -4106,3 +4106,71 @@ Verification:
 
 - `OtExt_Silent_AuditState_Test` requires both roles to reject hashing after
   configuration but before internal expansion.
+
+## AUD-129: Malicious SoftSpoken exposed a distinguishable base-VOLE abort
+
+Status: fixed
+
+Affected code:
+
+- Malicious SmallField VOLE expansion and the enclosing malicious subspace
+  VOLE consistency check.
+
+Concern:
+
+The SmallField PPRF consistency check aborted immediately, before the outer
+subspace-VOLE consistency transcript. A malicious peer could distinguish a
+base-VOLE failure from the final VOLE failure by observing whether subsequent
+protocol messages arrived.
+
+Impact:
+
+The separate abort events exposed an additional selective-failure predicate
+of the honest party's secret PPRF choices and did not follow the composed
+protocol's requirement to reveal only the final consistency result.
+
+Resolution:
+
+SmallField VOLE supports explicit deferred consistency failure for its
+malicious subspace-VOLE caller while retaining immediate failure for direct
+callers. The enclosing receiver completes the normal transcript and combines
+the latched result with the final consistency decision. The generation and
+hash hot loops are unchanged.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` verifies that a deferred base failure is
+  reported only by the final malicious subspace-VOLE check.
+
+## AUD-130: Failed SmallField VOLE expansion retained false seed readiness
+
+Status: fixed
+
+Affected code:
+
+- Sender and receiver `SmallFieldVole::expand()` failure paths.
+- Final malicious subspace-VOLE failure handling.
+
+Concern:
+
+Both expansion roles allocated `mSeeds` before awaited PPRF and network work.
+An exception closed the socket but left the seed vector nonempty, so
+`hasSeed()` reported the failed endpoint as ready.
+
+Impact:
+
+Reusing the endpoint could skip expansion and generate from partial or
+zero-filled seed state, causing transcript desynchronization or silently
+invalid correlations.
+
+Resolution:
+
+Every SmallField expansion exception now clears seed readiness. A failed final
+malicious consistency check also invalidates the deferred seed state, and the
+outer OT sender clears it if the remainder of a deferred-failure transcript
+terminates early.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` checks sender and receiver expansion
+  exceptions, the deferred final failure, and cleared readiness afterward.
