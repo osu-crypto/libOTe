@@ -526,6 +526,46 @@ namespace osuCrypto
 
 	struct CoeffCtxFp : CoeffCtxInteger
 	{
+		template<typename F>
+		OC_FORCEINLINE bool isCanonical(const F& value) const
+		{
+			using traits = FpTraits<std::remove_cvref_t<F>>;
+			static_assert(traits::is_fp, "F must be an Fp type.");
+			return value.mVal < traits::modulus_value;
+		}
+
+		// Peer-provided field encodings must be canonical. The arithmetic
+		// kernels intentionally assume this invariant and only assert it.
+		template<typename SrcIter, typename DstIter>
+		void deserialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin) const
+		{
+			using SrcType = std::remove_cvref_t<decltype(*begin)>;
+			using DstType = std::remove_cvref_t<decltype(*dstBegin)>;
+			static_assert(FpTraits<DstType>::is_fp,
+				"CoeffCtxFp can only deserialize into an Fp type.");
+
+			CoeffCtxInteger::deserialize(begin, end, dstBegin);
+
+			auto srcCount = std::distance(begin, end);
+			if (srcCount)
+			{
+				// The base deserializer has already checked the range, byte
+				// multiplication, and divisibility.
+				auto bytes = static_cast<std::size_t>(srcCount) * sizeof(SrcType);
+				auto dstCount = bytes / sizeof(DstType);
+				for (std::size_t i = 0; i < dstCount; ++i)
+				{
+					if (!isCanonical(dstBegin[i]))
+					{
+						for (std::size_t j = 0; j < dstCount; ++j)
+							dstBegin[j].mVal = 0;
+						throw std::invalid_argument(
+							"Noncanonical finite-field encoding. " LOCATION);
+					}
+				}
+			}
+		}
+
 		template<typename G>
 		bool characteristicTwo() const {
 			static_assert(FpTraits<G>::is_fp, "G must be an Fp type.");

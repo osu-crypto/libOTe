@@ -17,6 +17,8 @@ using namespace oc;
 
 #include <libOTe/config.h>
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Tools/Field/FVec.h"
 
 using namespace tests_libOTe;
 #ifdef ENABLE_SILENT_VOLE
@@ -28,7 +30,8 @@ void Vole_Noisy_test_impl(u64 n)
 	F delta = prng.get();
 	std::vector<G> c(n);
 	std::vector<F> a(n), b(n);
-	prng.get(c.data(), c.size());
+	for (auto& value : c)
+		value = prng.get();
 
 	NoisyVoleReceiver<F, G, Ctx> recv;
 	NoisyVoleSender<F, G, Ctx> send;
@@ -74,6 +77,9 @@ void Vole_Noisy_test(const oc::CLP& cmd)
 		Vole_Noisy_test_impl<u64, u32, CoeffCtxInteger>(n);
 		Vole_Noisy_test_impl<block, block, CoeffCtxGF128>(n);
 		Vole_Noisy_test_impl<std::array<u32, 11>, u32, CoeffCtxArray<u32, 11>>(n);
+		Vole_Noisy_test_impl<F12289, F12289, DefaultCoeffCtx<F12289>>(n);
+		using VF = FVec<Fp31, 2>;
+		Vole_Noisy_test_impl<VF, VF, DefaultCoeffCtx<VF>>(n);
 	}
 }
 

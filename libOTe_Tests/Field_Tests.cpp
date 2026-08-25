@@ -273,6 +273,94 @@ namespace tests_libOTe
 		auto byteEnd = bytes.end();
 		auto decodedBegin = &decoded;
 		expectRejected([&] { ctx.deserialize(byteBegin, byteEnd, decodedBegin); });
+
+		CoeffCtxFp fpCtx;
+		std::array<u8, sizeof(F12289)> noncanonicalBytes;
+		noncanonicalBytes.fill(0xff);
+		F12289 noncanonical = 0;
+		expectInvalid([&]
+		{
+			fpCtx.deserialize(
+				noncanonicalBytes.begin(), noncanonicalBytes.end(), &noncanonical);
+		});
+		if (noncanonical != F12289::zero())
+			throw RTE_LOC;
+
+		F12289 canonical = 4091;
+		std::array<u8, sizeof(F12289)> canonicalBytes{};
+		fpCtx.serialize(&canonical, &canonical + 1, canonicalBytes.begin());
+		F12289 canonicalRoundTrip = 0;
+		fpCtx.deserialize(
+			canonicalBytes.begin(), canonicalBytes.end(), &canonicalRoundTrip);
+		if (canonicalRoundTrip != canonical)
+			throw RTE_LOC;
+
+		using VF2 = FVec<Fp31, 2>;
+		using VF4 = FVec<Fp31, 4>;
+		using VCtx = DefaultCoeffCtx<VF4>;
+		static_assert(std::is_same_v<VCtx, CoeffCtxFVec<Fp31, 4>>);
+
+		CoeffCtxFVec<Fp31, 2> vec2Ctx;
+		if (vec2Ctx.template byteSize<VF2>() != 2 * sizeof(Fp31) ||
+			vec2Ctx.template bitSize<VF2>() != 2 * sizeof(Fp31) * 8)
+			throw RTE_LOC;
+
+		VF2 vec2{ Fp31(11), Fp31(29) };
+		std::array<u8, sizeof(VF2)> vecBytes;
+		vecBytes.fill(0xa5);
+		vec2Ctx.serialize(&vec2, &vec2 + 1, vecBytes.begin());
+		for (u64 i = vec2Ctx.template byteSize<VF2>(); i < vecBytes.size(); ++i)
+			if (vecBytes[i] != 0xa5)
+				throw RTE_LOC;
+
+		VF2 vec2RoundTrip;
+		std::memset(&vec2RoundTrip, 0xcc, sizeof(vec2RoundTrip));
+		vec2Ctx.deserialize(
+			vecBytes.begin(),
+			vecBytes.begin() + vec2Ctx.template byteSize<VF2>(),
+			&vec2RoundTrip);
+		if (vec2RoundTrip != vec2)
+			throw RTE_LOC;
+		for (u64 i = 2 * sizeof(Fp31); i < sizeof(VF2); ++i)
+			if (reinterpret_cast<u8*>(&vec2RoundTrip)[i] != 0)
+				throw RTE_LOC;
+
+		vecBytes[0] = vecBytes[1] = vecBytes[2] = vecBytes[3] = 0xff;
+		expectInvalid([&]
+		{
+			vec2Ctx.deserialize(
+				vecBytes.begin(),
+				vecBytes.begin() + vec2Ctx.template byteSize<VF2>(),
+				&vec2RoundTrip);
+		});
+		if (vec2RoundTrip != VF2::zero())
+			throw RTE_LOC;
+
+		VCtx vec4Ctx;
+		VF4 sampled;
+		vec4Ctx.fromBlock(sampled, AllOneBlock);
+		for (auto& lane : sampled.v)
+			if (!vec4Ctx.mScalarCtx.isCanonical(lane))
+				throw RTE_LOC;
+
+		VF4 gapPower;
+		vec4Ctx.powerOfTwoUnchecked(gapPower, 31);
+		if (gapPower != VF4::zero())
+			throw RTE_LOC;
+
+		auto decomposition = vec4Ctx.binaryDecomposition(sampled);
+		VF4 reconstructed = VF4::zero();
+		for (u64 i = 0; i < decomposition.size(); ++i)
+		{
+			if (decomposition[i])
+			{
+				VF4 power;
+				vec4Ctx.powerOfTwoUnchecked(power, i);
+				reconstructed += power;
+			}
+		}
+		if (reconstructed != sampled)
+			throw RTE_LOC;
 	}
 
 }

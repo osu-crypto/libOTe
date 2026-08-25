@@ -4174,3 +4174,103 @@ Verification:
 
 - `Vole_SoftSpokenSmall_Audit_Test` checks sender and receiver expansion
   exceptions, the deferred final failure, and cleared readiness afterward.
+
+## AUD-131: Prime-field deserialization accepted noncanonical residues
+
+Status: fixed
+
+Affected code:
+
+- `CoeffCtxFp` deserialization and generic protocols receiving serialized
+  prime-field coefficients.
+
+Concern:
+
+The prime-field context inherited bytewise deserialization without checking
+that the resulting storage value was below the field modulus. Field arithmetic
+only asserted that invariant.
+
+Impact:
+
+A peer could supply a noncanonical residue that aborted a debug build and
+entered arithmetic with violated reduction assumptions in a release build.
+Addition, subtraction, and Barrett multiplication could then produce invalid
+correlations.
+
+Resolution:
+
+Prime-field deserialization checks every decoded residue once at the wire
+boundary and rejects noncanonical encodings. A failed decode clears the whole
+destination range. Arithmetic kernels are unchanged.
+
+Verification:
+
+- `Field_Audit_Test` rejects an all-one `F12289` encoding, requires failure to
+  clear the destination, and round-trips a canonical encoding.
+
+## AUD-132: Vector fields selected the integer coefficient context
+
+Status: fixed
+
+Affected code:
+
+- Default coefficient-context selection for `FVec<F, N>`.
+- Vector coefficient sampling, decomposition, powers, and serialization.
+
+Concern:
+
+`FVec` fell through to `CoeffCtxInteger`. Random blocks were copied directly
+into scalar field lanes without reduction, and binary powers treated unused
+high storage bits as valid scalar values. In particular, the advertised
+`FVec<Fp31, 4>` configuration used four invalid power rows and commonly
+sampled noncanonical lanes.
+
+Impact:
+
+Debug builds could abort on scalar-field assertions. Release DPF, VOLE, and
+Ring-LPN computations could silently produce invalid correlations.
+
+Resolution:
+
+A dedicated compile-time vector context delegates canonical sampling and
+validation to the scalar context. Binary decomposition remains an
+allocation-free lane-storage view; unused scalar high-bit rows map to zero.
+The fixed lane loops remain compile-time unrolled, and arithmetic kernels are
+unchanged.
+
+Verification:
+
+- `Field_Audit_Test` checks default context selection, canonical sampling,
+  unused Fp31 power rows, and reconstruction from the complete decomposition.
+- `Vole_Noisy_test` exercises scalar `F12289` and two-lane `Fp31` vector VOLE.
+
+## AUD-133: Raw vector serialization included alignment padding
+
+Status: fixed
+
+Affected code:
+
+- Serialization and deserialization of aligned `FVec` coefficients.
+
+Concern:
+
+The integer context serialized `sizeof(FVec)`. For lane arrays whose byte size
+was not a multiple of the vector's 16-byte alignment, this included
+uninitialized tail padding. Binary decomposition included the same padding.
+
+Impact:
+
+A padded vector protocol instantiation could transmit stale stack or heap
+bytes and allow indeterminate padding to affect protocol choices.
+
+Resolution:
+
+The vector context serializes only the packed scalar lanes, excludes tail
+padding from its decomposition, and zeroes the complete destination object
+before decoding. Padding-free vectors retain a bulk-copy fast path.
+
+Verification:
+
+- `Field_Audit_Test` verifies that `FVec<Fp31, 2>` serializes eight bytes,
+  leaves bytes beyond that representation untouched, zeroes decoded padding,
+  and rejects a noncanonical lane atomically.
