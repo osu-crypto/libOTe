@@ -124,6 +124,42 @@ namespace osuCrypto
 		}
 	}
 
+	Gmw::Gmw(Gmw&& src) noexcept
+	{
+		*this = std::move(src);
+	}
+
+	Gmw& Gmw::operator=(Gmw&& src) noexcept
+	{
+		if (this != &src)
+		{
+			mTimer = src.mTimer;
+			mO = std::move(src.mO);
+			mLevelize = src.mLevelize;
+			mN = src.mN;
+			mN128 = src.mN128;
+			mRemainingMappings = src.mRemainingMappings;
+			mRole = src.mRole;
+			mWords = std::move(src.mWords);
+			mMem = std::move(src.mMem);
+			mNumRounds = src.mNumRounds;
+			mCir = std::move(src.mCir);
+			mGates = src.mGates;
+			mOutputFlags = std::move(src.mOutputFlags);
+			mConsumed = src.mConsumed;
+			mDebugPrintIdx = src.mDebugPrintIdx;
+			mPrint = src.mPrint;
+			mOleIndex = src.mOleIndex;
+			mOleMult = std::move(src.mOleMult);
+			mOleAdd = std::move(src.mOleAdd);
+
+			src.clear();
+			src.mTimer = nullptr;
+			src.mDebugPrintIdx = ~0ull;
+		}
+		return *this;
+	}
+
 	void Gmw::init(
 		u64 partyIdx,
 		u64 n,

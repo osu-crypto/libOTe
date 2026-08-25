@@ -28,6 +28,12 @@ namespace osuCrypto
 	class Gmw final : public TimerAdapter
 	{
 	public:
+		Gmw() = default;
+		Gmw(const Gmw&) = delete;
+		Gmw& operator=(const Gmw&) = delete;
+		Gmw(Gmw&&) noexcept;
+		Gmw& operator=(Gmw&&) noexcept;
+
 		static constexpr u64 MaxOleDimension =
 			std::numeric_limits<u32>::max() / 2;
 

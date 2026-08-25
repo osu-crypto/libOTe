@@ -405,6 +405,15 @@ namespace osuCrypto
 		if (weight * weight > Gmw::MaxOleDimension)
 			throw std::invalid_argument("RingLPN tensor weight exceeds the supported range. " LOCATION);
 
+		mSparsePositions.resize(0, 0);
+		mSparseCoefficients.clear();
+		mTensoredCoefficients.clear();
+		mTensorRecvOts.clear();
+		mTensorChoice.resize(0);
+		mTensorSendOts.clear();
+		mProdPolyTreePosArth.clear();
+		mProdPolyTreePosXor.clear();
+
 		mPartyIdx = partyIdx;
 		mNumPolys = numPolys;
 		mPolyWeight = polyWeight;
@@ -1088,6 +1097,25 @@ namespace osuCrypto
 		PRNG& prng,
 		coproto::Socket& sock)
 	{
+		// true if we are generating OLEs, false if we are generating triples.
+		constexpr bool ole = std::is_same_v<std::decay_t<decltype(C)>, std::monostate>;
+		if  constexpr (ole)
+		{
+			if (mN < A.size())
+				throw RTE_LOC;
+			if (A.size() != B.size())
+				throw RTE_LOC;
+		}
+		else
+		{
+			if (mN / 2 < A.size())
+				throw RTE_LOC;
+			if (A.size() != B.size())
+				throw RTE_LOC;
+			if (A.size() != C.size())
+				throw RTE_LOC;
+		}
+
 		MACORO_TRY{
 
 		setTimePoint("expand start");
@@ -1111,27 +1139,6 @@ namespace osuCrypto
 		}
 		else if (hasTensor() == false)
 			co_await tensor(prng, sock);
-
-		// true if we are generating OLEs, false if we are generating triples.
-		constexpr bool ole = std::is_same_v<std::decay_t<decltype(C)>, std::monostate>;
-
-		if  constexpr (ole)
-		{
-			// OLE
-			if (mN < A.size())
-				throw RTE_LOC;
-			if (A.size() != B.size())
-				throw RTE_LOC;
-		}
-		else
-		{
-			if (mN / 2 < A.size())
-				throw RTE_LOC;
-			if (A.size() != B.size())
-				throw RTE_LOC;
-			if (A.size() != C.size())
-				throw RTE_LOC;
-		}
 
 		if (mDebug)
 			co_await checkTensor(sock);

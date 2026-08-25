@@ -6,12 +6,18 @@
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "libOTe/Tools/Gmw/Gmw.h"
 #include <sstream>
+#include <type_traits>
 
 namespace osuCrypto
 {
 	void Gmw_Audit_Test(const CLP&)
 	{
 #ifdef ENABLE_CIRCUITS
+		static_assert(!std::is_copy_constructible<Gmw>::value);
+		static_assert(!std::is_copy_assignable<Gmw>::value);
+		static_assert(std::is_nothrow_move_constructible<Gmw>::value);
+		static_assert(std::is_nothrow_move_assignable<Gmw>::value);
+
 		BetaLibrary library;
 		auto* add2 = library.int_int_add(2, 2, 2);
 		std::array<Gmw, 2> gmw;
@@ -162,17 +168,27 @@ namespace osuCrypto
 		std::fill(flaggedInput1.begin(), flaggedInput1.end(), 0);
 		flaggedGmw[0].setInput<u8>(0, flaggedInput0);
 		flaggedGmw[1].setInput<u8>(0, flaggedInput1);
+		Gmw movedFlagged0(std::move(flaggedGmw[0]));
+		Gmw movedFlagged1;
+		movedFlagged1 = std::move(flaggedGmw[1]);
+		for (const auto& source : flaggedGmw)
+		{
+			if (source.mN || source.mRole != ~0ull || !source.mGates.empty() ||
+				!source.mWords.empty() || !source.mMem.empty() ||
+				!source.mOleMult.empty() || !source.mOleAdd.empty())
+				throw UnitTestFail("GMW move retained active source state");
+		}
 
 		auto flaggedSockets = coproto::LocalAsyncSocket::makePair();
 		auto flaggedResult = macoro::sync_wait(macoro::when_all_ready(
-			flaggedGmw[0].run(flaggedSockets[0]),
-			flaggedGmw[1].run(flaggedSockets[1])));
+			movedFlagged0.run(flaggedSockets[0]),
+			movedFlagged1.run(flaggedSockets[1])));
 		std::get<0>(flaggedResult).result();
 		std::get<1>(flaggedResult).result();
 
 		Matrix<u8> flaggedOutput0(3, 1), flaggedOutput1(3, 1);
-		flaggedGmw[0].getOutput<u8>(0, flaggedOutput0);
-		flaggedGmw[1].getOutput<u8>(0, flaggedOutput1);
+		movedFlagged0.getOutput<u8>(0, flaggedOutput0);
+		movedFlagged1.getOutput<u8>(0, flaggedOutput1);
 		const std::array<u8, 3> expectedFlaggedOutput{ 3, 7, 2 };
 		for (u64 i = 0; i < expectedFlaggedOutput.size(); ++i)
 		{
@@ -182,7 +198,7 @@ namespace osuCrypto
 		}
 
 		bool linearRerunRejected = false;
-		try { macoro::sync_wait(flaggedGmw[0].run(flaggedSockets[0])); }
+		try { macoro::sync_wait(movedFlagged0.run(flaggedSockets[0])); }
 		catch (const std::logic_error&) { linearRerunRejected = true; }
 		if (!linearRerunRejected)
 			throw UnitTestFail("GMW reran a consumed linear gate schedule");

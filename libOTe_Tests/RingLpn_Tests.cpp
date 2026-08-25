@@ -75,6 +75,47 @@ namespace osuCrypto
 		expectRejected(oversizedTriple, 0, Gmw::MaxOleDimension,
 			Ring::Mode::Triple, sum, precomputed,
 			"RingLPN accepted an overflowing triple request");
+
+		Ring reinitialized;
+		reinitialized.mNumPolys = 2;
+		reinitialized.mPolyWeight = 8;
+		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		reinitialized.mSparseCoefficients.resize(16);
+		reinitialized.mTensoredCoefficients.resize(16 * 16);
+		reinitialized.mTensorRecvOts.resize(1);
+		reinitialized.mTensorChoice.resize(1);
+		reinitialized.mTensorSendOts.resize(1);
+		reinitialized.mProdPolyTreePosArth.resize(1);
+		reinitialized.mProdPolyTreePosXor.resize(1);
+		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		if (!reinitialized.mSparseCoefficients.empty() ||
+			!reinitialized.mTensoredCoefficients.empty() ||
+			!reinitialized.mTensorRecvOts.empty() ||
+			reinitialized.mTensorChoice.size() ||
+			!reinitialized.mTensorSendOts.empty() ||
+			!reinitialized.mProdPolyTreePosArth.empty() ||
+			!reinitialized.mProdPolyTreePosXor.empty() ||
+			reinitialized.baseCorCount().mCoeffCount != 16)
+			throw UnitTestFail("RingLPN reinitialization retained tensor state");
+
+		reinitialized.mTensoredCoefficients.resize(16 * 16);
+		std::vector<F12289> shortA(1), longB(2), shortC(1);
+		PRNG invalidExpandPrng(block(0x1234, 0x5678));
+		auto invalidExpandSockets = coproto::LocalAsyncSocket::makePair();
+		bool invalidOutputRejected = false;
+		try
+		{
+			macoro::sync_wait(reinitialized.expand(
+				shortA, longB, shortC, invalidExpandPrng, invalidExpandSockets[0]));
+		}
+		catch (const std::runtime_error&)
+		{
+			invalidOutputRejected = true;
+		}
+		if (!invalidOutputRejected || !reinitialized.isInitialized() ||
+			reinitialized.mTensoredCoefficients.size() != 16 * 16 ||
+			invalidExpandSockets[0].closed())
+			throw UnitTestFail("RingLPN consumed state before validating its outputs");
 #else
 		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
 #endif

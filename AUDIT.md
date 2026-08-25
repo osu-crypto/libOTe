@@ -4432,3 +4432,100 @@ Verification:
 
 - `Gmw_Audit_Test` requires fresh OLE installation and a second zero-OLE
   linear evaluation on a consumed evaluator to fail before state changes.
+
+## AUD-139: GMW copies retained views into the source object
+
+Status: fixed
+
+Affected code:
+
+- GMW object construction and assignment.
+- Move support for `BetaCircuit`.
+
+Concern:
+
+The implicit GMW copy operations copied `mGates`, `mPrint`, and `mWords` as
+non-owning references. These references continued to address the source
+object's circuit and wire storage instead of the copied containers.
+
+Impact:
+
+Evaluation through a copy could modify the source object. Destroying the
+source before evaluation left the copy with dangling references and enabled
+use-after-free.
+
+Resolution:
+
+GMW is now move-only. Its explicit move operations transfer the owning
+containers together with their internal references and clear the source.
+`BetaCircuit` exposes its default vector moves so circuit transfer does not
+copy a potentially large gate schedule.
+
+Verification:
+
+- Compile-time checks require GMW to be noncopyable and nothrow movable.
+- `Gmw_Audit_Test` evaluates move-constructed and move-assigned instances and
+  requires both source objects to be inert.
+
+## AUD-140: RingLPN reinitialization retained tensor state
+
+Status: fixed
+
+Affected code:
+
+- `RingLpnTriple::init`.
+
+Concern:
+
+Reinitialization replaced the DPF and GMW state but retained tensor
+coefficients, tensor OTs, choices, and product positions. The retained tensor
+coefficient vector made `baseCorCount()` treat the new session's tensor as
+ready.
+
+Impact:
+
+The reported base-correlation count omitted the tensor material required by
+the new session. Later setup could clear the retained tensor without producing
+a replacement, causing failure after protocol state had been consumed.
+
+Resolution:
+
+After validating the new configuration, initialization discards all tensor
+and product state from the previous session. Reusable base-OT extension state
+and public transform caches remain available.
+
+Verification:
+
+- `RingLpn_Audit_test` populates every tensor-state container, reinitializes
+  the object, and requires the new base-correlation count to include the
+  complete tensor.
+
+## AUD-141: RingLPN validated outputs after consuming protocol state
+
+Status: fixed
+
+Affected code:
+
+- The OLE and triple overloads of `RingLpnTriple::expand`.
+
+Concern:
+
+Expansion checked output lengths only after generating or consuming the
+tensor, DPF, GMW, and OT state. A caller could therefore begin both parties'
+protocol work with incompatible output spans.
+
+Impact:
+
+A local size error consumed one-time correlations, closed the protocol socket,
+and forced the peer to abort before the error was reported.
+
+Resolution:
+
+Both overloads now validate their complete output interface before entering
+the protocol body or its failure-cleanup scope. Invalid calls preserve the
+initialized state and leave the socket untouched.
+
+Verification:
+
+- `RingLpn_Audit_test` supplies mismatched triple outputs and requires
+  rejection before the tensor state or socket changes.
