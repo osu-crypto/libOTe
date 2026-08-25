@@ -5,6 +5,7 @@
 #include "cryptoTools/Common/TestCollection.h"
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "libOTe/Tools/Gmw/Gmw.h"
+#include <sstream>
 
 namespace osuCrypto
 {
@@ -95,6 +96,78 @@ namespace osuCrypto
 		}
 		if (!evaluationBoundRejected || !gateBoundRejected)
 			throw UnitTestFail("GMW accepted an oversized OLE dimension");
+
+		auto expectInitRejected = [&](const BetaCircuit& circuit, u64 party,
+			u64 evaluations, const char* message) {
+			bool rejected = false;
+			try { mapped.init(party, evaluations, circuit); }
+			catch (const std::invalid_argument&) { rejected = true; }
+			if (!rejected)
+				throw UnitTestFail(message);
+		};
+		expectInitRejected(*add2, 2, 128,
+			"GMW accepted an invalid party index");
+		expectInitRejected(*add2, 0, 0,
+			"GMW accepted zero circuit evaluations");
+
+		auto badWireCircuit = *add2;
+		badWireCircuit.mGates[0].mInput[0] = badWireCircuit.mWireCount;
+		expectInitRejected(badWireCircuit, 0, 128,
+			"GMW accepted an out-of-range gate wire");
+
+		auto badLevels = *add2;
+		badLevels.mLevelCounts = { badLevels.mGates.size() + 1 };
+		badLevels.mLevelAndCounts = { 0 };
+		expectInitRejected(badLevels, 0, 128,
+			"GMW accepted levels extending beyond the gate list");
+
+		auto emptyBundleCircuit = *add2;
+		emptyBundleCircuit.mInputs.emplace_back();
+		Gmw emptyBundle;
+		emptyBundle.init(0, 128, emptyBundleCircuit);
+		bool emptyBundleRejected = false;
+		try { emptyBundle.setZeroInput(emptyBundleCircuit.mInputs.size() - 1); }
+		catch (const std::invalid_argument&) { emptyBundleRejected = true; }
+		if (!emptyBundleRejected)
+			throw UnitTestFail("GMW dereferenced an empty input bundle");
+
+		std::stringstream malformedBinary(
+			std::ios::in | std::ios::out | std::ios::binary);
+		badWireCircuit.writeBin(malformedBinary);
+		BetaCircuit parsed = *add2;
+		const auto originalHash = parsed.hash();
+		bool malformedBinaryRejected = false;
+		try
+		{
+			malformedBinary.seekg(0);
+			parsed.readBin(malformedBinary);
+		}
+		catch (const std::exception&)
+		{
+			malformedBinaryRejected = true;
+		}
+		if (!malformedBinaryRejected || neq(parsed.hash(), originalHash))
+			throw UnitTestFail("BetaCircuit accepted malformed binary structure or changed state");
+
+		std::stringstream validBinary(
+			std::ios::in | std::ios::out | std::ios::binary);
+		add2->writeBin(validBinary);
+		auto truncatedBytes = validBinary.str();
+		truncatedBytes.pop_back();
+		std::stringstream truncatedBinary(truncatedBytes,
+			std::ios::in | std::ios::binary);
+		bool truncatedBinaryRejected = false;
+		try { parsed.readBin(truncatedBinary); }
+		catch (const std::exception&) { truncatedBinaryRejected = true; }
+		if (!truncatedBinaryRejected || neq(parsed.hash(), originalHash))
+			throw UnitTestFail("BetaCircuit accepted truncated binary input or changed state");
+
+		std::istringstream malformedBristol("1 3 2 2 1\n");
+		bool malformedBristolRejected = false;
+		try { parsed.readBristol(malformedBristol); }
+		catch (const std::exception&) { malformedBristolRejected = true; }
+		if (!malformedBristolRejected || neq(parsed.hash(), originalHash))
+			throw UnitTestFail("BetaCircuit accepted invalid Bristol dimensions or changed state");
 
 		Gmw cleared;
 		cleared.init(0, 128, *add2);

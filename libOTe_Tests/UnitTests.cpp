@@ -305,6 +305,7 @@ namespace tests_libOTe
 			tc.add("RingLpn_Triple_test                     ", RingLpn_Triple_test);
 			tc.add("RingLpn_GenBase_test                    ", RingLpn_GenBase_test);
 			tc.add("RingLpn_stationary_test                 ", RingLpn_stationary_test);
+			tc.add("RingLpn_Audit_test                      ", RingLpn_Audit_test);
 			tc.add("Gmw_Audit_Test                           ", Gmw_Audit_Test);
 
 #ifdef ENABLE_LOGVOLE

@@ -14,6 +14,7 @@
 #include <cryptoTools/Common/Aligned.h>
 #include <cryptoTools/Common/MatrixView.h>
 #include <cryptoTools/Network/Channel.h>
+#include <limits>
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/Tools/Pprf/RegularPprf.h"
@@ -35,6 +36,7 @@ namespace osuCrypto
 
 	public:
 		static constexpr u64 fieldBitsMax = 31;
+		static constexpr u64 seedCountMax = std::numeric_limits<u32>::max();
 
 		u64 mFieldBits = 0;
 		u64 mNumVoles = 0;
@@ -57,8 +59,11 @@ namespace osuCrypto
 			return *this;
 		}
 
-		static constexpr u64 baseOtCount(u64 fieldBits, u64 numVoles)
+		static u64 baseOtCount(u64 fieldBits, u64 numVoles)
 		{
+			if (fieldBits < 1 || fieldBits > fieldBitsMax || numVoles == 0 ||
+				numVoles > seedCountMax / fieldBits)
+				throw std::invalid_argument("SmallField VOLE dimensions exceed the supported range. " LOCATION);
 			return fieldBits * numVoles;
 		}
 

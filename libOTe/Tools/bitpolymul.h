@@ -12,6 +12,8 @@
 
 #include <stdint.h>
 #include <cryptoTools/Common/Defines.h>
+#include <limits>
+#include <new>
 #include <vector>
 //#include <boost/align/aligned_allocator.hpp>
 #include "bitpolymul/bitpolymul.h"
@@ -24,6 +26,9 @@ namespace osuCrypto
 
     template <typename T, std::size_t N = 16>
     class AlignmentAllocator {
+        static_assert(N && (N & (N - 1)) == 0,
+            "alignment must be a nonzero power of two");
+
     public:
         typedef T value_type;
         typedef std::size_t size_type;
@@ -52,7 +57,8 @@ namespace osuCrypto
         }
 
         inline pointer allocate(size_type n) {
-
+            if (n > max_size())
+                throw std::bad_array_new_length();
             auto size = n * sizeof(value_type);
             auto header = N + sizeof(void*);
             auto base = new char[size + header];
@@ -98,7 +104,9 @@ namespace osuCrypto
         }
 
         inline size_type max_size() const throw () {
-            return size_type(-1) / sizeof(value_type);
+            constexpr auto header = N + sizeof(void*);
+            return (std::numeric_limits<size_type>::max() - header) /
+                sizeof(value_type);
         }
 
         template <typename T2>
@@ -130,6 +138,7 @@ namespace osuCrypto
     class FFTPoly
     {
     public:
+        static constexpr u64 MaxSize = std::numeric_limits<u32>::max();
 
         FFTPoly() = default;
         FFTPoly(const FFTPoly&) = default;

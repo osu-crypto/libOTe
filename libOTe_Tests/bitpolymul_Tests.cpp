@@ -44,6 +44,43 @@ void Tools_bitpolymul_test(const CLP& cmd)
 #ifdef ENABLE_BITPOLYMUL
     using namespace bpm;
 
+    {
+        FFTPoly poly;
+        poly.resize(1);
+        const auto oldN = poly.mN;
+        const auto oldNPow2 = poly.mNPow2;
+        const auto oldSize = poly.mPoly.size();
+
+        bool rejected = false;
+        try
+        {
+            poly.resize(FFTPoly::MaxSize + 1);
+        }
+        catch (const std::invalid_argument&)
+        {
+            rejected = true;
+        }
+
+        if (!rejected)
+            throw UnitTestFail("FFTPoly accepted an unsupported input size" LOCATION);
+        if (poly.mN != oldN || poly.mNPow2 != oldNPow2 || poly.mPoly.size() != oldSize)
+            throw UnitTestFail("failed FFTPoly resize changed object state" LOCATION);
+
+        AlignmentAllocator<u64, 32> allocator;
+        rejected = false;
+        try
+        {
+            (void)allocator.allocate(allocator.max_size() + 1);
+        }
+        catch (const std::bad_array_new_length&)
+        {
+            rejected = true;
+        }
+
+        if (!rejected)
+            throw UnitTestFail("alignment allocator accepted an overflowing size" LOCATION);
+    }
+
 
     uint64_t TEST_RUN = cmd.getOr("t", 4);
     uint64_t len = (1ull << cmd.getOr("nn", 12));

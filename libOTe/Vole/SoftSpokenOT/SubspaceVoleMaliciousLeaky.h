@@ -241,16 +241,25 @@ namespace osuCrypto
 
 		void init(u64 fieldBits, u64 numVoles)
 		{
-			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits));
-			Sender::mVole.init(fieldBits, numVoles, true);
-
-			if (Sender::mVole.mNumVoles != code().length())
+			SmallFieldVoleBase::baseOtCount(fieldBits, numVoles);
+			Code code(divCeil(gOtExtBaseOtCount, fieldBits));
+			if (numVoles != code.length())
 				throw RTE_LOC;
 
-			hashU.resize(Sender::uSize());
-			subtotalU.resize(Sender::uSize());
-			hashV.resize(vPadded());
-			subtotalV.resize(vPadded());
+			SmallFieldVoleSender vole;
+			vole.init(fieldBits, numVoles, true);
+			AlignedUnVector<block> nextHashU(code.dimension());
+			AlignedUnVector<block> nextSubtotalU(code.dimension());
+			const auto paddedV = roundUpTo(vole.vPadded(), 4);
+			AlignedUnVector<block> nextHashV(paddedV);
+			AlignedUnVector<block> nextSubtotalV(paddedV);
+
+			this->mCode = std::move(code);
+			Sender::mVole = std::move(vole);
+			hashU = std::move(nextHashU);
+			subtotalU = std::move(nextSubtotalU);
+			hashV = std::move(nextHashV);
+			subtotalV = std::move(nextSubtotalV);
 			
 			clearHashes();
 		}
@@ -396,18 +405,23 @@ namespace osuCrypto
 
 		void init(u64 fieldBits_, u64 numVoles_)
 		{
-			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits_));
-			Receiver::mVole.init(fieldBits_, numVoles_, true);
-			Receiver::mCorrectionU.resize(Receiver::uPadded());
-
-			if (Receiver::mVole.mNumVoles != code().length())
-			{
-				std::cout << Receiver::mVole.mNumVoles << " vs " << code().length() << std::endl;
+			SmallFieldVoleBase::baseOtCount(fieldBits_, numVoles_);
+			Code code(divCeil(gOtExtBaseOtCount, fieldBits_));
+			if (numVoles_ != code.length())
 				throw RTE_LOC;
-			}
 
-			mHashW.resize(wPadded());
-			mSubtotalW.resize(wPadded());
+			SmallFieldVoleReceiver vole;
+			vole.init(fieldBits_, numVoles_, true);
+			AlignedUnVector<block> correctionU(vole.uPadded());
+			const auto paddedW = roundUpTo(vole.wPadded(), 4);
+			AlignedUnVector<block> nextHashW(paddedW);
+			AlignedUnVector<block> nextSubtotalW(paddedW);
+
+			this->mCode = std::move(code);
+			Receiver::mVole = std::move(vole);
+			Receiver::mCorrectionU = std::move(correctionU);
+			mHashW = std::move(nextHashW);
+			mSubtotalW = std::move(nextSubtotalW);
 			clearHashes();
 		}
 

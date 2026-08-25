@@ -13,14 +13,108 @@ namespace osuCrypto
 {
 	using PRNG = PRNG;
 
+	namespace
+	{
+		void validateGmwCircuit(const BetaCircuit& cir)
+		{
+			if (cir.mWireCount == 0 || cir.mGates.empty())
+				throw std::invalid_argument("GMW requires a nonempty circuit. " LOCATION);
+			if (cir.mGates.size() > Gmw::MaxOleDimension)
+				throw std::invalid_argument("GMW gate count exceeds the supported range. " LOCATION);
+			if (cir.mWireFlags.size() != cir.mWireCount)
+				throw std::invalid_argument("GMW circuit wire flags are inconsistent. " LOCATION);
+
+			std::vector<u8> available(cir.mWireCount, 0);
+			u64 nextInputWire = 0;
+			for (const auto& bundle : cir.mInputs)
+			{
+				for (auto wire : bundle.mWires)
+				{
+					if (wire >= cir.mWireCount || wire != nextInputWire++)
+						throw std::invalid_argument("GMW circuit input wires are invalid. " LOCATION);
+					available[wire] = 1;
+				}
+			}
+
+			for (u64 wire = 0; wire < cir.mWireCount; ++wire)
+			{
+				if (cir.mWireFlags[wire] == BetaWireFlag::Zero ||
+					cir.mWireFlags[wire] == BetaWireFlag::One)
+					available[wire] = 1;
+			}
+
+			u64 nonlinearCount = 0;
+			for (const auto& gate : cir.mGates)
+			{
+				const auto supportedType =
+					gate.mType == GateType::a ||
+					gate.mType == GateType::Xor || gate.mType == GateType::Nxor ||
+					gate.mType == GateType::na_And || gate.mType == GateType::nb_And ||
+					gate.mType == GateType::And || gate.mType == GateType::Nand ||
+					gate.mType == GateType::Nor || gate.mType == GateType::nb_Or ||
+					gate.mType == GateType::Or;
+				if (!supportedType ||
+					gate.mInput[0] >= cir.mWireCount ||
+					gate.mOutput >= cir.mWireCount ||
+					!available[gate.mInput[0]])
+					throw std::invalid_argument("GMW circuit contains an invalid gate. " LOCATION);
+				if (gate.mType == GateType::a)
+				{
+					if (gate.mInput[1] != 1 || gate.mInput[1] >= cir.mWireCount)
+						throw std::invalid_argument("GMW only supports single-wire copy gates. " LOCATION);
+				}
+				else if (gate.mInput[1] >= cir.mWireCount ||
+					!available[gate.mInput[1]] || gate.mInput[0] == gate.mInput[1])
+					throw std::invalid_argument("GMW circuit gate repeats an input. " LOCATION);
+
+				available[gate.mOutput] = 1;
+				nonlinearCount += !isLinear(gate.mType);
+			}
+
+			if (nonlinearCount != cir.mNonlinearGateCount)
+				throw std::invalid_argument("GMW circuit nonlinear gate count is inconsistent. " LOCATION);
+
+			for (const auto& bundle : cir.mOutputs)
+				for (auto wire : bundle.mWires)
+					if (wire >= cir.mWireCount || !available[wire])
+						throw std::invalid_argument("GMW circuit output wires are invalid. " LOCATION);
+
+			if (!cir.mLevelCounts.empty())
+			{
+				if (cir.mLevelCounts.size() != cir.mLevelAndCounts.size())
+					throw std::invalid_argument("GMW circuit level metadata is inconsistent. " LOCATION);
+
+				u64 gateOffset = 0;
+				for (u64 level = 0; level < cir.mLevelCounts.size(); ++level)
+				{
+					const auto count = cir.mLevelCounts[level];
+					if (count > cir.mGates.size() - gateOffset)
+						throw std::invalid_argument("GMW circuit level exceeds the gate count. " LOCATION);
+
+					u64 andCount = 0;
+					for (u64 i = 0; i < count; ++i)
+						andCount += !isLinear(cir.mGates[gateOffset + i].mType);
+					if (andCount != cir.mLevelAndCounts[level])
+						throw std::invalid_argument("GMW circuit level gate count is inconsistent. " LOCATION);
+					gateOffset += count;
+				}
+				if (gateOffset != cir.mGates.size())
+					throw std::invalid_argument("GMW circuit levels do not cover all gates. " LOCATION);
+			}
+		}
+	}
+
 	void Gmw::init(
 		u64 partyIdx,
 		u64 n,
 		const BetaCircuit& cir)
 	{
-		if (n > MaxOleDimension ||
+		if (partyIdx > 1)
+			throw std::invalid_argument("GMW party index must be zero or one. " LOCATION);
+		if (n == 0 || n > MaxOleDimension ||
 			cir.mNonlinearGateCount > MaxOleDimension)
 			throw std::invalid_argument("GMW OLE dimensions exceed the supported range. " LOCATION);
+		validateGmwCircuit(cir);
 
 		mN = n;
 
@@ -119,10 +213,15 @@ namespace osuCrypto
 
 	MatrixView<u8> Gmw::getMemView(BetaBundle& wires)
 	{
+		if (wires.size() == 0)
+			throw std::invalid_argument("GMW does not support empty wire bundles. " LOCATION);
+		if (wires[0] >= mWords.size())
+			throw std::invalid_argument("GMW wire bundle is out of range. " LOCATION);
+
 		// we require the input bundles and memory are contiguous.
 		for (u64 j = 1; j < wires.size(); ++j)
 		{
-			if (wires[j - 1] + 1 != wires[j])
+			if (wires[j] >= mWords.size() || wires[j - 1] + 1 != wires[j])
 				throw RTE_LOC;
 		}
 
@@ -238,7 +337,7 @@ namespace osuCrypto
 		auto batchSize = 1ull << 14;
 
 		if (mRole > 1)
-			std::terminate();
+			throw std::logic_error("Gmw::init(...) was not called with a valid role. " LOCATION);
 		if (mCir.mGates.size() == 0ull)
 			throw std::runtime_error("Gmw::init(...) was not called");
 		auto expectedOleBlocks = oleCount() / 128;

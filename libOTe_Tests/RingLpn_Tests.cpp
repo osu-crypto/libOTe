@@ -15,6 +15,70 @@
 
 namespace osuCrypto
 {
+	void RingLpn_Audit_test(const CLP&)
+	{
+#ifdef ENABLE_RINGLPN
+		using Ring = RingLpnTriple<F12289>;
+		const auto expectRejected = [](Ring& ring, u64 partyIdx, u64 n,
+			Ring::Mode mode, Ring::DpfType dpf, Ring::TensorBaseCorType base,
+			const char* message) {
+			bool rejected = false;
+			try
+			{
+				ring.init(partyIdx, n, mode, dpf, base);
+			}
+			catch (const std::invalid_argument&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw UnitTestFail(message);
+		};
+
+		const auto sum = Ring::DpfType::SumDmpf;
+		const auto precomputed = Ring::TensorBaseCorType::Precomputed;
+		Ring ring;
+		ring.mPartyIdx = 1;
+		ring.mNumPolys = 2;
+		ring.mPolyWeight = 8;
+		ring.mN = 64;
+		ring.mLogN = 6;
+		expectRejected(ring, 2, 64, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted an invalid party index");
+		if (ring.mPartyIdx != 1 || ring.mNumPolys != 2 ||
+			ring.mPolyWeight != 8 || ring.mN != 64 || ring.mLogN != 6)
+			throw UnitTestFail("RingLPN invalid initialization changed existing state");
+
+		Ring zero;
+		expectRejected(zero, 0, 0, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted a zero request");
+
+		Ring tooManyPolys;
+		tooManyPolys.mNumPolys = 9;
+		tooManyPolys.mPolyWeight = 8;
+		expectRejected(tooManyPolys, 0, 64, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted too many polynomials");
+
+		Ring badWeight;
+		badWeight.mNumPolys = 2;
+		badWeight.mPolyWeight = 512;
+		expectRejected(badWeight, 0, 2048, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted a polynomial weight above 256");
+
+		Ring shallowRing;
+		shallowRing.mNumPolys = 2;
+		shallowRing.mPolyWeight = 64;
+		expectRejected(shallowRing, 0, 64, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted a ring smaller than two blocks");
+
+		Ring oversizedTriple;
+		expectRejected(oversizedTriple, 0, Gmw::MaxOleDimension,
+			Ring::Mode::Triple, sum, precomputed,
+			"RingLPN accepted an overflowing triple request");
+#else
+		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
+#endif
+	}
 
 	void RingLpn_basic_test(const CLP& cmd)
 	{

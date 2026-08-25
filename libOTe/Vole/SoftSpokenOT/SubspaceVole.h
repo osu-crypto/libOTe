@@ -77,11 +77,15 @@ namespace osuCrypto
 
 		void init(u64 fieldBits, u64 numVoles)
 		{
-			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits));
-			mVole.init(fieldBits, numVoles, false);
-
-			if (mVole.mNumVoles != code().length())
+			SmallFieldVoleBase::baseOtCount(fieldBits, numVoles);
+			Code code(divCeil(gOtExtBaseOtCount, fieldBits));
+			if (numVoles != code.length())
 				throw RTE_LOC;
+
+			SmallFieldVoleSender vole;
+			vole.init(fieldBits, numVoles, false);
+			this->mCode = std::move(code);
+			mVole = std::move(vole);
 		}
 
 
@@ -229,12 +233,17 @@ namespace osuCrypto
 
 		void init(u64 fieldBits_, u64 numVoles_)
 		{
-			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits_));
-			mVole.init(fieldBits_, numVoles_, false);
-			mCorrectionU.resize(uPadded());
-
-			if (mVole.mNumVoles != code().length())
+			SmallFieldVoleBase::baseOtCount(fieldBits_, numVoles_);
+			Code code(divCeil(gOtExtBaseOtCount, fieldBits_));
+			if (numVoles_ != code.length())
 				throw RTE_LOC;
+
+			SmallFieldVoleReceiver vole;
+			vole.init(fieldBits_, numVoles_, false);
+			AlignedUnVector<block> correctionU(vole.uPadded());
+			this->mCode = std::move(code);
+			mVole = std::move(vole);
+			mCorrectionU = std::move(correctionU);
 		}
 
 		void setBaseOts(

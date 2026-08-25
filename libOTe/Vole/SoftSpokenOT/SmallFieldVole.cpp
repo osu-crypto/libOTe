@@ -283,7 +283,7 @@ namespace osuCrypto
 		if ((u64)seeds_.size() != numSeeds)
 			throw RTE_LOC;
 
-		assert(mNumVolesPadded >= numSeeds);
+		assert(mNumVoles <= mNumVolesPadded);
 		mSeeds.resize(mNumVolesPadded * fieldSize());
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
 	}
@@ -292,7 +292,7 @@ namespace osuCrypto
 	{
 		u64 volesPadded;
 		if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
-			volesPadded = roundUpTo(numVoles, divNearest(superBlkSize, (1 << fieldBits) - 1));
+			volesPadded = roundUpTo(numVoles, divNearest(superBlkSize, (1ull << fieldBits) - 1));
 		else // > 1 super block per VOLE.
 			volesPadded = numVoles;
 
@@ -302,14 +302,18 @@ namespace osuCrypto
 
 	void SmallFieldVoleBase::init(u64 fieldBits_, u64 numVoles_, bool malicious)
 	{
+		baseOtCount(fieldBits_, numVoles_);
+		const auto fieldSize = 1ull << fieldBits_;
+		const auto numVolesPadded = computeNumVolesPadded(fieldBits_, numVoles_);
+		if (numVolesPadded > seedCountMax / fieldSize)
+			throw std::invalid_argument("SmallField VOLE seed count exceeds the supported range. " LOCATION);
+
 		mFieldBits = fieldBits_;
 		mNumVoles = numVoles_;
+		mNumVolesPadded = numVolesPadded;
 		mMalicious = malicious;
+		mSeeds.clear();
 		mInit = true;
-		if (mFieldBits < 1 || mFieldBits > fieldBitsMax)
-			throw RTE_LOC;
-		mNumVolesPadded = (computeNumVolesPadded(fieldBits_, numVoles_));
-		mSeeds.resize(0);
 	}
 
 	void SmallFieldVoleSender::init(u64 fieldBits_, u64 numVoles_, bool malicious)
@@ -345,7 +349,7 @@ namespace osuCrypto
 		if ((u64)seeds_.size() != numSeeds)
 			throw RTE_LOC;
 
-		assert(mNumVolesPadded >= numSeeds);
+		assert(mNumVoles <= mNumVolesPadded);
 		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
 	}

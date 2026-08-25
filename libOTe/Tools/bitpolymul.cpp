@@ -23,6 +23,9 @@ namespace osuCrypto
         if (mN == n)
             return;
 
+        if (n > MaxSize)
+            throw std::invalid_argument("bitpolymul input exceeds the supported range. " LOCATION);
+
         if (n == 0)
         {
             mN = 0;
@@ -31,11 +34,12 @@ namespace osuCrypto
         }
         else
         {
-            mN = n;
             // round up to the next power of 2
-            u64 log_n = oc::log2ceil(mN);
-            mNPow2 = std::max<u64>(1ull << log_n, 256);
-            mPoly.resize(2 * mNPow2);
+            const u64 log_n = oc::log2ceil(n);
+            const u64 nPow2 = std::max<u64>(1ull << log_n, 256);
+            mPoly.resize(2 * nPow2);
+            mN = n;
+            mNPow2 = nPow2;
         }
     }
 
@@ -146,6 +150,8 @@ namespace osuCrypto
     void bitpolymul(uint64_t* c, const uint64_t* a, const uint64_t* b, uint64_t _n_64)
     {
         auto n = _n_64;
+        if (n > FFTPoly::MaxSize)
+            throw std::invalid_argument("bitpolymul input exceeds the supported range. " LOCATION);
         FFTPoly A(span<const u64>(a, n));
         FFTPoly B(span<const u64>(b, n));
 

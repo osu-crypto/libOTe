@@ -7,6 +7,9 @@
 
 
 #include "libOTe/Vole/SoftSpokenOT/SmallFieldVole.h"
+#include "libOTe/Vole/SoftSpokenOT/SubspaceVole.h"
+#include "libOTe/Vole/SoftSpokenOT/SubspaceVoleMaliciousLeaky.h"
+#include "libOTe/Tools/RepetitionCode.h"
 //#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalLeakyDotExt.h"
 #include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h"
 #include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
@@ -171,10 +174,47 @@ namespace tests_libOTe
         auto expectRejected = [](auto&& fn, const char* message) {
             bool rejected = false;
             try { fn(); }
-            catch (const std::runtime_error&) { rejected = true; }
+            catch (const std::exception&) { rejected = true; }
             if (!rejected)
                 throw UnitTestFail(message);
         };
+
+		SmallFieldVoleSender seededSender;
+		SmallFieldVoleReceiver seededReceiver;
+		seededSender.init(2, 4, false);
+		seededReceiver.init(2, 4, false);
+		std::vector<block> senderSeeds(4 * 4);
+		std::vector<block> receiverSeeds(4 * 3);
+		seededSender.setSeed(senderSeeds);
+		seededReceiver.setSeeds(receiverSeeds);
+
+		expectRejected([&] { seededSender.init(0, 1, false); },
+			"SmallField VOLE accepted a zero field width");
+		if (!seededSender.mInit || seededSender.mFieldBits != 2 ||
+			seededSender.mNumVoles != 4)
+			throw UnitTestFail("SmallField VOLE failed initialization changed existing state");
+
+		SmallFieldVoleSender zeroVoles;
+		expectRejected([&] { zeroVoles.init(1, 0, false); },
+			"SmallField VOLE accepted zero VOLEs");
+		expectRejected([&] {
+			zeroVoles.init(1, SmallFieldVoleBase::seedCountMax, false);
+		}, "SmallField VOLE accepted an oversized padded seed count");
+		expectRejected([&] { zeroVoles.init(31, 1, false); },
+			"SmallField VOLE accepted an oversized 31-bit seed table");
+
+		SubspaceVoleSender<RepetitionCode> subspaceSender;
+		SubspaceVoleReceiver<RepetitionCode> subspaceReceiver;
+		SubspaceVoleMaliciousSender<RepetitionCode> maliciousSender;
+		SubspaceVoleMaliciousReceiver<RepetitionCode> maliciousReceiver;
+		expectRejected([&] { subspaceSender.init(0, 1); },
+			"Subspace VOLE sender divided by a zero field width");
+		expectRejected([&] { subspaceReceiver.init(0, 1); },
+			"Subspace VOLE receiver divided by a zero field width");
+		expectRejected([&] { maliciousSender.init(0, 1); },
+			"Malicious subspace VOLE sender divided by a zero field width");
+		expectRejected([&] { maliciousReceiver.init(0, 1); },
+			"Malicious subspace VOLE receiver divided by a zero field width");
 
         expectRejected([&] {
             sender.generate(0, mAesFixedKey,

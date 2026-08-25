@@ -359,43 +359,78 @@ namespace osuCrypto
 		DpfType dpfType,
 		TensorBaseCorType base, CoeffCtx ctx)
 	{
-		mPartyIdx = partyIdx;
-		if (mode == Mode::Triple)
-			n *= 2;
-		mLogN = log2ceil(n);
-		mN = 1ull << mLogN;
-		mBaseCorType = base;
-		mCtx = ctx;
+		if (partyIdx > 1)
+			throw std::invalid_argument("RingLPN party index must be zero or one. " LOCATION);
+		if (mode != Mode::Ole && mode != Mode::Triple)
+			throw std::invalid_argument("RingLPN mode is invalid. " LOCATION);
+		if (dpfType != DpfType::RevCuckooDmpf && dpfType != DpfType::SumDmpf)
+			throw std::invalid_argument("RingLPN DPF type is invalid. " LOCATION);
+		if (base != TensorBaseCorType::OtBased &&
+			base != TensorBaseCorType::Precomputed)
+			throw std::invalid_argument("RingLPN tensor correlation type is invalid. " LOCATION);
+		if (n == 0 || n > Gmw::MaxOleDimension)
+			throw std::invalid_argument("RingLPN request size exceeds the supported range. " LOCATION);
 
-		if (mNumPolys == 0)
+		auto numPolys = mNumPolys;
+		auto polyWeight = mPolyWeight;
+		if (numPolys == 0)
 		{
-			mNumPolys = 4;
-			mPolyWeight = 16;
+			numPolys = 4;
+			polyWeight = 16;
+		}
+		if (numPolys > 8)
+			throw std::invalid_argument("RingLPN supports at most eight polynomials. " LOCATION);
+		if (polyWeight == 0 || polyWeight > 256 ||
+			(polyWeight & (polyWeight - 1)))
+			throw std::invalid_argument("RingLPN polynomial weight must be a power of two at most 256. " LOCATION);
+
+		if (mode == Mode::Triple)
+		{
+			if (n > Gmw::MaxOleDimension / 2)
+				throw std::invalid_argument("RingLPN triple request size exceeds the supported range. " LOCATION);
+			n *= 2;
 		}
 
-		auto logT = log2ceil(mPolyWeight);
-		if (mPolyWeight != 1ull << logT)
-			throw RTE_LOC;
+		const auto logN = log2ceil(n);
+		const auto ringSize = 1ull << logN;
+		const auto logT = log2ceil(polyWeight);
+		const auto blockSize = ringSize / polyWeight;
+		if (blockSize < 2)
+			throw std::invalid_argument("RingLPN ring size is too small for the polynomial weight. " LOCATION);
 
-		mBlockSize = mN / mPolyWeight;
-		mBlockDepth = mLogN - logT;
-		mDpfTreeDepth = mBlockDepth + 1;
+		const auto blockDepth = logN - logT;
+		const auto dpfTreeDepth = blockDepth + 1;
+		const auto dpfTreeSize = 1ull << dpfTreeDepth;
+		const auto weight = numPolys * polyWeight;
+		if (weight * weight > Gmw::MaxOleDimension)
+			throw std::invalid_argument("RingLPN tensor weight exceeds the supported range. " LOCATION);
 
-		mDpfTreeSize = 1ull << mDpfTreeDepth;
+		mPartyIdx = partyIdx;
+		mNumPolys = numPolys;
+		mPolyWeight = polyWeight;
+		mLogN = logN;
+		mN = ringSize;
+		mBaseCorType = base;
+		mCtx = ctx;
+		mBlockSize = blockSize;
+		mBlockDepth = blockDepth;
+		mDpfTreeDepth = dpfTreeDepth;
+		mDpfTreeSize = dpfTreeSize;
+		mHasDpf = false;
 
 		if (dpfType == DpfType::RevCuckooDmpf)
 		{
 			mDpf = RevCuckooDmpf<F, CoeffCtx>();
 			std::get<0>(mDpf).init(
 				partyIdx,
-				mPolyWeight,
-				mNumPolys * mNumPolys * mPolyWeight,
+				polyWeight,
+				numPolys * numPolys * polyWeight,
 				mDpfTreeSize);
 		}
 		else if (dpfType == DpfType::SumDmpf)
 		{
 			mDpf = SumDmpf<F, CoeffCtx>();
-			std::get<1>(mDpf).init(mPartyIdx, mDpfTreeSize, mPolyWeight, mNumPolys * mNumPolys * mPolyWeight);
+			std::get<1>(mDpf).init(mPartyIdx, mDpfTreeSize, polyWeight, numPolys * numPolys * polyWeight);
 		}
 		else
 			throw RTE_LOC;
@@ -404,11 +439,7 @@ namespace osuCrypto
 		BetaLibrary lib;
 		mAdder = *lib.int_int_add(mDpfTreeDepth, mDpfTreeDepth, mDpfTreeDepth, BetaLibrary::Optimized::Depth);
 
-		auto weight = mNumPolys * mPolyWeight;
 		mGmw.init(mPartyIdx, weight * weight, mAdder);
-
-		if (mBlockSize < 2)
-			throw RTE_LOC;
 
 		sampleA(block(3127894527893612049, 240925987420932408));
 	}

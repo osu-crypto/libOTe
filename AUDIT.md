@@ -3789,3 +3789,166 @@ Verification:
 
 - `Field_Audit_Test` checks `UINT64_MAX` against its Fermat-reduced exponent and
   confirms that negative signed exponents remain rejected.
+
+## AUD-119: RingLPN initialization accepted unsafe dimensions and roles
+
+Status: fixed
+
+Affected code:
+
+- `RingLpnTriple::init()`.
+
+Concern:
+
+Initialization accepted invalid party and enum values, zero requests,
+unsupported polynomial counts and weights, and derived dimensions that could
+overflow or underflow before reaching lower-level components.
+
+Impact:
+
+Caller-controlled configurations could trigger undefined shifts, invalid tree
+depths, oversized tensor correlations, or inconsistent protocol state.
+
+Resolution:
+
+The initialization boundary now validates each public parameter and derived
+dimension before committing state. The existing DPF and arithmetic expansion
+loops are unchanged, and RevCuckoo internals remain outside this audit track.
+
+Verification:
+
+- `RingLpn_Audit_test` covers invalid roles, zero and oversized requests,
+  excessive polynomial counts and weights, and rings too small for the chosen
+  weight.
+
+## AUD-120: Small-field and subspace VOLE initialization was non-atomic
+
+Status: fixed
+
+Affected code:
+
+- `SmallFieldVoleBase`, `SmallFieldVoleSender`, and `SmallFieldVoleReceiver`.
+- Semi-honest and malicious-leaky `SubspaceVole` initialization.
+
+Concern:
+
+Invalid field widths and VOLE counts were used in divisions, shifts, and seed
+table products before complete validation. Failed initialization could leave
+objects partially configured. Two seed setters also asserted an unrelated
+comparison, and a signed shift was undefined at the maximum field width.
+
+Impact:
+
+Invalid caller dimensions could cause division by zero, undefined behavior,
+oversized allocation requests, or reuse of a partially changed object.
+
+Resolution:
+
+Field widths, nonzero counts, base-OT products, and padded seed-table sizes are
+now bounded before state changes. Subspace wrappers construct their code,
+VOLE, and correction storage in temporaries and move them into place only
+after validation. The signed shift and seed assertions were corrected. No
+generation hot loop was changed.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` covers zero and maximum field widths,
+  zero/oversized counts, failed-initialization state preservation, valid seed
+  installation, and all four subspace wrapper boundaries.
+
+## AUD-121: BetaCircuit deserializers trusted counts and structure
+
+Status: fixed
+
+Affected code:
+
+- BetaCircuit JSON, binary, and Bristol readers in the cryptoTools submodule.
+
+Concern:
+
+Serialized counts were allocated or narrowed without practical bounds, stream
+failures left scalars indeterminate, Bristol dimension subtraction could
+underflow, and gate, level, wire, flag, and print relationships were not fully
+validated. Readers also modified the destination incrementally.
+
+Impact:
+
+Malformed circuit files could cause excessive allocations, out-of-bounds
+access during parsing or later evaluation, or leave a reusable circuit object
+partially overwritten after an exception.
+
+Resolution:
+
+All readers now parse into a temporary circuit, bound individual serialized
+collections and strings, check every stream operation and narrowing boundary,
+validate circuit structure, verify the hash, and commit only on success.
+Copy-gate ranges are validated according to their length encoding.
+
+Verification:
+
+- `BetaCircuit_bin_Tests` continues to round-trip valid binary circuits.
+- `Gmw_Audit_Test` rejects structurally invalid and truncated binary circuits
+  and malformed Bristol dimensions while preserving the destination object.
+
+## AUD-122: GMW accepted malformed roles and circuit metadata
+
+Status: fixed
+
+Affected code:
+
+- `Gmw::init()`, wire-bundle mapping, and the run precondition.
+
+Concern:
+
+GMW did not validate the party role or preflight circuit wire ordering, gate
+types and dependencies, nonlinear counts, outputs, or level metadata. Empty
+or out-of-range bundles could also be dereferenced before rejection.
+
+Impact:
+
+A malformed caller-provided circuit could cause out-of-bounds access, consume
+the wrong amount of OLE correlation, or fail after protocol execution began.
+
+Resolution:
+
+Initialization now performs a one-time structural preflight before allocating
+or committing state, and bundle accessors reject empty and out-of-range
+bundles. The evaluator's gate loops are unchanged; unsupported copy encodings
+and gate types are rejected at initialization.
+
+Verification:
+
+- `Gmw_Audit_Test` covers invalid roles and evaluation counts, out-of-range
+  wires, inconsistent levels, empty bundles, and parser failures.
+
+## AUD-123: Bit-polynomial sizes could overflow allocation arithmetic
+
+Status: fixed
+
+Affected code:
+
+- `AlignmentAllocator`, `FFTPoly::resize()`, and the raw `bitpolymul()` entry
+  point.
+
+Concern:
+
+The aligned allocator multiplied element counts and added its alignment header
+without accounting for overflow. FFT sizing also rounded unrestricted 64-bit
+input lengths and doubled the transform size.
+
+Impact:
+
+Extreme caller sizes could wrap an allocation byte count or transform length,
+leading to an undersized allocation and subsequent out-of-bounds writes.
+
+Resolution:
+
+The allocator exposes a header-aware maximum and rejects larger requests.
+FFT inputs are explicitly limited to the supported 32-bit range, and resize
+commits dimensions only after storage allocation succeeds. Transform hot loops
+are unchanged.
+
+Verification:
+
+- `Tools_bitpolymul_test` checks allocator overflow rejection and atomic
+  rejection of an unsupported FFT size in a bitpolymul-enabled build.
