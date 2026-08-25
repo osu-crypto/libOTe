@@ -1887,6 +1887,26 @@ void SparseDpf_Punct_Test(const oc::CLP& cmd)
 }
 
 
+struct TrackingTernaryCoeffCtx : CoeffCtxGF2
+{
+	inline static u64 mSerializeCalls = 0;
+	inline static u64 mDeserializeCalls = 0;
+
+	template<typename SrcIter, typename DstIter>
+	void serialize(SrcIter begin, SrcIter end, DstIter dstBegin) const
+	{
+		++mSerializeCalls;
+		CoeffCtxGF2::serialize(begin, end, dstBegin);
+	}
+
+	template<typename SrcIter, typename DstIter>
+	void deserialize(SrcIter begin, SrcIter end, DstIter dstBegin) const
+	{
+		++mDeserializeCalls;
+		CoeffCtxGF2::deserialize(begin, end, dstBegin);
+	}
+};
+
 template<typename F, typename Ctx>
 void TernaryDpf_Proto_Test_(const oc::CLP& cmd)
 {
@@ -1908,8 +1928,8 @@ void TernaryDpf_Proto_Test_(const oc::CLP& cmd)
 		points1[i] = F3x32(prng.get<u64>() % domain);
 		points0[i] = points[i] - points1[i];
 		//std::cout << points[i] << " = " << points0[i] <<" + "<< points1[i] << std::endl;
-		values0[i] = prng.get();
-		values1[i] = prng.get();
+		ctx.fromBlock(values0[i], prng.get());
+		ctx.fromBlock(values1[i], prng.get());
 		//ctx.minus(points0[i], points[i], points1[i];)
 	}
 
@@ -2007,6 +2027,13 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 {
 	TernaryDpf_Proto_Test_<block, CoeffCtxGF2>(cmd);
 	TernaryDpf_Proto_Test_<u8, CoeffCtxGF2>(cmd);
+	TrackingTernaryCoeffCtx::mSerializeCalls = 0;
+	TrackingTernaryCoeffCtx::mDeserializeCalls = 0;
+	TernaryDpf_Proto_Test_<u8, TrackingTernaryCoeffCtx>(cmd);
+	if (TrackingTernaryCoeffCtx::mSerializeCalls != 2 ||
+		TrackingTernaryCoeffCtx::mDeserializeCalls != 2)
+		throw UnitTestFail(
+			"Ternary DPF bypassed its coefficient context wire encoding");
 }
 
 void Dpf_Audit_Test(const oc::CLP&)
@@ -2020,6 +2047,35 @@ void Dpf_Audit_Test(const oc::CLP&)
 	};
 
 #if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
+	{
+		constexpr u64 n = 1;
+		DpfMult mult;
+		mult.init(1, n);
+		std::vector<std::array<block, 2>> sendOts(n);
+		std::vector<block> recvOts(n);
+		BitVector choices(n);
+		mult.setBaseOts(sendOts, recvOts, choices);
+
+		BitVector x(n), y(n), xy(n);
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		auto injectPadding = [&]() -> macoro::task<> {
+			AlignedUnVector<u8> theta(1), phi(1);
+			co_await sockets[1].recv(theta);
+			co_await sockets[1].recv(phi);
+			theta[0] |= 0xfe;
+			phi[0] |= 0xfe;
+			co_await sockets[1].send(std::move(theta));
+			co_await sockets[1].send(std::move(phi));
+		};
+
+		macoro::sync_wait(macoro::when_all_ready(
+			mult.multiplyBits(x, y, xy, sockets[0]),
+			injectPadding()));
+		if (xy.getSpan<const u8>()[0] & 0xfe)
+			throw UnitTestFail(
+				"DPF bit multiplication retained peer-controlled padding");
+	}
+
 	{
 		Matrix<u8> unpacked(2, 3);
 		std::fill(unpacked.begin(), unpacked.end(), 0xff);

@@ -1142,6 +1142,12 @@ namespace osuCrypto
 			AlignedUnVector<u8> theta1(theta.size()), phi1(phi.size());
 			co_await sock.recv(theta1);
 			co_await sock.recv(phi1);
+			if (n % 8)
+			{
+				u8 mask = (1 << (n % 8)) - 1;
+				theta1.back() &= mask;
+				phi1.back() &= mask;
+			}
 			for (u64 i = 0; i < n8; ++i)
 			{
 				phi[i] ^= phi1[i];

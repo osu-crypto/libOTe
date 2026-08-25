@@ -4274,3 +4274,67 @@ Verification:
 - `Field_Audit_Test` verifies that `FVec<Fp31, 2>` serializes eight bytes,
   leaves bytes beyond that representation untouched, zeroes decoded padding,
   and rejects a noncanonical lane atomically.
+
+## AUD-134: Ternary DPF bypassed coefficient wire encodings
+
+Status: fixed
+
+Affected code:
+
+- The final coefficient-share exchange in `TernaryDpf::expand`.
+
+Concern:
+
+Ternary DPF sent and received its coefficient vector as raw typed storage
+instead of using the supplied coefficient context. This bypassed any
+context-defined canonical validation and included alignment padding for
+padded coefficient types.
+
+Impact:
+
+A malicious peer could inject representations that the coefficient context
+would reject before arithmetic. Padded coefficient types could also disclose
+stale bytes, and custom contexts could not define their intended wire
+representation.
+
+Resolution:
+
+The final reveal is serialized to a fixed-size byte buffer and deserialized
+through the coefficient context. Validation remains at the transcript
+boundary, outside the leaf-expansion loops.
+
+Verification:
+
+- `TritDpf_Proto_Test` uses an instrumented binary coefficient context and
+  requires both parties to serialize and deserialize the final reveal.
+
+## AUD-135: DPF bit multiplication retained peer-controlled padding
+
+Status: fixed
+
+Affected code:
+
+- `DpfMult::multiplyBits` for a bit count not divisible by eight.
+
+Concern:
+
+The local party cleared unused high bits in its final packed byte, but did not
+normalize the corresponding bytes received from its peer. The bytewise
+multiplication therefore allowed those nonlogical bits to affect output
+padding.
+
+Impact:
+
+A peer could make the packed result noncanonical. Code that later handled the
+backing bytes rather than the logical bit length could serialize or consume
+the peer-controlled padding.
+
+Resolution:
+
+The two received final bytes are masked once before the existing bytewise
+multiplication loop. Full-byte inputs and the loop itself are unchanged.
+
+Verification:
+
+- `Dpf_Audit_Test` injects set padding bits from a peer and requires the
+  one-bit multiplication result to retain zero padding.

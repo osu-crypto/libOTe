@@ -397,8 +397,14 @@ namespace osuCrypto
 				{
 					ctx.plus(diff[k], values[k], sums[k]);
 				}
-				co_await sock.send(std::move(diff));
-				co_await sock.recv(gamma);
+				std::vector<u8> buffer(
+					mNumPointsPerSet * ctx.template byteSize<F>());
+				ctx.serialize(diff.begin(), diff.end(), buffer.begin());
+				co_await sock.send(std::move(buffer));
+				buffer.resize(
+					mNumPointsPerSet * ctx.template byteSize<F>());
+				co_await sock.recv(buffer);
+				ctx.deserialize(buffer.begin(), buffer.end(), gamma.begin());
 				for (u64 k = 0; k < mNumPointsPerSet; ++k)
 				{
 					ctx.plus(gamma[k], gamma[k], sums[k]);
