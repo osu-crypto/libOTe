@@ -2124,6 +2124,11 @@ void Dpf_Audit_Test(const oc::CLP&)
 			RegularDpf<block>::keyGen(domain, invalidPoint, invalidValue, prng, keys);
 		}, "Regular DPF accepted a point outside its domain");
 
+		RegularDpf<block> oversizedDomain;
+		expectRejected([&] {
+			oversizedDomain.init(0, u64{ 1 } << 63, 8);
+		}, "Regular DPF accepted wrapping working-matrix dimensions");
+
 		SumDmpf<block> sum;
 		sum.init(0, domain, 2, 1);
 		auto count = sum.baseOtCount().mRecvCount;
@@ -2137,6 +2142,15 @@ void Dpf_Audit_Test(const oc::CLP&)
 			sum.mNumPointsPerSet || sum.mPoints.size() ||
 			sum.mDpf.mMultiplier.mSendOts.size())
 			throw UnitTestFail("Sum DMPF clear retained protocol state");
+	}
+#endif
+
+#ifdef ENABLE_TERNARY_DPF
+	{
+		TernaryDpf<block, CoeffCtxGF2> oversizedTernary;
+		expectRejected([&] {
+			oversizedTernary.init(0, ipow(3, 32), 431);
+		}, "Ternary DPF accepted wrapping derived storage dimensions");
 	}
 #endif
 

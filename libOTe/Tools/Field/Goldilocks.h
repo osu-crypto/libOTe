@@ -238,6 +238,13 @@ namespace osuCrypto
 			return result;
 		}
 
+		constexpr OC_FORCEINLINE Goldilocks inverse() const noexcept
+		{
+			Goldilocks result;
+			inv(result, *this);
+			return result;
+		}
+
 		// pow(result, x, exps):
 		//   Compute x^exps via square-and-multiply with field multiplication.
 		static constexpr OC_FORCEINLINE void pow(

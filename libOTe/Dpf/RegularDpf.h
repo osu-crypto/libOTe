@@ -267,6 +267,9 @@ namespace osuCrypto
 		auto depth = log2ceil(domain);
 		if (depth >= 64)
 			throw RTE_LOC;
+		const auto roundedDomain = u64{ 1 } << depth;
+		if (numPoints > std::numeric_limits<u64>::max() / roundedDomain)
+			throw RTE_LOC;
 
 		mDepth = depth;
 		mPartyIdx = partyIdx;

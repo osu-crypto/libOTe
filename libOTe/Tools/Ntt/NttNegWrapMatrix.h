@@ -142,19 +142,20 @@ namespace osuCrypto
         for (u64 i = 0; i < n; ++i)
         {
             auto& ai = a[i];
-            ai = 0;
+            ai = F::zero();
             for (u64 j = 0; j < n; ++j)
             {
                 auto idx = (2 * j * i + i) % powers.size();
                 if(verbose)
                     std::cout << idx << " ";
-                ai += powers[idx] * aHat[j];
+                ai += aHat[j] * powers[idx];
             }
             if (verbose)
                 std::cout << std::endl;
         }
 
-        auto nInv = F(a.size()).inverse();
+        using SF = std::remove_cvref_t<decltype(psi)>;
+        auto nInv = SF(a.size()).inverse();
         for (u64 i = 0; i < a.size(); ++i)
         {
             a[i] *= nInv;

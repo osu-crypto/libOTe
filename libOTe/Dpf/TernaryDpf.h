@@ -58,6 +58,14 @@ namespace osuCrypto
 				(depth && numPoints > std::numeric_limits<u64>::max() / (2 * depth)))
 				throw RTE_LOC;
 
+			const auto pow3 = ipow(3, depth);
+			const auto seedElementsPerPoint = pow3 + pow3 / 3 + pow3 / 9 + 6;
+			const auto max = std::numeric_limits<u64>::max();
+			if (numPoints > max / domain ||
+				seedElementsPerPoint > max / sizeof(block) ||
+				numPoints > max / (sizeof(block) * seedElementsPerPoint))
+				throw RTE_LOC;
+
 			clearBaseOts();
 			mDepth = depth;
 			mPartyIdx = partyIdx;

@@ -243,6 +243,16 @@ void UInt_Conversions_Test() {
     ASSERT_TRUE(static_cast<bool>(b));
     ASSERT_EQ(static_cast<u64>(b), u64(42));
 
+    const UInt<128> neg8(static_cast<i8>(-1));
+    ASSERT_EQ(neg8.v[0], std::numeric_limits<u64>::max());
+    ASSERT_EQ(neg8.v[1], std::numeric_limits<u64>::max());
+
+    const UInt<256> neg32(static_cast<i32>(-2));
+    ASSERT_EQ(neg32.v[0], std::numeric_limits<u64>::max() - 1);
+    ASSERT_EQ(neg32.v[1], std::numeric_limits<u64>::max());
+    ASSERT_EQ(neg32.v[2], std::numeric_limits<u64>::max());
+    ASSERT_EQ(neg32.v[3], std::numeric_limits<u64>::max());
+
     // truncation to u64: take least-significant limb
     u256 x = limbs<256>({ 0x9988776655443322ull, 0xAAAAAAAAAAAAAAAAull, 0, 0 });
     ASSERT_EQ(static_cast<u64>(x), 0x9988776655443322ull);

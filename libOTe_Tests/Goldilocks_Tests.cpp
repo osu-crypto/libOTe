@@ -539,6 +539,7 @@ namespace osuCrypto
 		Goldilocks::inv(inv_b, b);
 		Goldilocks::mul(mul_result, b, inv_b);
 		ThrowIfNotEqual((u64)mul_result, 1, "b * b^-1 = 1");
+		ThrowIfNotEqual((u64)b.inverse(), (u64)inv_b, "member inverse");
 
 		// Test large value inverse
 		Goldilocks inv_large;

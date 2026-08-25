@@ -52,6 +52,19 @@ namespace tests_libOTe
 		F orderTwoRoot = F::order() - 1;
 		expectInvalid([&] { nttNegWrapCt<F>(orderTwoOutput, orderTwoInput, orderTwoRoot, NttOrder::NormalOrder); });
 		expectInvalid([&] { inttNegWrapGs<F>(orderTwoOutput, orderTwoInput, orderTwoRoot, NttOrder::BitReversedOrder); });
+
+		using VF = FVec<Fp31, 2>;
+		auto vectorPsi = primRootOfUnity<Fp31>(2 * n);
+		std::vector<VF> vectorInput(n), vectorHat(n), vectorOutput(n);
+		for (u64 i = 0; i < n; ++i)
+		{
+			vectorInput[i][0] = Fp31(i + 1);
+			vectorInput[i][1] = Fp31(3 * i + 2);
+		}
+		nttNegWrapMatrix<VF>(vectorHat, vectorInput, vectorPsi, NttOrder::NormalOrder);
+		inttNegWrapMatrix<VF>(vectorOutput, vectorHat, vectorPsi, NttOrder::NormalOrder);
+		if (vectorOutput != vectorInput)
+			throw UnitTestFail("matrix inverse NTT did not normalize every vector lane" LOCATION);
 	}
 
 	void Ntt_nttNegWrapMatrix_normal_Test()

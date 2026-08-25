@@ -3481,3 +3481,158 @@ Verification:
 
 - `Vole_Silent_baseOT_test` runs successfully with debug checking enabled in
   the primary, base, and no-SSE Release configurations.
+
+## AUD-109: Negative integers were zero-extended into fixed-width unsigned values
+
+Status: fixed
+
+Affected code:
+
+- The integral constructor of `UInt<W>`.
+
+Concern:
+
+The constructor first converted a signed source to the source type's unsigned
+counterpart and then widened it. A negative source narrower than 64 bits was
+therefore zero-extended within the low limb, and all higher limbs were also
+zeroed.
+
+Impact:
+
+For example, `UInt<128>(int{-1})` produced `0x00000000ffffffff`
+instead of the builtin unsigned conversion result modulo `2^128`. Arithmetic
+using negative integral constants could consequently start from the wrong
+value.
+
+Resolution:
+
+Signed negative sources now initialize the destination limbs with ones and
+convert directly into the low limb, preserving sign extension. Wider source
+chunks continue to overwrite the corresponding destination limbs.
+
+Verification:
+
+- `UInt_Conversions_Test` checks negative 8- and 32-bit sources across 128- and
+  256-bit destinations.
+
+## AUD-110: Goldilocks omitted the generic member inverse interface
+
+Status: fixed
+
+Affected code:
+
+- `Goldilocks` and generic field algorithms that call `F::inverse()`.
+
+Concern:
+
+Goldilocks exposed only the static `inv(result, input)` helper, while the other
+field types and generic inverse NTT code use a member `inverse()` operation.
+
+Impact:
+
+Generic inverse algorithms instantiated with Goldilocks, including vector-field
+inversion, failed to compile.
+
+Resolution:
+
+Goldilocks now provides an inline member wrapper around the existing static
+inversion implementation. The arithmetic implementation is unchanged.
+
+Verification:
+
+- `Goldilocks_Inverse_Test` compares the member and static inverse interfaces.
+
+## AUD-111: Matrix inverse NTT normalized only one vector lane
+
+Status: fixed
+
+Affected code:
+
+- `inttNegWrapMatrix()` with `FVec` coefficient types.
+
+Concern:
+
+The inverse constructed its normalization factor as `F(a.size())`. For an
+`FVec`, the initializer-list constructor stored the size in lane zero and
+zero-filled the remaining lanes. The inverse path also initialized vector
+accumulators from a scalar zero and placed the scalar root on the unsupported
+left side of vector multiplication.
+
+Impact:
+
+For vector fields that compiled through the normalization expression, lane zero
+was scaled correctly and every other lane was multiplied by zero. Other vector
+field combinations failed to instantiate.
+
+Resolution:
+
+The accumulator now uses `F::zero()`, scalar multiplication uses the supported
+vector-times-scalar order, and the normalization inverse is constructed from
+the scalar root type. The quadratic transform loops retain their existing
+structure.
+
+Verification:
+
+- `Ntt_Audit_Test` round-trips a two-lane `FVec<Fp31, 2>` through the matrix
+  forward and inverse transforms with distinct lane values.
+
+## AUD-112: Regular DPF working-matrix dimensions could wrap
+
+Status: fixed
+
+Affected code:
+
+- `RegularDpf::init()` and the full-domain expansion working matrices.
+
+Concern:
+
+Initialization bounded the OT count but did not bound the rounded domain times
+the number of points. The matrix container multiplies its row and column counts
+in `u64`, so accepted dimensions such as a `2^63` domain with eight points
+wrapped all three working-matrix allocations to zero.
+
+Impact:
+
+Release builds could subsequently write through empty matrix views, causing
+out-of-bounds memory access from a caller-size error.
+
+Resolution:
+
+Initialization now bounds the point count against the rounded power-of-two
+domain before committing state or configuring the multiplier. Expansion loops
+are unchanged.
+
+Verification:
+
+- `Dpf_Audit_Test` requires rejection of the wrapping `2^63`-by-eight
+  configuration.
+
+## AUD-113: Ternary DPF derived storage dimensions could wrap
+
+Status: fixed
+
+Affected code:
+
+- `TernaryDpf::init()` and its seed, leaf, and tag storage allocations.
+
+Concern:
+
+The OT-count bound did not also bound the independently derived seed-storage
+byte count or the point-count-times-domain leaf dimensions. Those products
+were formed directly during expansion.
+
+Impact:
+
+Extreme caller parameters could wrap an allocation dimension and form matrix
+views larger than their backing allocation.
+
+Resolution:
+
+Initialization now individually bounds the leaf/tag element count and the
+complete seed-storage byte count before clearing prior OTs or committing the
+new configuration. Expansion loops are unchanged.
+
+Verification:
+
+- `Dpf_Audit_Test` requires rejection of a depth-32 ternary configuration whose
+  derived seed-storage size exceeds `u64`.

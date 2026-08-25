@@ -34,13 +34,19 @@ namespace osuCrypto
         constexpr explicit(std::is_same_v<std::remove_cv_t<T>, bool>) 
             UInt(T x)
         {
-            v.fill(0);
+            using RawT = std::remove_cv_t<T>;
+            if constexpr (std::is_signed_v<RawT>)
+                v.fill(x < 0 ? std::numeric_limits<u64>::max() : 0);
+            else
+                v.fill(0);
 
-            using UT = std::make_unsigned_t<std::remove_cv_t<T>>;
+            using UT = std::make_unsigned_t<RawT>;
             UT ux = static_cast<UT>(x);
 
             // low 64 bits
-            v[0] = static_cast<u64>(ux);
+            // Convert directly from the source so negative narrow integers are
+            // sign-extended before the modulo-2^64 conversion.
+            v[0] = static_cast<u64>(x);
 
             // spill remaining chunks if source wider than 64 bits (e.g., __int128)
             if constexpr (sizeof(UT) > 8)
