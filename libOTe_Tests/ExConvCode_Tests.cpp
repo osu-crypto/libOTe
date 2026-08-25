@@ -3,6 +3,7 @@
 #include <iomanip>
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Tools/ExConvCode/ExConvChecker.h"
+#include "libOTe/Tools/EACode/EAChecker.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/TestCollection.h>
@@ -11,6 +12,17 @@
 
 namespace osuCrypto
 {
+	struct CheckerIdentityCode
+	{
+		u64 mMessageSize;
+		u64 mCodeSize;
+
+		template<typename T, typename Ctx>
+		void dualEncode(T*, Ctx)
+		{
+		}
+	};
+
 	void ExConvCode_Audit_Test(const oc::CLP&)
 	{
 		auto expectInvalid = [](auto&& fn)
@@ -52,6 +64,41 @@ namespace osuCrypto
 		expectInvalid([] { ExpanderCode code; code.config(16, 0, 7); });
 		expectInvalid([] { ExpanderCode code; code.config(16, 32, 0); });
 		expectInvalid([] { ExpanderCode code; code.config(16, 3, 7); });
+
+		CheckerIdentityCode identity{ 1025, 1025 };
+		auto compressed = getCompressedGenerator(identity);
+		for (u64 row = 0; row < identity.mMessageSize; ++row)
+		{
+			u64 weight = 0;
+			for (u64 j = 0; j < compressed.cols(); ++j)
+				weight += popcount(compressed(row, j).get<u64>(0)) +
+					popcount(compressed(row, j).get<u64>(1));
+			if (weight != 1 || !*BitIterator(compressed.data(row), row))
+				throw UnitTestFail("partial generator batch was encoded incorrectly" LOCATION);
+		}
+		if (getGeneratorWeight2(identity, false) != 1)
+			throw UnitTestFail("partial generator batch weight was incorrect" LOCATION);
+
+		{
+			CLP invalid;
+			invalid.mKeyValues["bw"].push_back("0");
+			expectInvalid([&] { EAChecker(invalid); });
+		}
+		{
+			CLP invalid;
+			invalid.mKeyValues["nn"].push_back("64");
+			expectInvalid([&] { EAChecker(invalid); });
+		}
+		{
+			CLP invalid;
+			invalid.mKeyValues["nt"].push_back("0");
+			expectInvalid([&] { ExConvChecker(invalid); });
+		}
+		{
+			CLP invalid;
+			invalid.mKeyValues["kk"].push_back("64");
+			expectInvalid([&] { ExConvChecker(invalid); });
+		}
 
 		ExpanderCode expander;
 		expander.config(10, 17, 7, true, block(3, 4));

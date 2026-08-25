@@ -2,6 +2,9 @@
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include <iomanip>
 #include "libOTe/Tools/CoeffCtx.h"
+#include <exception>
+#include <limits>
+#include <stdexcept>
 #include <thread>
 
 namespace osuCrypto
@@ -115,7 +118,18 @@ namespace osuCrypto
 
     void ExConvChecker(const oc::CLP& cmd)
     {
-        u64  k = cmd.getOr("k", 1ull << cmd.getOr("kk", 6));
+        u64 k = 0;
+        if (cmd.hasValue("k"))
+            k = cmd.get<u64>("k");
+        else
+        {
+            const auto kk = cmd.getOr<u64>("kk", 6);
+            if (kk >= std::numeric_limits<u64>::digits)
+                throw std::invalid_argument("ExConv checker message-size logarithm is too large. " LOCATION);
+            k = u64{ 1 } << kk;
+        }
+        if (k == 0 || k > std::numeric_limits<u64>::max() / 2)
+            throw std::invalid_argument("ExConv checker message size is invalid. " LOCATION);
         u64 n = k * 2;
         bool verbose = cmd.isSet("v");
         bool accTwice = cmd.getOr("accTwice", 1);
@@ -130,50 +144,82 @@ namespace osuCrypto
         u64 bwEnd = cmd.getOr("bwEnd", 11);
         auto x2 = cmd.isSet("x2");
 
+        if (nt == 0 || trials == 0)
+            throw std::invalid_argument("ExConv checker thread and trial counts must be nonzero. " LOCATION);
+        if (awBeing >= awEnd || bwBeing >= bwEnd || awEnd > n || bwEnd > n)
+            throw std::invalid_argument("ExConv checker weight ranges are invalid. " LOCATION);
+        if (x2)
+        {
+            if (k > std::numeric_limits<u64>::max() / k ||
+                k * k > std::numeric_limits<u64>::max() / trials)
+                throw std::invalid_argument("ExConv checker work count overflows. " LOCATION);
+        }
+        else if (n > std::numeric_limits<u64>::max() / trials)
+            throw std::invalid_argument("ExConv checker work count overflows. " LOCATION);
+
         for (u64 aw = awBeing; aw < awEnd; aw += 2)
         {
             for (u64 bw = bwBeing; bw < bwEnd; bw += 2)
             {
 
+                // Reject invalid code parameters before worker-thread creation,
+                // where an exception would otherwise terminate the process.
+                ExConvCode validationEncoder;
+                validationEncoder.config(k, n, bw, aw, sys, reg, block(21341234, 0));
+                validationEncoder.mAccTwice = accTwice;
+
 
                 u64 avg = 0;
                 u64 gMin = n;
                 std::mutex mtx;
+                std::exception_ptr workerException;
                 u64 ticks = x2 ? k * k * trials  : n * trials;
                 std::atomic<u64> done = 0;
+                std::atomic<bool> workerFailed = false;
                 auto routine = [&](u64 i) {
-                    for (u64 j = i; j < trials; j += nt)
+                    try
                     {
-
-                        ExConvCode encoder;
-                        encoder.config(k, n, bw, aw, sys, reg, block(21341234, j));
-                        encoder.mAccTwice = accTwice;
-
-                        //auto g = getGenerator(encoder);
-                        //auto g2 = compress(g);
-                        //auto G = getCompressedGenerator(encoder);
-                        //if(std::equal(G.begin(), G.end(), g2.begin()) == false)
-                        //    throw RTE_LOC;
-
-                        u64 min = 0;
-                        if (x2)
+                        for (u64 j = i; j < trials; j += nt)
                         {
-                            min = getGeneratorWeightx2<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
-                            
-                        }
-                        else
-                        {
-                            //min = getGeneratorWeight<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
-                            min = getGeneratorWeight2<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
-                            //if(min != min2)
+
+                            ExConvCode encoder;
+                            encoder.config(k, n, bw, aw, sys, reg, block(21341234, j));
+                            encoder.mAccTwice = accTwice;
+
+                            //auto g = getGenerator(encoder);
+                            //auto g2 = compress(g);
+                            //auto G = getCompressedGenerator(encoder);
+                            //if(std::equal(G.begin(), G.end(), g2.begin()) == false)
                             //    throw RTE_LOC;
-                        }
 
-                        std::lock_guard<std::mutex> lock(mtx);
-                        gMin = std::min(gMin, min);
-                        avg += min;
+                            u64 min = 0;
+                            if (x2)
+                            {
+                                min = getGeneratorWeightx2<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
+                            }
+                            else
+                            {
+                                //min = getGeneratorWeight<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
+                                min = getGeneratorWeight2<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
+                                //if(min != min2)
+                                //    throw RTE_LOC;
+                            }
+
+                            std::lock_guard<std::mutex> lock(mtx);
+                            gMin = std::min(gMin, min);
+                            avg += min;
+                        }
                     }
-                    };
+                    catch (...)
+                    {
+                        {
+                            std::lock_guard<std::mutex> lock(mtx);
+                            if (!workerException)
+                                workerException = std::current_exception();
+                        }
+                        workerFailed.store(true, std::memory_order_relaxed);
+                    }
+                };
 
                 std::vector<std::thread> thrds(nt);
                 for (u64 i = 0; i < thrds.size(); ++i)
@@ -183,7 +229,7 @@ namespace osuCrypto
                 //routine(nt - 1);
                 u64 sleep = 1;
                 auto start = std::chrono::high_resolution_clock::now();
-                while (done != ticks)
+                while (done != ticks && !workerFailed.load(std::memory_order_relaxed))
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(sleep));
                     sleep = std::min<u64>(1000, sleep * 2);
@@ -206,6 +252,9 @@ namespace osuCrypto
                 {
                     thrds[i].join();
                 }
+                if (workerException)
+                    std::rethrow_exception(workerException);
+
                 std::cout << "aw " << aw << " bw " << bw <<
                     " min " << double(gMin) / n <<
                     " avg " << double(avg) / n / trials << std::endl;

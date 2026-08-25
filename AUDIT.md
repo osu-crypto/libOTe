@@ -3636,3 +3636,156 @@ Verification:
 
 - `Dpf_Audit_Test` requires rejection of a depth-32 ternary configuration whose
   derived seed-storage size exceeds `u64`.
+
+## AUD-114: MR POPF overfilled a two-block randomness buffer
+
+Status: fixed
+
+Affected code:
+
+- `MRPopf::program()`.
+
+Concern:
+
+The POPF requested 32 blocks of PRNG output through a pointer into a
+`Block256`, whose storage contains only two blocks.
+
+Impact:
+
+Calling `program()` overwrote adjacent stack storage and corrupted the
+function's local state before it was returned.
+
+Resolution:
+
+The PRNG request now uses the destination object's two-block size. The change
+does not add work or checks to the protocol path; it corrects the requested
+output length.
+
+Verification:
+
+- `Bot_McQuoidRR_Moeller_MR_Test` checks that `program()` consumes exactly one
+  `Block256` and passes for both enabled MR configurations.
+
+## AUD-115: ExConv checker mishandled a partial generator batch
+
+Status: fixed
+
+Affected code:
+
+- `getCompressedGenerator()` and `getGeneratorWeight2()`.
+
+Concern:
+
+Both checker helpers processed fixed 1024-row batches without consistently
+accounting for the final partial batch. One helper initialized rows beyond the
+matrix, while the other ignored its current offset and omitted the last row.
+
+Impact:
+
+Non-multiple-of-1024 dimensions could cause out-of-bounds access or an
+incorrect reported generator weight in the offline code checker.
+
+Resolution:
+
+Each batch now derives one active-row count from the remaining rows and uses it
+for initialization, packing, and progress accounting. Protocol encoding loops
+are unchanged.
+
+Verification:
+
+- `ExConvCode_Audit_Test` checks both helpers with a 1025-row identity code.
+
+## AUD-116: Offline code checkers accepted invalid derived dimensions
+
+Status: fixed
+
+Affected code:
+
+- `EAChecker()`, `ahash()`, and `ExConvChecker()`.
+
+Concern:
+
+CLI-provided sizes and weights reached divisions, shifts, products,
+allocations, and worker setup without validation. Exceptions raised inside
+workers also terminated the process, and an ExConv worker failure could leave
+the progress loop waiting forever.
+
+Impact:
+
+Invalid checker inputs could trigger undefined shifts, division by zero,
+wrapped dimensions, excessive allocations, process termination, or a hang.
+
+Resolution:
+
+The checker entry points now validate individual dimensions and relationships
+before worker creation. Dynamically discovered exponential sets are bounded at
+the point of use. Worker exceptions are captured, all threads are joined, and
+the first exception is rethrown to the caller. These are offline checker and
+CLI boundaries; no protocol hot loop was changed.
+
+Verification:
+
+- `ExConvCode_Audit_Test` requires rejection of zero thread or weight counts
+  and 64-bit logarithmic shifts.
+- The checker tests pass in the primary, base, no-SSE, and bit-polynomial build
+  configurations.
+
+## AUD-117: Chosen NCO matrix dimensions could wrap before allocation
+
+Status: fixed
+
+Affected code:
+
+- `NcoOtExtReceiver::receiveChosen()`.
+
+Concern:
+
+The chosen-message adapter multiplied the OT count by the messages-per-OT
+count for an internal matrix allocation without bounding the product.
+
+Impact:
+
+For a 64-bit configured input domain, extreme caller sizes could wrap the
+allocation dimension after state validation, leading to undersized storage and
+subsequent out-of-bounds access.
+
+Resolution:
+
+The public adapter now bounds the two caller-controlled factors before choices
+are processed, base-OT state is consumed, or protocol work begins. Inner NCO
+loops are unchanged.
+
+Verification:
+
+- `NcoOt_ChosenValidation_Test` requires rejection of an overflowing
+  two-by-`2^63` request and confirms that receiver state remains unconsumed.
+
+## AUD-118: Prime-field exponentiation truncated large unsigned exponents
+
+Status: fixed
+
+Affected code:
+
+- `Fp::pow()` and generic field inversion for large `u64` moduli.
+
+Concern:
+
+The exponent interface accepted only `i64`. Passing a `u64` exponent above
+`INT64_MAX`, including `modulus - 2` for large moduli, converted it to a
+negative signed value and caused rejection.
+
+Impact:
+
+Valid large unsigned powers and generic inversions over prime moduli above the
+signed 64-bit range could not be computed through the field interface.
+
+Resolution:
+
+`pow()` now accepts non-Boolean integral exponent types, rejects negative
+signed values, and performs the square-and-multiply loop using the source
+type's unsigned counterpart. The arithmetic loop retains the same structure.
+
+Verification:
+
+- `Field_Audit_Test` checks `UINT64_MAX` against its Fermat-reduced exponent and
+  confirms that negative signed exponents remain rejected.

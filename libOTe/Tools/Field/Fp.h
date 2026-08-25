@@ -199,11 +199,18 @@ namespace osuCrypto
 			return mVal;
 		}
 
-		constexpr Fp pow(i64 v) const
+		template<typename I>
+			requires (std::is_integral_v<std::remove_cv_t<I>> &&
+				!std::is_same_v<std::remove_cv_t<I>, bool>)
+		constexpr Fp pow(I exponent) const
 		{
 			assert(mVal < mMod);
-			if (v < 0)
-				throw RTE_LOC;
+			using E = std::remove_cv_t<I>;
+			if constexpr (std::is_signed_v<E>)
+				if (exponent < 0)
+					throw RTE_LOC;
+			using U = std::make_unsigned_t<E>;
+			U v = static_cast<U>(exponent);
 			if (v == 0)
 				return 1;
 

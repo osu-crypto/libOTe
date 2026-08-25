@@ -212,6 +212,10 @@ namespace tests_libOTe
 		F a = 3;
 		if (a.pow(F::order() + 1) != a * a)
 			throw RTE_LOC;
+		const auto maxExponent = std::numeric_limits<u64>::max();
+		if (a.pow(maxExponent) != a.pow(maxExponent % (F::order() - 1)))
+			throw RTE_LOC;
+		expectRejected([&] { (void)a.pow(i64{ -1 }); });
 		if (F::zero().inverse() != F::zero())
 			throw RTE_LOC;
 

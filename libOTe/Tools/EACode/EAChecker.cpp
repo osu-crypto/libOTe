@@ -1,4 +1,8 @@
 #include "EAChecker.h"
+#include <cmath>
+#include <exception>
+#include <limits>
+#include <stdexcept>
 #include <thread>
 
 //#define USE_ANKERL_HASH
@@ -19,6 +23,9 @@ namespace osuCrypto
     // approx hash
     std::vector<u64> ahash(span<u64> mIdx, u64 numBins, u64 N, double d, bool verbose)
     {
+        if (numBins == 0 || N == 0 || numBins > N)
+            throw std::invalid_argument("EA checker hash dimensions are invalid. " LOCATION);
+
         std::vector<u64> H, B;
         H.push_back(hash(mIdx, numBins, N));
 
@@ -52,7 +59,9 @@ namespace osuCrypto
             B.push_back(bIdx);
         }
 
-        for (u64 i = 1; i < (1ull << tweakIdx.size()); ++i)
+        if (tweakIdx.size() >= std::numeric_limits<u64>::digits)
+            throw std::length_error("EA checker boundary-tweak set is too large. " LOCATION);
+        for (u64 i = 1; i < (u64{ 1 } << tweakIdx.size()); ++i)
         {
             RandomOracle ro(sizeof(u64));
             BitIterator iIter((u8*)&i);
@@ -87,13 +96,19 @@ namespace osuCrypto
         u64 nt = cmd.getOr("nt", 1);
 
         // message size
-        u64 n = cmd.getOr("n", 1ull<< cmd.getOr("nn", 10));
+        u64 n = 0;
+        if (cmd.hasValue("n"))
+            n = cmd.get<u64>("n");
+        else
+        {
+            const auto nn = cmd.getOr<u64>("nn", 10);
+            if (nn >= std::numeric_limits<u64>::digits)
+                throw std::invalid_argument("EA checker message-size logarithm is too large. " LOCATION);
+            n = u64{ 1 } << nn;
+        }
 
         // expansion factor
         u64 e = cmd.getOr("e", 5);
-
-        // code size
-        u64 N = n * e;
 
         // expander weight
         u64 bw = cmd.getOr("bw", 7);
@@ -116,8 +131,26 @@ namespace osuCrypto
         // regular expander
         bool regular = cmd.getOr("reg", 0);
 
+        if (tt == 0 || nt == 0 || n == 0 || e == 0 || bw == 0 || b == 0)
+            throw std::invalid_argument("EA checker dimensions must be nonzero. " LOCATION);
+        if (n > std::numeric_limits<u64>::max() / e)
+            throw std::invalid_argument("EA checker code size overflows. " LOCATION);
+        const u64 N = n * e;
+        if (b > N)
+            throw std::invalid_argument("EA checker bin count exceeds the code size. " LOCATION);
+        if (regular && bw > n)
+            throw std::invalid_argument("EA checker regular weight exceeds the message size. " LOCATION);
+        if (!allowCollisions && bw > N)
+            throw std::invalid_argument("EA checker distinct weight exceeds the code size. " LOCATION);
+        if (bw > std::numeric_limits<u64>::max() / 2 ||
+            n > std::numeric_limits<u64>::max() / bw)
+            throw std::invalid_argument("EA checker working dimensions overflow. " LOCATION);
+        if (!std::isfinite(d) || d < 0 || d >= 0.5)
+            throw std::invalid_argument("EA checker boundary distance must be in [0, 0.5). " LOCATION);
+
         std::vector<std::thread> thrds(nt);
         std::mutex mutex;
+        std::exception_ptr workerException;
         u64 gMinDist = -1, gMinDistSingle = -1;
         auto runOne = [&](u64 t, Matrix<u64>& sig) {
 
@@ -200,7 +233,9 @@ namespace osuCrypto
                     // consider all combinations of rows that hash to the same bin.
                     if (highWeight)
                     {
-                        u64 pow = 1ull << (ss.size() - 1);
+                        if (ss.size() - 1 >= std::numeric_limits<u64>::digits)
+                            throw std::length_error("EA checker collision set is too large. " LOCATION);
+                        u64 pow = u64{ 1 } << (ss.size() - 1);
                         for (u64 jj = 1; jj < pow; ++jj)
                         {
                             xx.clear();
@@ -291,17 +326,27 @@ namespace osuCrypto
         {
             thrds[tIdx] = std::thread(
                 [&, tIdx] {
-                    Matrix<u64> sig(n, bw);
-
-                    for (u64 t = tIdx; t < tt; t += nt)
+                    try
                     {
-                        runOne(t, sig);
+                        Matrix<u64> sig(n, bw);
+
+                        for (u64 t = tIdx; t < tt; t += nt)
+                            runOne(t, sig);
+                    }
+                    catch (...)
+                    {
+                        std::lock_guard<std::mutex> lock(mutex);
+                        if (!workerException)
+                            workerException = std::current_exception();
                     }
                 });
         }
 
         for (u64 tIdx = 0; tIdx < nt; ++tIdx)
             thrds[tIdx].join();
+
+        if (workerException)
+            std::rethrow_exception(workerException);
 
         std::cout << "\n\ngMinDist:" << gMinDist * 1.0 / N << " gMinDistSingle: " << gMinDistSingle * 1.0 / N << std::endl;
     }

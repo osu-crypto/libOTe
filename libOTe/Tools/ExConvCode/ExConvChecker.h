@@ -1,4 +1,4 @@
-// © 2024 Peter Rindal.
+// Â© 2024 Peter Rindal.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 // 
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
@@ -67,8 +67,9 @@ namespace osuCrypto
         for (u64 i = 0; i < n; i += batchSize)
         {
             memset(x.data(), 0, sizeof(x[0]) * x.size());
+            const u64 active = std::min<u64>(batchSize, n - i);
 
-            for (u64 p = 0; p < batchSize; ++p)
+            for (u64 p = 0; p < active; ++p)
             {
                 *oc::BitIterator((u8*)&x[i + p], p) = 1;
             }
@@ -76,7 +77,7 @@ namespace osuCrypto
             // encode a batch of batchSize=1024 unit vectors...
             encoder.template dualEncode<detail::GetGeneratorBatch, CoeffCtxGF2>(x.data(), {});
 
-            u64 mk = divCeil(std::min<u64>(batchSize, n - i), 8);
+            u64 mk = divCeil(active, 8);
             auto i128 = i / 128;
 
             // x[j,p] is the (i+p)-th bit of the j-th codeword.
@@ -244,9 +245,9 @@ namespace osuCrypto
         for (u64 i = 0; i < n; i += batchSize)
         {
             memset(x.data(), 0, sizeof(x[0]) * x.size());
-            u64 min = std::min<u64>(batchSize, n - 1);
+            const u64 active = std::min<u64>(batchSize, n - i);
 
-            for (u64 p = 0; p < min; ++p)
+            for (u64 p = 0; p < active; ++p)
             {
                 *oc::BitIterator((u8*)&x[i + p], p) = 1;
             }
@@ -269,7 +270,7 @@ namespace osuCrypto
                 }
             }
 
-            c += min;
+            c += active;
         }
 
         return *std::min_element(weights.begin(), weights.end());

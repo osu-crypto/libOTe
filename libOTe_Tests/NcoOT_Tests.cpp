@@ -474,6 +474,19 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
                 return receiver.receiveChosen(5, messages, choices, prng, sockets[0]);
             });
         }
+		{
+			OosNcoOtReceiver wideReceiver;
+			wideReceiver.configure(false, 40, 64);
+			auto sockets = cp::LocalAsyncSocket::makePair();
+			std::vector<block> messages(2);
+			std::vector<u64> choices(2);
+			expectThrow([&] {
+				return wideReceiver.receiveChosen(
+					u64{ 1 } << 63, messages, choices, prng, sockets[0]);
+			});
+			if (wideReceiver.hasBaseOts())
+				throw UnitTestFail("overflowing chosen dimensions consumed NCO state" LOCATION);
+		}
 #else
         throw UnitTestSkipped("ENABLE_OOS is not defined.");
 #endif

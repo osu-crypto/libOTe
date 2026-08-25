@@ -366,6 +366,16 @@ namespace tests_libOTe
 
     void Bot_McQuoidRR_Moeller_MR_Test()
     {
+        DomainSepMRPopf factory;
+        auto popf = factory.construct();
+        PRNG actual(block(0x1234, 0x5678));
+        PRNG expected(block(0x1234, 0x5678));
+        (void)popf.program(false, Block256{}, actual);
+        Block256 consumed;
+        expected.get(consumed.data(), consumed.size());
+        if (actual.get<block>() != expected.get<block>())
+            throw UnitTestFail("MR POPF consumed the wrong amount of randomness" LOCATION);
+
         Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepMRPopf>();
         Bot_McRosRoy_Twist_Adversarial_impl<DomainSepMRPopf>();
     }

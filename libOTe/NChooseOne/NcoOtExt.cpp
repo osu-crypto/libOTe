@@ -11,6 +11,7 @@
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Aligned.h>
 #include <cryptoTools/Network/Channel.h>
+#include <limits>
 namespace osuCrypto
 {
 
@@ -183,6 +184,9 @@ namespace osuCrypto
 			throw std::invalid_argument("numMsgsPerOT must be nonzero. " LOCATION);
 		if (inputBitCount < 64 && numMsgsPerOT > (u64{ 1 } << inputBitCount))
 			throw std::invalid_argument("message count exceeds the configured NCO input domain. " LOCATION);
+		if (messages.size() &&
+			numMsgsPerOT > std::numeric_limits<u64>::max() / messages.size())
+			throw std::length_error("NCO chosen-message matrix dimensions overflow. " LOCATION);
 		for (u64 i = 0; i < choices.size(); ++i)
 			if (choices[i] >= numMsgsPerOT)
 				throw std::invalid_argument("NCO choice is outside the message range. " LOCATION);
