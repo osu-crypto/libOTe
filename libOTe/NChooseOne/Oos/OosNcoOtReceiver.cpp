@@ -56,6 +56,12 @@ namespace osuCrypto
 	task<> OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
+		if (numOtExt > maxNcoOtCount)
+			throw std::length_error("OOS OT count exceeds the supported limit. " LOCATION);
+		if (mStatSecParam > maxNcoStatSecParam)
+			throw std::invalid_argument("OOS statistical security parameter exceeds the supported limit. " LOCATION);
+		if (mMalicious && (mStatSecParam == 0 || mStatSecParam % 8))
+			throw std::invalid_argument("malicious OOS requires a nonzero, byte-aligned statistical security parameter. " LOCATION);
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first" LOCATION);
 
@@ -329,6 +335,10 @@ namespace osuCrypto
 		u64 statSecParam,
 		u64 inputBitCount)
 	{
+		if (statSecParam > maxNcoStatSecParam)
+			throw std::invalid_argument("OOS statistical security parameter exceeds the supported limit. " LOCATION);
+		if (maliciousSecure && (statSecParam == 0 || statSecParam % 8))
+			throw std::invalid_argument("malicious OOS requires a nonzero, byte-aligned statistical security parameter. " LOCATION);
 		if (inputBitCount <= 76)
 		{
 

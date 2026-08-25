@@ -88,6 +88,12 @@ namespace osuCrypto
 		u64 numOTExt, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
+		if (numOTExt > maxNcoOtCount)
+			throw std::length_error("OOS OT count exceeds the supported limit. " LOCATION);
+		if (mStatSecParam > maxNcoStatSecParam)
+			throw std::invalid_argument("OOS statistical security parameter exceeds the supported limit. " LOCATION);
+		if (mMalicious && (mStatSecParam == 0 || mStatSecParam % 8))
+			throw std::invalid_argument("malicious OOS requires a nonzero, byte-aligned statistical security parameter. " LOCATION);
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first" LOCATION);
 
@@ -258,6 +264,10 @@ namespace osuCrypto
 		u64 statSecParam,
 		u64 inputBitCount)
 	{
+		if (statSecParam > maxNcoStatSecParam)
+			throw std::invalid_argument("OOS statistical security parameter exceeds the supported limit. " LOCATION);
+		if (maliciousSecure && (statSecParam == 0 || statSecParam % 8))
+			throw std::invalid_argument("malicious OOS requires a nonzero, byte-aligned statistical security parameter. " LOCATION);
 		if (inputBitCount <= 76)
 		{
 			mCode.load(bch511_binary, sizeof(bch511_binary));
@@ -406,13 +416,11 @@ namespace osuCrypto
 		// To make this work, the zeroAndQ[0] will always be 00000.....00000,
 		// and  zeroAndQ[1] will hold the q_i row. This is so much faster than
 		// if(x^(l)_i) qSum[l] = qSum[l] ^ q_i.
-		std::array<std::array<block, 8>, 2> zeroAndQ;
-
-		// set it all to zero initially.
-		memset(zeroAndQ.data(), 0, zeroAndQ.size() * 2 * sizeof(block));
+		std::array<std::array<block, 8>, 2> zeroAndQ{};
 
 		// make sure that having this allocated on the stack is ok.
-		if (codeSize < zeroAndQ.size()) throw std::runtime_error("Make this bigger. " LOCATION);
+		if (codeSize == 0 || codeSize > zeroAndQ[0].size())
+			throw std::runtime_error("Make zeroAndQ bigger. " LOCATION);
 
 
 		// this will hold out random x^(l)_i values that we compute from the seed.

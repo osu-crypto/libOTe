@@ -63,17 +63,27 @@ namespace osuCrypto
         }
 
 
-        void operator=(KkrtNcoOtReceiver&&v)
+        void operator=(KkrtNcoOtReceiver&& v)
         {
+            if (this == &v)
+                return;
             mGens = std::move(v.mGens);
             mGensBlkIdx = std::move(v.mGensBlkIdx);
             mT0 = std::move(v.mT0);
             mT1 = std::move(v.mT1);
             mEncodeFlags = std::move(v.mEncodeFlags);
-            mCorrectionIdx = v.mCorrectionIdx;
-            mInputByteCount = v.mInputByteCount;
-            mInputBitCount = v.mInputBitCount;
+            mCorrectionIdx = std::exchange(v.mCorrectionIdx, 0);
+            mInputByteCount = std::exchange(v.mInputByteCount, 0);
+            mInputBitCount = std::exchange(v.mInputBitCount, 0);
             mMultiKeyAES = std::move(v.mMultiKeyAES);
+
+            std::array<block, 4> zeroKeys{};
+            v.mMultiKeyAES.setKeys(zeroKeys);
+            v.mGens.clear();
+            v.mGensBlkIdx.clear();
+            v.mT0 = {};
+            v.mT1.reset();
+            v.mEncodeFlags.clear();
         }
 
         bool isMalicious() const override { return false; }

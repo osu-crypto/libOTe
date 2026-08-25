@@ -35,6 +35,8 @@ namespace osuCrypto
 	task<> KkrtNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
+		if (numOtExt > maxNcoOtCount)
+			throw std::length_error("KKRT OT count exceeds the supported limit. " LOCATION);
 		if (hasBaseOts() == false)
 			co_await(genBaseOts(prng, chl));
 

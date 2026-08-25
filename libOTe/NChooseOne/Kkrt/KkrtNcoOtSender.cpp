@@ -70,8 +70,8 @@ namespace osuCrypto
 		u64 numOTExt, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
-
-
+		if (numOTExt > maxNcoOtCount)
+			throw std::length_error("KKRT OT count exceeds the supported limit. " LOCATION);
 
 		if (hasBaseOts() == false)
 			co_await  genBaseOts(prng, chl);

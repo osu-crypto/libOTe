@@ -124,8 +124,7 @@ namespace osuCrypto
         }
         else
         {
-            cache.mTemp2.reserve(mPoly.size());
-            cache.mTemp2.insert(cache.mTemp2.end(), mPoly.begin(), mPoly.end());
+            cache.mTemp2.assign(mPoly.begin(), mPoly.end());
             ptr = cache.mTemp2.data();
         }
 

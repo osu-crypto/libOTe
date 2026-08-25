@@ -21,6 +21,9 @@
 
 namespace osuCrypto
 {
+    inline constexpr u64 maxNcoOtCount = (u64{ 1 } << 32) - 1;
+    inline constexpr u64 maxNcoStatSecParam = 256;
+
     class PRNG;
     class BitVector;
     //static const u64 NcoOtExtDefaultDestSize(sizeof(block));

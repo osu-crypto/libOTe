@@ -28,7 +28,10 @@ namespace osuCrypto
 
         KosDotExtReceiver() = default;
         KosDotExtReceiver(const KosDotExtReceiver&) = delete;
-        KosDotExtReceiver(KosDotExtReceiver&&) = default;
+        KosDotExtReceiver(KosDotExtReceiver&& v)
+        {
+            *this = std::move(v);
+        }
 
         KosDotExtReceiver(span<std::array<block, 2>> baseSendOts)
         {
@@ -39,9 +42,11 @@ namespace osuCrypto
 
         void operator=(KosDotExtReceiver&& v)
         {
-            mHasBase = std::move(v.mHasBase);
+            if (this == &v)
+                return;
+            mHasBase = std::exchange(v.mHasBase, false);
             mGens = std::move(v.mGens);
-            v.mHasBase = false;
+            v.mGens.clear();
         }
 
         // defaults to requiring 40 more base OTs. This gives 40 bits 

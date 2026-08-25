@@ -1204,6 +1204,98 @@ namespace tests_libOTe
     }
 
 
+    void OtExt_MoveState_Test()
+    {
+#if defined(ENABLE_KOS) || defined(ENABLE_DELTA_KOS)
+#ifdef ENABLE_KOS
+        {
+            KosOtExtSender source;
+            source.mPrngIdx = 9;
+            source.mBaseChoiceBits.resize(1);
+            source.mHashType = HashType::RandomOracle;
+            source.mFiatShamir = true;
+            source.mIsMalicious = false;
+
+            KosOtExtSender destination(std::move(source));
+            if (destination.mPrngIdx != 9 || destination.mBaseChoiceBits.size() != 1 ||
+                destination.mHashType != HashType::RandomOracle ||
+                !destination.mFiatShamir || destination.mIsMalicious)
+                throw UnitTestFail(LOCATION);
+            if (source.mPrngIdx || source.mBaseChoiceBits.size() ||
+                source.mHashType != HashType::AesHash || source.mFiatShamir ||
+                !source.mIsMalicious || source.hasBaseOts())
+                throw UnitTestFail(LOCATION);
+        }
+        {
+            KosOtExtReceiver source;
+            source.mHasBase = true;
+            source.mGens.resize(1);
+            source.mPrngIdx = 9;
+            source.mHashType = HashType::RandomOracle;
+            source.mFiatShamir = true;
+            source.mIsMalicious = false;
+
+            KosOtExtReceiver destination(std::move(source));
+            if (!destination.mHasBase || destination.mGens.size() != 1 ||
+                destination.mPrngIdx != 9 || destination.mHashType != HashType::RandomOracle ||
+                !destination.mFiatShamir || destination.mIsMalicious)
+                throw UnitTestFail(LOCATION);
+            if (source.mHasBase || !source.mGens.empty() || source.mPrngIdx ||
+                source.mHashType != HashType::AesHash || source.mFiatShamir ||
+                !source.mIsMalicious || source.hasBaseOts())
+                throw UnitTestFail(LOCATION);
+        }
+#endif
+#ifdef ENABLE_DELTA_KOS
+        {
+            KosDotExtSender source;
+            source.mDelta = block(3, 4);
+            source.mHasDelta = true;
+            source.mGens.resize(1);
+            source.mBaseChoiceBits.resize(1);
+
+            KosDotExtSender destination(std::move(source));
+            if (destination.mDelta != block(3, 4) || !destination.mHasDelta ||
+                destination.mGens.size() != 1 || destination.mBaseChoiceBits.size() != 1)
+                throw UnitTestFail(LOCATION);
+            if (source.mDelta != ZeroBlock || source.mHasDelta || !source.mGens.empty() ||
+                source.mBaseChoiceBits.size() || source.hasBaseOts())
+                throw UnitTestFail(LOCATION);
+        }
+        {
+            KosDotExtReceiver source;
+            source.mHasBase = true;
+            source.mGens.resize(1);
+
+            KosDotExtReceiver destination(std::move(source));
+            if (!destination.mHasBase || destination.mGens.size() != 1)
+                throw UnitTestFail(LOCATION);
+            if (source.mHasBase || !source.mGens.empty() || source.hasBaseOts())
+                throw UnitTestFail(LOCATION);
+        }
+#endif
+#else
+        throw UnitTestSkipped("ENABLE_KOS or ENABLE_DELTA_KOS is required.");
+#endif
+    }
+
+
+    void Tools_Arithmetic_Audit_Test()
+    {
+        const block a0(0x0123456789abcdef, 0xfedcba9876543210);
+        const block a1(0x0000000000000003, 0x456789abcdef0123);
+        const block b0(0x0f1e2d3c4b5a6978, 0x8877665544332211);
+        const block b1(0x0000000000000002, 0x13579bdf2468ace0);
+        block c0 = AllOneBlock, c1 = AllOneBlock, c2 = AllOneBlock;
+        block d0, d1, d2, d3;
+
+        mul190(a0, a1, b0, b1, c0, c1, c2);
+        mul256(a0, a1, b0, b1, d0, d1, d2, d3);
+        if (c0 != d0 || c1 != d1 || c2 != d2)
+            throw UnitTestFail(LOCATION);
+    }
+
+
     void DotExt_Kos_Check_Test()
     {
 #if defined(ENABLE_DELTA_KOS)

@@ -58,23 +58,36 @@ namespace osuCrypto {
 
         OosNcoOtSender() = default;
         OosNcoOtSender(const OosNcoOtSender&) = delete;
-        OosNcoOtSender(OosNcoOtSender&&) = default;
+        OosNcoOtSender(OosNcoOtSender&& v)
+        {
+            *this = std::move(v);
+        }
 
         void operator=(OosNcoOtSender&& v)
         {
+            if (this == &v)
+                return;
             mCode = std::move(v.mCode);
-            mStatSecParam = v.mStatSecParam;
-            mMalicious = v.mMalicious;
+            mStatSecParam = std::exchange(v.mStatSecParam, 0);
+            mMalicious = std::exchange(v.mMalicious, false);
             mGens = std::move(v.mGens);
             mBaseChoiceBits = std::move(v.mBaseChoiceBits);
             mChoiceBlks = std::move(v.mChoiceBlks);
             mT = std::move(v.mT);
             mCorrectionVals = std::move(v.mCorrectionVals);
-            mCorrectionIdx = v.mCorrectionIdx;
-            mInputByteCount = v.mInputByteCount;
-            mInputBitCount = v.mInputBitCount;
-            mChallengeSeed = v.mChallengeSeed;
+            mCorrectionIdx = std::exchange(v.mCorrectionIdx, 0);
+            mInputByteCount = std::exchange(v.mInputByteCount, 0);
+            mInputBitCount = std::exchange(v.mInputBitCount, 0);
+            mChallengeSeed = std::exchange(v.mChallengeSeed, ZeroBlock);
             qSum = std::move(v.qSum);
+
+            v.mCode = {};
+            v.mGens.clear();
+            v.mBaseChoiceBits = {};
+            v.mChoiceBlks.clear();
+            v.mT = {};
+            v.mCorrectionVals = {};
+            v.qSum.clear();
         }
 
         bool isMalicious() const override { return mMalicious; }

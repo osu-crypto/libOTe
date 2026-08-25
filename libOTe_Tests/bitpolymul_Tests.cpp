@@ -170,7 +170,12 @@ void Tools_bitpolymul_test(const CLP& cmd)
         fft_12.mult(fft1, fft2);
         fft_13.mult(fft1, fft3);
 
-        fft_12.decode(poly_12, false);
+        FFTPoly::DecodeCache decodeCache;
+        fft_12.decode(poly_12, decodeCache, false);
+        auto repeatDecode = poly_12;
+        fft_12.decode(repeatDecode, decodeCache, false);
+        if (repeatDecode != poly_12)
+            throw UnitTestFail(LOCATION);
         fft_13.decode(poly_13, false);
 
         FFTPoly fft_12_13;

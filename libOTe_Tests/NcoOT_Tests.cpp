@@ -500,6 +500,53 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
         block input = ZeroBlock;
         block output = ZeroBlock;
 
+        expectThrow([&] {
+            OosNcoOtSender sender;
+            sender.configure(true, 0, 8);
+        });
+        expectThrow([&] {
+            OosNcoOtReceiver receiver;
+            receiver.configure(true, 7, 8);
+        });
+        expectThrow([&] {
+            OosNcoOtSender sender;
+            sender.configure(false, maxNcoStatSecParam + 1, 8);
+        });
+
+        PRNG prng(ZeroBlock);
+        {
+            KkrtNcoOtSender sender;
+            sender.configure(false, 40, 128);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(sender.init(maxNcoOtCount + 1, prng, sockets[0]));
+            });
+        }
+        {
+            KkrtNcoOtReceiver receiver;
+            receiver.configure(false, 40, 128);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(receiver.init(maxNcoOtCount + 1, prng, sockets[0]));
+            });
+        }
+        {
+            OosNcoOtSender sender;
+            sender.configure(true, 40, 8);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(sender.init(maxNcoOtCount + 1, prng, sockets[0]));
+            });
+        }
+        {
+            OosNcoOtReceiver receiver;
+            receiver.configure(true, 40, 8);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(receiver.init(maxNcoOtCount + 1, prng, sockets[0]));
+            });
+        }
+
         {
             KkrtNcoOtSender sender;
             sender.mT.resize(1, 4);
@@ -562,40 +609,113 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
     void NcoOt_OosMove_Test()
     {
 #ifdef ENABLE_OOS
-        OosNcoOtReceiver source;
-        source.mMalicious = true;
-        source.mHasBase = true;
-        source.mStatSecParam = 40;
-        source.mCorrectionIdx = 7;
-        source.mInputByteCount = 3;
-        source.mInputBitCount = 17;
-        source.mChallengeSeed = block(3, 4);
-        source.mGens.resize(1);
-        source.mT0.resize(2, 4);
-        source.mT1 = std::make_shared<Matrix<block>>(2, 4);
-        source.mW.resize(2, 1);
-        source.mEncodeFlags = { 1, 0 };
-        source.mWBuff = { OneBlock };
-        source.mTBuff = { AllOneBlock };
+        {
+            OosNcoOtReceiver source;
+            source.mMalicious = true;
+            source.mHasBase = true;
+            source.mStatSecParam = 40;
+            source.mCorrectionIdx = 7;
+            source.mInputByteCount = 3;
+            source.mInputBitCount = 17;
+            source.mChallengeSeed = block(3, 4);
+            source.mGens.resize(1);
+            source.mT0.resize(2, 4);
+            source.mT1 = std::make_shared<Matrix<block>>(2, 4);
+            source.mW.resize(2, 1);
+            source.mEncodeFlags = { 1, 0 };
+            source.mWBuff = { OneBlock };
+            source.mTBuff = { AllOneBlock };
 
-        OosNcoOtReceiver destination(std::move(source));
-        if (!destination.mMalicious || !destination.mHasBase ||
-            destination.mStatSecParam != 40 || destination.mCorrectionIdx != 7 ||
-            destination.mInputByteCount != 3 || destination.mInputBitCount != 17 ||
-            destination.mChallengeSeed != block(3, 4) || destination.mGens.size() != 1 ||
-            destination.mT0.rows() != 2 || !destination.mT1 ||
-            destination.mW.rows() != 2 || destination.mEncodeFlags.size() != 2 ||
-            destination.mWBuff.size() != 1 || destination.mTBuff.size() != 1)
-            throw UnitTestFail(LOCATION);
+            OosNcoOtReceiver destination(std::move(source));
+            if (!destination.mMalicious || !destination.mHasBase ||
+                destination.mStatSecParam != 40 || destination.mCorrectionIdx != 7 ||
+                destination.mInputByteCount != 3 || destination.mInputBitCount != 17 ||
+                destination.mChallengeSeed != block(3, 4) || destination.mGens.size() != 1 ||
+                destination.mT0.rows() != 2 || !destination.mT1 ||
+                destination.mW.rows() != 2 || destination.mEncodeFlags.size() != 2 ||
+                destination.mWBuff.size() != 1 || destination.mTBuff.size() != 1)
+                throw UnitTestFail(LOCATION);
 
-        if (source.mMalicious || source.mHasBase || source.mStatSecParam != 0 ||
-            source.mCorrectionIdx != 0 || source.mInputByteCount != 0 ||
-            source.mInputBitCount != 0 || source.mChallengeSeed != ZeroBlock ||
-            !source.mGens.empty() || source.mT0.size() != 0 || source.mT1 ||
-            source.mW.size() != 0 || source.mHasPendingSendFuture ||
-            source.mPendingSendFuture.valid() || !source.mEncodeFlags.empty() ||
-            !source.mWBuff.empty() || !source.mTBuff.empty())
-            throw UnitTestFail(LOCATION);
+            if (source.mMalicious || source.mHasBase || source.mStatSecParam != 0 ||
+                source.mCorrectionIdx != 0 || source.mInputByteCount != 0 ||
+                source.mInputBitCount != 0 || source.mChallengeSeed != ZeroBlock ||
+                !source.mGens.empty() || source.mT0.size() != 0 || source.mT1 ||
+                source.mW.size() != 0 || source.mHasPendingSendFuture ||
+                source.mPendingSendFuture.valid() || !source.mEncodeFlags.empty() ||
+                !source.mWBuff.empty() || !source.mTBuff.empty())
+                throw UnitTestFail(LOCATION);
+        }
+        {
+            OosNcoOtSender source;
+            source.configure(true, 40, 17);
+            source.mBaseChoiceBits.resize(1);
+            source.mChoiceBlks = { OneBlock };
+            source.mT.resize(2, 4);
+            source.mCorrectionVals.resize(2, 4);
+            source.mCorrectionIdx = 7;
+            source.mChallengeSeed = block(3, 4);
+            source.qSum = { AllOneBlock };
+
+            OosNcoOtSender destination(std::move(source));
+            if (!destination.mMalicious || destination.mStatSecParam != 40 ||
+                destination.mInputByteCount != 3 || destination.mInputBitCount != 17 ||
+                destination.mCorrectionIdx != 7 || destination.mChallengeSeed != block(3, 4) ||
+                destination.mGens.empty() || destination.mBaseChoiceBits.size() != 1 ||
+                destination.mChoiceBlks.size() != 1 || destination.mT.rows() != 2 ||
+                destination.mCorrectionVals.rows() != 2 || destination.qSum.size() != 1)
+                throw UnitTestFail(LOCATION);
+            if (source.mMalicious || source.mStatSecParam || source.mCorrectionIdx ||
+                source.mInputByteCount || source.mInputBitCount ||
+                source.mChallengeSeed != ZeroBlock || !source.mGens.empty() ||
+                source.mBaseChoiceBits.size() || !source.mChoiceBlks.empty() ||
+                source.mT.size() || source.mCorrectionVals.size() || !source.qSum.empty())
+                throw UnitTestFail(LOCATION);
+        }
+#ifdef ENABLE_KKRT
+        {
+            KkrtNcoOtSender source;
+            source.configure(false, 40, 128);
+            source.mGensBlkIdx = { 9 };
+            source.mBaseChoiceBits.resize(1);
+            source.mChoiceBlks = { OneBlock };
+            source.mT.resize(2, 4);
+            source.mCorrectionVals.resize(2, 4);
+            source.mCorrectionIdx = 7;
+
+            KkrtNcoOtSender destination(std::move(source));
+            if (destination.mGens.empty() || destination.mGensBlkIdx.size() != 1 ||
+                destination.mBaseChoiceBits.size() != 1 || destination.mChoiceBlks.size() != 1 ||
+                destination.mT.rows() != 2 || destination.mCorrectionVals.rows() != 2 ||
+                destination.mCorrectionIdx != 7 || destination.mInputByteCount != 16 ||
+                destination.mInputBitCount != 128)
+                throw UnitTestFail(LOCATION);
+            if (!source.mGens.empty() || !source.mGensBlkIdx.empty() ||
+                source.mBaseChoiceBits.size() || !source.mChoiceBlks.empty() ||
+                source.mT.size() || source.mCorrectionVals.size() || source.mCorrectionIdx ||
+                source.mInputByteCount || source.mInputBitCount)
+                throw UnitTestFail(LOCATION);
+        }
+        {
+            KkrtNcoOtReceiver source;
+            source.configure(false, 40, 128);
+            source.mGensBlkIdx = { 9 };
+            source.mT0.resize(2, 4);
+            source.mT1 = std::make_shared<Matrix<block>>(2, 4);
+            source.mEncodeFlags = { 1, 0 };
+            source.mCorrectionIdx = 7;
+
+            KkrtNcoOtReceiver destination(std::move(source));
+            if (destination.mGens.empty() || destination.mGensBlkIdx.size() != 1 ||
+                destination.mT0.rows() != 2 || !destination.mT1 ||
+                destination.mEncodeFlags.size() != 2 || destination.mCorrectionIdx != 7 ||
+                destination.mInputByteCount != 16 || destination.mInputBitCount != 128)
+                throw UnitTestFail(LOCATION);
+            if (!source.mGens.empty() || !source.mGensBlkIdx.empty() || source.mT0.size() ||
+                source.mT1 || !source.mEncodeFlags.empty() || source.mCorrectionIdx ||
+                source.mInputByteCount || source.mInputBitCount)
+                throw UnitTestFail(LOCATION);
+        }
+#endif
 #else
         throw UnitTestSkipped("ENABLE_OOS is not defined.");
 #endif

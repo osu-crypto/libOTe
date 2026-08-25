@@ -24,17 +24,17 @@ namespace osuCrypto {
     static inline void mul190(block a0, block a1, block b0, block b1, block& c0, block& c1, block& c2)
     {
         // c3c2c1c0 = a1a0 * b1b0
-        block c4, c5;
+        block c3, c4, c5;
 
         mul128(a0, b0, c0, c1);
-        //mul128(a1, b1, c2, c3);
+        mul128(a1, b1, c2, c3);
         a0 = (a0 ^ a1);
         b0 = (b0 ^ b1);
         mul128(a0, b0, c4, c5);
         c4 = (c4 ^ c0);
         c4 = (c4 ^ c2);
         c5 = (c5 ^ c1);
-        //c5 = _mm_xor_si128(c5, c3);
+        c5 = (c5 ^ c3);
         c1 = (c1 ^ c4);
         c2 = (c2 ^ c5);
     }

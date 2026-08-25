@@ -48,6 +48,7 @@ namespace tests_libOTe
 			tc.add("Tools_Transpose_Test                    ", Tools_Transpose_Test);
 			tc.add("Tools_Transpose_View_Test               ", Tools_Transpose_View_Test);
 			tc.add("Tools_Transpose_Bench                   ", Tools_Transpose_Bench);
+			tc.add("Tools_Arithmetic_Audit_Test             ", Tools_Arithmetic_Audit_Test);
 
 			tc.add("Tools_LinearCode_Test                   ", Tools_LinearCode_Test);
 			tc.add("Tools_LinearCode_sub_Test               ", Tools_LinearCode_sub_Test);
@@ -239,6 +240,7 @@ namespace tests_libOTe
 			tc.add("DotExt_Kos_BaseValidation_Test          ", DotExt_Kos_BaseValidation_Test);
 			tc.add("OtExt_NoHashMultiBlock_Test             ", OtExt_NoHashMultiBlock_Test);
 			tc.add("OtExt_SplitConfig_Test                  ", OtExt_SplitConfig_Test);
+			tc.add("OtExt_MoveState_Test                    ", OtExt_MoveState_Test);
 			tc.add("DotExt_Kos_Check_Test                   ", DotExt_Kos_Check_Test);
 			tc.add("DotExt_Kos_SplitDelta_Test              ", DotExt_Kos_SplitDelta_Test);
 			tc.add("OtExt_Silent_random_Test                ", OtExt_Silent_random_Test);

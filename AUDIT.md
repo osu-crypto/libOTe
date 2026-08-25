@@ -3137,3 +3137,186 @@ Verification:
 
 - `Dpf_Audit_Test` checks padded physical rows, undersized rows, and
   normalization of partial-byte padding in both directions.
+
+## AUD-098: OT extension moves retained active source state
+
+Status: fixed
+
+Affected code:
+
+- KOS and KOS-Dot sender and receiver move operations.
+- KKRT sender and receiver move operations.
+- OOS sender move operations.
+
+Concern:
+
+Defaulted move constructors and incomplete move assignments left flags,
+counters, configuration, and fixed AES schedules live in the source object.
+Several moved containers also relied on unspecified post-move state.
+
+Impact:
+
+A moved-from object could still report configured base OTs or retain protocol
+secrets and session state, making accidental reuse possible and extending the
+lifetime of sensitive material.
+
+Resolution:
+
+Move constructors now use the corresponding clearing assignment. Source
+flags, counters, configuration, matrices, and containers are reset explicitly;
+fixed AES schedules are overwritten with zero-key schedules. These operations
+only affect object moves and do not alter OT generation loops.
+
+Verification:
+
+- `OtExt_MoveState_Test` covers both roles of KOS and KOS-Dot.
+- `NcoOt_OosMove_Test` covers both KKRT roles and both OOS roles.
+
+## AUD-099: OOS accepted vacuous or malformed malicious security parameters
+
+Status: fixed
+
+Affected code:
+
+- OOS sender and receiver configuration and initialization.
+
+Concern:
+
+Malicious OOS accepted a zero statistical security parameter, producing a
+vacuous proof, and deferred byte-alignment validation until the final check.
+The public parameter could also be changed after configuration.
+
+Impact:
+
+A caller could select no effective malicious check or begin a protocol that
+could only fail after communication and computation.
+
+Resolution:
+
+Configuration requires a nonzero, byte-aligned malicious parameter and bounds
+all OOS statistical parameters at 256 bits. Initialization repeats the checks
+before allocation or communication to defend the public state boundary.
+
+Verification:
+
+- `NcoOt_StateValidation_Test` checks zero, non-byte-aligned, and oversized
+  parameters.
+
+## AUD-100: NCO OT count rounding could overflow
+
+Status: fixed
+
+Affected code:
+
+- KKRT sender and receiver initialization.
+- OOS sender and receiver initialization.
+
+Concern:
+
+Rounding an unrestricted `u64` OT count added 127 and, for OOS, the statistical
+security parameter before allocation. A sufficiently large direct count could
+wrap to a small matrix size.
+
+Impact:
+
+Later protocol processing could operate against storage much smaller than the
+requested logical OT domain.
+
+Resolution:
+
+Each initialization entry point individually bounds the caller's OT count at
+`2^32 - 1` before arithmetic, allocation, base-OT generation, or network I/O.
+The check is outside all expansion and transpose loops.
+
+Verification:
+
+- `NcoOt_StateValidation_Test` checks oversized counts for both roles of both
+  protocols.
+
+## AUD-101: Generic OOS proof scratch storage was partly uninitialized
+
+Status: fixed
+
+Affected code:
+
+- The generic-width branch of `OosNcoOtSender::computeProof()`.
+
+Concern:
+
+The scratch array's `memset()` cleared only four of sixteen blocks, and its
+capacity check compared the code size to the outer two-element dimension in
+the wrong direction.
+
+Impact:
+
+A future non-four-block OOS code could read uninitialized stack data or index
+past the fixed scratch row during the malicious proof.
+
+Resolution:
+
+The complete array is value-initialized and the codeword stride must be
+nonzero and no larger than the eight-block row capacity. The current
+four-block optimized proof loop is unchanged.
+
+Verification:
+
+- `NcoOt_Oos_Test` continues to exercise the active four-block malicious proof.
+- The corrected generic capacity invariant is checked before its processing
+  loop.
+
+## AUD-102: Reused FFT decode caches accumulated stale transforms
+
+Status: fixed
+
+Affected code:
+
+- Nondestructive `FFTPoly::decode()` with a caller-provided `DecodeCache`.
+
+Concern:
+
+The decode path reserved capacity and appended the polynomial to `mTemp2`
+without clearing its previous contents.
+
+Impact:
+
+Reusing a cache transformed stale data, returned an incorrect decode, and grew
+memory on every call.
+
+Resolution:
+
+The temporary is assigned from the current polynomial before each transform.
+Capacity is still reused, and the copy already required by nondestructive
+decoding remains the only data movement.
+
+Verification:
+
+- `Tools_bitpolymul_test` decodes the same transform twice through one cache
+  and compares the results.
+
+## AUD-103: `mul190()` omitted the high-limb product
+
+Status: fixed
+
+Affected code:
+
+- The public carryless `mul190()` arithmetic helper.
+
+Concern:
+
+The `a1 * b1` multiplication and its contribution to the Karatsuba middle
+term were commented out while the uninitialized result limb was still read.
+
+Impact:
+
+Direct callers received undefined and generally incorrect 190-bit products.
+No in-tree protocol currently calls this helper.
+
+Resolution:
+
+The missing carryless multiplication and cross-term XOR are restored, matching
+the corresponding low three limbs of `mul256()`.
+
+Verification:
+
+- `Tools_Arithmetic_Audit_Test` compares `mul190()` against the low three limbs
+  of `mul256()` with nonzero high input limbs.

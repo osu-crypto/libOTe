@@ -26,6 +26,8 @@ namespace tests_libOTe
     void DotExt_Kos_BaseValidation_Test();
     void OtExt_NoHashMultiBlock_Test();
     void OtExt_SplitConfig_Test();
+    void OtExt_MoveState_Test();
+    void Tools_Arithmetic_Audit_Test();
     void DotExt_Kos_Check_Test();
     void DotExt_Kos_SplitDelta_Test();
     void DotExt_Kos_Test();
