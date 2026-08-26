@@ -167,6 +167,14 @@ namespace osuCrypto
 		}, "Foleage installed base OTs before initialization");
 		expectRejected([] {
 			FoleageTriple triple;
+			triple.init(0, 1000);
+			PRNG prng(ZeroBlock);
+			auto sockets = coproto::LocalAsyncSocket::makePair();
+			macoro::sync_wait(triple.genBaseOts(
+				prng, sockets[0], static_cast<SilentBaseType>(255)));
+		}, "Foleage accepted an invalid base-OT mode");
+		expectRejected([] {
+			FoleageTriple triple;
 			PRNG prng(ZeroBlock);
 			auto sockets = coproto::LocalAsyncSocket::makePair();
 			std::vector<block> empty;

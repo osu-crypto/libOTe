@@ -153,6 +153,9 @@ namespace osuCrypto
 		Socket& sock,
 		SilentBaseType baseType)
 	{
+		if (baseType != SilentBaseType::Base &&
+			baseType != SilentBaseType::BaseExtend)
+			throw std::invalid_argument("Silent base type not supported. " LOCATION);
 		if (isInitialized() == false)
 		{
 			throw std::runtime_error("init must be called first. " LOCATION);

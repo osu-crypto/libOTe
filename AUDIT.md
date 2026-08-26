@@ -5796,6 +5796,7 @@ Affected code:
 - Silent OT sender and receiver configuration.
 - Silent VOLE sender and receiver configuration.
 - Silent OT receiver output-mode and choice-packing entry points.
+- Silent OT triple and Foleage base-OT generation entry points.
 
 Concern:
 
@@ -5822,6 +5823,8 @@ Verification:
 - `OtExt_Silent_AuditState_Test` covers invalid security, OT, and choice-packing
   modes.
 - `Vole_Noisy_Audit_Test` covers invalid Silent VOLE security and base modes.
+- `SilentOtTriple_Audit_test` and `foleage_Audit_test` cover invalid base modes
+  in their protocol wrappers.
 - The normal Silent random and correlated OT tests pass in Release.
 
 ## AUD-180: Exact 64-bit quasi-cyclic shifts were undefined in scalar builds

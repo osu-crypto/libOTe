@@ -562,6 +562,9 @@ namespace osuCrypto
 
 	macoro::task<> SilentOtTriple::genBaseOts(PRNG& prng, Socket& sock, SilentBaseType baseType)
 	{
+		if (baseType != SilentBaseType::Base &&
+			baseType != SilentBaseType::BaseExtend)
+			throw std::invalid_argument("Silent base type not supported. " LOCATION);
 		if (!isInitialized())
 			throw std::runtime_error("SilentOtTriple::init must be called first");
 

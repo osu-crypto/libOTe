@@ -410,6 +410,10 @@ void SilentOtTriple_Audit_test(const oc::CLP&)
 
 	PRNG prng(CCBlock);
 	auto sockets = coproto::LocalAsyncSocket::makePair();
+	expectRejected([&] {
+		macoro::sync_wait(triple.genBaseOts(
+			prng, sockets[0], static_cast<SilentBaseType>(255)));
+	});
 	std::vector<block> A(1), B(1), C(1);
 	expectRejected([&] {
 		macoro::sync_wait(triple.expand(A, B, C, prng, sockets[0]));
