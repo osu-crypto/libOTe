@@ -31,10 +31,23 @@ namespace osuCrypto
         }
 
         IknpOtExtReceiver(const IknpOtExtReceiver&) = delete;
-        IknpOtExtReceiver(IknpOtExtReceiver&& v) = default;
-        IknpOtExtReceiver& operator=(IknpOtExtReceiver&& v) = default;
+        IknpOtExtReceiver(IknpOtExtReceiver&& v)
+            : KosOtExtReceiver(std::move(v))
+        {
+            mIsMalicious = false;
+            v.mIsMalicious = false;
+        }
+        IknpOtExtReceiver& operator=(IknpOtExtReceiver&& v)
+        {
+            if (this != &v)
+                KosOtExtReceiver::operator=(std::move(v));
+            mIsMalicious = false;
+            v.mIsMalicious = false;
+            return *this;
+        }
 
         IknpOtExtReceiver(span<std::array<block, 2>> baseSendOts)
+            : IknpOtExtReceiver()
         {
             setBaseOts(baseSendOts);
         }

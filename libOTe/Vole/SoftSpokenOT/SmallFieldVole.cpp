@@ -393,6 +393,10 @@ namespace osuCrypto
 
 	task<> SmallFieldVoleSender::expand(Socket& chl,PRNG& prng, u64 numThreads)
 	{
+		if (!mInit || !mPprf || !mNumVoles || mNumVoles > mNumVolesPadded ||
+			!mSeeds.empty() || !mPprf->hasBaseOts())
+			throw std::logic_error("SmallField VOLE sender is not ready to expand. " LOCATION);
+
 		MACORO_TRY{
 		auto corrections = std::vector<std::array<block, 2>>{};
 			auto hashes = std::vector<std::array<block, 2>>{};
@@ -450,6 +454,10 @@ namespace osuCrypto
 	task<> SmallFieldVoleReceiver::expand(
 		Socket& chl, PRNG& prng, u64 numThreads, bool deferConsistencyFailure)
 	{
+		if (!mInit || !mPprf || !mNumVoles || mNumVoles > mNumVolesPadded ||
+			!mSeeds.empty() || !mPprf->hasBaseOts())
+			throw std::logic_error("SmallField VOLE receiver is not ready to expand. " LOCATION);
+
 		MACORO_TRY{
 		auto seeds = AlignedUnVector<block>{};
 			auto seedsFull = MatrixView<block>{};

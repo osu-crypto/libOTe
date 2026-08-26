@@ -171,13 +171,25 @@ namespace tests_libOTe
         std::vector<block> w(receiver.wPadded());
         std::vector<block> correction(receiver.uPadded());
 
-        auto expectRejected = [](auto&& fn, const char* message) {
+		auto expectRejected = [](auto&& fn, const char* message) {
             bool rejected = false;
             try { fn(); }
             catch (const std::exception&) { rejected = true; }
             if (!rejected)
                 throw UnitTestFail(message);
-        };
+		};
+		PRNG auditPrng(block::allSame(0x129));
+
+		SmallFieldVoleSender defaultSender;
+		auto defaultSenderSockets = cp::LocalAsyncSocket::makePair();
+		expectRejected([&] {
+			cp::sync_wait(defaultSender.expand(defaultSenderSockets[0], auditPrng, 1));
+		}, "Default SmallField VOLE sender expansion was not rejected");
+		SmallFieldVoleReceiver defaultReceiver;
+		auto defaultReceiverSockets = cp::LocalAsyncSocket::makePair();
+		expectRejected([&] {
+			cp::sync_wait(defaultReceiver.expand(defaultReceiverSockets[0], auditPrng, 1));
+		}, "Default SmallField VOLE receiver expansion was not rejected");
 
 		expectRejected([&] {
 			sender.generate(0, mAesFixedKey, span<block>(u), span<block>(v));
@@ -198,6 +210,19 @@ namespace tests_libOTe
 		std::vector<block> receiverSeeds(4 * 3);
 		seededSender.setSeed(senderSeeds);
 		seededReceiver.setSeeds(receiverSeeds);
+		const auto seededSenderCount = seededSender.mSeeds.size();
+		const auto seededReceiverCount = seededReceiver.mSeeds.size();
+		auto seededSenderSockets = cp::LocalAsyncSocket::makePair();
+		expectRejected([&] {
+			cp::sync_wait(seededSender.expand(seededSenderSockets[0], auditPrng, 1));
+		}, "Seeded SmallField VOLE sender expansion was not rejected");
+		auto seededReceiverSockets = cp::LocalAsyncSocket::makePair();
+		expectRejected([&] {
+			cp::sync_wait(seededReceiver.expand(seededReceiverSockets[0], auditPrng, 1));
+		}, "Seeded SmallField VOLE receiver expansion was not rejected");
+		if (seededSender.mSeeds.size() != seededSenderCount ||
+			seededReceiver.mSeeds.size() != seededReceiverCount)
+			throw UnitTestFail("Rejected SmallField VOLE expansion changed seed state");
 
 		SmallFieldVoleSender moveSenderSource;
 		moveSenderSource.init(2, 4, false);
@@ -354,7 +379,6 @@ namespace tests_libOTe
             if (w[i] != ZeroBlock)
                 throw UnitTestFail("SmallField VOLE tail consumed padded input");
 
-		PRNG auditPrng(block::allSame(0x129));
 		SmallFieldVoleSender failedSender;
 		failedSender.init(1, 1, false);
 		auto failedSenderSockets = cp::LocalAsyncSocket::makePair();
@@ -392,13 +416,39 @@ namespace tests_libOTe
 			deferredReceiver.sendChallenge(auditPrng, deferredSockets[0]),
 			deferredSockets[1].recv(deferredChallenge)));
 		deferredSender.setChallenge(deferredChallenge);
-		cp::sync_wait(deferredSender.sendResponse(deferredSockets[1]));
+		auto deferredResults = cp::sync_wait(cp::when_all_ready(
+			deferredSender.sendResponse(deferredSockets[1]),
+			deferredReceiver.checkResponse(deferredSockets[0])));
+		std::get<0>(deferredResults).result();
+		bool deferredRejected = false;
+		try { std::get<1>(deferredResults).result(); }
+		catch (const std::exception&) { deferredRejected = true; }
+		if (!deferredRejected)
+			throw UnitTestFail(
+				"Deferred SmallField VOLE failure was not folded into the final check");
+		if (deferredReceiver.hasSeed() ||
+			deferredReceiver.hasDeferredConsistencyFailure() ||
+			deferredReceiver.hasChallenge())
+			throw UnitTestFail("Final malicious VOLE failure retained seed state");
 		expectRejected([&] {
 			cp::sync_wait(deferredReceiver.checkResponse(deferredSockets[0]));
-		}, "Deferred SmallField VOLE failure was not folded into the final check");
-		if (deferredReceiver.hasSeed() ||
-			deferredReceiver.hasDeferredConsistencyFailure())
-			throw UnitTestFail("Final malicious VOLE failure retained seed state");
+		}, "Failed malicious VOLE response check allowed a retry");
+
+		SubspaceVoleMaliciousSender<RepetitionCode> failedResponseSender;
+		failedResponseSender.init(maliciousFieldBits, maliciousNumVoles);
+		failedResponseSender.setChallenge(block::allSame(0x437));
+		auto failedResponseSockets = cp::LocalAsyncSocket::makePair();
+		failedResponseSockets[0].mSock->mImpl->mDebugErrorInjector = [] {
+			return cp::make_error_code(cp::code::ioError);
+		};
+		expectRejected([&] {
+			cp::sync_wait(failedResponseSender.sendResponse(failedResponseSockets[0]));
+		}, "Failed malicious VOLE response send did not throw");
+		if (failedResponseSender.hasChallenge())
+			throw UnitTestFail("Failed malicious VOLE response send retained its challenge");
+		expectRejected([&] {
+			cp::sync_wait(failedResponseSender.sendResponse(failedResponseSockets[0]));
+		}, "Failed malicious VOLE response send allowed a retry");
 #else
         throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
 #endif

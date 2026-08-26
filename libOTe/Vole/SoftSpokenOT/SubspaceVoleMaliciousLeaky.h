@@ -105,6 +105,14 @@ namespace osuCrypto
 				throw std::logic_error("Malicious subspace VOLE challenge is not initialized. " LOCATION);
 		}
 
+		void clearChallenge()
+		{
+			hashKeyPrng = PRNG{};
+			hashKeySqAndA64 = ZeroBlock;
+			hashKey = 0;
+			hashKeyUseCount = ~0ull;
+		}
+
 		// inHalf == 0 => input in low 64 bits. High 64 bits of output should be ignored.
 		template <int inHalf>
 		static block mulA64(block in)
@@ -400,15 +408,16 @@ namespace osuCrypto
 
 		void clearHashes()
 		{
-			std::fill_n(hashU.data(), Sender::uSize(), block::allSame(0));
-			std::fill_n(subtotalU.data(), Sender::uSize(), block::allSame(0));
-			std::fill_n(hashV.data(), vPadded(), block::allSame(0));
-			std::fill_n(subtotalV.data(), vPadded(), block::allSame(0));
+			std::fill(hashU.begin(), hashU.end(), ZeroBlock);
+			std::fill(subtotalU.begin(), subtotalU.end(), ZeroBlock);
+			std::fill(hashV.begin(), hashV.end(), ZeroBlock);
+			std::fill(subtotalV.begin(), subtotalV.end(), ZeroBlock);
 		}
 
 		[[nodiscard]]
-		auto sendResponse(Socket& chl)
+		task<> sendResponse(Socket& chl)
 		{
+			MACORO_TRY{
 			requireChallenge();
 			requireHashState();
 			u64 fieldBits = Sender::mVole.mFieldBits;
@@ -450,8 +459,14 @@ namespace osuCrypto
 				memcpy(&finalHashesPacked[bytesPerHash * i], &output, bytesPerHash);
 			}
 
-			return chl.send(std::move(finalHashesPacked));
-			//return finalHashesPacked;
+			co_await(chl.send(finalHashesPacked));
+			} MACORO_CATCH(eptr) {
+				Sender::mVole.clearSeed();
+				clearChallenge();
+				clearHashes();
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 	};
 
@@ -600,14 +615,13 @@ namespace osuCrypto
 
 		void clearHashes()
 		{
-			memset(mHashW.data(), 0, wPadded() * sizeof(block));
-			memset(mSubtotalW.data(), 0, wPadded() * sizeof(block));
-			//std::fill_n(mHashW.data(), wPadded(), block::allSame(0));
-			//std::fill_n(mSubtotalW.data(), wPadded(), block::allSame(0));
+			std::fill(mHashW.begin(), mHashW.end(), ZeroBlock);
+			std::fill(mSubtotalW.begin(), mSubtotalW.end(), ZeroBlock);
 		}
 
 		task<> checkResponse(Socket& chl)
 		{
+			MACORO_TRY{
 			requireChallenge();
 			requireHashState();
 			auto fieldBits = u64{};
@@ -689,12 +703,15 @@ namespace osuCrypto
 				const bool consistent = std::equal(
 					finalHashW.data(), finalHashW.data() + numVoles * fieldBits, finalHashV);
 				if (!consistent || Receiver::mVole.mConsistencyFailed)
-				{
-					Receiver::mVole.clearSeed();
 					throw std::runtime_error("Failed subspace VOLE consistency check");
-				}
 			}
-
+			} MACORO_CATCH(eptr) {
+				Receiver::mVole.clearSeed();
+				clearChallenge();
+				clearHashes();
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 	};
 

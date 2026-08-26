@@ -1208,6 +1208,30 @@ namespace tests_libOTe
     {
 #if defined(ENABLE_KOS) || defined(ENABLE_DELTA_KOS)
 #ifdef ENABLE_KOS
+#ifdef ENABLE_IKNP
+		{
+			std::array<block, gOtExtBaseOtCount> senderBase{};
+			std::array<std::array<block, 2>, gOtExtBaseOtCount> receiverBase{};
+			BitVector senderChoices(gOtExtBaseOtCount);
+
+			IknpOtExtSender sender(senderBase, senderChoices);
+			IknpOtExtReceiver receiver(receiverBase);
+			if (sender.mIsMalicious || receiver.mIsMalicious)
+				throw UnitTestFail("IKNP base-OT constructor enabled malicious KOS mode");
+
+			IknpOtExtSender movedSender(std::move(sender));
+			IknpOtExtReceiver movedReceiver;
+			movedReceiver = std::move(receiver);
+			if (movedSender.mIsMalicious || sender.mIsMalicious ||
+				movedReceiver.mIsMalicious || receiver.mIsMalicious)
+				throw UnitTestFail("IKNP move changed the semi-honest mode");
+
+			sender.setBaseOts(senderBase, senderChoices);
+			receiver.setBaseOts(receiverBase);
+			if (sender.mIsMalicious || receiver.mIsMalicious)
+				throw UnitTestFail("Moved-from IKNP object changed wire mode after reuse");
+		}
+#endif
         {
             KosOtExtSender source;
             source.mPrngIdx = 9;

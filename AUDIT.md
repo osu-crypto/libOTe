@@ -4938,3 +4938,107 @@ Verification:
 - `LogVole_Civole_StateMachineAutoOfflineSequentialSids` moves populated
   offline wrappers, checks that all representative source state and owning
   pointers are clear, and completes the next online SID with the destinations.
+
+## AUD-155: IKNP did not preserve its semi-honest mode invariant
+
+Status: fixed
+
+Affected code:
+
+- `IknpOtExtSender` and `IknpOtExtReceiver` construction and move operations.
+
+Concern:
+
+The receiver constructor that accepted base OTs did not disable the inherited
+KOS malicious check. In addition, inherited KOS moves reset the source object
+to malicious mode. Reusing a moved-from IKNP object after installing new base
+OTs could therefore select a different wire protocol.
+
+Impact:
+
+IKNP peers constructed or reused through different public paths could disagree
+about whether the malicious KOS check was present. The disagreement could hang
+the session or misinterpret later messages.
+
+Resolution:
+
+The base-OT constructors delegate through the IKNP default constructors.
+Explicit IKNP moves preserve semi-honest mode in both the destination and the
+cleared source. These changes do not affect extension loops.
+
+Verification:
+
+- `OtExt_MoveState_Test` checks both base-OT constructors, both move forms, and
+  reuse of the moved-from objects.
+- Release and scalar builds pass the focused move-state test.
+
+## AUD-156: Failed malicious subspace-VOLE checks allowed empty retries
+
+Status: fixed
+
+Affected code:
+
+- `SubspaceVoleMaliciousSender::sendResponse`.
+- `SubspaceVoleMaliciousReceiver::checkResponse`.
+
+Concern:
+
+Both roles cleared their accumulated hashes before response I/O but retained
+the active challenge after a transport or consistency failure. A retry then
+advanced the challenge PRNG and authenticated cleared, all-zero accumulators.
+The receiver also allowed the retry after clearing its VOLE seed.
+
+Impact:
+
+A caller could observe a failed malicious consistency check and then obtain a
+successful empty check from the same objects. External outputs from the failed
+batch could already have been released.
+
+Resolution:
+
+Failure paths clear the VOLE seed, challenge PRNG and keys, and accumulated
+hashes before closing the socket and re-throwing. The final sender response now
+uses an awaited reference send, so the response buffer remains live and an I/O
+failure is observable by the coroutine. Hashing and VOLE generation kernels
+are unchanged.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` forces a deferred receiver consistency
+  failure and an injected sender I/O failure. Both roles discard the challenge
+  and reject a second response operation.
+- The existing malicious SoftSpoken OT test passes in Release and scalar builds.
+
+## AUD-157: SmallField VOLE expansion relied on assertions for readiness
+
+Status: fixed
+
+Affected code:
+
+- `SmallFieldVoleSender::expand` and `SmallFieldVoleReceiver::expand`.
+
+Concern:
+
+Expansion checked initialization, dimensions, and empty seed state only with
+assertions. A Release build could dereference a null PPRF from a default object
+or begin overwriting retained direct seeds before a lower layer rejected the
+call.
+
+Impact:
+
+Invalid public call order could cause a null dereference or destroy valid seed
+state before reporting failure.
+
+Resolution:
+
+Each expansion entry point now validates initialization, PPRF ownership and
+base OTs, dimensions, and empty seed state before any mutation or network
+operation. The checks run once per expansion and do not enter the generation
+loops.
+
+Verification:
+
+- `Vole_SoftSpokenSmall_Audit_Test` requires default and directly seeded
+  objects to reject expansion and verifies that rejection preserves direct
+  seeds.
+- Release and scalar builds pass the focused SmallField VOLE audit test.
