@@ -588,10 +588,12 @@ namespace osuCrypto
 				co_await socks[1].recv(recvBuffer);
 				};
 
-			co_await macoro::when_all_ready(
+			auto results = co_await macoro::when_all_ready(
 				sender(),
 				recver()
 			);
+			std::get<0>(results).result();
+			std::get<1>(results).result();
 
 			for (u64 i = 0; i < mNumPointsPerSet; ++i)
 			{

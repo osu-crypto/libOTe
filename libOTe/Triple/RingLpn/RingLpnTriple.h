@@ -660,10 +660,12 @@ namespace osuCrypto
 			auto baseOt1 = DefaultBaseOT{};
 			auto baseOt2 = DefaultBaseOT{};
 
-			co_await(
+			auto results = co_await(
 				macoro::when_all_ready(
 					baseOt1.send(sendMsg, prng, sock),
 					baseOt2.receive(choice, recvMsg, prng2, sock2)));
+			std::get<0>(results).result();
+			std::get<1>(results).result();
 #else
 			throw std::runtime_error("A base OT must be enabled. " LOCATION);
 #endif
@@ -703,11 +705,13 @@ namespace osuCrypto
 			auto baseOt1 = DefaultBaseOT{};
 			auto baseOt2 = DefaultBaseOT{};
 
-			co_await(
+			auto results = co_await(
 				macoro::when_all_ready(
 					baseOt1.receive(choice, recvMsg, prng, sock),
 					baseOt2.send(sendMsg, prng2, sock2)
 				));
+			std::get<0>(results).result();
+			std::get<1>(results).result();
 #else
 			throw std::runtime_error("A base OT must be enabled. " LOCATION);
 #endif
@@ -1145,10 +1149,12 @@ namespace osuCrypto
 			{
 				auto prng2 = prng.fork();
 				auto sock2 = sock.fork();
-				co_await macoro::when_all_ready(
+				auto results = co_await macoro::when_all_ready(
 					tensor(prng2, sock2),
 					genDpf(prng, sock)
 				);
+				std::get<0>(results).result();
+				std::get<1>(results).result();
 			}
 		}
 		else if (hasTensor() == false)
@@ -1625,7 +1631,9 @@ namespace osuCrypto
 		co_await sock.send(std::move(diff));
 
 		// Execute all VOLE instances in parallel
-		co_await macoro::when_all_ready(std::move(tasks));
+		auto results = co_await macoro::when_all_ready(std::move(tasks));
+		for (auto& result : results)
+			result.result();
 
 		// Copy results to the output array
 		for (u64 i = 0; i < n; ++i)
@@ -1688,7 +1696,9 @@ namespace osuCrypto
 		}
 
 		// Execute all VOLE instances in parallel
-		co_await macoro::when_all_ready(std::move(tasks));
+		auto results = co_await macoro::when_all_ready(std::move(tasks));
+		for (auto& result : results)
+			result.result();
 
 		// Copy results to the output array
 		for (u64 i = 0; i < n; ++i)

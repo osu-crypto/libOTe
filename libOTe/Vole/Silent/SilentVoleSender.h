@@ -435,10 +435,12 @@ namespace osuCrypto
 
 					if (msg.size())
 					{
-						co_await
+						auto results = co_await
 							macoro::when_all_ready(
 								nv.send(delta, b, prng2, *mOtExtRecver, chl2, mCtx),
 								mOtExtSender->send(msg, prng, chl));
+						std::get<0>(results).result();
+						std::get<1>(results).result();
 					}
 					else
 						co_await nv.send(delta, b, prng2, *mOtExtRecver, chl2, mCtx);
@@ -455,10 +457,14 @@ namespace osuCrypto
 				auto baseOt = BaseOT{};
 
 				if(msg.size())
-					co_await
+				{
+					auto results = co_await
 						macoro::when_all_ready(
 							baseOt.send(msg, prng, chl),
 							nv.send(delta, b, prng2, baseOt, chl2, mCtx));
+					std::get<0>(results).result();
+					std::get<1>(results).result();
+				}
 				else
 					co_await nv.send(delta, b, prng2, baseOt, chl2, mCtx);
 			}

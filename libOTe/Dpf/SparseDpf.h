@@ -696,16 +696,23 @@ namespace osuCrypto
 				throw RTE_LOC;
 			std::vector<block> sBuff(sigma.begin(), sigma.end());
 			std::vector<std::array<u8, 2>> tBuff(tau.begin(), tau.end());
-			co_await macoro::when_all_ready(
+			auto sendResults = co_await macoro::when_all_ready(
 				sock.send(std::move(sBuff)),
 				sock.send(std::move(tBuff))
 			);
+			std::get<0>(sendResults).result();
+			std::get<1>(sendResults).result();
 			sBuff.resize(sigma.size());
 			tBuff.resize(tau.size());
-			co_await macoro::when_all_ready(
+			auto recvResults = co_await macoro::when_all_ready(
 				sock.recv(sBuff),
 				sock.recv(tBuff)
 			);
+			std::get<0>(recvResults).result();
+			std::get<1>(recvResults).result();
+			for (u64 i = 0; i < sigma.size(); ++i)
+				if (tBuff[i][0] > 1 || tBuff[i][1] > 1)
+					throw std::runtime_error("SparseDpf received a non-bit tau value. " LOCATION);
 			for (u64 i = 0; i < sigma.size(); ++i)
 			{
 				sigma[i] = sigma[i] ^ sBuff[i];

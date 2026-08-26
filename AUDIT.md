@@ -4766,3 +4766,66 @@ Verification:
 
 - `Dpf_Audit_Test` closes the peer socket, requires multiplication to fail,
   and verifies that the attempted OT range remains consumed.
+
+## AUD-150: Parallel protocol joins discarded child failures
+
+Status: fixed
+
+Affected code:
+
+- Parallel protocol joins in Silent VOLE, RingLPN triples, Foleage triples,
+  Ternary DPF, and Sparse DPF.
+
+Concern:
+
+`when_all_ready` waits for every child task but stores each child exception in
+the returned task object. The affected call sites discarded these objects, so
+a failed transport or base-correlation task did not fail the parent protocol.
+
+Impact:
+
+The parent could install or consume partially initialized correlation state.
+Ternary DPF could also continue from an incomplete correction-word exchange
+and derive a response from receive buffers that the peer did not initialize.
+
+Resolution:
+
+Every affected join checks the result of each child after all children finish.
+Any child exception now fails the parent before it installs or consumes the
+parallel operation's output. The checks run only at protocol boundaries.
+
+Verification:
+
+- `Dpf_Audit_Test` closes the peer socket before a parallel Sparse DPF receive
+  completes and requires the parent operation to report the failure.
+- Release and scalar builds exercise the affected protocol implementations.
+
+## AUD-151: Sparse DPF accepted non-bit correction tags
+
+Status: fixed
+
+Affected code:
+
+- `SparseDpf::reveal` for seed and tag corrections.
+
+Concern:
+
+The protocol received each correction tag as a byte and combined it with a
+local bit without checking that the peer sent zero or one.
+
+Impact:
+
+A peer could inject high bits into the binary tag state. Those bits then
+entered tag arithmetic and block-mask construction, producing malformed DPF
+outputs outside the protocol's binary invariant.
+
+Resolution:
+
+Sparse DPF validates both received tag components before it combines either
+component with local state. The validation occurs once per exchanged tree
+node and does not change the expansion kernels.
+
+Verification:
+
+- `Dpf_Audit_Test` sends a correction tag with value two and requires the
+  receiver to reject it before changing its output state.

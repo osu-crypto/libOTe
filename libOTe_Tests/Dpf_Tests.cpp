@@ -2362,6 +2362,57 @@ void Dpf_Audit_Test(const oc::CLP&)
 			[&](auto, auto, auto, auto) { ++outputs; }, prng, oneSet, sock));
 		if (outputs != 1)
 			throw UnitTestFail("Sparse DPF did not expand a singleton sparse set");
+
+		{
+			SparseDpf sparse;
+			std::vector<block> sigma{ block(1, 2) };
+			std::vector<std::array<u8, 2>> tau{ { 1, 0 } };
+			auto originalSigma = sigma;
+			auto originalTau = tau;
+			auto sockets = coproto::LocalAsyncSocket::makePair();
+			auto sendInvalidTau = [&]() -> macoro::task<> {
+				std::vector<block> peerSigma(1);
+				std::vector<std::array<u8, 2>> peerTau(1);
+				co_await sockets[1].recv(peerSigma);
+				co_await sockets[1].recv(peerTau);
+				peerTau[0] = { 2, 0 };
+				co_await sockets[1].send(std::move(peerSigma));
+				co_await sockets[1].send(std::move(peerTau));
+			};
+
+			auto results = macoro::sync_wait(macoro::when_all_ready(
+				sparse.reveal(sigma, tau, sockets[0]), sendInvalidTau()));
+			bool rejected = false;
+			try { std::get<0>(results).result(); }
+			catch (const std::exception&) { rejected = true; }
+			std::get<1>(results).result();
+			if (!rejected || sigma != originalSigma || tau != originalTau)
+				throw UnitTestFail(
+					"Sparse DPF accepted or applied a non-bit peer tau value");
+		}
+
+		{
+			SparseDpf sparse;
+			std::vector<block> sigma(1);
+			std::vector<std::array<u8, 2>> tau(1);
+			auto sockets = coproto::LocalAsyncSocket::makePair();
+			auto closeBeforeReply = [&]() -> macoro::task<> {
+				std::vector<block> peerSigma(1);
+				std::vector<std::array<u8, 2>> peerTau(1);
+				co_await sockets[1].recv(peerSigma);
+				co_await sockets[1].recv(peerTau);
+				co_await sockets[1].close();
+			};
+
+			auto results = macoro::sync_wait(macoro::when_all_ready(
+				sparse.reveal(sigma, tau, sockets[0]), closeBeforeReply()));
+			bool failed = false;
+			try { std::get<0>(results).result(); }
+			catch (const std::exception&) { failed = true; }
+			std::get<1>(results).result();
+			if (!failed)
+				throw UnitTestFail("Sparse DPF suppressed a parallel receive failure");
+		}
 	}
 #endif
 }

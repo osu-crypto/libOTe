@@ -211,10 +211,12 @@ namespace osuCrypto
 				BitVector choice(baseCount.mRecvCount);
 				choice.randomize(prng);
 
-				co_await(
+				auto results = co_await(
 					macoro::when_all_ready(
 						baseOt1.send(sendMsg, prng, sock),
 						baseOt2.receive(choice, recvMsg, prng2, sock2)));
+				std::get<0>(results).result();
+				std::get<1>(results).result();
 
 				setBaseOts(sendMsg, recvMsg, choice);
 #else
@@ -274,11 +276,13 @@ namespace osuCrypto
 				BitVector choice(baseCount.mRecvCount);
 				choice.randomize(prng);
 
-				co_await(
+				auto results = co_await(
 					macoro::when_all_ready(
 						baseOt1.receive(choice, recvMsg, prng, sock),
 						baseOt2.send(sendMsg, prng2, sock2)
 					));
+				std::get<0>(results).result();
+				std::get<1>(results).result();
 
 				setBaseOts(sendMsg, recvMsg, choice);
 #else

@@ -530,11 +530,13 @@ namespace osuCrypto
 
 					if (choiceBits.size())
 					{
-						co_await
+						auto results = co_await
 							macoro::when_all_ready(
 								nv.receive(baseC, baseA, prng2, *mOtExtSender, chl2, mCtx),
 								mOtExtRecver->receive(choiceBits, msg, prng, chl)
 							);
+						std::get<0>(results).result();
+						std::get<1>(results).result();
 					}
 					else
 						co_await nv.receive(baseC, baseA, prng2, *mOtExtSender, chl2, mCtx);
@@ -551,10 +553,12 @@ namespace osuCrypto
 				BaseOT baseOt;
 				if (choiceBits.size())
 				{
-					co_await
+					auto results = co_await
 						macoro::when_all_ready(
 							baseOt.receive(choiceBits, msg, prng, chl),
 							nv.receive(baseC, baseA, prng2, baseOt, chl2, mCtx));
+					std::get<0>(results).result();
+					std::get<1>(results).result();
 				}
 				else
 					co_await nv.receive(baseC, baseA, prng2, baseOt, chl2, mCtx);
