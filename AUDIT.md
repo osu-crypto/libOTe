@@ -5307,3 +5307,41 @@ Verification:
 - The test requires both roles to report the correlations ready, executes the
   malicious protocol, and verifies the resulting Triple and OLE correlations.
 - The focused test passes in Release AVX2 and scalar builds.
+
+## AUD-166: Triple compression violated strict aliasing
+
+Status: fixed
+
+Affected code:
+
+- `SilentOtTriple::{compressRecver,compressSender}()`.
+- Both `RingLpnTriple::convertToOle()` overloads.
+
+Concern:
+
+The OLE compression paths cast arrays of live `block` objects to `u16*` and
+wrote the compressed output through those pointers. A `block` contains SIMD
+vector storage, or a `uint64_t` array in scalar builds, so a `u16` lvalue is not
+a permitted alias for that storage under the C++ object model. Optimizers could
+therefore transform the surrounding code on the assumption that these stores
+did not modify the `block` objects.
+
+Impact:
+
+A compiler exploiting the undefined behavior could produce incorrect OLE or
+triple shares. This could invalidate the correctness or security of a protocol
+using the resulting preprocessing. The issue also made these kernels dependent
+on compiler- and architecture-specific aliasing behavior.
+
+Resolution:
+
+The output cursors now remain byte pointers, which may access an object's byte
+representation. Each 16-bit result is stored with a constant-size `memcpy`.
+The existing fixed-width compression loops and batching are unchanged; an
+optimizing compiler lowers each two-byte copy to the corresponding scalar
+store.
+
+Verification:
+
+- The Silent triple/OLE audit test passes in Release AVX2 and scalar builds.
+- The Ring-LPN conversion test passes in Release AVX2 and scalar builds.

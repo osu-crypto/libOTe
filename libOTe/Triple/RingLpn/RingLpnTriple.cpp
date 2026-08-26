@@ -79,7 +79,7 @@ namespace osuCrypto
         span<block> add,
         span<block> mult)
     {
-        auto aIter16 = (u16*)add.data();
+        auto addIter = (u8*)add.data();
         //auto bIter8 = (u8*)mult.data();
 
         if (add.size() * 128 != A.size())
@@ -155,7 +155,8 @@ namespace osuCrypto
 
             u16 ap = movemask_epi8(a00);
 
-            *aIter16++ = ap;
+            memcpy(addIter, &ap, sizeof(ap));
+            addIter += sizeof(ap);
             m += 16;
 
         }
@@ -168,8 +169,8 @@ namespace osuCrypto
         span<block> mult)
     {
 
-        auto bIter16 = (u16*)add.data();
-        auto aIter16 = (u16*)mult.data();
+        auto addIter = (u8*)add.data();
+        auto multIter = (u8*)mult.data();
 
         if (add.size() * 128 != B.size())
             throw RTE_LOC;
@@ -298,11 +299,14 @@ namespace osuCrypto
             u16 ap = movemask_epi8(a00);
             u16 bp = movemask_epi8(b00);
 
-            assert(aIter16 < (u16*)(mult.data() + mult.size()));
-            assert(bIter16 < (u16*)(add.data() + add.size()));
+            assert(multIter + sizeof(u16) <= (u8*)(mult.data() + mult.size()));
+            assert(addIter + sizeof(u16) <= (u8*)(add.data() + add.size()));
 
-            *aIter16++ = ap ^ bp;
-            *bIter16++ = ap;
+            auto ab = static_cast<u16>(ap ^ bp);
+            memcpy(multIter, &ab, sizeof(ab));
+            memcpy(addIter, &ap, sizeof(ap));
+            multIter += sizeof(ab);
+            addIter += sizeof(ap);
         }
     }
 

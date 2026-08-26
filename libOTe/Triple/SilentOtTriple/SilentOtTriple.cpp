@@ -80,7 +80,6 @@ namespace osuCrypto
 		span<oc::block> B)
 	{
 
-		auto cIter16 = (u16*)C.data();
 		auto cIter8 = (u8*)C.data();
 		auto aIter8 = (u8*)A.data();
 		auto bIter8 = (u8*)B.data();
@@ -228,7 +227,8 @@ namespace osuCrypto
 
 				*aIter8++ = choice[0];
 				*aIter8++ = choice[1];
-				*cIter16++ = ap;
+				memcpy(cIter8, &ap, sizeof(ap));
+				cIter8 += sizeof(ap);
 			}
 			m += 16;
 
@@ -243,10 +243,6 @@ namespace osuCrypto
 		span<oc::block> A,
 		span<oc::block> B)
 	{
-
-		auto cIter16 = (u16*)C.data();
-		auto aIter16 = (u16*)A.data();
-
 
 		auto cIter8 = (u8*)C.data();
 		auto aIter8 = (u8*)A.data();
@@ -404,11 +400,11 @@ namespace osuCrypto
 			u16 ap = movemask_epi8(a00);
 			u16 bp = movemask_epi8(b00);
 
-			assert(aIter16 < (u16*)(A.data() + A.size()));
-			assert(cIter16 < (u16*)(C.data() + C.size()));
-
 			if (bIter8)
 			{
+				assert(aIter8 < (u8*)(A.data() + A.size()));
+				assert(cIter8 < (u8*)(C.data() + C.size()));
+
 				// triples
 
 				// want
@@ -448,8 +444,14 @@ namespace osuCrypto
 			else
 			{
 				// ole
-				*aIter16++ = ap ^ bp;
-				*cIter16++ = ap;
+				assert(aIter8 + sizeof(u16) <= (u8*)(A.data() + A.size()));
+				assert(cIter8 + sizeof(u16) <= (u8*)(C.data() + C.size()));
+
+				auto ab = static_cast<u16>(ap ^ bp);
+				memcpy(aIter8, &ab, sizeof(ab));
+				memcpy(cIter8, &ap, sizeof(ap));
+				aIter8 += sizeof(ab);
+				cIter8 += sizeof(ap);
 			}
 		}
 	}
