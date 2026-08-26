@@ -297,13 +297,14 @@ namespace osuCrypto
 			transpose128(outW.data());
 		}
 
-		void xorMessages(u64 numUsed, block* messagesOut, const block* messagesIn) const;
+		void xorMessages(
+			u64 numUsed, std::array<block, 2>* messagesOut, const block* messagesIn) const;
 
 
-		// messagesOut and messagesIn must either be equal or non-overlapping.
 		template<typename Enc>
 		static OC_FORCEINLINE void xorAndHashMessages(
-			u64 numUsed, block deltaBlock, block* messagesOut, const block* messagesIn, Enc& enc)
+			u64 numUsed, block deltaBlock, std::array<block, 2>* messagesOut,
+			const block* messagesIn, Enc& enc)
 		{
 			// Loop backwards, similarly to DotSemiHonest.
 			u64 i = numUsed;
@@ -319,7 +320,8 @@ namespace osuCrypto
 					superBlk[2 * j + 1] = messagesIn[i + j] ^ deltaBlock;
 				}
 
-				enc.template hashBlocks<superBlkSize>(superBlk, messagesOut + 2 * i);
+				enc.template hashBlocks<superBlkSize>(superBlk, superBlk);
+				memcpy(messagesOut + i, superBlk, sizeof(superBlk));
 			}
 
 			// Finish up. The more straightforward while (i--) unfortunately gives a (spurious AFAICT)
@@ -332,7 +334,8 @@ namespace osuCrypto
 				block msgs[2];
 				msgs[0] = messagesIn[i];
 				msgs[1] = msgs[0] ^ deltaBlock;
-				enc.template hashBlocks<2>(msgs, messagesOut + 2 * i);
+				enc.template hashBlocks<2>(msgs, msgs);
+				messagesOut[i] = { msgs[0], msgs[1] };
 			}
 
 			// Note: probably need a stronger hash for malicious secure version.
@@ -348,12 +351,8 @@ namespace osuCrypto
 		auto recvBuffer(Socket& chl, u64 batchSize) { return mSubVole.recv(chl, 0, batchSize); }
 
 		OC_FORCEINLINE void processChunk(
-			u64 nChunk, u64 numUsed, span<std::array<block, 2>> messages);
-
-		OC_FORCEINLINE void processPartialChunk(
-			u64 chunkIdx, u64 numUsed,
-			span<std::array<block, 2>> messages,
-			span<std::array<block, 2>> temp);
+			u64 numUsed, span<std::array<block, 2>> messages,
+			span<block> inputW);
 	};
 
 	template<typename SubspaceVole = SubspaceVoleSender<RepetitionCode>>

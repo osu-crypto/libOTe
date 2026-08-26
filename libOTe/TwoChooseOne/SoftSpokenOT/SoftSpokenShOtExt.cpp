@@ -42,11 +42,10 @@ namespace osuCrypto
 		auto numInstances = u64{};
 		auto numChunks = u64{};
 		auto chunkSize_ = u64{};
-		auto minInstances = u64{};
 		auto nChunk = u64{};
 		auto nInstance = u64{};
 		auto numUsed = u64{};
-		auto temp = AlignedUnVector<std::array<block, 2>>();
+		auto inputW = AlignedUnVector<block>();
 		auto seed = block{};
 
 		if (!hasBaseOts())
@@ -63,34 +62,18 @@ namespace osuCrypto
 		numInstances = messages.size();
 		numChunks = divCeil(numInstances, chunkSize());
 		chunkSize_ = chunkSize();
-		minInstances = chunkSize_ + paddingSize();
+		inputW.resize(wPadded());
 
-		// The bulk of the instances can work directly on the input / output data.
 		nChunk = 0;
 		nInstance = 0;
-		for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += chunkSize_)
+		for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize_)
 		{
 			if (nChunk % commSize == 0)
 				co_await(recvBuffer(chl, std::min<u64>(numChunks - nChunk, commSize)));
 
-			processChunk(
-				nChunk, chunkSize_,
-				messages.subspan(nInstance, minInstances));
-		}
-
-		// The last few (probably only 1) need an intermediate buffer.
-		temp.resize(minInstances * (nInstance < numInstances));
-
-		for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize_)
-		{
-			if (nChunk % commSize == 0)
-				co_await recvBuffer(chl, std::min<u64>(numChunks - nChunk, commSize));
-
 			numUsed = std::min<u64>(numInstances - nInstance, chunkSize_);
-			processPartialChunk(
-				nChunk, numUsed,
-				messages.subspan(nInstance, numUsed),
-				temp);
+			processChunk(numUsed,
+				messages.subspan(nInstance, numUsed), inputW);
 		}
 
 		} MACORO_CATCH(eptr) {
@@ -101,53 +84,29 @@ namespace osuCrypto
 
 	template<typename SubspaceVole>
 	void SoftSpokenShOtSender<SubspaceVole>::processChunk(
-		u64 nChunk, u64 numUsed, span<std::array<block, 2>> messages)
+		u64 numUsed, span<std::array<block, 2>> messages,
+		span<block> inputW)
 	{
 		u64 blockIdx = mBlockIdx++;
 
-		block* messagesPtr = (block*)messages.data();
-
 		// Only 1 AES evaluation per VOLE is on a secret seed.
 		auto& aes = mAesMgr.useAES(mSubVole.mVole.mNumVoles);
-		generateChosen(blockIdx, aes, span<block>(messagesPtr, wPadded()));
+		generateChosen(blockIdx, aes, inputW);
 
 		if (mRandomOt)
-			xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr, aes);
+			xorAndHashMessages(numUsed, delta(), messages.data(), inputW.data(), aes);
 		else
-			xorMessages(numUsed, messagesPtr, messagesPtr);
+			xorMessages(numUsed, messages.data(), inputW.data());
 	}
 
 
 
-	// Use temporaries to make processChunk work on a partial chunk.
-	template<typename SubspaceVole>
-	void SoftSpokenShOtSender<SubspaceVole>::processPartialChunk(
-		u64 chunkIdx, u64 numUsed,
-		span<std::array<block, 2>> messages,
-		span<std::array<block, 2>> temp)
-	{
-		assert(temp.size() > messages.size());
-
-		memcpy(temp.data(), messages.data(), sizeof(messages[0]) * numUsed);
-
-		processChunk(
-			chunkIdx, numUsed,
-			temp);
-
-		memcpy(messages.data(), temp.data(), sizeof(messages[0]) * numUsed);
-	}
-
-
-
-	// messagesOut and messagesIn must either be equal or non-overlapping.
 	template<typename SubspaceVole>
 	void SoftSpokenShOtSender<SubspaceVole>::xorMessages(
-		u64 numUsed, block* messagesOut, const block* messagesIn) const
+		u64 numUsed, std::array<block, 2>* messagesOut, const block* messagesIn) const
 	{
 		block deltaBlock = delta();
 
-		// Loop backwards to avoid tripping over other iterations, as the loop is essentially mapping
-		// index i to index 2*i and messagesOut might be messagesIn.
 		u64 i = numUsed;
 		while (i >= superBlkSize / 2)
 		{
@@ -160,7 +119,7 @@ namespace osuCrypto
 				superBlk[2 * j] = messagesIn[i + j];
 				superBlk[2 * j + 1] = messagesIn[i + j] ^ deltaBlock;
 			}
-			std::copy_n(superBlk, superBlkSize, messagesOut + 2 * i);
+			memcpy(messagesOut + i, superBlk, sizeof(superBlk));
 		}
 
 		// Finish up. The more straightforward while (i--) unfortunately gives a (spurious AFAICT)
@@ -171,8 +130,7 @@ namespace osuCrypto
 			i = remainingIters - j - 1;
 
 			block v = messagesIn[i];
-			messagesOut[2 * i] = v;
-			messagesOut[2 * i + 1] = v ^ deltaBlock;
+			messagesOut[i] = { v, v ^ deltaBlock };
 		}
 	}
 

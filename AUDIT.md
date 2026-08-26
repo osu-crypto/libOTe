@@ -5526,3 +5526,86 @@ Verification:
 - `DotExt_Kos_Test` passes in Release AVX2 and scalar builds.
 - Across five sequential 500-iteration Release runs, the median changed from
   3,797.4 ms to 3,696.0 ms (-2.7%).
+
+## AUD-172: Nested transpose buffers depended on flattened inner-array traversal
+
+Status: closed (portability cleanup)
+
+Affected code:
+
+- KKRT and OOS NCO sender and receiver transpose workspaces.
+- The nested-array compatibility overloads for 128-by-1024 transpose.
+- The KOS-Dot correction receive buffer.
+
+Concern:
+
+These paths treated nested arrays of blocks as one flat block array. Every
+element was a live `block` and the implementations rely on the contiguous
+standard-array layout, so this was not a strict-aliasing or object-lifetime
+violation. Formally, however, arithmetic from the first inner array's data
+pointer beyond that inner array is a pointer-provenance portability concern.
+
+Impact:
+
+No credible security impact was identified on the supported compilers. This
+finding records a layout dependency and not an observed correctness failure.
+
+Resolution:
+
+The internal KKRT and OOS workspaces are now flat aligned vectors of `block`,
+which preserves their exact allocation size, alignment, access order, and
+transpose kernel. The public nested-array transpose overloads remain for source
+compatibility and now assert the required packed layout. A proposed KOS-Dot
+flattening was reverted because sequential A/B measurements showed a repeatable
+hot-path regression; its known block layout remains unchanged.
+
+Verification:
+
+- The KKRT and OOS focused tests pass in Release AVX2 and scalar builds.
+- Seven-run interleaved Release A/B measurements changed KKRT by -0.6% and OOS
+  by +0.6%.
+- The KOS-Dot experiment regressed by about 5% on its repeated A/B check and
+  was not retained.
+
+## AUD-173: SoftSpoken flattened OT-pair output storage
+
+Status: closed (hardened)
+
+Affected code:
+
+- `SoftSpokenShOtSender::processChunk()`.
+- `SoftSpokenShOtSender::xorMessages()` and `xorAndHashMessages()`.
+- `SoftSpokenMalOtSender::Hasher::processChunk()`.
+
+Concern:
+
+SoftSpoken exposed its `std::array<block, 2>` output as a flat `block*` both as
+temporary VOLE storage and as the destination for pair generation and hashing.
+The pair elements are live blocks in a guaranteed contiguous container layout,
+but flat pointer traversal across inner arrays is a formal portability concern.
+
+Impact:
+
+No credible security impact was identified on the supported compilers. A
+future optimizer or unsupported representation could, in principle, interpret
+the cross-inner-array pointer arithmetic more narrowly than intended.
+
+Resolution:
+
+The semi-honest sender now generates each chunk into one reusable aligned block
+workspace. Pair construction and hashing write through typed OT-pair pointers;
+batched hashing remains fixed-width and uses stack arrays. The malicious sender
+also uses typed pair output. Its full-size input workspace still intentionally
+reuses the public pair layout, guarded by a size assertion and an explicit
+comment: replacing that view with a separate allocation measurably increased
+large-transfer cost and memory footprint.
+
+Verification:
+
+- Semi-honest, malicious, split, AES-state, and buffer-state SoftSpoken tests
+  pass in Release AVX2; the main semi-honest and malicious tests also pass in
+  the scalar build.
+- Seven-run interleaved Release A/B measurements changed the semi-honest test
+  by -1.9% and the malicious test by -0.4%.
+- At one million OTs, the final malicious path measured +0.7%, within run noise.
+  The rejected separate full-size workspace measured +3.1% and was removed.

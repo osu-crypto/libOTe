@@ -109,7 +109,7 @@ namespace osuCrypto
 		u64 doneIdx = 0;
 
 		// a temp that will be used to transpose the sender's matrix
-		AlignedUnVector<std::array<block, superBlkSize>> t(128);
+		AlignedUnVector<block> t(128 * superBlkSize);
 
 		u64 numCols = mGens.size();
 
@@ -128,13 +128,13 @@ namespace osuCrypto
 				// generate the columns using AES-NI in counter mode.
 				for (u64 tIdx = 0, colIdx = i * 128; tIdx < 128; ++tIdx, ++colIdx)
 				{
-					mGens[colIdx].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t.data() + superBlkSize * tIdx));
+					mGens[colIdx].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, t.data() + superBlkSize * tIdx);
 					mGensBlkIdx[colIdx] += superBlkSize;
 				}
 
 				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 				// each 128 bits wide.
-				transpose128x1024(t[0].data());
+				transpose128x1024(t.data());
 
 				// This is the index of where we will store the matrix long term.
 				// doneIdx is the starting row. i is the offset into the blocks of 128 bits.
@@ -147,7 +147,7 @@ namespace osuCrypto
 					// because we transposed 1024 rows, the indexing gets a bit weird. But this
 					// is the location of the next row that we want. Keep in mind that we had long
 					// **contiguous** columns.
-					block* __restrict tIter = (((block*)t.data()) + j);
+					block* __restrict tIter = t.data() + j;
 
 					// do the copy!
 					for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)

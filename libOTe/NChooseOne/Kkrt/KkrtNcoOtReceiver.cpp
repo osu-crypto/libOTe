@@ -45,8 +45,8 @@ namespace osuCrypto
 		// this will be used as temporary buffers of 128 columns,
 		// each containing 1024 bits. Once transposed, they will be copied
 		// into the T1, T0 buffers for long term storage.
-		AlignedUnVector<std::array<block, superBlkSize>> t0(128);
-		AlignedUnVector<std::array<block, superBlkSize>> t1(128);
+		AlignedUnVector<block> t0(128 * superBlkSize);
+		AlignedUnVector<block> t1(128 * superBlkSize);
 
 		// we are going to process OTs in blocks of 128 * superblkSize mMessages.
 		u64 numSuperBlocks = ((numOtExt + 127) / 128 + superBlkSize - 1) / superBlkSize;
@@ -91,8 +91,8 @@ namespace osuCrypto
 					// AES in counter mode acting as a PRNG. We don't use the normal
 					// PRNG interface because that would result in a data copy when
 					// we move it into the T0,T1 matrices. Instead we do it directly.
-					mGens[colIdx][0].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t0.data() + superBlkSize * tIdx));
-					mGens[colIdx][1].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t1.data() + superBlkSize * tIdx));
+					mGens[colIdx][0].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, t0.data() + superBlkSize * tIdx);
+					mGens[colIdx][1].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, t1.data() + superBlkSize * tIdx);
 
 					// increment the counter mode idx.
 					mGensBlkIdx[colIdx] += superBlkSize;
@@ -100,8 +100,8 @@ namespace osuCrypto
 
 				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 				// each 128 bits wide.
-				transpose128x1024(t0[0].data());
-				transpose128x1024(t1[0].data());
+				transpose128x1024(t0.data());
+				transpose128x1024(t1.data());
 
 				// This is the index of where we will store the matrix long term.
 				// doneIdx is the starting row. i is the offset into the blocks of 128 bits.
@@ -115,8 +115,8 @@ namespace osuCrypto
 					// because we transposed 1024 rows, the indexing gets a bit weird. But this
 					// is the location of the next row that we want. Keep in mind that we had long
 					// **contiguous** columns.
-					block* __restrict t0Iter = ((block*)t0.data()) + j;
-					block* __restrict t1Iter = ((block*)t1.data()) + j;
+					block* __restrict t0Iter = t0.data() + j;
+					block* __restrict t1Iter = t1.data() + j;
 
 					// do the copy!
 					for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)

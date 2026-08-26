@@ -87,6 +87,8 @@ namespace osuCrypto {
     void eklundh_transpose128x1024(block* inOut);
     inline void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
     {
+        static_assert(sizeof(inOut) == 128 * 8 * sizeof(block));
+        // Compatibility overload for callers using the historical nested layout.
         eklundh_transpose128x1024(inOut[0].data());
     }
 
@@ -100,6 +102,8 @@ namespace osuCrypto {
     void sse_transpose128x1024(block* inOut);
     inline void sse_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
     {
+        static_assert(sizeof(inOut) == 128 * 8 * sizeof(block));
+        // Compatibility overload for callers using the historical nested layout.
         sse_transpose128x1024(inOut[0].data());
     }
     inline void sse_transpose128(std::array<block, 128>& inOut) { sse_transpose128(inOut.data()); };
@@ -141,6 +145,8 @@ namespace osuCrypto {
 
     inline void transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
     {
+        static_assert(sizeof(inOut) == 128 * 8 * sizeof(block));
+        // Compatibility overload for callers using the historical nested layout.
         transpose128x1024(inOut[0].data());
     }
 }
