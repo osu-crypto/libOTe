@@ -353,19 +353,16 @@ namespace osuCrypto {
 
 
 
-	// given a 16x16 sub square, place its transpose into u16OutView at
+	// given a 16x16 sub square, place its transpose into two-byte lanes at
 	// rows  16*h, ..., 16 *(h+1)  a byte  columns w, w+1.
 	void sse_transposeSubSquare(block* out, array<block, 2>& in, u64 x, u64 y)
 	{
-		static_assert(sizeof(array<array<u16, 8>, 128>) == sizeof(array<block, 128>), "");
-
-		array<u16, 8>* outU16View = (array<u16, 8>*)out;
-
-
 		for (int j = 0; j < 8; j++)
 		{
-			outU16View[16 * x + 7 - j][y] = in[0].movemask_epi8();
-			outU16View[16 * x + 15 - j][y] = in[1].movemask_epi8();
+			auto lo = static_cast<u16>(in[0].movemask_epi8());
+			auto hi = static_cast<u16>(in[1].movemask_epi8());
+			memcpy(out[16 * x + 7 - j].data() + y * sizeof(u16), &lo, sizeof(lo));
+			memcpy(out[16 * x + 15 - j].data() + y * sizeof(u16), &hi, sizeof(hi));
 
 			in[0] = in[0].slli_epi64(1);
 			in[1] = in[1].slli_epi64(1);
@@ -506,14 +503,22 @@ namespace osuCrypto {
 					// use the special movemask_epi8 to perform the final step of that bit-wise tranpose.
 					// this instruction takes ever 8'th bit (start at idx 7) and moves them into a single
 					// 16 bit output. Its like shaving off the top bit of each of the 16 bytes.
-					*(u16*)out0 = t.blks[0].movemask_epi8();
-					*(u16*)out1 = t.blks[1].movemask_epi8();
-					*(u16*)out2 = t.blks[2].movemask_epi8();
-					*(u16*)out3 = t.blks[3].movemask_epi8();
-					*(u16*)out4 = t.blks[4].movemask_epi8();
-					*(u16*)out5 = t.blks[5].movemask_epi8();
-					*(u16*)out6 = t.blks[6].movemask_epi8();
-					*(u16*)out7 = t.blks[7].movemask_epi8();
+					auto mask = static_cast<u16>(t.blks[0].movemask_epi8());
+					memcpy(out0, &mask, sizeof(mask));
+					mask = static_cast<u16>(t.blks[1].movemask_epi8());
+					memcpy(out1, &mask, sizeof(mask));
+					mask = static_cast<u16>(t.blks[2].movemask_epi8());
+					memcpy(out2, &mask, sizeof(mask));
+					mask = static_cast<u16>(t.blks[3].movemask_epi8());
+					memcpy(out3, &mask, sizeof(mask));
+					mask = static_cast<u16>(t.blks[4].movemask_epi8());
+					memcpy(out4, &mask, sizeof(mask));
+					mask = static_cast<u16>(t.blks[5].movemask_epi8());
+					memcpy(out5, &mask, sizeof(mask));
+					mask = static_cast<u16>(t.blks[6].movemask_epi8());
+					memcpy(out6, &mask, sizeof(mask));
+					mask = static_cast<u16>(t.blks[7].movemask_epi8());
+					memcpy(out7, &mask, sizeof(mask));
 
 					// step each of out 8 pointer over to the next output row.
 					out0 -= out.stride();
@@ -586,7 +591,8 @@ namespace osuCrypto {
 
 				for (int j = 0; j < rem; j++)
 				{
-					*(u16*)out0 = t.blks[0].movemask_epi8();
+					auto mask = static_cast<u16>(t.blks[0].movemask_epi8());
+					memcpy(out0, &mask, sizeof(mask));
 
 					out0 -= out.stride();
 
@@ -669,14 +675,22 @@ namespace osuCrypto {
 				{
 					for (int j = 0; j < 8; j++)
 					{
-						*(u16*)out0 = t.blks[0].movemask_epi8();
-						*(u16*)out1 = t.blks[1].movemask_epi8();
-						*(u16*)out2 = t.blks[2].movemask_epi8();
-						*(u16*)out3 = t.blks[3].movemask_epi8();
-						*(u16*)out4 = t.blks[4].movemask_epi8();
-						*(u16*)out5 = t.blks[5].movemask_epi8();
-						*(u16*)out6 = t.blks[6].movemask_epi8();
-						*(u16*)out7 = t.blks[7].movemask_epi8();
+						auto mask = static_cast<u16>(t.blks[0].movemask_epi8());
+						memcpy(out0, &mask, sizeof(mask));
+						mask = static_cast<u16>(t.blks[1].movemask_epi8());
+						memcpy(out1, &mask, sizeof(mask));
+						mask = static_cast<u16>(t.blks[2].movemask_epi8());
+						memcpy(out2, &mask, sizeof(mask));
+						mask = static_cast<u16>(t.blks[3].movemask_epi8());
+						memcpy(out3, &mask, sizeof(mask));
+						mask = static_cast<u16>(t.blks[4].movemask_epi8());
+						memcpy(out4, &mask, sizeof(mask));
+						mask = static_cast<u16>(t.blks[5].movemask_epi8());
+						memcpy(out5, &mask, sizeof(mask));
+						mask = static_cast<u16>(t.blks[6].movemask_epi8());
+						memcpy(out6, &mask, sizeof(mask));
+						mask = static_cast<u16>(t.blks[7].movemask_epi8());
+						memcpy(out7, &mask, sizeof(mask));
 
 						out0 -= out.stride();
 						out1 -= out.stride();
@@ -733,7 +747,8 @@ namespace osuCrypto {
 				{
 					if (leftOverWidth > 8)
 					{
-						*(u16*)out0 = t.blks[0].movemask_epi8();
+						auto mask = static_cast<u16>(t.blks[0].movemask_epi8());
+						memcpy(out0, &mask, sizeof(mask));
 					}
 					else
 					{
@@ -960,10 +975,6 @@ namespace osuCrypto {
 
 	inline void sse_transposeSubSquarex(array<array<block, 8>, 128>& out, array<block, 2>& in, u64 x, u64 y, u64 i)
 	{
-		static_assert(sizeof(array<array<u16, 64>, 128>) == sizeof(array<array<block, 8>, 128>), "");
-
-		array<array<u16, 64>, 128>& outU16View = *(array<array<u16, 64>, 128>*) & out;
-
 		auto i8y = i * 8 + y;
 		auto x16_7 = x * 16 + 7;
 		auto x16_15 = x * 16 + 15;
@@ -977,14 +988,22 @@ namespace osuCrypto {
 		block b6 = in[0].slli_epi64(6);
 		block b7 = in[0].slli_epi64(7);
 
-		outU16View[x16_7 - 0][i8y] = b0.movemask_epi8();
-		outU16View[x16_7 - 1][i8y] = b1.movemask_epi8();
-		outU16View[x16_7 - 2][i8y] = b2.movemask_epi8();
-		outU16View[x16_7 - 3][i8y] = b3.movemask_epi8();
-		outU16View[x16_7 - 4][i8y] = b4.movemask_epi8();
-		outU16View[x16_7 - 5][i8y] = b5.movemask_epi8();
-		outU16View[x16_7 - 6][i8y] = b6.movemask_epi8();
-		outU16View[x16_7 - 7][i8y] = b7.movemask_epi8();
+		auto mask = static_cast<u16>(b0.movemask_epi8());
+		memcpy((u8*)out[x16_7 - 0].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b1.movemask_epi8());
+		memcpy((u8*)out[x16_7 - 1].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b2.movemask_epi8());
+		memcpy((u8*)out[x16_7 - 2].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b3.movemask_epi8());
+		memcpy((u8*)out[x16_7 - 3].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b4.movemask_epi8());
+		memcpy((u8*)out[x16_7 - 4].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b5.movemask_epi8());
+		memcpy((u8*)out[x16_7 - 5].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b6.movemask_epi8());
+		memcpy((u8*)out[x16_7 - 6].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b7.movemask_epi8());
+		memcpy((u8*)out[x16_7 - 7].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 
 		b0 = in[1].slli_epi64(0);
 		b1 = in[1].slli_epi64(1);
@@ -995,14 +1014,22 @@ namespace osuCrypto {
 		b6 = in[1].slli_epi64(6);
 		b7 = in[1].slli_epi64(7);
 
-		outU16View[x16_15 - 0][i8y] = b0.movemask_epi8();
-		outU16View[x16_15 - 1][i8y] = b1.movemask_epi8();
-		outU16View[x16_15 - 2][i8y] = b2.movemask_epi8();
-		outU16View[x16_15 - 3][i8y] = b3.movemask_epi8();
-		outU16View[x16_15 - 4][i8y] = b4.movemask_epi8();
-		outU16View[x16_15 - 5][i8y] = b5.movemask_epi8();
-		outU16View[x16_15 - 6][i8y] = b6.movemask_epi8();
-		outU16View[x16_15 - 7][i8y] = b7.movemask_epi8();
+		mask = static_cast<u16>(b0.movemask_epi8());
+		memcpy((u8*)out[x16_15 - 0].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b1.movemask_epi8());
+		memcpy((u8*)out[x16_15 - 1].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b2.movemask_epi8());
+		memcpy((u8*)out[x16_15 - 2].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b3.movemask_epi8());
+		memcpy((u8*)out[x16_15 - 3].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b4.movemask_epi8());
+		memcpy((u8*)out[x16_15 - 4].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b5.movemask_epi8());
+		memcpy((u8*)out[x16_15 - 5].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b6.movemask_epi8());
+		memcpy((u8*)out[x16_15 - 6].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		mask = static_cast<u16>(b7.movemask_epi8());
+		memcpy((u8*)out[x16_15 - 7].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 
 	}
 

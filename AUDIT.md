@@ -5345,3 +5345,43 @@ Verification:
 
 - The Silent triple/OLE audit test passes in Release AVX2 and scalar builds.
 - The Ring-LPN conversion test passes in Release AVX2 and scalar builds.
+
+## AUD-167: Transpose kernels violated aliasing and alignment rules
+
+Status: fixed
+
+Affected code:
+
+- `sse_transposeSubSquare()`.
+- `sse_transposeSubSquarex()`.
+- `sse_transpose(MatrixView<const u8>, MatrixView<u8>)`.
+
+Concern:
+
+The SSE transpose kernels wrote 16-bit outputs through `u16` views of `block`
+or byte storage. Those lvalues are not permitted aliases for the underlying
+objects. The generic byte-view overload could additionally form an unaligned
+`u16*` when the caller supplied an odd output stride.
+
+Impact:
+
+A compiler exploiting the aliasing violation, or a target requiring aligned
+16-bit accesses, could corrupt a transpose. These kernels feed OT-extension
+matrix generation, so an incorrect result could corrupt derived OTs.
+
+Resolution:
+
+The kernels now keep their output cursors byte-addressed and store each
+16-bit mask with a constant-size `memcpy`. The fixed-width vector operations,
+unrolled stores, batching, and memory traversal are unchanged. The existing
+transpose benchmark is now exposed as `-bench -transpose` for regression
+testing.
+
+Verification:
+
+- `Tools_Transpose_Test` and `Tools_Transpose_View_Test` pass in Release AVX2
+  and scalar builds. The view test includes odd strides and compares the SSE
+  path with the AVX implementation when available.
+- Across five sequential Release runs of 1,048,576 trials, the
+  `sse_transpose128` median changed from 1,070 ms to 1,022 ms (-4.5%), while
+  the `sse_transpose128x1024` median remained 6,509 ms.

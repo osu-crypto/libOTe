@@ -2601,6 +2601,8 @@ namespace osuCrypto
 			WaksmanPermuteBench(cmd);
 		else if (cmd.isSet("binSolve"))
 			BinarySolverBench(cmd);
+		else if (cmd.isSet("transpose"))
+			transpose(cmd);
 		else if (cmd.isSet("goldilocks"))
 			Goldilocks_Mul_Bench(cmd);
 		else if (cmd.isSet("mulx"))
@@ -2628,6 +2630,7 @@ namespace osuCrypto
 			std::cout << "  -ring" << std::endl;
 			std::cout << "  -waksman" << std::endl;
 			std::cout << "  -binSolve" << std::endl;
+			std::cout << "  -transpose" << std::endl;
 		}
 	}
 }
