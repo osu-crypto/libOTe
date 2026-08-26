@@ -84,9 +84,9 @@ namespace osuCrypto
 		auto choices2 = BitVector{};
 		auto extraChoices = BitVector(128);
 		auto choiceBlocks = span<block>{};
-		auto t0 = Matrix<u8>{};
-		auto messageTemp = Matrix<u8>{};
-		auto mIter = Matrix<u8>::iterator{};
+		auto t0 = Matrix<block>{};
+		auto messageTemp = Matrix<details::KosDotCheckRow>{};
+		auto mIter = Matrix<details::KosDotCheckRow>::iterator{};
 		auto step = u64{};
 		auto uBuff = std::vector<block>{};
 		auto uIter = (block*)nullptr;
@@ -127,9 +127,12 @@ namespace osuCrypto
 		// this will be used as temporary buffers of 128 columns,
 		// each containing 1024 bits. Once transposed, they will be copied
 		// into the T1, T0 buffers for long term storage.
-		t0.resize(mGens.size(), superBlkSize * sizeof(block));
+		t0.resize(mGens.size(), superBlkSize);
+		auto t0Bytes = MatrixView<const u8>(
+			reinterpret_cast<const u8*>(t0.data()),
+			t0.rows(), t0.stride() * sizeof(block));
 
-		messageTemp.resize(messages.size() + 128, sizeof(block) * 2);
+		messageTemp.resize(messages.size() + 128, 1);
 		mIter = messageTemp.begin();
 
 
@@ -154,7 +157,7 @@ namespace osuCrypto
 			// the users next 128 choice bits. This will select what message is receiver.
 			cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
 
-			tIter = (block*)t0.data();
+			tIter = t0.data();
 			memset(t0.data(), 0, superBlkSize * 128 * sizeof(block));
 
 			// transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
@@ -211,18 +214,18 @@ namespace osuCrypto
 
 
 
-			auto mCount = std::min<u64>((messageTemp.end() - mIter) / messageTemp.stride(), 128 * superBlkSize);
+			auto mCount = std::min<u64>(messageTemp.end() - mIter, 128 * superBlkSize);
 
 			MatrixView<u8> tOut(
-				(u8*)&*mIter,
+				reinterpret_cast<u8*>(&*mIter),
 				mCount,
-				messageTemp.stride());
+				sizeof(details::KosDotCheckRow));
 
-			mIter += mCount * messageTemp.stride();
+			mIter += mCount;
 
 			// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 			// each 128 bits wide.
-			transpose(t0, tOut);
+			transpose(t0Bytes, tOut);
 		}
 
 
@@ -242,7 +245,7 @@ namespace osuCrypto
 				"KOS-Dot compression map changed for reused base choices. " LOCATION);
 		const auto& code = mCodeState->code();
 
-		auto msg = reinterpret_cast<details::KosDotCheckRow*>(messageTemp.data());
+		auto msg = messageTemp.data();
 		auto checkSeed = seed ^ senderSeeds[1];
 		auto columnCheck = details::kosDotColumnCheck(
 			span<const details::KosDotCheckRow>(msg, messages.size()),

@@ -1,4 +1,6 @@
 #include "cryptoTools/Crypto/PRNG.h"
+#include <array>
+#include <cstring>
 #include <vector>
 #ifdef ENABLE_AVX
 #define LIBDIVIDE_AVX2
@@ -89,21 +91,28 @@ namespace osuCrypto
                 }
 
                 auto src = prng.mBuffer.data();
-                auto dst = (block*)vals.data();
                 if (mIsPow2 )
                 {
                     assert(prng.mBuffer.size() == 256);
 
                     for (u64 i = 0; i < 256; i += 8)
                     {
-                        dst[i + 0] = src[i + 0] & mPow2MaskBlk;
-                        dst[i + 1] = src[i + 1] & mPow2MaskBlk;
-                        dst[i + 2] = src[i + 2] & mPow2MaskBlk;
-                        dst[i + 3] = src[i + 3] & mPow2MaskBlk;
-                        dst[i + 4] = src[i + 4] & mPow2MaskBlk;
-                        dst[i + 5] = src[i + 5] & mPow2MaskBlk;
-                        dst[i + 6] = src[i + 6] & mPow2MaskBlk;
-                        dst[i + 7] = src[i + 7] & mPow2MaskBlk;
+                        auto v0 = src[i + 0] & mPow2MaskBlk;
+                        auto v1 = src[i + 1] & mPow2MaskBlk;
+                        auto v2 = src[i + 2] & mPow2MaskBlk;
+                        auto v3 = src[i + 3] & mPow2MaskBlk;
+                        auto v4 = src[i + 4] & mPow2MaskBlk;
+                        auto v5 = src[i + 5] & mPow2MaskBlk;
+                        auto v6 = src[i + 6] & mPow2MaskBlk;
+                        auto v7 = src[i + 7] & mPow2MaskBlk;
+                        memcpy(vals.data() + 2 * (i + 0), &v0, sizeof(v0));
+                        memcpy(vals.data() + 2 * (i + 1), &v1, sizeof(v1));
+                        memcpy(vals.data() + 2 * (i + 2), &v2, sizeof(v2));
+                        memcpy(vals.data() + 2 * (i + 3), &v3, sizeof(v3));
+                        memcpy(vals.data() + 2 * (i + 4), &v4, sizeof(v4));
+                        memcpy(vals.data() + 2 * (i + 5), &v5, sizeof(v5));
+                        memcpy(vals.data() + 2 * (i + 6), &v6, sizeof(v6));
+                        memcpy(vals.data() + 2 * (i + 7), &v7, sizeof(v7));
                         //vals[i]
                         //vals.data()[i] = *(u64*)ptr & mPow2Mask;
                         //ptr += mPow2Step;
@@ -112,7 +121,7 @@ namespace osuCrypto
                 }
                 else
                 {
-                    memcpy(dst, src, vals.size() * sizeof(value_type));
+                    memcpy(vals.data(), src, vals.size() * sizeof(value_type));
                     //throw RTE_LOC;
                     //assert(vals.size() % 32 == 0);
                     for (u64 i = 0; i < vals.size(); i += 32)
@@ -131,6 +140,18 @@ namespace osuCrypto
 
 #ifdef ENABLE_AVX
             using block256 = __m256i;
+            static inline block256 load256(const u64* p)
+            {
+                return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+            }
+
+            static inline std::array<u64, 4> toU64(const block256& x)
+            {
+                std::array<u64, 4> result;
+                _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.data()), x);
+                return result;
+            }
+
             static inline block256 my_libdivide_u64_do_vec256(const block256& x, const libdivide::libdivide_u64_t* divider)
             {
                 return libdivide::libdivide_u64_do_vec256(x, divider);
@@ -138,18 +159,31 @@ namespace osuCrypto
 #else
             using block256 = std::array<block, 2>;
 
-            static inline block256 _mm256_loadu_si256(block256* p) { return *p; }
+            static inline block256 load256(const u64* p)
+            {
+                block256 result;
+                memcpy(&result, p, sizeof(result));
+                return result;
+            }
+
+            static inline std::array<u64, 4> toU64(const block256& x)
+            {
+                std::array<u64, 4> result;
+                memcpy(result.data(), &x, sizeof(x));
+                return result;
+            }
 
             static inline block256 my_libdivide_u64_do_vec256(const block256& x, const libdivide::libdivide_u64_t* divider)
             {
-                block256 y;
-                auto x64 = (u64*)&x;
-                auto y64 = (u64*)&y;
+                auto x64 = toU64(x);
+                std::array<u64, 4> y64;
                 for (u64 i = 0; i < 4; ++i)
                 {
                     y64[i] = libdivide::libdivide_u64_do(x64[i], divider);
                 }
 
+                block256 y;
+                memcpy(&y, y64.data(), sizeof(y));
                 return y;
             }
 #endif
@@ -159,14 +193,14 @@ namespace osuCrypto
             {
                 {
                     u64 i = 0;
-                    block256 row256a = _mm256_loadu_si256((block256*)&vals[i]);
-                    block256 row256b = _mm256_loadu_si256((block256*)&vals[i + 4]);
-                    block256 row256c = _mm256_loadu_si256((block256*)&vals[i + 8]);
-                    block256 row256d = _mm256_loadu_si256((block256*)&vals[i + 12]);
-                    block256 row256e = _mm256_loadu_si256((block256*)&vals[i + 16]);
-                    block256 row256f = _mm256_loadu_si256((block256*)&vals[i + 20]);
-                    block256 row256g = _mm256_loadu_si256((block256*)&vals[i + 24]);
-                    block256 row256h = _mm256_loadu_si256((block256*)&vals[i + 28]);
+                    block256 row256a = load256(&vals[i]);
+                    block256 row256b = load256(&vals[i + 4]);
+                    block256 row256c = load256(&vals[i + 8]);
+                    block256 row256d = load256(&vals[i + 12]);
+                    block256 row256e = load256(&vals[i + 16]);
+                    block256 row256f = load256(&vals[i + 20]);
+                    block256 row256g = load256(&vals[i + 24]);
+                    block256 row256h = load256(&vals[i + 28]);
                     auto tempa = my_libdivide_u64_do_vec256(row256a, divider);
                     auto tempb = my_libdivide_u64_do_vec256(row256b, divider);
                     auto tempc = my_libdivide_u64_do_vec256(row256c, divider);
@@ -176,14 +210,14 @@ namespace osuCrypto
                     auto tempg = my_libdivide_u64_do_vec256(row256g, divider);
                     auto temph = my_libdivide_u64_do_vec256(row256h, divider);
                     //auto temp = libdivide::libdivide_u64_branchfree_do_vec256(row256, divider);
-                    auto temp64a = (u64*)&tempa;
-                    auto temp64b = (u64*)&tempb;
-                    auto temp64c = (u64*)&tempc;
-                    auto temp64d = (u64*)&tempd;
-                    auto temp64e = (u64*)&tempe;
-                    auto temp64f = (u64*)&tempf;
-                    auto temp64g = (u64*)&tempg;
-                    auto temp64h = (u64*)&temph;
+                    auto temp64a = toU64(tempa);
+                    auto temp64b = toU64(tempb);
+                    auto temp64c = toU64(tempc);
+                    auto temp64d = toU64(tempd);
+                    auto temp64e = toU64(tempe);
+                    auto temp64f = toU64(tempf);
+                    auto temp64g = toU64(tempg);
+                    auto temp64h = toU64(temph);
                     vals[i + 0] -= temp64a[0] * modVal;
                     vals[i + 1] -= temp64a[1] * modVal;
                     vals[i + 2] -= temp64a[2] * modVal;

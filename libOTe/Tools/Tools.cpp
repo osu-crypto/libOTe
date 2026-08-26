@@ -213,31 +213,31 @@ namespace osuCrypto {
 
 						// t1 is lower 64 bits, t2 is upper 64 bits
 						// (remember we're transposing a little-endian format)
-						u64& d1 = ((u64*)&inOut[i1])[0];
-						u64& d2 = ((u64*)&inOut[i1])[1];
+						auto d = inOut[i1].get<u64>();
+						auto dd = inOut[i2].get<u64>();
 
-						u64& dd1 = ((u64*)&inOut[i2])[0];
-						u64& dd2 = ((u64*)&inOut[i2])[1];
+						u64 t1 = d[0];
+						u64 t2 = d[1];
 
-						u64 t1 = d1;
-						u64 t2 = d2;
-
-						u64 tt1 = dd1;
-						u64 tt2 = dd2;
+						u64 tt1 = dd[0];
+						u64 tt2 = dd[1];
 
 						// swap operations due to little endian-ness
-						d1 = (t1 & mask1) ^ ((tt1 & mask1) << width);
+						d[0] = (t1 & mask1) ^ ((tt1 & mask1) << width);
 
-						d2 = (t2 & mask2) ^
+						d[1] = (t2 & mask2) ^
 							((tt2 & mask2) << width) ^
 							((tt1 & mask1) >> (64 - width));
 
-						dd1 = (tt1 & inv_mask1) ^
+						dd[0] = (tt1 & inv_mask1) ^
 							((t1 & inv_mask1) >> width) ^
 							((t2 & inv_mask2)) << (64 - width);
 
-						dd2 = (tt2 & inv_mask2) ^
+						dd[1] = (tt2 & inv_mask2) ^
 							((t2 & inv_mask2) >> width);
+
+						inOut[i1] = d;
+						inOut[i2] = dd;
 					}
 				}
 			}
@@ -252,26 +252,26 @@ namespace osuCrypto {
 
 						// t1 is lower 64 bits, t2 is upper 64 bits
 						// (remember we're transposing a little-endian format)
-						u64& d1 = ((u64*)&inOut[i1])[0];
-						u64& d2 = ((u64*)&inOut[i1])[1];
+						auto d = inOut[i1].get<u64>();
+						auto dd = inOut[i2].get<u64>();
 
-						u64& dd1 = ((u64*)&inOut[i2])[0];
-						u64& dd2 = ((u64*)&inOut[i2])[1];
+						//u64 t1 = d[0];
+						u64 t2 = d[1];
 
-						//u64 t1 = d1;
-						u64 t2 = d2;
+						//u64 tt1 = dd[0];
+						//u64 tt2 = dd[1];
 
-						//u64 tt1 = dd1;
-						//u64 tt2 = dd2;
+						d[0] &= mask1;
+						d[1] = (t2 & mask2) ^
+							((dd[0] & mask1) >> (64 - width));
 
-						d1 &= mask1;
-						d2 = (t2 & mask2) ^
-							((dd1 & mask1) >> (64 - width));
-
-						dd1 = (dd1 & inv_mask1) ^
+						dd[0] = (dd[0] & inv_mask1) ^
 							((t2 & inv_mask2)) << (64 - width);
 
-						dd2 &= inv_mask2;
+						dd[1] &= inv_mask2;
+
+						inOut[i1] = d;
+						inOut[i2] = dd;
 					}
 				}
 			}
@@ -300,7 +300,7 @@ namespace osuCrypto {
 
 
 
-	void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
+	void eklundh_transpose128x1024(block* inOut)
 	{
 
 
@@ -308,12 +308,12 @@ namespace osuCrypto {
 		{
 			std::array<block, 128> sub;
 			for (u64 j = 0; j < 128; ++j)
-				sub[j] = inOut[j][i];
+				sub[j] = inOut[j * 8 + i];
 
 			eklundh_transpose128(sub.data());
 
 			for (u64 j = 0; j < 128; ++j)
-				inOut[j][i] = sub[j];
+				inOut[j * 8 + i] = sub[j];
 		}
 
 	}
@@ -338,16 +338,14 @@ namespace osuCrypto {
 	//       u16OutView[1] stores the second column of 16 bytes.
 	void sse_loadSubSquare(block* in, array<block, 2>& out, u64 x, u64 y)
 	{
-		static_assert(sizeof(array<array<u8, 16>, 2>) == sizeof(array<block, 2>), "");
-		static_assert(sizeof(array<array<u8, 16>, 128>) == sizeof(array<block, 128>), "");
-
-		array<array<u8, 16>, 2>& outByteView = *(array<array<u8, 16>, 2>*) & out;
-		array<u8, 16>* inByteView = (array<u8, 16>*)in;
+		auto* outBytes = reinterpret_cast<u8*>(out.data());
+		auto* inBytes = reinterpret_cast<const u8*>(in);
 
 		for (int l = 0; l < 16; l++)
 		{
-			outByteView[0][l] = inByteView[16 * x + l][2 * y];
-			outByteView[1][l] = inByteView[16 * x + l][2 * y + 1];
+			auto row = static_cast<u64>(16 * x + l) * sizeof(block);
+			outBytes[l] = inBytes[row + 2 * y];
+			outBytes[sizeof(block) + l] = inBytes[row + 2 * y + 1];
 		}
 	}
 
@@ -919,16 +917,10 @@ namespace osuCrypto {
 
 
 
-	inline void sse_loadSubSquarex(array<array<block, 8>, 128>& in, array<block, 2>& out, u64 x, u64 y, u64 i)
+	inline void sse_loadSubSquarex(block* in, array<block, 2>& out, u64 x, u64 y, u64 i)
 	{
-		typedef array<array<u8, 16>, 2> OUT_t;
-		typedef array<array<u8, 128>, 128> IN_t;
-
-		static_assert(sizeof(OUT_t) == sizeof(array<block, 2>), "");
-		static_assert(sizeof(IN_t) == sizeof(array<array<block, 8>, 128>), "");
-
-		OUT_t& outByteView = *(OUT_t*)&out;
-		IN_t& inByteView = *(IN_t*)&in;
+		auto* outBytes = reinterpret_cast<u8*>(out.data());
+		auto* inBytes = reinterpret_cast<const u8*>(in);
 
 		auto x16 = (x * 16);
 
@@ -936,44 +928,44 @@ namespace osuCrypto {
 		auto i16y21 = (i * 16) + 2 * y + 1;
 
 
-		outByteView[0][0] = inByteView[x16 + 0][i16y2];
-		outByteView[1][0] = inByteView[x16 + 0][i16y21];
-		outByteView[0][1] = inByteView[x16 + 1][i16y2];
-		outByteView[1][1] = inByteView[x16 + 1][i16y21];
-		outByteView[0][2] = inByteView[x16 + 2][i16y2];
-		outByteView[1][2] = inByteView[x16 + 2][i16y21];
-		outByteView[0][3] = inByteView[x16 + 3][i16y2];
-		outByteView[1][3] = inByteView[x16 + 3][i16y21];
-		outByteView[0][4] = inByteView[x16 + 4][i16y2];
-		outByteView[1][4] = inByteView[x16 + 4][i16y21];
-		outByteView[0][5] = inByteView[x16 + 5][i16y2];
-		outByteView[1][5] = inByteView[x16 + 5][i16y21];
-		outByteView[0][6] = inByteView[x16 + 6][i16y2];
-		outByteView[1][6] = inByteView[x16 + 6][i16y21];
-		outByteView[0][7] = inByteView[x16 + 7][i16y2];
-		outByteView[1][7] = inByteView[x16 + 7][i16y21];
-		outByteView[0][8] = inByteView[x16 + 8][i16y2];
-		outByteView[1][8] = inByteView[x16 + 8][i16y21];
-		outByteView[0][9] = inByteView[x16 + 9][i16y2];
-		outByteView[1][9] = inByteView[x16 + 9][i16y21];
-		outByteView[0][10] = inByteView[x16 + 10][i16y2];
-		outByteView[1][10] = inByteView[x16 + 10][i16y21];
-		outByteView[0][11] = inByteView[x16 + 11][i16y2];
-		outByteView[1][11] = inByteView[x16 + 11][i16y21];
-		outByteView[0][12] = inByteView[x16 + 12][i16y2];
-		outByteView[1][12] = inByteView[x16 + 12][i16y21];
-		outByteView[0][13] = inByteView[x16 + 13][i16y2];
-		outByteView[1][13] = inByteView[x16 + 13][i16y21];
-		outByteView[0][14] = inByteView[x16 + 14][i16y2];
-		outByteView[1][14] = inByteView[x16 + 14][i16y21];
-		outByteView[0][15] = inByteView[x16 + 15][i16y2];
-		outByteView[1][15] = inByteView[x16 + 15][i16y21];
+		outBytes[0] = inBytes[(x16 + 0) * 128 + i16y2];
+		outBytes[16] = inBytes[(x16 + 0) * 128 + i16y21];
+		outBytes[1] = inBytes[(x16 + 1) * 128 + i16y2];
+		outBytes[17] = inBytes[(x16 + 1) * 128 + i16y21];
+		outBytes[2] = inBytes[(x16 + 2) * 128 + i16y2];
+		outBytes[18] = inBytes[(x16 + 2) * 128 + i16y21];
+		outBytes[3] = inBytes[(x16 + 3) * 128 + i16y2];
+		outBytes[19] = inBytes[(x16 + 3) * 128 + i16y21];
+		outBytes[4] = inBytes[(x16 + 4) * 128 + i16y2];
+		outBytes[20] = inBytes[(x16 + 4) * 128 + i16y21];
+		outBytes[5] = inBytes[(x16 + 5) * 128 + i16y2];
+		outBytes[21] = inBytes[(x16 + 5) * 128 + i16y21];
+		outBytes[6] = inBytes[(x16 + 6) * 128 + i16y2];
+		outBytes[22] = inBytes[(x16 + 6) * 128 + i16y21];
+		outBytes[7] = inBytes[(x16 + 7) * 128 + i16y2];
+		outBytes[23] = inBytes[(x16 + 7) * 128 + i16y21];
+		outBytes[8] = inBytes[(x16 + 8) * 128 + i16y2];
+		outBytes[24] = inBytes[(x16 + 8) * 128 + i16y21];
+		outBytes[9] = inBytes[(x16 + 9) * 128 + i16y2];
+		outBytes[25] = inBytes[(x16 + 9) * 128 + i16y21];
+		outBytes[10] = inBytes[(x16 + 10) * 128 + i16y2];
+		outBytes[26] = inBytes[(x16 + 10) * 128 + i16y21];
+		outBytes[11] = inBytes[(x16 + 11) * 128 + i16y2];
+		outBytes[27] = inBytes[(x16 + 11) * 128 + i16y21];
+		outBytes[12] = inBytes[(x16 + 12) * 128 + i16y2];
+		outBytes[28] = inBytes[(x16 + 12) * 128 + i16y21];
+		outBytes[13] = inBytes[(x16 + 13) * 128 + i16y2];
+		outBytes[29] = inBytes[(x16 + 13) * 128 + i16y21];
+		outBytes[14] = inBytes[(x16 + 14) * 128 + i16y2];
+		outBytes[30] = inBytes[(x16 + 14) * 128 + i16y21];
+		outBytes[15] = inBytes[(x16 + 15) * 128 + i16y2];
+		outBytes[31] = inBytes[(x16 + 15) * 128 + i16y21];
 
 	}
 
 
 
-	inline void sse_transposeSubSquarex(array<array<block, 8>, 128>& out, array<block, 2>& in, u64 x, u64 y, u64 i)
+	inline void sse_transposeSubSquarex(block* out, array<block, 2>& in, u64 x, u64 y, u64 i)
 	{
 		auto i8y = i * 8 + y;
 		auto x16_7 = x * 16 + 7;
@@ -989,21 +981,21 @@ namespace osuCrypto {
 		block b7 = in[0].slli_epi64(7);
 
 		auto mask = static_cast<u16>(b0.movemask_epi8());
-		memcpy((u8*)out[x16_7 - 0].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_7 - 0) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b1.movemask_epi8());
-		memcpy((u8*)out[x16_7 - 1].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_7 - 1) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b2.movemask_epi8());
-		memcpy((u8*)out[x16_7 - 2].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_7 - 2) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b3.movemask_epi8());
-		memcpy((u8*)out[x16_7 - 3].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_7 - 3) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b4.movemask_epi8());
-		memcpy((u8*)out[x16_7 - 4].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_7 - 4) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b5.movemask_epi8());
-		memcpy((u8*)out[x16_7 - 5].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_7 - 5) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b6.movemask_epi8());
-		memcpy((u8*)out[x16_7 - 6].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_7 - 6) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b7.movemask_epi8());
-		memcpy((u8*)out[x16_7 - 7].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_7 - 7) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 
 		b0 = in[1].slli_epi64(0);
 		b1 = in[1].slli_epi64(1);
@@ -1015,27 +1007,27 @@ namespace osuCrypto {
 		b7 = in[1].slli_epi64(7);
 
 		mask = static_cast<u16>(b0.movemask_epi8());
-		memcpy((u8*)out[x16_15 - 0].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_15 - 0) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b1.movemask_epi8());
-		memcpy((u8*)out[x16_15 - 1].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_15 - 1) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b2.movemask_epi8());
-		memcpy((u8*)out[x16_15 - 2].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_15 - 2) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b3.movemask_epi8());
-		memcpy((u8*)out[x16_15 - 3].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_15 - 3) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b4.movemask_epi8());
-		memcpy((u8*)out[x16_15 - 4].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_15 - 4) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b5.movemask_epi8());
-		memcpy((u8*)out[x16_15 - 5].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_15 - 5) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b6.movemask_epi8());
-		memcpy((u8*)out[x16_15 - 6].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_15 - 6) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 		mask = static_cast<u16>(b7.movemask_epi8());
-		memcpy((u8*)out[x16_15 - 7].data() + i8y * sizeof(mask), &mask, sizeof(mask));
+		memcpy(out[(x16_15 - 7) * 8].data() + i8y * sizeof(mask), &mask, sizeof(mask));
 
 	}
 
 
 	// we have long rows of contiguous data data, 128 columns
-	void sse_transpose128x1024(array<array<block, 8>, 128>& inOut)
+	void sse_transpose128x1024(block* inOut)
 	{
 		array<block, 2> a, b;
 

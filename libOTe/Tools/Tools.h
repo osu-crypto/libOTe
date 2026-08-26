@@ -84,7 +84,11 @@ namespace osuCrypto {
 
     void eklundh_transpose128(block* inOut);
     inline void eklundh_transpose128(std::array<block, 128>& inOut) { eklundh_transpose128(inOut.data()); }
-    void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
+    void eklundh_transpose128x1024(block* inOut);
+    inline void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
+    {
+        eklundh_transpose128x1024(inOut[0].data());
+    }
 
 #ifdef OC_ENABLE_AVX2
     void avx_transpose128(block* inOut);
@@ -93,7 +97,11 @@ namespace osuCrypto {
 #endif
 #ifdef OC_ENABLE_SSE2
     void sse_transpose128(block* inOut);
-    void sse_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
+    void sse_transpose128x1024(block* inOut);
+    inline void sse_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
+    {
+        sse_transpose128x1024(inOut[0].data());
+    }
     inline void sse_transpose128(std::array<block, 128>& inOut) { sse_transpose128(inOut.data()); };
     void sse_transpose(MatrixView<const u8> in, MatrixView<u8> out);
 #endif
@@ -120,11 +128,10 @@ namespace osuCrypto {
     inline void transpose128(std::array<block, 128>& inOut) { transpose128(inOut.data()); };
 
 
-    inline void transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
+    inline void transpose128x1024(block* inOut)
     {
-
 #if defined(OC_ENABLE_AVX2)
-        avx_transpose128x1024(inOut[0].data());
+        avx_transpose128x1024(inOut);
 #elif defined(OC_ENABLE_SSE2)
         sse_transpose128x1024(inOut);
 #else
@@ -132,8 +139,8 @@ namespace osuCrypto {
 #endif
     }
 
-    inline void transpose128x1024(block* inOut)
+    inline void transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
     {
-        transpose128x1024(*(std::array<std::array<block, 8>, 128>*)inOut);
+        transpose128x1024(inOut[0].data());
     }
 }

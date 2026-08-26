@@ -21,6 +21,7 @@
 #include "LDPC/Mtx.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -108,10 +109,14 @@ namespace osuCrypto
 
                 if (end != static_cast<u64>(dest.size()))
                 {
-                    u64 b0 = *(u64*)inPtr;
+                    u64 b0;
+                    memcpy(&b0, inPtr, sizeof(b0));
                     b0 = (b0 >> bitShift);
 
-                    *(u64*)(&dest[end]) ^= b0;
+                    u64 d;
+                    memcpy(&d, dest[end].data(), sizeof(d));
+                    d ^= b0;
+                    memcpy(dest[end].data(), &d, sizeof(d));
                 }
             }
             else if (bitShift)
@@ -144,12 +149,16 @@ namespace osuCrypto
 
                     dest[end] = dest[end] ^ b0;
 
-                    u64 b1 = *(u64*)(inPtr + sizeof(u64));
+                    u64 b1;
+                    memcpy(&b1, inPtr + sizeof(u64), sizeof(b1));
                     b1 = (b1 << bitShift2);
 
                     //bv1.append((u8*)&b1, 64);
 
-                    *(u64*)&dest[end] ^= b1;
+                    u64 d;
+                    memcpy(&d, dest[end].data(), sizeof(d));
+                    d ^= b1;
+                    memcpy(dest[end].data(), &d, sizeof(d));
                 }
 
 

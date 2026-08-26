@@ -441,6 +441,13 @@ namespace osuCrypto
 			AlignedArray<block, 128> data;
 
 			Timer timer;
+			auto startEklundh = timer.setTimePoint("b");
+
+			for (u64 i = 0; i < trials; ++i)
+			{
+				eklundh_transpose128(data.data());
+			}
+
 			auto start0 = timer.setTimePoint("b");
 
 			for (u64 i = 0; i < trials; ++i)
@@ -458,6 +465,7 @@ namespace osuCrypto
 
 			auto end1 = timer.setTimePoint("b");
 
+			std::cout << "eklundh " << std::chrono::duration_cast<std::chrono::milliseconds>(start0 - startEklundh).count() << std::endl;
 			std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(end0 - start0).count() << std::endl;
 			std::cout << "sse " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - end0).count() << std::endl;
 		}
@@ -486,7 +494,7 @@ namespace osuCrypto
 
 			for (u64 i = 0; i < trials; ++i)
 			{
-				sse_transpose128x1024(*(std::array<std::array<block, 8>, 128>*)data.data());
+				sse_transpose128x1024(data.data());
 			}
 
 			auto end1 = timer.setTimePoint("b");

@@ -5385,3 +5385,144 @@ Verification:
 - Across five sequential Release runs of 1,048,576 trials, the
   `sse_transpose128` median changed from 1,070 ms to 1,022 ms (-4.5%), while
   the `sse_transpose128x1024` median remained 6,509 ms.
+
+## AUD-168: Remaining transpose paths violated object-lifetime and aliasing rules
+
+Status: fixed
+
+Affected code:
+
+- `eklundh_transpose128()` and `eklundh_transpose128x1024()`.
+- The SSE sub-square loaders and `sse_transpose128x1024()`.
+- The pointer overload of `transpose128x1024()`.
+
+Concern:
+
+These paths accessed live `block` storage through manufactured `u64`, byte
+array, or nested `std::array` objects. Although the layouts had the expected
+sizes, the corresponding objects had not been created in that storage. The
+scalar Eklundh path also formed `u64` lvalues over SIMD-backed blocks.
+
+Impact:
+
+Optimizers could assume that accesses through the unrelated object types did
+not modify the blocks, producing an incorrect transpose. The 128-by-1024 path
+is used by several OT extensions, so such corruption could invalidate their
+outputs.
+
+Resolution:
+
+The scalar kernel now extracts and assigns block lanes through the block API.
+The SSE loaders use byte pointers, which may inspect object representations,
+while retaining their fixed-width and unrolled memory accesses. The
+128-by-1024 pointer path now remains a `block*` through dispatch rather than
+fabricating a nested array object.
+
+Verification:
+
+- `Tools_Transpose_Test` and `Tools_Transpose_View_Test` pass in Release AVX2
+  and scalar builds.
+- Across five sequential Release runs of 262,144 trials, median times changed
+  from 303 ms to 174 ms for Eklundh, from 294 ms to 249 ms for SSE-128, and
+  from 1,706 ms to 1,597 ms for SSE-128-by-1024.
+
+## AUD-169: EA and ExConv samplers violated storage aliasing rules
+
+Status: fixed
+
+Affected code:
+
+- `EACode::Modulus::refill()` and `EACode::Modulus::doMod32()`.
+- `ExConvCode::Modulus::refill()` and `ExConvCode::Modulus::doMod32()`.
+
+Concern:
+
+The modulus samplers accessed live `u64` arrays through `block` and vector
+objects, and accessed scalar vector fallbacks through `u64` pointers. These
+objects have compatible sizes but are not permitted aliases under the C++
+object model.
+
+Impact:
+
+Compiler transformations based on the aliasing rules could corrupt sampled
+field elements or modular reductions. Those values feed the EA and ExConv
+encoders.
+
+Resolution:
+
+Object-representation transfers now use constant-size `memcpy` operations.
+The AVX path uses explicit unaligned intrinsic loads and stores. The original
+eight-way batching, vector reductions, and scalar reduction order remain
+unchanged.
+
+Verification:
+
+- The EA and ExConv focused tests pass in Release AVX2 and scalar builds.
+- Across five sequential Release runs, the EA benchmark median changed from
+  260.8 ms to 248.4 ms (-4.8%), and the ExConv median changed from 240.6 ms to
+  222.1 ms (-7.7%).
+
+## AUD-170: Quasi-cyclic tail handling violated storage aliasing rules
+
+Status: fixed
+
+Affected code:
+
+- The partial-word tails in `QuasiCyclicCode::bitShiftXor()`.
+
+Concern:
+
+The tail cases read input bytes and updated the low 64 bits of a destination
+block through manufactured `u64` lvalues. The input could also be unaligned.
+
+Impact:
+
+An optimizer exploiting the aliasing violation, or a target requiring aligned
+64-bit accesses, could corrupt the tail of a quasi-cyclic multiplication.
+
+Resolution:
+
+Only the exceptional tail paths changed. They transfer the relevant eight
+bytes with constant-size `memcpy` operations; the full-block hot loop remains
+unchanged.
+
+Verification:
+
+- The bit-shift, modular-polynomial, quasi-cyclic, and Silent quasi-cyclic OT
+  tests pass in the bit-polynomial build.
+- An interleaved sequential A/B benchmark measured a 775.0 ms median for the
+  original code and 768.7 ms for the fixed code (-0.8%).
+
+## AUD-171: KOS-Dot scratch matrices contained objects of the wrong type
+
+Status: fixed
+
+Affected code:
+
+- `KosDotExtSender::send()`.
+- `KosDotExtReceiver::receive()`.
+
+Concern:
+
+KOS-Dot allocated scratch matrices as `u8` objects, then generated and read
+`block` and `KosDotCheckRow` objects through pointers cast into that storage.
+Alignment alone did not create objects of those types or permit access through
+those lvalues.
+
+Impact:
+
+Compiler transformations based on object lifetime and aliasing could corrupt
+the extended rows or the malicious consistency-check input.
+
+Resolution:
+
+The scratch matrices now contain `block` and `KosDotCheckRow` objects
+directly. Explicit byte views are constructed only at the generic transpose
+interface, where byte access is valid. No copies or checks were added to the
+generation, transpose, or consistency-check loops.
+
+Verification:
+
+- `DotExt_Kos_Test` passes in Release AVX2 and scalar builds.
+- Across five sequential 500-iteration Release runs, the median changed from
+  3,797.4 ms to 3,696.0 ms (-2.7%).

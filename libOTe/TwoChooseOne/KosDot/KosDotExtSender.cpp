@@ -76,7 +76,7 @@ namespace osuCrypto
 
 		auto numOtExt = u64{};
 		auto numSuperBlocks = u64{};
-		auto t = Matrix<u8>{};
+		auto t = Matrix<block>{};
 		auto u = std::vector<std::array<block, superBlkSize>>{};
 		auto choiceMask = std::vector<block>{};
 		auto delta = std::array<block, 2>{};
@@ -105,7 +105,10 @@ namespace osuCrypto
 		numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
 
 		// a temp that will be used to transpose the sender's matrix
-		t.resize(mGens.size(), superBlkSize * sizeof(block));
+		t.resize(mGens.size(), superBlkSize);
+		auto tBytes = MatrixView<const u8>(
+			reinterpret_cast<const u8*>(t.data()),
+			t.rows(), t.stride() * sizeof(block));
 		u.resize(mGens.size() * commStepSize);
 
 		choiceMask.resize(mBaseChoiceBits.size());
@@ -143,7 +146,7 @@ namespace osuCrypto
 			}
 
 			block* cIter = choiceMask.data();
-			block* tIter = (block*)t.data();
+			block* tIter = t.data();
 
 			// transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
 			for (u64 colIdx = 0; colIdx < mGens.size(); ++colIdx)
@@ -183,7 +186,7 @@ namespace osuCrypto
 
 				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 				// each 128 bits wide.
-				transpose(t, tOut);
+				transpose(tBytes, tOut);
 
 				auto mCount = std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 				auto xCount = std::min<u64>(128 * superBlkSize - mCount, extraBlocks.data() + extraBlocks.size() - xIter);
@@ -209,7 +212,7 @@ namespace osuCrypto
 
 				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 				// each 128 bits wide.
-				transpose(t, tOut);
+				transpose(tBytes, tOut);
 			}
 
 		}
