@@ -413,6 +413,10 @@ namespace osuCrypto
 
 		// select random positions for the sparse polynomial.
 		// The i'th is the noise position in the i'th block.
+		// The LPN construction is robust to the small bias introduced by
+		// reducing a 64-bit sample modulo this power of three; exact uniformity
+		// is not required, and the intended parameters retain 30--40 bits of
+		// statistical security from this sampling step.
 		for (u64 i = 0; i < mSparsePositions.size(); ++i)
 			mSparsePositions(i) = prng.get<u64>() % mBlockSize;
 
