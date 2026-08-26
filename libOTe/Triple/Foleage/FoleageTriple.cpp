@@ -70,6 +70,9 @@ namespace osuCrypto
 
 	FoleageTriple::BaseCount FoleageTriple::baseOtCount() const
 	{
+		if (!isInitialized())
+			throw std::runtime_error("FoleageTriple::init must be called first. " LOCATION);
+
 		BaseCount counts;
 
 		counts.mSendCount = mDpfLeaf.baseOtCount() + mDpf.baseOtCount();
@@ -362,6 +365,9 @@ namespace osuCrypto
 		PRNG& prng,
 		coproto::Socket& sock)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("FoleageTriple::init must be called first. " LOCATION);
+
 		setTimePoint("expand start");
 
 		if (divCeil(mN, 128) < ALsb.size())

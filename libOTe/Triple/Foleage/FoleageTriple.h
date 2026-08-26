@@ -23,6 +23,7 @@
 #include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
+#include <utility>
 
 namespace osuCrypto
 {
@@ -37,6 +38,60 @@ namespace osuCrypto
 	class FoleageTriple : public TimerAdapter
 	{
 	public:
+		FoleageTriple() = default;
+		FoleageTriple(const FoleageTriple&) = delete;
+		FoleageTriple& operator=(const FoleageTriple&) = delete;
+
+		FoleageTriple(FoleageTriple&& src)
+		{
+			*this = std::move(src);
+		}
+
+		FoleageTriple& operator=(FoleageTriple&& src)
+		{
+			if (this == &src)
+				return *this;
+
+			mTimer = std::exchange(src.mTimer, nullptr);
+			mPartyIdx = std::exchange(src.mPartyIdx, 0);
+			mT = std::exchange(src.mT, 9);
+			mLog3T = std::exchange(src.mLog3T, 0);
+			mC = std::exchange(src.mC, 8);
+			mN = std::exchange(src.mN, 0);
+			mLog3N = std::exchange(src.mLog3N, 0);
+			mFftA = std::move(src.mFftA);
+			mFftASquared = std::move(src.mFftASquared);
+			mBlockSize = std::exchange(src.mBlockSize, 0);
+			mBlockDepth = std::exchange(src.mBlockDepth, 0);
+			mDpfLeafSize = std::exchange(src.mDpfLeafSize, 0);
+			mDpfLeafDepth = std::exchange(src.mDpfLeafDepth, 0);
+			mDpfTreeSize = std::exchange(src.mDpfTreeSize, 0);
+			mDpfTreeDepth = std::exchange(src.mDpfTreeDepth, 0);
+			mSparsePositions = std::move(src.mSparsePositions);
+			mDpfLeaf = std::move(src.mDpfLeaf);
+#ifdef ENABLE_SOFTSPOKEN_OT
+			mOtExtRecver = std::move(src.mOtExtRecver);
+			mOtExtSender = std::move(src.mOtExtSender);
+#endif
+			mDpf = std::move(src.mDpf);
+			mRecvOts = std::move(src.mRecvOts);
+			mSendOts = std::move(src.mSendOts);
+			mChoiceOts = std::move(src.mChoiceOts);
+			mBaseOtsAvailable = std::exchange(src.mBaseOtsAvailable, false);
+
+			src.mFftA.clear();
+			src.mFftASquared.clear();
+			src.mSparsePositions = {};
+#ifdef ENABLE_SOFTSPOKEN_OT
+			src.mOtExtRecver.reset();
+			src.mOtExtSender.reset();
+#endif
+			src.mRecvOts.clear();
+			src.mSendOts.clear();
+			src.mChoiceOts = {};
+			return *this;
+		}
+
 		u64 mPartyIdx = 0;
 
 		// the number of noisy positions per polynomial

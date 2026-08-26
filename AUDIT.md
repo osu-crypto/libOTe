@@ -5042,3 +5042,76 @@ Verification:
   objects to reject expansion and verifies that rejection preserves direct
   seeds.
 - Release and scalar builds pass the focused SmallField VOLE audit test.
+
+## AUD-158: Foleage moves retained active source metadata
+
+Status: fixed
+
+Affected code:
+
+- `FoleageTriple` move construction and move assignment.
+
+Concern:
+
+The implicit move operations transferred the DPF objects, OT-extension
+objects, and correlation buffers. They copied scalar configuration and the
+flag that reported an unused base-OT set. The moved-from object could therefore
+report that it was initialized and held base OTs after their storage moved to
+the destination.
+
+Impact:
+
+Reusing the moved-from object could enter a Foleage operation with derived
+dimensions from the old session and empty correlation storage. A later failure
+could occur after the peers had started different protocol steps.
+
+Resolution:
+
+`FoleageTriple` is explicitly move-only. Each move transfers the timer,
+configuration, DPF state, OT-extension state, and correlation storage. It then
+resets the source to the reusable default state. The move operations do not
+change expansion or arithmetic loops.
+
+Verification:
+
+- `foleage_Audit_test` checks move construction and assignment with an active
+  base-OT set. It requires the destination to retain the set and the source to
+  become uninitialized and empty.
+- The test reinitializes a moved-from object and obtains its new base-OT count.
+
+## AUD-159: Foleage accepted base OTs before initialization
+
+Status: fixed
+
+Affected code:
+
+- `FoleageTriple::baseOtCount()`.
+- `FoleageTriple::setBaseOts()`.
+- `FoleageTriple::expand()`.
+
+Concern:
+
+A default object could compute base-OT counts from default sparse parameters
+and install a matching set. The installed-set flag then allowed expansion to
+bypass base-OT generation even though initialization had not derived the
+domain, block size, or DPF dimensions.
+
+Impact:
+
+Expansion could begin correlation-dependent protocol work with zero derived
+dimensions. The later position sampling included a reduction modulo the zero
+block size.
+
+Resolution:
+
+The base-OT count and expansion entry points now require initialization.
+`setBaseOts()` obtains its dimensions through the guarded count function, so it
+also rejects before changing correlation state. These checks execute once at
+public lifecycle boundaries and do not affect protocol loops.
+
+Verification:
+
+- `foleage_Audit_test` requires default objects to reject base-OT counting,
+  base-OT installation, and expansion.
+- Release and scalar builds pass `foleage_Audit_test` and the complete Foleage
+  F4 OLE test.
