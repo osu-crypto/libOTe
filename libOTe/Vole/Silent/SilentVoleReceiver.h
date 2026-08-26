@@ -949,6 +949,7 @@ namespace osuCrypto
 
 
 		} MACORO_CATCH(eptr) {
+			clear();
 			co_await chl.close();
 			std::rethrow_exception(eptr);
 		}

@@ -1371,6 +1371,65 @@ void OtExt_Silent_AuditState_Test(const oc::CLP& cmd)
 		lifecycleSender.mCodeSeed != ZeroBlock ||
 		lifecycleReceiver.mCodeSeed != ZeroBlock)
 		throw RTE_LOC;
+
+	SilentOtExtSender failedSender;
+	failedSender.configure(128, 2, 1, SilentSecType::Malicious,
+		SdNoiseDistribution::Stationary, MultType::ExConv21x24);
+	auto failedSenderCount = failedSender.baseCount();
+	std::vector<std::array<block, 2>> failedSendBase(
+		failedSenderCount.mBaseOtCount);
+	std::vector<block> failedBaseB(failedSenderCount.mBaseVoleCount);
+	prng.get(failedSendBase.data(), failedSendBase.size());
+	prng.get(failedBaseB.data(), failedBaseB.size());
+	failedSender.setBaseCors(failedSendBase, failedBaseB, prng.get());
+	auto failedSenderSockets = cp::LocalAsyncSocket::makePair();
+	macoro::sync_wait(failedSenderSockets[1].close());
+	bool failedSenderThrew = false;
+	try
+	{
+		macoro::sync_wait(failedSender.silentSendInplace(
+			prng.get<block>(), 128, prng, failedSenderSockets[0]));
+	}
+	catch (const std::exception&)
+	{
+		failedSenderThrew = true;
+	}
+	if (!failedSenderThrew || failedSender.isConfigured() ||
+		!failedSender.mMalCheckOts.empty() ||
+		!failedSender.mBaseB.empty())
+		throw UnitTestFail("failed Silent OT sender retained correlations");
+
+	SilentOtExtReceiver failedReceiver;
+	failedReceiver.configure(128, 2, 1, SilentSecType::Malicious,
+		SdNoiseDistribution::Stationary, MultType::ExConv21x24);
+	auto failedReceiverCount = failedReceiver.baseCount();
+	auto failedChoices = failedReceiver.sampleBaseChoiceBits(prng);
+	failedChoices.resize(failedReceiverCount.mBaseOtCount);
+	std::vector<block> failedRecvBase(failedReceiverCount.mBaseOtCount);
+	std::vector<block> failedBaseA(failedReceiverCount.mBaseVoleCount);
+	BitVector failedBaseC(failedReceiverCount.mBaseVoleCount);
+	prng.get(failedRecvBase.data(), failedRecvBase.size());
+	prng.get(failedBaseA.data(), failedBaseA.size());
+	failedBaseC.randomize(prng);
+	failedReceiver.setBaseCors(
+		failedRecvBase, failedChoices, failedBaseA, failedBaseC);
+	auto failedReceiverSockets = cp::LocalAsyncSocket::makePair();
+	macoro::sync_wait(failedReceiverSockets[1].close());
+	bool failedReceiverThrew = false;
+	try
+	{
+		macoro::sync_wait(failedReceiver.silentReceiveInplace(
+			128, prng, failedReceiverSockets[0], ChoiceBitPacking::True));
+	}
+	catch (const std::exception&)
+	{
+		failedReceiverThrew = true;
+	}
+	if (!failedReceiverThrew || failedReceiver.isConfigured() ||
+		failedReceiver.hasBaseCors() || !failedReceiver.mMalCheckOts.empty() ||
+		failedReceiver.mMalCheckChoice.size() ||
+		!failedReceiver.mBaseA.empty() || failedReceiver.mBaseC.size())
+		throw UnitTestFail("failed Silent OT receiver retained correlations");
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT and ENABLE_SOFTSPOKEN_OT are required.");
 #endif

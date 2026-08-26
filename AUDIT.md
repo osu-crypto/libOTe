@@ -4829,3 +4829,43 @@ Verification:
 
 - `Dpf_Audit_Test` sends a correction tag with value two and requires the
   receiver to reject it before changing its output state.
+
+## AUD-152: Failed stationary Silent sessions retained consumed correlations
+
+Status: fixed
+
+Affected code:
+
+- The online exception paths of the Silent OT and Silent VOLE sender and
+  receiver implementations.
+
+Concern:
+
+Successful stationary executions discarded their per-execution base VOLE and
+malicious-check correlations. Exceptional exits only closed the socket and
+re-threw the error. A caller could therefore retry an object after the peer had
+observed a correlation-dependent transcript. The Silent OT sender could also
+retain malicious-check OT pairs already reordered by the failed execution.
+
+Impact:
+
+A retry could reuse one-time masks across distinct transcripts. This is outside
+the OT and VOLE security arguments and can expose relations by mask
+cancellation. Reapplying OT derandomization to already reordered pairs could
+also make an otherwise honest retry inconsistent.
+
+Resolution:
+
+Every affected online exception path clears the complete protocol object before
+it closes the socket and re-throws. The successful path and all expansion and
+compression loops are unchanged.
+
+Verification:
+
+- `OtExt_Silent_AuditState_Test` preloads both malicious stationary roles,
+  forces a transport failure, and requires all base and malicious-check
+  correlations to be invalidated.
+- `Vole_Silent_Clear_test` performs the corresponding check for both Silent
+  VOLE roles.
+- Release and scalar builds pass the new failure tests and the existing
+  malicious and stationary success tests.

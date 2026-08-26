@@ -570,6 +570,7 @@ namespace osuCrypto
 		mBaseB.resize(0);
 
 		} MACORO_CATCH(eptr) {
+			clear();
 			if (!chl.closed()) co_await chl.close();
 			std::rethrow_exception(eptr);
 		}

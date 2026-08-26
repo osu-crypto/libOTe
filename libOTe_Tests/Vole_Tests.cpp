@@ -585,6 +585,63 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 		receiver.mDerandomizeMalCheck)
 		throw RTE_LOC;
 
+	PRNG failurePrng(CCBlock);
+	Sender failedSender;
+	failedSender.configure(128, SilentSecType::Malicious, DefaultMultType,
+		SilentBaseType::BaseExtend, SdNoiseDistribution::Stationary);
+	auto failedSenderCount = failedSender.baseCount();
+	std::vector<std::array<block, 2>> failedSendBase(
+		failedSenderCount.mBaseOtCount);
+	Sender::VecF failedBaseB(failedSenderCount.mBaseVoleCount);
+	failurePrng.get(failedSendBase.data(), failedSendBase.size());
+	failurePrng.get(failedBaseB.data(), failedBaseB.size());
+	failedSender.setBaseCors(failedSendBase, failedBaseB);
+	auto failedSenderSockets = cp::LocalAsyncSocket::makePair();
+	macoro::sync_wait(failedSenderSockets[1].close());
+	bool failedSenderThrew = false;
+	try
+	{
+		macoro::sync_wait(failedSender.silentSendInplace(
+			failurePrng.get<block>(), 128, failurePrng, failedSenderSockets[0]));
+	}
+	catch (const std::exception&)
+	{
+		failedSenderThrew = true;
+	}
+	if (!failedSenderThrew || failedSender.isConfigured() ||
+		failedSender.hasBaseCors() || !failedSender.mBaseB.empty())
+		throw UnitTestFail("failed Silent VOLE sender retained correlations");
+
+	Receiver failedReceiver;
+	failedReceiver.configure(128, SilentSecType::Malicious, DefaultMultType,
+		SilentBaseType::BaseExtend, SdNoiseDistribution::Stationary);
+	auto failedReceiverCount = failedReceiver.baseCount();
+	auto failedChoices = failedReceiver.sampleBaseChoiceBits(failurePrng);
+	std::vector<block> failedRecvBase(failedReceiverCount.mBaseOtCount);
+	Receiver::VecF failedBaseA(failedReceiverCount.mBaseVoleCount);
+	Receiver::VecG failedBaseC(failedReceiverCount.mBaseVoleCount);
+	failurePrng.get(failedRecvBase.data(), failedRecvBase.size());
+	failurePrng.get(failedBaseA.data(), failedBaseA.size());
+	failurePrng.get(failedBaseC.data(), failedBaseC.size());
+	failedReceiver.setBaseCors(
+		failedChoices, failedRecvBase, failedBaseA, failedBaseC);
+	auto failedReceiverSockets = cp::LocalAsyncSocket::makePair();
+	macoro::sync_wait(failedReceiverSockets[1].close());
+	bool failedReceiverThrew = false;
+	try
+	{
+		macoro::sync_wait(failedReceiver.silentReceiveInplace(
+			128, failurePrng, failedReceiverSockets[0]));
+	}
+	catch (const std::exception&)
+	{
+		failedReceiverThrew = true;
+	}
+	if (!failedReceiverThrew || failedReceiver.isConfigured() ||
+		failedReceiver.hasBaseCors() || !failedReceiver.mBaseA.empty() ||
+		!failedReceiver.mBaseC.empty())
+		throw UnitTestFail("failed Silent VOLE receiver retained correlations");
+
 	using Product = FVec<Fp31, 2>;
 	SilentVoleSender<Product> productSender;
 	SilentVoleReceiver<Product> productReceiver;
