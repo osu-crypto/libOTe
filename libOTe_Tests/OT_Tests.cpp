@@ -1026,6 +1026,45 @@ namespace tests_libOTe
         }
 #endif
 
+        {
+            struct DeterministicOtSender final : OtSender
+            {
+                task<> send(
+                    span<std::array<block, 2>> messages,
+                    PRNG&,
+                    Socket&) override
+                {
+                    for (u64 i = 0; i < messages.size(); ++i)
+                        messages[i] = { block(i, 0), block(i, 1) };
+                    co_return;
+                }
+            } sender;
+
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG prng(ZeroBlock);
+            AlignedUnVector<block> messages(2);
+            AlignedUnVector<block> peerCorrection(2);
+            auto results = macoro::sync_wait(macoro::when_all_ready(
+                sender.sendCorrelated(
+                    messages,
+                    [](block, u64) -> block {
+                        throw std::runtime_error(
+                            "intentional correlation callback failure");
+                    },
+                    prng,
+                    sockets[0]),
+                sockets[1].recv(peerCorrection)));
+            bool senderRejected = false;
+            bool peerReleased = false;
+            try { std::get<0>(results).result(); }
+            catch (const std::exception&) { senderRejected = true; }
+            try { std::get<1>(results).result(); }
+            catch (const std::exception&) { peerReleased = true; }
+            if (!senderRejected || !peerReleased || !sockets[0].closed())
+                throw UnitTestFail(
+                    "Correlated OT callback failure left its peer waiting");
+        }
+
 #if defined(ENABLE_DELTA_KOS)
         {
             auto sockets = cp::LocalAsyncSocket::makePair();

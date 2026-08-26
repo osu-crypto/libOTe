@@ -5115,3 +5115,71 @@ Verification:
   base-OT installation, and expansion.
 - Release and scalar builds pass `foleage_Audit_test` and the complete Foleage
   F4 OLE test.
+
+## AUD-160: Correlated-OT sender left the peer waiting after callback failure
+
+Status: fixed
+
+Affected code:
+
+- `OtSender::sendCorrelated()`.
+
+Concern:
+
+The adapter completed the random-OT protocol before it evaluated the caller's
+correlation function. If that function threw, the adapter sent no correction
+vector and left the socket open. The receiver had already completed its random
+OTs and was waiting for that vector.
+
+Impact:
+
+The receiver could remain suspended indefinitely. The open socket also
+retained a transcript that could not complete the correlated-OT protocol.
+
+Resolution:
+
+The correlated sender now closes the socket and rethrows after any failure in
+the random-OT call, correlation function, or correction send. The correlation
+loop and successful protocol path are unchanged.
+
+Verification:
+
+- `OtExt_InputValidation_Test` injects a correlation-function exception after
+  random OT generation. The test requires exception propagation, closure of
+  the sender endpoint, and release of the peer's pending receive.
+
+## AUD-161: Moved-from SoftSpoken OT objects divided by zero
+
+Status: fixed
+
+Affected code:
+
+- Semi-honest SoftSpoken sender and receiver base-OT counting and splitting.
+- The SoftSpoken sender correlation accessor.
+- Malicious SoftSpoken wrappers through their embedded semi-honest base.
+
+Concern:
+
+Move operations cleared the embedded VOLE and set its field width to zero.
+Base-OT counting checked the field width only with an assertion before passing
+zero to `roundUpTo()`. The sender correlation accessor could also index an
+empty choice vector.
+
+Impact:
+
+A Release build could divide by zero or access empty storage when a moved-from
+object was reused before `init()`. The source object appeared inert but did not
+reject all public operations safely.
+
+Resolution:
+
+Base-OT counting and splitting now require a nonzero field width. The sender
+correlation accessor also requires installed base OTs. These checks occur only
+at public boundaries. A moved-from object remains cleared and can be restored
+by calling `init()`.
+
+Verification:
+
+- `OtExt_SoftSpoken_BufferState_Audit_Test` covers move construction and move
+  assignment for both semi-honest and malicious roles. It requires safe
+  rejection from the cleared sources and successful reinitialization.

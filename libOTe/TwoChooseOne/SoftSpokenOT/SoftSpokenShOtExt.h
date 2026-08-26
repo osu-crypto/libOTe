@@ -227,12 +227,17 @@ namespace osuCrypto
 
 		block delta() const
 		{
+			if (!fieldBits() || !hasBaseOts())
+				throw std::logic_error(
+					"SoftSpoken OT sender delta is not available. " LOCATION);
 			return mSubVole.getDelta().template getSpan<block>()[0];
 		}
 
 		u64 baseOtCount() const override
 		{
-			assert(fieldBits() && "init() must be called first");
+			if (!fieldBits())
+				throw std::logic_error(
+					"SoftSpoken OT sender must be initialized. " LOCATION);
 			// Can only use base OTs in groups of mFieldBits.
 			return roundUpTo(gOtExtBaseOtCount, fieldBits());
 		}
@@ -244,6 +249,9 @@ namespace osuCrypto
 
 		SoftSpokenShOtSender splitBase()
 		{
+			if (!fieldBits())
+				throw std::logic_error(
+					"SoftSpoken OT sender must be initialized before splitting. " LOCATION);
 			SoftSpokenShOtSender r;
 			r.mSubVole = mSubVole.copy();
 			r.mRandomOt = mRandomOt;
@@ -416,7 +424,9 @@ namespace osuCrypto
 
 		u64 baseOtCount() const override
 		{
-			assert(fieldBits() && "init() must be called first");
+			if (!fieldBits())
+				throw std::logic_error(
+					"SoftSpoken OT receiver must be initialized. " LOCATION);
 			// Can only use base OTs in groups of mFieldBits.
 			return roundUpTo(gOtExtBaseOtCount, fieldBits());
 		}
@@ -428,6 +438,9 @@ namespace osuCrypto
 
 		SoftSpokenShOtReceiver splitBase()
 		{
+			if (!fieldBits())
+				throw std::logic_error(
+					"SoftSpoken OT receiver must be initialized before splitting. " LOCATION);
 			SoftSpokenShOtReceiver r;
 			r.mSubVole = mSubVole.copy();
 			r.mRandomOt = mRandomOt;

@@ -637,6 +637,56 @@ namespace tests_libOTe
         expectRejected([&] { (void)rtcrAssignmentSource.useAES(1); },
             "TwoOneRTCR move assignment left the source seeded");
 
+        SoftSpokenShOtSender<> shSenderSource;
+        SoftSpokenShOtSender<> shSenderDestination(std::move(shSenderSource));
+        if (shSenderSource.fieldBits() || shSenderSource.hasBaseOts())
+            throw UnitTestFail(
+                "SoftSpoken sender move left active source state");
+        expectRejected([&] { (void)shSenderSource.baseOtCount(); },
+            "Moved-from SoftSpoken sender accepted base-OT counting");
+        expectRejected([&] { (void)shSenderSource.delta(); },
+            "Moved-from SoftSpoken sender exposed an empty delta");
+        expectRejected([&] { (void)shSenderSource.split(); },
+            "Moved-from SoftSpoken sender allowed splitting");
+        shSenderSource.init();
+        if (shSenderSource.baseOtCount() != gOtExtBaseOtCount)
+            throw UnitTestFail(
+                "Moved-from SoftSpoken sender could not be reinitialized");
+
+        SoftSpokenShOtReceiver<> shReceiverSource;
+        SoftSpokenShOtReceiver<> shReceiverDestination;
+        shReceiverDestination = std::move(shReceiverSource);
+        if (shReceiverSource.fieldBits() || shReceiverSource.hasBaseOts())
+            throw UnitTestFail(
+                "SoftSpoken receiver move left active source state");
+        expectRejected([&] { (void)shReceiverSource.baseOtCount(); },
+            "Moved-from SoftSpoken receiver accepted base-OT counting");
+        expectRejected([&] { (void)shReceiverSource.split(); },
+            "Moved-from SoftSpoken receiver allowed splitting");
+        shReceiverSource.init();
+        if (shReceiverSource.baseOtCount() != gOtExtBaseOtCount)
+            throw UnitTestFail(
+                "Moved-from SoftSpoken receiver could not be reinitialized");
+
+        SoftSpokenMalOtSender malSenderSource;
+        SoftSpokenMalOtSender malSenderDestination(std::move(malSenderSource));
+        expectRejected([&] { (void)malSenderSource.baseOtCount(); },
+            "Moved-from malicious SoftSpoken sender accepted base-OT counting");
+        expectRejected([&] { (void)malSenderSource.delta(); },
+            "Moved-from malicious SoftSpoken sender exposed an empty delta");
+        expectRejected([&] { (void)malSenderSource.split(); },
+            "Moved-from malicious SoftSpoken sender allowed splitting");
+        malSenderSource.init();
+
+        SoftSpokenMalOtReceiver malReceiverSource;
+        SoftSpokenMalOtReceiver malReceiverDestination;
+        malReceiverDestination = std::move(malReceiverSource);
+        expectRejected([&] { (void)malReceiverSource.baseOtCount(); },
+            "Moved-from malicious SoftSpoken receiver accepted base-OT counting");
+        expectRejected([&] { (void)malReceiverSource.split(); },
+            "Moved-from malicious SoftSpoken receiver allowed splitting");
+        malReceiverSource.init();
+
         SoftSpokenMalOtReceiver emptyReceiver;
         BitVector emptyChoices;
         AlignedUnVector<block> emptyMessages;
