@@ -2290,6 +2290,21 @@ void Dpf_Audit_Test(const oc::CLP&)
 	static_assert(std::is_move_constructible_v<TernaryDpf<block, CoeffCtxGF2>>);
 
 	{
+		F3x32 mutableValue;
+		mutableValue.mVal = 0x9123456789abcdefull;
+		const F3x32 value = mutableValue;
+		if (value.lower(0).mVal != 0 || value.upper(0).mVal != value.mVal ||
+			value.lower(31).mVal != (value.mVal & ((1ull << 62) - 1)) ||
+			value.upper(31).mVal != (value.mVal >> 62) ||
+			value.lower(32).mVal != value.mVal || value.upper(32).mVal != 0)
+			throw UnitTestFail("F3x32 slicing mishandled a boundary digit count");
+		expectRejected([&] { (void)value.lower(33); },
+			"F3x32 lower slicing accepted too many digits");
+		expectRejected([&] { (void)value.upper(33); },
+			"F3x32 upper slicing accepted too many digits");
+	}
+
+	{
 		TernaryDpf<block, CoeffCtxGF2> ternary;
 		ternary.init(1, 3, 1);
 		auto count = ternary.baseOtCount();

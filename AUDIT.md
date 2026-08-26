@@ -5682,3 +5682,33 @@ Verification:
   scalar builds.
 - A nine-run interleaved sequential A/B benchmark measured 1,441.9 ms for the
   original PPRF path and 1,453.0 ms for the fixed path (+0.77%).
+
+## AUD-176: Full-width F3x32 slicing shifted by the word width
+
+Status: fixed
+
+Affected code:
+
+- `F3x32::lower()` and `F3x32::upper()`.
+
+Concern:
+
+`F3x32` stores 32 two-bit ternary digits in a `u64`. Asking either slicing
+helper to split at the valid full-width boundary formed a shift by 64. C++
+does not define shifts by the width of the promoted left operand.
+
+Impact:
+
+`lower(32)` and `upper(32)` could return platform-dependent results instead of
+the complete value and zero. Current Foleage protocol calls split at a depth
+of at most five, so no existing protocol path reached the faulty boundary.
+
+Resolution:
+
+The helpers now handle the 32-digit boundary explicitly and reject digit
+counts above the representation capacity. Both helpers are const. The normal
+sub-32 path retains its original shifts and masks.
+
+Verification:
+
+- `Dpf_Audit_Test` covers split positions 0, 31, and 32 and rejection at 33.

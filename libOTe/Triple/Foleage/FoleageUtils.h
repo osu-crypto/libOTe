@@ -102,16 +102,20 @@ namespace osuCrypto
 			}
 		}
 
-		F3x32 lower(u64 digits)
+		F3x32 lower(u64 digits) const
 		{
+			if (digits > 32)
+				throw std::out_of_range("F3x32 lower digit count exceeds its capacity");
 			F3x32 r;
-			r.mVal = mVal & ((1ull << (2 * digits)) - 1);
+			r.mVal = digits == 32 ? mVal : mVal & ((1ull << (2 * digits)) - 1);
 			return r;
 		}
-		F3x32 upper(u64 digits)
+		F3x32 upper(u64 digits) const
 		{
+			if (digits > 32)
+				throw std::out_of_range("F3x32 upper digit count exceeds its capacity");
 			F3x32 r;
-			r.mVal = mVal >> (2 * digits);
+			r.mVal = digits == 32 ? 0 : mVal >> (2 * digits);
 			return r;
 		}
 
