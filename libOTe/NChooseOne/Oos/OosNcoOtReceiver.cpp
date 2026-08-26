@@ -14,26 +14,45 @@ namespace osuCrypto
 {
 	task<> OosNcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Socket& chl)
 	{
-		MACORO_TRY{
-		if (u64(baseRecvOts.size()) != u64(mGens.size()))
-			throw std::runtime_error("rt error at " LOCATION);
+		if (mGens.empty() || u64(baseRecvOts.size()) != u64(mGens.size()))
+			throw std::invalid_argument("OOS base OT count does not match the configured code. " LOCATION);
 
+		MACORO_TRY{
 		auto delta = BitVector(getBaseOTCount());
 		delta.randomize(prng);
+		auto nextGens = std::vector<std::array<PRNG, 2>>(mGens.size());
 
 		auto iter = delta.begin();
-		for (u64 i = 0; i < mGens.size(); i++)
+		for (u64 i = 0; i < nextGens.size(); i++)
 		{
-			mGens[i][0].SetSeed(baseRecvOts[i][0 ^ *iter]);
-			mGens[i][1].SetSeed(baseRecvOts[i][1 ^ *iter]);
+			nextGens[i][0].SetSeed(baseRecvOts[i][0 ^ *iter]);
+			nextGens[i][1].SetSeed(baseRecvOts[i][1 ^ *iter]);
 			++iter;
 		}
 
+		// The peer cannot install the transformed base OTs until it receives
+		// delta. Invalidate the old correlation before this ambiguous transport
+		// boundary and publish the replacement only after the send completes.
+		mHasBase = false;
+		for (auto& gens : mGens)
+		{
+			gens[0] = PRNG{};
+			gens[1] = PRNG{};
+		}
+		// Use the reference send so this await observes transport completion.
+		// The moving overload only waits until the message is buffered.
+		co_await chl.send(delta);
+		mGens = std::move(nextGens);
 		mHasBase = true;
-		co_await chl.send(std::move(delta));
 
 
 		} MACORO_CATCH(eptr) {
+			mHasBase = false;
+			for (auto& gens : mGens)
+			{
+				gens[0] = PRNG{};
+				gens[1] = PRNG{};
+			}
 			if (!chl.closed()) co_await chl.close();
 			std::rethrow_exception(eptr);
 		}

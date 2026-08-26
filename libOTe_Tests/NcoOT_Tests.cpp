@@ -561,6 +561,42 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
         }
 
         {
+            OosNcoOtSender sender;
+            sender.configure(true, 40, 8);
+            const auto baseCount = sender.getBaseOTCount();
+            std::vector<block> baseOts(baseCount, ZeroBlock);
+            BitVector choices(baseCount);
+            sender.setUniformBaseOts(baseOts, choices);
+
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            sockets[0].mSock->mImpl->mDebugErrorInjector = [] {
+                return cp::make_error_code(cp::code::ioError);
+            };
+            expectThrow([&] {
+                macoro::sync_wait(sender.setBaseOts(baseOts, choices, sockets[0]));
+            });
+            if (sender.hasBaseOts() || !sockets[0].closed())
+                throw UnitTestFail("failed OOS base-delta receive retained base state" LOCATION);
+        }
+        {
+            OosNcoOtReceiver receiver;
+            receiver.configure(true, 40, 8);
+            const auto baseCount = receiver.getBaseOTCount();
+            std::vector<std::array<block, 2>> baseOts(baseCount);
+            receiver.setUniformBaseOts(baseOts);
+
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            sockets[0].mSock->mImpl->mDebugErrorInjector = [] {
+                return cp::make_error_code(cp::code::ioError);
+            };
+            expectThrow([&] {
+                macoro::sync_wait(receiver.setBaseOts(baseOts, prng, sockets[0]));
+            });
+            if (receiver.hasBaseOts() || !sockets[0].closed())
+                throw UnitTestFail("failed OOS base-delta send retained base state" LOCATION);
+        }
+
+        {
             KkrtNcoOtSender sender;
             sender.mT.resize(1, 4);
             sender.mCorrectionVals.resize(1, 4);

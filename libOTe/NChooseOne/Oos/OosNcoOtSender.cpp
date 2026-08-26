@@ -21,13 +21,34 @@ namespace osuCrypto
 		span<block> baseRecvOts,
 		const BitVector& choices, Socket& chl)
 	{
-		auto delta = BitVector{};
+		if (choices.size() != u64(baseRecvOts.size()))
+			throw std::invalid_argument("OOS base OT messages and choices have different sizes. " LOCATION);
+		if (mGens.empty() || choices.size() != u64(mGens.size()) ||
+			choices.size() % (sizeof(block) * 8) != 0)
+			throw std::invalid_argument("OOS base OT count does not match the configured code. " LOCATION);
 
-		delta.resize(choices.size());
+		MACORO_TRY{
+		auto delta = BitVector(choices.size());
 
+		// Delivery of the randomization delta determines which base-OT
+		// correlation the peer installs. Once the exchange starts, old base
+		// state is no longer safe to report as matching the peer.
+		mBaseChoiceBits = {};
+		mChoiceBlks.clear();
+		for (auto& gen : mGens)
+			gen = PRNG{};
 		co_await chl.recv(delta);
 
 		setUniformBaseOts(baseRecvOts, choices ^ delta);
+
+		} MACORO_CATCH(eptr) {
+			mBaseChoiceBits = {};
+			mChoiceBlks.clear();
+			for (auto& gen : mGens)
+				gen = PRNG{};
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	void OosNcoOtSender::setUniformBaseOts(span<block> baseRecvOts, const BitVector& uniformChoices)

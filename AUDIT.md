@@ -5183,3 +5183,43 @@ Verification:
 - `OtExt_SoftSpoken_BufferState_Audit_Test` covers move construction and move
   assignment for both semi-honest and malicious roles. It requires safe
   rejection from the cleared sources and successful reinitialization.
+
+## AUD-163: OOS base randomization committed non-atomic state
+
+Status: fixed
+
+Affected code:
+
+- Interactive `OosNcoOtSender::setBaseOts()`.
+- Interactive `OosNcoOtReceiver::setBaseOts()`.
+
+Concern:
+
+The receiver installed transformed base generators and reported them ready
+before it sent the randomization delta. The sender received the delta before
+it validated its local base-OT dimensions. A failed exchange could therefore
+leave one role reporting usable base state that did not match the state held
+by its peer.
+
+Impact:
+
+A retry could expand mismatched base correlations. Because transport failure
+does not establish whether the peer observed the delta, retaining the previous
+state could also reuse a correlation after the peer installed its replacement.
+
+Resolution:
+
+Both roles now validate their local dimensions before communication. The
+receiver derives replacement generators in temporary storage. Each role
+invalidates its previous interactive base state immediately before the delta
+exchange, and the receiver waits for transport completion rather than merely
+buffering the delta before it commits the replacement. Both roles close the
+socket while retaining an unready state after transport failure.
+These changes affect setup only; the encoding and transpose loops are
+unchanged.
+
+Verification:
+
+- `NcoOt_StateValidation_Test` starts each role with installed uniform base
+  OTs, forces its side of the delta exchange to fail, and requires the role to
+  clear base readiness and close its socket.
