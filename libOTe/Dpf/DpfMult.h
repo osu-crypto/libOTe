@@ -21,6 +21,30 @@ namespace osuCrypto
 	// this protocol used |x| OTs in both directions to execute the protocol.
 	struct DpfMult
 	{
+		DpfMult() = default;
+		DpfMult(const DpfMult&) = delete;
+		DpfMult& operator=(const DpfMult&) = delete;
+
+		DpfMult(DpfMult&& src) noexcept
+		{
+			*this = std::move(src);
+		}
+
+		DpfMult& operator=(DpfMult&& src) noexcept
+		{
+			if (this != &src)
+			{
+				mPartyIdx = src.mPartyIdx;
+				mTotalMults = src.mTotalMults;
+				mChoiceBits = std::move(src.mChoiceBits);
+				mRecvOts = std::move(src.mRecvOts);
+				mSendOts = std::move(src.mSendOts);
+				mOtIdx = src.mOtIdx;
+				src.clear();
+			}
+			return *this;
+		}
+
 		static constexpr u64 packedBytes(u64 bitCount) noexcept
 		{
 			return bitCount / 8 + (bitCount % 8 != 0);
@@ -123,9 +147,11 @@ namespace osuCrypto
 			requireAvailableOts(x.size());
 			if (hasBaseOts() == false)
 				throw RTE_LOC;
+			auto otIdx = mOtIdx;
+			mOtIdx += x.size();
 
 			// our a share of a * b = c.
-			BitVector a0; a0.append(mChoiceBits, x.size(), mOtIdx);
+			BitVector a0; a0.append(mChoiceBits, x.size(), otIdx);
 
 			// A0 = 11...1 * a , an expanded version of a used for masking.
 			AlignedUnVector<block> A0(x.size());
@@ -142,9 +168,9 @@ namespace osuCrypto
 			for (u64 j = 0; j < x.size(); ++j)
 			{
 				A0[j] = block(-u64(a0[j]), -u64(a0[j]));
-				auto c00 = mRecvOts[mOtIdx + j];
-				auto c10 = mSendOts[mOtIdx + j][0];
-				b1[j] = mSendOts[mOtIdx + j][0] ^ mSendOts[mOtIdx + j][1];
+				auto c00 = mRecvOts[otIdx + j];
+				auto c10 = mSendOts[otIdx + j][0];
+				b1[j] = mSendOts[otIdx + j][0] ^ mSendOts[otIdx + j][1];
 
 				// C0' = c00+c10+a0b1
 				C[j] = c00 ^ c10 ^ (b1[j] & A0[j]);
@@ -187,10 +213,6 @@ namespace osuCrypto
 				// [zy] = [c] + theta * [a] + phi * [b] + theta * phi
 				xy[j] = C[j] ^ (theta[j] & A0[j]) ^ (Phi & b1[j]) ^ (partyMask & theta[j] & Phi);
 			}
-
-
-			mOtIdx += x.size();
-
 		}
 
 		static void packBits(span<u8> dest, MatrixView<u8> src, u64 bitCount)
@@ -649,6 +671,29 @@ namespace osuCrypto
 		// y shares.
 		struct MultSession
 		{
+			MultSession() = default;
+			MultSession(const MultSession&) = delete;
+			MultSession& operator=(const MultSession&) = delete;
+
+			MultSession(MultSession&& src) noexcept
+			{
+				*this = std::move(src);
+			}
+
+			MultSession& operator=(MultSession&& src) noexcept
+			{
+				if (this != &src)
+				{
+					mPartyIdx = src.mPartyIdx;
+					mExpandIdx = src.mExpandIdx;
+					mRecvOts = src.mRecvOts;
+					mSendOts = src.mSendOts;
+					mX = std::move(src.mX);
+					src.clear();
+				}
+				return *this;
+			}
+
 			u64 mPartyIdx = 0;
 			u64 mExpandIdx = 0;
 
@@ -659,6 +704,8 @@ namespace osuCrypto
 
 			void clear()
 			{
+				mPartyIdx = 0;
+				mExpandIdx = 0;
 				mRecvOts = {};
 				mSendOts = {};
 				mX = {};

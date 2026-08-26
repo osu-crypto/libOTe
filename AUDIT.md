@@ -4671,3 +4671,98 @@ Verification:
   Goldilocks.
 - `Vole_Silent_Clear_test` checks the resulting conservative parameters for
   both coefficient types.
+
+## AUD-146: DPF owners copied one-time correlations
+
+Status: fixed
+
+Affected code:
+
+- `DpfMult` and the DPF protocol objects that own multiplication OTs.
+
+Concern:
+
+The protocol objects used implicit copy operations. A copy duplicated each OT
+seed and its consumption index. The original object and its copy could then
+consume the same one-time correlations in different protocol executions.
+
+Impact:
+
+Reusing OT-derived multiplication correlations can cancel the masks between
+two transcripts. The peer can then learn relations between the secret inputs
+that the correlations were intended to hide.
+
+Resolution:
+
+`DpfMult`, Regular DPF, Sparse DPF, Sum DMPF, and Ternary DPF are move-only.
+Each move transfers the protocol state and clears the source object.
+
+Verification:
+
+- Compile-time checks require the protocol types to be non-copyable and
+  movable.
+- `Dpf_Audit_Test` moves each state-bearing DPF type and requires the source
+  object to contain no protocol state.
+
+## AUD-147: DPF multiplication sessions copied mask state
+
+Status: fixed
+
+Affected code:
+
+- `DpfMult::MultSession`.
+
+Concern:
+
+A multiplication session contains spans over reserved OTs and an expansion
+index. Its implicit copy operation duplicated both. The original session and
+its copy therefore derived the same masks for their next multiplication.
+
+Impact:
+
+Two transcripts with the same OT-derived masks can expose relations between
+the fixed secret bit sharing and the multiplicands supplied to each session.
+
+Resolution:
+
+Multiplication sessions are move-only. A move transfers the OT spans, fixed
+bit sharing, and expansion index. It then clears all state in the source
+session.
+
+Verification:
+
+- Compile-time checks require multiplication sessions to be non-copyable and
+  movable.
+- `Dpf_Audit_Test` verifies that moving a populated session clears its source
+  without changing the transferred state.
+
+## AUD-148: Failed DPF multiplication reused exposed Beaver correlations
+
+Status: fixed
+
+Affected code:
+
+- The block-vector overload of `DpfMult::multiply`.
+
+Concern:
+
+The protocol incremented its OT index only after both network operations
+completed. A peer could receive the opened Beaver masks and close the socket
+before replying. A retry would then use the same multiplication correlations.
+
+Impact:
+
+Differences between two openings under one Beaver correlation cancel the
+random masks. A peer can use the result to learn a relation between the secret
+inputs from the two executions.
+
+Resolution:
+
+The multiplication reserves its complete OT range before it computes or sends
+the first protocol message. All later accesses use the reserved starting
+index. The inner multiplication loops are unchanged.
+
+Verification:
+
+- `Dpf_Audit_Test` closes the peer socket, requires multiplication to fail,
+  and verifies that the attempted OT range remains consumed.

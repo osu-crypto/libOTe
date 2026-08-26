@@ -96,6 +96,29 @@ namespace osuCrypto
 	template<typename T, typename CoeffCtx = DefaultCoeffCtx<T>>
 	struct RegularDpf
 	{
+		RegularDpf() = default;
+		RegularDpf(const RegularDpf&) = delete;
+		RegularDpf& operator=(const RegularDpf&) = delete;
+
+		RegularDpf(RegularDpf&& src) noexcept
+		{
+			*this = std::move(src);
+		}
+
+		RegularDpf& operator=(RegularDpf&& src) noexcept
+		{
+			if (this != &src)
+			{
+				mPartyIdx = src.mPartyIdx;
+				mDomain = src.mDomain;
+				mDepth = src.mDepth;
+				mNumPoints = src.mNumPoints;
+				mMultiplier = std::move(src.mMultiplier);
+				src.clear();
+			}
+			return *this;
+		}
+
 		u64 mPartyIdx = 0;
 
 		u64 mDomain = 0;

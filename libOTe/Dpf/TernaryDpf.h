@@ -26,6 +26,32 @@ namespace osuCrypto
 	{
 		using VecF = typename CoeffCtx::template Vec<F>;
 
+		TernaryDpf() = default;
+		TernaryDpf(const TernaryDpf&) = delete;
+		TernaryDpf& operator=(const TernaryDpf&) = delete;
+
+		TernaryDpf(TernaryDpf&& src) noexcept
+		{
+			*this = std::move(src);
+		}
+
+		TernaryDpf& operator=(TernaryDpf&& src) noexcept
+		{
+			if (this != &src)
+			{
+				mPartyIdx = src.mPartyIdx;
+				mDomain = src.mDomain;
+				mDepth = src.mDepth;
+				mNumPointsPerSet = src.mNumPointsPerSet;
+				mOtIdx = src.mOtIdx;
+				mBaseSendOts = std::move(src.mBaseSendOts);
+				mBaseRecvOts = std::move(src.mBaseRecvOts);
+				mBaseChoice = std::move(src.mBaseChoice);
+				src.clear();
+			}
+			return *this;
+		}
+
 
 		u64 mPartyIdx = 0;
 
@@ -88,6 +114,15 @@ namespace osuCrypto
 			mBaseRecvOts.clear();
 			mBaseChoice.clear();
 			mOtIdx = 0;
+		}
+
+		void clear()
+		{
+			clearBaseOts();
+			mPartyIdx = 0;
+			mDomain = 0;
+			mDepth = 0;
+			mNumPointsPerSet = 0;
 		}
 
 		u8 lsb(const block& b)

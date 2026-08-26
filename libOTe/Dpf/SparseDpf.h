@@ -22,6 +22,30 @@ namespace osuCrypto
 	/// achieving O(|S|) work instead of O(2^D) for full domain evaluation.
 	struct SparseDpf
 	{
+		SparseDpf() = default;
+		SparseDpf(const SparseDpf&) = delete;
+		SparseDpf& operator=(const SparseDpf&) = delete;
+
+		SparseDpf(SparseDpf&& src) noexcept
+		{
+			*this = std::move(src);
+		}
+
+		SparseDpf& operator=(SparseDpf&& src) noexcept
+		{
+			if (this != &src)
+			{
+				mPartyIdx = src.mPartyIdx;
+				mNumPoints = src.mNumPoints;
+				mDomain = src.mDomain;
+				mDenseDepth = src.mDenseDepth;
+				mRegDpf = std::move(src.mRegDpf);
+				mMultiplier = std::move(src.mMultiplier);
+				src.clear();
+			}
+			return *this;
+		}
+
 		u64 mPartyIdx = 0;           // Party index p ∈ {0,1}
 		u64 mNumPoints = 0;    // Number of parallel sparse DPF instances
 		u64 mDomain = 0;             // Domain size 2^D

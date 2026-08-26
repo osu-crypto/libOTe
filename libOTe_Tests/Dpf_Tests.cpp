@@ -12,6 +12,7 @@
 #include "libOTe/Dpf/RevCuckoo/GoldreichHash.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Dpf/SumDmpf.h"
+#include <type_traits>
 
 using namespace oc;
 
@@ -293,8 +294,8 @@ void RegularDpf_MultSession_Test(const CLP& cmd)
 			dpf[1].setupMultiply(n, x1.getSpan<u8>(), sock[1])
 		));
 
-		auto session0 = std::get<0>(sessions).result();
-		auto session1 = std::get<1>(sessions).result();
+		auto& session0 = std::get<0>(sessions).result();
+		auto& session1 = std::get<1>(sessions).result();
 
 		// check that the base OTs in the sessions are correct
 		if (session0.mRecvOts.size() != n ||
@@ -2047,6 +2048,67 @@ void Dpf_Audit_Test(const oc::CLP&)
 	};
 
 #if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
+	static_assert(!std::is_copy_constructible_v<DpfMult>);
+	static_assert(!std::is_copy_assignable_v<DpfMult>);
+	static_assert(std::is_move_constructible_v<DpfMult>);
+	static_assert(std::is_move_assignable_v<DpfMult>);
+	static_assert(!std::is_copy_constructible_v<DpfMult::MultSession>);
+	static_assert(!std::is_copy_assignable_v<DpfMult::MultSession>);
+	static_assert(std::is_move_constructible_v<DpfMult::MultSession>);
+	static_assert(std::is_move_assignable_v<DpfMult::MultSession>);
+
+	{
+		DpfMult mult;
+		mult.init(1, 1);
+		std::vector<std::array<block, 2>> sendOts(1);
+		std::vector<block> recvOts(1);
+		BitVector choices(1);
+		mult.setBaseOts(sendOts, recvOts, choices);
+
+		auto moved = std::move(mult);
+		if (!moved.hasBaseOts() || mult.hasBaseOts() || mult.mPartyIdx ||
+			mult.mTotalMults || mult.mOtIdx || mult.mChoiceBits.size() ||
+			mult.mRecvOts.size() || mult.mSendOts.size())
+			throw UnitTestFail("DPF multiplier move retained source correlation state");
+
+		DpfMult::MultSession session;
+		session.mPartyIdx = 1;
+		session.mExpandIdx = 7;
+		session.mRecvOts = moved.mRecvOts;
+		session.mSendOts = moved.mSendOts;
+		session.mX.resize(1);
+		auto movedSession = std::move(session);
+		if (movedSession.mExpandIdx != 7 || movedSession.mRecvOts.size() != 1 ||
+			movedSession.mSendOts.size() != 1 || movedSession.mX.size() != 1 ||
+			session.mPartyIdx || session.mExpandIdx || session.mRecvOts.size() ||
+			session.mSendOts.size() || session.mX.size())
+			throw UnitTestFail("DPF multiplication session move retained source state");
+	}
+
+	{
+		DpfMult mult;
+		mult.init(0, 1);
+		std::vector<std::array<block, 2>> sendOts(1);
+		std::vector<block> recvOts(1);
+		BitVector choices(1), x(1);
+		mult.setBaseOts(sendOts, recvOts, choices);
+		std::vector<block> y(1), xy(1);
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		macoro::sync_wait(sockets[1].close());
+
+		bool failed = false;
+		try
+		{
+			macoro::sync_wait(mult.multiply(x, y, xy, sockets[0]));
+		}
+		catch (const std::exception&)
+		{
+			failed = true;
+		}
+		if (!failed || mult.mOtIdx != 1 || mult.hasBaseOts())
+			throw UnitTestFail("DPF multiplication reused OTs after transport failure");
+	}
+
 	{
 		constexpr u64 n = 1;
 		DpfMult mult;
@@ -2139,6 +2201,28 @@ void Dpf_Audit_Test(const oc::CLP&)
 #endif
 
 #ifdef ENABLE_REGULAR_DPF
+	static_assert(!std::is_copy_constructible_v<RegularDpf<block>>);
+	static_assert(std::is_move_constructible_v<RegularDpf<block>>);
+	static_assert(!std::is_copy_constructible_v<SumDmpf<block>>);
+	static_assert(std::is_move_constructible_v<SumDmpf<block>>);
+	{
+		RegularDpf<block> regular;
+		regular.init(1, 8, 1);
+		auto movedRegular = std::move(regular);
+		if (movedRegular.mDomain != 8 || regular.mPartyIdx || regular.mDomain ||
+			regular.mDepth || regular.mNumPoints || regular.hasBaseOts())
+			throw UnitTestFail("Regular DPF move retained source state");
+
+		SumDmpf<block> sum;
+		sum.init(1, 8, 1, 1);
+		sum.mPoints.push_back(3);
+		auto movedSum = std::move(sum);
+		if (movedSum.mPoints.size() != 1 || sum.mTimer || sum.mPartyIdx ||
+			sum.mDomain || sum.mNumSets || sum.mNumPointsPerSet ||
+			sum.mPoints.size() || sum.hasBaseOts())
+			throw UnitTestFail("Sum DMPF move retained source state");
+	}
+
 	{
 		PRNG prng(block(0x4155442d303238ull, 0x4155442d303239ull));
 		constexpr u64 domain = 8;
@@ -2202,6 +2286,25 @@ void Dpf_Audit_Test(const oc::CLP&)
 #endif
 
 #ifdef ENABLE_TERNARY_DPF
+	static_assert(!std::is_copy_constructible_v<TernaryDpf<block, CoeffCtxGF2>>);
+	static_assert(std::is_move_constructible_v<TernaryDpf<block, CoeffCtxGF2>>);
+
+	{
+		TernaryDpf<block, CoeffCtxGF2> ternary;
+		ternary.init(1, 3, 1);
+		auto count = ternary.baseOtCount();
+		std::vector<std::array<block, 2>> sendOts(count);
+		std::vector<block> recvOts(count);
+		BitVector choices(count);
+		ternary.setBaseOts(sendOts, recvOts, choices);
+		auto moved = std::move(ternary);
+		if (!moved.hasBaseOts() || ternary.hasBaseOts() || ternary.mPartyIdx ||
+			ternary.mDomain || ternary.mDepth || ternary.mNumPointsPerSet ||
+			ternary.mOtIdx || ternary.mBaseSendOts.size() ||
+			ternary.mBaseRecvOts.size() || ternary.mBaseChoice.size())
+			throw UnitTestFail("Ternary DPF move retained source correlation state");
+	}
+
 	{
 		TernaryDpf<block, CoeffCtxGF2> oversizedTernary;
 		expectRejected([&] {
@@ -2211,6 +2314,19 @@ void Dpf_Audit_Test(const oc::CLP&)
 #endif
 
 #ifdef ENABLE_SPARSE_DPF
+	static_assert(!std::is_copy_constructible_v<SparseDpf>);
+	static_assert(std::is_move_constructible_v<SparseDpf>);
+	{
+		SparseDpf sparse;
+		sparse.init(1, 1, 8, 1);
+		auto moved = std::move(sparse);
+		if (moved.mDomain != 8 || sparse.mPartyIdx || sparse.mNumPoints ||
+			sparse.mDomain || sparse.mDenseDepth ||
+			sparse.mRegDpf.mMultiplier.mSendOts.size() ||
+			sparse.mMultiplier.mSendOts.size())
+			throw UnitTestFail("Sparse DPF move retained source state");
+	}
+
 	{
 		PRNG prng(block(0x4155442d303331ull, 0x4155442d303332ull));
 		coproto::Socket sock;
