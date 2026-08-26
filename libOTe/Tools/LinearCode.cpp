@@ -95,8 +95,7 @@ namespace osuCrypto
         //auto iter1 = mG1.begin();
 
         BitVector buff;
-        buff.reserve(roundUpTo(numCols, 128));
-        buff.resize(numCols);
+        buff.resize(roundUpTo(numCols, 128));
 
         //u32 v;
         std::string line;
@@ -119,10 +118,10 @@ namespace osuCrypto
 				buff[j] = bit - '0';
             }
 
-            block* blkView = (block*)buff.data();
             for (u64 j = 0, k = 0; j < numCols; j += 128, ++k)
             {
-                *iter++ = blkView[k];
+				std::memcpy(&*iter, buff.data() + k * sizeof(block), sizeof(block));
+				++iter;
             }
         }
 

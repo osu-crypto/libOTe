@@ -394,6 +394,7 @@ namespace osuCrypto
 			auto d = *mDelta & mask;
 
 			auto n8 = (u64)messages.size() / 8 * 8;
+			std::array<block, 16> hashBatch;
 
 			std::array<block, 2>* m = messages.data();
 			auto r = mB.data();
@@ -411,32 +412,20 @@ namespace osuCrypto
 				r[6] = r[6] & mask;
 				r[7] = r[7] & mask;
 
-				// Set first message to mB value
-				m[0][0] = r[0];
-				m[1][0] = r[1];
-				m[2][0] = r[2];
-				m[3][0] = r[3];
-				m[4][0] = r[4];
-				m[5][0] = r[5];
-				m[6][0] = r[6];
-				m[7][0] = r[7];
-
-				// Set second message to mB xor delta
-				m[0][1] = r[0] ^ d;
-				m[1][1] = r[1] ^ d;
-				m[2][1] = r[2] ^ d;
-				m[3][1] = r[3] ^ d;
-				m[4][1] = r[4] ^ d;
-				m[5][1] = r[5] ^ d;
-				m[6][1] = r[6] ^ d;
-				m[7][1] = r[7] ^ d;
-
-				// Hash all messages for security
-				auto iter = (block*)m;
-				mAesFixedKey.hashBlocks<8>(iter, iter);
-
-				iter += 8;
-				mAesFixedKey.hashBlocks<8>(iter, iter);
+				// Keep the fixed-width AES batching without flattening the nested
+				// std::array<block, 2> output objects.
+				for (u64 j = 0; j < 8; ++j)
+				{
+					hashBatch[2 * j] = r[j];
+					hashBatch[2 * j + 1] = r[j] ^ d;
+				}
+				mAesFixedKey.hashBlocks<8>(hashBatch.data(), hashBatch.data());
+				mAesFixedKey.hashBlocks<8>(hashBatch.data() + 8, hashBatch.data() + 8);
+				for (u64 j = 0; j < 8; ++j)
+				{
+					m[j][0] = hashBatch[2 * j];
+					m[j][1] = hashBatch[2 * j + 1];
+				}
 
 				m += 8;
 				r += 8;

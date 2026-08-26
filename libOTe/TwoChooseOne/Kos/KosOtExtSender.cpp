@@ -99,6 +99,7 @@ namespace osuCrypto
 		auto t = AlignedUnVector<block>{ tSize };
 		auto u = AlignedUnVector<block>{};
 		auto transBuff = AlignedUnVector<block>{ 128ull * mIsMalicious };
+		auto hashBuff = std::array<block, 256>{};
 
 		block* uIter = 0;
 		block* uEnd = 0;
@@ -218,7 +219,12 @@ namespace osuCrypto
 			{
 				if (size)
 				{
-					auto hh = span<block>(mIter->data(), size * 2);
+					for (u64 j = 0; j < size; ++j)
+					{
+						hashBuff[2 * j] = mIter[j][0];
+						hashBuff[2 * j + 1] = mIter[j][1];
+					}
+					auto hh = span<block>(hashBuff.data(), size * 2);
 					if (mIsMalicious)
 					{
 						mAesFixedKey.TmmoHashBlocks(hh, hh, [mTweak = i * 256]() mutable {
@@ -228,6 +234,11 @@ namespace osuCrypto
 					else
 					{
 						mAesFixedKey.hashBlocks(hh, hh);
+					}
+					for (u64 j = 0; j < size; ++j)
+					{
+						mIter[j][0] = hashBuff[2 * j];
+						mIter[j][1] = hashBuff[2 * j + 1];
 					}
 				}
 				mIter += size;

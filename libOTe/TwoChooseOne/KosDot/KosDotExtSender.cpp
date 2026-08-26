@@ -77,7 +77,7 @@ namespace osuCrypto
 		auto numOtExt = u64{};
 		auto numSuperBlocks = u64{};
 		auto t = Matrix<block>{};
-		auto u = std::vector<std::array<block, superBlkSize>>{};
+		auto u = std::vector<block>{};
 		auto choiceMask = std::vector<block>{};
 		auto delta = std::array<block, 2>{};
 		auto extraBlocks = std::array<std::array<block, 2>, 128>{};
@@ -109,7 +109,7 @@ namespace osuCrypto
 		auto tBytes = MatrixView<const u8>(
 			reinterpret_cast<const u8*>(t.data()),
 			t.rows(), t.stride() * sizeof(block));
-		u.resize(mGens.size() * commStepSize);
+		u.resize(mGens.size() * commStepSize * superBlkSize);
 
 		choiceMask.resize(mBaseChoiceBits.size());
 		delta = { ZeroBlock, ZeroBlock };
@@ -132,7 +132,7 @@ namespace osuCrypto
 		mIterPartial = messages.end() - std::min<u64>(128 * superBlkSize, messages.size());
 
 		// set uIter = to the end so that it gets loaded on the first loop.
-		uIter = (block*)u.data() + superBlkSize * mGens.size() * commStepSize;
+		uIter = u.data() + superBlkSize * mGens.size() * commStepSize;
 		uEnd = uIter;
 
 		for (superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
@@ -141,8 +141,8 @@ namespace osuCrypto
 			if (uIter == uEnd)
 			{
 				step = std::min<u64>(numSuperBlocks - superBlkIdx, (u64)commStepSize);
-				co_await(chl.recv(span<block>((block*)u.data(), step * superBlkSize * mGens.size())));
-				uIter = (block*)u.data();
+				co_await(chl.recv(span<block>(u.data(), step * superBlkSize * mGens.size())));
+				uIter = u.data();
 			}
 
 			block* cIter = choiceMask.data();

@@ -5712,3 +5712,45 @@ sub-32 path retains its original shifts and masks.
 Verification:
 
 - `Dpf_Audit_Test` covers split positions 0, 31, and 32 and rejection at 33.
+
+## AUD-177: Remaining OT sender batches flattened nested block arrays
+
+Status: fixed
+
+Affected code:
+
+- KOS sender AES hashing.
+- KOS-Dot sender correction buffering.
+- Silent OT sender AES hashing.
+- `LinearCode` text-row loading.
+
+Concern:
+
+Three sender paths exposed `std::array<block, N>` storage through flat block
+pointers or spans and traversed into adjacent inner arrays. The text-code
+loader similarly read a byte-backed bit vector through a fabricated block
+pointer. The supported representations have the expected layout and
+alignment, but these accesses depended on cross-subobject pointer arithmetic
+or typed access to byte storage.
+
+Impact:
+
+No credible security failure was identified on the supported compilers.
+Formally, an optimizer or a different standard-library representation could
+interpret the object boundaries more narrowly, producing incorrect OT
+outputs or loaded linear-code rows. The text loader also copied the complete
+last block from storage whose logical padding was not explicitly initialized.
+
+Resolution:
+
+KOS-Dot now receives corrections into a flat block vector directly. KOS and
+Silent OT retain their fixed-width AES batches but stage them through real
+block arrays before scattering results through typed OT-pair pointers. The
+text loader zeroes a block-rounded bit vector and copies each row block through
+`memcpy`. No validation or abstraction was added to the expansion kernels.
+
+Verification:
+
+- Linear-code, KOS, KOS-Dot, and Silent random-OT tests pass in Release AVX2.
+- Seven-run sequential measurements at `2^20` OTs changed median KOS time from
+  145 to 144 ms, KOS-Dot from 216 to 211 ms, and Silent OT from 350 to 337 ms.
