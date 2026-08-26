@@ -516,7 +516,7 @@ namespace osuCrypto
 		{
 			r.mRecvChoice = std::get<1>(mSendRecv).sampleBaseChoiceBits(prng);
 			auto count = std::get<1>(mSendRecv).baseCount();
-			while(count.mBaseOtCount < r.mRecvChoice.size())
+			while (r.mRecvChoice.size() < count.mBaseOtCount)
 				r.mRecvChoice.pushBack(prng.getBit());
 			mChoice = r.mRecvChoice;
 		}
@@ -550,11 +550,11 @@ namespace osuCrypto
 
 		if (mSendRecv.index())
 		{
-			return std::get<1>(mSendRecv).hasBaseOts();
+			return std::get<1>(mSendRecv).hasBaseCors();
 		}
 		else
 		{
-			return std::get<0>(mSendRecv).hasBaseOts();
+			return std::get<0>(mSendRecv).hasBaseCors();
 		}
 	}
 

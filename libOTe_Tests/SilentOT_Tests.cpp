@@ -421,6 +421,62 @@ void SilentOtTriple_Audit_test(const oc::CLP&)
 	expectRejected([&] {
 		macoro::sync_wait(triples.expand(oleA, oleC, prng, sockets[1]));
 	});
+
+	auto testMaliciousExternalBaseOts = [](SilentOtTriple::Type type)
+	{
+		constexpr u64 n = 128;
+		std::array<SilentOtTriple, 2> parties;
+		std::array<PRNG, 2> prngs{ PRNG(CCBlock), PRNG(OneBlock) };
+		parties[0].init(0, n, SilentSecType::Malicious, type);
+		parties[1].init(1, n, SilentSecType::Malicious, type);
+
+		auto receiverCount = parties[0].baseCount(prngs[0]);
+		auto senderCount = parties[1].baseCount(prngs[1]);
+		if (receiverCount.mRecvChoice.size() != senderCount.mSendCount)
+			throw UnitTestFail("SilentOtTriple malicious base counts disagree");
+
+		std::vector<std::array<block, 2>> sendBase(senderCount.mSendCount);
+		std::vector<block> recvBase(senderCount.mSendCount);
+		prngs[1].get(sendBase.data(), sendBase.size());
+		for (u64 i = 0; i < sendBase.size(); ++i)
+			recvBase[i] = sendBase[i][receiverCount.mRecvChoice[i]];
+
+		parties[0].setBaseOts({}, recvBase);
+		parties[1].setBaseOts(sendBase, {});
+		if (!parties[0].hasBaseOts() || !parties[1].hasBaseOts())
+			throw UnitTestFail("SilentOtTriple did not report installed base correlations");
+
+		auto testSockets = coproto::LocalAsyncSocket::makePair();
+		if (type == SilentOtTriple::Type::OLE)
+		{
+			std::array<std::vector<block>, 2> A{ std::vector<block>(1), std::vector<block>(1) };
+			std::array<std::vector<block>, 2> C{ std::vector<block>(1), std::vector<block>(1) };
+			auto result = macoro::sync_wait(macoro::when_all_ready(
+				parties[0].expand(A[0], C[0], prngs[0], testSockets[0]),
+				parties[1].expand(A[1], C[1], prngs[1], testSockets[1])));
+			std::get<0>(result).result();
+			std::get<1>(result).result();
+			if ((C[0][0] ^ C[1][0]) != (A[0][0] & A[1][0]))
+				throw UnitTestFail("SilentOtTriple malicious external-base OLE failed");
+		}
+		else
+		{
+			std::array<std::vector<block>, 2> A{ std::vector<block>(1), std::vector<block>(1) };
+			std::array<std::vector<block>, 2> B{ std::vector<block>(1), std::vector<block>(1) };
+			std::array<std::vector<block>, 2> C{ std::vector<block>(1), std::vector<block>(1) };
+			auto result = macoro::sync_wait(macoro::when_all_ready(
+				parties[0].expand(A[0], B[0], C[0], prngs[0], testSockets[0]),
+				parties[1].expand(A[1], B[1], C[1], prngs[1], testSockets[1])));
+			std::get<0>(result).result();
+			std::get<1>(result).result();
+			if ((C[0][0] ^ C[1][0]) !=
+				((A[0][0] ^ A[1][0]) & (B[0][0] ^ B[1][0])))
+				throw UnitTestFail("SilentOtTriple malicious external-base triple failed");
+		}
+	};
+
+	testMaliciousExternalBaseOts(SilentOtTriple::Type::OLE);
+	testMaliciousExternalBaseOts(SilentOtTriple::Type::Triple);
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif

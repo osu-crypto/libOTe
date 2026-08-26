@@ -5267,3 +5267,43 @@ Verification:
   base-choice family and checks that both parties retain one map.
 - The test confirms that split descendants share the same map and that the
   receiver rejects a replacement map seed.
+
+## AUD-165: Silent triples omitted malicious-check base choices
+
+Status: fixed
+
+Affected code:
+
+- `SilentOtTriple::baseCount()`.
+- `SilentOtTriple::hasBaseOts()`.
+
+Concern:
+
+The triple wrapper sampled the PPRF receiver choices but used a reversed
+comparison when extending them to the complete Silent base-OT count. In
+malicious mode, the returned choice vector therefore omitted the 128 base OTs
+used by the Ferret consistency check. The wrapper also queried the embedded
+base extender rather than the installed Silent correlations when reporting
+base readiness.
+
+Impact:
+
+Externally supplied base OTs could not initialize malicious Silent triples or
+OLEs: the Silent receiver rejected the incomplete choice vector. A valid
+externally installed correlation set was also reported as unavailable.
+
+Resolution:
+
+The receiver choice vector is now extended until it reaches the complete
+Silent base-OT count. The wrapper's readiness query now delegates to
+`hasBaseCors()` on the embedded Silent sender or receiver. These changes occur
+only during setup and do not affect the expansion, compression, or hashing
+loops.
+
+Verification:
+
+- `SilentOtTriple_Audit_test` installs externally generated malicious base OTs
+  for both Triple and OLE configurations.
+- The test requires both roles to report the correlations ready, executes the
+  malicious protocol, and verifies the resulting Triple and OLE correlations.
+- The focused test passes in Release AVX2 and scalar builds.
