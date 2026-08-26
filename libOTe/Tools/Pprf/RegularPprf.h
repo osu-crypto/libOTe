@@ -52,7 +52,7 @@ namespace osuCrypto
 		std::function<void(u64 treeIdx, VecF& leaf)> mOutputFn;
 
 		// an internal buffer that is used to expand the tree.
-		AlignedUnVector<block> mTempBuffer;
+		pprf::ExpandTreeBuffer mTempBuffer;
 
 		RegularPprfSender() = default;
 
@@ -567,7 +567,7 @@ namespace osuCrypto
 		std::function<void(u64 treeIdx, VecF& leafs)> mOutputFn;
 
 		// an internal buffer that is used to expand the tree.
-		AlignedUnVector<block> mTempBuffer;
+		pprf::ExpandTreeBuffer mTempBuffer;
 
 		RegularPprfReceiver() = default;
 		RegularPprfReceiver(const RegularPprfReceiver&) = delete;

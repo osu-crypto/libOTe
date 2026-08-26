@@ -149,12 +149,18 @@ namespace osuCrypto
             encode(data);
         }
 
+        FFTPoly(span<const block> data)
+        {
+            encode(data);
+        }
+
         u64 mN = 0, mNPow2 = 0;
         aligned_vector<u64> mPoly;
 
         void resize(u64 n);
 
         void encode(span<const u64> data);
+        void encode(span<const block> data);
 
 
         void mult(const FFTPoly& a, const FFTPoly& b);
@@ -171,6 +177,12 @@ namespace osuCrypto
 
         void decode(span<u64> dest, bool destructive = true);
         void decode(span<u64> dest, DecodeCache& cache, bool destructive);
+        void decode(span<block> dest, bool destructive = true);
+        void decode(span<block> dest, DecodeCache& cache, bool destructive);
+
+    private:
+        void encode(const void* data, u64 size64);
+        void decode(void* dest, u64 sizeBytes, DecodeCache& cache, bool destructive);
 
     };
 

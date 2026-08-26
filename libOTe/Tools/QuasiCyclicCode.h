@@ -290,14 +290,14 @@ namespace osuCrypto
             FFTPoly cPoly;
 
             AlignedUnVector<block> temp128(2 * polyBlockSize);
+            AlignedUnVector<u64> randomPoly(polyU64Size);
 
             FFTPoly::DecodeCache cache;
             for (u64 s = 0; s < scalerMinusOne; s += 1)
             {
-                auto a64 = spanCast<u64>(temp128).subspan(polyU64Size);
                 PRNG pubPrng(toBlock(s) ^ mSeed);
-                pubPrng.get(a64.data(), a64.size());
-                a[s].encode(a64);
+                pubPrng.get(randomPoly.data(), randomPoly.size());
+                a[s].encode(randomPoly);
             }
 
             for (u64 i = 0; i < rows; i += 1)
@@ -306,9 +306,9 @@ namespace osuCrypto
                 for (u64 s = 0; s < scalerMinusOne; ++s)
                 {
                     auto& aPoly = a[s];
-                    auto b64 = spanCast<u64>(XT[i]).subspan(s * polyU64Size, polyU64Size);
+                    auto b = XT[i].subspan(s * polyBlockSize, polyBlockSize);
 
-                    bPoly.encode(b64);
+                    bPoly.encode(b);
 
                     if (s == 0)
                     {
@@ -322,7 +322,7 @@ namespace osuCrypto
                 }
 
                 // decode c[i] and store it at t64Ptr
-                cPoly.decode(spanCast<u64>(temp128), cache, true);
+                cPoly.decode(temp128, cache, true);
 
                 // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
                 modp(cModP1[i], temp128, mPrimeModulus);

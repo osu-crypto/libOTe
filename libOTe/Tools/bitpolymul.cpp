@@ -46,7 +46,20 @@ namespace osuCrypto
 
     void FFTPoly::encode(span<const u64> data)
     {
-        resize(data.size());
+        encode(data.data(), data.size());
+    }
+
+    void FFTPoly::encode(span<const block> data)
+    {
+        if (data.size() > MaxSize / 2)
+            throw std::invalid_argument("bitpolymul input exceeds the supported range. " LOCATION);
+
+        encode(data.data(), data.size() * 2);
+    }
+
+    void FFTPoly::encode(const void* data, u64 size64)
+    {
+        resize(size64);
 
         if (!mN)
             return;
@@ -55,10 +68,8 @@ namespace osuCrypto
 
 
         // encode a
-        aligned_vector<u64> temp;
-        temp.reserve(mNPow2);
-        temp.insert(temp.end(), data.begin(), data.end());
-        temp.resize(mNPow2);
+        aligned_vector<u64> temp(mNPow2);
+        memcpy(temp.data(), data, size64 * sizeof(u64));
 
         bc_to_lch_2_unit256(temp.data(), mNPow2);
         encode_128_half_input_zero(mPoly.data(), temp.data(), mNPow2);
@@ -114,7 +125,23 @@ namespace osuCrypto
 
     void FFTPoly::decode(span<u64> dest, DecodeCache& cache, bool destructive)
     {
-        if (static_cast<u64>(dest.size()) != 2 * mN)
+        decode(dest.data(), dest.size() * sizeof(u64), cache, destructive);
+    }
+
+    void FFTPoly::decode(span<block> dest, bool destructive)
+    {
+        DecodeCache cache;
+        decode(dest, cache, destructive);
+    }
+
+    void FFTPoly::decode(span<block> dest, DecodeCache& cache, bool destructive)
+    {
+        decode(dest.data(), dest.size() * sizeof(block), cache, destructive);
+    }
+
+    void FFTPoly::decode(void* dest, u64 sizeBytes, DecodeCache& cache, bool destructive)
+    {
+        if (sizeBytes != 2 * mN * sizeof(u64))
             throw RTE_LOC;
 
         if (cache.mTemp.size() < mPoly.size())
@@ -139,7 +166,7 @@ namespace osuCrypto
         bc_to_mono_2_unit256(cache.mTemp.data(), 2 * mNPow2);
 
         // copy out
-        memcpy(dest.data(), cache.mTemp.data(), dest.size() * sizeof(u64));
+        memcpy(dest, cache.mTemp.data(), sizeBytes);
 
 
         if (destructive)

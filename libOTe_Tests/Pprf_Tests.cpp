@@ -58,7 +58,7 @@ void RegularPprf_expandOne_test_impl(u64 domain, bool program)
 
 
 	//mTreeAlloc.reserve(2, (1ull << depth) + 2);
-	AlignedUnVector<block> sTree, rTree;
+	pprf::ExpandTreeBuffer sTree, rTree;
 
 	pprf::allocateExpandTree(domain, sTree, sLevels, false);
 	pprf::allocateExpandTree(domain, rTree, rLevels, false);

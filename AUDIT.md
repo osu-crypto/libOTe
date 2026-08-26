@@ -5609,3 +5609,76 @@ Verification:
   by -1.9% and the malicious test by -0.4%.
 - At one million OTs, the final malicious path measured +0.7%, within run noise.
   The rejected separate full-size workspace measured +3.1% and was removed.
+
+## AUD-174: Quasi-cyclic FFT calls accessed block storage through u64 lvalues
+
+Status: fixed
+
+Affected code:
+
+- `QuasiCyclicCode::dualEncode()`.
+- The `FFTPoly` encode and decode interfaces used by the quasi-cyclic encoder.
+
+Concern:
+
+The quasi-cyclic encoder constructed `u64` spans over live `block` storage for
+public polynomial generation, FFT input, and decoded FFT output. The buffers
+had the correct size and alignment, but `u64` is not a permitted alias for a
+`block` object.
+
+Impact:
+
+An optimizer using the C++ aliasing and lifetime rules could corrupt public
+polynomials, transposed input polynomials, or decoded products. This could
+produce incorrect quasi-cyclic encodings used by Silent OT.
+
+Resolution:
+
+`FFTPoly` now accepts block spans directly. Its block overloads feed the same
+padded encode workspace and the same final decode copy through object-
+representation access, so they add no memory pass. Public random polynomials
+use a real aligned `u64` buffer. The quasi-cyclic encoder no longer uses
+`spanCast<u64>`.
+
+Verification:
+
+- The bit-polynomial and Silent quasi-cyclic OT tests pass in the dedicated
+  bit-polynomial build.
+- A seven-run interleaved sequential A/B benchmark measured 977.2 ms for the
+  original QC path and 980.6 ms for the fixed path (+0.35%).
+
+## AUD-175: PPRF tree nodes were overlaid on block-vector storage
+
+Status: fixed
+
+Affected code:
+
+- `pprf::allocateExpandTree()`.
+- The regular PPRF sender and receiver expansion buffers.
+
+Concern:
+
+PPRF allocated its tree as individual `block` objects and then accessed that
+storage through fabricated `AlignedArray<block, 8>` objects. All contained
+blocks were live, and bounds and alignment were correct, but the aggregate
+tree-node objects had not been created in that storage.
+
+Impact:
+
+No supported-platform failure was observed. Formally, an optimizer could use
+the aggregate lifetime mismatch while transforming tree expansion, producing
+incorrect PPRF seeds and downstream Silent-protocol output.
+
+Resolution:
+
+The backing buffers now contain aligned eight-block tree nodes directly. The
+allocation has the same byte size and alignment, and the fixed-width AES and
+tree-expansion loops are unchanged. No copy, allocation, or runtime check was
+added to the expansion loop.
+
+Verification:
+
+- The complete regular and stationary PPRF test set passes in Release AVX2 and
+  scalar builds.
+- A nine-run interleaved sequential A/B benchmark measured 1,441.9 ms for the
+  original PPRF path and 1,453.0 ms for the fixed path (+0.77%).

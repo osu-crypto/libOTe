@@ -132,6 +132,10 @@ namespace osuCrypto
 
     namespace pprf
     {
+        using ExpandTreeNode = AlignedArray<block, 8>;
+        using ExpandTreeBuffer = AlignedUnVector<ExpandTreeNode>;
+        static_assert(sizeof(ExpandTreeNode) == 8 * sizeof(block));
+
 
         inline u64 checkedAdd(u64 a, u64 b)
         {
@@ -368,7 +372,7 @@ namespace osuCrypto
 
         inline void allocateExpandTree(
             u64 domainSize,
-            AlignedUnVector<block>& alloc,
+            ExpandTreeBuffer& alloc,
             std::vector<span<AlignedArray<block, 8>>>& levels,
             bool reuseLevel = true)
         {
@@ -388,11 +392,12 @@ namespace osuCrypto
                 // these levels will be used for the smaller levels as
                 // well. We will alternate between the two.
                 alloc.clear();
-                alloc.resize(checkedSize(checkedMul(size, 8)));
+                auto blockCount = checkedMul(size, 8);
+                alloc.resize(checkedSize(blockCount / 8));
 
                 std::array<span<AlignedArray<block, 8>>, 2>  buffs;
-                buffs[0] = { (AlignedArray<block, 8>*)alloc.data(), secondLast };
-                buffs[1] = { (AlignedArray<block, 8>*)alloc.data() + secondLast , domainSize };
+                buffs[0] = { alloc.data(), secondLast };
+                buffs[1] = { alloc.data() + secondLast, domainSize };
 
                 // give the last level the big buffer.
                 levels.back() = buffs[1].subspan(0, domainSize);
@@ -421,8 +426,9 @@ namespace osuCrypto
                 }
 
                 alloc.clear();
-                alloc.resize(checkedSize(checkedMul(totalSize, 8)));
-                span<AlignedArray<block, 8>> buff((AlignedArray<block, 8>*)alloc.data(), totalSize);
+                auto blockCount = checkedMul(totalSize, 8);
+                alloc.resize(checkedSize(blockCount / 8));
+                span<AlignedArray<block, 8>> buff(alloc.data(), totalSize);
 
                 levels.back() = buff.subspan(0, domainSize);
                 buff = buff.subspan(domainSize);
