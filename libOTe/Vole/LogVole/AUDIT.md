@@ -1377,6 +1377,16 @@ type expected at that protocol step. It rejects a larger peer-supplied header
 before allocating the payload. The sender and receiver key-derive paths have a
 regression test that supplies a header one byte above the expected bound.
 
+Update 2026-08-25:
+
+The receiver no longer trusts the sender's offline label count. The low-level
+receiver input carries the agreed output length, and
+`civoleReceiverOffline` compares the fixed-size peer metadata against it before
+building the CRT context or starting offline setup. The default test
+`LogVole_Civole_RejectsPeerOfflineWidth` supplies only a mismatched count and
+requires immediate rejection with empty output state. This fix is tracked as
+AUD-153.
+
 Concern:
 
 Three transport/robustness gaps against a non-honest peer or transport. All are
@@ -1411,8 +1421,10 @@ hardening gaps if the transport is untrusted:
 
 Current state:
 
-No security break in the semi-honest model (the sender is honest, so the count
-and frame sizes are correct; SID wrap is infeasible and safely caught).
+Peer-controlled frame lengths and the offline label count are checked against
+local protocol bounds before allocation or expensive setup. The append-only SID
+history remains an accepted lifecycle cost for unrealistically long sessions;
+SID reuse is rejected.
 
 Relevant files:
 
@@ -1436,17 +1448,14 @@ Evidence:
 
 What would close it:
 
-- Have `civoleReceiverOffline` validate `meta.mLabelCount` against an expected
-  bound rather than trusting it unconditionally.
-- Optional: replace `mUsedSids` with a hash set, or track a monotonic-SID
-  high-water mark, if very high session counts on a single offline state are
-  expected.
+- The actionable peer-input hardening is complete. Revisit SID storage only if
+  deployments require an exceptionally large number of online calls from one
+  offline state.
 
 Recommended targeted test:
 
-- A negative/robustness test feeding an out-of-range `meta.mLabelCount` and
-  asserting graceful rejection (kept out of normal CI). Oversized ring-frame
-  headers are now covered by the default key-derive coproto test.
+- Covered by the default peer-width rejection test and the existing oversized
+  key-derive frame tests.
 
 ## LV-AUDIT-027: Wide-arithmetic precision and ring add/sub canonicalization hardening
 

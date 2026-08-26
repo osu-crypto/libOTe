@@ -4,6 +4,7 @@
 
 #define LIBOTE_LOGVOLE_TESTS(X) \
     X(Civole, RejectsZeroDelta) \
+    X(Civole, RejectsPeerOfflineWidth) \
     X(Civole, ValidationAndSidReuse) \
     X(Civole, StateMachineAutoOfflineSequentialSids) \
     X(Core, WideU64OneShiftBounds) \

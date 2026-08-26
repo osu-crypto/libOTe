@@ -4869,3 +4869,72 @@ Verification:
   VOLE roles.
 - Release and scalar builds pass the new failure tests and the existing
   malicious and stationary success tests.
+
+## AUD-153: LogVole receiver trusted the peer's offline output length
+
+Status: fixed
+
+Affected code:
+
+- `LogVole::civoleReceiverOffline`.
+
+Concern:
+
+The receiver learned the output length from the sender's offline metadata. The
+public wrapper knew the configured length, but it compared the result only
+after the low-level protocol had constructed the CRT context and completed the
+offline setup. A peer could therefore advertise a larger valid length and make
+the receiver perform unintended allocation and computation before rejection.
+
+Impact:
+
+A malicious peer could amplify the cost of an offline request and consume
+receiver memory or CPU beyond the agreed session size.
+
+Resolution:
+
+The low-level receiver input now includes the agreed output length. The
+receiver rejects zero local lengths and mismatched peer metadata immediately
+after the fixed-size metadata receive, before CRT construction or protocol
+setup. The public wrapper supplies its configured request size.
+
+Verification:
+
+- `LogVole_Civole_RejectsPeerOfflineWidth` sends a mismatched metadata count
+  without sending the remaining protocol messages. The receiver rejects it
+  immediately and leaves the output state empty.
+- The existing CI-VOLE validation and state-machine tests pass.
+
+## AUD-154: Moved-from LogVole wrappers retained active session metadata
+
+Status: fixed
+
+Affected code:
+
+- `LogVoleSender` and `LogVoleReceiver`.
+
+Concern:
+
+Implicit moves transferred the owning protocol state but copied scalar
+metadata, including the wrapper state and next session identifier. A moved-from
+wrapper could still report that it held offline state and attempt another
+protocol call using incomplete transferred storage.
+
+Impact:
+
+Using both objects after a move could contact the peer with inconsistent
+session state or attempt to reuse a session identifier.
+
+Resolution:
+
+Both wrappers are explicitly move-only. Move construction and assignment
+transfer the timer, configuration, session counters, communication statistics,
+and nested offline state. They then clear the source to its default inert state.
+The move operations do not affect protocol kernels or online loops.
+
+Verification:
+
+- Compile-time checks require both wrappers to be non-copyable and movable.
+- `LogVole_Civole_StateMachineAutoOfflineSequentialSids` moves populated
+  offline wrappers, checks that all representative source state and owning
+  pointers are clear, and completes the next online SID with the destinations.

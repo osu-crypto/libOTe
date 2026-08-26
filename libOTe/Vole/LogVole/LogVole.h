@@ -46,9 +46,12 @@ namespace osuCrypto::LogVole
         u64 mW = 0;
     };
 
+    // Low-level CI-VOLE offline input for the receiver. mW is the agreed
+    // output length and must match the sender's advertised length.
     struct CivoleReceiverOfflineInput
     {
         CivoleParams mParams;
+        u64 mW = 0;
     };
 
     // Low-level reusable sender state for a fixed Delta and output length.
@@ -123,6 +126,12 @@ namespace osuCrypto
             Offline
         };
 
+        LogVoleSender() = default;
+        LogVoleSender(const LogVoleSender&) = delete;
+        LogVoleSender& operator=(const LogVoleSender&) = delete;
+        LogVoleSender(LogVoleSender&& other);
+        LogVoleSender& operator=(LogVoleSender&& other);
+
         u64 mRequestSize = 0;
         u32 mPlaintextModulusBits = 55;
         u64 mModulus = 0;
@@ -182,6 +191,12 @@ namespace osuCrypto
             Configured,
             Offline
         };
+
+        LogVoleReceiver() = default;
+        LogVoleReceiver(const LogVoleReceiver&) = delete;
+        LogVoleReceiver& operator=(const LogVoleReceiver&) = delete;
+        LogVoleReceiver(LogVoleReceiver&& other);
+        LogVoleReceiver& operator=(LogVoleReceiver&& other);
 
         u64 mRequestSize = 0;
         u32 mPlaintextModulusBits = 55;
