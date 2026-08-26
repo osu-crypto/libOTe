@@ -86,6 +86,11 @@ namespace osuCrypto
 		if (choices.size() != messages.size())
 			throw std::runtime_error("choices and messages must have the same size. " LOCATION);
 
+		if (mHashType != HashType::RandomOracle &&
+			mHashType != HashType::AesHash &&
+			mHashType != HashType::NoHash)
+			throw std::invalid_argument("invalid KOS hash type. " LOCATION);
+
 		if (mIsMalicious && mHashType == HashType::NoHash)
 			throw std::runtime_error("malicious no hash is not supported, use DotKos. " LOCATION);
 

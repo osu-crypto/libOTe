@@ -35,7 +35,7 @@ void Tools_bitShift_test(const CLP& cmd)
     // Test bitShiftXor with various shift values
     for (u64 i = 0; i < t; ++i)
     {
-        u8 bitShift = prng.get<u8>() % 128;
+        u8 bitShift = i ? prng.get<u8>() % 128 : 64;
 
         u64 inSize = std::max<u64>(1, n + (i & 1 ? 1 : -1));
         u64 inBits = std::min<u64>(n * 128, inSize * 128 - bitShift);
@@ -1255,6 +1255,37 @@ void OtExt_Silent_AuditState_Test(const oc::CLP& cmd)
 
     SilentOtExtSender sender;
     SilentOtExtReceiver receiver;
+	expectRejected([&] {
+		SilentOtExtSender invalid;
+		invalid.configure(128, 2, 1, static_cast<SilentSecType>(255));
+	}, "Silent OT sender accepted an invalid security type");
+	expectRejected([&] {
+		SilentOtExtReceiver invalid;
+		invalid.configure(128, 2, 1, static_cast<SilentSecType>(255));
+	}, "Silent OT receiver accepted an invalid security type");
+	{
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		SilentOtExtReceiver invalid;
+		BitVector choices;
+		std::vector<block> messages;
+		expectRejected([&] {
+			macoro::sync_wait(invalid.silentReceive(
+				choices, messages, prng, sockets[0], static_cast<OTType>(255)));
+		}, "Silent OT receiver accepted an invalid OT type");
+	}
+	{
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		SilentOtExtReceiver invalid;
+		expectRejected([&] {
+			macoro::sync_wait(invalid.silentReceiveInplace(
+				128, prng, sockets[0], static_cast<ChoiceBitPacking>(255)));
+		}, "Silent OT receiver accepted invalid choice-bit packing");
+	}
+	expectRejected([&] {
+		SilentOtExtReceiver invalid;
+		invalid.compress(static_cast<ChoiceBitPacking>(255));
+	}, "Silent OT compression accepted invalid choice-bit packing");
+
     sender.configure(128, 2, 3, SilentSecType::Malicious,
         SdNoiseDistribution::Stationary, MultType::ExConv21x24);
     receiver.configure(128, 2, 3, SilentSecType::Malicious,

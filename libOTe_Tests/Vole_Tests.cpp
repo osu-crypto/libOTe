@@ -337,6 +337,25 @@ void Vole_Noisy_Audit_Test(const oc::CLP&)
 	CoeffCtxInteger ctx;
 	u8 delta = 0;
 
+	expectInvalidArgument([] {
+		SilentVoleSender<block, block, CoeffCtxGF128> sender;
+		sender.configure(128, static_cast<SilentSecType>(255));
+	});
+	expectInvalidArgument([] {
+		SilentVoleReceiver<block, block, CoeffCtxGF128> receiver;
+		receiver.configure(128, static_cast<SilentSecType>(255));
+	});
+	expectInvalidArgument([] {
+		SilentVoleSender<block, block, CoeffCtxGF128> sender;
+		sender.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+			static_cast<SilentBaseType>(255));
+	});
+	expectInvalidArgument([] {
+		SilentVoleReceiver<block, block, CoeffCtxGF128> receiver;
+		receiver.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+			static_cast<SilentBaseType>(255));
+	});
+
 	{
 		CountingOtReceiver ot;
 		std::vector<u8> output;

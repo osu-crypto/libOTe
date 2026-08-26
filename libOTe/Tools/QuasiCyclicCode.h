@@ -88,7 +88,26 @@ namespace osuCrypto
 			if (in.empty())
 				throw std::invalid_argument("Shifted input must be nonempty. " LOCATION);
 
-            if (bitShift >= 64)
+            if (bitShift == 64)
+            {
+                u8* inPtr = ((u8*)in.data()) + sizeof(u64);
+
+                auto end = std::min<u64>(dest.size(), in.size() - 1);
+                for (u64 i = 0; i < end; ++i, inPtr += sizeof(block))
+                    dest[i] = dest[i] ^ toBlock(inPtr);
+
+                if (end != static_cast<u64>(dest.size()))
+                {
+                    u64 b0;
+                    memcpy(&b0, inPtr, sizeof(b0));
+
+                    u64 d;
+                    memcpy(&d, dest[end].data(), sizeof(d));
+                    d ^= b0;
+                    memcpy(dest[end].data(), &d, sizeof(d));
+                }
+            }
+            else if (bitShift > 64)
             {
                 bitShift -= 64;
                 const int bitShift2 = 64 - bitShift;

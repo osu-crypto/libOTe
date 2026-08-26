@@ -143,6 +143,8 @@ namespace osuCrypto
     {
         if (sizeBytes != 2 * mN * sizeof(u64))
             throw RTE_LOC;
+		if (!mN)
+			return;
 
         if (cache.mTemp.size() < mPoly.size())
             cache.mTemp.resize(mPoly.size());

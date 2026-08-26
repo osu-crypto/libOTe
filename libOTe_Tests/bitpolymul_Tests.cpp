@@ -45,6 +45,11 @@ void Tools_bitpolymul_test(const CLP& cmd)
     using namespace bpm;
 
     {
+        FFTPoly empty;
+        empty.encode(span<const u64>{});
+        empty.decode(span<u64>{});
+        bitpolymul(nullptr, nullptr, nullptr, 0);
+
         FFTPoly poly;
         poly.resize(1);
         const auto oldN = poly.mN;

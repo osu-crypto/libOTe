@@ -5754,3 +5754,138 @@ Verification:
 - Linear-code, KOS, KOS-Dot, and Silent random-OT tests pass in Release AVX2.
 - Seven-run sequential measurements at `2^20` OTs changed median KOS time from
   145 to 144 ms, KOS-Dot from 216 to 211 ms, and Silent OT from 350 to 337 ms.
+
+## AUD-178: KOS accepted out-of-range hash modes as no-hash
+
+Status: fixed
+
+Affected code:
+
+- `KosOtExtSender::send()`.
+- `KosOtExtReceiver::receive()`.
+
+Concern:
+
+Malicious KOS explicitly rejects `HashType::NoHash`, but an out-of-range enum
+value passed that guard. Both output loops then interpreted the value as the
+no-hash case and returned raw OT rows.
+
+Impact:
+
+An invalid application configuration could execute the unsupported malicious
+KOS no-hash variant instead of failing closed. This bypassed the output-hash
+mode invariant that the entry points otherwise enforce.
+
+Resolution:
+
+Both roles validate the complete hash-mode domain before generating base OTs
+or performing network activity. The hashing and transpose loops are unchanged.
+
+Verification:
+
+- `OtExt_InputValidation_Test` requires both roles to reject an out-of-range
+  hash mode before entering the protocol.
+- The normal malicious KOS test passes in the Release audit build.
+
+## AUD-179: Silent protocol modes failed open
+
+Status: fixed
+
+Affected code:
+
+- Silent OT sender and receiver configuration.
+- Silent VOLE sender and receiver configuration.
+- Silent OT receiver output-mode and choice-packing entry points.
+
+Concern:
+
+The Silent configuration paths stored out-of-range `SilentSecType` values.
+Later equality tests enabled malicious correlations and checks only for the
+named malicious enumerator, so every other value ran without them. Invalid OT,
+choice-packing, and base-OT modes similarly fell through to an existing mode.
+
+Impact:
+
+An invalid application configuration could silently run the semi-honest
+protocol or return a different OT representation instead of rejecting the
+configuration. In particular, the requested malicious-security invariant was
+not fail-closed.
+
+Resolution:
+
+Each public mode parameter is validated at its configuration or protocol
+boundary before state mutation, base generation, or network activity. No check
+was added to a PPRF, encoding, hashing, or malicious-check loop.
+
+Verification:
+
+- `OtExt_Silent_AuditState_Test` covers invalid security, OT, and choice-packing
+  modes.
+- `Vole_Noisy_Audit_Test` covers invalid Silent VOLE security and base modes.
+- The normal Silent random and correlated OT tests pass in Release.
+
+## AUD-180: Exact 64-bit quasi-cyclic shifts were undefined in scalar builds
+
+Status: fixed
+
+Affected code:
+
+- `QuasiCyclicCode::bitShiftXor()`.
+
+Concern:
+
+The 64-to-127-bit shift branch subtracted 64 from its input and formed the
+complementary lane shift as `64 - bitShift`. At an input shift of exactly 64,
+the scalar `block` fallback shifted 64-bit words by 64, which C++ does not
+define. SIMD shift instructions happened to return the intended zero lane.
+
+Impact:
+
+The public helper could produce platform-dependent results under the scalar
+backend. The quasi-cyclic encoder's odd prime modulus prevents its internal
+reduction path from selecting an exact 64-bit offset, so no current Silent
+protocol call reached this case.
+
+Resolution:
+
+The exact-64 case has a dedicated copy/XOR kernel over the corresponding
+half-block-aligned windows. The existing kernels for all other shift amounts
+are unchanged.
+
+Verification:
+
+- `Tools_bitShift_test` deterministically covers shift 64.
+- The bit-polynomial quasi-cyclic test passes in the dedicated Release build.
+- A scalar GCC/UBSan reproducer completes without a shift diagnostic and
+  returns the expected two-block output.
+
+## AUD-181: Empty bit-polynomial decoding terminated the process
+
+Status: fixed
+
+Affected code:
+
+- `FFTPoly::decode()`.
+- The raw `bitpolymul()` entry point through its decode call.
+
+Concern:
+
+`FFTPoly::resize()` and `encode()` explicitly represented an empty polynomial,
+but `decode()` still invoked the bundled inverse transform with zero terms.
+That backend treats the term count as unsupported and terminates the process.
+
+Impact:
+
+`bitpolymul(..., 0)` terminated instead of behaving as an empty operation. A
+caller-derived zero length could therefore cause a local denial of service.
+The configured quasi-cyclic protocol requires nonempty dimensions.
+
+Resolution:
+
+Decode returns after validating the requested zero-byte output when the stored
+polynomial is empty. Nonempty transform setup and loops are unchanged.
+
+Verification:
+
+- `Tools_bitpolymul_test` covers empty `FFTPoly` encode/decode and the raw
+  zero-length multiplication entry point in the dedicated bit-polynomial build.

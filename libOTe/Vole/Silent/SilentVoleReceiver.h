@@ -597,6 +597,12 @@ namespace osuCrypto
 		u64 secParam,
 		Ctx ctx)
 	{
+		if (malType != SilentSecType::SemiHonest &&
+			malType != SilentSecType::Malicious)
+			throw std::invalid_argument("Silent security type not supported. " LOCATION);
+		if (type != SilentBaseType::Base &&
+			type != SilentBaseType::BaseExtend)
+			throw std::invalid_argument("Silent base type not supported. " LOCATION);
 		if (noiseType != SdNoiseDistribution::Regular &&
 			noiseType != SdNoiseDistribution::Stationary)
 			throw std::invalid_argument("Unknown noise type. " LOCATION);

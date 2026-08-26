@@ -1024,6 +1024,29 @@ namespace tests_libOTe
                 macoro::sync_wait(receiver.receiveChosen(choices, messages, prng, sockets[0]));
             });
         }
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG prng(ZeroBlock);
+            KosOtExtSender sender;
+            sender.mHashType = static_cast<HashType>(255);
+            AlignedUnVector<std::array<block, 2>> messages;
+
+            expectThrow([&] {
+                macoro::sync_wait(sender.send(messages, prng, sockets[0]));
+            });
+        }
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG prng(ZeroBlock);
+            KosOtExtReceiver receiver;
+            receiver.mHashType = static_cast<HashType>(255);
+            BitVector choices;
+            AlignedUnVector<block> messages;
+
+            expectThrow([&] {
+                macoro::sync_wait(receiver.receive(choices, messages, prng, sockets[0]));
+            });
+        }
 #endif
 
         {

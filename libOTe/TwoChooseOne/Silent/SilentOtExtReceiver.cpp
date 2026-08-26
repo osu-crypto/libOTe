@@ -285,6 +285,10 @@ namespace osuCrypto
 		MultType multType)
 	{
 		(void)scaler;
+		if (malType != SilentSecType::SemiHonest &&
+			malType != SilentSecType::Malicious)
+			throw std::invalid_argument("Silent security type not supported. " LOCATION);
+
 		constexpr u64 secParam = 128;
 		auto param = syndromeDecodingConfigure(secParam, numOTs, multType, noiseType, 1);
 		auto format = PprfOutputFormat{};
@@ -440,6 +444,9 @@ namespace osuCrypto
 		OTType type)
 	{
 		MACORO_TRY{
+			if (type != OTType::Random && type != OTType::Correlated)
+				throw std::invalid_argument("Silent OT type not supported. " LOCATION);
+
 			// Determine choice bit packing based on OT type
 			auto packing = (type == OTType::Random) ?
 				ChoiceBitPacking::True :
@@ -491,6 +498,10 @@ namespace osuCrypto
 		ChoiceBitPacking type)
 	{
 		MACORO_TRY{
+		if (type != ChoiceBitPacking::False &&
+			type != ChoiceBitPacking::True)
+			throw std::invalid_argument("Silent choice-bit packing not supported. " LOCATION);
+
 		auto gapVals = std::vector<block>{};
 		auto rT = MatrixView<block>{};
 
@@ -728,6 +739,10 @@ namespace osuCrypto
 	// Compresses the sparse vector to generate dense vector
 	void SilentOtExtReceiver::compress(ChoiceBitPacking packing)
 	{
+		if (packing != ChoiceBitPacking::False &&
+			packing != ChoiceBitPacking::True)
+			throw std::invalid_argument("Silent choice-bit packing not supported. " LOCATION);
+
 		auto points = getPoints();
 
 		if (packing == ChoiceBitPacking::True)
