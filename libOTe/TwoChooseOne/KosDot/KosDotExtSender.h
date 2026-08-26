@@ -14,8 +14,10 @@
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include "libOTe/Tools/LinearCode.h"
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtState.h"
 #include "libOTe/Tools/Coproto.h"
 #include <array>
+#include <memory>
 namespace osuCrypto {
 
     class KosDotExtSender :
@@ -26,6 +28,7 @@ namespace osuCrypto {
         bool mHasDelta = false;
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
+        std::shared_ptr<details::KosDotCodeState> mCodeState;
 
         KosDotExtSender() = default;
         KosDotExtSender(const KosDotExtSender&) = delete;
@@ -48,6 +51,7 @@ namespace osuCrypto {
                 return;
             mGens = std::move(v.mGens);
             mBaseChoiceBits = std::move(v.mBaseChoiceBits);
+            mCodeState = std::move(v.mCodeState);
             mDelta = std::exchange(v.mDelta, ZeroBlock);
             mHasDelta = std::exchange(v.mHasDelta, false);
             v.mGens.clear();

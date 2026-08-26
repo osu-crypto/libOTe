@@ -26,6 +26,7 @@ namespace osuCrypto
 		auto child = KosDotExtSender(baseRecvOts, mBaseChoiceBits);
 		child.mDelta = mDelta;
 		child.mHasDelta = mHasDelta || neq(mDelta, ZeroBlock);
+		child.mCodeState = mCodeState;
 		return child;
 	}
 
@@ -38,6 +39,7 @@ namespace osuCrypto
 		auto child = std::make_unique<KosDotExtSender>(baseRecvOts, mBaseChoiceBits);
 		child->mDelta = mDelta;
 		child->mHasDelta = mHasDelta || neq(mDelta, ZeroBlock);
+		child->mCodeState = mCodeState;
 		return child;
 	}
 
@@ -48,6 +50,7 @@ namespace osuCrypto
 
 		mBaseChoiceBits = choices;
 		mGens.resize(choices.size());
+		mCodeState = std::make_shared<details::KosDotCodeState>();
 		mBaseChoiceBits.resize(roundUpTo(mBaseChoiceBits.size(), 8));
 		for (u64 i = mBaseChoiceBits.size() - 1; i >= choices.size(); --i)
 			mBaseChoiceBits[i] = 0;
@@ -86,10 +89,10 @@ namespace osuCrypto
 		auto uEnd = (block*)nullptr;
 		auto superBlkIdx = u64{};
 		auto step = u64{};
-		auto seed = block{};
+		auto codeSeed = block{};
+		auto checkSeed = block{};
 		auto offset = block{};
 		auto theirSeed = block{};
-		auto code = LinearCode{};
 		auto recv = details::KosDotProof{};
 
 		if (hasBaseOts() == false)
@@ -213,13 +216,13 @@ namespace osuCrypto
 
 		setTimePoint("KosDot.send.transposeDone");
 
-		seed = prng.get<block>();
-		co_await chl.send(std::move(seed));
+		mCodeState->initSender(prng);
+		codeSeed = mCodeState->seed();
+		checkSeed = prng.get<block>();
+		co_await chl.send(std::array<block, 2>{ codeSeed, checkSeed });
 
 		{
-
-			PRNG codePrng(seed);
-			code.random(codePrng, mBaseChoiceBits.size(), 128);
+			const auto& code = mCodeState->code();
 			block curDelta;
 			code.encode((u8*)delta.data(), (u8*)&curDelta);
 
@@ -246,7 +249,7 @@ namespace osuCrypto
 		auto q = details::kosDotColumnCheck(
 			span<const details::KosDotCheckRow>(messages.data(), messages.size()),
 			span<const details::KosDotCheckRow>(extraBlocks.data(), extraBlocks.size()),
-			seed ^ theirSeed);
+			checkSeed ^ theirSeed);
 
 		setTimePoint("KosDot.send.checkSummed");
 
@@ -264,6 +267,7 @@ namespace osuCrypto
 					throw std::runtime_error("KOS-Dot, bad malicious check. " LOCATION);
 			}
 
+			const auto& code = mCodeState->code();
 			for (auto& row : messages)
 			{
 				block output;

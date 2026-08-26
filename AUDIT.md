@@ -5223,3 +5223,47 @@ Verification:
 - `NcoOt_StateValidation_Test` starts each role with installed uniform base
   OTs, forces its side of the delta exchange to fail, and requires the role to
   clear base readiness and close its socket.
+
+## AUD-164: Reused KOS-Dot bases exposed independent images of their secret choices
+
+Status: fixed
+
+Affected code:
+
+- `KosDotExtSender::send()`, `KosDotExtReceiver::receive()`, and both
+  `splitBase()` implementations.
+
+Concern:
+
+Let `s` denote the sender's 168 base-OT choices. On call `i`, the sender
+sampled a fresh public linear map `C_i` and sent
+
+`offset_i = C_i(s) XOR delta`.
+
+The sender retained `s` and `delta` across calls. After three calls, the
+receiver could eliminate `delta` and obtain 256 linear equations in the 168
+bits of `s`. For independently sampled maps, these equations determine `s`
+except with probability below approximately `2^-88`.
+
+Impact:
+
+The receiver knows both messages from every base OT. After recovering `s`, the
+receiver can reconstruct the sender's extended rows, recover `delta`, and
+derive both outputs of affected OTs. Split extenders had the same exposure
+because they retained the parent's choice vector and delta.
+
+Resolution:
+
+One compression map is now initialized for each base-choice family and reused
+by the parent and all split descendants. The shared map is immutable after
+initialization, so concurrent encodings require no locks. A separate fresh
+sender seed is still combined with the receiver's committed seed for every
+malicious consistency check. The receiver rejects a changed compression-map
+seed before processing the offset.
+
+Verification:
+
+- `DotExt_Kos_MapReuse_Test` performs three sequential extensions with one
+  base-choice family and checks that both parties retain one map.
+- The test confirms that split descendants share the same map and that the
+  receiver rejects a replacement map seed.

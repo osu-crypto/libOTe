@@ -30,6 +30,7 @@ namespace tests_libOTe
     void Tools_Arithmetic_Audit_Test();
     void DotExt_Kos_Check_Test();
     void DotExt_Kos_SplitDelta_Test();
+    void DotExt_Kos_MapReuse_Test();
     void DotExt_Kos_Test();
     void OtExt_genBaseOts_Test();
     void OtExt_Chosen_Test();

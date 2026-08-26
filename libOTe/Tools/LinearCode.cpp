@@ -368,7 +368,7 @@ namespace osuCrypto
 
     void LinearCode::encode(
         const span<const block>& plaintxt,
-        const span<block>& codeword)
+        const span<block>& codeword) const
     {
 		if (mG8.empty() || static_cast<u64>(plaintxt.size()) != plaintextBlkSize() ||
             static_cast<u64>(codeword.size()) < codewordBlkSize())
@@ -475,7 +475,7 @@ namespace osuCrypto
 
     void LinearCode::encode(
         const span<const u8>& plaintxt,
-        const span<u8>& codeword)
+        const span<u8>& codeword) const
     {
 		if (mG8.empty() || static_cast<u64>(plaintxt.size()) != plaintextU8Size() ||
             static_cast<u64>(codeword.size()) < codewordU8Size())
@@ -483,7 +483,7 @@ namespace osuCrypto
         encode(plaintxt.data(), codeword.data());
     }
 
-    void LinearCode::encode(const u8 * input, u8 * codeword)
+    void LinearCode::encode(const u8 * input, u8 * codeword) const
     {
 
         // highlevel idea: For each byte of the input, we have preprocessed 

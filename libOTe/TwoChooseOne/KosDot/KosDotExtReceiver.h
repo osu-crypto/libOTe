@@ -14,6 +14,8 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Common/Timer.h>
 #include "libOTe/Tools/LinearCode.h"
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtState.h"
+#include <memory>
 
 namespace osuCrypto
 {
@@ -24,6 +26,7 @@ namespace osuCrypto
     public:
         bool mHasBase = false;
         std::vector<std::array<PRNG, 2>> mGens;
+        std::shared_ptr<details::KosDotCodeState> mCodeState;
 
 
         KosDotExtReceiver() = default;
@@ -46,6 +49,7 @@ namespace osuCrypto
                 return;
             mHasBase = std::exchange(v.mHasBase, false);
             mGens = std::move(v.mGens);
+            mCodeState = std::move(v.mCodeState);
             v.mGens.clear();
         }
 

@@ -1460,4 +1460,67 @@ namespace tests_libOTe
         throw UnitTestSkipped("ENABLE_DELTA_KOS is not defined.");
 #endif
     }
+
+    void DotExt_Kos_MapReuse_Test()
+    {
+#if defined(ENABLE_DELTA_KOS)
+        PRNG setupPrng(block(0x4b6f73446f744d61, 1));
+        constexpr u64 baseCount = gOtExtBaseOtCount + 40;
+        constexpr u64 numOTs = 257;
+        AlignedUnVector<block> baseRecv(baseCount);
+        AlignedUnVector<std::array<block, 2>> baseSend(baseCount);
+        BitVector baseChoice(baseCount);
+        baseChoice.randomize(setupPrng);
+        for (u64 i = 0; i < baseCount; ++i)
+        {
+            baseSend[i][0] = setupPrng.get<block>();
+            baseSend[i][1] = setupPrng.get<block>();
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
+
+        KosDotExtSender sender;
+        KosDotExtReceiver receiver;
+        sender.setDelta(setupPrng.get<block>());
+        sender.setBaseOts(baseRecv, baseChoice);
+        receiver.setBaseOts(baseSend);
+
+        block mapSeed = ZeroBlock;
+        for (u64 round = 0; round < 3; ++round)
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG receiverPrng(block(0x4b6f73446f744d72, round));
+            PRNG senderPrng(block(0x4b6f73446f744d73, round));
+            BitVector choices(numOTs);
+            choices.randomize(receiverPrng);
+            AlignedUnVector<block> recvMsg(numOTs);
+            AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+
+            auto p0 = receiver.receive(choices, recvMsg, receiverPrng, sockets[0]);
+            auto p1 = sender.send(sendMsg, senderPrng, sockets[1]);
+            eval(p0, p1);
+            OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+            const auto senderSeed = sender.mCodeState->seed();
+            const auto receiverSeed = receiver.mCodeState->seed();
+            if (senderSeed != receiverSeed || (round && senderSeed != mapSeed))
+                throw UnitTestFail("KOS-Dot changed its compression map across calls");
+            mapSeed = senderSeed;
+        }
+
+        auto senderChild = sender.splitBase();
+        auto receiverChild = receiver.splitBase();
+        if (senderChild.mCodeState != sender.mCodeState ||
+            receiverChild.mCodeState != receiver.mCodeState ||
+            senderChild.mCodeState->seed() != mapSeed ||
+            receiverChild.mCodeState->seed() != mapSeed)
+            throw UnitTestFail("KOS-Dot split did not retain its compression map");
+
+        details::KosDotCodeState mismatch;
+        if (!mismatch.initReceiver(block(1, 2)) ||
+            mismatch.initReceiver(block(3, 4)))
+            throw UnitTestFail("KOS-Dot accepted a changed compression map");
+#else
+        throw UnitTestSkipped("ENABLE_DELTA_KOS is not defined.");
+#endif
+    }
 }

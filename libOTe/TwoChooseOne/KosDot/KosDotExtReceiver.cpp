@@ -24,6 +24,7 @@ namespace osuCrypto
 			throw std::runtime_error("KosDot base OT count mismatch. " LOCATION);
 
 		mGens.resize(baseOTs.size());
+		mCodeState = std::make_shared<details::KosDotCodeState>();
 		for (u64 i = 0; i < u64(baseOTs.size()); i++)
 		{
 			mGens[i][0].SetSeed(baseOTs[i][0]);
@@ -43,7 +44,9 @@ namespace osuCrypto
 			baseRecvOts[i][1] = mGens[i][1].get<block>();
 		}
 
-		return KosDotExtReceiver(baseRecvOts);
+		auto child = KosDotExtReceiver(baseRecvOts);
+		child.mCodeState = mCodeState;
+		return child;
 	}
 
 	std::unique_ptr<OtExtReceiver> KosDotExtReceiver::split()
@@ -56,7 +59,9 @@ namespace osuCrypto
 			baseRecvOts[i][1] = mGens[i][1].get<block>();
 		}
 
-		return std::make_unique<KosDotExtReceiver>(baseRecvOts);
+		auto child = std::make_unique<KosDotExtReceiver>(baseRecvOts);
+		child->mCodeState = mCodeState;
+		return child;
 	}
 
 
@@ -89,7 +94,7 @@ namespace osuCrypto
 		auto cIter = (block*)nullptr;
 		auto uEnd = (block*)nullptr;
 		auto superBlkIdx = u64{};
-		auto theirSeed = block{};
+		auto senderSeeds = std::array<block, 2>{};
 		auto offset = block{};
 		auto proof = details::KosDotProof{};
 
@@ -226,18 +231,19 @@ namespace osuCrypto
 		// do correlation check and hashing
 		// For the malicious secure OTs, we need a random PRNG that is chosen random
 		// for both parties. So that is what this is.
-		co_await chl.recv(theirSeed);
+		co_await chl.recv(senderSeeds);
 		co_await chl.send(std::move(seed));
 		co_await chl.recv(offset);
 
 		setTimePoint("KosDot.recv.cncSeed");
 
-		PRNG codePrng(theirSeed);
-		LinearCode code;
-		code.random(codePrng, mGens.size(), 128);
+		if (!mCodeState->initReceiver(senderSeeds[0]))
+			throw std::runtime_error(
+				"KOS-Dot compression map changed for reused base choices. " LOCATION);
+		const auto& code = mCodeState->code();
 
 		auto msg = reinterpret_cast<details::KosDotCheckRow*>(messageTemp.data());
-		auto checkSeed = seed ^ theirSeed;
+		auto checkSeed = seed ^ senderSeeds[1];
 		auto columnCheck = details::kosDotColumnCheck(
 			span<const details::KosDotCheckRow>(msg, messages.size()),
 			span<const details::KosDotCheckRow>(msg + messages.size(), 128),
