@@ -597,6 +597,69 @@ namespace tests_libOTe
         expectRejected([&] { reservationSender.reserveMessages(~0ull, 1); },
             "Subspace VOLE accepted a wrapped message reservation");
 
+		Sender unseededSender;
+		unseededSender.init(fieldBits, numVoles);
+		std::vector<block> subspaceU(unseededSender.uSize());
+		std::vector<block> subspaceV(
+			unseededSender.vPadded(), block::allSame(0x91));
+		expectRejected([&] {
+			unseededSender.generateRandom(
+				0, mAesFixedKey, span<block>(subspaceU), span<block>(subspaceV));
+		}, "Unseeded subspace VOLE sender generated output");
+		if (!unseededSender.mMessages.empty())
+			throw UnitTestFail(
+				"Rejected subspace VOLE sender call appended a correction message");
+
+		Sender validatingSender;
+		validatingSender.init(fieldBits, numVoles);
+		std::vector<block> senderSeeds(numVoles * 2);
+		validatingSender.mVole.setSeed(senderSeeds);
+		expectRejected([&] {
+			validatingSender.generateRandom(0, mAesFixedKey,
+				span<block>(subspaceU.data(), subspaceU.size() - 1),
+				span<block>(subspaceV));
+		}, "Subspace VOLE sender accepted an undersized random u span");
+		expectRejected([&] {
+			validatingSender.generateChosen(0, mAesFixedKey,
+				span<const block>(subspaceU.data(), subspaceU.size() - 1),
+				span<block>(subspaceV));
+		}, "Subspace VOLE sender accepted an undersized chosen u span");
+		expectRejected([&] {
+			validatingSender.generateRandom(0, mAesFixedKey,
+				span<block>(subspaceU),
+				span<block>(subspaceV.data(), subspaceV.size() - 1));
+		}, "Subspace VOLE sender accepted an undersized v span");
+		if (!validatingSender.mMessages.empty())
+			throw UnitTestFail(
+				"Rejected subspace VOLE sender dimensions appended a correction message");
+		for (const auto& value : subspaceV)
+			if (value != block::allSame(0x91))
+				throw UnitTestFail(
+					"Rejected subspace VOLE sender dimensions changed its output");
+
+		Receiver validatingReceiver;
+		validatingReceiver.init(fieldBits, numVoles);
+		std::vector<block> receiverSeeds(numVoles);
+		validatingReceiver.mVole.setSeeds(receiverSeeds);
+		std::vector<block> subspaceW(
+			validatingReceiver.wPadded(), block::allSame(0x92));
+		validatingReceiver.mMessages.resize(validatingReceiver.uPadded());
+		expectRejected([&] {
+			validatingReceiver.generateRandom(0, mAesFixedKey,
+				span<block>(subspaceW.data(), subspaceW.size() - 1));
+		}, "Subspace VOLE receiver accepted an undersized random w span");
+		expectRejected([&] {
+			validatingReceiver.generateChosen(0, mAesFixedKey,
+				span<block>(subspaceW.data(), subspaceW.size() - 1));
+		}, "Subspace VOLE receiver accepted an undersized chosen w span");
+		if (validatingReceiver.mReadIndex != 0)
+			throw UnitTestFail(
+				"Rejected subspace VOLE receiver call consumed a correction message");
+		for (const auto& value : subspaceW)
+			if (value != block::allSame(0x92))
+				throw UnitTestFail(
+					"Rejected subspace VOLE receiver dimensions changed its output");
+
         Receiver receiver;
         receiver.init(fieldBits, numVoles);
         auto sockets = cp::LocalAsyncSocket::makePair();

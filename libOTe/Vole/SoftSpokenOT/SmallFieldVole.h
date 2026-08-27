@@ -219,6 +219,11 @@ namespace osuCrypto
 			return mSeeds.size() || (mPprf && mPprf->hasBaseOts());
 		}
 
+		bool isReadyToGenerate() const
+		{
+			return mInit && mGenerateFn && hasSeed();
+		}
+
 		// outV outputs the values for v, i.e. xor_x x * PRG(seed[x]). outU gives the values for u (the
 		// xor of all PRG evaluations).
 		void generate(u64 blockIdx, const AES& aes, block* outU, block* outV) const
@@ -228,7 +233,7 @@ namespace osuCrypto
 
 		void generate(u64 blockIdx, const AES& aes, span<block> outU, span<block> outV) const
 		{
-			if (!mInit || !mGenerateFn || !hasSeed())
+			if (!isReadyToGenerate())
 				throw std::logic_error("SmallField VOLE sender is not ready to generate. " LOCATION);
 			if ((u64)outU.size() != uPadded())
 				throw RTE_LOC;
@@ -334,6 +339,11 @@ namespace osuCrypto
 			return mSeeds.size() || (mPprf && mPprf->hasBaseOts());
 		}
 
+		bool isReadyToGenerate() const
+		{
+			return mInit && mGenerateFn && hasSeed();
+		}
+
 		const BitVector& getDelta() const { return mDelta; }
 
 		// Uses a PPRF to implement the 2**mFieldBits - 1 of 2**mFieldBits OTs out of 1 of 2 base OTs. The
@@ -360,7 +370,7 @@ namespace osuCrypto
 		void generate(u64 blockIdx, const AES& aes,
 			span<block> outW, span<const block> correction = span<block>()) const
 		{
-			if (!mInit || !mGenerateFn || !hasSeed())
+			if (!isReadyToGenerate())
 				throw std::logic_error("SmallField VOLE receiver is not ready to generate. " LOCATION);
 			if ((u64)outW.size() != wPadded())
 				throw RTE_LOC;

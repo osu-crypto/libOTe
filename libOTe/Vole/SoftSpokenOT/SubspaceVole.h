@@ -171,6 +171,11 @@ namespace osuCrypto
 
 		void generateRandom(u64 blockIdx, const AES& aes, span<block> randomU, span<block> outV)
 		{
+			if (!mVole.isReadyToGenerate())
+				throw std::logic_error("Subspace VOLE sender is not ready to generate. " LOCATION);
+			if ((u64)randomU.size() != uSize() || (u64)outV.size() != vPadded())
+				throw RTE_LOC;
+
 			span<block> tmpU = extendMessages(mVole.uPadded());
 
 			mVole.generate(blockIdx, aes, tmpU, outV);
@@ -182,6 +187,11 @@ namespace osuCrypto
 
 		void generateChosen(u64 blockIdx, const AES& aes, span<const block> chosenU, span<block> outV)
 		{
+			if (!mVole.isReadyToGenerate())
+				throw std::logic_error("Subspace VOLE sender is not ready to generate. " LOCATION);
+			if ((u64)chosenU.size() != uSize() || (u64)outV.size() != vPadded())
+				throw RTE_LOC;
+
 			span<block> correction = extendMessages(mVole.uPadded());
 
 			mVole.generate(blockIdx, aes, correction, outV);
@@ -360,6 +370,11 @@ namespace osuCrypto
 
 		void generateRandom(u64 blockIdx, const AES& aes, span<block> outW)
 		{
+			if (!mVole.isReadyToGenerate())
+				throw std::logic_error("Subspace VOLE receiver is not ready to generate. " LOCATION);
+			if ((u64)outW.size() != wPadded())
+				throw RTE_LOC;
+
 			span<block> syndrome = getMessage(code().codimension());
 
 			// TODO: at least for some codes this is kind of a nop, so maybe could avoid a copy.
@@ -369,6 +384,11 @@ namespace osuCrypto
 
 		void generateChosen(u64 blockIdx, const AES& aes, span<block> outW)
 		{
+			if (!mVole.isReadyToGenerate())
+				throw std::logic_error("Subspace VOLE receiver is not ready to generate. " LOCATION);
+			if ((u64)outW.size() != wPadded())
+				throw RTE_LOC;
+
 			span<block> correctionU = getMessage(uSize(), uPadded());
 			mVole.generate(blockIdx, aes, outW, correctionU);
 		}

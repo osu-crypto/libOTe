@@ -6185,3 +6185,38 @@ Verification:
 
 - `Dpf_Audit_Test` requires a correction byte of two to be rejected and checks
   that failed decoding leaves the destination key unchanged.
+
+## AUD-191: Rejected Subspace VOLE generation changed correction-buffer state
+
+Status: fixed
+
+Affected code:
+
+- Semi-honest Subspace VOLE sender and receiver generation entry points.
+
+Concern:
+
+The sender appended a correction message before validating generator readiness
+and caller spans. The receiver consumed a buffered peer correction before the
+same validation. A rejected direct call could therefore change synchronization
+state, and some malformed sender calls could modify output before discovering
+an invalid input span.
+
+Impact:
+
+A caller error or use of an unseeded generator could desynchronize subsequent
+Subspace VOLE calls. The high-level SoftSpoken protocols supply valid spans, so
+this affected direct use of the public low-level interface.
+
+Resolution:
+
+The entry points now validate readiness and exact caller span sizes before
+appending or consuming correction messages. SmallField VOLE exposes and reuses
+one readiness predicate so both layers apply the same state definition. These
+checks remain outside the generation kernels.
+
+Verification:
+
+- `OtExt_SoftSpoken_BufferState_Audit_Test` requires rejected unseeded and
+  undersized generation calls to preserve sender messages, receiver read index,
+  and output buffers.
