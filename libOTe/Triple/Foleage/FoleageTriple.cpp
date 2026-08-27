@@ -398,7 +398,7 @@ namespace osuCrypto
 		} clearBaseOtsOnExit{ this };
 
 		// the coefficient of the sparse polynomial.
-		// the i'th row containts the coeffs for the i'th poly.
+		// the i'th row contains the coefficients for the i'th polynomial.
 		mSparsePositions.resize(mC, mT);
 
 		// The mT coefficients of the mC sparse polynomials.
@@ -449,7 +449,7 @@ namespace osuCrypto
 
 		setTimePoint("input Mult");
 
-		// compress the resume and set the output.
+		// Compress the result and set the output.
 		auto outSize = std::min<u64>(mN, ALsb.size() * 128);
 		//std::vector<u8> A(mN);
 
@@ -479,9 +479,9 @@ namespace osuCrypto
 		}
 		setTimePoint("copyOutX");
 
-		// sharing of the F4 coefficients of the product polynomails.
+		// Sharing of the F4 coefficients of the product polynomials.
 		// these will just be the tensored coefficients but in permuted
-		// order to match how they are expended in the DPF and then added 
+		// order to match how they are expanded in the DPF and then added
 		// together.
 		std::vector<uint8_t> prodPolyF4Coeffs(mC * mC * mT * mT);
 
@@ -493,7 +493,7 @@ namespace osuCrypto
 		std::vector<F3x32> prodPolyLeafPos(mC * mC * mT * mT);
 
 		// once we construct large F4^243 coefficients, we will expand them
-		// the main DPF to get the full shared polynomail. prodPolyTreePos
+		// the main DPF to get the full shared polynomial. prodPolyTreePos
 		// is the location that the F4^243 coefficient should be mapped to.
 		std::vector<F3x32> prodPolyTreePos(mC * mC * mT * mT);
 
@@ -544,7 +544,7 @@ namespace osuCrypto
 
 		setTimePoint("dpfParams");
 
-		// sharing of the F4^243 coefficients of the product polynomails.
+		// Sharing of the F4^243 coefficients of the product polynomials.
 		// These are obtained by expanding the F4 coefficients into 243
 		// elements using a "small DPF".
 		std::vector<FoleageF4x243> prodPolyF4x243Coeffs(mC * mC * mT * mT);

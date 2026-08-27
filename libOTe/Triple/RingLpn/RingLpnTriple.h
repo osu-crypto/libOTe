@@ -81,7 +81,7 @@ namespace osuCrypto
 		u64 mDpfTreeDepth = 0;
 
 		// the locations of the non-zeros in the bPolyIdx'th block of the sparse polynomial.
-		// the polyIdx'th row containts the coeffs for the polyIdx'th poly.
+		// the polyIdx'th row contains the coefficients for that polynomial.
 		Matrix<u64> mSparsePositions;
 
 		// The mPolyWeight coefficients of the mNumPolys sparse polynomials.
@@ -148,7 +148,7 @@ namespace osuCrypto
 			SumDmpf = 1
 		};
 
-		// Intializes the protocol to generate n F OLEs. Most efficient when n
+		// Initializes the protocol to generate n F OLEs. Most efficient when n
 		// is a power of 2. Once called, baseOtCount() can be called to 
 		// determine the required number of base OTs.
 		void init(
@@ -276,7 +276,7 @@ namespace osuCrypto
 			BitVector& choice);
 
 
-		// check that the expended sparse polynomials are correct.
+		// Check that the expanded sparse polynomials are correct.
 		// and that the additive shares of the positions are the 
 		// same as the xor shares.
 		task<> checkExpanded(
@@ -284,6 +284,17 @@ namespace osuCrypto
 			coproto::Socket& sock,
 			std::vector<osuCrypto::u64> prodPolyTreePosXor,
 			osuCrypto::Matrix<F>& prodPolys);
+
+		// Validate block-local sparse offsets received by the debug verifier.
+		static void validateSparsePositionOffsets(
+			span<const u64> positions,
+			u64 blockSize)
+		{
+			for (auto position : positions)
+				if (position >= blockSize)
+					throw std::runtime_error(
+						"RingLPN sparse position is outside its block. " LOCATION);
+		}
 
 		// check that the tensored coefficients are correct.
 		task<> checkTensor(Socket& sock);
@@ -1176,7 +1187,7 @@ namespace osuCrypto
 
 		// sharing of the F coefficients of the product polynomials.
 		// these will just be the tensored coefficients but in permuted
-		// order to match how they are expended in the DPF and then added 
+		// order to match how they are expanded in the DPF and then added
 		// together.
 		std::vector<F> prodPolyFCoeffs(mNumPolys * mNumPolys * mPolyWeight * mPolyWeight);
 
@@ -1471,6 +1482,7 @@ namespace osuCrypto
 
 		co_await sock.send(coproto::copy(mSparsePositions));
 		co_await sock.recv(Pos[mPartyIdx ^ 1]);
+		validateSparsePositionOffsets(Pos[mPartyIdx ^ 1], mBlockSize);
 		co_await send<F>(mSparseCoefficients, sock, mCtx);
 		co_await recv<F>(Val[mPartyIdx ^ 1], sock, mCtx);
 

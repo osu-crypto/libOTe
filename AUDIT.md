@@ -8,6 +8,11 @@ Status values:
 - `open`: accepted finding that still needs a fix.
 - `fixed`: a fix and its regression evidence have been recorded.
 - `deferred`: accepted finding whose fix is intentionally postponed.
+- `closed (...)`: the concern was resolved with the disposition in parentheses.
+
+Audit status: closed on 2026-08-27 after the cleanup and verification pass.
+The RevCuckoo implementation was excluded because it is undergoing a separate
+set of substantial changes. AUD-001 remains intentionally deferred.
 
 ## AUD-001: Ring-LPN regular support can lose effective weight after factor folding
 
@@ -6312,3 +6317,34 @@ Verification:
 
 - `RingLpn_Audit_test` requires both queries to reject an invalid protocol
   selector.
+
+## AUD-195: RingLPN debug verification trusted peer sparse offsets
+
+Status: fixed
+
+Affected code:
+
+- `RingLpnTriple::checkExpanded()`.
+
+Concern:
+
+The insecure debug verifier received the peer's block-local sparse positions
+and used them as dynamically growing polynomial indices without first checking
+that each offset was smaller than the configured block size.
+
+Impact:
+
+A malicious peer could make a debug-mode process attempt an attacker-sized
+allocation or throw a length error before completing the diagnostic check.
+The production protocol path was unaffected.
+
+Resolution:
+
+The verifier validates all received sparse offsets immediately after the
+receive and before constructing either polynomial. The validation exists only
+on the debug path and does not affect expansion hot loops.
+
+Verification:
+
+- `RingLpn_Audit_test` accepts the boundary-valid offsets and rejects an offset
+  equal to the block size.

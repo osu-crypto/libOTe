@@ -102,6 +102,21 @@ namespace osuCrypto
 		if (!countRejected || !readinessRejected)
 			throw UnitTestFail("RingLPN accepted an invalid protocol selector");
 
+		std::array<u64, 3> validSparsePositions{ 0, 3, 7 };
+		Ring::validateSparsePositionOffsets(validSparsePositions, 8);
+		std::array<u64, 3> invalidSparsePositions{ 0, 8, 7 };
+		bool sparsePositionRejected = false;
+		try
+		{
+			Ring::validateSparsePositionOffsets(invalidSparsePositions, 8);
+		}
+		catch (const std::runtime_error&)
+		{
+			sparsePositionRejected = true;
+		}
+		if (!sparsePositionRejected)
+			throw UnitTestFail("RingLPN accepted an out-of-block sparse position");
+
 		Ring reinitialized;
 		reinitialized.mNumPolys = 2;
 		reinitialized.mPolyWeight = 8;

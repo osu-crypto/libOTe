@@ -139,7 +139,7 @@ namespace osuCrypto
 		u64 mDpfTreeDepth = 0;
 
 		// the locations of the non-zeros in the j'th block of the sparse polynomial.
-		// the i'th row containts the coeffs for the i'th poly.
+		// the i'th row contains the coefficients for the i'th polynomial.
 		Matrix<u64> mSparsePositions;
 
 		// a dpf used to construct the F4x243 leaf value of the larger DPF.
@@ -177,7 +177,7 @@ namespace osuCrypto
 		bool mBaseOtsAvailable = false;
 
 
-		// Intializes the protocol to generate n F4 OLEs. Most efficient when n
+		// Initializes the protocol to generate n F4 OLEs. Most efficient when n
 		// is a power of 3. Once called, baseOtCount() can be called to 
 		// determine the required number of base OTs.
 		void init(u64 partyIdx, u64 n);
