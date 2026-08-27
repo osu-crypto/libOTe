@@ -19,6 +19,7 @@ void OtExt_Silent_Tungsten_Test(const oc::CLP& cmd);
 void OtExt_Silent_baseOT_Test(const oc::CLP& cmd);
 void OtExt_Silent_stationary_Test(const oc::CLP& cmd);
 void OtExt_Silent_mal_Test(const oc::CLP& cmd);
+void OtExt_Silent_ExAcc_Test(const oc::CLP& cmd);
 void OtExt_Silent_AuditState_Test(const oc::CLP& cmd);
 
 void Tools_bitShift_test(const oc::CLP& cmd);

@@ -284,6 +284,9 @@ namespace osuCrypto
 		SdNoiseDistribution noiseType,
 		MultType multType)
 	{
+		if (numOTs == 0)
+			throw std::invalid_argument("Silent OT count must be nonzero. " LOCATION);
+
 		(void)scaler;
 		if (malType != SilentSecType::SemiHonest &&
 			malType != SilentSecType::Malicious)

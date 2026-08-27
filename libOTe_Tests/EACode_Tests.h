@@ -9,4 +9,6 @@ namespace osuCrypto
 
     void EACode_weight_test(const oc::CLP& cmd);
 
+    void EACode_config_test(const oc::CLP& cmd);
+
 }

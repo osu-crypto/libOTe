@@ -68,6 +68,7 @@ namespace tests_libOTe
 
 			tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
 			tc.add("EACode_weight_test                      ", EACode_weight_test);
+			tc.add("EACode_config_test                      ", EACode_config_test);
 
 			tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
 			tc.add("ExConvCode_Audit_Test                   ", ExConvCode_Audit_Test);
@@ -253,6 +254,7 @@ namespace tests_libOTe
 			tc.add("OtExt_Silent_stationary_Test            ", OtExt_Silent_stationary_Test);
 			tc.add("OtExt_Silent_baseOT_Test                ", OtExt_Silent_baseOT_Test);
 			tc.add("OtExt_Silent_mal_Test                   ", OtExt_Silent_mal_Test);
+			tc.add("OtExt_Silent_ExAcc_Test                 ", OtExt_Silent_ExAcc_Test);
 			tc.add("OtExt_Silent_AuditState_Test            ", OtExt_Silent_AuditState_Test);
 
 			tc.add("OtExt_SoftSpokenSemiHonest_Test         ", OtExt_SoftSpokenSemiHonest_Test);

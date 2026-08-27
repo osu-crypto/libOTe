@@ -863,6 +863,43 @@ void OtExt_Silent_random_Test(const CLP& cmd)
 #endif
 }
 
+void OtExt_Silent_ExAcc_Test(const CLP& cmd)
+{
+#ifdef ENABLE_SILENTOT
+    const u64 n = cmd.getOr("n", 128);
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+    const MultType types[] = {
+        MultType::ExAcc7,
+        MultType::ExAcc11,
+        MultType::ExAcc21,
+        MultType::ExAcc40
+    };
+
+    for (const auto type : types)
+    {
+        auto sockets = cp::LocalAsyncSocket::makePair();
+        SilentOtExtSender sender;
+        SilentOtExtReceiver receiver;
+        sender.configure(n, 2, 1, SilentSecType::SemiHonest,
+            SdNoiseDistribution::Regular, type);
+        receiver.configure(n, 2, 1, SilentSecType::SemiHonest,
+            SdNoiseDistribution::Regular, type);
+        fakeBase(n, 2, 1, prng, receiver, sender);
+
+        std::vector<std::array<block, 2>> senderMessages(n);
+        std::vector<block> receiverMessages(n);
+        BitVector choices(n);
+        auto send = sender.silentSend(senderMessages, prng, sockets[0]);
+        auto receive = receiver.silentReceive(
+            choices, receiverMessages, prng, sockets[1]);
+        eval(send, receive);
+        checkRandom(receiverMessages, senderMessages, choices, n, false);
+    }
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
+
 void OtExt_Silent_correlated_Test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
@@ -1259,6 +1296,14 @@ void OtExt_Silent_AuditState_Test(const oc::CLP& cmd)
 
     SilentOtExtSender sender;
     SilentOtExtReceiver receiver;
+	expectRejected([&] {
+		SilentOtExtSender invalid;
+		invalid.configure(0);
+	}, "Silent OT sender accepted a zero OT count");
+	expectRejected([&] {
+		SilentOtExtReceiver invalid;
+		invalid.configure(0);
+	}, "Silent OT receiver accepted a zero OT count");
 	expectRejected([&] {
 		SilentOtExtSender invalid;
 		invalid.configure(128, 2, 1, static_cast<SilentSecType>(255));

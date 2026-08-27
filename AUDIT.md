@@ -5892,3 +5892,75 @@ Verification:
 
 - `Tools_bitpolymul_test` covers empty `FFTPoly` encode/decode and the raw
   zero-length multiplication entry point in the dedicated bit-polynomial build.
+
+## AUD-182: Expander-accumulator configuration outputs were reversed
+
+Status: fixed
+
+Affected code:
+
+- `EAConfigure()` and every Silent OT ExAcc compression mode.
+
+Concern:
+
+The declaration exposed the output references as `(scaler, expanderWeight)`,
+and every caller used that order, while the definition named and assigned the
+two references in the opposite order. Parameter selection therefore used the
+variant's expander weight as the compression scaler, while the encoder used
+the intended scaler value of five as its row weight.
+
+Impact:
+
+ExAcc7, ExAcc11, ExAcc21, and ExAcc40 instantiated codes with row weight five
+and approximate compression scalers 7, 11, 21, and 41 respectively. Those
+codes did not match the rate and weight pairs underlying their configured
+minimum-distance estimates, so the requested security parameters were not
+supported by the intended analysis.
+
+Resolution:
+
+The definition now matches the declared scaler-first order. Parameter setup is
+the only changed control flow; no validation or dispatch was added to an
+encoding loop.
+
+Verification:
+
+- `EACode_config_test` checks scaler five and expander weights 7, 11, 21, and
+  41 for all ExAcc modes.
+- `OtExt_Silent_ExAcc_Test` exercises every corrected encoder configuration end
+  to end.
+- At 262,144 messages in the Release audit build, the corrected ExAcc21 kernel
+  took 97 ms versus 239 ms with the reversed parameters; ExAcc40 took 173 ms
+  versus 375 ms. Benchmarks were run sequentially.
+
+## AUD-183: Zero-length Silent OT configuration could not become configured
+
+Status: fixed
+
+Affected code:
+
+- Silent OT sender and receiver configuration.
+
+Concern:
+
+Both configuration routines accepted an OT count of zero and initialized PPRF
+parameters, but `isConfigured()` uses the positive requested OT count as its
+state sentinel. Every subsequent operation therefore treated the initialized
+object as unconfigured.
+
+Impact:
+
+A zero-length invocation failed later with a misleading configuration error
+after doing setup work. This was an API correctness issue, not a protocol
+security bypass.
+
+Resolution:
+
+Sender and receiver reject a zero OT count immediately, before parameter
+selection or state mutation. Nonempty protocol and hot-loop behavior is
+unchanged.
+
+Verification:
+
+- `OtExt_Silent_AuditState_Test` requires both roles to reject zero during
+  configuration.
