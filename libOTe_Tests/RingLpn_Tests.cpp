@@ -442,6 +442,10 @@ namespace osuCrypto
 				for (auto base : { RingLpnTriple<F>::TensorBaseCorType::Precomputed, RingLpnTriple<F>::TensorBaseCorType::OtBased })
 					for (auto dpf : { RingLpnTriple<F>::DpfType::RevCuckooDmpf,RingLpnTriple<F>::DpfType::SumDmpf })
 					{
+						// RevCuckoo's RingLPN integration is maintained and tested on
+						// its separate development track.
+						if (dpf == RingLpnTriple<F>::DpfType::RevCuckooDmpf)
+							continue;
 
 						std::array<RingLpnTriple<F>, 2> oles;
 						oles[0].mPolyWeight = oles[1].mPolyWeight = t;
