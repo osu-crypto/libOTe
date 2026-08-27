@@ -673,19 +673,21 @@ namespace osuCrypto
 		const auto& baseA,
 		const auto& baseC)
 	{
-		auto count = baseCount();
 		if (isConfigured() == false)
 			throw std::runtime_error("configure(...) must be called first.");
+		auto count = baseCount();
 
 		if (static_cast<u64>(recvBaseOts.size()) != count.mBaseOtCount)
 			throw std::runtime_error("wrong number of silent base OTs");
+		if (choice.size() != count.mBaseOtCount)
+			throw std::invalid_argument("wrong number of silent base OT choices");
 
 		if (baseA.size() != count.mBaseVoleCount)
 			throw std::runtime_error("wrong number of silent base Vole values." LOCATION);
 		if (baseC.size() != count.mBaseVoleCount)
 			throw std::runtime_error("wrong number of silent base Vole values." LOCATION);
 
-		if (choice.size())
+		if (count.mBaseOtCount)
 		{
 			gen().setChoiceBits(choice);
 			gen().setBase(recvBaseOts);
@@ -738,6 +740,9 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
+		if (n == 0)
+			throw std::invalid_argument("Silent VOLE request size must be nonzero. " LOCATION);
+
 		MACORO_TRY{
 		auto myHash = std::array<u8, 32>{};
 		auto theirHash = std::array<u8, 32>{};

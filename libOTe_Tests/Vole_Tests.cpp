@@ -314,6 +314,21 @@ namespace
 			throw RTE_LOC;
 	}
 
+	void expectTaskInvalidArgument(task<>&& operation)
+	{
+		bool threw = false;
+		try
+		{
+			macoro::sync_wait(std::move(operation));
+		}
+		catch (const std::invalid_argument&)
+		{
+			threw = true;
+		}
+		if (!threw)
+			throw RTE_LOC;
+	}
+
 	template<typename Fn>
 	void expectInvalidArgument(Fn&& fn)
 	{
@@ -364,6 +379,51 @@ void Vole_Noisy_Audit_Test(const oc::CLP&)
 		receiver.configure(128, SilentSecType::SemiHonest, DefaultMultType,
 			static_cast<SilentBaseType>(255));
 	});
+
+	using SilentSender = SilentVoleSender<block, block, CoeffCtxGF128>;
+	using SilentReceiver = SilentVoleReceiver<block, block, CoeffCtxGF128>;
+	{
+		SilentReceiver receiver;
+		receiver.configure(128);
+		auto count = receiver.baseCount();
+		std::vector<block> recvBaseOts(count.mBaseOtCount);
+		SilentReceiver::VecF baseA(count.mBaseVoleCount);
+		SilentReceiver::VecG baseC(count.mBaseVoleCount);
+		expectInvalidArgument([&] {
+			receiver.setBaseCors({}, recvBaseOts, baseA, baseC);
+		});
+		if (receiver.mState != SilentReceiver::State::Configured ||
+			!receiver.mBaseA.empty() || !receiver.mBaseC.empty() ||
+			receiver.hasBaseCors())
+			throw UnitTestFail(
+				"Silent VOLE accepted missing base-OT choices");
+	}
+
+	{
+		SilentSender sender;
+		sender.configure(128);
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		macoro::sync_wait(sockets[1].close());
+		expectTaskInvalidArgument(sender.silentSendInplace(
+			ZeroBlock, 0, prng, sockets[0]));
+		if (sender.mState != SilentSender::State::Configured ||
+			sender.mRequestSize != 128)
+			throw UnitTestFail(
+				"zero-length Silent VOLE sender call changed configured state");
+	}
+
+	{
+		SilentReceiver receiver;
+		receiver.configure(128);
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		macoro::sync_wait(sockets[1].close());
+		expectTaskInvalidArgument(receiver.silentReceiveInplace(
+			0, prng, sockets[0]));
+		if (receiver.mState != SilentReceiver::State::Configured ||
+			receiver.mRequestSize != 128)
+			throw UnitTestFail(
+				"zero-length Silent VOLE receiver call changed configured state");
+	}
 
 	{
 		CountingOtReceiver ot;

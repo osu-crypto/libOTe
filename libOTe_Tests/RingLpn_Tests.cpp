@@ -76,6 +76,32 @@ namespace osuCrypto
 			Ring::Mode::Triple, sum, precomputed,
 			"RingLPN accepted an overflowing triple request");
 
+		Ring invalidProtocol;
+		invalidProtocol.mNumPolys = 2;
+		invalidProtocol.mPolyWeight = 8;
+		invalidProtocol.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		auto badProtocol = static_cast<Ring::Protocol>(255);
+		bool countRejected = false;
+		bool readinessRejected = false;
+		try
+		{
+			std::ignore = invalidProtocol.baseCorCount(badProtocol);
+		}
+		catch (const std::invalid_argument&)
+		{
+			countRejected = true;
+		}
+		try
+		{
+			std::ignore = invalidProtocol.hasBaseCors(badProtocol);
+		}
+		catch (const std::invalid_argument&)
+		{
+			readinessRejected = true;
+		}
+		if (!countRejected || !readinessRejected)
+			throw UnitTestFail("RingLPN accepted an invalid protocol selector");
+
 		Ring reinitialized;
 		reinitialized.mNumPolys = 2;
 		reinitialized.mPolyWeight = 8;

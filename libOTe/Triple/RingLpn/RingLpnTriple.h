@@ -459,6 +459,10 @@ namespace osuCrypto
 		Protocol proto
 	) const
 	{
+		if (proto != Protocol::Full && proto != Protocol::Expand &&
+			proto != Protocol::GenDpf)
+			throw std::invalid_argument("RingLPN protocol is invalid. " LOCATION);
+
 		BaseCorCount counts;
 
 		const auto sumNeedsFreshBase =
@@ -572,6 +576,10 @@ namespace osuCrypto
 	template<typename F, typename CoeffCtx>
 	bool RingLpnTriple<F, CoeffCtx>::hasBaseCors(Protocol protocol) const
 	{
+		if (protocol != Protocol::Full && protocol != Protocol::Expand &&
+			protocol != Protocol::GenDpf)
+			throw std::invalid_argument("RingLPN protocol is invalid. " LOCATION);
+
 		bool dpfBase = std::visit([](auto&& dpf) { return dpf.hasBaseOts(); }, mDpf);
 		auto tensorBase = 
 			mTensoredCoefficients.size() || 

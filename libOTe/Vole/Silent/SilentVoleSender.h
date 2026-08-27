@@ -618,6 +618,9 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
+		if (n == 0)
+			throw std::invalid_argument("Silent VOLE request size must be nonzero. " LOCATION);
+
 		MACORO_TRY{
 			auto X = block{};
 			auto hash = std::array<u8, 32>{};

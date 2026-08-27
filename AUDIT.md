@@ -6220,3 +6220,95 @@ Verification:
 - `OtExt_SoftSpoken_BufferState_Audit_Test` requires rejected unseeded and
   undersized generation calls to preserve sender messages, receiver read index,
   and output buffers.
+
+## AUD-192: Silent VOLE accepted missing base-OT choices
+
+Status: fixed
+
+Affected code:
+
+- Silent VOLE receiver external base-correlation installation.
+
+Concern:
+
+The receiver validated the supplied base-OT messages but treated an empty
+choice vector as a request to skip both PPRF choice and base installation. It
+still stored the base-VOLE values and marked the object as having base state.
+
+Impact:
+
+A malformed external-base call was accepted. The next online call detected
+that the PPRF bases were absent and unexpectedly entered base generation,
+which could desynchronize a peer using the externally supplied correlations.
+
+Resolution:
+
+The receiver now requires exactly one choice bit per required base OT before
+changing state. A stationary PPRF refresh, for which both counts are zero,
+remains valid.
+
+Verification:
+
+- `Vole_Noisy_Audit_Test` requires an empty choice vector to be rejected while
+  preserving configured state and empty base-correlation storage.
+
+## AUD-193: Zero-length Silent VOLE calls consumed configured sessions
+
+Status: fixed
+
+Affected code:
+
+- Silent VOLE sender and receiver in-place generation entry points.
+
+Concern:
+
+Once configured for a positive maximum size, both roles accepted an online
+request of zero. They could generate base correlations, execute the configured
+PPRF and compression, and advance or clear reusable state while returning no
+correlations.
+
+Impact:
+
+A zero-length caller error could waste a complete protocol invocation and
+desynchronize later use of externally managed base state.
+
+Resolution:
+
+Both roles reject zero before the fail-stop protocol scope, so configured
+state is preserved and the socket is not used. Positive-size paths and
+protocol loops are unchanged.
+
+Verification:
+
+- `Vole_Noisy_Audit_Test` requires both configured roles to reject zero while
+  preserving their configuration.
+
+## AUD-194: RingLPN protocol selectors failed open
+
+Status: fixed
+
+Affected code:
+
+- RingLPN base-correlation counting and readiness queries.
+
+Concern:
+
+The public queries distinguished protocol stages only through equality and
+inequality comparisons. Every out-of-range enum representation therefore
+behaved like the full protocol instead of being rejected.
+
+Impact:
+
+An invalid caller configuration could silently obtain the wrong correlation
+requirements or readiness result.
+
+Resolution:
+
+Both public queries validate the three supported protocol values before
+examining correlation state. The checks do not affect generation or expansion
+loops.
+
+Verification:
+
+- `RingLpn_Audit_test` requires both queries to reject an invalid protocol
+  selector.
