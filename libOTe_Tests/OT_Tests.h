@@ -20,6 +20,17 @@ namespace tests_libOTe
     void OtExt_Kos_Test();
     void OtExt_Kos_fs_Test();
     void OtExt_Kos_ro_Test();
+    void OtExt_Kos_Split_Test();
+    void OtExt_Kos_BlockBoundary_Test();
+    void OtExt_InputValidation_Test();
+    void DotExt_Kos_BaseValidation_Test();
+    void OtExt_NoHashMultiBlock_Test();
+    void OtExt_SplitConfig_Test();
+    void OtExt_MoveState_Test();
+    void Tools_Arithmetic_Audit_Test();
+    void DotExt_Kos_Check_Test();
+    void DotExt_Kos_SplitDelta_Test();
+    void DotExt_Kos_MapReuse_Test();
     void DotExt_Kos_Test();
     void OtExt_genBaseOts_Test();
     void OtExt_Chosen_Test();

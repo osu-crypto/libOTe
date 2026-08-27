@@ -24,7 +24,14 @@ namespace osuCrypto
 	public:
 		u64 dimension() const { return static_cast<const Derived*>(this)->dimension(); }
 		u64 length() const { return static_cast<const Derived*>(this)->length(); }
-		u64 codimension() const { return length() - dimension(); }
+		u64 codimension() const
+		{
+			const u64 len = length();
+			const u64 dim = dimension();
+			if (len < dim)
+				throw RTE_LOC;
+			return len - dim;
+		}
 
 		// All of the following functions must be linear over GF(2).
 
@@ -38,12 +45,12 @@ namespace osuCrypto
 		template<typename T>
 		void encodeXor(span<const T> message, span<T> codeWord) const
 		{
-#ifndef NDEBUG
-			if ((u64)message.size() != dimension())
+			const u64 dim = dimension();
+			const u64 len = length();
+			if (len < dim || (u64)message.size() != dim)
 				throw RTE_LOC;
-			if ((u64)codeWord.size() != length())
+			if ((u64)codeWord.size() != len)
 				throw RTE_LOC;
-#endif
 			encodeXor(message.data(), codeWord.data());
 		}
 
@@ -65,12 +72,12 @@ namespace osuCrypto
 		template<typename T>
 		void encode(span<T> message, span<std::remove_const_t<T>> codeWord) const
 		{
-#ifndef NDEBUG
-			if ((u64)message.size() != dimension())
+			const u64 dim = dimension();
+			const u64 len = length();
+			if (len < dim || (u64)message.size() != dim)
 				throw RTE_LOC;
-			if ((u64)codeWord.size() != length())
+			if ((u64)codeWord.size() != len)
 				throw RTE_LOC;
-#endif
 			encode(message.data(), codeWord.data());
 		}
 
@@ -87,14 +94,15 @@ namespace osuCrypto
 		template<typename T>
 		void encodeSyndrome(span< T> syndrome, span<std::remove_const_t<T>> word) const
 		{
-#ifndef NDEBUG
 			const u64 len = length();
-			const u64 codim = len - dimension();
+			const u64 dim = dimension();
+			if (len < dim)
+				throw RTE_LOC;
+			const u64 codim = len - dim;
 			if ((u64)syndrome.size() != codim)
 				throw RTE_LOC;
 			if ((u64)word.size() != len)
 				throw RTE_LOC;
-#endif
 			encodeSyndrome(syndrome.data(), word.data());
 		}
 
@@ -113,13 +121,13 @@ namespace osuCrypto
 		{
 			const u64 len = length();
 			const u64 dim = dimension();
+			if (len < dim)
+				throw RTE_LOC;
 			const u64 codim = len - dim;
-#ifndef NDEBUG
 			if ((u64)message.size() != dim)
 				throw RTE_LOC;
 			if ((u64)wordInSyndromeOut.size() != len)
 				throw RTE_LOC;
-#endif
 			decodeInPlace(wordInSyndromeOut.data(), message.data());
 			return wordInSyndromeOut.subspan(0, codim);
 		}

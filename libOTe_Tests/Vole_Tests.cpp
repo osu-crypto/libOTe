@@ -3,6 +3,7 @@
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Vole/Silent/SilentVoleSender.h"
 #include "libOTe/Vole/Silent/SilentVoleReceiver.h"
+#include "libOTe/TwoChooseOne/ConfigureCode.h"
 #include "cryptoTools/Network/Session.h"
 #include "cryptoTools/Network/IOService.h"
 #include "cryptoTools/Common/BitVector.h"
@@ -16,6 +17,9 @@ using namespace oc;
 
 #include <libOTe/config.h>
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Tools/Field/FVec.h"
+#include "libOTe/Tools/Field/Goldilocks.h"
 
 using namespace tests_libOTe;
 #ifdef ENABLE_SILENT_VOLE
@@ -27,7 +31,8 @@ void Vole_Noisy_test_impl(u64 n)
 	F delta = prng.get();
 	std::vector<G> c(n);
 	std::vector<F> a(n), b(n);
-	prng.get(c.data(), c.size());
+	for (auto& value : c)
+		value = prng.get();
 
 	NoisyVoleReceiver<F, G, Ctx> recv;
 	NoisyVoleSender<F, G, Ctx> send;
@@ -73,6 +78,9 @@ void Vole_Noisy_test(const oc::CLP& cmd)
 		Vole_Noisy_test_impl<u64, u32, CoeffCtxInteger>(n);
 		Vole_Noisy_test_impl<block, block, CoeffCtxGF128>(n);
 		Vole_Noisy_test_impl<std::array<u32, 11>, u32, CoeffCtxArray<u32, 11>>(n);
+		Vole_Noisy_test_impl<F12289, F12289, DefaultCoeffCtx<F12289>>(n);
+		using VF = FVec<Fp31, 2>;
+		Vole_Noisy_test_impl<VF, VF, DefaultCoeffCtx<VF>>(n);
 	}
 }
 
@@ -250,6 +258,239 @@ void Vole_Silent_test_impl(
 
 }
 
+namespace
+{
+	struct CountingOtReceiver final : OtReceiver
+	{
+		u64 mCalls = 0;
+
+		task<> receive(const BitVector&, span<block>, PRNG&, Socket&) override
+		{
+			++mCalls;
+			throw std::runtime_error("unexpected OT receive");
+			co_return;
+		}
+	};
+
+	struct CountingOtSender final : OtSender
+	{
+		u64 mCalls = 0;
+
+		task<> send(span<std::array<block, 2>>, PRNG&, Socket&) override
+		{
+			++mCalls;
+			throw std::runtime_error("unexpected OT send");
+			co_return;
+		}
+	};
+
+	template<typename T>
+	struct OversizedVector
+	{
+		T mValue{};
+
+		u64 size() const { return static_cast<u64>(std::numeric_limits<u32>::max()) + 1; }
+		void resize(u64) {}
+		T* begin() { return &mValue; }
+		T* end() { return &mValue; }
+		const T* begin() const { return &mValue; }
+		const T* end() const { return &mValue; }
+		T& operator[](std::size_t) { return mValue; }
+		const T& operator[](std::size_t) const { return mValue; }
+	};
+
+	void expectTaskFailure(task<>&& operation)
+	{
+		bool threw = false;
+		try
+		{
+			macoro::sync_wait(std::move(operation));
+		}
+		catch (const std::exception&)
+		{
+			threw = true;
+		}
+		if (!threw)
+			throw RTE_LOC;
+	}
+
+	void expectTaskInvalidArgument(task<>&& operation)
+	{
+		bool threw = false;
+		try
+		{
+			macoro::sync_wait(std::move(operation));
+		}
+		catch (const std::invalid_argument&)
+		{
+			threw = true;
+		}
+		if (!threw)
+			throw RTE_LOC;
+	}
+
+	template<typename Fn>
+	void expectInvalidArgument(Fn&& fn)
+	{
+		bool threw = false;
+		try
+		{
+			fn();
+		}
+		catch (const std::invalid_argument&)
+		{
+			threw = true;
+		}
+		if (!threw)
+			throw RTE_LOC;
+	}
+}
+
+void Vole_Noisy_Audit_Test(const oc::CLP&)
+{
+	PRNG prng(CCBlock);
+	CoeffCtxInteger ctx;
+	u8 delta = 0;
+
+	expectInvalidArgument([] {
+		SilentVoleSender<block, block, CoeffCtxGF128> sender;
+		sender.configure(0);
+	});
+	expectInvalidArgument([] {
+		SilentVoleReceiver<block, block, CoeffCtxGF128> receiver;
+		receiver.configure(0);
+	});
+
+	expectInvalidArgument([] {
+		SilentVoleSender<block, block, CoeffCtxGF128> sender;
+		sender.configure(128, static_cast<SilentSecType>(255));
+	});
+	expectInvalidArgument([] {
+		SilentVoleReceiver<block, block, CoeffCtxGF128> receiver;
+		receiver.configure(128, static_cast<SilentSecType>(255));
+	});
+	expectInvalidArgument([] {
+		SilentVoleSender<block, block, CoeffCtxGF128> sender;
+		sender.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+			static_cast<SilentBaseType>(255));
+	});
+	expectInvalidArgument([] {
+		SilentVoleReceiver<block, block, CoeffCtxGF128> receiver;
+		receiver.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+			static_cast<SilentBaseType>(255));
+	});
+
+	using SilentSender = SilentVoleSender<block, block, CoeffCtxGF128>;
+	using SilentReceiver = SilentVoleReceiver<block, block, CoeffCtxGF128>;
+	{
+		SilentReceiver receiver;
+		receiver.configure(128);
+		auto count = receiver.baseCount();
+		std::vector<block> recvBaseOts(count.mBaseOtCount);
+		SilentReceiver::VecF baseA(count.mBaseVoleCount);
+		SilentReceiver::VecG baseC(count.mBaseVoleCount);
+		expectInvalidArgument([&] {
+			receiver.setBaseCors({}, recvBaseOts, baseA, baseC);
+		});
+		if (receiver.mState != SilentReceiver::State::Configured ||
+			!receiver.mBaseA.empty() || !receiver.mBaseC.empty() ||
+			receiver.hasBaseCors())
+			throw UnitTestFail(
+				"Silent VOLE accepted missing base-OT choices");
+	}
+
+	{
+		SilentSender sender;
+		sender.configure(128);
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		macoro::sync_wait(sockets[1].close());
+		expectTaskInvalidArgument(sender.silentSendInplace(
+			ZeroBlock, 0, prng, sockets[0]));
+		if (sender.mState != SilentSender::State::Configured ||
+			sender.mRequestSize != 128)
+			throw UnitTestFail(
+				"zero-length Silent VOLE sender call changed configured state");
+	}
+
+	{
+		SilentReceiver receiver;
+		receiver.configure(128);
+		auto sockets = cp::LocalAsyncSocket::makePair();
+		macoro::sync_wait(sockets[1].close());
+		expectTaskInvalidArgument(receiver.silentReceiveInplace(
+			0, prng, sockets[0]));
+		if (receiver.mState != SilentReceiver::State::Configured ||
+			receiver.mRequestSize != 128)
+			throw UnitTestFail(
+				"zero-length Silent VOLE receiver call changed configured state");
+	}
+
+	{
+		CountingOtReceiver ot;
+		std::vector<u8> output;
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleSender<u8, u8, CoeffCtxInteger>::send(
+			delta, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	{
+		CountingOtSender ot;
+		std::vector<u8> input(2), output(1);
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleReceiver<u8, u8, CoeffCtxInteger>::receive(
+			input, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	{
+		CountingOtSender ot;
+		std::vector<u8> input, output;
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleReceiver<u8, u8, CoeffCtxInteger>::receive(
+			input, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	{
+		CountingOtReceiver ot;
+		OversizedVector<u8> output;
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleSender<u8, u8, CoeffCtxInteger>::send(
+			delta, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	{
+		CountingOtSender ot;
+		OversizedVector<u8> input, output;
+		cp::BufferingSocket socket;
+		expectTaskFailure(NoisyVoleReceiver<u8, u8, CoeffCtxInteger>::receive(
+			input, output, prng, ot, socket, ctx));
+		if (ot.mCalls != 0)
+			throw RTE_LOC;
+	}
+
+	expectInvalidArgument([] {
+		syndromeDecodingConfigure(1025, 1, DefaultMultType,
+			SdNoiseDistribution::Regular, 1);
+	});
+	expectInvalidArgument([] {
+		syndromeDecodingConfigure(128,
+			static_cast<u64>(std::numeric_limits<u32>::max()) + 1,
+			DefaultMultType, SdNoiseDistribution::Regular, 1);
+	});
+	expectInvalidArgument([] {
+		syndromeDecodingConfigure(128, 1, DefaultMultType,
+			SdNoiseDistribution::Regular,
+			static_cast<u64>(std::numeric_limits<u16>::max()) + 1);
+	});
+}
+
 
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
 {
@@ -346,6 +587,177 @@ void Vole_Silent_mal_test(const oc::CLP& cmd)
 			Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, DefaultMultType, debug, false, true, noise);
 		}
 	}
+}
+
+void Vole_Silent_malBase_test(const oc::CLP& cmd)
+{
+	auto debug = cmd.isSet("debug");
+	for (auto noise : { SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary })
+	{
+		Vole_Silent_test_impl<block, block, CoeffCtxGF128>(
+			4364, DefaultMultType, debug, true, true, noise);
+	}
+}
+
+void Vole_Silent_Clear_test(const oc::CLP&)
+{
+	using Sender = SilentVoleSender<block, block, CoeffCtxGF128>;
+	using Receiver = SilentVoleReceiver<block, block, CoeffCtxGF128>;
+
+	Sender sender;
+	Receiver receiver;
+	sender.configure(128, SilentSecType::Malicious, DefaultMultType,
+		SilentBaseType::BaseExtend, SdNoiseDistribution::Stationary);
+	receiver.configure(128, SilentSecType::Malicious, DefaultMultType,
+		SilentBaseType::BaseExtend, SdNoiseDistribution::Stationary);
+	sender.mB.resize(1);
+	sender.mBaseB.resize(1);
+	sender.mDerandomizeMalCheck = true;
+	receiver.mA.resize(1);
+	receiver.mC.resize(1);
+	receiver.mBaseA.resize(1);
+	receiver.mBaseC.resize(1);
+	receiver.mMalCheckSeed = OneBlock;
+	receiver.mDerandomizeMalCheck = true;
+
+	auto invalidMult = static_cast<MultType>(255);
+	bool senderConfigThrew = false;
+	bool receiverConfigThrew = false;
+	try
+	{
+		sender.configure(256, SilentSecType::SemiHonest, invalidMult,
+			SilentBaseType::Base, SdNoiseDistribution::Regular);
+	}
+	catch (const std::exception&)
+	{
+		senderConfigThrew = true;
+	}
+	try
+	{
+		receiver.configure(256, SilentSecType::SemiHonest, invalidMult,
+			SilentBaseType::Base, SdNoiseDistribution::Regular);
+	}
+	catch (const std::exception&)
+	{
+		receiverConfigThrew = true;
+	}
+
+	if (!senderConfigThrew || !receiverConfigThrew ||
+		sender.mState != Sender::State::Configured ||
+		receiver.mState != Receiver::State::Configured ||
+		sender.mRequestSize != 128 || receiver.mRequestSize != 128 ||
+		sender.mSecurityType != SilentSecType::Malicious ||
+		receiver.mSecurityType != SilentSecType::Malicious ||
+		sender.mLpnMultType != DefaultMultType ||
+		receiver.mLpnMultType != DefaultMultType ||
+		sender.mB.size() != 1 || sender.mBaseB.size() != 1 ||
+		receiver.mA.size() != 1 || receiver.mC.size() != 1 ||
+		receiver.mBaseA.size() != 1 || receiver.mBaseC.size() != 1 ||
+		!receiver.mMalCheckSeed.has_value())
+		throw RTE_LOC;
+
+	sender.clear();
+	receiver.clear();
+
+	if (sender.mState != Sender::State::Default || sender.isConfigured() ||
+		sender.mRequestSize || sender.mNoiseVecSize || sender.mNumPartitions ||
+		sender.mSizePer || sender.mSecParam || sender.mCodeSeed != ZeroBlock ||
+		!sender.mB.empty() || !sender.mBaseB.empty() || sender.mDerandomizeMalCheck)
+		throw RTE_LOC;
+
+	if (receiver.mState != Receiver::State::Default || receiver.isConfigured() ||
+		receiver.mRequestSize || receiver.mNoiseVecSize || receiver.mNumPartitions ||
+		receiver.mSizePer || receiver.mSecParam || receiver.mCodeSeed != ZeroBlock ||
+		!receiver.mA.empty() || !receiver.mC.empty() || !receiver.mBaseA.empty() ||
+		!receiver.mBaseC.empty() || receiver.mMalCheckSeed.has_value() ||
+		receiver.mDerandomizeMalCheck)
+		throw RTE_LOC;
+
+	PRNG failurePrng(CCBlock);
+	Sender failedSender;
+	failedSender.configure(128, SilentSecType::Malicious, DefaultMultType,
+		SilentBaseType::BaseExtend, SdNoiseDistribution::Stationary);
+	auto failedSenderCount = failedSender.baseCount();
+	std::vector<std::array<block, 2>> failedSendBase(
+		failedSenderCount.mBaseOtCount);
+	Sender::VecF failedBaseB(failedSenderCount.mBaseVoleCount);
+	failurePrng.get(failedSendBase.data(), failedSendBase.size());
+	failurePrng.get(failedBaseB.data(), failedBaseB.size());
+	failedSender.setBaseCors(failedSendBase, failedBaseB);
+	auto failedSenderSockets = cp::LocalAsyncSocket::makePair();
+	macoro::sync_wait(failedSenderSockets[1].close());
+	bool failedSenderThrew = false;
+	try
+	{
+		macoro::sync_wait(failedSender.silentSendInplace(
+			failurePrng.get<block>(), 128, failurePrng, failedSenderSockets[0]));
+	}
+	catch (const std::exception&)
+	{
+		failedSenderThrew = true;
+	}
+	if (!failedSenderThrew || failedSender.isConfigured() ||
+		failedSender.hasBaseCors() || !failedSender.mBaseB.empty())
+		throw UnitTestFail("failed Silent VOLE sender retained correlations");
+
+	Receiver failedReceiver;
+	failedReceiver.configure(128, SilentSecType::Malicious, DefaultMultType,
+		SilentBaseType::BaseExtend, SdNoiseDistribution::Stationary);
+	auto failedReceiverCount = failedReceiver.baseCount();
+	auto failedChoices = failedReceiver.sampleBaseChoiceBits(failurePrng);
+	std::vector<block> failedRecvBase(failedReceiverCount.mBaseOtCount);
+	Receiver::VecF failedBaseA(failedReceiverCount.mBaseVoleCount);
+	Receiver::VecG failedBaseC(failedReceiverCount.mBaseVoleCount);
+	failurePrng.get(failedRecvBase.data(), failedRecvBase.size());
+	failurePrng.get(failedBaseA.data(), failedBaseA.size());
+	failurePrng.get(failedBaseC.data(), failedBaseC.size());
+	failedReceiver.setBaseCors(
+		failedChoices, failedRecvBase, failedBaseA, failedBaseC);
+	auto failedReceiverSockets = cp::LocalAsyncSocket::makePair();
+	macoro::sync_wait(failedReceiverSockets[1].close());
+	bool failedReceiverThrew = false;
+	try
+	{
+		macoro::sync_wait(failedReceiver.silentReceiveInplace(
+			128, failurePrng, failedReceiverSockets[0]));
+	}
+	catch (const std::exception&)
+	{
+		failedReceiverThrew = true;
+	}
+	if (!failedReceiverThrew || failedReceiver.isConfigured() ||
+		failedReceiver.hasBaseCors() || !failedReceiver.mBaseA.empty() ||
+		!failedReceiver.mBaseC.empty())
+		throw UnitTestFail("failed Silent VOLE receiver retained correlations");
+
+	using Product = FVec<Fp31, 2>;
+	SilentVoleSender<Product> productSender;
+	SilentVoleReceiver<Product> productReceiver;
+	productSender.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+		SilentBaseType::Base, SdNoiseDistribution::Stationary);
+	productReceiver.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+		SilentBaseType::Base, SdNoiseDistribution::Stationary);
+	const auto productConfig = syndromeDecodingConfigure(
+		128, 128, DefaultMultType, SdNoiseDistribution::Stationary,
+		log2ceil(Fp31::mMod));
+	if (productSender.mNumPartitions != productConfig.mNumPartitions ||
+		productSender.mSizePer != productConfig.mSizePer ||
+		productSender.mNoiseVecSize != productConfig.mNoiseVectorSize ||
+		productReceiver.mNumPartitions != productConfig.mNumPartitions ||
+		productReceiver.mSizePer != productConfig.mSizePer ||
+		productReceiver.mNoiseVecSize != productConfig.mNoiseVectorSize)
+		throw UnitTestFail(
+			"Silent VOLE used binary-group parameters for an odd-characteristic product group");
+
+	SilentVoleSender<Goldilocks> goldSender;
+	goldSender.configure(128, SilentSecType::SemiHonest, DefaultMultType,
+		SilentBaseType::Base, SdNoiseDistribution::Stationary);
+	const auto goldConfig = syndromeDecodingConfigure(
+		128, 128, DefaultMultType, SdNoiseDistribution::Stationary, 64);
+	if (goldSender.mNumPartitions != goldConfig.mNumPartitions ||
+		goldSender.mSizePer != goldConfig.mSizePer ||
+		goldSender.mNoiseVecSize != goldConfig.mNoiseVectorSize)
+		throw UnitTestFail("Silent VOLE misclassified the Goldilocks additive group");
 }
 
 
@@ -526,11 +938,14 @@ void Vole_Silent_BlkAcc_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_stationary_test(const oc::CLP& cmd) { throwDisabled(); }
 
 void Vole_Noisy_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Noisy_Audit_Test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_defaultMatrixRank_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_baseOT_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_mal_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_malBase_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_Clear_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_Rounds_test(const oc::CLP& cmd) { throwDisabled(); }
 
 

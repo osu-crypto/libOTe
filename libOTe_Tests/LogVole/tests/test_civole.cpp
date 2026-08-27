@@ -7,9 +7,12 @@
 #include "macoro/sync_wait.h"
 #include "macoro/when_all.h"
 
+#include <array>
 #include <stdexcept>
 #include <span>
+#include <type_traits>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace osuCrypto::LogVole;
@@ -48,6 +51,7 @@ namespace
 
         CivoleReceiverOfflineInput receiverInput{};
         receiverInput.mParams = params;
+        receiverInput.mW = w;
 
         auto sockets = coproto::LocalAsyncSocket::makePair();
         auto result = macoro::sync_wait(macoro::when_all_ready(
@@ -96,7 +100,28 @@ namespace
             LOGVOLE_EXPECT_EQ(macs[idx], expected) << "VOLE relation mismatch at index " << idx;
         }
     }
+
+    macoro::task<> send_offline_meta(coproto::Socket& sock, u64 labelCount)
+    {
+        std::array<osuCrypto::u8, sizeof(u64)> payload{};
+        for (std::size_t i = 0; i < payload.size(); ++i)
+        {
+            payload[i] = static_cast<osuCrypto::u8>(labelCount >> (8 * i));
+        }
+
+        auto metaSock = sock.fork();
+        co_await metaSock.send(coproto::copy(payload));
+    }
 }
+
+static_assert(!std::is_copy_constructible_v<LogVoleSender>);
+static_assert(!std::is_copy_assignable_v<LogVoleSender>);
+static_assert(std::is_move_constructible_v<LogVoleSender>);
+static_assert(std::is_move_assignable_v<LogVoleSender>);
+static_assert(!std::is_copy_constructible_v<LogVoleReceiver>);
+static_assert(!std::is_copy_assignable_v<LogVoleReceiver>);
+static_assert(std::is_move_constructible_v<LogVoleReceiver>);
+static_assert(std::is_move_assignable_v<LogVoleReceiver>);
 
 void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
 {
@@ -120,6 +145,33 @@ void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
         threw = true;
     }
     LOGVOLE_EXPECT_TRUE(threw);
+}
+
+void LogVole_Civole_RejectsPeerOfflineWidth(const oc::CLP&)
+{
+    CivoleReceiverOfflineInput input{};
+    input.mParams = make_params();
+    input.mW = 8;
+
+    CivoleReceiverState state{};
+    auto sockets = coproto::LocalAsyncSocket::makePair();
+    auto result = macoro::sync_wait(macoro::when_all_ready(
+        civoleReceiverOffline(input, state, sockets[0]),
+        send_offline_meta(sockets[1], input.mW + 1)));
+
+    bool threw = false;
+    try
+    {
+        std::get<0>(result).result();
+    }
+    catch (const std::runtime_error&)
+    {
+        threw = true;
+    }
+    std::get<1>(result).result();
+
+    LOGVOLE_EXPECT_TRUE(threw);
+    LOGVOLE_EXPECT_EQ(state.mW, 0ull);
 }
 
 void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
@@ -230,4 +282,48 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
     expect_vole_relation(x2, delta, b2, a2, sender.modulus());
     LOGVOLE_EXPECT_EQ(sender.mNextSid, 2ull);
     LOGVOLE_EXPECT_EQ(receiver.mNextSid, 2ull);
+
+    oc::Timer senderTimer;
+    oc::Timer receiverTimer;
+    sender.setTimer(senderTimer);
+    receiver.setTimer(receiverTimer);
+
+    LogVoleSender movedSender{};
+    movedSender = std::move(sender);
+    LogVoleReceiver movedReceiver(std::move(receiver));
+
+    LOGVOLE_EXPECT_FALSE(sender.isConfigured());
+    LOGVOLE_EXPECT_FALSE(receiver.isConfigured());
+    LOGVOLE_EXPECT_EQ(sender.mRequestSize, 0ull);
+    LOGVOLE_EXPECT_EQ(receiver.mRequestSize, 0ull);
+    LOGVOLE_EXPECT_EQ(sender.mModulus, 0ull);
+    LOGVOLE_EXPECT_EQ(receiver.mModulus, 0ull);
+    LOGVOLE_EXPECT_EQ(sender.mOfflineState.mW, 0ull);
+    LOGVOLE_EXPECT_EQ(receiver.mOfflineState.mW, 0ull);
+    LOGVOLE_EXPECT_TRUE(sender.mOfflineState.mUsedSids.empty());
+    LOGVOLE_EXPECT_TRUE(receiver.mOfflineState.mUsedSids.empty());
+    LOGVOLE_EXPECT_FALSE(sender.mOfflineState.mLogVoleState.mNextLevelState);
+    LOGVOLE_EXPECT_FALSE(receiver.mOfflineState.mLogVoleState.mNextLevelState);
+    LOGVOLE_EXPECT_EQ(sender.mTimer, nullptr);
+    LOGVOLE_EXPECT_EQ(receiver.mTimer, nullptr);
+    LOGVOLE_EXPECT_TRUE(movedSender.hasOffline());
+    LOGVOLE_EXPECT_TRUE(movedReceiver.hasOffline());
+    LOGVOLE_EXPECT_EQ(movedSender.mNextSid, 2ull);
+    LOGVOLE_EXPECT_EQ(movedReceiver.mNextSid, 2ull);
+    LOGVOLE_EXPECT_EQ(movedSender.mTimer, &senderTimer);
+    LOGVOLE_EXPECT_EQ(movedReceiver.mTimer, &receiverTimer);
+
+    const std::vector<u64> x3{ 2, 3, 5, 7, 11, 13, 17, 19 };
+    std::vector<u64> b3(x3.size());
+    std::vector<u64> a3(x3.size());
+    auto onlineSockets3 = coproto::LocalAsyncSocket::makePair();
+    auto onlineResult3 = macoro::sync_wait(macoro::when_all_ready(
+        movedSender.send(b3, senderPrng, onlineSockets3[0]),
+        movedReceiver.receive(x3, a3, receiverPrng, onlineSockets3[1])));
+    std::get<0>(onlineResult3).result();
+    std::get<1>(onlineResult3).result();
+
+    expect_vole_relation(x3, delta, b3, a3, movedSender.modulus());
+    LOGVOLE_EXPECT_EQ(movedSender.mNextSid, 3ull);
+    LOGVOLE_EXPECT_EQ(movedReceiver.mNextSid, 3ull);
 }

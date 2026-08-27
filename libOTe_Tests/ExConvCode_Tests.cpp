@@ -3,10 +3,159 @@
 #include <iomanip>
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Tools/ExConvCode/ExConvChecker.h"
+#include "libOTe/Tools/EACode/EAChecker.h"
+#include "libOTe/Tools/QuasiCyclicCode.h"
+#include "libOTe/Tools/Tools.h"
+#include <cryptoTools/Common/TestCollection.h>
 #include <cmath>
+#include <limits>
 
 namespace osuCrypto
 {
+	struct CheckerIdentityCode
+	{
+		u64 mMessageSize;
+		u64 mCodeSize;
+
+		template<typename T, typename Ctx>
+		void dualEncode(T*, Ctx)
+		{
+		}
+	};
+
+	void ExConvCode_Audit_Test(const oc::CLP&)
+	{
+		auto expectInvalid = [](auto&& fn)
+		{
+			bool rejected = false;
+			try
+			{
+				fn();
+			}
+			catch (const std::invalid_argument&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw UnitTestFail("invalid code configuration was accepted" LOCATION);
+		};
+
+		expectInvalid([] { ExConvCode code; code.config(0, 1); });
+		expectInvalid([] { ExConvCode code; code.config(std::numeric_limits<u64>::max(), 0); });
+		expectInvalid([] { ExConvCode code; code.config(16, 16); });
+		expectInvalid([] { ExConvCode code; code.config(16, 32, 7, 16); });
+		expectInvalid([] { ExConvCode code; code.config(1, 32771, 7, 32769); });
+
+		ExConvCode exConv;
+		exConv.config(16, 64, 7, 24, true, true, block(1, 2));
+		const auto oldSeed = exConv.mSeed;
+		const auto oldMessageSize = exConv.mMessageSize;
+		const auto oldCodeSize = exConv.mCodeSize;
+		const auto oldAccumulatorSize = exConv.mAccumulatorSize;
+		const auto oldExpanderSeed = exConv.mExpander.mSeed;
+		expectInvalid([&] { exConv.config(16, 16); });
+		if (exConv.mSeed != oldSeed || exConv.mMessageSize != oldMessageSize ||
+			exConv.mCodeSize != oldCodeSize ||
+			exConv.mAccumulatorSize != oldAccumulatorSize ||
+			exConv.mExpander.mSeed != oldExpanderSeed)
+			throw UnitTestFail("failed ExConv configuration changed object state" LOCATION);
+
+		expectInvalid([] { ExpanderCode code; code.config(0, 16, 7); });
+		expectInvalid([] { ExpanderCode code; code.config(16, 0, 7); });
+		expectInvalid([] { ExpanderCode code; code.config(16, 32, 0); });
+		expectInvalid([] { ExpanderCode code; code.config(16, 3, 7); });
+
+		CheckerIdentityCode identity{ 1025, 1025 };
+		auto compressed = getCompressedGenerator(identity);
+		for (u64 row = 0; row < identity.mMessageSize; ++row)
+		{
+			u64 weight = 0;
+			for (u64 j = 0; j < compressed.cols(); ++j)
+				weight += popcount(compressed(row, j).get<u64>(0)) +
+					popcount(compressed(row, j).get<u64>(1));
+			if (weight != 1 || !*BitIterator(compressed.data(row), row))
+				throw UnitTestFail("partial generator batch was encoded incorrectly" LOCATION);
+		}
+		if (getGeneratorWeight2(identity, false) != 1)
+			throw UnitTestFail("partial generator batch weight was incorrect" LOCATION);
+
+		{
+			CLP invalid;
+			invalid.mKeyValues["bw"].push_back("0");
+			expectInvalid([&] { EAChecker(invalid); });
+		}
+		{
+			CLP invalid;
+			invalid.mKeyValues["nn"].push_back("64");
+			expectInvalid([&] { EAChecker(invalid); });
+		}
+		{
+			CLP invalid;
+			invalid.mKeyValues["nt"].push_back("0");
+			expectInvalid([&] { ExConvChecker(invalid); });
+		}
+		{
+			CLP invalid;
+			invalid.mKeyValues["kk"].push_back("64");
+			expectInvalid([&] { ExConvChecker(invalid); });
+		}
+
+		ExpanderCode expander;
+		expander.config(10, 17, 7, true, block(3, 4));
+		std::vector<u64> input(expander.mCodeSize), output(expander.mMessageSize);
+		for (u64 i = 0; i != input.size(); ++i)
+			input[i] = i + 1;
+		expander.expand<u64, CoeffCtxInteger, false>(
+			input.begin(), output.begin(), CoeffCtxInteger{});
+		auto matrix = expander.getMatrix();
+		for (u64 i = 0; i != matrix.rows(); ++i)
+		{
+			u64 expected = 0;
+			for (auto index : matrix[i])
+				expected += input[index];
+			if (output[i] != expected)
+				throw UnitTestFail("regular expander matrix disagrees with encoder" LOCATION);
+		}
+
+		if (nextPrime(1024) != 1031 ||
+			!isPrime(18446744073709551557ull) ||
+			isPrime(341550071728321ull) ||
+			isPrime(std::numeric_limits<u64>::max()))
+			throw UnitTestFail("deterministic 64-bit primality test failed" LOCATION);
+
+		bool exhausted = false;
+		try
+		{
+			(void)nextPrime(std::numeric_limits<u64>::max());
+		}
+		catch (const std::overflow_error&)
+		{
+			exhausted = true;
+		}
+		if (!exhausted)
+			throw UnitTestFail("nextPrime wrapped at the 64-bit limit" LOCATION);
+
+#ifdef ENABLE_BITPOLYMUL
+		expectInvalid([] { QuasiCyclicCode code; code.init2(0, 16); });
+		expectInvalid([] { QuasiCyclicCode code; code.init2(16, 16); });
+		expectInvalid([] { QuasiCyclicCode code; code.init2(17, 16); });
+
+		QuasiCyclicCode quasi;
+		quasi.init2(16, 32, block(5, 6));
+		const auto oldSize = quasi.size();
+		expectInvalid([&] { quasi.init2(16, 16); });
+		if (quasi.size() != oldSize)
+			throw UnitTestFail("failed quasi-cyclic configuration changed object state" LOCATION);
+
+		block value = ZeroBlock;
+		expectInvalid([&] {
+			QuasiCyclicCode::bitShiftXor(span<block>(&value, 1), span<block>{}, 1);
+		});
+		expectInvalid([&] {
+			QuasiCyclicCode::modp(span<block>(&value, 1), span<block>(&value, 1), 0);
+		});
+#endif
+	}
 
     std::ostream& operator<<(std::ostream& o, const std::array<u8, 3>& a)
     {

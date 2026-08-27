@@ -1,5 +1,5 @@
 #pragma once
-// © 2025 Peter Rindal.
+// Â© 2025 Peter Rindal.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 // 
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
@@ -7,7 +7,7 @@
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 // Code partially authored by:
-// Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, Clément Ducros, and Sacha Servan - Schreiber
+// Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, ClÃ©ment Ducros, and Sacha Servan - Schreiber
 
 
 #include "libOTe/config.h"
@@ -17,8 +17,10 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <iomanip>
+#include <stdexcept>
 
 namespace osuCrypto
 {
@@ -100,16 +102,20 @@ namespace osuCrypto
 			}
 		}
 
-		F3x32 lower(u64 digits)
+		F3x32 lower(u64 digits) const
 		{
+			if (digits > 32)
+				throw std::out_of_range("F3x32 lower digit count exceeds its capacity");
 			F3x32 r;
-			r.mVal = mVal & ((1ull << (2 * digits)) - 1);
+			r.mVal = digits == 32 ? mVal : mVal & ((1ull << (2 * digits)) - 1);
 			return r;
 		}
-		F3x32 upper(u64 digits)
+		F3x32 upper(u64 digits) const
 		{
+			if (digits > 32)
+				throw std::out_of_range("F3x32 upper digit count exceeds its capacity");
 			F3x32 r;
-			r.mVal = mVal >> (2 * digits);
+			r.mVal = digits == 32 ? 0 : mVal >> (2 * digits);
 			return r;
 		}
 
@@ -175,6 +181,10 @@ namespace osuCrypto
 		span<uint8_t> res_poly,
 		size_t poly_size)
 	{
+		if (a_poly.size() < poly_size || b_poly.size() < poly_size ||
+			res_poly.size() < poly_size)
+			throw std::invalid_argument("F4Multiply span is shorter than poly_size");
+
 		const uint8_t pattern = 0xaa;
 		uint8_t mask_h = pattern;     // 0b10101010
 		uint8_t mask_l = mask_h >> 1; // 0b01010101
@@ -206,6 +216,10 @@ namespace osuCrypto
 		span<uint16_t> res_poly,
 		size_t poly_size)
 	{
+		if (a_poly.size() < poly_size || b_poly.size() < poly_size ||
+			res_poly.size() < poly_size)
+			throw std::invalid_argument("F4Multiply span is shorter than poly_size");
+
 		const uint16_t pattern = 0xaaaa;
 		uint16_t mask_h = pattern;     // 0b101010101010101001010
 		uint16_t mask_l = mask_h >> 1; // 0b010101010101010100101
@@ -237,6 +251,10 @@ namespace osuCrypto
 		span<uint32_t> res_poly,
 		size_t poly_size)
 	{
+		if (a_poly.size() < poly_size || b_poly.size() < poly_size ||
+			res_poly.size() < poly_size)
+			throw std::invalid_argument("F4Multiply span is shorter than poly_size");
+
 		const uint32_t pattern = 0xaaaaaaaa;
 		uint32_t mask_h = pattern;     // 0b101010101010101001010
 		uint32_t mask_l = mask_h >> 1; // 0b010101010101010100101
@@ -268,6 +286,10 @@ namespace osuCrypto
 		span<uint64_t> res_poly,
 		size_t poly_size)
 	{
+		if (a_poly.size() < poly_size || b_poly.size() < poly_size ||
+			res_poly.size() < poly_size)
+			throw std::invalid_argument("F4Multiply span is shorter than poly_size");
+
 		const uint64_t pattern = 0xaaaaaaaaaaaaaaaa;
 		uint64_t mask_h = pattern;     // 0b101010101010101001010
 		uint64_t mask_l = mask_h >> 1; // 0b010101010101010100101
@@ -300,6 +322,10 @@ namespace osuCrypto
 		span<block> res_poly,
 		size_t poly_size)
 	{
+		if (a_poly.size() < poly_size || b_poly.size() < poly_size ||
+			res_poly.size() < poly_size)
+			throw std::invalid_argument("F4Multiply span is shorter than poly_size");
+
 		const uint64_t pattern = 0xaaaaaaaaaaaaaaaa;
 		block mask_h = block(pattern, pattern);     // 0b101010101010101001010
 		block mask_l = block(pattern >> 1, pattern >> 1); // 0b010101010101010100101
@@ -330,6 +356,8 @@ namespace osuCrypto
 		u64 v = 1;
 		while (v < x)
 		{
+			if (v > std::numeric_limits<u64>::max() / 3)
+				throw std::overflow_error("log3ceil input exceeds the representable power-of-three range");
 			v *= 3;
 			i++;
 		}
@@ -352,10 +380,16 @@ namespace osuCrypto
 		while (1)
 		{
 			if (exp & 1)
+			{
+				if (base && result > std::numeric_limits<size_t>::max() / base)
+					throw std::overflow_error("ipow result does not fit in size_t");
 				result *= base;
+			}
 			exp >>= 1;
 			if (!exp)
 				break;
+			if (base && base > std::numeric_limits<size_t>::max() / base)
+				throw std::overflow_error("ipow intermediate does not fit in size_t");
 			base *= base;
 		}
 

@@ -1,9 +1,12 @@
 #pragma once
 
 #include "cryptoTools/Common/Defines.h"
+#include "cryptoTools/Crypto/PRNG.h"
+#include "libOTe/Tools/CoeffCtx.h"
 #include <array>
 #include <iostream>
 #include <assert.h>
+#include <stdexcept>
 #include <utility>
 #include "util.h"
 #include "UInt.h"
@@ -59,7 +62,7 @@ namespace osuCrypto
 		static constexpr u64 mModulus = -(1ull << 32) + 1;
 
 		// Alias for the modulus, useful for generic code treating "order" as the field size.
-		static constexpr u128 order() { return (u128(1) << 64) + u128(mModulus); }
+		static constexpr u128 order() { return u128(mModulus); }
 
 		// Internal value (unreduced). Any u64 is accepted; interpreted modulo mModulus.
 		// Invariant: all arithmetic maintains a correct representative modulo p.
@@ -71,6 +74,17 @@ namespace osuCrypto
 
 		// Enable construction from u64 (and int via standard conversion)
 		constexpr explicit Goldilocks(u64 v) noexcept : mVal(v) {}
+
+		Goldilocks(PRNG::Any prng)
+			: mVal(fieldSampling::sample(prng.mPrng, mModulus))
+		{
+		}
+
+		Goldilocks& operator=(PRNG::Any prng)
+		{
+			mVal = fieldSampling::sample(prng.mPrng, mModulus);
+			return *this;
+		}
 
 		// Returns the canonical representative in [0, p-1].
 		constexpr Goldilocks canonical() const noexcept
@@ -237,6 +251,13 @@ namespace osuCrypto
 			return result;
 		}
 
+		constexpr OC_FORCEINLINE Goldilocks inverse() const noexcept
+		{
+			Goldilocks result;
+			inv(result, *this);
+			return result;
+		}
+
 		// pow(result, x, exps):
 		//   Compute x^exps via square-and-multiply with field multiplication.
 		static constexpr OC_FORCEINLINE void pow(
@@ -319,7 +340,9 @@ namespace osuCrypto
 			Goldilocks& result,
 			Goldilocks in1)
 		{
+			constexpr u64 reducer = (1ull << 32) - 1;
 			auto v = in1.mVal + 1;
+			v += reducer & (0 - static_cast<u64>(v == 0));
 			result.mVal = v < mModulus ? v : v - mModulus;
 		}
 
@@ -356,6 +379,50 @@ namespace osuCrypto
 	static_assert(std::is_constructible_v<Goldilocks, u64>, "Constructible from u64");
 	static_assert(std::is_constructible_v<Goldilocks, decltype(1)>, "Constructible from int");
 
+	struct CoeffCtxGoldilocks : CoeffCtxInteger
+	{
+		template<typename G>
+		constexpr bool characteristicTwo() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			return false;
+		}
+
+		template<typename G>
+		constexpr bool isField() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			return true;
+		}
+
+		template<typename G>
+		constexpr u64 additiveGroupBitCount() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			return 64;
+		}
+
+		template<typename G>
+		constexpr u64 bitSize() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			return 64;
+		}
+
+		template<typename G>
+		OC_FORCEINLINE void fromBlock(G& ret, const block& seed) const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			ret.mVal = fieldSampling::fromBlock(seed, Goldilocks::mModulus);
+		}
+	};
+
+	template<>
+	struct DefaultCoeffCtx_t<Goldilocks, Goldilocks>
+	{
+		using type = CoeffCtxGoldilocks;
+	};
+
 
 
 	// Function to prevent branch from being inlined/optimized away
@@ -381,6 +448,7 @@ namespace osuCrypto
 		Goldilocks in)
 	{
 		// Extended Euclidean algorithm to find modular inverse
+		in = in.canonical();
 		if (in.mVal == 0)
 		{
 			result.mVal = 0; // Handle zero case gracefully
@@ -821,9 +889,13 @@ namespace osuCrypto
 	template<>
 	inline Goldilocks primRootOfUnity<Goldilocks>(u64 n)
 	{
+		if (n == 0)
+			throw std::invalid_argument("Goldilocks root-of-unity order must be nonzero. " LOCATION);
 		auto ln = log2ceil(n);
-		if (1ull << ln != n)
-			throw RTE_LOC;
+		if (ln >= 64 || (1ull << ln) != n)
+			throw std::invalid_argument("Goldilocks root-of-unity order must be a power of two. " LOCATION);
+		if (ln >= GoldilocksRootsOfUnity.size())
+			throw std::invalid_argument("Goldilocks root-of-unity order exceeds the field two-adicity. " LOCATION);
 		return GoldilocksRootsOfUnity[ln];
 	}
 

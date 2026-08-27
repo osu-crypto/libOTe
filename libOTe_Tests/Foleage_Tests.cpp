@@ -6,6 +6,7 @@
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Common/TestCollection.h"
+#include <type_traits>
 
 
 namespace osuCrypto
@@ -90,6 +91,16 @@ namespace osuCrypto
 			std::get<0>(r).result();
 			std::get<1>(r).result();
 
+			for (const auto& ole : oles)
+			{
+				if (ole.hasBaseOts())
+					throw UnitTestFail("Foleage retained consumed base OTs");
+				if (ole.mSendOts.size() || ole.mRecvOts.size() || ole.mChoiceOts.size() ||
+					ole.mDpfLeaf.mBaseSendOts.size() || ole.mDpfLeaf.mBaseRecvOts.size() ||
+					ole.mDpf.mBaseSendOts.size() || ole.mDpf.mBaseRecvOts.size())
+					throw UnitTestFail("Foleage did not clear consumed base-OT storage");
+			}
+
 			// Now we check that we got the correct OLE correlations and fail
 			// the test otherwise.
 			for (size_t i = 0; i < blocks; i++)
@@ -116,6 +127,124 @@ namespace osuCrypto
 		throw UnitTestSkipped("ENABLE_FOLEAGE not defined.");
 #endif
 
+	}
+
+	void foleage_Audit_test(const CLP&)
+	{
+#ifdef ENABLE_FOLEAGE
+		static_assert(!std::is_copy_constructible_v<FoleageTriple>);
+		static_assert(!std::is_copy_assignable_v<FoleageTriple>);
+		static_assert(std::is_move_constructible_v<FoleageTriple>);
+		static_assert(std::is_move_assignable_v<FoleageTriple>);
+
+		auto expectRejected = [](auto&& fn, const char* message) {
+			bool rejected = false;
+			try { fn(); }
+			catch (const std::exception&) { rejected = true; }
+			if (!rejected)
+				throw UnitTestFail(message);
+		};
+
+		expectRejected([] {
+			FoleageTriple triple;
+			triple.init(0, 0);
+		}, "Foleage accepted a zero domain");
+		expectRejected([] {
+			FoleageTriple triple;
+			triple.init(0, 1);
+		}, "Foleage accepted fewer than two positions per sparse block");
+		expectRejected([] {
+			FoleageTriple triple;
+			triple.init(2, 1000);
+		}, "Foleage accepted an invalid party index");
+		expectRejected([] {
+			FoleageTriple triple;
+			(void)triple.baseOtCount();
+		}, "Foleage reported base-OT counts before initialization");
+		expectRejected([] {
+			FoleageTriple triple;
+			triple.setBaseOts({}, {}, {});
+		}, "Foleage installed base OTs before initialization");
+		expectRejected([] {
+			FoleageTriple triple;
+			triple.init(0, 1000);
+			PRNG prng(ZeroBlock);
+			auto sockets = coproto::LocalAsyncSocket::makePair();
+			macoro::sync_wait(triple.genBaseOts(
+				prng, sockets[0], static_cast<SilentBaseType>(255)));
+		}, "Foleage accepted an invalid base-OT mode");
+		expectRejected([] {
+			FoleageTriple triple;
+			PRNG prng(ZeroBlock);
+			auto sockets = coproto::LocalAsyncSocket::makePair();
+			std::vector<block> empty;
+			macoro::sync_wait(triple.expand(
+				empty, empty, empty, empty, prng, sockets[0]));
+		}, "Foleage expanded before initialization");
+		expectRejected([] {
+			(void)log3ceil(std::numeric_limits<u64>::max());
+		}, "log3ceil accepted an unrepresentable power-of-three result");
+
+		std::vector<u8> shortPoly(1);
+		expectRejected([&] {
+			F4Multiply(span<u8>(shortPoly), span<u8>(shortPoly),
+				span<u8>(shortPoly), 2);
+		}, "F4Multiply accepted spans shorter than poly_size");
+
+		std::vector<u16> shortFft(2);
+		expectRejected([&] {
+			foleageFft<u16>(span<u16>(shortFft), 1, 1);
+		}, "foleageFft accepted an undersized coefficient span");
+
+		FoleageTriple triple;
+		triple.init(1, 1000);
+		auto counts = triple.baseOtCount();
+		std::vector<std::array<block, 2>> sendOts(counts.mSendCount);
+		std::vector<block> recvOts(counts.mRecvCount);
+		BitVector choices(counts.mRecvCount);
+		triple.setBaseOts(sendOts, recvOts, choices);
+		triple.mDpfLeaf.mOtIdx = triple.mDpfLeaf.baseOtCount();
+		triple.mDpf.mOtIdx = triple.mDpf.baseOtCount();
+
+		triple.setBaseOts(sendOts, recvOts, choices);
+		if (triple.mSendOts.size() != 2 * triple.mC * triple.mT ||
+			triple.mRecvOts.size() != 0)
+			throw UnitTestFail("Foleage appended replacement tensor base OTs");
+		if (triple.mDpfLeaf.mOtIdx || triple.mDpf.mOtIdx)
+			throw UnitTestFail("Foleage did not reset replacement DPF base OTs");
+
+		triple.clearBaseOts();
+		if (triple.hasBaseOts() || triple.mSendOts.size() ||
+			triple.mDpf.mBaseSendOts.size())
+			throw UnitTestFail("Foleage clearBaseOts retained active state");
+
+		triple.setBaseOts(sendOts, recvOts, choices);
+		auto moved(std::move(triple));
+		if (!moved.isInitialized() || !moved.hasBaseOts() ||
+			moved.mN == 0 || moved.mSendOts.size() != 2 * moved.mC * moved.mT)
+			throw UnitTestFail("Foleage move construction lost active state");
+		if (triple.isInitialized() || triple.hasBaseOts() || triple.mTimer ||
+			triple.mT != 9 || triple.mC != 8 || triple.mN ||
+			triple.mFftA.size() || triple.mFftASquared.size() ||
+			triple.mSparsePositions.size() || triple.mRecvOts.size() ||
+			triple.mSendOts.size() || triple.mChoiceOts.size())
+			throw UnitTestFail("Foleage move construction retained source state");
+
+		FoleageTriple assigned;
+		assigned = std::move(moved);
+		if (!assigned.isInitialized() || !assigned.hasBaseOts() ||
+			moved.isInitialized() || moved.hasBaseOts() || moved.mTimer ||
+			moved.mT != 9 || moved.mC != 8 || moved.mN ||
+			moved.mFftA.size() || moved.mFftASquared.size() ||
+			moved.mSparsePositions.size() || moved.mRecvOts.size() ||
+			moved.mSendOts.size() || moved.mChoiceOts.size())
+			throw UnitTestFail("Foleage move assignment retained source state");
+
+		triple.init(0, 1000);
+		(void)triple.baseOtCount();
+#else
+		throw UnitTestSkipped("ENABLE_FOLEAGE not defined.");
+#endif
 	}
 
 	void foleage_Triple_test(const CLP& cmd)

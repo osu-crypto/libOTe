@@ -21,13 +21,34 @@ namespace osuCrypto
 		span<block> baseRecvOts,
 		const BitVector& choices, Socket& chl)
 	{
-		auto delta = BitVector{};
+		if (choices.size() != u64(baseRecvOts.size()))
+			throw std::invalid_argument("OOS base OT messages and choices have different sizes. " LOCATION);
+		if (mGens.empty() || choices.size() != u64(mGens.size()) ||
+			choices.size() % (sizeof(block) * 8) != 0)
+			throw std::invalid_argument("OOS base OT count does not match the configured code. " LOCATION);
 
-		delta.resize(choices.size());
+		MACORO_TRY{
+		auto delta = BitVector(choices.size());
 
+		// Delivery of the randomization delta determines which base-OT
+		// correlation the peer installs. Once the exchange starts, old base
+		// state is no longer safe to report as matching the peer.
+		mBaseChoiceBits = {};
+		mChoiceBlks.clear();
+		for (auto& gen : mGens)
+			gen = PRNG{};
 		co_await chl.recv(delta);
 
 		setUniformBaseOts(baseRecvOts, choices ^ delta);
+
+		} MACORO_CATCH(eptr) {
+			mBaseChoiceBits = {};
+			mChoiceBlks.clear();
+			for (auto& gen : mGens)
+				gen = PRNG{};
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	void OosNcoOtSender::setUniformBaseOts(span<block> baseRecvOts, const BitVector& uniformChoices)
@@ -58,6 +79,7 @@ namespace osuCrypto
 		OosNcoOtSender raw;
 		raw.mCode = mCode;
 		raw.mInputByteCount = mInputByteCount;
+		raw.mInputBitCount = mInputBitCount;
 		raw.mStatSecParam = mStatSecParam;
 		raw.mGens.resize(mGens.size());
 		raw.mMalicious = mMalicious;
@@ -87,6 +109,12 @@ namespace osuCrypto
 		u64 numOTExt, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
+		if (numOTExt > maxNcoOtCount)
+			throw std::length_error("OOS OT count exceeds the supported limit. " LOCATION);
+		if (mStatSecParam > maxNcoStatSecParam)
+			throw std::invalid_argument("OOS statistical security parameter exceeds the supported limit. " LOCATION);
+		if (mMalicious && (mStatSecParam == 0 || mStatSecParam % 8))
+			throw std::invalid_argument("malicious OOS requires a nonzero, byte-aligned statistical security parameter. " LOCATION);
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first" LOCATION);
 
@@ -116,7 +144,7 @@ namespace osuCrypto
 		u64 doneIdx = 0;
 
 		// a temp that will be used to transpose the sender's matrix
-		AlignedUnVector<std::array<block, superBlkSize>> t(128);
+		AlignedUnVector<block> t(128 * superBlkSize);
 
 		u64 numCols = mGens.size();
 
@@ -137,13 +165,13 @@ namespace osuCrypto
 				for (u64 tIdx = 0, colIdx = i * 128; tIdx < 128; ++tIdx, ++colIdx)
 				{
 					// generate the columns using AES-NI in counter mode.
-					mGens[colIdx].mAes.ecbEncCounterMode(mGens[colIdx].mBlockIdx, superBlkSize, ((block*)t.data() + superBlkSize * tIdx));
+					mGens[colIdx].mAes.ecbEncCounterMode(mGens[colIdx].mBlockIdx, superBlkSize, t.data() + superBlkSize * tIdx);
 					mGens[colIdx].mBlockIdx += superBlkSize;
 				}
 
 				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 				// each 128 bits wide.
-				transpose128x1024(t[0].data());
+				transpose128x1024(t.data());
 
 				// This is the index of where we will store the matrix long term.
 				// doneIdx is the starting row. l is the offset into the blocks of 128 bits.
@@ -156,7 +184,7 @@ namespace osuCrypto
 					// because we transposed 1024 rows, the indexing gets a bit weird. But this
 					// is the location of the next row that we want. Keep in mind that we had long
 					// **contiguous** columns.
-					block* __restrict tIter = (((block*)t.data()) + j);
+					block* __restrict tIter = t.data() + j;
 
 					// do the copy!
 					for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
@@ -185,11 +213,14 @@ namespace osuCrypto
 		void* dest,
 		u64 destSize)
 	{
-
-#ifndef NDEBUG
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first" LOCATION);
-#endif // !NDEBUG
+		if (otIdx >= mCorrectionIdx || otIdx >= mT.rows())
+			throw std::out_of_range("OOS sender OT index has no received correction. " LOCATION);
+		if (destSize == 0 || destSize > RandomOracle::HashSize)
+			throw std::invalid_argument("invalid OOS encoding size. " LOCATION);
+		if (plaintext == nullptr || dest == nullptr)
+			throw std::invalid_argument("null OOS encoding buffer. " LOCATION);
 
 		// compute the codeword. We assume the
 		// the codeword is less that 10 block = 1280 bits.
@@ -254,17 +285,19 @@ namespace osuCrypto
 		u64 statSecParam,
 		u64 inputBitCount)
 	{
-		if (inputBitCount <= 76)
-		{
-			mCode.load(bch511_binary, sizeof(bch511_binary));
-			//mCode.loadTxtFile("C:/Users/peter/repo/libOTe/libOTe/Tools/bch511.txt");
-		}
-		else
-			throw std::runtime_error(LOCATION);
+		if (statSecParam > maxNcoStatSecParam)
+			throw std::invalid_argument("OOS statistical security parameter exceeds the supported limit. " LOCATION);
+		if (maliciousSecure && (statSecParam == 0 || statSecParam % 8))
+			throw std::invalid_argument("malicious OOS requires a nonzero, byte-aligned statistical security parameter. " LOCATION);
+		if (inputBitCount == 0 || inputBitCount > 76)
+			throw std::invalid_argument("OOS input bit count must be between 1 and 76. " LOCATION);
+		mCode.load(bch511_binary, sizeof(bch511_binary));
+		//mCode.loadTxtFile("C:/Users/peter/repo/libOTe/libOTe/Tools/bch511.txt");
 
 
 
 		mInputByteCount = (inputBitCount + 7) / 8;
+		mInputBitCount = inputBitCount;
 		mStatSecParam = statSecParam;
 		mMalicious = maliciousSecure;
 		mGens.resize(roundUpTo(mCode.codewordBitSize(), 128));
@@ -273,21 +306,17 @@ namespace osuCrypto
 	task<> OosNcoOtSender::recvCorrection(Socket& chl, u64 recvCount)
 	{
 		MACORO_TRY{
-
- #ifndef NDEBUG
-		 if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
-			 throw std::runtime_error("bad receiver, will overwrite the end of our buffer" LOCATION);
-
- #endif // !NDEBUG
+		if (mCorrectionIdx > mCorrectionVals.rows() ||
+			recvCount > mCorrectionVals.rows() - mCorrectionIdx)
+			throw std::runtime_error("bad receiver, will overwrite the end of our buffer" LOCATION);
 
 		// receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
 		// there c(w) is a pseudo-random code.
-		auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
+		auto dest = mCorrectionVals.data() + mCorrectionIdx * mCorrectionVals.stride();
 
 		// update the index of there we should store the next set of correction values.
-		mCorrectionIdx += recvCount;
-
 		co_await(chl.recv(span<block>(dest, recvCount * mCorrectionVals.stride())));
+		mCorrectionIdx += recvCount;
 
 		} MACORO_CATCH(eptr) {
 			if (!chl.closed()) co_await chl.close();
@@ -405,13 +434,11 @@ namespace osuCrypto
 		// To make this work, the zeroAndQ[0] will always be 00000.....00000,
 		// and  zeroAndQ[1] will hold the q_i row. This is so much faster than
 		// if(x^(l)_i) qSum[l] = qSum[l] ^ q_i.
-		std::array<std::array<block, 8>, 2> zeroAndQ;
-
-		// set it all to zero initially.
-		memset(zeroAndQ.data(), 0, zeroAndQ.size() * 2 * sizeof(block));
+		std::array<std::array<block, 8>, 2> zeroAndQ{};
 
 		// make sure that having this allocated on the stack is ok.
-		if (codeSize < zeroAndQ.size()) throw std::runtime_error("Make this bigger. " LOCATION);
+		if (codeSize == 0 || codeSize > zeroAndQ[0].size())
+			throw std::runtime_error("Make zeroAndQ bigger. " LOCATION);
 
 
 		// this will hold out random x^(l)_i values that we compute from the seed.

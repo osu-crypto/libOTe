@@ -2,6 +2,8 @@
 #include "libOTe/Tools/Ntt/Poly.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#include <array>
+#include <limits>
 
 using namespace oc;
 
@@ -163,5 +165,65 @@ namespace tests_libOTe
         Poly<Field> zero_p = p * Field(0);
         if (!zero_p.isZero())
             throw RTE_LOC;
+    }
+
+    void Poly_Audit_Test()
+    {
+        using Field = F12289;
+
+        auto expectException = [](auto&& fn)
+        {
+            bool rejected = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::exception&)
+            {
+                rejected = true;
+            }
+            if (!rejected)
+                throw RTE_LOC;
+        };
+
+        Poly<Field> indexed;
+        expectException([&] { indexed.setCoeff(std::numeric_limits<u64>::max(), Field::one()); });
+        expectException([&] { (void)indexed[std::numeric_limits<u64>::max()]; });
+
+        std::array<Field, 3> longCoeffs{ Field(1), Field(2), Field(3) };
+        std::array<Field, 1> shortCoeffs{ Field(4) };
+        Poly<Field> assigned{ span<const Field>(longCoeffs) };
+        assigned = span<const Field>(shortCoeffs);
+        if (assigned.size() != 1 || assigned[0] != Field(4))
+            throw RTE_LOC;
+
+        assigned = span<const Field>(longCoeffs);
+        auto tail = span<const Field>(assigned.mCoeffs).subspan(1);
+        assigned = tail;
+        if (assigned.size() != 2 || assigned[0] != Field(2) || assigned[1] != Field(3))
+            throw RTE_LOC;
+
+        assigned = span<const Field>{};
+        if (assigned.size())
+            throw RTE_LOC;
+
+        Poly<Field> zero, paddedZero;
+        paddedZero.setCoeff(3, Field::zero());
+        if (zero != Poly<Field>{} || zero != paddedZero)
+            throw RTE_LOC;
+
+        Poly<Field> paddedOne;
+        paddedOne.setCoeff(2, Field::zero());
+        paddedOne[0] = Field::one();
+        auto product = paddedOne * paddedOne;
+        if (product.size() != 1 || product[0] != Field::one())
+            throw RTE_LOC;
+
+        Poly<Field> negativeOne;
+        negativeOne[0] = -Field::one();
+        if (!(paddedOne + negativeOne).isZero())
+            throw RTE_LOC;
+
+        expectException([&] { (void)(paddedOne / Field::zero()); });
     }
 }

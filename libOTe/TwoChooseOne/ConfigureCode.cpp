@@ -52,8 +52,8 @@ namespace osuCrypto
 
     void EAConfigure(
         MultType mMultType,
-        u64& expanderWeight,
         u64& scaler,
+        u64& expanderWeight,
         double& minDist
     )
     {

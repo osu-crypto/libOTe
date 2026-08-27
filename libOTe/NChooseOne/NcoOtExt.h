@@ -21,6 +21,9 @@
 
 namespace osuCrypto
 {
+    inline constexpr u64 maxNcoOtCount = (u64{ 1 } << 32) - 1;
+    inline constexpr u64 maxNcoStatSecParam = 256;
+
     class PRNG;
     class BitVector;
     //static const u64 NcoOtExtDefaultDestSize(sizeof(block));
@@ -55,6 +58,9 @@ namespace osuCrypto
         // Returns the number of base OTs that should be provided to setBaseOts(...).
         // congifure(...) should be called first.
         virtual u64 getBaseOTCount() const = 0;
+
+        // Returns the configured number of input bits.
+        virtual u64 getInputBitCount() const = 0;
 
         // Returns whether the extension is configured to be malicious.
         // congifure(...) should be called first.
@@ -175,6 +181,9 @@ namespace osuCrypto
         // Returns the number of base OTs that should be provided to setBaseOts(...).
         // congifure(...) should be called first.
         virtual u64 getBaseOTCount() const = 0;
+
+        // Returns the configured number of input bits.
+        virtual u64 getInputBitCount() const = 0;
 
         // Returns whether the extension is configured to be malicious.
         // congifure(...) should be called first.

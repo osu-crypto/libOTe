@@ -48,24 +48,41 @@ namespace osuCrypto {
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
         Matrix<block> mT, mCorrectionVals;
-        u64 mCorrectionIdx, mInputByteCount;
+        u64 mCorrectionIdx = 0;
+        u64 mInputByteCount = 0;
+        u64 mInputBitCount = 0;
         MultiKeyAES<4> mMultiKeyAES;
 
         KkrtNcoOtSender() = default;
         KkrtNcoOtSender(const KkrtNcoOtSender&) = delete;
-        KkrtNcoOtSender(KkrtNcoOtSender&&v) = default;
-
-        void operator=(KkrtNcoOtSender&&v)
+        KkrtNcoOtSender(KkrtNcoOtSender&& v)
         {
+            *this = std::move(v);
+        }
+
+        void operator=(KkrtNcoOtSender&& v)
+        {
+            if (this == &v)
+                return;
             mGens = std::move(v.mGens);
             mGensBlkIdx = std::move(v.mGensBlkIdx);
             mBaseChoiceBits = std::move(v.mBaseChoiceBits);
             mChoiceBlks = std::move(v.mChoiceBlks);
             mT = std::move(v.mT);
             mCorrectionVals = std::move(v.mCorrectionVals);
-            mCorrectionIdx = std::move(v.mCorrectionIdx);
-            mInputByteCount = std::move(v.mInputByteCount);
+            mCorrectionIdx = std::exchange(v.mCorrectionIdx, 0);
+            mInputByteCount = std::exchange(v.mInputByteCount, 0);
+            mInputBitCount = std::exchange(v.mInputBitCount, 0);
             mMultiKeyAES = std::move(v.mMultiKeyAES);
+
+            std::array<block, 4> zeroKeys{};
+            v.mMultiKeyAES.setKeys(zeroKeys);
+            v.mGens.clear();
+            v.mGensBlkIdx.clear();
+            v.mBaseChoiceBits = {};
+            v.mChoiceBlks.clear();
+            v.mT = {};
+            v.mCorrectionVals = {};
         }
 
         bool isMalicious() const override { return false; }
@@ -81,6 +98,7 @@ namespace osuCrypto {
         // Returns the number of base OTs that should be provided to setBaseOts(...).
         // congifure(...) should be called first.
         u64 getBaseOTCount() const override;
+        u64 getInputBitCount() const override { return mInputBitCount; }
 
         // Returns whether the base OTs have already been set
         bool hasBaseOts() const override

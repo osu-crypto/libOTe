@@ -19,6 +19,7 @@ namespace osuCrypto
     {
     public:
         static const u16 sLinearCodePlainTextMaxSize;
+		static const u64 sLinearCodeCodewordBitMaxSize;
 
         LinearCode();
         ~LinearCode();
@@ -50,8 +51,8 @@ namespace osuCrypto
 
         void generateMod8Table();
 
-        u64 mU8RowCount, mPow2CodeSize, mPlaintextU8Size;
-        u64 mCodewordBitSize;
+        u64 mU8RowCount = 0, mPow2CodeSize = 0, mPlaintextU8Size = 0;
+        u64 mCodewordBitSize = 0;
         AlignedUnVector<block> mG;
         AlignedUnVector<block> mG8;
 
@@ -66,7 +67,8 @@ namespace osuCrypto
         }
         inline u64 plaintextBitSize() const
         {
-            return mG.size() / codewordBlkSize();
+			const u64 blocks = codewordBlkSize();
+            return blocks ? mG.size() / blocks : 0;
         }
         inline u64 plaintextBlkSize() const
         {
@@ -85,9 +87,9 @@ namespace osuCrypto
 
 
 
-        void encode(const span<const block>& plaintext,const span<block>& codeword);
-        void encode(const span<const u8>& plaintext, const span<u8>& codeword);
-        void encode(const u8* plaintext, u8* codeword);
+        void encode(const span<const block>& plaintext,const span<block>& codeword) const;
+        void encode(const span<const u8>& plaintext, const span<u8>& codeword) const;
+        void encode(const u8* plaintext, u8* codeword) const;
 
         void encode_bch511(u8* plaintext, u8* codeword);
 

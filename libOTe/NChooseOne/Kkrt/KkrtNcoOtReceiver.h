@@ -41,10 +41,11 @@ namespace osuCrypto
         std::vector<u64> mGensBlkIdx;
         Matrix<block> mT0;
         std::shared_ptr<Matrix<block>> mT1;
-        
-        u64 mCorrectionIdx;
 
-        u64 mInputByteCount;
+        std::vector<u8> mEncodeFlags;
+        u64 mCorrectionIdx = 0;
+        u64 mInputByteCount = 0;
+        u64 mInputBitCount = 0;
 
         MultiKeyAES<4> mMultiKeyAES;
 
@@ -62,15 +63,27 @@ namespace osuCrypto
         }
 
 
-        void operator=(KkrtNcoOtReceiver&&v)
+        void operator=(KkrtNcoOtReceiver&& v)
         {
+            if (this == &v)
+                return;
             mGens = std::move(v.mGens);
             mGensBlkIdx = std::move(v.mGensBlkIdx);
             mT0 = std::move(v.mT0);
             mT1 = std::move(v.mT1);
-            mCorrectionIdx = v.mCorrectionIdx;
-            mInputByteCount = v.mInputByteCount;
+            mEncodeFlags = std::move(v.mEncodeFlags);
+            mCorrectionIdx = std::exchange(v.mCorrectionIdx, 0);
+            mInputByteCount = std::exchange(v.mInputByteCount, 0);
+            mInputBitCount = std::exchange(v.mInputBitCount, 0);
             mMultiKeyAES = std::move(v.mMultiKeyAES);
+
+            std::array<block, 4> zeroKeys{};
+            v.mMultiKeyAES.setKeys(zeroKeys);
+            v.mGens.clear();
+            v.mGensBlkIdx.clear();
+            v.mT0 = {};
+            v.mT1.reset();
+            v.mEncodeFlags.clear();
         }
 
         bool isMalicious() const override { return false; }
@@ -87,6 +100,7 @@ namespace osuCrypto
         // Returns the number of base OTs that should be provided to setBaseOts(...).
         // congifure(...) should be called first.
         u64 getBaseOTCount() const override;
+        u64 getInputBitCount() const override { return mInputBitCount; }
 
         // Returns whether the base OTs have already been set
         bool hasBaseOts() const override

@@ -11,6 +11,7 @@ namespace osuCrypto
 
 
     void ExConvCode_encode_basic_test(const oc::CLP& cmd);
+	void ExConvCode_Audit_Test(const oc::CLP& cmd);
 
     void ExConvCode_weight_test(const oc::CLP& cmd);
 

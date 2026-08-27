@@ -12,6 +12,7 @@
 
 #include "DpfMult.h"
 #include "libOTe/Tools/CoeffCtx.h" 
+#include <limits>
 
 namespace osuCrypto
 {
@@ -21,13 +22,18 @@ namespace osuCrypto
 		void resize(u64 domain, u64 numTrees, CoeffCtx ctx = {}, bool programLeafVal = true)
 		{
 			auto depth = log2ceil(domain);
-			if (depth == 0)
+			if (depth == 0 || depth >= 64)
 				throw RTE_LOC;
 
 			mCorrectionWords.resize(depth, numTrees);
 			mCorrectionBits.resize(depth, numTrees);
+			auto byteSize = ctx.template byteSize<F>();
+			if (numTrees && byteSize > std::numeric_limits<u64>::max() / numTrees)
+				throw RTE_LOC;
 			if (programLeafVal)
-				mLeafVals.resize(numTrees * ctx.template byteSize<F>());
+				mLeafVals.resize(numTrees * byteSize);
+			else
+				mLeafVals.clear();
 		}
 		block mSeed;
 		Matrix<block> mCorrectionWords;
@@ -61,6 +67,14 @@ namespace osuCrypto
 		{
 			if (src.size() != sizeBytes())
 				throw RTE_LOC;
+
+			auto correctionBits = src.subspan(
+				sizeof(block) + mCorrectionWords.size() * sizeof(block),
+				mCorrectionBits.size());
+			for (auto bit : correctionBits)
+				if (bit > 1)
+					throw RTE_LOC;
+
 			copyBytesMin(mSeed, src);
 			src = src.subspan(sizeof(block));
 			copyBytesMin(mCorrectionWords, src);
@@ -90,6 +104,29 @@ namespace osuCrypto
 	template<typename T, typename CoeffCtx = DefaultCoeffCtx<T>>
 	struct RegularDpf
 	{
+		RegularDpf() = default;
+		RegularDpf(const RegularDpf&) = delete;
+		RegularDpf& operator=(const RegularDpf&) = delete;
+
+		RegularDpf(RegularDpf&& src) noexcept
+		{
+			*this = std::move(src);
+		}
+
+		RegularDpf& operator=(RegularDpf&& src) noexcept
+		{
+			if (this != &src)
+			{
+				mPartyIdx = src.mPartyIdx;
+				mDomain = src.mDomain;
+				mDepth = src.mDepth;
+				mNumPoints = src.mNumPoints;
+				mMultiplier = std::move(src.mMultiplier);
+				src.clear();
+			}
+			return *this;
+		}
+
 		u64 mPartyIdx = 0;
 
 		u64 mDomain = 0;
@@ -258,13 +295,23 @@ namespace osuCrypto
 		if (!numPoints)
 			throw RTE_LOC;
 
-		mDepth = log2ceil(domain);
+		auto depth = log2ceil(domain);
+		if (depth >= 64)
+			throw RTE_LOC;
+		const auto roundedDomain = u64{ 1 } << depth;
+		if (numPoints > std::numeric_limits<u64>::max() / roundedDomain)
+			throw RTE_LOC;
+
+		mDepth = depth;
 		mPartyIdx = partyIdx;
 		mDomain = domain;
 		mNumPoints = numPoints;
 
-		mMultiplier.init(partyIdx, 
-			numPoints * (mDepth + !ctx.template characteristicTwo<T>()));
+		auto multsPerPoint = mDepth + !ctx.template characteristicTwo<T>();
+		if (numPoints > std::numeric_limits<u64>::max() / multsPerPoint)
+			throw RTE_LOC;
+
+		mMultiplier.init(partyIdx, numPoints * multsPerPoint);
 	}
 
 
@@ -336,6 +383,18 @@ namespace osuCrypto
 		else
 		{
 			if (outputKey)
+				throw RTE_LOC;
+
+			auto leafByteSize = ctx.template byteSize<T>();
+			if (mNumPoints && leafByteSize > std::numeric_limits<u64>::max() / mNumPoints)
+				throw RTE_LOC;
+			auto expectedLeafBytes = mNumPoints * leafByteSize;
+			if (inputKey->mCorrectionWords.rows() != mDepth ||
+				inputKey->mCorrectionWords.cols() != mNumPoints ||
+				inputKey->mCorrectionBits.rows() != mDepth ||
+				inputKey->mCorrectionBits.cols() != mNumPoints ||
+				(inputKey->mLeafVals.size() != 0 &&
+					inputKey->mLeafVals.size() != expectedLeafBytes))
 				throw RTE_LOC;
 		}
 
@@ -830,19 +889,24 @@ namespace osuCrypto
 	{
 		if (keys.size() != 2)
 			throw RTE_LOC;
+		if (domain < 2 || log2ceil(domain) >= 64 || points.empty())
+			throw RTE_LOC;
 		if (values.size() != points.size() && values.size() != 0)
+			throw RTE_LOC;
+		if (std::any_of(points.begin(), points.end(),
+			[domain](u64 point) { return point >= domain; }))
 			throw RTE_LOC;
 
 		auto depth = log2ceil(domain);
-		keys[0].resize<T>(domain, values.size(), ctx, false);
-		keys[1].resize<T>(domain, values.size(), ctx, false);
+		keys[0].resize<T>(domain, points.size(), ctx, false);
+		keys[1].resize<T>(domain, points.size(), ctx, false);
 
 		auto seed0 = prng.get<block>();
 		auto seed1 = prng.get<block>();
 		std::array<PRNG, 2> prngs{ seed0, seed1 };
 		keys[0].mSeed = prngs[0].getSeed();
 		keys[1].mSeed = prngs[1].getSeed();
-		for (u64 i = 0; i < values.size(); ++i)
+		for (u64 i = 0; i < points.size(); ++i)
 		{
 			std::array<block, 2> parentTags;
 			std::array<std::array<block, 2>, 2> seeds;

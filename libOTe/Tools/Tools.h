@@ -24,17 +24,17 @@ namespace osuCrypto {
     static inline void mul190(block a0, block a1, block b0, block b1, block& c0, block& c1, block& c2)
     {
         // c3c2c1c0 = a1a0 * b1b0
-        block c4, c5;
+        block c3, c4, c5;
 
         mul128(a0, b0, c0, c1);
-        //mul128(a1, b1, c2, c3);
+        mul128(a1, b1, c2, c3);
         a0 = (a0 ^ a1);
         b0 = (b0 ^ b1);
         mul128(a0, b0, c4, c5);
         c4 = (c4 ^ c0);
         c4 = (c4 ^ c2);
         c5 = (c5 ^ c1);
-        //c5 = _mm_xor_si128(c5, c3);
+        c5 = (c5 ^ c3);
         c1 = (c1 ^ c4);
         c2 = (c2 ^ c5);
     }
@@ -72,6 +72,8 @@ namespace osuCrypto {
     //    c2 = _mm_xor_si128(c2, c5);
     //}
     class PRNG;
+	// Exact over the 64-bit domain. The PRNG and round count are retained for
+	// source compatibility with the former randomized implementation.
     bool isPrime(u64 n, PRNG& prng, u64 k = 20);
     bool isPrime(u64 n);
     u64 nextPrime(u64 n);
@@ -82,7 +84,13 @@ namespace osuCrypto {
 
     void eklundh_transpose128(block* inOut);
     inline void eklundh_transpose128(std::array<block, 128>& inOut) { eklundh_transpose128(inOut.data()); }
-    void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
+    void eklundh_transpose128x1024(block* inOut);
+    inline void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
+    {
+        static_assert(sizeof(inOut) == 128 * 8 * sizeof(block));
+        // Compatibility overload for callers using the historical nested layout.
+        eklundh_transpose128x1024(inOut[0].data());
+    }
 
 #ifdef OC_ENABLE_AVX2
     void avx_transpose128(block* inOut);
@@ -91,7 +99,13 @@ namespace osuCrypto {
 #endif
 #ifdef OC_ENABLE_SSE2
     void sse_transpose128(block* inOut);
-    void sse_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
+    void sse_transpose128x1024(block* inOut);
+    inline void sse_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
+    {
+        static_assert(sizeof(inOut) == 128 * 8 * sizeof(block));
+        // Compatibility overload for callers using the historical nested layout.
+        sse_transpose128x1024(inOut[0].data());
+    }
     inline void sse_transpose128(std::array<block, 128>& inOut) { sse_transpose128(inOut.data()); };
     void sse_transpose(MatrixView<const u8> in, MatrixView<u8> out);
 #endif
@@ -118,11 +132,10 @@ namespace osuCrypto {
     inline void transpose128(std::array<block, 128>& inOut) { transpose128(inOut.data()); };
 
 
-    inline void transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
+    inline void transpose128x1024(block* inOut)
     {
-
 #if defined(OC_ENABLE_AVX2)
-        avx_transpose128x1024(inOut[0].data());
+        avx_transpose128x1024(inOut);
 #elif defined(OC_ENABLE_SSE2)
         sse_transpose128x1024(inOut);
 #else
@@ -130,8 +143,10 @@ namespace osuCrypto {
 #endif
     }
 
-    inline void transpose128x1024(block* inOut)
+    inline void transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
     {
-        transpose128x1024(*(std::array<std::array<block, 8>, 128>*)inOut);
+        static_assert(sizeof(inOut) == 128 * 8 * sizeof(block));
+        // Compatibility overload for callers using the historical nested layout.
+        transpose128x1024(inOut[0].data());
     }
 }

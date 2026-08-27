@@ -1,5 +1,5 @@
 #pragma once
-// © 2025 Peter Rindal.
+// Â© 2025 Peter Rindal.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 // 
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
@@ -7,7 +7,7 @@
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 // Code partially authored by:
-// Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, Clément Ducros, and Sacha Servan - Schreiber
+// Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, ClÃ©ment Ducros, and Sacha Servan - Schreiber
 
 
 #include "libOTe/config.h"
@@ -23,6 +23,7 @@
 #include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
+#include <utility>
 
 namespace osuCrypto
 {
@@ -37,6 +38,60 @@ namespace osuCrypto
 	class FoleageTriple : public TimerAdapter
 	{
 	public:
+		FoleageTriple() = default;
+		FoleageTriple(const FoleageTriple&) = delete;
+		FoleageTriple& operator=(const FoleageTriple&) = delete;
+
+		FoleageTriple(FoleageTriple&& src)
+		{
+			*this = std::move(src);
+		}
+
+		FoleageTriple& operator=(FoleageTriple&& src)
+		{
+			if (this == &src)
+				return *this;
+
+			mTimer = std::exchange(src.mTimer, nullptr);
+			mPartyIdx = std::exchange(src.mPartyIdx, 0);
+			mT = std::exchange(src.mT, 9);
+			mLog3T = std::exchange(src.mLog3T, 0);
+			mC = std::exchange(src.mC, 8);
+			mN = std::exchange(src.mN, 0);
+			mLog3N = std::exchange(src.mLog3N, 0);
+			mFftA = std::move(src.mFftA);
+			mFftASquared = std::move(src.mFftASquared);
+			mBlockSize = std::exchange(src.mBlockSize, 0);
+			mBlockDepth = std::exchange(src.mBlockDepth, 0);
+			mDpfLeafSize = std::exchange(src.mDpfLeafSize, 0);
+			mDpfLeafDepth = std::exchange(src.mDpfLeafDepth, 0);
+			mDpfTreeSize = std::exchange(src.mDpfTreeSize, 0);
+			mDpfTreeDepth = std::exchange(src.mDpfTreeDepth, 0);
+			mSparsePositions = std::move(src.mSparsePositions);
+			mDpfLeaf = std::move(src.mDpfLeaf);
+#ifdef ENABLE_SOFTSPOKEN_OT
+			mOtExtRecver = std::move(src.mOtExtRecver);
+			mOtExtSender = std::move(src.mOtExtSender);
+#endif
+			mDpf = std::move(src.mDpf);
+			mRecvOts = std::move(src.mRecvOts);
+			mSendOts = std::move(src.mSendOts);
+			mChoiceOts = std::move(src.mChoiceOts);
+			mBaseOtsAvailable = std::exchange(src.mBaseOtsAvailable, false);
+
+			src.mFftA.clear();
+			src.mFftASquared.clear();
+			src.mSparsePositions = {};
+#ifdef ENABLE_SOFTSPOKEN_OT
+			src.mOtExtRecver.reset();
+			src.mOtExtSender.reset();
+#endif
+			src.mRecvOts.clear();
+			src.mSendOts.clear();
+			src.mChoiceOts = {};
+			return *this;
+		}
+
 		u64 mPartyIdx = 0;
 
 		// the number of noisy positions per polynomial
@@ -84,7 +139,7 @@ namespace osuCrypto
 		u64 mDpfTreeDepth = 0;
 
 		// the locations of the non-zeros in the j'th block of the sparse polynomial.
-		// the i'th row containts the coeffs for the i'th poly.
+		// the i'th row contains the coefficients for the i'th polynomial.
 		Matrix<u64> mSparsePositions;
 
 		// a dpf used to construct the F4x243 leaf value of the larger DPF.
@@ -118,8 +173,11 @@ namespace osuCrypto
 		// The base OTs used to tensor the coefficients of the sparse polynomial.
 		BitVector mChoiceOts;
 
+		// True exactly when a complete, unused base-OT set is installed.
+		bool mBaseOtsAvailable = false;
 
-		// Intializes the protocol to generate n F4 OLEs. Most efficient when n
+
+		// Initializes the protocol to generate n F4 OLEs. Most efficient when n
 		// is a power of 3. Once called, baseOtCount() can be called to 
 		// determine the required number of base OTs.
 		void init(u64 partyIdx, u64 n);
@@ -146,6 +204,9 @@ namespace osuCrypto
 
 		// returns true of the base OTs have been set.
 		bool hasBaseOts() const;
+
+		// Clears all base OTs and marks the current set as unavailable.
+		void clearBaseOts();
 
 		macoro::task<> genBaseOts(PRNG& prng, Socket& sock, SilentBaseType baseType = SilentBaseType::BaseExtend);
 

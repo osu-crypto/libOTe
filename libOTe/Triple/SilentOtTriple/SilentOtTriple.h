@@ -13,6 +13,12 @@ namespace osuCrypto
 
 	struct SilentOtTriple : TimerAdapter
 	{
+		enum class Type
+		{
+			Triple,
+			OLE
+		};
+
 		u64 mPartyIdx = 0;
 
         macoro::variant<SilentOtExtSender, SilentOtExtReceiver> mSendRecv;
@@ -20,15 +26,10 @@ namespace osuCrypto
 		BitVector mChoice;
 
 		// the number of OTs/OLEs. Triples will be half this amount.
-		u64 mN;
+		u64 mN = 0;
+		Type mType = Type::Triple;
 
 		MultType mLpnMultType = DefaultMultType;
-
-		enum class Type
-		{
-			Triple,
-			OLE
-		};
 
 		// Intializes the protocol to generate n binary tiples or
 		// n binary OLEs. Once called, baseOtCount() can be called to 

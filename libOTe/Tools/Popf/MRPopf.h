@@ -43,7 +43,7 @@ namespace osuCrypto
         PopfFunc program(PopfIn x, PopfOut y, PRNG& prng) const
         {
             PopfFunc r;
-            prng.get(r[1-x].data(),32);
+            prng.get(r[1-x].data(), r[1-x].size());
 
             Block256 mask;
             RandomOracle roMask = ro;

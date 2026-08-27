@@ -45,6 +45,11 @@ namespace osuCrypto
 		if (!mOtExtSender)
 			throw RTE_LOC;
 		ptr->mOtExtSender = mOtExtSender->splitBase();
+		ptr->mNumThreads = mNumThreads;
+		ptr->mLpnMultType = mLpnMultType;
+		ptr->mSecurityType = mSecurityType;
+		ptr->mNoiseDist = mNoiseDist;
+		ptr->mDebug = mDebug;
 		return ret;
 #else
 		throw std::runtime_error("softspoken must be enabled. " LOCATION);
@@ -247,38 +252,54 @@ namespace osuCrypto
 		SdNoiseDistribution noiseType,
 		MultType mult)
 	{
-		mLpnMultType = mult;
-		mSecurityType = malType;
-		mNumThreads = numThreads;
-		u64 secParam = 128;
-		mRequestNumOts = numOTs;
-		mNoiseDist = noiseType;
+		if (numOTs == 0)
+			throw std::invalid_argument("Silent OT count must be nonzero. " LOCATION);
 
-		// Configure based on syndrome decoding parameters
-		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mLpnMultType, mNoiseDist, 1);
-		mNumPartitions = param.mNumPartitions;
-		mSizePer = param.mSizePer;
-		mNoiseVecSize = param.mNoiseVectorSize;
-		mCodeSeed = block(12528943721987127, 98743297823479812);
+		(void)scaler;
+		if (malType != SilentSecType::SemiHonest &&
+			malType != SilentSecType::Malicious)
+			throw std::invalid_argument("Silent security type not supported. " LOCATION);
 
-		// Initialize the appropriate PPRF based on noise distribution
+		constexpr u64 secParam = 128;
+		auto param = syndromeDecodingConfigure(secParam, numOTs, mult, noiseType, 1);
+		auto format = PprfOutputFormat{};
+
 		if (SdNoiseDistribution::Regular == noiseType)
 		{
-			mGenVar.template emplace<0>();  // Use RegularPprfSender
-			mPprfFormat = PprfOutputFormat::Interleaved;
+			format = PprfOutputFormat::Interleaved;
 		}
 		else if (SdNoiseDistribution::Stationary == noiseType)
 		{
-			mGenVar.template emplace<1>();  // Use StationaryPprfSender
-			mPprfFormat = PprfOutputFormat::ByTreeIndex;
+			format = PprfOutputFormat::ByTreeIndex;
 		}
 		else
 		{
 			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
 		}
+		pprf::validateConfigure(param.mSizePer, param.mNumPartitions);
 
-		// Configure the PPRF generator
-		gen().configure(mSizePer, mNumPartitions);
+		if (SdNoiseDistribution::Regular == noiseType)
+			mGenVar.template emplace<0>();
+		else
+			mGenVar.template emplace<1>();
+		std::visit([&](auto& gen) {
+			gen.configure(param.mSizePer, param.mNumPartitions);
+			}, mGenVar);
+		mLpnMultType = mult;
+		mSecurityType = malType;
+		mNumThreads = numThreads;
+		mRequestNumOts = numOTs;
+		mNoiseDist = noiseType;
+		mNumPartitions = param.mNumPartitions;
+		mSizePer = param.mSizePer;
+		mNoiseVecSize = param.mNoiseVectorSize;
+		mPprfFormat = format;
+		mCodeSeed = block(12528943721987127, 98743297823479812);
+		mB = {};
+		mEncodeTemp = {};
+		mDelta.reset();
+		mMalCheckOts = {};
+		mBaseB = {};
 	}
 
 	// Debug function to verify correctness with receiver
@@ -293,18 +314,17 @@ namespace osuCrypto
 	// Clears internal buffers and state
 	void SilentOtExtSender::clear()
 	{
+		std::visit([](auto& gen) { gen.clear(); }, mGenVar);
 		mNoiseVecSize = 0;
 		mRequestNumOts = 0;
 		mSizePer = 0;
 		mNumPartitions = 0;
-
 		mB = {};
 		mEncodeTemp = {};
-
 		mDelta.reset();
-
-		if (isConfigured())
-			gen().clear();
+		mMalCheckOts = {};
+		mBaseB = {};
+		mCodeSeed = ZeroBlock;
 	}
 
 	// Standard OT extension interface - receiver specifies choice bits
@@ -371,11 +391,17 @@ namespace osuCrypto
 	{
 		if (type == ChoiceBitPacking::True)
 		{
+			if ((u64)messages.size() != mRequestNumOts)
+				throw RTE_LOC;
+			if ((u64)mB.size() != mRequestNumOts || !mDelta)
+				throw std::logic_error("Silent OT sender hash state is not ready. " LOCATION);
+
 			// Mask to clear the least significant bit (used for choice bit)
 			block mask = OneBlock ^ AllOneBlock;
 			auto d = *mDelta & mask;
 
 			auto n8 = (u64)messages.size() / 8 * 8;
+			std::array<block, 16> hashBatch;
 
 			std::array<block, 2>* m = messages.data();
 			auto r = mB.data();
@@ -393,32 +419,20 @@ namespace osuCrypto
 				r[6] = r[6] & mask;
 				r[7] = r[7] & mask;
 
-				// Set first message to mB value
-				m[0][0] = r[0];
-				m[1][0] = r[1];
-				m[2][0] = r[2];
-				m[3][0] = r[3];
-				m[4][0] = r[4];
-				m[5][0] = r[5];
-				m[6][0] = r[6];
-				m[7][0] = r[7];
-
-				// Set second message to mB xor delta
-				m[0][1] = r[0] ^ d;
-				m[1][1] = r[1] ^ d;
-				m[2][1] = r[2] ^ d;
-				m[3][1] = r[3] ^ d;
-				m[4][1] = r[4] ^ d;
-				m[5][1] = r[5] ^ d;
-				m[6][1] = r[6] ^ d;
-				m[7][1] = r[7] ^ d;
-
-				// Hash all messages for security
-				auto iter = (block*)m;
-				mAesFixedKey.hashBlocks<8>(iter, iter);
-
-				iter += 8;
-				mAesFixedKey.hashBlocks<8>(iter, iter);
+				// Keep the fixed-width AES batching without flattening the nested
+				// std::array<block, 2> output objects.
+				for (u64 j = 0; j < 8; ++j)
+				{
+					hashBatch[2 * j] = r[j];
+					hashBatch[2 * j + 1] = r[j] ^ d;
+				}
+				mAesFixedKey.hashBlocks<8>(hashBatch.data(), hashBatch.data());
+				mAesFixedKey.hashBlocks<8>(hashBatch.data() + 8, hashBatch.data() + 8);
+				for (u64 j = 0; j < 8; ++j)
+				{
+					m[j][0] = hashBatch[2 * j];
+					m[j][1] = hashBatch[2 * j + 1];
+				}
 
 				m += 8;
 				r += 8;
@@ -471,7 +485,7 @@ namespace osuCrypto
 
 		// Auto-configure if needed
 		if (isConfigured() == false)
-			configure(n, 2, mNumThreads, mSecurityType);
+			configure(n, 2, mNumThreads, mSecurityType, mNoiseDist, mLpnMultType);
 
 		if (n != mRequestNumOts)
 			throw std::invalid_argument("n != mRequestNumOts " LOCATION);
@@ -552,6 +566,7 @@ namespace osuCrypto
 		mBaseB.resize(0);
 
 		} MACORO_CATCH(eptr) {
+			clear();
 			if (!chl.closed()) co_await chl.close();
 			std::rethrow_exception(eptr);
 		}

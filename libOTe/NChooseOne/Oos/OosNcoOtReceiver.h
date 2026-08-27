@@ -16,6 +16,7 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Common/Timer.h>
 #include <future>
+#include <utility>
 #ifdef GetMessage
 #undef GetMessage
 #endif
@@ -42,7 +43,9 @@ namespace osuCrypto
         bool mMalicious = false, mHasBase = false;
         u64 mStatSecParam = 0;
         LinearCode mCode;
-        u64 mCorrectionIdx, mInputByteCount = 0;
+        u64 mCorrectionIdx = 0;
+        u64 mInputByteCount = 0;
+        u64 mInputBitCount = 0;
         block mChallengeSeed = ZeroBlock;
 
         std::vector<std::array<PRNG, 2>> mGens;
@@ -53,9 +56,7 @@ namespace osuCrypto
         bool mHasPendingSendFuture = false;
         std::future<void> mPendingSendFuture;
 
-#ifndef NDEBUG
         std::vector<u8> mEncodeFlags;
-#endif
         OosNcoOtReceiver() = default;
         OosNcoOtReceiver(const OosNcoOtReceiver&) = delete;
         OosNcoOtReceiver(OosNcoOtReceiver&&v) 
@@ -70,22 +71,38 @@ namespace osuCrypto
         }
 
         void operator=(OosNcoOtReceiver&& v) {
-            mMalicious = v.mMalicious;
-            mHasBase = v.mHasBase;
-            mStatSecParam = v.mStatSecParam;
+            if (this == &v)
+                return;
+            if (mHasPendingSendFuture)
+                mPendingSendFuture.get();
+
+            mMalicious = std::exchange(v.mMalicious, false);
+            mHasBase = std::exchange(v.mHasBase, false);
+            mStatSecParam = std::exchange(v.mStatSecParam, 0);
             mCode = std::move(v.mCode);
-            mInputByteCount = v.mInputByteCount;
+            mCorrectionIdx = std::exchange(v.mCorrectionIdx, 0);
+            mInputByteCount = std::exchange(v.mInputByteCount, 0);
+            mInputBitCount = std::exchange(v.mInputBitCount, 0);
+            mChallengeSeed = std::exchange(v.mChallengeSeed, ZeroBlock);
             mGens = std::move(v.mGens);
             mT0 = std::move(v.mT0);
             mT1 = std::move(v.mT1);
             mW = std::move(v.mW);
-            mHasPendingSendFuture = v.mHasPendingSendFuture;
+            mHasPendingSendFuture = std::exchange(v.mHasPendingSendFuture, false);
             mPendingSendFuture = std::move(v.mPendingSendFuture);
-            v.mHasPendingSendFuture = false;
-            v.mHasBase = false;
-#ifndef NDEBUG
             mEncodeFlags = std::move(v.mEncodeFlags);
-#endif
+            mWBuff = std::move(v.mWBuff);
+            mTBuff = std::move(v.mTBuff);
+
+            v.mCode = {};
+            v.mGens.clear();
+            v.mT0 = {};
+            v.mT1.reset();
+            v.mW = {};
+            v.mPendingSendFuture = {};
+            v.mEncodeFlags.clear();
+            v.mWBuff.clear();
+            v.mTBuff.clear();
         }
 
         bool isMalicious() const override { return mMalicious; }
@@ -101,6 +118,7 @@ namespace osuCrypto
         // Once configure(...) is called, this function well return the expected
         // number of base OTs that setBaseOts(...) is expecting.
         u64 getBaseOTCount() const override;
+        u64 getInputBitCount() const override { return mInputBitCount; }
 
         // Sets the base OTs. Note that getBaseOTCount() of OTs should be provided.
         // @ baseSendOts: a std vector like container that which holds a series of both 

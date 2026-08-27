@@ -10,6 +10,7 @@
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Matrix.h"
 #include "libOTe/Dpf/RegularDpf.h"
+#include <limits>
 
 namespace osuCrypto
 {
@@ -21,6 +22,30 @@ namespace osuCrypto
 	/// achieving O(|S|) work instead of O(2^D) for full domain evaluation.
 	struct SparseDpf
 	{
+		SparseDpf() = default;
+		SparseDpf(const SparseDpf&) = delete;
+		SparseDpf& operator=(const SparseDpf&) = delete;
+
+		SparseDpf(SparseDpf&& src) noexcept
+		{
+			*this = std::move(src);
+		}
+
+		SparseDpf& operator=(SparseDpf&& src) noexcept
+		{
+			if (this != &src)
+			{
+				mPartyIdx = src.mPartyIdx;
+				mNumPoints = src.mNumPoints;
+				mDomain = src.mDomain;
+				mDenseDepth = src.mDenseDepth;
+				mRegDpf = std::move(src.mRegDpf);
+				mMultiplier = std::move(src.mMultiplier);
+				src.clear();
+			}
+			return *this;
+		}
+
 		u64 mPartyIdx = 0;           // Party index p ∈ {0,1}
 		u64 mNumPoints = 0;    // Number of parallel sparse DPF instances
 		u64 mDomain = 0;             // Domain size 2^D
@@ -45,16 +70,24 @@ namespace osuCrypto
 			u64 denseDepth
 		)
 		{
+			// the implementation assumes the domain is at most 2^32
+			// could be generalized.
+			if (partyIdx > 1 || numPoints == 0 || domain < 2 ||
+				domain > (1ull << 32))
+				throw RTE_LOC;
+
+			auto domainDepth = log2ceil(domain);
+			auto actualDenseDepth = std::min(denseDepth, domainDepth);
+			auto depth = domainDepth - actualDenseDepth;
+			if (depth && numPoints > std::numeric_limits<u64>::max() / depth)
+				throw RTE_LOC;
+
+			mRegDpf.clear();
+			mMultiplier.clear();
 			mNumPoints = numPoints;
 			mPartyIdx = partyIdx;
 			mDomain = domain;
-			mDenseDepth = std::min(denseDepth, log2ceil(mDomain));
-			auto depth = log2ceil(mDomain) - mDenseDepth;
-
-			// the implementation assumes the domain is at most 2^32
-			// could be generalized.
-			if(domain > 1ull<< 32)
-				throw RTE_LOC;
+			mDenseDepth = actualDenseDepth;
 
 			// Initialize multiplier for correction word computation at each level
 			mMultiplier.init(mPartyIdx, depth * mNumPoints);
@@ -67,7 +100,8 @@ namespace osuCrypto
 
 		bool hasBaseOts() const
 		{
-			return mRegDpf.hasBaseOts();
+			return (!mRegDpf.baseOtCount() || mRegDpf.hasBaseOts()) &&
+				(!mMultiplier.baseOtCount() || mMultiplier.hasBaseOts());
 		}
 
 		// the number of base OTs required for the protocol. Requires OTs in both directions.
@@ -174,23 +208,17 @@ namespace osuCrypto
 		/// describes the left/right index ranges.
 		std::pair<u32, Partition> partition(Range points, u32 upperBitsBegin)
 		{
+			if (points.size() == 0)
+				throw RTE_LOC;
 			// Step 1: if β₁ = β₂, return (0, (β, ⊥))
 			if (points.size() == 1)
 				return { 0, Partition{points.begin(), points.end(), points.end()}};
-#ifndef NDEBUG
-			if (std::adjacent_find(points.begin(), points.end(), std::greater<u32>{}) != points.end())
-				throw RTE_LOC;
-			if (std::any_of(points.begin(), points.end(),
-				[upperBitsBegin, prefix = *points.begin() >> (upperBitsBegin)](auto v) {return v >> (upperBitsBegin) != prefix; }))
-				throw RTE_LOC;
-			if (points.size() <= 1)
-				throw RTE_LOC;
-#endif
 
 			// Step 2: Find max δ where bit δ splits the range into {0,1}
 			Partition par;
 			do {
-				assert(upperBitsBegin != 0);
+				if (upperBitsBegin == 0)
+					throw RTE_LOC;
 				--upperBitsBegin;
 				// Step 3: Split based on bit sδ values
 				par.mMid = std::upper_bound(
@@ -328,10 +356,22 @@ namespace osuCrypto
 					return sparsePoints.size();
 				};
 
-			if (points.size() != rows())
+			if (rows() != mNumPoints || points.size() != mNumPoints)
 				throw RTE_LOC;
-			if (values.size() && values.size() != rows())
+			if (values.size() && values.size() != mNumPoints)
 				throw RTE_LOC;
+			for (u64 i = 0; i < mNumPoints; ++i)
+			{
+				auto&& set = sparsePoints[i];
+				if (set.size() == 0)
+					throw RTE_LOC;
+				for (u64 j = 0; j < set.size(); ++j)
+				{
+					if (static_cast<u64>(set[j]) >= mDomain ||
+						(j && set[j - 1] >= set[j]))
+						throw RTE_LOC;
+				}
+			}
 
 			// the number of levels in the sparse tree.
 			u64 depth = log2ceil(mDomain) - mDenseDepth;
@@ -446,6 +486,14 @@ namespace osuCrypto
 				{
 					Range points{ sparsePoints[r].data(), sparsePoints[r].data() + sparsePoints[r].size() };
 					auto& tree = trees[r];
+					if (points.size() == 1)
+					{
+						leafValues[r][0] = prng.get();
+						leafTags[r][0] = mPartyIdx;
+						if (gamma.size())
+							gamma[r] = gamma[r] ^ leafValues[r][0];
+						continue;
+					}
 					// (δ,b) := PARTITION((1,|S|), S)
 					auto [delta, b] = partition(points, depth);
 					auto children = b.children();
@@ -648,16 +696,23 @@ namespace osuCrypto
 				throw RTE_LOC;
 			std::vector<block> sBuff(sigma.begin(), sigma.end());
 			std::vector<std::array<u8, 2>> tBuff(tau.begin(), tau.end());
-			co_await macoro::when_all_ready(
+			auto sendResults = co_await macoro::when_all_ready(
 				sock.send(std::move(sBuff)),
 				sock.send(std::move(tBuff))
 			);
+			std::get<0>(sendResults).result();
+			std::get<1>(sendResults).result();
 			sBuff.resize(sigma.size());
 			tBuff.resize(tau.size());
-			co_await macoro::when_all_ready(
+			auto recvResults = co_await macoro::when_all_ready(
 				sock.recv(sBuff),
 				sock.recv(tBuff)
 			);
+			std::get<0>(recvResults).result();
+			std::get<1>(recvResults).result();
+			for (u64 i = 0; i < sigma.size(); ++i)
+				if (tBuff[i][0] > 1 || tBuff[i][1] > 1)
+					throw std::runtime_error("SparseDpf received a non-bit tau value. " LOCATION);
 			for (u64 i = 0; i < sigma.size(); ++i)
 			{
 				sigma[i] = sigma[i] ^ sBuff[i];

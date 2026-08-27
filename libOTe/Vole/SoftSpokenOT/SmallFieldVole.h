@@ -14,6 +14,8 @@
 #include <cryptoTools/Common/Aligned.h>
 #include <cryptoTools/Common/MatrixView.h>
 #include <cryptoTools/Network/Channel.h>
+#include <limits>
+#include <utility>
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/Tools/Pprf/RegularPprf.h"
@@ -35,6 +37,7 @@ namespace osuCrypto
 
 	public:
 		static constexpr u64 fieldBitsMax = 31;
+		static constexpr u64 seedCountMax = std::numeric_limits<u32>::max();
 
 		u64 mFieldBits = 0;
 		u64 mNumVoles = 0;
@@ -48,8 +51,31 @@ namespace osuCrypto
 		AlignedUnVector<block> mSeeds;
 
 		SmallFieldVoleBase() = default;
-		SmallFieldVoleBase(SmallFieldVoleBase&&) = default;
-		SmallFieldVoleBase& operator=(SmallFieldVoleBase&&) = default;
+		SmallFieldVoleBase(SmallFieldVoleBase&& o)
+			: mFieldBits(std::exchange(o.mFieldBits, 0))
+			, mNumVoles(std::exchange(o.mNumVoles, 0))
+			, mNumVolesPadded(std::exchange(o.mNumVolesPadded, 0))
+			, mMalicious(std::exchange(o.mMalicious, false))
+			, mInit(std::exchange(o.mInit, false))
+			, mSeeds(std::move(o.mSeeds))
+		{
+			o.mSeeds.clear();
+		}
+
+		SmallFieldVoleBase& operator=(SmallFieldVoleBase&& o)
+		{
+			if (this != &o)
+			{
+				mFieldBits = std::exchange(o.mFieldBits, 0);
+				mNumVoles = std::exchange(o.mNumVoles, 0);
+				mNumVolesPadded = std::exchange(o.mNumVolesPadded, 0);
+				mMalicious = std::exchange(o.mMalicious, false);
+				mInit = std::exchange(o.mInit, false);
+				mSeeds = std::move(o.mSeeds);
+				o.mSeeds.clear();
+			}
+			return *this;
+		}
 
 
 		SmallFieldVoleBase copy() const
@@ -57,8 +83,11 @@ namespace osuCrypto
 			return *this;
 		}
 
-		static constexpr u64 baseOtCount(u64 fieldBits, u64 numVoles)
+		static u64 baseOtCount(u64 fieldBits, u64 numVoles)
 		{
+			if (fieldBits < 1 || fieldBits > fieldBitsMax || numVoles == 0 ||
+				numVoles > seedCountMax / fieldBits)
+				throw std::invalid_argument("SmallField VOLE dimensions exceed the supported range. " LOCATION);
 			return fieldBits * numVoles;
 		}
 
@@ -82,6 +111,11 @@ namespace osuCrypto
 		bool hasSeed() const
 		{
 			return mSeeds.size();
+		}
+
+		void clearSeed()
+		{
+			mSeeds.clear();
 		}
 
 
@@ -142,8 +176,22 @@ namespace osuCrypto
 		std::unique_ptr<PprfSender> mPprf;
 
 		SmallFieldVoleSender() = default;
-		SmallFieldVoleSender(SmallFieldVoleSender&&) = default;
-		SmallFieldVoleSender& operator=(SmallFieldVoleSender&&) = default;
+		SmallFieldVoleSender(SmallFieldVoleSender&& o)
+			: SmallFieldVoleBase(std::move(o))
+			, mPprf(std::move(o.mPprf))
+			, mGenerateFn(std::exchange(o.mGenerateFn, nullptr))
+		{}
+
+		SmallFieldVoleSender& operator=(SmallFieldVoleSender&& o)
+		{
+			if (this != &o)
+			{
+				SmallFieldVoleBase::operator=(std::move(o));
+				mPprf = std::move(o.mPprf);
+				mGenerateFn = std::exchange(o.mGenerateFn, nullptr);
+			}
+			return *this;
+		}
 
 		// copy the vole seeds but not the pprf/base-OTs
 		SmallFieldVoleSender copy()const
@@ -171,6 +219,11 @@ namespace osuCrypto
 			return mSeeds.size() || (mPprf && mPprf->hasBaseOts());
 		}
 
+		bool isReadyToGenerate() const
+		{
+			return mInit && mGenerateFn && hasSeed();
+		}
+
 		// outV outputs the values for v, i.e. xor_x x * PRG(seed[x]). outU gives the values for u (the
 		// xor of all PRG evaluations).
 		void generate(u64 blockIdx, const AES& aes, block* outU, block* outV) const
@@ -180,12 +233,12 @@ namespace osuCrypto
 
 		void generate(u64 blockIdx, const AES& aes, span<block> outU, span<block> outV) const
 		{
-#ifndef NDEBUG
+			if (!isReadyToGenerate())
+				throw std::logic_error("SmallField VOLE sender is not ready to generate. " LOCATION);
 			if ((u64)outU.size() != uPadded())
 				throw RTE_LOC;
 			if ((u64)outV.size() != vPadded())
 				throw RTE_LOC;
-#endif
 
 			return generate(blockIdx, aes, outU.data(), outV.data());
 		}
@@ -217,6 +270,7 @@ namespace osuCrypto
 			, mPprf(new PprfReceiver)
 			, mDelta(b.mDelta)
 			, mDeltaUnpacked(b.mDeltaUnpacked)
+			, mConsistencyFailed(b.mConsistencyFailed)
 			, mGenerateFn(b.mGenerateFn)
 		{}
 
@@ -224,10 +278,36 @@ namespace osuCrypto
 		std::unique_ptr<PprfReceiver> mPprf;
 		BitVector mDelta;
 		AlignedUnVector<u8> mDeltaUnpacked; // Each bit of delta becomes a byte, either 0 or 0xff.
+		bool mConsistencyFailed = false;
 
 		SmallFieldVoleReceiver() = default;
-		SmallFieldVoleReceiver(SmallFieldVoleReceiver&&) = default;
-		SmallFieldVoleReceiver& operator=(SmallFieldVoleReceiver&&) = default;
+		SmallFieldVoleReceiver(SmallFieldVoleReceiver&& o)
+			: SmallFieldVoleBase(std::move(o))
+			, mPprf(std::move(o.mPprf))
+			, mDelta(std::move(o.mDelta))
+			, mDeltaUnpacked(std::move(o.mDeltaUnpacked))
+			, mConsistencyFailed(std::exchange(o.mConsistencyFailed, false))
+			, mGenerateFn(std::exchange(o.mGenerateFn, nullptr))
+		{
+			o.mDelta.resize(0);
+			o.mDeltaUnpacked.clear();
+		}
+
+		SmallFieldVoleReceiver& operator=(SmallFieldVoleReceiver&& o)
+		{
+			if (this != &o)
+			{
+				SmallFieldVoleBase::operator=(std::move(o));
+				mPprf = std::move(o.mPprf);
+				mDelta = std::move(o.mDelta);
+				mDeltaUnpacked = std::move(o.mDeltaUnpacked);
+				mConsistencyFailed = std::exchange(o.mConsistencyFailed, false);
+				mGenerateFn = std::exchange(o.mGenerateFn, nullptr);
+				o.mDelta.resize(0);
+				o.mDeltaUnpacked.clear();
+			}
+			return *this;
+		}
 
 
 		// copy the vole seeds but not the pprf/base-OTs
@@ -259,12 +339,24 @@ namespace osuCrypto
 			return mSeeds.size() || (mPprf && mPprf->hasBaseOts());
 		}
 
+		bool isReadyToGenerate() const
+		{
+			return mInit && mGenerateFn && hasSeed();
+		}
+
 		const BitVector& getDelta() const { return mDelta; }
 
 		// Uses a PPRF to implement the 2**mFieldBits - 1 of 2**mFieldBits OTs out of 1 of 2 base OTs. The
 		// messages and choice bits (which must be uniformly random) of the base OTs must be in
 		// baseMessages and choices.
-		task<> expand(Socket& chl, PRNG& prng, u64 numThreads);
+		task<> expand(Socket& chl, PRNG& prng, u64 numThreads,
+			bool deferConsistencyFailure = false);
+
+		void clearSeed()
+		{
+			SmallFieldVoleBase::clearSeed();
+			mConsistencyFailed = false;
+		}
 
 
 		// outW outputs the values for w, i.e. xor_x x * PRG(seed[x]). If correction is passed, its
@@ -278,12 +370,12 @@ namespace osuCrypto
 		void generate(u64 blockIdx, const AES& aes,
 			span<block> outW, span<const block> correction = span<block>()) const
 		{
-#ifndef NDEBUG
+			if (!isReadyToGenerate())
+				throw std::logic_error("SmallField VOLE receiver is not ready to generate. " LOCATION);
 			if ((u64)outW.size() != wPadded())
 				throw RTE_LOC;
 			if (correction.data() && (u64)correction.size() != uPadded())
 				throw RTE_LOC;
-#endif
 
 			generate(blockIdx, aes, outW.data(), correction.data());
 		}
@@ -302,12 +394,10 @@ namespace osuCrypto
 		template<typename T>
 		void sharedFunctionXor(span<const T> u, span<T> product)
 		{
-#ifndef NDEBUG
 			if ((u64)u.size() != mNumVoles)
 				throw RTE_LOC;
 			if ((u64)product.size() != wPadded())
 				throw RTE_LOC;
-#endif
 			sharedFunctionXor(u.data(), product.data());
 		}
 
@@ -353,7 +443,8 @@ namespace osuCrypto
 	template<typename T>
 	void SmallFieldVoleReceiver::sharedFunctionXor(const T* u, T* product)
 	{
-		for (u64 nVole = 0; nVole < mNumVoles; nVole += 4)
+		u64 nVole = 0;
+		for (; nVole + 4 <= mNumVoles; nVole += 4)
 		{
 			T uBlock[4];
 			for (u64 i = 0; i < 4; ++i)
@@ -362,7 +453,15 @@ namespace osuCrypto
 			for (u64 bit = 0; bit < mFieldBits; ++bit)
 				for (u64 i = 0; i < 4; ++i)
 					product[(nVole + i) * mFieldBits + bit] ^=
-					uBlock[i] & allSame<T>(mDeltaUnpacked[(nVole + i) * mFieldBits + bit]);
+						uBlock[i] & allSame<T>(mDeltaUnpacked[(nVole + i) * mFieldBits + bit]);
+		}
+
+		for (; nVole < mNumVoles; ++nVole)
+		{
+			const T uValue = u[nVole];
+			for (u64 bit = 0; bit < mFieldBits; ++bit)
+				product[nVole * mFieldBits + bit] ^=
+					uValue & allSame<T>(mDeltaUnpacked[nVole * mFieldBits + bit]);
 		}
 	}
 

@@ -43,19 +43,27 @@ namespace osuCrypto
             , mI(begin)
             , mEnd(std::min<u64>(choose(n, k), end))
         {
-            assert(k <= n);
-            mSet = ithCombination(begin, n, k);
+            if (begin > mEnd)
+                throw std::invalid_argument("Combination range begins after its end. " LOCATION);
+            if (begin < mEnd)
+                mSet = ithCombination(begin, n, k);
         }
 
         const std::vector<u64>& operator*() const
         {
+            if (mI >= mEnd)
+                throw std::out_of_range("Combination iterator is exhausted. " LOCATION);
             return mSet;
         }
 
         void operator++()
         {
+            if (mI >= mEnd)
+                throw std::out_of_range("Combination iterator is exhausted. " LOCATION);
+
             ++mI;
-            assert(mI <= mEnd);
+            if (mI == mEnd)
+                return;
 
             u64 i = 0;
             while (i < mK - 1 && mSet[i] + 1 == mSet[i + 1])

@@ -52,7 +52,7 @@ namespace osuCrypto
 		std::function<void(u64 treeIdx, VecF& leaf)> mOutputFn;
 
 		// an internal buffer that is used to expand the tree.
-		AlignedUnVector<block> mTempBuffer;
+		pprf::ExpandTreeBuffer mTempBuffer;
 
 		RegularPprfSender() = default;
 
@@ -66,16 +66,13 @@ namespace osuCrypto
 
 		void configure(u64 domainSize, u64 pointCount) override
 		{
-			if (domainSize & 1)
-				throw std::runtime_error("Pprf domain must be even. " LOCATION);
-			if (domainSize < 2)
-				throw std::runtime_error("Pprf domain must must be at least 2. " LOCATION);
-
+			auto depth = pprf::validateConfigure(domainSize, pointCount);
 			mDomain = domainSize;
-			mDepth = log2ceil(mDomain);
+			mDepth = depth;
 			mPntCount = pointCount;
 
 			mBaseOTs.resize(0, 0);
+			mValue.clear();
 		}
 
 
@@ -86,11 +83,14 @@ namespace osuCrypto
 
 		// returns true if the base OTs are currently set.
 		bool hasBaseOts() const override {
-			return mBaseOTs.size();
+			return mBaseOTs.rows() == mPntCount &&
+				mBaseOTs.cols() == mDepth && mBaseOTs.size();
 		}
 
 
 		void setBase(span<const std::array<block, 2>> baseMessages) override {
+			if (mDomain == 0 || mPntCount == 0)
+				throw std::runtime_error("PPRF must be configured before setting base OTs. " LOCATION);
 			if (baseOtCount() != static_cast<u64>(baseMessages.size()))
 				throw RTE_LOC;
 
@@ -109,13 +109,17 @@ namespace osuCrypto
 			u64 numThreads,
 			CoeffCtx ctx = {}) override 
 		{
+			auto consumeBaseOts = false;
 			MACORO_TRY{
+			pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
+			if (!hasBaseOts())
+				throw std::runtime_error("PPRF sender base OTs are not set. " LOCATION);
+			if (oFormat == PprfOutputFormat::Callback && !mOutputFn)
+				throw std::runtime_error("PPRF callback output requires a callback. " LOCATION);
 			if (programPuncturedPoint)
 				setValue(value);
 
 			this->setTimePoint("SilentMultiPprfSender.start");
-
-			pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
 			//auto tree = span<AlignedArray<block, 8>>{};
 			auto levels = std::vector<span<AlignedArray<block, 8>> >{};
@@ -130,7 +134,7 @@ namespace osuCrypto
 			auto encOffset = u64{};
 			auto leafOffset = u64{};
 
-			auto dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
+			auto dd = mDomain > 2 ? pprf::checkedRoundUpTo(pprf::checkedAdd(mDomain, 1) / 2, 2) : 1;
 			pprf::allocateExpandTree(dd, mTempBuffer, levels);
 			assert(levels.size() == mDepth);
 
@@ -159,7 +163,7 @@ namespace osuCrypto
 					// we will use leaf level as a buffer before
 					// copying the result to the output.
 					leafIndex = 0;
-					ctx.resize(leafLevel, mDomain * 8);
+					ctx.resize(leafLevel, pprf::checkedSize(pprf::checkedMul(mDomain, 8)));
 					leafLevelPtr = &leafLevel;
 				}
 
@@ -174,6 +178,10 @@ namespace osuCrypto
 					encOffset = 0;
 					leafOffset = 0;
 				}
+
+				// Reserve the complete base-OT set before its first use. Once
+				// reserved, every exit consumes it.
+				consumeBaseOts = true;
 
 				// exapnd the tree
 				expandOne(
@@ -211,10 +219,13 @@ namespace osuCrypto
 			}
 
 			mBaseOTs = {};
+			consumeBaseOts = false;
 
 			this->setTimePoint("SilentMultiPprfSender.de-alloc");
 
 			} MACORO_CATCH(eptr) {
+				if (consumeBaseOts)
+					mBaseOTs = {};
 				if (!chl.closed()) co_await chl.close();
 				std::rethrow_exception(eptr);
 			}
@@ -237,6 +248,8 @@ namespace osuCrypto
 
 		void clear() override {
 			mBaseOTs.resize(0, 0);
+			mValue.clear();
+			mTempBuffer.clear();
 			mDomain = 0;
 			mDepth = 0;
 			mPntCount = 0;
@@ -554,7 +567,7 @@ namespace osuCrypto
 		std::function<void(u64 treeIdx, VecF& leafs)> mOutputFn;
 
 		// an internal buffer that is used to expand the tree.
-		AlignedUnVector<block> mTempBuffer;
+		pprf::ExpandTreeBuffer mTempBuffer;
 
 		RegularPprfReceiver() = default;
 		RegularPprfReceiver(const RegularPprfReceiver&) = delete;
@@ -562,16 +575,13 @@ namespace osuCrypto
 
 		void configure(u64 domainSize, u64 pointCount) override
 		{
-			if (domainSize & 1)
-				throw std::runtime_error("Pprf domain must be even. " LOCATION);
-			if (domainSize < 2)
-				throw std::runtime_error("Pprf domain must must be at least 2. " LOCATION);
-
+			auto depth = pprf::validateConfigure(domainSize, pointCount);
 			mDomain = domainSize;
-			mDepth = log2ceil(mDomain);
+			mDepth = depth;
 			mPntCount = pointCount;
 
 			mBaseOTs.resize(0, 0);
+			mBaseChoices.resize(0, 0);
 		}
 
 
@@ -579,6 +589,8 @@ namespace osuCrypto
 		// [0,domain) and returns these as the choice bits.
 		BitVector sampleChoiceBits(PRNG& prng)override
 		{
+			if (mDomain == 0 || mPntCount == 0)
+				throw std::runtime_error("PPRF must be configured before sampling choices. " LOCATION);
 			BitVector choices(mPntCount * mDepth);
 
 			// The points are read in blocks of 8, so make sure that there is a
@@ -586,7 +598,7 @@ namespace osuCrypto
 			mBaseChoices.resize(mPntCount, mDepth);
 			for (u64 i = 0; i < mPntCount; ++i)
 			{
-				u64 idx = prng.get<u64>() % mDomain;
+				u64 idx = pprf::sampleMod(prng, mDomain);
 				for (u64 j = 0; j < mDepth; ++j)
 					mBaseChoices(i, j) = *BitIterator((u8*)&idx, j);
 			}
@@ -602,23 +614,26 @@ namespace osuCrypto
 		// choices is in the same format as the output from sampleChoiceBits.
 		void setChoiceBits(const BitVector& choices)override
 		{
+			if (mDomain == 0 || mPntCount == 0)
+				throw std::runtime_error("PPRF must be configured before setting choices. " LOCATION);
 			// Make sure we're given the right number of OTs.
 			if (choices.size() != baseOtCount())
 				throw RTE_LOC;
 
-			mBaseChoices.resize(mPntCount, mDepth);
+			// Validate every encoded point before changing the active paths.
 			for (u64 i = 0; i < mPntCount; ++i)
 			{
 				u64 idx = 0;
 				for (u64 j = 0; j < mDepth; ++j)
-				{
-					mBaseChoices(i, j) = choices[mDepth * i + j];
 					idx |= u64(choices[mDepth * i + j]) << j;
-				}
 
 				if (idx >= mDomain)
 					throw std::runtime_error("provided choice bits index outside of the domain." LOCATION);
 			}
+
+			mBaseChoices.resize(mPntCount, mDepth);
+			for (u64 i = 0; i < mBaseChoices.size(); ++i)
+				mBaseChoices(i) = choices[i];
 		}
 
 
@@ -631,18 +646,27 @@ namespace osuCrypto
 		// returns true if the base OTs are currently set.
 		bool hasBaseOts() const override
 		{
-			return mBaseOTs.size();
+			return mBaseOTs.rows() == pprf::checkedRoundUpTo(mPntCount, 8) &&
+				mBaseOTs.cols() == mDepth && mBaseOTs.size();
+		}
+
+		bool hasChoiceBits() const
+		{
+			return mBaseChoices.rows() == mPntCount &&
+				mBaseChoices.cols() == mDepth && mBaseChoices.size();
 		}
 
 
 		void setBase(span<const block> baseMessages) override
 		{
+			if (mDomain == 0 || mPntCount == 0)
+				throw std::runtime_error("PPRF must be configured before setting base OTs. " LOCATION);
 			if (baseOtCount() != static_cast<u64>(baseMessages.size()))
 				throw RTE_LOC;
 
 			// The OTs are used in blocks of 8, so make sure that there is a whole
 			// number of blocks.
-			mBaseOTs.resize(roundUpTo(mPntCount, 8), mDepth);
+			mBaseOTs.resize(pprf::checkedRoundUpTo(mPntCount, 8), mDepth);
 			if (mBaseOTs.size() < baseMessages.size())
 				throw RTE_LOC;
 			memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
@@ -660,6 +684,8 @@ namespace osuCrypto
 		{
 			if ((u64)points.size() != mPntCount)
 				throw RTE_LOC;
+			if (!hasChoiceBits())
+				throw std::runtime_error("PPRF receiver choices are not set. " LOCATION);
 
 			switch (format)
 			{
@@ -672,7 +698,8 @@ namespace osuCrypto
 					for (u64 k = 0; k < mDepth; ++k)
 						points[j] |= u64(mBaseChoices(j, k)) << k;
 
-					assert(points[j] < mDomain);
+					if (points[j] >= mDomain)
+						throw std::runtime_error("PPRF receiver choice is outside the domain. " LOCATION);
 				}
 
 
@@ -712,8 +739,15 @@ namespace osuCrypto
 			u64 numThreads,
 			CoeffCtx ctx = {}) override
 		{
+			auto consumeBaseOts = false;
 			MACORO_TRY{
 				pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
+				if (!hasBaseOts())
+					throw std::runtime_error("PPRF receiver base OTs are not set. " LOCATION);
+				if (!hasChoiceBits())
+					throw std::runtime_error("PPRF receiver choices are not set. " LOCATION);
+				if (oFormat == PprfOutputFormat::Callback && !mOutputFn)
+					throw std::runtime_error("PPRF callback output requires a callback. " LOCATION);
 
 				auto treeIndex = u64{};
 				auto levels = std::vector<span<AlignedArray<block, 8>>>{};
@@ -735,9 +769,10 @@ namespace osuCrypto
 
 				//setTimePoint("SilentMultiPprfSender.reserve");
 
-				auto dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
+				auto dd = mDomain > 2 ? pprf::checkedRoundUpTo(pprf::checkedAdd(mDomain, 1) / 2, 2) : 1;
 				pprf::allocateExpandTree(dd, mTempBuffer, levels);
 				assert(levels.size() == mDepth);
+				consumeBaseOts = true;
 
 
 				if (!mEagerSend)
@@ -767,7 +802,7 @@ namespace osuCrypto
 						// we will use leaf level as a buffer before
 						// copying the result to the output.
 						leafIndex = 0;
-						ctx.resize(leafLevel, mDomain * 8);
+						ctx.resize(leafLevel, pprf::checkedSize(pprf::checkedMul(mDomain, 8)));
 						leafLevelPtr = &leafLevel;
 					}
 
@@ -809,10 +844,13 @@ namespace osuCrypto
 				this->setTimePoint("SilentMultiPprfReceiver.join");
 
 				mBaseOTs = {};
+				consumeBaseOts = false;
 
 				this->setTimePoint("SilentMultiPprfReceiver.de-alloc");
 
 			} MACORO_CATCH(eptr) {
+				if (consumeBaseOts)
+					mBaseOTs = {};
 				if (!chl.closed()) co_await chl.close();
 				std::rethrow_exception(eptr);
 			}
@@ -822,6 +860,7 @@ namespace osuCrypto
 		{
 			mBaseOTs.resize(0, 0);
 			mBaseChoices.resize(0, 0);
+			mTempBuffer.clear();
 			mDomain = 0;
 			mDepth = 0;
 			mPntCount = 0;

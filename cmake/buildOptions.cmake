@@ -104,9 +104,6 @@ option(ENABLE_REGULAR_DPF    "Build the Regular DPF protocol." OFF)
 option(ENABLE_TERNARY_DPF    "Build the Ternary DPF protocol." OFF)
 option(ENABLE_SPARSE_DPF     "Build the Sparse DPF protocol." OFF)
 
-option(NO_KOS_WARNING        "Build with no kos security warning." OFF)
-
-
 EVAL(FETCH_BITPOLYMUL_IMPL 
 	(DEFINED FETCH_BITPOLYMUL AND FETCH_BITPOLYMUL) OR
 	((NOT DEFINED FETCH_BITPOLYMUL) AND (FETCH_AUTO AND ENABLE_BITPOLYMUL)))
@@ -180,7 +177,6 @@ message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}\n\n")
 
 
 message(STATUS "other \n=======================================================")
-message(STATUS "Option: NO_KOS_WARNING        = ${NO_KOS_WARNING}")
 message(STATUS "Option: LIBOTE_SHARED         = ${LIBOTE_SHARED}\n\n")
 
 

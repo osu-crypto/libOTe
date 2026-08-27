@@ -14,8 +14,12 @@ namespace tests_libOTe
     void NcoOt_Oos_Test();
     void NcoOt_genBaseOts_Test();
     void NcoOt_chosen();
+    void NcoOt_ChosenValidation_Test();
+    void NcoOt_StateValidation_Test();
+    void NcoOt_OosMove_Test();
 
     void Tools_LinearCode_Test();
     void Tools_LinearCode_sub_Test();
     void Tools_LinearCode_rep_Test();
+	void Tools_LinearCode_Audit_Test();
 }

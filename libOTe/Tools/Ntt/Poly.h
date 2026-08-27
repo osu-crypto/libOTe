@@ -3,6 +3,8 @@
 #include "libOTe/config.h"
 #include <vector>
 #include <iostream>
+#include <limits>
+#include <stdexcept>
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Crypto/PRNG.h"
 
@@ -52,10 +54,10 @@ namespace osuCrypto
 
 		Poly& operator=(span<const F> coeffs)
 		{
-			for (u64 i = coeffs.size() - 1; i < coeffs.size(); --i)
-			{
-				setCoeff(i, coeffs[i]);
-			}
+			// A span can refer to this polynomial, so take the copy before
+			// replacing the current coefficient storage.
+			std::vector<F> copy(coeffs.begin(), coeffs.end());
+			mCoeffs = std::move(copy);
 			return *this;
 		}
 
@@ -72,7 +74,11 @@ namespace osuCrypto
 		void setCoeff(u64 i, const F& f)
 		{
 			if (mCoeffs.size() <= i)
+			{
+				if (i == std::numeric_limits<u64>::max() || i + 1 > mCoeffs.max_size())
+					throw std::length_error("Polynomial coefficient index is too large. " LOCATION);
 				mCoeffs.resize(i + 1);
+			}
 
 			mCoeffs[i] = f;
 
@@ -93,7 +99,11 @@ namespace osuCrypto
 		F& operator[](u64 i)
 		{
 			if (mCoeffs.size() <= i)
+			{
+				if (i == std::numeric_limits<u64>::max() || i + 1 > mCoeffs.max_size())
+					throw std::length_error("Polynomial coefficient index is too large. " LOCATION);
 				mCoeffs.resize(i + 1);
+			}
 			return mCoeffs[i];
 		}
 		const F& operator[](u64 i)const
@@ -131,6 +141,8 @@ namespace osuCrypto
 
 		Poly operator/(const F& o) const
 		{
+			if (o == F::zero())
+				throw std::domain_error("Polynomial scalar division by zero. " LOCATION);
 			return *this * o.inverse();
 		}
 
@@ -179,12 +191,9 @@ namespace osuCrypto
 
 		bool operator==(const Poly& o) const
 		{
-			if (degree() != o.degree())
-				return false;
-
-			auto d = degree();
+			auto d = std::max(degree(), o.degree());
 			for (u64 i = 0; i <= d; ++i)
-				if ((*this)[i] != o[i])
+				if (getCoeff(i) != o.getCoeff(i))
 					return false;
 
 			return true;
@@ -199,11 +208,16 @@ namespace osuCrypto
 		operator span<const F>() const { return mCoeffs; }
 
 		u64 size() const { return mCoeffs.size(); }
+		u64 effectiveSize() const
+		{
+			auto s = size();
+			while (s && mCoeffs[s - 1] == F::zero())
+				--s;
+			return s;
+		}
 		u64 degree()  const { 
-			for (u64 i = mCoeffs.size() - 1; i < mCoeffs.size(); --i)
-				if (mCoeffs[i] != F::zero())
-					return i;
-			return 0;
+			auto s = effectiveSize();
+			return s ? s - 1 : 0;
 			//return mCoeffs.size() ? mCoeffs.size() - 1 : 0; 
 		}
 
@@ -263,6 +277,8 @@ namespace osuCrypto
 					ret[i] = longest[i];
 				}
 			}
+
+			ret.compact();
 		}
 
 		static void mult(Poly& ret, const Poly& a, const Poly& b)
@@ -271,19 +287,33 @@ namespace osuCrypto
 
 			auto& dst = &ret == &a || &ret == &b ? t : ret;
 
-			auto size = a.size() + b.size();
-			dst.mCoeffs.resize(size ? size - 1 : 0);
+			auto aSize = a.effectiveSize();
+			auto bSize = b.effectiveSize();
+			if (aSize == 0 || bSize == 0)
+			{
+				dst.mCoeffs.clear();
+				if (&dst == &t)
+					ret = std::move(t);
+				return;
+			}
+
+			auto maxSize = static_cast<u64>(dst.mCoeffs.max_size());
+			if (bSize - 1 > maxSize || aSize > maxSize - (bSize - 1))
+				throw std::length_error("Polynomial product size is too large. " LOCATION);
+
+			auto size = aSize + bSize - 1;
+			dst.mCoeffs.resize(size);
 			std::fill(dst.begin(), dst.end(), F::zero());
 
-			for (u64 i = 0; i < a.size(); ++i)
+			for (u64 i = 0; i < aSize; ++i)
 			{
-				for (u64 j = 0; j < b.size(); ++j)
+				for (u64 j = 0; j < bSize; ++j)
 				{
 					dst[i + j] += a[i] * b[j];
 				}
 			}
 
-			assert(dst.size() == 0 || dst.back() != F::zero());
+			dst.compact();
 
 			if (&dst == &t)
 				ret = std::move(t);

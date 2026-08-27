@@ -22,6 +22,7 @@
 
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
+#include "libOTe/Base/MockOt.h"
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Crypto/Edwards25519/Curve25519Backend.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
@@ -221,6 +222,7 @@ namespace tests_libOTe
         }
     }
 
+#ifdef ENABLE_MRR
     template<typename DSPopf>
     static void Bot_McRosRoy_Ristretto_Adversarial_impl()
     {
@@ -278,7 +280,9 @@ namespace tests_libOTe
                     "McRosRoy receiver accepted a malformed Ristretto point");
         }
     }
+#endif
 
+#ifdef ENABLE_MRR_TWIST
     template<typename DSPopf>
     static void Bot_McRosRoy_Twist_Adversarial_impl()
     {
@@ -343,6 +347,7 @@ namespace tests_libOTe
                     "McRosRoyTwist receiver accepted a small-order point");
         }
     }
+#endif
 
 #if defined(ENABLE_MRR_TWIST) && defined(ENABLE_SSE)
     void Bot_McQuoidRR_Moeller_EKE_Test()
@@ -361,6 +366,16 @@ namespace tests_libOTe
 
     void Bot_McQuoidRR_Moeller_MR_Test()
     {
+        DomainSepMRPopf factory;
+        auto popf = factory.construct();
+        PRNG actual(block(0x1234, 0x5678));
+        PRNG expected(block(0x1234, 0x5678));
+        (void)popf.program(false, Block256{}, actual);
+        Block256 consumed;
+        expected.get(consumed.data(), consumed.size());
+        if (actual.get<block>() != expected.get<block>())
+            throw UnitTestFail("MR POPF consumed the wrong amount of randomness" LOCATION);
+
         Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepMRPopf>();
         Bot_McRosRoy_Twist_Adversarial_impl<DomainSepMRPopf>();
     }
@@ -502,11 +517,27 @@ namespace tests_libOTe
 #ifdef ENABLE_MR_KYBER
         setThreadName("Sender");
 
-
-        auto sock = cp::LocalAsyncSocket::makePair();
-
         PRNG prng0(block(4253465, 3434565));
         PRNG prng1(block(4253233465, 334565));
+
+        {
+            auto mismatchSockets = cp::LocalAsyncSocket::makePair();
+            BitVector mismatchChoices(1);
+            std::vector<block> noOutputs;
+            MasnyRindalKyber receiver;
+            auto honest = receiver.receive(
+                mismatchChoices, noOutputs, prng0, mismatchSockets[1]);
+            auto idlePeerProtocol = []() -> task<> { co_return; };
+            auto idlePeer = idlePeerProtocol();
+            bool rejected = false;
+            try { eval(honest, idlePeer); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail(
+                    "MasnyRindalKyber receiver accepted mismatched choices/messages");
+        }
+
+        auto sock = cp::LocalAsyncSocket::makePair();
 
         u64 numOTs = 50;
         std::vector<block> recvMsg(numOTs);
@@ -533,6 +564,28 @@ namespace tests_libOTe
         }
 #else
         throw UnitTestSkipped("MasnyRindalKyber OT not enabled. Requires linux and Kyber");
+#endif
+    }
+
+    void Bot_Mock_Test()
+    {
+#ifdef ENABLE_MOCK_OT
+        auto sockets = cp::LocalAsyncSocket::makePair();
+        PRNG prng(block(4253465, 3434565));
+        BitVector choices(1);
+        std::vector<block> noOutputs;
+        INSECURE_MOCK_OT receiver;
+        auto honest = receiver.receive(choices, noOutputs, prng, sockets[1]);
+        auto idlePeerProtocol = []() -> task<> { co_return; };
+        auto idlePeer = idlePeerProtocol();
+        bool rejected = false;
+        try { eval(honest, idlePeer); }
+        catch (const std::runtime_error&) { rejected = true; }
+        if (!rejected)
+            throw UnitTestFail(
+                "INSECURE_MOCK_OT receiver accepted mismatched choices/messages");
+#else
+        throw UnitTestSkipped("Mock OT not enabled (ENABLE_MOCK_OT).");
 #endif
     }
 

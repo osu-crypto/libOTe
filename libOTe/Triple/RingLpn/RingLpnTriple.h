@@ -81,7 +81,7 @@ namespace osuCrypto
 		u64 mDpfTreeDepth = 0;
 
 		// the locations of the non-zeros in the bPolyIdx'th block of the sparse polynomial.
-		// the polyIdx'th row containts the coeffs for the polyIdx'th poly.
+		// the polyIdx'th row contains the coefficients for that polynomial.
 		Matrix<u64> mSparsePositions;
 
 		// The mPolyWeight coefficients of the mNumPolys sparse polynomials.
@@ -148,7 +148,7 @@ namespace osuCrypto
 			SumDmpf = 1
 		};
 
-		// Intializes the protocol to generate n F OLEs. Most efficient when n
+		// Initializes the protocol to generate n F OLEs. Most efficient when n
 		// is a power of 2. Once called, baseOtCount() can be called to 
 		// determine the required number of base OTs.
 		void init(
@@ -276,7 +276,7 @@ namespace osuCrypto
 			BitVector& choice);
 
 
-		// check that the expended sparse polynomials are correct.
+		// Check that the expanded sparse polynomials are correct.
 		// and that the additive shares of the positions are the 
 		// same as the xor shares.
 		task<> checkExpanded(
@@ -284,6 +284,17 @@ namespace osuCrypto
 			coproto::Socket& sock,
 			std::vector<osuCrypto::u64> prodPolyTreePosXor,
 			osuCrypto::Matrix<F>& prodPolys);
+
+		// Validate block-local sparse offsets received by the debug verifier.
+		static void validateSparsePositionOffsets(
+			span<const u64> positions,
+			u64 blockSize)
+		{
+			for (auto position : positions)
+				if (position >= blockSize)
+					throw std::runtime_error(
+						"RingLPN sparse position is outside its block. " LOCATION);
+		}
 
 		// check that the tensored coefficients are correct.
 		task<> checkTensor(Socket& sock);
@@ -359,43 +370,87 @@ namespace osuCrypto
 		DpfType dpfType,
 		TensorBaseCorType base, CoeffCtx ctx)
 	{
-		mPartyIdx = partyIdx;
-		if (mode == Mode::Triple)
-			n *= 2;
-		mLogN = log2ceil(n);
-		mN = 1ull << mLogN;
-		mBaseCorType = base;
-		mCtx = ctx;
+		if (partyIdx > 1)
+			throw std::invalid_argument("RingLPN party index must be zero or one. " LOCATION);
+		if (mode != Mode::Ole && mode != Mode::Triple)
+			throw std::invalid_argument("RingLPN mode is invalid. " LOCATION);
+		if (dpfType != DpfType::RevCuckooDmpf && dpfType != DpfType::SumDmpf)
+			throw std::invalid_argument("RingLPN DPF type is invalid. " LOCATION);
+		if (base != TensorBaseCorType::OtBased &&
+			base != TensorBaseCorType::Precomputed)
+			throw std::invalid_argument("RingLPN tensor correlation type is invalid. " LOCATION);
+		if (n == 0 || n > Gmw::MaxOleDimension)
+			throw std::invalid_argument("RingLPN request size exceeds the supported range. " LOCATION);
 
-		if (mNumPolys == 0)
+		auto numPolys = mNumPolys;
+		auto polyWeight = mPolyWeight;
+		if (numPolys == 0)
 		{
-			mNumPolys = 4;
-			mPolyWeight = 16;
+			numPolys = 4;
+			polyWeight = 16;
+		}
+		if (numPolys > 8)
+			throw std::invalid_argument("RingLPN supports at most eight polynomials. " LOCATION);
+		if (polyWeight == 0 || polyWeight > 256 ||
+			(polyWeight & (polyWeight - 1)))
+			throw std::invalid_argument("RingLPN polynomial weight must be a power of two at most 256. " LOCATION);
+
+		if (mode == Mode::Triple)
+		{
+			if (n > Gmw::MaxOleDimension / 2)
+				throw std::invalid_argument("RingLPN triple request size exceeds the supported range. " LOCATION);
+			n *= 2;
 		}
 
-		auto logT = log2ceil(mPolyWeight);
-		if (mPolyWeight != 1ull << logT)
-			throw RTE_LOC;
+		const auto logN = log2ceil(n);
+		const auto ringSize = 1ull << logN;
+		const auto logT = log2ceil(polyWeight);
+		const auto blockSize = ringSize / polyWeight;
+		if (blockSize < 2)
+			throw std::invalid_argument("RingLPN ring size is too small for the polynomial weight. " LOCATION);
 
-		mBlockSize = mN / mPolyWeight;
-		mBlockDepth = mLogN - logT;
-		mDpfTreeDepth = mBlockDepth + 1;
+		const auto blockDepth = logN - logT;
+		const auto dpfTreeDepth = blockDepth + 1;
+		const auto dpfTreeSize = 1ull << dpfTreeDepth;
+		const auto weight = numPolys * polyWeight;
+		if (weight * weight > Gmw::MaxOleDimension)
+			throw std::invalid_argument("RingLPN tensor weight exceeds the supported range. " LOCATION);
 
-		mDpfTreeSize = 1ull << mDpfTreeDepth;
+		mSparsePositions.resize(0, 0);
+		mSparseCoefficients.clear();
+		mTensoredCoefficients.clear();
+		mTensorRecvOts.clear();
+		mTensorChoice.resize(0);
+		mTensorSendOts.clear();
+		mProdPolyTreePosArth.clear();
+		mProdPolyTreePosXor.clear();
+
+		mPartyIdx = partyIdx;
+		mNumPolys = numPolys;
+		mPolyWeight = polyWeight;
+		mLogN = logN;
+		mN = ringSize;
+		mBaseCorType = base;
+		mCtx = ctx;
+		mBlockSize = blockSize;
+		mBlockDepth = blockDepth;
+		mDpfTreeDepth = dpfTreeDepth;
+		mDpfTreeSize = dpfTreeSize;
+		mHasDpf = false;
 
 		if (dpfType == DpfType::RevCuckooDmpf)
 		{
 			mDpf = RevCuckooDmpf<F, CoeffCtx>();
 			std::get<0>(mDpf).init(
 				partyIdx,
-				mPolyWeight,
-				mNumPolys * mNumPolys * mPolyWeight,
+				polyWeight,
+				numPolys * numPolys * polyWeight,
 				mDpfTreeSize);
 		}
 		else if (dpfType == DpfType::SumDmpf)
 		{
 			mDpf = SumDmpf<F, CoeffCtx>();
-			std::get<1>(mDpf).init(mPartyIdx, mDpfTreeSize, mPolyWeight, mNumPolys * mNumPolys * mPolyWeight);
+			std::get<1>(mDpf).init(mPartyIdx, mDpfTreeSize, polyWeight, numPolys * numPolys * polyWeight);
 		}
 		else
 			throw RTE_LOC;
@@ -404,11 +459,7 @@ namespace osuCrypto
 		BetaLibrary lib;
 		mAdder = *lib.int_int_add(mDpfTreeDepth, mDpfTreeDepth, mDpfTreeDepth, BetaLibrary::Optimized::Depth);
 
-		auto weight = mNumPolys * mPolyWeight;
 		mGmw.init(mPartyIdx, weight * weight, mAdder);
-
-		if (mBlockSize < 2)
-			throw RTE_LOC;
 
 		sampleA(block(3127894527893612049, 240925987420932408));
 	}
@@ -419,9 +470,20 @@ namespace osuCrypto
 		Protocol proto
 	) const
 	{
+		if (proto != Protocol::Full && proto != Protocol::Expand &&
+			proto != Protocol::GenDpf)
+			throw std::invalid_argument("RingLPN protocol is invalid. " LOCATION);
+
 		BaseCorCount counts;
 
-		if (hasDpf() == false && proto != Protocol::Expand)
+		const auto sumNeedsFreshBase =
+			hasDpf() &&
+			proto != Protocol::GenDpf &&
+			std::holds_alternative<SumDmpf<F, CoeffCtx>>(mDpf) &&
+			!std::get<SumDmpf<F, CoeffCtx>>(mDpf).hasBaseOts();
+		const auto needsInitialDpf = !hasDpf() && proto != Protocol::Expand;
+
+		if (needsInitialDpf || sumNeedsFreshBase)
 		{
 			std::visit([&](auto& dpf) {
 				auto c = dpf.baseOtCount();
@@ -429,7 +491,8 @@ namespace osuCrypto
 				counts.mRecvOtCount = c.mRecvCount;
 				}, mDpf);
 
-			counts.mOleCount = mGmw.oleCount();
+			if (needsInitialDpf)
+				counts.mOleCount = mGmw.oleCount();
 		}
 
 		if (hasTensor() == false &&
@@ -485,19 +548,25 @@ namespace osuCrypto
 		auto sendIter = baseSendOts;
 		//auto& choiceIter = baseChoices;
 		u64 recvIdx = 0, sendIdx = 0;
-		std::visit([&](auto& dpf) {
-			auto count = dpf.baseOtCount();
-			recvIdx += count.mRecvCount;
-			sendIdx += count.mSendCount;
-			if (count.mRecvCount || count.mSendCount)
-			{
-				dpf.setBaseOts(
-					sendIter.subspan(0, sendIdx),
-					recvIter.subspan(0, recvIdx),
-					baseChoices.subvec(0, recvIdx)
-				);
-			}
-			}, mDpf);
+		const auto installDpfBase =
+			!hasDpf() ||
+			(std::holds_alternative<SumDmpf<F, CoeffCtx>>(mDpf) &&
+				!std::get<SumDmpf<F, CoeffCtx>>(mDpf).hasBaseOts());
+		if (installDpfBase)
+		{
+			std::visit([&](auto& dpf) {
+				auto count = dpf.baseOtCount();
+				recvIdx = count.mRecvCount;
+				sendIdx = count.mSendCount;
+				if (recvIdx || sendIdx)
+				{
+					dpf.setBaseOts(
+						sendIter.subspan(0, sendIdx),
+						recvIter.subspan(0, recvIdx),
+						baseChoices.subvec(0, recvIdx));
+				}
+				}, mDpf);
+		}
 
 		mTensorRecvOts.assign(
 			recvIter.subspan(recvIdx).begin(),
@@ -518,6 +587,10 @@ namespace osuCrypto
 	template<typename F, typename CoeffCtx>
 	bool RingLpnTriple<F, CoeffCtx>::hasBaseCors(Protocol protocol) const
 	{
+		if (protocol != Protocol::Full && protocol != Protocol::Expand &&
+			protocol != Protocol::GenDpf)
+			throw std::invalid_argument("RingLPN protocol is invalid. " LOCATION);
+
 		bool dpfBase = std::visit([](auto&& dpf) { return dpf.hasBaseOts(); }, mDpf);
 		auto tensorBase = 
 			mTensoredCoefficients.size() || 
@@ -606,10 +679,12 @@ namespace osuCrypto
 			auto baseOt1 = DefaultBaseOT{};
 			auto baseOt2 = DefaultBaseOT{};
 
-			co_await(
+			auto results = co_await(
 				macoro::when_all_ready(
 					baseOt1.send(sendMsg, prng, sock),
 					baseOt2.receive(choice, recvMsg, prng2, sock2)));
+			std::get<0>(results).result();
+			std::get<1>(results).result();
 #else
 			throw std::runtime_error("A base OT must be enabled. " LOCATION);
 #endif
@@ -649,11 +724,13 @@ namespace osuCrypto
 			auto baseOt1 = DefaultBaseOT{};
 			auto baseOt2 = DefaultBaseOT{};
 
-			co_await(
+			auto results = co_await(
 				macoro::when_all_ready(
 					baseOt1.receive(choice, recvMsg, prng, sock),
 					baseOt2.send(sendMsg, prng2, sock2)
 				));
+			std::get<0>(results).result();
+			std::get<1>(results).result();
 #else
 			throw std::runtime_error("A base OT must be enabled. " LOCATION);
 #endif
@@ -946,6 +1023,15 @@ namespace osuCrypto
 		// overall polynomial.
 		mSparsePositions.resize(mNumPolys, mPolyWeight);
 
+		// TODO(Security): Rejection-sample the complete regular support against
+		// the smallest relevant 1-sparse factor before committing to it. For the
+		// current (mNumPolys, mPolyWeight) = (4, 16) parameter set, fold each
+		// absolute position blockIdx * mBlockSize + offset modulo 128, separately
+		// for each polynomial, and require at least 61 distinct folded positions
+		// in total. This accepts with probability about 0.502. Generalize the
+		// factor degree and minimum weight as Ring-LPN parameters rather than
+		// hard-coding them here. See AUD-001 in the repository audit tracker.
+
 		// select random positions for the sparse polynomial.
 		// The polyIdx'th is the noise position in the polyIdx'th block.
 		for (u64 i = 0; i < mSparsePositions.size(); ++i)
@@ -1048,36 +1134,10 @@ namespace osuCrypto
 		PRNG& prng,
 		coproto::Socket& sock)
 	{
-		MACORO_TRY{
-
-		setTimePoint("expand start");
-
-		if (hasBaseCors(Protocol::Full) == false)
-			co_await genBaseCors(prng, sock);
-
-		if (hasDpf() == false)
-		{
-			if (hasTensor())
-				co_await genDpf(prng, sock);
-			else
-			{
-				auto prng2 = prng.fork();
-				auto sock2 = sock.fork();
-				co_await macoro::when_all_ready(
-					tensor(prng2, sock2),
-					genDpf(prng, sock)
-				);
-			}
-		}
-		else if (hasTensor() == false)
-			co_await tensor(prng, sock);
-
 		// true if we are generating OLEs, false if we are generating triples.
 		constexpr bool ole = std::is_same_v<std::decay_t<decltype(C)>, std::monostate>;
-
 		if  constexpr (ole)
 		{
-			// OLE
 			if (mN < A.size())
 				throw RTE_LOC;
 			if (A.size() != B.size())
@@ -1093,6 +1153,32 @@ namespace osuCrypto
 				throw RTE_LOC;
 		}
 
+		MACORO_TRY{
+
+		setTimePoint("expand start");
+
+		if (hasBaseCors(Protocol::Full) == false)
+			co_await genBaseCors(prng, sock);
+
+		if (hasDpf() == false)
+		{
+			if (hasTensor())
+				co_await genDpf(prng, sock);
+			else
+			{
+				auto prng2 = prng.fork();
+				auto sock2 = sock.fork();
+				auto results = co_await macoro::when_all_ready(
+					tensor(prng2, sock2),
+					genDpf(prng, sock)
+				);
+				std::get<0>(results).result();
+				std::get<1>(results).result();
+			}
+		}
+		else if (hasTensor() == false)
+			co_await tensor(prng, sock);
+
 		if (mDebug)
 			co_await checkTensor(sock);
 
@@ -1101,7 +1187,7 @@ namespace osuCrypto
 
 		// sharing of the F coefficients of the product polynomials.
 		// these will just be the tensored coefficients but in permuted
-		// order to match how they are expended in the DPF and then added 
+		// order to match how they are expanded in the DPF and then added
 		// together.
 		std::vector<F> prodPolyFCoeffs(mNumPolys * mNumPolys * mPolyWeight * mPolyWeight);
 
@@ -1396,6 +1482,7 @@ namespace osuCrypto
 
 		co_await sock.send(coproto::copy(mSparsePositions));
 		co_await sock.recv(Pos[mPartyIdx ^ 1]);
+		validateSparsePositionOffsets(Pos[mPartyIdx ^ 1], mBlockSize);
 		co_await send<F>(mSparseCoefficients, sock, mCtx);
 		co_await recv<F>(Val[mPartyIdx ^ 1], sock, mCtx);
 
@@ -1564,7 +1651,9 @@ namespace osuCrypto
 		co_await sock.send(std::move(diff));
 
 		// Execute all VOLE instances in parallel
-		co_await macoro::when_all_ready(std::move(tasks));
+		auto results = co_await macoro::when_all_ready(std::move(tasks));
+		for (auto& result : results)
+			result.result();
 
 		// Copy results to the output array
 		for (u64 i = 0; i < n; ++i)
@@ -1627,7 +1716,9 @@ namespace osuCrypto
 		}
 
 		// Execute all VOLE instances in parallel
-		co_await macoro::when_all_ready(std::move(tasks));
+		auto results = co_await macoro::when_all_ready(std::move(tasks));
+		for (auto& result : results)
+			result.result();
 
 		// Copy results to the output array
 		for (u64 i = 0; i < n; ++i)

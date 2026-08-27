@@ -12,6 +12,28 @@ using namespace osuCrypto;
 namespace tests_libOTe
 {
 
+    void Permutation_Audit_Test(const CLP&)
+    {
+        constexpr u64 size = 37;
+        FeistelPerm perm(size, block(0x1234, 0x5678));
+        auto iter = perm.begin();
+        auto end = perm.end();
+        std::set<u32> outputs;
+        u64 count = 0;
+
+        while (iter != end)
+        {
+            if (count == size)
+                throw UnitTestFail("FeistelPerm iterator did not reach end" LOCATION);
+            outputs.insert(*iter);
+            ++iter;
+            ++count;
+        }
+
+        if (count != size || outputs.size() != size)
+            throw UnitTestFail("FeistelPerm iterator did not cover its domain" LOCATION);
+    }
+
     void Permutation_bijection_test(const CLP& cmd)
     {
         // Test various sizes for both permutation types

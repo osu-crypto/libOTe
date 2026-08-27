@@ -48,13 +48,14 @@ namespace osuCrypto::LogVole
             }
         }
 
-        task<Buffer> recvFrame(Socket& sock)
+        task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize)
         {
             std::array<u8, kFrameHeaderSize> header{};
             co_await sock.recv(header);
 
             const auto size = readU64(header);
-            if (size > static_cast<u64>(std::numeric_limits<std::size_t>::max()))
+            if (size > maxPayloadSize ||
+				size > static_cast<u64>(std::numeric_limits<std::size_t>::max()))
             {
                 throw std::length_error("LogVole frame is too large");
             }
@@ -72,6 +73,13 @@ namespace osuCrypto::LogVole
         {
             return kFrameHeaderSize + static_cast<u64>(payload.size());
         }
+
+		u64 requirePayloadSize(bool valid, u64 size)
+		{
+			if (!valid)
+				throw std::length_error("LogVole could not derive a frame size bound");
+			return size;
+		}
 
         bool computeTauHi(const Params& params, u32& out)
         {
@@ -197,7 +205,11 @@ namespace osuCrypto::LogVole
             else
             {
                 auto shrinkExpandSock = sock.fork();
-                const auto shrinkExpandPayload = co_await recvFrame(shrinkExpandSock);
+				u64 maxPayload = 0;
+				const bool validPayloadSize =
+					shrinkExpandOfflinePayloadSize(params.mShrinkExpand, maxPayload);
+				const auto shrinkExpandPayload = co_await recvFrame(
+					shrinkExpandSock, requirePayloadSize(validPayloadSize, maxPayload));
                 if (!decode(shrinkExpandPayload, message.mShrinkExpandMessage))
                 {
                     throw std::runtime_error("LogVole receiver could not decode shrink/expand offline message");
@@ -212,7 +224,14 @@ namespace osuCrypto::LogVole
             if (mode == RecursiveMode::Root)
             {
                 auto rootSock = sock.fork();
-                const auto rootPayload = co_await recvFrame(rootSock);
+				u32 tauHi = 0;
+				u64 maxPayload = 0;
+				if (!computeTauHi(params, tauHi))
+					throw std::length_error("LogVole root dimension is invalid");
+				const bool validPayloadSize =
+					rootOfflinePayloadSize(params.mShrinkExpand, tauHi, maxPayload);
+				const auto rootPayload =
+					co_await recvFrame(rootSock, requirePayloadSize(validPayloadSize, maxPayload));
                 if (!decode(rootPayload, message.mRootMessage))
                 {
                     throw std::runtime_error("LogVole receiver could not decode root offline message");
@@ -237,7 +256,9 @@ namespace osuCrypto::LogVole
         ShrinkExpandReceiverState& state,
         Socket& sock)
     {
-        const auto payload = co_await recvFrame(sock);
+		u64 maxPayload = 0;
+		const bool validPayloadSize = shrinkExpandOfflinePayloadSize(input.mParams, maxPayload);
+		const auto payload = co_await recvFrame(sock, requirePayloadSize(validPayloadSize, maxPayload));
 
         ShrinkExpandOfflineMessage message{};
         if (!decode(payload, message))
@@ -281,7 +302,10 @@ namespace osuCrypto::LogVole
 
         co_await sendFrame(sock, encode(request));
 
-        const auto responsePayload = co_await recvFrame(sock);
+		u64 maxPayload = 0;
+		const bool validPayloadSize = keyDerivePayloadSize(input.mParams, request.mTau, maxPayload);
+		const auto responsePayload =
+			co_await recvFrame(sock, requirePayloadSize(validPayloadSize, maxPayload));
 
         KeyDeriveResponse response{};
         if (!decode(responsePayload, response))
@@ -342,7 +366,11 @@ namespace osuCrypto::LogVole
                 digestPayload = encode(digest);
                 co_await sendFrame(rootSock, digestPayload);
 
-                responsePayload = co_await recvFrame(rootSock);
+				u64 maxPayload = 0;
+				const bool validPayloadSize =
+					rootResponsePayloadSize(state.mParams.mShrinkExpand.mRing, maxPayload);
+				responsePayload =
+					co_await recvFrame(rootSock, requirePayloadSize(validPayloadSize, maxPayload));
                 RootResponseMessage response{};
                 if (!decode(responsePayload, response))
                 {
@@ -544,7 +572,10 @@ namespace osuCrypto::LogVole
 
         co_await sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, shrink.mDigest)));
 
-        const auto skXPayload = co_await recvFrame(sock);
+		u64 maxPayload = 0;
+		const bool validPayloadSize = polyPayloadSize(state.mParams.mRing, maxPayload);
+		const auto skXPayload =
+			co_await recvFrame(sock, requirePayloadSize(validPayloadSize, maxPayload));
 
         PolyMessage skXMessage{};
         if (!decode(skXPayload, skXMessage))

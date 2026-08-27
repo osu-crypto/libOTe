@@ -168,10 +168,13 @@ namespace osuCrypto {
          */
         void init(u64 n, block seed = block(34123421, 2134123), u32 numRounds = 4)
         {
-            mN = n;
+            if (n == 0 || n > (1ull << 32))
+                throw std::invalid_argument("Feistel2KPerm domain must fit in a nonzero u32 range.");
             auto totalBits = log2ceil(n);
             if (log2ceil(n) != log2floor(n))
                 throw RTE_LOC;
+
+            mN = n;
 
             mLeftSideBits = totalBits / 2;
             mLeftSideMask = (1ull << mLeftSideBits) - 1;
@@ -292,7 +295,7 @@ namespace osuCrypto {
         struct Iterator 
         {
             const Feistel2KPerm& mFeistel;
-            u32 mIdx = 0;
+            u64 mIdx = 0;
             Iterator(const Feistel2KPerm& feistel, u64 index)
                 : mFeistel(feistel)
                 , mIdx(index)
@@ -415,6 +418,8 @@ namespace osuCrypto {
          */
         void init(u64 n, block seed = block(34123421, 2134123), u32 numRounds = 4)
         {
+            if (n == 0 || n > (1ull << 32))
+                throw std::invalid_argument("FeistelPerm domain must fit in a nonzero u32 range.");
             mN = n;
             // Calculate the next power of 2 that's >= n
             mPow2N = 1ull << log2ceil(n);
@@ -537,6 +542,7 @@ namespace osuCrypto {
             auto& operator++()
             {
                 mFeistelPerm.increment();
+				++mIdx;
                 return *this;
             }
 

@@ -81,6 +81,7 @@ namespace osuCrypto
 		template<typename CorrelationFunc>
 		task<> sendCorrelated(span<block> messages, const CorrelationFunc& corFunc, PRNG& prng, Socket& chl)
 		{
+			MACORO_TRY{
 			auto temp = AlignedUnVector<std::array<block, 2>>(messages.size());
 			auto temp2 = AlignedUnVector<block>(messages.size());
 
@@ -93,6 +94,11 @@ namespace osuCrypto
 			}
 
 			co_await(chl.send(std::move(temp2)));
+
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 
 	};

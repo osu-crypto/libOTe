@@ -10,6 +10,7 @@
 #include <cryptoTools/Crypto/Commit.h>
 #include <cryptoTools/Network/Channel.h>
 
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtCheck.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include <queue>
 
@@ -19,7 +20,11 @@ namespace osuCrypto
 {
 	void KosDotExtReceiver::setBaseOts(span<std::array<block, 2>> baseOTs)
 	{
+		if (baseOTs.size() != baseOtCount())
+			throw std::runtime_error("KosDot base OT count mismatch. " LOCATION);
+
 		mGens.resize(baseOTs.size());
+		mCodeState = std::make_shared<details::KosDotCodeState>();
 		for (u64 i = 0; i < u64(baseOTs.size()); i++)
 		{
 			mGens[i][0].SetSeed(baseOTs[i][0]);
@@ -39,7 +44,9 @@ namespace osuCrypto
 			baseRecvOts[i][1] = mGens[i][1].get<block>();
 		}
 
-		return KosDotExtReceiver(baseRecvOts);
+		auto child = KosDotExtReceiver(baseRecvOts);
+		child.mCodeState = mCodeState;
+		return child;
 	}
 
 	std::unique_ptr<OtExtReceiver> KosDotExtReceiver::split()
@@ -52,7 +59,9 @@ namespace osuCrypto
 			baseRecvOts[i][1] = mGens[i][1].get<block>();
 		}
 
-		return std::make_unique<KosDotExtReceiver>(baseRecvOts);
+		auto child = std::make_unique<KosDotExtReceiver>(baseRecvOts);
+		child->mCodeState = mCodeState;
+		return child;
 	}
 
 
@@ -64,16 +73,20 @@ namespace osuCrypto
 	{
 		MACORO_TRY{
 
+		if (choices.size() != messages.size())
+			throw std::runtime_error("choices and messages must have the same size. " LOCATION);
+
 		auto numOtExt = u64{};
 		auto numSuperBlocks = u64{};
 		auto numBlocks = u64{};
 		auto seed = block{};
 		auto myComm = Commit{};
 		auto choices2 = BitVector{};
+		auto extraChoices = BitVector(128);
 		auto choiceBlocks = span<block>{};
-		auto t0 = Matrix<u8>{};
-		auto messageTemp = Matrix<u8>{};
-		auto mIter = Matrix<u8>::iterator{};
+		auto t0 = Matrix<block>{};
+		auto messageTemp = Matrix<details::KosDotCheckRow>{};
+		auto mIter = Matrix<details::KosDotCheckRow>::iterator{};
 		auto step = u64{};
 		auto uBuff = std::vector<block>{};
 		auto uIter = (block*)nullptr;
@@ -81,9 +94,9 @@ namespace osuCrypto
 		auto cIter = (block*)nullptr;
 		auto uEnd = (block*)nullptr;
 		auto superBlkIdx = u64{};
-		auto theirSeed = block{};
+		auto senderSeeds = std::array<block, 2>{};
 		auto offset = block{};
-		auto correlationData = std::vector<std::array<block, 4>>(2);
+		auto proof = details::KosDotProof{};
 
 		if (hasBaseOts() == false)
 			co_await genBaseOts(prng, chl);
@@ -104,18 +117,22 @@ namespace osuCrypto
 		choices2.resize(numBlocks * 128);
 		choices2 = choices;
 		choices2.resize(numBlocks * 128);
+		extraChoices.randomize(prng);
 		for (u64 i = 0; i < 128; ++i)
 		{
-			choices2[choices.size() + i] = prng.getBit();
+			choices2[choices.size() + i] = extraChoices[i];
 		}
 
 		choiceBlocks = choices2.getSpan<block>();
 		// this will be used as temporary buffers of 128 columns,
 		// each containing 1024 bits. Once transposed, they will be copied
 		// into the T1, T0 buffers for long term storage.
-		t0.resize(mGens.size(), superBlkSize * sizeof(block));
+		t0.resize(mGens.size(), superBlkSize);
+		auto t0Bytes = MatrixView<const u8>(
+			reinterpret_cast<const u8*>(t0.data()),
+			t0.rows(), t0.stride() * sizeof(block));
 
-		messageTemp.resize(messages.size() + 128, sizeof(block) * 2);
+		messageTemp.resize(messages.size() + 128, 1);
 		mIter = messageTemp.begin();
 
 
@@ -140,7 +157,7 @@ namespace osuCrypto
 			// the users next 128 choice bits. This will select what message is receiver.
 			cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
 
-			tIter = (block*)t0.data();
+			tIter = t0.data();
 			memset(t0.data(), 0, superBlkSize * 128 * sizeof(block));
 
 			// transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
@@ -197,18 +214,18 @@ namespace osuCrypto
 
 
 
-			auto mCount = std::min<u64>((messageTemp.end() - mIter) / messageTemp.stride(), 128 * superBlkSize);
+			auto mCount = std::min<u64>(messageTemp.end() - mIter, 128 * superBlkSize);
 
 			MatrixView<u8> tOut(
-				(u8*)&*mIter,
+				reinterpret_cast<u8*>(&*mIter),
 				mCount,
-				messageTemp.stride());
+				sizeof(details::KosDotCheckRow));
 
-			mIter += mCount * messageTemp.stride();
+			mIter += mCount;
 
 			// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 			// each 128 bits wide.
-			transpose(t0, tOut);
+			transpose(t0Bytes, tOut);
 		}
 
 
@@ -217,96 +234,35 @@ namespace osuCrypto
 		// do correlation check and hashing
 		// For the malicious secure OTs, we need a random PRNG that is chosen random
 		// for both parties. So that is what this is.
-		co_await chl.recv(theirSeed);
+		co_await chl.recv(senderSeeds);
 		co_await chl.send(std::move(seed));
 		co_await chl.recv(offset);
 
+		setTimePoint("KosDot.recv.cncSeed");
+
+		if (!mCodeState->initReceiver(senderSeeds[0]))
+			throw std::runtime_error(
+				"KOS-Dot compression map changed for reused base choices. " LOCATION);
+		const auto& code = mCodeState->code();
+
+		auto msg = messageTemp.data();
+		auto checkSeed = seed ^ senderSeeds[1];
+		auto columnCheck = details::kosDotColumnCheck(
+			span<const details::KosDotCheckRow>(msg, messages.size()),
+			span<const details::KosDotCheckRow>(msg + messages.size(), 128),
+			checkSeed);
+		std::copy(columnCheck.begin(), columnCheck.end(), proof.begin());
+		proof.back() = details::kosDotChoiceCheck(
+			choices, extraChoices.blocks()[0], checkSeed);
+
+		for (u64 i = 0; i < messages.size(); ++i)
 		{
-
-			setTimePoint("KosDot.recv.cncSeed");
-
-			PRNG commonPrng(seed ^ theirSeed);
-			PRNG codePrng(theirSeed);
-			LinearCode code;
-			code.random(codePrng, mGens.size(), 128);
-
-			// this buffer will be sent to the other party to prove we used the
-			// same value of r in all of the column vectors...
-			auto& x = correlationData[0];
-			auto& t = correlationData[1];
-
-			x = t = { ZeroBlock,ZeroBlock, ZeroBlock, ZeroBlock };
-			block ti1, ti2, ti3, ti4;
-
-			u64 doneIdx = (0);
-
-			std::array<block, 2> zeroOneBlk{ ZeroBlock, AllOneBlock };
-			std::array<block, 128> challenges, challenges2;
-
-			std::array<block, 8> expendedChoiceBlk;
-			std::array<std::array<u8, 16>, 8>& expendedChoice = *reinterpret_cast<std::array<std::array<u8, 16>, 8>*>(&expendedChoiceBlk);
-
-			block mask = block(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
-
-			//std::cout << IoStream::lock;
-
-			auto msg = (std::array<block, 2>*)messageTemp.data();
-
-			u64 bb = (messageTemp.bounds()[0] + 127) / 128;
-			for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
-			{
-				commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
-				commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges2.data());
-
-				u64 stop0 = std::min<u64>(messages.size(), doneIdx + 128);
-				u64 stop1 = std::min<u64>(messageTemp.bounds()[0], doneIdx + 128);
-
-				expendedChoiceBlk[0] = mask & choiceBlocks[blockIdx].srai_epi16(0);
-				expendedChoiceBlk[1] = mask & choiceBlocks[blockIdx].srai_epi16(1);
-				expendedChoiceBlk[2] = mask & choiceBlocks[blockIdx].srai_epi16(2);
-				expendedChoiceBlk[3] = mask & choiceBlocks[blockIdx].srai_epi16(3);
-				expendedChoiceBlk[4] = mask & choiceBlocks[blockIdx].srai_epi16(4);
-				expendedChoiceBlk[5] = mask & choiceBlocks[blockIdx].srai_epi16(5);
-				expendedChoiceBlk[6] = mask & choiceBlocks[blockIdx].srai_epi16(6);
-				expendedChoiceBlk[7] = mask & choiceBlocks[blockIdx].srai_epi16(7);
-
-				u64 i = 0, dd = doneIdx;
-				for (; dd < stop0; ++dd, ++i)
-				{
-					auto maskBlock = zeroOneBlk[expendedChoice[i % 8][i / 8]];
-					x[0] = x[0] ^ (challenges[i] & maskBlock);
-					x[1] = x[1] ^ (challenges2[i] & maskBlock);
-
-					mul256(msg[dd][0], msg[dd][1], challenges[i], challenges2[i], ti1, ti2, ti3, ti4);
-					t[0] = t[0] ^ ti1;
-					t[1] = t[1] ^ ti2;
-					t[2] = t[2] ^ ti3;
-					t[3] = t[3] ^ ti4;
-
-					code.encode((u8*)msg[dd].data(), (u8*)&messages[dd]);
-
-					messages[dd] = messages[dd] ^ (maskBlock & offset);
-				}
-
-				for (; dd < stop1; ++dd, ++i)
-				{
-
-					x[0] = x[0] ^ (challenges[i] & zeroOneBlk[expendedChoice[i % 8][i / 8]]);
-					x[1] = x[1] ^ (challenges2[i] & zeroOneBlk[expendedChoice[i % 8][i / 8]]);
-
-					mul256(msg[dd][0], msg[dd][1], challenges[i], challenges2[i], ti1, ti2, ti3, ti4);
-					t[0] = t[0] ^ ti1;
-					t[1] = t[1] ^ ti2;
-					t[2] = t[2] ^ ti3;
-					t[3] = t[3] ^ ti4;
-				}
-
-
-				doneIdx = stop1;
-			}
+			code.encode(reinterpret_cast<u8*>(msg[i].data()),
+				reinterpret_cast<u8*>(&messages[i]));
+			messages[i] ^= offset & zeroAndAllOne[choices[i]];
 		}
 
-		co_await chl.send(std::move(correlationData));
+		co_await chl.send(std::move(proof));
 		setTimePoint("KosDot.recv.done");
 		static_assert(gOtExtBaseOtCount == 128, "expecting 128");
 

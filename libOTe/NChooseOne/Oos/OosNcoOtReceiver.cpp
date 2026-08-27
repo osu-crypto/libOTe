@@ -14,26 +14,45 @@ namespace osuCrypto
 {
 	task<> OosNcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Socket& chl)
 	{
-		MACORO_TRY{
-		if (u64(baseRecvOts.size()) != u64(mGens.size()))
-			throw std::runtime_error("rt error at " LOCATION);
+		if (mGens.empty() || u64(baseRecvOts.size()) != u64(mGens.size()))
+			throw std::invalid_argument("OOS base OT count does not match the configured code. " LOCATION);
 
+		MACORO_TRY{
 		auto delta = BitVector(getBaseOTCount());
 		delta.randomize(prng);
+		auto nextGens = std::vector<std::array<PRNG, 2>>(mGens.size());
 
 		auto iter = delta.begin();
-		for (u64 i = 0; i < mGens.size(); i++)
+		for (u64 i = 0; i < nextGens.size(); i++)
 		{
-			mGens[i][0].SetSeed(baseRecvOts[i][0 ^ *iter]);
-			mGens[i][1].SetSeed(baseRecvOts[i][1 ^ *iter]);
+			nextGens[i][0].SetSeed(baseRecvOts[i][0 ^ *iter]);
+			nextGens[i][1].SetSeed(baseRecvOts[i][1 ^ *iter]);
 			++iter;
 		}
 
+		// The peer cannot install the transformed base OTs until it receives
+		// delta. Invalidate the old correlation before this ambiguous transport
+		// boundary and publish the replacement only after the send completes.
+		mHasBase = false;
+		for (auto& gens : mGens)
+		{
+			gens[0] = PRNG{};
+			gens[1] = PRNG{};
+		}
+		// Use the reference send so this await observes transport completion.
+		// The moving overload only waits until the message is buffered.
+		co_await chl.send(delta);
+		mGens = std::move(nextGens);
 		mHasBase = true;
-		co_await chl.send(std::move(delta));
 
 
 		} MACORO_CATCH(eptr) {
+			mHasBase = false;
+			for (auto& gens : mGens)
+			{
+				gens[0] = PRNG{};
+				gens[1] = PRNG{};
+			}
 			if (!chl.closed()) co_await chl.close();
 			std::rethrow_exception(eptr);
 		}
@@ -56,6 +75,12 @@ namespace osuCrypto
 	task<> OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
+		if (numOtExt > maxNcoOtCount)
+			throw std::length_error("OOS OT count exceeds the supported limit. " LOCATION);
+		if (mStatSecParam > maxNcoStatSecParam)
+			throw std::invalid_argument("OOS statistical security parameter exceeds the supported limit. " LOCATION);
+		if (mMalicious && (mStatSecParam == 0 || mStatSecParam % 8))
+			throw std::invalid_argument("malicious OOS requires a nonzero, byte-aligned statistical security parameter. " LOCATION);
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first" LOCATION);
 
@@ -71,8 +96,8 @@ namespace osuCrypto
 		// this will be used as temporary buffers of 128 columns,
 		// each containing 1024 bits. Once transposed, they will be copied
 		// into the T1, T0 buffers for long term storage.
-		AlignedUnVector<std::array<block, superBlkSize>> t0(128);
-		AlignedUnVector<std::array<block, superBlkSize>> t1(128);
+		AlignedUnVector<block> t0(128 * superBlkSize);
+		AlignedUnVector<block> t1(128 * superBlkSize);
 
 		// round up and add the extra OT used in the check at the end
 		numOtExt = roundUpTo(numOtExt + mStatSecParam, 128);
@@ -97,12 +122,7 @@ namespace osuCrypto
 		mT0.resize(numOtExt, numCols / 128);
 		mT1->resize(numOtExt, numCols / 128);
 
-		// An extra debugging check that can be used. Each one
-		// gets marked as used, makes use we don't encode twice.
-#ifndef NDEBUG
-		mEncodeFlags = std::vector<u8>();
-		mEncodeFlags.resize(numOtExt, 0);
-#endif
+		mEncodeFlags.assign(numOtExt, 0);
 
 		// NOTE: We do not transpose a bit-matrix of size numCol * numCol.
 		//   Instead we break it down into smaller chunks. We do 128 columns
@@ -129,8 +149,8 @@ namespace osuCrypto
 					// AES in counter mode acting as a PRNG. We don't use the normal
 					// PRNG interface because that would result in a data copy when
 					// we mode it into the T0,T1 matrices. Instead we do it directly.
-					mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, ((block*)t0.data() + superBlkSize * tIdx));
-					mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, ((block*)t1.data() + superBlkSize * tIdx));
+					mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, t0.data() + superBlkSize * tIdx);
+					mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, t1.data() + superBlkSize * tIdx);
 
 					// increment the counter mode idx.
 					mGens[colIdx][0].mBlockIdx += superBlkSize;
@@ -139,8 +159,8 @@ namespace osuCrypto
 
 				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 				// each 128 bits wide.
-				transpose128x1024(t0[0].data());
-				transpose128x1024(t1[0].data());
+				transpose128x1024(t0.data());
+				transpose128x1024(t1.data());
 
 				// This is the index of where we will store the matrix long term.
 				// doneIdx is the starting row. i is the offset into the blocks of 128 bits.
@@ -154,8 +174,8 @@ namespace osuCrypto
 					// because we transposed 1024 rows, the indexing gets a bit weird. But this
 					// is the location of the next row that we want. Keep in mind that we had long
 					// **contiguous** columns.
-					block* __restrict t0Iter = ((block*)t0.data()) + j;
-					block* __restrict t1Iter = ((block*)t1.data()) + j;
+					block* __restrict t0Iter = t0.data() + j;
+					block* __restrict t1Iter = t1.data() + j;
 
 					// do the copy!
 					for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
@@ -190,6 +210,7 @@ namespace osuCrypto
 		raw.mMalicious = mMalicious;
 		raw.mStatSecParam = mStatSecParam;
 		raw.mInputByteCount = mInputByteCount;
+		raw.mInputBitCount = mInputBitCount;
 		raw.mGens.resize(mGens.size());
 
 		std::vector<std::array<block, 2>> base(mGens.size());
@@ -218,18 +239,17 @@ namespace osuCrypto
 		void* dest,
 		u64 destSize)
 	{
-#ifndef NDEBUG
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first");
-
-		if (eq(mT0[otIdx][0], ZeroBlock))
-			throw std::runtime_error("uninitialized OT extension");
-
+		if (otIdx >= mT0.rows() || !mT1)
+			throw std::out_of_range("OOS receiver OT index is not initialized. " LOCATION);
 		if (mEncodeFlags[otIdx])
 			throw std::runtime_error("encode can only be called once per otIdx");
-
+		if (destSize == 0 || destSize > RandomOracle::HashSize)
+			throw std::invalid_argument("invalid OOS encoding size. " LOCATION);
+		if (input == nullptr || dest == nullptr)
+			throw std::invalid_argument("null OOS encoding buffer. " LOCATION);
 		mEncodeFlags[otIdx] = 1;
-#endif // !NDEBUG
 
 		block* t0Val = mT0.data() + mT0.stride() * otIdx;
 		block* t1Val = mT1->data() + mT0.stride() * otIdx;
@@ -291,13 +311,11 @@ namespace osuCrypto
 	void OosNcoOtReceiver::zeroEncode(u64 otIdx)
 	{
 		//std::cout << "encode[" << otIdx <<"] = * " << std::endl;
-
-#ifndef NDEBUG
-		if (eq(mT0[otIdx][0], ZeroBlock))
-			throw std::runtime_error("uninitialized OT extension");
-
+		if (otIdx >= mT0.rows() || !mT1)
+			throw std::out_of_range("OOS receiver OT index is not initialized. " LOCATION);
+		if (mEncodeFlags[otIdx])
+			throw std::runtime_error("encode can only be called once per otIdx");
 		mEncodeFlags[otIdx] = 1;
-#endif // !NDEBUG
 
 		block* t0Val = mT0.data() + mT0.stride() * otIdx;
 		block* t1Val = mT1->data() + mT0.stride() * otIdx;
@@ -336,17 +354,19 @@ namespace osuCrypto
 		u64 statSecParam,
 		u64 inputBitCount)
 	{
-		if (inputBitCount <= 76)
-		{
+		if (statSecParam > maxNcoStatSecParam)
+			throw std::invalid_argument("OOS statistical security parameter exceeds the supported limit. " LOCATION);
+		if (maliciousSecure && (statSecParam == 0 || statSecParam % 8))
+			throw std::invalid_argument("malicious OOS requires a nonzero, byte-aligned statistical security parameter. " LOCATION);
+		if (inputBitCount == 0 || inputBitCount > 76)
+			throw std::invalid_argument("OOS input bit count must be between 1 and 76. " LOCATION);
 
-			//mCode.loadTxtFile("C:/Users/peter/repo/libOTe/libOTe/Tools/bch511.txt");
-			mCode.load(bch511_binary, sizeof(bch511_binary));
-		}
-		else
-			throw std::runtime_error("76 bits is currently the max. larger inputs can be supported on request.... " LOCATION);
+		//mCode.loadTxtFile("C:/Users/peter/repo/libOTe/libOTe/Tools/bch511.txt");
+		mCode.load(bch511_binary, sizeof(bch511_binary));
 
 
 		mInputByteCount = (inputBitCount + 7) / 8;
+		mInputBitCount = inputBitCount;
 		mStatSecParam = statSecParam;
 		mMalicious = maliciousSecure;
 		mGens.resize(roundUpTo(mCode.codewordBitSize(), 128));
@@ -371,14 +391,13 @@ namespace osuCrypto
 	{
 		MACORO_TRY{
 		auto sub = T1Sub{};
-#ifndef NDEBUG
+		if (mCorrectionIdx > mT0.rows() || sendCount > mT0.rows() - mCorrectionIdx)
+			throw std::out_of_range("OOS correction range exceeds initialized OTs. " LOCATION);
 		for (u64 i = mCorrectionIdx; i < sendCount + mCorrectionIdx; ++i)
 		{
 			if (mEncodeFlags[i] == 0)
 				throw std::runtime_error("an item was not encoded. " LOCATION);
 		}
-
-#endif
 		// a shared pointer to T1 and a container to
 		// some sub region of T1. Used to send data.
 		sub.mMem = mT1;
@@ -386,9 +405,8 @@ namespace osuCrypto
 			mT1->data() + (mCorrectionIdx * mT0.stride()),
 			mT0.stride() * sendCount
 		);
-		mCorrectionIdx += sendCount;
-
 		co_await chl.send(std::move(sub));
+		mCorrectionIdx += sendCount;
 
 		} MACORO_CATCH(eptr) {
 			if (!chl.closed()) co_await chl.close();
@@ -415,8 +433,6 @@ namespace osuCrypto
 
 	task<> OosNcoOtReceiver::sendFinalization(Socket& chl, block seed)
 	{
-
-#ifndef NDEBUG
 		for (u64 i = 0; i < mCorrectionIdx; ++i)
 		{
 			if (mEncodeFlags[i] == 0)
@@ -424,7 +440,6 @@ namespace osuCrypto
 				throw std::runtime_error("All messages must be encoded before check is called. " LOCATION);
 			}
 		}
-#endif
 
 		PRNG prng(seed);
 

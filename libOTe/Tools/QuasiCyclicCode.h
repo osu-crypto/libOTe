@@ -21,6 +21,9 @@
 #include "LDPC/Mtx.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include <cmath>
+#include <cstring>
+#include <limits>
+#include <stdexcept>
 
 namespace osuCrypto
 {
@@ -51,8 +54,25 @@ namespace osuCrypto
 
         void init2(u64 messageSize, u64 codeSize, block seed = block(4321234327842623191,423723984231774321))
         {
+			if (messageSize == 0)
+				throw std::invalid_argument("Quasi-cyclic message size must be nonzero. " LOCATION);
+			if (codeSize <= messageSize)
+				throw std::invalid_argument("Quasi-cyclic code size must exceed its message size. " LOCATION);
+
+			const auto primeModulus = nextPrime(messageSize);
+			const auto paritySize = codeSize - messageSize;
+			const auto scalerMinusOne = 1 + (paritySize - 1) / primeModulus;
+			const auto polyBlockSize = 1 + (primeModulus - 1) / 128;
+			if (scalerMinusOne > std::numeric_limits<u64>::max() / polyBlockSize)
+				throw std::invalid_argument("Quasi-cyclic polynomial dimensions overflow. " LOCATION);
+			const auto multiPolyBlockSize = scalerMinusOne * polyBlockSize;
+			if (multiPolyBlockSize > std::numeric_limits<u64>::max() / 128)
+				throw std::invalid_argument("Quasi-cyclic transpose dimensions overflow. " LOCATION);
+			if (polyBlockSize > std::numeric_limits<i64>::max() / 2)
+				throw std::invalid_argument("Quasi-cyclic polynomial exceeds the FFT interface. " LOCATION);
+
             mMessageSize = messageSize;
-            mPrimeModulus = nextPrime(messageSize);
+			mPrimeModulus = primeModulus;
             mCodeSize = codeSize;
             mSeed = seed;
         }
@@ -63,8 +83,31 @@ namespace osuCrypto
                 throw RTE_LOC;
             if (u64(in.data()) % 16)
                 throw RTE_LOC;
+			if (dest.empty())
+				return;
+			if (in.empty())
+				throw std::invalid_argument("Shifted input must be nonempty. " LOCATION);
 
-            if (bitShift >= 64)
+            if (bitShift == 64)
+            {
+                u8* inPtr = ((u8*)in.data()) + sizeof(u64);
+
+                auto end = std::min<u64>(dest.size(), in.size() - 1);
+                for (u64 i = 0; i < end; ++i, inPtr += sizeof(block))
+                    dest[i] = dest[i] ^ toBlock(inPtr);
+
+                if (end != static_cast<u64>(dest.size()))
+                {
+                    u64 b0;
+                    memcpy(&b0, inPtr, sizeof(b0));
+
+                    u64 d;
+                    memcpy(&d, dest[end].data(), sizeof(d));
+                    d ^= b0;
+                    memcpy(dest[end].data(), &d, sizeof(d));
+                }
+            }
+            else if (bitShift > 64)
             {
                 bitShift -= 64;
                 const int bitShift2 = 64 - bitShift;
@@ -85,10 +128,14 @@ namespace osuCrypto
 
                 if (end != static_cast<u64>(dest.size()))
                 {
-                    u64 b0 = *(u64*)inPtr;
+                    u64 b0;
+                    memcpy(&b0, inPtr, sizeof(b0));
                     b0 = (b0 >> bitShift);
 
-                    *(u64*)(&dest[end]) ^= b0;
+                    u64 d;
+                    memcpy(&d, dest[end].data(), sizeof(d));
+                    d ^= b0;
+                    memcpy(dest[end].data(), &d, sizeof(d));
                 }
             }
             else if (bitShift)
@@ -121,12 +168,16 @@ namespace osuCrypto
 
                     dest[end] = dest[end] ^ b0;
 
-                    u64 b1 = *(u64*)(inPtr + sizeof(u64));
+                    u64 b1;
+                    memcpy(&b1, inPtr + sizeof(u64), sizeof(b1));
                     b1 = (b1 << bitShift2);
 
                     //bv1.append((u8*)&b1, 64);
 
-                    *(u64*)&dest[end] ^= b1;
+                    u64 d;
+                    memcpy(&d, dest[end].data(), sizeof(d));
+                    d ^= b1;
+                    memcpy(dest[end].data(), &d, sizeof(d));
                 }
 
 
@@ -146,8 +197,15 @@ namespace osuCrypto
 
         static void modp(span<block> dest, span<block> in, u64 p)
         {
-            auto pBlocks = (p + 127) / 128;
-            auto pBytes = (p + 7) / 8;
+			if (p == 0)
+				throw std::invalid_argument("Polynomial modulus must be nonzero. " LOCATION);
+			if (in.size() > std::numeric_limits<u64>::max() / 128)
+				throw std::invalid_argument("Polynomial input bit length overflows. " LOCATION);
+			if (dest.size() > std::numeric_limits<u64>::max() / sizeof(block))
+				throw std::invalid_argument("Polynomial output byte length overflows. " LOCATION);
+
+			const auto pBlocks = 1 + (p - 1) / 128;
+			const auto pBytes = 1 + (p - 1) / 8;
 
             if (static_cast<u64>(dest.size()) < pBlocks)
                 throw RTE_LOC;
@@ -155,18 +213,19 @@ namespace osuCrypto
             if (static_cast<u64>(in.size()) < pBlocks)
                 throw RTE_LOC;
 
-            auto count = (in.size() * 128 + p - 1) / p;
+			const auto inputBits = in.size() * 128;
+			const auto count = 1 + (inputBits - 1) / p;
 
             memcpy(dest.data(), in.data(), pBytes);
 
             for (u64 i = 1; i < count; ++i)
             {
                 auto begin = i * p;
-                auto end = std::min<u64>(i * p + p, in.size() * 128);
+				auto end = begin + std::min<u64>(p, inputBits - begin);
 
                 auto shift = begin & 127;
                 auto beginBlock = in.data() + (begin / 128);
-                auto endBlock = in.data() + ((end + 127) / 128);
+				auto endBlock = in.data() + end / 128 + (end % 128 != 0);
 
                 if (endBlock > in.data() + in.size())
                     throw RTE_LOC;
@@ -250,14 +309,14 @@ namespace osuCrypto
             FFTPoly cPoly;
 
             AlignedUnVector<block> temp128(2 * polyBlockSize);
+            AlignedUnVector<u64> randomPoly(polyU64Size);
 
             FFTPoly::DecodeCache cache;
             for (u64 s = 0; s < scalerMinusOne; s += 1)
             {
-                auto a64 = spanCast<u64>(temp128).subspan(polyU64Size);
                 PRNG pubPrng(toBlock(s) ^ mSeed);
-                pubPrng.get(a64.data(), a64.size());
-                a[s].encode(a64);
+                pubPrng.get(randomPoly.data(), randomPoly.size());
+                a[s].encode(randomPoly);
             }
 
             for (u64 i = 0; i < rows; i += 1)
@@ -266,9 +325,9 @@ namespace osuCrypto
                 for (u64 s = 0; s < scalerMinusOne; ++s)
                 {
                     auto& aPoly = a[s];
-                    auto b64 = spanCast<u64>(XT[i]).subspan(s * polyU64Size, polyU64Size);
+                    auto b = XT[i].subspan(s * polyBlockSize, polyBlockSize);
 
-                    bPoly.encode(b64);
+                    bPoly.encode(b);
 
                     if (s == 0)
                     {
@@ -282,7 +341,7 @@ namespace osuCrypto
                 }
 
                 // decode c[i] and store it at t64Ptr
-                cPoly.decode(spanCast<u64>(temp128), cache, true);
+                cPoly.decode(temp128, cache, true);
 
                 // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
                 modp(cModP1[i], temp128, mPrimeModulus);

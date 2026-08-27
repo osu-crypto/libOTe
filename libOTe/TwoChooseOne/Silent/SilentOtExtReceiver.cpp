@@ -69,11 +69,14 @@ namespace osuCrypto
 		if (isConfigured() == false)
 			throw std::runtime_error("configure(...) must be called first.");
 
-		// Validate input sizes
-		if (static_cast<u64>(recvBaseOts.size()) != baseCount().mBaseOtCount)
+		// Validate every input before installing any base state.
+		auto count = baseCount();
+		if (static_cast<u64>(recvBaseOts.size()) != count.mBaseOtCount)
 			throw std::runtime_error("wrong number of silent base OTs");
+		if (choices.size() != count.mBaseOtCount)
+			throw std::runtime_error("wrong number of silent base OT choices");
 
-		if (baseA.size() != baseCount().mBaseVoleCount || baseC.size() != baseCount().mBaseVoleCount)
+		if (baseA.size() != count.mBaseVoleCount || baseC.size() != count.mBaseVoleCount)
 			throw std::runtime_error("wrong number of silent base VOLEs");
 
 		// Split base OTs into PPRF OTs and malicious check OTs
@@ -123,6 +126,11 @@ namespace osuCrypto
 		if (!mOtExtRecver)
 			throw RTE_LOC;
 		ptr->mOtExtRecver = mOtExtRecver->splitBase();
+		ptr->mNumThreads = mNumThreads;
+		ptr->mLpnMultType = mLpnMultType;
+		ptr->mSecurityType = mSecurityType;
+		ptr->mNoiseDist = mNoiseDist;
+		ptr->mDebug = mDebug;
 		return ret;
 #else
 		throw std::runtime_error("softSpoken ot must be enabled. " LOCATION);
@@ -136,7 +144,16 @@ namespace osuCrypto
 	// Checks if the required base correlations are available
 	bool SilentOtExtReceiver::hasBaseCors() const
 	{
-		return gen().hasBaseOts() && mBaseA.size() == baseCount().mBaseVoleCount;
+		if (!isConfigured())
+			return false;
+
+		auto count = baseCount();
+		auto hasMalCheck = mSecurityType != SilentSecType::Malicious ||
+			(mMalCheckOts.size() == 128 && mMalCheckChoice.size() == 128);
+		return gen().hasBaseOts() &&
+			mBaseA.size() == count.mBaseVoleCount &&
+			mBaseC.size() == count.mBaseVoleCount &&
+			hasMalCheck;
 	}
 
 	// Samples the choice bits for base OTs
@@ -215,6 +232,7 @@ namespace osuCrypto
 			// Extract base VOLE A values
 			std::copy(msg.begin() + msg.size() - baseA.size(), msg.end(), baseA.begin());
 			msg.resize(msg.size() - baseA.size());
+			choice.resize(msg.size());
 
 			// For stationary noise, we need to generate base VOLEs
 			if (baseA.size())
@@ -266,38 +284,56 @@ namespace osuCrypto
 		SdNoiseDistribution noiseType,
 		MultType multType)
 	{
-		mLpnMultType = multType;
-		mSecurityType = malType;
-		mNumThreads = numThreads;
-		u64 secParam = 128;
-		mRequestNumOts = numOTs;
-		mNoiseDist = noiseType;
+		if (numOTs == 0)
+			throw std::invalid_argument("Silent OT count must be nonzero. " LOCATION);
 
-		// Configure based on syndrome decoding parameters
-		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mLpnMultType, noiseType, 1);
-		mNumPartitions = param.mNumPartitions;
-		mSizePer = param.mSizePer;
-		mNoiseVecSize = param.mNoiseVectorSize;
-		mCodeSeed = block(12528943721987127, 98743297823479812);
+		(void)scaler;
+		if (malType != SilentSecType::SemiHonest &&
+			malType != SilentSecType::Malicious)
+			throw std::invalid_argument("Silent security type not supported. " LOCATION);
 
-		// Initialize the appropriate PPRF based on noise distribution
+		constexpr u64 secParam = 128;
+		auto param = syndromeDecodingConfigure(secParam, numOTs, multType, noiseType, 1);
+		auto format = PprfOutputFormat{};
+
 		if (SdNoiseDistribution::Regular == noiseType)
 		{
-			mGenVar.template emplace<0>();  // Use RegularPprfSender
-			mPprfFormat = PprfOutputFormat::Interleaved;
+			format = PprfOutputFormat::Interleaved;
 		}
 		else if (SdNoiseDistribution::Stationary == noiseType)
 		{
-			mGenVar.template emplace<1>();  // Use StationaryPprfSender
-			mPprfFormat = PprfOutputFormat::ByTreeIndex;
+			format = PprfOutputFormat::ByTreeIndex;
 		}
 		else
 		{
 			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
 		}
+		pprf::validateConfigure(param.mSizePer, param.mNumPartitions);
 
-		// Configure the PPRF generator
-		gen().configure(mSizePer, mNumPartitions);
+		if (SdNoiseDistribution::Regular == noiseType)
+			mGenVar.template emplace<0>();
+		else
+			mGenVar.template emplace<1>();
+		std::visit([&](auto& gen) {
+			gen.configure(param.mSizePer, param.mNumPartitions);
+			}, mGenVar);
+		mLpnMultType = multType;
+		mSecurityType = malType;
+		mNumThreads = numThreads;
+		mRequestNumOts = numOTs;
+		mNoiseDist = noiseType;
+		mNumPartitions = param.mNumPartitions;
+		mSizePer = param.mSizePer;
+		mNoiseVecSize = param.mNoiseVectorSize;
+		mPprfFormat = format;
+		mCodeSeed = block(12528943721987127, 98743297823479812);
+		mC = {};
+		mA = {};
+		mEncodeTemp = {};
+		mMalCheckOts = {};
+		mMalCheckChoice = {};
+		mBaseA = {};
+		mBaseC = {};
 	}
 
 	//sigma = 0   Receiver
@@ -384,6 +420,9 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
+		if (choices.size() != messages.size())
+			throw std::invalid_argument("Silent OT choices and messages must have the same size. " LOCATION);
+
 		MACORO_TRY{
 			// First perform random OT
 			auto randChoice = BitVector(messages.size());
@@ -408,6 +447,9 @@ namespace osuCrypto
 		OTType type)
 	{
 		MACORO_TRY{
+			if (type != OTType::Random && type != OTType::Correlated)
+				throw std::invalid_argument("Silent OT type not supported. " LOCATION);
+
 			// Determine choice bit packing based on OT type
 			auto packing = (type == OTType::Random) ?
 				ChoiceBitPacking::True :
@@ -459,6 +501,10 @@ namespace osuCrypto
 		ChoiceBitPacking type)
 	{
 		MACORO_TRY{
+		if (type != ChoiceBitPacking::False &&
+			type != ChoiceBitPacking::True)
+			throw std::invalid_argument("Silent choice-bit packing not supported. " LOCATION);
+
 		auto gapVals = std::vector<block>{};
 		auto rT = MatrixView<block>{};
 
@@ -467,7 +513,7 @@ namespace osuCrypto
 		// Auto-configure if needed
 		if (isConfigured() == false)
 		{
-			configure(n, 2, mNumThreads, mSecurityType);
+			configure(n, 2, mNumThreads, mSecurityType, mNoiseDist, mLpnMultType);
 		}
 
 		if (n != mRequestNumOts)
@@ -534,6 +580,7 @@ namespace osuCrypto
 			mC.resize(mRequestNumOts);
 
 		} MACORO_CATCH(eptr) {
+			clear();
 			if (!chl.closed()) co_await chl.close();
 			std::rethrow_exception(eptr);
 		}
@@ -612,11 +659,13 @@ namespace osuCrypto
 			throw RTE_LOC;
 		if ((u64)messages.size() != mRequestNumOts)
 			throw RTE_LOC;
+		if ((u64)mA.size() != mRequestNumOts)
+			throw std::logic_error("Silent OT receiver hash state is not ready. " LOCATION);
 
 		auto cIter = choices.begin();
 		auto n8 = mRequestNumOts / 8 * 8;
-		auto m = &messages[0];
-		auto r = &mA[0];
+		auto m = messages.data();
+		auto r = mA.data();
 
 		if (type == ChoiceBitPacking::True)
 		{
@@ -693,6 +742,10 @@ namespace osuCrypto
 	// Compresses the sparse vector to generate dense vector
 	void SilentOtExtReceiver::compress(ChoiceBitPacking packing)
 	{
+		if (packing != ChoiceBitPacking::False &&
+			packing != ChoiceBitPacking::True)
+			throw std::invalid_argument("Silent choice-bit packing not supported. " LOCATION);
+
 		auto points = getPoints();
 
 		if (packing == ChoiceBitPacking::True)
@@ -911,15 +964,19 @@ namespace osuCrypto
 	// Clears internal buffers and state
 	void SilentOtExtReceiver::clear()
 	{
+		std::visit([](auto& gen) { gen.clear(); }, mGenVar);
 		mNoiseVecSize = 0;
 		mRequestNumOts = 0;
 		mSizePer = 0;
-
+		mNumPartitions = 0;
 		mC = {};
 		mA = {};
-
-		if (isConfigured())
-			gen().clear();
+		mEncodeTemp = {};
+		mMalCheckOts = {};
+		mMalCheckChoice = {};
+		mBaseA = {};
+		mBaseC = {};
+		mCodeSeed = ZeroBlock;
 	}
 }
 #endif

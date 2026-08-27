@@ -30,14 +30,26 @@ namespace osuCrypto {
             mIsMalicious = false;
         }
         IknpOtExtSender(const IknpOtExtSender&) = delete;
-        IknpOtExtSender(IknpOtExtSender&&) = default;
-        IknpOtExtSender& operator=(IknpOtExtSender&& v) = default;
+        IknpOtExtSender(IknpOtExtSender&& v)
+            : KosOtExtSender(std::move(v))
+        {
+            mIsMalicious = false;
+            v.mIsMalicious = false;
+        }
+        IknpOtExtSender& operator=(IknpOtExtSender&& v)
+        {
+            if (this != &v)
+                KosOtExtSender::operator=(std::move(v));
+            mIsMalicious = false;
+            v.mIsMalicious = false;
+            return *this;
+        }
 
         IknpOtExtSender(
             span<block> baseRecvOts,
             const BitVector& choices)
+            : IknpOtExtSender()
         {
-            mIsMalicious = false;
             setBaseOts(baseRecvOts, choices);
         }
         virtual ~IknpOtExtSender() = default;
@@ -49,7 +61,13 @@ namespace osuCrypto {
         {
             IknpOtExtSender r;
             static_cast<KosOtExtSender&>(r) = static_cast<KosOtExtSender&>(*this).splitBase();
+            r.mIsMalicious = false;
             return r;
+        }
+
+        std::unique_ptr<OtExtSender> split() override
+        {
+            return std::make_unique<IknpOtExtSender>(splitBase());
         }
 
 

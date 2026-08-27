@@ -29,6 +29,7 @@
 #include "libOTe_Tests/BinarySolver_Tests.h"
 #include "libOTe_Tests/RingLpn_Tests.h"
 #include "libOTe_Tests/Goldilocks_Tests.h"
+#include "libOTe_Tests/Gmw_Tests.h"
 #include "libOTe_Tests/UInt_Tests.h"
 #include "libOTe_Tests/Permutation_Tests.h"
 #include "libOTe_Tests/BlkAccCode_Tests.h"
@@ -38,6 +39,8 @@
 using namespace osuCrypto;
 namespace tests_libOTe
 {
+	void TungstenCode_Audit_Test(const CLP& cmd);
+
 	TestCollection Tests([](TestCollection& tc)
 		{
 
@@ -45,10 +48,12 @@ namespace tests_libOTe
 			tc.add("Tools_Transpose_Test                    ", Tools_Transpose_Test);
 			tc.add("Tools_Transpose_View_Test               ", Tools_Transpose_View_Test);
 			tc.add("Tools_Transpose_Bench                   ", Tools_Transpose_Bench);
+			tc.add("Tools_Arithmetic_Audit_Test             ", Tools_Arithmetic_Audit_Test);
 
 			tc.add("Tools_LinearCode_Test                   ", Tools_LinearCode_Test);
 			tc.add("Tools_LinearCode_sub_Test               ", Tools_LinearCode_sub_Test);
 			tc.add("Tools_LinearCode_rep_Test               ", Tools_LinearCode_rep_Test);
+			tc.add("Tools_LinearCode_Audit_Test             ", Tools_LinearCode_Audit_Test);
 
 			tc.add("Tools_bitShift_test                     ", Tools_bitShift_test);
 			tc.add("Tools_modp_test                         ", Tools_modp_test);
@@ -59,19 +64,24 @@ namespace tests_libOTe
 			tc.add("Mtx_add_test                            ", tests::Mtx_add_test);
 			tc.add("Mtx_mult_test                           ", tests::Mtx_mult_test);
 			tc.add("Mtx_invert_test                         ", tests::Mtx_invert_test);
+			tc.add("Mtx_Audit_Test                          ", tests::Mtx_Audit_Test);
 
 			tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
 			tc.add("EACode_weight_test                      ", EACode_weight_test);
+			tc.add("EACode_config_test                      ", EACode_config_test);
 
 			tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
+			tc.add("ExConvCode_Audit_Test                   ", ExConvCode_Audit_Test);
 			tc.add("ExConvCode_weight_test                  ", ExConvCode_weight_test);
 
 			tc.add("TungstenCode_encode_test                ", TungstenCode_encode_test);
 			tc.add("TungstenCode_weight_test                ", TungstenCode_weight_test);
+			tc.add("TungstenCode_Audit_Test                 ", TungstenCode_Audit_Test);
 
 			tc.add("Permutation_bijection                    ", Permutation_bijection_test);
 			tc.add("Permutation_data                         ", Permutation_data_test);
 			tc.add("Permutation_chunk                        ", Permutation_chunk_test);
+			tc.add("Permutation_Audit_Test                  ", Permutation_Audit_Test);
 
 			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
 			tc.add("RegularDpf_MultByte_Test                ", RegularDpf_MultByte_Test);
@@ -89,6 +99,7 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Vec_Test                      ", SparseDpf_Vec_Test);
 			tc.add("SparseDpf_Punct_Test                    ", SparseDpf_Punct_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
+			tc.add("Dpf_Audit_Test                          ", Dpf_Audit_Test);
 
 			tc.add("BinSolver_multiply_test                 ", BinSolver_multiply_test);
 			tc.add("BinSolver_multiplyMtx_test              ", BinSolver_multiplyMtx_test);
@@ -120,6 +131,7 @@ namespace tests_libOTe
 			tc.add("Field_F7681_Test                        ", Field_F7681_Test);
 			tc.add("Field_F12289_Test                       ", Field_F12289_Test);
 			tc.add("Field_Fp31_Test                         ", Field_Fp31_Test);
+			tc.add("Field_Audit_Test                        ", Field_Audit_Test);
 
 
 			tc.add("UInt_Basics_Test                        ", UInt_Basics_Test);
@@ -145,10 +157,12 @@ namespace tests_libOTe
 			tc.add("Poly_basics_Tests                       ", Poly_basics_Tests);
 			tc.add("Poly_eval_root_test                     ", Poly_eval_root_test);
 			tc.add("Poly_scalar_test                        ", Poly_scalar_test);
+			tc.add("Poly_Audit_Test                         ", Poly_Audit_Test);
 
 			tc.add("Ntt_bitReverse_SIMD_Test                ", Ntt_bitReverse_SIMD_Test);
 			tc.add("Ntt_nttNegWrapMatrix_normal_Test        ", Ntt_nttNegWrapMatrix_normal_Test);
 			tc.add("Ntt_nttNegWrapMatrix_Test               ", Ntt_nttNegWrapMatrix_Test);
+			tc.add("Ntt_Audit_Test                          ", Ntt_Audit_Test);
 			//tc.add("Ntt_nttNegWrapBatch_Test                ", Ntt_nttNegWrapBatch_Test);
 			
 			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
@@ -163,18 +177,22 @@ namespace tests_libOTe
 
 			tc.add("Bot_MasnyRindal_Test                    ", Bot_MasnyRindal_Test);
 			tc.add("Bot_MasnyRindal_Kyber_Test              ", Bot_MasnyRindal_Kyber_Test);
+			tc.add("Bot_Mock_Test                             ", Bot_Mock_Test);
 
 			tc.add("Vole_SoftSpokenSmall_Test               ", Vole_SoftSpokenSmall_Test);
+			tc.add("Vole_SoftSpokenSmall_Audit_Test         ", Vole_SoftSpokenSmall_Audit_Test);
 			tc.add("DotExt_Kos_Test                         ", DotExt_Kos_Test);
 			tc.add("DotExt_Iknp_Test                        ", DotExt_Iknp_Test);
 			tc.add("BlkAccCode_mtx_test                      ", BlkAccCode_mtx_test);
 			tc.add("BlkAccCode_paramSweep_test               ", BlkAccCode_paramSweep_test);
+			tc.add("BlkAccCode_Audit_Test                   ", BlkAccCode_Audit_Test);
 			
 			tc.add("RegularPprf_expandOne_test               ", RegularPprf_expandOne_test);
 			tc.add("RegularPprf_inter_test                   ", RegularPprf_inter_test);
 			tc.add("RegularPprf_ByLeafIndex_test             ", RegularPprf_ByLeafIndex_test);
 			tc.add("RegularPprf_ByTreeIndex_test             ", RegularPprf_ByTreeIndex_test);
 			tc.add("RegularPprf_callback_test                ", RegularPprf_callback_test);
+			tc.add("Pprf_Audit_Test                           ", Pprf_Audit_Test);
 			tc.add("StationaryPprf_inter_test                ", StationaryPprf_inter_test);
 
 			tc.add("RegularDpf_Multiply_Test                 ", RegularDpf_Multiply_Test);
@@ -189,6 +207,7 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Punct_Test                     ", SparseDpf_Punct_Test);
 			
 			tc.add("TritDpf_Proto_Test                       ", TritDpf_Proto_Test);
+			tc.add("Dpf_Audit_Test                           ", Dpf_Audit_Test);
 														   
 														   
 														   
@@ -216,6 +235,16 @@ namespace tests_libOTe
 			tc.add("OtExt_Kos_Test                          ", OtExt_Kos_Test);
 			tc.add("OtExt_Kos_fs_Test                       ", OtExt_Kos_fs_Test);
 			tc.add("OtExt_Kos_ro_Test                       ", OtExt_Kos_ro_Test);
+			tc.add("OtExt_Kos_Split_Test                    ", OtExt_Kos_Split_Test);
+			tc.add("OtExt_Kos_BlockBoundary_Test            ", OtExt_Kos_BlockBoundary_Test);
+			tc.add("OtExt_InputValidation_Test              ", OtExt_InputValidation_Test);
+			tc.add("DotExt_Kos_BaseValidation_Test          ", DotExt_Kos_BaseValidation_Test);
+			tc.add("OtExt_NoHashMultiBlock_Test             ", OtExt_NoHashMultiBlock_Test);
+			tc.add("OtExt_SplitConfig_Test                  ", OtExt_SplitConfig_Test);
+			tc.add("OtExt_MoveState_Test                    ", OtExt_MoveState_Test);
+			tc.add("DotExt_Kos_Check_Test                   ", DotExt_Kos_Check_Test);
+			tc.add("DotExt_Kos_SplitDelta_Test              ", DotExt_Kos_SplitDelta_Test);
+			tc.add("DotExt_Kos_MapReuse_Test                ", DotExt_Kos_MapReuse_Test);
 			tc.add("OtExt_Silent_random_Test                ", OtExt_Silent_random_Test);
 			tc.add("OtExt_Silent_correlated_Test            ", OtExt_Silent_correlated_Test);
 			tc.add("OtExt_Silent_inplace_Test               ", OtExt_Silent_inplace_Test);
@@ -225,15 +254,20 @@ namespace tests_libOTe
 			tc.add("OtExt_Silent_stationary_Test            ", OtExt_Silent_stationary_Test);
 			tc.add("OtExt_Silent_baseOT_Test                ", OtExt_Silent_baseOT_Test);
 			tc.add("OtExt_Silent_mal_Test                   ", OtExt_Silent_mal_Test);
+			tc.add("OtExt_Silent_ExAcc_Test                 ", OtExt_Silent_ExAcc_Test);
+			tc.add("OtExt_Silent_AuditState_Test            ", OtExt_Silent_AuditState_Test);
 
 			tc.add("OtExt_SoftSpokenSemiHonest_Test         ", OtExt_SoftSpokenSemiHonest_Test);
 			tc.add("OtExt_SoftSpokenSemiHonest_Split_Test   ", OtExt_SoftSpokenSemiHonest_Split_Test);
+			tc.add("OtExt_SoftSpoken_AesState_Audit_Test    ", OtExt_SoftSpoken_AesState_Audit_Test);
+			tc.add("OtExt_SoftSpoken_BufferState_Audit_Test ", OtExt_SoftSpoken_BufferState_Audit_Test);
 			//tc.add("OtExt_SoftSpokenSemiHonest21_Test       ", OtExt_SoftSpokenSemiHonest21_Test);
 			tc.add("OtExt_SoftSpokenMalicious21_Test        ", OtExt_SoftSpokenMalicious21_Test);
 			tc.add("OtExt_SoftSpokenMalicious21_Split_Test  ", OtExt_SoftSpokenMalicious21_Split_Test);
 			tc.add("DotExt_SoftSpokenMaliciousLeaky_Test    ", DotExt_SoftSpokenMaliciousLeaky_Test);
 
 			tc.add("Vole_Noisy_test                         ", Vole_Noisy_test);
+			tc.add("Vole_Noisy_Audit_Test                   ", Vole_Noisy_Audit_Test);
 			tc.add("Vole_Silent_paramSweep_test             ", Vole_Silent_paramSweep_test);
 			tc.add("Vole_Silent_defaultMatrixRank_test      ", Vole_Silent_defaultMatrixRank_test);
 			tc.add("Vole_Silent_stationary_test             ", Vole_Silent_stationary_test);
@@ -243,11 +277,17 @@ namespace tests_libOTe
 			
 			tc.add("Vole_Silent_baseOT_test                 ", Vole_Silent_baseOT_test);
 			tc.add("Vole_Silent_mal_test                    ", Vole_Silent_mal_test);
+			tc.add("Vole_Silent_malBase_test                ", Vole_Silent_malBase_test);
+			tc.add("Vole_Silent_Clear_test                  ", Vole_Silent_Clear_test);
 			tc.add("Vole_Silent_Rounds_test                 ", Vole_Silent_Rounds_test);
 
 			tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);
 			tc.add("NcoOt_Oos_Test                          ", NcoOt_Oos_Test);
 			tc.add("NcoOt_genBaseOts_Test                   ", NcoOt_genBaseOts_Test);
+			tc.add("NcoOt_chosen                            ", NcoOt_chosen);
+			tc.add("NcoOt_ChosenValidation_Test             ", NcoOt_ChosenValidation_Test);
+			tc.add("NcoOt_StateValidation_Test              ", NcoOt_StateValidation_Test);
+			tc.add("NcoOt_OosMove_Test                      ", NcoOt_OosMove_Test);
 
 
 			tc.add("foleage_tensor_test                     ", foleage_tensor_test);
@@ -255,9 +295,11 @@ namespace tests_libOTe
 			tc.add("foleage_Triple_test                     ", foleage_Triple_test);
 
 			tc.add("foleage_GenBase_test                    ", foleage_GenBase_test);
+			tc.add("foleage_Audit_test                      ", foleage_Audit_test);
 
 			tc.add("SilentOtTriple_ole_test                 ", SilentOtTriple_ole_test);
 			tc.add("SilentOtTriple_triple_test              ", SilentOtTriple_triple_test);
+			tc.add("SilentOtTriple_Audit_test               ", SilentOtTriple_Audit_test);
 
 			tc.add("RingLpn_tensor_test                     ", RingLpn_tensor_test);
 			tc.add("RingLpn_basic_test                      ", RingLpn_basic_test);
@@ -266,6 +308,8 @@ namespace tests_libOTe
 			tc.add("RingLpn_Triple_test                     ", RingLpn_Triple_test);
 			tc.add("RingLpn_GenBase_test                    ", RingLpn_GenBase_test);
 			tc.add("RingLpn_stationary_test                 ", RingLpn_stationary_test);
+			tc.add("RingLpn_Audit_test                      ", RingLpn_Audit_test);
+			tc.add("Gmw_Audit_Test                           ", Gmw_Audit_Test);
 
 #ifdef ENABLE_LOGVOLE
 #define LIBOTE_LOGVOLE_ADD_TEST(suite, name) \

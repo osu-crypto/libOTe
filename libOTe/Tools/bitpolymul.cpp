@@ -23,6 +23,9 @@ namespace osuCrypto
         if (mN == n)
             return;
 
+        if (n > MaxSize)
+            throw std::invalid_argument("bitpolymul input exceeds the supported range. " LOCATION);
+
         if (n == 0)
         {
             mN = 0;
@@ -31,18 +34,32 @@ namespace osuCrypto
         }
         else
         {
-            mN = n;
             // round up to the next power of 2
-            u64 log_n = oc::log2ceil(mN);
-            mNPow2 = std::max<u64>(1ull << log_n, 256);
-            mPoly.resize(2 * mNPow2);
+            const u64 log_n = oc::log2ceil(n);
+            const u64 nPow2 = std::max<u64>(1ull << log_n, 256);
+            mPoly.resize(2 * nPow2);
+            mN = n;
+            mNPow2 = nPow2;
         }
     }
 
 
     void FFTPoly::encode(span<const u64> data)
     {
-        resize(data.size());
+        encode(data.data(), data.size());
+    }
+
+    void FFTPoly::encode(span<const block> data)
+    {
+        if (data.size() > MaxSize / 2)
+            throw std::invalid_argument("bitpolymul input exceeds the supported range. " LOCATION);
+
+        encode(data.data(), data.size() * 2);
+    }
+
+    void FFTPoly::encode(const void* data, u64 size64)
+    {
+        resize(size64);
 
         if (!mN)
             return;
@@ -51,10 +68,8 @@ namespace osuCrypto
 
 
         // encode a
-        aligned_vector<u64> temp;
-        temp.reserve(mNPow2);
-        temp.insert(temp.end(), data.begin(), data.end());
-        temp.resize(mNPow2);
+        aligned_vector<u64> temp(mNPow2);
+        memcpy(temp.data(), data, size64 * sizeof(u64));
 
         bc_to_lch_2_unit256(temp.data(), mNPow2);
         encode_128_half_input_zero(mPoly.data(), temp.data(), mNPow2);
@@ -110,8 +125,26 @@ namespace osuCrypto
 
     void FFTPoly::decode(span<u64> dest, DecodeCache& cache, bool destructive)
     {
-        if (static_cast<u64>(dest.size()) != 2 * mN)
+        decode(dest.data(), dest.size() * sizeof(u64), cache, destructive);
+    }
+
+    void FFTPoly::decode(span<block> dest, bool destructive)
+    {
+        DecodeCache cache;
+        decode(dest, cache, destructive);
+    }
+
+    void FFTPoly::decode(span<block> dest, DecodeCache& cache, bool destructive)
+    {
+        decode(dest.data(), dest.size() * sizeof(block), cache, destructive);
+    }
+
+    void FFTPoly::decode(void* dest, u64 sizeBytes, DecodeCache& cache, bool destructive)
+    {
+        if (sizeBytes != 2 * mN * sizeof(u64))
             throw RTE_LOC;
+		if (!mN)
+			return;
 
         if (cache.mTemp.size() < mPoly.size())
             cache.mTemp.resize(mPoly.size());
@@ -124,8 +157,7 @@ namespace osuCrypto
         }
         else
         {
-            cache.mTemp2.reserve(mPoly.size());
-            cache.mTemp2.insert(cache.mTemp2.end(), mPoly.begin(), mPoly.end());
+            cache.mTemp2.assign(mPoly.begin(), mPoly.end());
             ptr = cache.mTemp2.data();
         }
 
@@ -136,7 +168,7 @@ namespace osuCrypto
         bc_to_mono_2_unit256(cache.mTemp.data(), 2 * mNPow2);
 
         // copy out
-        memcpy(dest.data(), cache.mTemp.data(), dest.size() * sizeof(u64));
+        memcpy(dest, cache.mTemp.data(), sizeBytes);
 
 
         if (destructive)
@@ -147,6 +179,8 @@ namespace osuCrypto
     void bitpolymul(uint64_t* c, const uint64_t* a, const uint64_t* b, uint64_t _n_64)
     {
         auto n = _n_64;
+        if (n > FFTPoly::MaxSize)
+            throw std::invalid_argument("bitpolymul input exceeds the supported range. " LOCATION);
         FFTPoly A(span<const u64>(a, n));
         FFTPoly B(span<const u64>(b, n));
 

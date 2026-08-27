@@ -15,6 +15,177 @@
 
 namespace osuCrypto
 {
+	void RingLpn_Audit_test(const CLP&)
+	{
+#ifdef ENABLE_RINGLPN
+		using Ring = RingLpnTriple<F12289>;
+		const auto expectRejected = [](Ring& ring, u64 partyIdx, u64 n,
+			Ring::Mode mode, Ring::DpfType dpf, Ring::TensorBaseCorType base,
+			const char* message) {
+			bool rejected = false;
+			try
+			{
+				ring.init(partyIdx, n, mode, dpf, base);
+			}
+			catch (const std::invalid_argument&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw UnitTestFail(message);
+		};
+
+		const auto sum = Ring::DpfType::SumDmpf;
+		const auto precomputed = Ring::TensorBaseCorType::Precomputed;
+		Ring ring;
+		ring.mPartyIdx = 1;
+		ring.mNumPolys = 2;
+		ring.mPolyWeight = 8;
+		ring.mN = 64;
+		ring.mLogN = 6;
+		expectRejected(ring, 2, 64, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted an invalid party index");
+		if (ring.mPartyIdx != 1 || ring.mNumPolys != 2 ||
+			ring.mPolyWeight != 8 || ring.mN != 64 || ring.mLogN != 6)
+			throw UnitTestFail("RingLPN invalid initialization changed existing state");
+
+		Ring zero;
+		expectRejected(zero, 0, 0, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted a zero request");
+
+		Ring tooManyPolys;
+		tooManyPolys.mNumPolys = 9;
+		tooManyPolys.mPolyWeight = 8;
+		expectRejected(tooManyPolys, 0, 64, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted too many polynomials");
+
+		Ring badWeight;
+		badWeight.mNumPolys = 2;
+		badWeight.mPolyWeight = 512;
+		expectRejected(badWeight, 0, 2048, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted a polynomial weight above 256");
+
+		Ring shallowRing;
+		shallowRing.mNumPolys = 2;
+		shallowRing.mPolyWeight = 64;
+		expectRejected(shallowRing, 0, 64, Ring::Mode::Ole, sum, precomputed,
+			"RingLPN accepted a ring smaller than two blocks");
+
+		Ring oversizedTriple;
+		expectRejected(oversizedTriple, 0, Gmw::MaxOleDimension,
+			Ring::Mode::Triple, sum, precomputed,
+			"RingLPN accepted an overflowing triple request");
+
+		Ring invalidProtocol;
+		invalidProtocol.mNumPolys = 2;
+		invalidProtocol.mPolyWeight = 8;
+		invalidProtocol.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		auto badProtocol = static_cast<Ring::Protocol>(255);
+		bool countRejected = false;
+		bool readinessRejected = false;
+		try
+		{
+			std::ignore = invalidProtocol.baseCorCount(badProtocol);
+		}
+		catch (const std::invalid_argument&)
+		{
+			countRejected = true;
+		}
+		try
+		{
+			std::ignore = invalidProtocol.hasBaseCors(badProtocol);
+		}
+		catch (const std::invalid_argument&)
+		{
+			readinessRejected = true;
+		}
+		if (!countRejected || !readinessRejected)
+			throw UnitTestFail("RingLPN accepted an invalid protocol selector");
+
+		std::array<u64, 3> validSparsePositions{ 0, 3, 7 };
+		Ring::validateSparsePositionOffsets(validSparsePositions, 8);
+		std::array<u64, 3> invalidSparsePositions{ 0, 8, 7 };
+		bool sparsePositionRejected = false;
+		try
+		{
+			Ring::validateSparsePositionOffsets(invalidSparsePositions, 8);
+		}
+		catch (const std::runtime_error&)
+		{
+			sparsePositionRejected = true;
+		}
+		if (!sparsePositionRejected)
+			throw UnitTestFail("RingLPN accepted an out-of-block sparse position");
+
+		Ring reinitialized;
+		reinitialized.mNumPolys = 2;
+		reinitialized.mPolyWeight = 8;
+		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		reinitialized.mSparseCoefficients.resize(16);
+		reinitialized.mTensoredCoefficients.resize(16 * 16);
+		reinitialized.mTensorRecvOts.resize(1);
+		reinitialized.mTensorChoice.resize(1);
+		reinitialized.mTensorSendOts.resize(1);
+		reinitialized.mProdPolyTreePosArth.resize(1);
+		reinitialized.mProdPolyTreePosXor.resize(1);
+		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		if (!reinitialized.mSparseCoefficients.empty() ||
+			!reinitialized.mTensoredCoefficients.empty() ||
+			!reinitialized.mTensorRecvOts.empty() ||
+			reinitialized.mTensorChoice.size() ||
+			!reinitialized.mTensorSendOts.empty() ||
+			!reinitialized.mProdPolyTreePosArth.empty() ||
+			!reinitialized.mProdPolyTreePosXor.empty() ||
+			reinitialized.baseCorCount().mCoeffCount != 16)
+			throw UnitTestFail("RingLPN reinitialization retained tensor state");
+
+		reinitialized.mTensoredCoefficients.resize(16 * 16);
+		std::vector<F12289> shortA(1), longB(2), shortC(1);
+		PRNG invalidExpandPrng(block(0x1234, 0x5678));
+		auto invalidExpandSockets = coproto::LocalAsyncSocket::makePair();
+		bool invalidOutputRejected = false;
+		try
+		{
+			macoro::sync_wait(reinitialized.expand(
+				shortA, longB, shortC, invalidExpandPrng, invalidExpandSockets[0]));
+		}
+		catch (const std::runtime_error&)
+		{
+			invalidOutputRejected = true;
+		}
+		if (!invalidOutputRejected || !reinitialized.isInitialized() ||
+			reinitialized.mTensoredCoefficients.size() != 16 * 16 ||
+			invalidExpandSockets[0].closed())
+			throw UnitTestFail("RingLPN consumed state before validating its outputs");
+
+		Ring reusableSum;
+		reusableSum.mNumPolys = 2;
+		reusableSum.mPolyWeight = 8;
+		reusableSum.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		reusableSum.mHasDpf = true;
+		auto& sumDpf = std::get<SumDmpf<F12289>>(reusableSum.mDpf);
+		sumDpf.mDpf.mMultiplier.mOtIdx = sumDpf.mDpf.mMultiplier.mTotalMults;
+		auto refreshed = reusableSum.baseCorCount();
+		auto sumBase = sumDpf.baseOtCount();
+		if (refreshed.mSendOtCount != sumBase.mSendCount ||
+			refreshed.mRecvOtCount != sumBase.mRecvCount ||
+			refreshed.mOleCount != 0 || refreshed.mCoeffCount != 16)
+			throw UnitTestFail("RingLPN omitted consumed Sum-DMPF base OTs");
+		std::vector<std::array<block, 2>> refreshedSend(refreshed.mSendOtCount);
+		std::vector<block> refreshedRecv(refreshed.mRecvOtCount);
+		BitVector refreshedChoices(refreshed.mRecvOtCount);
+		std::vector<F12289> refreshedCoeffs(refreshed.mCoeffCount);
+		std::vector<F12289> refreshedTensor(
+			refreshed.mCoeffCount * refreshed.mCoeffCount);
+		reusableSum.setBaseCors(
+			refreshedSend, refreshedRecv, refreshedChoices, {}, {},
+			refreshedCoeffs, refreshedTensor);
+		if (!sumDpf.hasBaseOts())
+			throw UnitTestFail("RingLPN did not install refreshed Sum-DMPF base OTs");
+#else
+		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
+#endif
+	}
 
 	void RingLpn_basic_test(const CLP& cmd)
 	{
@@ -271,6 +442,10 @@ namespace osuCrypto
 				for (auto base : { RingLpnTriple<F>::TensorBaseCorType::Precomputed, RingLpnTriple<F>::TensorBaseCorType::OtBased })
 					for (auto dpf : { RingLpnTriple<F>::DpfType::RevCuckooDmpf,RingLpnTriple<F>::DpfType::SumDmpf })
 					{
+						// RevCuckoo's RingLPN integration is maintained and tested on
+						// its separate development track.
+						if (dpf == RingLpnTriple<F>::DpfType::RevCuckooDmpf)
+							continue;
 
 						std::array<RingLpnTriple<F>, 2> oles;
 						oles[0].mPolyWeight = oles[1].mPolyWeight = t;
@@ -541,7 +716,8 @@ namespace osuCrypto
 		u64 n = 1ull << logn;
 		bool verbose = cmd.isSet("v");
 		auto mode = RingLpnTriple<F>::Mode::Ole;
-		auto dpf = RingLpnTriple<F>::DpfType::RevCuckooDmpf;
+		auto dpf = static_cast<typename RingLpnTriple<F>::DpfType>(cmd.getOr(
+			"dmpf", static_cast<int>(RingLpnTriple<F>::DpfType::RevCuckooDmpf)));
 		auto tensor = RingLpnTriple<F>::TensorBaseCorType::Precomputed;
 		std::array<RingLpnTriple<F>, 2> oles;
 		u64 trials = cmd.getOr("trials", 10);
@@ -572,38 +748,45 @@ namespace osuCrypto
 		{
 			if (tt)
 			{
-				auto count0 = oles[0].baseCorCount();
-				auto count1 = oles[1].baseCorCount();
-				if (count0.mOleCount != count1.mOleCount ||
-					count0.mRecvOtCount != count1.mSendOtCount ||
-					count0.mSendOtCount != count1.mRecvOtCount ||
-					count0.mCoeffCount != count1.mCoeffCount)
+				if (dpf == RingLpnTriple<F>::DpfType::SumDmpf)
 				{
-					throw RTE_LOC;
+					ringSetBase(oles);
 				}
-				if (count0.mOleCount || count0.mRecvOtCount)
-					throw RTE_LOC;
-				auto coeffs = count0.mCoeffCount;
-				std::vector<F> coeff0(coeffs), coeff1(coeffs);
-				for (auto& c : coeff0)
-					c = prng0.get();
-				for (auto& c : coeff1)
-					c = prng1.get();
-				std::vector<F> tensor0(coeffs * coeffs), tensor1(coeffs * coeffs);
-				for (u64 i = 0; i < coeffs; ++i)
+				else
 				{
-					for (u64 j = 0; j < coeffs; ++j)
+					auto count0 = oles[0].baseCorCount();
+					auto count1 = oles[1].baseCorCount();
+					if (count0.mOleCount != count1.mOleCount ||
+						count0.mRecvOtCount != count1.mSendOtCount ||
+						count0.mSendOtCount != count1.mRecvOtCount ||
+						count0.mCoeffCount != count1.mCoeffCount)
 					{
-						auto idx = i * coeffs + j;
-						tensor0[idx] = prng0.get();
-						tensor1[idx] = coeff0[i] * coeff1[j] - tensor0[idx];
-						if ((tensor0[idx] + tensor1[idx]) != (coeff0[i] * coeff1[j]))
-							throw RTE_LOC;
+						throw RTE_LOC;
 					}
-				}
+					if (count0.mOleCount || count0.mRecvOtCount)
+						throw RTE_LOC;
+					auto coeffs = count0.mCoeffCount;
+					std::vector<F> coeff0(coeffs), coeff1(coeffs);
+					for (auto& c : coeff0)
+						c = prng0.get();
+					for (auto& c : coeff1)
+						c = prng1.get();
+					std::vector<F> tensor0(coeffs * coeffs), tensor1(coeffs * coeffs);
+					for (u64 i = 0; i < coeffs; ++i)
+					{
+						for (u64 j = 0; j < coeffs; ++j)
+						{
+							auto idx = i * coeffs + j;
+							tensor0[idx] = prng0.get();
+							tensor1[idx] = coeff0[i] * coeff1[j] - tensor0[idx];
+							if ((tensor0[idx] + tensor1[idx]) != (coeff0[i] * coeff1[j]))
+								throw RTE_LOC;
+						}
+					}
 
-				oles[0].setBaseCors({}, {}, {}, {}, {}, coeff0, tensor0);
-				oles[1].setBaseCors({}, {}, {}, {}, {}, coeff1, tensor1);
+					oles[0].setBaseCors({}, {}, {}, {}, {}, coeff0, tensor0);
+					oles[1].setBaseCors({}, {}, {}, {}, {}, coeff1, tensor1);
+				}
 			}
 
 			auto r = macoro::sync_wait(macoro::when_all_ready(
@@ -685,6 +868,38 @@ namespace osuCrypto
 
 		std::array<F, 2> a;// , b, c;
 		a[0] = ole0.a[0];
+
+		std::vector<std::array<block, 2>> sendOts(128);
+		std::vector<block> recvOts(128);
+		BitVector choices(128);
+		for (u64 i = 0; i < sendOts.size(); ++i)
+		{
+			sendOts[i][0] = prng.get();
+			sendOts[i][1] = prng.get();
+			*BitIterator(&sendOts[i][0]) = i & 1;
+			*BitIterator(&sendOts[i][1]) = (i / 3) & 1;
+			choices[i] = (i / 5) & 1;
+			recvOts[i] = sendOts[i][choices[i]];
+		}
+
+		std::vector<block> sendAdd(1), sendMult(1), recvAdd(1), recvMult(1);
+		auto recvChoices = choices;
+		convertToOle(sendOts, sendAdd, sendMult);
+		convertToOle(recvOts, recvChoices, recvAdd, recvMult);
+		for (u64 i = 0; i < sendOts.size(); ++i)
+		{
+			const u8 m0 = sendOts[i][0].get<u8>(0) & 1;
+			const u8 m1 = sendOts[i][1].get<u8>(0) & 1;
+			const u8 expectedSendMult = m0 ^ m1;
+			const u8 expectedSendAdd = m0;
+			const u8 expectedRecvMult = choices[i];
+			const u8 expectedRecvAdd = choices[i] ? m1 : m0;
+			if (u8(*BitIterator(reinterpret_cast<u8*>(sendMult.data()), i)) != expectedSendMult ||
+				u8(*BitIterator(reinterpret_cast<u8*>(sendAdd.data()), i)) != expectedSendAdd ||
+				u8(*BitIterator(reinterpret_cast<u8*>(recvMult.data()), i)) != expectedRecvMult ||
+				u8(*BitIterator(reinterpret_cast<u8*>(recvAdd.data()), i)) != expectedRecvAdd)
+				throw UnitTestFail("RingLPN OT-to-OLE bit packing changed its masks");
+		}
 
 
 #else

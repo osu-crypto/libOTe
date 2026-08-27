@@ -48,17 +48,23 @@ namespace osuCrypto
 
         KosOtExtReceiver() = default;
         KosOtExtReceiver(const KosOtExtReceiver&) = delete;
-        KosOtExtReceiver(KosOtExtReceiver&&) = default;
+        KosOtExtReceiver(KosOtExtReceiver&& v)
+        {
+            *this = std::move(v);
+        }
         KosOtExtReceiver(SetUniformOts, span<std::array<block, 2>> baseSendOts);
 
         void operator=(KosOtExtReceiver&& v)
         {
-            mHasBase = std::exchange(v.mHasBase, 0);
+            if (this == &v)
+                return;
+            mHasBase = std::exchange(v.mHasBase, false);
             mGens = std::move(v.mGens);
             mPrngIdx = std::exchange(v.mPrngIdx, 0);
-            mIsMalicious = v.mIsMalicious;
-            mHashType = v.mHashType;
-            mFiatShamir = v.mFiatShamir;
+            mIsMalicious = std::exchange(v.mIsMalicious, true);
+            mHashType = std::exchange(v.mHashType, HashType::AesHash);
+            mFiatShamir = std::exchange(v.mFiatShamir, false);
+            v.mGens.clear();
         }
 
         virtual ~KosOtExtReceiver() = default;

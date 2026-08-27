@@ -129,7 +129,7 @@ namespace osuCrypto
 		u64 mNumPartitions = 0;
 
 		// What type of Base OTs should be performed.
-		SilentBaseType mBaseType;
+		SilentBaseType mBaseType = SilentBaseType::BaseExtend;
 
 		// The matrix multiplication type which compresses the sparse vector
 		MultType mLpnMultType = DefaultMultType;
@@ -530,11 +530,13 @@ namespace osuCrypto
 
 					if (choiceBits.size())
 					{
-						co_await
+						auto results = co_await
 							macoro::when_all_ready(
 								nv.receive(baseC, baseA, prng2, *mOtExtSender, chl2, mCtx),
 								mOtExtRecver->receive(choiceBits, msg, prng, chl)
 							);
+						std::get<0>(results).result();
+						std::get<1>(results).result();
 					}
 					else
 						co_await nv.receive(baseC, baseA, prng2, *mOtExtSender, chl2, mCtx);
@@ -551,10 +553,12 @@ namespace osuCrypto
 				BaseOT baseOt;
 				if (choiceBits.size())
 				{
-					co_await
+					auto results = co_await
 						macoro::when_all_ready(
 							baseOt.receive(choiceBits, msg, prng, chl),
 							nv.receive(baseC, baseA, prng2, baseOt, chl2, mCtx));
+					std::get<0>(results).result();
+					std::get<1>(results).result();
 				}
 				else
 					co_await nv.receive(baseC, baseA, prng2, baseOt, chl2, mCtx);
@@ -593,45 +597,57 @@ namespace osuCrypto
 		u64 secParam,
 		Ctx ctx)
 	{
+		if (requestSize == 0)
+			throw std::invalid_argument("Silent VOLE request size must be nonzero. " LOCATION);
+		if (malType != SilentSecType::SemiHonest &&
+			malType != SilentSecType::Malicious)
+			throw std::invalid_argument("Silent security type not supported. " LOCATION);
+		if (type != SilentBaseType::Base &&
+			type != SilentBaseType::BaseExtend)
+			throw std::invalid_argument("Silent base type not supported. " LOCATION);
+		if (noiseType != SdNoiseDistribution::Regular &&
+			noiseType != SdNoiseDistribution::Stationary)
+			throw std::invalid_argument("Unknown noise type. " LOCATION);
+
+		const auto bitCount = coefficientGroupBitCount<G>(ctx);
+
+		auto param = syndromeDecodingConfigure(secParam, requestSize, mult, noiseType, bitCount);
+		auto format = PprfOutputFormat{};
+		if (noiseType == SdNoiseDistribution::Regular)
+		{
+			format = PprfOutputFormat::Interleaved;
+		}
+		else
+		{
+			format = PprfOutputFormat::ByTreeIndex;
+		}
+		pprf::validateConfigure(param.mSizePer, param.mNumPartitions);
+
 		mCtx = std::move(ctx);
+		if (SdNoiseDistribution::Regular == noiseType)
+			mGenVar.template emplace<0>();
+		else
+			mGenVar.template emplace<1>();
+		std::visit([&](auto& gen) {
+			gen.configure(param.mSizePer, param.mNumPartitions);
+			}, mGenVar);
 		mSecParam = secParam;
 		mRequestSize = requestSize;
 		mBaseType = type;
 		mLpnMultType = mult;
 		mSecurityType = malType;
-
-		// Calculate the bit size for the subfield elements
-		// for non-fields we assume 1 which gives worse parameters for stationary.
-		u64 bitCount = 1;
-		if (mCtx.template isField<F>())
-			bitCount = mCtx.template bitSize<G>();
-
-		// Configure parameters for syndrome decoding
-		auto param = syndromeDecodingConfigure(secParam, requestSize, mLpnMultType, noiseType, bitCount);
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNoiseVectorSize;
+		mPprfFormat = format;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
-
-
-		// Initialize the appropriate PPRF based on noise distribution
-		if (noiseType == SdNoiseDistribution::Regular)
-		{
-			mGenVar.template emplace<0>();// = RegularPprfReceiver<F, Ctx>{};
-			mPprfFormat = PprfOutputFormat::Interleaved;
-		}
-		else if (noiseType == SdNoiseDistribution::Stationary)
-		{
-			mGenVar.template emplace<1>();// = StationaryPprfReceiver<F, Ctx>{};
-			mPprfFormat = PprfOutputFormat::ByTreeIndex;
-		}
-		else
-		{
-			throw std::runtime_error("Unknown noise type. " LOCATION);
-		}
-
+		mA = {};
+		mC = {};
+		mBaseA = {};
+		mBaseC = {};
+		mMalCheckSeed.reset();
+		mDerandomizeMalCheck = false;
 		mState = State::Configured;
-		gen().configure(mSizePer, mNumPartitions);
 	}
 
 	template< typename F, typename G, typename Ctx >
@@ -657,19 +673,21 @@ namespace osuCrypto
 		const auto& baseA,
 		const auto& baseC)
 	{
-		auto count = baseCount();
 		if (isConfigured() == false)
 			throw std::runtime_error("configure(...) must be called first.");
+		auto count = baseCount();
 
 		if (static_cast<u64>(recvBaseOts.size()) != count.mBaseOtCount)
 			throw std::runtime_error("wrong number of silent base OTs");
+		if (choice.size() != count.mBaseOtCount)
+			throw std::invalid_argument("wrong number of silent base OT choices");
 
 		if (baseA.size() != count.mBaseVoleCount)
 			throw std::runtime_error("wrong number of silent base Vole values." LOCATION);
 		if (baseC.size() != count.mBaseVoleCount)
 			throw std::runtime_error("wrong number of silent base Vole values." LOCATION);
 
-		if (choice.size())
+		if (count.mBaseOtCount)
 		{
 			gen().setChoiceBits(choice);
 			gen().setBase(recvBaseOts);
@@ -722,6 +740,9 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
+		if (n == 0)
+			throw std::invalid_argument("Silent VOLE request size must be nonzero. " LOCATION);
+
 		MACORO_TRY{
 		auto myHash = std::array<u8, 32>{};
 		auto theirHash = std::array<u8, 32>{};
@@ -941,6 +962,7 @@ namespace osuCrypto
 
 
 		} MACORO_CATCH(eptr) {
+			clear();
 			co_await chl.close();
 			std::rethrow_exception(eptr);
 		}
@@ -974,7 +996,7 @@ namespace osuCrypto
 		// recv the noisy values.
 		buffer.resize(mCtx.template byteSize<F>() * mBaseA.size());
 		mCtx.resize(baseB, mBaseA.size());
-		co_await chl.recvResize(buffer);
+		co_await chl.recv(buffer);
 		mCtx.deserialize(buffer.begin(), buffer.end(), baseB.begin());
 
 		auto points = gen().getPoints(mPprfFormat);
@@ -1120,6 +1142,15 @@ namespace osuCrypto
 		mBaseA = {};
 		mBaseC = {};
 		std::visit([](auto& gen) {gen.clear(); }, mGenVar);
+		mState = State::Default;
+		mRequestSize = 0;
+		mNoiseVecSize = 0;
+		mNumPartitions = 0;
+		mSizePer = 0;
+		mSecParam = 0;
+		mCodeSeed = ZeroBlock;
+		mMalCheckSeed.reset();
+		mDerandomizeMalCheck = false;
 	}
 
 }

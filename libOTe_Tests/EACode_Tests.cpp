@@ -4,6 +4,7 @@
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe_Tests/ExConvCode_Tests.h"
 #include "libOTe/Tools/ExConvCode/ExConvChecker.h"
+#include "libOTe/TwoChooseOne/ConfigureCode.h"
 #include <cmath>
 
 namespace osuCrypto
@@ -110,6 +111,34 @@ namespace osuCrypto
         if (min < threshold)
         {
             throw RTE_LOC;
+        }
+    }
+
+    void EACode_config_test(const oc::CLP&)
+    {
+        struct TestCase
+        {
+            MultType mType;
+            u64 mExpanderWeight;
+        };
+
+        const TestCase tests[] = {
+            { MultType::ExAcc7, 7 },
+            { MultType::ExAcc11, 11 },
+            { MultType::ExAcc21, 21 },
+            { MultType::ExAcc40, 41 }
+        };
+
+        for (const auto& test : tests)
+        {
+            u64 scaler = 0;
+            u64 expanderWeight = 0;
+            double minDistance = 0;
+            EAConfigure(test.mType, scaler, expanderWeight, minDistance);
+
+            if (scaler != 5 || expanderWeight != test.mExpanderWeight ||
+                minDistance <= 0 || minDistance >= 1)
+                throw RTE_LOC;
         }
     }
 

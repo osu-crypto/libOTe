@@ -24,12 +24,13 @@ namespace osuCrypto
         NttOrder order, 
         bool verbose = false)
     {
+        validateNttOrder(order);
         u64 n = a.size();
-        auto ln = log2ceil(n);
+		if (aHat.size() != n)
+			throw std::invalid_argument("matrix NTT input and output spans must have equal lengths. " LOCATION);
+        auto ln = checkedNttLogSize(n);
         auto qq = F::order(); qq = qq - 1;
 
-        if (n != 1ull << ln)
-            throw RTE_LOC;
         if (n > qq)
             throw RTE_LOC;
         if (qq % n != 0)
@@ -38,7 +39,12 @@ namespace osuCrypto
             throw RTE_LOC;
 
         if(isPrimRootOfUnity(2 * n, psi) == false)
-			throw RTE_LOC;
+			throw std::invalid_argument("Matrix NTT root must be primitive for the doubled transform order. " LOCATION);
+		if (n == 1)
+		{
+			aHat[0] = a[0];
+			return;
+		}
 
         using SF = std::remove_cvref_t<decltype(psi)>;
         std::vector<SF> powers(2 * n);
@@ -90,12 +96,13 @@ namespace osuCrypto
         NttOrder order,
         bool verbose = false)
     {
+        validateNttOrder(order);
         auto n = a.size();
-        auto ln = log2ceil(n);
+		if (aHat_.size() != n)
+			throw std::invalid_argument("matrix inverse NTT input and output spans must have equal lengths. " LOCATION);
+        auto ln = checkedNttLogSize(n);
         auto qq = F::order(); qq = qq - 1;
 
-        if (n != 1ull << ln)
-            throw RTE_LOC;
         if (n > qq)
             throw RTE_LOC;
         if (qq % n != 0)
@@ -103,7 +110,12 @@ namespace osuCrypto
         if (psi.pow(2 * n) != 1)
             throw RTE_LOC;
         if (isPrimRootOfUnity(2 * n, psi) == false)
-            throw RTE_LOC;
+            throw std::invalid_argument("Matrix inverse NTT root must be primitive for the doubled transform order. " LOCATION);
+		if (n == 1)
+		{
+			a[0] = aHat_[0];
+			return;
+		}
 
         span<const F> aHat;
         std::vector<F> temp;
@@ -132,19 +144,20 @@ namespace osuCrypto
         for (u64 i = 0; i < n; ++i)
         {
             auto& ai = a[i];
-            ai = 0;
+            ai = F::zero();
             for (u64 j = 0; j < n; ++j)
             {
                 auto idx = (2 * j * i + i) % powers.size();
                 if(verbose)
                     std::cout << idx << " ";
-                ai += powers[idx] * aHat[j];
+                ai += aHat[j] * powers[idx];
             }
             if (verbose)
                 std::cout << std::endl;
         }
 
-        auto nInv = F(a.size()).inverse();
+        using SF = std::remove_cvref_t<decltype(psi)>;
+        auto nInv = SF(a.size()).inverse();
         for (u64 i = 0; i < a.size(); ++i)
         {
             a[i] *= nInv;

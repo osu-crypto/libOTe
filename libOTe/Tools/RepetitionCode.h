@@ -19,7 +19,11 @@ namespace osuCrypto
 		u64 n = 0;
 
 		RepetitionCode() : GenericLinearCode<RepetitionCode>(this) {}
-		RepetitionCode(u64 n_) : GenericLinearCode<RepetitionCode>(this), n(n_) {}
+		RepetitionCode(u64 n_) : GenericLinearCode<RepetitionCode>(this), n(n_)
+		{
+			if (n == 0)
+				throw RTE_LOC;
+		}
 
 		RepetitionCode(const RepetitionCode& o) : GenericLinearCode<RepetitionCode>(this), n(o.n) {}
 		RepetitionCode& operator=(const RepetitionCode& o) { 
@@ -33,6 +37,8 @@ namespace osuCrypto
 		template<typename T>
 		void encodeXor(const T* __restrict message, T* __restrict codeWord) const
 		{
+			if (n == 0)
+				throw RTE_LOC;
 			for (u64 i = 0; i < n; ++i)
 				codeWord[i] ^= message[0];
 		}
@@ -40,6 +46,8 @@ namespace osuCrypto
 		template<typename T>
 		void encodeSyndrome(const T* __restrict syndrome, T* __restrict word) const
 		{
+			if (n == 0)
+				throw RTE_LOC;
 			for (u64 i = 0; i < n - 1; ++i)
 				word[i] = syndrome[i];
 			word[n - 1] = T(0);
@@ -48,6 +56,8 @@ namespace osuCrypto
 		template<typename T>
 		void decodeInPlace(T* __restrict wordInSyndromeOut, T* __restrict message) const
 		{
+			if (n == 0)
+				throw RTE_LOC;
 			T msg = wordInSyndromeOut[n - 1];
 			*message = msg;
 			for (u64 i = 0; i < n - 1; ++i)

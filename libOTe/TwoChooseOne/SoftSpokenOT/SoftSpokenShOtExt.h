@@ -59,6 +59,11 @@ namespace osuCrypto
 			refillBuffer();
 		}
 
+		bool hasSeed() const
+		{
+			return mIndex != ~0ull;
+		}
+
 		const AES& get() const
 		{
 			assert(mIndex != ~0ull);
@@ -82,7 +87,12 @@ namespace osuCrypto
 		// Both can be used independently.
 		AESStream split()
 		{
-			return mPrng.ecbEncBlock(block(23142341234234ull, mIndex++));
+			if (!hasSeed())
+				throw RTE_LOC;
+
+			auto seed = mPrng.ecbEncBlock(block(23142341234234ull, mIndex));
+			next();
+			return seed;
 		}
 	};
 
@@ -115,12 +125,14 @@ namespace osuCrypto
 			if (mAesKeyUseCount == ~0ull)
 				throw RTE_LOC;
 
-			mAesKeyUseCount += n;
-			if (mAesKeyUseCount > maxAESKeyUsage)
+			if (mAesKeyUseCount > maxAESKeyUsage ||
+				n > maxAESKeyUsage - mAesKeyUseCount)
 			{
-				mAesKeyUseCount = 0;
 				mAESs.next();
+				mAesKeyUseCount = n;
 			}
+			else
+				mAesKeyUseCount += n;
 
 			return mAESs.get();
 		}
@@ -136,8 +148,12 @@ namespace osuCrypto
 		AESRekeyManager split()
 		{
 			AESRekeyManager r;
+			if (!mAESs.hasSeed())
+				return r;
+
 			r.mAESs = mAESs.split();
 			r.mAesKeyUseCount = 0;
+			mAesKeyUseCount = 0;
 			return r;
 		}
 
@@ -211,12 +227,17 @@ namespace osuCrypto
 
 		block delta() const
 		{
+			if (!fieldBits() || !hasBaseOts())
+				throw std::logic_error(
+					"SoftSpoken OT sender delta is not available. " LOCATION);
 			return mSubVole.getDelta().template getSpan<block>()[0];
 		}
 
 		u64 baseOtCount() const override
 		{
-			assert(fieldBits() && "init() must be called first");
+			if (!fieldBits())
+				throw std::logic_error(
+					"SoftSpoken OT sender must be initialized. " LOCATION);
 			// Can only use base OTs in groups of mFieldBits.
 			return roundUpTo(gOtExtBaseOtCount, fieldBits());
 		}
@@ -228,6 +249,9 @@ namespace osuCrypto
 
 		SoftSpokenShOtSender splitBase()
 		{
+			if (!fieldBits())
+				throw std::logic_error(
+					"SoftSpoken OT sender must be initialized before splitting. " LOCATION);
 			SoftSpokenShOtSender r;
 			r.mSubVole = mSubVole.copy();
 			r.mRandomOt = mRandomOt;
@@ -273,13 +297,14 @@ namespace osuCrypto
 			transpose128(outW.data());
 		}
 
-		void xorMessages(u64 numUsed, block* messagesOut, const block* messagesIn) const;
+		void xorMessages(
+			u64 numUsed, std::array<block, 2>* messagesOut, const block* messagesIn) const;
 
 
-		// messagesOut and messagesIn must either be equal or non-overlapping.
 		template<typename Enc>
 		static OC_FORCEINLINE void xorAndHashMessages(
-			u64 numUsed, block deltaBlock, block* messagesOut, const block* messagesIn, Enc& enc)
+			u64 numUsed, block deltaBlock, std::array<block, 2>* messagesOut,
+			const block* messagesIn, Enc& enc)
 		{
 			// Loop backwards, similarly to DotSemiHonest.
 			u64 i = numUsed;
@@ -295,7 +320,8 @@ namespace osuCrypto
 					superBlk[2 * j + 1] = messagesIn[i + j] ^ deltaBlock;
 				}
 
-				enc.template hashBlocks<superBlkSize>(superBlk, messagesOut + 2 * i);
+				enc.template hashBlocks<superBlkSize>(superBlk, superBlk);
+				memcpy(messagesOut + i, superBlk, sizeof(superBlk));
 			}
 
 			// Finish up. The more straightforward while (i--) unfortunately gives a (spurious AFAICT)
@@ -308,7 +334,8 @@ namespace osuCrypto
 				block msgs[2];
 				msgs[0] = messagesIn[i];
 				msgs[1] = msgs[0] ^ deltaBlock;
-				enc.template hashBlocks<2>(msgs, messagesOut + 2 * i);
+				enc.template hashBlocks<2>(msgs, msgs);
+				messagesOut[i] = { msgs[0], msgs[1] };
 			}
 
 			// Note: probably need a stronger hash for malicious secure version.
@@ -324,12 +351,8 @@ namespace osuCrypto
 		auto recvBuffer(Socket& chl, u64 batchSize) { return mSubVole.recv(chl, 0, batchSize); }
 
 		OC_FORCEINLINE void processChunk(
-			u64 nChunk, u64 numUsed, span<std::array<block, 2>> messages);
-
-		OC_FORCEINLINE void processPartialChunk(
-			u64 chunkIdx, u64 numUsed,
-			span<std::array<block, 2>> messages,
-			span<std::array<block, 2>> temp);
+			u64 numUsed, span<std::array<block, 2>> messages,
+			span<block> inputW);
 	};
 
 	template<typename SubspaceVole = SubspaceVoleSender<RepetitionCode>>
@@ -400,7 +423,9 @@ namespace osuCrypto
 
 		u64 baseOtCount() const override
 		{
-			assert(fieldBits() && "init() must be called first");
+			if (!fieldBits())
+				throw std::logic_error(
+					"SoftSpoken OT receiver must be initialized. " LOCATION);
 			// Can only use base OTs in groups of mFieldBits.
 			return roundUpTo(gOtExtBaseOtCount, fieldBits());
 		}
@@ -412,6 +437,9 @@ namespace osuCrypto
 
 		SoftSpokenShOtReceiver splitBase()
 		{
+			if (!fieldBits())
+				throw std::logic_error(
+					"SoftSpoken OT receiver must be initialized before splitting. " LOCATION);
 			SoftSpokenShOtReceiver r;
 			r.mSubVole = mSubVole.copy();
 			r.mRandomOt = mRandomOt;

@@ -9,5 +9,6 @@ namespace osuCrypto
 	void RingLpn_GenBase_test(const CLP& cmd);
 	void RingLpn_tensor_test(const CLP& cmd);
 	void RingLpn_conversion_test(const CLP& cmd);
+	void RingLpn_Audit_test(const CLP& cmd);
 
 }

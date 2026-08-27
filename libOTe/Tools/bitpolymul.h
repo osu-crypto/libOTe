@@ -12,6 +12,8 @@
 
 #include <stdint.h>
 #include <cryptoTools/Common/Defines.h>
+#include <limits>
+#include <new>
 #include <vector>
 //#include <boost/align/aligned_allocator.hpp>
 #include "bitpolymul/bitpolymul.h"
@@ -24,6 +26,9 @@ namespace osuCrypto
 
     template <typename T, std::size_t N = 16>
     class AlignmentAllocator {
+        static_assert(N && (N & (N - 1)) == 0,
+            "alignment must be a nonzero power of two");
+
     public:
         typedef T value_type;
         typedef std::size_t size_type;
@@ -52,7 +57,8 @@ namespace osuCrypto
         }
 
         inline pointer allocate(size_type n) {
-
+            if (n > max_size())
+                throw std::bad_array_new_length();
             auto size = n * sizeof(value_type);
             auto header = N + sizeof(void*);
             auto base = new char[size + header];
@@ -98,7 +104,9 @@ namespace osuCrypto
         }
 
         inline size_type max_size() const throw () {
-            return size_type(-1) / sizeof(value_type);
+            constexpr auto header = N + sizeof(void*);
+            return (std::numeric_limits<size_type>::max() - header) /
+                sizeof(value_type);
         }
 
         template <typename T2>
@@ -130,6 +138,7 @@ namespace osuCrypto
     class FFTPoly
     {
     public:
+        static constexpr u64 MaxSize = std::numeric_limits<u32>::max();
 
         FFTPoly() = default;
         FFTPoly(const FFTPoly&) = default;
@@ -140,12 +149,18 @@ namespace osuCrypto
             encode(data);
         }
 
+        FFTPoly(span<const block> data)
+        {
+            encode(data);
+        }
+
         u64 mN = 0, mNPow2 = 0;
         aligned_vector<u64> mPoly;
 
         void resize(u64 n);
 
         void encode(span<const u64> data);
+        void encode(span<const block> data);
 
 
         void mult(const FFTPoly& a, const FFTPoly& b);
@@ -162,6 +177,12 @@ namespace osuCrypto
 
         void decode(span<u64> dest, bool destructive = true);
         void decode(span<u64> dest, DecodeCache& cache, bool destructive);
+        void decode(span<block> dest, bool destructive = true);
+        void decode(span<block> dest, DecodeCache& cache, bool destructive);
+
+    private:
+        void encode(const void* data, u64 size64);
+        void decode(void* dest, u64 sizeBytes, DecodeCache& cache, bool destructive);
 
     };
 

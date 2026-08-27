@@ -8,6 +8,9 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Matrix.h"
+#include <limits>
+#include <stdexcept>
+#include <utility>
 
 namespace osuCrypto
 {
@@ -18,6 +21,40 @@ namespace osuCrypto
 	// this protocol used |x| OTs in both directions to execute the protocol.
 	struct DpfMult
 	{
+		DpfMult() = default;
+		DpfMult(const DpfMult&) = delete;
+		DpfMult& operator=(const DpfMult&) = delete;
+
+		DpfMult(DpfMult&& src) noexcept
+		{
+			*this = std::move(src);
+		}
+
+		DpfMult& operator=(DpfMult&& src) noexcept
+		{
+			if (this != &src)
+			{
+				mPartyIdx = src.mPartyIdx;
+				mTotalMults = src.mTotalMults;
+				mChoiceBits = std::move(src.mChoiceBits);
+				mRecvOts = std::move(src.mRecvOts);
+				mSendOts = std::move(src.mSendOts);
+				mOtIdx = src.mOtIdx;
+				src.clear();
+			}
+			return *this;
+		}
+
+		static constexpr u64 packedBytes(u64 bitCount) noexcept
+		{
+			return bitCount / 8 + (bitCount % 8 != 0);
+		}
+
+		void requireAvailableOts(u64 count) const
+		{
+			if (mOtIdx > mTotalMults || count > mTotalMults - mOtIdx)
+				throw std::out_of_range("DPF multiplication exceeds its available OTs. " LOCATION);
+		}
 
 		u64 mPartyIdx = 0;
 
@@ -30,7 +67,13 @@ namespace osuCrypto
 
 		u64 mOtIdx = 0;
 
-		bool hasBaseOts() const { return mChoiceBits.size(); }
+		bool hasBaseOts() const
+		{
+			return mOtIdx < mTotalMults &&
+				mChoiceBits.size() == mTotalMults &&
+				mRecvOts.size() == mTotalMults &&
+				mSendOts.size() == mTotalMults;
+		}
 
 		u8 lsb(const block& b)
 		{
@@ -99,13 +142,16 @@ namespace osuCrypto
 		{
 			if (x.size() != y.size() || x.size() != xy.size())
 				throw RTE_LOC;
-			if (x.size() + mOtIdx > mTotalMults)
-				throw RTE_LOC;
+			if (x.size() == 0)
+				co_return;
+			requireAvailableOts(x.size());
 			if (hasBaseOts() == false)
 				throw RTE_LOC;
+			auto otIdx = mOtIdx;
+			mOtIdx += x.size();
 
 			// our a share of a * b = c.
-			BitVector a0; a0.append(mChoiceBits, x.size(), mOtIdx);
+			BitVector a0; a0.append(mChoiceBits, x.size(), otIdx);
 
 			// A0 = 11...1 * a , an expanded version of a used for masking.
 			AlignedUnVector<block> A0(x.size());
@@ -122,9 +168,9 @@ namespace osuCrypto
 			for (u64 j = 0; j < x.size(); ++j)
 			{
 				A0[j] = block(-u64(a0[j]), -u64(a0[j]));
-				auto c00 = mRecvOts[mOtIdx + j];
-				auto c10 = mSendOts[mOtIdx + j][0];
-				b1[j] = mSendOts[mOtIdx + j][0] ^ mSendOts[mOtIdx + j][1];
+				auto c00 = mRecvOts[otIdx + j];
+				auto c10 = mSendOts[otIdx + j][0];
+				b1[j] = mSendOts[otIdx + j][0] ^ mSendOts[otIdx + j][1];
 
 				// C0' = c00+c10+a0b1
 				C[j] = c00 ^ c10 ^ (b1[j] & A0[j]);
@@ -167,28 +213,31 @@ namespace osuCrypto
 				// [zy] = [c] + theta * [a] + phi * [b] + theta * phi
 				xy[j] = C[j] ^ (theta[j] & A0[j]) ^ (Phi & b1[j]) ^ (partyMask & theta[j] & Phi);
 			}
-
-
-			mOtIdx += x.size();
-
 		}
 
 		static void packBits(span<u8> dest, MatrixView<u8> src, u64 bitCount)
 		{
-			if (dest.size() != divCeil(src.rows() * bitCount, 8))
+			const auto rowBytes = packedBytes(bitCount);
+			if (src.cols() < rowBytes)
+				throw std::invalid_argument("DPF bit source rows are too narrow. " LOCATION);
+			if (src.rows() && bitCount > std::numeric_limits<u64>::max() / src.rows())
+				throw std::length_error("DPF packed bit count overflows. " LOCATION);
+			const auto totalBits = src.rows() * bitCount;
+			if (dest.size() != packedBytes(totalBits))
 				throw RTE_LOC;
 
 			if (bitCount % 8 == 0)
 			{
-				auto bytes = divCeil(bitCount, 8);
+				auto bytes = rowBytes;
 				for (u64 i = 0; i < src.rows(); ++i)
 				{
 					copyBytes(dest.subspan(0, bytes), src[i].subspan(0, bytes));
-					dest = dest.subspan(src.cols());
+					dest = dest.subspan(bytes);
 				}
 			}
 			else
 			{
+				std::fill(dest.begin(), dest.end(), 0);
 				auto dIter = BitIterator(dest.data());
 				for (u64 i = 0; i < src.rows(); ++i)
 				{
@@ -205,15 +254,21 @@ namespace osuCrypto
 
 		static void unpackBits(Matrix<u8>& dest, span<u8> src, u64 bitCount)
 		{
-			if (src.size() != divCeil(dest.rows() * bitCount, 8))
+			const auto rowBytes = packedBytes(bitCount);
+			if (dest.cols() < rowBytes)
+				throw std::invalid_argument("DPF bit destination rows are too narrow. " LOCATION);
+			if (dest.rows() && bitCount > std::numeric_limits<u64>::max() / dest.rows())
+				throw std::length_error("DPF unpacked bit count overflows. " LOCATION);
+			const auto totalBits = dest.rows() * bitCount;
+			if (src.size() != packedBytes(totalBits))
 				throw RTE_LOC;
 			if (bitCount % 8 == 0)
 			{
-				auto bytes = divCeil(bitCount, 8);
+				auto bytes = rowBytes;
 				for (u64 i = 0; i < dest.rows(); ++i)
 				{
 					copyBytes(dest[i].subspan(0, bytes), src.subspan(0, bytes));
-					src = src.subspan(dest.cols());
+					src = src.subspan(bytes);
 				}
 			}
 			else
@@ -228,6 +283,7 @@ namespace osuCrypto
 						++dIter;
 						++sIter;
 					}
+					dest[i][rowBytes - 1] &= static_cast<u8>((1u << (bitCount % 8)) - 1);
 				}
 			}
 		}
@@ -277,9 +333,20 @@ namespace osuCrypto
 			coproto::Socket& sock,
 			const CoeffCtx& ctx)
 		{
+			const auto n = static_cast<u64>(y.size());
+			if (static_cast<u64>(xy.size()) != n)
+				throw std::invalid_argument(
+					"DPF multiplication input and output sizes differ. " LOCATION);
+			if (n == 0)
+				co_return;
+			auto mutableCtx = ctx;
+			const auto elementBytes = mutableCtx.template byteSize<F>();
+			if (elementBytes > std::numeric_limits<u64>::max() / n)
+				throw std::length_error("DPF multiplication message size overflows. " LOCATION);
 
-			auto session = co_await setupMultiply(y.size(), x, sock);
-			co_await session.template multiply<F, CoeffCtx>(y.begin(), y.end(), xy.begin(), sock, ctx);
+			auto session = co_await setupMultiply(n, x, sock);
+			co_await session.template multiply<F, CoeffCtx>(
+				y.begin(), y.end(), xy.begin(), sock, std::move(mutableCtx));
 			co_return;
 		}
 
@@ -292,7 +359,7 @@ namespace osuCrypto
 
 			BitMatrixCoeffCtx(u64 bitCount) 
 				: mBitCount(bitCount)
-				, mByteCount(divCeil(bitCount, 8))
+				, mByteCount(DpfMult::packedBytes(bitCount))
 			{}
 
 			template<typename T>
@@ -523,6 +590,17 @@ namespace osuCrypto
 
 			void deserialize(const u8* src, const u8* srcEnd, auto dst) const
 			{
+				if (srcEnd < src)
+					throw std::invalid_argument("DPF byte range must not be reversed. " LOCATION);
+				const auto bytes = static_cast<u64>(srcEnd - src);
+				if (mByteCount == 0)
+				{
+					if (bytes)
+						throw std::invalid_argument("Nonempty DPF byte range has zero-width elements. " LOCATION);
+					return;
+				}
+				if (bytes % mByteCount)
+					throw std::invalid_argument("DPF byte range contains a partial element. " LOCATION);
 				while (src < srcEnd)
 				{
 					auto&& elem = *dst++;
@@ -555,14 +633,15 @@ namespace osuCrypto
 		{
 			u64 n = y.rows();
 
-			if (x.size() != divCeil(y.rows(), 8) || y.rows() != xy.rows())
+			if (x.size() != packedBytes(y.rows()) || y.rows() != xy.rows())
 				throw RTE_LOC;
 			if (y.cols() != xy.cols())
 				throw RTE_LOC;
-			if (divCeil(bitCount, 8) != y.cols())
+			if (packedBytes(bitCount) != y.cols())
 				throw RTE_LOC;
-			if (n + mOtIdx > mTotalMults)
-				throw RTE_LOC;
+			if (n == 0)
+				co_return;
+			requireAvailableOts(n);
 			if (hasBaseOts() == false)
 				throw RTE_LOC;
 
@@ -592,6 +671,29 @@ namespace osuCrypto
 		// y shares.
 		struct MultSession
 		{
+			MultSession() = default;
+			MultSession(const MultSession&) = delete;
+			MultSession& operator=(const MultSession&) = delete;
+
+			MultSession(MultSession&& src) noexcept
+			{
+				*this = std::move(src);
+			}
+
+			MultSession& operator=(MultSession&& src) noexcept
+			{
+				if (this != &src)
+				{
+					mPartyIdx = src.mPartyIdx;
+					mExpandIdx = src.mExpandIdx;
+					mRecvOts = src.mRecvOts;
+					mSendOts = src.mSendOts;
+					mX = std::move(src.mX);
+					src.clear();
+				}
+				return *this;
+			}
+
 			u64 mPartyIdx = 0;
 			u64 mExpandIdx = 0;
 
@@ -602,6 +704,8 @@ namespace osuCrypto
 
 			void clear()
 			{
+				mPartyIdx = 0;
+				mExpandIdx = 0;
 				mRecvOts = {};
 				mSendOts = {};
 				mX = {};
@@ -675,13 +779,20 @@ namespace osuCrypto
 
 				u64 n = mX.size();
 				auto n8 = n / 8 * 8;
-				if (std::distance(yBegin, yEnd) != i64(n))
+				const auto yCount = std::distance(yBegin, yEnd);
+				if (yCount < 0 || static_cast<u64>(yCount) != n)
 					throw RTE_LOC;
+				if (n == 0)
+					co_return;
 
 				// make sure we can deref xy
 				std::ignore = *(xyBegin + (n - 1));
 
-				AlignedUnVector<u8> msg(n * ctx.template byteSize<F>());
+				const auto elementBytes = ctx.template byteSize<F>();
+				if (elementBytes > std::numeric_limits<u64>::max() / n)
+					throw std::length_error("DPF multiplication message size overflows. " LOCATION);
+				const auto messageBytes = n * elementBytes;
+				AlignedUnVector<u8> msg(messageBytes);
 				auto mIter = msg.data();
 				auto zero = ctx.template makeVec<F>(1);
 				auto t0 = ctx.template makeVec<F>(8);
@@ -760,7 +871,7 @@ namespace osuCrypto
 				}
 
 				co_await sock.send(std::move(msg));
-				msg.resize(n * ctx.template byteSize<F>());
+				msg.resize(messageBytes);
 				co_await sock.recv(msg);
 				mIter = msg.data();
 
@@ -834,6 +945,8 @@ namespace osuCrypto
 					throw RTE_LOC;
 				if (y.rows() != mX.size())
 					throw RTE_LOC;
+				if (y.cols() > std::numeric_limits<u64>::max() / 8)
+					throw std::length_error("DPF matrix bit width overflows. " LOCATION);
 
 				auto ctx = DpfMult::BitMatrixCoeffCtx(y.cols() * 8);
 				auto vy = DpfMult::BitMatrixCoeffCtx::View<const u8>(y);
@@ -858,10 +971,15 @@ namespace osuCrypto
 			span<const u8> x,
 			coproto::Socket& sock)
 		{
-			if (x.size() != divCeil(n, 8))
+			if (x.size() != packedBytes(n))
 				throw RTE_LOC;
-			if (n + mOtIdx > mTotalMults)
-				throw RTE_LOC;
+			if (n == 0)
+			{
+				MultSession session;
+				session.mPartyIdx = mPartyIdx;
+				co_return session;
+			}
+			requireAvailableOts(n);
 			if (hasBaseOts() == false)
 				throw RTE_LOC;
 
@@ -923,8 +1041,13 @@ namespace osuCrypto
 		// Returns: MultSession that can be used for multiple multiplications
 		MultSession randMultiply(u64 n)
 		{
-			if (n + mOtIdx > mTotalMults)
-				throw RTE_LOC;
+			if (n == 0)
+			{
+				MultSession session;
+				session.mPartyIdx = mPartyIdx;
+				return session;
+			}
+			requireAvailableOts(n);
 			if (hasBaseOts() == false)
 				throw RTE_LOC;
 
@@ -1013,18 +1136,19 @@ namespace osuCrypto
 			span<u8> xy,
 			coproto::Socket& sock)
 		{
-			if (x.size() != divCeil(n, 8))
+			if (x.size() != packedBytes(n))
 				throw RTE_LOC;
-			if (y.size() != divCeil(n, 8))
+			if (y.size() != packedBytes(n))
 				throw RTE_LOC;
-			if (xy.size() != divCeil(n, 8))
+			if (xy.size() != packedBytes(n))
 				throw RTE_LOC;
-			if (n + mOtIdx > mTotalMults)
-				throw RTE_LOC;
+			if (n == 0)
+				co_return;
+			requireAvailableOts(n);
 			if (hasBaseOts() == false)
 				throw RTE_LOC;
 
-			u64 n8 = divCeil(n, 8);
+			u64 n8 = packedBytes(n);
 			auto otIdx = mOtIdx;
 			mOtIdx += n;
 
@@ -1065,6 +1189,12 @@ namespace osuCrypto
 			AlignedUnVector<u8> theta1(theta.size()), phi1(phi.size());
 			co_await sock.recv(theta1);
 			co_await sock.recv(phi1);
+			if (n % 8)
+			{
+				u8 mask = (1 << (n % 8)) - 1;
+				theta1.back() &= mask;
+				phi1.back() &= mask;
+			}
 			for (u64 i = 0; i < n8; ++i)
 			{
 				phi[i] ^= phi1[i];
@@ -1130,5 +1260,3 @@ namespace osuCrypto
 
 
 #endif // defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
-
-

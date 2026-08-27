@@ -27,6 +27,8 @@
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include <limits>
+#include <stdexcept>
 
 namespace osuCrypto {
 
@@ -37,6 +39,22 @@ namespace osuCrypto {
 	>
 	class NoisyVoleReceiver : public TimerAdapter
 	{
+		static void validateDimensions(u64 count, const CoeffCtx& ctx)
+		{
+			const auto fieldBits = ctx.template bitSize<F>();
+			const auto elementBytes = ctx.template byteSize<F>();
+
+			// These strict bounds also make count * fieldBits * elementBytes < 2^64.
+			if (count == 0)
+				throw std::invalid_argument("Noisy VOLE requires at least one output. " LOCATION);
+			if (count > std::numeric_limits<u32>::max())
+				throw std::invalid_argument("Noisy VOLE output count exceeds the supported range. " LOCATION);
+			if (fieldBits == 0 || fieldBits > std::numeric_limits<u16>::max())
+				throw std::invalid_argument("Noisy VOLE field bit size exceeds the supported range. " LOCATION);
+			if (elementBytes == 0 || elementBytes > std::numeric_limits<u16>::max())
+				throw std::invalid_argument("Noisy VOLE element size exceeds the supported range. " LOCATION);
+		}
+
 	public:
 		using VecF = typename CoeffCtx::template Vec<F>;
 
@@ -51,6 +69,9 @@ namespace osuCrypto {
 		{
 			MACORO_TRY{
 
+			if (c.size() != a.size())
+				throw std::invalid_argument("Noisy VOLE input and output counts must match. " LOCATION);
+			validateDimensions(static_cast<u64>(a.size()), ctx);
 			auto otMsg = AlignedUnVector<std::array<block, 2>>{};
 
 			otMsg.resize(ctx.template bitSize<F>());
@@ -80,16 +101,16 @@ namespace osuCrypto {
 			auto temp = VecF{};
 			auto prng = PRNG{};
 
-			if (ctx.template bitSize<F>() != otMsg.size())
-				throw RTE_LOC;
 			if (c.size() != a.size())
-				throw RTE_LOC;
-			if (a.size() == 0)
-				throw RTE_LOC;
+				throw std::invalid_argument("Noisy VOLE input and output counts must match. " LOCATION);
+			validateDimensions(static_cast<u64>(a.size()), ctx);
+			if (ctx.template bitSize<F>() != otMsg.size())
+				throw std::invalid_argument("Noisy VOLE sender OT count does not match the field bit size. " LOCATION);
 
 
 			ctx.zero(a.begin(), a.end());
-			ctx.resize(msg, otMsg.size() * a.size());
+			const auto messageCount = static_cast<u64>(otMsg.size()) * static_cast<u64>(a.size());
+			ctx.resize(msg, messageCount);
 			ctx.resize(temp, 2);
 
 			for (size_t i = 0, k = 0; i < otMsg.size(); ++i)
@@ -97,7 +118,10 @@ namespace osuCrypto {
 				prng.SetSeed(otMsg[i][0], a.size());
 
 				// t1 = 2^i
-				ctx.powerOfTwo(temp[1], i);
+				if constexpr (requires { ctx.powerOfTwoUnchecked(temp[1], i); })
+					ctx.powerOfTwoUnchecked(temp[1], i);
+				else
+					ctx.powerOfTwo(temp[1], i);
 				//std::cout << "2^i " << ctx.str(temp[1]) << "\n";
 
 				for (size_t j = 0; j < c.size(); ++j, ++k)
@@ -137,7 +161,8 @@ namespace osuCrypto {
 				}
 			}
 
-			buff.resize(msg.size() * ctx.template byteSize<F>());
+			const auto bufferSize = static_cast<u64>(msg.size()) * ctx.template byteSize<F>();
+			buff.resize(bufferSize);
 			ctx.serialize(msg.begin(), msg.end(), buff.begin());
 
 			co_await chl.send(std::move(buff));

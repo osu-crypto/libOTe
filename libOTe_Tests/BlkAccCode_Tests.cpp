@@ -10,6 +10,73 @@ using namespace osuCrypto;
 
 namespace tests_libOTe
 {
+	void BlkAccCode_Audit_Test()
+	{
+		auto expectInvalid = [](auto&& fn)
+		{
+			bool rejected = false;
+			try
+			{
+				fn();
+			}
+			catch (const std::invalid_argument&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw UnitTestFail("invalid BlkAcc configuration was accepted" LOCATION);
+		};
+
+		expectInvalid([] { BlkAccCode code; code.init(0, 8, 8, 3); });
+		expectInvalid([] { BlkAccCode code; code.init(8, 16, 0, 3); });
+		expectInvalid([] { BlkAccCode code; code.init(16, 24, 8, 3); });
+		expectInvalid([] { BlkAccCode code; code.init(8, 18, 8, 3); });
+		expectInvalid([] { BlkAccCode code; code.init(8, (1ull << 32) + 8, 8, 3); });
+		expectInvalid([] { BlkAccCode code; code.init(8, 16, 8, 2); });
+
+		for (auto powerOfTwo : { false, true })
+		{
+			const u64 n = powerOfTwo ? 32 : 40;
+			const block seed(0x12345678, 0x9abcdef0);
+			std::vector<u8> input(n, 1), output(n);
+			if (powerOfTwo)
+			{
+				Feistel2KPerm expected(n, seed);
+				Accumulator<Feistel2KPerm> acc(n, Feistel2KPerm(n, seed));
+				acc.dualEncode<u8>(input.begin(), output.begin(), CoeffCtxGF2{});
+				if (acc.mPerm.mKeys != expected.mKeys)
+					throw UnitTestFail("Accumulator discarded its Feistel2K seed" LOCATION);
+			}
+			else
+			{
+				FeistelPerm expected(n, seed);
+				Accumulator<FeistelPerm> acc(n, FeistelPerm(n, seed));
+				acc.dualEncode<u8>(input.begin(), output.begin(), CoeffCtxGF2{});
+				if (acc.mPerm.mFeistel.mKeys != expected.mFeistel.mKeys)
+					throw UnitTestFail("Accumulator discarded its Feistel seed" LOCATION);
+			}
+		}
+
+		for (auto params : { std::array<u64, 3>{16, 40, 8}, std::array<u64, 3>{10, 30, 8} })
+		{
+			const auto k = params[0];
+			const auto n = params[1];
+			BlockDiagonal bd(k, n, params[2], block(0x1111, 0x2222));
+			PRNG prng(block(0x3333, 0x4444));
+			std::vector<u8> input(n), encoded, expected(k);
+			prng.get(input.data(), input.size());
+			encoded = input;
+			bd.dualEncode<u8>(encoded.begin(), CoeffCtxGF2{});
+			bd.getMtx().multAdd(input, expected);
+			if (!std::equal(expected.begin(), expected.end(), encoded.begin()))
+				throw UnitTestFail("BlockDiagonal SIMD and matrix encoders disagree" LOCATION);
+		}
+
+		BlkAccCode valid;
+		valid.init(10, 24, 8, 3);
+		std::vector<u8> input(24);
+		valid.dualEncode<u8>(input.begin(), CoeffCtxGF2{});
+	}
 
 
 	template<typename F, typename Ctx>

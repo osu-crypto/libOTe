@@ -12,6 +12,7 @@
 #include "libOTe/Dpf/RevCuckoo/GoldreichHash.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Dpf/SumDmpf.h"
+#include <type_traits>
 
 using namespace oc;
 
@@ -293,8 +294,8 @@ void RegularDpf_MultSession_Test(const CLP& cmd)
 			dpf[1].setupMultiply(n, x1.getSpan<u8>(), sock[1])
 		));
 
-		auto session0 = std::get<0>(sessions).result();
-		auto session1 = std::get<1>(sessions).result();
+		auto& session0 = std::get<0>(sessions).result();
+		auto& session1 = std::get<1>(sessions).result();
 
 		// check that the base OTs in the sessions are correct
 		if (session0.mRecvOts.size() != n ||
@@ -1887,6 +1888,26 @@ void SparseDpf_Punct_Test(const oc::CLP& cmd)
 }
 
 
+struct TrackingTernaryCoeffCtx : CoeffCtxGF2
+{
+	inline static u64 mSerializeCalls = 0;
+	inline static u64 mDeserializeCalls = 0;
+
+	template<typename SrcIter, typename DstIter>
+	void serialize(SrcIter begin, SrcIter end, DstIter dstBegin) const
+	{
+		++mSerializeCalls;
+		CoeffCtxGF2::serialize(begin, end, dstBegin);
+	}
+
+	template<typename SrcIter, typename DstIter>
+	void deserialize(SrcIter begin, SrcIter end, DstIter dstBegin) const
+	{
+		++mDeserializeCalls;
+		CoeffCtxGF2::deserialize(begin, end, dstBegin);
+	}
+};
+
 template<typename F, typename Ctx>
 void TernaryDpf_Proto_Test_(const oc::CLP& cmd)
 {
@@ -1908,8 +1929,8 @@ void TernaryDpf_Proto_Test_(const oc::CLP& cmd)
 		points1[i] = F3x32(prng.get<u64>() % domain);
 		points0[i] = points[i] - points1[i];
 		//std::cout << points[i] << " = " << points0[i] <<" + "<< points1[i] << std::endl;
-		values0[i] = prng.get();
-		values1[i] = prng.get();
+		ctx.fromBlock(values0[i], prng.get());
+		ctx.fromBlock(values1[i], prng.get());
 		//ctx.minus(points0[i], points[i], points1[i];)
 	}
 
@@ -1952,6 +1973,25 @@ void TernaryDpf_Proto_Test_(const oc::CLP& cmd)
 		dpf[0].expand(points0, values0, [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t; }, prng, sock[0]),
 		dpf[1].expand(points1, values1, [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t; }, prng, sock[1])
 	));
+	for (auto& instance : dpf)
+	{
+		if (instance.hasBaseOts() || instance.mBaseSendOts.size() ||
+			instance.mBaseRecvOts.size() || instance.mBaseChoice.size())
+			throw UnitTestFail("Ternary DPF retained consumed base OTs");
+	}
+	bool rejectedReuse = false;
+	try
+	{
+		coproto::Socket emptySock;
+		macoro::sync_wait(dpf[0].expand(points0, values0,
+			[](auto, auto, auto, auto) {}, prng, emptySock));
+	}
+	catch (const std::exception&)
+	{
+		rejectedReuse = true;
+	}
+	if (!rejectedReuse)
+		throw UnitTestFail("Ternary DPF reused consumed base OTs");
 
 
 	for (u64 i = 0; i < domain; ++i)
@@ -1988,6 +2028,420 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 {
 	TernaryDpf_Proto_Test_<block, CoeffCtxGF2>(cmd);
 	TernaryDpf_Proto_Test_<u8, CoeffCtxGF2>(cmd);
+	TrackingTernaryCoeffCtx::mSerializeCalls = 0;
+	TrackingTernaryCoeffCtx::mDeserializeCalls = 0;
+	TernaryDpf_Proto_Test_<u8, TrackingTernaryCoeffCtx>(cmd);
+	if (TrackingTernaryCoeffCtx::mSerializeCalls != 2 ||
+		TrackingTernaryCoeffCtx::mDeserializeCalls != 2)
+		throw UnitTestFail(
+			"Ternary DPF bypassed its coefficient context wire encoding");
+}
+
+void Dpf_Audit_Test(const oc::CLP&)
+{
+	auto expectRejected = [](auto&& fn, const char* message) {
+		bool rejected = false;
+		try { fn(); }
+		catch (const std::exception&) { rejected = true; }
+		if (!rejected)
+			throw UnitTestFail(message);
+	};
+
+#if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
+	static_assert(!std::is_copy_constructible_v<DpfMult>);
+	static_assert(!std::is_copy_assignable_v<DpfMult>);
+	static_assert(std::is_move_constructible_v<DpfMult>);
+	static_assert(std::is_move_assignable_v<DpfMult>);
+	static_assert(!std::is_copy_constructible_v<DpfMult::MultSession>);
+	static_assert(!std::is_copy_assignable_v<DpfMult::MultSession>);
+	static_assert(std::is_move_constructible_v<DpfMult::MultSession>);
+	static_assert(std::is_move_assignable_v<DpfMult::MultSession>);
+
+	{
+		DpfMult mult;
+		mult.init(1, 1);
+		std::vector<std::array<block, 2>> sendOts(1);
+		std::vector<block> recvOts(1);
+		BitVector choices(1);
+		mult.setBaseOts(sendOts, recvOts, choices);
+
+		auto moved = std::move(mult);
+		if (!moved.hasBaseOts() || mult.hasBaseOts() || mult.mPartyIdx ||
+			mult.mTotalMults || mult.mOtIdx || mult.mChoiceBits.size() ||
+			mult.mRecvOts.size() || mult.mSendOts.size())
+			throw UnitTestFail("DPF multiplier move retained source correlation state");
+
+		DpfMult::MultSession session;
+		session.mPartyIdx = 1;
+		session.mExpandIdx = 7;
+		session.mRecvOts = moved.mRecvOts;
+		session.mSendOts = moved.mSendOts;
+		session.mX.resize(1);
+		auto movedSession = std::move(session);
+		if (movedSession.mExpandIdx != 7 || movedSession.mRecvOts.size() != 1 ||
+			movedSession.mSendOts.size() != 1 || movedSession.mX.size() != 1 ||
+			session.mPartyIdx || session.mExpandIdx || session.mRecvOts.size() ||
+			session.mSendOts.size() || session.mX.size())
+			throw UnitTestFail("DPF multiplication session move retained source state");
+	}
+
+	{
+		DpfMult mult;
+		mult.init(0, 1);
+		std::vector<std::array<block, 2>> sendOts(1);
+		std::vector<block> recvOts(1);
+		BitVector choices(1), x(1);
+		mult.setBaseOts(sendOts, recvOts, choices);
+		std::vector<block> y(1), xy(1);
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		macoro::sync_wait(sockets[1].close());
+
+		bool failed = false;
+		try
+		{
+			macoro::sync_wait(mult.multiply(x, y, xy, sockets[0]));
+		}
+		catch (const std::exception&)
+		{
+			failed = true;
+		}
+		if (!failed || mult.mOtIdx != 1 || mult.hasBaseOts())
+			throw UnitTestFail("DPF multiplication reused OTs after transport failure");
+	}
+
+	{
+		constexpr u64 n = 1;
+		DpfMult mult;
+		mult.init(1, n);
+		std::vector<std::array<block, 2>> sendOts(n);
+		std::vector<block> recvOts(n);
+		BitVector choices(n);
+		mult.setBaseOts(sendOts, recvOts, choices);
+
+		BitVector x(n), y(n), xy(n);
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		auto injectPadding = [&]() -> macoro::task<> {
+			AlignedUnVector<u8> theta(1), phi(1);
+			co_await sockets[1].recv(theta);
+			co_await sockets[1].recv(phi);
+			theta[0] |= 0xfe;
+			phi[0] |= 0xfe;
+			co_await sockets[1].send(std::move(theta));
+			co_await sockets[1].send(std::move(phi));
+		};
+
+		macoro::sync_wait(macoro::when_all_ready(
+			mult.multiplyBits(x, y, xy, sockets[0]),
+			injectPadding()));
+		if (xy.getSpan<const u8>()[0] & 0xfe)
+			throw UnitTestFail(
+				"DPF bit multiplication retained peer-controlled padding");
+	}
+
+	{
+		Matrix<u8> unpacked(2, 3);
+		std::fill(unpacked.begin(), unpacked.end(), 0xff);
+		std::vector<u8> packed{ 1, 2, 3, 4 };
+		DpfMult::unpackBits(unpacked, packed, 16);
+		if (unpacked(0, 0) != 1 || unpacked(0, 1) != 2 ||
+			unpacked(1, 0) != 3 || unpacked(1, 1) != 4 ||
+			unpacked(0, 2) != 0xff || unpacked(1, 2) != 0xff)
+			throw UnitTestFail("DPF byte unpacking used the physical row stride");
+
+		Matrix<u8> source(2, 3);
+		source(0, 0) = 5;
+		source(0, 1) = 6;
+		source(0, 2) = 0xee;
+		source(1, 0) = 7;
+		source(1, 1) = 8;
+		source(1, 2) = 0xee;
+		packed.assign(4, 0xff);
+		DpfMult::packBits(packed, source, 16);
+		if (packed != std::vector<u8>{ 5, 6, 7, 8 })
+			throw UnitTestFail("DPF byte packing used the physical row stride");
+
+		Matrix<u8> partialSource(1, 1);
+		partialSource(0, 0) = 0x15;
+		packed.assign(1, 0xff);
+		DpfMult::packBits(packed, partialSource, 5);
+		if (packed[0] != 0x15)
+			throw UnitTestFail("DPF bit packing retained stale padding bits");
+		Matrix<u8> partialDest(1, 1);
+		partialDest(0, 0) = 0xff;
+		DpfMult::unpackBits(partialDest, packed, 5);
+		if (partialDest(0, 0) != 0x15)
+			throw UnitTestFail("DPF bit unpacking retained stale padding bits");
+
+		Matrix<u8> narrow(1, 1);
+		std::vector<u8> twoBytes(2);
+		expectRejected([&] {
+			DpfMult::packBits(twoBytes, narrow, 9);
+		}, "DPF bit packing accepted an undersized row");
+
+		DpfMult multiplier;
+		coproto::Socket socket;
+		std::vector<u8> noChoices;
+		std::vector<block> noInput, noOutput;
+		macoro::sync_wait(multiplier.multiply<block, CoeffCtxGF2>(
+			noChoices, noInput, noOutput, socket, CoeffCtxGF2{}));
+
+		std::vector<u8> oneChoice(1);
+		std::vector<block> oneInput(1);
+		expectRejected([&] {
+			macoro::sync_wait(multiplier.multiply<block, CoeffCtxGF2>(
+				oneChoice, oneInput, noOutput, socket, CoeffCtxGF2{}));
+		}, "DPF multiplication accepted an undersized output");
+
+		multiplier.mTotalMults = std::numeric_limits<u64>::max();
+		multiplier.mOtIdx = multiplier.mTotalMults - 1;
+		expectRejected([&] {
+			macoro::sync_wait(multiplier.setupMultiply(2, oneChoice, socket));
+		}, "DPF multiplication OT bounds wrapped");
+	}
+#endif
+
+#ifdef ENABLE_REGULAR_DPF
+	static_assert(!std::is_copy_constructible_v<RegularDpf<block>>);
+	static_assert(std::is_move_constructible_v<RegularDpf<block>>);
+	static_assert(!std::is_copy_constructible_v<SumDmpf<block>>);
+	static_assert(std::is_move_constructible_v<SumDmpf<block>>);
+	{
+		RegularDpf<block> regular;
+		regular.init(1, 8, 1);
+		auto movedRegular = std::move(regular);
+		if (movedRegular.mDomain != 8 || regular.mPartyIdx || regular.mDomain ||
+			regular.mDepth || regular.mNumPoints || regular.hasBaseOts())
+			throw UnitTestFail("Regular DPF move retained source state");
+
+		SumDmpf<block> sum;
+		sum.init(1, 8, 1, 1);
+		sum.mPoints.push_back(3);
+		auto movedSum = std::move(sum);
+		if (movedSum.mPoints.size() != 1 || sum.mTimer || sum.mPartyIdx ||
+			sum.mDomain || sum.mNumSets || sum.mNumPointsPerSet ||
+			sum.mPoints.size() || sum.hasBaseOts())
+			throw UnitTestFail("Sum DMPF move retained source state");
+	}
+
+	{
+		PRNG prng(block(0x4155442d303238ull, 0x4155442d303239ull));
+		constexpr u64 domain = 8;
+		std::vector<u64> points{ 1, 5 };
+		std::vector<block> values{ prng.get(), prng.get() };
+		std::array<RegularDpfKey, 2> keys;
+
+		RegularDpf<block>::keyGen(domain, points, values, prng, keys);
+		values = { prng.get(), prng.get() };
+		RegularDpf<block>::keyGen(domain, points, values, prng, keys);
+		if (keys[0].mLeafVals.size() != points.size() * sizeof(block) ||
+			keys[1].mLeafVals.size() != points.size() * sizeof(block))
+			throw UnitTestFail("Regular DPF appended reused leaf programming");
+
+		std::vector<u8> malformedKey(keys[0].sizeBytes());
+		keys[0].toBytes(malformedKey);
+		auto correctionBitOffset = sizeof(block) *
+			(1 + keys[0].mCorrectionWords.size());
+		malformedKey[correctionBitOffset] = 2;
+		auto unchangedKey = keys[0];
+		expectRejected([&] {
+			keys[0].fromBytes(malformedKey);
+		}, "Regular DPF accepted a noncanonical correction bit");
+		if (keys[0] != unchangedKey)
+			throw UnitTestFail("failed Regular DPF decoding changed the key");
+
+		auto oversizedLeaf = keys[0];
+		oversizedLeaf.mLeafVals.push_back(0);
+		expectRejected([&] {
+			RegularDpf<block>::expand(0, domain, oversizedLeaf,
+				[](auto, auto, auto, auto) {});
+		}, "Regular DPF accepted an oversized leaf buffer");
+
+		auto shortWords = keys[0];
+		shortWords.mCorrectionWords.resize(log2ceil(domain) - 1, points.size());
+		expectRejected([&] {
+			RegularDpf<block>::expand(0, domain, shortWords,
+				[](auto, auto, auto, auto) {});
+		}, "Regular DPF accepted inconsistent correction dimensions");
+
+		std::array<RegularDpfKey, 2> puncturedKeys;
+		std::vector<block> noValues;
+		RegularDpf<block>::keyGen(domain, points, noValues, prng, puncturedKeys);
+		if (puncturedKeys[0].mCorrectionBits.cols() != points.size() ||
+			puncturedKeys[0].mLeafVals.size())
+			throw UnitTestFail("Regular DPF ignored punctured-key points");
+
+		std::vector<u64> invalidPoint{ domain };
+		std::vector<block> invalidValue{ prng.get() };
+		expectRejected([&] {
+			RegularDpf<block>::keyGen(domain, invalidPoint, invalidValue, prng, keys);
+		}, "Regular DPF accepted a point outside its domain");
+
+		RegularDpf<block> oversizedDomain;
+		expectRejected([&] {
+			oversizedDomain.init(0, u64{ 1 } << 63, 8);
+		}, "Regular DPF accepted wrapping working-matrix dimensions");
+
+		SumDmpf<block> sum;
+		sum.init(0, domain, 2, 1);
+		auto count = sum.baseOtCount().mRecvCount;
+		std::vector<std::array<block, 2>> sendOts(count);
+		std::vector<block> recvOts(count);
+		BitVector choices(count);
+		sum.setBaseOts(sendOts, recvOts, choices);
+		sum.mPoints = points;
+		sum.clear();
+		if (sum.hasBaseOts() || sum.mPartyIdx || sum.mDomain || sum.mNumSets ||
+			sum.mNumPointsPerSet || sum.mPoints.size() ||
+			sum.mDpf.mMultiplier.mSendOts.size())
+			throw UnitTestFail("Sum DMPF clear retained protocol state");
+	}
+#endif
+
+#ifdef ENABLE_TERNARY_DPF
+	static_assert(!std::is_copy_constructible_v<TernaryDpf<block, CoeffCtxGF2>>);
+	static_assert(std::is_move_constructible_v<TernaryDpf<block, CoeffCtxGF2>>);
+
+	{
+		F3x32 mutableValue;
+		mutableValue.mVal = 0x9123456789abcdefull;
+		const F3x32 value = mutableValue;
+		if (value.lower(0).mVal != 0 || value.upper(0).mVal != value.mVal ||
+			value.lower(31).mVal != (value.mVal & ((1ull << 62) - 1)) ||
+			value.upper(31).mVal != (value.mVal >> 62) ||
+			value.lower(32).mVal != value.mVal || value.upper(32).mVal != 0)
+			throw UnitTestFail("F3x32 slicing mishandled a boundary digit count");
+		expectRejected([&] { (void)value.lower(33); },
+			"F3x32 lower slicing accepted too many digits");
+		expectRejected([&] { (void)value.upper(33); },
+			"F3x32 upper slicing accepted too many digits");
+	}
+
+	{
+		TernaryDpf<block, CoeffCtxGF2> ternary;
+		ternary.init(1, 3, 1);
+		auto count = ternary.baseOtCount();
+		std::vector<std::array<block, 2>> sendOts(count);
+		std::vector<block> recvOts(count);
+		BitVector choices(count);
+		ternary.setBaseOts(sendOts, recvOts, choices);
+		auto moved = std::move(ternary);
+		if (!moved.hasBaseOts() || ternary.hasBaseOts() || ternary.mPartyIdx ||
+			ternary.mDomain || ternary.mDepth || ternary.mNumPointsPerSet ||
+			ternary.mOtIdx || ternary.mBaseSendOts.size() ||
+			ternary.mBaseRecvOts.size() || ternary.mBaseChoice.size())
+			throw UnitTestFail("Ternary DPF move retained source correlation state");
+	}
+
+	{
+		TernaryDpf<block, CoeffCtxGF2> oversizedTernary;
+		expectRejected([&] {
+			oversizedTernary.init(0, ipow(3, 32), 431);
+		}, "Ternary DPF accepted wrapping derived storage dimensions");
+	}
+#endif
+
+#ifdef ENABLE_SPARSE_DPF
+	static_assert(!std::is_copy_constructible_v<SparseDpf>);
+	static_assert(std::is_move_constructible_v<SparseDpf>);
+	{
+		SparseDpf sparse;
+		sparse.init(1, 1, 8, 1);
+		auto moved = std::move(sparse);
+		if (moved.mDomain != 8 || sparse.mPartyIdx || sparse.mNumPoints ||
+			sparse.mDomain || sparse.mDenseDepth ||
+			sparse.mRegDpf.mMultiplier.mSendOts.size() ||
+			sparse.mMultiplier.mSendOts.size())
+			throw UnitTestFail("Sparse DPF move retained source state");
+	}
+
+	{
+		PRNG prng(block(0x4155442d303331ull, 0x4155442d303332ull));
+		coproto::Socket sock;
+		std::vector<block> noValues;
+
+		SparseDpf wrongRows;
+		wrongRows.init(0, 2, 8, 0);
+		std::vector<u64> onePoint{ 1 };
+		std::vector<std::vector<u32>> oneSet{ { 1 } };
+		expectRejected([&] {
+			macoro::sync_wait(wrongRows.expand(onePoint, noValues,
+				[](auto, auto, auto, auto) {}, prng, oneSet, sock));
+		}, "Sparse DPF accepted the wrong row count");
+
+		auto rejectSet = [&](std::vector<u32> set, const char* message) {
+			SparseDpf sparse;
+			sparse.init(0, 1, 8, 0);
+			std::vector<std::vector<u32>> sets{ std::move(set) };
+			expectRejected([&] {
+				macoro::sync_wait(sparse.expand(onePoint, noValues,
+					[](auto, auto, auto, auto) {}, prng, sets, sock));
+			}, message);
+		};
+		rejectSet({}, "Sparse DPF accepted an empty sparse set");
+		rejectSet({ 2, 1 }, "Sparse DPF accepted an unsorted sparse set");
+		rejectSet({ 1, 1 }, "Sparse DPF accepted duplicate sparse points");
+		rejectSet({ 1, 8 }, "Sparse DPF accepted an out-of-domain sparse point");
+
+		SparseDpf singleton;
+		singleton.init(0, 1, 8, 0);
+		u64 outputs = 0;
+		macoro::sync_wait(singleton.expand(onePoint, noValues,
+			[&](auto, auto, auto, auto) { ++outputs; }, prng, oneSet, sock));
+		if (outputs != 1)
+			throw UnitTestFail("Sparse DPF did not expand a singleton sparse set");
+
+		{
+			SparseDpf sparse;
+			std::vector<block> sigma{ block(1, 2) };
+			std::vector<std::array<u8, 2>> tau{ { 1, 0 } };
+			auto originalSigma = sigma;
+			auto originalTau = tau;
+			auto sockets = coproto::LocalAsyncSocket::makePair();
+			auto sendInvalidTau = [&]() -> macoro::task<> {
+				std::vector<block> peerSigma(1);
+				std::vector<std::array<u8, 2>> peerTau(1);
+				co_await sockets[1].recv(peerSigma);
+				co_await sockets[1].recv(peerTau);
+				peerTau[0] = { 2, 0 };
+				co_await sockets[1].send(std::move(peerSigma));
+				co_await sockets[1].send(std::move(peerTau));
+			};
+
+			auto results = macoro::sync_wait(macoro::when_all_ready(
+				sparse.reveal(sigma, tau, sockets[0]), sendInvalidTau()));
+			bool rejected = false;
+			try { std::get<0>(results).result(); }
+			catch (const std::exception&) { rejected = true; }
+			std::get<1>(results).result();
+			if (!rejected || sigma != originalSigma || tau != originalTau)
+				throw UnitTestFail(
+					"Sparse DPF accepted or applied a non-bit peer tau value");
+		}
+
+		{
+			SparseDpf sparse;
+			std::vector<block> sigma(1);
+			std::vector<std::array<u8, 2>> tau(1);
+			auto sockets = coproto::LocalAsyncSocket::makePair();
+			auto closeBeforeReply = [&]() -> macoro::task<> {
+				std::vector<block> peerSigma(1);
+				std::vector<std::array<u8, 2>> peerTau(1);
+				co_await sockets[1].recv(peerSigma);
+				co_await sockets[1].recv(peerTau);
+				co_await sockets[1].close();
+			};
+
+			auto results = macoro::sync_wait(macoro::when_all_ready(
+				sparse.reveal(sigma, tau, sockets[0]), closeBeforeReply()));
+			bool failed = false;
+			try { std::get<0>(results).result(); }
+			catch (const std::exception&) { failed = true; }
+			std::get<1>(results).result();
+			if (!failed)
+				throw UnitTestFail("Sparse DPF suppressed a parallel receive failure");
+		}
+	}
+#endif
 }
 
 

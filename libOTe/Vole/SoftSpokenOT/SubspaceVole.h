@@ -54,12 +54,14 @@ namespace osuCrypto
 		SubspaceVoleSender(SubspaceVoleSender && o)
 			: Base(std::move(o))
 			, mVole(std::move(o.mVole))
+			, mMessages(std::move(o.mMessages))
 		{}
 
 		SubspaceVoleSender& operator=(SubspaceVoleSender&& o)
 		{
 			*(Base*)this = (std::move(o));
 			mVole = (std::move(o.mVole));
+			mMessages = (std::move(o.mMessages));
 			return *this;
 		}
 
@@ -75,17 +77,26 @@ namespace osuCrypto
 
 		void init(u64 fieldBits, u64 numVoles)
 		{
-			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits));
-			mVole.init(fieldBits, numVoles, false);
-
-			if (mVole.mNumVoles != code().length())
+			SmallFieldVoleBase::baseOtCount(fieldBits, numVoles);
+			Code code(divCeil(gOtExtBaseOtCount, fieldBits));
+			if (numVoles != code.length())
 				throw RTE_LOC;
+
+			SmallFieldVoleSender vole;
+			vole.init(fieldBits, numVoles, false);
+			this->mCode = std::move(code);
+			mVole = std::move(vole);
 		}
 
 
 		bool hasSeed() const
 		{
 			return mVole.hasSeed();
+		}
+
+		void clearSeed()
+		{
+			mVole.clearSeed();
 		}
 
 		bool hasBaseOts() const
@@ -115,13 +126,26 @@ namespace osuCrypto
 		{
 			// The extra added on is because some extra memory is used temporarily in generateRandom and
 			// generateChosen.
-			mMessages.reserve(blocks * code().length() + mVole.uPadded() - code().codimension());
+			u64 padding = mVole.uPadded() - code().codimension();
+			if (blocks > ~0ull - padding)
+				throw std::invalid_argument("Subspace VOLE message reservation overflow. " LOCATION);
+			mMessages.reserve(blocks + padding);
 		}
 
 		// Reserve room for the given numbers of random and chosen u subspace VOLEs.
 		void reserveMessages(u64 random, u64 chosen)
 		{
-			reserveMessages(code().codimension() * random + code().length() * chosen);
+			u64 randomWidth = code().codimension();
+			u64 chosenWidth = code().length();
+			if ((randomWidth && random > ~0ull / randomWidth) ||
+				(chosenWidth && chosen > ~0ull / chosenWidth))
+				throw std::invalid_argument("Subspace VOLE message reservation overflow. " LOCATION);
+
+			u64 randomBlocks = randomWidth * random;
+			u64 chosenBlocks = chosenWidth * chosen;
+			if (chosenBlocks > ~0ull - randomBlocks)
+				throw std::invalid_argument("Subspace VOLE message reservation overflow. " LOCATION);
+			reserveMessages(randomBlocks + chosenBlocks);
 		}
 
 		// Extend mMessages by blocks blocks, and return the span of added blocks.
@@ -147,6 +171,11 @@ namespace osuCrypto
 
 		void generateRandom(u64 blockIdx, const AES& aes, span<block> randomU, span<block> outV)
 		{
+			if (!mVole.isReadyToGenerate())
+				throw std::logic_error("Subspace VOLE sender is not ready to generate. " LOCATION);
+			if ((u64)randomU.size() != uSize() || (u64)outV.size() != vPadded())
+				throw RTE_LOC;
+
 			span<block> tmpU = extendMessages(mVole.uPadded());
 
 			mVole.generate(blockIdx, aes, tmpU, outV);
@@ -158,6 +187,11 @@ namespace osuCrypto
 
 		void generateChosen(u64 blockIdx, const AES& aes, span<const block> chosenU, span<block> outV)
 		{
+			if (!mVole.isReadyToGenerate())
+				throw std::logic_error("Subspace VOLE sender is not ready to generate. " LOCATION);
+			if ((u64)chosenU.size() != uSize() || (u64)outV.size() != vPadded())
+				throw RTE_LOC;
+
 			span<block> correction = extendMessages(mVole.uPadded());
 
 			mVole.generate(blockIdx, aes, correction, outV);
@@ -214,12 +248,17 @@ namespace osuCrypto
 
 		void init(u64 fieldBits_, u64 numVoles_)
 		{
-			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits_));
-			mVole.init(fieldBits_, numVoles_, false);
-			mCorrectionU.resize(uPadded());
-
-			if (mVole.mNumVoles != code().length())
+			SmallFieldVoleBase::baseOtCount(fieldBits_, numVoles_);
+			Code code(divCeil(gOtExtBaseOtCount, fieldBits_));
+			if (numVoles_ != code.length())
 				throw RTE_LOC;
+
+			SmallFieldVoleReceiver vole;
+			vole.init(fieldBits_, numVoles_, false);
+			AlignedUnVector<block> correctionU(vole.uPadded());
+			this->mCode = std::move(code);
+			mVole = std::move(vole);
+			mCorrectionU = std::move(correctionU);
 		}
 
 		void setBaseOts(
@@ -232,6 +271,11 @@ namespace osuCrypto
 		bool hasSeed() const
 		{
 			return mVole.hasSeed();
+		}
+
+		void clearSeed()
+		{
+			mVole.clearSeed();
 		}
 
 		bool hasBaseOts() const
@@ -259,10 +303,13 @@ namespace osuCrypto
 		{
 			// To avoid needing a queue, this assumes that all mMessages are used up before more are
 			// read.
-#ifndef NDEBUG
-			if (!mMessages.empty() && mMessages.size() != mReadIndex + uPadded() - uSize())
+			u64 padding = uPadded() - uSize();
+			if (!mMessages.empty() &&
+				(mReadIndex > mMessages.size() ||
+					mMessages.size() - mReadIndex != padding))
 				throw RTE_LOC;
-#endif
+			if (blocks > ~0ull - padding)
+				throw std::invalid_argument("Subspace VOLE receive size overflow. " LOCATION);
 			clear();
 
 			//u64 currentEnd = mMessages.size();
@@ -274,17 +321,26 @@ namespace osuCrypto
 		// await the result to perform the receive.
 		auto recv(Socket& socket, u64 random, u64 chosen)
 		{
-			return recv(socket, code().codimension() * random + code().length() * chosen);
+			u64 randomWidth = code().codimension();
+			u64 chosenWidth = code().length();
+			if ((randomWidth && random > ~0ull / randomWidth) ||
+				(chosenWidth && chosen > ~0ull / chosenWidth))
+				throw std::invalid_argument("Subspace VOLE receive size overflow. " LOCATION);
+
+			u64 randomBlocks = randomWidth * random;
+			u64 chosenBlocks = chosenWidth * chosen;
+			if (chosenBlocks > ~0ull - randomBlocks)
+				throw std::invalid_argument("Subspace VOLE receive size overflow. " LOCATION);
+			return recv(socket, randomBlocks + chosenBlocks);
 		}
 
 		// Get a message from the receive buffer that is blocks blocks long, with paddedLen extra blocks
 		// on the end that should be ignored.
 		span<block> getMessage(u64 blocks, u64 paddedLen)
 		{
-#ifndef NDEBUG
-			if (mReadIndex + paddedLen > mMessages.size())
+			if (blocks > paddedLen || mReadIndex > mMessages.size() ||
+				paddedLen > mMessages.size() - mReadIndex)
 				throw RTE_LOC;
-#endif
 
 			auto output = mMessages.subspan(mReadIndex, paddedLen);
 			mReadIndex += blocks;
@@ -314,6 +370,11 @@ namespace osuCrypto
 
 		void generateRandom(u64 blockIdx, const AES& aes, span<block> outW)
 		{
+			if (!mVole.isReadyToGenerate())
+				throw std::logic_error("Subspace VOLE receiver is not ready to generate. " LOCATION);
+			if ((u64)outW.size() != wPadded())
+				throw RTE_LOC;
+
 			span<block> syndrome = getMessage(code().codimension());
 
 			// TODO: at least for some codes this is kind of a nop, so maybe could avoid a copy.
@@ -323,6 +384,11 @@ namespace osuCrypto
 
 		void generateChosen(u64 blockIdx, const AES& aes, span<block> outW)
 		{
+			if (!mVole.isReadyToGenerate())
+				throw std::logic_error("Subspace VOLE receiver is not ready to generate. " LOCATION);
+			if ((u64)outW.size() != wPadded())
+				throw RTE_LOC;
+
 			span<block> correctionU = getMessage(uSize(), uPadded());
 			mVole.generate(blockIdx, aes, outW, correctionU);
 		}

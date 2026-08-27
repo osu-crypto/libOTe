@@ -35,13 +35,15 @@ namespace osuCrypto
 
 		TwoOneRTCR() = default;
 		TwoOneRTCR(TwoOneRTCR&& o)
-			: mHashKeys(std::exchange(o.mHashKeys, {}))
+			: AESRekeyManager(std::move(o))
+			, mHashKeys(std::exchange(o.mHashKeys, {}))
 			, mTweak(std::exchange(o.mTweak, -1))
 			, mTweakMul(std::exchange(o.mTweakMul, block(0ull)))
 		{}
 
 		TwoOneRTCR& operator=(TwoOneRTCR&& o)
 		{
+			AESRekeyManager::operator=(std::move(o));
 			mHashKeys = (std::exchange(o.mHashKeys, {}));
 			mTweak = (std::exchange(o.mTweak, -1));
 			mTweakMul = (std::exchange(o.mTweakMul, block(0ull)));

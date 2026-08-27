@@ -1,4 +1,4 @@
-// © 2025 Peter Rindal.
+// Â© 2025 Peter Rindal.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 // 
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
@@ -6,7 +6,7 @@
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 // Code partially authored by:
-// Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, Clément Ducros, and Sacha Servan - Schreiber
+// Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, ClÃ©ment Ducros, and Sacha Servan - Schreiber
 
 #include "libOTe/config.h"
 #if defined(ENABLE_FOLEAGE)
@@ -23,16 +23,38 @@ namespace osuCrypto
 
 	void FoleageTriple::init(u64 partyIdx, u64 n)
 	{
+		if (partyIdx > 1)
+			throw std::invalid_argument("FoleageTriple party index must be zero or one");
+		if (!n)
+			throw std::invalid_argument("FoleageTriple size must be positive");
+		if (!mT)
+			throw std::invalid_argument("FoleageTriple mT must be positive");
+		if (!mC || mC > 8)
+			throw std::invalid_argument("FoleageTriple mC must be in [1, 8]");
+		if (mT > 128 / mC)
+			throw std::invalid_argument("FoleageTriple supports at most 128 sparse coefficients");
+
+		const auto log3N = log3ceil(n);
+		const auto log3T = log3ceil(mT);
+
+		if (mT != ipow(3, log3T))
+			throw std::invalid_argument("FoleageTriple mT must be a power of three");
+		if (log3N <= log3T)
+			throw std::invalid_argument("FoleageTriple requires at least two positions per sparse block");
+
+		const auto N = ipow(3, log3N);
+		const auto blockSize = N / mT;
+		const auto blockDepth = log3N - log3T;
+		if (blockDepth > 32)
+			throw std::invalid_argument("FoleageTriple block depth exceeds F3x32 capacity");
+
+		clearBaseOts();
 		mPartyIdx = partyIdx;
-		mLog3N = log3ceil(n);
-		mLog3T = log3ceil(mT);
-		mN = ipow(3, mLog3N);
-
-		if (mT != ipow(3, mLog3T))
-			throw RTE_LOC;
-
-		mBlockSize = mN / mT;
-		mBlockDepth = mLog3N - mLog3T;
+		mLog3N = log3N;
+		mLog3T = log3T;
+		mN = N;
+		mBlockSize = blockSize;
+		mBlockDepth = blockDepth;
 		mDpfLeafDepth = std::min<u64>(5, mBlockDepth);
 		mDpfTreeDepth = mBlockDepth - mDpfLeafDepth;
 
@@ -42,15 +64,15 @@ namespace osuCrypto
 		mDpfLeaf.init(mPartyIdx, mDpfLeafSize, mC * mC * mT * mT);
 		mDpf.init(mPartyIdx, mDpfTreeSize, mC * mC * mT * mT);
 
-		if (mBlockSize < 2)
-			throw RTE_LOC;
-
 		sampleA(block(3127894527893612049, 240925987420932408));
 	}
 
 
 	FoleageTriple::BaseCount FoleageTriple::baseOtCount() const
 	{
+		if (!isInitialized())
+			throw std::runtime_error("FoleageTriple::init must be called first. " LOCATION);
+
 		BaseCount counts;
 
 		counts.mSendCount = mDpfLeaf.baseOtCount() + mDpf.baseOtCount();
@@ -75,6 +97,8 @@ namespace osuCrypto
 			throw RTE_LOC;
 		if (baseChoices.size() != baseCounts.mRecvCount)
 			throw RTE_LOC;
+
+		clearBaseOts();
 		auto recvIter = recvBaseOts;
 		auto sendIter = baseSendOts;
 		auto choiceIter = baseChoices;
@@ -98,14 +122,30 @@ namespace osuCrypto
 
 		auto sendOts = sendIter.subspan(offset);
 		auto recvOts = recvIter.subspan(offset);
-		mSendOts.insert(mSendOts.end(), sendOts.begin(), sendOts.end());
-		mRecvOts.insert(mRecvOts.end(), recvOts.begin(), recvOts.end());
+		mSendOts.assign(sendOts.begin(), sendOts.end());
+		mRecvOts.assign(recvOts.begin(), recvOts.end());
 		mChoiceOts = BitVector(baseChoices.data(), baseChoices.size() - offset, offset);
+		mBaseOtsAvailable = true;
 	}
 
 	bool FoleageTriple::hasBaseOts() const
 	{
-		return mSendOts.size() + mRecvOts.size() > 0;
+		return mBaseOtsAvailable;
+	}
+
+	void FoleageTriple::clearBaseOts()
+	{
+		mBaseOtsAvailable = false;
+		mSendOts.clear();
+		mRecvOts.clear();
+		mChoiceOts.resize(0);
+
+		mDpfLeaf.mBaseSendOts.resize(0);
+		mDpfLeaf.mBaseRecvOts.resize(0);
+		mDpfLeaf.mBaseChoice.resize(0);
+		mDpf.mBaseSendOts.resize(0);
+		mDpf.mBaseRecvOts.resize(0);
+		mDpf.mBaseChoice.resize(0);
 	}
 
 	macoro::task<> FoleageTriple::genBaseOts(
@@ -113,6 +153,9 @@ namespace osuCrypto
 		Socket& sock,
 		SilentBaseType baseType)
 	{
+		if (baseType != SilentBaseType::Base &&
+			baseType != SilentBaseType::BaseExtend)
+			throw std::invalid_argument("Silent base type not supported. " LOCATION);
 		if (isInitialized() == false)
 		{
 			throw std::runtime_error("init must be called first. " LOCATION);
@@ -174,10 +217,12 @@ namespace osuCrypto
 				BitVector choice(baseCount.mRecvCount);
 				choice.randomize(prng);
 
-				co_await(
+				auto results = co_await(
 					macoro::when_all_ready(
 						baseOt1.send(sendMsg, prng, sock),
 						baseOt2.receive(choice, recvMsg, prng2, sock2)));
+				std::get<0>(results).result();
+				std::get<1>(results).result();
 
 				setBaseOts(sendMsg, recvMsg, choice);
 #else
@@ -237,11 +282,13 @@ namespace osuCrypto
 				BitVector choice(baseCount.mRecvCount);
 				choice.randomize(prng);
 
-				co_await(
+				auto results = co_await(
 					macoro::when_all_ready(
 						baseOt1.receive(choice, recvMsg, prng, sock),
 						baseOt2.send(sendMsg, prng2, sock2)
 					));
+				std::get<0>(results).result();
+				std::get<1>(results).result();
 
 				setBaseOts(sendMsg, recvMsg, choice);
 #else
@@ -321,12 +368,10 @@ namespace osuCrypto
 		PRNG& prng,
 		coproto::Socket& sock)
 	{
-		setTimePoint("expand start");
+		if (!isInitialized())
+			throw std::runtime_error("FoleageTriple::init must be called first. " LOCATION);
 
-		if (hasBaseOts() == false)
-		{
-			co_await genBaseOts(prng, sock);
-		}
+		setTimePoint("expand start");
 
 		if (divCeil(mN, 128) < ALsb.size())
 			throw RTE_LOC;
@@ -336,8 +381,24 @@ namespace osuCrypto
 		if (ALsb.size() != CMsb.size() && CMsb.size())
 			throw RTE_LOC;
 
+		if (hasBaseOts() == false)
+		{
+			co_await genBaseOts(prng, sock);
+		}
+		if (!mBaseOtsAvailable)
+			throw std::runtime_error("FoleageTriple requires a fresh base-OT set");
+
+		// One expansion consumes every DPF and tensor base OT. Mark the set
+		// unavailable before protocol I/O, and clear it on every exit path.
+		mBaseOtsAvailable = false;
+		struct ClearBaseOtsOnExit
+		{
+			FoleageTriple* mThis;
+			~ClearBaseOtsOnExit() { mThis->clearBaseOts(); }
+		} clearBaseOtsOnExit{ this };
+
 		// the coefficient of the sparse polynomial.
-		// the i'th row containts the coeffs for the i'th poly.
+		// the i'th row contains the coefficients for the i'th polynomial.
 		mSparsePositions.resize(mC, mT);
 
 		// The mT coefficients of the mC sparse polynomials.
@@ -355,6 +416,10 @@ namespace osuCrypto
 
 		// select random positions for the sparse polynomial.
 		// The i'th is the noise position in the i'th block.
+		// The LPN construction is robust to the small bias introduced by
+		// reducing a 64-bit sample modulo this power of three; exact uniformity
+		// is not required, and the intended parameters retain 30--40 bits of
+		// statistical security from this sampling step.
 		for (u64 i = 0; i < mSparsePositions.size(); ++i)
 			mSparsePositions(i) = prng.get<u64>() % mBlockSize;
 
@@ -384,7 +449,7 @@ namespace osuCrypto
 
 		setTimePoint("input Mult");
 
-		// compress the resume and set the output.
+		// Compress the result and set the output.
 		auto outSize = std::min<u64>(mN, ALsb.size() * 128);
 		//std::vector<u8> A(mN);
 
@@ -414,9 +479,9 @@ namespace osuCrypto
 		}
 		setTimePoint("copyOutX");
 
-		// sharing of the F4 coefficients of the product polynomails.
+		// Sharing of the F4 coefficients of the product polynomials.
 		// these will just be the tensored coefficients but in permuted
-		// order to match how they are expended in the DPF and then added 
+		// order to match how they are expanded in the DPF and then added
 		// together.
 		std::vector<uint8_t> prodPolyF4Coeffs(mC * mC * mT * mT);
 
@@ -428,7 +493,7 @@ namespace osuCrypto
 		std::vector<F3x32> prodPolyLeafPos(mC * mC * mT * mT);
 
 		// once we construct large F4^243 coefficients, we will expand them
-		// the main DPF to get the full shared polynomail. prodPolyTreePos
+		// the main DPF to get the full shared polynomial. prodPolyTreePos
 		// is the location that the F4^243 coefficient should be mapped to.
 		std::vector<F3x32> prodPolyTreePos(mC * mC * mT * mT);
 
@@ -479,7 +544,7 @@ namespace osuCrypto
 
 		setTimePoint("dpfParams");
 
-		// sharing of the F4^243 coefficients of the product polynomails.
+		// Sharing of the F4^243 coefficients of the product polynomials.
 		// These are obtained by expanding the F4 coefficients into 243
 		// elements using a "small DPF".
 		std::vector<FoleageF4x243> prodPolyF4x243Coeffs(mC * mC * mT * mT);
@@ -624,8 +689,10 @@ namespace osuCrypto
 
 	macoro::task<> FoleageTriple::tensor(span<u16> coeffs, span<u16> prod, coproto::Socket& sock)
 	{
-		if (coeffs.size() * coeffs.size() != prod.size())
-			throw RTE_LOC;
+		if (!coeffs.size() || coeffs.size() > 128)
+			throw std::invalid_argument("FoleageTriple tensor supports 1 to 128 coefficients");
+		if (prod.size() != coeffs.size() * coeffs.size())
+			throw std::invalid_argument("FoleageTriple tensor product has the wrong size");
 
 		auto expand = [](block k, span<block> diff) {
 			AES aes(k);
@@ -640,7 +707,7 @@ namespace osuCrypto
 
 		if (mPartyIdx)
 		{
-			if (mSendOts.size() < 2 * coeffs.size() - 1)
+			if (mSendOts.size() < 2 * coeffs.size())
 				throw RTE_LOC; //base ots not set.
 			// b * a = (b0 * a +  b1 * (2 * a))
 			//auto getDiff = [](block k0, block k1, span<block> diff) {
@@ -706,9 +773,9 @@ namespace osuCrypto
 		else
 		{
 
-			if (mChoiceOts.size() < 2 * coeffs.size() - 1)
+			if (mChoiceOts.size() < 2 * coeffs.size())
 				throw RTE_LOC; //base ots not set.
-			if (mRecvOts.size() < 2 * coeffs.size() - 1)
+			if (mRecvOts.size() < 2 * coeffs.size())
 				throw RTE_LOC; //base ots not set.
 
 			for (u64 i = 0; i < coeffs.size(); ++i)

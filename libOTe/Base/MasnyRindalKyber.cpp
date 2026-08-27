@@ -3,6 +3,7 @@
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>
+#include <stdexcept>
 
 namespace osuCrypto
 {
@@ -14,6 +15,10 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MACORO_TRY{
+		if (messages.size() != choices.size())
+			throw std::invalid_argument(
+				"MasnyRindalKyber receiver choices and messages have different sizes");
+
 		static_assert(std::is_trivial<KyberOtRecvPKs>::value, "");
 		static_assert(std::is_trivial<KyberOTCtxt>::value, "");
 

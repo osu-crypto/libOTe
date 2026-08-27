@@ -6,6 +6,61 @@
 namespace osuCrypto
 {
 
+    SparseMtx::SparseMtx(const SparseMtx& o)
+        : mDataRow(o.mDataRow)
+        , mDataCol(o.mDataCol)
+        , mRows(o.mRows.size())
+        , mCols(o.mCols.size())
+    {
+        u64 offset = 0;
+        for (u64 i = 0; i < mRows.size(); ++i)
+        {
+            auto size = static_cast<u64>(o.mRows[i].size());
+            if (size > mDataRow.size() - offset)
+                throw std::invalid_argument("Sparse matrix row views exceed owned storage. " LOCATION);
+
+            auto sourceData = o.mDataRow.data();
+            auto expectedSource = sourceData ? sourceData + offset : nullptr;
+            if (size && o.mRows[i].data() != expectedSource)
+                throw std::invalid_argument("Sparse matrix row view is not backed by owned storage. " LOCATION);
+
+            auto data = mDataRow.data();
+            mRows[i] = Row(span<u64>(data ? data + offset : nullptr, size));
+            offset += size;
+        }
+        if (offset != mDataRow.size())
+            throw std::invalid_argument("Sparse matrix row views do not cover owned storage. " LOCATION);
+
+        offset = 0;
+        for (u64 i = 0; i < mCols.size(); ++i)
+        {
+            auto size = static_cast<u64>(o.mCols[i].size());
+            if (size > mDataCol.size() - offset)
+                throw std::invalid_argument("Sparse matrix column views exceed owned storage. " LOCATION);
+
+            auto sourceData = o.mDataCol.data();
+            auto expectedSource = sourceData ? sourceData + offset : nullptr;
+            if (size && o.mCols[i].data() != expectedSource)
+                throw std::invalid_argument("Sparse matrix column view is not backed by owned storage. " LOCATION);
+
+            auto data = mDataCol.data();
+            mCols[i] = Col(span<u64>(data ? data + offset : nullptr, size));
+            offset += size;
+        }
+        if (offset != mDataCol.size())
+            throw std::invalid_argument("Sparse matrix column views do not cover owned storage. " LOCATION);
+    }
+
+    SparseMtx& SparseMtx::operator=(const SparseMtx& o)
+    {
+        if (this != &o)
+        {
+            SparseMtx copy(o);
+            *this = std::move(copy);
+        }
+        return *this;
+    }
+
 
     // add the given point. SHould not have previously been added.
     PointList::PointList(u64 r, u64 c, span<const Point> pp)
@@ -68,33 +123,19 @@ namespace osuCrypto
         std::vector<u64> rowSizes(rows);
         std::vector<u64> colSizes(cols);
 
-#define OC_INSERT_DEBUG
-#ifdef OC_INSERT_DEBUG
         std::set<std::pair<u64, u64>> set;
-#endif // !NDEBUG
 
         for (u64 i = 0; i < u64(points.size()); ++i)
         {
-#ifdef OC_INSERT_DEBUG
-            auto s = set.insert({ points[i].mRow , points[i].mCol });
-
-            if (!s.second)
-            {
-                std::cout << "dup " << points[i].mRow << " " << points[i].mCol << std::endl;
-                abort();
-            }
-
             if (points[i].mRow >= rows)
-            {
-                std::cout << "row out of bounds " << points[i].mRow << " " << rows << std::endl;
-                abort();
-            }
+                throw std::invalid_argument("Sparse matrix row index is out of range. " LOCATION);
             if (points[i].mCol >= cols)
-            {
-                std::cout << "col out of bounds " << points[i].mCol << " " << cols << std::endl;
-                abort();
-            }
-#endif
+                throw std::invalid_argument("Sparse matrix column index is out of range. " LOCATION);
+
+            auto s = set.insert({ points[i].mRow , points[i].mCol });
+            if (!s.second)
+                throw std::invalid_argument("Sparse matrix points must be unique. " LOCATION);
+
             ++rowSizes[points[i].mRow];
             ++colSizes[points[i].mCol];
 
@@ -154,8 +195,8 @@ namespace osuCrypto
 
     bool SparseMtx::isSet(u64 row, u64 col)
     {
-        assert(row < rows());
-        assert(col < cols());
+        if (row >= rows() || col >= cols())
+            throw std::invalid_argument("Sparse matrix index is out of range. " LOCATION);
 
         auto iter = std::lower_bound(
             mCols[col].begin(),
@@ -168,16 +209,32 @@ namespace osuCrypto
 
     bool SparseMtx::validate()
     {
+        if (mDataRow.size() != mDataCol.size())
+            return false;
+
         std::vector<span<u64>::iterator> colIters(cols());
         for (u64 i = 0; i < cols(); ++i)
         {
+            if (!std::is_sorted(mCols[i].begin(), mCols[i].end()) ||
+                std::adjacent_find(mCols[i].begin(), mCols[i].end()) != mCols[i].end())
+                return false;
             colIters[i] = mCols[i].begin();
         }
 
+        u64 rowEntries = 0;
         for (u64 i = 0; i < rows(); ++i)
         {
-            if (!std::is_sorted(mRows[i].begin(), mRows[i].end()))
+            if (!std::is_sorted(mRows[i].begin(), mRows[i].end()) ||
+                std::adjacent_find(mRows[i].begin(), mRows[i].end()) != mRows[i].end())
                 return false;
+
+            if (mRows[i].size() > mDataRow.size() - rowEntries)
+                return false;
+            auto data = mDataRow.data();
+            auto expected = data ? data + rowEntries : nullptr;
+            if (mRows[i].size() && mRows[i].data() != expected)
+                return false;
+            rowEntries += mRows[i].size();
 
             for (auto cc : mRows[i])
             {
@@ -193,7 +250,24 @@ namespace osuCrypto
             }
         }
 
-        return true;
+        if (rowEntries != mDataRow.size())
+            return false;
+
+        u64 colEntries = 0;
+        for (u64 i = 0; i < cols(); ++i)
+        {
+            auto data = mDataCol.data();
+            auto expected = data ? data + colEntries : nullptr;
+            if (mCols[i].size() && mCols[i].data() != expected)
+                return false;
+            if (colIters[i] != mCols[i].end())
+                return false;
+            if (mCols[i].size() > mDataCol.size() - colEntries)
+                return false;
+            colEntries += mCols[i].size();
+        }
+
+        return colEntries == mDataCol.size();
     }
 
     // vertically concatinate this matrix and the parameter.
@@ -202,7 +276,9 @@ namespace osuCrypto
     SparseMtx SparseMtx::vConcat(const SparseMtx& o) const
     {
         if (cols() != o.cols())
-            throw RTE_LOC;
+            throw std::invalid_argument("Sparse matrices must have equal column counts. " LOCATION);
+        if (o.rows() > std::numeric_limits<u64>::max() - rows())
+            throw std::invalid_argument("Sparse matrix row count overflows. " LOCATION);
 
         PointList pPnts = *this;
         pPnts.mRows += o.rows();
@@ -216,6 +292,11 @@ namespace osuCrypto
 
     SparseMtx SparseMtx::subMatrix(u64 row, u64 col, u64 rowCount, u64 colCount)const
     {
+        if (row > rows() || rowCount > rows() - row)
+            throw std::invalid_argument("Sparse submatrix row range is out of bounds. " LOCATION);
+        if (col > cols() || colCount > cols() - col)
+            throw std::invalid_argument("Sparse submatrix column range is out of bounds. " LOCATION);
+
         if (rowCount == 0 || colCount == 0)
             return {};
 
@@ -223,11 +304,6 @@ namespace osuCrypto
 
         auto rEnd = row + rowCount;
         auto cEnd = col + colCount;
-
-        assert(rows() > row);
-        assert(rows() >= rEnd);
-        assert(cols() > col);
-        assert(cols() >= cEnd);
 
         u64 total = 0;
         std::vector<std::array<span<u64>::iterator, 2>> rowIters(rEnd - row);
@@ -363,7 +439,8 @@ namespace osuCrypto
 
     SparseMtx SparseMtx::mult(const SparseMtx& X) const
     {
-        assert(cols() == X.rows());
+        if (cols() != X.rows())
+            throw std::invalid_argument("Sparse matrix multiplication dimensions do not match. " LOCATION);
 
 
 
@@ -411,8 +488,8 @@ namespace osuCrypto
 
     SparseMtx SparseMtx::add(const SparseMtx& p) const
     {
-        assert(rows() == p.rows());
-        assert(cols() == p.cols());
+        if (rows() != p.rows() || cols() != p.cols())
+            throw std::invalid_argument("Sparse matrix addition dimensions do not match. " LOCATION);
 
         SparseMtx r;
         r.mDataCol.reserve(
@@ -599,6 +676,16 @@ namespace osuCrypto
         return true;
     }
 
+    bool DenseMtx::ConstRow::isZero() const
+    {
+        for (u64 colIdx = 0; colIdx < mMtx.cols(); ++colIdx)
+        {
+            if (mMtx(mIdx, colIdx))
+                return false;
+        }
+        return true;
+    }
+
     void DenseMtx::Row::operator^=(const Row& r)
     {
         for (u64 colIdx = 0; colIdx < mMtx.cols(); ++colIdx)
@@ -609,8 +696,15 @@ namespace osuCrypto
 
     void DenseMtx::resize(u64 rows, u64 cols)
     {
+        if (rows > std::numeric_limits<u64>::max() - 127)
+            throw std::invalid_argument("Dense matrix row padding overflows. " LOCATION);
+
+        auto blockRows = (rows + 127) / 128;
+        if (cols && blockRows > std::numeric_limits<u64>::max() / cols)
+            throw std::invalid_argument("Dense matrix dimensions overflow. " LOCATION);
+
+        mData.resize(cols, blockRows);
         mRows = rows;
-        mData.resize(cols, (rows + 127) / 128);
     }
 
     void DenseMtx::colIndexSet(u64 c, std::vector<u64>& set) const
@@ -629,6 +723,10 @@ namespace osuCrypto
 
     DenseMtx DenseMtx::selectColumns(span<u64> perm)
     {
+        for (auto colIdx : perm)
+            if (colIdx >= cols())
+                throw std::invalid_argument("Dense matrix column index is out of range. " LOCATION);
+
         DenseMtx r(rows(), perm.size());
 
         for (u64 i = 0; i < (u64)perm.size(); ++i)
@@ -651,6 +749,8 @@ namespace osuCrypto
 
     void DenseMtx::rowSwap(u64 i, u64 j)
     {
+        if (i >= rows() || j >= rows())
+            throw std::invalid_argument("Dense matrix row index is out of range. " LOCATION);
         if (i != j)
         {
             row(i).swap(row(j));
@@ -681,7 +781,8 @@ namespace osuCrypto
 
     DenseMtx DenseMtx::mult(const DenseMtx& m)
     {
-        assert(cols() == m.rows());
+        if (cols() != m.rows())
+            throw std::invalid_argument("Dense matrix multiplication dimensions do not match. " LOCATION);
 
         DenseMtx ret(rows(), m.cols());
 
@@ -693,7 +794,7 @@ namespace osuCrypto
                 u8 v = 0;
                 for (u64 k = 0; k < cols(); ++k)
                 {
-                    v = v ^ ((*this)(i, k) & m(k, j));
+                    v ^= static_cast<u8>((*this)(i, k)) & static_cast<u8>(m(k, j));
                 }
 
                 ret(i, j) = v;
@@ -707,7 +808,8 @@ namespace osuCrypto
 
     DenseMtx DenseMtx::add(DenseMtx& m)
     {
-        assert(rows() == m.rows() && cols() == m.cols());
+        if (rows() != m.rows() || cols() != m.cols())
+            throw std::invalid_argument("Dense matrix addition dimensions do not match. " LOCATION);
 
         auto ret = *this;
         for (u64 i = 0; i < mData.size(); ++i)
@@ -733,9 +835,12 @@ namespace osuCrypto
 
     DenseMtx DenseMtx::upperTriangular() const
     {
-        auto& mtx = *this;
+        auto mtx = *this;
         auto rows = mtx.rows();
         auto cols = mtx.cols();
+
+        if (cols == 0)
+            return mtx;
 
         u64 colIdx = 0ull;
         for (u64 i = 0; i < rows; ++i)
@@ -778,9 +883,12 @@ namespace osuCrypto
     // Perform gausian elimination and return the result.
     DenseMtx DenseMtx::gausianElimination() const
     {
-        auto& mtx = *this;
+        auto mtx = *this;
         auto rows = mtx.rows();
         auto cols = mtx.cols();
+
+        if (cols == 0)
+            return mtx;
 
         u64 colIdx = 0ull;
         for (u64 i = 0; i < rows; ++i)
@@ -822,7 +930,8 @@ namespace osuCrypto
 
     DenseMtx DenseMtx::invert() const
     {
-        assert(rows() == cols());
+        if (rows() != cols())
+            throw std::invalid_argument("Only square dense matrices can be inverted. " LOCATION);
 
         auto mtx = *this;
         auto n = this->rows();
@@ -887,6 +996,11 @@ namespace osuCrypto
 
     DenseMtx DenseMtx::subMatrix(u64 row, u64 col, u64 rowCount, u64 colCount)
     {
+        if (row > rows() || rowCount > rows() - row)
+            throw std::invalid_argument("Dense submatrix row range is out of bounds. " LOCATION);
+        if (col > cols() || colCount > cols() - col)
+            throw std::invalid_argument("Dense submatrix column range is out of bounds. " LOCATION);
+
         DenseMtx ret(rowCount, colCount);
 
         for (u64 i = 0, ii = row; i < rowCount; ++i, ++ii)
@@ -1010,12 +1124,15 @@ namespace osuCrypto
     void VecSortSet::erase(u64 i)
     {
         auto iter = lowerBound(i);
-        assert(iter != end());
+        if (iter == end() || *iter != i)
+            throw std::invalid_argument("Cannot erase a missing sorted-set element. " LOCATION);
         erase(iter);
     }
 
     void VecSortSet::erase(iterator iter)
     {
+        if (iter == end())
+            throw std::invalid_argument("Cannot erase the sorted-set end iterator. " LOCATION);
         auto e = end() - 1;
         while (iter < e)
         {
@@ -1117,14 +1234,14 @@ namespace osuCrypto
 
     void DynSparseMtx::resize(u64 rows, u64 cols)
     {
-        if (mRows.size() < rows)
+        if (rows < mRows.size())
         {
-            for (u64 i = mRows.size() - 1; i <= rows; --i)
+            for (u64 i = mRows.size(); i-- > rows; )
                 clearRow(i);
         }
-        if (mCols.size() < cols)
+        if (cols < mCols.size())
         {
-            for (u64 i = mCols.size() - 1; i <= cols; --i)
+            for (u64 i = mCols.size(); i-- > cols; )
                 clearCol(i);
         }
 
@@ -1142,26 +1259,34 @@ namespace osuCrypto
 
     void DynSparseMtx::clearRow(u64 i)
     {
-        assert(i < mRows.size());
+        if (i >= rows())
+            throw std::invalid_argument("Dynamic sparse matrix row index is out of range. " LOCATION);
         for (auto c : mRows[i])
         {
             mCols[c].erase(i);
         }
+        mRows[i].clear();
     }
 
     // clears the given column and maintains the invariances.
 
     void DynSparseMtx::clearCol(u64 i)
     {
-        assert(i < mCols.size());
+        if (i >= cols())
+            throw std::invalid_argument("Dynamic sparse matrix column index is out of range. " LOCATION);
         for (auto r : mCols[i])
         {
             mRows[r].erase(i);
         }
+        mCols[i].clear();
     }
 
     void DynSparseMtx::pushBackCol(span<const u64> col)
     {
+        for (auto rowIdx : col)
+            if (rowIdx >= rows())
+                throw std::invalid_argument("Dynamic sparse matrix row index is out of range. " LOCATION);
+
         auto c = mCols.size();
         mCols.emplace_back();
         mCols.back().insert(col.begin(), col.end());
@@ -1176,6 +1301,10 @@ namespace osuCrypto
 
     void DynSparseMtx::pushBackRow(span<const u64> row)
     {
+        for (auto colIdx : row)
+            if (colIdx >= cols())
+                throw std::invalid_argument("Dynamic sparse matrix column index is out of range. " LOCATION);
+
         auto r = mRows.size();
         mRows.emplace_back();
         mRows.back().insert(row.begin(), row.end());
@@ -1190,6 +1319,13 @@ namespace osuCrypto
 
     void DynSparseMtx::rowAdd(u64 r0, u64 r1)
     {
+        if (r0 >= rows() || r1 >= rows())
+            throw std::invalid_argument("Dynamic sparse matrix row index is out of range. " LOCATION);
+        if (r0 == r1)
+        {
+            clearRow(r0);
+            return;
+        }
 
         u64 i0 = 0;
         u64 i1 = 0;
@@ -1235,8 +1371,8 @@ namespace osuCrypto
     {
         //validate();
 
-        assert(r0 < rows());
-        assert(r1 < rows());
+        if (r0 >= rows() || r1 >= rows())
+            throw std::invalid_argument("Dynamic sparse matrix row index is out of range. " LOCATION);
 
         if (r0 == r1)
             return;
@@ -1301,6 +1437,8 @@ namespace osuCrypto
         {
             for (auto j : mRows[i])
             {
+                if (j >= cols())
+                    throw std::runtime_error("Dynamic sparse matrix contains an invalid column index. " LOCATION);
                 if (mCols[j].find(i) == mCols[j].end())
                     throw RTE_LOC;
             }
@@ -1310,6 +1448,8 @@ namespace osuCrypto
         {
             for (auto j : mCols[i])
             {
+                if (j >= rows())
+                    throw std::runtime_error("Dynamic sparse matrix contains an invalid row index. " LOCATION);
                 if (mRows[j].find(i) == mRows[j].end())
                     throw RTE_LOC;
             }
@@ -1321,6 +1461,10 @@ namespace osuCrypto
 
     DynSparseMtx DynSparseMtx::selectColumns(span<u64> perm) const
     {
+        for (auto colIdx : perm)
+            if (colIdx >= cols())
+                throw std::invalid_argument("Dynamic sparse matrix column index is out of range. " LOCATION);
+
         DynSparseMtx r;
         r.mRows.resize(rows());
         for (u64 i = 0; i < (u64)perm.size(); ++i)
@@ -1541,6 +1685,211 @@ namespace osuCrypto
 
         assert(I == DenseMtx::Identity(n1));
 
+    }
+
+    void tests::Mtx_Audit_Test()
+    {
+        auto expectInvalid = [](auto&& fn)
+        {
+            bool rejected = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::invalid_argument&)
+            {
+                rejected = true;
+            }
+            if (!rejected)
+                throw RTE_LOC;
+        };
+
+        auto expectOutOfRange = [](auto&& fn)
+        {
+            bool rejected = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::out_of_range&)
+            {
+                rejected = true;
+            }
+            if (!rejected)
+                throw RTE_LOC;
+        };
+
+        auto expectOverflow = [](auto&& fn)
+        {
+            bool rejected = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::overflow_error&)
+            {
+                rejected = true;
+            }
+            if (!rejected)
+                throw RTE_LOC;
+        };
+
+        std::vector<Point> points{ { 0, 0 }, { 1, 1 } };
+        SparseMtx sparse(2, 2, points);
+
+        SparseMtx copied(sparse);
+        if (copied.row(0).data() == sparse.row(0).data() ||
+            copied.col(0).data() == sparse.col(0).data() || !copied.validate())
+            throw RTE_LOC;
+
+        SparseMtx assigned;
+        {
+            SparseMtx source(2, 2, points);
+            assigned = source;
+            if (assigned.row(0).data() == source.row(0).data() ||
+                assigned.col(0).data() == source.col(0).data())
+                throw RTE_LOC;
+        }
+        if (!assigned.validate() || !assigned(0, 0) || !assigned(1, 1))
+            throw RTE_LOC;
+
+        auto inconsistent = copied;
+        std::array<u64, 2> extraColumn{ 0, 0 };
+        inconsistent.mCols[0] = SparseMtx::Col(span<u64>(extraColumn));
+        if (inconsistent.validate())
+            throw RTE_LOC;
+        expectInvalid([&] { SparseMtx invalidCopy(inconsistent); });
+
+        std::vector<u8> shortInput(1), output(2);
+        expectInvalid([&] { sparse.multAdd(shortInput, output); });
+        expectInvalid([&] { (void)sparse.subMatrix(1, 0, 2, 1); });
+        std::array<u64, 1> invalidColumn{ 2 };
+        expectInvalid([&] { (void)sparse.getCols<u64>(invalidColumn); });
+
+        std::vector<Point> duplicate{ { 0, 0 }, { 0, 0 } };
+        expectInvalid([&]
+            {
+                SparseMtx invalid;
+                invalid.init(1, 1, duplicate);
+            });
+
+        std::vector<Point> outOfRange{ { 1, 0 } };
+        expectInvalid([&]
+            {
+                SparseMtx invalid;
+                invalid.init(1, 1, outOfRange);
+            });
+
+        SparseMtx wrongSparse(3, 1, span<Point>{});
+        expectInvalid([&] { (void)sparse.mult(wrongSparse); });
+        expectInvalid([&] { (void)sparse.add(wrongSparse); });
+
+        DynSparseMtx dynamic(sparse);
+        dynamic.resize(3, 3);
+        dynamic.validate();
+        if (!dynamic(0, 0) || !dynamic(1, 1))
+            throw RTE_LOC;
+
+        dynamic.resize(1, 1);
+        dynamic.validate();
+        if (!dynamic(0, 0))
+            throw RTE_LOC;
+
+        dynamic.clearRow(0);
+        dynamic.validate();
+        if (dynamic.row(0).size() || dynamic.col(0).size())
+            throw RTE_LOC;
+
+        std::array<u64, 1> invalidRow{ 1 };
+        expectInvalid([&] { dynamic.pushBackCol(invalidRow); });
+        if (dynamic.cols() != 1)
+            throw RTE_LOC;
+
+        VecSortSet set;
+        expectInvalid([&] { set.erase(0); });
+
+        DenseMtx dense(2, 2), wrongDense(3, 1), nonSquare(2, 3);
+        expectInvalid([&] { (void)dense.mult(wrongDense); });
+        expectInvalid([&] { (void)dense.add(wrongDense); });
+        expectInvalid([&] { (void)nonSquare.invert(); });
+        expectInvalid([&] { (void)dense.subMatrix(1, 0, 2, 1); });
+        expectInvalid([&] { (void)dense.selectColumns(invalidColumn); });
+        expectInvalid([&]
+            {
+                DenseMtx invalid;
+                invalid.resize(std::numeric_limits<u64>::max(), 1);
+            });
+
+        DenseMtx elimination(2, 2);
+        elimination(0, 1) = 1;
+        elimination(1, 0) = 1;
+        auto original = elimination;
+        auto upper = elimination.upperTriangular();
+        auto reduced = elimination.gausianElimination();
+        if (elimination != original || upper != DenseMtx::Identity(2) ||
+            reduced != DenseMtx::Identity(2))
+            throw RTE_LOC;
+
+        DenseMtx zeroWidth(2, 0);
+        if (zeroWidth.upperTriangular().rows() != 2 ||
+            zeroWidth.gausianElimination().rows() != 2)
+            throw RTE_LOC;
+
+        const DenseMtx& constElimination = elimination;
+        if (constElimination(0, 1) != 1 || constElimination.row(0).isZero())
+            throw RTE_LOC;
+
+        if (choose(5, 2) != 10)
+            throw RTE_LOC;
+        expectInvalid([&] { (void)choose(2, 3); });
+        expectOverflow([&] { (void)choose(68, 34); });
+        expectOutOfRange([&] { (void)ithCombination(10, 5, 2); });
+
+        u64 combinationIndex = 0;
+        for (NChooseK combinations(5, 2); combinations; ++combinations, ++combinationIndex)
+        {
+            if (*combinations != ithCombination(combinationIndex, 5, 2))
+                throw RTE_LOC;
+        }
+        if (combinationIndex != 10)
+            throw RTE_LOC;
+
+        NChooseK emptyCombination(5, 0);
+        if (!emptyCombination || !(*emptyCombination).empty())
+            throw RTE_LOC;
+        ++emptyCombination;
+        if (emptyCombination)
+            throw RTE_LOC;
+        expectOutOfRange([&] { (void)*emptyCombination; });
+        expectOutOfRange([&] { ++emptyCombination; });
+        expectInvalid([&] { NChooseK invalid(5, 2, 11); });
+
+        DenseMtx invalidParityCheck(2, 2);
+        expectInvalid([&] { (void)computeGen(invalidParityCheck); });
+        expectInvalid([&] { (void)computeSysGen(DenseMtx(2, 1)); });
+
+        std::vector<std::pair<u64, u64>> invalidSwaps{ { 0, 1 } };
+        expectInvalid([&] { (void)colSwap(DenseMtx(1, 1), invalidSwaps); });
+
+        DenseMtx singularParityCheck(1, 2);
+        std::vector<std::pair<u64, u64>> preservedSwaps{ { 7, 9 } };
+        auto noGenerator = computeGen(singularParityCheck, preservedSwaps);
+        if (noGenerator.rows() || preservedSwaps != std::vector<std::pair<u64, u64>>{ { 7, 9 } })
+            throw RTE_LOC;
+
+#ifndef ENABLE_ALGO994
+        bool unavailable = false;
+        try
+        {
+            (void)minDist2(singularParityCheck, 1, false);
+        }
+        catch (const std::runtime_error&)
+        {
+            unavailable = true;
+        }
+        if (!unavailable)
+            throw RTE_LOC;
+#endif
     }
 
     void tests::Mtx_block_test()

@@ -16,6 +16,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace osuCrypto::LogVole
 {
@@ -335,6 +336,59 @@ namespace osuCrypto
 {
     using namespace LogVole;
 
+    LogVoleSender::LogVoleSender(LogVoleSender&& other)
+    {
+        *this = std::move(other);
+    }
+
+    LogVoleSender& LogVoleSender::operator=(LogVoleSender&& other)
+    {
+        if (this != &other)
+        {
+            mTimer = other.mTimer;
+            mRequestSize = other.mRequestSize;
+            mPlaintextModulusBits = other.mPlaintextModulusBits;
+            mModulus = other.mModulus;
+            mDelta = other.mDelta;
+            mNumThreads = other.mNumThreads;
+            mNextSid = other.mNextSid;
+            mLastOnlineComm = other.mLastOnlineComm;
+            mState = other.mState;
+            mParams = std::move(other.mParams);
+            mOfflineState = std::move(other.mOfflineState);
+
+            other.mTimer = nullptr;
+            other.clear();
+        }
+        return *this;
+    }
+
+    LogVoleReceiver::LogVoleReceiver(LogVoleReceiver&& other)
+    {
+        *this = std::move(other);
+    }
+
+    LogVoleReceiver& LogVoleReceiver::operator=(LogVoleReceiver&& other)
+    {
+        if (this != &other)
+        {
+            mTimer = other.mTimer;
+            mRequestSize = other.mRequestSize;
+            mPlaintextModulusBits = other.mPlaintextModulusBits;
+            mModulus = other.mModulus;
+            mNumThreads = other.mNumThreads;
+            mNextSid = other.mNextSid;
+            mLastOnlineComm = other.mLastOnlineComm;
+            mState = other.mState;
+            mParams = std::move(other.mParams);
+            mOfflineState = std::move(other.mOfflineState);
+
+            other.mTimer = nullptr;
+            other.clear();
+        }
+        return *this;
+    }
+
     void LogVoleSender::configure(u64 n, u32 plaintextModulusBits, u32 numThreads)
     {
         if (n == 0)
@@ -503,6 +557,7 @@ namespace osuCrypto
 
         CivoleReceiverOfflineInput input{};
         input.mParams = mParams;
+        input.mW = mRequestSize;
 
         CivoleReceiverState state{};
         co_await civoleReceiverOffline(input, state, sock);
@@ -970,8 +1025,17 @@ namespace osuCrypto::LogVole
         CivoleReceiverState& state,
         Socket& sock)
     {
+        if (input.mW == 0)
+        {
+            throw std::runtime_error("LogVole CI-VOLE receiver requires a nonzero output length");
+        }
+
         auto metaSock = sock.fork();
         const CivoleOfflineMeta meta = co_await recvCivoleOfflineMeta(metaSock);
+        if (meta.mLabelCount != input.mW)
+        {
+            throw std::runtime_error("LogVole CI-VOLE receiver peer output length does not match expected length");
+        }
         CivoleParams sessionParams = input.mParams;
 
         ZpCrtContext ctx{};

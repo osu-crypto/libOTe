@@ -4,6 +4,8 @@
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include <ostream>
+#include <limits>
+#include <stdexcept>
 #include "libOTe/Tools/CoeffCtx.h"
 #include <array>
 
@@ -12,8 +14,15 @@ namespace osuCrypto
 	template<u64 modulus, typename T, typename TT = T>
 	struct Fp
 	{
+		static_assert(std::is_unsigned_v<T>, "Fp storage must be unsigned.");
+		static_assert(std::is_unsigned_v<TT>, "Fp wide storage must be unsigned.");
+		static_assert(modulus >= 2, "Fp modulus must be at least two.");
+		static_assert(modulus <= std::numeric_limits<T>::max(),
+			"Fp modulus must fit in its storage type.");
 		static constexpr T mMod = modulus;
 		static_assert(log2ceil(mMod) * 2 <= 8 * sizeof(TT), "a double sized value must fit in TT ");
+		static constexpr bool mNarrowAddSub =
+			mMod <= std::numeric_limits<T>::max() / 2 + 1;
 		T mVal;
 
 
@@ -29,7 +38,7 @@ namespace osuCrypto
 		}
 		Fp& operator=(PRNG::Any prng)
 		{
-			mVal = prng.mPrng.get<u64>() % mMod;
+			mVal = static_cast<T>(fieldSampling::sample(prng.mPrng, mMod));
 			return *this;
 		}
 
@@ -39,9 +48,20 @@ namespace osuCrypto
 		{
 
 			assert(mVal < mMod && o.mVal < mMod);
-			T r = mVal + o.mVal;
-			if (r >= mMod)
-				r -= mMod;
+			T r;
+			if constexpr (mNarrowAddSub)
+			{
+				r = mVal + o.mVal;
+				if (r >= mMod)
+					r -= mMod;
+			}
+			else
+			{
+				TT wide = TT(mVal) + TT(o.mVal);
+				if (wide >= TT(mMod))
+					wide -= TT(mMod);
+				r = static_cast<T>(wide);
+			}
 
 			assert(r == (TT(mVal) + TT(o.mVal)) % TT(mMod));
 
@@ -52,9 +72,19 @@ namespace osuCrypto
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			Fp r;
-			r.mVal = mVal + o.mVal;
-			if (r.mVal >= mMod)
-				r.mVal -= mMod;
+			if constexpr (mNarrowAddSub)
+			{
+				r.mVal = mVal + o.mVal;
+				if (r.mVal >= mMod)
+					r.mVal -= mMod;
+			}
+			else
+			{
+				TT wide = TT(mVal) + TT(o.mVal);
+				if (wide >= TT(mMod))
+					wide -= TT(mMod);
+				r.mVal = static_cast<T>(wide);
+			}
 
 			assert(r.mVal == (TT(mVal) + TT(o.mVal)) % TT(mMod));
 			return r;
@@ -63,10 +93,20 @@ namespace osuCrypto
 		constexpr Fp& operator-=(const Fp& o)
 		{
 			assert(mVal < mMod && o.mVal < mMod);
-			T r = mVal - o.mVal;
-			if (r >= mMod)
-				r += mMod;
-			assert(r == (TT(mVal) - TT(o.mVal) + mMod) % TT(mMod));
+			T r;
+			if constexpr (mNarrowAddSub)
+			{
+				r = mVal - o.mVal;
+				if (r >= mMod)
+					r += mMod;
+			}
+			else
+			{
+				r = mVal >= o.mVal ?
+					static_cast<T>(mVal - o.mVal) :
+					static_cast<T>(TT(mVal) + TT(mMod) - TT(o.mVal));
+			}
+			assert(r == (TT(mVal) + TT(mMod) - TT(o.mVal)) % TT(mMod));
 
 			mVal = r;
 			return *this;
@@ -75,11 +115,20 @@ namespace osuCrypto
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			Fp r;
-			r.mVal = mVal - o.mVal;
-			if (r.mVal >= mMod)
-				r.mVal += mMod;
+			if constexpr (mNarrowAddSub)
+			{
+				r.mVal = mVal - o.mVal;
+				if (r.mVal >= mMod)
+					r.mVal += mMod;
+			}
+			else
+			{
+				r.mVal = mVal >= o.mVal ?
+					static_cast<T>(mVal - o.mVal) :
+					static_cast<T>(TT(mVal) + TT(mMod) - TT(o.mVal));
+			}
 
-			assert(r.mVal == (TT(mVal) - TT(o.mVal) + mMod) % TT(mMod));
+			assert(r.mVal == (TT(mVal) + TT(mMod) - TT(o.mVal)) % TT(mMod));
 
 			return r;
 		};
@@ -117,12 +166,16 @@ namespace osuCrypto
 		constexpr Fp operator/(const Fp& o) const
 		{
 			assert(mVal < mMod && o.mVal < mMod);
+			if (o.mVal == 0)
+				throw std::domain_error("Finite-field division by zero. " LOCATION);
 			return *this * o.inverse();
 		}
 
 		constexpr Fp& operator/=(const Fp& o)
 		{
 			assert(mVal < mMod && o.mVal < mMod);
+			if (o.mVal == 0)
+				throw std::domain_error("Finite-field division by zero. " LOCATION);
 			*this = *this * o.inverse();
 			return *this;
 		}
@@ -146,15 +199,20 @@ namespace osuCrypto
 			return mVal;
 		}
 
-		constexpr Fp pow(i64 v) const
+		template<typename I>
+			requires (std::is_integral_v<std::remove_cv_t<I>> &&
+				!std::is_same_v<std::remove_cv_t<I>, bool>)
+		constexpr Fp pow(I exponent) const
 		{
 			assert(mVal < mMod);
-			if (v < 0)
-				throw RTE_LOC;
+			using E = std::remove_cv_t<I>;
+			if constexpr (std::is_signed_v<E>)
+				if (exponent < 0)
+					throw RTE_LOC;
+			using U = std::make_unsigned_t<E>;
+			U v = static_cast<U>(exponent);
 			if (v == 0)
 				return 1;
-			if (v > mMod)
-				v = v % mMod;
 
 			Fp y = 1;
 			Fp x = *this;
@@ -186,6 +244,11 @@ namespace osuCrypto
 
 		constexpr Fp inverse() const
 		{
+			// Match the vector-friendly convention used by Goldilocks. Division
+			// still rejects a zero divisor explicitly.
+			if (mVal == 0)
+				return zero();
+
 			// fermat's little theorem
 			auto p = pow(mMod - 2);
 			assert((*this * p).mVal == 1);
@@ -352,15 +415,21 @@ namespace osuCrypto
 		u64 n = 1;
 		for (auto fe : factors)
 		{
+			if (fe.mFactor < 2 || fe.mExp == 0)
+				throw std::invalid_argument("Root-of-unity factors must have positive exponents and factors of at least two. " LOCATION);
 			for (u64 i = 0; i < fe.mExp; ++i)
+			{
+				if (n > std::numeric_limits<u64>::max() / fe.mFactor)
+					throw std::invalid_argument("Root-of-unity order overflows. " LOCATION);
 				n *= fe.mFactor;
+			}
 		}
 
 		if ((p - 1) % n)
-			throw RTE_LOC;
+			throw std::invalid_argument("Root-of-unity order must divide the field multiplicative order. " LOCATION);
 
 		// make suer u is in Fp*
-		if (u == 0 || u.integer() % p == 0)
+		if (u == 0)
 			return false;
 
 		// make sure u is a root of unity.
@@ -368,7 +437,7 @@ namespace osuCrypto
 			return false;
 
 		// check that u is a primitive root of unity.
-		for (u64 i = 1; i < factors.size() - 1; ++i)
+		for (u64 i = 0; i < factors.size(); ++i)
 		{
 			if (u.pow(n / factors[i].mFactor) == 1)
 			{
@@ -391,7 +460,12 @@ namespace osuCrypto
 	inline F primRootOfUnity(u64 n, F generator)
 	{
 		auto p = F::order();
-		return generator.pow((p - 1) / n);
+		if (n == 0)
+			throw std::invalid_argument("Root-of-unity order must be nonzero. " LOCATION);
+		auto pMinusOne = p - 1;
+		if (pMinusOne % n)
+			throw std::invalid_argument("Root-of-unity order must divide the field multiplicative order. " LOCATION);
+		return generator.pow(static_cast<u64>(pMinusOne / n));
 	}
 
 	template<typename F>
@@ -452,6 +526,46 @@ namespace osuCrypto
 
 	struct CoeffCtxFp : CoeffCtxInteger
 	{
+		template<typename F>
+		OC_FORCEINLINE bool isCanonical(const F& value) const
+		{
+			using traits = FpTraits<std::remove_cvref_t<F>>;
+			static_assert(traits::is_fp, "F must be an Fp type.");
+			return value.mVal < traits::modulus_value;
+		}
+
+		// Peer-provided field encodings must be canonical. The arithmetic
+		// kernels intentionally assume this invariant and only assert it.
+		template<typename SrcIter, typename DstIter>
+		void deserialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin) const
+		{
+			using SrcType = std::remove_cvref_t<decltype(*begin)>;
+			using DstType = std::remove_cvref_t<decltype(*dstBegin)>;
+			static_assert(FpTraits<DstType>::is_fp,
+				"CoeffCtxFp can only deserialize into an Fp type.");
+
+			CoeffCtxInteger::deserialize(begin, end, dstBegin);
+
+			auto srcCount = std::distance(begin, end);
+			if (srcCount)
+			{
+				// The base deserializer has already checked the range, byte
+				// multiplication, and divisibility.
+				auto bytes = static_cast<std::size_t>(srcCount) * sizeof(SrcType);
+				auto dstCount = bytes / sizeof(DstType);
+				for (std::size_t i = 0; i < dstCount; ++i)
+				{
+					if (!isCanonical(dstBegin[i]))
+					{
+						for (std::size_t j = 0; j < dstCount; ++j)
+							dstBegin[j].mVal = 0;
+						throw std::invalid_argument(
+							"Noncanonical finite-field encoding. " LOCATION);
+					}
+				}
+			}
+		}
+
 		template<typename G>
 		bool characteristicTwo() const {
 			static_assert(FpTraits<G>::is_fp, "G must be an Fp type.");
@@ -463,6 +577,14 @@ namespace osuCrypto
 		OC_FORCEINLINE bool isField()const {
 			static_assert(FpTraits<G>::is_fp, "G must be an Fp type.");
 			return true;
+		}
+
+		template<typename G>
+		constexpr u64 additiveGroupBitCount() const
+		{
+			using traits = FpTraits<G>;
+			static_assert(traits::is_fp, "G must be an Fp type.");
+			return log2ceil(traits::modulus_value);
 		}
 
 		// the bit size require to prepresent F
@@ -492,7 +614,8 @@ namespace osuCrypto
 
 			using traits = FpTraits<F>;
 			static_assert(traits::is_fp, "G must be an Fp type.");
-			ret.mVal = b.get<u64>(0) % traits::modulus_value;
+			ret.mVal = static_cast<typename traits::value_type>(
+				fieldSampling::fromBlock(b, traits::modulus_value));
 		}
 
 
@@ -523,7 +646,7 @@ namespace osuCrypto
 	using Fp31 = Fp<2013265921, u32, u64>;
 	static_assert(sizeof(Fp31) == 4, "expecting 32 bits");
 
-	// Table of primitive 2^k-th roots of unity for k=0..32, suitable for NTTs over F_p.
+	// Table of primitive 2^k-th roots of unity for k=0..27, suitable for NTTs over F_p.
 	// Entry i is a primitive 2^i-th root. Consumers should ensure sizes are powers of two.
 	static constexpr std::array<Fp31, 28> Fp31RootsOfUnity =
 	{
@@ -558,15 +681,19 @@ namespace osuCrypto
 	};
 
 
-	// Goldilocks specialization:
+	// Fp31 specialization:
 	// - n must be a power of two (n = 2^k).
 	// - Returns the precomputed primitive n-th root from the table above.
 	template<>
 	inline Fp31 primRootOfUnity<Fp31>(u64 n)
 	{
+		if (n == 0)
+			throw std::invalid_argument("Fp31 root-of-unity order must be nonzero. " LOCATION);
 		auto ln = log2ceil(n);
-		if (1ull << ln != n)
-			throw RTE_LOC;
+		if (ln >= 64 || (1ull << ln) != n)
+			throw std::invalid_argument("Fp31 root-of-unity order must be a power of two. " LOCATION);
+		if (ln >= Fp31RootsOfUnity.size())
+			throw std::invalid_argument("Fp31 root-of-unity order exceeds the field two-adicity. " LOCATION);
 		return Fp31RootsOfUnity[ln];
 	}
 }

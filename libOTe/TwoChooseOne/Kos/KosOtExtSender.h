@@ -44,7 +44,10 @@ namespace osuCrypto {
 
         KosOtExtSender() = default;
         KosOtExtSender(const KosOtExtSender&) = delete;
-        KosOtExtSender(KosOtExtSender&&) = default;
+        KosOtExtSender(KosOtExtSender&& v)
+        {
+            *this = std::move(v);
+        }
 
         KosOtExtSender(
             SetUniformOts,
@@ -55,12 +58,18 @@ namespace osuCrypto {
 
         void operator=(KosOtExtSender&& v)
         {
+            if (this == &v)
+                return;
             mGens = std::move(v.mGens);
             mPrngIdx = std::exchange(v.mPrngIdx, 0);
             mBaseChoiceBits = std::move(v.mBaseChoiceBits);
-            mHashType = v.mHashType;
-            mFiatShamir = v.mFiatShamir;
-            mIsMalicious = v.mIsMalicious;
+            mHashType = std::exchange(v.mHashType, HashType::AesHash);
+            mFiatShamir = std::exchange(v.mFiatShamir, false);
+            mIsMalicious = std::exchange(v.mIsMalicious, true);
+
+            std::array<block, gOtExtBaseOtCount> zeroKeys{};
+            v.mGens.setKeys(zeroKeys);
+            v.mBaseChoiceBits = {};
         }
 
         // return true if this instance has valid base OTs. 

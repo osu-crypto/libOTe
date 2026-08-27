@@ -4,6 +4,7 @@
 
 #define LIBOTE_LOGVOLE_TESTS(X) \
     X(Civole, RejectsZeroDelta) \
+    X(Civole, RejectsPeerOfflineWidth) \
     X(Civole, ValidationAndSidReuse) \
     X(Civole, StateMachineAutoOfflineSequentialSids) \
     X(Core, WideU64OneShiftBounds) \
@@ -17,6 +18,7 @@
     X(KeyDeriveCore, DeterministicRegressionSeeds) \
     X(KeyDeriveCore, MetadataMismatchRejected) \
     X(KeyDeriveCoproto, HappyPathAndAlgebraicRelation) \
+	X(KeyDeriveCoproto, OversizedFramesRejectedBeforeAllocation) \
     X(Core, RepOfflineSenderInputGammaTauUnbundlesResidues) \
     X(Core, RecursiveLiftOracleKeepsSenderResiduesUnscaled) \
     X(LheOps, PublicADeterministic) \

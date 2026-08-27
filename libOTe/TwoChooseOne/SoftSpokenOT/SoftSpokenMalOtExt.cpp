@@ -15,10 +15,10 @@ namespace osuCrypto
 	{
 		MACORO_TRY{
 		if ((u64)messages.data() % 32)
-			throw std::runtime_error("soft spoken requires the messages to by 32 byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
+			throw std::runtime_error("soft spoken requires the messages to be 32-byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
 
 		if (messages.size() == 0)
-			throw std::runtime_error("soft spoken must be called with at least 1 messag." LOCATION);
+			throw std::runtime_error("soft spoken must be called with at least 1 message." LOCATION);
 
 		auto nChunks = u64{};
 		auto messagesFullChunks = u64{};
@@ -43,6 +43,8 @@ namespace osuCrypto
 		nChunks = divCeil(messages.size() + 64, 128);
 		messagesFullChunks = messages.size() / 128;
 		numExtra = nChunks - messagesFullChunks; // Always 1 or 2
+		static_assert(sizeof(messages[0]) == 2 * sizeof(block));
+		// The public OT pair layout is intentionally reused as a flat block workspace.
 		scratch = span<block>(messages[0].data(), messages.size() * 2);
 		if (mBase.wSize() > 2 * 128)
 		{
@@ -50,7 +52,8 @@ namespace osuCrypto
 			scratch = scratchBacking;
 		}
 
-		scratch[0] = ZeroBlock;
+		if (!scratch.empty())
+			scratch[0] = ZeroBlock;
 		co_await(runBatch(chl, scratch.subspan(0, messagesFullChunks * chunkSize())));
 		assert(messagesFullChunks == 0 || scratch[0] != ZeroBlock);
 
@@ -70,6 +73,8 @@ namespace osuCrypto
 		co_await(mBase.mSubVole.checkResponse(chl));
 
 	} MACORO_CATCH(eptr) {
+		if (mBase.mSubVole.hasDeferredConsistencyFailure())
+			mBase.mSubVole.clearSeed();
 		co_await chl.close();
 		std::rethrow_exception(eptr);
 	}
@@ -199,11 +204,11 @@ namespace osuCrypto
 		{
 			rtcr.useAES(numUsed);
 			Base::xorAndHashMessages(
-				numUsed, parent->mBase.delta(), (block*)messages.data(), inputW.data(), rtcr);
+				numUsed, parent->mBase.delta(), messages.data(), inputW.data(), rtcr);
 		}
 		else
 		{
-			parent->mBase.xorMessages(numUsed, (block*)messages.data(), inputW.data());
+			parent->mBase.xorMessages(numUsed, messages.data(), inputW.data());
 		}
 	}
 
@@ -293,8 +298,13 @@ namespace osuCrypto
 	{
 		MACORO_TRY{
 
+		if (choices.size() != messages.size())
+			throw std::runtime_error("choices and messages must have the same size. " LOCATION);
+		if (messages.empty())
+			throw std::runtime_error("soft spoken must be called with at least 1 message. " LOCATION);
+
 		if ((u64)messages.data() % 32)
-			throw std::runtime_error("soft spoken requires the messages to by 32 byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
+			throw std::runtime_error("soft spoken requires the messages to be 32-byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
 
 		auto nChunks = u64{};
 		auto messagesFullChunks = u64{};
@@ -324,7 +334,7 @@ namespace osuCrypto
 
 		nChunks = divCeil(messages.size() + 64, 128);
 		messagesFullChunks = messages.size() / 128;
-		scratch = (block*)messages.data();
+		scratch = messages.data();
 		if (mBase.vSize() > 128)
 		{
 			scratchBacking.resize(messagesFullChunks * chunkSize() + paddingSize());
@@ -390,8 +400,8 @@ namespace osuCrypto
 
 	task<> SoftSpokenMalOtReceiver::runBatch(Socket& chl, span<block> messages, span<block> choices)
 	{
-		auto numChunks = u64{};
 		auto numInstances = messages.size();
+		auto numChunks = numInstances / chunkSize() + (numInstances % chunkSize() != 0);
 		auto nChunk = u64{ 0 };
 		auto nInstance = u64{ 0 };
 		auto numUsed = u64{};

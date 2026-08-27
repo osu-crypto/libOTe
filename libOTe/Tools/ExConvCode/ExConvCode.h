@@ -10,6 +10,8 @@
 #include "cryptoTools/Common/Timer.h"
 #include "libOTe/Tools/ExConvCode/Expander.h"
 #include "libOTe/Tools/EACode/Util.h"
+#include <limits>
+#include <stdexcept>
 
 namespace osuCrypto
 {
@@ -254,14 +256,35 @@ namespace osuCrypto
         block seed)
     {
         if (codeSize == 0)
+        {
+            if (messageSize > std::numeric_limits<u64>::max() / 2)
+                throw std::invalid_argument("ExConv default code size overflows. " LOCATION);
             codeSize = 2 * messageSize;
+		}
+
+		if (messageSize == 0)
+			throw std::invalid_argument("ExConv message size must be nonzero. " LOCATION);
+		if (systematic && codeSize <= messageSize)
+			throw std::invalid_argument("Systematic ExConv code size must exceed its message size. " LOCATION);
+
+		const auto accumulatorRegion = codeSize - messageSize * systematic;
+		if (accumulatorRegion <= accumulatorSize)
+			throw std::invalid_argument("ExConv accumulator must be smaller than its working region. " LOCATION);
+
+		constexpr u64 coefficientBufferBits = 256 * sizeof(block) * 8;
+		if (accumulatorSize > coefficientBufferBits)
+			throw std::invalid_argument("ExConv accumulator exceeds the coefficient buffer. " LOCATION);
+
+		ExpanderCode expander;
+		expander.config(messageSize, accumulatorRegion, expanderWeight,
+			regularExpander, seed ^ CCBlock);
 
         mSeed = seed;
         mMessageSize = messageSize;
         mCodeSize = codeSize;
         mAccumulatorSize = accumulatorSize;
         mSystematic = systematic;
-        mExpander.config(messageSize, codeSize - messageSize * systematic, expanderWeight, regularExpander, seed ^ CCBlock);
+		mExpander = std::move(expander);
     }
 
     // Compute e[0,...,k-1] = G * e.

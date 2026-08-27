@@ -435,10 +435,12 @@ namespace osuCrypto
 
 					if (msg.size())
 					{
-						co_await
+						auto results = co_await
 							macoro::when_all_ready(
 								nv.send(delta, b, prng2, *mOtExtRecver, chl2, mCtx),
 								mOtExtSender->send(msg, prng, chl));
+						std::get<0>(results).result();
+						std::get<1>(results).result();
 					}
 					else
 						co_await nv.send(delta, b, prng2, *mOtExtRecver, chl2, mCtx);
@@ -455,10 +457,14 @@ namespace osuCrypto
 				auto baseOt = BaseOT{};
 
 				if(msg.size())
-					co_await
+				{
+					auto results = co_await
 						macoro::when_all_ready(
 							baseOt.send(msg, prng, chl),
 							nv.send(delta, b, prng2, baseOt, chl2, mCtx));
+					std::get<0>(results).result();
+					std::get<1>(results).result();
+				}
 				else
 					co_await nv.send(delta, b, prng2, baseOt, chl2, mCtx);
 			}
@@ -490,44 +496,55 @@ namespace osuCrypto
 		u64 secParam,
 		Ctx ctx)
 	{
+		if (requestSize == 0)
+			throw std::invalid_argument("Silent VOLE request size must be nonzero. " LOCATION);
+		if (malType != SilentSecType::SemiHonest &&
+			malType != SilentSecType::Malicious)
+			throw std::invalid_argument("Silent security type not supported. " LOCATION);
+		if (type != SilentBaseType::Base &&
+			type != SilentBaseType::BaseExtend)
+			throw std::invalid_argument("Silent base type not supported. " LOCATION);
+		if (noiseType != SdNoiseDistribution::Regular &&
+			noiseType != SdNoiseDistribution::Stationary)
+			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
+
+		const auto bitCount = coefficientGroupBitCount<G>(ctx);
+
+		auto config = syndromeDecodingConfigure(
+			secParam, requestSize, mult, noiseType, bitCount);
+		auto format = PprfOutputFormat{};
+		if (SdNoiseDistribution::Regular == noiseType)
+		{
+			format = PprfOutputFormat::Interleaved;
+		}
+		else
+		{
+			format = PprfOutputFormat::ByTreeIndex;
+		}
+		pprf::validateConfigure(config.mSizePer, config.mNumPartitions);
+
 		mCtx = std::move(ctx);
+		if (SdNoiseDistribution::Regular == noiseType)
+			mGenVar.template emplace<0>();
+		else
+			mGenVar.template emplace<1>();
+		std::visit([&](auto& gen) {
+			gen.configure(config.mSizePer, config.mNumPartitions);
+			}, mGenVar);
 		mSecParam = secParam;
 		mRequestSize = requestSize;
 		mBaseType = type;
 		mLpnMultType = mult;
 		mSecurityType = malType;
-
-		// Calculate the bit size for the field elements
-		u64 bitCount = 1;
-		if (mCtx.template isField<F>())
-			bitCount = mCtx.template bitSize<G>();
-
-		// Configure parameters for syndrome decoding
-		auto config = syndromeDecodingConfigure(
-			mSecParam, mRequestSize, mLpnMultType, noiseType, bitCount);
 		mNumPartitions = config.mNumPartitions;
 		mSizePer = config.mSizePer;
 		mNoiseVecSize = config.mNoiseVectorSize;
+		mPprfFormat = format;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
-
-		// Initialize the appropriate PPRF based on noise distribution
-		if (SdNoiseDistribution::Regular == noiseType)
-		{
-			mGenVar.template emplace<0>();  // Use RegularPprfSender
-			mPprfFormat = PprfOutputFormat::Interleaved;
-		}
-		else if (SdNoiseDistribution::Stationary == noiseType)
-		{
-			mGenVar.template emplace<1>();  // Use StationaryPprfSender
-			mPprfFormat = PprfOutputFormat::ByTreeIndex;
-		}
-		else
-		{
-			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
-		}
-
+		mB = {};
+		mBaseB = {};
+		mDerandomizeMalCheck = false;
 		mState = State::Configured;
-		gen().configure(mSizePer, mNumPartitions);
 	}
 
 	template<typename F, typename G, typename Ctx>
@@ -601,6 +618,9 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
+		if (n == 0)
+			throw std::invalid_argument("Silent VOLE request size must be nonzero. " LOCATION);
+
 		MACORO_TRY{
 			auto X = block{};
 			auto hash = std::array<u8, 32>{};
@@ -647,7 +667,9 @@ namespace osuCrypto
 					//    = a - c * d
 					// a  = b + c * d
 					// 
-					mCtx.plus(mBaseB[mNumPartitions], mBaseB[mNumPartitions], diff[0]);
+					auto correction = mCtx.template make<F>();
+					mCtx.mul(correction, delta, diff[0]);
+					mCtx.plus(mBaseB[mNumPartitions], mBaseB[mNumPartitions], correction);
 				}
 				else throw RTE_LOC;
 			}
@@ -782,6 +804,7 @@ namespace osuCrypto
 				mState = State::Configured;
 
 		} MACORO_CATCH(eptr) {
+			clear();
 			co_await chl.close();
 			std::rethrow_exception(eptr);
 		}
@@ -830,9 +853,18 @@ namespace osuCrypto
 	template<typename F, typename G, typename Ctx>
 	void SilentVoleSender<F, G, Ctx>::clear()
 	{
-		// Free all memory and reset the generator
+		// Free active protocol state and reset the generator.
 		mB = {};
+		mBaseB = {};
 		std::visit([](auto& gen) {gen.clear(); }, mGenVar);
+		mState = State::Default;
+		mRequestSize = 0;
+		mNoiseVecSize = 0;
+		mNumPartitions = 0;
+		mSizePer = 0;
+		mSecParam = 0;
+		mCodeSeed = ZeroBlock;
+		mDerandomizeMalCheck = false;
 	}
 
 }

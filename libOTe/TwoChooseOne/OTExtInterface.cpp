@@ -76,6 +76,9 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MACORO_TRY{
+		if (choices.size() != recvMessages.size())
+			throw std::runtime_error("choices and messages must have the same size. " LOCATION);
+
 		auto temp = AlignedUnVector<std::array<block, 2>>(recvMessages.size());
 
 		co_await(receive(choices, recvMessages, prng, chl));
@@ -97,6 +100,9 @@ namespace osuCrypto
 	task<> OtReceiver::receiveCorrelated(const BitVector& choices, span<block> recvMessages, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
+		if (choices.size() != recvMessages.size())
+			throw std::runtime_error("choices and messages must have the same size. " LOCATION);
+
 		auto  temp = AlignedUnVector<block>(recvMessages.size());
 
 		co_await(receive(choices, recvMessages, prng, chl));

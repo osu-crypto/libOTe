@@ -14,8 +14,10 @@
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include "libOTe/Tools/LinearCode.h"
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtState.h"
 #include "libOTe/Tools/Coproto.h"
 #include <array>
+#include <memory>
 namespace osuCrypto {
 
     class KosDotExtSender :
@@ -23,12 +25,17 @@ namespace osuCrypto {
     {
     public: 
         block mDelta = ZeroBlock;
+        bool mHasDelta = false;
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
+        std::shared_ptr<details::KosDotCodeState> mCodeState;
 
         KosDotExtSender() = default;
         KosDotExtSender(const KosDotExtSender&) = delete;
-        KosDotExtSender(KosDotExtSender&&) = default;
+        KosDotExtSender(KosDotExtSender&& v)
+        {
+            *this = std::move(v);
+        }
 
         KosDotExtSender(
             span<block> baseRecvOts,
@@ -40,10 +47,15 @@ namespace osuCrypto {
 
         void operator=(KosDotExtSender&& v)
         {
+            if (this == &v)
+                return;
             mGens = std::move(v.mGens);
             mBaseChoiceBits = std::move(v.mBaseChoiceBits);
-            mDelta = v.mDelta;
-            v.mDelta = ZeroBlock;
+            mCodeState = std::move(v.mCodeState);
+            mDelta = std::exchange(v.mDelta, ZeroBlock);
+            mHasDelta = std::exchange(v.mHasDelta, false);
+            v.mGens.clear();
+            v.mBaseChoiceBits = {};
         }
 
         // defaults to requiring 40 more base OTs. This gives 40 bits 

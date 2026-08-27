@@ -14,6 +14,7 @@
 #include <cryptoTools/Common/Matrix.h>
 #include <cryptoTools/Common/Timer.h>
 #include <list>
+#include <limits>
 #include <vector>
 #include "libOTe/Tools/Coproto.h"
 #ifdef ENABLE_CIRCUITS
@@ -27,6 +28,14 @@ namespace osuCrypto
 	class Gmw final : public TimerAdapter
 	{
 	public:
+		Gmw() = default;
+		Gmw(const Gmw&) = delete;
+		Gmw& operator=(const Gmw&) = delete;
+		Gmw(Gmw&&) noexcept;
+		Gmw& operator=(Gmw&&) noexcept;
+
+		static constexpr u64 MaxOleDimension =
+			std::numeric_limits<u32>::max() / 2;
 
 		struct Debug
 		{
@@ -69,6 +78,13 @@ namespace osuCrypto
 		// the remaining gates to be evaluated.
 		span<BetaGate> mGates;
 
+		// The logical flags for each output, captured before circuit
+		// levelization rewrites the wire metadata.
+		std::vector<std::vector<BetaWireFlag>> mOutputFlags;
+
+		// GMW evaluation consumes both the gate schedule and its OLEs.
+		bool mConsumed = false;
+
 		// the index of the circuit to print if debugging is enabled.
 		u64 mDebugPrintIdx = ~0ull;
 
@@ -82,10 +98,11 @@ namespace osuCrypto
 
 		void clear()
 		{
-			//mTriples.clear();
 			mPrint = {};
 			mCir = {};
 			mGates = {};
+			mOutputFlags = {};
+			mConsumed = false;
 			mNumRounds = 0;
 			mMem = {};
 			mWords = {};
@@ -95,6 +112,9 @@ namespace osuCrypto
 			mN128 = 0;
 			mRemainingMappings = 0;
 			mRole = ~0ull;
+			mOleIndex = 0;
+			mOleMult = {};
+			mOleAdd = {};
 		}
 
 		// init should be called first. 
@@ -154,7 +174,7 @@ namespace osuCrypto
 				throw std::runtime_error("GMW mapOutput called with incorrect number of wires. " LOCATION);
 			if (divCeil(mN, 8) > d.cols())
 				throw std::runtime_error("GMW mapOutput called with incorrect number of inputs. " LOCATION);
-			if (d.rows() % sizeof(block))
+			if (d.cols() % sizeof(block))
 				throw std::runtime_error("the alignment of the data must be at least sizeof(block). " LOCATION);
 
 			for (u64 j = 0; j < d.rows(); ++j)
@@ -163,6 +183,9 @@ namespace osuCrypto
 
 		u64 oleCount() const
 		{
+			if (mN > MaxOleDimension ||
+				mCir.mNonlinearGateCount > MaxOleDimension)
+				throw std::invalid_argument("GMW OLE dimensions exceed the supported range. " LOCATION);
 			return 2 * mCir.mNonlinearGateCount * roundUpTo(mN, 128);
 		}
 
@@ -170,6 +193,9 @@ namespace osuCrypto
 		// party i will hold ai,ci such that mult0 * mult1 = add0 + add0
 		void setOle(span<block> mult, span<block> add)
 		{
+			if (mConsumed)
+				throw std::logic_error("GMW must be reinitialized before installing new OLE correlations. " LOCATION);
+
 			auto count = oleCount();
 			if (count / 128 != mult.size() || mult.size() != add.size())
 				throw RTE_LOC;

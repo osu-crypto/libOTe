@@ -39,13 +39,13 @@ namespace osuCrypto
 		block dst;
 		for (u64 i = 0; i < 16; ++i)
 		{
-			auto bi = b.get<i8>(i);
+			auto bi = b.get<u8>(i);
 
-			// 0 if bi < 0. otherwise 11111111
-			u8 mask = ~(-i8(bi >> 7));
+			// Zero the output when the control byte has its high bit set.
+			u8 mask = (bi >> 7) - 1;
 			u8 idx = bi & 15;
 
-			dst.set<i8>(i, a.get<i8>(idx) & mask);
+			dst.set<u8>(i, a.get<u8>(idx) & mask);
 		}
 		return dst;
 	}
@@ -54,23 +54,17 @@ namespace osuCrypto
 	OC_FORCEINLINE block slli_epi16(const block& v)
 	{
 		block r;
-		auto rr = (i16*)&r;
-		auto vv = (const i16*)&v;
 		for (u64 i = 0; i < 8; ++i)
-			rr[i] = vv[i] << s;
+			r.set<u16>(i, static_cast<u16>(v.get<u16>(i) << s));
 		return r;
 	}
 
 	OC_FORCEINLINE int movemask_epi8(const block v)
 	{
 		// extract all the of MSBs if each byte.
-		u64 mask = 1;
 		int r = 0;
-		for (i64 i = 0; i < 16; ++i)
-		{
-			r |= (v.get<u8>(0) >> i) & mask;
-			mask <<= 1;
-		}
+		for (u64 i = 0; i < 16; ++i)
+			r |= ((v.get<u8>(i) >> 7) & 1) << i;
 		return r;
 	}
 
@@ -86,27 +80,26 @@ namespace osuCrypto
 		span<oc::block> B)
 	{
 
-		auto cIter16 = (u16*)C.data();
 		auto cIter8 = (u8*)C.data();
 		auto aIter8 = (u8*)A.data();
 		auto bIter8 = (u8*)B.data();
 
 		if (B.size())
 		{
-			if (C.size() * 256 != X.size())
+			if (X.size() % 256 || C.size() != X.size() / 256)
 				throw RTE_LOC;
-			if (A.size() * 256 != X.size())
+			if (A.size() != X.size() / 256)
 				throw RTE_LOC;
-			if (A.size() * 256 != X.size())
+			if (B.size() != X.size() / 256)
 				throw RTE_LOC;
 
 		}
 		else
 		{
 
-			if (C.size() * 128 != X.size())
+			if (X.size() % 128 || C.size() != X.size() / 128)
 				throw RTE_LOC;
-			if (A.size() * 128 != X.size())
+			if (A.size() != X.size() / 128)
 				throw RTE_LOC;
 		}
 
@@ -119,7 +112,7 @@ namespace osuCrypto
 		auto AllOneBlock = block(~0ull, ~0ull);
 		block mask = OneBlock ^ AllOneBlock;
 
-		auto m = &X[0];
+		auto m = X.data();
 
 		for (u64 i = 0; i < X.size(); i += 16)
 		{
@@ -234,7 +227,8 @@ namespace osuCrypto
 
 				*aIter8++ = choice[0];
 				*aIter8++ = choice[1];
-				*cIter16++ = ap;
+				memcpy(cIter8, &ap, sizeof(ap));
+				cIter8 += sizeof(ap);
 			}
 			m += 16;
 
@@ -250,30 +244,26 @@ namespace osuCrypto
 		span<oc::block> B)
 	{
 
-		auto cIter16 = (u16*)C.data();
-		auto aIter16 = (u16*)A.data();
-
-
 		auto cIter8 = (u8*)C.data();
 		auto aIter8 = (u8*)A.data();
 		auto bIter8 = (u8*)B.data();
 
 		if (B.size())
 		{
-			if (C.size() * 256 != Y.size())
+			if (Y.size() % 256 || C.size() != Y.size() / 256)
 				throw RTE_LOC;
-			if (A.size() * 256 != Y.size())
+			if (A.size() != Y.size() / 256)
 				throw RTE_LOC;
-			if (A.size() * 256 != Y.size())
+			if (B.size() != Y.size() / 256)
 				throw RTE_LOC;
 
 		}
 		else
 		{
 
-		if (C.size() * 128 != Y.size())
+		if (Y.size() % 128 || C.size() != Y.size() / 128)
 			throw RTE_LOC;
-		if (A.size() * 128 != Y.size())
+		if (A.size() != Y.size() / 128)
 			throw RTE_LOC;
 		}
 		using block = oc::block;
@@ -410,11 +400,11 @@ namespace osuCrypto
 			u16 ap = movemask_epi8(a00);
 			u16 bp = movemask_epi8(b00);
 
-			assert(aIter16 < (u16*)(A.data() + A.size()));
-			assert(cIter16 < (u16*)(C.data() + C.size()));
-
 			if (bIter8)
 			{
+				assert(aIter8 < (u8*)(A.data() + A.size()));
+				assert(cIter8 < (u8*)(C.data() + C.size()));
+
 				// triples
 
 				// want
@@ -454,8 +444,14 @@ namespace osuCrypto
 			else
 			{
 				// ole
-				*aIter16++ = ap ^ bp;
-				*cIter16++ = ap;
+				assert(aIter8 + sizeof(u16) <= (u8*)(A.data() + A.size()));
+				assert(cIter8 + sizeof(u16) <= (u8*)(C.data() + C.size()));
+
+				auto ab = static_cast<u16>(ap ^ bp);
+				memcpy(aIter8, &ab, sizeof(ab));
+				memcpy(cIter8, &ap, sizeof(ap));
+				aIter8 += sizeof(ab);
+				cIter8 += sizeof(ap);
 			}
 		}
 	}
@@ -465,33 +461,64 @@ namespace osuCrypto
 
 	void SilentOtTriple::init(u64 partyIdx, u64 n, SilentSecType mal, Type type)
 	{
-		mPartyIdx = partyIdx;
-		if (type == Type::Triple)
-			mN = 2 * roundUpTo(n, 128);
-		else
-			mN = roundUpTo(n, 128);;
+		constexpr u64 maxRequest = std::numeric_limits<u32>::max();
+		constexpr u64 maxOleCount = maxRequest / 128 * 128;
+		constexpr u64 maxTripleCount = maxRequest / 256 * 128;
 
-		if (mPartyIdx)
+		if (partyIdx > 1)
+			throw std::invalid_argument("SilentOtTriple party index must be zero or one. " LOCATION);
+		if (n == 0)
+			throw std::invalid_argument("SilentOtTriple request size must be nonzero. " LOCATION);
+		if (type != Type::Triple && type != Type::OLE)
+			throw std::invalid_argument("SilentOtTriple type is invalid. " LOCATION);
+		if ((type == Type::Triple && n > maxTripleCount) ||
+			(type == Type::OLE && n > maxOleCount))
+			throw std::invalid_argument("SilentOtTriple request size exceeds the supported range. " LOCATION);
+
+		auto nextN = roundUpTo(n, 128);
+		if (type == Type::Triple)
+			nextN *= 2;
+
+		try
 		{
-			mSendRecv.emplace<0>();
-			std::get<0>(mSendRecv).configure(mN, 2, 1, mal);
+			if (partyIdx)
+			{
+				mSendRecv.emplace<0>();
+				std::get<0>(mSendRecv).configure(nextN, 2, 1, mal);
+			}
+			else
+			{
+				mSendRecv.emplace<1>();
+				std::get<1>(mSendRecv).configure(nextN, 2, 1, mal);
+			}
 		}
-		else
+		catch (...)
 		{
-			mSendRecv.emplace<1>();
-			std::get<1>(mSendRecv).configure(mN, 2, 1, mal);
+			mPartyIdx = 0;
+			mN = 0;
+			mType = Type::Triple;
+			mChoice = {};
+			throw;
 		}
+
+		mPartyIdx = partyIdx;
+		mN = nextN;
+		mType = type;
+		mChoice = {};
 	}
 
 
 	SilentOtTriple::BaseCount SilentOtTriple::baseCount(PRNG& prng)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
+
 		SilentOtTriple::BaseCount r;
 		if (mSendRecv.index())
 		{
 			r.mRecvChoice = std::get<1>(mSendRecv).sampleBaseChoiceBits(prng);
 			auto count = std::get<1>(mSendRecv).baseCount();
-			while(count.mBaseOtCount < r.mRecvChoice.size())
+			while (r.mRecvChoice.size() < count.mBaseOtCount)
 				r.mRecvChoice.pushBack(prng.getBit());
 			mChoice = r.mRecvChoice;
 		}
@@ -505,6 +532,9 @@ namespace osuCrypto
 
 	void SilentOtTriple::setBaseOts(span<const std::array<block, 2>> baseSendOts, span<const block> recvBaseOts)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
+
 		if (mSendRecv.index())
 		{
 			std::get<1>(mSendRecv).setBaseCors(recvBaseOts, mChoice, {}, {});
@@ -517,18 +547,27 @@ namespace osuCrypto
 
 	bool SilentOtTriple::hasBaseOts() const
 	{
+		if (!isInitialized())
+			return false;
+
 		if (mSendRecv.index())
 		{
-			return std::get<1>(mSendRecv).hasBaseOts();
+			return std::get<1>(mSendRecv).hasBaseCors();
 		}
 		else
 		{
-			return std::get<0>(mSendRecv).hasBaseOts();
+			return std::get<0>(mSendRecv).hasBaseCors();
 		}
 	}
 
 	macoro::task<> SilentOtTriple::genBaseOts(PRNG& prng, Socket& sock, SilentBaseType baseType)
 	{
+		if (baseType != SilentBaseType::Base &&
+			baseType != SilentBaseType::BaseExtend)
+			throw std::invalid_argument("Silent base type not supported. " LOCATION);
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
+
 		if (mSendRecv.index())
 		{
 			return std::get<1>(mSendRecv).genBaseCors(prng, sock, baseType == SilentBaseType::BaseExtend);
@@ -542,6 +581,10 @@ namespace osuCrypto
 
 	macoro::task<> SilentOtTriple::expand(span<block> A, span<block> C, PRNG& prng, coproto::Socket& sock)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
+		if (mType != Type::OLE)
+			throw std::invalid_argument("SilentOtTriple was not initialized for OLE expansion. " LOCATION);
 
 		if (A.size() != divCeil(mN, 128))
 			throw RTE_LOC;
@@ -594,7 +637,7 @@ namespace osuCrypto
 			mSender.mLpnMultType = mLpnMultType;
 			//mSender.mGen.mEagerSend = false;
 
-			co_await mSender.silentSendInplace(mSender.mDelta, mSender.mRequestNumOts, prng, sock);
+			co_await mSender.silentSendInplace(prng.get(), mSender.mRequestNumOts, prng, sock);
 			compressSender(*mSender.mDelta, mSender.mB, C, A, {});
 
 			setTimePoint("compressSenderDone");
@@ -605,6 +648,11 @@ namespace osuCrypto
 		span<block> A, span<block> B, span<block> C,
 		PRNG& prng, coproto::Socket& sock)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
+		if (mType != Type::Triple)
+			throw std::invalid_argument("SilentOtTriple was not initialized for triple expansion. " LOCATION);
+
 		if (A.size() != divCeil(mN, 256))
 			throw RTE_LOC;
 		if (B.size() != divCeil(mN, 256))

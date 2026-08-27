@@ -34,6 +34,7 @@ namespace osuCrypto
 		{
 			mExpanded = false;
 			mExpandCounter = 0;
+			mShare.clear();
 			mSender.configure(domainSize, pointCount);
 		}
 
@@ -54,6 +55,8 @@ namespace osuCrypto
 		void setBase(span<const std::array<block, 2>> baseMessages) override {
 			if (baseOtCount() != static_cast<u64>(baseMessages.size()))
 				throw RTE_LOC;
+			if (mExpanded)
+				return;
 			mSender.setBase(baseMessages);
 		}
 
@@ -74,10 +77,13 @@ namespace osuCrypto
 
 			u64 numTrees = mSender.mPntCount;
 			u64 treeSize = mSender.mDomain;
+			pprf::validateExpandFormat(oFormat, output, treeSize, numTrees);
+			if (value.size() != numTrees)
+				throw std::invalid_argument("Stationary PPRF requires one value per tree. " LOCATION);
 			if (mExpanded == false)
 			{
 				this->setTimePoint("StationaryPprfSender::expand.pprf start");
-				mShare.resize(numTrees * treeSize);
+				mShare.resize(pprf::checkedSize(pprf::checkedMul(numTrees, treeSize)));
 				co_await mSender.expand(chl, {}, seed, mShare, PprfOutputFormat::ByTreeIndex, false, numThreads);
 				mExpanded = true;
 				mExpandCounter = 0;
@@ -97,7 +103,8 @@ namespace osuCrypto
 				block(24152452152341234, 213423421546325324) ^
 				block(mExpandCounter++)));
 
-			std::vector<u8> buffer(ctx.template byteSize<F>() * numTrees);
+			std::vector<u8> buffer(pprf::checkedSize(
+				pprf::checkedMul(ctx.template byteSize<F>(), numTrees)));
 			span<u8> leafMsgs = buffer;
 			auto shareIter = share.data();
 			auto outIter = output.begin();
@@ -155,6 +162,7 @@ namespace osuCrypto
 			mSender.clear();
 			mShare.clear();
 			mExpanded = false;
+			mExpandCounter = 0;
 		}
 
 	};
@@ -179,6 +187,7 @@ namespace osuCrypto
 			mRecver.configure(domainSize, pointCount);
 			mExpanded = false;
 			mExpandCounter = 0;
+			mShare.clear();
 		}
 
 
@@ -195,6 +204,12 @@ namespace osuCrypto
 		// choices is in the same format as the output from sampleChoiceBits.
 		void setChoiceBits(const BitVector& choices) override
 		{
+			if (mExpanded)
+			{
+				if (choices.size())
+					throw std::runtime_error("Stationary PPRF punctures cannot change after expansion. " LOCATION);
+				return;
+			}
 			mRecver.setChoiceBits(choices);
 		}
 
@@ -221,6 +236,8 @@ namespace osuCrypto
 		{
 			if (baseOtCount() != static_cast<u64>(baseMessages.size()))
 				throw RTE_LOC;
+			if (mExpanded)
+				return;
 			mRecver.setBase(baseMessages);
 		}
 
@@ -243,9 +260,10 @@ namespace osuCrypto
 
 			u64 numTrees = mRecver.mPntCount;
 			u64 treeSize = mRecver.mDomain;
+			pprf::validateExpandFormat(oFormat, output, treeSize, numTrees);
 			if (mExpanded == false)
 			{
-				mShare.resize(numTrees * treeSize);
+				mShare.resize(pprf::checkedSize(pprf::checkedMul(numTrees, treeSize)));
 				co_await mRecver.expand(
 					chl, mShare,
 					PprfOutputFormat::ByTreeIndex,
@@ -266,7 +284,8 @@ namespace osuCrypto
 				block(24152452152341234, 213423421546325324) ^
 				block(mExpandCounter++)));
 
-			std::vector<u8> buffer(ctx.template byteSize<F>() * numTrees);
+			std::vector<u8> buffer(pprf::checkedSize(
+				pprf::checkedMul(ctx.template byteSize<F>(), numTrees)));
 			span<u8> leafMsgs = buffer;
 			auto shareIter = share.data();
 			auto outIter = output.begin();
@@ -337,6 +356,8 @@ namespace osuCrypto
 		{
 			mExpanded = false;
 			mRecver.clear();
+			mShare.clear();
+			mExpandCounter = 0;
 		}
 
 	};

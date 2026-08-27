@@ -14,6 +14,8 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Common/Timer.h>
 #include "libOTe/Tools/LinearCode.h"
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtState.h"
+#include <memory>
 
 namespace osuCrypto
 {
@@ -24,11 +26,15 @@ namespace osuCrypto
     public:
         bool mHasBase = false;
         std::vector<std::array<PRNG, 2>> mGens;
+        std::shared_ptr<details::KosDotCodeState> mCodeState;
 
 
         KosDotExtReceiver() = default;
         KosDotExtReceiver(const KosDotExtReceiver&) = delete;
-        KosDotExtReceiver(KosDotExtReceiver&&) = default;
+        KosDotExtReceiver(KosDotExtReceiver&& v)
+        {
+            *this = std::move(v);
+        }
 
         KosDotExtReceiver(span<std::array<block, 2>> baseSendOts)
         {
@@ -39,9 +45,12 @@ namespace osuCrypto
 
         void operator=(KosDotExtReceiver&& v)
         {
-            mHasBase = std::move(v.mHasBase);
+            if (this == &v)
+                return;
+            mHasBase = std::exchange(v.mHasBase, false);
             mGens = std::move(v.mGens);
-            v.mHasBase = false;
+            mCodeState = std::move(v.mCodeState);
+            v.mGens.clear();
         }
 
         // defaults to requiring 40 more base OTs. This gives 40 bits 

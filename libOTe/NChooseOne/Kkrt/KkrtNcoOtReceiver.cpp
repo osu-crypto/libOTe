@@ -35,6 +35,8 @@ namespace osuCrypto
 	task<> KkrtNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
+		if (numOtExt > maxNcoOtCount)
+			throw std::length_error("KKRT OT count exceeds the supported limit. " LOCATION);
 		if (hasBaseOts() == false)
 			co_await(genBaseOts(prng, chl));
 
@@ -43,8 +45,8 @@ namespace osuCrypto
 		// this will be used as temporary buffers of 128 columns,
 		// each containing 1024 bits. Once transposed, they will be copied
 		// into the T1, T0 buffers for long term storage.
-		AlignedUnVector<std::array<block, superBlkSize>> t0(128);
-		AlignedUnVector<std::array<block, superBlkSize>> t1(128);
+		AlignedUnVector<block> t0(128 * superBlkSize);
+		AlignedUnVector<block> t1(128 * superBlkSize);
 
 		// we are going to process OTs in blocks of 128 * superblkSize mMessages.
 		u64 numSuperBlocks = ((numOtExt + 127) / 128 + superBlkSize - 1) / superBlkSize;
@@ -55,6 +57,7 @@ namespace osuCrypto
 		mT0.resize(numOtExt, numCols / 128);
 		mT1 = std::make_shared<Matrix<block>>();
 		mT1->resize(numOtExt, numCols / 128);
+		mEncodeFlags.assign(numOtExt, 0);
 
 		// The is the index of the last correction value u = T0 ^ T1 ^ c(w)
 		// that was sent to the sender.
@@ -88,8 +91,8 @@ namespace osuCrypto
 					// AES in counter mode acting as a PRNG. We don't use the normal
 					// PRNG interface because that would result in a data copy when
 					// we move it into the T0,T1 matrices. Instead we do it directly.
-					mGens[colIdx][0].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t0.data() + superBlkSize * tIdx));
-					mGens[colIdx][1].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t1.data() + superBlkSize * tIdx));
+					mGens[colIdx][0].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, t0.data() + superBlkSize * tIdx);
+					mGens[colIdx][1].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, t1.data() + superBlkSize * tIdx);
 
 					// increment the counter mode idx.
 					mGensBlkIdx[colIdx] += superBlkSize;
@@ -97,8 +100,8 @@ namespace osuCrypto
 
 				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 				// each 128 bits wide.
-				transpose128x1024(t0[0].data());
-				transpose128x1024(t1[0].data());
+				transpose128x1024(t0.data());
+				transpose128x1024(t1.data());
 
 				// This is the index of where we will store the matrix long term.
 				// doneIdx is the starting row. i is the offset into the blocks of 128 bits.
@@ -112,8 +115,8 @@ namespace osuCrypto
 					// because we transposed 1024 rows, the indexing gets a bit weird. But this
 					// is the location of the next row that we want. Keep in mind that we had long
 					// **contiguous** columns.
-					block* __restrict t0Iter = ((block*)t0.data()) + j;
-					block* __restrict t1Iter = ((block*)t1.data()) + j;
+					block* __restrict t0Iter = t0.data() + j;
+					block* __restrict t1Iter = t1.data() + j;
 
 					// do the copy!
 					for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
@@ -162,6 +165,7 @@ namespace osuCrypto
 		KkrtNcoOtReceiver raw;
 		raw.mGens.resize(mGens.size());
 		raw.mInputByteCount = mInputByteCount;
+		raw.mInputBitCount = mInputBitCount;
 		raw.mMultiKeyAES = mMultiKeyAES;
 
 		if (hasBaseOts())
@@ -194,19 +198,17 @@ namespace osuCrypto
 		u64 destSize)
 	{
 		static const int width(4);
-#ifndef NDEBUG
+		if (otIdx >= mT0.rows() || !mT1)
+			throw std::out_of_range("Kkrt receiver OT index is not initialized. " LOCATION);
+		if (mEncodeFlags[otIdx])
+			throw std::runtime_error("Kkrt receiver OT index was already encoded. " LOCATION);
 		if (mT0.stride() != width)
 			throw std::runtime_error(LOCATION);
-
-		//if (choice.size() != mT0.stride())
-		//    throw std::invalid_argument("");
-
-		if (eq(mT0[otIdx][0], ZeroBlock))
-			throw std::runtime_error("uninitialized OT extension");
-
-		if (eq(mT0[otIdx][0], AllOneBlock))
-			throw std::runtime_error("This otIdx has already been encoded");
-#endif // !NDEBUG
+		if (destSize == 0 || destSize > RandomOracle::HashSize)
+			throw std::invalid_argument("invalid Kkrt encoding size. " LOCATION);
+		if ((mInputByteCount && input == nullptr) || dest == nullptr)
+			throw std::invalid_argument("null Kkrt encoding buffer. " LOCATION);
+		mEncodeFlags[otIdx] = 1;
 
 		block* t0Val = mT0.data() + mT0.stride() * otIdx;
 		block* t1Val = mT1->data() + mT0.stride() * otIdx;
@@ -251,22 +253,15 @@ namespace osuCrypto
 		for (u64 i = 0; i < mT0.stride(); ++i)
 			val = val ^ aesBuff[i] ^ t0Val[i];
 #endif
-#ifndef NDEBUG
-		// a debug check to mark this OT as used and ready to send.
-		mT0[otIdx][0] = AllOneBlock;
-#endif
-
 	}
 
 	void KkrtNcoOtReceiver::zeroEncode(u64 otIdx)
 	{
-#ifndef NDEBUG
-		if (eq(mT0[otIdx][0], ZeroBlock))
-			throw std::runtime_error("uninitialized OT extension");
-
-		if (eq(mT0[otIdx][0], AllOneBlock))
-			throw std::runtime_error("This otIdx has already been encoded");
-#endif // !NDEBUG
+		if (otIdx >= mT0.rows() || !mT1)
+			throw std::out_of_range("Kkrt receiver OT index is not initialized. " LOCATION);
+		if (mEncodeFlags[otIdx])
+			throw std::runtime_error("Kkrt receiver OT index was already encoded. " LOCATION);
+		mEncodeFlags[otIdx] = 1;
 
 		block* t0Val = mT0.data() + mT0.stride() * otIdx;
 		block* t1Val = mT1->data() + mT0.stride() * otIdx;
@@ -282,10 +277,6 @@ namespace osuCrypto
 				^ t1Val[i];
 		}
 
-#ifndef NDEBUG
-		// a debug check to mark this OT as used and ready to send.
-		mT0[otIdx][0] = AllOneBlock;
-#endif
 	}
 
 	void KkrtNcoOtReceiver::configure(
@@ -297,6 +288,7 @@ namespace osuCrypto
 		if (inputBitCount > 128) throw std::runtime_error("currently only support up to 128 bit KKRT inputs. Can be extended on request" LOCATION);
 
 		mInputByteCount = (inputBitCount + 7) / 8;
+		mInputBitCount = inputBitCount;
 		auto count = 128 * 4;
 		mGens.resize(count);
 
@@ -319,13 +311,13 @@ namespace osuCrypto
 
 	task<> KkrtNcoOtReceiver::sendCorrection(Socket& chl, u64 sendCount)
 	{
+		if (mCorrectionIdx > mT0.rows() || sendCount > mT0.rows() - mCorrectionIdx)
+			throw std::out_of_range("Kkrt correction range exceeds initialized OTs. " LOCATION);
 
-#ifndef NDEBUG
 		// make sure these OTs all contain valid correction values, aka encode has been called.
 		for (u64 i = mCorrectionIdx; i < mCorrectionIdx + sendCount; ++i)
-			if (neq(mT0[i][0], AllOneBlock))
+			if (!mEncodeFlags[i])
 				throw std::runtime_error("This send request contains uninitialized OT. Call encode first...");
-#endif
 
 		static_assert(cp::has_size_member_func<T1Sub>::value, "size ");
 		static_assert(cp::has_data_member_func<T1Sub>::value, "data");
@@ -337,9 +329,8 @@ namespace osuCrypto
 			mT1->data() + (mCorrectionIdx * mT0.stride()),
 			mT0.stride() * sendCount
 		);
-		mCorrectionIdx += sendCount;
-
 		co_await chl.send(std::move(sub));
+		mCorrectionIdx += sendCount;
 
 	}
 

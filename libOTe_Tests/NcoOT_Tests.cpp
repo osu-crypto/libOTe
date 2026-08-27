@@ -4,6 +4,7 @@
 
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
+#include "libOTe/Tools/RepetitionCode.h"
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Network/Session.h>
 #include <cryptoTools/Network/IOService.h>
@@ -30,6 +31,8 @@
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#include <cstring>
+#include <sstream>
 
 using namespace osuCrypto;
 
@@ -419,6 +422,363 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
     }
 
 
+    void NcoOt_ChosenValidation_Test()
+    {
+#ifdef ENABLE_OOS
+        auto expectThrow = [](auto&& taskFactory) {
+            bool threw = false;
+            try
+            {
+                macoro::sync_wait(taskFactory());
+            }
+            catch (const std::exception&)
+            {
+                threw = true;
+            }
+            if (!threw)
+                throw UnitTestFail(LOCATION);
+        };
+
+        PRNG prng(ZeroBlock);
+        OosNcoOtSender sender;
+        OosNcoOtReceiver receiver;
+        sender.configure(true, 40, 2);
+        receiver.configure(true, 40, 2);
+
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            Matrix<block> messages(1, 5);
+            expectThrow([&] { return sender.sendChosen(messages, prng, sockets[0]); });
+        }
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            std::vector<block> messages(2);
+            std::vector<u64> choices(1);
+            expectThrow([&] {
+                return receiver.receiveChosen(4, messages, choices, prng, sockets[0]);
+            });
+        }
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            std::vector<block> messages(1);
+            std::vector<u64> choices{ 4 };
+            expectThrow([&] {
+                return receiver.receiveChosen(4, messages, choices, prng, sockets[0]);
+            });
+        }
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            std::vector<block> messages(1);
+            std::vector<u64> choices{ 0 };
+            expectThrow([&] {
+                return receiver.receiveChosen(5, messages, choices, prng, sockets[0]);
+            });
+        }
+		{
+			OosNcoOtReceiver wideReceiver;
+			wideReceiver.configure(false, 40, 64);
+			auto sockets = cp::LocalAsyncSocket::makePair();
+			std::vector<block> messages(2);
+			std::vector<u64> choices(2);
+			expectThrow([&] {
+				return wideReceiver.receiveChosen(
+					u64{ 1 } << 63, messages, choices, prng, sockets[0]);
+			});
+			if (wideReceiver.hasBaseOts())
+				throw UnitTestFail("overflowing chosen dimensions consumed NCO state" LOCATION);
+		}
+#else
+        throw UnitTestSkipped("ENABLE_OOS is not defined.");
+#endif
+    }
+
+
+    void NcoOt_StateValidation_Test()
+    {
+#if defined(ENABLE_KKRT) && defined(ENABLE_OOS)
+        auto expectThrow = [](auto&& fn) {
+            bool threw = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::exception&)
+            {
+                threw = true;
+            }
+            if (!threw)
+                throw UnitTestFail(LOCATION);
+        };
+
+        block input = ZeroBlock;
+        block output = ZeroBlock;
+
+        expectThrow([&] {
+            OosNcoOtSender sender;
+            sender.configure(true, 0, 8);
+        });
+        expectThrow([&] {
+            OosNcoOtReceiver receiver;
+            receiver.configure(true, 7, 8);
+        });
+        expectThrow([&] {
+            OosNcoOtSender sender;
+            sender.configure(false, maxNcoStatSecParam + 1, 8);
+        });
+        expectThrow([&] {
+            OosNcoOtSender sender;
+            sender.configure(false, 40, 0);
+        });
+        expectThrow([&] {
+            OosNcoOtReceiver receiver;
+            receiver.configure(false, 40, 0);
+        });
+
+        PRNG prng(ZeroBlock);
+        {
+            KkrtNcoOtSender sender;
+            sender.configure(false, 40, 128);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(sender.init(maxNcoOtCount + 1, prng, sockets[0]));
+            });
+        }
+        {
+            KkrtNcoOtReceiver receiver;
+            receiver.configure(false, 40, 128);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(receiver.init(maxNcoOtCount + 1, prng, sockets[0]));
+            });
+        }
+        {
+            OosNcoOtSender sender;
+            sender.configure(true, 40, 8);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(sender.init(maxNcoOtCount + 1, prng, sockets[0]));
+            });
+        }
+        {
+            OosNcoOtReceiver receiver;
+            receiver.configure(true, 40, 8);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(receiver.init(maxNcoOtCount + 1, prng, sockets[0]));
+            });
+        }
+
+        {
+            OosNcoOtSender sender;
+            sender.configure(true, 40, 8);
+            const auto baseCount = sender.getBaseOTCount();
+            std::vector<block> baseOts(baseCount, ZeroBlock);
+            BitVector choices(baseCount);
+            sender.setUniformBaseOts(baseOts, choices);
+
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            sockets[0].mSock->mImpl->mDebugErrorInjector = [] {
+                return cp::make_error_code(cp::code::ioError);
+            };
+            expectThrow([&] {
+                macoro::sync_wait(sender.setBaseOts(baseOts, choices, sockets[0]));
+            });
+            if (sender.hasBaseOts() || !sockets[0].closed())
+                throw UnitTestFail("failed OOS base-delta receive retained base state" LOCATION);
+        }
+        {
+            OosNcoOtReceiver receiver;
+            receiver.configure(true, 40, 8);
+            const auto baseCount = receiver.getBaseOTCount();
+            std::vector<std::array<block, 2>> baseOts(baseCount);
+            receiver.setUniformBaseOts(baseOts);
+
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            sockets[0].mSock->mImpl->mDebugErrorInjector = [] {
+                return cp::make_error_code(cp::code::ioError);
+            };
+            expectThrow([&] {
+                macoro::sync_wait(receiver.setBaseOts(baseOts, prng, sockets[0]));
+            });
+            if (receiver.hasBaseOts() || !sockets[0].closed())
+                throw UnitTestFail("failed OOS base-delta send retained base state" LOCATION);
+        }
+
+        {
+            KkrtNcoOtSender sender;
+            sender.mT.resize(1, 4);
+            sender.mCorrectionVals.resize(1, 4);
+            sender.mCorrectionIdx = 0;
+            expectThrow([&] { sender.encode(0, &input, &output, sizeof(block)); });
+
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(sender.recvCorrection(sockets[0], 2));
+            });
+        }
+        {
+            KkrtNcoOtReceiver receiver;
+            receiver.mT0.resize(1, 4);
+            receiver.mT1 = std::make_shared<Matrix<block>>(1, 4);
+            receiver.mEncodeFlags.assign(1, 0);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(receiver.sendCorrection(sockets[0], 1));
+            });
+            expectThrow([&] { receiver.zeroEncode(1); });
+            receiver.zeroEncode(0);
+            expectThrow([&] { receiver.zeroEncode(0); });
+        }
+        {
+            OosNcoOtSender sender;
+            sender.mT.resize(1, 4);
+            sender.mCorrectionVals.resize(1, 4);
+            sender.mCorrectionIdx = 0;
+            sender.mInputByteCount = 1;
+            sender.mInputBitCount = 8;
+            expectThrow([&] { sender.encode(0, &input, &output, sizeof(block)); });
+
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(sender.recvCorrection(sockets[0], 2));
+            });
+        }
+        {
+            OosNcoOtReceiver receiver;
+            receiver.mT0.resize(1, 4);
+            receiver.mT1 = std::make_shared<Matrix<block>>(1, 4);
+            receiver.mW.resize(1, 1);
+            receiver.mEncodeFlags.assign(1, 0);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(receiver.sendCorrection(sockets[0], 1));
+            });
+            expectThrow([&] { receiver.zeroEncode(1); });
+            receiver.zeroEncode(0);
+            expectThrow([&] { receiver.zeroEncode(0); });
+        }
+#else
+        throw UnitTestSkipped("ENABLE_KKRT and ENABLE_OOS are required.");
+#endif
+    }
+
+
+    void NcoOt_OosMove_Test()
+    {
+#ifdef ENABLE_OOS
+        {
+            OosNcoOtReceiver source;
+            source.mMalicious = true;
+            source.mHasBase = true;
+            source.mStatSecParam = 40;
+            source.mCorrectionIdx = 7;
+            source.mInputByteCount = 3;
+            source.mInputBitCount = 17;
+            source.mChallengeSeed = block(3, 4);
+            source.mGens.resize(1);
+            source.mT0.resize(2, 4);
+            source.mT1 = std::make_shared<Matrix<block>>(2, 4);
+            source.mW.resize(2, 1);
+            source.mEncodeFlags = { 1, 0 };
+            source.mWBuff = { OneBlock };
+            source.mTBuff = { AllOneBlock };
+
+            OosNcoOtReceiver destination(std::move(source));
+            if (!destination.mMalicious || !destination.mHasBase ||
+                destination.mStatSecParam != 40 || destination.mCorrectionIdx != 7 ||
+                destination.mInputByteCount != 3 || destination.mInputBitCount != 17 ||
+                destination.mChallengeSeed != block(3, 4) || destination.mGens.size() != 1 ||
+                destination.mT0.rows() != 2 || !destination.mT1 ||
+                destination.mW.rows() != 2 || destination.mEncodeFlags.size() != 2 ||
+                destination.mWBuff.size() != 1 || destination.mTBuff.size() != 1)
+                throw UnitTestFail(LOCATION);
+
+            if (source.mMalicious || source.mHasBase || source.mStatSecParam != 0 ||
+                source.mCorrectionIdx != 0 || source.mInputByteCount != 0 ||
+                source.mInputBitCount != 0 || source.mChallengeSeed != ZeroBlock ||
+                !source.mGens.empty() || source.mT0.size() != 0 || source.mT1 ||
+                source.mW.size() != 0 || source.mHasPendingSendFuture ||
+                source.mPendingSendFuture.valid() || !source.mEncodeFlags.empty() ||
+                !source.mWBuff.empty() || !source.mTBuff.empty())
+                throw UnitTestFail(LOCATION);
+        }
+        {
+            OosNcoOtSender source;
+            source.configure(true, 40, 17);
+            source.mBaseChoiceBits.resize(1);
+            source.mChoiceBlks = { OneBlock };
+            source.mT.resize(2, 4);
+            source.mCorrectionVals.resize(2, 4);
+            source.mCorrectionIdx = 7;
+            source.mChallengeSeed = block(3, 4);
+            source.qSum = { AllOneBlock };
+
+            OosNcoOtSender destination(std::move(source));
+            if (!destination.mMalicious || destination.mStatSecParam != 40 ||
+                destination.mInputByteCount != 3 || destination.mInputBitCount != 17 ||
+                destination.mCorrectionIdx != 7 || destination.mChallengeSeed != block(3, 4) ||
+                destination.mGens.empty() || destination.mBaseChoiceBits.size() != 1 ||
+                destination.mChoiceBlks.size() != 1 || destination.mT.rows() != 2 ||
+                destination.mCorrectionVals.rows() != 2 || destination.qSum.size() != 1)
+                throw UnitTestFail(LOCATION);
+            if (source.mMalicious || source.mStatSecParam || source.mCorrectionIdx ||
+                source.mInputByteCount || source.mInputBitCount ||
+                source.mChallengeSeed != ZeroBlock || !source.mGens.empty() ||
+                source.mBaseChoiceBits.size() || !source.mChoiceBlks.empty() ||
+                source.mT.size() || source.mCorrectionVals.size() || !source.qSum.empty())
+                throw UnitTestFail(LOCATION);
+        }
+#ifdef ENABLE_KKRT
+        {
+            KkrtNcoOtSender source;
+            source.configure(false, 40, 128);
+            source.mGensBlkIdx = { 9 };
+            source.mBaseChoiceBits.resize(1);
+            source.mChoiceBlks = { OneBlock };
+            source.mT.resize(2, 4);
+            source.mCorrectionVals.resize(2, 4);
+            source.mCorrectionIdx = 7;
+
+            KkrtNcoOtSender destination(std::move(source));
+            if (destination.mGens.empty() || destination.mGensBlkIdx.size() != 1 ||
+                destination.mBaseChoiceBits.size() != 1 || destination.mChoiceBlks.size() != 1 ||
+                destination.mT.rows() != 2 || destination.mCorrectionVals.rows() != 2 ||
+                destination.mCorrectionIdx != 7 || destination.mInputByteCount != 16 ||
+                destination.mInputBitCount != 128)
+                throw UnitTestFail(LOCATION);
+            if (!source.mGens.empty() || !source.mGensBlkIdx.empty() ||
+                source.mBaseChoiceBits.size() || !source.mChoiceBlks.empty() ||
+                source.mT.size() || source.mCorrectionVals.size() || source.mCorrectionIdx ||
+                source.mInputByteCount || source.mInputBitCount)
+                throw UnitTestFail(LOCATION);
+        }
+        {
+            KkrtNcoOtReceiver source;
+            source.configure(false, 40, 128);
+            source.mGensBlkIdx = { 9 };
+            source.mT0.resize(2, 4);
+            source.mT1 = std::make_shared<Matrix<block>>(2, 4);
+            source.mEncodeFlags = { 1, 0 };
+            source.mCorrectionIdx = 7;
+
+            KkrtNcoOtReceiver destination(std::move(source));
+            if (destination.mGens.empty() || destination.mGensBlkIdx.size() != 1 ||
+                destination.mT0.rows() != 2 || !destination.mT1 ||
+                destination.mEncodeFlags.size() != 2 || destination.mCorrectionIdx != 7 ||
+                destination.mInputByteCount != 16 || destination.mInputBitCount != 128)
+                throw UnitTestFail(LOCATION);
+            if (!source.mGens.empty() || !source.mGensBlkIdx.empty() || source.mT0.size() ||
+                source.mT1 || !source.mEncodeFlags.empty() || source.mCorrectionIdx ||
+                source.mInputByteCount || source.mInputBitCount)
+                throw UnitTestFail(LOCATION);
+        }
+#endif
+#else
+        throw UnitTestSkipped("ENABLE_OOS is not defined.");
+#endif
+    }
+
+
 
     void NcoOt_genBaseOts_Test()
     {
@@ -666,5 +1026,98 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
                 throw UnitTestFail(LOCATION);
         }
     }
+
+	void Tools_LinearCode_Audit_Test()
+	{
+		auto expectThrow = [](auto&& fn) {
+			bool threw = false;
+			try
+			{
+				fn();
+			}
+			catch (const std::exception&)
+			{
+				threw = true;
+			}
+			if (!threw)
+				throw UnitTestFail("expected validation failure");
+		};
+
+		LinearCode code;
+		std::stringstream valid;
+		valid << "1 8\n1 0 1 0 1 0 1 0";
+		code.loadTxtFile(valid);
+		const auto oldPlaintextBits = code.plaintextBitSize();
+		const auto oldCodewordBits = code.codewordBitSize();
+
+		std::stringstream shortRow;
+		shortRow << "2 8\n1 0 1\n0 1 0 1 0 1 0 1";
+		expectThrow([&] { code.loadTxtFile(shortRow); });
+		if (code.plaintextBitSize() != oldPlaintextBits || code.codewordBitSize() != oldCodewordBits)
+			throw UnitTestFail("failed text load changed LinearCode state");
+
+		std::stringstream invalidBit;
+		invalidBit << "1 8\n1 0 1 x 1 0 1 0";
+		expectThrow([&] { code.loadTxtFile(invalidBit); });
+
+		std::stringstream oversized;
+		oversized << "513 8\n";
+		expectThrow([&] { code.loadTxtFile(oversized); });
+
+		u64 blocks = 1;
+		u64 codewordBits = 128;
+		std::stringstream truncated(std::ios::in | std::ios::out | std::ios::binary);
+		truncated.write(reinterpret_cast<const char*>(&blocks), sizeof(blocks));
+		truncated.write(reinterpret_cast<const char*>(&codewordBits), sizeof(codewordBits));
+		truncated.seekg(0);
+		expectThrow([&] { code.loadBinFile(truncated); });
+
+		u64 inconsistentBlocks = 3;
+		codewordBits = 129;
+		std::stringstream inconsistent(std::ios::in | std::ios::out | std::ios::binary);
+		inconsistent.write(reinterpret_cast<const char*>(&inconsistentBlocks), sizeof(inconsistentBlocks));
+		inconsistent.write(reinterpret_cast<const char*>(&codewordBits), sizeof(codewordBits));
+		std::array<block, 3> binaryRows{};
+		inconsistent.write(reinterpret_cast<const char*>(binaryRows.data()), sizeof(binaryRows));
+		inconsistent.seekg(0);
+		expectThrow([&] { code.loadBinFile(inconsistent); });
+
+		PRNG prng(block(0x1A2B3C4D, 0));
+		for (u64 inputBits : { 1ull, 9ull, 17ull, 31ull, 57ull })
+		{
+			LinearCode randomCode;
+			randomCode.random(prng, inputBits, 129);
+			std::vector<u8> input(randomCode.plaintextU8Size());
+			prng.get(input.data(), input.size());
+			std::vector<u8> actual(randomCode.codewordU8Size());
+			randomCode.encode(span<const u8>(input), span<u8>(actual));
+
+			std::vector<block> expectedBlocks(randomCode.codewordBlkSize(), ZeroBlock);
+			for (u64 bit = 0; bit < inputBits; ++bit)
+			{
+				if ((input[bit / 8] >> (bit % 8)) & 1)
+				{
+					for (u64 j = 0; j < randomCode.codewordBlkSize(); ++j)
+						expectedBlocks[j] = expectedBlocks[j] ^
+							randomCode.mG[bit * randomCode.codewordBlkSize() + j];
+				}
+			}
+			if (std::memcmp(actual.data(), expectedBlocks.data(), actual.size()) != 0)
+				throw UnitTestFail("LinearCode padded encode disagrees with scalar matrix encode");
+		}
+
+		std::array<u8, 1> message{ 1 };
+		std::array<u8, 4> word{};
+		RepetitionCode repetition(4);
+		expectThrow([&] {
+			repetition.encode(span<const u8>(message.data(), 0), span<u8>(word));
+		});
+		expectThrow([&] {
+			repetition.encode(span<const u8>(message), span<u8>(word.data(), 3));
+		});
+		expectThrow([&] { RepetitionCode invalid(0); });
+		RepetitionCode unconfigured;
+		expectThrow([&] { unconfigured.encodeSyndrome(message.data(), word.data()); });
+	}
 
 }

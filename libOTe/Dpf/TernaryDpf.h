@@ -13,6 +13,7 @@
 #include "DpfMult.h"
 #include "libOTe/Triple/Foleage/FoleageUtils.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include <limits>
 
 namespace osuCrypto
 {
@@ -24,6 +25,32 @@ namespace osuCrypto
 	struct TernaryDpf
 	{
 		using VecF = typename CoeffCtx::template Vec<F>;
+
+		TernaryDpf() = default;
+		TernaryDpf(const TernaryDpf&) = delete;
+		TernaryDpf& operator=(const TernaryDpf&) = delete;
+
+		TernaryDpf(TernaryDpf&& src) noexcept
+		{
+			*this = std::move(src);
+		}
+
+		TernaryDpf& operator=(TernaryDpf&& src) noexcept
+		{
+			if (this != &src)
+			{
+				mPartyIdx = src.mPartyIdx;
+				mDomain = src.mDomain;
+				mDepth = src.mDepth;
+				mNumPointsPerSet = src.mNumPointsPerSet;
+				mOtIdx = src.mOtIdx;
+				mBaseSendOts = std::move(src.mBaseSendOts);
+				mBaseRecvOts = std::move(src.mBaseRecvOts);
+				mBaseChoice = std::move(src.mBaseChoice);
+				src.clear();
+			}
+			return *this;
+		}
 
 
 		u64 mPartyIdx = 0;
@@ -52,11 +79,50 @@ namespace osuCrypto
 			if (!numPoints)
 				throw RTE_LOC;
 
-			mDepth = log3ceil(domain);
+			auto depth = log3ceil(domain);
+			if (depth > 32 ||
+				(depth && numPoints > std::numeric_limits<u64>::max() / (2 * depth)))
+				throw RTE_LOC;
+
+			const auto pow3 = ipow(3, depth);
+			const auto seedElementsPerPoint = pow3 + pow3 / 3 + pow3 / 9 + 6;
+			const auto max = std::numeric_limits<u64>::max();
+			if (numPoints > max / domain ||
+				seedElementsPerPoint > max / sizeof(block) ||
+				numPoints > max / (sizeof(block) * seedElementsPerPoint))
+				throw RTE_LOC;
+
+			clearBaseOts();
+			mDepth = depth;
 			mPartyIdx = partyIdx;
 			mDomain = domain;
 			mNumPointsPerSet = numPoints;
+		}
+
+		bool hasBaseOts() const
+		{
+			auto count = baseOtCount();
+			return count != 0 && mOtIdx == 0 &&
+				mBaseSendOts.size() == count &&
+				mBaseRecvOts.size() == count &&
+				mBaseChoice.size() == count;
+		}
+
+		void clearBaseOts()
+		{
+			mBaseSendOts.clear();
+			mBaseRecvOts.clear();
+			mBaseChoice.clear();
 			mOtIdx = 0;
+		}
+
+		void clear()
+		{
+			clearBaseOts();
+			mPartyIdx = 0;
+			mDomain = 0;
+			mDepth = 0;
+			mNumPointsPerSet = 0;
 		}
 
 		u8 lsb(const block& b)
@@ -137,6 +203,14 @@ namespace osuCrypto
 				if (v)
 					throw std::runtime_error("TernaryDpf: invalid point sharing. point is larger than 3^D " LOCATION);
 			}
+
+			if (!hasBaseOts())
+				throw std::runtime_error("TernaryDpf requires a fresh base-OT set. " LOCATION);
+			struct ClearBaseOtsOnExit
+			{
+				TernaryDpf* mThis;
+				~ClearBaseOtsOnExit() { mThis->clearBaseOts(); }
+			} clearBaseOtsOnExit{ this };
 
 			u64 numPoints8 = mNumPointsPerSet / 8 * 8;
 			auto pow3 = ipow(3, mDepth);
@@ -358,8 +432,14 @@ namespace osuCrypto
 				{
 					ctx.plus(diff[k], values[k], sums[k]);
 				}
-				co_await sock.send(std::move(diff));
-				co_await sock.recv(gamma);
+				std::vector<u8> buffer(
+					mNumPointsPerSet * ctx.template byteSize<F>());
+				ctx.serialize(diff.begin(), diff.end(), buffer.begin());
+				co_await sock.send(std::move(buffer));
+				buffer.resize(
+					mNumPointsPerSet * ctx.template byteSize<F>());
+				co_await sock.recv(buffer);
+				ctx.deserialize(buffer.begin(), buffer.end(), gamma.begin());
 				for (u64 k = 0; k < mNumPointsPerSet; ++k)
 				{
 					ctx.plus(gamma[k], gamma[k], sums[k]);
@@ -508,10 +588,12 @@ namespace osuCrypto
 				co_await socks[1].recv(recvBuffer);
 				};
 
-			co_await macoro::when_all_ready(
+			auto results = co_await macoro::when_all_ready(
 				sender(),
 				recver()
 			);
+			std::get<0>(results).result();
+			std::get<1>(results).result();
 
 			for (u64 i = 0; i < mNumPointsPerSet; ++i)
 			{
@@ -643,6 +725,7 @@ namespace osuCrypto
 				mBaseRecvOts[i] = recvBaseOts[i];
 				mBaseChoice[i] = baseChoices[i];
 			}
+			mOtIdx = 0;
 		}
 
 

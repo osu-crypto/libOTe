@@ -34,6 +34,8 @@
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include <limits>
+#include <stdexcept>
 
 namespace osuCrypto {
 	template <
@@ -43,6 +45,21 @@ namespace osuCrypto {
 	>
 	class NoisyVoleSender : public TimerAdapter
 	{
+		static void validateDimensions(u64 count, const CoeffCtx& ctx)
+		{
+			const auto fieldBits = ctx.template bitSize<F>();
+			const auto elementBytes = ctx.template byteSize<F>();
+
+			// These strict bounds also make count * fieldBits * elementBytes < 2^64.
+			if (count == 0)
+				throw std::invalid_argument("Noisy VOLE requires at least one output. " LOCATION);
+			if (count > std::numeric_limits<u32>::max())
+				throw std::invalid_argument("Noisy VOLE output count exceeds the supported range. " LOCATION);
+			if (fieldBits == 0 || fieldBits > std::numeric_limits<u16>::max())
+				throw std::invalid_argument("Noisy VOLE field bit size exceeds the supported range. " LOCATION);
+			if (elementBytes == 0 || elementBytes > std::numeric_limits<u16>::max())
+				throw std::invalid_argument("Noisy VOLE element size exceeds the supported range. " LOCATION);
+		}
 
 	public:
 		using VecF = typename CoeffCtx::template Vec<F>;
@@ -57,7 +74,10 @@ namespace osuCrypto {
 		{
 			MACORO_TRY{
 
+			validateDimensions(static_cast<u64>(b.size()), ctx);
 			auto bv = ctx.binaryDecomposition(delta);
+			if (bv.size() != ctx.template bitSize<F>())
+				throw std::invalid_argument("Noisy VOLE binary decomposition has the wrong size. " LOCATION);
 			auto otMsg = AlignedUnVector<block>{ };
 			otMsg.resize(bv.size());
 
@@ -87,18 +107,23 @@ namespace osuCrypto {
 			auto temp = VecF{};
 			auto xb = BitVector{};
 
+			validateDimensions(static_cast<u64>(b.size()), ctx);
 			xb = ctx.binaryDecomposition(delta);
 
+			if (xb.size() != ctx.template bitSize<F>())
+				throw std::invalid_argument("Noisy VOLE binary decomposition has the wrong size. " LOCATION);
 			if (otMsg.size() != xb.size())
-				throw RTE_LOC;
+				throw std::invalid_argument("Noisy VOLE receiver OT count does not match the field bit size. " LOCATION);
 
 			// b = 0;
 			ctx.zero(b.begin(), b.end());
 
 			// receive the the excrypted one shares.
-			buffer.resize(xb.size() * b.size() * ctx.template byteSize<F>());
+			const auto messageCount = xb.size() * static_cast<u64>(b.size());
+			const auto bufferSize = messageCount * ctx.template byteSize<F>();
+			buffer.resize(bufferSize);
 			co_await chl.recv(buffer);
-			ctx.resize(msg, xb.size() * b.size());
+			ctx.resize(msg, messageCount);
 			ctx.deserialize(buffer.begin(), buffer.end(), msg.begin());
 
 
