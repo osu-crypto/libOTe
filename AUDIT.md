@@ -6124,3 +6124,64 @@ Verification:
   scalar plus 500 two-lane transforms had median wall times of 2060.938 ms
   before and 2061.437 ms after the checks, a +0.02% change. Benchmark processes
   were run sequentially.
+
+## AUD-189: Tungsten advanced its permutation iterator beyond one-past
+
+Status: fixed
+
+Affected code:
+
+- Tungsten accumulation for inputs smaller than one table block.
+
+Concern:
+
+The initial table pass advances by the full 1,024-entry table size even when
+the configured permutation has only one chunk. Passing that advance directly
+to the output map formed a pointer beyond the permitted one-past position.
+The pointer was reset before any access, but forming it is outside the C++
+pointer-arithmetic model.
+
+Impact:
+
+No invalid memory access was observed: the pointer was never dereferenced and
+was overwritten before use. This was low-severity portability and language
+correctness hardening rather than a practical memory-safety vulnerability on
+flat-address targets.
+
+Resolution:
+
+The prelude caps the skipped element count at the valid input size. The check
+is outside the accumulation loops and does not change their generated work.
+
+Verification:
+
+- `TungstenCode_Audit_Test` exercises the accepted 8-to-16 small-code path.
+
+## AUD-190: Regular DPF keys accepted noncanonical correction bits
+
+Status: fixed
+
+Affected code:
+
+- `RegularDpfKey::fromBytes()`.
+
+Concern:
+
+The decoder copied arbitrary bytes into the correction-bit matrix. Expansion
+interprets every nonzero byte as one, so encodings such as one and two had the
+same DPF behavior while remaining bytewise-distinct keys.
+
+Impact:
+
+Malformed serialized keys had malleable representations. This did not expose
+a current network protocol boundary or change the expanded function.
+
+Resolution:
+
+The decoder requires every serialized correction bit to be zero or one before
+mutating any key field. Expansion and its hot loops are unchanged.
+
+Verification:
+
+- `Dpf_Audit_Test` requires a correction byte of two to be rejected and checks
+  that failed decoding leaves the destination key unchanged.

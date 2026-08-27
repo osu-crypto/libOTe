@@ -67,6 +67,14 @@ namespace osuCrypto
 		{
 			if (src.size() != sizeBytes())
 				throw RTE_LOC;
+
+			auto correctionBits = src.subspan(
+				sizeof(block) + mCorrectionWords.size() * sizeof(block),
+				mCorrectionBits.size());
+			for (auto bit : correctionBits)
+				if (bit > 1)
+					throw RTE_LOC;
+
 			copyBytesMin(mSeed, src);
 			src = src.subspan(sizeof(block));
 			copyBytesMin(mCorrectionWords, src);

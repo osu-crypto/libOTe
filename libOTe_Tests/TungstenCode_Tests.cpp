@@ -47,6 +47,10 @@ namespace tests_libOTe
 			encoder.mPerm.mPerm.size() != oldPerm.size() ||
 			!std::equal(encoder.mPerm.mPerm.begin(), encoder.mPerm.mPerm.end(), oldPerm.begin()))
 			throw UnitTestFail("failed Tungsten configuration changed live state" LOCATION);
+
+		std::vector<block> smallCode(encoder.mCodeSize);
+		CoeffCtxGF128 ctx;
+		encoder.dualEncode<block>(smallCode.data(), ctx);
 	}
 
 

@@ -374,7 +374,7 @@ namespace osuCrypto {
 							accumulateBlock<Table, F, true>(input, i, output, size, noop, ctx);
 						i += Table::data.size();
 					}
-					map.skip(i);
+					map.skip(std::min(i, size));
 
 					// accumulate and map. no range check required.
 					for (; i < main; i += Table::data.size())

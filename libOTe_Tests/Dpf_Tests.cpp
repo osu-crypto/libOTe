@@ -2237,6 +2237,18 @@ void Dpf_Audit_Test(const oc::CLP&)
 			keys[1].mLeafVals.size() != points.size() * sizeof(block))
 			throw UnitTestFail("Regular DPF appended reused leaf programming");
 
+		std::vector<u8> malformedKey(keys[0].sizeBytes());
+		keys[0].toBytes(malformedKey);
+		auto correctionBitOffset = sizeof(block) *
+			(1 + keys[0].mCorrectionWords.size());
+		malformedKey[correctionBitOffset] = 2;
+		auto unchangedKey = keys[0];
+		expectRejected([&] {
+			keys[0].fromBytes(malformedKey);
+		}, "Regular DPF accepted a noncanonical correction bit");
+		if (keys[0] != unchangedKey)
+			throw UnitTestFail("failed Regular DPF decoding changed the key");
+
 		auto oversizedLeaf = keys[0];
 		oversizedLeaf.mLeafVals.push_back(0);
 		expectRejected([&] {
