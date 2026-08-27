@@ -27,9 +27,20 @@
 
 namespace osuCrypto
 {
+	enum class FoleageMode
+	{
+		F4Ole,
+		F2TraceOle
+	};
 
-	// The two party Foleage PCG protocol for generating F4 OLEs
-	// and Binary Beaver triples. The caller should call
+	enum class FoleageDpfMode
+	{
+		TernaryDpf,
+		RevCuckoo
+	};
+
+	// The two party Foleage PCG protocol for generating F4 OLEs,
+	// trace-derived binary OLEs, and binary Beaver triples. The caller should call
 	//
 	// FoleageTriple::init(...)
 	// FoleageTriple::expand(...)
@@ -54,6 +65,8 @@ namespace osuCrypto
 
 			mTimer = std::exchange(src.mTimer, nullptr);
 			mPartyIdx = std::exchange(src.mPartyIdx, 0);
+			mMode = std::exchange(src.mMode, FoleageMode::F4Ole);
+			mDpfMode = std::exchange(src.mDpfMode, FoleageDpfMode::TernaryDpf);
 			mT = std::exchange(src.mT, 9);
 			mLog3T = std::exchange(src.mLog3T, 0);
 			mC = std::exchange(src.mC, 8);
@@ -61,6 +74,7 @@ namespace osuCrypto
 			mLog3N = std::exchange(src.mLog3N, 0);
 			mFftA = std::move(src.mFftA);
 			mFftASquared = std::move(src.mFftASquared);
+			mFftAFrobenius = std::move(src.mFftAFrobenius);
 			mBlockSize = std::exchange(src.mBlockSize, 0);
 			mBlockDepth = std::exchange(src.mBlockDepth, 0);
 			mDpfLeafSize = std::exchange(src.mDpfLeafSize, 0);
@@ -81,6 +95,7 @@ namespace osuCrypto
 
 			src.mFftA.clear();
 			src.mFftASquared.clear();
+			src.mFftAFrobenius.clear();
 			src.mSparsePositions = {};
 #ifdef ENABLE_SOFTSPOKEN_OT
 			src.mOtExtRecver.reset();
@@ -93,6 +108,8 @@ namespace osuCrypto
 		}
 
 		u64 mPartyIdx = 0;
+		FoleageMode mMode = FoleageMode::F4Ole;
+		FoleageDpfMode mDpfMode = FoleageDpfMode::TernaryDpf;
 
 		// the number of noisy positions per polynomial
 		u64 mT = 9;
@@ -116,6 +133,9 @@ namespace osuCrypto
 
 		// The A^2 poly in FFT format. We pack mC^2 FFTs into a single block.
 		AlignedVector<block> mFftASquared;
+
+		// The packed A_r A_s^2 public coefficients used by trace OLE mode.
+		AlignedVector<block> mFftAFrobenius;
 
 		// the number of F4 values per block. Each block will have 1 non-zero.
 		// A polynomial will have mT blocks. i.e. mN = mT * mBlockSize.
@@ -177,10 +197,14 @@ namespace osuCrypto
 		bool mBaseOtsAvailable = false;
 
 
-		// Initializes the protocol to generate n F4 OLEs. Most efficient when n
-		// is a power of 3. Once called, baseOtCount() can be called to 
-		// determine the required number of base OTs.
-		void init(u64 partyIdx, u64 n);
+		// Initializes the selected correlation mode. The protocol is most efficient
+		// when n is a power of 3. Once called, baseOtCount() returns the required
+		// number of base OTs.
+		void init(
+			u64 partyIdx,
+			u64 n,
+			FoleageMode mode = FoleageMode::F4Ole,
+			FoleageDpfMode dpfMode = FoleageDpfMode::TernaryDpf);
 
 		bool isInitialized() const { return mN > 0; }
 
@@ -266,9 +290,37 @@ namespace osuCrypto
 		// as tensoredCoefficients. We allow the coeff to be zero.
 		macoro::task<> tensor(span<u16> coeffs, span<u16> prod, coproto::Socket& sock);
 
+		// As tensor(), and additionally shares a_i * b_j^2 without consuming
+		// additional OTs or sending additional messages.
+		macoro::task<> tensorTrace(
+			span<u16> coeffs,
+			span<u16> prod,
+			span<u16> prodFrobenius,
+			coproto::Socket& sock);
+
+		// Generates two binary OLEs from the F4 correlation using the trace
+		// maps Tr(x) and Tr(xi*x). The outputs satisfy
+		//   ZTrace_0 + ZTrace_1 = XTrace_0 * XTrace_1, and
+		//   ZXiTrace_0 + ZXiTrace_1 = XXiTrace_0 * XXiTrace_1.
+		macoro::task<> expandF2Ole(
+			span<block> XTrace,
+			span<block> XXiTrace,
+			span<block> ZTrace,
+			span<block> ZXiTrace,
+			PRNG& prng,
+			coproto::Socket& sock);
+
 		// sample the A polynomial. This is the polynomial that will be
 		// multiplied the sparse polynomials by.
 		void sampleA(block seed);
+
+	private:
+		template<bool Trace>
+		macoro::task<> tensorImpl(
+			span<u16> coeffs,
+			span<u16> prod,
+			span<u16> prodFrobenius,
+			coproto::Socket& sock);
 
 
 	};

@@ -307,6 +307,7 @@ namespace tests_libOTe
 
 			tc.add("foleage_tensor_test                     ", foleage_tensor_test);
 			tc.add("foleage_F4ole_test                      ", foleage_F4ole_test);
+			tc.add("foleage_F2ole_test                      ", foleage_F2ole_test);
 			tc.add("foleage_Triple_test                     ", foleage_Triple_test);
 
 			tc.add("foleage_GenBase_test                    ", foleage_GenBase_test);

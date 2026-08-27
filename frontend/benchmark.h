@@ -1052,6 +1052,7 @@ namespace osuCrypto
 		auto logn = cmd.getOr("nn", 10);
 		u64 n = ipow(3, logn);
 		auto blocks = divCeil(n, 128);
+		const bool trace = cmd.isSet("trace");
 		//bool verbose = cmd.isSet("v");
 
 
@@ -1078,8 +1079,9 @@ namespace osuCrypto
 			if (cmd.hasValue("c"))
 				oles[0].mC = oles[1].mC = cmd.get<u64>("c");
 
-			oles[0].init(0, n);
-			oles[1].init(1, n);
+			const auto mode = trace ? FoleageMode::F2TraceOle : FoleageMode::F4Ole;
+			oles[0].init(0, n, mode);
+			oles[1].init(1, n, mode);
 
 			if (cmd.isSet("mockBase"))
 			{
@@ -1116,23 +1118,32 @@ namespace osuCrypto
 				Bv0(blocks),
 				Bv1(blocks),
 				Cv0(blocks),
-				Cv1(blocks);
+				Cv1(blocks),
+				Dv0(trace ? blocks : 0),
+				Dv1(trace ? blocks : 0);
 
 			oles[0].setTimer(timer);
 			auto b = timer.setTimePoint("start");
 
-			auto r = macoro::sync_wait(macoro::when_all_ready(
-				oles[0].expand(Av0, Bv0, Cv0, prng0, sock[0]) | macoro::start_on(pool),
-				oles[1].expand(Av1, Bv1, Cv1, prng1, sock[1]) | macoro::start_on(pool)));
+			auto r = trace ?
+				macoro::sync_wait(macoro::when_all_ready(
+					oles[0].expandF2Ole(Av0, Bv0, Cv0, Dv0, prng0, sock[0]) | macoro::start_on(pool),
+					oles[1].expandF2Ole(Av1, Bv1, Cv1, Dv1, prng1, sock[1]) | macoro::start_on(pool))) :
+				macoro::sync_wait(macoro::when_all_ready(
+					oles[0].expand(Av0, Bv0, Cv0, prng0, sock[0]) | macoro::start_on(pool),
+					oles[1].expand(Av1, Bv1, Cv1, prng1, sock[1]) | macoro::start_on(pool)));
 			auto e = timer.setTimePoint("end");
-			tps = double(n) / (std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count() / 1000.0);
+			const auto correlationCount = trace ? 2 * n : n;
+			tps = double(correlationCount) /
+				(std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count() / 1000.0);
 			std::get<0>(r).result();
 			std::get<1>(r).result();
 
 		}
 		work = {};
-		std::cout << "foleage triple n=" << n << ", log2=" << log2ceil(n)
-			<< " triples/sec = " << u64(tps)
+		std::cout << (trace ? "foleage trace OLE" : "foleage triple")
+			<< " n=" << n << ", log2=" << log2ceil(n)
+			<< (trace ? " binary OLEs/sec = " : " triples/sec = ") << u64(tps)
 			<< "\n Time taken: \n" << timer << std::endl;
 #else
 		std::cout << "ENABLE_FOLEAGE = false" << std::endl;
@@ -3034,7 +3045,7 @@ namespace osuCrypto
 			std::cout << "  -aes" << std::endl;
 			std::cout << "  -dpf" << std::endl;
 			std::cout << "  -triDpf" << std::endl;
-			std::cout << "  -foleage" << std::endl;
+			std::cout << "  -foleage [-trace]" << std::endl;
 			std::cout << "  -silentTriple" << std::endl;
 			std::cout << "  -revCuckoo" << std::endl;
 			std::cout << "  -waterfall" << std::endl;
