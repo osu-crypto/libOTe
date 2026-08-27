@@ -129,6 +129,101 @@ namespace osuCrypto
 
 	}
 
+	void foleage_F2ole_test(const CLP& cmd)
+	{
+#ifdef ENABLE_FOLEAGE
+		const auto logn = 6;
+		const u64 n = ipow(3, logn) - 67;
+		const auto blockCount = divCeil(n, 128);
+		const bool verbose = cmd.isSet("v");
+
+		std::array<FoleageTriple, 2> oles;
+		if (cmd.hasValue("t"))
+			oles[0].mT = oles[1].mT = cmd.get<u64>("t");
+
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(6474567454546, 567546754674345444));
+		Timer timer;
+
+		oles[0].init(0, n, FoleageMode::F2TraceOle);
+		oles[1].init(1, n, FoleageMode::F2TraceOle);
+
+		auto otCount0 = oles[0].baseOtCount();
+		auto otCount1 = oles[1].baseOtCount();
+		if (otCount0.mRecvCount != otCount1.mSendCount ||
+			otCount0.mSendCount != otCount1.mRecvCount)
+			throw RTE_LOC;
+
+		std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+		baseSend[0].resize(otCount0.mSendCount);
+		baseSend[1].resize(otCount1.mSendCount);
+		std::array<std::vector<block>, 2> baseRecv;
+		std::array<BitVector, 2> baseChoice;
+		for (u64 i = 0; i < 2; ++i)
+		{
+			prng0.get(baseSend[i].data(), baseSend[i].size());
+			baseRecv[1 ^ i].resize(baseSend[i].size());
+			baseChoice[1 ^ i].resize(baseSend[i].size());
+			baseChoice[1 ^ i].randomize(prng0);
+			for (u64 j = 0; j < baseSend[i].size(); ++j)
+				baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+		}
+		oles[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+		oles[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+		std::array<std::vector<block>, 2> xTrace, xXiTrace, zTrace, zXiTrace;
+		for (u64 i = 0; i < 2; ++i)
+		{
+			xTrace[i].resize(blockCount);
+			xXiTrace[i].resize(blockCount);
+			zTrace[i].resize(blockCount);
+			zXiTrace[i].resize(blockCount);
+		}
+
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		if (verbose)
+			oles[0].setTimer(timer);
+		auto result = macoro::sync_wait(macoro::when_all_ready(
+			oles[0].expandF2Ole(
+				xTrace[0], xXiTrace[0], zTrace[0], zXiTrace[0], prng0, sockets[0]),
+			oles[1].expandF2Ole(
+				xTrace[1], xXiTrace[1], zTrace[1], zXiTrace[1], prng1, sockets[1])));
+		std::get<0>(result).result();
+		std::get<1>(result).result();
+
+		for (const auto& ole : oles)
+		{
+			if (ole.hasBaseOts() || ole.mSendOts.size() || ole.mRecvOts.size() ||
+				ole.mChoiceOts.size() || ole.mDpfLeaf.mBaseSendOts.size() ||
+				ole.mDpfLeaf.mBaseRecvOts.size() || ole.mDpf.mBaseSendOts.size() ||
+				ole.mDpf.mBaseRecvOts.size())
+				throw UnitTestFail("Foleage trace expansion retained consumed base OTs");
+		}
+
+		for (u64 i = 0; i < n; ++i)
+		{
+			const auto traceProduct =
+				*BitIterator(xTrace[0].data(), i) & *BitIterator(xTrace[1].data(), i);
+			const auto traceShare =
+				*BitIterator(zTrace[0].data(), i) ^ *BitIterator(zTrace[1].data(), i);
+			if (traceProduct != traceShare)
+				throw UnitTestFail("Foleage Tr(x) OLE correlation failed");
+
+			const auto xiTraceProduct =
+				*BitIterator(xXiTrace[0].data(), i) & *BitIterator(xXiTrace[1].data(), i);
+			const auto xiTraceShare =
+				*BitIterator(zXiTrace[0].data(), i) ^ *BitIterator(zXiTrace[1].data(), i);
+			if (xiTraceProduct != xiTraceShare)
+				throw UnitTestFail("Foleage Tr(xi*x) OLE correlation failed");
+		}
+
+		if (verbose)
+			std::cout << "Time taken: \n" << timer << std::endl;
+#else
+		throw UnitTestSkipped("ENABLE_FOLEAGE not defined.");
+#endif
+	}
+
 	void foleage_Audit_test(const CLP&)
 	{
 #ifdef ENABLE_FOLEAGE
@@ -157,6 +252,14 @@ namespace osuCrypto
 			FoleageTriple triple;
 			triple.init(2, 1000);
 		}, "Foleage accepted an invalid party index");
+		expectRejected([] {
+			FoleageTriple triple;
+			triple.init(0, 1000, FoleageMode::F2TraceOle, FoleageDpfMode::RevCuckoo);
+		}, "Foleage accepted the unimplemented RevCuckoo mode");
+		expectRejected([] {
+			FoleageTriple triple;
+			triple.init(0, 1000, static_cast<FoleageMode>(255));
+		}, "Foleage accepted an invalid correlation mode");
 		expectRejected([] {
 			FoleageTriple triple;
 			(void)triple.baseOtCount();
@@ -196,6 +299,34 @@ namespace osuCrypto
 			foleageFft<u16>(span<u16>(shortFft), 1, 1);
 		}, "foleageFft accepted an undersized coefficient span");
 
+		for (u64 i = 0; i < ipow(3, 6); ++i)
+		{
+			const F3x32 x(i);
+			if ((x + (-x)).toInt() != 0)
+				throw UnitTestFail("F3x32 packed negation failed");
+		}
+		F3x32 packedTrits;
+		packedTrits.mVal = 0x6666666666666666ull;
+		if ((packedTrits + (-packedTrits)).mVal != 0)
+			throw UnitTestFail("F3x32 packed negation failed in upper trits");
+
+		// Check the two characteristic-two trace product identities for every
+		// pair in F4. For z = l + xi*h, Tr(z)=h and Tr(xi*z)=l+h.
+		for (u8 x = 0; x < 4; ++x)
+		{
+			for (u8 y = 0; y < 4; ++y)
+			{
+				const auto r0 = F4Multiply(x, y);
+				const auto r1 = F4Multiply(x, F4Multiply(y, y));
+				const auto traceProduct = ((r0 >> 1) ^ (r1 >> 1)) & 1;
+				const auto xiTraceProduct = ((r0 & 1) ^ (r1 >> 1)) & 1;
+				if (traceProduct != (((x >> 1) & 1) & ((y >> 1) & 1)))
+					throw UnitTestFail("Foleage Tr product identity failed");
+				if (xiTraceProduct != (((x ^ (x >> 1)) & 1) & ((y ^ (y >> 1)) & 1)))
+					throw UnitTestFail("Foleage Tr(xi*x) product identity failed");
+			}
+		}
+
 		FoleageTriple triple;
 		triple.init(1, 1000);
 		auto counts = triple.baseOtCount();
@@ -225,7 +356,10 @@ namespace osuCrypto
 			throw UnitTestFail("Foleage move construction lost active state");
 		if (triple.isInitialized() || triple.hasBaseOts() || triple.mTimer ||
 			triple.mT != 9 || triple.mC != 8 || triple.mN ||
+			triple.mMode != FoleageMode::F4Ole ||
+			triple.mDpfMode != FoleageDpfMode::TernaryDpf ||
 			triple.mFftA.size() || triple.mFftASquared.size() ||
+			triple.mFftAFrobenius.size() ||
 			triple.mSparsePositions.size() || triple.mRecvOts.size() ||
 			triple.mSendOts.size() || triple.mChoiceOts.size())
 			throw UnitTestFail("Foleage move construction retained source state");
@@ -235,7 +369,10 @@ namespace osuCrypto
 		if (!assigned.isInitialized() || !assigned.hasBaseOts() ||
 			moved.isInitialized() || moved.hasBaseOts() || moved.mTimer ||
 			moved.mT != 9 || moved.mC != 8 || moved.mN ||
+			moved.mMode != FoleageMode::F4Ole ||
+			moved.mDpfMode != FoleageDpfMode::TernaryDpf ||
 			moved.mFftA.size() || moved.mFftASquared.size() ||
+			moved.mFftAFrobenius.size() ||
 			moved.mSparsePositions.size() || moved.mRecvOts.size() ||
 			moved.mSendOts.size() || moved.mChoiceOts.size())
 			throw UnitTestFail("Foleage move assignment retained source state");
@@ -432,11 +569,13 @@ namespace osuCrypto
 		u64 n = oles[0].mC * oles[0].mT;
 		u64 n2 = n * n;
 		auto sock = coproto::LocalAsyncSocket::makePair();
-		std::array<std::vector<u16>, 2> coeff, prod;
+		std::array<std::vector<u16>, 2> coeff, prod, prodFrobenius;
 		coeff[0].resize(n);
 		coeff[1].resize(n);
 		prod[0].resize(n2);
 		prod[1].resize(n2);
+		prodFrobenius[0].resize(n2);
+		prodFrobenius[1].resize(n2);
 
 		oles[1].mSendOts.resize(2 * n);
 		oles[0].mRecvOts.resize(2 * n);
@@ -448,8 +587,8 @@ namespace osuCrypto
 			oles[0].mRecvOts[i] = oles[1].mSendOts[i][oles[0].mChoiceOts[i]];
 		}
 		auto r = macoro::sync_wait(macoro::when_all_ready(
-			oles[0].tensor(coeff[0], prod[0], sock[0]),
-			oles[1].tensor(coeff[1], prod[1], sock[1])));
+			oles[0].tensorTrace(coeff[0], prod[0], prodFrobenius[0], sock[0]),
+			oles[1].tensorTrace(coeff[1], prod[1], prodFrobenius[1], sock[1])));
 		std::get<0>(r).result();
 		std::get<1>(r).result();
 
@@ -466,6 +605,11 @@ namespace osuCrypto
 				auto exp = F4Multiply(ci, cj);
 				auto act = prod[0][p] ^ prod[1][p];
 				if (exp != act)
+					throw RTE_LOC;
+
+				auto expFrobenius = F4Multiply(ci, F4Multiply(cj, cj));
+				auto actFrobenius = prodFrobenius[0][p] ^ prodFrobenius[1][p];
+				if (expFrobenius != actFrobenius)
 					throw RTE_LOC;
 			}
 		}

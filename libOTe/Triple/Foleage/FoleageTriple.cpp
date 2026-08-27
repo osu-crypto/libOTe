@@ -19,9 +19,22 @@
 #include "libOTe/Base/BaseOT.h"
 namespace osuCrypto
 {
+	namespace
+	{
+		OC_FORCEINLINE u8 tensorFrobenius(u8 v, bool xiLane)
+		{
+			const auto l = v & 1;
+			const auto h = (v >> 1) & 1;
+			return xiLane ? u8(l | ((l ^ h) << 1)) : u8((l ^ h) | (h << 1));
+		}
+	}
 
 
-	void FoleageTriple::init(u64 partyIdx, u64 n)
+	void FoleageTriple::init(
+		u64 partyIdx,
+		u64 n,
+		FoleageMode mode,
+		FoleageDpfMode dpfMode)
 	{
 		if (partyIdx > 1)
 			throw std::invalid_argument("FoleageTriple party index must be zero or one");
@@ -33,6 +46,10 @@ namespace osuCrypto
 			throw std::invalid_argument("FoleageTriple mC must be in [1, 8]");
 		if (mT > 128 / mC)
 			throw std::invalid_argument("FoleageTriple supports at most 128 sparse coefficients");
+		if (mode != FoleageMode::F4Ole && mode != FoleageMode::F2TraceOle)
+			throw std::invalid_argument("Foleage mode is invalid");
+		if (dpfMode != FoleageDpfMode::TernaryDpf)
+			throw std::invalid_argument("Foleage RevCuckoo mode is not implemented");
 
 		const auto log3N = log3ceil(n);
 		const auto log3T = log3ceil(mT);
@@ -50,6 +67,8 @@ namespace osuCrypto
 
 		clearBaseOts();
 		mPartyIdx = partyIdx;
+		mMode = mode;
+		mDpfMode = dpfMode;
 		mLog3N = log3N;
 		mLog3T = log3T;
 		mN = N;
@@ -61,8 +80,10 @@ namespace osuCrypto
 		mDpfLeafSize = ipow(3, mDpfLeafDepth);
 		mDpfTreeSize = ipow(3, mDpfTreeDepth);
 
-		mDpfLeaf.init(mPartyIdx, mDpfLeafSize, mC * mC * mT * mT);
-		mDpf.init(mPartyIdx, mDpfTreeSize, mC * mC * mT * mT);
+		const auto pointCount = mC * mC * mT * mT *
+			(mode == FoleageMode::F2TraceOle ? 2 : 1);
+		mDpfLeaf.init(mPartyIdx, mDpfLeafSize, pointCount);
+		mDpf.init(mPartyIdx, mDpfTreeSize, pointCount);
 
 		sampleA(block(3127894527893612049, 240925987420932408));
 	}
@@ -72,7 +93,6 @@ namespace osuCrypto
 	{
 		if (!isInitialized())
 			throw std::runtime_error("FoleageTriple::init must be called first. " LOCATION);
-
 		BaseCount counts;
 
 		counts.mSendCount = mDpfLeaf.baseOtCount() + mDpf.baseOtCount();
@@ -311,6 +331,9 @@ namespace osuCrypto
 		mFftA.resize(mN);
 		mFftASquared.resize(0);
 		mFftASquared.resize(mN);
+		mFftAFrobenius.clear();
+		if (mMode == FoleageMode::F2TraceOle)
+			mFftAFrobenius.resize(mN);
 		prng.get(mFftA.data(), mFftA.size());
 
 		// make a_0 the identity polynomial (in FFT space) i.e., all 1s
@@ -354,6 +377,33 @@ namespace osuCrypto
 				}
 			}
 			mFftASquared[i] = arr;
+
+		}
+
+		if (mMode == FoleageMode::F2TraceOle)
+		{
+			for (size_t i = 0; i < mN; ++i)
+			{
+				std::array<u16, 8> frobeniusArr{ };
+				u64 pos = 0, off = 0;
+				for (size_t j = 0; j < mC; ++j)
+				{
+					for (size_t k = 0; k < mC; ++k)
+					{
+						auto a = (mFftA[i] >> (2 * j)) & 3;
+						auto b = (mFftA[i] >> (2 * k)) & 3;
+						auto bSquared = F4Multiply(u8(b), u8(b));
+						auto prod = F4Multiply(u8(a), bSquared);
+						frobeniusArr[pos] |= u16(prod) << (2 * k);
+						if (++off == 8)
+						{
+							off = 0;
+							++pos;
+						}
+					}
+				}
+				mFftAFrobenius[i] = frobeniusArr;
+			}
 		}
 	}
 
@@ -370,6 +420,8 @@ namespace osuCrypto
 	{
 		if (!isInitialized())
 			throw std::runtime_error("FoleageTriple::init must be called first. " LOCATION);
+		if (mMode != FoleageMode::F4Ole)
+			throw std::runtime_error("Foleage F4 expansion requires F4Ole mode");
 
 		setTimePoint("expand start");
 
@@ -687,12 +739,286 @@ namespace osuCrypto
 	}
 
 
-	macoro::task<> FoleageTriple::tensor(span<u16> coeffs, span<u16> prod, coproto::Socket& sock)
+	macoro::task<> FoleageTriple::expandF2Ole(
+		span<block> XTrace,
+		span<block> XXiTrace,
+		span<block> ZTrace,
+		span<block> ZXiTrace,
+		PRNG& prng,
+		coproto::Socket& sock)
+	{
+		if (!isInitialized())
+			throw std::runtime_error("FoleageTriple::init must be called first. " LOCATION);
+		if (mMode != FoleageMode::F2TraceOle)
+			throw std::runtime_error("Foleage trace expansion requires F2TraceOle mode");
+
+		setTimePoint("trace expand start");
+
+		if (divCeil(mN, 128) < XTrace.size())
+			throw RTE_LOC;
+		if (XTrace.size() != XXiTrace.size() ||
+			XTrace.size() != ZTrace.size() ||
+			XTrace.size() != ZXiTrace.size())
+			throw RTE_LOC;
+
+		if (!hasBaseOts())
+			co_await genBaseOts(prng, sock);
+		if (!mBaseOtsAvailable)
+			throw std::runtime_error("FoleageTriple requires a fresh base-OT set");
+
+		mBaseOtsAvailable = false;
+		struct ClearBaseOtsOnExit
+		{
+			FoleageTriple* mThis;
+			~ClearBaseOtsOnExit() { mThis->clearBaseOts(); }
+		} clearBaseOtsOnExit{ this };
+
+		mSparsePositions.resize(mC, mT);
+		Matrix<u16> sparseCoefficients(mC, mT);
+		const auto productCount = mC * mC * mT * mT;
+		std::vector<u16> tensoredCoefficients(productCount);
+		std::vector<u16> tensoredFrobenius(productCount);
+
+		co_await tensorTrace(
+			sparseCoefficients,
+			tensoredCoefficients,
+			tensoredFrobenius,
+			sock);
+
+		// The LPN construction tolerates the small modulo-reduction bias. Exact
+		// uniformity is unnecessary, and these parameters retain 30--40 bits of
+		// statistical security from the position sampling step.
+		for (u64 i = 0; i < mSparsePositions.size(); ++i)
+			mSparsePositions(i) = prng.get<u64>() % mBlockSize;
+
+		std::vector<u16> fftSparsePoly(mN);
+		for (u64 i = 0; i < mT; ++i)
+		{
+			for (u64 j = 0; j < mC; ++j)
+			{
+				auto pos = i * mBlockSize + mSparsePositions(j, i);
+				fftSparsePoly[pos] |= sparseCoefficients(j, i) << (2 * j);
+			}
+		}
+
+		setTimePoint("trace sparsePolySample");
+		foleageFft<u16>(fftSparsePoly, mLog3N, mN / 3);
+		setTimePoint("trace input fft");
+		F4Multiply(mFftA, fftSparsePoly, fftSparsePoly, mN);
+		setTimePoint("trace input mult");
+
+		const auto outSize = std::min<u64>(mN, XTrace.size() * 128);
+		constexpr u16 msbMask = 0b1010101010101010;
+		constexpr u16 lsbMask = 0b0101010101010101;
+		for (u64 i = 0; i < outSize; ++i)
+		{
+			const auto l = popcount<u16>(fftSparsePoly[i] & lsbMask) & 1;
+			const auto h = popcount<u16>(fftSparsePoly[i] & msbMask) & 1;
+			*BitIterator(XTrace.data(), i) = h;
+			*BitIterator(XXiTrace.data(), i) = l ^ h;
+		}
+		setTimePoint("trace copyOutX");
+
+		const auto tracePointCount = 2 * productCount;
+		std::vector<u8> prodPolyF4Coeffs(tracePointCount);
+		std::vector<F3x32> prodPolyLeafPos(tracePointCount);
+		std::vector<F3x32> prodPolyTreePos(tracePointCount);
+
+		for (u64 lane = 0; lane < 2; ++lane)
+		{
+			// Lane 0 expands X_0 X_1 at p_0+p_1. Lane 1 expands
+			// X_0 X_1^2 at p_0+2p_1; multiplication by 2 in Z_3 is negation.
+			const auto laneOffset = lane * productCount;
+			const auto& coefficients = lane ? tensoredFrobenius : tensoredCoefficients;
+			for (u64 iA = 0, polyOffset = 0; iA < mC; ++iA)
+			{
+				std::array<u8, 128> nextIdx;
+				for (u64 iB = 0; iB < mC; ++iB, polyOffset += mT * mT)
+				{
+					std::fill_n(nextIdx.data(), mT, 0);
+					for (u64 jA = 0; jA < mT; ++jA)
+					{
+						for (u64 jB = 0; jB < mT; ++jB)
+						{
+							const u64 i = mPartyIdx ? iB : iA;
+							const u64 j = mPartyIdx ? jB : jA;
+							const auto blockPos = lane ?
+								F3x32(jA) + (-F3x32(jB)) :
+								F3x32(jA) + F3x32(jB);
+							const auto blockIdx = blockPos.toInt();
+							const auto idx = laneOffset + polyOffset +
+								blockIdx * mT + nextIdx[blockIdx]++;
+
+							auto pos = F3x32(mSparsePositions(i, j));
+							if (lane && mPartyIdx)
+								pos = -pos;
+							prodPolyLeafPos[idx] = pos.lower(mDpfLeafDepth);
+							prodPolyTreePos[idx] = pos.upper(mDpfLeafDepth);
+
+							const auto coeffIdx = (iA * mT + jA) * mC * mT +
+								iB * mT + jB;
+							prodPolyF4Coeffs[idx] = coefficients[coeffIdx];
+						}
+					}
+
+					for (u64 i = 0; i < mT; ++i)
+					{
+						if (nextIdx[i] != mT)
+							throw RTE_LOC;
+					}
+				}
+			}
+		}
+
+		setTimePoint("trace dpfParams");
+
+		std::vector<FoleageF4x243> prodPolyF4x243Coeffs(tracePointCount);
+		co_await mDpfLeaf.expand(prodPolyLeafPos, prodPolyF4Coeffs,
+			[&, byteIdx = 0ull, bitIdx = 0ull]
+			(u64 treeIdx, u64 leafIdx, u8 v) mutable {
+				if (treeIdx == 0)
+				{
+					byteIdx = leafIdx / 4;
+					bitIdx = leafIdx % 4;
+				}
+				assert(byteIdx == leafIdx / 4);
+				assert(bitIdx == leafIdx % 4);
+				auto ptr = reinterpret_cast<u8*>(
+					&prodPolyF4x243Coeffs[treeIdx]);
+				ptr[byteIdx] |= u8((v & 3) << (2 * bitIdx));
+			}, prng, sock);
+
+		setTimePoint("trace leafDpf");
+
+		Matrix<FoleageF4x243> blocks(2 * mC * mC * mT, mDpfTreeSize);
+		co_await mDpf.expand(prodPolyTreePos, prodPolyF4x243Coeffs,
+			[&, count = 0ull, out = blocks.data(), end = blocks.data() + blocks.size()]
+			(u64 treeIdx, u64 leafIdx, FoleageF4x243 v) mutable {
+				assert(out == &blocks(treeIdx / mT, leafIdx));
+				*out ^= v;
+				if (++count == mT)
+				{
+					count = 0;
+					out += blocks.cols();
+					if (out >= end)
+						out -= blocks.size() - 1;
+				}
+			}, prng, sock);
+
+		setTimePoint("trace mainDpf");
+
+		std::vector<block> fft(mN), fftRes(mN);
+		block packedLsbMask, packedMsbMask;
+		setBytes(packedLsbMask, 0b01010101);
+		setBytes(packedMsbMask, 0b10101010);
+
+		for (u64 lane = 0; lane < 2; ++lane)
+		{
+			if (lane)
+				setBytes(fft, 0);
+
+			const auto rowOffset = lane * mC * mC * mT;
+			for (size_t j = 0; j < mC; ++j)
+			{
+				for (size_t k = 0; k < mC; ++k)
+				{
+					const size_t polyIndex = j * mC + k;
+					MatrixView<FoleageF4x243> poly(
+						blocks.data(rowOffset + polyIndex * mT),
+						mT,
+						mDpfTreeSize);
+
+					for (u64 blockIdx = 0, i = 0; blockIdx < mT; ++blockIdx)
+					{
+						for (u64 packedIdx = 0; packedIdx < mDpfTreeSize; ++packedIdx)
+						{
+							auto coeff = extractF4(poly(blockIdx, packedIdx));
+							const auto e = std::min<u64>(
+								mBlockSize - packedIdx * mDpfLeafSize,
+								mDpfLeafSize);
+
+							if (polyIndex < 32)
+							{
+								for (u64 elementIdx = 0; elementIdx < e; ++elementIdx, ++i)
+									fft[i] |= block{ coeff[elementIdx] }.slli_epi64(2 * polyIndex);
+							}
+							else
+							{
+								for (u64 elementIdx = 0; elementIdx < e; ++elementIdx, ++i)
+									fft[i] |= block{ coeff[elementIdx], 0 }.slli_epi64(2 * polyIndex - 64);
+							}
+						}
+					}
+				}
+			}
+
+			setTimePoint(lane ? "trace transpose frobenius" : "trace transpose product");
+			foleageFft<block>(fft, mLog3N, mN / 3);
+			setTimePoint(lane ? "trace fft frobenius" : "trace fft product");
+			F4Multiply(
+				lane ? span<block>(mFftAFrobenius) : span<block>(mFftASquared),
+				fft,
+				fftRes,
+				mN);
+			setTimePoint(lane ? "trace mult frobenius" : "trace mult product");
+
+			for (u64 i = 0; i < outSize; ++i)
+			{
+				const auto h = popcount(fftRes[i] & packedMsbMask) & 1;
+				if (!lane)
+				{
+					// For R0=X0*X1 and R1=X0*X1^2:
+					// Tr(X0)Tr(X1) = msb(R0) + msb(R1), and
+					// Tr(xi*X0)Tr(xi*X1) = lsb(R0) + msb(R1).
+					*BitIterator(ZTrace.data(), i) = h;
+					*BitIterator(ZXiTrace.data(), i) =
+						popcount(fftRes[i] & packedLsbMask) & 1;
+				}
+				else
+				{
+					*BitIterator(ZTrace.data(), i) ^= h;
+					*BitIterator(ZXiTrace.data(), i) ^= h;
+				}
+			}
+		}
+
+		setTimePoint("trace addCopyY");
+	}
+
+
+	macoro::task<> FoleageTriple::tensor(
+		span<u16> coeffs,
+		span<u16> prod,
+		coproto::Socket& sock)
+	{
+		return tensorImpl<false>(coeffs, prod, {}, sock);
+	}
+
+	macoro::task<> FoleageTriple::tensorTrace(
+		span<u16> coeffs,
+		span<u16> prod,
+		span<u16> prodFrobenius,
+		coproto::Socket& sock)
+	{
+		return tensorImpl<true>(coeffs, prod, prodFrobenius, sock);
+	}
+
+	template<bool Trace>
+	macoro::task<> FoleageTriple::tensorImpl(
+		span<u16> coeffs,
+		span<u16> prod,
+		span<u16> prodFrobenius,
+		coproto::Socket& sock)
 	{
 		if (!coeffs.size() || coeffs.size() > 128)
 			throw std::invalid_argument("FoleageTriple tensor supports 1 to 128 coefficients");
 		if (prod.size() != coeffs.size() * coeffs.size())
 			throw std::invalid_argument("FoleageTriple tensor product has the wrong size");
+		if constexpr (Trace)
+		{
+			if (prodFrobenius.size() != prod.size())
+				throw std::invalid_argument("FoleageTriple Frobenius tensor product has the wrong size");
+		}
 
 		auto expand = [](block k, span<block> diff) {
 			AES aes(k);
@@ -735,11 +1061,21 @@ namespace osuCrypto
 
 			{
 				setBytes(prod, 0);
+				if constexpr (Trace)
+					setBytes(prodFrobenius, 0);
 				auto prodIter = prod.begin();
+				u16* frobeniusIter = nullptr;
+				if constexpr (Trace)
+					frobeniusIter = prodFrobenius.data();
 				auto lsbIter = BitIterator(&t0[0]);
 				auto msbIter = BitIterator(&t0[1]);
 				for (u64 i = 0; i < coeffs.size(); ++i)
-					*prodIter++ = (*lsbIter++) | (u8(*msbIter++) << 1);
+				{
+					auto v = (*lsbIter++) | (u8(*msbIter++) << 1);
+					*prodIter++ = v;
+					if constexpr (Trace)
+						*frobeniusIter++ = tensorFrobenius(v, false);
+				}
 			}
 
 
@@ -750,6 +1086,9 @@ namespace osuCrypto
 				auto b = i & 1;
 				auto idx = i / 2;
 				auto prodIter = prod.begin() + idx * coeffs.size();
+				u16* frobeniusIter = nullptr;
+				if constexpr (Trace)
+					frobeniusIter = prodFrobenius.data() + idx * coeffs.size();
 
 				expand(mSendOts[i][0], t0);
 				expand(mSendOts[i][1], t1);
@@ -758,7 +1097,12 @@ namespace osuCrypto
 				auto lsbIter = BitIterator(&t0[0]);
 				auto msbIter = BitIterator(&t0[1]);
 				for (u64 i = 0; i < coeffs.size(); ++i)
-					*prodIter++ ^= (*lsbIter++) | (u8(*msbIter++) << 1);
+				{
+					auto v = (*lsbIter++) | (u8(*msbIter++) << 1);
+					*prodIter++ ^= v;
+					if constexpr (Trace)
+						*frobeniusIter++ ^= tensorFrobenius(v, b != 0);
+				}
 
 				for (u64 i = 0; i < a.size(); ++i)
 				{   //        mask    key     value
@@ -785,11 +1129,21 @@ namespace osuCrypto
 
 			{
 				setBytes(prod, 0);
+				if constexpr (Trace)
+					setBytes(prodFrobenius, 0);
 				auto prodIter = prod.begin();
+				u16* frobeniusIter = nullptr;
+				if constexpr (Trace)
+					frobeniusIter = prodFrobenius.data();
 				auto lsbIter = BitIterator(&t[0]);
 				auto msbIter = BitIterator(&t[1]);
 				for (u64 i = 0; i < coeffs.size(); ++i)
-					*prodIter++ = (*lsbIter++) | (u8(*msbIter++) << 1);
+				{
+					auto v = (*lsbIter++) | (u8(*msbIter++) << 1);
+					*prodIter++ = v;
+					if constexpr (Trace)
+						*frobeniusIter++ = tensorFrobenius(v, false);
+				}
 			}
 
 			std::vector<block>  buffer((2 * coeffs.size() - 1) * size);
@@ -799,7 +1153,11 @@ namespace osuCrypto
 			for (u64 i = 1; i < 2 * coeffs.size(); ++i)
 			{
 				auto idx = i / 2;
+				auto xiLane = (i & 1) != 0;
 				auto prodIter = prod.begin() + idx * coeffs.size();
+				u16* frobeniusIter = nullptr;
+				if constexpr (Trace)
+					frobeniusIter = prodFrobenius.data() + idx * coeffs.size();
 
 				expand(mRecvOts[i], t);
 				if (mChoiceOts[i])
@@ -816,7 +1174,12 @@ namespace osuCrypto
 				auto lsbIter = BitIterator(&t[0]);
 				auto msbIter = BitIterator(&t[1]);
 				for (u64 i = 0; i < coeffs.size(); ++i)
-					*prodIter++ ^= (*lsbIter++) | (u8(*msbIter++) << 1);
+				{
+					auto v = (*lsbIter++) | (u8(*msbIter++) << 1);
+					*prodIter++ ^= v;
+					if constexpr (Trace)
+						*frobeniusIter++ ^= tensorFrobenius(v, xiLane);
+				}
 			}
 		}
 	}
