@@ -525,6 +525,14 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
             OosNcoOtSender sender;
             sender.configure(false, maxNcoStatSecParam + 1, 8);
         });
+        expectThrow([&] {
+            OosNcoOtSender sender;
+            sender.configure(false, 40, 0);
+        });
+        expectThrow([&] {
+            OosNcoOtReceiver receiver;
+            receiver.configure(false, 40, 0);
+        });
 
         PRNG prng(ZeroBlock);
         {

@@ -358,14 +358,11 @@ namespace osuCrypto
 			throw std::invalid_argument("OOS statistical security parameter exceeds the supported limit. " LOCATION);
 		if (maliciousSecure && (statSecParam == 0 || statSecParam % 8))
 			throw std::invalid_argument("malicious OOS requires a nonzero, byte-aligned statistical security parameter. " LOCATION);
-		if (inputBitCount <= 76)
-		{
+		if (inputBitCount == 0 || inputBitCount > 76)
+			throw std::invalid_argument("OOS input bit count must be between 1 and 76. " LOCATION);
 
-			//mCode.loadTxtFile("C:/Users/peter/repo/libOTe/libOTe/Tools/bch511.txt");
-			mCode.load(bch511_binary, sizeof(bch511_binary));
-		}
-		else
-			throw std::runtime_error("76 bits is currently the max. larger inputs can be supported on request.... " LOCATION);
+		//mCode.loadTxtFile("C:/Users/peter/repo/libOTe/libOTe/Tools/bch511.txt");
+		mCode.load(bch511_binary, sizeof(bch511_binary));
 
 
 		mInputByteCount = (inputBitCount + 7) / 8;

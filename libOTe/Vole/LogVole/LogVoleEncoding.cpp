@@ -367,6 +367,9 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
+            if (truncate > 1 || leafInputsAreGadget > 1)
+                return false;
+
             params.mTruncateOneGadgetDigit = truncate != 0;
             params.mLeafInputsAreGadget = leafInputsAreGadget != 0;
             return readShrinkExpandMode(mode, params.mMode);

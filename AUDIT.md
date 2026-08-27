@@ -5964,3 +5964,66 @@ Verification:
 
 - `OtExt_Silent_AuditState_Test` requires both roles to reject zero during
   configuration.
+
+## AUD-184: Zero-bit OOS configuration could not become configured
+
+Status: fixed
+
+Affected code:
+
+- OOS NCO OT sender and receiver configuration.
+
+Concern:
+
+Both configuration routines accepted an input bit count of zero, but their
+initialized-state checks use the positive input byte count as a configuration
+sentinel. Initialization and encoding therefore rejected the resulting object
+as unconfigured.
+
+Impact:
+
+A zero-bit invocation failed later with a misleading configuration error after
+loading the BCH code and mutating the object. This was an API correctness issue,
+not a protocol security bypass.
+
+Resolution:
+
+Sender and receiver reject input domains outside 1 through 76 bits before
+loading the code or mutating configuration state. Valid protocol and hot-loop
+behavior is unchanged.
+
+Verification:
+
+- `NcoOt_StateValidation_Test` requires both OOS roles to reject a zero-bit
+  input domain during configuration.
+
+## AUD-185: LogVole accepted noncanonical boolean encodings
+
+Status: fixed
+
+Affected code:
+
+- LogVole shrink-expand offline message decoding.
+
+Concern:
+
+The decoder interpreted each serialized boolean byte with `!= 0`. A malformed
+peer could therefore send values from 2 through 255 and have them accepted as
+true, while the adjacent mode field was decoded strictly.
+
+Impact:
+
+This allowed noncanonical peer messages through the protocol boundary. It did
+not create a parameter mismatch or cryptographic divergence because every
+nonzero representation had the same local meaning.
+
+Resolution:
+
+The decoder rejects boolean bytes greater than one before assigning decoded
+parameters. The check occurs once per offline message and does not affect an
+arithmetic or protocol hot loop.
+
+Verification:
+
+- `LogVole.Encoding.AllMessageRoundTrips` mutates both boolean fields to two
+  and requires decoding to reject each message.
