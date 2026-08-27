@@ -198,6 +198,7 @@ void Pprf_Audit_Test(const oc::CLP&)
 		throw UnitTestFail("PPRF 128-bit modular reduction ignored its high limb");
 
 	PRNG prng(CCBlock);
+	AlignedUnVector<block> noValue;
 
 	// Reconfiguration removes the prior active paths, and incomplete state is
 	// rejected before raw matrix indexing.
@@ -229,7 +230,7 @@ void Pprf_Audit_Test(const oc::CLP&)
 		auto sockets = cp::LocalAsyncSocket::makePair();
 		AlignedUnVector<block> output;
 		auto missingCallback = sender.expand(
-			sockets[0], {}, prng.get(), output,
+			sockets[0], noValue, prng.get(), output,
 			PprfOutputFormat::Callback, false, 1);
 		expectThrow([&] { macoro::sync_wait(std::move(missingCallback)); },
 			"PPRF sender accepted callback output without a callback");
@@ -241,7 +242,7 @@ void Pprf_Audit_Test(const oc::CLP&)
 			throw std::runtime_error("intentional callback failure");
 		};
 		auto failingCallback = sender.expand(
-			callbackSockets[0], {}, prng.get(), output,
+			callbackSockets[0], noValue, prng.get(), output,
 			PprfOutputFormat::Callback, false, 1);
 		expectThrow([&] { macoro::sync_wait(std::move(failingCallback)); },
 			"PPRF sender callback failure did not propagate");
@@ -282,7 +283,7 @@ void Pprf_Audit_Test(const oc::CLP&)
 		auto sockets = cp::LocalAsyncSocket::makePair();
 		AlignedUnVector<block> output(4);
 		auto missingValue = sender.expand(
-			sockets[0], {}, prng.get(), output,
+			sockets[0], noValue, prng.get(), output,
 			PprfOutputFormat::ByTreeIndex, true, 1);
 		expectThrow([&] { macoro::sync_wait(std::move(missingValue)); },
 			"Stationary PPRF sender accepted a missing value");
