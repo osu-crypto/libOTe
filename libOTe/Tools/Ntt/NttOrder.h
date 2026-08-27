@@ -12,6 +12,13 @@ namespace osuCrypto
 		BitReversedOrder, // BO order
 	};
 
+	inline void validateNttOrder(NttOrder order)
+	{
+		if (order != NttOrder::NormalOrder &&
+			order != NttOrder::BitReversedOrder)
+			throw std::invalid_argument("Invalid NTT order. " LOCATION);
+	}
+
 	// All current NTT index permutations use 32-bit indices and all negacyclic
 	// transforms form a doubled root order. Validate those domains before any
 	// shifts, n - 1 expressions, or 2 * n expressions are evaluated.
@@ -131,7 +138,7 @@ namespace osuCrypto
 		auto n = a.size();
 		if (n <= 1)
 			return;
-		const u64 bits = log2ceil(n);
+		const u64 bits = checkedNttLogSize(n);
 		for (u64 i = 0; i < n; ++i) {
 			u64 j = bitReversal(bits, i);
 			if (i < j) std::swap(a[i], a[j]);

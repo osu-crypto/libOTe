@@ -6027,3 +6027,100 @@ Verification:
 
 - `LogVole.Encoding.AllMessageRoundTrips` mutates both boolean fields to two
   and requires decoding to reject each message.
+
+## AUD-186: Non-power-of-two bit reversal accessed outside its span
+
+Status: fixed
+
+Affected code:
+
+- `bitReversePermute()`.
+
+Concern:
+
+The public permutation helper derived a ceiling log size but did not require
+the span length to be a power of two. For a five-element span, reversing the
+three-bit representation of index three produces index six, and the helper
+attempted to swap with that out-of-range element.
+
+Impact:
+
+A modest malformed direct call could perform an out-of-bounds read and write.
+Existing NTT entry points validate their transform sizes before reaching this
+helper, so protocol NTTs did not expose the unsafe call.
+
+Resolution:
+
+Nontrivial permutations reuse the shared NTT size check before entering the
+permutation loop. Empty and size-one permutations remain no-ops.
+
+Verification:
+
+- `Ntt_Audit_Test` requires a five-element permutation to be rejected.
+
+## AUD-187: Zero-length Silent VOLE consumed protocol work before failing
+
+Status: fixed
+
+Affected code:
+
+- Silent VOLE sender and receiver configuration.
+
+Concern:
+
+Both roles accepted a request size of zero. The resulting configuration still
+selected nonempty noise and PPRF parameters, so an online call could generate
+base correlations and expand the PPRF before the compression code rejected its
+zero message dimension.
+
+Impact:
+
+An unusable configuration failed only after communication and one-time
+correlations had been consumed. This was an API/state correctness issue, not a
+cryptographic security bypass.
+
+Resolution:
+
+Both roles reject a zero request at the configuration boundary before parameter
+selection, state mutation, or communication. Nonempty protocol paths are
+unchanged.
+
+Verification:
+
+- `Vole_Noisy_Audit_Test` requires both Silent VOLE roles to reject zero during
+  configuration.
+
+## AUD-188: NTT order values failed open as bit-reversed order
+
+Status: fixed
+
+Affected code:
+
+- Recursive, iterative, and matrix forward NTT entry points.
+- Matrix inverse NTT entry point.
+
+Concern:
+
+The transform APIs distinguished normal order with an equality comparison and
+treated every other enum representation as bit-reversed order. Invalid cast or
+corrupted values therefore selected a valid but unintended layout.
+
+Impact:
+
+Callers could silently receive or supply coefficients in the wrong order,
+producing incorrect downstream arithmetic instead of an immediate boundary
+failure.
+
+Resolution:
+
+The public transform entry points validate the two supported enum values once
+before transform setup. Butterfly, matrix, and permutation loops are unchanged.
+
+Verification:
+
+- `Ntt_Audit_Test` requires recursive, iterative, forward-matrix, and
+  inverse-matrix transforms to reject an invalid order value.
+- Five alternating Release benchmark pairs at 65,536 coefficients and 500
+  scalar plus 500 two-lane transforms had median wall times of 2060.938 ms
+  before and 2061.437 ms after the checks, a +0.02% change. Benchmark processes
+  were run sequentially.

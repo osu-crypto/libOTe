@@ -177,6 +177,7 @@ namespace osuCrypto
 		auto psi,
 		NttOrder order)
 	{
+		validateNttOrder(order);
 		auto rng = NttRange{ .mBaseIndex = 0, .mStride = 1, .mSize = a.size() };
 		nttNegWrapCt(aHat, a, psi, psi, rng, 0, order);
 	}
@@ -278,6 +279,7 @@ namespace osuCrypto
 		span<SF> w,
 		NttOrder order = NttOrder::BitReversedOrder)
 	{
+		validateNttOrder(order);
 
 		F* __restrict aPtr = a.data();
 		SF* __restrict wPtr = w.data();

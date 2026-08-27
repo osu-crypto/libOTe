@@ -24,6 +24,7 @@ namespace osuCrypto
         NttOrder order, 
         bool verbose = false)
     {
+        validateNttOrder(order);
         u64 n = a.size();
 		if (aHat.size() != n)
 			throw std::invalid_argument("matrix NTT input and output spans must have equal lengths. " LOCATION);
@@ -95,6 +96,7 @@ namespace osuCrypto
         NttOrder order,
         bool verbose = false)
     {
+        validateNttOrder(order);
         auto n = a.size();
 		if (aHat_.size() != n)
 			throw std::invalid_argument("matrix inverse NTT input and output spans must have equal lengths. " LOCATION);

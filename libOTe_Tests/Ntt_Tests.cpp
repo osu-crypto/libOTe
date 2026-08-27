@@ -31,8 +31,21 @@ namespace tests_libOTe
 				rejected = true;
 			}
 			if (!rejected)
-				throw UnitTestFail("mismatched NTT spans were accepted" LOCATION);
+				throw UnitTestFail("invalid NTT input was accepted" LOCATION);
 		};
+
+		std::vector<F> nonPowerOfTwo(5);
+		expectInvalid([&] { bitReversePermute<F>(nonPowerOfTwo); });
+
+		const auto invalidOrder = static_cast<NttOrder>(255);
+		expectInvalid([&] { nttNegWrapCt<F>(full, full, psi, invalidOrder); });
+		expectInvalid([&] { nttNegWrapMatrix<F>(full, full, psi, invalidOrder); });
+		expectInvalid([&] { inttNegWrapMatrix<F>(full, full, psi, invalidOrder); });
+
+		std::vector<F> roots(2 * n);
+		nttPrecomputeRootsOfUnity<F>(psi, roots);
+		auto negWrapRoots = getNegWrapRoots<F>(roots, n);
+		expectInvalid([&] { nttNegWrapCt<F, F>(full, negWrapRoots, invalidOrder); });
 
 		expectInvalid([&] { nttNegWrapCt<F>(shortSpan, full, psi, NttOrder::NormalOrder); });
 		expectInvalid([&] { inttNegWrapGs<F>(full, shortSpan, psi, NttOrder::BitReversedOrder); });

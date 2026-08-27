@@ -496,6 +496,8 @@ namespace osuCrypto
 		u64 secParam,
 		Ctx ctx)
 	{
+		if (requestSize == 0)
+			throw std::invalid_argument("Silent VOLE request size must be nonzero. " LOCATION);
 		if (malType != SilentSecType::SemiHonest &&
 			malType != SilentSecType::Malicious)
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);

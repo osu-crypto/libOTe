@@ -339,6 +339,15 @@ void Vole_Noisy_Audit_Test(const oc::CLP&)
 
 	expectInvalidArgument([] {
 		SilentVoleSender<block, block, CoeffCtxGF128> sender;
+		sender.configure(0);
+	});
+	expectInvalidArgument([] {
+		SilentVoleReceiver<block, block, CoeffCtxGF128> receiver;
+		receiver.configure(0);
+	});
+
+	expectInvalidArgument([] {
+		SilentVoleSender<block, block, CoeffCtxGF128> sender;
 		sender.configure(128, static_cast<SilentSecType>(255));
 	});
 	expectInvalidArgument([] {
