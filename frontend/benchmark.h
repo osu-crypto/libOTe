@@ -1052,6 +1052,7 @@ namespace osuCrypto
 		auto logn = cmd.getOr("nn", 10);
 		u64 n = ipow(3, logn);
 		auto blocks = divCeil(n, 128);
+		auto traceBlocks = divCeil(2 * n, 128);
 		const bool trace = cmd.isSet("trace");
 		//bool verbose = cmd.isSet("v");
 
@@ -1113,22 +1114,20 @@ namespace osuCrypto
 			}
 
 			std::vector<block>
-				Av0(blocks),
-				Av1(blocks),
-				Bv0(blocks),
-				Bv1(blocks),
-				Cv0(blocks),
-				Cv1(blocks),
-				Dv0(trace ? blocks : 0),
-				Dv1(trace ? blocks : 0);
+				Av0(trace ? traceBlocks : blocks),
+				Av1(trace ? traceBlocks : blocks),
+				Bv0(trace ? 0 : blocks),
+				Bv1(trace ? 0 : blocks),
+				Cv0(trace ? traceBlocks : blocks),
+				Cv1(trace ? traceBlocks : blocks);
 
 			oles[0].setTimer(timer);
 			auto b = timer.setTimePoint("start");
 
 			auto r = trace ?
 				macoro::sync_wait(macoro::when_all_ready(
-					oles[0].expandF2Ole(Av0, Bv0, Cv0, Dv0, prng0, sock[0]) | macoro::start_on(pool),
-					oles[1].expandF2Ole(Av1, Bv1, Cv1, Dv1, prng1, sock[1]) | macoro::start_on(pool))) :
+					oles[0].expand(Av0, Cv0, prng0, sock[0]) | macoro::start_on(pool),
+					oles[1].expand(Av1, Cv1, prng1, sock[1]) | macoro::start_on(pool))) :
 				macoro::sync_wait(macoro::when_all_ready(
 					oles[0].expand(Av0, Bv0, Cv0, prng0, sock[0]) | macoro::start_on(pool),
 					oles[1].expand(Av1, Bv1, Cv1, prng1, sock[1]) | macoro::start_on(pool)));
