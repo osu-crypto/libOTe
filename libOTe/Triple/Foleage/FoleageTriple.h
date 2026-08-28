@@ -248,7 +248,10 @@ namespace osuCrypto
 			coproto::Socket& sock);
 
 
-		// The F2 beaver triple protocol. This will generate n beaver triples.
+		// The F2 Beaver triple protocol. This directly projects the F4 product
+		// and generates one triple per F4 position. It intentionally does not use
+		// the trace-OLE expansion below: a pair of trace OLEs makes only one
+		// independently masked triple while requiring twice as many DPF points.
 		macoro::task<> expand(
 			span<block> A,
 			span<block> B,
@@ -298,15 +301,16 @@ namespace osuCrypto
 			span<u16> prodFrobenius,
 			coproto::Socket& sock);
 
-		// Generates two binary OLEs from the F4 correlation using the trace
-		// maps Tr(x) and Tr(xi*x). The outputs satisfy
-		//   ZTrace_0 + ZTrace_1 = XTrace_0 * XTrace_1, and
-		//   ZXiTrace_0 + ZXiTrace_1 = XXiTrace_0 * XXiTrace_1.
-		macoro::task<> expandF2Ole(
-			span<block> XTrace,
-			span<block> XXiTrace,
-			span<block> ZTrace,
-			span<block> ZXiTrace,
+		// Generates a single packed batch containing two binary OLEs per F4
+		// position. Entries 2*i and 2*i+1 use Tr(x_i) and Tr(xi*x_i),
+		// respectively. Both are returned because either trace product requires
+		// the same two F4 products, so discarding one would not reduce DPF work.
+		// If k = min(mN, 64 * X.size()), the first 2*k entries satisfy
+		//   Z_0[j] + Z_1[j] = X_0[j] * X_1[j].
+		// This overload requires F2TraceOle mode and X.size() == Z.size().
+		macoro::task<> expand(
+			span<block> X,
+			span<block> Z,
 			PRNG& prng,
 			coproto::Socket& sock);
 

@@ -739,11 +739,9 @@ namespace osuCrypto
 	}
 
 
-	macoro::task<> FoleageTriple::expandF2Ole(
-		span<block> XTrace,
-		span<block> XXiTrace,
-		span<block> ZTrace,
-		span<block> ZXiTrace,
+	macoro::task<> FoleageTriple::expand(
+		span<block> X,
+		span<block> Z,
 		PRNG& prng,
 		coproto::Socket& sock)
 	{
@@ -754,11 +752,9 @@ namespace osuCrypto
 
 		setTimePoint("trace expand start");
 
-		if (divCeil(mN, 128) < XTrace.size())
+		if (divCeil(2 * mN, 128) < X.size())
 			throw RTE_LOC;
-		if (XTrace.size() != XXiTrace.size() ||
-			XTrace.size() != ZTrace.size() ||
-			XTrace.size() != ZXiTrace.size())
+		if (X.size() != Z.size())
 			throw RTE_LOC;
 
 		if (!hasBaseOts())
@@ -807,15 +803,16 @@ namespace osuCrypto
 		F4Multiply(mFftA, fftSparsePoly, fftSparsePoly, mN);
 		setTimePoint("trace input mult");
 
-		const auto outSize = std::min<u64>(mN, XTrace.size() * 128);
+		const auto outSize = std::min<u64>(mN, X.size() * 64);
 		constexpr u16 msbMask = 0b1010101010101010;
 		constexpr u16 lsbMask = 0b0101010101010101;
+		auto xIter = BitIterator(X.data());
 		for (u64 i = 0; i < outSize; ++i)
 		{
 			const auto l = popcount<u16>(fftSparsePoly[i] & lsbMask) & 1;
 			const auto h = popcount<u16>(fftSparsePoly[i] & msbMask) & 1;
-			*BitIterator(XTrace.data(), i) = h;
-			*BitIterator(XXiTrace.data(), i) = l ^ h;
+			*xIter++ = h;
+			*xIter++ = l ^ h;
 		}
 		setTimePoint("trace copyOutX");
 
@@ -962,6 +959,7 @@ namespace osuCrypto
 				mN);
 			setTimePoint(lane ? "trace mult frobenius" : "trace mult product");
 
+			auto zIter = BitIterator(Z.data());
 			for (u64 i = 0; i < outSize; ++i)
 			{
 				const auto h = popcount(fftRes[i] & packedMsbMask) & 1;
@@ -970,14 +968,13 @@ namespace osuCrypto
 					// For R0=X0*X1 and R1=X0*X1^2:
 					// Tr(X0)Tr(X1) = msb(R0) + msb(R1), and
 					// Tr(xi*X0)Tr(xi*X1) = lsb(R0) + msb(R1).
-					*BitIterator(ZTrace.data(), i) = h;
-					*BitIterator(ZXiTrace.data(), i) =
-						popcount(fftRes[i] & packedLsbMask) & 1;
+					*zIter++ = h;
+					*zIter++ = popcount(fftRes[i] & packedLsbMask) & 1;
 				}
 				else
 				{
-					*BitIterator(ZTrace.data(), i) ^= h;
-					*BitIterator(ZXiTrace.data(), i) ^= h;
+					*zIter++ ^= h;
+					*zIter++ ^= h;
 				}
 			}
 		}

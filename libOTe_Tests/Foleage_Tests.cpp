@@ -134,7 +134,7 @@ namespace osuCrypto
 #ifdef ENABLE_FOLEAGE
 		const auto logn = 6;
 		const u64 n = ipow(3, logn) - 67;
-		const auto blockCount = divCeil(n, 128);
+		const auto blockCount = divCeil(2 * n, 128);
 		const bool verbose = cmd.isSet("v");
 
 		std::array<FoleageTriple, 2> oles;
@@ -171,23 +171,19 @@ namespace osuCrypto
 		oles[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
 		oles[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
-		std::array<std::vector<block>, 2> xTrace, xXiTrace, zTrace, zXiTrace;
+		std::array<std::vector<block>, 2> x, z;
 		for (u64 i = 0; i < 2; ++i)
 		{
-			xTrace[i].resize(blockCount);
-			xXiTrace[i].resize(blockCount);
-			zTrace[i].resize(blockCount);
-			zXiTrace[i].resize(blockCount);
+			x[i].resize(blockCount);
+			z[i].resize(blockCount);
 		}
 
 		auto sockets = coproto::LocalAsyncSocket::makePair();
 		if (verbose)
 			oles[0].setTimer(timer);
 		auto result = macoro::sync_wait(macoro::when_all_ready(
-			oles[0].expandF2Ole(
-				xTrace[0], xXiTrace[0], zTrace[0], zXiTrace[0], prng0, sockets[0]),
-			oles[1].expandF2Ole(
-				xTrace[1], xXiTrace[1], zTrace[1], zXiTrace[1], prng1, sockets[1])));
+			oles[0].expand(x[0], z[0], prng0, sockets[0]),
+			oles[1].expand(x[1], z[1], prng1, sockets[1])));
 		std::get<0>(result).result();
 		std::get<1>(result).result();
 
@@ -202,17 +198,17 @@ namespace osuCrypto
 
 		for (u64 i = 0; i < n; ++i)
 		{
-			const auto traceProduct =
-				*BitIterator(xTrace[0].data(), i) & *BitIterator(xTrace[1].data(), i);
-			const auto traceShare =
-				*BitIterator(zTrace[0].data(), i) ^ *BitIterator(zTrace[1].data(), i);
+			const auto traceProduct = *BitIterator(x[0].data(), 2 * i) &
+				*BitIterator(x[1].data(), 2 * i);
+			const auto traceShare = *BitIterator(z[0].data(), 2 * i) ^
+				*BitIterator(z[1].data(), 2 * i);
 			if (traceProduct != traceShare)
 				throw UnitTestFail("Foleage Tr(x) OLE correlation failed");
 
-			const auto xiTraceProduct =
-				*BitIterator(xXiTrace[0].data(), i) & *BitIterator(xXiTrace[1].data(), i);
-			const auto xiTraceShare =
-				*BitIterator(zXiTrace[0].data(), i) ^ *BitIterator(zXiTrace[1].data(), i);
+			const auto xiTraceProduct = *BitIterator(x[0].data(), 2 * i + 1) &
+				*BitIterator(x[1].data(), 2 * i + 1);
+			const auto xiTraceShare = *BitIterator(z[0].data(), 2 * i + 1) ^
+				*BitIterator(z[1].data(), 2 * i + 1);
 			if (xiTraceProduct != xiTraceShare)
 				throw UnitTestFail("Foleage Tr(xi*x) OLE correlation failed");
 		}
