@@ -34,6 +34,7 @@
 #include "libOTe_Tests/Permutation_Tests.h"
 #include "libOTe_Tests/BlkAccCode_Tests.h"
 #include "libOTe_Tests/LogVole_Tests.h"
+#include "libOTe_Tests/AnyField_Tests.h"
 
 
 using namespace osuCrypto;
@@ -43,6 +44,9 @@ namespace tests_libOTe
 
 	TestCollection Tests([](TestCollection& tc)
 		{
+			tc.add("AnyField_F9_Test                       ", AnyField_F9_Test);
+			tc.add("AnyField_F9Transform_Test              ", AnyField_F9Transform_Test);
+			tc.add("AnyField_F3Ole_Test                     ", AnyField_F3Ole_Test);
 
 			tc.add("Cmp_greaterThan_test                    ", Cmp_greaterThan_test);
 			tc.add("Tools_Transpose_Test                    ", Tools_Transpose_Test);

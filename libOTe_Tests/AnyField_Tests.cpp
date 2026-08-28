@@ -1,0 +1,221 @@
+#include "AnyField_Tests.h"
+#include "libOTe/Triple/AnyField/AnyFieldCtx.h"
+#include "libOTe/Triple/AnyField/AnyFieldOle.h"
+#include "cryptoTools/Common/TestCollection.h"
+#include "coproto/Socket/LocalAsyncSock.h"
+#include <array>
+#include <chrono>
+#include <iostream>
+#include <vector>
+
+namespace osuCrypto
+{
+	void AnyField_F9_Test(const CLP&)
+	{
+		AnyFieldF9Ctx ctx;
+		CoeffCtxF9 coeffCtx;
+
+		for (u8 i = 0; i < 9; ++i)
+		{
+			const auto a = F9::fromIndex(i);
+			if (!a.isCanonical())
+				throw UnitTestFail("F9 enumeration produced a non-canonical element");
+			if (a + F9::zero() != a || a - a != F9::zero())
+				throw UnitTestFail("F9 additive identity failed");
+			if (a.frobenius() != a.pow(3) || a.frobenius().frobenius() != a)
+				throw UnitTestFail("F9 Frobenius failed");
+			if (F9(a.trace(), F3(0)) != a + a.frobenius())
+				throw UnitTestFail("F9 trace failed");
+			if (i && a * a.inverse() != F9::one())
+				throw UnitTestFail("F9 inverse failed");
+
+			auto mutableA = a;
+			auto bits = coeffCtx.binaryDecomposition(mutableA);
+			F9 reconstructed = F9::zero();
+			for (u64 bit = 0; bit < bits.size(); ++bit)
+			{
+				F9 generator;
+				coeffCtx.powerOfTwo(generator, bit);
+				if (bits[bit])
+					reconstructed += generator;
+			}
+			if (reconstructed != a)
+				throw UnitTestFail("F9 additive decomposition failed");
+
+			for (u8 j = 0; j < 9; ++j)
+			{
+				const auto b = F9::fromIndex(j);
+				if ((a + b) - b != a)
+					throw UnitTestFail("F9 addition/subtraction failed");
+				if (a * (b + F9::one()) != a * b + a)
+					throw UnitTestFail("F9 distributivity failed");
+			}
+		}
+
+		const auto xi = ctx.traceBasis(0);
+		if (xi.pow(8) != F9::one() || xi.pow(4) == F9::one())
+			throw UnitTestFail("F9 context generator does not have order eight");
+		if (ctx.traceBasis(1) != xi.frobenius())
+			throw UnitTestFail("F9 context trace basis is inconsistent");
+	}
+
+	void AnyField_F9Transform_Test(const CLP&)
+	{
+		AnyFieldF9Ctx ctx;
+		std::array<F9, 8> input;
+		for (u8 i = 0; i < input.size(); ++i)
+			input[i] = F9::fromIndex(i);
+
+		auto actual = input;
+		ctx.transform(actual, 1);
+
+		std::array<F9, 8> expected;
+		const auto omega = ctx.rootOfUnity();
+		for (u64 frequency = 0; frequency < 8; ++frequency)
+		{
+			F9 sum = F9::zero();
+			for (u64 coefficient = 0; coefficient < 8; ++coefficient)
+				sum += input[coefficient] * omega.pow(coefficient * frequency);
+
+			const auto reversed = static_cast<u64>(
+				((frequency & 1) << 2) | (frequency & 2) | ((frequency & 4) >> 2));
+			expected[reversed] = sum;
+		}
+
+		if (actual != expected)
+			throw UnitTestFail("F9 fixed radix-eight transform disagrees with direct evaluation");
+
+		std::vector<F9> twoDimensional(64, F9::zero());
+		twoDimensional[0] = F9::one();
+		ctx.transform(twoDimensional, 2);
+		for (const auto value : twoDimensional)
+			if (value != F9::one())
+				throw UnitTestFail("F9 multidimensional transform has inconsistent strides");
+	}
+
+	void AnyField_F3Ole_Test(const CLP& cmd)
+	{
+#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+		auto runCase = [](u64 dimensions, u64 weight, bool printTiming) {
+		std::array<AnyFieldF3Ole, 2> ole;
+		const block publicSeed(0x9132749812374981, 0x1239874192387491);
+		for (u64 party = 0; party < 2; ++party)
+			ole[party].init(party, dimensions, weight, publicSeed);
+
+		const auto count0 = ole[0].baseCorCount();
+		const auto count1 = ole[1].baseCorCount();
+		if (count0.mSendOtCount != count1.mRecvOtCount ||
+			count0.mRecvOtCount != count1.mSendOtCount ||
+			count0.mOleCount != count1.mOleCount)
+			throw UnitTestFail("AnyFieldOle base-correlation counts disagree");
+
+		PRNG basePrng(block(0x1234567812345678, 0x8765432187654321));
+		std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+		std::array<std::vector<block>, 2> recvOts;
+		std::array<BitVector, 2> choices;
+		const std::array counts{ count0, count1 };
+		for (u64 sender = 0; sender < 2; ++sender)
+		{
+			sendOts[sender].resize(counts[sender].mSendOtCount);
+			basePrng.get(sendOts[sender].data(), sendOts[sender].size());
+			const auto receiver = 1 ^ sender;
+			recvOts[receiver].resize(sendOts[sender].size());
+			choices[receiver].resize(sendOts[sender].size());
+			choices[receiver].randomize(basePrng);
+			for (u64 i = 0; i < sendOts[sender].size(); ++i)
+				recvOts[receiver][i] = sendOts[sender][i][choices[receiver][i]];
+		}
+
+		const auto oleBlocks = divCeil(count0.mOleCount, 128);
+		std::array<std::vector<block>, 2> oleMult{
+			std::vector<block>(oleBlocks), std::vector<block>(oleBlocks) };
+		std::array<std::vector<block>, 2> oleAdd{
+			std::vector<block>(oleBlocks), std::vector<block>(oleBlocks) };
+		for (u64 party = 0; party < 2; ++party)
+		{
+			basePrng.get(oleMult[party].data(), oleMult[party].size());
+			basePrng.get(oleAdd[party].data(), oleAdd[party].size());
+		}
+		for (u64 i = 0; i < count0.mOleCount; ++i)
+		{
+			const auto product = *BitIterator(oleMult[0].data(), i) &
+				*BitIterator(oleMult[1].data(), i);
+			*BitIterator(oleAdd[1].data(), i) =
+				product ^ *BitIterator(oleAdd[0].data(), i);
+		}
+
+		for (u64 party = 0; party < 2; ++party)
+			ole[party].setBaseCors(
+				sendOts[party], recvOts[party], choices[party],
+				oleMult[party], oleAdd[party]);
+
+		PRNG prng0(block(0x1111111111111111, 0x2222222222222222));
+		PRNG prng1(block(0x3333333333333333, 0x4444444444444444));
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		const auto setupStart = std::chrono::steady_clock::now();
+		auto setupResult = macoro::sync_wait(macoro::when_all_ready(
+			ole[0].setup(prng0, sockets[0]),
+			ole[1].setup(prng1, sockets[1])));
+		std::get<0>(setupResult).result();
+		std::get<1>(setupResult).result();
+		const auto setupEnd = std::chrono::steady_clock::now();
+
+		if (!ole[0].hasSetup() || !ole[1].hasSetup() ||
+			ole[0].hasBaseCors() || ole[1].hasBaseCors())
+			throw UnitTestFail("AnyFieldOle setup retained or lost protocol state");
+
+		std::array<std::vector<F3>, 2> x, z;
+		for (u64 party = 0; party < 2; ++party)
+		{
+			x[party].resize(ole[party].outputSize());
+			z[party].resize(ole[party].outputSize());
+			ole[party].expand(x[party], z[party]);
+		}
+		const auto expandEnd = std::chrono::steady_clock::now();
+
+		for (u64 i = 0; i < x[0].size(); ++i)
+			if (x[0][i] * x[1][i] != z[0][i] + z[1][i])
+				throw UnitTestFail("AnyFieldOle F3 correlation failed");
+		if (ole[0].hasSetup() || ole[1].hasSetup())
+			throw UnitTestFail("AnyFieldOle expansion did not consume its seed");
+
+		// An initialized public matrix can be reused for another independent
+		// setup, but every underlying correlation must be installed afresh. The
+		// test data is reused here only to exercise the state transition.
+		if (!printTiming)
+		{
+			for (u64 party = 0; party < 2; ++party)
+				ole[party].setBaseCors(
+					sendOts[party], recvOts[party], choices[party],
+					oleMult[party], oleAdd[party]);
+			auto secondSockets = coproto::LocalAsyncSocket::makePair();
+			auto secondSetup = macoro::sync_wait(macoro::when_all_ready(
+				ole[0].setup(prng0, secondSockets[0]),
+				ole[1].setup(prng1, secondSockets[1])));
+			std::get<0>(secondSetup).result();
+			std::get<1>(secondSetup).result();
+			for (u64 party = 0; party < 2; ++party)
+				ole[party].expand(x[party], z[party]);
+			for (u64 i = 0; i < x[0].size(); ++i)
+				if (x[0][i] * x[1][i] != z[0][i] + z[1][i])
+					throw UnitTestFail("AnyFieldOle repeated F3 correlation failed");
+		}
+		if (printTiming)
+		{
+			const auto setupMs = std::chrono::duration<double, std::milli>(setupEnd - setupStart).count();
+			const auto expandMs = std::chrono::duration<double, std::milli>(expandEnd - setupEnd).count();
+			std::cout << "AnyField F3 OLE: N=" << ole[0].outputSize() / 2
+				<< ", t=" << weight << ", setup=" << setupMs
+				<< " ms, two local expands=" << expandMs << " ms\n";
+		}
+		};
+
+		runCase(1, 1, false);
+		runCase(2, 2, false);
+		if (cmd.isSet("v"))
+			runCase(4, 4, true);
+#else
+		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
+#endif
+	}
+}

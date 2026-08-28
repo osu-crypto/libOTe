@@ -29,6 +29,7 @@ set(SRCS
     UInt_Tests.cpp
     Permutation_Tests.cpp
     BlkAccCode_Tests.cpp
+    AnyField_Tests.cpp
 )
 
 add_library(libOTe_Tests STATIC ${SRCS})
