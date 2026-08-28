@@ -5,6 +5,7 @@
 #include "coproto/Socket/LocalAsyncSock.h"
 #include <array>
 #include <chrono>
+#include <cstring>
 #include <iostream>
 #include <vector>
 
@@ -93,11 +94,151 @@ namespace osuCrypto
 				throw UnitTestFail("F9 multidimensional transform has inconsistent strides");
 	}
 
-	void AnyField_F3Ole_Test(const CLP& cmd)
+	void AnyField_F4_Test(const CLP&)
+	{
+		AnyFieldF4Ctx ctx;
+		CoeffCtxF4 coeffCtx;
+
+		for (u8 i = 0; i < 4; ++i)
+		{
+			const auto a = F4::fromIndex(i);
+			if (!a.isCanonical())
+				throw UnitTestFail("F4 enumeration produced a non-canonical element");
+			if (a + F4::zero() != a || a - a != F4::zero())
+				throw UnitTestFail("F4 additive identity failed");
+			if (a.frobenius() != a.pow(2) || a.frobenius().frobenius() != a)
+				throw UnitTestFail("F4 Frobenius failed");
+			if (F4(a.trace(), F2(0)) != a + a.frobenius())
+				throw UnitTestFail("F4 trace failed");
+			if (i && a * a.inverse() != F4::one())
+				throw UnitTestFail("F4 inverse failed");
+
+			auto mutableA = a;
+			auto bits = coeffCtx.binaryDecomposition(mutableA);
+			F4 reconstructed = F4::zero();
+			for (u64 bit = 0; bit < bits.size(); ++bit)
+			{
+				F4 generator;
+				coeffCtx.powerOfTwo(generator, bit);
+				if (bits[bit])
+					reconstructed += generator;
+			}
+			if (reconstructed != a)
+				throw UnitTestFail("F4 additive decomposition failed");
+
+			for (u8 j = 0; j < 4; ++j)
+			{
+				const auto b = F4::fromIndex(j);
+				if ((a + b) - b != a)
+					throw UnitTestFail("F4 addition/subtraction failed");
+				if (a * (b + F4::one()) != a * b + a)
+					throw UnitTestFail("F4 distributivity failed");
+			}
+		}
+
+		const auto xi = ctx.traceBasis(0);
+		if (xi.pow(3) != F4::one() || xi == F4::one())
+			throw UnitTestFail("F4 context generator does not have order three");
+		if (ctx.traceBasis(1) != xi.frobenius())
+			throw UnitTestFail("F4 context trace basis is inconsistent");
+	}
+
+	void AnyField_F4Transform_Test(const CLP&)
+	{
+		AnyFieldF4Ctx ctx;
+		std::array<F4, 3> input{
+			F4::fromIndex(1), F4::fromIndex(2), F4::fromIndex(3) };
+		auto actual = input;
+		ctx.transform(actual, 1);
+
+		std::array<F4, 3> expected;
+		const auto omega = ctx.rootOfUnity();
+		for (u64 frequency = 0; frequency < 3; ++frequency)
+		{
+			F4 sum = F4::zero();
+			for (u64 coefficient = 0; coefficient < 3; ++coefficient)
+				sum += input[coefficient] * omega.pow(coefficient * frequency);
+			expected[frequency] = sum;
+		}
+		if (actual != expected)
+			throw UnitTestFail("F4 fixed radix-three transform disagrees with direct evaluation");
+
+		std::vector<F4> twoDimensional(9, F4::zero());
+		twoDimensional[0] = F4::one();
+		ctx.transform(twoDimensional, 2);
+		for (const auto value : twoDimensional)
+			if (value != F4::one())
+				throw UnitTestFail("F4 multidimensional transform has inconsistent strides");
+	}
+
+	void AnyField_PositionCircuit_Test(const CLP&)
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
-		auto runCase = [](u64 dimensions, u64 weight, bool printTiming) {
-		std::array<AnyFieldF3Ole, 2> ole;
+		auto runCase = [](u64 modulus, u64 coordinateBits, u64 dimensions) {
+			u64 domain = 1;
+			for (u64 i = 0; i < dimensions; ++i)
+				domain *= modulus;
+			auto circuit = anyField::detail::makePositionCircuit(
+				modulus, coordinateBits, dimensions, domain);
+			const auto inputBits = coordinateBits * dimensions;
+			const auto outputBits = log2ceil(domain);
+
+			auto pack = [&](u64 position) {
+				u64 result = 0;
+				for (u64 coordinate = 0; coordinate < dimensions; ++coordinate)
+				{
+					result |= (position % modulus) << (coordinateBits * coordinate);
+					position /= modulus;
+				}
+				return result;
+			};
+
+			for (u64 lhs = 0; lhs < domain; ++lhs)
+				for (u64 rhs = 0; rhs < domain; ++rhs)
+				{
+					auto lhsInput = pack(lhs);
+					auto rhsInput = pack(rhs);
+					std::vector<BitVector> inputs(2), outputs(1);
+					inputs[0].append(reinterpret_cast<u8*>(&lhsInput), inputBits);
+					inputs[1].append(reinterpret_cast<u8*>(&rhsInput), inputBits);
+					outputs[0].resize(outputBits);
+					circuit.evaluate(inputs, outputs, false);
+
+					u64 actual = 0;
+					std::memcpy(&actual, outputs[0].data(), outputs[0].sizeBytes());
+					u64 expected = 0;
+					u64 radix = 1;
+					auto lhsDigits = lhs;
+					auto rhsDigits = rhs;
+					for (u64 coordinate = 0; coordinate < dimensions; ++coordinate)
+					{
+						expected += ((lhsDigits % modulus + rhsDigits % modulus) % modulus) * radix;
+						lhsDigits /= modulus;
+						rhsDigits /= modulus;
+						radix *= modulus;
+					}
+					if (actual != expected)
+						throw UnitTestFail("AnyField position circuit produced the wrong group sum");
+				}
+		};
+
+		runCase(3, 2, 1);
+		runCase(3, 2, 2);
+		runCase(3, 2, 3);
+		runCase(5, 3, 2);
+		runCase(8, 3, 2);
+#else
+		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
+#endif
+	}
+
+#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+	template<typename Ole>
+	void runAnyFieldOleCase(u64 dimensions, u64 weight, bool printTiming, const char* fieldName)
+	{
+		using Base = typename Ole::Base;
+		using Ctx = typename Ole::Ctx;
+		std::array<Ole, 2> ole;
 		const block publicSeed(0x9132749812374981, 0x1239874192387491);
 		for (u64 party = 0; party < 2; ++party)
 			ole[party].init(party, dimensions, weight, publicSeed);
@@ -164,7 +305,7 @@ namespace osuCrypto
 			ole[0].hasBaseCors() || ole[1].hasBaseCors())
 			throw UnitTestFail("AnyFieldOle setup retained or lost protocol state");
 
-		std::array<std::vector<F3>, 2> x, z;
+		std::array<std::vector<Base>, 2> x, z;
 		for (u64 party = 0; party < 2; ++party)
 		{
 			x[party].resize(ole[party].outputSize());
@@ -175,7 +316,7 @@ namespace osuCrypto
 
 		for (u64 i = 0; i < x[0].size(); ++i)
 			if (x[0][i] * x[1][i] != z[0][i] + z[1][i])
-				throw UnitTestFail("AnyFieldOle F3 correlation failed");
+				throw UnitTestFail("AnyFieldOle correlation failed");
 		if (ole[0].hasSetup() || ole[1].hasSetup())
 			throw UnitTestFail("AnyFieldOle expansion did not consume its seed");
 
@@ -198,22 +339,41 @@ namespace osuCrypto
 				ole[party].expand(x[party], z[party]);
 			for (u64 i = 0; i < x[0].size(); ++i)
 				if (x[0][i] * x[1][i] != z[0][i] + z[1][i])
-					throw UnitTestFail("AnyFieldOle repeated F3 correlation failed");
+					throw UnitTestFail("AnyFieldOle repeated correlation failed");
 		}
 		if (printTiming)
 		{
 			const auto setupMs = std::chrono::duration<double, std::milli>(setupEnd - setupStart).count();
 			const auto expandMs = std::chrono::duration<double, std::milli>(expandEnd - setupEnd).count();
-			std::cout << "AnyField F3 OLE: N=" << ole[0].outputSize() / 2
+			std::cout << "AnyField " << fieldName << " OLE: N="
+				<< ole[0].outputSize() / Ctx::extensionDegree
 				<< ", t=" << weight << ", setup=" << setupMs
 				<< " ms, two local expands=" << expandMs << " ms\n";
 		}
-		};
+	}
+#endif
 
-		runCase(1, 1, false);
-		runCase(2, 2, false);
+	void AnyField_F3Ole_Test(const CLP& cmd)
+	{
+#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+		runAnyFieldOleCase<AnyFieldF3Ole>(1, 1, false, "F3");
+		runAnyFieldOleCase<AnyFieldF3Ole>(2, 2, false, "F3");
 		if (cmd.isSet("v"))
-			runCase(4, 4, true);
+			runAnyFieldOleCase<AnyFieldF3Ole>(
+				cmd.getOr("d", 4ull), cmd.getOr("w", 4ull), true, "F3");
+#else
+		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
+#endif
+	}
+
+	void AnyField_F2Ole_Test(const CLP& cmd)
+	{
+#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+		runAnyFieldOleCase<AnyFieldF2Ole>(1, 1, false, "F2");
+		runAnyFieldOleCase<AnyFieldF2Ole>(2, 2, false, "F2");
+		if (cmd.isSet("v"))
+			runAnyFieldOleCase<AnyFieldF2Ole>(
+				cmd.getOr("d", 5ull), cmd.getOr("w", 4ull), true, "F2");
 #else
 		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
 #endif
