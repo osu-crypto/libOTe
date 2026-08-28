@@ -113,6 +113,8 @@ namespace osuCrypto
 			co_return;
 		}
 
+		// Output callbacks follow the RegularDpf physical leaf order. pointIdx is
+		// always the logical domain index.
 		template<typename Output, typename = std::enable_if_t<
 			std::is_lvalue_reference<Output>::value || std::is_object<Output>::value>>
 		macoro::task<> expand(
@@ -127,18 +129,16 @@ namespace osuCrypto
 			if (values.size() != mNumSets * mNumPointsPerSet)
 				throw RTE_LOC;
 
-			T sum;
-			ctx.zero(sum);
-			u64 count = 0;
+			auto sums = ctx.template makeVec<T>(mDomain);
+			ctx.zero(sums.begin(), sums.end());
 			co_await mDpf.expand(
 				mPoints, values, prng, sock, 
-				[&](u64 treeIdx, u64 pointIdx, auto value, block tag) {
-					ctx.plus(sum, sum, value);
-					if (++count == mNumPointsPerSet)
+				[&](u64 treeIdx, u64 pointIdx, auto value, block) {
+					ctx.plus(sums[pointIdx], sums[pointIdx], value);
+					if (treeIdx % mNumPointsPerSet + 1 == mNumPointsPerSet)
 					{
-						output(treeIdx / mNumPointsPerSet, pointIdx, sum);
-						ctx.zero(sum);
-						count = 0;
+						output(treeIdx / mNumPointsPerSet, pointIdx, sums[pointIdx]);
+						ctx.zero(sums[pointIdx]);
 					}
 				}, ctx);
 			co_return;

@@ -16,6 +16,17 @@
 
 namespace osuCrypto
 {
+#define REGULAR_DPF_SIMD8(VAR, STATEMENT) do { \
+	{ constexpr u64 VAR = 0; STATEMENT; } \
+	{ constexpr u64 VAR = 1; STATEMENT; } \
+	{ constexpr u64 VAR = 2; STATEMENT; } \
+	{ constexpr u64 VAR = 3; STATEMENT; } \
+	{ constexpr u64 VAR = 4; STATEMENT; } \
+	{ constexpr u64 VAR = 5; STATEMENT; } \
+	{ constexpr u64 VAR = 6; STATEMENT; } \
+	{ constexpr u64 VAR = 7; STATEMENT; } \
+} while (0)
+
 	struct RegularDpfKey
 	{
 		template<typename F, typename CoeffCtx = DefaultCoeffCtx<F>>
@@ -104,6 +115,8 @@ namespace osuCrypto
 	template<typename T, typename CoeffCtx = DefaultCoeffCtx<T>>
 	struct RegularDpf
 	{
+		struct CompactScratch;
+
 		RegularDpf() = default;
 		RegularDpf(const RegularDpf&) = delete;
 		RegularDpf& operator=(const RegularDpf&) = delete;
@@ -167,7 +180,8 @@ namespace osuCrypto
 		// - values should be a secret sharing of the values.
 		// - output should be a lambda of the form [](treeIdx, leadIdx, value, tag){...}
 		// this will be called for each leaf value produced. tag is a zero/one secret sharing
-		// indicating if this is the active leaf.
+		// indicating if this is the active leaf. Each tree completes before the next;
+		// leaves use physical order. leadIdx is the logical domain index.
 		// - prng randomness.
 		// - sock is the network socket to the other party.
 		// - ctx context for F operations.
@@ -195,6 +209,17 @@ namespace osuCrypto
 			coproto::Socket& sock,
 			CoeffCtx ctx = {});
 
+		// As above, but reuse caller-owned compact tree storage. This is useful
+		// when generating several keys with the same maximum domain.
+		macoro::task<> keyGen(
+			span<u64> points,
+			auto&& values,
+			PRNG& seed,
+			RegularDpfKey& outputKey,
+			CompactScratch& scratch,
+			coproto::Socket& sock,
+			CoeffCtx ctx = {});
+
 
 		// A static function that can generate a pair of keys. 
 		// - domain is the number of leaf values.
@@ -217,41 +242,67 @@ namespace osuCrypto
 		// - key is the share of the FSS key.
 		// - output should be a lambda of the form [](treeIdx, leadIdx, value, tag){...}
 		// this will be called for each leaf value produced. tag is a zero/one secret sharing
-		// indicating if this is the active leaf.
+		// indicating if this is the active leaf. Each tree completes before the next;
+		// leaves use the physical order of the compact tree kernel. leadIdx is the
+		// logical domain index and must be used if ordered output is required.
 		template<typename Output>
 		static void expand(
 			u64 partyIdx,
 			u64 domain,
-			RegularDpfKey& key,
+			const RegularDpfKey& key,
 			Output&& output,
 			CoeffCtx ctx = {});
 
+		// As above, but reuse caller-owned scratch independent of the number of
+		// DPF trees. Eight physical lanes are eight public subtrees of one tree.
+		template<typename Output>
+		static void expand(
+			u64 partyIdx,
+			u64 domain,
+			const RegularDpfKey& key,
+			CompactScratch& scratch,
+			Output&& output,
+			CoeffCtx ctx = {});
 
-		// the internal implementation. This function can be called with 
-		// different parameters. 
-		//
-		// For distributed keygen, points, values should be shared and seed is some 
-		// random see. inputKey == nullptr, output = anything, and outputKey
-		// should point to valid object.
-		//
-		// For interactive expand (without an existing key), the parameters are the same
-		// except that outputKey should be null and output should be a lambda of the form
-		// [](treeIdx, leadIdx, value, tag){...}
-		// 
-		// For non-interactive expand (with an existing key), points, values, seed are 
-		// all ignored. inputKey should point to an existing dpf key. sock is ignored.
-		// output should be a lambda as above.
-		//
-		template<typename VecT, typename Output>
-		macoro::task<> implExpand(
+		template<typename VecT>
+		macoro::task<> implKeyGen(
 			span<u64> points,
 			VecT&& values,
 			PRNG& prng,
-			RegularDpfKey* inputKey,
-			Output&& output,
+			RegularDpfKey& outputKey,
+			CompactScratch& scratch,
 			coproto::Socket& sock,
-			RegularDpfKey* outputKey,
 			CoeffCtx ctx);
+
+		struct CompactScratch
+		{
+			std::array<AlignedUnVector<block>, 2> mSeeds;
+			std::array<std::vector<u8>, 2> mTags;
+
+			void resize(u64 depth)
+			{
+				if (depth <= 3)
+					return;
+				const auto localDepth = depth - 3;
+				const auto paddedDomain = u64{ 1 } << depth;
+				const auto subtreeDomain = u64{ 1 } << localDepth;
+				const auto finalSlab = localDepth & 1;
+				mSeeds[finalSlab].resize(paddedDomain);
+				mSeeds[finalSlab ^ 1].resize(paddedDomain / 2);
+				mTags[finalSlab].resize(subtreeDomain);
+				mTags[finalSlab ^ 1].resize(std::max<u64>(subtreeDomain / 2, 1));
+			}
+		};
+
+		static void compactChildSums(
+			u64 partyIdx,
+			u64 targetDepth,
+			u64 tree,
+			const std::array<block, 2>& roots,
+			const RegularDpfKey& key,
+			CompactScratch& scratch,
+			block& leftSum,
+			block& rightSum);
 
 
 		static u8 lsb(const block& b)
@@ -325,7 +376,13 @@ namespace osuCrypto
 		Output&& output,
 		CoeffCtx ctx)
 	{
-		return implExpand(points, values, prng, nullptr, output, sock, nullptr, ctx);
+		CompactScratch scratch;
+		RegularDpfKey key;
+		co_await implKeyGen(
+			points, values, prng, key, scratch, sock, ctx);
+		expand(
+			mPartyIdx, mDomain, key, scratch,
+			std::forward<Output>(output), ctx);
 	}
 
 
@@ -342,526 +399,329 @@ namespace osuCrypto
 		coproto::Socket& sock,
 		CoeffCtx ctx)
 	{
-		return implExpand(points, values, prng, nullptr, [](auto, auto, auto, auto) {}, sock, &outputKey, ctx);
+		CompactScratch scratch;
+		co_await implKeyGen(
+			points, values, prng, outputKey, scratch, sock, ctx);
 	}
 
-	// the internal implementation. This function can be called with 
-	// different parameters. 
-	//
-	// For distributed keygen, points, values should be shared and seed is some 
-	// random see. inputKey == nullptr, output = anything, and outputKey
-	// should point to valid object.
-	//
-	// For interactive expand (without an existing key), the parameters are the same
-	// except that outputKey should be null and output should be a lambda of the form
-	// [](treeIdx, leadIdx, value, tag){...}
-	// 
-	// For non-interactive expand (with an existing key), points, values, seed are 
-	// all ignored. inputKey should point to an existing dpf key. sock is ignored.
-	// output should be a lambda as above.
-	//
 	template<typename T, typename CoeffCtx>
-	template<typename VecT, typename Output>
-	macoro::task<> RegularDpf<T, CoeffCtx>::implExpand(
+	inline macoro::task<> RegularDpf<T, CoeffCtx>::keyGen(
+		span<u64> points,
+		auto&& values,
+		PRNG& prng,
+		RegularDpfKey& outputKey,
+		CompactScratch& scratch,
+		coproto::Socket& sock,
+		CoeffCtx ctx)
+	{
+		return implKeyGen(
+			points, values, prng, outputKey, scratch, sock, ctx);
+	}
+
+	template<typename T, typename CoeffCtx>
+	void RegularDpf<T, CoeffCtx>::compactChildSums(
+		u64 partyIdx,
+		u64 targetDepth,
+		u64 tree,
+		const std::array<block, 2>& roots,
+		const RegularDpfKey& key,
+		CompactScratch& scratch,
+		block& leftSum,
+		block& rightSum)
+	{
+		if (targetDepth == 0 || targetDepth > key.mCorrectionWords.rows())
+			throw RTE_LOC;
+
+		std::array<block, 8> currentSeeds{};
+		std::array<block, 8> nextSeeds{};
+		std::array<block, 8> currentTags{};
+		std::array<block, 8> nextTags{};
+		currentSeeds[0] = roots[0];
+		currentSeeds[1] = roots[1];
+		currentTags[0] = block::allSame<u8>(-static_cast<i8>(partyIdx));
+		currentTags[1] = currentTags[0];
+
+		const auto topDepth = std::min<u64>(3, targetDepth);
+		for (u64 d = 1; d < topDepth; ++d)
+		{
+			const auto width = u64{ 1 } << d;
+			for (u64 node = 0; node < width; ++node)
+			{
+				const auto branch = node & 1;
+				auto sigma = key.mCorrectionWords(d - 1, tree);
+				if (branch)
+					*BitIterator(&sigma) = key.mCorrectionBits(d - 1, tree);
+				auto corrected = currentSeeds[node] ^ (currentTags[node] & sigma);
+				auto aes = mAesFixedKey.ecbEncBlock(corrected);
+				nextSeeds[2 * node] = AES::roundEnc(aes, corrected);
+				nextSeeds[2 * node + 1] = aes.add_epi64(corrected);
+				nextTags[2 * node] = tagBit(corrected);
+				nextTags[2 * node + 1] = nextTags[2 * node];
+			}
+			currentSeeds = nextSeeds;
+			currentTags = nextTags;
+		}
+
+		block leftAccumulator = ZeroBlock;
+		block rightAccumulator = ZeroBlock;
+		if (targetDepth <= 3)
+		{
+			const auto width = u64{ 1 } << targetDepth;
+			for (u64 node = 0; node < width; ++node)
+			{
+				const auto branch = node & 1;
+				auto sigma = key.mCorrectionWords(targetDepth - 1, tree);
+				if (branch)
+					*BitIterator(&sigma) = key.mCorrectionBits(targetDepth - 1, tree);
+				auto corrected = currentSeeds[node] ^ (currentTags[node] & sigma);
+				auto aes = mAesFixedKey.ecbEncBlock(corrected);
+				leftAccumulator = leftAccumulator ^ AES::roundEnc(aes, corrected);
+				rightAccumulator = rightAccumulator ^ aes.add_epi64(corrected);
+			}
+			leftSum = leftAccumulator;
+			rightSum = rightAccumulator;
+			return;
+		}
+
+		for (u64 lane = 0; lane < 8; ++lane)
+			scratch.mSeeds[0][lane] = currentSeeds[lane];
+		u8 topTagBits = 0;
+		for (u64 lane = 0; lane < 8; ++lane)
+			topTagBits |= lsb(currentTags[lane]) << lane;
+		scratch.mTags[0][0] = topTagBits;
+
+		std::array<block, 8> corrected;
+		std::array<block, 8> aes;
+		for (u64 d = 3; d < targetDepth; ++d)
+		{
+			const auto level = d - 3;
+			const auto currentSlab = level & 1;
+			const auto nextSlab = currentSlab ^ 1;
+			const auto width = u64{ 1 } << level;
+			const auto sigma0 = key.mCorrectionWords(d - 1, tree);
+			auto sigma1 = sigma0;
+			*BitIterator(&sigma1) = key.mCorrectionBits(d - 1, tree);
+
+			for (u64 node = 0; node < width; ++node)
+			{
+				const auto* parent = scratch.mSeeds[currentSlab].data() + 8 * node;
+				auto* left = scratch.mSeeds[nextSlab].data() + 16 * node;
+				auto* right = left + 8;
+				const auto parentTagBits = scratch.mTags[currentSlab][node];
+				u8 childTagBits = 0;
+				if (d == 3)
+				{
+					REGULAR_DPF_SIMD8(lane, {
+						const auto tagMask = block::allSame<u8>(
+							-static_cast<i8>((parentTagBits >> lane) & 1));
+						corrected[lane] = parent[lane] ^
+							(tagMask & (lane & 1 ? sigma1 : sigma0));
+						childTagBits |= lsb(corrected[lane]) << lane;
+					});
+				}
+				else
+				{
+					const auto& sigma = node & 1 ? sigma1 : sigma0;
+					REGULAR_DPF_SIMD8(lane, {
+						const auto tagMask = block::allSame<u8>(
+							-static_cast<i8>((parentTagBits >> lane) & 1));
+						corrected[lane] = parent[lane] ^ (tagMask & sigma);
+						childTagBits |= lsb(corrected[lane]) << lane;
+					});
+				}
+				mAesFixedKey.ecbEncBlocks<8>(corrected.data(), aes.data());
+				REGULAR_DPF_SIMD8(lane, {
+					left[lane] = AES::roundEnc(aes[lane], corrected[lane]);
+					right[lane] = aes[lane].add_epi64(corrected[lane]);
+				});
+				scratch.mTags[nextSlab][2 * node] = childTagBits;
+				scratch.mTags[nextSlab][2 * node + 1] = childTagBits;
+			}
+		}
+
+		const auto level = targetDepth - 3;
+		const auto currentSlab = level & 1;
+		const auto width = u64{ 1 } << level;
+		const auto sigma0 = key.mCorrectionWords(targetDepth - 1, tree);
+		auto sigma1 = sigma0;
+		*BitIterator(&sigma1) = key.mCorrectionBits(targetDepth - 1, tree);
+		for (u64 node = 0; node < width; ++node)
+		{
+			const auto* parent = scratch.mSeeds[currentSlab].data() + 8 * node;
+			const auto parentTagBits = scratch.mTags[currentSlab][node];
+			const auto& sigma = node & 1 ? sigma1 : sigma0;
+			REGULAR_DPF_SIMD8(lane, {
+				const auto tagMask = block::allSame<u8>(
+					-static_cast<i8>((parentTagBits >> lane) & 1));
+				corrected[lane] = parent[lane] ^ (tagMask & sigma);
+			});
+			mAesFixedKey.ecbEncBlocks<8>(corrected.data(), aes.data());
+
+			// One accumulator pair is shared by all eight subtrees. Keeping this
+			// reduction independent of the physical lanes gives substantially
+			// better register allocation than eight long-lived sums.
+			leftAccumulator = leftAccumulator ^ AES::roundEnc(aes[0], corrected[0]) ^
+				AES::roundEnc(aes[1], corrected[1]) ^
+				AES::roundEnc(aes[2], corrected[2]) ^
+				AES::roundEnc(aes[3], corrected[3]) ^
+				AES::roundEnc(aes[4], corrected[4]) ^
+				AES::roundEnc(aes[5], corrected[5]) ^
+				AES::roundEnc(aes[6], corrected[6]) ^
+				AES::roundEnc(aes[7], corrected[7]);
+			rightAccumulator = rightAccumulator ^ aes[0].add_epi64(corrected[0]) ^
+				aes[1].add_epi64(corrected[1]) ^
+				aes[2].add_epi64(corrected[2]) ^
+				aes[3].add_epi64(corrected[3]) ^
+				aes[4].add_epi64(corrected[4]) ^
+				aes[5].add_epi64(corrected[5]) ^
+				aes[6].add_epi64(corrected[6]) ^
+				aes[7].add_epi64(corrected[7]);
+		}
+		leftSum = leftAccumulator;
+		rightSum = rightAccumulator;
+	}
+
+	template<typename T, typename CoeffCtx>
+	template<typename VecT>
+	macoro::task<> RegularDpf<T, CoeffCtx>::implKeyGen(
 		span<u64> points,
 		VecT&& values,
 		PRNG& prng,
-		RegularDpfKey* inputKey,
-		Output&& output,
+		RegularDpfKey& outputKey,
+		CompactScratch& scratch,
 		coproto::Socket& sock,
-		RegularDpfKey* outputKey,
 		CoeffCtx ctx)
 	{
+		if (points.size() != mNumPoints ||
+			(values.size() && values.size() != mNumPoints))
+			throw RTE_LOC;
+		if (!mMultiplier.hasBaseOts())
+			throw RTE_LOC;
 
-		if (inputKey == nullptr)
-		{
-			if (points.size() != mNumPoints)
-				throw RTE_LOC;
-			if (values.size() && values.size() != mNumPoints)
-				throw RTE_LOC;
-		}
-		else
-		{
-			if (outputKey)
-				throw RTE_LOC;
+		const auto numPoints = mNumPoints;
+		outputKey.resize<T>(mDomain, numPoints, ctx, false);
+		outputKey.mSeed = prng.get<block>();
 
-			auto leafByteSize = ctx.template byteSize<T>();
-			if (mNumPoints && leafByteSize > std::numeric_limits<u64>::max() / mNumPoints)
-				throw RTE_LOC;
-			auto expectedLeafBytes = mNumPoints * leafByteSize;
-			if (inputKey->mCorrectionWords.rows() != mDepth ||
-				inputKey->mCorrectionWords.cols() != mNumPoints ||
-				inputKey->mCorrectionBits.rows() != mDepth ||
-				inputKey->mCorrectionBits.cols() != mNumPoints ||
-				(inputKey->mLeafVals.size() != 0 &&
-					inputKey->mLeafVals.size() != expectedLeafBytes))
-				throw RTE_LOC;
-		}
-
-		u64 numPoints = mNumPoints;
-		u64 numPoints8 = numPoints / 8 * 8;
-
-
-		// shares of S'
-		auto pow2 = 1ull << log2ceil(mDomain);
-		std::array<Matrix<block>, 3> s;
-		s[mDepth % 3].resize(pow2, numPoints, oc::AllocType::Uninitialized);
-		s[(mDepth + 2) % 3].resize(pow2 / 2, numPoints, oc::AllocType::Uninitialized);
-		s[(mDepth + 1) % 3].resize(pow2 / 4, numPoints, oc::AllocType::Uninitialized);
-
-#if defined(NDEBUG)
-		auto getRow = [](auto&& m, u64 i) {return m.data(i); };
-#else
-		auto getRow = [](auto&& m, u64 i) {return m[i]; };
-#endif
-
-		if (outputKey)
-		{
-			outputKey->resize<T>(mDomain, numPoints, ctx, false);
-		}
-
+		std::vector<std::array<block, 2>> roots(numPoints);
 		std::array<AlignedUnVector<block>, 2> z;
-		z[0].resize(mNumPoints);
-		z[1].resize(mNumPoints);
-		std::array<AlignedUnVector<block>, 2> sigma;
-		sigma[0].resize(mNumPoints);
-		sigma[1].resize(mNumPoints);
-		AlignedUnVector<block> sigmaMult(mNumPoints);
-		BitVector negAlphaj(mNumPoints);
-		AlignedUnVector<block> diff(mNumPoints);
-		std::array<block, 8> temp;
-
+		z[0].resize(numPoints);
+		z[1].resize(numPoints);
+		PRNG basePrng(outputKey.mSeed, 2 * numPoints);
+		for (u64 point = 0; point < numPoints; ++point)
 		{
-			block seed;
-			if (inputKey)
-				seed = inputKey->mSeed;
-			else
-				seed = prng.get();
-
-			// we skip level 0 and set level 1 to be random
-			if (outputKey)
-				outputKey->mSeed = seed;
-
-
-			PRNG basePrng(seed, 2 * numPoints);
-			auto sc0 = s[1][0];
-			auto sc1 = s[1][1];
-			auto tag = s[0][0];
-			for (u64 k = 0; k < numPoints; ++k)
-			{
-				sc0[k] = basePrng.get<block>();
-				sc1[k] = basePrng.get<block>();
-				tag[k] = block::allSame<u8>(-mPartyIdx);
-
-				z[0][k] = sc0[k];
-				z[1][k] = sc1[k];
-			}
+			roots[point][0] = basePrng.get<block>();
+			roots[point][1] = basePrng.get<block>();
+			z[0][point] = roots[point][0];
+			z[1][point] = roots[point][1];
 		}
 
-		// at each iteration we first correct the parent level.
-		// The parent level has two syblings which are random.
-		// We need to correct the inactive child so that both parties
-		// hold the same seed (a sharing of zero).
-		//
-		// we then expand the parent to level to get the children level.
-		// We compute left and right sums for the children.
+		std::array<AlignedUnVector<block>, 2> sigma;
+		sigma[0].resize(numPoints);
+		sigma[1].resize(numPoints);
+		AlignedUnVector<block> sigmaMult(numPoints);
+		AlignedUnVector<block> diff(numPoints);
+		BitVector negAlphaj(numPoints);
+		scratch.resize(mDepth);
+
 		for (u64 iter = 1; iter <= mDepth; ++iter)
 		{
-			// the grand parent level
-			auto& tp = s[(iter - 1) % 3];
-
-			// the parent level
-			auto& sc = s[iter % 3];
-			//auto& tc = t[iter & 1];
-
-			// the child level
-			auto& sg = s[(iter + 1) % 3];
-
-			auto size = 1ull << iter;
-
-			if (inputKey)
+			for (u64 point = 0; point < numPoints; ++point)
 			{
-				for (u64 k = 0; k < mNumPoints; ++k)
-				{
-					sigma[0][k] = inputKey->mCorrectionWords(iter - 1, k);
-					sigma[1][k] = sigma[0][k];
-					*BitIterator(&sigma[1][k]) = inputKey->mCorrectionBits(iter - 1, k);
-				}
-
-			}
-			else
-			{
-				for (u64 k = 0; k < mNumPoints; ++k)
-				{
-					u8 alphaj = *oc::BitIterator(&points[k], mDepth - iter);
-					diff[k] = z[0][k] ^ z[1][k];
-					*BitIterator(&diff[k]) = 0;
-
-					negAlphaj[k] = alphaj ^ mPartyIdx;
-				}
-
-				co_await mMultiplier.multiply(negAlphaj, diff, diff, sock);
-				// sigma = z[1^alpha[j]]
-				std::vector<block> buff(mNumPoints + divCeil(mNumPoints, 128));
-				auto z1LsbIter = BitIterator(&buff[mNumPoints]);
-				for (u64 k = 0; k < mNumPoints; ++k)
-				{
-					u8 alphaj = *oc::BitIterator(&points[k], mDepth - iter);
-					sigmaMult[k] = diff[k] ^ z[0][k] ^ block(0, mPartyIdx ^ alphaj);
-					buff[k] = sigmaMult[k];
-					*z1LsbIter++ = lsb(z[1][k]) ^ alphaj;
-				}
-
-				// reveal sigma and tau
-				co_await sock.send(coproto::copy(buff));
-				co_await sock.recv(buff);
-				z1LsbIter = BitIterator(&buff[mNumPoints]);
-				for (u64 k = 0; k < mNumPoints; ++k)
-				{
-					u8 alphaj = *oc::BitIterator(&points[k], mDepth - iter);
-					auto sigma1Bit = *z1LsbIter++ ^ lsb(z[1][k]) ^ alphaj;
-					sigma[0][k] = buff[k] ^ sigmaMult[k];
-					sigma[1][k] = sigma[0][k];
-					*BitIterator(&sigma[1][k]) = sigma1Bit;
-					if (outputKey)
-					{
-						outputKey->mCorrectionWords(iter - 1, k) = sigma[0][k];
-						outputKey->mCorrectionBits(iter - 1, k) = sigma1Bit;
-					}
-				}
+				const auto alphaj = *BitIterator(&points[point], mDepth - iter);
+				diff[point] = z[0][point] ^ z[1][point];
+				*BitIterator(&diff[point]) = 0;
+				negAlphaj[point] = alphaj ^ mPartyIdx;
 			}
 
-			if (0)
+			co_await mMultiplier.multiply(negAlphaj, diff, diff, sock);
+
+			std::vector<block> buffer(numPoints + divCeil(numPoints, 128));
+			auto z1LsbIter = BitIterator(&buffer[numPoints]);
+			for (u64 point = 0; point < numPoints; ++point)
 			{
-				co_await sock.send(coproto::copy(negAlphaj));
-				co_await sock.send(coproto::copy(z[0]));
-				co_await sock.send(coproto::copy(z[1]));
-				BitVector negAlphaj2(mNumPoints);
-
-				std::array<AlignedUnVector<block>, 2> z2;
-				z2[0].resize(mNumPoints);
-				z2[1].resize(mNumPoints);
-
-				co_await sock.recv(negAlphaj2);
-				co_await sock.recv(z2[0]);
-				co_await sock.recv(z2[1]);
-
-				auto negA = negAlphaj ^ negAlphaj2;
-				for (u64 i = 0; i < mNumPoints; ++i)
-				{
-					auto na = negA[i];
-					auto a = na ^ 1;
-					block exp[2], zz[2];
-					zz[0] = z[0][i] ^ z2[0][i];
-					zz[1] = z[1][i] ^ z2[1][i];
-
-					exp[0] = (zz[na] & ~OneBlock) ^ block(0, lsb(zz[0]) ^ na);
-					exp[1] = (zz[na] & ~OneBlock) ^ block(0, lsb(zz[1]) ^ a);
-
-					if (sigma[0][i] != exp[0])
-					{
-						std::cout << "exp " << exp[0] << " act " << sigma[0][i] << std::endl;
-						std::cout << "a " << (1 ^ negA[i]) << std::endl;
-						throw RTE_LOC;
-					}
-					if (sigma[1][i] != exp[1])
-					{
-						std::cout << "exp " << exp[1] << " act " << sigma[1][i] << std::endl;
-						std::cout << "a " << (1 ^ negA[i]) << std::endl;
-						throw RTE_LOC;
-					}
-				}
+				const auto alphaj = *BitIterator(&points[point], mDepth - iter);
+				sigmaMult[point] = diff[point] ^ z[0][point] ^
+					block(0, mPartyIdx ^ alphaj);
+				buffer[point] = sigmaMult[point];
+				*z1LsbIter++ = lsb(z[1][point]) ^ alphaj;
 			}
 
-#define SIMD8(VAR, STATEMENT) do{\
-	{ constexpr u64 VAR = 0; STATEMENT; }\
-	{ constexpr u64 VAR = 1; STATEMENT; }\
-	{ constexpr u64 VAR = 2; STATEMENT; }\
-	{ constexpr u64 VAR = 3; STATEMENT; }\
-	{ constexpr u64 VAR = 4; STATEMENT; }\
-	{ constexpr u64 VAR = 5; STATEMENT; }\
-	{ constexpr u64 VAR = 6; STATEMENT; }\
-	{ constexpr u64 VAR = 7; STATEMENT; }\
-	}while(0)
+			co_await sock.send(coproto::copy(buffer));
+			co_await sock.recv(buffer);
+			z1LsbIter = BitIterator(&buffer[numPoints]);
+			for (u64 point = 0; point < numPoints; ++point)
+			{
+				const auto alphaj = *BitIterator(&points[point], mDepth - iter);
+				const auto sigma1Bit = *z1LsbIter++ ^ lsb(z[1][point]) ^ alphaj;
+				sigma[0][point] = buffer[point] ^ sigmaMult[point];
+				sigma[1][point] = sigma[0][point];
+				*BitIterator(&sigma[1][point]) = sigma1Bit;
+				outputKey.mCorrectionWords(iter - 1, point) = sigma[0][point];
+				outputKey.mCorrectionBits(iter - 1, point) = sigma1Bit;
+			}
 
 			if (iter != mDepth)
 			{
-				setBytes(z[0], 0);
-				setBytes(z[1], 0);
-
-				// we iterate over the parent tags. Each has two children. We expend
-				// these two children into 4 grandchildren.
-				for (u64 L = 0, L2 = 0, L4 = 0; L2 < size; ++L, L2 += 2, L4 += 4)
+				for (u64 point = 0; point < numPoints; ++point)
 				{
-					// parent control bits
-					auto parentTag = getRow(tp, L);
-
-					// child seed
-					std::array currentSeed{ getRow(sc, L2 + 0), getRow(sc, L2 + 1) };
-
-					// grandchild seeds
-					std::array childSeed{ getRow(sg, L4 + 0), getRow(sg, L4 + 1), getRow(sg, L4 + 2), getRow(sg, L4 + 3) };
-
-					for (u64 k = 0; k < numPoints8; k += 8)
-					{
-						// for each child
-						for (u64 j = 0; j < 2; ++j)
-						{
-							// update seed with correction
-							SIMD8(q, currentSeed[j][k + q] ^= parentTag[k + q] & sigma[j][k + q]);
-
-							// (s0', s1') = H(s)
-							mAesFixedKey.ecbEncBlocks<8>(&currentSeed[j][k], &temp[0]);
-							SIMD8(q, childSeed[j * 2 + 0][k + q] = AES::roundEnc(temp[q], currentSeed[j][k + q]));
-							SIMD8(q, childSeed[j * 2 + 1][k + q] = temp[q].add_epi64(currentSeed[j][k + q]));
-
-							// z = z ^ s'
-							SIMD8(q, z[0][k + q] ^= childSeed[j * 2 + 0][k + q]);
-							SIMD8(q, z[1][k + q] ^= childSeed[j * 2 + 1][k + q]);
-
-							// extract the tag from the seed
-							SIMD8(q, currentSeed[j][k + q] = tagBit(currentSeed[j][k + q]));
-						}
-
-					}
-
-					for (u64 k = numPoints8; k < mNumPoints; ++k)
-					{
-						for (u64 j = 0; j < 2; ++j)
-						{
-							currentSeed[j][k] ^= parentTag[k] & sigma[j][k];
-
-							temp[0] = mAesFixedKey.ecbEncBlock(currentSeed[j][k]);
-							childSeed[j * 2 + 0][k] = AES::roundEnc(temp[0], currentSeed[j][k]);
-							childSeed[j * 2 + 1][k] = temp[0].add_epi64(currentSeed[j][k]);
-
-							z[0][k] ^= childSeed[j * 2 + 0][k];
-							z[1][k] ^= childSeed[j * 2 + 1][k];
-
-							currentSeed[j][k] = tagBit(currentSeed[j][k]);
-						}
-					}
+					compactChildSums(
+						mPartyIdx, iter, point, roots[point], outputKey, scratch,
+						z[0][point], z[1][point]);
 				}
 			}
 		}
 
-		if (!values.size() && outputKey)
+		if (!values.size())
 			co_return;
 
-		auto size = roundUpTo(mDomain, 2);
-		Matrix<block> tags(size, mNumPoints);
-		auto leafSums = ctx.template makeVec<T>(mNumPoints);
+		auto leafSums = ctx.template makeVec<T>(numPoints);
 		ctx.zero(leafSums.begin(), leafSums.end());
+		std::vector<u8> d(numPoints);
+		const auto sumDomain = roundUpTo(mDomain, 2);
+		expand(
+			mPartyIdx,
+			sumDomain,
+			outputKey,
+			scratch,
+			[&](u64 tree, u64, const auto& leaf, block tag) {
+				ctx.plus(leafSums[tree], leafSums[tree], leaf);
+				d[tree] += lsb(tag);
+			},
+			ctx);
 
-		auto leaves = ctx.template makeVec<T>(mNumPoints * size);
-		auto zero = ctx.template make<T>();
-		ctx.zero(zero);
+		for (u64 point = 0; point < numPoints; ++point)
+			ctx.minus(leafSums[point], values[point], leafSums[point]);
 
-		// fixing the last layer
+		if (!ctx.template characteristicTwo<T>())
 		{
-			auto& tp = s[(mDepth - 1) % 3];
-			auto& sc = s[mDepth % 3];
-			auto& tc = tags;
-
-			for (u64 L = 0, L2 = 0; L2 < size; ++L, L2 += 2)
+			auto signDiff = ctx.template makeVec<T>(numPoints);
+			BitVector dBits(numPoints);
+			for (u64 point = 0; point < numPoints; ++point)
 			{
-				// parent control bits
-				auto parentTag = getRow(tp, L);
-
-				// child seed
-				std::array currentSeed{ getRow(sc, L2 + 0), getRow(sc, L2 + 1) };
-
-				// the converted leaves.
-				std::array currentLeaves{
-					leaves.begin() + (L2 + 0) * numPoints,
-					leaves.begin() + (L2 + 1) * numPoints };
-
-				// child control bit
-				std::array tag{ getRow(tc, L2 + 0), getRow(tc, L2 + 1) };
-
-				for (u64 k = 0; k < numPoints8; k += 8)
-				{
-					for (u64 j = 0; j < 2; ++j)
-					{
-						SIMD8(q, temp[q] = currentSeed[j][k + q] ^ (parentTag[k + q] & sigma[j][k + q]));
-						SIMD8(q, tag[j][k + q] = tagBit(temp[q]));
-						SIMD8(q, temp[q] = AES::roundEnc(temp[q], temp[q]));
-						SIMD8(q, ctx.fromBlock(currentLeaves[j][k + q], temp[q]));
-						if (mPartyIdx)
-							SIMD8(q, ctx.minus(currentLeaves[j][k + q], zero, currentLeaves[j][k + q]));
-
-						SIMD8(q, ctx.plus(leafSums[k + q], leafSums[k + q], currentLeaves[j][k + q]));
-					}
-				}
-
-				for (u64 k = numPoints8; k < mNumPoints; ++k)
-				{
-					for (u64 j = 0; j < 2; ++j)
-					{
-						temp[0] = currentSeed[j][k] ^ (parentTag[k] & sigma[j][k]);
-						tag[j][k] = tagBit(temp[0]);
-
-						ctx.fromBlock(currentLeaves[j][k], AES::roundEnc(temp[0], temp[0]));
-						if (mPartyIdx)
-							ctx.minus(currentLeaves[j][k], zero, currentLeaves[j][k]);
-						ctx.plus(leafSums[k], leafSums[k], currentLeaves[j][k]);
-					}
-				}
+				d[point] = ((d[point] / 2) % 2) ^ (mPartyIdx & d[point]);
+				dBits[point] = d[point];
+				ctx.plus(signDiff[point], leafSums[point], leafSums[point]);
 			}
+
+			co_await mMultiplier.multiply<T>(
+				dBits.getSpan<u8>(), signDiff, signDiff, sock, ctx);
+			for (u64 point = 0; point < numPoints; ++point)
+				ctx.minus(leafSums[point], leafSums[point], signDiff[point]);
 		}
-		//std::cout << std::endl;
-		//std::cout << mPartyIdx << " " << mDomain << " " << mNumPoints << " " << mDepth << std::endl;
-		//for (u64 i = 0; i < mNumPoints; ++i)
-		//{
-		//	for(u64 j = 0; j < mDomain; ++j)
-		//	{
-		//		std::cout << ctx.str(leaves[i + j * mNumPoints]) << " ";
-		//	}
-		//	std::cout << std::endl;
-		//}
 
-		if (values.size() || (inputKey && inputKey->mLeafVals.size()))
-		{
-			auto gamma = ctx.template makeVec<T>(mNumPoints);
-			//AlignedUnVector<block> gamma(mNumPoints);
-			if (inputKey)
-			{
-				ctx.deserialize(inputKey->mLeafVals.begin(), inputKey->mLeafVals.end(), gamma.begin());
-			}
-			else
-			{
-				//////////
-				// gamma = beta - sum_i y_i 
-				for (u64 k = 0; k < mNumPoints; ++k)
-					ctx.minus(leafSums[k], values[k], leafSums[k]);
+		std::vector<u8> gammaBuffer(numPoints * ctx.template byteSize<T>());
+		ctx.serialize(leafSums.begin(), leafSums.end(), gammaBuffer.begin());
+		co_await sock.send(std::move(gammaBuffer));
+		gammaBuffer.resize(numPoints * ctx.template byteSize<T>());
+		co_await sock.recv(gammaBuffer);
+		auto gamma = ctx.template makeVec<T>(numPoints);
+		ctx.deserialize(gammaBuffer.begin(), gammaBuffer.end(), gamma.begin());
+		for (u64 point = 0; point < numPoints; ++point)
+			ctx.plus(gamma[point], gamma[point], leafSums[point]);
 
-				// if not charactristic two, we need to conditionally negate
-				// the leaf sums depending on the party with tag=1 on the
-				// active leaf.
-				if (ctx.template characteristicTwo<T>() == false)
-				{
-					std::vector<u8> d(mNumPoints);
-					for (u64 i = 0; i < size; ++i)
-					{
-						for (u64 j = 0; j < d.size(); ++j)
-						{
-							auto t = lsb(tags(i, j));
-							d[j] += t;
-						}
-					}
-
-					// d = 1 if P1 is going to apply the update
-					// but p1 is going to substract the update.
-					// so we need to neagte the payload.
-					for (u64 j = 0; j < d.size(); ++j)
-						d[j] = ((d[j] / 2) % 2) ^ (mPartyIdx & d[j]);
-
-					// if d, then we need to negate the leaf sums.
-					// we will compute the difference between leafSums and -leafSums.
-					// diff = leafSums - (-leafSums)
-					//
-					// and then 
-					// 
-					// h = leafSums - d * diff
-					//   = leafSums - d * (leafSums - (-leafSums))
-					//   = (1-d) leafSums + d * (-leafSums)
-
-					auto diff = ctx.template makeVec<T>(mNumPoints);
-					BitVector dBits(mNumPoints);
-					for (u64 k = 0; k < mNumPoints; ++k)
-					{
-						assert(d[k] < 2);
-						dBits[k] = d[k];
-						ctx.plus(diff[k], leafSums[k], leafSums[k]);
-					}
-
-					co_await mMultiplier.multiply<T>(dBits.getSpan<u8>(), diff, diff, sock, ctx);
-
-					// now we have d * diff
-					for (u64 k = 0; k < mNumPoints; ++k)
-					{
-						// leadSums[k] = leafSums[k] - diff[k];
-						//             = (1-d) leafSums[k] + d * (-leafSums[k])
-						ctx.minus(leafSums[k], leafSums[k], diff[k]);
-					}
-
-				}
-
-				///////////
-				// reveal gamma
-				std::vector<u8> buffer(leafSums.size() * ctx.template byteSize<T>());
-				ctx.serialize(leafSums.begin(), leafSums.end(), buffer.begin());
-				co_await sock.send(std::move(buffer));
-				buffer.resize(leafSums.size() * ctx.template byteSize<T>());
-				co_await sock.recv(buffer);
-				ctx.deserialize(buffer.begin(), buffer.end(), gamma.begin());
-				for (u64 k = 0; k < mNumPoints; ++k)
-					ctx.plus(gamma[k], gamma[k], leafSums[k]);
-			}
-
-			if (outputKey)
-			{
-				//outputKey->mLeafVals.insert(outputKey->mLeafVals.end(), gamma.begin(), gamma.end());
-				outputKey->mLeafVals.resize(mNumPoints * ctx.template byteSize<T>());
-				ctx.serialize(gamma.begin(), gamma.end(), outputKey->mLeafVals.begin());
-			}
-			else
-			{
-				//auto& sd = s[mDepth % 3];
-				auto& td = tags;
-				auto temp = ctx.template makeVec<T>(8);
-
-				for (u64 i = 0; i < mDomain; ++i)
-				{
-					//auto sdi = getRow(sd, i);
-					auto sdi = leaves.begin() + i * mNumPoints;
-					auto tdi = getRow(td, i);
-
-					for (u64 k = 0; k < numPoints8; k += 8)
-					{
-						SIMD8(q, ctx.mask(temp[q], gamma[k + q], tdi[k + q]));
-						if (mPartyIdx)
-							SIMD8(q, ctx.minus(temp[q], sdi[k + q], temp[q]));
-						else
-							SIMD8(q, ctx.plus(temp[q], sdi[k + q], temp[q]));
-						SIMD8(q, output(k + q, i, temp[q], tdi[k + q]));
-					}
-					for (u64 k = numPoints8; k < mNumPoints; ++k)
-					{
-						//auto T = tdi[k] & gamma[k];
-						ctx.mask(temp[0], gamma[k], tdi[k]);
-						if (mPartyIdx)
-						{
-							ctx.minus(temp[0], sdi[k], temp[0]);
-						}
-						else
-						{
-							ctx.plus(temp[0], sdi[k], temp[0]);
-						}
-
-						output(k, i, temp[0], tdi[k]);
-					}
-				}
-			}
-		}
-		else
-		{
-			//auto& sd = s[mDepth % 3];
-			auto& td = tags;
-			for (u64 i = 0; i < mDomain; ++i)
-			{
-				//auto sdi = getRow(sd, i);
-
-				auto sdi = leaves.begin() + i * mNumPoints;
-				auto tdi = getRow(td, i);
-				for (u64 k = 0; k < mNumPoints; ++k)
-				{
-					output(k, i, sdi[k], tdi[k]);
-				}
-			}
-		}
+		outputKey.mLeafVals.resize(numPoints * ctx.template byteSize<T>());
+		ctx.serialize(gamma.begin(), gamma.end(), outputKey.mLeafVals.begin());
 	}
-
 
 	template<typename T, typename CoeffCtx>
 	inline u64 RegularDpf<T, CoeffCtx>::baseOtCount() const {
@@ -1021,19 +881,223 @@ namespace osuCrypto
 	void RegularDpf<T, CoeffCtx>::expand(
 		u64 partyIdx,
 		u64 domain,
-		RegularDpfKey& key,
+		const RegularDpfKey& key,
 		Output&& output,
 		CoeffCtx ctx)
 	{
-		RegularDpf d;
-		d.init(partyIdx, domain, key.mCorrectionBits.cols());
-		coproto::Socket sock;
-		PRNG prng;
-		return macoro::sync_wait(d.implExpand({}, std::vector<T>{}, prng, & key, output, sock, nullptr, ctx));
+		CompactScratch scratch;
+		expand(
+			partyIdx, domain, key, scratch,
+			std::forward<Output>(output), ctx);
+	}
+
+	template<typename T, typename CoeffCtx>
+	template<typename Output>
+	void RegularDpf<T, CoeffCtx>::expand(
+		u64 partyIdx,
+		u64 domain,
+		const RegularDpfKey& key,
+		CompactScratch& scratch,
+		Output&& output,
+		CoeffCtx ctx)
+	{
+		if (partyIdx > 1 || domain < 2)
+			throw RTE_LOC;
+
+		const auto depth = log2ceil(domain);
+		const auto numTrees = key.mCorrectionBits.cols();
+		if (!numTrees || depth == 0 || depth >= 64)
+			throw RTE_LOC;
+
+		const auto leafByteSize = ctx.template byteSize<T>();
+		if (numTrees && leafByteSize > std::numeric_limits<u64>::max() / numTrees)
+			throw RTE_LOC;
+		if (key.mCorrectionWords.rows() != depth ||
+			key.mCorrectionWords.cols() != numTrees ||
+			key.mCorrectionBits.rows() != depth ||
+			key.mCorrectionBits.cols() != numTrees ||
+			(key.mLeafVals.size() != 0 &&
+				key.mLeafVals.size() != numTrees * leafByteSize))
+			throw RTE_LOC;
+
+		constexpr u64 TopDepth = 3;
+		const auto topDepth = std::min<u64>(TopDepth, depth);
+		const auto laneCount = u64{ 1 } << topDepth;
+		const auto localDepth = depth - topDepth;
+		const auto subtreeDomain = u64{ 1 } << localDepth;
+
+		// Two alternating slabs hold the largest two physical levels. A physical
+		// node is eight adjacent subtrees of one DPF tree. Unlike the old matrix
+		// layout, the workspace does not grow with numTrees.
+		scratch.resize(depth);
+		auto& seedSlabs = scratch.mSeeds;
+		auto& tagSlabs = scratch.mTags;
+
+		auto gamma = ctx.template makeVec<T>(numTrees);
+		const auto hasGamma = !key.mLeafVals.empty();
+		if (hasGamma)
+			ctx.deserialize(key.mLeafVals.begin(), key.mLeafVals.end(), gamma.begin());
+
+		auto zero = ctx.template make<T>();
+		ctx.zero(zero);
+		auto leaf = ctx.template make<T>();
+		auto maskedGamma = ctx.template make<T>();
+
+		PRNG basePrng(key.mSeed, 2 * numTrees);
+		for (u64 tree = 0; tree < numTrees; ++tree)
+		{
+			std::array<block, 8> currentSeeds{};
+			std::array<block, 8> nextSeeds{};
+			std::array<block, 8> currentTags{};
+			std::array<block, 8> nextTags{};
+			currentSeeds[0] = basePrng.get<block>();
+			currentSeeds[1] = basePrng.get<block>();
+			currentTags[0] = block::allSame<u8>(-static_cast<i8>(partyIdx));
+			currentTags[1] = currentTags[0];
+
+			// Expand the small public top tree. Its leaves become the SIMD lanes
+			// of the lower physical traversal.
+			for (u64 d = 1; d < topDepth; ++d)
+			{
+				const auto width = u64{ 1 } << d;
+				for (u64 node = 0; node < width; ++node)
+				{
+					const auto branch = node & 1;
+					auto sigma = key.mCorrectionWords(d - 1, tree);
+					if (branch)
+						*BitIterator(&sigma) = key.mCorrectionBits(d - 1, tree);
+					auto corrected = currentSeeds[node] ^ (currentTags[node] & sigma);
+					auto aes = mAesFixedKey.ecbEncBlock(corrected);
+					nextSeeds[2 * node] = AES::roundEnc(aes, corrected);
+					nextSeeds[2 * node + 1] = aes.add_epi64(corrected);
+					nextTags[2 * node] = tagBit(corrected);
+					nextTags[2 * node + 1] = nextTags[2 * node];
+				}
+				currentSeeds = nextSeeds;
+				currentTags = nextTags;
+			}
+
+			if (depth <= TopDepth)
+			{
+				for (u64 lane = 0; lane < laneCount; ++lane)
+				{
+					if (lane >= domain)
+						continue;
+					auto sigma = key.mCorrectionWords(depth - 1, tree);
+					if (lane & 1)
+						*BitIterator(&sigma) = key.mCorrectionBits(depth - 1, tree);
+					auto corrected = currentSeeds[lane] ^ (currentTags[lane] & sigma);
+					auto tag = tagBit(corrected);
+					ctx.fromBlock(leaf, AES::roundEnc(corrected, corrected));
+					if (partyIdx)
+						ctx.minus(leaf, zero, leaf);
+					if (hasGamma)
+					{
+						ctx.mask(maskedGamma, gamma[tree], tag);
+						if (partyIdx)
+							ctx.minus(leaf, leaf, maskedGamma);
+						else
+							ctx.plus(leaf, leaf, maskedGamma);
+					}
+					output(tree, lane, leaf, tag);
+				}
+				continue;
+			}
+
+			for (u64 lane = 0; lane < 8; ++lane)
+				seedSlabs[0][lane] = currentSeeds[lane];
+			u8 topTagBits = 0;
+			for (u64 lane = 0; lane < 8; ++lane)
+				topTagBits |= lsb(currentTags[lane]) << lane;
+			tagSlabs[0][0] = topTagBits;
+
+			std::array<block, 8> corrected;
+			std::array<block, 8> aes;
+			for (u64 d = TopDepth; d < depth; ++d)
+			{
+				const auto level = d - TopDepth;
+				const auto currentSlab = level & 1;
+				const auto nextSlab = currentSlab ^ 1;
+				const auto width = u64{ 1 } << level;
+				const auto sigma0 = key.mCorrectionWords(d - 1, tree);
+				auto sigma1 = sigma0;
+				*BitIterator(&sigma1) = key.mCorrectionBits(d - 1, tree);
+
+				for (u64 node = 0; node < width; ++node)
+				{
+					const auto* parent = seedSlabs[currentSlab].data() + 8 * node;
+					auto* left = seedSlabs[nextSlab].data() + 16 * node;
+					auto* right = left + 8;
+					const auto parentTagBits = tagSlabs[currentSlab][node];
+					u8 childTagBits = 0;
+					if (d == TopDepth)
+					{
+						REGULAR_DPF_SIMD8(lane, {
+							const auto tagMask = block::allSame<u8>(
+								-static_cast<i8>((parentTagBits >> lane) & 1));
+							corrected[lane] = parent[lane] ^
+								(tagMask & (lane & 1 ? sigma1 : sigma0));
+							childTagBits |= lsb(corrected[lane]) << lane;
+						});
+					}
+					else
+					{
+						const auto& sigma = node & 1 ? sigma1 : sigma0;
+						REGULAR_DPF_SIMD8(lane, {
+							const auto tagMask = block::allSame<u8>(
+								-static_cast<i8>((parentTagBits >> lane) & 1));
+							corrected[lane] = parent[lane] ^ (tagMask & sigma);
+							childTagBits |= lsb(corrected[lane]) << lane;
+						});
+					}
+
+					mAesFixedKey.ecbEncBlocks<8>(corrected.data(), aes.data());
+					REGULAR_DPF_SIMD8(lane, {
+						left[lane] = AES::roundEnc(aes[lane], corrected[lane]);
+						right[lane] = aes[lane].add_epi64(corrected[lane]);
+					});
+					tagSlabs[nextSlab][2 * node] = childTagBits;
+					tagSlabs[nextSlab][2 * node + 1] = childTagBits;
+				}
+			}
+
+			const auto leafSlab = localDepth & 1;
+			const auto sigma0 = key.mCorrectionWords(depth - 1, tree);
+			auto sigma1 = sigma0;
+			*BitIterator(&sigma1) = key.mCorrectionBits(depth - 1, tree);
+			for (u64 local = 0; local < subtreeDomain; ++local)
+			{
+				const auto* seeds = seedSlabs[leafSlab].data() + 8 * local;
+				const auto parentTagBits = tagSlabs[leafSlab][local];
+				const auto& sigma = local & 1 ? sigma1 : sigma0;
+				REGULAR_DPF_SIMD8(lane, {
+					const auto logicalLeaf = lane * subtreeDomain + local;
+					if (logicalLeaf < domain)
+					{
+						const auto tagMask = block::allSame<u8>(
+							-static_cast<i8>((parentTagBits >> lane) & 1));
+						auto correctedLeaf = seeds[lane] ^ (tagMask & sigma);
+						auto tag = tagBit(correctedLeaf);
+						ctx.fromBlock(leaf, AES::roundEnc(correctedLeaf, correctedLeaf));
+						if (partyIdx)
+							ctx.minus(leaf, zero, leaf);
+						if (hasGamma)
+						{
+							ctx.mask(maskedGamma, gamma[tree], tag);
+							if (partyIdx)
+								ctx.minus(leaf, leaf, maskedGamma);
+							else
+								ctx.plus(leaf, leaf, maskedGamma);
+						}
+						output(tree, logicalLeaf, leaf, tag);
+					}
+				});
+			}
+		}
 	}
 
 }
 
-#undef SIMD8
+#undef REGULAR_DPF_SIMD8
 
 #endif
