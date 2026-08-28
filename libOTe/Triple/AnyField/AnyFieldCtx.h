@@ -25,6 +25,7 @@ namespace osuCrypto
 		{ Ctx::baseCharacteristic } -> std::convertible_to<u64>;
 		{ Ctx::coordinateSize } -> std::convertible_to<u64>;
 		{ Ctx::coordinateBits } -> std::convertible_to<u64>;
+		{ Ctx::fieldBits } -> std::convertible_to<u64>;
 		{ Ctx::domainSize(dimensions) } -> std::same_as<u64>;
 		{ ctx.dpfCoeffCtx() } -> std::same_as<typename Ctx::DpfCoeffCtx>;
 		{ ctx.frobenius(ext, power) } -> std::same_as<typename Ctx::Ext>;
@@ -49,6 +50,7 @@ namespace osuCrypto
 		static constexpr u64 extensionDegree = 2;
 		static constexpr u64 coordinateSize = 8;
 		static constexpr u64 coordinateBits = 3;
+		static constexpr u64 fieldBits = 4;
 
 		constexpr DpfCoeffCtx dpfCoeffCtx() const { return {}; }
 
@@ -179,6 +181,7 @@ namespace osuCrypto
 		static constexpr u64 extensionDegree = 2;
 		static constexpr u64 coordinateSize = 3;
 		static constexpr u64 coordinateBits = 2;
+		static constexpr u64 fieldBits = 2;
 
 		constexpr DpfCoeffCtx dpfCoeffCtx() const { return {}; }
 
@@ -264,4 +267,47 @@ namespace osuCrypto
 
 	static_assert(AnyFieldContext<AnyFieldF9Ctx>);
 	static_assert(AnyFieldContext<AnyFieldF4Ctx>);
+
+	// The public aliases use fixed parameter policies targeting 128-bit QA-SD
+	// security. These values are deliberately not exposed through
+	// AnyFieldOle::init(): callers request OLEs, while the construction selects and
+	// rounds its QA-SD domain internally. See ePrint 2025/169 for the original
+	// estimates and ePrint 2025/892 for the evaluation/interpolation attack that
+	// motivates the larger compression factors.
+	struct AnyFieldF4Params128
+	{
+		// Nine public cosets with two points in each give generalized regular
+		// weight 18. With c=8, the total syndrome weight is 144.
+		static constexpr u64 compressionFactor = 8;
+		static constexpr u64 blockDimensions = 2;
+		static constexpr u64 pointsPerBlock = 2;
+		static constexpr u64 minimumDimension = 19;
+		static constexpr u64 maximumDimension = 27;
+	};
+
+	struct AnyFieldF9Params128
+	{
+		// One radix-eight quotient coordinate gives eight public cosets. Three
+		// points per coset conservatively give total syndrome weight 192.
+		static constexpr u64 compressionFactor = 8;
+		static constexpr u64 blockDimensions = 1;
+		static constexpr u64 pointsPerBlock = 3;
+		static constexpr u64 minimumDimension = 10;
+		static constexpr u64 maximumDimension = 20;
+	};
+
+	template<typename Context>
+	struct AnyFieldDefaultParams;
+
+	template<>
+	struct AnyFieldDefaultParams<AnyFieldF4Ctx>
+	{
+		using type = AnyFieldF4Params128;
+	};
+
+	template<>
+	struct AnyFieldDefaultParams<AnyFieldF9Ctx>
+	{
+		using type = AnyFieldF9Params128;
+	};
 }

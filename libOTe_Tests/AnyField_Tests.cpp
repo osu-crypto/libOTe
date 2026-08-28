@@ -233,15 +233,55 @@ namespace osuCrypto
 	}
 
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+	struct AnyFieldOleTestParams
+	{
+		static constexpr u64 compressionFactor = 2;
+		static constexpr u64 blockDimensions = 1;
+		static constexpr u64 pointsPerBlock = 2;
+		static constexpr u64 minimumDimension = 2;
+		static constexpr u64 maximumDimension = 6;
+	};
+
+	struct AnyFieldF4BenchmarkParams
+	{
+		static constexpr u64 compressionFactor = 8;
+		static constexpr u64 blockDimensions = 2;
+		static constexpr u64 pointsPerBlock = 2;
+		static constexpr u64 minimumDimension = 4;
+		static constexpr u64 maximumDimension = 8;
+	};
+
+	// Test-only comparison policy for measuring the cost that generalized
+	// regular blocks avoid. All 18 points occupy one full-domain block.
+	struct AnyFieldF4FullDomainBenchmarkParams
+	{
+		static constexpr u64 compressionFactor = 8;
+		static constexpr u64 blockDimensions = 0;
+		static constexpr u64 pointsPerBlock = 18;
+		static constexpr u64 minimumDimension = 4;
+		static constexpr u64 maximumDimension = 8;
+	};
+
+	struct AnyFieldF9BenchmarkParams
+	{
+		static constexpr u64 compressionFactor = 8;
+		static constexpr u64 blockDimensions = 1;
+		static constexpr u64 pointsPerBlock = 3;
+		static constexpr u64 minimumDimension = 2;
+		static constexpr u64 maximumDimension = 4;
+	};
+
 	template<typename Ole>
-	void runAnyFieldOleCase(u64 dimensions, u64 weight, bool printTiming, const char* fieldName)
+	void runAnyFieldOleCase(u64 numOles, bool printTiming, const char* fieldName)
 	{
 		using Base = typename Ole::Base;
 		using Ctx = typename Ole::Ctx;
 		std::array<Ole, 2> ole;
 		const block publicSeed(0x9132749812374981, 0x1239874192387491);
 		for (u64 party = 0; party < 2; ++party)
-			ole[party].init(party, dimensions, weight, publicSeed);
+			ole[party].init(party, numOles, publicSeed);
+		if (ole[0].outputSize() != numOles || ole[1].outputSize() != numOles)
+			throw UnitTestFail("AnyFieldOle did not preserve the requested output count");
 
 		const auto count0 = ole[0].baseCorCount();
 		const auto count1 = ole[1].baseCorCount();
@@ -346,8 +386,12 @@ namespace osuCrypto
 			const auto setupMs = std::chrono::duration<double, std::milli>(setupEnd - setupStart).count();
 			const auto expandMs = std::chrono::duration<double, std::milli>(expandEnd - setupEnd).count();
 			std::cout << "AnyField " << fieldName << " OLE: N="
-				<< ole[0].outputSize() / Ctx::extensionDegree
-				<< ", t=" << weight << ", setup=" << setupMs
+				<< ole[0].expandedOutputSize() / Ctx::extensionDegree
+				<< ", requested=" << ole[0].outputSize()
+				<< ", c=" << Ole::CompressionFactor
+				<< ", blocks=" << Ole::BlockCount
+				<< ", points/block=" << Ole::PointsPerBlock
+				<< ", setup=" << setupMs
 				<< " ms, two local expands=" << expandMs << " ms\n";
 		}
 	}
@@ -356,11 +400,14 @@ namespace osuCrypto
 	void AnyField_F3Ole_Test(const CLP& cmd)
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
-		runAnyFieldOleCase<AnyFieldF3Ole>(1, 1, false, "F3");
-		runAnyFieldOleCase<AnyFieldF3Ole>(2, 2, false, "F3");
+		using TestOle = AnyFieldOle<AnyFieldF9Ctx, AnyFieldOleTestParams>;
+		runAnyFieldOleCase<TestOle>(1, false, "F3");
+		runAnyFieldOleCase<TestOle>(128, false, "F3");
 		if (cmd.isSet("v"))
-			runAnyFieldOleCase<AnyFieldF3Ole>(
-				cmd.getOr("d", 4ull), cmd.getOr("w", 4ull), true, "F3");
+		{
+			using BenchmarkOle = AnyFieldOle<AnyFieldF9Ctx, AnyFieldF9BenchmarkParams>;
+			runAnyFieldOleCase<BenchmarkOle>(cmd.getOr("n", 128ull), true, "F3");
+		}
 #else
 		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
 #endif
@@ -369,11 +416,23 @@ namespace osuCrypto
 	void AnyField_F2Ole_Test(const CLP& cmd)
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
-		runAnyFieldOleCase<AnyFieldF2Ole>(1, 1, false, "F2");
-		runAnyFieldOleCase<AnyFieldF2Ole>(2, 2, false, "F2");
+		using TestOle = AnyFieldOle<AnyFieldF4Ctx, AnyFieldOleTestParams>;
+		runAnyFieldOleCase<TestOle>(1, false, "F2");
+		runAnyFieldOleCase<TestOle>(18, false, "F2");
 		if (cmd.isSet("v"))
-			runAnyFieldOleCase<AnyFieldF2Ole>(
-				cmd.getOr("d", 5ull), cmd.getOr("w", 4ull), true, "F2");
+		{
+			if (cmd.isSet("fullDomain"))
+			{
+				using BenchmarkOle = AnyFieldOle<
+					AnyFieldF4Ctx, AnyFieldF4FullDomainBenchmarkParams>;
+				runAnyFieldOleCase<BenchmarkOle>(cmd.getOr("n", 486ull), true, "F2 full-domain");
+			}
+			else
+			{
+				using BenchmarkOle = AnyFieldOle<AnyFieldF4Ctx, AnyFieldF4BenchmarkParams>;
+				runAnyFieldOleCase<BenchmarkOle>(cmd.getOr("n", 486ull), true, "F2");
+			}
+		}
 #else
 		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
 #endif

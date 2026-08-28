@@ -173,19 +173,36 @@ namespace osuCrypto
 	// AnyFieldF4Ctx generates F2 OLEs from QA-SD over F4. For each output index,
 	// the parties' shares satisfy x_0 * x_1 = z_0 + z_1.
 	//
-	// The ordinary-DPF backend securely converts positions in the context's
-	// cyclic product group to canonical binary DPF indices. Base OTs and binary
-	// OLEs are one-shot and must be freshly installed before every setup.
-	template<AnyFieldContext Context>
+	// Callers request a number of OLEs. The implementation fixes its 128-bit
+	// QA-SD parameters, rounds small requests up to the minimum secure domain,
+	// and returns exactly the requested prefix. Noise is generalized regular:
+	// every sparse polynomial has a fixed number of points in each public coset,
+	// allowing each product DPF to expand over a domain smaller by BlockCount.
+	// Base OTs and binary OLEs are one-shot and must be freshly installed before
+	// every setup.
+	template<AnyFieldContext Context,
+		typename Parameters = typename AnyFieldDefaultParams<Context>::type>
 	class AnyFieldOle : public TimerAdapter
 	{
 	public:
 		using Ctx = Context;
+		using Params = Parameters;
 		using Base = typename Ctx::Base;
 		using Ext = typename Ctx::Ext;
 		using DpfCoeffCtx = typename Ctx::DpfCoeffCtx;
 
-		static constexpr u64 GroupCount = 4 * Ctx::extensionDegree;
+		static constexpr u64 CompressionFactor = Params::compressionFactor;
+		static constexpr u64 BlockDimensions = Params::blockDimensions;
+		static constexpr u64 PointsPerBlock = Params::pointsPerBlock;
+		static constexpr u64 BlockCount = [] {
+			u64 result = 1;
+			for (u64 i = 0; i < BlockDimensions; ++i)
+				result *= Ctx::coordinateSize;
+			return result;
+		}();
+		static constexpr u64 Weight = BlockCount * PointsPerBlock;
+		static constexpr u64 GroupCount =
+			CompressionFactor * CompressionFactor * Ctx::extensionDegree;
 		static constexpr bool PowerOfTwoCoordinates =
 			Ctx::coordinateSize == (u64{ 1 } << Ctx::coordinateBits);
 		static_assert(Ctx::extensionDegree > 0,
@@ -195,6 +212,12 @@ namespace osuCrypto
 		static_assert(Ctx::coordinateSize > (u64{ 1 } << (Ctx::coordinateBits - 1)) &&
 			Ctx::coordinateSize <= (u64{ 1 } << Ctx::coordinateBits),
 			"AnyFieldOle coordinateBits must be ceil(log2(coordinateSize)).");
+		static_assert(CompressionFactor > 1 && CompressionFactor * Ctx::fieldBits <= 32,
+			"AnyFieldOle packs all public multipliers into one u32.");
+		static_assert(Params::minimumDimension > BlockDimensions,
+			"AnyFieldOle requires a nontrivial within-block DPF domain.");
+		static_assert(Params::minimumDimension <= Params::maximumDimension,
+			"AnyFieldOle dimension bounds are inconsistent.");
 
 		struct BaseCorCount
 		{
@@ -219,9 +242,10 @@ namespace osuCrypto
 				mTimer = std::exchange(source.mTimer, nullptr);
 				mCtx = std::move(source.mCtx);
 				mPartyIdx = std::exchange(source.mPartyIdx, 0);
-				mDimensions = std::exchange(source.mDimensions, 0);
-				mWeight = std::exchange(source.mWeight, 0);
+				mDimension = std::exchange(source.mDimension, 0);
+				mRequestedOleCount = std::exchange(source.mRequestedOleCount, 0);
 				mN = std::exchange(source.mN, 0);
+				mBlockSize = std::exchange(source.mBlockSize, 0);
 				mPublicSeed = std::exchange(source.mPublicSeed, block{});
 				mPublicA = std::move(source.mPublicA);
 				mPositionGmw = std::move(source.mPositionGmw);
@@ -251,43 +275,56 @@ namespace osuCrypto
 
 		void init(
 			u64 partyIdx,
-			u64 dimensions,
-			u64 weight,
+			u64 numOles,
 			block publicSeed,
 			Ctx ctx = {})
 		{
 			if (partyIdx > 1)
 				throw std::invalid_argument("AnyFieldOle party index must be zero or one. " LOCATION);
-			if (!dimensions)
-				throw std::invalid_argument("AnyFieldOle requires at least one ring dimension. " LOCATION);
-			if (!weight)
-				throw std::invalid_argument("AnyFieldOle sparse weight must be positive. " LOCATION);
-			if (Ctx::coordinateBits * dimensions >= 64)
-				throw std::invalid_argument("AnyFieldOle binary DPF depth must be below 64. " LOCATION);
-			if (weight > std::numeric_limits<u64>::max() / weight)
-				throw std::length_error("AnyFieldOle point count overflows u64. " LOCATION);
+			if (!numOles)
+				throw std::invalid_argument("AnyFieldOle requires at least one requested OLE. " LOCATION);
 
-			const auto pointsPerGroup = weight * weight;
+			const auto requestedRingSize = divCeil(numOles, Ctx::extensionDegree);
+			u64 dimension = 0;
+			u64 domain = 1;
+			while (domain < requestedRingSize && dimension < Params::maximumDimension)
+			{
+				if (domain > std::numeric_limits<u64>::max() / Ctx::coordinateSize)
+					throw std::length_error("AnyFieldOle domain size overflows u64. " LOCATION);
+				domain *= Ctx::coordinateSize;
+				++dimension;
+			}
+			dimension = std::max<u64>(dimension, Params::minimumDimension);
+			if (dimension > Params::maximumDimension)
+				throw std::invalid_argument("AnyFieldOle request exceeds one secure expansion domain. " LOCATION);
+			domain = Ctx::domainSize(dimension);
+			if (domain < requestedRingSize)
+				throw std::invalid_argument("AnyFieldOle request exceeds one secure expansion domain. " LOCATION);
+			if (Ctx::coordinateBits * dimension >= 64)
+				throw std::invalid_argument("AnyFieldOle binary DPF depth must be below 64. " LOCATION);
+
+			constexpr auto pointsPerGroup = Weight * Weight;
 			if (pointsPerGroup > std::numeric_limits<u64>::max() / GroupCount)
 				throw std::length_error("AnyFieldOle total point count overflows u64. " LOCATION);
 			const auto pointCount = GroupCount * pointsPerGroup;
-			if (pointCount > std::numeric_limits<u64>::max() / dimensions)
+			const auto localDimensions = dimension - BlockDimensions;
+			if (pointCount > std::numeric_limits<u64>::max() / localDimensions)
 				throw std::length_error("AnyFieldOle coordinate conversion count overflows u64. " LOCATION);
 			const auto positionInstances = PowerOfTwoCoordinates ?
-				pointCount * dimensions : pointCount;
+				pointCount * localDimensions : pointCount;
 			if (positionInstances > Gmw::MaxOleDimension)
 				throw std::invalid_argument("AnyFieldOle position conversion exceeds GMW capacity. " LOCATION);
 
-			const auto domain = Ctx::domainSize(dimensions);
-			if (weight > domain)
-				throw std::invalid_argument("AnyFieldOle sparse weight exceeds its domain. " LOCATION);
 			if (domain > std::numeric_limits<u64>::max() / Ctx::extensionDegree)
 				throw std::length_error("AnyFieldOle output size overflows u64. " LOCATION);
+			const auto blockSize = domain / BlockCount;
+			if (PointsPerBlock > blockSize)
+				throw std::invalid_argument("AnyFieldOle regular block is too small for its points. " LOCATION);
 
 			// Build the replacement state in temporaries so a rejected
 			// reconfiguration leaves the current object unchanged.
 			RegularDpf<Ext, DpfCoeffCtx> validator;
-			validator.init(partyIdx, domain, pointsPerGroup, ctx.dpfCoeffCtx());
+			validator.init(partyIdx, blockSize, pointsPerGroup, ctx.dpfCoeffCtx());
 
 			BetaCircuit positionCircuit;
 			if constexpr (PowerOfTwoCoordinates)
@@ -302,23 +339,30 @@ namespace osuCrypto
 			else
 			{
 				positionCircuit = anyField::detail::makePositionCircuit(
-					Ctx::coordinateSize, Ctx::coordinateBits, dimensions, domain);
+					Ctx::coordinateSize, Ctx::coordinateBits,
+					localDimensions, blockSize);
 			}
 			Gmw positionGmw;
 			positionGmw.init(partyIdx, positionInstances, positionCircuit);
 
-			std::vector<Ext> publicA(domain);
+			std::vector<u32> publicA(domain);
 			PRNG publicPrng(publicSeed);
 			auto coeffCtx = ctx.dpfCoeffCtx();
-			for (auto& value : publicA)
-				value = coeffCtx.sample(publicPrng);
+			for (auto& packed : publicA)
+			{
+				packed = Ext::one().index();
+				for (u64 polynomial = 1; polynomial < CompressionFactor; ++polynomial)
+					packed |= u32(coeffCtx.sample(publicPrng).index()) <<
+						(polynomial * Ctx::fieldBits);
+			}
 
 			clear();
 			mCtx = std::move(ctx);
 			mPartyIdx = partyIdx;
-			mDimensions = dimensions;
-			mWeight = weight;
+			mDimension = dimension;
+			mRequestedOleCount = numOles;
 			mN = domain;
+			mBlockSize = blockSize;
 			mPublicSeed = publicSeed;
 			mPublicA = std::move(publicA);
 			mPositionCircuit = std::move(positionCircuit);
@@ -329,6 +373,13 @@ namespace osuCrypto
 		bool hasSetup() const { return mHasSetup; }
 
 		u64 outputSize() const
+		{
+			if (!isInitialized())
+				throw std::logic_error("AnyFieldOle::init must be called first. " LOCATION);
+			return mRequestedOleCount;
+		}
+
+		u64 expandedOutputSize() const
 		{
 			if (!isInitialized())
 				throw std::logic_error("AnyFieldOle::init must be called first. " LOCATION);
@@ -343,7 +394,7 @@ namespace osuCrypto
 				return {};
 
 			RegularDpf<Ext, DpfCoeffCtx> dpf;
-			dpf.init(mPartyIdx, mN, pointsPerGroup(), mCtx.dpfCoeffCtx());
+			dpf.init(mPartyIdx, mBlockSize, pointsPerGroup(), mCtx.dpfCoeffCtx());
 			const auto dpfOtCount = dpf.baseOtCount();
 			if (dpfOtCount > std::numeric_limits<u64>::max() / GroupCount)
 				throw std::length_error("AnyFieldOle DPF base-OT count overflows u64. " LOCATION);
@@ -424,17 +475,21 @@ namespace osuCrypto
 			{
 				const std::vector<block> localParams{
 					mPublicSeed,
-					block(mDimensions, mWeight),
+					block(mDimension, mRequestedOleCount),
 					block(mN, mPartyIdx),
-					block(Ctx::baseCharacteristic, Ctx::extensionDegree)
+					block(Ctx::baseCharacteristic, Ctx::extensionDegree),
+					block(CompressionFactor, Weight),
+					block(BlockCount, PointsPerBlock)
 				};
-				std::vector<block> peerParams(4);
+				std::vector<block> peerParams(localParams.size());
 				co_await socket.send(coproto::copy(localParams));
 				co_await socket.recv(peerParams);
 				if (peerParams[0] != mPublicSeed ||
-					peerParams[1] != block(mDimensions, mWeight) ||
+					peerParams[1] != block(mDimension, mRequestedOleCount) ||
 					peerParams[2] != block(mN, 1 ^ mPartyIdx) ||
-					peerParams[3] != block(Ctx::baseCharacteristic, Ctx::extensionDegree))
+					peerParams[3] != block(Ctx::baseCharacteristic, Ctx::extensionDegree) ||
+					peerParams[4] != block(CompressionFactor, Weight) ||
+					peerParams[5] != block(BlockCount, PointsPerBlock))
 					throw std::invalid_argument(
 						"AnyFieldOle peers initialized incompatible parameters. " LOCATION);
 
@@ -451,7 +506,7 @@ namespace osuCrypto
 				for (u64 group = 0; group < GroupCount; ++group)
 				{
 					RegularDpf<Ext, DpfCoeffCtx> dpf;
-					dpf.init(mPartyIdx, mN, pointsPerGroup(), mCtx.dpfCoeffCtx());
+					dpf.init(mPartyIdx, mBlockSize, pointsPerGroup(), mCtx.dpfCoeffCtx());
 					const auto otOffset = group * dpfOtCount;
 					dpf.setBaseOts(
 						span<const std::array<block, 2>>(mSendOts).subspan(otOffset, dpfOtCount),
@@ -482,9 +537,10 @@ namespace osuCrypto
 			}
 		}
 
-		// Output is basis-major: entry j*mN+i is the i-th OLE extracted with
-		// Tr(xi^(p^j) * x). Expansion consumes the PCG seed to prevent accidental
-		// reuse of the same correlation.
+		// The conceptual full expansion is basis-major: entry j*mN+i is the i-th
+		// OLE extracted with Tr(xi^(p^j) * x). Only the requested prefix is
+		// returned. Expansion consumes the PCG seed to prevent accidental reuse of
+		// the same correlation.
 		void expand(span<Base> x, span<Base> z)
 		{
 			if (!mHasSetup)
@@ -509,21 +565,32 @@ namespace osuCrypto
 							mCtx.frobenius(traceBasis[basis], power);
 				}
 
-				std::vector<Ext> sparseS(mN, Ext::zero());
-				std::vector<Ext> sparseE(mN, Ext::zero());
-				for (u64 i = 0; i < mWeight; ++i)
+				// Transform one sparse polynomial at a time. This keeps the working
+				// set O(N); the eight public multipliers remain packed in one u32 per
+				// frequency-domain element.
+				std::vector<Ext> sparse(mN, Ext::zero());
+				for (u64 polynomial = 0; polynomial < CompressionFactor; ++polynomial)
 				{
-					sparseS[mSparsePositions[i]] += mSparseCoefficients[i];
-					sparseE[mSparsePositions[mWeight + i]] += mSparseCoefficients[mWeight + i];
-				}
-				mCtx.transform(sparseS, mDimensions);
-				mCtx.transform(sparseE, mDimensions);
+					std::fill(sparse.begin(), sparse.end(), Ext::zero());
+					const auto coefficientOffset = polynomial * Weight;
+					for (u64 point = 0; point < Weight; ++point)
+						sparse[fullPosition(point, mSparsePositions[coefficientOffset + point])] +=
+							mSparseCoefficients[coefficientOffset + point];
+					mCtx.transform(sparse, mDimension);
+					const auto needed = std::min<u64>(mN, x.size());
+					for (u64 index = 0; index < needed; ++index)
+						sparse[index] *= publicValue(index, polynomial);
 
-				for (u64 index = 0; index < mN; ++index)
-				{
-					const auto value = mPublicA[index] * sparseS[index] + sparseE[index];
 					for (u64 basis = 0; basis < Ctx::extensionDegree; ++basis)
-						x[basis * mN + index] = mCtx.trace(traceBasis[basis] * value);
+					{
+						const auto outputOffset = basis * mN;
+						if (outputOffset >= x.size())
+							break;
+						const auto count = std::min<u64>(mN, x.size() - outputOffset);
+						for (u64 index = 0; index < count; ++index)
+							x[outputOffset + index] +=
+								mCtx.trace(traceBasis[basis] * sparse[index]);
+					}
 				}
 
 				std::vector<Ext> product(mN);
@@ -532,32 +599,33 @@ namespace osuCrypto
 					std::fill(product.begin(), product.end(), Ext::zero());
 					RegularDpf<Ext, DpfCoeffCtx>::expand(
 						mPartyIdx,
-						mN,
+						mBlockSize,
 						mDpfKeys[group],
-						[&](u64, u64 leaf, Ext value, block) {
-							product[leaf] += value;
+						[&](u64 tree, u64 leaf, Ext value, block) {
+							const auto left = tree / Weight;
+							const auto right = tree - left * Weight;
+							product[productBlock(group, left, right) + BlockCount * leaf] += value;
 						},
 						mCtx.dpfCoeffCtx());
-					mCtx.transform(product, mDimensions);
+					mCtx.transform(product, mDimension);
 
-					const auto frobeniusPower = group / 4;
-					const auto term = group % 4;
-					for (u64 index = 0; index < mN; ++index)
+					const auto frobeniusPower = group / (CompressionFactor * CompressionFactor);
+					const auto pair = group % (CompressionFactor * CompressionFactor);
+					const auto leftPolynomial = pair / CompressionFactor;
+					const auto rightPolynomial = pair % CompressionFactor;
+					const auto needed = std::min<u64>(mN, z.size());
+					for (u64 index = 0; index < needed; ++index)
+						product[index] *= publicValue(index, leftPolynomial) *
+							mCtx.frobenius(publicValue(index, rightPolynomial), frobeniusPower);
+					for (u64 basis = 0; basis < Ctx::extensionDegree; ++basis)
 					{
-						const auto a = mPublicA[index];
-						const auto aFrobenius = mCtx.frobenius(a, frobeniusPower);
-						Ext scaled;
-						switch (term)
-						{
-						case 0: scaled = a * aFrobenius * product[index]; break;
-						case 1: scaled = aFrobenius * product[index]; break;
-						case 2: scaled = a * product[index]; break;
-						default: scaled = product[index]; break;
-						}
-
-						for (u64 basis = 0; basis < Ctx::extensionDegree; ++basis)
-							z[basis * mN + index] += mCtx.trace(
-								traceFactors[frobeniusPower][basis] * scaled);
+						const auto outputOffset = basis * mN;
+						if (outputOffset >= z.size())
+							break;
+						const auto count = std::min<u64>(mN, z.size() - outputOffset);
+						for (u64 index = 0; index < count; ++index)
+							z[outputOffset + index] += mCtx.trace(
+								traceFactors[frobeniusPower][basis] * product[index]);
 					}
 				}
 
@@ -575,9 +643,10 @@ namespace osuCrypto
 			clearBaseCors();
 			clearSetupState();
 			mPartyIdx = 0;
-			mDimensions = 0;
-			mWeight = 0;
+			mDimension = 0;
+			mRequestedOleCount = 0;
 			mN = 0;
+			mBlockSize = 0;
 			mPublicSeed = block{};
 			mPublicA.clear();
 			mPositionGmw.clear();
@@ -587,11 +656,12 @@ namespace osuCrypto
 	private:
 		Ctx mCtx;
 		u64 mPartyIdx = 0;
-		u64 mDimensions = 0;
-		u64 mWeight = 0;
+		u64 mDimension = 0;
+		u64 mRequestedOleCount = 0;
 		u64 mN = 0;
+		u64 mBlockSize = 0;
 		block mPublicSeed{};
-		std::vector<Ext> mPublicA;
+		std::vector<u32> mPublicA;
 
 		Gmw mPositionGmw;
 		BetaCircuit mPositionCircuit;
@@ -605,19 +675,22 @@ namespace osuCrypto
 		std::array<RegularDpfKey, GroupCount> mDpfKeys;
 		bool mHasSetup = false;
 
-		u64 pointsPerGroup() const { return mWeight * mWeight; }
+		static constexpr u64 pointsPerGroup() { return Weight * Weight; }
 		u64 positionInstanceCount() const
 		{
 			const auto points = GroupCount * pointsPerGroup();
-			return PowerOfTwoCoordinates ? points * mDimensions : points;
+			return PowerOfTwoCoordinates ? points * localDimensions() : points;
 		}
-		u64 leftCoefficientCount() const { return 2 * mWeight; }
-		u64 rightCoefficientCount() const { return 2 * Ctx::extensionDegree * mWeight; }
+		static constexpr u64 leftCoefficientCount() { return CompressionFactor * Weight; }
+		static constexpr u64 rightCoefficientCount()
+		{
+			return CompressionFactor * Ctx::extensionDegree * Weight;
+		}
 
 		u64 dpfBaseOtCount() const
 		{
 			RegularDpf<Ext, DpfCoeffCtx> dpf;
-			dpf.init(mPartyIdx, mN, pointsPerGroup(), mCtx.dpfCoeffCtx());
+			dpf.init(mPartyIdx, mBlockSize, pointsPerGroup(), mCtx.dpfCoeffCtx());
 			return dpf.baseOtCount();
 		}
 
@@ -643,23 +716,27 @@ namespace osuCrypto
 			mSparsePositions.resize(leftCoefficientCount());
 			mSparseCoefficients.resize(leftCoefficientCount());
 			auto coeffCtx = mCtx.dpfCoeffCtx();
-			for (u64 polynomial = 0; polynomial < 2; ++polynomial)
+			for (u64 polynomial = 0; polynomial < CompressionFactor; ++polynomial)
 			{
-				const auto offset = polynomial * mWeight;
-				for (u64 i = 0; i < mWeight; ++i)
+				const auto polynomialOffset = polynomial * Weight;
+				for (u64 blockIndex = 0; blockIndex < BlockCount; ++blockIndex)
 				{
-					u64 position;
-					bool duplicate;
-					do
+					const auto blockOffset = polynomialOffset + blockIndex * PointsPerBlock;
+					for (u64 slot = 0; slot < PointsPerBlock; ++slot)
 					{
-						position = fieldSampling::sample(prng, mN);
-						duplicate = false;
-						for (u64 j = 0; j < i; ++j)
-							duplicate |= mSparsePositions[offset + j] == position;
+						u64 position;
+						bool duplicate;
+						do
+						{
+							position = fieldSampling::sample(prng, mBlockSize);
+							duplicate = false;
+							for (u64 previous = 0; previous < slot; ++previous)
+								duplicate |= mSparsePositions[blockOffset + previous] == position;
+						}
+						while (duplicate);
+						mSparsePositions[blockOffset + slot] = position;
+						mSparseCoefficients[blockOffset + slot] = coeffCtx.sampleNonZero(prng);
 					}
-					while (duplicate);
-					mSparsePositions[offset + i] = position;
-					mSparseCoefficients[offset + i] = coeffCtx.sampleNonZero(prng);
 				}
 			}
 		}
@@ -676,11 +753,11 @@ namespace osuCrypto
 			if (mPartyIdx)
 			{
 				std::vector<Ext> right(rightCoefficientCount());
-				for (u64 polynomial = 0; polynomial < 2; ++polynomial)
+				for (u64 polynomial = 0; polynomial < CompressionFactor; ++polynomial)
 					for (u64 power = 0; power < Ctx::extensionDegree; ++power)
-						for (u64 i = 0; i < mWeight; ++i)
-							right[(2 * polynomial + power) * mWeight + i] =
-								mCtx.frobenius(mSparseCoefficients[polynomial * mWeight + i], power);
+						for (u64 i = 0; i < Weight; ++i)
+							right[(Ctx::extensionDegree * polynomial + power) * Weight + i] =
+								mCtx.frobenius(mSparseCoefficients[polynomial * Weight + i], power);
 
 				auto tensorOts = span<block>(mRecvOts).subspan(dpfOts);
 				BitVector choices = mRecvChoices.subvec(dpfOts, tensorOts.size());
@@ -750,24 +827,26 @@ namespace osuCrypto
 			std::vector<u64> localPositions(positionInstances);
 			for (u64 group = 0; group < GroupCount; ++group)
 			{
-				const auto power = group / 4;
-				const auto term = group % 4;
-				for (u64 left = 0; left < mWeight; ++left)
+				const auto power = group / (CompressionFactor * CompressionFactor);
+				const auto pair = group % (CompressionFactor * CompressionFactor);
+				const auto leftPolynomial = pair / CompressionFactor;
+				const auto rightPolynomial = pair % CompressionFactor;
+				for (u64 left = 0; left < Weight; ++left)
 				{
-					const auto leftPosition = mSparsePositions[
-						(term == 1 || term == 3 ? mWeight : 0) + left];
-					for (u64 right = 0; right < mWeight; ++right)
+					const auto leftPosition =
+						mSparsePositions[leftPolynomial * Weight + left];
+					for (u64 right = 0; right < Weight; ++right)
 					{
-						const auto rightPosition = mSparsePositions[
-							(term >= 2 ? mWeight : 0) + right];
-						const auto point = (group * pointsPerGroup() + left * mWeight + right);
+						const auto rightPosition =
+							mSparsePositions[rightPolynomial * Weight + right];
+						const auto point = group * pointsPerGroup() + left * Weight + right;
 						if constexpr (PowerOfTwoCoordinates)
 						{
-							for (u64 coordinate = 0; coordinate < mDimensions; ++coordinate)
+							for (u64 coordinate = 0; coordinate < localDimensions(); ++coordinate)
 							{
 								const auto position = mPartyIdx ? rightPosition : leftPosition;
 								const auto coordinatePower = mPartyIdx ? power : 0;
-								localPositions[point * mDimensions + coordinate] =
+								localPositions[point * localDimensions() + coordinate] =
 									mCtx.frobeniusCoordinate(
 										mCtx.positionCoordinate(position, coordinate), coordinatePower);
 							}
@@ -794,9 +873,9 @@ namespace osuCrypto
 				mPositionGmw.getOutput<u64>(0, output);
 				pointShares.assign(pointCount, 0);
 				for (u64 point = 0; point < pointCount; ++point)
-					for (u64 coordinate = 0; coordinate < mDimensions; ++coordinate)
+					for (u64 coordinate = 0; coordinate < localDimensions(); ++coordinate)
 						pointShares[point] |=
-							(coordinates[point * mDimensions + coordinate] &
+							(coordinates[point * localDimensions() + coordinate] &
 								(Ctx::coordinateSize - 1)) <<
 							(Ctx::coordinateBits * coordinate);
 			}
@@ -811,7 +890,7 @@ namespace osuCrypto
 		u64 packPositionInput(u64 position, u64 frobeniusPower) const
 		{
 			u64 packed = 0;
-			for (u64 coordinate = 0; coordinate < mDimensions; ++coordinate)
+			for (u64 coordinate = 0; coordinate < localDimensions(); ++coordinate)
 			{
 				const auto value = mCtx.frobeniusCoordinate(
 					mCtx.positionCoordinate(position, coordinate), frobeniusPower);
@@ -820,15 +899,55 @@ namespace osuCrypto
 			return packed;
 		}
 
+		u64 localDimensions() const
+		{
+			return mDimension - BlockDimensions;
+		}
+
+		u64 fullPosition(u64 point, u64 localPosition) const
+		{
+			return point / PointsPerBlock + BlockCount * localPosition;
+		}
+
+		Ext publicValue(u64 index, u64 polynomial) const
+		{
+			const auto mask = (u32{ 1 } << Ctx::fieldBits) - 1;
+			return Ext::fromIndex(static_cast<u8>(
+				(mPublicA[index] >> (polynomial * Ctx::fieldBits)) & mask));
+		}
+
+		u64 productBlock(u64 group, u64 leftPoint, u64 rightPoint) const
+		{
+			const auto power = group / (CompressionFactor * CompressionFactor);
+			auto leftBlock = leftPoint / PointsPerBlock;
+			auto rightBlock = rightPoint / PointsPerBlock;
+			u64 result = 0;
+			u64 radix = 1;
+			for (u64 coordinate = 0; coordinate < BlockDimensions; ++coordinate)
+			{
+				const auto left = leftBlock % Ctx::coordinateSize;
+				const auto right = mCtx.frobeniusCoordinate(
+					rightBlock % Ctx::coordinateSize, power);
+				result += ((left + right) % Ctx::coordinateSize) * radix;
+				leftBlock /= Ctx::coordinateSize;
+				rightBlock /= Ctx::coordinateSize;
+				radix *= Ctx::coordinateSize;
+			}
+			return result;
+		}
+
 		void fillGroupValues(u64 group, span<const Ext> productShares, span<Ext> values) const
 		{
-			const auto power = group / 4;
-			const auto term = group % 4;
-			const auto leftOffset = (term == 1 || term == 3) ? mWeight : 0;
-			const auto rightOffset = (2 * (term >= 2) + power) * mWeight;
-			for (u64 left = 0; left < mWeight; ++left)
-				for (u64 right = 0; right < mWeight; ++right)
-					values[left * mWeight + right] = productShares[
+			const auto power = group / (CompressionFactor * CompressionFactor);
+			const auto pair = group % (CompressionFactor * CompressionFactor);
+			const auto leftPolynomial = pair / CompressionFactor;
+			const auto rightPolynomial = pair % CompressionFactor;
+			const auto leftOffset = leftPolynomial * Weight;
+			const auto rightOffset =
+				(Ctx::extensionDegree * rightPolynomial + power) * Weight;
+			for (u64 left = 0; left < Weight; ++left)
+				for (u64 right = 0; right < Weight; ++right)
+					values[left * Weight + right] = productShares[
 						(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
 		}
 	};
