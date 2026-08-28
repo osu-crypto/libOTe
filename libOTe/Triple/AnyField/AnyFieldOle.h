@@ -22,17 +22,160 @@
 
 namespace osuCrypto
 {
+	namespace anyField::detail
+	{
+		inline BitVector constantBits(u64 value, u64 size)
+		{
+			BitVector result(size);
+			for (u64 bit = 0; bit < size; ++bit)
+				result[bit] = (value >> bit) & 1;
+			return result;
+		}
+
+		inline BetaBundle bundleSlice(const BetaBundle& bundle, u64 offset, u64 size)
+		{
+			if (offset > bundle.size() || size > bundle.size() - offset)
+				throw std::out_of_range("AnyField position-circuit bundle slice is out of range. " LOCATION);
+			BetaBundle result;
+			result.insert(result.end(), bundle.begin() + offset, bundle.begin() + offset + size);
+			return result;
+		}
+
+		inline BetaCircuit makePositionCircuit(
+			u64 coordinateSize,
+			u64 coordinateBits,
+			u64 dimensions,
+			u64 domainSize)
+		{
+			if (coordinateSize < 2 || !coordinateBits || coordinateBits >= 64 || !dimensions)
+				throw std::invalid_argument("Invalid AnyField position-circuit parameters. " LOCATION);
+			if (coordinateSize > (u64{ 1 } << coordinateBits) ||
+				coordinateSize <= (u64{ 1 } << (coordinateBits - 1)))
+				throw std::invalid_argument("AnyField coordinate width is not canonical. " LOCATION);
+			if (coordinateBits * dimensions >= 64 || log2ceil(domainSize) >= 64)
+				throw std::invalid_argument("AnyField position circuit exceeds the u64 interface. " LOCATION);
+			u64 expectedDomain = 1;
+			for (u64 i = 0; i < dimensions; ++i)
+				expectedDomain *= coordinateSize;
+			if (domainSize != expectedDomain)
+				throw std::invalid_argument("AnyField position circuit has an inconsistent domain. " LOCATION);
+
+			const auto inputBits = coordinateBits * dimensions;
+			const auto outputBits = log2ceil(domainSize);
+			BetaCircuit circuit;
+			BetaBundle lhs(inputBits), rhs(inputBits), output(outputBits);
+			circuit.addInputBundle(lhs);
+			circuit.addInputBundle(rhs);
+			circuit.addOutputBundle(output);
+
+			const auto powerOfTwo = coordinateSize == (u64{ 1 } << coordinateBits);
+			std::vector<BetaBundle> coordinates(dimensions);
+			for (u64 coordinate = 0; coordinate < dimensions; ++coordinate)
+			{
+				auto lhsCoordinate = bundleSlice(
+					lhs, coordinate * coordinateBits, coordinateBits);
+				auto rhsCoordinate = bundleSlice(
+					rhs, coordinate * coordinateBits, coordinateBits);
+
+				if (powerOfTwo)
+				{
+					coordinates[coordinate] = bundleSlice(
+						output, coordinate * coordinateBits, coordinateBits);
+					BetaBundle temp(2 * coordinateBits);
+					circuit.addTempWireBundle(temp);
+					BetaLibrary::add_build(
+						circuit, lhsCoordinate, rhsCoordinate, coordinates[coordinate], temp,
+						BetaLibrary::IntType::Unsigned, BetaLibrary::Optimized::Depth);
+				}
+				else
+				{
+					BetaBundle sum(coordinateBits + 1);
+					BetaBundle sumTemp(2 * sum.size());
+					circuit.addTempWireBundle(sum);
+					circuit.addTempWireBundle(sumTemp);
+					BetaLibrary::add_build(
+						circuit, lhsCoordinate, rhsCoordinate, sum, sumTemp,
+						BetaLibrary::IntType::Unsigned, BetaLibrary::Optimized::Depth);
+
+					BetaBundle modulus(sum.size());
+					auto modulusBits = constantBits(coordinateSize, sum.size());
+					circuit.addConstBundle(modulus, modulusBits);
+					BetaBundle difference(sum.size() + 1);
+					BetaBundle differenceTemp(2 * difference.size());
+					circuit.addTempWireBundle(difference);
+					circuit.addTempWireBundle(differenceTemp);
+					BetaLibrary::subtract_build(
+						circuit, sum, modulus, difference, differenceTemp,
+						BetaLibrary::IntType::Unsigned, BetaLibrary::Optimized::Depth);
+
+					coordinates[coordinate].resize(coordinateBits);
+					circuit.addTempWireBundle(coordinates[coordinate]);
+					BetaBundle differenceLow = bundleSlice(difference, 0, coordinateBits);
+					BetaBundle sumLow = bundleSlice(sum, 0, coordinateBits);
+					BetaBundle borrow = bundleSlice(difference, difference.size() - 1, 1);
+					BetaBundle muxTemp(1);
+					circuit.addTempWireBundle(muxTemp);
+					BetaLibrary::multiplex_build(
+						circuit, sumLow, differenceLow, borrow,
+						coordinates[coordinate], muxTemp);
+				}
+			}
+
+			if (!powerOfTwo)
+			{
+				if (dimensions == 1)
+				{
+					circuit.addCopy(
+						bundleSlice(coordinates[0], 0, outputBits), output);
+				}
+				else
+				{
+					u64 partialDomain = coordinateSize;
+					BetaBundle accumulator = coordinates.back();
+					for (u64 processed = 1; processed < dimensions; ++processed)
+					{
+						const auto coordinate = dimensions - 1 - processed;
+						if (partialDomain > std::numeric_limits<u64>::max() / coordinateSize)
+							throw std::length_error("AnyField partial domain overflows u64. " LOCATION);
+						partialDomain *= coordinateSize;
+						const auto nextBits = log2ceil(partialDomain);
+						BetaBundle radix(coordinateBits);
+						auto radixBits = constantBits(coordinateSize, coordinateBits);
+						circuit.addConstBundle(radix, radixBits);
+
+						BetaBundle product(nextBits);
+						circuit.addTempWireBundle(product);
+						BetaLibrary::mult_build(
+							circuit, accumulator, radix, product,
+							BetaLibrary::Optimized::Depth, BetaLibrary::IntType::Unsigned);
+
+						BetaBundle next = processed + 1 == dimensions ? output : BetaBundle(nextBits);
+						if (processed + 1 != dimensions)
+							circuit.addTempWireBundle(next);
+						BetaBundle addTemp(2 * nextBits);
+						circuit.addTempWireBundle(addTemp);
+						BetaLibrary::add_build(
+							circuit, product, coordinates[coordinate], next, addTemp,
+							BetaLibrary::IntType::Unsigned, BetaLibrary::Optimized::Depth);
+						accumulator = std::move(next);
+					}
+				}
+			}
+
+			return circuit;
+		}
+	}
+
 	// Semi-honest two-party PCG for OLE over a base field, following
 	// Construction 1 of "Efficient Pseudorandom Correlation Generators for Any
 	// Finite Field". Field-specific operations are supplied by a compile-time
-	// context. The first context is AnyFieldF9Ctx, which generates two N-element
-	// batches of F3 OLEs from QA-SD over F9. For each output index, the parties'
-	// shares satisfy x_0 * x_1 = z_0 + z_1.
+	// context. AnyFieldF9Ctx generates F3 OLEs from QA-SD over F9, while
+	// AnyFieldF4Ctx generates F2 OLEs from QA-SD over F4. For each output index,
+	// the parties' shares satisfy x_0 * x_1 = z_0 + z_1.
 	//
-	// This initial ordinary-DPF backend packs each transform coordinate into a
-	// fixed-width binary field. It therefore requires a power-of-two coordinate
-	// group. Base OTs and binary OLEs are one-shot and must be freshly installed
-	// before every setup.
+	// The ordinary-DPF backend securely converts positions in the context's
+	// cyclic product group to canonical binary DPF indices. Base OTs and binary
+	// OLEs are one-shot and must be freshly installed before every setup.
 	template<AnyFieldContext Context>
 	class AnyFieldOle : public TimerAdapter
 	{
@@ -43,12 +186,15 @@ namespace osuCrypto
 		using DpfCoeffCtx = typename Ctx::DpfCoeffCtx;
 
 		static constexpr u64 GroupCount = 4 * Ctx::extensionDegree;
+		static constexpr bool PowerOfTwoCoordinates =
+			Ctx::coordinateSize == (u64{ 1 } << Ctx::coordinateBits);
 		static_assert(Ctx::extensionDegree > 0,
 			"AnyFieldOle requires a positive extension degree.");
 		static_assert(Ctx::coordinateBits > 0 && Ctx::coordinateBits < 64,
 			"AnyFieldOle requires a coordinate width between one and 63 bits.");
-		static_assert(Ctx::coordinateSize == (u64{ 1 } << Ctx::coordinateBits),
-			"The ordinary-DPF AnyFieldOle backend requires a power-of-two coordinate group.");
+		static_assert(Ctx::coordinateSize > (u64{ 1 } << (Ctx::coordinateBits - 1)) &&
+			Ctx::coordinateSize <= (u64{ 1 } << Ctx::coordinateBits),
+			"AnyFieldOle coordinateBits must be ceil(log2(coordinateSize)).");
 
 		struct BaseCorCount
 		{
@@ -79,7 +225,7 @@ namespace osuCrypto
 				mPublicSeed = std::exchange(source.mPublicSeed, block{});
 				mPublicA = std::move(source.mPublicA);
 				mPositionGmw = std::move(source.mPositionGmw);
-				mCoordinateAdder = std::move(source.mCoordinateAdder);
+				mPositionCircuit = std::move(source.mPositionCircuit);
 				mSendOts = std::move(source.mSendOts);
 				mRecvOts = std::move(source.mRecvOts);
 				mRecvChoices = std::move(source.mRecvChoices);
@@ -90,6 +236,8 @@ namespace osuCrypto
 				mHasSetup = std::exchange(source.mHasSetup, false);
 
 				source.mPublicA.clear();
+				source.mPositionGmw.clear();
+				source.mPositionCircuit = {};
 				source.mSendOts.clear();
 				source.mRecvOts.clear();
 				source.mRecvChoices.resize(0);
@@ -125,9 +273,10 @@ namespace osuCrypto
 			const auto pointCount = GroupCount * pointsPerGroup;
 			if (pointCount > std::numeric_limits<u64>::max() / dimensions)
 				throw std::length_error("AnyFieldOle coordinate conversion count overflows u64. " LOCATION);
-			const auto coordinateCount = pointCount * dimensions;
-			if (coordinateCount > Gmw::MaxOleDimension)
-				throw std::invalid_argument("AnyFieldOle coordinate conversion exceeds GMW capacity. " LOCATION);
+			const auto positionInstances = PowerOfTwoCoordinates ?
+				pointCount * dimensions : pointCount;
+			if (positionInstances > Gmw::MaxOleDimension)
+				throw std::invalid_argument("AnyFieldOle position conversion exceeds GMW capacity. " LOCATION);
 
 			const auto domain = Ctx::domainSize(dimensions);
 			if (weight > domain)
@@ -140,14 +289,23 @@ namespace osuCrypto
 			RegularDpf<Ext, DpfCoeffCtx> validator;
 			validator.init(partyIdx, domain, pointsPerGroup, ctx.dpfCoeffCtx());
 
-			BetaLibrary library;
-			auto coordinateAdder = *library.int_int_add(
-				Ctx::coordinateBits,
-				Ctx::coordinateBits,
-				Ctx::coordinateBits,
-				BetaLibrary::Optimized::Depth);
+			BetaCircuit positionCircuit;
+			if constexpr (PowerOfTwoCoordinates)
+			{
+				BetaLibrary library;
+				positionCircuit = *library.int_int_add(
+					Ctx::coordinateBits,
+					Ctx::coordinateBits,
+					Ctx::coordinateBits,
+					BetaLibrary::Optimized::Depth);
+			}
+			else
+			{
+				positionCircuit = anyField::detail::makePositionCircuit(
+					Ctx::coordinateSize, Ctx::coordinateBits, dimensions, domain);
+			}
 			Gmw positionGmw;
-			positionGmw.init(partyIdx, coordinateCount, coordinateAdder);
+			positionGmw.init(partyIdx, positionInstances, positionCircuit);
 
 			std::vector<Ext> publicA(domain);
 			PRNG publicPrng(publicSeed);
@@ -163,7 +321,7 @@ namespace osuCrypto
 			mN = domain;
 			mPublicSeed = publicSeed;
 			mPublicA = std::move(publicA);
-			mCoordinateAdder = std::move(coordinateAdder);
+			mPositionCircuit = std::move(positionCircuit);
 			mPositionGmw = std::move(positionGmw);
 		}
 
@@ -229,8 +387,8 @@ namespace osuCrypto
 			Gmw newPositionGmw;
 			newPositionGmw.init(
 				mPartyIdx,
-				GroupCount * pointsPerGroup() * mDimensions,
-				mCoordinateAdder);
+				positionInstanceCount(),
+				mPositionCircuit);
 			newPositionGmw.setOle(oleMult, oleAdd);
 
 			mSendOts = std::move(newSendOts);
@@ -423,7 +581,7 @@ namespace osuCrypto
 			mPublicSeed = block{};
 			mPublicA.clear();
 			mPositionGmw.clear();
-			mCoordinateAdder = {};
+			mPositionCircuit = {};
 		}
 
 	private:
@@ -436,7 +594,7 @@ namespace osuCrypto
 		std::vector<Ext> mPublicA;
 
 		Gmw mPositionGmw;
-		BetaCircuit mCoordinateAdder;
+		BetaCircuit mPositionCircuit;
 		std::vector<std::array<block, 2>> mSendOts;
 		std::vector<block> mRecvOts;
 		BitVector mRecvChoices;
@@ -448,6 +606,11 @@ namespace osuCrypto
 		bool mHasSetup = false;
 
 		u64 pointsPerGroup() const { return mWeight * mWeight; }
+		u64 positionInstanceCount() const
+		{
+			const auto points = GroupCount * pointsPerGroup();
+			return PowerOfTwoCoordinates ? points * mDimensions : points;
+		}
 		u64 leftCoefficientCount() const { return 2 * mWeight; }
 		u64 rightCoefficientCount() const { return 2 * Ctx::extensionDegree * mWeight; }
 
@@ -489,7 +652,7 @@ namespace osuCrypto
 					bool duplicate;
 					do
 					{
-						position = prng.get<u64>() & (mN - 1);
+						position = fieldSampling::sample(prng, mN);
 						duplicate = false;
 						for (u64 j = 0; j < i; ++j)
 							duplicate |= mSparsePositions[offset + j] == position;
@@ -582,8 +745,9 @@ namespace osuCrypto
 
 		macoro::task<> makePointShares(std::vector<u64>& pointShares, coproto::Socket& socket)
 		{
-			const auto coordinateCount = GroupCount * pointsPerGroup() * mDimensions;
-			std::vector<u64> localCoordinates(coordinateCount);
+			const auto pointCount = GroupCount * pointsPerGroup();
+			const auto positionInstances = positionInstanceCount();
+			std::vector<u64> localPositions(positionInstances);
 			for (u64 group = 0; group < GroupCount; ++group)
 			{
 				const auto power = group / 4;
@@ -597,33 +761,63 @@ namespace osuCrypto
 						const auto rightPosition = mSparsePositions[
 							(term >= 2 ? mWeight : 0) + right];
 						const auto point = (group * pointsPerGroup() + left * mWeight + right);
-						for (u64 coordinate = 0; coordinate < mDimensions; ++coordinate)
+						if constexpr (PowerOfTwoCoordinates)
 						{
-							const auto value = mPartyIdx ?
-								mCtx.frobeniusCoordinate(
-									mCtx.positionCoordinate(rightPosition, coordinate), power) :
-								mCtx.positionCoordinate(leftPosition, coordinate);
-							localCoordinates[point * mDimensions + coordinate] = value;
+							for (u64 coordinate = 0; coordinate < mDimensions; ++coordinate)
+							{
+								const auto position = mPartyIdx ? rightPosition : leftPosition;
+								const auto coordinatePower = mPartyIdx ? power : 0;
+								localPositions[point * mDimensions + coordinate] =
+									mCtx.frobeniusCoordinate(
+										mCtx.positionCoordinate(position, coordinate), coordinatePower);
+							}
+						}
+						else
+						{
+							localPositions[point] = mPartyIdx ?
+								packPositionInput(rightPosition, power) :
+								packPositionInput(leftPosition, 0);
 						}
 					}
 				}
 			}
 
-			MatrixView<const u64> input(localCoordinates.data(), coordinateCount, 1);
+			MatrixView<const u64> input(localPositions.data(), positionInstances, 1);
 			mPositionGmw.setInput<const u64>(mPartyIdx, input);
 			mPositionGmw.setZeroInput(1 ^ mPartyIdx);
 			co_await mPositionGmw.run(socket);
 
-			std::vector<u64> binaryCoordinates(coordinateCount);
-			MatrixView<u64> output(binaryCoordinates.data(), coordinateCount, 1);
-			mPositionGmw.getOutput<u64>(0, output);
+			if constexpr (PowerOfTwoCoordinates)
+			{
+				std::vector<u64> coordinates(positionInstances);
+				MatrixView<u64> output(coordinates.data(), positionInstances, 1);
+				mPositionGmw.getOutput<u64>(0, output);
+				pointShares.assign(pointCount, 0);
+				for (u64 point = 0; point < pointCount; ++point)
+					for (u64 coordinate = 0; coordinate < mDimensions; ++coordinate)
+						pointShares[point] |=
+							(coordinates[point * mDimensions + coordinate] &
+								(Ctx::coordinateSize - 1)) <<
+							(Ctx::coordinateBits * coordinate);
+			}
+			else
+			{
+				pointShares.assign(pointCount, 0);
+				MatrixView<u64> output(pointShares.data(), pointCount, 1);
+				mPositionGmw.getOutput<u64>(0, output);
+			}
+		}
 
-			pointShares.assign(GroupCount * pointsPerGroup(), 0);
-			for (u64 point = 0; point < pointShares.size(); ++point)
-				for (u64 coordinate = 0; coordinate < mDimensions; ++coordinate)
-					pointShares[point] |=
-						(binaryCoordinates[point * mDimensions + coordinate] & (Ctx::coordinateSize - 1))
-						<< (Ctx::coordinateBits * coordinate);
+		u64 packPositionInput(u64 position, u64 frobeniusPower) const
+		{
+			u64 packed = 0;
+			for (u64 coordinate = 0; coordinate < mDimensions; ++coordinate)
+			{
+				const auto value = mCtx.frobeniusCoordinate(
+					mCtx.positionCoordinate(position, coordinate), frobeniusPower);
+				packed |= value << (Ctx::coordinateBits * coordinate);
+			}
+			return packed;
 		}
 
 		void fillGroupValues(u64 group, span<const Ext> productShares, span<Ext> values) const
@@ -639,6 +833,7 @@ namespace osuCrypto
 		}
 	};
 
+	using AnyFieldF2Ole = AnyFieldOle<AnyFieldF4Ctx>;
 	using AnyFieldF3Ole = AnyFieldOle<AnyFieldF9Ctx>;
 }
 

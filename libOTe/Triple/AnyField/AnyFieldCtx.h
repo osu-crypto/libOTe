@@ -1,5 +1,6 @@
 #pragma once
 
+#include "libOTe/Tools/Field/F4.h"
 #include "libOTe/Tools/Field/F9.h"
 #include "cryptoTools/Common/Defines.h"
 #include <concepts>
@@ -165,5 +166,102 @@ namespace osuCrypto
 		}
 	};
 
+	// Context for OLE over F2 using F4 as the QA-SD extension field. Its
+	// coordinate group has order three, so this context exercises the general
+	// modular position conversion rather than the power-of-two fast path.
+	struct AnyFieldF4Ctx
+	{
+		using Base = F2;
+		using Ext = F4;
+		using DpfCoeffCtx = CoeffCtxF4;
+
+		static constexpr u64 baseCharacteristic = 2;
+		static constexpr u64 extensionDegree = 2;
+		static constexpr u64 coordinateSize = 3;
+		static constexpr u64 coordinateBits = 2;
+
+		constexpr DpfCoeffCtx dpfCoeffCtx() const { return {}; }
+
+		constexpr Ext frobenius(Ext value, u64 power) const
+		{
+			return power & 1 ? value.frobenius() : value;
+		}
+
+		constexpr Base trace(Ext value) const
+		{
+			return value.trace();
+		}
+
+		// u has order three, and (u,u^2) is a normal basis of F4/F2.
+		constexpr Ext traceBasis(u64 index) const
+		{
+			if (index >= extensionDegree)
+				throw std::out_of_range("F4 trace-basis index is out of range. " LOCATION);
+			return index == 0 ?
+				Ext::fromCoefficients(0, 1) :
+				Ext::fromCoefficients(1, 1);
+		}
+
+		constexpr Ext rootOfUnity() const
+		{
+			return Ext::fromCoefficients(0, 1);
+		}
+
+		constexpr u64 positionCoordinate(u64 position, u64 coordinate) const
+		{
+			for (u64 i = 0; i < coordinate; ++i)
+				position /= coordinateSize;
+			return position % coordinateSize;
+		}
+
+		constexpr u64 frobeniusCoordinate(u64 coordinate, u64 power) const
+		{
+			return power & 1 ? (2 * coordinate) % coordinateSize : coordinate;
+		}
+
+		static u64 domainSize(u64 dimensions)
+		{
+			u64 result = 1;
+			for (u64 i = 0; i < dimensions; ++i)
+			{
+				if (result > std::numeric_limits<u64>::max() / coordinateSize)
+					throw std::length_error("Any-field domain size overflows u64. " LOCATION);
+				result *= coordinateSize;
+			}
+			return result;
+		}
+
+		void transform(span<Ext> values, u64 dimensions) const
+		{
+			const auto expected = domainSize(dimensions);
+			if (values.size() != expected)
+				throw std::invalid_argument("F4 transform input has the wrong size. " LOCATION);
+
+			u64 stride = 1;
+			for (u64 dimension = 0; dimension < dimensions; ++dimension)
+			{
+				const auto groupStride = stride * coordinateSize;
+				for (u64 group = 0; group < values.size(); group += groupStride)
+					for (u64 offset = 0; offset < stride; ++offset)
+						transform3(values.data() + group + offset, stride);
+				stride = groupStride;
+			}
+		}
+
+	private:
+		static OC_FORCEINLINE void transform3(Ext* values, u64 stride)
+		{
+			const Ext omega = Ext::fromCoefficients(0, 1);
+			const Ext omega2 = Ext::fromCoefficients(1, 1);
+			const Ext x0 = values[0 * stride];
+			const Ext x1 = values[1 * stride];
+			const Ext x2 = values[2 * stride];
+			values[0 * stride] = x0 + x1 + x2;
+			values[1 * stride] = x0 + omega * x1 + omega2 * x2;
+			values[2 * stride] = x0 + omega2 * x1 + omega * x2;
+		}
+	};
+
 	static_assert(AnyFieldContext<AnyFieldF9Ctx>);
+	static_assert(AnyFieldContext<AnyFieldF4Ctx>);
 }
