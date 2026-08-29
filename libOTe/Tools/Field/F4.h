@@ -159,6 +159,13 @@ namespace osuCrypto
 	struct CoeffCtxF4 : CoeffCtxInteger
 	{
 		template<typename F>
+		constexpr double regularNoiseFactor() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<F>, F4>);
+			return 4.0 / 3.0;
+		}
+
+		template<typename F>
 		OC_FORCEINLINE bool isField() const
 		{
 			static_assert(std::is_same_v<std::remove_cvref_t<F>, F4>);

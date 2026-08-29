@@ -479,17 +479,17 @@ void Vole_Noisy_Audit_Test(const oc::CLP&)
 
 	expectInvalidArgument([] {
 		syndromeDecodingConfigure(1025, 1, DefaultMultType,
-			SdNoiseDistribution::Regular, 1);
+			SdNoiseDistribution::Regular, SdNoiseSecurityModel::binary());
 	});
 	expectInvalidArgument([] {
 		syndromeDecodingConfigure(128,
 			static_cast<u64>(std::numeric_limits<u32>::max()) + 1,
-			DefaultMultType, SdNoiseDistribution::Regular, 1);
+			DefaultMultType, SdNoiseDistribution::Regular,
+			SdNoiseSecurityModel::binary());
 	});
 	expectInvalidArgument([] {
 		syndromeDecodingConfigure(128, 1, DefaultMultType,
-			SdNoiseDistribution::Regular,
-			static_cast<u64>(std::numeric_limits<u16>::max()) + 1);
+			SdNoiseDistribution::Regular, SdNoiseSecurityModel{ 0.5 });
 	});
 }
 
@@ -745,7 +745,8 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 		SilentBaseType::Base, SdNoiseDistribution::Stationary);
 	const auto productConfig = syndromeDecodingConfigure(
 		128, 128, DefaultMultType, SdNoiseDistribution::Stationary,
-		log2ceil(Fp31::mMod));
+		SdNoiseSecurityModel{
+			coefficientRegularNoiseFactor<Product>(CoeffCtxFVec<Fp31, 2>{}) });
 	if (productSender.mNumPartitions != productConfig.mNumPartitions ||
 		productSender.mSizePer != productConfig.mSizePer ||
 		productSender.mNoiseVecSize != productConfig.mNoiseVectorSize ||
@@ -759,7 +760,9 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 	goldSender.configure(128, SilentSecType::SemiHonest, DefaultMultType,
 		SilentBaseType::Base, SdNoiseDistribution::Stationary);
 	const auto goldConfig = syndromeDecodingConfigure(
-		128, 128, DefaultMultType, SdNoiseDistribution::Stationary, 64);
+		128, 128, DefaultMultType, SdNoiseDistribution::Stationary,
+		SdNoiseSecurityModel{ coefficientRegularNoiseFactor<Goldilocks>(
+			CoeffCtxGoldilocks{}) });
 	if (goldSender.mNumPartitions != goldConfig.mNumPartitions ||
 		goldSender.mSizePer != goldConfig.mSizePer ||
 		goldSender.mNoiseVecSize != goldConfig.mNoiseVectorSize)
@@ -768,6 +771,25 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 
 void Vole_Silent_NoiseSampling_test(const oc::CLP&)
 {
+	const auto binaryLarge = getRegNoiseWeight(
+		0.25, 4096, 128, SdNoiseDistribution::Regular,
+		SdNoiseSecurityModel::binary());
+	const auto binarySmall = getRegNoiseWeight(
+		0.25, 2048, 128, SdNoiseDistribution::Regular,
+		SdNoiseSecurityModel::binary());
+	const auto f9Regular = getRegNoiseWeight(
+		0.25, 4096, 128, SdNoiseDistribution::Regular,
+		SdNoiseSecurityModel{ 9.0 / 8.0 });
+	const auto largeFieldRegular = getRegNoiseWeight(
+		0.25, 4096, 128, SdNoiseDistribution::Regular,
+		SdNoiseSecurityModel{ 1.0 });
+	const auto stationaryWeight = getRegNoiseWeight(
+		0.25, 4096, 128, SdNoiseDistribution::Stationary,
+		SdNoiseSecurityModel::binary());
+	if (binaryLarge != 128 || binarySmall != 144 || f9Regular != 136 ||
+		largeFieldRegular != 160 || stationaryWeight != 160)
+		throw UnitTestFail("Silent-noise security floors selected an unexpected weight");
+
 	PRNG prng(CCBlock);
 	CoeffCtxInteger integerCtx;
 	for (u64 i = 0; i < 256; ++i)

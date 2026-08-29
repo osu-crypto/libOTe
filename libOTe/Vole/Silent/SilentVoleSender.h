@@ -513,10 +513,11 @@ namespace osuCrypto
 			noiseType != SdNoiseDistribution::Stationary)
 			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
 
-		const auto bitCount = coefficientGroupBitCount<G>(ctx);
+		const auto securityModel = SdNoiseSecurityModel{
+			coefficientRegularNoiseFactor<G>(ctx) };
 
 		auto config = syndromeDecodingConfigure(
-			secParam, requestSize, mult, noiseType, bitCount);
+			secParam, requestSize, mult, noiseType, securityModel);
 		auto format = PprfOutputFormat{};
 		if (SdNoiseDistribution::Regular == noiseType)
 		{

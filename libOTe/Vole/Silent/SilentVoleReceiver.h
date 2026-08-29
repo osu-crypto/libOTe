@@ -620,9 +620,11 @@ namespace osuCrypto
 			noiseType != SdNoiseDistribution::Stationary)
 			throw std::invalid_argument("Unknown noise type. " LOCATION);
 
-		const auto bitCount = coefficientGroupBitCount<G>(ctx);
+		const auto securityModel = SdNoiseSecurityModel{
+			coefficientRegularNoiseFactor<G>(ctx) };
 
-		auto param = syndromeDecodingConfigure(secParam, requestSize, mult, noiseType, bitCount);
+		auto param = syndromeDecodingConfigure(
+			secParam, requestSize, mult, noiseType, securityModel);
 		auto format = PprfOutputFormat{};
 		if (noiseType == SdNoiseDistribution::Regular)
 		{

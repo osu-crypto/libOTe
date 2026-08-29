@@ -14,6 +14,19 @@ namespace osuCrypto
         Stationary, // use the stationary noise model
     };
 
+    // Describes the worst-case linear-character decay caused by one selected
+    // regular-noise position. If delta is the codeword's relative weight, the
+    // one-sample bias is 1 - mRegularNoiseFactor * delta.
+    struct SdNoiseSecurityModel
+    {
+        double mRegularNoiseFactor = 2.0;
+
+        static constexpr SdNoiseSecurityModel binary()
+        {
+            return { 2.0 };
+        }
+    };
+
 
     inline std::ostream& operator<<(std::ostream& o, SdNoiseDistribution m)
     {
@@ -102,21 +115,12 @@ namespace osuCrypto
     constexpr MultType DefaultMultType = MultType::BlkAcc3x32;
 
 
-    // We get e^{-2t d/N} security against linear attacks, 
-    // with noise weight t and minDist d and code size N. 
-    // For regular we can be slightly more accurate with
-    //    (1 − 2d/N)^t
-    // which implies a bit security level of
-    // k = -t * log2(1 - 2d/N)
-    // t = -k / log2(1 - 2d/N)
-    //
-    //
-    // For stationary, we get
-    //    (1-d/N)^t
-    // 
-    // minDistRatio = d / N
-    // where d is the min dist and N is the code size.
-    u64 getRegNoiseWeight(double minDistRatio, u64 N, u64 secParam, SdNoiseDistribution noiseType);
+    u64 getRegNoiseWeight(
+        double pseudoMinDistRatio,
+        u64 N,
+        u64 secParam,
+        SdNoiseDistribution noiseType,
+        SdNoiseSecurityModel securityModel);
 
 
     class EACode;
@@ -202,25 +206,21 @@ namespace osuCrypto
     // * requestSize the compressed vector size. 
     // * multType the code to be used.
     // * noiseType the choice distribution
-    // * groupBitCount the bit count of the subfield or smallest subgroup. 
-    //   For example, Z2k should be 1 because you have the Z2 subgroup.
+    // * securityModel describes the regular-noise coefficient distribution.
     inline SdConfig syndromeDecodingConfigure(
         u64 secParam,
         u64 requestSize,
         MultType multType, 
         SdNoiseDistribution noiseType,
-        u64 groupBitCount)
+        SdNoiseSecurityModel securityModel)
     {
 		constexpr u64 maxSecurityParameter = 1024;
 		constexpr u64 maxRequestSize = std::numeric_limits<u32>::max();
-		constexpr u64 maxGroupBitCount = std::numeric_limits<u16>::max();
 
 		if (secParam > maxSecurityParameter)
 			throw std::invalid_argument("Syndrome-decoding security parameter exceeds the supported range. " LOCATION);
 		if (requestSize > maxRequestSize)
 			throw std::invalid_argument("Syndrome-decoding request size exceeds the supported range. " LOCATION);
-		if (groupBitCount > maxGroupBitCount)
-			throw std::invalid_argument("Syndrome-decoding group bit count exceeds the supported range. " LOCATION);
 
         double minDist = 0;
         u64 scaler = 0;
@@ -263,11 +263,6 @@ namespace osuCrypto
             break;
         }
 
-        // for small fields and SD we use the conservative parameters.
-        // otherwise just use the normal SD parameters. 
-        if (groupBitCount > 4 && noiseType == SdNoiseDistribution::Stationary)
-            noiseType = SdNoiseDistribution::Regular;
-
         SdConfig config;
 
         auto baseSize = roundUpTo(requestSize * scaler, 2);
@@ -278,7 +273,8 @@ namespace osuCrypto
 
         if (preferPow2)
         {
-            config.mNumPartitions = roundUpTo(getRegNoiseWeight(minDist, baseSize, secParam, noiseType), 2);
+            config.mNumPartitions = roundUpTo(getRegNoiseWeight(
+                minDist, baseSize, secParam, noiseType, securityModel), 2);
             config.mSizePer = std::max<u64>(4, roundUpTo(baseSize / config.mNumPartitions, 2));
 		    config.mNoiseVectorSize =  std::max(baseSize, config.mNumPartitions * config.mSizePer);
 
@@ -295,7 +291,8 @@ namespace osuCrypto
 			(config.mNoiseVectorSize > (config.mNumPartitions * config.mSizePer * 1.05)))
         {
 			// non power of two case. 
-            config.mNumPartitions = roundUpTo(getRegNoiseWeight(minDist, baseSize, secParam, noiseType), 2);
+            config.mNumPartitions = roundUpTo(getRegNoiseWeight(
+                minDist, baseSize, secParam, noiseType, securityModel), 2);
             config.mSizePer = std::max<u64>(4, roundUpTo(divCeil(baseSize, config.mNumPartitions), 2));
 			config.mNoiseVectorSize = config.mNumPartitions * config.mSizePer;
         }

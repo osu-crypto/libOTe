@@ -293,7 +293,8 @@ namespace osuCrypto
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);
 
 		constexpr u64 secParam = 128;
-		auto param = syndromeDecodingConfigure(secParam, numOTs, multType, noiseType, 1);
+		auto param = syndromeDecodingConfigure(
+			secParam, numOTs, multType, noiseType, SdNoiseSecurityModel::binary());
 		auto format = PprfOutputFormat{};
 
 		if (SdNoiseDistribution::Regular == noiseType)

@@ -339,6 +339,13 @@ namespace osuCrypto
         }
 
     public:
+		template<typename V>
+		constexpr double regularNoiseFactor() const
+		{
+			requireVector<V>();
+			return coefficientRegularNoiseFactor<F>(mScalarCtx);
+		}
+
 		OC_FORCEINLINE bool isUnit(const Vector& value) const
 		{
 			bool result = true;
