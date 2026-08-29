@@ -6386,3 +6386,52 @@ Verification:
 
 - `RingLpn_Audit_test` accepts the boundary-valid offsets and rejects an offset
   equal to the block size.
+
+## AUD-198: Regular integer Silent VOLE sampled nonunit noise coefficients
+
+Status: fixed
+
+Affected code:
+
+- Silent VOLE receiver base-correlation generation and installation.
+- Silent VOLE coefficient-context sampling.
+
+Concern:
+
+Regular sparse noise over an integer ring requires a nonzero unit at every
+selected position. For `Z_{2^k}`, these are exactly the odd elements. The
+current generator sampled uniform ring elements, so projecting modulo two
+removed about half of the selected errors. An older implementation attempted
+to enforce odd coefficients but inverted its parity branch and instead made
+every generated coefficient even.
+
+Stationary noise has different semantics: its coefficients remain uniform ring
+elements, including even elements and zero. Its parameter selection must
+account for the resulting projection through a larger noise weight rather than
+conditioning each coefficient to be a unit.
+
+Impact:
+
+Regular integer Silent VOLE used less effective noise than its regular-weight
+parameter selection assumed. In the older all-even implementation, reduction
+modulo two removed the noise entirely. The current uniform implementation did
+not remove it entirely, but still reduced the effective binary noise weight.
+
+Resolution:
+
+Regular base generation now samples multiplicative units through the
+coefficient context. The default integer context maps one uniform sample to a
+uniform odd element; fields reject zero; product-ring contexts sample a unit in
+every lane. Externally supplied regular bases are validated before protocol
+state changes. Stationary generation deliberately retains uniform
+coefficients, and the existing stationary integer parameter path supplies its
+larger weight. Sampling and validation occur only during setup; expansion and
+encoding loops are unchanged.
+
+Verification:
+
+- `Vole_Silent_NoiseSampling_test` checks integer and product-ring unit
+  sampling, rejects an externally supplied even regular coefficient, and
+  verifies that stationary integer parameters use a larger weight.
+- The regular Silent VOLE parameter sweep, stationary Silent VOLE test,
+  external-base test, and state-clear test pass in the Release AVX2 build.

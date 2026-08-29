@@ -293,6 +293,7 @@ namespace tests_libOTe
 			tc.add("Vole_Silent_mal_test                    ", Vole_Silent_mal_test);
 			tc.add("Vole_Silent_malBase_test                ", Vole_Silent_malBase_test);
 			tc.add("Vole_Silent_Clear_test                  ", Vole_Silent_Clear_test);
+			tc.add("Vole_Silent_NoiseSampling_test          ", Vole_Silent_NoiseSampling_test);
 			tc.add("Vole_Silent_Rounds_test                 ", Vole_Silent_Rounds_test);
 
 			tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);

@@ -339,6 +339,24 @@ namespace osuCrypto
         }
 
     public:
+		OC_FORCEINLINE bool isUnit(const Vector& value) const
+		{
+			bool result = true;
+			static_for<N>([&](auto i)
+			{
+				result &= isRegularNoiseUnit(value.v[i], mScalarCtx);
+			});
+			return result;
+		}
+
+		OC_FORCEINLINE void sampleUnit(Vector& value, PRNG& prng) const
+		{
+			static_for<N>([&](auto i)
+			{
+				sampleRegularNoiseUnit(value.v[i], prng, mScalarCtx);
+			});
+		}
+
         template<typename V>
         bool characteristicTwo() const
         {

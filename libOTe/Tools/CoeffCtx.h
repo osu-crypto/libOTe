@@ -212,6 +212,20 @@ namespace osuCrypto {
             }
         }
 
+		// Uniformly sample a unit of the default integer ring Z_{2^k}. Setting
+		// the low bit maps a uniform ring element to a uniform odd element.
+		template<typename G>
+		OC_FORCEINLINE void sampleUnit(G& ret, PRNG& prng) const
+		{
+			fromBlock(ret, prng.get<block>());
+			if (!binaryDecomposition(ret)[0])
+			{
+				auto oneValue = make<G>();
+				one(oneValue);
+				plus(ret, ret, oneValue);
+			}
+		}
+
 		// Return the F element with value 2^power. The unchecked form is for
 		// callers that validate a whole decomposition domain before a hot loop.
 		template<typename F>
@@ -728,6 +742,57 @@ namespace osuCrypto {
 
 	template<typename F, typename G = F>
 	using DefaultCoeffCtx = typename DefaultCoeffCtx_t<F, G>::type;
+
+	// Regular-noise LPN samples require every selected coefficient to be a
+	// multiplicative unit. This is nonzero for fields and odd for the default
+	// integer rings Z_{2^k}. Product and other nonfield contexts can override
+	// the fallback by providing sampleUnit(G&, PRNG&) and isUnit(const G&).
+	template<typename G, typename Ctx>
+	OC_FORCEINLINE bool isRegularNoiseUnit(const G& value, const Ctx& ctx)
+	{
+		if (ctx.template isField<G>())
+		{
+			auto zero = ctx.template make<G>();
+			ctx.zero(zero);
+			return !ctx.eq(value, zero);
+		}
+
+		if constexpr (requires { ctx.isUnit(value); })
+			return ctx.isUnit(value);
+
+		// CoeffCtxInteger models Z_{2^k}, whose units are exactly the odd
+		// elements. Custom nonfield rings should provide isUnit().
+		auto copy = value;
+		return ctx.binaryDecomposition(copy)[0];
+	}
+
+	template<typename G, typename Ctx>
+	OC_FORCEINLINE void sampleRegularNoiseUnit(G& value, PRNG& prng, const Ctx& ctx)
+	{
+		if (ctx.template isField<G>())
+		{
+			if constexpr (requires { value = ctx.sampleNonZero(prng); })
+			{
+				value = ctx.sampleNonZero(prng);
+			}
+			else
+			{
+				do
+					ctx.fromBlock(value, prng.get<block>());
+				while (!isRegularNoiseUnit(value, ctx));
+			}
+		}
+		else if constexpr (requires { ctx.sampleUnit(value, prng); })
+		{
+			ctx.sampleUnit(value, prng);
+		}
+		else
+		{
+			do
+				ctx.fromBlock(value, prng.get<block>());
+			while (!isRegularNoiseUnit(value, ctx));
+		}
+	}
 
 	// Preserve compatibility with custom coefficient contexts that predate the
 	// explicit additive-group interface.
