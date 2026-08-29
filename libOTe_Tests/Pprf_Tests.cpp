@@ -1,6 +1,7 @@
 #include "Pprf_Tests.h"
 
 #include "libOTe/Tools/Pprf/RegularPprf.h"
+#include "libOTe/Tools/Pprf/HalfTreePprf.h"
 #include "libOTe/Tools/Pprf/StationaryPprf.h"
 #include "cryptoTools/Common/TestCollection.h"
 
@@ -15,137 +16,57 @@ using namespace tests_libOTe;
 template<typename F, typename G, typename Ctx>
 void RegularPprf_expandOne_test_impl(u64 domain, bool program)
 {
-
-	u64 depth = log2ceil(domain);
-	auto pntCount = 8ull;
+	const u64 pntCount = 8;
 	PRNG prng(CCBlock);
-
-	RegularPprfSender<F, Ctx> sender;
-	RegularPprfReceiver<F,  Ctx> recver;
-
-	sender.configure(domain, pntCount);
-	recver.configure(domain, pntCount);
-
-	F value = prng.get();
-	sender.setValue({ &value, 1 });
-
-	auto numOTs = sender.baseOtCount();
-	std::vector<std::array<block, 2>> sendOTs(numOTs);
-	std::vector<block> recvOTs(numOTs);
-	BitVector recvBits = recver.sampleChoiceBits(prng);
-
-
-	prng.get(sendOTs.data(), sendOTs.size());
-	for (u64 i = 0; i < numOTs; ++i)
-	{
-		recvOTs[i] = sendOTs[i][recvBits[i]];
-	}
-	sender.setBase(sendOTs);
-	recver.setBase(recvOTs);
-
-
-	block seed = CCBlock;
-
-	auto sLevels = std::vector<span<AlignedArray<block, 8>>>{};
-	auto rLevels = std::vector<span<AlignedArray<block, 8>>>{};
-	auto sBuff = std::vector<u8>{};
-	auto sSums = span<std::array<block, 2>>{};
-	auto sLast = span<u8>{};
-
-	//pprf::TreeAllocator mTreeAlloc;
-	sLevels.resize(depth);
-	rLevels.resize(depth);
-
-
-	//mTreeAlloc.reserve(2, (1ull << depth) + 2);
-	pprf::ExpandTreeBuffer sTree, rTree;
-
-	pprf::allocateExpandTree(domain, sTree, sLevels, false);
-	pprf::allocateExpandTree(domain, rTree, rLevels, false);
-	using VecF = typename Ctx::template Vec<F>;
-	VecF sLeafLevel(8ull * domain);
-	VecF rLeafLevel(8ull * domain);
-	u64 leafOffset = 0;
-
 	Ctx ctx;
-	pprf::allocateExpandBuffer<F, Ctx>(depth - 1, pntCount, program, sBuff, sSums, sLast, ctx);
+	RegularPprfSender<F, Ctx> sender;
+	RegularPprfReceiver<F, Ctx> receiver;
+	sender.configure(domain, pntCount);
+	receiver.configure(domain, pntCount);
 
-	std::vector<u64> points(recver.mPntCount);
-	recver.getPoints(points, PprfOutputFormat::ByLeafIndex);
+	auto sendOts = std::vector<std::array<block, 2>>(sender.baseOtCount());
+	auto recvOts = std::vector<block>(sender.baseOtCount());
+	auto choices = receiver.sampleChoiceBits(prng);
+	prng.get(sendOts.data(), sendOts.size());
+	for (u64 i = 0; i < sendOts.size(); ++i)
+		recvOts[i] = sendOts[i][choices[i]];
+	sender.setBase(sendOts);
+	receiver.setBase(recvOts);
 
-	sender.expandOne(seed, 0, program, sLevels, sLeafLevel, leafOffset, sSums, sLast, ctx);
-	recver.expandOne(0, program, rLevels, rLeafLevel, leafOffset, sSums, sLast, points, ctx);
+	auto values = ctx.template makeVec<F>(pntCount);
+	for (auto& value : values)
+		ctx.fromBlock(value, prng.get<block>());
+	auto senderOutput = ctx.template makeVec<F>(pntCount * domain);
+	auto receiverOutput = ctx.template makeVec<F>(pntCount * domain);
+	auto points = receiver.getPoints(PprfOutputFormat::ByTreeIndex);
+	auto sockets = coproto::LocalAsyncSocket::makePair();
+	auto send = sender.expand(
+		sockets[0], values, prng.get(), senderOutput,
+		PprfOutputFormat::ByTreeIndex, program, 1, ctx);
+	auto recv = receiver.expand(
+		sockets[1], receiverOutput,
+		PprfOutputFormat::ByTreeIndex, program, 1, ctx);
+	macoro::sync_wait(macoro::when_all_ready(std::move(send), std::move(recv)));
 
-	bool failed = false;
-	for (u64 i = 0; i < pntCount; ++i)
+	for (u64 tree = 0; tree < pntCount; ++tree)
 	{
-		// the index of the leaf node that is active.
-		auto leafIdx = points[i];
-		//std::cout << "active leaf idx = " << leafIdx << std::endl;
-		for (u64 d = 1; d < depth; ++d)
+		for (u64 leaf = 0; leaf < domain; ++leaf)
 		{
-			//u64 width = std::min<u64>(domain, 1ull << d);
-			auto width = divCeil(domain, 1ull << (depth - d));
-
-			// The index of the active child node.
-			auto activeChildIdx = leafIdx >> (depth - d);
-
-			// The index of the active child node sibling.
-
-			for (u64 j = 0; j < width; ++j)
+			const auto index = tree * domain + leaf;
+			auto expected = ctx.template makeVec<F>(1);
+			if (leaf == points[tree])
 			{
-				//std::cout
-				//    << " " << sLevels[d][j][i].get<u16>()[0]
-				//    << " " << rLevels[d][j][i].get<u16>()[0]
-				//    ;
-
-				if (j == activeChildIdx)
-				{
-					//std::cout << "*";
-					continue;
-				}
-
-
-				if (sLevels[d][j][i] != rLevels[d][j][i])
-				{
-					//std::cout << " < ";
-					throw RTE_LOC;
-					failed = true;
-				}
-
-				//std::cout << ", ";
-			}
-			//std::cout << std::endl;
-		}
-
-		MatrixView<F> sLeaves(sLeafLevel.data(), sLeafLevel.size() / 8, 8);
-		MatrixView<F> rLeaves(rLeafLevel.data(), rLeafLevel.size() / 8, 8);
-
-		for (u64 j = 0; j < sLeaves.rows(); ++j)
-		{
-			if (j == leafIdx)
-			{
-				F exp;
-				ctx.plus(exp, sLeaves(j, i), value);
-				if (program && exp != rLeaves(j, i))
-				{
-					std::cout << i << " exp " << ctx.str(exp) << " " << ctx.str(rLeaves(j, i)) << std::endl;
-					throw RTE_LOC;
-				}
+				if (program)
+					ctx.plus(expected[0], senderOutput[index], values[tree]);
+				else
+					ctx.zero(expected.begin(), expected.end());
 			}
 			else
-			{
-				if (sLeaves(j, i) != rLeaves(j, i))
-				{
-					std::cout << "j " << j << " i " << i << " sender " << ctx.str(sLeaves(j, i)) << " recver " << ctx.str(rLeaves(j, i)) << std::endl;
-					throw RTE_LOC;
-				}
-			}
+				ctx.copy(expected[0], senderOutput[index]);
+			if (!ctx.eq(expected[0], receiverOutput[index]))
+				throw RTE_LOC;
 		}
 	}
-
-	if (failed)
-		throw RTE_LOC;
 }
 
 void RegularPprf_expandOne_test(const oc::CLP& cmd)
@@ -196,6 +117,20 @@ void Pprf_Audit_Test(const oc::CLP&)
 	// The high half of the oversized sample must affect modular reduction.
 	if (pprf::reduce128Mod(0, 1, 3) != 1)
 		throw UnitTestFail("PPRF 128-bit modular reduction ignored its high limb");
+
+	// Native physical indexing must compact every valid logical leaf exactly
+	// once, including ragged final subtrees.
+	for (u64 domain : { 2, 4, 6, 32, 3242, 4522 })
+	{
+		BitVector seen(domain);
+		for (u64 logical = 0; logical < domain; ++logical)
+		{
+			const auto physical = pprf::physicalLeafIndex(domain, logical);
+			if (physical >= domain || seen[physical])
+				throw UnitTestFail("PPRF physical leaf mapping is not a bijection");
+			seen[physical] = 1;
+		}
+	}
 
 	PRNG prng(CCBlock);
 	AlignedUnVector<block> noValue;
@@ -476,7 +411,7 @@ void Pprf_test_impl(
 
 		break;
 	}
-	case osuCrypto::PprfOutputFormat::Interleaved:
+	case osuCrypto::PprfOutputFormat::ByPhysicalIndex:
 	case osuCrypto::PprfOutputFormat::Callback:
 	{
 
@@ -555,8 +490,7 @@ void Pprf_test_impl(
 
 }
 
-template<
-	typename F, typename Ctx>
+template<typename F, typename Ctx>
 void RegularPprf_test_impl(
 	u64 domain,
 	u64 numPoints,
@@ -575,6 +509,56 @@ void RegularPprf_test_impl(
 			format,
 			eagerSend,
 			verbose);
+}
+
+template<typename F, typename Ctx>
+void HalfTreePprf_test_impl(
+	u64 domain,
+	u64 numPoints,
+	bool program,
+	PprfOutputFormat format,
+	bool eagerSend,
+	bool verbose)
+{
+	Pprf_test_impl<
+		HalfTreePprfSender<F, Ctx>,
+		HalfTreePprfReceiver<F, Ctx>,
+		F, F, Ctx>(
+			domain,
+			numPoints,
+			program,
+			format,
+			eagerSend,
+			verbose);
+}
+
+void HalfTreePprf_test(const oc::CLP& cmd)
+{
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
+	const auto verbose = cmd.isSet("v");
+	for (auto domain : { 32, 3242 })
+	{
+		for (auto format : {
+			PprfOutputFormat::ByLeafIndex,
+			PprfOutputFormat::ByTreeIndex,
+			PprfOutputFormat::ByPhysicalIndex,
+			PprfOutputFormat::Callback })
+		{
+			for (auto program : { false, true })
+			{
+				for (auto eager : { false, true })
+				{
+					HalfTreePprf_test_impl<block, CoeffCtxGF2>(
+						domain, 8, program, format, eager, verbose);
+					HalfTreePprf_test_impl<u64, CoeffCtxInteger>(
+						domain, 8, program, format, eager, verbose);
+				}
+			}
+		}
+	}
+#else
+	throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }
 
 //template<
@@ -600,9 +584,9 @@ void RegularPprf_test_impl(
 //            verbose);
 //}
 
-void RegularPprf_inter_test(const CLP& cmd)
+void RegularPprf_PhysicalIndex_test(const CLP& cmd)
 {
-	auto f = PprfOutputFormat::Interleaved;
+	auto f = PprfOutputFormat::ByPhysicalIndex;
 	auto v = cmd.isSet("v");
 	for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true, false }) for (auto e : { true, false })
 	{
@@ -807,7 +791,7 @@ void StationaryPprf_test_impl(
 
 			break;
 		}
-		case osuCrypto::PprfOutputFormat::Interleaved:
+		case osuCrypto::PprfOutputFormat::ByPhysicalIndex:
 			//case osuCrypto::PprfOutputFormat::Callback:
 		{
 
@@ -917,7 +901,7 @@ namespace {
 }
 
 void RegularPprf_expandOne_test(const oc::CLP& cmd) { throwDisabled(); }
-void RegularPprf_inter_test(const oc::CLP& cmd) { throwDisabled(); }
+void RegularPprf_PhysicalIndex_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_ByLeafIndex_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_ByTreeIndex_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_callback_test(const oc::CLP& cmd) { throwDisabled(); }
