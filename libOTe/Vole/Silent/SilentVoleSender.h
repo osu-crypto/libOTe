@@ -138,6 +138,9 @@ namespace osuCrypto
 		// BaseExtend requires less compute but more rounds
 		SilentBaseType mBaseType = SilentBaseType::BaseExtend;
 
+		// Distribution used for the sparse LPN noise.
+		SdNoiseDistribution mNoiseType = SdNoiseDistribution::Regular;
+
 		// Seed for syndrome decoding
 		block mCodeSeed = ZeroBlock; 
 
@@ -220,7 +223,9 @@ namespace osuCrypto
 		 * @param requestSize Number of VOLE correlations to generate
 		 * @param malType Security type (SemiHonest or Malicious)
 		 * @param type Type of base OT to use (BaseExtend or Base)
-		 * @param noiseType Distribution of the noise vector (Regular or Stationary)
+		 * @param noiseType Distribution of the noise vector. Regular uses a
+		 * multiplicative unit at every selected position. Stationary uses uniform
+		 * coefficients; small-group contexts use a larger weight.
 		 * @param secParam Security parameter (typically 128)
 		 * @param ctx Context object for F, G operations (default constructed if not provided)
 		 * @param mult the lpn compression matrix type to use (default DefaultMultType)
@@ -534,6 +539,7 @@ namespace osuCrypto
 		mSecParam = secParam;
 		mRequestSize = requestSize;
 		mBaseType = type;
+		mNoiseType = noiseType;
 		mLpnMultType = mult;
 		mSecurityType = malType;
 		mNumPartitions = config.mNumPartitions;
@@ -863,6 +869,7 @@ namespace osuCrypto
 		mNumPartitions = 0;
 		mSizePer = 0;
 		mSecParam = 0;
+		mNoiseType = SdNoiseDistribution::Regular;
 		mCodeSeed = ZeroBlock;
 		mDerandomizeMalCheck = false;
 	}
