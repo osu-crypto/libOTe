@@ -17,6 +17,7 @@
 #include <limits>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -203,6 +204,10 @@ namespace osuCrypto
 		static constexpr u64 Weight = BlockCount * PointsPerBlock;
 		static constexpr u64 GroupCount =
 			CompressionFactor * CompressionFactor * Ctx::extensionDegree;
+		using PackedPublic = std::conditional_t<
+			CompressionFactor * Ctx::fieldBits <= 8,
+			u8,
+			std::conditional_t<CompressionFactor * Ctx::fieldBits <= 16, u16, u32>>;
 		static constexpr bool PowerOfTwoCoordinates =
 			Ctx::coordinateSize == (u64{ 1 } << Ctx::coordinateBits);
 		static_assert(Ctx::extensionDegree > 0,
@@ -250,6 +255,7 @@ namespace osuCrypto
 				mPublicA = std::move(source.mPublicA);
 				mPositionGmw = std::move(source.mPositionGmw);
 				mPositionCircuit = std::move(source.mPositionCircuit);
+				mPositionOleCount = std::exchange(source.mPositionOleCount, 0);
 				mSendOts = std::move(source.mSendOts);
 				mRecvOts = std::move(source.mRecvOts);
 				mRecvChoices = std::move(source.mRecvChoices);
@@ -344,16 +350,21 @@ namespace osuCrypto
 			}
 			Gmw positionGmw;
 			positionGmw.init(partyIdx, positionInstances, positionCircuit);
+			const auto positionOleCount = positionGmw.oleCount();
 
-			std::vector<u32> publicA(domain);
+			// Expansion returns a basis-major prefix and never reads a public
+			// multiplier past that prefix. Avoid materializing the unused tail of
+			// the much larger secure ring domain.
+			std::vector<PackedPublic> publicA(std::min(domain, numOles));
 			PRNG publicPrng(publicSeed);
 			auto coeffCtx = ctx.dpfCoeffCtx();
-			for (auto& packed : publicA)
+			for (auto& output : publicA)
 			{
-				packed = Ext::one().index();
+				u32 packed = Ext::one().index();
 				for (u64 polynomial = 1; polynomial < CompressionFactor; ++polynomial)
 					packed |= u32(coeffCtx.sample(publicPrng).index()) <<
 						(polynomial * Ctx::fieldBits);
+				output = static_cast<PackedPublic>(packed);
 			}
 
 			clear();
@@ -367,6 +378,7 @@ namespace osuCrypto
 			mPublicA = std::move(publicA);
 			mPositionCircuit = std::move(positionCircuit);
 			mPositionGmw = std::move(positionGmw);
+			mPositionOleCount = positionOleCount;
 		}
 
 		bool isInitialized() const { return mN != 0; }
@@ -410,7 +422,7 @@ namespace osuCrypto
 			else
 				result.mSendOtCount += tensorOtCount;
 
-			result.mOleCount = mPositionGmw.oleCount();
+			result.mOleCount = mPositionOleCount;
 			return result;
 		}
 
@@ -568,20 +580,20 @@ namespace osuCrypto
 				}
 
 				// Transform one sparse polynomial at a time. This keeps the working
-				// set O(N); the eight public multipliers remain packed in one u32 per
-				// frequency-domain element.
-				std::vector<Ext> sparse(mN, Ext::zero());
+				// set O(N); the public multipliers remain packed in the smallest
+				// integral word that holds them.
+				std::vector<Ext> work(mN, Ext::zero());
 				for (u64 polynomial = 0; polynomial < CompressionFactor; ++polynomial)
 				{
-					std::fill(sparse.begin(), sparse.end(), Ext::zero());
+					std::fill(work.begin(), work.end(), Ext::zero());
 					const auto coefficientOffset = polynomial * Weight;
 					for (u64 point = 0; point < Weight; ++point)
-						sparse[fullPosition(point, mSparsePositions[coefficientOffset + point])] +=
+						work[fullPosition(point, mSparsePositions[coefficientOffset + point])] +=
 							mSparseCoefficients[coefficientOffset + point];
-					mCtx.transform(sparse, mDimension);
+					mCtx.transform(work, mDimension);
 					const auto needed = std::min<u64>(mN, x.size());
 					for (u64 index = 0; index < needed; ++index)
-						sparse[index] *= publicValue(index, polynomial);
+						work[index] *= publicValue(index, polynomial);
 
 					for (u64 basis = 0; basis < Ctx::extensionDegree; ++basis)
 					{
@@ -591,15 +603,14 @@ namespace osuCrypto
 						const auto count = std::min<u64>(mN, x.size() - outputOffset);
 						for (u64 index = 0; index < count; ++index)
 							x[outputOffset + index] +=
-								mCtx.trace(traceBasis[basis] * sparse[index]);
+								mCtx.trace(traceBasis[basis] * work[index]);
 					}
 				}
 
-				std::vector<Ext> product(mN);
 				typename RegularDpf<Ext, DpfCoeffCtx>::CompactScratch dpfScratch;
 				for (u64 group = 0; group < GroupCount; ++group)
 				{
-					std::fill(product.begin(), product.end(), Ext::zero());
+					std::fill(work.begin(), work.end(), Ext::zero());
 					RegularDpf<Ext, DpfCoeffCtx>::expand(
 						mPartyIdx,
 						mBlockSize,
@@ -608,10 +619,10 @@ namespace osuCrypto
 						[&](u64 tree, u64 leaf, Ext value, block) {
 							const auto left = tree / Weight;
 							const auto right = tree - left * Weight;
-							product[productBlock(group, left, right) + BlockCount * leaf] += value;
+							work[productBlock(group, left, right) + BlockCount * leaf] += value;
 						},
 						mCtx.dpfCoeffCtx());
-					mCtx.transform(product, mDimension);
+					mCtx.transform(work, mDimension);
 
 					const auto frobeniusPower = group / (CompressionFactor * CompressionFactor);
 					const auto pair = group % (CompressionFactor * CompressionFactor);
@@ -619,7 +630,7 @@ namespace osuCrypto
 					const auto rightPolynomial = pair % CompressionFactor;
 					const auto needed = std::min<u64>(mN, z.size());
 					for (u64 index = 0; index < needed; ++index)
-						product[index] *= publicValue(index, leftPolynomial) *
+						work[index] *= publicValue(index, leftPolynomial) *
 							mCtx.frobenius(publicValue(index, rightPolynomial), frobeniusPower);
 					for (u64 basis = 0; basis < Ctx::extensionDegree; ++basis)
 					{
@@ -629,7 +640,7 @@ namespace osuCrypto
 						const auto count = std::min<u64>(mN, z.size() - outputOffset);
 						for (u64 index = 0; index < count; ++index)
 							z[outputOffset + index] += mCtx.trace(
-								traceFactors[frobeniusPower][basis] * product[index]);
+								traceFactors[frobeniusPower][basis] * work[index]);
 					}
 				}
 
@@ -655,6 +666,7 @@ namespace osuCrypto
 			mPublicA.clear();
 			mPositionGmw.clear();
 			mPositionCircuit = {};
+			mPositionOleCount = 0;
 		}
 
 	private:
@@ -665,10 +677,11 @@ namespace osuCrypto
 		u64 mN = 0;
 		u64 mBlockSize = 0;
 		block mPublicSeed{};
-		std::vector<u32> mPublicA;
+		std::vector<PackedPublic> mPublicA;
 
 		Gmw mPositionGmw;
 		BetaCircuit mPositionCircuit;
+		u64 mPositionOleCount = 0;
 		std::vector<std::array<block, 2>> mSendOts;
 		std::vector<block> mRecvOts;
 		BitVector mRecvChoices;
@@ -700,9 +713,12 @@ namespace osuCrypto
 
 		void clearBaseCors()
 		{
-			mSendOts.clear();
-			mRecvOts.clear();
-			mRecvChoices.resize(0);
+			// These correlations are one-shot, and setBaseCors builds fresh
+			// replacement storage. Release their capacity once setup consumes them.
+			mSendOts = {};
+			mRecvOts = {};
+			mRecvChoices = {};
+			mPositionGmw.clear();
 			mBaseCorsAvailable = false;
 		}
 
@@ -917,7 +933,8 @@ namespace osuCrypto
 		{
 			const auto mask = (u32{ 1 } << Ctx::fieldBits) - 1;
 			return Ext::fromIndex(static_cast<u8>(
-				(mPublicA[index] >> (polynomial * Ctx::fieldBits)) & mask));
+				(static_cast<u32>(mPublicA[index]) >>
+					(polynomial * Ctx::fieldBits)) & mask));
 		}
 
 		u64 productBlock(u64 group, u64 leftPoint, u64 rightPoint) const
