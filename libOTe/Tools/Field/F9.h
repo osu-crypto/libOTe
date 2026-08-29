@@ -197,6 +197,14 @@ namespace osuCrypto
 	// generators (1, 2, u, 2u).
 	struct CoeffCtxF9 : CoeffCtxInteger
 	{
+		// Multiplication by u mixes the two F3 components. In particular, the
+		// prime-subfield basis element 1 maps outside F3. Binary structured LPN
+		// codes require this instead of the scalar context's identity mulConst.
+		OC_FORCEINLINE void mulConst(F9& ret, const F9& value) const
+		{
+			ret = value * F9::fromCoefficients(0, 1);
+		}
+
 		template<typename F>
 		constexpr double regularNoiseFactor() const
 		{

@@ -142,15 +142,22 @@ namespace osuCrypto {
 			return eq(v, z); // char 2 if 1+1 = 0;
 		}
 
-		// For the base field G is an extension fields, 
-		// mulConst should multiply x by some constant in G to linearly
-		// mix the components. Most of the LPN codes this library
-		// uses are binary and so for extension field this would
-		// result in the componets not interactive. This can lead 
-		// to a splitting attack. To fix this we multiply by some 
-		// non-zero G element.
+		// Contract for the fixed linear mixing operation used by the binary
+		// structured LPN encoders (EA, ExConv, BlkAcc, and Tungsten):
 		//
-		// If your type is a scaler, e.g. Fp or Z2k, just return x.
+		// * A scalar prime-field or base-ring context, such as Fp or Z_(2^k),
+		//   may use the identity below.
+		// * Every extension-field context must override mulConst and multiply by
+		//   a fixed element outside its prime subfield. Otherwise the encoder is
+		//   a direct sum of independent base-field codes, enabling a component-
+		//   splitting attack even when the nominal coefficient field is large.
+		// * Product/vector contexts must apply the scalar context's mulConst to
+		//   every lane. Product lanes remain independent, while the components
+		//   inside each extension-field lane are mixed.
+		//
+		// Implementations must support ret aliasing x; the encoding kernels use
+		// mulConst in place. The operation is fixed and deterministic so sender
+		// and receiver instantiate the same linear code.
 		template<typename F>
 		OC_FORCEINLINE void mulConst(F& ret, const F& x)const
 		{
@@ -604,7 +611,9 @@ namespace osuCrypto {
 			ret = lhs.gf128Mul(rhs);
 		}
 
-		// ret = x * 4234123421 mod 2^127 - 135
+		// Multiply by a fixed non-base-field element so binary structured codes
+		// mix all GF(2^128) components. This is the extension-field mulConst
+		// contract documented by CoeffCtxInteger.
 		OC_FORCEINLINE void mulConst(block& ret, const block& x)const
 		{
 			// multiplication y modulo mod
