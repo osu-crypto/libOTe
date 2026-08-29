@@ -233,6 +233,9 @@ namespace osuCrypto
 	}
 
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+	static_assert(sizeof(AnyFieldF2Ole::PackedPublic) == sizeof(u16));
+	static_assert(sizeof(AnyFieldF3Ole::PackedPublic) == sizeof(u32));
+
 	struct AnyFieldOleTestParams
 	{
 		static constexpr u64 compressionFactor = 2;
