@@ -188,10 +188,11 @@ namespace tests_libOTe
 			tc.add("BlkAccCode_Audit_Test                   ", BlkAccCode_Audit_Test);
 			
 			tc.add("RegularPprf_expandOne_test               ", RegularPprf_expandOne_test);
-			tc.add("RegularPprf_inter_test                   ", RegularPprf_inter_test);
+			tc.add("RegularPprf_PhysicalIndex_test           ", RegularPprf_PhysicalIndex_test);
 			tc.add("RegularPprf_ByLeafIndex_test             ", RegularPprf_ByLeafIndex_test);
 			tc.add("RegularPprf_ByTreeIndex_test             ", RegularPprf_ByTreeIndex_test);
 			tc.add("RegularPprf_callback_test                ", RegularPprf_callback_test);
+			tc.add("HalfTreePprf_test                         ", HalfTreePprf_test);
 			tc.add("Pprf_Audit_Test                           ", Pprf_Audit_Test);
 			tc.add("StationaryPprf_inter_test                ", StationaryPprf_inter_test);
 
