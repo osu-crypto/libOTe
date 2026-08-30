@@ -6472,13 +6472,18 @@ units use factor 2; stationary noise uses factor 1. The selector also adds a
 9/8 margin to small binary regular instances, where current estimators place
 the former `N=2048, t=128` parameters below 128 bits. The rationale, formulas,
 tradeoff, and remaining estimator uncertainty are documented beside the code.
+For stationary noise, the independent attack floor counts secret support
+positions rather than the nonzero coefficients in one sample. This matches the
+zero-inclusive SSD algebraic model; compensating again for zeros would partially
+turn the explicitly chosen 64-bit linear-test guard back into a 128-bit guard.
 All calculations occur during configuration and do not affect expansion loops.
 
 Verification:
 
 - `Vole_Silent_NoiseSampling_test` checks the binary large-instance floor, the
   small-instance attack margin, an `F_9` regular-noise case, the large-field
-  limit, and the stationary 64-bit pseudo-distance floor.
+  limit, the stationary 64-bit pseudo-distance floor at distances 0.2 and 0.25,
+  and the independent 128-position stationary attack floor.
 
 ## AUD-201: Quasi-cyclic Silent VOLE decomposed extension-field elements
 
