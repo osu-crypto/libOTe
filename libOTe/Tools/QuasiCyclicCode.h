@@ -59,7 +59,11 @@ namespace osuCrypto
 			if (codeSize <= messageSize)
 				throw std::invalid_argument("Quasi-cyclic code size must exceed its message size. " LOCATION);
 
-			const auto primeModulus = nextPrime(messageSize);
+            // The quotient Phi_p(X) = (X^p - 1) / (X - 1) is irreducible
+            // over F_2 exactly when 2 is primitive modulo p. Merely choosing
+            // p prime can leave many small factors and enables reduced-ring
+            // attacks that the generic pseudo-distance estimate does not model.
+            const auto primeModulus = nextPrimeWithPrimitiveRootTwo(messageSize);
 			const auto paritySize = codeSize - messageSize;
 			const auto scalerMinusOne = 1 + (paritySize - 1) / primeModulus;
 			const auto polyBlockSize = 1 + (primeModulus - 1) / 128;

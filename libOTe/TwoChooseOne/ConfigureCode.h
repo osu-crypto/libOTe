@@ -54,10 +54,9 @@ namespace osuCrypto
         QuasiCyclic = 1,
 
         // https://eprint.iacr.org/2022/1014
-        ExAcc7 = 4, // fast
-        ExAcc11 = 5,// fast but more conservative
-        ExAcc21 = 6,
-        ExAcc40 = 7, // conservative
+        // Low fixed-weight EA parameters admit efficiently findable low-weight
+        // codewords. Only the conservative weight-41 mode is exposed.
+        ExAcc40 = 7,
 
         // https://eprint.iacr.org/2023/882
         ExConv7x24 = 8, //fast
@@ -79,15 +78,6 @@ namespace osuCrypto
             o << "QuasiCyclic";
             break;
 
-        case osuCrypto::MultType::ExAcc7:
-            o << "ExAcc7";
-            break;
-        case osuCrypto::MultType::ExAcc11:
-            o << "ExAcc11";
-            break;
-        case osuCrypto::MultType::ExAcc21:
-            o << "ExAcc21";
-            break;
         case osuCrypto::MultType::ExAcc40:
             o << "ExAcc40";
             break;
@@ -147,7 +137,10 @@ namespace osuCrypto
     )
     {
         scaler = 2;
-        minDist = 0.25; // estimated psuedo min dist
+        // A generator row has relative weight close to 1/4. This is a pseudo
+        // distance estimate; algebraic attacks are handled separately by
+        // requiring an irreducible quasi-cyclic modulus.
+        minDist = 0.25;
     }
 
 
@@ -162,16 +155,22 @@ namespace osuCrypto
         {
             sigma = 8;
             depth = 3;
+            // The concrete minimum distance is about 0.1. We use 0.15 as an
+            // aggressive pseudo-distance estimate: finding the lowest-weight
+            // words still requires exploiting the sampled global code.
+            minDist = 0.15;
         }
         else if (mult == MultType::BlkAcc3x32)
         {
             sigma = 32;
             depth = 3;
+            // The larger local state makes the known low-weight mechanism
+            // substantially harder to search than for sigma=8.
+            minDist = 0.20;
         }
         else
             throw RTE_LOC;
         scaler = 2;
-        minDist = 0.25; // estimated psuedo min dist
     }
 
     inline void TungstenConfigure(
@@ -179,7 +178,9 @@ namespace osuCrypto
         double& minDist)
     {
         mScaler = 2;
-        minDist = 0.25; // estimated psuedo min dist
+        // Tungsten is experimental and has no proof. Generator-row checks are
+        // consistent with a value near 1/4; retain explicit heuristic margin.
+        minDist = 0.20;
 
     }
 
@@ -228,9 +229,6 @@ namespace osuCrypto
         u64 scaler = 0;
         switch (multType)
         {
-        case osuCrypto::MultType::ExAcc7:
-        case osuCrypto::MultType::ExAcc11:
-        case osuCrypto::MultType::ExAcc21:
         case osuCrypto::MultType::ExAcc40:
         {
             u64 _1;

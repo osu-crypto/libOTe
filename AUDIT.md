@@ -6569,3 +6569,91 @@ Verification:
 - `Field_Audit_Test` checks that the GF(2^128) constant is outside every proper
   subfield, the exact F4 and F9 generator action including in-place calls, and
   lane-wise FVec<F4> mixing.
+
+## AUD-203: Quasi-cyclic modulus selection admitted small algebraic factors
+
+Status: fixed
+
+Affected code:
+
+- Quasi-cyclic Silent OT modulus selection.
+
+Concern:
+
+The quasi-cyclic encoder selected the first prime `p` at least as large as the
+requested output dimension. Primality alone does not make
+`(X^p - 1) / (X - 1)` irreducible over `F_2`; irreducibility additionally
+requires 2 to have multiplicative order `p - 1` modulo `p`. Some common request
+sizes selected highly reducible quotients. For example, a request of `2^16`
+selected `p = 65537`, where the order of 2 is only 32, producing 2048
+degree-32 factors. At least one of those factors has polynomial weight five.
+
+Impact:
+
+An attacker could project the quasi-cyclic LPN instance into much smaller
+factor rings. The projected regular error may become dense enough to prevent a
+practical attack, so this audit did not establish a concrete break. However,
+the generic pseudo-distance and decoding-attack floors did not model these
+reduced instances, leaving an unnecessary algebraic assumption in the QC
+parameter selection.
+
+Resolution:
+
+QC now selects the first prime `p` for which 2 is a primitive root. The
+distinct prime factors of `p - 1` are checked using modular exponentiation, so
+the selected quotient is irreducible over `F_2`. The padding cost is negligible
+at the target dimensions: requests of `2^16`, `2^17`, and `2^20` select 65539,
+131213, and 1048589, respectively, adding 3, 141, and 13 positions.
+
+Verification:
+
+- The deterministic number-theory audit test checks all three representative
+  modulus selections.
+- The existing quasi-cyclic encoder and Silent OT tests exercise the new
+  modulus through the supported binary protocol path.
+
+## AUD-204: Structured-code pseudo distances exceeded available evidence
+
+Status: fixed
+
+Affected code:
+
+- Silent OT and Silent VOLE structured-code parameter selection.
+- Protocol-facing low-weight expand-accumulate modes.
+
+Concern:
+
+Several compression modes used a pseudo minimum-distance ratio of 0.25 with no
+explicit margin. Expand-accumulate weights 7 and 11 were contradicted by both
+generator-row estimates and the efficient signature-collision attack of the
+Expand-Convolute analysis. Weight 21 also lacked enough evidence to retain as a
+production security choice. The block-accumulate paper estimates actual
+relative distance near 0.1, while its larger pseudo distance remains a
+computational-hardness heuristic. ExConv and experimental Tungsten similarly
+did not justify treating the generator-row mean as a lower bound.
+
+Impact:
+
+Overstating pseudo distance selected too few stationary or large-field noise
+positions for the intended 64-bit linear-test guard. Low-weight EA additionally
+admitted efficiently findable codewords far below its configured ratio. Binary
+regular noise was often protected by the independent 128-position attack
+floor, but that did not make the documented pseudo-distance claims accurate.
+
+Resolution:
+
+The protocol API removes EA weights 7, 11, and 21, retaining only weight 41 at
+pseudo distance 0.20. ExConv weights 7 and 21 now use 0.15 and 0.20. BA-3 with
+sigma 8 and 32 now uses 0.15 and 0.20. Tungsten remains explicitly experimental
+and uses 0.20. QC retains 0.25 after AUD-203 removes its separate algebraic
+factor concern. These are attack-visible pseudo-distance judgments, not claims
+about literal minimum distance; the distinction and construction-specific
+uncertainty are documented beside the selectors.
+
+Verification:
+
+- `EACode_config_test` checks that only the retained weight-41 production
+  configuration is selected.
+- `Vole_Silent_NoiseSampling_test` checks every approved pseudo-distance value
+  and rejects the retired numeric EA modes.
+- The Silent OT EA integration test now exercises only the retained mode.

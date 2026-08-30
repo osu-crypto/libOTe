@@ -118,6 +118,9 @@ namespace osuCrypto
 		}
 
 		if (nextPrime(1024) != 1031 ||
+			nextPrimeWithPrimitiveRootTwo(65536) != 65539 ||
+			nextPrimeWithPrimitiveRootTwo(131072) != 131213 ||
+			nextPrimeWithPrimitiveRootTwo(1048576) != 1048589 ||
 			!isPrime(18446744073709551557ull) ||
 			isPrime(341550071728321ull) ||
 			isPrime(std::numeric_limits<u64>::max()))

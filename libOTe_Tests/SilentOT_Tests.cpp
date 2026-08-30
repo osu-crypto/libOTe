@@ -869,9 +869,6 @@ void OtExt_Silent_ExAcc_Test(const CLP& cmd)
     const u64 n = cmd.getOr("n", 128);
     PRNG prng(toBlock(cmd.getOr("seed", 0)));
     const MultType types[] = {
-        MultType::ExAcc7,
-        MultType::ExAcc11,
-        MultType::ExAcc21,
         MultType::ExAcc40
     };
 
