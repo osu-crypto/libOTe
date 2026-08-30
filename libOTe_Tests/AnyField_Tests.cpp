@@ -277,6 +277,17 @@ namespace osuCrypto
 		static constexpr u64 maximumDimension = 8;
 	};
 
+	// Keep the RevCuckoo integration test bounded. Production AnyField parameter
+	// sets are exercised separately from this state-machine/correctness test.
+	struct AnyFieldF4RevCuckooTestParams
+	{
+		static constexpr u64 compressionFactor = 2;
+		static constexpr u64 blockDimensions = 1;
+		static constexpr u64 pointsPerBlock = 1;
+		static constexpr u64 minimumDimension = 5;
+		static constexpr u64 maximumDimension = 6;
+	};
+
 	// Test-only comparison policy for measuring the cost that generalized
 	// regular blocks avoid. All 18 points occupy one full-domain block.
 	struct AnyFieldF4FullDomainBenchmarkParams
@@ -311,119 +322,127 @@ namespace osuCrypto
 	};
 
 	template<typename Ole>
-	void runAnyFieldOleCase(u64 numOles, bool printTiming, const char* fieldName)
+	void runAnyFieldOleCase(
+		u64 numOles,
+		bool printTiming,
+		const char* fieldName,
+		AnyFieldDpfMode dpfMode = AnyFieldDpfMode::RegularDpf,
+		AnyFieldNoiseMode noiseMode = AnyFieldNoiseMode::SingleUse)
 	{
 		using Base = typename Ole::Base;
 		using Ctx = typename Ole::Ctx;
 		std::array<Ole, 2> ole;
 		const block publicSeed(0x9132749812374981, 0x1239874192387491);
 		for (u64 party = 0; party < 2; ++party)
-			ole[party].init(party, numOles, publicSeed);
+			ole[party].init(party, numOles, publicSeed, dpfMode, noiseMode);
 		if (ole[0].outputSize() != numOles || ole[1].outputSize() != numOles)
 			throw UnitTestFail("AnyFieldOle did not preserve the requested output count");
 
-		const auto count0 = ole[0].baseCorCount();
-		const auto count1 = ole[1].baseCorCount();
-		if (count0.mSendOtCount != count1.mRecvOtCount ||
-			count0.mRecvOtCount != count1.mSendOtCount ||
-			count0.mOleCount != count1.mOleCount)
-			throw UnitTestFail("AnyFieldOle base-correlation counts disagree");
-
-		PRNG basePrng(block(0x1234567812345678, 0x8765432187654321));
-		std::array<std::vector<std::array<block, 2>>, 2> sendOts;
-		std::array<std::vector<block>, 2> recvOts;
-		std::array<BitVector, 2> choices;
-		const std::array counts{ count0, count1 };
-		for (u64 sender = 0; sender < 2; ++sender)
-		{
-			sendOts[sender].resize(counts[sender].mSendOtCount);
-			basePrng.get(sendOts[sender].data(), sendOts[sender].size());
-			const auto receiver = 1 ^ sender;
-			recvOts[receiver].resize(sendOts[sender].size());
-			choices[receiver].resize(sendOts[sender].size());
-			choices[receiver].randomize(basePrng);
-			for (u64 i = 0; i < sendOts[sender].size(); ++i)
-				recvOts[receiver][i] = sendOts[sender][i][choices[receiver][i]];
-		}
-
-		const auto oleBlocks = divCeil(count0.mOleCount, 128);
-		std::array<std::vector<block>, 2> oleMult{
-			std::vector<block>(oleBlocks), std::vector<block>(oleBlocks) };
-		std::array<std::vector<block>, 2> oleAdd{
-			std::vector<block>(oleBlocks), std::vector<block>(oleBlocks) };
-		for (u64 party = 0; party < 2; ++party)
-		{
-			basePrng.get(oleMult[party].data(), oleMult[party].size());
-			basePrng.get(oleAdd[party].data(), oleAdd[party].size());
-		}
-		for (u64 i = 0; i < count0.mOleCount; ++i)
-		{
-			const auto product = *BitIterator(oleMult[0].data(), i) &
-				*BitIterator(oleMult[1].data(), i);
-			*BitIterator(oleAdd[1].data(), i) =
-				product ^ *BitIterator(oleAdd[0].data(), i);
-		}
-
-		for (u64 party = 0; party < 2; ++party)
-			ole[party].setBaseCors(
-				sendOts[party], recvOts[party], choices[party],
-				oleMult[party], oleAdd[party]);
-
 		PRNG prng0(block(0x1111111111111111, 0x2222222222222222));
 		PRNG prng1(block(0x3333333333333333, 0x4444444444444444));
-		auto sockets = coproto::LocalAsyncSocket::makePair();
-		const auto setupStart = std::chrono::steady_clock::now();
-		auto setupResult = macoro::sync_wait(macoro::when_all_ready(
-			ole[0].setup(prng0, sockets[0]),
-			ole[1].setup(prng1, sockets[1])));
-		std::get<0>(setupResult).result();
-		std::get<1>(setupResult).result();
-		const auto setupEnd = std::chrono::steady_clock::now();
-
-		if (!ole[0].hasSetup() || !ole[1].hasSetup() ||
-			ole[0].hasBaseCors() || ole[1].hasBaseCors())
-			throw UnitTestFail("AnyFieldOle setup retained or lost protocol state");
-
 		std::array<std::vector<Base>, 2> x, z;
 		for (u64 party = 0; party < 2; ++party)
 		{
 			x[party].resize(ole[party].outputSize());
 			z[party].resize(ole[party].outputSize());
-			ole[party].expand(x[party], z[party]);
 		}
-		const auto expandEnd = std::chrono::steady_clock::now();
 
-		for (u64 i = 0; i < x[0].size(); ++i)
-			if (x[0][i] * x[1][i] != z[0][i] + z[1][i])
-				throw UnitTestFail("AnyFieldOle correlation failed");
-		if (ole[0].hasSetup() || ole[1].hasSetup())
-			throw UnitTestFail("AnyFieldOle expansion did not consume its seed");
-
-		// An initialized public matrix can be reused for another independent
-		// setup, but every underlying correlation must be installed afresh. The
-		// test data is reused here only to exercise the state transition.
-		if (!printTiming)
+		double setupMs = 0;
+		double expandMs = 0;
+		const auto repetitions = printTiming ? 1 : 2;
+		for (u64 repetition = 0; repetition < repetitions; ++repetition)
 		{
+			const auto count0 = ole[0].baseCorCount();
+			const auto count1 = ole[1].baseCorCount();
+			if (count0.mSendOtCount != count1.mRecvOtCount ||
+				count0.mRecvOtCount != count1.mSendOtCount ||
+				count0.mOleCount != count1.mOleCount)
+				throw UnitTestFail("AnyFieldOle base-correlation counts disagree");
+			if (repetition &&
+				(ole[0].hasPositions() != (noiseMode == AnyFieldNoiseMode::Stationary) ||
+					ole[1].hasPositions() != (noiseMode == AnyFieldNoiseMode::Stationary)))
+				throw UnitTestFail("AnyFieldOle noise mode has the wrong position lifecycle");
+
+			PRNG basePrng(block(
+				0x1234567812345678ull + repetition,
+				0x8765432187654321ull - repetition));
+			std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+			std::array<std::vector<block>, 2> recvOts;
+			std::array<BitVector, 2> choices;
+			const std::array counts{ count0, count1 };
+			for (u64 sender = 0; sender < 2; ++sender)
+			{
+				sendOts[sender].resize(counts[sender].mSendOtCount);
+				basePrng.get(sendOts[sender].data(), sendOts[sender].size());
+				const auto receiver = 1 ^ sender;
+				recvOts[receiver].resize(sendOts[sender].size());
+				choices[receiver].resize(sendOts[sender].size());
+				choices[receiver].randomize(basePrng);
+				for (u64 i = 0; i < sendOts[sender].size(); ++i)
+					recvOts[receiver][i] =
+						sendOts[sender][i][choices[receiver][i]];
+			}
+
+			const auto oleBlocks = divCeil(count0.mOleCount, 128);
+			std::array<std::vector<block>, 2> oleMult{
+				std::vector<block>(oleBlocks), std::vector<block>(oleBlocks) };
+			std::array<std::vector<block>, 2> oleAdd{
+				std::vector<block>(oleBlocks), std::vector<block>(oleBlocks) };
+			for (u64 party = 0; party < 2; ++party)
+			{
+				basePrng.get(oleMult[party].data(), oleMult[party].size());
+				basePrng.get(oleAdd[party].data(), oleAdd[party].size());
+			}
+			for (u64 i = 0; i < count0.mOleCount; ++i)
+			{
+				const auto product = *BitIterator(oleMult[0].data(), i) &
+					*BitIterator(oleMult[1].data(), i);
+				*BitIterator(oleAdd[1].data(), i) =
+					product ^ *BitIterator(oleAdd[0].data(), i);
+			}
+
 			for (u64 party = 0; party < 2; ++party)
 				ole[party].setBaseCors(
 					sendOts[party], recvOts[party], choices[party],
 					oleMult[party], oleAdd[party]);
-			auto secondSockets = coproto::LocalAsyncSocket::makePair();
-			auto secondSetup = macoro::sync_wait(macoro::when_all_ready(
-				ole[0].setup(prng0, secondSockets[0]),
-				ole[1].setup(prng1, secondSockets[1])));
-			std::get<0>(secondSetup).result();
-			std::get<1>(secondSetup).result();
-			for (u64 party = 0; party < 2; ++party)
-				ole[party].expand(x[party], z[party]);
+
+			auto setupSockets = coproto::LocalAsyncSocket::makePair();
+			const auto setupStart = std::chrono::steady_clock::now();
+			auto setupResult = macoro::sync_wait(macoro::when_all_ready(
+				ole[0].setup(prng0, setupSockets[0]),
+				ole[1].setup(prng1, setupSockets[1])));
+			std::get<0>(setupResult).result();
+			std::get<1>(setupResult).result();
+			const auto setupEnd = std::chrono::steady_clock::now();
+
+			if (!ole[0].hasSetup() || !ole[1].hasSetup() ||
+				!ole[0].hasPositions() || !ole[1].hasPositions() ||
+				ole[0].hasBaseCors() || ole[1].hasBaseCors())
+				throw UnitTestFail("AnyFieldOle setup retained or lost protocol state");
+
+			auto expandSockets = coproto::LocalAsyncSocket::makePair();
+			auto expandResult = macoro::sync_wait(macoro::when_all_ready(
+				ole[0].expand(x[0], z[0], prng0, expandSockets[0]),
+				ole[1].expand(x[1], z[1], prng1, expandSockets[1])));
+			std::get<0>(expandResult).result();
+			std::get<1>(expandResult).result();
+			const auto expandEnd = std::chrono::steady_clock::now();
+
 			for (u64 i = 0; i < x[0].size(); ++i)
 				if (x[0][i] * x[1][i] != z[0][i] + z[1][i])
-					throw UnitTestFail("AnyFieldOle repeated correlation failed");
+					throw UnitTestFail("AnyFieldOle correlation failed");
+			if (ole[0].hasSetup() || ole[1].hasSetup() ||
+				ole[0].hasPositions() != (noiseMode == AnyFieldNoiseMode::Stationary) ||
+				ole[1].hasPositions() != (noiseMode == AnyFieldNoiseMode::Stationary))
+				throw UnitTestFail("AnyFieldOle expansion consumed the wrong state");
+
+			setupMs += std::chrono::duration<double, std::milli>(
+				setupEnd - setupStart).count();
+			expandMs += std::chrono::duration<double, std::milli>(
+				expandEnd - setupEnd).count();
 		}
 		if (printTiming)
 		{
-			const auto setupMs = std::chrono::duration<double, std::milli>(setupEnd - setupStart).count();
-			const auto expandMs = std::chrono::duration<double, std::milli>(expandEnd - setupEnd).count();
 			std::cout << "AnyField " << fieldName << " OLE: N="
 				<< ole[0].expandedOutputSize() / Ctx::extensionDegree
 				<< ", requested=" << ole[0].outputSize()
@@ -431,7 +450,7 @@ namespace osuCrypto
 				<< ", blocks=" << Ole::BlockCount
 				<< ", points/block=" << Ole::PointsPerBlock
 				<< ", setup=" << setupMs
-				<< " ms, two local expands=" << expandMs << " ms\n";
+				<< " ms, expand=" << expandMs << " ms\n";
 		}
 	}
 #endif
@@ -456,8 +475,29 @@ namespace osuCrypto
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
 		using TestOle = AnyFieldOle<AnyFieldF4Ctx, AnyFieldOleTestParams>;
-		runAnyFieldOleCase<TestOle>(1, false, "F2");
-		runAnyFieldOleCase<TestOle>(18, false, "F2");
+		if (!cmd.isSet("revOnly"))
+		{
+			runAnyFieldOleCase<TestOle>(1, false, "F2");
+			runAnyFieldOleCase<TestOle>(18, false, "F2");
+			runAnyFieldOleCase<TestOle>(
+				1, false, "F2 regular stationary",
+				AnyFieldDpfMode::RegularDpf, AnyFieldNoiseMode::Stationary);
+		}
+#ifdef ENABLE_SPARSE_DPF
+		if (!cmd.isSet("regularOnly"))
+		{
+			using RevTestOle = AnyFieldOle<
+				AnyFieldF4Ctx, AnyFieldF4RevCuckooTestParams>;
+			if (!cmd.isSet("stationaryOnly"))
+				runAnyFieldOleCase<RevTestOle>(
+					1, false, "F2 RevCuckoo single-use",
+					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::SingleUse);
+			if (!cmd.isSet("singleOnly"))
+				runAnyFieldOleCase<RevTestOle>(
+					1, false, "F2 RevCuckoo stationary",
+					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary);
+		}
+#endif
 		if (cmd.isSet("v"))
 		{
 			if (cmd.isSet("fullDomain"))

@@ -59,12 +59,13 @@ namespace osuCrypto
 			u64 partyIdx,
 			u64 domain,
 			u64 pointsPerSet,
-			u64 numSets)
+			u64 numSets,
+			CoeffCtx ctx = {})
 		{
 			if (pointsPerSet && numSets > std::numeric_limits<u64>::max() / pointsPerSet)
 				throw RTE_LOC;
 			auto numPoints = pointsPerSet * numSets;
-			mDpf.init(partyIdx, domain, numPoints);
+			mDpf.init(partyIdx, domain, numPoints, ctx);
 			mPartyIdx = partyIdx;
 			mNumPointsPerSet = pointsPerSet;
 			mDomain = domain;

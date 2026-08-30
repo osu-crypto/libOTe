@@ -49,7 +49,7 @@ namespace osuCrypto
 
 		bool mPrint = false;
 
-		u64 mPrintIndex = ~0;
+		u64 mPrintIndex = ~u64{ 0 };
 
 		std::vector<Dedup> mDedup;
 		std::vector<GoldreichHash> mGoldreichHash;

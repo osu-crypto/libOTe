@@ -4,7 +4,10 @@
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
 
 #include "libOTe/Triple/AnyField/AnyFieldCtx.h"
-#include "libOTe/Dpf/RegularDpf.h"
+#include "libOTe/Dpf/SumDmpf.h"
+#ifdef ENABLE_SPARSE_DPF
+#include "libOTe/Dpf/RevCuckooDmpf.h"
+#endif
 #include "libOTe/Tools/Gmw/Gmw.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
@@ -19,10 +22,23 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace osuCrypto
 {
+	enum class AnyFieldDpfMode
+	{
+		RegularDpf,
+		RevCuckoo
+	};
+
+	enum class AnyFieldNoiseMode
+	{
+		SingleUse,
+		Stationary
+	};
+
 	namespace anyField::detail
 	{
 		inline BitVector constantBits(u64 value, u64 size)
@@ -181,8 +197,18 @@ namespace osuCrypto
 	// and returns exactly the requested prefix. Noise is generalized regular:
 	// every sparse polynomial has a fixed number of points in each public coset,
 	// allowing each product DPF to expand over a domain smaller by BlockCount.
-	// Base OTs and binary OLEs are one-shot and must be freshly installed before
-	// every setup. The public seed must be sampled honestly and uniformly,
+	// The DPF backend and noise lifecycle are independent runtime choices.
+	// RegularDpf and RevCuckoo implement the same sparse product expansion.
+	// SingleUse samples fresh sparse positions for every expansion, while
+	// Stationary retains positions and samples fresh nonzero coefficients for
+	// every expansion. The latter uses the stationary/shared-support QA-SD
+	// assumption regardless of which DPF backend is selected.
+	//
+	// Tensor correlations are one-shot and must be freshly installed before every
+	// setup. RegularDpf also needs fresh DPF base OTs for every expansion.
+	// RevCuckoo consumes its position-setup correlations once and reuses that
+	// position state in Stationary mode. Binary OLEs are needed whenever fresh
+	// positions are sampled. The public seed must be sampled honestly and uniformly,
 	// independently of the parties' private inputs, and agreed by both parties; it
 	// must not be adversarially selected or biased. The paper states QA-SD for a
 	// uniformly random public group-algebra element, whereas this implementation
@@ -213,6 +239,9 @@ namespace osuCrypto
 		static constexpr u64 Weight = BlockCount * PointsPerBlock;
 		static constexpr u64 GroupCount =
 			CompressionFactor * CompressionFactor * Ctx::extensionDegree;
+		static constexpr u64 DpfSetCount = GroupCount * BlockCount;
+		static constexpr u64 PointsPerDpfSet =
+			BlockCount * PointsPerBlock * PointsPerBlock;
 		static constexpr bool PacksPublicCoefficients =
 			CompressionFactor * Ctx::fieldBits <= 32;
 		using PackedPublic = std::conditional_t<
@@ -244,6 +273,14 @@ namespace osuCrypto
 			u64 mOleCount = 0;
 		};
 
+		using RegularBackend = SumDmpf<Ext, DpfCoeffCtx>;
+#ifdef ENABLE_SPARSE_DPF
+		using RevCuckooBackend = RevCuckooDmpf<Ext, DpfCoeffCtx>;
+		using DpfBackend = std::variant<RegularBackend, RevCuckooBackend>;
+#else
+		using DpfBackend = std::variant<RegularBackend>;
+#endif
+
 		AnyFieldOle() = default;
 		AnyFieldOle(const AnyFieldOle&) = delete;
 		AnyFieldOle& operator=(const AnyFieldOle&) = delete;
@@ -260,6 +297,8 @@ namespace osuCrypto
 				mTimer = std::exchange(source.mTimer, nullptr);
 				mCtx = std::move(source.mCtx);
 				mPartyIdx = std::exchange(source.mPartyIdx, 0);
+				mDpfMode = std::exchange(source.mDpfMode, AnyFieldDpfMode::RegularDpf);
+				mNoiseMode = std::exchange(source.mNoiseMode, AnyFieldNoiseMode::SingleUse);
 				mDimension = std::exchange(source.mDimension, 0);
 				mRequestedOleCount = std::exchange(source.mRequestedOleCount, 0);
 				mN = std::exchange(source.mN, 0);
@@ -269,13 +308,18 @@ namespace osuCrypto
 				mPositionGmw = std::move(source.mPositionGmw);
 				mPositionCircuit = std::move(source.mPositionCircuit);
 				mPositionOleCount = std::exchange(source.mPositionOleCount, 0);
+				mDpf = std::move(source.mDpf);
 				mSendOts = std::move(source.mSendOts);
 				mRecvOts = std::move(source.mRecvOts);
 				mRecvChoices = std::move(source.mRecvChoices);
 				mBaseCorsAvailable = std::exchange(source.mBaseCorsAvailable, false);
+				mInstalledDpfSendOtCount = std::exchange(source.mInstalledDpfSendOtCount, 0);
+				mInstalledDpfRecvOtCount = std::exchange(source.mInstalledDpfRecvOtCount, 0);
+				mDpfOrder = std::move(source.mDpfOrder);
 				mSparsePositions = std::move(source.mSparsePositions);
 				mSparseCoefficients = std::move(source.mSparseCoefficients);
-				mDpfKeys = std::move(source.mDpfKeys);
+				mDpfValues = std::move(source.mDpfValues);
+				mHasPositions = std::exchange(source.mHasPositions, false);
 				mHasSetup = std::exchange(source.mHasSetup, false);
 
 				source.mPublicA = {};
@@ -284,10 +328,10 @@ namespace osuCrypto
 				source.mSendOts.clear();
 				source.mRecvOts.clear();
 				source.mRecvChoices.resize(0);
+				source.mDpfOrder.clear();
 				source.mSparsePositions.clear();
 				source.mSparseCoefficients.clear();
-				for (auto& key : source.mDpfKeys)
-					key = {};
+				source.mDpfValues.clear();
 			}
 			return *this;
 		}
@@ -296,12 +340,25 @@ namespace osuCrypto
 			u64 partyIdx,
 			u64 numOles,
 			block publicSeed,
+			AnyFieldDpfMode dpfMode = AnyFieldDpfMode::RegularDpf,
+			AnyFieldNoiseMode noiseMode = AnyFieldNoiseMode::SingleUse,
 			Ctx ctx = {})
 		{
 			if (partyIdx > 1)
 				throw std::invalid_argument("AnyFieldOle party index must be zero or one. " LOCATION);
 			if (!numOles)
 				throw std::invalid_argument("AnyFieldOle requires at least one requested OLE. " LOCATION);
+			if (dpfMode != AnyFieldDpfMode::RegularDpf &&
+				dpfMode != AnyFieldDpfMode::RevCuckoo)
+				throw std::invalid_argument("AnyFieldOle DPF mode is invalid. " LOCATION);
+			if (noiseMode != AnyFieldNoiseMode::SingleUse &&
+				noiseMode != AnyFieldNoiseMode::Stationary)
+				throw std::invalid_argument("AnyFieldOle noise mode is invalid. " LOCATION);
+#ifndef ENABLE_SPARSE_DPF
+			if (dpfMode == AnyFieldDpfMode::RevCuckoo)
+				throw std::invalid_argument(
+					"AnyFieldOle RevCuckoo mode requires ENABLE_SPARSE_DPF. " LOCATION);
+#endif
 
 			const auto requestedRingSize = divCeil(numOles, Ctx::extensionDegree);
 			u64 dimension = 0;
@@ -339,11 +396,6 @@ namespace osuCrypto
 			const auto blockSize = domain / BlockCount;
 			if (PointsPerBlock > blockSize)
 				throw std::invalid_argument("AnyFieldOle regular block is too small for its points. " LOCATION);
-
-			// Build the replacement state in temporaries so a rejected
-			// reconfiguration leaves the current object unchanged.
-			RegularDpf<Ext, DpfCoeffCtx> validator;
-			validator.init(partyIdx, blockSize, pointsPerGroup, ctx.dpfCoeffCtx());
 
 			BetaCircuit positionCircuit;
 			if constexpr (PowerOfTwoCoordinates)
@@ -397,6 +449,8 @@ namespace osuCrypto
 			clear();
 			mCtx = std::move(ctx);
 			mPartyIdx = partyIdx;
+			mDpfMode = dpfMode;
+			mNoiseMode = noiseMode;
 			mDimension = dimension;
 			mRequestedOleCount = numOles;
 			mN = domain;
@@ -406,10 +460,15 @@ namespace osuCrypto
 			mPositionCircuit = std::move(positionCircuit);
 			mPositionGmw = std::move(positionGmw);
 			mPositionOleCount = positionOleCount;
+			initDpfBackend();
+			buildDpfOrder();
 		}
 
 		bool isInitialized() const { return mN != 0; }
 		bool hasSetup() const { return mHasSetup; }
+		bool hasPositions() const { return mHasPositions; }
+		AnyFieldDpfMode dpfMode() const { return mDpfMode; }
+		AnyFieldNoiseMode noiseMode() const { return mNoiseMode; }
 
 		u64 outputSize() const
 		{
@@ -432,24 +491,22 @@ namespace osuCrypto
 			if (mHasSetup)
 				return {};
 
-			RegularDpf<Ext, DpfCoeffCtx> dpf;
-			dpf.init(mPartyIdx, mBlockSize, pointsPerGroup(), mCtx.dpfCoeffCtx());
-			const auto dpfOtCount = dpf.baseOtCount();
-			if (dpfOtCount > std::numeric_limits<u64>::max() / GroupCount)
-				throw std::length_error("AnyFieldOle DPF base-OT count overflows u64. " LOCATION);
-
 			BaseCorCount result;
-			result.mSendOtCount = GroupCount * dpfOtCount;
-			result.mRecvOtCount = GroupCount * dpfOtCount;
+			const auto dpfCount = dpfBaseOtCount();
+			result.mSendOtCount = dpfCount.mSendCount;
+			result.mRecvOtCount = dpfCount.mRecvCount;
 
 			const auto tensorOtCount = rightCoefficientCount() *
 				mCtx.dpfCoeffCtx().template bitSize<Ext>();
+			if ((mPartyIdx ? result.mRecvOtCount : result.mSendOtCount) >
+				std::numeric_limits<u64>::max() - tensorOtCount)
+				throw std::length_error("AnyFieldOle base-OT count overflows u64. " LOCATION);
 			if (mPartyIdx)
 				result.mRecvOtCount += tensorOtCount;
 			else
 				result.mSendOtCount += tensorOtCount;
 
-			result.mOleCount = mPositionOleCount;
+			result.mOleCount = mHasPositions ? 0 : mPositionOleCount;
 			return result;
 		}
 
@@ -475,16 +532,33 @@ namespace osuCrypto
 			std::vector<block> newRecvOts(recvOts.begin(), recvOts.end());
 			BitVector newRecvChoices = recvChoices;
 			Gmw newPositionGmw;
-			newPositionGmw.init(
-				mPartyIdx,
-				positionInstanceCount(),
-				mPositionCircuit);
-			newPositionGmw.setOle(oleMult, oleAdd);
+			if (!mHasPositions)
+			{
+				newPositionGmw.init(
+					mPartyIdx,
+					positionInstanceCount(),
+					mPositionCircuit);
+				newPositionGmw.setOle(oleMult, oleAdd);
+			}
+
+			const auto dpfCount = dpfBaseOtCount();
+			if (dpfCount.mSendCount || dpfCount.mRecvCount)
+			{
+				std::visit([&](auto& dpf) {
+					dpf.setBaseOts(
+						span<const std::array<block, 2>>(newSendOts).subspan(
+							0, dpfCount.mSendCount),
+						span<const block>(newRecvOts).subspan(0, dpfCount.mRecvCount),
+						newRecvChoices.subvec(0, dpfCount.mRecvCount));
+				}, mDpf);
+			}
 
 			mSendOts = std::move(newSendOts);
 			mRecvOts = std::move(newRecvOts);
 			mRecvChoices = std::move(newRecvChoices);
 			mPositionGmw = std::move(newPositionGmw);
+			mInstalledDpfSendOtCount = dpfCount.mSendCount;
+			mInstalledDpfRecvOtCount = dpfCount.mRecvCount;
 			mBaseCorsAvailable = true;
 		}
 
@@ -518,7 +592,9 @@ namespace osuCrypto
 					block(mN, mPartyIdx),
 					block(Ctx::baseCharacteristic, Ctx::extensionDegree),
 					block(CompressionFactor, Weight),
-					block(BlockCount, PointsPerBlock)
+					block(BlockCount, PointsPerBlock),
+					block(static_cast<u64>(mDpfMode), static_cast<u64>(mNoiseMode)),
+					block(mHasPositions, 0)
 				};
 				std::vector<block> peerParams(localParams.size());
 				co_await socket.send(coproto::copy(localParams));
@@ -528,44 +604,36 @@ namespace osuCrypto
 					peerParams[2] != block(mN, 1 ^ mPartyIdx) ||
 					peerParams[3] != block(Ctx::baseCharacteristic, Ctx::extensionDegree) ||
 					peerParams[4] != block(CompressionFactor, Weight) ||
-					peerParams[5] != block(BlockCount, PointsPerBlock))
+					peerParams[5] != block(BlockCount, PointsPerBlock) ||
+					peerParams[6] != block(
+						static_cast<u64>(mDpfMode), static_cast<u64>(mNoiseMode)) ||
+					peerParams[7] != block(mHasPositions, 0))
 					throw std::invalid_argument(
 						"AnyFieldOle peers initialized incompatible parameters. " LOCATION);
 
-				sampleSparseInputs(prng);
+				if (!mHasPositions)
+				{
+					sampleSparsePositions(prng);
+					std::vector<u64> pointShares;
+					co_await makePointShares(pointShares, socket);
+					std::vector<u64> orderedPoints(pointShares.size());
+					for (u64 i = 0; i < orderedPoints.size(); ++i)
+						orderedPoints[i] = pointShares[mDpfOrder[i]];
+					MatrixView<const u64> points(
+						orderedPoints.data(), DpfSetCount, PointsPerDpfSet);
+					co_await std::visit([&](auto& dpf) {
+						if (mTimer)
+							dpf.setTimer(*mTimer);
+						return dpf.setPoints(points, prng, socket);
+					}, mDpf);
+					mHasPositions = true;
+				}
+
+				sampleSparseCoefficients(prng);
 
 				std::vector<Ext> productShares(leftCoefficientCount() * rightCoefficientCount());
 				co_await tensorCoefficients(productShares, prng, socket);
-
-				std::vector<u64> pointShares;
-				co_await makePointShares(pointShares, socket);
-
-				const auto dpfOtCount = dpfBaseOtCount();
-				mDpfKeys = {};
-				typename RegularDpf<Ext, DpfCoeffCtx>::CompactScratch dpfScratch;
-				for (u64 group = 0; group < GroupCount; ++group)
-				{
-					RegularDpf<Ext, DpfCoeffCtx> dpf;
-					dpf.init(mPartyIdx, mBlockSize, pointsPerGroup(), mCtx.dpfCoeffCtx());
-					const auto otOffset = group * dpfOtCount;
-					dpf.setBaseOts(
-						span<const std::array<block, 2>>(mSendOts).subspan(otOffset, dpfOtCount),
-						span<const block>(mRecvOts).subspan(otOffset, dpfOtCount),
-						mRecvChoices.subvec(otOffset, dpfOtCount));
-
-					auto groupPoints = span<u64>(pointShares).subspan(
-						group * pointsPerGroup(), pointsPerGroup());
-					std::vector<Ext> groupValues(pointsPerGroup());
-					fillGroupValues(group, productShares, groupValues);
-					co_await dpf.keyGen(
-						groupPoints,
-						groupValues,
-						prng,
-						mDpfKeys[group],
-						dpfScratch,
-						socket,
-						mCtx.dpfCoeffCtx());
-				}
+				fillDpfValues(productShares);
 
 				clearBaseCors();
 				mHasSetup = true;
@@ -580,9 +648,13 @@ namespace osuCrypto
 
 		// The conceptual full expansion is basis-major: entry j*mN+i is the i-th
 		// OLE extracted with Tr(xi^(p^j) * x). Only the requested prefix is
-		// returned. Expansion consumes the PCG seed to prevent accidental reuse of
-		// the same correlation.
-		void expand(span<Base> x, span<Base> z)
+		// returned. SingleUse consumes both the coefficient and position state;
+		// Stationary consumes only the fresh coefficient/tensor state.
+		macoro::task<> expand(
+			span<Base> x,
+			span<Base> z,
+			PRNG& prng,
+			coproto::Socket& socket)
 		{
 			if (!mHasSetup)
 				throw std::logic_error("AnyFieldOle::setup must complete before expansion. " LOCATION);
@@ -647,98 +719,67 @@ namespace osuCrypto
 					}
 				}
 
-				typename RegularDpf<Ext, DpfCoeffCtx>::CompactScratch dpfScratch;
-				for (u64 group = 0; group < GroupCount; ++group)
-				{
-					std::fill(work.begin(), work.end(), Ext::zero());
-					RegularDpf<Ext, DpfCoeffCtx>::expand(
-						mPartyIdx,
-						mBlockSize,
-						mDpfKeys[group],
-						dpfScratch,
-						[&](u64 tree, u64 leaf, Ext value, block) {
-							const auto left = tree / Weight;
-							const auto right = tree - left * Weight;
-							work[productBlock(group, left, right) + BlockCount * leaf] += value;
+				std::fill(work.begin(), work.end(), Ext::zero());
+				u64 nextSet = 0;
+				u64 setLeafCount = 0;
+				// Sets are group-major and product-block-major. SumDmpf and
+				// RevCuckoo both combine all point leaves in a set before this
+				// callback. Transform a group as soon as its last block completes,
+				// retaining one O(N) work vector instead of GroupCount dense rows.
+				co_await std::visit([&](auto& dpf) {
+					if (mTimer)
+						dpf.setTimer(*mTimer);
+					return dpf.expand(
+						mDpfValues, prng, socket,
+						[&](u64 set, u64 leaf, const auto& value) {
+							if (set != nextSet || leaf >= mBlockSize)
+								throw std::runtime_error(
+									"AnyFieldOle DPF emitted an invalid leaf sequence. " LOCATION);
+							const auto blockIndex = set % BlockCount;
+							work[blockIndex + BlockCount * leaf] += value;
+							if (++setLeafCount == mBlockSize)
+							{
+								setLeafCount = 0;
+								++nextSet;
+								if (nextSet % BlockCount == 0)
+								{
+									const auto group = nextSet / BlockCount - 1;
+									accumulateProductGroup(
+										group, publicCount, work, traceFactors, z);
+									std::fill(work.begin(), work.end(), Ext::zero());
+								}
+							}
 						},
 						mCtx.dpfCoeffCtx());
-					mCtx.transform(work, mDimension);
+				}, mDpf);
+				if (nextSet != DpfSetCount || setLeafCount)
+					throw std::runtime_error(
+						"AnyFieldOle DPF expansion ended early. " LOCATION);
 
-					const auto frobeniusPower = group / (CompressionFactor * CompressionFactor);
-					const auto pair = group % (CompressionFactor * CompressionFactor);
-					const auto leftPolynomial = pair / CompressionFactor;
-					const auto rightPolynomial = pair % CompressionFactor;
-					if constexpr (PacksPublicCoefficients)
-					{
-						if (leftPolynomial && rightPolynomial)
-						{
-							for (u64 index = 0; index < publicCount; ++index)
-								work[index] *= publicValue(index, leftPolynomial) *
-									mCtx.frobenius(
-										publicValue(index, rightPolynomial), frobeniusPower);
-						}
-						else if (leftPolynomial)
-						{
-							for (u64 index = 0; index < publicCount; ++index)
-								work[index] *= publicValue(index, leftPolynomial);
-						}
-						else if (rightPolynomial)
-						{
-							for (u64 index = 0; index < publicCount; ++index)
-								work[index] *= mCtx.frobenius(
-									publicValue(index, rightPolynomial), frobeniusPower);
-						}
-					}
-					else
-					{
-						const auto* leftPublic = leftPolynomial ?
-							mPublicA.data() + (leftPolynomial - 1) * publicCount : nullptr;
-						const auto* rightPublic = rightPolynomial ?
-							mPublicA.data() + (rightPolynomial - 1) * publicCount : nullptr;
-						if (leftPublic && rightPublic)
-						{
-							for (u64 index = 0; index < publicCount; ++index)
-								work[index] *= leftPublic[index] *
-									mCtx.frobenius(rightPublic[index], frobeniusPower);
-						}
-						else if (leftPublic)
-						{
-							for (u64 index = 0; index < publicCount; ++index)
-								work[index] *= leftPublic[index];
-						}
-						else if (rightPublic)
-						{
-							for (u64 index = 0; index < publicCount; ++index)
-								work[index] *=
-									mCtx.frobenius(rightPublic[index], frobeniusPower);
-						}
-					}
-					for (u64 basis = 0; basis < Ctx::extensionDegree; ++basis)
-					{
-						const auto outputOffset = basis * mN;
-						if (outputOffset >= z.size())
-							break;
-						const auto count = std::min<u64>(mN, z.size() - outputOffset);
-						for (u64 index = 0; index < count; ++index)
-							z[outputOffset + index] += mCtx.trace(
-								traceFactors[frobeniusPower][basis] * work[index]);
-					}
-				}
-
-				clearSetupState();
+				clearExpansionState();
+				if (mNoiseMode == AnyFieldNoiseMode::SingleUse)
+					clearPositionState();
 			}
 			catch (...)
 			{
-				clearSetupState();
+				clearExpansionState();
+				clearPositionState();
 				throw;
 			}
+			co_return;
 		}
 
 		void clear()
 		{
 			clearBaseCors();
-			clearSetupState();
+			clearExpansionState();
+			mSparsePositions.clear();
+			mHasPositions = false;
+			std::visit([](auto& dpf) { dpf.clear(); }, mDpf);
+			mDpfOrder.clear();
 			mPartyIdx = 0;
+			mDpfMode = AnyFieldDpfMode::RegularDpf;
+			mNoiseMode = AnyFieldNoiseMode::SingleUse;
 			mDimension = 0;
 			mRequestedOleCount = 0;
 			mN = 0;
@@ -756,6 +797,8 @@ namespace osuCrypto
 	private:
 		Ctx mCtx;
 		u64 mPartyIdx = 0;
+		AnyFieldDpfMode mDpfMode = AnyFieldDpfMode::RegularDpf;
+		AnyFieldNoiseMode mNoiseMode = AnyFieldNoiseMode::SingleUse;
 		u64 mDimension = 0;
 		u64 mRequestedOleCount = 0;
 		u64 mN = 0;
@@ -766,14 +809,19 @@ namespace osuCrypto
 		Gmw mPositionGmw;
 		BetaCircuit mPositionCircuit;
 		u64 mPositionOleCount = 0;
+		DpfBackend mDpf;
 		std::vector<std::array<block, 2>> mSendOts;
 		std::vector<block> mRecvOts;
 		BitVector mRecvChoices;
 		bool mBaseCorsAvailable = false;
+		u64 mInstalledDpfSendOtCount = 0;
+		u64 mInstalledDpfRecvOtCount = 0;
 
+		std::vector<u64> mDpfOrder;
 		std::vector<u64> mSparsePositions;
 		std::vector<Ext> mSparseCoefficients;
-		std::array<RegularDpfKey, GroupCount> mDpfKeys;
+		std::vector<Ext> mDpfValues;
+		bool mHasPositions = false;
 		bool mHasSetup = false;
 
 		static constexpr u64 pointsPerGroup() { return Weight * Weight; }
@@ -788,11 +836,47 @@ namespace osuCrypto
 			return CompressionFactor * Ctx::extensionDegree * Weight;
 		}
 
-		u64 dpfBaseOtCount() const
+		struct DpfBaseOtCount
 		{
-			RegularDpf<Ext, DpfCoeffCtx> dpf;
-			dpf.init(mPartyIdx, mBlockSize, pointsPerGroup(), mCtx.dpfCoeffCtx());
-			return dpf.baseOtCount();
+			u64 mSendCount = 0;
+			u64 mRecvCount = 0;
+		};
+
+		DpfBaseOtCount dpfBaseOtCount() const
+		{
+			if (mDpfMode == AnyFieldDpfMode::RevCuckoo && mHasPositions)
+				return {};
+			return std::visit([](const auto& dpf) {
+				const auto count = dpf.baseOtCount();
+				return DpfBaseOtCount{ count.mSendCount, count.mRecvCount };
+			}, mDpf);
+		}
+
+		void initDpfBackend()
+		{
+			if (mDpfMode == AnyFieldDpfMode::RegularDpf)
+			{
+				mDpf = RegularBackend{};
+				std::get<RegularBackend>(mDpf).init(
+					mPartyIdx, mBlockSize, PointsPerDpfSet, DpfSetCount,
+					mCtx.dpfCoeffCtx());
+				return;
+			}
+#ifdef ENABLE_SPARSE_DPF
+			mDpf = RevCuckooBackend{};
+			std::get<RevCuckooBackend>(mDpf).init(
+				mPartyIdx,
+				PointsPerDpfSet,
+				DpfSetCount,
+				mBlockSize,
+				2,
+				2,
+				40,
+				mCtx.dpfCoeffCtx().template characteristicTwo<Ext>());
+#else
+			throw std::logic_error(
+				"AnyFieldOle RevCuckoo mode requires ENABLE_SPARSE_DPF. " LOCATION);
+#endif
 		}
 
 		void clearBaseCors()
@@ -803,23 +887,29 @@ namespace osuCrypto
 			mRecvOts = {};
 			mRecvChoices = {};
 			mPositionGmw.clear();
+			mInstalledDpfSendOtCount = 0;
+			mInstalledDpfRecvOtCount = 0;
 			mBaseCorsAvailable = false;
 		}
 
-		void clearSetupState()
+		void clearExpansionState()
 		{
-			mSparsePositions.clear();
 			mSparseCoefficients.clear();
-			for (auto& key : mDpfKeys)
-				key = {};
+			mDpfValues.clear();
 			mHasSetup = false;
 		}
 
-		void sampleSparseInputs(PRNG& prng)
+		void clearPositionState()
+		{
+			mSparsePositions.clear();
+			mHasPositions = false;
+			std::visit([](auto& dpf) { dpf.clear(); }, mDpf);
+			initDpfBackend();
+		}
+
+		void sampleSparsePositions(PRNG& prng)
 		{
 			mSparsePositions.resize(leftCoefficientCount());
-			mSparseCoefficients.resize(leftCoefficientCount());
-			auto coeffCtx = mCtx.dpfCoeffCtx();
 			for (u64 polynomial = 0; polynomial < CompressionFactor; ++polynomial)
 			{
 				const auto polynomialOffset = polynomial * Weight;
@@ -839,10 +929,17 @@ namespace osuCrypto
 						}
 						while (duplicate);
 						mSparsePositions[blockOffset + slot] = position;
-						mSparseCoefficients[blockOffset + slot] = coeffCtx.sampleNonZero(prng);
 					}
 				}
 			}
+		}
+
+		void sampleSparseCoefficients(PRNG& prng)
+		{
+			mSparseCoefficients.resize(leftCoefficientCount());
+			auto coeffCtx = mCtx.dpfCoeffCtx();
+			for (auto& coefficient : mSparseCoefficients)
+				coefficient = coeffCtx.sampleNonZero(prng);
 		}
 
 		macoro::task<> tensorCoefficients(
@@ -853,7 +950,6 @@ namespace osuCrypto
 			if (productShares.size() != leftCoefficientCount() * rightCoefficientCount())
 				throw std::invalid_argument("AnyFieldOle tensor output has the wrong size. " LOCATION);
 
-			const auto dpfOts = GroupCount * dpfBaseOtCount();
 			if (mPartyIdx)
 			{
 				std::vector<Ext> right(rightCoefficientCount());
@@ -863,8 +959,9 @@ namespace osuCrypto
 							right[(Ctx::extensionDegree * polynomial + power) * Weight + i] =
 								mCtx.frobenius(mSparseCoefficients[polynomial * Weight + i], power);
 
-				auto tensorOts = span<block>(mRecvOts).subspan(dpfOts);
-				BitVector choices = mRecvChoices.subvec(dpfOts, tensorOts.size());
+				auto tensorOts = span<block>(mRecvOts).subspan(mInstalledDpfRecvOtCount);
+				BitVector choices = mRecvChoices.subvec(
+					mInstalledDpfRecvOtCount, tensorOts.size());
 				BitVector difference = choices;
 				std::vector<std::vector<Ext>> vole(rightCoefficientCount(),
 					std::vector<Ext>(leftCoefficientCount()));
@@ -894,7 +991,8 @@ namespace osuCrypto
 			}
 			else
 			{
-				auto tensorOts = span<std::array<block, 2>>(mSendOts).subspan(dpfOts);
+				auto tensorOts = span<std::array<block, 2>>(mSendOts).subspan(
+					mInstalledDpfSendOtCount);
 				std::vector<std::vector<Ext>> vole(rightCoefficientCount(),
 					std::vector<Ext>(leftCoefficientCount()));
 				std::vector<coproto::Socket> sockets(rightCoefficientCount());
@@ -1051,19 +1149,117 @@ namespace osuCrypto
 			return result;
 		}
 
-		void fillGroupValues(u64 group, span<const Ext> productShares, span<Ext> values) const
+		void buildDpfOrder()
 		{
-			const auto power = group / (CompressionFactor * CompressionFactor);
+			mDpfOrder.resize(DpfSetCount * PointsPerDpfSet);
+			std::vector<u64> next(DpfSetCount);
+			for (u64 group = 0; group < GroupCount; ++group)
+				for (u64 left = 0; left < Weight; ++left)
+					for (u64 right = 0; right < Weight; ++right)
+					{
+						const auto set = group * BlockCount +
+							productBlock(group, left, right);
+						const auto target = set * PointsPerDpfSet + next[set]++;
+						mDpfOrder[target] =
+							group * pointsPerGroup() + left * Weight + right;
+					}
+			for (auto count : next)
+				if (count != PointsPerDpfSet)
+					throw std::logic_error(
+						"AnyFieldOle product blocks are not regular. " LOCATION);
+		}
+
+		void fillDpfValues(span<const Ext> productShares)
+		{
+			mDpfValues.resize(mDpfOrder.size());
+			for (u64 target = 0; target < mDpfOrder.size(); ++target)
+			{
+				const auto source = mDpfOrder[target];
+				const auto group = source / pointsPerGroup();
+				const auto point = source % pointsPerGroup();
+				const auto left = point / Weight;
+				const auto right = point % Weight;
+				const auto power = group / (CompressionFactor * CompressionFactor);
+				const auto pair = group % (CompressionFactor * CompressionFactor);
+				const auto leftPolynomial = pair / CompressionFactor;
+				const auto rightPolynomial = pair % CompressionFactor;
+				const auto leftOffset = leftPolynomial * Weight;
+				const auto rightOffset =
+					(Ctx::extensionDegree * rightPolynomial + power) * Weight;
+				mDpfValues[target] = productShares[
+					(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
+			}
+		}
+
+		void accumulateProductGroup(
+			u64 group,
+			u64 publicCount,
+			std::vector<Ext>& work,
+			const std::array<std::array<Ext, Ctx::extensionDegree>,
+				Ctx::extensionDegree>& traceFactors,
+			span<Base> z)
+		{
+			mCtx.transform(work, mDimension);
+
+			const auto frobeniusPower = group / (CompressionFactor * CompressionFactor);
 			const auto pair = group % (CompressionFactor * CompressionFactor);
 			const auto leftPolynomial = pair / CompressionFactor;
 			const auto rightPolynomial = pair % CompressionFactor;
-			const auto leftOffset = leftPolynomial * Weight;
-			const auto rightOffset =
-				(Ctx::extensionDegree * rightPolynomial + power) * Weight;
-			for (u64 left = 0; left < Weight; ++left)
-				for (u64 right = 0; right < Weight; ++right)
-					values[left * Weight + right] = productShares[
-						(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
+			if constexpr (PacksPublicCoefficients)
+			{
+				if (leftPolynomial && rightPolynomial)
+				{
+					for (u64 index = 0; index < publicCount; ++index)
+						work[index] *= publicValue(index, leftPolynomial) *
+							mCtx.frobenius(
+								publicValue(index, rightPolynomial), frobeniusPower);
+				}
+				else if (leftPolynomial)
+				{
+					for (u64 index = 0; index < publicCount; ++index)
+						work[index] *= publicValue(index, leftPolynomial);
+				}
+				else if (rightPolynomial)
+				{
+					for (u64 index = 0; index < publicCount; ++index)
+						work[index] *= mCtx.frobenius(
+							publicValue(index, rightPolynomial), frobeniusPower);
+				}
+			}
+			else
+			{
+				const auto* leftPublic = leftPolynomial ?
+					mPublicA.data() + (leftPolynomial - 1) * publicCount : nullptr;
+				const auto* rightPublic = rightPolynomial ?
+					mPublicA.data() + (rightPolynomial - 1) * publicCount : nullptr;
+				if (leftPublic && rightPublic)
+				{
+					for (u64 index = 0; index < publicCount; ++index)
+						work[index] *= leftPublic[index] *
+							mCtx.frobenius(rightPublic[index], frobeniusPower);
+				}
+				else if (leftPublic)
+				{
+					for (u64 index = 0; index < publicCount; ++index)
+						work[index] *= leftPublic[index];
+				}
+				else if (rightPublic)
+				{
+					for (u64 index = 0; index < publicCount; ++index)
+						work[index] *=
+							mCtx.frobenius(rightPublic[index], frobeniusPower);
+				}
+			}
+			for (u64 basis = 0; basis < Ctx::extensionDegree; ++basis)
+			{
+				const auto outputOffset = basis * mN;
+				if (outputOffset >= z.size())
+					break;
+				const auto count = std::min<u64>(mN, z.size() - outputOffset);
+				for (u64 index = 0; index < count; ++index)
+					z[outputOffset + index] += mCtx.trace(
+						traceFactors[frobeniusPower][basis] * work[index]);
+			}
 		}
 	};
 
