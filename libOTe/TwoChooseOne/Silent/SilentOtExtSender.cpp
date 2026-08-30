@@ -470,7 +470,12 @@ namespace osuCrypto
 		// Copy the results to the output buffer
 		std::memcpy(b.data(), mB.data(), b.size() * sizeof(block));
 		setTimePoint("sender.expand.ldpc.copy");
-		clear();
+
+		// Regular PPRF state is one-shot. Stationary mode retains its
+		// configuration and advanced code seed for the next expansion, matching
+		// the receiver and the random-OT wrapper (AUD-209).
+		if (mGenVar.index() == 0)
+			clear();
 	}
 
 	// Performs Silent correlated OT protocol with internal storage

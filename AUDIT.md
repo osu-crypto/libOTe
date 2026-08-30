@@ -6802,3 +6802,40 @@ Verification:
 - Five sequential `k = 2^18` single-block encodes averaged 62.4 ms before and
   61.3 ms after the change. The difference is within run-to-run noise; no
   slowdown was observed.
+
+## AUD-209: Stationary correlated OT reset only the sender's encoder state
+
+Status: fixed
+
+Affected code:
+
+- Silent correlated-OT output wrapper with stationary noise.
+- Every compression mode when reused through that wrapper, including QC.
+
+Concern:
+
+After copying correlated OT output, the sender unconditionally cleared its
+configuration while the receiver cleared only regular-noise state. On a second
+stationary expansion, the sender therefore reconfigured and restarted from the
+initial code seed while the receiver retained its configuration and advanced
+code seed.
+
+Impact:
+
+The parties compressed their second stationary correlation with different
+matrices. The resulting outputs did not satisfy the requested correlation. The
+random-OT wrapper already retained stationary state symmetrically and was not
+affected.
+
+Resolution:
+
+The correlated sender wrapper now follows the same lifecycle rule as both
+random-OT wrappers: regular PPRF state is cleared after use, while stationary
+state and its advanced code seed are retained. Fresh base correlations are
+still required and consumed for every expansion.
+
+Verification:
+
+- The QC integration test performs two consecutive stationary correlated-OT
+  expansions with the same sender, receiver, and delta, replenishing base
+  correlations between expansions and checking every output correlation.

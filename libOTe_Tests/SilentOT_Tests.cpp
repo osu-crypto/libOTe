@@ -1137,6 +1137,35 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
         eval(p0, p1);
 
         checkRandom(msg1, msg2, choice, n, verbose);
+
+        // AUD-209: correlated stationary OT must retain synchronized encoder
+        // state across expansions. The sender previously reset its code seed
+        // while the receiver advanced to the next seed.
+        auto stationarySockets = cp::LocalAsyncSocket::makePair();
+        SilentOtExtSender stationarySender;
+        SilentOtExtReceiver stationaryReceiver;
+        stationarySender.configure(n, 2, 1, SilentSecType::SemiHonest,
+            SdNoiseDistribution::Stationary, MultType::QuasiCyclic);
+        stationaryReceiver.configure(n, 2, 1, SilentSecType::SemiHonest,
+            SdNoiseDistribution::Stationary, MultType::QuasiCyclic);
+
+        std::vector<block> stationarySend(n), stationaryRecv(n);
+        BitVector stationaryChoices(n);
+        const auto stationaryDelta = prng.get<block>();
+        for (u64 iteration = 0; iteration < 2; ++iteration)
+        {
+            fakeBase(n, s, threads, prng, stationaryReceiver,
+                stationarySender, stationaryDelta);
+            auto stationaryP0 = stationarySender.silentSend(
+                stationaryDelta, stationarySend, prng, stationarySockets[0]);
+            auto stationaryP1 = stationaryReceiver.silentReceive(
+                stationaryChoices, stationaryRecv, prng, stationarySockets[1],
+                OTType::Correlated);
+            eval(stationaryP0, stationaryP1);
+
+            checkCorrelated(stationarySend, stationaryRecv, stationaryChoices,
+                stationaryDelta, n, verbose, ChoiceBitPacking::False);
+        }
     }
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT or ENABLE_BITPOLYMUL are not defined.");
