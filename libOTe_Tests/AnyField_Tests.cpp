@@ -4,6 +4,7 @@
 #include "cryptoTools/Common/TestCollection.h"
 #include "coproto/Socket/LocalAsyncSock.h"
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -171,6 +172,26 @@ namespace osuCrypto
 				throw UnitTestFail("F4 multidimensional transform has inconsistent strides");
 	}
 
+	void AnyField_GoldilocksTransform_Test(const CLP&)
+	{
+		AnyFieldGoldilocksCtx ctx;
+		std::array<Goldilocks, 4> input{
+			Goldilocks{ 1 }, Goldilocks{ 2 }, Goldilocks{ 3 }, Goldilocks{ 4 } };
+		auto actual = input;
+		ctx.transform(actual, 2);
+
+		std::array<Goldilocks, 4> expected;
+		for (u64 y = 0; y < expected.size(); ++y)
+		{
+			auto sum = Goldilocks::zero();
+			for (u64 x = 0; x < input.size(); ++x)
+				sum += ((std::popcount(x & y) & 1) ? -input[x] : input[x]);
+			expected[y] = sum;
+		}
+		if (actual != expected)
+			throw UnitTestFail("Goldilocks Walsh-Hadamard transform disagrees with direct evaluation");
+	}
+
 	void AnyField_PositionCircuit_Test(const CLP&)
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
@@ -235,6 +256,7 @@ namespace osuCrypto
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
 	static_assert(sizeof(AnyFieldF2Ole::PackedPublic) == sizeof(u16));
 	static_assert(sizeof(AnyFieldF3Ole::PackedPublic) == sizeof(u32));
+	static_assert(sizeof(AnyFieldGoldilocksOle::PackedPublic) == sizeof(Goldilocks));
 
 	struct AnyFieldOleTestParams
 	{
@@ -272,6 +294,19 @@ namespace osuCrypto
 		static constexpr u64 pointsPerBlock = 3;
 		static constexpr u64 minimumDimension = 2;
 		static constexpr u64 maximumDimension = 4;
+	};
+
+	// Exercise the production Goldilocks layout at a bounded domain: eight
+	// public polynomials, eight regular blocks, and three points per block. A
+	// request for 16 OLEs rounds to N=32, which also checks the truncated public
+	// coefficient storage without launching the full N=2^20 expansion.
+	struct AnyFieldGoldilocksTestParams
+	{
+		static constexpr u64 compressionFactor = 8;
+		static constexpr u64 blockDimensions = 3;
+		static constexpr u64 pointsPerBlock = 3;
+		static constexpr u64 minimumDimension = 5;
+		static constexpr u64 maximumDimension = 6;
 	};
 
 	template<typename Ole>
@@ -436,6 +471,20 @@ namespace osuCrypto
 				runAnyFieldOleCase<BenchmarkOle>(cmd.getOr("n", 486ull), true, "F2");
 			}
 		}
+#else
+		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
+#endif
+	}
+
+	void AnyField_GoldilocksOle_Test(const CLP& cmd)
+	{
+#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+		using TestOle = AnyFieldOle<AnyFieldGoldilocksCtx, AnyFieldGoldilocksTestParams>;
+		runAnyFieldOleCase<TestOle>(1, false, "Goldilocks");
+		runAnyFieldOleCase<TestOle>(16, false, "Goldilocks");
+		if (cmd.isSet("v"))
+			runAnyFieldOleCase<AnyFieldGoldilocksOle>(
+				cmd.getOr("n", 1ull << 20), true, "Goldilocks");
 #else
 		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
 #endif

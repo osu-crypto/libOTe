@@ -2,6 +2,7 @@
 
 #include "libOTe/Tools/Field/F4.h"
 #include "libOTe/Tools/Field/F9.h"
+#include "libOTe/Tools/Field/Goldilocks.h"
 #include "cryptoTools/Common/Defines.h"
 #include <concepts>
 #include <limits>
@@ -265,8 +266,77 @@ namespace osuCrypto
 		}
 	};
 
+	// The large-field construction needs no extension: trace and Frobenius are
+	// both the identity. We use the order-two subgroup in each coordinate so the
+	// transform is a multiplication-free Walsh-Hadamard transform.
+	struct AnyFieldGoldilocksCtx
+	{
+		using Base = Goldilocks;
+		using Ext = Goldilocks;
+		using DpfCoeffCtx = CoeffCtxGoldilocks;
+
+		static constexpr u64 baseCharacteristic = Goldilocks::mModulus;
+		static constexpr u64 extensionDegree = 1;
+		static constexpr u64 coordinateSize = 2;
+		static constexpr u64 coordinateBits = 1;
+		static constexpr u64 fieldBits = 64;
+
+		constexpr DpfCoeffCtx dpfCoeffCtx() const { return {}; }
+		constexpr Ext frobenius(Ext value, u64) const { return value; }
+		constexpr Base trace(Ext value) const { return value; }
+
+		constexpr Ext traceBasis(u64 index) const
+		{
+			if (index)
+				throw std::out_of_range("Goldilocks trace-basis index is out of range. " LOCATION);
+			return Ext{ 1 };
+		}
+
+		constexpr Ext rootOfUnity() const
+		{
+			return Ext{ Goldilocks::mModulus - 1 };
+		}
+
+		constexpr u64 positionCoordinate(u64 position, u64 coordinate) const
+		{
+			return (position >> coordinate) & 1;
+		}
+
+		constexpr u64 frobeniusCoordinate(u64 coordinate, u64) const
+		{
+			return coordinate;
+		}
+
+		static u64 domainSize(u64 dimensions)
+		{
+			if (dimensions >= 64)
+				throw std::length_error("Goldilocks any-field domain size overflows u64. " LOCATION);
+			return u64{ 1 } << dimensions;
+		}
+
+		void transform(span<Ext> values, u64 dimensions) const
+		{
+			if (values.size() != domainSize(dimensions))
+				throw std::invalid_argument("Goldilocks transform input has the wrong size. " LOCATION);
+
+			for (u64 stride = 1; stride < values.size(); stride *= 2)
+			{
+				const auto groupStride = 2 * stride;
+				for (u64 group = 0; group < values.size(); group += groupStride)
+					for (u64 offset = 0; offset < stride; ++offset)
+					{
+						const auto left = values[group + offset];
+						const auto right = values[group + offset + stride];
+						values[group + offset] = left + right;
+						values[group + offset + stride] = left - right;
+					}
+			}
+		}
+	};
+
 	static_assert(AnyFieldContext<AnyFieldF9Ctx>);
 	static_assert(AnyFieldContext<AnyFieldF4Ctx>);
+	static_assert(AnyFieldContext<AnyFieldGoldilocksCtx>);
 
 	// The public aliases use fixed parameter policies targeting 128-bit QA-SD
 	// security. These values are deliberately not exposed through
@@ -296,6 +366,18 @@ namespace osuCrypto
 		static constexpr u64 maximumDimension = 20;
 	};
 
+	struct AnyFieldGoldilocksParams128
+	{
+		// Eight public cosets with three points each give regular weight 24.
+		// With c=8, the total syndrome weight is 192. The large base field
+		// also rules out the evaluation/interpolation attack of ePrint 2025/892.
+		static constexpr u64 compressionFactor = 8;
+		static constexpr u64 blockDimensions = 3;
+		static constexpr u64 pointsPerBlock = 3;
+		static constexpr u64 minimumDimension = 20;
+		static constexpr u64 maximumDimension = 63;
+	};
+
 	template<typename Context>
 	struct AnyFieldDefaultParams;
 
@@ -309,5 +391,11 @@ namespace osuCrypto
 	struct AnyFieldDefaultParams<AnyFieldF9Ctx>
 	{
 		using type = AnyFieldF9Params128;
+	};
+
+	template<>
+	struct AnyFieldDefaultParams<AnyFieldGoldilocksCtx>
+	{
+		using type = AnyFieldGoldilocksParams128;
 	};
 }

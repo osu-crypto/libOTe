@@ -49,9 +49,11 @@ namespace tests_libOTe
 			tc.add("AnyField_F9Transform_Test              ", AnyField_F9Transform_Test);
 			tc.add("AnyField_F4_Test                       ", AnyField_F4_Test);
 			tc.add("AnyField_F4Transform_Test              ", AnyField_F4Transform_Test);
+			tc.add("AnyField_GoldilocksTransform_Test      ", AnyField_GoldilocksTransform_Test);
 			tc.add("AnyField_PositionCircuit_Test          ", AnyField_PositionCircuit_Test);
 			tc.add("AnyField_F3Ole_Test                     ", AnyField_F3Ole_Test);
 			tc.add("AnyField_F2Ole_Test                     ", AnyField_F2Ole_Test);
+			tc.add("AnyField_GoldilocksOle_Test             ", AnyField_GoldilocksOle_Test);
 
 			tc.add("Cmp_greaterThan_test                    ", Cmp_greaterThan_test);
 			tc.add("Tools_Transpose_Test                    ", Tools_Transpose_Test);

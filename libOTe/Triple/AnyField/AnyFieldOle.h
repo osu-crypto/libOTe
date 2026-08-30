@@ -170,9 +170,11 @@ namespace osuCrypto
 	// Semi-honest two-party PCG for OLE over a base field, following
 	// Construction 1 of "Efficient Pseudorandom Correlation Generators for Any
 	// Finite Field". Field-specific operations are supplied by a compile-time
-	// context. AnyFieldF9Ctx generates F3 OLEs from QA-SD over F9, while
-	// AnyFieldF4Ctx generates F2 OLEs from QA-SD over F4. For each output index,
-	// the parties' shares satisfy x_0 * x_1 = z_0 + z_1.
+	// context. AnyFieldF9Ctx generates F3 OLEs from QA-SD over F9,
+	// AnyFieldF4Ctx generates F2 OLEs from QA-SD over F4, and
+	// AnyFieldGoldilocksCtx generates Goldilocks OLEs directly over the base
+	// field. For each output index, the parties' shares satisfy
+	// x_0 * x_1 = z_0 + z_1.
 	//
 	// Callers request a number of OLEs. The implementation fixes its 128-bit
 	// QA-SD parameters, rounds small requests up to the minimum secure domain,
@@ -204,10 +206,14 @@ namespace osuCrypto
 		static constexpr u64 Weight = BlockCount * PointsPerBlock;
 		static constexpr u64 GroupCount =
 			CompressionFactor * CompressionFactor * Ctx::extensionDegree;
+		static constexpr bool PacksPublicCoefficients =
+			CompressionFactor * Ctx::fieldBits <= 32;
 		using PackedPublic = std::conditional_t<
-			CompressionFactor * Ctx::fieldBits <= 8,
+			!PacksPublicCoefficients,
+			Ext,
+			std::conditional_t<CompressionFactor * Ctx::fieldBits <= 8,
 			u8,
-			std::conditional_t<CompressionFactor * Ctx::fieldBits <= 16, u16, u32>>;
+			std::conditional_t<CompressionFactor * Ctx::fieldBits <= 16, u16, u32>>>;
 		static constexpr bool PowerOfTwoCoordinates =
 			Ctx::coordinateSize == (u64{ 1 } << Ctx::coordinateBits);
 		static_assert(Ctx::extensionDegree > 0,
@@ -217,8 +223,8 @@ namespace osuCrypto
 		static_assert(Ctx::coordinateSize > (u64{ 1 } << (Ctx::coordinateBits - 1)) &&
 			Ctx::coordinateSize <= (u64{ 1 } << Ctx::coordinateBits),
 			"AnyFieldOle coordinateBits must be ceil(log2(coordinateSize)).");
-		static_assert(CompressionFactor > 1 && CompressionFactor * Ctx::fieldBits <= 32,
-			"AnyFieldOle packs all public multipliers into one u32.");
+		static_assert(CompressionFactor > 1 && Ctx::fieldBits > 0,
+			"AnyFieldOle requires at least two public polynomials and a nonzero field width.");
 		static_assert(Params::minimumDimension > BlockDimensions,
 			"AnyFieldOle requires a nontrivial within-block DPF domain.");
 		static_assert(Params::minimumDimension <= Params::maximumDimension,
@@ -355,16 +361,30 @@ namespace osuCrypto
 			// Expansion returns a basis-major prefix and never reads a public
 			// multiplier past that prefix. Avoid materializing the unused tail of
 			// the much larger secure ring domain.
-			std::vector<PackedPublic> publicA(std::min(domain, numOles));
+			const auto publicCount = std::min(domain, numOles);
+			std::vector<PackedPublic> publicA;
 			PRNG publicPrng(publicSeed);
 			auto coeffCtx = ctx.dpfCoeffCtx();
-			for (auto& output : publicA)
+			if constexpr (PacksPublicCoefficients)
 			{
-				u32 packed = Ext::one().index();
+				publicA.resize(publicCount);
+				for (auto& output : publicA)
+				{
+					u32 packed = Ext::one().index();
+					for (u64 polynomial = 1; polynomial < CompressionFactor; ++polynomial)
+						packed |= u32(coeffCtx.sample(publicPrng).index()) <<
+							(polynomial * Ctx::fieldBits);
+					output = static_cast<PackedPublic>(packed);
+				}
+			}
+			else
+			{
+				if (publicCount > std::numeric_limits<u64>::max() / (CompressionFactor - 1))
+					throw std::length_error("AnyFieldOle public coefficient count overflows u64. " LOCATION);
+				publicA.resize(publicCount * (CompressionFactor - 1));
 				for (u64 polynomial = 1; polynomial < CompressionFactor; ++polynomial)
-					packed |= u32(coeffCtx.sample(publicPrng).index()) <<
-						(polynomial * Ctx::fieldBits);
-				output = static_cast<PackedPublic>(packed);
+					for (u64 index = 0; index < publicCount; ++index)
+						publicA[(polynomial - 1) * publicCount + index] = coeffCtx.sample(publicPrng);
 			}
 
 			clear();
@@ -567,6 +587,7 @@ namespace osuCrypto
 			{
 				std::fill(x.begin(), x.end(), Base::zero());
 				std::fill(z.begin(), z.end(), Base::zero());
+				const auto publicCount = std::min(mN, mRequestedOleCount);
 
 				std::array<Ext, Ctx::extensionDegree> traceBasis;
 				std::array<std::array<Ext, Ctx::extensionDegree>, Ctx::extensionDegree>
@@ -591,9 +612,21 @@ namespace osuCrypto
 						work[fullPosition(point, mSparsePositions[coefficientOffset + point])] +=
 							mSparseCoefficients[coefficientOffset + point];
 					mCtx.transform(work, mDimension);
-					const auto needed = std::min<u64>(mN, x.size());
-					for (u64 index = 0; index < needed; ++index)
-						work[index] *= publicValue(index, polynomial);
+					if (polynomial)
+					{
+						if constexpr (PacksPublicCoefficients)
+						{
+							for (u64 index = 0; index < publicCount; ++index)
+								work[index] *= publicValue(index, polynomial);
+						}
+						else
+						{
+							const auto* publicValues = mPublicA.data() +
+								(polynomial - 1) * publicCount;
+							for (u64 index = 0; index < publicCount; ++index)
+								work[index] *= publicValues[index];
+						}
+					}
 
 					for (u64 basis = 0; basis < Ctx::extensionDegree; ++basis)
 					{
@@ -628,10 +661,51 @@ namespace osuCrypto
 					const auto pair = group % (CompressionFactor * CompressionFactor);
 					const auto leftPolynomial = pair / CompressionFactor;
 					const auto rightPolynomial = pair % CompressionFactor;
-					const auto needed = std::min<u64>(mN, z.size());
-					for (u64 index = 0; index < needed; ++index)
-						work[index] *= publicValue(index, leftPolynomial) *
-							mCtx.frobenius(publicValue(index, rightPolynomial), frobeniusPower);
+					if constexpr (PacksPublicCoefficients)
+					{
+						if (leftPolynomial && rightPolynomial)
+						{
+							for (u64 index = 0; index < publicCount; ++index)
+								work[index] *= publicValue(index, leftPolynomial) *
+									mCtx.frobenius(
+										publicValue(index, rightPolynomial), frobeniusPower);
+						}
+						else if (leftPolynomial)
+						{
+							for (u64 index = 0; index < publicCount; ++index)
+								work[index] *= publicValue(index, leftPolynomial);
+						}
+						else if (rightPolynomial)
+						{
+							for (u64 index = 0; index < publicCount; ++index)
+								work[index] *= mCtx.frobenius(
+									publicValue(index, rightPolynomial), frobeniusPower);
+						}
+					}
+					else
+					{
+						const auto* leftPublic = leftPolynomial ?
+							mPublicA.data() + (leftPolynomial - 1) * publicCount : nullptr;
+						const auto* rightPublic = rightPolynomial ?
+							mPublicA.data() + (rightPolynomial - 1) * publicCount : nullptr;
+						if (leftPublic && rightPublic)
+						{
+							for (u64 index = 0; index < publicCount; ++index)
+								work[index] *= leftPublic[index] *
+									mCtx.frobenius(rightPublic[index], frobeniusPower);
+						}
+						else if (leftPublic)
+						{
+							for (u64 index = 0; index < publicCount; ++index)
+								work[index] *= leftPublic[index];
+						}
+						else if (rightPublic)
+						{
+							for (u64 index = 0; index < publicCount; ++index)
+								work[index] *=
+									mCtx.frobenius(rightPublic[index], frobeniusPower);
+						}
+					}
 					for (u64 basis = 0; basis < Ctx::extensionDegree; ++basis)
 					{
 						const auto outputOffset = basis * mN;
@@ -929,12 +1003,22 @@ namespace osuCrypto
 			return point / PointsPerBlock + BlockCount * localPosition;
 		}
 
-		Ext publicValue(u64 index, u64 polynomial) const
+		OC_FORCEINLINE Ext publicValue(u64 index, u64 polynomial) const
 		{
-			const auto mask = (u32{ 1 } << Ctx::fieldBits) - 1;
-			return Ext::fromIndex(static_cast<u8>(
-				(static_cast<u32>(mPublicA[index]) >>
-					(polynomial * Ctx::fieldBits)) & mask));
+			if constexpr (PacksPublicCoefficients)
+			{
+				const auto mask = (u32{ 1 } << Ctx::fieldBits) - 1;
+				return Ext::fromIndex(static_cast<u8>(
+					(static_cast<u32>(mPublicA[index]) >>
+						(polynomial * Ctx::fieldBits)) & mask));
+			}
+			else
+			{
+				if (polynomial == 0)
+					return Ext::one();
+				const auto publicCount = std::min(mN, mRequestedOleCount);
+				return mPublicA[(polynomial - 1) * publicCount + index];
+			}
 		}
 
 		u64 productBlock(u64 group, u64 leftPoint, u64 rightPoint) const
@@ -975,6 +1059,7 @@ namespace osuCrypto
 
 	using AnyFieldF2Ole = AnyFieldOle<AnyFieldF4Ctx>;
 	using AnyFieldF3Ole = AnyFieldOle<AnyFieldF9Ctx>;
+	using AnyFieldGoldilocksOle = AnyFieldOle<AnyFieldGoldilocksCtx>;
 }
 
 #endif
