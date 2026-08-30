@@ -25,7 +25,6 @@
 #include <libOTe/Vole/Noisy/NoisyVoleReceiver.h>
 #include <libOTe/Vole/Noisy/NoisyVoleSender.h>
 #include <numeric>
-#include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h"
 #include <libOTe/Tools/TungstenCode/TungstenCode.h>
 #include <libOTe/Vole/VoleUtil.h>
@@ -619,6 +618,9 @@ namespace osuCrypto
 		if (noiseType != SdNoiseDistribution::Regular &&
 			noiseType != SdNoiseDistribution::Stationary)
 			throw std::invalid_argument("Unknown noise type. " LOCATION);
+		if (mult == MultType::QuasiCyclic)
+			throw std::invalid_argument(
+				"QuasiCyclic is a binary code supported by Silent OT, not Silent VOLE. " LOCATION);
 
 		const auto securityModel = SdNoiseSecurityModel{
 			coefficientRegularNoiseFactor<G>(ctx) };
@@ -931,25 +933,8 @@ namespace osuCrypto
 		}
 		case osuCrypto::MultType::QuasiCyclic:
 		{
-#ifdef ENABLE_BITPOLYMUL
-			// QuasiCyclic code is only supported for GF(2^128)
-			if constexpr (
-				std::is_same_v<F, block> &&
-				std::is_same_v<G, block> &&
-				std::is_same_v<Ctx, CoeffCtxGF128>)
-			{
-				QuasiCyclicCode encoder;
-				encoder.init2(mRequestSize, mNoiseVecSize, mCodeSeed);
-				encoder.dualEncode(mA);
-				encoder.dualEncode(mC);
-			}
-			else
-			{
-				throw std::runtime_error("QuasiCyclic is only supported for GF128, i.e. block. " LOCATION);
-			}
-#else
-			throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
-#endif
+			throw std::runtime_error(
+				"QuasiCyclic is a binary code supported by Silent OT, not Silent VOLE. " LOCATION);
 			break;
 		}
 		case osuCrypto::MultType::Tungsten:
