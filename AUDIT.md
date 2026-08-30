@@ -6657,3 +6657,102 @@ Verification:
 - `Vole_Silent_NoiseSampling_test` checks every approved pseudo-distance value
   and rejects the retired numeric EA modes.
 - The Silent OT EA integration test now exercises only the retained mode.
+
+## AUD-205: Quasi-cyclic encoding could retain the public parity component
+
+Status: fixed
+
+Affected code:
+
+- Quasi-cyclic Silent OT modulus selection and syndrome truncation.
+
+Concern:
+
+The encoder selected the first suitable prime `p` greater than or equal to the
+requested output dimension. When the requested dimension was itself such a
+prime, the encoder returned all `p` cyclic syndrome coordinates. This retained
+the `X - 1` component that the construction explicitly removes. The all-ones
+output character then mapped to a coefficient vector that was constant on each
+quasi-cyclic input block.
+
+Impact:
+
+For regular noise, only partitions crossing quasi-cyclic block boundaries
+randomized this character. At the representative supported dimension
+`p = 1048589`, the configured 128 noise partitions had only two such boundary
+crossings, giving the character bias at least 0.959 independently of the
+sampled circulants. This was a practical linear distinguisher.
+
+Resolution:
+
+QC now selects the first suitable prime strictly greater than the requested
+output dimension. Truncating at least one syndrome coordinate excludes the
+all-ones polynomial and removes the public `X - 1` component.
+
+Verification:
+
+- The QC utility test uses a requested dimension that is itself a suitable
+  prime and compares the optimized encoder with an independent scalar
+  polynomial implementation using the required strictly larger modulus.
+
+## AUD-206: Quasi-cyclic tests were skipped by continuous integration
+
+Status: fixed
+
+Affected code:
+
+- Ubuntu continuous-integration configuration.
+- Quasi-cyclic utility and Silent OT integration tests.
+
+Concern:
+
+`ENABLE_ALL_OT` enabled Silent OT but did not enable the independent bitpolymul
+dependency. All QC tests therefore reported skips in every normal CI build.
+
+Impact:
+
+Changes to the QC encoder and its Silent OT integration could reach the main
+branch without being compiled or executed by CI. In particular, no regression
+would have detected AUD-205.
+
+Resolution:
+
+The primary Ubuntu CI build now enables bitpolymul. Its existing unit-test step
+therefore compiles and runs the QC arithmetic, encoder, and end-to-end Silent OT
+tests under ASan.
+
+Verification:
+
+- The CI build configuration explicitly sets `ENABLE_BITPOLYMUL=ON`.
+
+## AUD-207: Quasi-cyclic matrix utility probabilistically rejected valid codes
+
+Status: fixed
+
+Affected code:
+
+- `QuasiCyclicCode::getMatrix()` diagnostic utility.
+
+Concern:
+
+While constructing the explicit matrix, the utility applied a one-sided random
+row-weight check using the prime modulus rather than deviation from the
+expected parity-row weight. A valid sampled matrix could therefore cause the
+utility to throw, with the failure becoming increasingly likely as more rows
+were inspected.
+
+Impact:
+
+This did not affect protocol encoding, but made the diagnostic API unreliable
+and unsuitable as deterministic regression coverage.
+
+Resolution:
+
+The probabilistic rejection was removed. Correctness is checked deterministically
+against the independent scalar encoder instead of treating an ordinary random
+weight fluctuation as an implementation failure.
+
+Verification:
+
+- The scalar QC regression checks the complete optimized result for four small
+  inputs using a dimension that requires strict syndrome truncation.

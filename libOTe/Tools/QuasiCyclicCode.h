@@ -20,7 +20,6 @@
 #include "Tools.h"
 #include "LDPC/Mtx.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
-#include <cmath>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -40,8 +39,8 @@ namespace osuCrypto
         // the length of the input. mCodeSize = mMessageSize * mScaler;
         u64 mCodeSize = 0;
 
-        // the next prime starting at mMessageSize. The 
-        // real code size will in fact be of size mScaler * mPrimeMosulus
+        // A prime strictly greater than mMessageSize. The internal cyclic
+        // blocks use this modulus and the output is truncated to mMessageSize.
         u64 mPrimeModulus = 0;
 
         // the randomness used to generate the code.
@@ -63,7 +62,13 @@ namespace osuCrypto
             // over F_2 exactly when 2 is primitive modulo p. Merely choosing
             // p prime can leave many small factors and enables reduced-ring
             // attacks that the generic pseudo-distance estimate does not model.
-            const auto primeModulus = nextPrimeWithPrimitiveRootTwo(messageSize);
+            //
+            // The strict inequality p > messageSize is equally important. It
+            // guarantees that at least one syndrome coordinate is truncated,
+            // removing the X - 1 component whose parity is otherwise a public
+            // linear distinguisher for regular noise (AUD-205).
+            const auto primeModulus =
+                nextPrimeWithPrimitiveRootTwo(messageSize + 1);
 			const auto paritySize = codeSize - messageSize;
 			const auto scalerMinusOne = 1 + (paritySize - 1) / primeModulus;
 			const auto polyBlockSize = 1 + (primeModulus - 1) / 128;
@@ -385,12 +390,10 @@ namespace osuCrypto
 
                 dualEncode(in);
 
-                u64 w = 0;
                 for (u64 j = 0; j < mMessageSize; ++j)
                 {
                     if (in[j] == oc::AllOneBlock)
                     {
-                        ++w;
                         mtx(i, j) = 1;
                     }
                     else if (in[j] == oc::ZeroBlock)
@@ -399,9 +402,6 @@ namespace osuCrypto
                     else
                         throw RTE_LOC;
                 }
-
-                if (std::abs((long long)(mPrimeModulus - w)) < mPrimeModulus / 2 - std::sqrt(mPrimeModulus))
-                    throw RTE_LOC;
             }
 
             return mtx;
