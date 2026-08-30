@@ -148,9 +148,15 @@ namespace osuCrypto {
 		// * A scalar prime-field or base-ring context, such as Fp or Z_(2^k),
 		//   may use the identity below.
 		// * Every extension-field context must override mulConst and multiply by
-		//   a fixed element outside its prime subfield. Otherwise the encoder is
-		//   a direct sum of independent base-field codes, enabling a component-
-		//   splitting attack even when the nominal coefficient field is large.
+		//   a fixed element of full algebraic degree over its prime field. Thus
+		//   the powers of the multiplication map span every extension component,
+		//   instead of preserving a proper base-field subspace. Merely choosing
+		//   an element outside the prime field is sufficient only when the
+		//   extension degree is prime.
+		// * A dense multiplication matrix can mix the stored components in fewer
+		//   applications and might improve resistance to splitting or low-weight
+		//   attacks. That is a useful heuristic, not a proved requirement of the
+		//   current parameter analysis; orbit-spanning mixing is the contract.
 		// * Product/vector contexts must apply the scalar context's mulConst to
 		//   every lane. Product lanes remain independent, while the components
 		//   inside each extension-field lane are mixed.
@@ -611,9 +617,10 @@ namespace osuCrypto {
 			ret = lhs.gf128Mul(rhs);
 		}
 
-		// Multiply by a fixed non-base-field element so binary structured codes
-		// mix all GF(2^128) components. This is the extension-field mulConst
-		// contract documented by CoeffCtxInteger.
+		// Multiply by a fixed full-degree element so repeated applications span
+		// all GF(2^128) components. Field_Audit_Test verifies that this element
+		// is outside GF(2^64), and therefore every proper subfield of GF(2^128).
+		// See the extension-field mulConst contract in CoeffCtxInteger.
 		OC_FORCEINLINE void mulConst(block& ret, const block& x)const
 		{
 			// multiplication y modulo mod
