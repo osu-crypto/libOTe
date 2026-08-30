@@ -172,6 +172,65 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
     PRNG prng(oc::ZeroBlock);
     code.init2(k, n);
 
+    // AUD-205: compare against a scalar polynomial implementation at a
+    // message size that is itself a suitable QC prime. The production encoder
+    // must select a strictly larger modulus so that the X - 1 syndrome
+    // coordinate is truncated.
+    {
+        const u64 scalarK = 11;
+        const u64 scalarN = 24;
+        const block scalarSeed = block(5, 6);
+        const auto p = nextPrimeWithPrimitiveRootTwo(scalarK + 1);
+        const auto polyBlockSize = divCeil(p, u64{ 128 });
+        const auto parityBlocks = divCeil(scalarN - scalarK, p);
+
+        std::vector<std::vector<u8>> multipliers(parityBlocks,
+            std::vector<u8>(p));
+        for (u64 s = 0; s < parityBlocks; ++s)
+        {
+            PRNG pubPrng(toBlock(s) ^ scalarSeed);
+            std::vector<u64> randomPoly(polyBlockSize * 2);
+            pubPrng.get(randomPoly.data(), randomPoly.size());
+
+            for (u64 bit = 0; bit < randomPoly.size() * 64; ++bit)
+                multipliers[s][bit % p] ^=
+                    *BitIterator(reinterpret_cast<u8*>(randomPoly.data()), bit);
+        }
+
+        for (u64 trial = 0; trial < 4; ++trial)
+        {
+            std::vector<u8> expected(scalarN);
+            if (trial == 0)
+                expected[scalarK] = 1;
+            else
+                for (auto& value : expected)
+                    value = prng.getBit();
+            auto actual = expected;
+
+            for (u64 s = 0; s < parityBlocks; ++s)
+            {
+                for (u64 j = 0; j < p; ++j)
+                {
+                    const auto inputIdx = scalarK + s * p + j;
+                    if (inputIdx == scalarN)
+                        break;
+                    if (!expected[inputIdx])
+                        continue;
+
+                    for (u64 i = 0; i < scalarK; ++i)
+                        expected[i] ^= multipliers[s][(i + p - j) % p];
+                }
+            }
+
+            QuasiCyclicCode scalarCode;
+            scalarCode.init2(scalarK, scalarN, scalarSeed);
+            scalarCode.dualEncode(actual);
+            if (actual != expected)
+                throw UnitTestFail(
+                    "quasi-cyclic encoder disagrees with scalar reference" LOCATION);
+        }
+    }
+
     // Test 1: Linear property - encoding(A ⊕ B) = encoding(A) ⊕ encoding(B)
     for (auto tt : rng(t))
     {
