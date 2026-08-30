@@ -276,8 +276,8 @@ namespace osuCrypto
 
 		struct CompactScratch
 		{
-			std::array<AlignedUnVector<block>, 2> mSeeds;
-			std::array<std::vector<u8>, 2> mTags;
+			AlignedUnVector<block> mSeeds;
+			std::vector<u8> mTags;
 
 			void resize(u64 depth)
 			{
@@ -286,11 +286,8 @@ namespace osuCrypto
 				const auto localDepth = depth - 3;
 				const auto paddedDomain = u64{ 1 } << depth;
 				const auto subtreeDomain = u64{ 1 } << localDepth;
-				const auto finalSlab = localDepth & 1;
-				mSeeds[finalSlab].resize(paddedDomain);
-				mSeeds[finalSlab ^ 1].resize(paddedDomain / 2);
-				mTags[finalSlab].resize(subtreeDomain);
-				mTags[finalSlab ^ 1].resize(std::max<u64>(subtreeDomain / 2, 1));
+				mSeeds.resize(paddedDomain);
+				mTags.resize(subtreeDomain);
 			}
 		};
 
@@ -484,30 +481,31 @@ namespace osuCrypto
 		}
 
 		for (u64 lane = 0; lane < 8; ++lane)
-			scratch.mSeeds[0][lane] = currentSeeds[lane];
+			scratch.mSeeds[lane] = currentSeeds[lane];
 		u8 topTagBits = 0;
 		for (u64 lane = 0; lane < 8; ++lane)
 			topTagBits |= lsb(currentTags[lane]) << lane;
-		scratch.mTags[0][0] = topTagBits;
+		scratch.mTags[0] = topTagBits;
 
 		std::array<block, 8> corrected;
 		std::array<block, 8> aes;
 		for (u64 d = 3; d < targetDepth; ++d)
 		{
 			const auto level = d - 3;
-			const auto currentSlab = level & 1;
-			const auto nextSlab = currentSlab ^ 1;
 			const auto width = u64{ 1 } << level;
 			const auto sigma0 = key.mCorrectionWords(d - 1, tree);
 			auto sigma1 = sigma0;
 			*BitIterator(&sigma1) = key.mCorrectionBits(d - 1, tree);
 
-			for (u64 node = 0; node < width; ++node)
+			// Expand backwards so children only overwrite parents that have
+			// already been consumed. This retains the breadth-first layout while
+			// requiring one physical-level slab instead of two.
+			for (u64 node = width; node-- > 0;)
 			{
-				const auto* parent = scratch.mSeeds[currentSlab].data() + 8 * node;
-				auto* left = scratch.mSeeds[nextSlab].data() + 16 * node;
+				const auto* parent = scratch.mSeeds.data() + 8 * node;
+				auto* left = scratch.mSeeds.data() + 16 * node;
 				auto* right = left + 8;
-				const auto parentTagBits = scratch.mTags[currentSlab][node];
+				const auto parentTagBits = scratch.mTags[node];
 				u8 childTagBits = 0;
 				if (d == 3)
 				{
@@ -534,21 +532,20 @@ namespace osuCrypto
 					left[lane] = AES::roundEnc(aes[lane], corrected[lane]);
 					right[lane] = aes[lane].add_epi64(corrected[lane]);
 				});
-				scratch.mTags[nextSlab][2 * node] = childTagBits;
-				scratch.mTags[nextSlab][2 * node + 1] = childTagBits;
+				scratch.mTags[2 * node] = childTagBits;
+				scratch.mTags[2 * node + 1] = childTagBits;
 			}
 		}
 
 		const auto level = targetDepth - 3;
-		const auto currentSlab = level & 1;
 		const auto width = u64{ 1 } << level;
 		const auto sigma0 = key.mCorrectionWords(targetDepth - 1, tree);
 		auto sigma1 = sigma0;
 		*BitIterator(&sigma1) = key.mCorrectionBits(targetDepth - 1, tree);
 		for (u64 node = 0; node < width; ++node)
 		{
-			const auto* parent = scratch.mSeeds[currentSlab].data() + 8 * node;
-			const auto parentTagBits = scratch.mTags[currentSlab][node];
+			const auto* parent = scratch.mSeeds.data() + 8 * node;
+			const auto parentTagBits = scratch.mTags[node];
 			const auto& sigma = node & 1 ? sigma1 : sigma0;
 			REGULAR_DPF_SIMD8(lane, {
 				const auto tagMask = block::allSame<u8>(
@@ -926,12 +923,12 @@ namespace osuCrypto
 		const auto localDepth = depth - topDepth;
 		const auto subtreeDomain = u64{ 1 } << localDepth;
 
-		// Two alternating slabs hold the largest two physical levels. A physical
-		// node is eight adjacent subtrees of one DPF tree. Unlike the old matrix
-		// layout, the workspace does not grow with numTrees.
+		// One in-place slab holds the current physical level. A physical node is
+		// eight adjacent subtrees of one DPF tree. Unlike the old matrix layout,
+		// the workspace does not grow with numTrees.
 		scratch.resize(depth);
-		auto& seedSlabs = scratch.mSeeds;
-		auto& tagSlabs = scratch.mTags;
+		auto& seeds = scratch.mSeeds;
+		auto& tags = scratch.mTags;
 
 		auto gamma = ctx.template makeVec<T>(numTrees);
 		const auto hasGamma = !key.mLeafVals.empty();
@@ -1005,30 +1002,30 @@ namespace osuCrypto
 			}
 
 			for (u64 lane = 0; lane < 8; ++lane)
-				seedSlabs[0][lane] = currentSeeds[lane];
+				seeds[lane] = currentSeeds[lane];
 			u8 topTagBits = 0;
 			for (u64 lane = 0; lane < 8; ++lane)
 				topTagBits |= lsb(currentTags[lane]) << lane;
-			tagSlabs[0][0] = topTagBits;
+			tags[0] = topTagBits;
 
 			std::array<block, 8> corrected;
 			std::array<block, 8> aes;
 			for (u64 d = TopDepth; d < depth; ++d)
 			{
 				const auto level = d - TopDepth;
-				const auto currentSlab = level & 1;
-				const auto nextSlab = currentSlab ^ 1;
 				const auto width = u64{ 1 } << level;
 				const auto sigma0 = key.mCorrectionWords(d - 1, tree);
 				auto sigma1 = sigma0;
 				*BitIterator(&sigma1) = key.mCorrectionBits(d - 1, tree);
 
-				for (u64 node = 0; node < width; ++node)
+				// Walk backwards so each child write only overlaps parent nodes
+				// that have already been expanded.
+				for (u64 node = width; node-- > 0;)
 				{
-					const auto* parent = seedSlabs[currentSlab].data() + 8 * node;
-					auto* left = seedSlabs[nextSlab].data() + 16 * node;
+					const auto* parent = seeds.data() + 8 * node;
+					auto* left = seeds.data() + 16 * node;
 					auto* right = left + 8;
-					const auto parentTagBits = tagSlabs[currentSlab][node];
+					const auto parentTagBits = tags[node];
 					u8 childTagBits = 0;
 					if (d == TopDepth)
 					{
@@ -1056,19 +1053,18 @@ namespace osuCrypto
 						left[lane] = AES::roundEnc(aes[lane], corrected[lane]);
 						right[lane] = aes[lane].add_epi64(corrected[lane]);
 					});
-					tagSlabs[nextSlab][2 * node] = childTagBits;
-					tagSlabs[nextSlab][2 * node + 1] = childTagBits;
+					tags[2 * node] = childTagBits;
+					tags[2 * node + 1] = childTagBits;
 				}
 			}
 
-			const auto leafSlab = localDepth & 1;
 			const auto sigma0 = key.mCorrectionWords(depth - 1, tree);
 			auto sigma1 = sigma0;
 			*BitIterator(&sigma1) = key.mCorrectionBits(depth - 1, tree);
 			for (u64 local = 0; local < subtreeDomain; ++local)
 			{
-				const auto* seeds = seedSlabs[leafSlab].data() + 8 * local;
-				const auto parentTagBits = tagSlabs[leafSlab][local];
+				const auto* leafSeeds = seeds.data() + 8 * local;
+				const auto parentTagBits = tags[local];
 				const auto& sigma = local & 1 ? sigma1 : sigma0;
 				REGULAR_DPF_SIMD8(lane, {
 					const auto logicalLeaf = lane * subtreeDomain + local;
@@ -1076,7 +1072,7 @@ namespace osuCrypto
 					{
 						const auto tagMask = block::allSame<u8>(
 							-static_cast<i8>((parentTagBits >> lane) & 1));
-						auto correctedLeaf = seeds[lane] ^ (tagMask & sigma);
+						auto correctedLeaf = leafSeeds[lane] ^ (tagMask & sigma);
 						auto tag = tagBit(correctedLeaf);
 						ctx.fromBlock(leaf, AES::roundEnc(correctedLeaf, correctedLeaf));
 						if (partyIdx)
