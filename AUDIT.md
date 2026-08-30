@@ -6480,6 +6480,48 @@ Verification:
   small-instance attack margin, an `F_9` regular-noise case, the large-field
   limit, and the stationary 64-bit pseudo-distance floor.
 
+## AUD-201: Quasi-cyclic Silent VOLE decomposed extension-field elements
+
+Status: fixed
+
+Affected code:
+
+- Quasi-cyclic compression in `SilentVoleSender` and `SilentVoleReceiver`.
+
+Concern:
+
+The quasi-cyclic encoder is a binary linear code. Applying it independently to
+the bits of a `block` does not turn it into a code over GF(2^128); it produces
+128 copies of the same binary code. In particular, stationary GF(2^128) noise
+projects to many binary noise vectors with the same support and the same code
+matrix. This falls outside the extension-field model and resembles the fixed-code
+correlation that the SSD analysis warns must be avoided. Unlike the other
+structured encoders, the quasi-cyclic encoder has no `mulConst` operation that
+couples extension components.
+
+Impact:
+
+The public Silent VOLE API admitted a nominal GF(2^128) construction whose
+security could only be analyzed through its correlated binary projections. The
+large-field parameter model therefore did not describe the instantiated code.
+
+Resolution:
+
+Quasi-cyclic compression is now explicitly binary-only. Silent OT retains it:
+although Silent OT stores 128 instances in each `block`, each bit lane is a
+separate binary protocol instance. Silent VOLE rejects `MultType::QuasiCyclic`
+during configuration, before allocating or consuming setup state, and retains a
+defensive rejection in the unreachable compression branch. Extension-field
+Silent VOLE must use an encoder that invokes the coefficient context's
+component-mixing operation.
+
+Verification:
+
+- `Vole_Silent_QuasiCyclic_test` verifies that both Silent VOLE roles reject QC
+  without becoming configured.
+- The existing quasi-cyclic Silent OT test continues to exercise the supported
+  binary construction.
+
 ## AUD-202: Small extension-field contexts did not mix base-field components
 
 Status: fixed

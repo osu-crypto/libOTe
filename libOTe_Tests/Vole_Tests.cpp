@@ -535,16 +535,35 @@ void Vole_Silent_stationary_test(const oc::CLP& cmd)
 }
 
 
-void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd)
+void Vole_Silent_QuasiCyclic_test(const oc::CLP&)
 {
-#if defined(ENABLE_BITPOLYMUL)
-	auto debug = cmd.isSet("debug");
-	auto noise = (SdNoiseDistribution)cmd.getOr("noise", 0);
-	for (u64 n : {128, 333})
-		Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, MultType::QuasiCyclic, debug, false, false, noise);
-#else
-	throw UnitTestSkipped("ENABLE_BITPOLYMUL not defined." LOCATION);
-#endif
+	using Sender = SilentVoleSender<block, block, CoeffCtxGF128>;
+	using Receiver = SilentVoleReceiver<block, block, CoeffCtxGF128>;
+	Sender sender;
+	Receiver receiver;
+	bool senderRejected = false;
+	bool receiverRejected = false;
+	try
+	{
+		sender.configure(128, SilentSecType::SemiHonest, MultType::QuasiCyclic,
+			SilentBaseType::Base, SdNoiseDistribution::Regular);
+	}
+	catch (const std::invalid_argument&)
+	{
+		senderRejected = true;
+	}
+	try
+	{
+		receiver.configure(128, SilentSecType::SemiHonest, MultType::QuasiCyclic,
+			SilentBaseType::Base, SdNoiseDistribution::Regular);
+	}
+	catch (const std::invalid_argument&)
+	{
+		receiverRejected = true;
+	}
+	if (!senderRejected || !receiverRejected || sender.isConfigured() ||
+		receiver.isConfigured())
+		throw UnitTestFail("Silent VOLE accepted the binary-only QuasiCyclic code");
 }
 
 void Vole_Silent_BlkAcc_test(const oc::CLP& cmd)

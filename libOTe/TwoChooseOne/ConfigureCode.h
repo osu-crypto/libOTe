@@ -48,6 +48,8 @@ namespace osuCrypto
 
     enum class MultType
     {
+        // Binary quasi-cyclic code. Supported by Silent OT; extension-field
+        // Silent VOLE requires a code that mixes extension components.
         // https://eprint.iacr.org/2019/1159.pdf
         QuasiCyclic = 1,
 
