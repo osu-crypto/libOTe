@@ -86,7 +86,7 @@ namespace osuCrypto
 			u64 domain,
 			u64 numPartitions = 2,
 			u64 cuckooSecParam = 2,
-			u64 linearSecParam = 10,
+			u64 linearSecParam = 40,
 			bool characteristicTwo = false)
 		{
 			mPartyIdx = partyIdx;
@@ -311,8 +311,10 @@ namespace osuCrypto
 			double expectedLoad = static_cast<double>(mNumPartitions * mDomain) / f;
 
 			// Chernoff bound: for Poisson(λ), Pr[X ≥ λ + t] ≤ exp(-t²/(2(λ + t/3)))
-			// Setting failure probability to 2^(-40), we get maxLoad ≈ λ + sqrt(2λ * 40 * ln(2)) + (80 * ln(2))/3
-			u64 maxLoad = static_cast<u64>(expectedLoad + std::sqrt(2 * expectedLoad * mLinearSecParam * std::log(2.0)) + (mLinearSecParam * 2 * std::log(2.0)) / 3) + 1;
+			// Union bound over every sparse bucket so that the probability that any
+			// bucket exceeds maxLoad is at most 2^(-mLinearSecParam).
+			auto perBucketSecParam = mLinearSecParam + log2ceil(f * mNumSets);
+			u64 maxLoad = static_cast<u64>(expectedLoad + std::sqrt(2 * expectedLoad * perBucketSecParam * std::log(2.0)) + (perBucketSecParam * 2 * std::log(2.0)) / 3) + 1;
 
 			std::vector<u32> sizes(mSparseSets.size());
 			mSparseSetBuf = std::make_unique<u32[]>(f * mNumSets * maxLoad);
