@@ -182,9 +182,14 @@ namespace osuCrypto
 	// every sparse polynomial has a fixed number of points in each public coset,
 	// allowing each product DPF to expand over a domain smaller by BlockCount.
 	// Base OTs and binary OLEs are one-shot and must be freshly installed before
-	// every setup. The public seed must be sampled uniformly and agreed by both
-	// parties. Reusing it for independent setups relies on the multi-instance
-	// form of the QA-SD assumption.
+	// every setup. The public seed must be sampled honestly and uniformly,
+	// independently of the parties' private inputs, and agreed by both parties; it
+	// must not be adversarially selected or biased. The paper states QA-SD for a
+	// uniformly random public group-algebra element, whereas this implementation
+	// derives that element from PRNG(publicSeed). Thus this seeded instantiation
+	// additionally uses the usual public-matrix/ideal-cipher heuristic. Reusing a
+	// seed for independent setups also relies on the multi-instance form of the
+	// QA-SD assumption.
 	template<AnyFieldContext Context,
 		typename Parameters = typename AnyFieldDefaultParams<Context>::type>
 	class AnyFieldOle : public TimerAdapter
