@@ -805,8 +805,15 @@ void Vole_Silent_NoiseSampling_test(const oc::CLP&)
 	const auto stationaryWeight = getRegNoiseWeight(
 		0.25, 4096, 128, SdNoiseDistribution::Stationary,
 		SdNoiseSecurityModel::binary());
+	const auto paperDistanceStationary = getRegNoiseWeight(
+		0.20, 4096, 128, SdNoiseDistribution::Stationary,
+		SdNoiseSecurityModel::binary());
+	const auto stationaryAttackFloor = getRegNoiseWeight(
+		0.50, 4096, 128, SdNoiseDistribution::Stationary,
+		SdNoiseSecurityModel::binary());
 	if (binaryLarge != 128 || binarySmall != 144 || f9Regular != 136 ||
-		largeFieldRegular != 160 || stationaryWeight != 160)
+		largeFieldRegular != 160 || stationaryWeight != 160 ||
+		paperDistanceStationary != 200 || stationaryAttackFloor != 128)
 		throw UnitTestFail("Silent-noise security floors selected an unexpected weight");
 
 	PRNG prng(CCBlock);

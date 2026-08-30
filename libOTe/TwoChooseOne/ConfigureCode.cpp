@@ -24,15 +24,27 @@ namespace osuCrypto
     // stationary noise rather than the binary formula. Thus the pseudo-distance
     // floor is ceil(-64/log2(1-a*delta)), where a is the applicable factor.
     //
-    // Second, pseudo distance does not model the best decoding/algebraic
+    // Second, pseudo distance does not model the best non-linear/algebraic
     // attacks. We independently require at least secParam noise positions.
     // Current regular-LPN estimates put the small binary N=2048, t=128 case
-    // below 128 bits, so binary sizes through 2048 use ceil(9*secParam/8)
-    // instead. This is a conservative calibration, not a proof for structured
-    // or nonbinary LPN; both this attack floor and the pseudo distances should
-    // be revisited when tighter estimators become available. The selected t is
-    // the maximum of these two safeguards and the legacy small-instance
-    // implementation floor, rounded up to a multiple of eight.
+    // below 128 bits, so binary regular-noise sizes through 2048 use
+    // ceil(9*secParam/8) instead.
+    //
+    // For stationary noise, this floor counts the secret support positions,
+    // not the nonzero coefficients in one sampled error vector. The SSD
+    // algebraic analysis already models coefficients uniform in the field,
+    // including zero, and its evaluated rate-one-half instances require at
+    // most 107 support positions for 128-bit security. Scaling this floor by
+    // the reciprocal nonzero probability would instead partially reinstate a
+    // 128-bit linear-test requirement: the effect of zero coefficients on
+    // linear tests (including ISD-style tests) is already captured by the
+    // stationary bias (1-delta)^t above.
+    //
+    // These attack floors are conservative calibrations, not proofs for every
+    // structured or nonbinary LPN instance. Both the floors and the pseudo
+    // distances should be revisited when tighter estimators become available.
+    // The selected t is the maximum of the two safeguards and the legacy
+    // small-instance implementation floor, rounded up to a multiple of eight.
     u64 getRegNoiseWeight(
         double pseudoMinDistRatio,
         u64 N,
