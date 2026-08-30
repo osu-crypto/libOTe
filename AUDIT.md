@@ -10,7 +10,8 @@ Status values:
 - `deferred`: accepted finding whose fix is intentionally postponed.
 - `closed (...)`: the concern was resolved with the disposition in parentheses.
 
-Audit status: closed on 2026-08-27 after the cleanup and verification pass.
+The original general audit closed on 2026-08-27 after the cleanup and
+verification pass. Follow-up reviews retain the same finding sequence.
 The RevCuckoo implementation was excluded because it is undergoing a separate
 set of substantial changes. AUD-001 remains intentionally deferred.
 
@@ -6839,3 +6840,73 @@ Verification:
 - The QC integration test performs two consecutive stationary correlated-OT
   expansions with the same sender, receiver, and delta, replenishing base
   correlations between expansions and checking every output correlation.
+
+## AUD-210: AnyField explicit clear retained the public matrix allocation
+
+Status: fixed
+
+Affected code:
+
+- `AnyFieldOle::clear()` and moved-from cleanup.
+
+Concern:
+
+The public coefficient matrix used `std::vector::clear()`, which destroys its
+elements but normally retains its allocation. Explicitly clearing a Goldilocks
+instance configured for `N = 2^20` could therefore retain 56 MiB until the
+object was destroyed, moved over, or reinitialized.
+
+Impact:
+
+Protocol state was cleared correctly, so this did not affect correlation
+correctness or security. It violated the memory-release expectation of the
+public `clear()` operation and could keep a substantial allocation alive in a
+long-running process.
+
+Resolution:
+
+Explicit clear and moved-from cleanup now replace the public vector with an
+empty vector, releasing its allocation. Expansion continues to retain the
+matrix intentionally so callers can perform independent setups with the same
+public QA-SD matrix.
+
+Verification:
+
+- The bounded production-shaped Goldilocks test exercises move construction
+  and explicit clear and checks the observable lifecycle state.
+- The release operation is outside setup and expansion hot paths.
+
+## AUD-211: AnyField public-seed security requirement was undocumented
+
+Status: fixed
+
+Affected code:
+
+- `AnyFieldOle` public API documentation.
+
+Concern:
+
+The construction models the QA-SD public matrix as uniformly sampled, but the
+API accepted an arbitrary caller-provided seed without documenting that
+precondition. The setup exchange checked that both parties supplied the same
+seed; it could not establish that the seed was sampled with the distribution
+required by the assumption.
+
+Impact:
+
+A caller could incorrectly treat an adversarially selected or fixed public
+matrix as covered by the stated QA-SD assumption. Reusing one public matrix for
+multiple independent samples additionally invokes a multi-instance form of the
+assumption.
+
+Resolution:
+
+The class documentation now requires the public seed to be sampled uniformly
+and agreed by both parties. It also states the assumption used when the public
+matrix is reused across independent setups. No runtime test can establish a
+seed's sampling provenance.
+
+Verification:
+
+- The setup protocol continues to reject peers that provide different public
+  seeds.

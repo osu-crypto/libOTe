@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <utility>
 #include <vector>
 
 namespace osuCrypto
@@ -482,6 +483,17 @@ namespace osuCrypto
 		using TestOle = AnyFieldOle<AnyFieldGoldilocksCtx, AnyFieldGoldilocksTestParams>;
 		runAnyFieldOleCase<TestOle>(1, false, "Goldilocks");
 		runAnyFieldOleCase<TestOle>(16, false, "Goldilocks");
+
+		const block publicSeed(0x9132749812374981, 0x1239874192387491);
+		TestOle source;
+		source.init(0, 16, publicSeed);
+		TestOle destination(std::move(source));
+		if (source.isInitialized() || destination.outputSize() != 16)
+			throw UnitTestFail("AnyFieldOle move construction retained or lost public state");
+		destination.clear();
+		if (destination.isInitialized() || destination.hasSetup() || destination.hasBaseCors())
+			throw UnitTestFail("AnyFieldOle explicit clear retained protocol state");
+
 		if (cmd.isSet("v"))
 			runAnyFieldOleCase<AnyFieldGoldilocksOle>(
 				cmd.getOr("n", 1ull << 20), true, "Goldilocks");

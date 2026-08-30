@@ -182,7 +182,9 @@ namespace osuCrypto
 	// every sparse polynomial has a fixed number of points in each public coset,
 	// allowing each product DPF to expand over a domain smaller by BlockCount.
 	// Base OTs and binary OLEs are one-shot and must be freshly installed before
-	// every setup.
+	// every setup. The public seed must be sampled uniformly and agreed by both
+	// parties. Reusing it for independent setups relies on the multi-instance
+	// form of the QA-SD assumption.
 	template<AnyFieldContext Context,
 		typename Parameters = typename AnyFieldDefaultParams<Context>::type>
 	class AnyFieldOle : public TimerAdapter
@@ -271,7 +273,7 @@ namespace osuCrypto
 				mDpfKeys = std::move(source.mDpfKeys);
 				mHasSetup = std::exchange(source.mHasSetup, false);
 
-				source.mPublicA.clear();
+				source.mPublicA = {};
 				source.mPositionGmw.clear();
 				source.mPositionCircuit = {};
 				source.mSendOts.clear();
@@ -601,8 +603,8 @@ namespace osuCrypto
 				}
 
 				// Transform one sparse polynomial at a time. This keeps the working
-				// set O(N); the public multipliers remain packed in the smallest
-				// integral word that holds them.
+				// set O(N). Small-field public multipliers remain packed in one
+				// integral word; large-field multipliers are stored polynomial-major.
 				std::vector<Ext> work(mN, Ext::zero());
 				for (u64 polynomial = 0; polynomial < CompressionFactor; ++polynomial)
 				{
@@ -737,7 +739,10 @@ namespace osuCrypto
 			mN = 0;
 			mBlockSize = 0;
 			mPublicSeed = block{};
-			mPublicA.clear();
+			// Explicit clear releases the potentially dominant public matrix. It is
+			// retained across expand() calls until the caller clears or reinitializes
+			// the object so that independent setups can reuse the same matrix.
+			mPublicA = {};
 			mPositionGmw.clear();
 			mPositionCircuit = {};
 			mPositionOleCount = 0;
