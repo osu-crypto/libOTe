@@ -790,6 +790,61 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 
 void Vole_Silent_NoiseSampling_test(const oc::CLP&)
 {
+	{
+		u64 scaler = 0, expanderWeight = 0, accumulatorWeight = 0;
+		u64 sigma = 0, depth = 0;
+		double pseudoDistance = 0;
+
+		EAConfigure(MultType::ExAcc40, scaler, expanderWeight, pseudoDistance);
+		if (scaler != 5 || expanderWeight != 41 || pseudoDistance != 0.20)
+			throw UnitTestFail("EA pseudo-distance parameters changed unexpectedly");
+
+		ExConvConfigure(MultType::ExConv7x24, scaler, expanderWeight,
+			accumulatorWeight, pseudoDistance);
+		if (scaler != 2 || expanderWeight != 7 || accumulatorWeight != 24 ||
+			pseudoDistance != 0.15)
+			throw UnitTestFail("aggressive ExConv pseudo-distance parameters changed unexpectedly");
+
+		ExConvConfigure(MultType::ExConv21x24, scaler, expanderWeight,
+			accumulatorWeight, pseudoDistance);
+		if (scaler != 2 || expanderWeight != 21 || accumulatorWeight != 24 ||
+			pseudoDistance != 0.20)
+			throw UnitTestFail("conservative ExConv pseudo-distance parameters changed unexpectedly");
+
+		BlkAccConfigure(MultType::BlkAcc3x8, scaler, sigma, depth, pseudoDistance);
+		if (scaler != 2 || sigma != 8 || depth != 3 || pseudoDistance != 0.15)
+			throw UnitTestFail("aggressive BlkAcc pseudo-distance parameters changed unexpectedly");
+
+		BlkAccConfigure(MultType::BlkAcc3x32, scaler, sigma, depth, pseudoDistance);
+		if (scaler != 2 || sigma != 32 || depth != 3 || pseudoDistance != 0.20)
+			throw UnitTestFail("conservative BlkAcc pseudo-distance parameters changed unexpectedly");
+
+		TungstenConfigure(scaler, pseudoDistance);
+		if (scaler != 2 || pseudoDistance != 0.20)
+			throw UnitTestFail("Tungsten pseudo-distance parameters changed unexpectedly");
+
+		QuasiCyclicConfigure(scaler, pseudoDistance);
+		if (scaler != 2 || pseudoDistance != 0.25)
+			throw UnitTestFail("quasi-cyclic pseudo-distance parameters changed unexpectedly");
+
+		for (int retired : { 4, 5, 6 })
+		{
+			bool rejected = false;
+			try
+			{
+				(void)syndromeDecodingConfigure(128, 4096,
+					static_cast<MultType>(retired), SdNoiseDistribution::Regular,
+					SdNoiseSecurityModel::binary());
+			}
+			catch (const std::exception&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw UnitTestFail("retired low-weight EA mode was accepted");
+		}
+	}
+
 	const auto binaryLarge = getRegNoiseWeight(
 		0.25, 4096, 128, SdNoiseDistribution::Regular,
 		SdNoiseSecurityModel::binary());

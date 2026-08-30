@@ -151,6 +151,60 @@ namespace osuCrypto {
 		return n;
 	}
 
+	namespace
+	{
+		bool isPrimitiveRootTwo(u64 prime)
+		{
+			if (prime <= 2)
+				return false;
+
+			const auto phi = prime - 1;
+			auto remaining = phi;
+
+			auto checkFactor = [&](u64 factor)
+			{
+				return power(2, phi / factor, prime) != 1;
+			};
+
+			if ((remaining & 1) == 0)
+			{
+				if (!checkFactor(2))
+					return false;
+				do
+				{
+					remaining >>= 1;
+				} while ((remaining & 1) == 0);
+			}
+
+			for (u64 factor = 3; factor <= remaining / factor; factor += 2)
+			{
+				if (remaining % factor)
+					continue;
+				if (!checkFactor(factor))
+					return false;
+				do
+				{
+					remaining /= factor;
+				} while (remaining % factor == 0);
+			}
+
+			return remaining == 1 || checkFactor(remaining);
+		}
+	}
+
+	u64 nextPrimeWithPrimitiveRootTwo(u64 n)
+	{
+		auto prime = nextPrime(std::max<u64>(n, 3));
+		while (!isPrimitiveRootTwo(prime))
+		{
+			if (prime == std::numeric_limits<u64>::max())
+				throw std::overflow_error(
+					"No 64-bit prime with primitive root two is at least the requested value. " LOCATION);
+			prime = nextPrime(prime + 1);
+		}
+		return prime;
+	}
+
 	void print(array<block, 128>& inOut)
 	{
 		BitVector temp(128);

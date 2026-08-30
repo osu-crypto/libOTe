@@ -802,9 +802,6 @@ namespace osuCrypto
 #endif
 			}
 			break;
-			case osuCrypto::MultType::ExAcc7:
-			case osuCrypto::MultType::ExAcc11:
-			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
 				// Use Expander-Accumulator code for compression
@@ -887,9 +884,6 @@ namespace osuCrypto
 #endif
 			}
 			break;
-			case osuCrypto::MultType::ExAcc7:
-			case osuCrypto::MultType::ExAcc11:
-			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
 				// Use Expander-Accumulator code for both A and C

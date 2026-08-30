@@ -78,6 +78,10 @@ namespace osuCrypto {
     bool isPrime(u64 n);
     u64 nextPrime(u64 n);
 
+    // Returns the first prime p >= n for which 2 has multiplicative order
+    // p - 1. Consequently, (X^p - 1) / (X - 1) is irreducible over F_2.
+    u64 nextPrimeWithPrimitiveRootTwo(u64 n);
+
 
     void print(std::array<block, 128>& inOut);
     u8 getBit(std::array<block, 128>& inOut, u64 i, u64 j);

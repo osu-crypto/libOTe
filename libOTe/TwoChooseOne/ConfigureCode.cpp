@@ -98,22 +98,12 @@ namespace osuCrypto
         scaler = 5;
         switch (mMultType)
         {
-        case osuCrypto::MultType::ExAcc7:
-            expanderWeight = 7;
-            // this is known to be high but likely overall accurate
-            minDist = 0.1;
-            break;
-        case osuCrypto::MultType::ExAcc11:
-            expanderWeight = 11;
-            minDist = 0.15;
-            break;
-        case osuCrypto::MultType::ExAcc21:
-            expanderWeight = 21;
-            minDist = 0.2;
-            break;
         case osuCrypto::MultType::ExAcc40:
             expanderWeight = 41;
-            minDist = 0.25;
+            // Fixed-weight EA is asymptotically vulnerable to signature
+            // collisions. Weight 41 is retained for practical dimensions with
+            // explicit margin below the generator-row heuristic.
+            minDist = 0.20;
             break;
         default:
             throw RTE_LOC;
@@ -136,12 +126,12 @@ namespace osuCrypto
         case osuCrypto::MultType::ExConv7x24:
             accumulatorWeight = 24;
             expanderWeight = 7;
-            minDist = 0.25; // psuedo min dist estimate
+            minDist = 0.15; // aggressive pseudo-distance estimate
             break;
         case osuCrypto::MultType::ExConv21x24:
             accumulatorWeight = 24;
             expanderWeight = 21;
-            minDist = 0.25; // psuedo min dist estimate
+            minDist = 0.20; // conservative pseudo-distance estimate
             break;
         default:
             throw RTE_LOC;
