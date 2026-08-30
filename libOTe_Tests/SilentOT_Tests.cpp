@@ -178,7 +178,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
     // coordinate is truncated.
     {
         const u64 scalarK = 11;
-        const u64 scalarN = 24;
+        const u64 scalarN = 27;
         const block scalarSeed = block(5, 6);
         const auto p = nextPrimeWithPrimitiveRootTwo(scalarK + 1);
         const auto polyBlockSize = divCeil(p, u64{ 128 });
@@ -202,6 +202,8 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
             std::vector<u8> expected(scalarN);
             if (trial == 0)
                 expected[scalarK] = 1;
+            else if (trial == 1)
+                expected[scalarK + p] = 1;
             else
                 for (auto& value : expected)
                     value = prng.getBit();

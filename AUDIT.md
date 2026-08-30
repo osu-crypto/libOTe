@@ -6755,4 +6755,50 @@ weight fluctuation as an implementation failure.
 Verification:
 
 - The scalar QC regression checks the complete optimized result for four small
-  inputs using a dimension that requires strict syndrome truncation.
+  inputs using strict syndrome truncation and two circulant blocks.
+
+## AUD-208: Quasi-cyclic parity blocks used the padded transpose stride
+
+Status: fixed
+
+Affected code:
+
+- Quasi-cyclic bit-matrix transposition before polynomial multiplication.
+
+Concern:
+
+The encoder transposed the complete parity span into a matrix whose polynomial
+columns were padded to `128 * ceil(p / 128)` bits, but it computed polynomial
+boundaries at multiples of the prime modulus `p`. Since `p` is not divisible
+by 128, coordinates after each `p`-boundary remained in the preceding padded
+block. Reduction modulo `X^p - 1` then folded those coordinates onto existing
+columns, while the following random circulant started only at the padded
+128-bit boundary.
+
+Impact:
+
+The implemented matrix deviated from the analyzed quasi-cyclic family whenever
+the parity region contained more than one modulus block. Up to 127 positions at
+each boundary were assigned to the wrong circulant and some input rows became
+duplicates. This could be a substantial fraction of the matrix for small
+configured dimensions. No concrete decoding attack was established, but the
+intended independent random-block structure did not hold.
+
+Resolution:
+
+The encoder now packs each `p`-coordinate polynomial independently in
+128-coordinate chunks. A single aligned stack buffer is zero-padded only for a
+partial chunk, transposed in place, and stored directly into the existing FFT
+input matrix. The matrix allocation is uninitialized because every used and
+padded cell is now written explicitly. The hot loop adds no allocation,
+dynamic dispatch, or per-coordinate abstraction.
+
+Verification:
+
+- The scalar QC regression spans two circulant blocks and checks basis vectors
+  in both blocks as well as random inputs.
+- The bit-shift, modular-reduction, bitpolymul, explicit-matrix, QC encoder, and
+  end-to-end Silent OT tests pass.
+- Five sequential `k = 2^18` single-block encodes averaged 62.4 ms before and
+  61.3 ms after the change. The difference is within run-to-run noise; no
+  slowdown was observed.
