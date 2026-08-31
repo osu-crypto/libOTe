@@ -24,6 +24,7 @@ namespace osuCrypto
 		u64 mLogG = 0;
 
 		u64 mBatchSize = 0;
+		bool mRequireFullRank = false;
 
 		DpfMult mMult;
 
@@ -31,13 +32,20 @@ namespace osuCrypto
 
 		u64 mPrintIdx = 0;
 
-		void init(u64 partyIdx, u64 m, u64 c, u64 logG, u64 batchSize = 1)
+		void init(
+			u64 partyIdx,
+			u64 m,
+			u64 c,
+			u64 logG,
+			u64 batchSize = 1,
+			bool requireFullRank = false)
 		{
 			mPartyIdx = partyIdx;
 			mM = m;
 			mC = c;
 			mLogG = logG;
 			mBatchSize = batchSize;
+			mRequireFullRank = requireFullRank;
 
 			auto oneHot = mM * (2 * mC - 3);
 			auto v = mM * mC;
@@ -45,9 +53,12 @@ namespace osuCrypto
 			auto randX = mC;
 			auto yy = std::min<u64>(mC * mM, mC * mLogG);
 			auto cc = std::min<u64>(mC * mM, mM * mLogG);
+			// Securely AND the pivot-exists flags down to one public abort bit.
+			// This detects a rank-deficient system without revealing which row failed.
+			auto rankCheck = mRequireFullRank ? mM * batchSize - 1 : 0;
 			auto baseCount = cc + yy + randX + oneHot + v + mUpdate;
 
-			mMult.init(partyIdx, baseCount * batchSize);
+			mMult.init(partyIdx, baseCount * batchSize + rankCheck);
 		}
 
 		u64 baseOtCount() const
@@ -1204,6 +1215,51 @@ namespace osuCrypto
 			if (mPrint)
 				co_await printMtxV(mLogG, X, "Final solution X", sock);
 
+			// Each support row is one-hot exactly when elimination found a pivot.
+			// Compute the conjunction in MPC and reveal only the aggregate success
+			// bit, as required by RevCuckoo's public abort semantics.
+			if (mRequireFullRank)
+			{
+				BitVector rankFlags(B * mM);
+				for (u64 b = 0, k = 0; b < B; ++b)
+				{
+					for (u64 i = 0; i < mM; ++i, ++k)
+					{
+						u8 flag = 0;
+						for (u64 j = 0; j < mC; ++j)
+							flag ^= bit(s[b][i], j);
+						rankFlags[k] = flag;
+					}
+				}
+
+				while (rankFlags.size() > 1)
+				{
+					auto pairs = rankFlags.size() / 2;
+					BitVector lhs(pairs), rhs(pairs), products(pairs);
+					for (u64 i = 0; i < pairs; ++i)
+					{
+						lhs[i] = rankFlags[2 * i];
+						rhs[i] = rankFlags[2 * i + 1];
+					}
+					co_await mMult.multiplyBits(
+						pairs, lhs.getSpan<u8>(), rhs.getSpan<u8>(), products.getSpan<u8>(), sock);
+
+					BitVector next(pairs + (rankFlags.size() & 1));
+					for (u64 i = 0; i < pairs; ++i)
+						next[i] = products[i];
+					if (rankFlags.size() & 1)
+						next[pairs] = rankFlags[rankFlags.size() - 1];
+					rankFlags = std::move(next);
+				}
+
+				u8 peerRank = 0;
+				u8 localRank = rankFlags[0];
+				co_await sock.send(coproto::copy(localRank));
+				co_await sock.recv(peerRank);
+				if (peerRank > 1 || (localRank ^ peerRank) != 1)
+					throw std::runtime_error("RevCuckoo binary system is rank deficient. " LOCATION);
+			}
+
 
 			if (mMult.mOtIdx != mMult.mTotalMults)
 				throw RTE_LOC;
@@ -1335,6 +1391,7 @@ namespace osuCrypto
 			mM = 0;
 			mC = 0;
 			mLogG = 0;
+			mRequireFullRank = false;
 		}
 	};
 

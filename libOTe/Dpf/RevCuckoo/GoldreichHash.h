@@ -12,17 +12,19 @@ namespace osuCrypto
 
 	// This hash is inspired by the goldreich PRG.
 	// 
-	// In input x, it computes
+	// On input x, it computes
 	//   1) a = M0 * x
 	//   2) b = M1 * x
-	//   3) c = a * b
-	//   4) y = M2 * (x || c)
+	//   3) d = M2 * x
+	//   4) c = a * b
+	//   5) e = c * d
+	//   6) y = M3 * (x || c || e)
 	// 
-	// where M0,M1,M2 are matrices, step 3 performs 
-	// elementwise multiplication of bits. M2 is compressing.
+	// where M0,...,M3 are matrices, steps 4 and 5 perform
+	// elementwise multiplication of bits, and M3 is compressing.
 	//
 	// This is not intended to be a cryptographic hash function.
-	// Instead we want that the output to be close ro uniform 
+	// Instead we want the output to be close to uniform
 	// given that the seed is sampled randomly after the input
 	// is fixed. 
 	struct GoldreichHash
@@ -47,6 +49,7 @@ namespace osuCrypto
 			LinearCode f0; 
 			LinearCode f1; 
 			LinearCode f2;
+			LinearCode f3;
 			Cache() = default;
 			Cache(const Cache&) = default;
 			Cache&operator=(const Cache&) = default;
@@ -56,7 +59,8 @@ namespace osuCrypto
 				PRNG fPrng(seed);
 				f0.random(fPrng, inBytes * 8, numIntermediateBytes * 8);
 				f1.random(fPrng, inBytes * 8, numIntermediateBytes * 8);
-				f2.random(fPrng, (inBytes + numIntermediateBytes) * 8, outBytes * 8);
+				f2.random(fPrng, inBytes * 8, numIntermediateBytes * 8);
+				f3.random(fPrng, (inBytes + 2 * numIntermediateBytes) * 8, outBytes * 8);
 			}
 
 		};
@@ -65,19 +69,28 @@ namespace osuCrypto
 		{
 			if (partyIdx > 1)
 				throw std::runtime_error("GoldreichHash: partyIdx must be 0 or 1. " LOCATION);
-			if (n == 0)
-				throw std::runtime_error("GoldreichHash: n must be > 0. " LOCATION);
+			if (n == 0 || inBytes == 0 || outBytes == 0)
+				throw std::runtime_error("GoldreichHash dimensions must be nonzero. " LOCATION);
 
 			mPartyIdx = partyIdx;
 			mN = n;
 			mInBytes = inBytes;
 			mOutBytes = outBytes;
 			mNumIntermediateBytes = mOutBytes * 1;
+			if (mInBytes > LinearCode::sLinearCodePlainTextMaxSize ||
+				mNumIntermediateBytes * 8 > LinearCode::sLinearCodeCodewordBitMaxSize ||
+				mInBytes + 2 * mNumIntermediateBytes > LinearCode::sLinearCodePlainTextMaxSize ||
+				mOutBytes * 8 > LinearCode::sLinearCodeCodewordBitMaxSize)
+				throw std::length_error("GoldreichHash dimensions exceed LinearCode limits. " LOCATION);
 
-			if (mNumIntermediateBytes * 8 > mInBytes * mInBytes * 8 * 8)
-				throw std::runtime_error("GoldreichHash: mOutBytes * 2 <= mInBytes * mInBytes. " LOCATION);
+			auto inputBits = mInBytes * 8;
+			auto featureCount = 1 + inputBits +
+				inputBits * (inputBits - 1) / 2 +
+				inputBits * (inputBits - 1) * (inputBits - 2) / 6;
+			if (mNumIntermediateBytes * 8 > featureCount)
+				throw std::runtime_error("GoldreichHash output exceeds its cubic feature dimension. " LOCATION);
 
-			mMult.init(mPartyIdx, mN * mNumIntermediateBytes * 8);
+			mMult.init(mPartyIdx, 2 * mN * mNumIntermediateBytes * 8);
 		}
 
 		auto cache(block seed) const
@@ -134,7 +147,8 @@ namespace osuCrypto
 			//LinearCode f2; f2.random(fPrng, (mInBytes + mNumIntermediateBytes) * 8, mOutBytes * 8);
 
 			std::vector<u8> A(mNumIntermediateBytes), B(mNumIntermediateBytes);
-			std::vector<u8> buff(x.cols() + mNumIntermediateBytes);
+			std::vector<u8> D(mNumIntermediateBytes), E(mNumIntermediateBytes);
+			std::vector<u8> buff(x.cols() + 2 * mNumIntermediateBytes);
 
 			//if (mPrint)
 			//{
@@ -144,16 +158,21 @@ namespace osuCrypto
 			{
 				cache.f0.encode(x[i], A);
 				cache.f1.encode(x[i], B);
+				cache.f2.encode(x[i], D);
 
 
 				for (u64 j = 0; j < B.size(); ++j)
+				{
 					B[j] &= A[j];
+					E[j] = B[j] & D[j];
+				}
 
 				memcpy(buff.data(), x.data(i), x.cols());
 				memcpy(buff.data() + x.cols(), B.data(), B.size());
+				memcpy(buff.data() + x.cols() + B.size(), E.data(), E.size());
 
 				buff[0] ^= 1;
-				cache.f2.encode(buff, y[i]);
+				cache.f3.encode(buff, y[i]);
 
 				if (mPrint)
 				{
@@ -189,18 +208,21 @@ namespace osuCrypto
 
 			Matrix<u8>
 				A(mN, mNumIntermediateBytes),
-				B(mN, mNumIntermediateBytes);
+				B(mN, mNumIntermediateBytes),
+				D(mN, mNumIntermediateBytes);
 
 			for (u64 i = 0; i < mN; ++i)
 			{
 				cache.f0.encode(x[i], A[i]);
 				cache.f1.encode(x[i], B[i]);
+				cache.f2.encode(x[i], D[i]);
 			}
 
 
 
 			// B = A * B
 			co_await mMult.multiplyBits(A.size() * 8, A, B, B, sock);
+			co_await mMult.multiplyBits(B.size() * 8, B, D, D, sock);
 
 			//if(mPrint)
 			//{
@@ -226,15 +248,16 @@ namespace osuCrypto
 			//}
 
 			// y[i] = f0 * (x[i] || B[i])
-			std::vector<u8> buff(x.cols() + mNumIntermediateBytes);
+			std::vector<u8> buff(x.cols() + 2 * mNumIntermediateBytes);
 			//cache.f2.random(fPrng, buff.size() * 8, mOutBytes * 8);
 			for (u64 i = 0; i < mN; ++i)
 			{
 				span<u8> bb(buff);
 				copyBytes(bb.subspan(0, x.cols()), x[i]);
 				copyBytes(bb.subspan(x.cols(), B.cols()), B[i]);
+				copyBytes(bb.subspan(x.cols() + B.cols(), D.cols()), D[i]);
 				buff[0] ^= mPartyIdx;
-				cache.f2.encode(buff, y[i]);
+				cache.f3.encode(buff, y[i]);
 			}
 
 			if (mPrint)
