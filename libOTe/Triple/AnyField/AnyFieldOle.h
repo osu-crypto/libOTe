@@ -7,6 +7,7 @@
 #include "libOTe/Dpf/SumDmpf.h"
 #ifdef ENABLE_SPARSE_DPF
 #include "libOTe/Dpf/RevCuckooDmpf.h"
+#include "libOTe/Tools/Field/FVec.h"
 #endif
 #include "libOTe/Tools/Gmw/Gmw.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
@@ -242,12 +243,15 @@ namespace osuCrypto
 		static constexpr u64 DpfSetCount = GroupCount * BlockCount;
 		static constexpr u64 PointsPerDpfSet =
 			BlockCount * PointsPerBlock * PointsPerBlock;
-		// The regular backend evaluates every (left, right, Frobenius-power)
-		// product separately. RevCuckoo instead shares its position trees across
-		// all products of the same polynomial degree. There are 2c-1 such
-		// convolution channels. Its two internal repetitions therefore retain
-		// 2(2c-1)N = O(4cN) leaves, independently of the sparse weight.
+		// A RevCuckoo instance corresponds to one regular output region of one
+		// product-degree channel. All product points that deterministically land in
+		// that region share its tree, irrespective of their multiplicity. There are
+		// 2c-1 channels and BlockCount regions per channel. With RevCuckoo's two
+		// repetitions, the instances retain 2(2c-1)N = O(4cN) leaves.
 		static constexpr u64 RevProductChannelCount = 2 * CompressionFactor - 1;
+		static constexpr u64 RevRegionCount = RevProductChannelCount * BlockCount;
+		static constexpr u64 RevPayloadLaneCount =
+			CompressionFactor * Ctx::extensionDegree;
 		static constexpr bool PacksPublicCoefficients =
 			CompressionFactor * Ctx::fieldBits <= 32;
 		using PackedPublic = std::conditional_t<
@@ -281,7 +285,13 @@ namespace osuCrypto
 
 		using RegularBackend = SumDmpf<Ext, DpfCoeffCtx>;
 #ifdef ENABLE_SPARSE_DPF
-		using RevCuckooBackend = RevCuckooDmpf<Ext, DpfCoeffCtx>;
+		// A lane identifies (left polynomial, Frobenius power). For a fixed
+		// product-degree channel, that also fixes the right polynomial. Keeping the
+		// lanes in one coefficient lets a region tree expand exactly once while
+		// preserving the algebraically distinct products for their later transforms.
+		using RevPayload = FVec<Ext, RevPayloadLaneCount>;
+		using RevPayloadCtx = CoeffCtxFVec<Ext, RevPayloadLaneCount>;
+		using RevCuckooBackend = RevCuckooDmpf<RevPayload, RevPayloadCtx>;
 		using RevCuckooBackends = std::vector<RevCuckooBackend>;
 		using DpfBackend = std::variant<RegularBackend, RevCuckooBackends>;
 #else
@@ -628,23 +638,26 @@ namespace osuCrypto
 					else
 					{
 						auto& dpfs = std::get<RevCuckooBackends>(mDpf);
-						std::vector<coproto::Socket> sockets(RevProductChannelCount);
-						std::vector<PRNG> prngs(RevProductChannelCount);
-						std::vector<macoro::task<>> tasks(RevProductChannelCount);
+						std::vector<coproto::Socket> sockets(RevRegionCount);
+						std::vector<PRNG> prngs(RevRegionCount);
+						std::vector<macoro::task<>> tasks(RevRegionCount);
 						for (u64 channel = 0; channel < RevProductChannelCount; ++channel)
-						{
-							auto& dpf = dpfs[channel];
-							if (mTimer)
-								dpf.setTimer(*mTimer);
-							const auto offset = revChannelPointOffset(channel);
-							MatrixView<const u64> points(
-								orderedPoints.data() + offset,
-								BlockCount, revPointsPerDpfSet(channel));
-							sockets[channel] = socket.fork();
-							prngs[channel] = prng.fork();
-							tasks[channel] = dpf.setPoints(
-								points, prngs[channel], sockets[channel]);
-						}
+							for (u64 region = 0; region < BlockCount; ++region)
+							{
+								const auto instance = revRegionIndex(channel, region);
+								auto& dpf = dpfs[instance];
+								if (mTimer)
+									dpf.setTimer(*mTimer);
+								const auto pointCount = revPointsPerDpfSet(channel);
+								const auto offset = revChannelPointOffset(channel) +
+									region * pointCount;
+								MatrixView<const u64> points(
+									orderedPoints.data() + offset, 1, pointCount);
+								sockets[instance] = socket.fork();
+								prngs[instance] = prng.fork();
+								tasks[instance] = dpf.setPoints(
+									points, prngs[instance], sockets[instance]);
+							}
 						auto results = co_await macoro::when_all_ready(std::move(tasks));
 						for (auto& result : results)
 							result.result();
@@ -789,71 +802,70 @@ namespace osuCrypto
 				else
 				{
 #ifdef ENABLE_SPARSE_DPF
-					// A product-degree channel contains several algebraically distinct
-					// payload lanes. Each exact-size backend retains one channel's
-					// position trees. For a fixed (left, Frobenius-power) lane, the c
-					// independent right-polynomial channels expand concurrently. This
-					// keeps the combined real-leaf buffer at O(4cN), avoids maximum-
-					// channel padding, and pays one RevCuckoo round schedule per lane.
+					// Each backend is exactly one regular output region. Its fixed-width
+					// payload carries every algebraically distinct product that can land
+					// in that region, so point multiplicity never causes another tree
+					// traversal. Execute all regions together to retain one RevCuckoo
+					// round schedule for the complete stationary expansion.
 					auto& dpfs = std::get<RevCuckooBackends>(mDpf);
-					std::vector<std::vector<Ext>> values(CompressionFactor);
-					std::vector<std::vector<Ext>> channelWork(
-						CompressionFactor, std::vector<Ext>(mN, Ext::zero()));
-					std::vector<coproto::Socket> sockets(CompressionFactor);
-					std::vector<PRNG> prngs(CompressionFactor);
-					std::array<u64, CompressionFactor> nextSet{};
-					std::array<u64, CompressionFactor> setLeafCount{};
-					for (u64 leftPolynomial = 0;
-						leftPolynomial < CompressionFactor; ++leftPolynomial)
-						for (u64 power = 0; power < Ctx::extensionDegree; ++power)
+					std::vector<std::vector<RevPayload>> values(RevRegionCount);
+					// Store only the active algebraic lanes. Edge channels use fewer than
+					// RevPayloadLaneCount lanes, so retaining full RevPayload objects for
+					// every dense output would waste nearly a factor of two at c=8.
+					std::vector<Ext> productWork(GroupCount * mN, Ext::zero());
+					std::vector<coproto::Socket> sockets(RevRegionCount);
+					std::vector<PRNG> prngs(RevRegionCount);
+					std::vector<macoro::task<>> tasks(RevRegionCount);
+					std::vector<u64> nextLeaf(RevRegionCount);
+					for (u64 channel = 0; channel < RevProductChannelCount; ++channel)
+						for (u64 region = 0; region < BlockCount; ++region)
 						{
-							std::vector<macoro::task<>> tasks(CompressionFactor);
-							nextSet.fill(0);
-							setLeafCount.fill(0);
-							for (u64 rightPolynomial = 0;
-								rightPolynomial < CompressionFactor; ++rightPolynomial)
-							{
-								const auto channel = leftPolynomial + rightPolynomial;
-								auto& dpf = dpfs[channel];
-								if (mTimer)
-									dpf.setTimer(*mTimer);
-								fillRevDpfValues(
-									channel, leftPolynomial, power, values[rightPolynomial]);
-								sockets[rightPolynomial] = socket.fork();
-								prngs[rightPolynomial] = prng.fork();
-								tasks[rightPolynomial] = dpf.expand(
-									values[rightPolynomial], prngs[rightPolynomial],
-									sockets[rightPolynomial],
-									[&, rightPolynomial](u64 set, u64 leaf, const auto& value) {
-										if (set != nextSet[rightPolynomial] || leaf >= mBlockSize)
-											throw std::runtime_error(
-												"AnyFieldOle RevCuckoo emitted an invalid leaf sequence. " LOCATION);
-										channelWork[rightPolynomial][set + BlockCount * leaf] += value;
-										if (++setLeafCount[rightPolynomial] == mBlockSize)
+							const auto instance = revRegionIndex(channel, region);
+							auto& dpf = dpfs[instance];
+							if (mTimer)
+								dpf.setTimer(*mTimer);
+							fillRevRegionValues(channel, region, values[instance]);
+							sockets[instance] = socket.fork();
+							prngs[instance] = prng.fork();
+							tasks[instance] = dpf.expand(
+								values[instance], prngs[instance], sockets[instance],
+								[&, instance, channel, region](u64 set, u64 leaf, const auto& value) {
+									if (set != 0 || leaf != nextLeaf[instance] || leaf >= mBlockSize)
+										throw std::runtime_error(
+											"AnyFieldOle RevCuckoo emitted an invalid region sequence. " LOCATION);
+									const auto firstLeft = channel < CompressionFactor ?
+										0 : channel - (CompressionFactor - 1);
+									const auto lastLeft = std::min(channel, CompressionFactor - 1);
+									const auto coefficient = region + BlockCount * leaf;
+									for (u64 leftPolynomial = firstLeft;
+										leftPolynomial <= lastLeft; ++leftPolynomial)
+									{
+										const auto rightPolynomial = channel - leftPolynomial;
+										for (u64 power = 0; power < Ctx::extensionDegree; ++power)
 										{
-											setLeafCount[rightPolynomial] = 0;
-											++nextSet[rightPolynomial];
+											const auto group = power * CompressionFactor * CompressionFactor +
+												leftPolynomial * CompressionFactor + rightPolynomial;
+											productWork[group * mN + coefficient] =
+												value[revPayloadLane(leftPolynomial, power)];
 										}
-									},
-									mCtx.dpfCoeffCtx());
-							}
-							auto results = co_await macoro::when_all_ready(std::move(tasks));
-							for (auto& result : results)
-								result.result();
-							for (u64 rightPolynomial = 0;
-								rightPolynomial < CompressionFactor; ++rightPolynomial)
-							{
-								if (nextSet[rightPolynomial] != BlockCount ||
-									setLeafCount[rightPolynomial])
-								throw std::runtime_error(
-									"AnyFieldOle RevCuckoo expansion ended early. " LOCATION);
-								accumulateProductPair(
-									power, leftPolynomial, rightPolynomial,
-									publicCount, channelWork[rightPolynomial], traceFactors, z);
-								std::fill(channelWork[rightPolynomial].begin(),
-									channelWork[rightPolynomial].end(), Ext::zero());
-							}
+									}
+									++nextLeaf[instance];
+								},
+								RevPayloadCtx{});
 						}
+					auto results = co_await macoro::when_all_ready(std::move(tasks));
+					for (auto& result : results)
+						result.result();
+					for (auto count : nextLeaf)
+						if (count != mBlockSize)
+							throw std::runtime_error(
+								"AnyFieldOle RevCuckoo region expansion ended early. " LOCATION);
+
+					for (u64 group = 0; group < GroupCount; ++group)
+						accumulateProductGroup(
+							group, publicCount,
+							span<Ext>(productWork).subspan(group * mN, mN),
+							traceFactors, z);
 #else
 					throw std::logic_error(
 						"AnyFieldOle RevCuckoo mode requires ENABLE_SPARSE_DPF. " LOCATION);
@@ -934,6 +946,14 @@ namespace osuCrypto
 		{
 			return channel < CompressionFactor ?
 				channel + 1 : RevProductChannelCount - channel;
+		}
+		static constexpr u64 revRegionIndex(u64 channel, u64 region)
+		{
+			return channel * BlockCount + region;
+		}
+		static constexpr u64 revPayloadLane(u64 leftPolynomial, u64 frobeniusPower)
+		{
+			return leftPolynomial * Ctx::extensionDegree + frobeniusPower;
 		}
 		static constexpr u64 revPointsPerDpfSet(u64 channel)
 		{
@@ -1071,18 +1091,19 @@ namespace osuCrypto
 				return;
 			}
 #ifdef ENABLE_SPARSE_DPF
-			mDpf = RevCuckooBackends(RevProductChannelCount);
+			mDpf = RevCuckooBackends(RevRegionCount);
 			auto& dpfs = std::get<RevCuckooBackends>(mDpf);
 			for (u64 channel = 0; channel < RevProductChannelCount; ++channel)
-				dpfs[channel].init(
-					mPartyIdx,
-					revPointsPerDpfSet(channel),
-					BlockCount,
-					mBlockSize,
-					2,
-					2,
-					40,
-					mCtx.dpfCoeffCtx().template characteristicTwo<Ext>());
+				for (u64 region = 0; region < BlockCount; ++region)
+					dpfs[revRegionIndex(channel, region)].init(
+						mPartyIdx,
+						revPointsPerDpfSet(channel),
+						1,
+						mBlockSize,
+						2,
+						2,
+						40,
+						RevPayloadCtx{}.template characteristicTwo<RevPayload>());
 #else
 			throw std::logic_error(
 				"AnyFieldOle RevCuckoo mode requires ENABLE_SPARSE_DPF. " LOCATION);
@@ -1426,44 +1447,43 @@ namespace osuCrypto
 			}
 		}
 
-		void fillRevDpfValues(
+#ifdef ENABLE_SPARSE_DPF
+		void fillRevRegionValues(
 			u64 channel,
-			u64 leftPolynomial,
-			u64 frobeniusPower,
-			std::vector<Ext>& dpfValues)
+			u64 region,
+			std::vector<RevPayload>& dpfValues)
 		{
 			if (mProductShares.size() != leftCoefficientCount() * rightCoefficientCount())
 				throw std::logic_error(
 					"AnyFieldOle RevCuckoo tensor state is missing. " LOCATION);
-			const auto orderOffset = revChannelPointOffset(channel);
-			const auto pointCount = BlockCount * revPointsPerDpfSet(channel);
-			dpfValues.assign(pointCount, Ext::zero());
+			const auto pointCount = revPointsPerDpfSet(channel);
+			const auto orderOffset = revChannelPointOffset(channel) + region * pointCount;
+			dpfValues.resize(pointCount);
+			RevPayloadCtx{}.zero(dpfValues.begin(), dpfValues.end());
 			for (u64 target = 0; target < pointCount; ++target)
 			{
 				const auto source = mDpfOrder[orderOffset + target];
 				const auto group = source / pointsPerGroup();
 				const auto power = group / (CompressionFactor * CompressionFactor);
 				const auto pair = group % (CompressionFactor * CompressionFactor);
-				if (power != frobeniusPower ||
-					pair / CompressionFactor != leftPolynomial)
-					continue;
-
 				const auto point = source % pointsPerGroup();
 				const auto left = point / Weight;
 				const auto right = point % Weight;
+				const auto leftPolynomial = pair / CompressionFactor;
 				const auto rightPolynomial = pair % CompressionFactor;
 				const auto leftOffset = leftPolynomial * Weight;
 				const auto rightOffset =
 					(Ctx::extensionDegree * rightPolynomial + power) * Weight;
-				dpfValues[target] = mProductShares[
+				dpfValues[target][revPayloadLane(leftPolynomial, power)] = mProductShares[
 					(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
 			}
 		}
+#endif
 
 		void accumulateProductGroup(
 			u64 group,
 			u64 publicCount,
-			std::vector<Ext>& work,
+			span<Ext> work,
 			const std::array<std::array<Ext, Ctx::extensionDegree>,
 				Ctx::extensionDegree>& traceFactors,
 			span<Base> z)
@@ -1482,7 +1502,7 @@ namespace osuCrypto
 			u64 leftPolynomial,
 			u64 rightPolynomial,
 			u64 publicCount,
-			std::vector<Ext>& work,
+			span<Ext> work,
 			const std::array<std::array<Ext, Ctx::extensionDegree>,
 				Ctx::extensionDegree>& traceFactors,
 			span<Base> z)
