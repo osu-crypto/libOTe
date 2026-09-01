@@ -347,6 +347,7 @@ namespace osuCrypto
 		const block publicSeed(0x9132749812374981, 0x1239874192387491);
 		for (u64 party = 0; party < 2; ++party)
 			ole[party].init(party, numOles, publicSeed, dpfMode, noiseMode);
+		const auto initialCorCount = ole[0].baseCorCount();
 		if (ole[0].outputSize() != numOles || ole[1].outputSize() != numOles)
 			throw UnitTestFail("AnyFieldOle did not preserve the requested output count");
 
@@ -414,9 +415,17 @@ namespace osuCrypto
 			}
 
 			for (u64 party = 0; party < 2; ++party)
-				ole[party].setBaseCors(
-					sendOts[party], recvOts[party], choices[party],
-					oleMult[party], oleAdd[party]);
+			{
+				if (!printTiming && party == 0)
+					ole[party].setBaseCors(
+						sendOts[party], recvOts[party], choices[party],
+						oleMult[party], oleAdd[party]);
+				else
+					ole[party].setBaseCors(
+						std::move(sendOts[party]), std::move(recvOts[party]),
+						std::move(choices[party]),
+						oleMult[party], oleAdd[party]);
+			}
 
 			auto setupSockets = coproto::LocalAsyncSocket::makePair();
 			const auto setupStart = std::chrono::steady_clock::now();
@@ -461,6 +470,9 @@ namespace osuCrypto
 				<< ", c=" << Ole::CompressionFactor
 				<< ", blocks=" << Ole::BlockCount
 				<< ", points/block=" << Ole::PointsPerBlock
+				<< ", base-OTs=" <<
+					initialCorCount.mSendOtCount + initialCorCount.mRecvOtCount
+				<< ", binary-OLEs=" << initialCorCount.mOleCount
 				<< ", setup=" << setupMs
 				<< " ms, expand=" << expandMs << " ms\n";
 		}
@@ -487,6 +499,23 @@ namespace osuCrypto
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
 		using TestOle = AnyFieldOle<AnyFieldF4Ctx, AnyFieldOleTestParams>;
+		if (cmd.isSet("channelBench"))
+		{
+			using ChannelTestOle = AnyFieldOle<
+				AnyFieldF4Ctx, AnyFieldF4RevCuckooChannelTestParams>;
+			const auto requested = cmd.getOr("n", 128ull);
+			if (!cmd.isSet("revOnly"))
+				runAnyFieldOleCase<ChannelTestOle>(
+					requested, true, "F2 c=8 regular",
+					AnyFieldDpfMode::RegularDpf, AnyFieldNoiseMode::SingleUse);
+#ifdef ENABLE_SPARSE_DPF
+			if (!cmd.isSet("regularOnly"))
+				runAnyFieldOleCase<ChannelTestOle>(
+					requested, true, "F2 c=8 RevCuckoo",
+					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::SingleUse);
+#endif
+			return;
+		}
 		if (!cmd.isSet("revOnly"))
 		{
 			runAnyFieldOleCase<TestOle>(1, false, "F2");

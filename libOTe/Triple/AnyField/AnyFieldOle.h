@@ -248,11 +248,6 @@ namespace osuCrypto
 		// convolution channels. Its two internal repetitions therefore retain
 		// 2(2c-1)N = O(4cN) leaves, independently of the sparse weight.
 		static constexpr u64 RevProductChannelCount = 2 * CompressionFactor - 1;
-		static constexpr u64 RevPayloadLaneCount =
-			CompressionFactor * Ctx::extensionDegree;
-		static constexpr u64 RevDpfSetCount = RevProductChannelCount * BlockCount;
-		static constexpr u64 RevPointsPerDpfSet = RevPayloadLaneCount *
-			BlockCount * PointsPerBlock * PointsPerBlock;
 		static constexpr bool PacksPublicCoefficients =
 			CompressionFactor * Ctx::fieldBits <= 32;
 		using PackedPublic = std::conditional_t<
@@ -287,7 +282,8 @@ namespace osuCrypto
 		using RegularBackend = SumDmpf<Ext, DpfCoeffCtx>;
 #ifdef ENABLE_SPARSE_DPF
 		using RevCuckooBackend = RevCuckooDmpf<Ext, DpfCoeffCtx>;
-		using DpfBackend = std::variant<RegularBackend, RevCuckooBackend>;
+		using RevCuckooBackends = std::vector<RevCuckooBackend>;
+		using DpfBackend = std::variant<RegularBackend, RevCuckooBackends>;
 #else
 		using DpfBackend = std::variant<RegularBackend>;
 #endif
@@ -531,7 +527,8 @@ namespace osuCrypto
 			span<block> oleAdd)
 		{
 			if (mHasSetup)
-				throw std::logic_error("AnyFieldOle cannot replace correlations while a seed is pending expansion. " LOCATION);
+				throw std::logic_error(
+					"AnyFieldOle cannot replace correlations while a seed is pending expansion. " LOCATION);
 			const auto count = baseCorCount();
 			if (sendOts.size() != count.mSendOtCount ||
 				recvOts.size() != count.mRecvOtCount ||
@@ -540,39 +537,25 @@ namespace osuCrypto
 			if (oleMult.size() != divCeil(count.mOleCount, 128) ||
 				oleAdd.size() != divCeil(count.mOleCount, 128))
 				throw std::invalid_argument("AnyFieldOle binary-OLE count mismatch. " LOCATION);
+			setBaseCorsOwned(
+				std::vector<std::array<block, 2>>(sendOts.begin(), sendOts.end()),
+				std::vector<block>(recvOts.begin(), recvOts.end()),
+				BitVector(recvChoices), oleMult, oleAdd);
+		}
 
-			std::vector<std::array<block, 2>> newSendOts(sendOts.begin(), sendOts.end());
-			std::vector<block> newRecvOts(recvOts.begin(), recvOts.end());
-			BitVector newRecvChoices = recvChoices;
-			Gmw newPositionGmw;
-			if (!mHasPositions)
-			{
-				newPositionGmw.init(
-					mPartyIdx,
-					positionInstanceCount(),
-					mPositionCircuit);
-				newPositionGmw.setOle(oleMult, oleAdd);
-			}
-
-			const auto dpfCount = dpfBaseOtCount();
-			if (dpfCount.mSendCount || dpfCount.mRecvCount)
-			{
-				std::visit([&](auto& dpf) {
-					dpf.setBaseOts(
-						span<const std::array<block, 2>>(newSendOts).subspan(
-							0, dpfCount.mSendCount),
-						span<const block>(newRecvOts).subspan(0, dpfCount.mRecvCount),
-						newRecvChoices.subvec(0, dpfCount.mRecvCount));
-				}, mDpf);
-			}
-
-			mSendOts = std::move(newSendOts);
-			mRecvOts = std::move(newRecvOts);
-			mRecvChoices = std::move(newRecvChoices);
-			mPositionGmw = std::move(newPositionGmw);
-			mInstalledDpfSendOtCount = dpfCount.mSendCount;
-			mInstalledDpfRecvOtCount = dpfCount.mRecvCount;
-			mBaseCorsAvailable = true;
+		// Consuming overload for large correlation batches. RevCuckoo can require
+		// millions of base OTs, so retaining both the caller's vectors and an
+		// internal copy needlessly doubles peak memory during installation.
+		void setBaseCors(
+			std::vector<std::array<block, 2>>&& sendOts,
+			std::vector<block>&& recvOts,
+			BitVector&& recvChoices,
+			span<block> oleMult,
+			span<block> oleAdd)
+		{
+			setBaseCorsOwned(
+				std::move(sendOts), std::move(recvOts), std::move(recvChoices),
+				oleMult, oleAdd);
 		}
 
 		bool hasBaseCors() const
@@ -631,21 +614,37 @@ namespace osuCrypto
 					co_await makePointShares(pointShares, socket);
 					std::vector<u64> orderedPoints(mDpfOrder.size());
 					for (u64 i = 0; i < orderedPoints.size(); ++i)
-						orderedPoints[i] = mDpfOrder[i] == DummyPoint ?
-							0 : pointShares[mDpfOrder[i]];
-					MatrixView<const u64> points(
-						orderedPoints.data(), dpfSetCount(), pointsPerDpfSet());
-					co_await std::visit([&](auto& dpf) {
+						orderedPoints[i] = pointShares[mDpfOrder[i]];
+					if (mDpfMode == AnyFieldDpfMode::RegularDpf)
+					{
+						auto& dpf = std::get<RegularBackend>(mDpf);
 						if (mTimer)
 							dpf.setTimer(*mTimer);
-						return dpf.setPoints(points, prng, socket);
-					}, mDpf);
+						MatrixView<const u64> points(
+							orderedPoints.data(), DpfSetCount, PointsPerDpfSet);
+						co_await dpf.setPoints(points, prng, socket);
+					}
 #ifdef ENABLE_SPARSE_DPF
-					if (mDpfMode == AnyFieldDpfMode::RevCuckoo &&
-						std::get<RevCuckooBackend>(mDpf).realLeafCount() !=
-							2 * RevProductChannelCount * mN)
-						throw std::runtime_error(
-							"AnyFieldOle RevCuckoo built the wrong number of real leaves. " LOCATION);
+					else
+					{
+						auto& dpfs = std::get<RevCuckooBackends>(mDpf);
+						u64 realLeafCount = 0;
+						for (u64 channel = 0; channel < RevProductChannelCount; ++channel)
+						{
+							auto& dpf = dpfs[channel];
+							if (mTimer)
+								dpf.setTimer(*mTimer);
+							const auto offset = revChannelPointOffset(channel);
+							MatrixView<const u64> points(
+								orderedPoints.data() + offset,
+								BlockCount, revPointsPerDpfSet(channel));
+							co_await dpf.setPoints(points, prng, socket);
+							realLeafCount += dpf.realLeafCount();
+						}
+						if (realLeafCount != 2 * RevProductChannelCount * mN)
+							throw std::runtime_error(
+								"AnyFieldOle RevCuckoo built the wrong number of real leaves. " LOCATION);
+					}
 #endif
 					mHasPositions = true;
 				}
@@ -781,18 +780,22 @@ namespace osuCrypto
 				{
 #ifdef ENABLE_SPARSE_DPF
 					// A product-degree channel contains several algebraically distinct
-					// payload lanes. Reuse the channel's RevCuckoo position trees and
-					// expand the scalar lanes serially. This keeps the retained leaf
-					// buffer at O(4cN), rather than multiplying it by c or by the
-					// extension degree.
-					auto& dpf = std::get<RevCuckooBackend>(mDpf);
-					if (mTimer)
-						dpf.setTimer(*mTimer);
+					// payload lanes. Each exact-size backend retains one channel's
+					// position trees; scalar lanes replay over those trees serially.
+					// This keeps the combined real-leaf buffer at O(4cN) without the
+					// maximum-channel padding that dominated RevCuckoo setup memory.
+					auto& dpfs = std::get<RevCuckooBackends>(mDpf);
 					for (u64 leftPolynomial = 0;
 						leftPolynomial < CompressionFactor; ++leftPolynomial)
 						for (u64 power = 0; power < Ctx::extensionDegree; ++power)
+							for (u64 rightPolynomial = 0;
+								rightPolynomial < CompressionFactor; ++rightPolynomial)
 						{
-							fillRevDpfValues(leftPolynomial, power);
+							const auto channel = leftPolynomial + rightPolynomial;
+							auto& dpf = dpfs[channel];
+							if (mTimer)
+								dpf.setTimer(*mTimer);
+							fillRevDpfValues(channel, leftPolynomial, power);
 							u64 nextSet = 0;
 							u64 setLeafCount = 0;
 							co_await dpf.expand(
@@ -801,31 +804,23 @@ namespace osuCrypto
 									if (set != nextSet || leaf >= mBlockSize)
 										throw std::runtime_error(
 											"AnyFieldOle RevCuckoo emitted an invalid leaf sequence. " LOCATION);
-									const auto channel = set / BlockCount;
-									const auto validChannel = channel >= leftPolynomial &&
-										channel - leftPolynomial < CompressionFactor;
-									if (validChannel)
-									{
-										const auto blockIndex = set % BlockCount;
-										work[blockIndex + BlockCount * leaf] += value;
-									}
+									const auto blockIndex = set;
+									work[blockIndex + BlockCount * leaf] += value;
 									if (++setLeafCount == mBlockSize)
 									{
 										setLeafCount = 0;
 										++nextSet;
-										if (nextSet % BlockCount == 0)
+										if (nextSet == BlockCount)
 										{
-											if (validChannel)
-												accumulateProductPair(
-													power, leftPolynomial,
-													channel - leftPolynomial,
-													publicCount, work, traceFactors, z);
+											accumulateProductPair(
+												power, leftPolynomial, rightPolynomial,
+												publicCount, work, traceFactors, z);
 											std::fill(work.begin(), work.end(), Ext::zero());
 										}
 									}
 								},
 								mCtx.dpfCoeffCtx());
-							if (nextSet != RevDpfSetCount || setLeafCount)
+							if (nextSet != BlockCount || setLeafCount)
 								throw std::runtime_error(
 									"AnyFieldOle RevCuckoo expansion ended early. " LOCATION);
 						}
@@ -904,17 +899,23 @@ namespace osuCrypto
 		bool mHasPositions = false;
 		bool mHasSetup = false;
 
-		static constexpr u64 DummyPoint = std::numeric_limits<u64>::max();
 		static constexpr u64 pointsPerGroup() { return Weight * Weight; }
-		u64 dpfSetCount() const
+		static constexpr u64 revPairCount(u64 channel)
 		{
-			return mDpfMode == AnyFieldDpfMode::RevCuckoo ?
-				RevDpfSetCount : DpfSetCount;
+			return channel < CompressionFactor ?
+				channel + 1 : RevProductChannelCount - channel;
 		}
-		u64 pointsPerDpfSet() const
+		static constexpr u64 revPointsPerDpfSet(u64 channel)
 		{
-			return mDpfMode == AnyFieldDpfMode::RevCuckoo ?
-				RevPointsPerDpfSet : PointsPerDpfSet;
+			return revPairCount(channel) * Ctx::extensionDegree *
+				BlockCount * PointsPerBlock * PointsPerBlock;
+		}
+		static constexpr u64 revChannelPointOffset(u64 channel)
+		{
+			u64 result = 0;
+			for (u64 previous = 0; previous < channel; ++previous)
+				result += BlockCount * revPointsPerDpfSet(previous);
+			return result;
 		}
 		u64 positionInstanceCount() const
 		{
@@ -933,14 +934,100 @@ namespace osuCrypto
 			u64 mRecvCount = 0;
 		};
 
+		void setBaseCorsOwned(
+			std::vector<std::array<block, 2>>&& newSendOts,
+			std::vector<block>&& newRecvOts,
+			BitVector&& newRecvChoices,
+			span<block> oleMult,
+			span<block> oleAdd)
+		{
+			if (mHasSetup)
+				throw std::logic_error(
+					"AnyFieldOle cannot replace correlations while a seed is pending expansion. " LOCATION);
+			const auto count = baseCorCount();
+			if (newSendOts.size() != count.mSendOtCount ||
+				newRecvOts.size() != count.mRecvOtCount ||
+				newRecvChoices.size() != count.mRecvOtCount)
+				throw std::invalid_argument("AnyFieldOle base-OT count mismatch. " LOCATION);
+			if (oleMult.size() != divCeil(count.mOleCount, 128) ||
+				oleAdd.size() != divCeil(count.mOleCount, 128))
+				throw std::invalid_argument("AnyFieldOle binary-OLE count mismatch. " LOCATION);
+
+			Gmw newPositionGmw;
+			if (!mHasPositions)
+			{
+				newPositionGmw.init(
+					mPartyIdx, positionInstanceCount(), mPositionCircuit);
+				newPositionGmw.setOle(oleMult, oleAdd);
+			}
+
+			const auto dpfCount = dpfBaseOtCount();
+			if (dpfCount.mSendCount || dpfCount.mRecvCount)
+			{
+				if (mDpfMode == AnyFieldDpfMode::RegularDpf)
+				{
+					auto& dpf = std::get<RegularBackend>(mDpf);
+					dpf.setBaseOts(
+						span<const std::array<block, 2>>(newSendOts).subspan(
+							0, dpfCount.mSendCount),
+						span<const block>(newRecvOts).subspan(0, dpfCount.mRecvCount),
+						newRecvChoices.subvec(0, dpfCount.mRecvCount));
+				}
+#ifdef ENABLE_SPARSE_DPF
+				else
+				{
+					u64 sendOffset = 0;
+					u64 recvOffset = 0;
+					for (auto& dpf : std::get<RevCuckooBackends>(mDpf))
+					{
+						const auto subCount = dpf.baseOtCount();
+						dpf.setBaseOts(
+							span<const std::array<block, 2>>(newSendOts).subspan(
+								sendOffset, subCount.mSendCount),
+							span<const block>(newRecvOts).subspan(
+								recvOffset, subCount.mRecvCount),
+							newRecvChoices.subvec(recvOffset, subCount.mRecvCount));
+						sendOffset += subCount.mSendCount;
+						recvOffset += subCount.mRecvCount;
+					}
+					if (sendOffset != dpfCount.mSendCount || recvOffset != dpfCount.mRecvCount)
+						throw std::logic_error(
+							"AnyFieldOle RevCuckoo base-OT slicing mismatch. " LOCATION);
+				}
+#endif
+			}
+
+			mSendOts = std::move(newSendOts);
+			mRecvOts = std::move(newRecvOts);
+			mRecvChoices = std::move(newRecvChoices);
+			mPositionGmw = std::move(newPositionGmw);
+			mInstalledDpfSendOtCount = dpfCount.mSendCount;
+			mInstalledDpfRecvOtCount = dpfCount.mRecvCount;
+			mBaseCorsAvailable = true;
+		}
+
 		DpfBaseOtCount dpfBaseOtCount() const
 		{
 			if (mDpfMode == AnyFieldDpfMode::RevCuckoo && mHasPositions)
 				return {};
-			return std::visit([](const auto& dpf) {
+			if (mDpfMode == AnyFieldDpfMode::RegularDpf)
+			{
+				const auto count = std::get<RegularBackend>(mDpf).baseOtCount();
+				return { count.mSendCount, count.mRecvCount };
+			}
+#ifdef ENABLE_SPARSE_DPF
+			DpfBaseOtCount result;
+			for (const auto& dpf : std::get<RevCuckooBackends>(mDpf))
+			{
 				const auto count = dpf.baseOtCount();
-				return DpfBaseOtCount{ count.mSendCount, count.mRecvCount };
-			}, mDpf);
+				result.mSendCount += count.mSendCount;
+				result.mRecvCount += count.mRecvCount;
+			}
+			return result;
+#else
+			throw std::logic_error(
+				"AnyFieldOle RevCuckoo mode requires ENABLE_SPARSE_DPF. " LOCATION);
+#endif
 		}
 
 		void initDpfBackend()
@@ -954,16 +1041,18 @@ namespace osuCrypto
 				return;
 			}
 #ifdef ENABLE_SPARSE_DPF
-			mDpf = RevCuckooBackend{};
-			std::get<RevCuckooBackend>(mDpf).init(
-				mPartyIdx,
-				RevPointsPerDpfSet,
-				RevDpfSetCount,
-				mBlockSize,
-				2,
-				2,
-				40,
-				mCtx.dpfCoeffCtx().template characteristicTwo<Ext>());
+			mDpf = RevCuckooBackends(RevProductChannelCount);
+			auto& dpfs = std::get<RevCuckooBackends>(mDpf);
+			for (u64 channel = 0; channel < RevProductChannelCount; ++channel)
+				dpfs[channel].init(
+					mPartyIdx,
+					revPointsPerDpfSet(channel),
+					BlockCount,
+					mBlockSize,
+					2,
+					2,
+					40,
+					mCtx.dpfCoeffCtx().template characteristicTwo<Ext>());
 #else
 			throw std::logic_error(
 				"AnyFieldOle RevCuckoo mode requires ENABLE_SPARSE_DPF. " LOCATION);
@@ -1243,8 +1332,11 @@ namespace osuCrypto
 
 		void buildDpfOrder()
 		{
-			mDpfOrder.assign(dpfSetCount() * pointsPerDpfSet(), DummyPoint);
-			std::vector<u64> next(dpfSetCount());
+			const auto revMode = mDpfMode == AnyFieldDpfMode::RevCuckoo;
+			mDpfOrder.resize(revMode ?
+				GroupCount * pointsPerGroup() : DpfSetCount * PointsPerDpfSet);
+			std::vector<u64> next(revMode ?
+				RevProductChannelCount * BlockCount : DpfSetCount);
 			for (u64 group = 0; group < GroupCount; ++group)
 			{
 				const auto pair = group % (CompressionFactor * CompressionFactor);
@@ -1254,14 +1346,18 @@ namespace osuCrypto
 				for (u64 left = 0; left < Weight; ++left)
 					for (u64 right = 0; right < Weight; ++right)
 					{
-						const auto setGroup = mDpfMode == AnyFieldDpfMode::RevCuckoo ?
-							productChannel : group;
+						const auto setGroup = revMode ? productChannel : group;
 						const auto set = setGroup * BlockCount +
 							productBlock(group, left, right);
-						if (next[set] >= pointsPerDpfSet())
+						const auto capacity = revMode ?
+							revPointsPerDpfSet(productChannel) : PointsPerDpfSet;
+						if (next[set] >= capacity)
 							throw std::logic_error(
 								"AnyFieldOle product block capacity is too small. " LOCATION);
-						const auto target = set * pointsPerDpfSet() + next[set]++;
+						const auto target = revMode ?
+							revChannelPointOffset(productChannel) +
+								productBlock(group, left, right) * capacity + next[set]++ :
+							set * PointsPerDpfSet + next[set]++;
 						mDpfOrder[target] =
 							group * pointsPerGroup() + left * Weight + right;
 					}
@@ -1271,9 +1367,9 @@ namespace osuCrypto
 					if (count != PointsPerDpfSet)
 						throw std::logic_error(
 							"AnyFieldOle product blocks are not regular. " LOCATION);
-			if (mDpfMode == AnyFieldDpfMode::RevCuckoo)
-				for (auto count : next)
-					if (!count || count > RevPointsPerDpfSet)
+			if (revMode)
+				for (u64 set = 0; set < next.size(); ++set)
+					if (next[set] != revPointsPerDpfSet(set / BlockCount))
 					throw std::logic_error(
 						"AnyFieldOle RevCuckoo product block is invalid. " LOCATION);
 		}
@@ -1300,17 +1396,20 @@ namespace osuCrypto
 			}
 		}
 
-		void fillRevDpfValues(u64 leftPolynomial, u64 frobeniusPower)
+		void fillRevDpfValues(
+			u64 channel,
+			u64 leftPolynomial,
+			u64 frobeniusPower)
 		{
 			if (mProductShares.size() != leftCoefficientCount() * rightCoefficientCount())
 				throw std::logic_error(
 					"AnyFieldOle RevCuckoo tensor state is missing. " LOCATION);
-			mDpfValues.assign(mDpfOrder.size(), Ext::zero());
-			for (u64 target = 0; target < mDpfOrder.size(); ++target)
+			const auto orderOffset = revChannelPointOffset(channel);
+			const auto pointCount = BlockCount * revPointsPerDpfSet(channel);
+			mDpfValues.assign(pointCount, Ext::zero());
+			for (u64 target = 0; target < pointCount; ++target)
 			{
-				const auto source = mDpfOrder[target];
-				if (source == DummyPoint)
-					continue;
+				const auto source = mDpfOrder[orderOffset + target];
 				const auto group = source / pointsPerGroup();
 				const auto power = group / (CompressionFactor * CompressionFactor);
 				const auto pair = group % (CompressionFactor * CompressionFactor);
