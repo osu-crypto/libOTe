@@ -38,6 +38,10 @@ namespace osuCrypto
 		// lambda
 		u64 mLinearSecParam = 0;
 
+		// Fixed margin for batching and the structured-relation loss analyzed in
+		// REV_CUCKOO_HASH_ANALYSIS.md. This is independent of lambda.
+		static constexpr u64 HashWidthSlack = 8;
+
 		u64 mCuckooSecParam = 0;
 
 		// arbitrary seed for the hash function
@@ -94,6 +98,11 @@ namespace osuCrypto
 			return mRealLeafCount;
 		}
 
+		u64 hashWidth() const
+		{
+			return mPartitionSize + mLinearSecParam + HashWidthSlack;
+		}
+
 		void init(
 			u64 partyIdx,
 			u64 numPointsPerSet,
@@ -132,7 +141,7 @@ namespace osuCrypto
 			}
 
 			auto f = mNumPartitions * mPartitionSize;
-			auto c = mPartitionSize + mLinearSecParam;
+			auto c = hashWidth();
 
 			mDedup.resize(mNumSets);
 
@@ -490,7 +499,7 @@ namespace osuCrypto
 
 			// Step 3-4: Apply hash functions and generate permutation
 			auto f = mNumPartitions * mPartitionSize;
-			auto c = mPartitionSize + mLinearSecParam;
+			auto c = hashWidth();
 			auto piCtx = DpfMult::BitMatrixCoeffCtx(A[0].cols() * 8);
 			using BitMtxVec = decltype(piCtx)::View<u8>;
 			std::vector<BitMtxVec> av(mNumSets);
@@ -905,7 +914,7 @@ namespace osuCrypto
 
 			// Step 3-4: Apply hash functions and generate permutation
 			auto f = mNumPartitions * mPartitionSize;
-			//auto c = mPartitionSize + mLinearSecParam;
+			//auto c = hashWidth();
 
 
 			for (u64 s = 0; s < mNumSets; ++s)
@@ -1391,7 +1400,7 @@ namespace osuCrypto
 
 //	// Step 3-4: Apply hash functions and generate permutation
 //	auto f = mNumPartitions * mPartitionSize;
-//	auto c = mPartitionSize + mLinearSecParam;
+//	auto c = hashWidth();
 
 //	// Step 5-6: Setup A and B matrices
 //	Matrix<u8> AB(f, A.cols() + B.cols());

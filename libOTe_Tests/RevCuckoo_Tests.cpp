@@ -8,6 +8,10 @@ namespace osuCrypto
 	{
 		RevCuckooDmpf<block> dpf;
 		dpf.init(0, 4, 2, 32, 2, 2, 10, false);
+		if (dpf.mLinearSecParam != 10 ||
+			dpf.hashWidth() != dpf.mPartitionSize + 10 + 8 ||
+			dpf.mBinarySolver.mC != dpf.hashWidth())
+			throw std::runtime_error("RevCuckoo hash-width slack regression. " LOCATION);
 
 		auto count = dpf.baseOtCount();
 		std::vector<std::array<block, 2>> baseSend(count.mSendCount);
