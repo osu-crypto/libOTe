@@ -628,7 +628,9 @@ namespace osuCrypto
 					else
 					{
 						auto& dpfs = std::get<RevCuckooBackends>(mDpf);
-						u64 realLeafCount = 0;
+						std::vector<coproto::Socket> sockets(RevProductChannelCount);
+						std::vector<PRNG> prngs(RevProductChannelCount);
+						std::vector<macoro::task<>> tasks(RevProductChannelCount);
 						for (u64 channel = 0; channel < RevProductChannelCount; ++channel)
 						{
 							auto& dpf = dpfs[channel];
@@ -638,9 +640,17 @@ namespace osuCrypto
 							MatrixView<const u64> points(
 								orderedPoints.data() + offset,
 								BlockCount, revPointsPerDpfSet(channel));
-							co_await dpf.setPoints(points, prng, socket);
-							realLeafCount += dpf.realLeafCount();
+							sockets[channel] = socket.fork();
+							prngs[channel] = prng.fork();
+							tasks[channel] = dpf.setPoints(
+								points, prngs[channel], sockets[channel]);
 						}
+						auto results = co_await macoro::when_all_ready(std::move(tasks));
+						for (auto& result : results)
+							result.result();
+						u64 realLeafCount = 0;
+						for (auto& dpf : dpfs)
+							realLeafCount += dpf.realLeafCount();
 						if (realLeafCount != 2 * RevProductChannelCount * mN)
 							throw std::runtime_error(
 								"AnyFieldOle RevCuckoo built the wrong number of real leaves. " LOCATION);
@@ -781,48 +791,68 @@ namespace osuCrypto
 #ifdef ENABLE_SPARSE_DPF
 					// A product-degree channel contains several algebraically distinct
 					// payload lanes. Each exact-size backend retains one channel's
-					// position trees; scalar lanes replay over those trees serially.
-					// This keeps the combined real-leaf buffer at O(4cN) without the
-					// maximum-channel padding that dominated RevCuckoo setup memory.
+					// position trees. For a fixed (left, Frobenius-power) lane, the c
+					// independent right-polynomial channels expand concurrently. This
+					// keeps the combined real-leaf buffer at O(4cN), avoids maximum-
+					// channel padding, and pays one RevCuckoo round schedule per lane.
 					auto& dpfs = std::get<RevCuckooBackends>(mDpf);
+					std::vector<std::vector<Ext>> values(CompressionFactor);
+					std::vector<std::vector<Ext>> channelWork(
+						CompressionFactor, std::vector<Ext>(mN, Ext::zero()));
+					std::vector<coproto::Socket> sockets(CompressionFactor);
+					std::vector<PRNG> prngs(CompressionFactor);
+					std::array<u64, CompressionFactor> nextSet{};
+					std::array<u64, CompressionFactor> setLeafCount{};
 					for (u64 leftPolynomial = 0;
 						leftPolynomial < CompressionFactor; ++leftPolynomial)
 						for (u64 power = 0; power < Ctx::extensionDegree; ++power)
+						{
+							std::vector<macoro::task<>> tasks(CompressionFactor);
+							nextSet.fill(0);
+							setLeafCount.fill(0);
 							for (u64 rightPolynomial = 0;
 								rightPolynomial < CompressionFactor; ++rightPolynomial)
-						{
-							const auto channel = leftPolynomial + rightPolynomial;
-							auto& dpf = dpfs[channel];
-							if (mTimer)
-								dpf.setTimer(*mTimer);
-							fillRevDpfValues(channel, leftPolynomial, power);
-							u64 nextSet = 0;
-							u64 setLeafCount = 0;
-							co_await dpf.expand(
-								mDpfValues, prng, socket,
-								[&](u64 set, u64 leaf, const auto& value) {
-									if (set != nextSet || leaf >= mBlockSize)
-										throw std::runtime_error(
-											"AnyFieldOle RevCuckoo emitted an invalid leaf sequence. " LOCATION);
-									const auto blockIndex = set;
-									work[blockIndex + BlockCount * leaf] += value;
-									if (++setLeafCount == mBlockSize)
-									{
-										setLeafCount = 0;
-										++nextSet;
-										if (nextSet == BlockCount)
+							{
+								const auto channel = leftPolynomial + rightPolynomial;
+								auto& dpf = dpfs[channel];
+								if (mTimer)
+									dpf.setTimer(*mTimer);
+								fillRevDpfValues(
+									channel, leftPolynomial, power, values[rightPolynomial]);
+								sockets[rightPolynomial] = socket.fork();
+								prngs[rightPolynomial] = prng.fork();
+								tasks[rightPolynomial] = dpf.expand(
+									values[rightPolynomial], prngs[rightPolynomial],
+									sockets[rightPolynomial],
+									[&, rightPolynomial](u64 set, u64 leaf, const auto& value) {
+										if (set != nextSet[rightPolynomial] || leaf >= mBlockSize)
+											throw std::runtime_error(
+												"AnyFieldOle RevCuckoo emitted an invalid leaf sequence. " LOCATION);
+										channelWork[rightPolynomial][set + BlockCount * leaf] += value;
+										if (++setLeafCount[rightPolynomial] == mBlockSize)
 										{
-											accumulateProductPair(
-												power, leftPolynomial, rightPolynomial,
-												publicCount, work, traceFactors, z);
-											std::fill(work.begin(), work.end(), Ext::zero());
+											setLeafCount[rightPolynomial] = 0;
+											++nextSet[rightPolynomial];
 										}
-									}
-								},
-								mCtx.dpfCoeffCtx());
-							if (nextSet != BlockCount || setLeafCount)
+									},
+									mCtx.dpfCoeffCtx());
+							}
+							auto results = co_await macoro::when_all_ready(std::move(tasks));
+							for (auto& result : results)
+								result.result();
+							for (u64 rightPolynomial = 0;
+								rightPolynomial < CompressionFactor; ++rightPolynomial)
+							{
+								if (nextSet[rightPolynomial] != BlockCount ||
+									setLeafCount[rightPolynomial])
 								throw std::runtime_error(
 									"AnyFieldOle RevCuckoo expansion ended early. " LOCATION);
+								accumulateProductPair(
+									power, leftPolynomial, rightPolynomial,
+									publicCount, channelWork[rightPolynomial], traceFactors, z);
+								std::fill(channelWork[rightPolynomial].begin(),
+									channelWork[rightPolynomial].end(), Ext::zero());
+							}
 						}
 #else
 					throw std::logic_error(
@@ -1399,14 +1429,15 @@ namespace osuCrypto
 		void fillRevDpfValues(
 			u64 channel,
 			u64 leftPolynomial,
-			u64 frobeniusPower)
+			u64 frobeniusPower,
+			std::vector<Ext>& dpfValues)
 		{
 			if (mProductShares.size() != leftCoefficientCount() * rightCoefficientCount())
 				throw std::logic_error(
 					"AnyFieldOle RevCuckoo tensor state is missing. " LOCATION);
 			const auto orderOffset = revChannelPointOffset(channel);
 			const auto pointCount = BlockCount * revPointsPerDpfSet(channel);
-			mDpfValues.assign(pointCount, Ext::zero());
+			dpfValues.assign(pointCount, Ext::zero());
 			for (u64 target = 0; target < pointCount; ++target)
 			{
 				const auto source = mDpfOrder[orderOffset + target];
@@ -1424,7 +1455,7 @@ namespace osuCrypto
 				const auto leftOffset = leftPolynomial * Weight;
 				const auto rightOffset =
 					(Ctx::extensionDegree * rightPolynomial + power) * Weight;
-				mDpfValues[target] = mProductShares[
+				dpfValues[target] = mProductShares[
 					(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
 			}
 		}
