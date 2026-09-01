@@ -307,7 +307,6 @@ namespace osuCrypto
 					const auto idx = mNodeSize;
 					if (idx >= mNodes_.size())
 						throw std::runtime_error("Sparse DPF node count mismatch. " LOCATION);
-					++mNodeSize;
 					const auto begin = static_cast<u64>(b.mBegin - mPointBase);
 					const auto mid = static_cast<u64>(b.mMid - mPointBase);
 					const auto end = static_cast<u64>(b.mEnd - mPointBase);
@@ -322,6 +321,7 @@ namespace osuCrypto
 						child,
 						parentLevel
 					};
+					mNodeSize = idx + 1;
 				}
 
 				u64 size() const { return mNodeSize; }
@@ -411,6 +411,110 @@ namespace osuCrypto
 				countBin(begin, end);
 
 			return levelSizes;
+		}
+
+		// Keep over-aligned SIMD scratch storage out of the coroutine frame.
+		// Some compilers do not over-align coroutine allocations even when a local
+		// object requires it. One call handles a complete tree level, so keeping
+		// this helper out of line has negligible dispatch cost and preserves the
+		// eight-node AES batching in the hot loop.
+#if defined(_MSC_VER)
+		__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+		__attribute__((noinline))
+#endif
+		void expandSparseLevel(Tree& tree, u64 level)
+		{
+			const auto size = tree[level].size();
+			auto z0 = tree[level].mZ[0];
+			auto z1 = tree[level].mZ[1];
+			u64 i = 0;
+			if (mProfileEnabled)
+			{
+				mLastProfile.mExpandedNodes += size;
+				mLastProfile.mBatchedNodes += size / 8 * 8;
+				mLastProfile.mTailNodes += size % 8;
+			}
+
+			// Expand eight independent active subtrees with one SIMD AES kernel.
+			for (; i + 8 <= size; i += 8)
+			{
+				AlignedArray<block, 8> cSeed0;
+				AlignedArray<block, 8> cSeed1;
+				std::array<u8, 8> cTag;
+
+				for (u64 lane = 0; lane < 8; ++lane)
+				{
+					auto& node = tree[level][i + lane];
+					const auto tag = node.mTag;
+					const auto child = node.mChild;
+					const auto parent = node.mParent;
+					const auto pTau = tree[parent].mTau[child];
+					const auto pSigma = tree[parent].mSigma;
+					const auto seed = node.mSeed ^
+						(pSigma & block::allSame<u8>(-tag));
+
+					cTag[lane] = lsb(node.mSeed) ^ tag * pTau;
+					cSeed0[lane] = seed ^ ZeroBlock;
+					cSeed1[lane] = seed ^ OneBlock;
+				}
+
+				mAesFixedKey.hashBlocks<8>(cSeed0.data(), cSeed0.data());
+				mAesFixedKey.hashBlocks<8>(cSeed1.data(), cSeed1.data());
+
+				for (u64 lane = 0; lane < 8; ++lane)
+				{
+					z0 ^= cSeed0[lane];
+					z1 ^= cSeed1[lane];
+					auto par = tree[level][i + lane].partition(tree.mPointBase);
+					auto children = par.children();
+
+					auto [leftLevel, leftPartition] = partition(children[0], level);
+					tree[leftLevel].push_back(
+						0, static_cast<u8>(level), leftPartition, cSeed0[lane], cTag[lane]);
+
+					auto [rightLevel, rightPartition] = partition(children[1], level);
+					tree[rightLevel].push_back(
+						1, static_cast<u8>(level), rightPartition, cSeed1[lane], cTag[lane]);
+				}
+			}
+
+			// Scalar tail for levels whose active-node count is not a multiple of eight.
+			for (; i < size; ++i)
+			{
+				auto& node = tree[level][i];
+				auto par = node.partition(tree.mPointBase);
+				const auto tag = node.mTag;
+				const auto child = node.mChild;
+				const auto parent = node.mParent;
+				const auto pTau = tree[parent].mTau[child];
+				const auto pSigma = tree[parent].mSigma;
+				const auto cTag = lsb(node.mSeed) ^ tag * pTau;
+				const auto seed = node.mSeed ^
+					(pSigma & block::allSame<u8>(-tag));
+
+				std::array<block, 2> cSeed;
+				cSeed[0] = mAesFixedKey.hashBlock(seed ^ ZeroBlock);
+				cSeed[1] = mAesFixedKey.hashBlock(seed ^ OneBlock);
+				z0 ^= cSeed[0];
+				z1 ^= cSeed[1];
+
+				auto children = par.children();
+				for (u64 childIndex = 0; childIndex < 2; ++childIndex)
+				{
+					auto [childLevel, childPartition] = partition(children[childIndex], level);
+					tree[childLevel].push_back(
+						static_cast<u8>(childIndex), static_cast<u8>(level),
+						childPartition, cSeed[childIndex], cTag);
+				}
+			}
+
+			if (size)
+			{
+				tree[level].mZ[0] = z0;
+				tree[level].mZ[1] = z1;
+				tree[level].mC = 1;
+			}
 		}
 
 		// Helper template to detect if a type has a `rows()` method
@@ -719,95 +823,7 @@ namespace osuCrypto
 				for (u64 r = 0; r < mNumPoints; ++r)
 				{
 					auto& tree = trees[r];
-					auto size = tree[dNext].size();
-					auto z0 = tree[dNext].mZ[0];
-					auto z1 = tree[dNext].mZ[1];
-					u64 i = 0;
-					if (mProfileEnabled)
-					{
-						mLastProfile.mExpandedNodes += size;
-						mLastProfile.mBatchedNodes += size / 8 * 8;
-						mLastProfile.mTailNodes += size % 8;
-					}
-
-					// Expand eight independent active subtrees with one SIMD AES kernel.
-					for (; i + 8 <= size; i += 8)
-					{
-						AlignedArray<block, 8> cSeed0;
-						AlignedArray<block, 8> cSeed1;
-						std::array<u8, 8> cTag;
-
-						for (u64 lane = 0; lane < 8; ++lane)
-						{
-							auto& node = tree[dNext][i + lane];
-							const auto tag = node.mTag;
-							const auto child = node.mChild;
-							const auto parent = node.mParent;
-							const auto pTau = tree[parent].mTau[child];
-							const auto pSigma = tree[parent].mSigma;
-							const auto seed = node.mSeed ^
-								(pSigma & block::allSame<u8>(-tag));
-
-							cTag[lane] = lsb(node.mSeed) ^ tag * pTau;
-							cSeed0[lane] = seed ^ ZeroBlock;
-							cSeed1[lane] = seed ^ OneBlock;
-						}
-
-						mAesFixedKey.hashBlocks<8>(cSeed0.data(), cSeed0.data());
-						mAesFixedKey.hashBlocks<8>(cSeed1.data(), cSeed1.data());
-
-						for (u64 lane = 0; lane < 8; ++lane)
-						{
-							z0 ^= cSeed0[lane];
-							z1 ^= cSeed1[lane];
-							auto par = tree[dNext][i + lane].partition(tree.mPointBase);
-							auto children = par.children();
-
-							auto [leftLevel, leftPartition] = partition(children[0], dNext);
-							tree[leftLevel].push_back(
-								0, static_cast<u8>(dNext), leftPartition, cSeed0[lane], cTag[lane]);
-
-							auto [rightLevel, rightPartition] = partition(children[1], dNext);
-							tree[rightLevel].push_back(
-								1, static_cast<u8>(dNext), rightPartition, cSeed1[lane], cTag[lane]);
-						}
-					}
-
-					// Scalar tail for levels whose active-node count is not a multiple of eight.
-					for (; i < size; ++i)
-					{
-						auto& node = tree[dNext][i];
-						auto par = node.partition(tree.mPointBase);
-						const auto tag = node.mTag;
-						const auto child = node.mChild;
-						const auto parent = node.mParent;
-						const auto pTau = tree[parent].mTau[child];
-						const auto pSigma = tree[parent].mSigma;
-						const auto cTag = lsb(node.mSeed) ^ tag * pTau;
-						const auto seed = node.mSeed ^
-							(pSigma & block::allSame<u8>(-tag));
-
-						std::array<block, 2> cSeed;
-						cSeed[0] = mAesFixedKey.hashBlock(seed ^ ZeroBlock);
-						cSeed[1] = mAesFixedKey.hashBlock(seed ^ OneBlock);
-						z0 ^= cSeed[0];
-						z1 ^= cSeed[1];
-
-						auto children = par.children();
-						for (u64 j = 0; j < 2; ++j)
-						{
-							auto [cd, cPar] = partition(children[j], dNext);
-							tree[cd].push_back(
-								static_cast<u8>(j), static_cast<u8>(dNext), cPar, cSeed[j], cTag);
-						}
-					}
-
-					if (size)
-					{
-						tree[dNext].mZ[0] = z0;
-						tree[dNext].mZ[1] = z1;
-						tree[dNext].mC = 1;
-					}
+					expandSparseLevel(tree, dNext);
 				}
 				addTime(mLastProfile.mSparseExpandMs, profileBegin);
 			}
