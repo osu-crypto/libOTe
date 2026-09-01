@@ -306,6 +306,18 @@ namespace osuCrypto
 		static constexpr u64 maximumDimension = 6;
 	};
 
+	// Exercise every c=8 convolution channel without approaching a production
+	// output size. This catches channel/lane ordering errors while keeping the
+	// RevCuckoo real-leaf count at 2(2c-1)N = 7290.
+	struct AnyFieldF4RevCuckooChannelTestParams
+	{
+		static constexpr u64 compressionFactor = 8;
+		static constexpr u64 blockDimensions = 1;
+		static constexpr u64 pointsPerBlock = 1;
+		static constexpr u64 minimumDimension = 5;
+		static constexpr u64 maximumDimension = 5;
+	};
+
 	// A bounded post-setup throughput policy. It preserves the production c=8
 	// leaf topology while reducing point multiplicity so the two-party setup
 	// harness remains comfortably below the local memory limit.
@@ -524,6 +536,23 @@ namespace osuCrypto
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
 		using TestOle = AnyFieldOle<AnyFieldF4Ctx, AnyFieldOleTestParams>;
+		if (cmd.isSet("channelBench"))
+		{
+			using ChannelTestOle = AnyFieldOle<
+				AnyFieldF4Ctx, AnyFieldF4RevCuckooChannelTestParams>;
+			const auto requested = cmd.getOr("n", 128ull);
+			if (!cmd.isSet("revOnly"))
+				runAnyFieldOleCase<ChannelTestOle>(
+					requested, true, "F2 c=8 regular",
+					AnyFieldDpfMode::RegularDpf, AnyFieldNoiseMode::SingleUse);
+#ifdef ENABLE_SPARSE_DPF
+			if (!cmd.isSet("regularOnly"))
+				runAnyFieldOleCase<ChannelTestOle>(
+					requested, true, "F2 c=8 RevCuckoo",
+					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::SingleUse);
+#endif
+			return;
+		}
 		if (!cmd.isSet("revOnly"))
 		{
 			runAnyFieldOleCase<TestOle>(1, false, "F2");
@@ -545,6 +574,22 @@ namespace osuCrypto
 				runAnyFieldOleCase<RevTestOle>(
 					1, false, "F2 RevCuckoo stationary",
 					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary);
+			if (!cmd.isSet("stationaryOnly"))
+			{
+				using ChannelTestOle = AnyFieldOle<
+					AnyFieldF4Ctx, AnyFieldF4RevCuckooChannelTestParams>;
+				runAnyFieldOleCase<ChannelTestOle>(
+					1, false, "F2 RevCuckoo c=8 channels",
+					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::SingleUse);
+			}
+			if (!cmd.isSet("singleOnly"))
+			{
+				using ChannelTestOle = AnyFieldOle<
+					AnyFieldF4Ctx, AnyFieldF4RevCuckooChannelTestParams>;
+				runAnyFieldOleCase<ChannelTestOle>(
+					1, false, "F2 RevCuckoo c=8 stationary channels",
+					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary);
+			}
 		}
 #endif
 		if (cmd.isSet("v"))
