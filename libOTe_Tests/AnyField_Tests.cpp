@@ -284,8 +284,10 @@ namespace osuCrypto
 		static constexpr u64 compressionFactor = 2;
 		static constexpr u64 blockDimensions = 1;
 		static constexpr u64 pointsPerBlock = 1;
-		static constexpr u64 minimumDimension = 5;
-		static constexpr u64 maximumDimension = 6;
+		// Use a two-byte block index, as required by the paper hash's quadratic
+		// feature bound for this channel size.
+		static constexpr u64 minimumDimension = 7;
+		static constexpr u64 maximumDimension = 7;
 	};
 
 	struct AnyFieldF9RevCuckooTestParams
@@ -293,7 +295,9 @@ namespace osuCrypto
 		static constexpr u64 compressionFactor = 2;
 		static constexpr u64 blockDimensions = 1;
 		static constexpr u64 pointsPerBlock = 1;
-		static constexpr u64 minimumDimension = 3;
+		// The paper hash's quadratic feature space requires two input bytes for
+		// this 32-point channel; dimension four gives a 512-element block.
+		static constexpr u64 minimumDimension = 4;
 		static constexpr u64 maximumDimension = 4;
 	};
 
@@ -308,14 +312,14 @@ namespace osuCrypto
 
 	// Exercise every c=8 convolution channel without approaching a production
 	// output size. This catches channel/lane ordering errors while keeping the
-	// RevCuckoo real-leaf count at 2(2c-1)N = 7290.
+	// RevCuckoo real-leaf count at 2(2c-1)N = 65610.
 	struct AnyFieldF4RevCuckooChannelTestParams
 	{
 		static constexpr u64 compressionFactor = 8;
 		static constexpr u64 blockDimensions = 1;
 		static constexpr u64 pointsPerBlock = 1;
-		static constexpr u64 minimumDimension = 5;
-		static constexpr u64 maximumDimension = 5;
+		static constexpr u64 minimumDimension = 7;
+		static constexpr u64 maximumDimension = 7;
 	};
 
 	// A bounded post-setup throughput policy. It preserves the production c=8

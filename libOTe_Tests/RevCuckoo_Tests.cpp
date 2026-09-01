@@ -357,13 +357,12 @@ namespace osuCrypto
 		};
 
 		// These remain intentionally bounded. They cover the former empty-bucket
-		// failure, non-power-of-two domains, three partitions, repeated expansion,
-		// and bucket labels wider than one byte without attempting a production run.
+		// failure, non-power-of-two domains, three partitions, and repeated expansion
+		// without selecting parameters outside the paper hash's quadratic feature bound.
 		for (auto p : {
 			Params{ 32, 8, 16, 2, 3 },
-			Params{ 257, 17, 5, 3, 2 },
-			Params{ 2048, 257, 1, 2, 2 }
-		})
+			Params{ 257, 17, 5, 3, 2 }
+			})
 		{
 			CLP cmd;
 			cmd.setDefault("domain", p.mDomain);
