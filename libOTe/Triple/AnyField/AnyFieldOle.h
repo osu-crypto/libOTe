@@ -7,7 +7,6 @@
 #include "libOTe/Dpf/SumDmpf.h"
 #ifdef ENABLE_SPARSE_DPF
 #include "libOTe/Dpf/RevCuckooDmpf.h"
-#include "libOTe/Tools/Field/FVec.h"
 #endif
 #include "libOTe/Tools/Gmw/Gmw.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
@@ -243,15 +242,15 @@ namespace osuCrypto
 		static constexpr u64 DpfSetCount = GroupCount * BlockCount;
 		static constexpr u64 PointsPerDpfSet =
 			BlockCount * PointsPerBlock * PointsPerBlock;
-		// A RevCuckoo instance corresponds to one regular output region of one
-		// product-degree channel. All product points that deterministically land in
-		// that region share its tree, irrespective of their multiplicity. There are
-		// 2c-1 channels and BlockCount regions per channel. With RevCuckoo's two
-		// repetitions, the instances retain 2(2c-1)N = O(4cN) leaves.
+		// Product-degree channels have multiplicities 1,2,...,c,...,2,1. Ordinary
+		// DPFs handle multiplicities one and two. RevCuckoo handles multiplicities
+		// three through c, grouping the two channels of each equal multiplicity into
+		// one rectangular multi-set instance. The center channel is the sole set
+		// group at multiplicity c.
 		static constexpr u64 RevProductChannelCount = 2 * CompressionFactor - 1;
-		static constexpr u64 RevRegionCount = RevProductChannelCount * BlockCount;
-		static constexpr u64 RevPayloadLaneCount =
-			CompressionFactor * Ctx::extensionDegree;
+		static constexpr u64 SmallPairCountLimit = 2;
+		static constexpr u64 RevCountClassCount = CompressionFactor > SmallPairCountLimit ?
+			CompressionFactor - SmallPairCountLimit : 0;
 		static constexpr bool PacksPublicCoefficients =
 			CompressionFactor * Ctx::fieldBits <= 32;
 		using PackedPublic = std::conditional_t<
@@ -285,15 +284,26 @@ namespace osuCrypto
 
 		using RegularBackend = SumDmpf<Ext, DpfCoeffCtx>;
 #ifdef ENABLE_SPARSE_DPF
-		// A lane identifies (left polynomial, Frobenius power). For a fixed
-		// product-degree channel, that also fixes the right polynomial. Keeping the
-		// lanes in one coefficient lets a region tree expand exactly once while
-		// preserving the algebraically distinct products for their later transforms.
-		using RevPayload = FVec<Ext, RevPayloadLaneCount>;
-		using RevPayloadCtx = CoeffCtxFVec<Ext, RevPayloadLaneCount>;
-		using RevCuckooBackend = RevCuckooDmpf<RevPayload, RevPayloadCtx>;
+		// RevCuckoo caches the position-dependent leaf seeds. Each later expansion
+		// maps one logical product polynomial's scalar extension-field coefficients
+		// onto that setup, matching the RingLPN integration. Trace and Frobenius
+		// bookkeeping remain outside RevCuckoo.
+		using RevCuckooBackend = RevCuckooDmpf<Ext, DpfCoeffCtx>;
 		using RevCuckooBackends = std::vector<RevCuckooBackend>;
-		using DpfBackend = std::variant<RegularBackend, RevCuckooBackends>;
+		struct HybridBackend
+		{
+			RegularBackend mSmall;
+			RevCuckooBackends mLarge;
+
+			void clear()
+			{
+				mSmall.clear();
+				for (auto& dpf : mLarge)
+					dpf.clear();
+				mLarge.clear();
+			}
+		};
+		using DpfBackend = std::variant<RegularBackend, HybridBackend>;
 #else
 		using DpfBackend = std::variant<RegularBackend>;
 #endif
@@ -637,34 +647,39 @@ namespace osuCrypto
 #ifdef ENABLE_SPARSE_DPF
 					else
 					{
-						auto& dpfs = std::get<RevCuckooBackends>(mDpf);
-						std::vector<coproto::Socket> sockets(RevRegionCount);
-						std::vector<PRNG> prngs(RevRegionCount);
-						std::vector<macoro::task<>> tasks(RevRegionCount);
-						for (u64 channel = 0; channel < RevProductChannelCount; ++channel)
-							for (u64 region = 0; region < BlockCount; ++region)
-							{
-								const auto instance = revRegionIndex(channel, region);
-								auto& dpf = dpfs[instance];
-								if (mTimer)
-									dpf.setTimer(*mTimer);
-								const auto pointCount = revPointsPerDpfSet(channel);
-								const auto offset = revChannelPointOffset(channel) +
-									region * pointCount;
-								MatrixView<const u64> points(
-									orderedPoints.data() + offset, 1, pointCount);
-								sockets[instance] = socket.fork();
-								prngs[instance] = prng.fork();
-								tasks[instance] = dpf.setPoints(
-									points, prngs[instance], sockets[instance]);
-							}
+						auto& hybrid = std::get<HybridBackend>(mDpf);
+						if (mTimer)
+							hybrid.mSmall.setTimer(*mTimer);
+						MatrixView<const u64> smallPoints(
+							orderedPoints.data(), smallDpfSetCount(), PointsPerDpfSet);
+						co_await hybrid.mSmall.setPoints(smallPoints, prng, socket);
+
+						std::vector<coproto::Socket> sockets(RevCountClassCount);
+						std::vector<PRNG> prngs(RevCountClassCount);
+						std::vector<macoro::task<>> tasks(RevCountClassCount);
+						for (u64 pairCount = SmallPairCountLimit + 1;
+							pairCount <= CompressionFactor; ++pairCount)
+						{
+							const auto instance = revCountClassIndex(pairCount);
+							auto& dpf = hybrid.mLarge[instance];
+							if (mTimer)
+								dpf.setTimer(*mTimer);
+							const auto pointCount = revPointsPerDpfSet(pairCount);
+							MatrixView<const u64> points(
+								orderedPoints.data() + revClassPointOffset(pairCount),
+								revSetCount(pairCount), pointCount);
+							sockets[instance] = socket.fork();
+							prngs[instance] = prng.fork();
+							tasks[instance] = dpf.setPoints(
+								points, prngs[instance], sockets[instance]);
+						}
 						auto results = co_await macoro::when_all_ready(std::move(tasks));
 						for (auto& result : results)
 							result.result();
 						u64 realLeafCount = 0;
-						for (auto& dpf : dpfs)
+						for (auto& dpf : hybrid.mLarge)
 							realLeafCount += dpf.realLeafCount();
-						if (realLeafCount != 2 * RevProductChannelCount * mN)
+						if (realLeafCount != 2 * largeRevChannelCount() * mN)
 							throw std::runtime_error(
 								"AnyFieldOle RevCuckoo built the wrong number of real leaves. " LOCATION);
 					}
@@ -679,7 +694,10 @@ namespace osuCrypto
 				if (mDpfMode == AnyFieldDpfMode::RegularDpf)
 					fillRegularDpfValues(productShares);
 				else
+				{
+					fillSmallDpfValues(productShares);
 					mProductShares = std::move(productShares);
+				}
 
 				clearBaseCors();
 				mHasSetup = true;
@@ -802,70 +820,122 @@ namespace osuCrypto
 				else
 				{
 #ifdef ENABLE_SPARSE_DPF
-					// Each backend is exactly one regular output region. Its fixed-width
-					// payload carries every algebraically distinct product that can land
-					// in that region, so point multiplicity never causes another tree
-					// traversal. Execute all regions together to retain one RevCuckoo
-					// round schedule for the complete stationary expansion.
-					auto& dpfs = std::get<RevCuckooBackends>(mDpf);
-					std::vector<std::vector<RevPayload>> values(RevRegionCount);
-					// Store only the active algebraic lanes. Edge channels use fewer than
-					// RevPayloadLaneCount lanes, so retaining full RevPayload objects for
-					// every dense output would waste nearly a factor of two at c=8.
-					std::vector<Ext> productWork(GroupCount * mN, Ext::zero());
-					std::vector<coproto::Socket> sockets(RevRegionCount);
-					std::vector<PRNG> prngs(RevRegionCount);
-					std::vector<macoro::task<>> tasks(RevRegionCount);
-					std::vector<u64> nextLeaf(RevRegionCount);
-					for (u64 channel = 0; channel < RevProductChannelCount; ++channel)
-						for (u64 region = 0; region < BlockCount; ++region)
+					auto& hybrid = std::get<HybridBackend>(mDpf);
+
+					// Low-multiplicity channels are cheaper as one ordinary sum-DPF.
+					std::fill(work.begin(), work.end(), Ext::zero());
+					u64 nextSmallSet = 0;
+					u64 smallSetLeafCount = 0;
+					if (mTimer)
+						hybrid.mSmall.setTimer(*mTimer);
+					auto smallSocket = socket.fork();
+					auto smallPrng = prng.fork();
+					auto smallTask = hybrid.mSmall.expand(
+						mDpfValues, smallPrng, smallSocket,
+						[&](u64 set, u64 leaf, const auto& value) {
+							if (set != nextSmallSet || leaf >= mBlockSize)
+								throw std::runtime_error(
+									"AnyFieldOle small DPF emitted an invalid leaf sequence. " LOCATION);
+							const auto region = set % BlockCount;
+							work[region + BlockCount * leaf] += value;
+							if (++smallSetLeafCount == mBlockSize)
+							{
+								smallSetLeafCount = 0;
+								++nextSmallSet;
+								if (nextSmallSet % BlockCount == 0)
+								{
+									const auto group = smallGroup(
+										nextSmallSet / BlockCount - 1);
+									accumulateProductGroup(
+										group, publicCount, work, traceFactors, z);
+									std::fill(work.begin(), work.end(), Ext::zero());
+								}
+							}
+						},
+						mCtx.dpfCoeffCtx());
+					// RevCuckoo natively batches sets with an equal point count. Run one
+					// scalar product from every count class in the same wave; the first
+					// wave also carries the ordinary DPF above. The two symmetric channels
+					// of a class are emitted by the same expansion.
+					std::vector<std::vector<Ext>> values(RevCountClassCount);
+					std::vector<std::vector<Ext>> productWork(RevCountClassCount);
+					for (u64 pairCount = SmallPairCountLimit + 1;
+						pairCount <= CompressionFactor; ++pairCount)
+						productWork[revCountClassIndex(pairCount)].resize(
+							revChannelCount(pairCount) * mN);
+
+					const auto waveCount = CompressionFactor * Ctx::extensionDegree;
+					for (u64 wave = 0; wave < waveCount; ++wave)
+					{
+						std::vector<coproto::Socket> sockets(RevCountClassCount);
+						std::vector<PRNG> prngs(RevCountClassCount);
+						std::vector<macoro::task<>> tasks;
+						std::vector<u64> active;
+						std::vector<u64> nextSet(RevCountClassCount);
+						std::vector<u64> setLeafCount(RevCountClassCount);
+						tasks.reserve(RevCountClassCount + 1);
+						active.reserve(RevCountClassCount);
+						if (wave == 0)
+							tasks.push_back(std::move(smallTask));
+						for (u64 pairCount = SmallPairCountLimit + 1;
+							pairCount <= CompressionFactor; ++pairCount)
 						{
-							const auto instance = revRegionIndex(channel, region);
-							auto& dpf = dpfs[instance];
+							if (wave >= pairCount * Ctx::extensionDegree)
+								continue;
+							const auto instance = revCountClassIndex(pairCount);
+							auto& dpf = hybrid.mLarge[instance];
 							if (mTimer)
 								dpf.setTimer(*mTimer);
-							fillRevRegionValues(channel, region, values[instance]);
+							fillRevValues(pairCount, wave, values[instance]);
 							sockets[instance] = socket.fork();
 							prngs[instance] = prng.fork();
-							tasks[instance] = dpf.expand(
+							active.push_back(instance);
+							tasks.push_back(dpf.expand(
 								values[instance], prngs[instance], sockets[instance],
-								[&, instance, channel, region](u64 set, u64 leaf, const auto& value) {
-									if (set != 0 || leaf != nextLeaf[instance] || leaf >= mBlockSize)
+								[&, instance, pairCount](u64 set, u64 leaf, const auto& value) {
+									if (set != nextSet[instance] || leaf >= mBlockSize)
 										throw std::runtime_error(
-											"AnyFieldOle RevCuckoo emitted an invalid region sequence. " LOCATION);
-									const auto firstLeft = channel < CompressionFactor ?
-										0 : channel - (CompressionFactor - 1);
-									const auto lastLeft = std::min(channel, CompressionFactor - 1);
-									const auto coefficient = region + BlockCount * leaf;
-									for (u64 leftPolynomial = firstLeft;
-										leftPolynomial <= lastLeft; ++leftPolynomial)
+											"AnyFieldOle RevCuckoo emitted an invalid set sequence. " LOCATION);
+									const auto channelSlot = set / BlockCount;
+									const auto region = set % BlockCount;
+									productWork[instance][channelSlot * mN +
+										region + BlockCount * leaf] = value;
+									if (++setLeafCount[instance] == mBlockSize)
 									{
-										const auto rightPolynomial = channel - leftPolynomial;
-										for (u64 power = 0; power < Ctx::extensionDegree; ++power)
-										{
-											const auto group = power * CompressionFactor * CompressionFactor +
-												leftPolynomial * CompressionFactor + rightPolynomial;
-											productWork[group * mN + coefficient] =
-												value[revPayloadLane(leftPolynomial, power)];
-										}
+										setLeafCount[instance] = 0;
+										++nextSet[instance];
 									}
-									++nextLeaf[instance];
 								},
-								RevPayloadCtx{});
+								mCtx.dpfCoeffCtx()));
 						}
-					auto results = co_await macoro::when_all_ready(std::move(tasks));
-					for (auto& result : results)
-						result.result();
-					for (auto count : nextLeaf)
-						if (count != mBlockSize)
+						auto results = co_await macoro::when_all_ready(std::move(tasks));
+						for (auto& result : results)
+							result.result();
+						if (wave == 0 &&
+							(nextSmallSet != smallDpfSetCount() || smallSetLeafCount))
 							throw std::runtime_error(
-								"AnyFieldOle RevCuckoo region expansion ended early. " LOCATION);
-
-					for (u64 group = 0; group < GroupCount; ++group)
-						accumulateProductGroup(
-							group, publicCount,
-							span<Ext>(productWork).subspan(group * mN, mN),
-							traceFactors, z);
+								"AnyFieldOle small DPF expansion ended early. " LOCATION);
+						for (auto instance : active)
+						{
+							const auto pairCount = instance + SmallPairCountLimit + 1;
+							if (nextSet[instance] != revSetCount(pairCount) ||
+								setLeafCount[instance])
+								throw std::runtime_error(
+									"AnyFieldOle RevCuckoo expansion ended early. " LOCATION);
+							for (u64 channelSlot = 0;
+								channelSlot < revChannelCount(pairCount); ++channelSlot)
+							{
+								const auto channel = channelSlot == 0 ?
+									pairCount - 1 : RevProductChannelCount - pairCount;
+								const auto group = revGroup(channel, wave);
+								accumulateProductGroup(
+									group, publicCount,
+									span<Ext>(productWork[instance]).subspan(
+										channelSlot * mN, mN),
+									traceFactors, z);
+							}
+						}
+					}
 #else
 					throw std::logic_error(
 						"AnyFieldOle RevCuckoo mode requires ENABLE_SPARSE_DPF. " LOCATION);
@@ -947,25 +1017,106 @@ namespace osuCrypto
 			return channel < CompressionFactor ?
 				channel + 1 : RevProductChannelCount - channel;
 		}
-		static constexpr u64 revRegionIndex(u64 channel, u64 region)
+		static constexpr bool useSmallDpf(u64 channel)
 		{
-			return channel * BlockCount + region;
+			return revPairCount(channel) <= SmallPairCountLimit;
 		}
-		static constexpr u64 revPayloadLane(u64 leftPolynomial, u64 frobeniusPower)
-		{
-			return leftPolynomial * Ctx::extensionDegree + frobeniusPower;
-		}
-		static constexpr u64 revPointsPerDpfSet(u64 channel)
-		{
-			return revPairCount(channel) * Ctx::extensionDegree *
-				BlockCount * PointsPerBlock * PointsPerBlock;
-		}
-		static constexpr u64 revChannelPointOffset(u64 channel)
+		static constexpr u64 smallProductGroupCount()
 		{
 			u64 result = 0;
-			for (u64 previous = 0; previous < channel; ++previous)
-				result += BlockCount * revPointsPerDpfSet(previous);
+			for (u64 group = 0; group < GroupCount; ++group)
+			{
+				const auto pair = group % (CompressionFactor * CompressionFactor);
+				const auto channel = pair / CompressionFactor + pair % CompressionFactor;
+				result += useSmallDpf(channel);
+			}
 			return result;
+		}
+		static constexpr u64 smallDpfSetCount()
+		{
+			return smallProductGroupCount() * BlockCount;
+		}
+		static constexpr u64 smallDpfPointCount()
+		{
+			return smallDpfSetCount() * PointsPerDpfSet;
+		}
+		static constexpr u64 revPointsPerDpfSet(u64 pairCount)
+		{
+			return pairCount * Ctx::extensionDegree *
+				BlockCount * PointsPerBlock * PointsPerBlock;
+		}
+		static constexpr u64 revChannelCount(u64 pairCount)
+		{
+			return pairCount == CompressionFactor ? 1 : 2;
+		}
+		static constexpr u64 revSetCount(u64 pairCount)
+		{
+			return revChannelCount(pairCount) * BlockCount;
+		}
+		static constexpr u64 revCountClassIndex(u64 pairCount)
+		{
+			return pairCount - (SmallPairCountLimit + 1);
+		}
+		static constexpr u64 revClassSetOffset(u64 pairCount)
+		{
+			u64 result = smallDpfSetCount();
+			for (u64 previous = SmallPairCountLimit + 1;
+				previous < pairCount; ++previous)
+				result += revSetCount(previous);
+			return result;
+		}
+		static constexpr u64 hybridSetCount()
+		{
+			u64 result = smallDpfSetCount();
+			for (u64 pairCount = SmallPairCountLimit + 1;
+				pairCount <= CompressionFactor; ++pairCount)
+				result += revSetCount(pairCount);
+			return result;
+		}
+		static constexpr u64 largeRevChannelCount()
+		{
+			u64 result = 0;
+			for (u64 pairCount = SmallPairCountLimit + 1;
+				pairCount <= CompressionFactor; ++pairCount)
+				result += revChannelCount(pairCount);
+			return result;
+		}
+		static constexpr u64 revClassPointOffset(u64 pairCount)
+		{
+			u64 result = smallDpfPointCount();
+			for (u64 previous = SmallPairCountLimit + 1;
+				previous < pairCount; ++previous)
+				result += revSetCount(previous) * revPointsPerDpfSet(previous);
+			return result;
+		}
+		static constexpr u64 revSetIndex(u64 channel, u64 region)
+		{
+			const auto pairCount = revPairCount(channel);
+			const auto firstChannel = pairCount - 1;
+			return (channel == firstChannel ? 0 : BlockCount) + region;
+		}
+		static constexpr u64 revGroup(u64 channel, u64 groupSlot)
+		{
+			const auto pairCount = revPairCount(channel);
+			const auto power = groupSlot / pairCount;
+			const auto pairSlot = groupSlot % pairCount;
+			const auto firstLeft = channel < CompressionFactor ?
+				0 : channel - (CompressionFactor - 1);
+			const auto leftPolynomial = firstLeft + pairSlot;
+			const auto rightPolynomial = channel - leftPolynomial;
+			return power * CompressionFactor * CompressionFactor +
+				leftPolynomial * CompressionFactor + rightPolynomial;
+		}
+		u64 smallGroup(u64 ordinal) const
+		{
+			for (u64 group = 0; group < GroupCount; ++group)
+			{
+				const auto pair = group % (CompressionFactor * CompressionFactor);
+				const auto channel = pair / CompressionFactor + pair % CompressionFactor;
+				if (useSmallDpf(channel) && ordinal-- == 0)
+					return group;
+			}
+			throw std::logic_error("AnyFieldOle small DPF group is invalid. " LOCATION);
 		}
 		u64 positionInstanceCount() const
 		{
@@ -1028,8 +1179,20 @@ namespace osuCrypto
 				{
 					u64 sendOffset = 0;
 					u64 recvOffset = 0;
-					for (auto& dpf : std::get<RevCuckooBackends>(mDpf))
+					auto& hybrid = std::get<HybridBackend>(mDpf);
+					const auto smallCount = hybrid.mSmall.baseOtCount();
+					hybrid.mSmall.setBaseOts(
+						span<const std::array<block, 2>>(newSendOts).subspan(
+							sendOffset, smallCount.mSendCount),
+						span<const block>(newRecvOts).subspan(
+							recvOffset, smallCount.mRecvCount),
+						newRecvChoices.subvec(recvOffset, smallCount.mRecvCount));
+					sendOffset += smallCount.mSendCount;
+					recvOffset += smallCount.mRecvCount;
+					for (auto& dpf : hybrid.mLarge)
 					{
+						if (mHasPositions)
+							break;
 						const auto subCount = dpf.baseOtCount();
 						dpf.setBaseOts(
 							span<const std::array<block, 2>>(newSendOts).subspan(
@@ -1058,16 +1221,18 @@ namespace osuCrypto
 
 		DpfBaseOtCount dpfBaseOtCount() const
 		{
-			if (mDpfMode == AnyFieldDpfMode::RevCuckoo && mHasPositions)
-				return {};
 			if (mDpfMode == AnyFieldDpfMode::RegularDpf)
 			{
 				const auto count = std::get<RegularBackend>(mDpf).baseOtCount();
 				return { count.mSendCount, count.mRecvCount };
 			}
 #ifdef ENABLE_SPARSE_DPF
-			DpfBaseOtCount result;
-			for (const auto& dpf : std::get<RevCuckooBackends>(mDpf))
+			const auto& hybrid = std::get<HybridBackend>(mDpf);
+			const auto smallCount = hybrid.mSmall.baseOtCount();
+			DpfBaseOtCount result{ smallCount.mSendCount, smallCount.mRecvCount };
+			if (mHasPositions)
+				return result;
+			for (const auto& dpf : hybrid.mLarge)
 			{
 				const auto count = dpf.baseOtCount();
 				result.mSendCount += count.mSendCount;
@@ -1091,19 +1256,23 @@ namespace osuCrypto
 				return;
 			}
 #ifdef ENABLE_SPARSE_DPF
-			mDpf = RevCuckooBackends(RevRegionCount);
-			auto& dpfs = std::get<RevCuckooBackends>(mDpf);
-			for (u64 channel = 0; channel < RevProductChannelCount; ++channel)
-				for (u64 region = 0; region < BlockCount; ++region)
-					dpfs[revRegionIndex(channel, region)].init(
-						mPartyIdx,
-						revPointsPerDpfSet(channel),
-						1,
-						mBlockSize,
-						2,
-						2,
-						40,
-						RevPayloadCtx{}.template characteristicTwo<RevPayload>());
+			mDpf = HybridBackend{};
+			auto& hybrid = std::get<HybridBackend>(mDpf);
+			hybrid.mSmall.init(
+				mPartyIdx, mBlockSize, PointsPerDpfSet, smallDpfSetCount(),
+				mCtx.dpfCoeffCtx());
+			hybrid.mLarge.resize(RevCountClassCount);
+			for (u64 pairCount = SmallPairCountLimit + 1;
+				pairCount <= CompressionFactor; ++pairCount)
+				hybrid.mLarge[revCountClassIndex(pairCount)].init(
+					mPartyIdx,
+					revPointsPerDpfSet(pairCount),
+					revSetCount(pairCount),
+					mBlockSize,
+					2,
+					2,
+					40,
+					mCtx.dpfCoeffCtx().template characteristicTwo<Ext>());
 #else
 			throw std::logic_error(
 				"AnyFieldOle RevCuckoo mode requires ENABLE_SPARSE_DPF. " LOCATION);
@@ -1384,34 +1553,53 @@ namespace osuCrypto
 		void buildDpfOrder()
 		{
 			const auto revMode = mDpfMode == AnyFieldDpfMode::RevCuckoo;
-			mDpfOrder.resize(revMode ?
-				GroupCount * pointsPerGroup() : DpfSetCount * PointsPerDpfSet);
-			std::vector<u64> next(revMode ?
-				RevProductChannelCount * BlockCount : DpfSetCount);
+			mDpfOrder.resize(GroupCount * pointsPerGroup());
+			std::vector<u64> next(revMode ? hybridSetCount() : DpfSetCount);
+			u64 smallOrdinal = 0;
 			for (u64 group = 0; group < GroupCount; ++group)
 			{
 				const auto pair = group % (CompressionFactor * CompressionFactor);
 				const auto leftPolynomial = pair / CompressionFactor;
 				const auto rightPolynomial = pair % CompressionFactor;
 				const auto productChannel = leftPolynomial + rightPolynomial;
+				const auto small = revMode && useSmallDpf(productChannel);
 				for (u64 left = 0; left < Weight; ++left)
 					for (u64 right = 0; right < Weight; ++right)
 					{
-						const auto setGroup = revMode ? productChannel : group;
-						const auto set = setGroup * BlockCount +
-							productBlock(group, left, right);
-						const auto capacity = revMode ?
-							revPointsPerDpfSet(productChannel) : PointsPerDpfSet;
+						const auto region = productBlock(group, left, right);
+						u64 set;
+						u64 capacity;
+						u64 targetOffset;
+						if (!revMode)
+						{
+							set = group * BlockCount + region;
+							capacity = PointsPerDpfSet;
+							targetOffset = set * capacity;
+						}
+						else if (small)
+						{
+							set = smallOrdinal * BlockCount + region;
+							capacity = PointsPerDpfSet;
+							targetOffset = set * capacity;
+						}
+						else
+						{
+							const auto pairCount = revPairCount(productChannel);
+							const auto classSet = revSetIndex(productChannel, region);
+							set = revClassSetOffset(pairCount) + classSet;
+							capacity = revPointsPerDpfSet(pairCount);
+							targetOffset = revClassPointOffset(pairCount) +
+								classSet * capacity;
+						}
 						if (next[set] >= capacity)
 							throw std::logic_error(
 								"AnyFieldOle product block capacity is too small. " LOCATION);
-						const auto target = revMode ?
-							revChannelPointOffset(productChannel) +
-								productBlock(group, left, right) * capacity + next[set]++ :
-							set * PointsPerDpfSet + next[set]++;
+						const auto target = targetOffset + next[set]++;
 						mDpfOrder[target] =
 							group * pointsPerGroup() + left * Weight + right;
 					}
+				if (small)
+					++smallOrdinal;
 			}
 			if (mDpfMode == AnyFieldDpfMode::RegularDpf)
 				for (auto count : next)
@@ -1419,63 +1607,85 @@ namespace osuCrypto
 						throw std::logic_error(
 							"AnyFieldOle product blocks are not regular. " LOCATION);
 			if (revMode)
-				for (u64 set = 0; set < next.size(); ++set)
-					if (next[set] != revPointsPerDpfSet(set / BlockCount))
+			{
+				if (smallOrdinal != smallProductGroupCount())
+					throw std::logic_error(
+						"AnyFieldOle small DPF group count is invalid. " LOCATION);
+				for (u64 set = 0; set < smallDpfSetCount(); ++set)
+					if (next[set] != PointsPerDpfSet)
 						throw std::logic_error(
-							"AnyFieldOle RevCuckoo product block is invalid. " LOCATION);
+							"AnyFieldOle small DPF product block is invalid. " LOCATION);
+				for (u64 pairCount = SmallPairCountLimit + 1;
+					pairCount <= CompressionFactor; ++pairCount)
+					for (u64 classSet = 0; classSet < revSetCount(pairCount); ++classSet)
+						if (next[revClassSetOffset(pairCount) + classSet] !=
+							revPointsPerDpfSet(pairCount))
+							throw std::logic_error(
+								"AnyFieldOle RevCuckoo product block is invalid. " LOCATION);
+			}
+		}
+
+		Ext productShare(span<const Ext> productShares, u64 source) const
+		{
+			const auto group = source / pointsPerGroup();
+			const auto point = source % pointsPerGroup();
+			const auto left = point / Weight;
+			const auto right = point % Weight;
+			const auto power = group / (CompressionFactor * CompressionFactor);
+			const auto pair = group % (CompressionFactor * CompressionFactor);
+			const auto leftPolynomial = pair / CompressionFactor;
+			const auto rightPolynomial = pair % CompressionFactor;
+			const auto leftOffset = leftPolynomial * Weight;
+			const auto rightOffset =
+				(Ctx::extensionDegree * rightPolynomial + power) * Weight;
+			return productShares[
+				(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
+		}
+
+		void fillDpfValues(span<const Ext> productShares, u64 pointCount)
+		{
+			mDpfValues.resize(pointCount);
+			for (u64 target = 0; target < pointCount; ++target)
+				mDpfValues[target] = productShare(productShares, mDpfOrder[target]);
 		}
 
 		void fillRegularDpfValues(span<const Ext> productShares)
 		{
-			mDpfValues.resize(mDpfOrder.size());
-			for (u64 target = 0; target < mDpfOrder.size(); ++target)
-			{
-				const auto source = mDpfOrder[target];
-				const auto group = source / pointsPerGroup();
-				const auto point = source % pointsPerGroup();
-				const auto left = point / Weight;
-				const auto right = point % Weight;
-				const auto power = group / (CompressionFactor * CompressionFactor);
-				const auto pair = group % (CompressionFactor * CompressionFactor);
-				const auto leftPolynomial = pair / CompressionFactor;
-				const auto rightPolynomial = pair % CompressionFactor;
-				const auto leftOffset = leftPolynomial * Weight;
-				const auto rightOffset =
-					(Ctx::extensionDegree * rightPolynomial + power) * Weight;
-				mDpfValues[target] = productShares[
-					(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
-			}
+			fillDpfValues(productShares, mDpfOrder.size());
+		}
+
+		void fillSmallDpfValues(span<const Ext> productShares)
+		{
+			fillDpfValues(productShares, smallDpfPointCount());
 		}
 
 #ifdef ENABLE_SPARSE_DPF
-		void fillRevRegionValues(
-			u64 channel,
-			u64 region,
-			std::vector<RevPayload>& dpfValues)
+		void fillRevValues(
+			u64 pairCount,
+			u64 groupSlot,
+			std::vector<Ext>& dpfValues)
 		{
 			if (mProductShares.size() != leftCoefficientCount() * rightCoefficientCount())
 				throw std::logic_error(
 					"AnyFieldOle RevCuckoo tensor state is missing. " LOCATION);
-			const auto pointCount = revPointsPerDpfSet(channel);
-			const auto orderOffset = revChannelPointOffset(channel) + region * pointCount;
-			dpfValues.resize(pointCount);
-			RevPayloadCtx{}.zero(dpfValues.begin(), dpfValues.end());
-			for (u64 target = 0; target < pointCount; ++target)
+			const auto pointCount = revPointsPerDpfSet(pairCount);
+			const auto setCount = revSetCount(pairCount);
+			dpfValues.resize(setCount * pointCount);
+			for (u64 set = 0; set < setCount; ++set)
 			{
-				const auto source = mDpfOrder[orderOffset + target];
-				const auto group = source / pointsPerGroup();
-				const auto power = group / (CompressionFactor * CompressionFactor);
-				const auto pair = group % (CompressionFactor * CompressionFactor);
-				const auto point = source % pointsPerGroup();
-				const auto left = point / Weight;
-				const auto right = point % Weight;
-				const auto leftPolynomial = pair / CompressionFactor;
-				const auto rightPolynomial = pair % CompressionFactor;
-				const auto leftOffset = leftPolynomial * Weight;
-				const auto rightOffset =
-					(Ctx::extensionDegree * rightPolynomial + power) * Weight;
-				dpfValues[target][revPayloadLane(leftPolynomial, power)] = mProductShares[
-					(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
+				const auto channelSlot = set / BlockCount;
+				const auto channel = channelSlot == 0 ?
+					pairCount - 1 : RevProductChannelCount - pairCount;
+				const auto group = revGroup(channel, groupSlot);
+				const auto orderOffset = revClassPointOffset(pairCount) + set * pointCount;
+				const auto valueOffset = set * pointCount;
+				for (u64 target = 0; target < pointCount; ++target)
+				{
+					const auto source = mDpfOrder[orderOffset + target];
+					dpfValues[valueOffset + target] =
+						source / pointsPerGroup() == group ?
+						productShare(mProductShares, source) : Ext::zero();
+				}
 			}
 		}
 #endif
