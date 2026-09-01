@@ -288,6 +288,24 @@ namespace osuCrypto
 		static constexpr u64 maximumDimension = 6;
 	};
 
+	struct AnyFieldF9RevCuckooTestParams
+	{
+		static constexpr u64 compressionFactor = 2;
+		static constexpr u64 blockDimensions = 1;
+		static constexpr u64 pointsPerBlock = 1;
+		static constexpr u64 minimumDimension = 3;
+		static constexpr u64 maximumDimension = 4;
+	};
+
+	struct AnyFieldGoldilocksRevCuckooTestParams
+	{
+		static constexpr u64 compressionFactor = 2;
+		static constexpr u64 blockDimensions = 1;
+		static constexpr u64 pointsPerBlock = 1;
+		static constexpr u64 minimumDimension = 5;
+		static constexpr u64 maximumDimension = 6;
+	};
+
 	// Exercise every c=8 convolution channel without approaching a production
 	// output size. This catches channel/lane ordering errors while keeping the
 	// RevCuckoo real-leaf count at 2(2c-1)N = 7290.
@@ -485,6 +503,13 @@ namespace osuCrypto
 		using TestOle = AnyFieldOle<AnyFieldF9Ctx, AnyFieldOleTestParams>;
 		runAnyFieldOleCase<TestOle>(1, false, "F3");
 		runAnyFieldOleCase<TestOle>(128, false, "F3");
+#ifdef ENABLE_SPARSE_DPF
+		using RevTestOle = AnyFieldOle<
+			AnyFieldF9Ctx, AnyFieldF9RevCuckooTestParams>;
+		runAnyFieldOleCase<RevTestOle>(
+			1, false, "F3 RevCuckoo stationary",
+			AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary);
+#endif
 		if (cmd.isSet("v"))
 		{
 			using BenchmarkOle = AnyFieldOle<AnyFieldF9Ctx, AnyFieldF9BenchmarkParams>;
@@ -545,6 +570,14 @@ namespace osuCrypto
 					1, false, "F2 RevCuckoo c=8 channels",
 					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::SingleUse);
 			}
+			if (!cmd.isSet("singleOnly"))
+			{
+				using ChannelTestOle = AnyFieldOle<
+					AnyFieldF4Ctx, AnyFieldF4RevCuckooChannelTestParams>;
+				runAnyFieldOleCase<ChannelTestOle>(
+					1, false, "F2 RevCuckoo c=8 stationary channels",
+					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary);
+			}
 		}
 #endif
 		if (cmd.isSet("v"))
@@ -572,6 +605,13 @@ namespace osuCrypto
 		using TestOle = AnyFieldOle<AnyFieldGoldilocksCtx, AnyFieldGoldilocksTestParams>;
 		runAnyFieldOleCase<TestOle>(1, false, "Goldilocks");
 		runAnyFieldOleCase<TestOle>(16, false, "Goldilocks");
+#ifdef ENABLE_SPARSE_DPF
+		using RevTestOle = AnyFieldOle<
+			AnyFieldGoldilocksCtx, AnyFieldGoldilocksRevCuckooTestParams>;
+		runAnyFieldOleCase<RevTestOle>(
+			1, false, "Goldilocks RevCuckoo stationary",
+			AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary);
+#endif
 
 		const block publicSeed(0x9132749812374981, 0x1239874192387491);
 		TestOle source;
