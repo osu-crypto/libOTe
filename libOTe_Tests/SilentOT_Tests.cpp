@@ -872,7 +872,8 @@ void OtExt_Silent_ExAcc_Test(const CLP& cmd)
         MultType::ExAcc7,
         MultType::ExAcc11,
         MultType::ExAcc21,
-        MultType::ExAcc40
+        MultType::ExAcc40,
+        MultType::RegularEc10x5x15
     };
 
     for (const auto type : types)
@@ -895,6 +896,79 @@ void OtExt_Silent_ExAcc_Test(const CLP& cmd)
         eval(send, receive);
         checkRandom(receiverMessages, senderMessages, choices, n, false);
     }
+
+    const auto checkRegularEcSize = [](u64 requested)
+    {
+        const auto config = syndromeDecodingConfigure(
+            128,
+            requested,
+            MultType::RegularEc10x5x15,
+            SdNoiseDistribution::Regular,
+            1);
+        const u64 messageSize = config.mNoiseVectorSize / 2;
+        const u64 physicalNoiseSize =
+            config.mNumPartitions * config.mSizePer;
+        if (config.mNoiseVectorSize % 20 != 10 ||
+            messageSize < requested || messageSize < 525 ||
+            physicalNoiseSize > config.mNoiseVectorSize ||
+            config.mNoiseVectorSize - physicalNoiseSize >= 20)
+        {
+            throw UnitTestFail(
+                "regular EC size rounding produced invalid dimensions" LOCATION);
+        }
+    };
+    for (u64 requested = 1; requested <= 4096; ++requested)
+        checkRegularEcSize(requested);
+    checkRegularEcSize(65537);
+    checkRegularEcSize(1048576);
+
+	bool fieldSenderRejected = false;
+	bool fieldReceiverRejected = false;
+	try
+	{
+		SilentOtExtSender fieldSender;
+		fieldSender.configure(n, 2, 1, SilentSecType::SemiHonest,
+			SdNoiseDistribution::Regular, MultType::RegularEc26x13x4);
+	}
+	catch (const std::invalid_argument&)
+	{
+		fieldSenderRejected = true;
+	}
+	try
+	{
+		SilentOtExtReceiver fieldReceiver;
+		fieldReceiver.configure(n, 2, 1, SilentSecType::SemiHonest,
+			SdNoiseDistribution::Regular, MultType::RegularEc26x13x4);
+	}
+	catch (const std::invalid_argument&)
+	{
+		fieldReceiverRejected = true;
+	}
+	if (!fieldSenderRejected || !fieldReceiverRejected)
+		throw UnitTestFail("Silent OT accepted the field-only regular EC profile");
+
+    auto packedSockets = cp::LocalAsyncSocket::makePair();
+    SilentOtExtSender packedSender;
+    SilentOtExtReceiver packedReceiver;
+    packedSender.configure(n, 2, 1, SilentSecType::SemiHonest,
+        SdNoiseDistribution::Regular, MultType::RegularEc10x5x15);
+    packedReceiver.configure(n, 2, 1, SilentSecType::SemiHonest,
+        SdNoiseDistribution::Regular, MultType::RegularEc10x5x15);
+    fakeBase(n, 2, 1, prng, packedReceiver, packedSender);
+    const block delta = *packedSender.mDelta;
+    auto packedSend = packedSender.silentSendInplace(
+        delta, n, prng, packedSockets[0]);
+    auto packedReceive = packedReceiver.silentReceiveInplace(
+        n, prng, packedSockets[1], ChoiceBitPacking::True);
+    eval(packedSend, packedReceive);
+    checkCorrelated(
+        packedReceiver.mA,
+        packedSender.mB,
+        packedReceiver.mC,
+        delta,
+        n,
+        false,
+        ChoiceBitPacking::True);
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif

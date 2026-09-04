@@ -561,6 +561,115 @@ void Vole_Silent_Tungsten_test(const oc::CLP& cmd)
 		Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, MultType::Tungsten, debug, false, false, noise);
 }
 
+void Vole_Silent_RegularEcGF128_test(const oc::CLP& cmd)
+{
+	constexpr u64 requestSize = 257;
+	u64 scaler = 0;
+	double pseudoDistance = 0;
+	RegularEcFieldConfigure(scaler, pseudoDistance);
+	if (scaler != 2 || pseudoDistance != 0.30)
+		throw UnitTestFail(
+			"GF128 field regular EC parameters changed unexpectedly");
+
+	const auto groupBitCount =
+		coefficientGroupBitCount<block>(CoeffCtxGF128{});
+	for (u64 requested = 1; requested <= 4096; ++requested)
+	{
+		const auto config = syndromeDecodingConfigure(
+			128, requested, MultType::RegularEc26x13x4,
+			SdNoiseDistribution::Regular, groupBitCount);
+		const u64 physicalNoiseSize =
+			config.mNumPartitions * config.mSizePer;
+		if (config.mNoiseVectorSize % 26 ||
+			config.mNoiseVectorSize / 2 < requested ||
+			physicalNoiseSize > config.mNoiseVectorSize ||
+			config.mNoiseVectorSize - physicalNoiseSize >= 26 ||
+			config.mNumPartitions == 0)
+			throw UnitTestFail(
+				"GF128 field regular EC selected incompatible dimensions");
+	}
+
+	for (auto noise : { SdNoiseDistribution::Regular,
+		SdNoiseDistribution::Stationary })
+	{
+		Vole_Silent_test_impl<block, block, CoeffCtxGF128>(
+			requestSize,
+			MultType::RegularEc26x13x4,
+			cmd.isSet("debug"),
+			true,
+			false,
+			noise);
+	}
+
+	expectInvalidArgument([] {
+		SilentVoleSender<block, block, CoeffCtxGF128> sender;
+		sender.configure(257, SilentSecType::SemiHonest,
+			MultType::RegularEc10x5x15);
+	});
+	expectInvalidArgument([] {
+		SilentVoleReceiver<block, block, CoeffCtxGF128> receiver;
+		receiver.configure(257, SilentSecType::SemiHonest,
+			MultType::RegularEc10x5x15);
+	});
+}
+
+void Vole_Silent_RegularEcField_test(const oc::CLP& cmd)
+{
+	constexpr u64 requestSize = 257;
+	u64 scaler = 0;
+	double pseudoDistance = 0;
+	RegularEcFieldConfigure(scaler, pseudoDistance);
+	if (scaler != 2 || pseudoDistance != 0.30)
+		throw UnitTestFail(
+			"streaming field regular EC parameters changed unexpectedly");
+
+	const auto groupBitCount =
+		coefficientGroupBitCount<Goldilocks>(CoeffCtxGoldilocks{});
+	for (u64 requested = 1; requested <= 4096; ++requested)
+	{
+		const auto config = syndromeDecodingConfigure(
+			128, requested, MultType::RegularEc26x13x4,
+			SdNoiseDistribution::Regular, groupBitCount);
+		const u64 physicalNoiseSize =
+			config.mNumPartitions * config.mSizePer;
+		if (config.mNoiseVectorSize % 26 ||
+			config.mNoiseVectorSize / 2 < requested ||
+			physicalNoiseSize > config.mNoiseVectorSize ||
+			config.mNoiseVectorSize - physicalNoiseSize >= 26 ||
+			config.mNumPartitions == 0)
+			throw UnitTestFail(
+				"streaming field regular EC selected incompatible dimensions");
+	}
+
+	for (auto noise : { SdNoiseDistribution::Regular,
+		SdNoiseDistribution::Stationary })
+	{
+		Vole_Silent_test_impl<Goldilocks, Goldilocks, CoeffCtxGoldilocks>(
+			requestSize,
+			MultType::RegularEc26x13x4,
+			cmd.isSet("debug"),
+			true,
+			false,
+			noise);
+	}
+
+	expectInvalidArgument([] {
+		SilentVoleSender<u64, u64, CoeffCtxInteger> sender;
+		sender.configure(257, SilentSecType::SemiHonest,
+			MultType::RegularEc26x13x4);
+	});
+	expectInvalidArgument([] {
+		SilentVoleReceiver<u64, u64, CoeffCtxInteger> receiver;
+		receiver.configure(257, SilentSecType::SemiHonest,
+			MultType::RegularEc26x13x4);
+	});
+	expectInvalidArgument([] {
+		SilentVoleSender<Fp31> sender;
+		sender.configure(257, SilentSecType::SemiHonest,
+			MultType::RegularEc26x13x4);
+	});
+}
+
 
 void Vole_Silent_baseOT_test(const oc::CLP& cmd)
 {
@@ -934,6 +1043,8 @@ namespace {
 	}
 }
 void Vole_Silent_Tungsten_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_RegularEcGF128_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_RegularEcField_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_BlkAcc_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_stationary_test(const oc::CLP& cmd) { throwDisabled(); }
 

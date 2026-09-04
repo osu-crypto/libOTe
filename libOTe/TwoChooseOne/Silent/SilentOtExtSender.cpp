@@ -13,6 +13,7 @@
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
 #include "libOTe/Tools/BlkAccCode/BlkAccCode.h"
+#include "libOTe/Tools/ExConvCode/RegularEcCode.h"
 
 namespace osuCrypto
 {
@@ -259,6 +260,9 @@ namespace osuCrypto
 		if (malType != SilentSecType::SemiHonest &&
 			malType != SilentSecType::Malicious)
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);
+		if (mult == MultType::RegularEc26x13x4)
+			throw std::invalid_argument(
+				"Streaming field regular EC is supported by Silent VOLE, not Silent OT. " LOCATION);
 
 		constexpr u64 secParam = 128;
 		auto param = syndromeDecodingConfigure(secParam, numOTs, mult, noiseType, 1);
@@ -536,12 +540,23 @@ namespace osuCrypto
 		if(mTimer)
 			gen().setTimer(getTimer());
 
-		// Allocate and expand the B vector
-		mB.resize(mNoiseVecSize);
-		co_await gen().expand(chl, delta, prng.get(), mB, mPprfFormat, true, mNumThreads, CoeffCtxGF2{});
+		// Allocate and expand the physical PPRF prefix of the B vector.
+		const u64 physicalNoiseSize = mNumPartitions * mSizePer;
+		mB.resize(physicalNoiseSize);
+		co_await gen().expand(
+			chl,
+			delta,
+			prng.get(),
+			mB,
+			mPprfFormat,
+			true,
+			mNumThreads,
+			CoeffCtxGF2{});
 
-		// fill remaining with zeros
-		for (u64 i = mNumPartitions * mSizePer; i < mB.size(); ++i)
+		// The regular EC adapter may pad the codeword beyond the PPRF's
+		// physical prefix. Extend that prefix with public zeros.
+		mB.resize(mNoiseVecSize);
+		for (u64 i = physicalNoiseSize; i < mB.size(); ++i)
 			mB[i] = ZeroBlock;
 
 		setTimePoint("sender.expand.pprf");
@@ -663,6 +678,13 @@ namespace osuCrypto
 			exConvEncoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, accWeight, true, true, mCodeSeed);
 
 			exConvEncoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
+			break;
+		}
+		case osuCrypto::MultType::RegularEc10x5x15:
+		{
+			RegularEcCode<10, 15> encoder;
+			encoder.config(mNoiseVecSize / 2, mNoiseVecSize, mCodeSeed);
+			encoder.dualEncode<block>(mB.begin(), CoeffCtxGF2{});
 			break;
 		}
 		case MultType::BlkAcc3x8:

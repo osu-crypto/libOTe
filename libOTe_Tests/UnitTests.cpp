@@ -14,6 +14,7 @@
 #include "libOTe_Tests/Vole_Tests.h"
 #include "libOTe_Tests/ExConvCode_Tests.h"
 #include "libOTe_Tests/EACode_Tests.h"
+#include "libOTe_Tests/RegularEcCode_Tests.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
 #include "libOTe_Tests/Pprf_Tests.h"
 #include "libOTe_Tests/TungstenCode_Tests.h"
@@ -73,6 +74,8 @@ namespace tests_libOTe
 			tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
 			tc.add("ExConvCode_Audit_Test                   ", ExConvCode_Audit_Test);
 			tc.add("ExConvCode_weight_test                  ", ExConvCode_weight_test);
+			tc.add("RegularEcCode_encode_test                ", RegularEcCode_encode_test);
+			tc.add("RegularEcCode_config_test                ", RegularEcCode_config_test);
 
 			tc.add("TungstenCode_encode_test                ", TungstenCode_encode_test);
 			tc.add("TungstenCode_weight_test                ", TungstenCode_weight_test);
@@ -272,6 +275,8 @@ namespace tests_libOTe
 			tc.add("Vole_Silent_defaultMatrixRank_test      ", Vole_Silent_defaultMatrixRank_test);
 			tc.add("Vole_Silent_stationary_test             ", Vole_Silent_stationary_test);
 			tc.add("Vole_Silent_Tungsten_test               ", Vole_Silent_Tungsten_test);
+			tc.add("Vole_Silent_RegularEcGF128_test          ", Vole_Silent_RegularEcGF128_test);
+			tc.add("Vole_Silent_RegularEcField_test          ", Vole_Silent_RegularEcField_test);
 			tc.add("Vole_Silent_QuasiCyclic_test            ", Vole_Silent_QuasiCyclic_test);
 			tc.add("Vole_Silent_BlkAcc_test                 ", Vole_Silent_BlkAcc_test);
 			
