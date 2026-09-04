@@ -28,6 +28,7 @@
 #include "libOTe/Tools/Field/FVec.h"
 #include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
+#include "RegularEcBench.h"
 #include <format>
 
 namespace osuCrypto
@@ -2583,6 +2584,8 @@ namespace osuCrypto
 			ExConvCodeBench(cmd);
 		else if (cmd.isSet("ecold"))
 			ExConvCodeOldBench(cmd);
+		else if (cmd.isSet("regularEc"))
+			RegularEcBench(cmd);
 		else if (cmd.isSet("tungsten"))
 			TungstenCodeBench(cmd);
 		else if (cmd.isSet("blkacc"))
@@ -2625,6 +2628,7 @@ namespace osuCrypto
 			std::cout << "  -ea" << std::endl;
 			std::cout << "  -ec" << std::endl;
 			std::cout << "  -ecold" << std::endl;
+			std::cout << "  -regularEc [-gf128 [-default]|-fp31|-goldilocks [-vole]] [-reference|-audit] [-profile 26/13/m4] [-n N] [-t 3]" << std::endl;
 			std::cout << "  -tungsten" << std::endl;
 			std::cout << "  -blkacc" << std::endl;
 			std::cout << "  -aes" << std::endl;
