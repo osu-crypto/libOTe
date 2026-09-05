@@ -389,8 +389,10 @@ namespace osuCrypto
 				rKeys[i] = rKeys[prev];
 			}
 
-			keys[0][i] = prng.get<u32>() & ((1u << keyBits) - 1);
-			altKeys[0][i] = prng.get<u32>() & ((1u << keyBits) - 1);
+			// Keep padding bits random in each share. They cancel on reconstruction
+			// and must not spill into the next packed key when keyBits is not byte aligned.
+			keys[0][i] = prng.get<u32>();
+			altKeys[0][i] = prng.get<u32>();
 			keys[1][i] = rKeys[i] ^ keys[0][i];
 			altKeys[1][i] = rAltKeys[i] ^ altKeys[0][i];
 

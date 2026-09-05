@@ -14,6 +14,7 @@
 #include "libOTe/Vole/Silent/SilentVoleSender.h"
 #include "libOTe/Vole/Silent/SilentVoleReceiver.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Tools/Pprf/HalfTreePprf.h"
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
 #include "libOTe/Tools/ExConvCodeOld/ExConvCodeOld.h"
 #include "libOTe/Dpf/RegularDpf.h"
@@ -21,12 +22,14 @@
 #include "libOTe/Triple/Foleage/FoleageTriple.h"
 #include "libOTe/Triple/SilentOtTriple/SilentOtTriple.h"
 #include "libOTe/Dpf/RevCuckooDmpf.h"
+#include "libOTe/Dpf/WaterfallDmpf.h"
 #include "libOTe/Dpf/SumDmpf.h"
 #include "libOTe/Tools/Ntt/NttNegWrap.h"
 #include "libOTe/Triple/RingLpn/RingLpnTriple.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Tools/Field/FVec.h"
 #include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
+#include "libOTe/Dpf/Waterfall/SerialWaksmanPermute.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
 #include <format>
 
@@ -261,61 +264,66 @@ namespace osuCrypto
 
 		try
 		{
-			using Ctx = CoeffCtxGF2;
-			RegularPprfReceiver<block, Ctx> recver;
-			RegularPprfSender<block, Ctx> sender;
-
-			u64 trials = cmd.getOr("t", 10);
-
-			u64 w = cmd.getOr("w", 32);
-			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 14));
-
-			PRNG prng0(ZeroBlock), prng1(ZeroBlock);
-			//block delta = prng0.get();
-
-			auto sock = coproto::LocalAsyncSocket::makePair();
-
-			Timer rTimer;
-			auto s = rTimer.setTimePoint("start");
-			auto ctx = Ctx{};
-			auto vals = Ctx::Vec<block>(w);
-			auto out0 = Ctx::Vec<block>(n / w * w);
-			auto out1 = Ctx::Vec<block>(n / w * w);
-
-
-
-			for (u64 t = 0; t < trials; ++t)
+			auto run = [&]<typename Sender, typename Receiver>(const char* name)
 			{
-				sender.configure(n / w, w);
-				recver.configure(n / w, w);
+				using Ctx = CoeffCtxGF2;
+				Receiver recver;
+				Sender sender;
 
-				std::vector<std::array<block, 2>> baseSend(sender.baseOtCount());
-				std::vector<block> baseRecv(sender.baseOtCount());
-				BitVector baseChoice(sender.baseOtCount());
-				sender.setBase(baseSend);
-				recver.setBase(baseRecv);
-				recver.setChoiceBits(baseChoice);
+				u64 trials = cmd.getOr("t", 10);
+				u64 w = cmd.getOr("w", 32);
+				u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 14));
 
-				auto p0 = sender.expand(sock[0], vals, prng0.get(), out0, PprfOutputFormat::Interleaved, true, 1, ctx);
-				auto p1 = recver.expand(sock[1], out1, PprfOutputFormat::Interleaved, true, 1, ctx);
+				PRNG prng0(ZeroBlock), prng1(ZeroBlock);
+				auto sock = coproto::LocalAsyncSocket::makePair();
 
-				rTimer.setTimePoint("r start");
-				coproto::sync_wait(macoro::when_all_ready(
-					std::move(p0), std::move(p1)));
-				rTimer.setTimePoint("r done");
+				Timer rTimer;
+				auto s = rTimer.setTimePoint("start");
+				auto ctx = Ctx{};
+				auto vals = Ctx::Vec<block>(w);
+				auto out0 = Ctx::Vec<block>(n / w * w);
+				auto out1 = Ctx::Vec<block>(n / w * w);
 
-			}
-			auto e = rTimer.setTimePoint("end");
+				for (u64 t = 0; t < trials; ++t)
+				{
+					sender.configure(n / w, w);
+					recver.configure(n / w, w);
 
-			auto time = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
-			auto avgTime = time / double(trials);
-			auto timePer512 = avgTime / n * 512;
-			std::cout << "OT n:" << n << ", " <<
-				avgTime << "ms/batch, " << timePer512 << "ms/512ot" << std::endl;
+					std::vector<std::array<block, 2>> baseSend(sender.baseOtCount());
+					std::vector<block> baseRecv(sender.baseOtCount());
+					BitVector baseChoice(sender.baseOtCount());
+					sender.setBase(baseSend);
+					recver.setBase(baseRecv);
+					recver.setChoiceBits(baseChoice);
 
-			std::cout << rTimer << std::endl;
+					auto p0 = sender.expand(sock[0], vals, prng0.get(), out0, PprfOutputFormat::ByPhysicalIndex, true, 1, ctx);
+					auto p1 = recver.expand(sock[1], out1, PprfOutputFormat::ByPhysicalIndex, true, 1, ctx);
 
-			std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+					rTimer.setTimePoint("r start");
+					coproto::sync_wait(macoro::when_all_ready(
+						std::move(p0), std::move(p1)));
+					rTimer.setTimePoint("r done");
+				}
+				auto e = rTimer.setTimePoint("end");
+
+				auto time = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+				auto avgTime = time / double(trials);
+				auto timePer512 = avgTime / n * 512;
+				std::cout << name << " PPRF, OT n:" << n << ", " <<
+					avgTime << "ms/batch, " << timePer512 << "ms/512ot" << std::endl;
+
+				std::cout << rTimer << std::endl;
+				std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+			};
+
+			if (cmd.isSet("halfTree"))
+				run.template operator()<
+					HalfTreePprfSender<block, CoeffCtxGF2>,
+					HalfTreePprfReceiver<block, CoeffCtxGF2>>("half-tree");
+			else
+				run.template operator()<
+					RegularPprfSender<block, CoeffCtxGF2>,
+					RegularPprfReceiver<block, CoeffCtxGF2>>("regular");
 		}
 		catch (std::exception& e)
 		{
@@ -1239,6 +1247,7 @@ namespace osuCrypto
 		u64 iterations = cmd.getOr("iters", 3); // Number of different value sets to test
 		bool print = cmd.isSet("print"); // Print flag
 		bool quiet = cmd.isSet("quiet");
+		bool serialParties = cmd.isSet("serialParties");
 
 		// Helper function to format bytes
 		auto formatBytes = [](u64 bytes) {
@@ -1277,6 +1286,7 @@ namespace osuCrypto
 			std::cout << "  Number of partitions: " << numPartitions << std::endl;
 			std::cout << "  Linear security parameter: " << linearSecParam << std::endl;
 			std::cout << "  Cuckoo security parameter: " << cuckooSecParam << std::endl;
+			std::cout << "  Party scheduling: " << (serialParties ? "serial" : "parallel") << std::endl;
 			std::cout << "  Expansion iterations: " << iterations << std::endl;
 			std::cout << std::endl;
 		}
@@ -1365,12 +1375,24 @@ namespace osuCrypto
 		auto setupStartBytes1 = sock[1].bytesReceived();
 		auto setupStartTime = std::chrono::high_resolution_clock::now();
 
-		auto r = macoro::sync_wait(macoro::when_all_ready(
-			dpf[0].setPoints(points0, prng, sock[0]) | macoro::start_on(threadPools[0]),
-			dpf[1].setPoints(points1, prng, sock[1]) | macoro::start_on(threadPools[1])
-		));
-		std::get<0>(r).result();
-		std::get<1>(r).result();
+		if (serialParties)
+		{
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].setPoints(points0, prng, sock[0]),
+				dpf[1].setPoints(points1, prng, sock[1])
+			));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+		}
+		else
+		{
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].setPoints(points0, prng, sock[0]) | macoro::start_on(threadPools[0]),
+				dpf[1].setPoints(points1, prng, sock[1]) | macoro::start_on(threadPools[1])
+			));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+		}
 
 		auto setupEndTime = std::chrono::high_resolution_clock::now();
 		auto setupEndBytes0 = sock[0].bytesReceived();
@@ -1425,12 +1447,24 @@ namespace osuCrypto
 			auto expStartTime = std::chrono::high_resolution_clock::now();
 
 			// Expand values using the cached point setup
-			auto r = macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }) | macoro::start_on(threadPools[0]),
-				dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; }) | macoro::start_on(threadPools[1])
-			));
-			std::get<0>(r).result();
-			std::get<1>(r).result();
+			if (serialParties)
+			{
+				auto r = macoro::sync_wait(macoro::when_all_ready(
+					dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }),
+					dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; })
+				));
+				std::get<0>(r).result();
+				std::get<1>(r).result();
+			}
+			else
+			{
+				auto r = macoro::sync_wait(macoro::when_all_ready(
+					dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }) | macoro::start_on(threadPools[0]),
+					dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; }) | macoro::start_on(threadPools[1])
+				));
+				std::get<0>(r).result();
+				std::get<1>(r).result();
+			}
 
 			auto expEndTime = std::chrono::high_resolution_clock::now();
 			auto expEndBytes0 = sock[0].bytesReceived();
@@ -1982,6 +2016,372 @@ namespace osuCrypto
 		std::cout << "RingLpnBench exception: " << e.what() << std::endl;
 	}
 
+
+	template<typename Permutation>
+	inline void WaterfallScatterPermuteBenchImpl(const CLP& cmd, const char* name)
+	{
+		using coproto::LocalAsyncSocket;
+		constexpr bool serial = std::is_same_v<Permutation, SerialWaksmanPermute>;
+
+		const u64 columns = cmd.getOr<u64>("n", 64);
+		const u64 sets = cmd.getOr<u64>("sets", 256);
+		const u64 rows = cmd.getOr<u64>("rows", 16);
+		const u64 recordBits = cmd.getOr<u64>("recordBits", 150);
+		const u64 trials = cmd.getOr<u64>("trials", 5);
+		if (columns == 0 || sets == 0 || rows == 0 || recordBits == 0 || trials == 0)
+			throw std::invalid_argument("Waterfall scatter benchmark dimensions must be nonzero. " LOCATION);
+
+		macoro::thread_pool pool0, pool1;
+		auto work0 = pool0.make_work();
+		auto work1 = pool1.make_work();
+		pool0.create_thread();
+		pool1.create_thread();
+
+		std::vector<double> programTimes;
+		std::vector<double> programWallEstimates;
+		std::vector<double> onlineTimes;
+		std::vector<u64> communication;
+		programTimes.reserve(trials);
+		programWallEstimates.reserve(trials);
+		onlineTimes.reserve(trials);
+		communication.reserve(trials);
+		u64 recvOts = 0;
+		u64 sendOts = 0;
+
+		for (u64 trial = 0; trial < trials; ++trial)
+		{
+			PRNG prng(block(0x776174657266616cull ^ trial, 0x7363617474657221ull));
+			std::array<Permutation, 2> permutation;
+			for (u64 party = 0; party < 2; ++party)
+				permutation[party].init(party, columns, sets);
+
+			const std::array counts{
+				permutation[0].baseOtCount(),
+				permutation[1].baseOtCount()
+			};
+			if (counts[0].mRecvCount != counts[1].mSendCount ||
+				counts[1].mRecvCount != counts[0].mSendCount)
+				throw RTE_LOC;
+			recvOts = counts[0].mRecvCount;
+			sendOts = counts[0].mSendCount;
+
+			std::array<std::vector<std::array<block, 2>>, 2> send;
+			std::array<std::vector<block>, 2> receive;
+			std::array<BitVector, 2> choices;
+			for (u64 party = 0; party < 2; ++party)
+			{
+				send[party].resize(counts[party].mSendCount);
+				receive[party].resize(counts[party].mRecvCount);
+				choices[party].resize(counts[party].mRecvCount);
+				prng.get(send[party].data(), send[party].size());
+				choices[party].randomize(prng);
+			}
+			for (u64 party = 0; party < 2; ++party)
+				for (u64 i = 0; i < receive[party].size(); ++i)
+					receive[party][i] = send[party ^ 1][i][choices[party][i]];
+			for (u64 party = 0; party < 2; ++party)
+				permutation[party].setBaseOts(send[party], receive[party], choices[party]);
+
+			double programCpu = 0;
+			double programWallEstimate = 0;
+			if constexpr (serial)
+			{
+				std::array<PRNG, 2> permutationPrng{
+					PRNG(prng.get<block>()),
+					PRNG(prng.get<block>())
+				};
+				for (u64 party = 0; party < 2; ++party)
+				{
+					const auto start = std::chrono::steady_clock::now();
+					permutation[party].sample(permutationPrng[party]);
+					const auto end = std::chrono::steady_clock::now();
+					const auto elapsed = std::chrono::duration<double, std::milli>(end - start).count();
+					programCpu += elapsed;
+					programWallEstimate = std::max(programWallEstimate, elapsed);
+				}
+			}
+			programTimes.push_back(programCpu);
+			programWallEstimates.push_back(programWallEstimate);
+
+			const auto placementBytes = divCeil(rows, 8);
+			const auto recordBytes = divCeil(recordBits, 8);
+			std::array<std::vector<Matrix<u8>>, 2> placement;
+			std::array<std::vector<Matrix<u8>>, 2> records;
+			for (u64 party = 0; party < 2; ++party)
+			{
+				placement[party].assign(sets, Matrix<u8>(columns, placementBytes));
+				records[party].assign(sets, Matrix<u8>(columns, recordBytes));
+				for (auto& batch : placement[party])
+					prng.get(batch.data(), batch.size());
+				for (auto& batch : records[party])
+					prng.get(batch.data(), batch.size());
+			}
+
+			auto placementContext = DpfMult::BitMatrixCoeffCtx(rows);
+			auto recordContext = DpfMult::BitMatrixCoeffCtx(recordBits);
+			using View = DpfMult::BitMatrixCoeffCtx::View<u8>;
+			std::array<std::vector<View>, 2> placementView;
+			std::array<std::vector<View>, 2> recordView;
+			for (u64 party = 0; party < 2; ++party)
+			{
+				placementView[party].reserve(sets);
+				recordView[party].reserve(sets);
+				for (u64 set = 0; set < sets; ++set)
+				{
+					placementView[party].emplace_back(placement[party][set]);
+					recordView[party].emplace_back(records[party][set]);
+				}
+			}
+
+			auto sockets = LocalAsyncSocket::makePair();
+			sockets[0].setExecutor(pool0);
+			sockets[1].setExecutor(pool1);
+			const auto onlineStart = std::chrono::steady_clock::now();
+			auto forward = macoro::sync_wait(macoro::when_all_ready(
+				permutation[0].template applyMany<u8, View>(
+					placementView[0], sockets[0], placementContext) | macoro::start_on(pool0),
+				permutation[1].template applyMany<u8, View>(
+					placementView[1], sockets[1], placementContext) | macoro::start_on(pool1)
+			));
+			std::get<0>(forward).result();
+			std::get<1>(forward).result();
+			auto inverse = macoro::sync_wait(macoro::when_all_ready(
+				permutation[0].template applyManyInverse<u8, View>(
+					recordView[0], sockets[0], recordContext) | macoro::start_on(pool0),
+				permutation[1].template applyManyInverse<u8, View>(
+					recordView[1], sockets[1], recordContext) | macoro::start_on(pool1)
+			));
+			std::get<0>(inverse).result();
+			std::get<1>(inverse).result();
+			const auto onlineEnd = std::chrono::steady_clock::now();
+			onlineTimes.push_back(std::chrono::duration<double, std::milli>(
+				onlineEnd - onlineStart).count());
+			communication.push_back(sockets[0].bytesReceived() + sockets[1].bytesReceived());
+		}
+
+		auto median = [](auto values)
+		{
+			std::sort(values.begin(), values.end());
+			return values[values.size() / 2];
+		};
+		std::cout << "Waterfall scatter permutation benchmark\n"
+			<< "  mode: " << name << "\n"
+			<< "  columns: " << columns << "\n"
+			<< "  sets: " << sets << "\n"
+			<< "  forward bits/column: " << rows << "\n"
+			<< "  inverse bits/record: " << recordBits << "\n"
+			<< "  trials: " << trials << "\n"
+			<< "  base OTs per party (recv/send): " << recvOts << "/" << sendOts << "\n"
+			<< "  median local programming CPU (both parties): " << std::format("{:.3f}", median(programTimes)) << " ms\n"
+			<< "  median parallel programming wall estimate: " << std::format("{:.3f}", median(programWallEstimates)) << " ms\n"
+			<< "  median online forward+inverse: " << std::format("{:.3f}", median(onlineTimes)) << " ms\n"
+			<< "  median communication: " << median(communication) << " bytes\n";
+	}
+
+	inline void WaterfallScatterPermuteBench(const CLP& cmd)
+	{
+		if (cmd.isSet("paired"))
+		{
+			const auto pairs = cmd.getOr<u64>("pairs", 11);
+			for (u64 pair = 0; pair < pairs; ++pair)
+			{
+				std::cout << "paired sample: " << pair << "\n";
+				if ((pair & 1) == 0)
+				{
+					WaterfallScatterPermuteBenchImpl<SerialWaksmanPermute>(cmd, "exact serial private-control");
+					WaterfallScatterPermuteBenchImpl<WaksmanPermute>(cmd, "legacy shared-control (Reverse-Cuckoo)");
+				}
+				else
+				{
+					WaterfallScatterPermuteBenchImpl<WaksmanPermute>(cmd, "legacy shared-control (Reverse-Cuckoo)");
+					WaterfallScatterPermuteBenchImpl<SerialWaksmanPermute>(cmd, "exact serial private-control");
+				}
+			}
+		}
+		else if (cmd.isSet("legacy"))
+			WaterfallScatterPermuteBenchImpl<WaksmanPermute>(cmd, "legacy shared-control (Reverse-Cuckoo)");
+		else
+			WaterfallScatterPermuteBenchImpl<SerialWaksmanPermute>(cmd, "exact serial private-control");
+	}
+
+	template<typename F, typename Context, u64 ValueBatch = 1>
+	void WaterfallDmpfBenchImpl(const CLP& cmd)
+	{
+		const u64 profile = cmd.getOr("profile", 4);
+		if (profile != 3 && profile != 4)
+			throw std::invalid_argument("Waterfall profile must be 3 or 4. " LOCATION);
+		const auto config = profile == 3
+			? WaterfallConfig::compact3N()
+			: WaterfallConfig::compact4N();
+		// These concrete profiles were generated and validated for t = 16.
+		// compact3N compensates for one fewer partition with larger tables and
+		// bounded repair; it is not a generic profile for other point counts.
+		const u64 defaultPoints = 16;
+		const u64 numPoints = cmd.getOr("numPoints", defaultPoints);
+		const u64 numSets = cmd.getOr("numSets", 16);
+		const u64 domain = cmd.getOr("domain", 1ull << cmd.getOr("dd", 12));
+		const u64 iterations = cmd.getOr("iters", 1);
+		if (numPoints != 16 || numSets == 0 || iterations == 0)
+			throw std::invalid_argument("Invalid Waterfall benchmark dimensions. " LOCATION);
+
+		Context context;
+		PRNG prng(block(0x574642454e4348ull, 0x20260807ull));
+		Matrix<u64> pointShares[2]{
+			Matrix<u64>(numSets, numPoints),
+			Matrix<u64>(numSets, numPoints)
+		};
+		const auto indexBits = log2ceil(domain + 1);
+		const auto shareMask = indexBits == 64 ? ~0ull : (1ull << indexBits) - 1;
+		for (u64 i = 0; i < pointShares[0].size(); ++i)
+		{
+			const auto point = prng.get<u64>() % domain;
+			pointShares[0](i) = prng.get<u64>() & shareMask;
+			pointShares[1](i) = pointShares[0](i) ^ point;
+		}
+
+		std::array<WaterfallDmpf<F, Context>, 2> dmpf;
+		std::array<Timer, 2> timers;
+		for (u64 party = 0; party < 2; ++party)
+		{
+			dmpf[party].init(party, numPoints, numSets, domain, config);
+			dmpf[party].mSparseDpf.enableProfile(cmd.isSet("details"));
+			dmpf[party].setTimer(timers[party]);
+		}
+		const std::array counts{ dmpf[0].baseOtCount(), dmpf[1].baseOtCount() };
+		if (counts[0].mRecvCount != counts[1].mSendCount ||
+			counts[1].mRecvCount != counts[0].mSendCount)
+			throw RTE_LOC;
+
+		std::array<std::vector<std::array<block, 2>>, 2> send;
+		std::array<std::vector<block>, 2> receive;
+		std::array<BitVector, 2> choices;
+		for (u64 party = 0; party < 2; ++party)
+		{
+			send[party].resize(counts[party].mSendCount);
+			receive[party].resize(counts[party].mRecvCount);
+			choices[party].resize(counts[party].mRecvCount);
+			prng.get(send[party].data(), send[party].size());
+			choices[party].randomize(prng);
+		}
+		for (u64 party = 0; party < 2; ++party)
+			for (u64 i = 0; i < receive[party].size(); ++i)
+				receive[party][i] = send[party ^ 1][i][choices[party][i]];
+		for (u64 party = 0; party < 2; ++party)
+			dmpf[party].setBaseOts(send[party], receive[party], choices[party]);
+
+		std::array<PRNG, 2> partyPrng{
+			PRNG(prng.get<block>()),
+			PRNG(prng.get<block>())
+		};
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		const auto setupBytesBegin = sockets[0].bytesReceived() + sockets[1].bytesReceived();
+		const auto setupBegin = std::chrono::steady_clock::now();
+		auto setup = macoro::sync_wait(macoro::when_all_ready(
+			dmpf[0].setPoints(pointShares[0], partyPrng[0], sockets[0]),
+			dmpf[1].setPoints(pointShares[1], partyPrng[1], sockets[1])
+		));
+		std::get<0>(setup).result();
+		std::get<1>(setup).result();
+		const auto setupEnd = std::chrono::steady_clock::now();
+		const auto setupBytes = sockets[0].bytesReceived() + sockets[1].bytesReceived() - setupBytesBegin;
+
+		u64 overflow = 0;
+		for (u64 row = 0; row < numSets * numPoints; ++row)
+			overflow += dmpf[0].mOverflow[row] ^ dmpf[1].mOverflow[row];
+
+		double expansionMs = 0;
+		u64 expansionBytes = 0;
+		using ValueVector = typename Context::template Vec<F>;
+		for (u64 iteration = 0; iteration < iterations; ++iteration)
+		{
+			std::array<ValueVector, 2> values{
+				context.template makeVec<F>(numSets * numPoints),
+				context.template makeVec<F>(numSets * numPoints)
+			};
+			for (u64 party = 0; party < 2; ++party)
+				for (auto& value : values[party])
+					context.fromBlock(value, prng.get<block>());
+			std::array<Matrix<F>, 2> output{
+				Matrix<F>(numSets, domain),
+				Matrix<F>(numSets, domain)
+			};
+			const auto bytesBegin = sockets[0].bytesReceived() + sockets[1].bytesReceived();
+			const auto begin = std::chrono::steady_clock::now();
+			auto expanded = macoro::sync_wait(macoro::when_all_ready(
+				dmpf[0].expand(values[0], partyPrng[0], sockets[0],
+					[&](u64 set, u64 point, const F& value) { output[0](set, point) = value; }, context),
+				dmpf[1].expand(values[1], partyPrng[1], sockets[1],
+					[&](u64 set, u64 point, const F& value) { output[1](set, point) = value; }, context)
+			));
+			std::get<0>(expanded).result();
+			std::get<1>(expanded).result();
+			const auto end = std::chrono::steady_clock::now();
+			expansionMs += std::chrono::duration<double, std::milli>(end - begin).count();
+			expansionBytes += sockets[0].bytesReceived() + sockets[1].bytesReceived() - bytesBegin;
+		}
+
+		const auto setupMs = std::chrono::duration<double, std::milli>(setupEnd - setupBegin).count();
+		std::cout << "Waterfall DMPF benchmark\n"
+			<< "  profile: " << profile << "N\n"
+			<< "  field: " << (std::is_same_v<F, block> ? "GF(2^128)" : "u64 additive") << "\n"
+			<< "  packed value expansions: " << ValueBatch << "\n"
+			<< "  sets / points / columns / domain: " << numSets << " / " << numPoints
+			<< " / " << config.numColumns() << " / " << domain << "\n"
+			<< "  base OTs (party 0 recv/send): " << counts[0].mRecvCount << " / " << counts[0].mSendCount << "\n"
+			<< "  setup: " << setupMs << " ms, " << setupBytes << " bytes\n"
+			<< "  overflow rows: " << overflow << "\n"
+			<< "  expansion average: " << expansionMs / iterations << " ms, "
+			<< expansionBytes / iterations << " bytes\n"
+			<< "  per logical expansion: " << expansionMs / iterations / ValueBatch << " ms, "
+			<< expansionBytes / iterations / ValueBatch << " bytes\n";
+		if (cmd.isSet("details"))
+		{
+			for (u64 party = 0; party < 2; ++party)
+			{
+				std::cout << "Party " << party << " detailed timing:\n" << timers[party] << '\n';
+				const auto& sparse = dmpf[party].mSparseDpf.mLastProfile;
+				std::cout << "  SparseDpf local profile (ms): allocation " << sparse.mAllocateMs
+					<< ", dense protocol " << sparse.mDenseProtocolMs
+					<< ", dense initialization " << sparse.mDenseInitializeMs
+					<< ", correction preparation " << sparse.mCorrectionPrepareMs
+					<< ", correction protocol " << sparse.mCorrectionProtocolMs
+					<< ", sparse expansion " << sparse.mSparseExpandMs
+					<< ", leaves " << sparse.mLeafMs
+					<< ", output " << sparse.mOutputMs << '\n'
+					<< "  SparseDpf nodes: " << sparse.mExpandedNodes
+					<< " expanded, " << sparse.mBatchedNodes
+					<< " SIMD-8, " << sparse.mTailNodes << " scalar\n\n";
+			}
+		}
+	}
+
+	inline void WaterfallDmpfBench(const CLP& cmd)
+	{
+		if (cmd.isSet("block"))
+			WaterfallDmpfBenchImpl<block, CoeffCtxGF128>(cmd);
+		else
+		{
+			const auto valueBatch = cmd.getOr<u64>("valueBatch", 1);
+			switch (valueBatch)
+			{
+			case 1:
+				WaterfallDmpfBenchImpl<u64, CoeffCtxInteger, 1>(cmd);
+				break;
+			case 2:
+				WaterfallDmpfBenchImpl<std::array<u64, 2>, CoeffCtxArray<u64, 2>, 2>(cmd);
+				break;
+			case 4:
+				WaterfallDmpfBenchImpl<std::array<u64, 4>, CoeffCtxArray<u64, 4>, 4>(cmd);
+				break;
+			case 8:
+				WaterfallDmpfBenchImpl<std::array<u64, 8>, CoeffCtxArray<u64, 8>, 8>(cmd);
+				break;
+			default:
+				throw std::invalid_argument(
+					"Waterfall valueBatch must be one of 1, 2, 4, or 8. " LOCATION);
+			}
+		}
+	}
 
 	inline void WaksmanPermuteBench(const CLP& cmd)
 	{
@@ -2607,6 +3007,10 @@ namespace osuCrypto
 			RingLpnBench(cmd);
 		else if (cmd.isSet("waksman"))
 			WaksmanPermuteBench(cmd);
+		else if (cmd.isSet("waterfallScatter"))
+			WaterfallScatterPermuteBench(cmd);
+		else if (cmd.isSet("waterfall"))
+			WaterfallDmpfBench(cmd);
 		else if (cmd.isSet("binSolve"))
 			BinarySolverBench(cmd);
 		else if (cmd.isSet("transpose"))
@@ -2620,7 +3024,7 @@ namespace osuCrypto
 			std::cout << "unknown benchmark, opts:" << std::endl;
 			std::cout << "  -QC" << std::endl;
 			std::cout << "  -silent" << std::endl;
-			std::cout << "  -pprf" << std::endl;
+			std::cout << "  -pprf [-halfTree]" << std::endl;
 			std::cout << "  -vole2" << std::endl;
 			std::cout << "  -ea" << std::endl;
 			std::cout << "  -ec" << std::endl;
@@ -2633,10 +3037,12 @@ namespace osuCrypto
 			std::cout << "  -foleage" << std::endl;
 			std::cout << "  -silentTriple" << std::endl;
 			std::cout << "  -revCuckoo" << std::endl;
+			std::cout << "  -waterfall" << std::endl;
 			std::cout << "  -ntt" << std::endl;
 			std::cout << "  -sum" << std::endl;
 			std::cout << "  -ring" << std::endl;
 			std::cout << "  -waksman" << std::endl;
+			std::cout << "  -waterfallScatter" << std::endl;
 			std::cout << "  -binSolve" << std::endl;
 			std::cout << "  -transpose" << std::endl;
 		}

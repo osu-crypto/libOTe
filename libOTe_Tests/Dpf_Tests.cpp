@@ -2377,10 +2377,18 @@ void Dpf_Audit_Test(const oc::CLP&)
 					[](auto, auto, auto, auto) {}, prng, sets, sock));
 			}, message);
 		};
-		rejectSet({}, "Sparse DPF accepted an empty sparse set");
 		rejectSet({ 2, 1 }, "Sparse DPF accepted an unsorted sparse set");
 		rejectSet({ 1, 1 }, "Sparse DPF accepted duplicate sparse points");
 		rejectSet({ 1, 8 }, "Sparse DPF accepted an out-of-domain sparse point");
+
+		SparseDpf empty;
+		empty.init(0, 1, 8, 0);
+		std::vector<std::vector<u32>> emptySet{ {} };
+		u64 emptyOutputs = 0;
+		macoro::sync_wait(empty.expand(onePoint, noValues,
+			[&](auto, auto, auto, auto) { ++emptyOutputs; }, prng, emptySet, sock));
+		if (emptyOutputs)
+			throw UnitTestFail("Sparse DPF emitted a leaf for an empty sparse set");
 
 		SparseDpf singleton;
 		singleton.init(0, 1, 8, 0);

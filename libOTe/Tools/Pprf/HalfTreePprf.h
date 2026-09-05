@@ -17,7 +17,7 @@
 namespace osuCrypto
 {
 
-#define REGULAR_PPRF_SIMD8(VAR, STATEMENT) do { \
+#define HALF_TREE_PPRF_SIMD8(VAR, STATEMENT) do { \
 	{ constexpr u64 VAR = 0; STATEMENT; } \
 	{ constexpr u64 VAR = 1; STATEMENT; } \
 	{ constexpr u64 VAR = 2; STATEMENT; } \
@@ -31,19 +31,19 @@ namespace osuCrypto
 #if defined(_MSC_VER) && defined(_M_X64)
 // MSVC otherwise serializes the eight independent AES-NI chains. This is a
 // compiler barrier only; it emits no machine instruction.
-#define REGULAR_PPRF_ROUND_BARRIER() _ReadWriteBarrier()
+#define HALF_TREE_PPRF_ROUND_BARRIER() _ReadWriteBarrier()
 #else
-#define REGULAR_PPRF_ROUND_BARRIER() do {} while (0)
+#define HALF_TREE_PPRF_ROUND_BARRIER() do {} while (0)
 #endif
 
 	extern const std::array<AES, 2> gGgmAes;
 
 	namespace pprf
 	{
-		// Expand eight GGM parents while keeping the raw AES outputs in
-		// registers. Calling ecbEncBlocks followed by the two child transforms
-		// makes MSVC store and reload every raw AES output.
-		OC_FORCEINLINE void expandGgm8(
+		// Expand eight half-tree parents while keeping the AES outputs in
+		// registers. The left child is H(x) = AES(x) XOR x and the right child
+		// is x XOR H(x) = AES(x).
+		OC_FORCEINLINE void expandHalfTree8(
 			const AES& aes,
 			const block* parents,
 			block* left,
@@ -60,9 +60,9 @@ namespace osuCrypto
 			block x5 = AES::firstFn(parents[5], k[0]);
 			block x6 = AES::firstFn(parents[6], k[0]);
 			block x7 = AES::firstFn(parents[7], k[0]);
-			REGULAR_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_ROUND_BARRIER();
 
-#define REGULAR_PPRF_AES_ROUND(R, FN) do { \
+#define HALF_TREE_PPRF_AES_ROUND(R, FN) do { \
 			x0 = AES::FN(x0, k[R]); \
 			x1 = AES::FN(x1, k[R]); \
 			x2 = AES::FN(x2, k[R]); \
@@ -73,50 +73,50 @@ namespace osuCrypto
 			x7 = AES::FN(x7, k[R]); \
 		} while (0)
 
-			REGULAR_PPRF_AES_ROUND(1, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(2, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(3, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(4, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(5, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(6, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(7, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(8, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(9, penultimateFn);
-			REGULAR_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_AES_ROUND(1, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_AES_ROUND(2, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_AES_ROUND(3, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_AES_ROUND(4, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_AES_ROUND(5, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_AES_ROUND(6, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_AES_ROUND(7, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_AES_ROUND(8, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_AES_ROUND(9, penultimateFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
 
-#undef REGULAR_PPRF_AES_ROUND
+#undef HALF_TREE_PPRF_AES_ROUND
 
-#define REGULAR_PPRF_STORE_CHILD(I) do { \
+#define HALF_TREE_PPRF_STORE_CHILD(I) do { \
 			const auto encrypted = AES::finalFn(x##I, k[10]); \
-			const auto leftChild = AES::roundEnc(encrypted, parents[I]); \
-			const auto rightChild = encrypted.add_epi64(parents[I]); \
+			const auto leftChild = encrypted ^ parents[I]; \
+			const auto rightChild = encrypted; \
 			left[I] = leftChild; \
 			right[I] = rightChild; \
 			leftAccumulator = leftAccumulator ^ leftChild; \
 			rightAccumulator = rightAccumulator ^ rightChild; \
 		} while (0)
 
-			REGULAR_PPRF_STORE_CHILD(0);
-			REGULAR_PPRF_STORE_CHILD(1);
-			REGULAR_PPRF_STORE_CHILD(2);
-			REGULAR_PPRF_STORE_CHILD(3);
-			REGULAR_PPRF_STORE_CHILD(4);
-			REGULAR_PPRF_STORE_CHILD(5);
-			REGULAR_PPRF_STORE_CHILD(6);
-			REGULAR_PPRF_STORE_CHILD(7);
+			HALF_TREE_PPRF_STORE_CHILD(0);
+			HALF_TREE_PPRF_STORE_CHILD(1);
+			HALF_TREE_PPRF_STORE_CHILD(2);
+			HALF_TREE_PPRF_STORE_CHILD(3);
+			HALF_TREE_PPRF_STORE_CHILD(4);
+			HALF_TREE_PPRF_STORE_CHILD(5);
+			HALF_TREE_PPRF_STORE_CHILD(6);
+			HALF_TREE_PPRF_STORE_CHILD(7);
 
-#undef REGULAR_PPRF_STORE_CHILD
+#undef HALF_TREE_PPRF_STORE_CHILD
 		}
 
-		OC_FORCEINLINE void hashGgmLeaves8(
+		OC_FORCEINLINE void hashHalfTreeLeaves8(
 			const AES& aes,
 			const block* parents,
 			block* output,
@@ -131,9 +131,9 @@ namespace osuCrypto
 			block x5 = AES::firstFn(parents[5], k[0]);
 			block x6 = AES::firstFn(parents[6], k[0]);
 			block x7 = AES::firstFn(parents[7], k[0]);
-			REGULAR_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_ROUND_BARRIER();
 
-#define REGULAR_PPRF_HASH_ROUND(R, FN) do { \
+#define HALF_TREE_PPRF_HASH_ROUND(R, FN) do { \
 			x0 = AES::FN(x0, k[R]); \
 			x1 = AES::FN(x1, k[R]); \
 			x2 = AES::FN(x2, k[R]); \
@@ -144,43 +144,43 @@ namespace osuCrypto
 			x7 = AES::FN(x7, k[R]); \
 		} while (0)
 
-			REGULAR_PPRF_HASH_ROUND(1, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(2, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(3, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(4, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(5, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(6, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(7, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(8, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(9, penultimateFn);
-			REGULAR_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_HASH_ROUND(1, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_HASH_ROUND(2, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_HASH_ROUND(3, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_HASH_ROUND(4, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_HASH_ROUND(5, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_HASH_ROUND(6, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_HASH_ROUND(7, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_HASH_ROUND(8, roundFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
+			HALF_TREE_PPRF_HASH_ROUND(9, penultimateFn);
+			HALF_TREE_PPRF_ROUND_BARRIER();
 
-#undef REGULAR_PPRF_HASH_ROUND
+#undef HALF_TREE_PPRF_HASH_ROUND
 
-#define REGULAR_PPRF_STORE_HASH(I) do { \
+#define HALF_TREE_PPRF_STORE_HASH(I) do { \
 			const auto hash = AES::finalFn(x##I, k[10]) ^ parents[I]; \
 			output[I] = hash; \
 			accumulator = accumulator ^ hash; \
 		} while (0)
 
-			REGULAR_PPRF_STORE_HASH(0);
-			REGULAR_PPRF_STORE_HASH(1);
-			REGULAR_PPRF_STORE_HASH(2);
-			REGULAR_PPRF_STORE_HASH(3);
-			REGULAR_PPRF_STORE_HASH(4);
-			REGULAR_PPRF_STORE_HASH(5);
-			REGULAR_PPRF_STORE_HASH(6);
-			REGULAR_PPRF_STORE_HASH(7);
+			HALF_TREE_PPRF_STORE_HASH(0);
+			HALF_TREE_PPRF_STORE_HASH(1);
+			HALF_TREE_PPRF_STORE_HASH(2);
+			HALF_TREE_PPRF_STORE_HASH(3);
+			HALF_TREE_PPRF_STORE_HASH(4);
+			HALF_TREE_PPRF_STORE_HASH(5);
+			HALF_TREE_PPRF_STORE_HASH(6);
+			HALF_TREE_PPRF_STORE_HASH(7);
 
-#undef REGULAR_PPRF_STORE_HASH
+#undef HALF_TREE_PPRF_STORE_HASH
 		}
 	}
 
@@ -189,7 +189,7 @@ namespace osuCrypto
 		typename F,
 		typename CoeffCtx = DefaultCoeffCtx<F>
 	>
-	class RegularPprfSender : public PprfSender<F, CoeffCtx> {
+	class HalfTreePprfSender : public PprfSender<F, CoeffCtx> {
 	public:
 
 		// the number of leaves in a single tree.
@@ -219,13 +219,13 @@ namespace osuCrypto
 		// Compact two-level scratch reused one tree at a time.
 		pprf::ExpandTreeBuffer mTempBuffer;
 
-		RegularPprfSender() = default;
+		HalfTreePprfSender() = default;
 
-		RegularPprfSender(const RegularPprfSender&) = delete;
+		HalfTreePprfSender(const HalfTreePprfSender&) = delete;
 
-		RegularPprfSender(RegularPprfSender&&) = delete;
+		HalfTreePprfSender(HalfTreePprfSender&&) = delete;
 
-		RegularPprfSender(u64 domainSize, u64 pointCount) {
+		HalfTreePprfSender(u64 domainSize, u64 pointCount) {
 			configure(domainSize, pointCount);
 		}
 
@@ -422,8 +422,10 @@ namespace osuCrypto
 				{
 					const auto parent = current[parentIdx];
 					const auto aes = mAesFixedKey.ecbEncBlock(parent);
-					const auto left = AES::roundEnc(aes, parent);
-					const auto right = aes.add_epi64(parent);
+					// The half-tree variant uses H(x) = AES(x) XOR x and
+					// derives the other child as x XOR H(x) = AES(x).
+					const auto left = aes ^ parent;
+					const auto right = aes;
 					next[2 * parentIdx] = left;
 					next[2 * parentIdx + 1] = right;
 					leftAccumulator = leftAccumulator ^ left;
@@ -440,7 +442,7 @@ namespace osuCrypto
 			if (mDepth > 3)
 			{
 				assert(levels.size() == mDepth - 3);
-				REGULAR_PPRF_SIMD8(lane, {
+				HALF_TREE_PPRF_SIMD8(lane, {
 					levels[0][0][lane] = current[lane];
 				});
 
@@ -456,7 +458,7 @@ namespace osuCrypto
 						auto& parent = parents[parentIdx];
 						auto& left = children[2 * parentIdx];
 						auto& right = children[2 * parentIdx + 1];
-						pprf::expandGgm8(
+						pprf::expandHalfTree8(
 							mAesFixedKey, parent.data(), left.data(), right.data(),
 							leftAccumulator, rightAccumulator);
 					}
@@ -521,7 +523,7 @@ namespace osuCrypto
 							gGgmAes[side].hashBlocks<8>(
 								parents[parentIdx].data(), hashed.data());
 							const auto localLeaf = 2 * parentIdx + side;
-							REGULAR_PPRF_SIMD8(lane, {
+							HALF_TREE_PPRF_SIMD8(lane, {
 								addLeaf(
 									side, hashed[lane],
 									lane * subtreeDomain + localLeaf);
@@ -548,11 +550,11 @@ namespace osuCrypto
 						block rightAccumulator = ZeroBlock;
 						for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
 						{
-							pprf::hashGgmLeaves8(gGgmAes[0],
+							pprf::hashHalfTreeLeaves8(gGgmAes[0],
 								parents[parentIdx].data(), dest + nativeLeaf,
 								leftAccumulator);
 							nativeLeaf += 8;
-							pprf::hashGgmLeaves8(gGgmAes[1],
+							pprf::hashHalfTreeLeaves8(gGgmAes[1],
 								parents[parentIdx].data(), dest + nativeLeaf,
 								rightAccumulator);
 							nativeLeaf += 8;
@@ -616,7 +618,7 @@ namespace osuCrypto
 		typename F,
 		typename CoeffCtx = DefaultCoeffCtx<F>
 	>
-	class RegularPprfReceiver : public PprfReceiver<F, CoeffCtx>
+	class HalfTreePprfReceiver : public PprfReceiver<F, CoeffCtx>
 	{
 	public:
 
@@ -647,9 +649,9 @@ namespace osuCrypto
 		// Compact two-level scratch reused one tree at a time.
 		pprf::ExpandTreeBuffer mTempBuffer;
 
-		RegularPprfReceiver() = default;
-		RegularPprfReceiver(const RegularPprfReceiver&) = delete;
-		RegularPprfReceiver(RegularPprfReceiver&&) = delete;
+		HalfTreePprfReceiver() = default;
+		HalfTreePprfReceiver(const HalfTreePprfReceiver&) = delete;
+		HalfTreePprfReceiver(HalfTreePprfReceiver&&) = delete;
 
 		void configure(u64 domainSize, u64 pointCount) override
 		{
@@ -932,10 +934,7 @@ namespace osuCrypto
 			std::array<block, 8> next{};
 
 			const auto zeroAes = mAesFixedKey.ecbEncBlock(ZeroBlock);
-			const std::array<block, 2> inactiveInternal{
-				AES::roundEnc(zeroAes, ZeroBlock),
-				zeroAes.add_epi64(ZeroBlock)
-			};
+			const std::array<block, 2> inactiveInternal{ zeroAes, zeroAes };
 
 			const auto topInternalDepth = std::min<u64>(3, mDepth - 1);
 			for (u64 d = 0; d < topInternalDepth; ++d)
@@ -947,8 +946,8 @@ namespace osuCrypto
 				{
 					const auto parent = current[parentIdx];
 					const auto aes = mAesFixedKey.ecbEncBlock(parent);
-					const auto left = AES::roundEnc(aes, parent);
-					const auto right = aes.add_epi64(parent);
+					const auto left = aes ^ parent;
+					const auto right = aes;
 					next[2 * parentIdx] = left;
 					next[2 * parentIdx + 1] = right;
 					leftAccumulator = leftAccumulator ^ left;
@@ -971,7 +970,7 @@ namespace osuCrypto
 			if (mDepth > 3)
 			{
 				assert(levels.size() == mDepth - 3);
-				REGULAR_PPRF_SIMD8(lane, {
+				HALF_TREE_PPRF_SIMD8(lane, {
 					levels[0][0][lane] = current[lane];
 				});
 
@@ -987,7 +986,7 @@ namespace osuCrypto
 						auto& parent = parents[parentIdx];
 						auto& left = children[2 * parentIdx];
 						auto& right = children[2 * parentIdx + 1];
-						pprf::expandGgm8(
+						pprf::expandHalfTree8(
 							mAesFixedKey, parent.data(), left.data(), right.data(),
 							leftAccumulator, rightAccumulator);
 					}
@@ -1073,7 +1072,7 @@ namespace osuCrypto
 							gGgmAes[side].hashBlocks<8>(
 								parents[parentIdx].data(), hashed.data());
 							const auto localLeaf = 2 * parentIdx + side;
-							REGULAR_PPRF_SIMD8(lane, {
+							HALF_TREE_PPRF_SIMD8(lane, {
 								addLeaf(
 									side, hashed[lane],
 									lane * subtreeDomain + localLeaf);
@@ -1100,11 +1099,11 @@ namespace osuCrypto
 						block rightAccumulator = gGgmAes[1].hashBlock(ZeroBlock);
 						for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
 						{
-							pprf::hashGgmLeaves8(gGgmAes[0],
+							pprf::hashHalfTreeLeaves8(gGgmAes[0],
 								parents[parentIdx].data(), dest + nativeLeaf,
 								leftAccumulator);
 							nativeLeaf += 8;
-							pprf::hashGgmLeaves8(gGgmAes[1],
+							pprf::hashHalfTreeLeaves8(gGgmAes[1],
 								parents[parentIdx].data(), dest + nativeLeaf,
 								rightAccumulator);
 							nativeLeaf += 8;
@@ -1164,7 +1163,7 @@ namespace osuCrypto
 
 }
 
-#undef REGULAR_PPRF_SIMD8
-#undef REGULAR_PPRF_ROUND_BARRIER
+#undef HALF_TREE_PPRF_SIMD8
+#undef HALF_TREE_PPRF_ROUND_BARRIER
 
 #endif

@@ -14,6 +14,44 @@ Audit status: closed on 2026-08-27 after the cleanup and verification pass.
 The RevCuckoo implementation was excluded because it is undergoing a separate
 set of substantial changes. AUD-001 remains intentionally deferred.
 
+## AUD-213: Punctured SparseDpf singleton expansion wrote through empty spans
+
+Status: fixed
+
+Affected code:
+
+- `SparseDpf::expand()` with no explicit leaf values, zero dense depth, and a
+  sparse set containing one point.
+
+Concern:
+
+Punctured expansion does not allocate the spans used to derandomize explicit
+leaf values. The zero-dense-depth singleton branch nevertheless wrote its
+random seed and tag through those empty spans. The dense singleton branch
+already used a separate direct-output path.
+
+Impact:
+
+The write was out of bounds and caused undefined behavior, observed as a
+process crash. RevCuckoo and Waterfall can produce singleton public buckets,
+so a valid internal layout could reach the faulty branch. A one-sided crash
+could also leave the peer waiting for protocol messages.
+
+Resolution:
+
+The singleton branch now materializes its random seed as a `block`. Expansion
+with explicit values stores the seed and tag in the allocated spans. Punctured
+expansion appends the seed and tag to the existing direct-output list instead.
+Empty public sparse sets remain valid and emit no leaves, as required by the
+Waterfall and RevCuckoo integrations.
+
+Verification:
+
+- `Dpf_Audit_Test` covers empty and singleton sparse sets.
+- `RevCuckoo_robustness_Test` covers layouts that contain empty or singleton
+  buckets.
+- `Waterfall_dmpfEndToEnd_Test` passes.
+
 ## AUD-001: Ring-LPN regular support can lose effective weight after factor folding
 
 Status: deferred

@@ -18,11 +18,11 @@ namespace osuCrypto
 	//   3) c = a * b
 	//   4) y = M2 * (x || c)
 	// 
-	// where M0,M1,M2 are matrices, step 3 performs 
+	// where M0,M1,M2 are matrices, step 3 performs
 	// elementwise multiplication of bits. M2 is compressing.
 	//
 	// This is not intended to be a cryptographic hash function.
-	// Instead we want that the output to be close ro uniform 
+	// Instead we want the output to be close to uniform
 	// given that the seed is sampled randomly after the input
 	// is fixed. 
 	struct GoldreichHash
@@ -73,9 +73,6 @@ namespace osuCrypto
 			mInBytes = inBytes;
 			mOutBytes = outBytes;
 			mNumIntermediateBytes = mOutBytes * 1;
-
-			if (mNumIntermediateBytes * 8 > mInBytes * mInBytes * 8 * 8)
-				throw std::runtime_error("GoldreichHash: mOutBytes * 2 <= mInBytes * mInBytes. " LOCATION);
 
 			mMult.init(mPartyIdx, mN * mNumIntermediateBytes * 8);
 		}

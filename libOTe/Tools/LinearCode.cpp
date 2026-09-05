@@ -16,7 +16,10 @@
 namespace osuCrypto
 {
     // must be a multiple of 8...
-    const u16 LinearCode::sLinearCodePlainTextMaxSize(64);
+	// The general table encoder scales linearly in the plaintext byte count.
+	// RevCuckoo systems with 512-1024 rows exceed the historical 64-byte
+	// ceiling while remaining comfortably bounded in memory.
+    const u16 LinearCode::sLinearCodePlainTextMaxSize(512);
 	const u64 LinearCode::sLinearCodeCodewordBitMaxSize(1ull << 16);
 
 	namespace

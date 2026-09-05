@@ -615,7 +615,7 @@ namespace osuCrypto
 		auto format = PprfOutputFormat{};
 		if (noiseType == SdNoiseDistribution::Regular)
 		{
-			format = PprfOutputFormat::Interleaved;
+			format = PprfOutputFormat::ByPhysicalIndex;
 		}
 		else
 		{

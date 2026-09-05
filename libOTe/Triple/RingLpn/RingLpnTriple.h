@@ -440,12 +440,18 @@ namespace osuCrypto
 
 		if (dpfType == DpfType::RevCuckooDmpf)
 		{
+			constexpr u64 numPartitions = 2;
+			constexpr u64 cuckooSecParam = 2;
+			constexpr u64 sparseSetSecParam = 40;
 			mDpf = RevCuckooDmpf<F, CoeffCtx>();
 			std::get<0>(mDpf).init(
 				partyIdx,
 				polyWeight,
 				numPolys * numPolys * polyWeight,
-				mDpfTreeSize);
+				mDpfTreeSize,
+				numPartitions,
+				cuckooSecParam,
+				sparseSetSecParam);
 		}
 		else if (dpfType == DpfType::SumDmpf)
 		{
