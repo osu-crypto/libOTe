@@ -6435,3 +6435,47 @@ Verification:
   verifies that stationary integer parameters use a larger weight.
 - The regular Silent VOLE parameter sweep, stationary Silent VOLE test,
   external-base test, and state-clear test pass in the Release AVX2 build.
+
+## AUD-200: Silent LPN noise selection conflated binary and large-field bias
+
+Status: fixed
+
+Affected code:
+
+- Silent OT and Silent VOLE syndrome-decoding parameter selection.
+
+Concern:
+
+The regular-noise selector always used the binary linear-character decay
+`(1 - 2 delta)^t`. For coefficients uniform in `F_q^*`, the corresponding
+factor is `q/(q-1)`, so the decay approaches the stationary-noise expression
+`(1 - delta)^t` over large fields. The stationary large-field path compensated
+by silently selecting regular parameters, but those parameters still used the
+binary formula and did not describe the noise distribution actually sampled.
+The distance calculation also stood alone rather than being combined with a
+separate floor for known decoding and algebraic attacks.
+
+Impact:
+
+Large-field regular and stationary Silent VOLE could select substantially less
+noise than their pseudo-distance estimates required. At pseudo distance 0.25,
+the old large-field stationary path selected weight 128, corresponding to only
+about 53 bits under the stationary linear-character calculation.
+
+Resolution:
+
+Parameter selection now takes the maximum of a 64-bit pseudo-distance guard, a
+128-bit attack-oriented weight floor (scaled from the requested security
+parameter), and the existing small-instance implementation floor. Regular
+field noise uses the field-specific factor `q/(q-1)`; binary and odd integer
+units use factor 2; stationary noise uses factor 1. The selector also adds a
+9/8 margin to small binary regular instances, where current estimators place
+the former `N=2048, t=128` parameters below 128 bits. The rationale, formulas,
+tradeoff, and remaining estimator uncertainty are documented beside the code.
+All calculations occur during configuration and do not affect expansion loops.
+
+Verification:
+
+- `Vole_Silent_NoiseSampling_test` checks the binary large-instance floor, the
+  small-instance attack margin, an `F_9` regular-noise case, the large-field
+  limit, and the stationary 64-bit pseudo-distance floor.

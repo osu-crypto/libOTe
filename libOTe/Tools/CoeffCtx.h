@@ -535,6 +535,15 @@ namespace osuCrypto {
 	struct CoeffCtxGF2 : CoeffCtxInteger
 	{
 		template<typename F>
+		constexpr double regularNoiseFactor() const
+		{
+			// CoeffCtxGF2 is also the base of CoeffCtxGF128. A nonzero
+			// coefficient has factor q/(q-1): 2 for GF(2), effectively 1
+			// for the block-sized extension field.
+			return std::is_same_v<std::remove_cvref_t<F>, bool> ? 2.0 : 1.0;
+		}
+
+		template<typename F>
 		OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs)const {
 			ret = lhs ^ rhs;
 		}
@@ -803,5 +812,18 @@ namespace osuCrypto {
 			return ctx.template additiveGroupBitCount<G>();
 		else
 			return ctx.template isField<G>() ? ctx.template bitSize<G>() : 1;
+	}
+
+	// For regular noise, the worst nontrivial additive character has one-hit
+	// factor q/(q-1) when coefficients are uniform in F_q^*. Integer-like
+	// contexts use odd units and therefore the binary factor 2. Unknown field
+	// contexts conservatively use the limiting large-field factor 1.
+	template<typename G, typename Ctx>
+	constexpr double coefficientRegularNoiseFactor(const Ctx& ctx)
+	{
+		if constexpr (requires { ctx.template regularNoiseFactor<G>(); })
+			return ctx.template regularNoiseFactor<G>();
+		else
+			return ctx.template isField<G>() ? 1.0 : 2.0;
 	}
 }
