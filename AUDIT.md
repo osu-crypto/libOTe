@@ -6506,15 +6506,19 @@ the same problem within every lane.
 
 Resolution:
 
-F4 and F9 now multiply by their extension generator `u`, which maps the prime-
-subfield basis element `1` outside the prime subfield and mixes the two stored
-components. FVec applies its scalar context's operation independently to every
-lane. The coefficient-context contract now requires every extension-field
-context to override `mulConst`, requires product contexts to delegate lane-wise,
-and explicitly requires in-place operation because the encoding kernels alias
-the input and output. Scalar prime fields and base rings retain identity.
+F4 and F9 now multiply by their extension generator `u`. Since both extensions
+have prime degree two, `u` has full algebraic degree and its multiplication
+orbit spans both stored components. FVec applies its scalar context's operation
+independently to every lane. The coefficient-context contract now requires an
+extension field to use a full-degree constant, requires product contexts to
+delegate lane-wise, and explicitly requires in-place operation because the
+encoding kernels alias the input and output. Scalar prime fields and base rings
+retain identity. A denser multiplication matrix could provide faster component
+diffusion and might improve heuristic security, but the current parameter
+analysis does not prove or require that stronger property.
 
 Verification:
 
-- `Field_Audit_Test` checks nonidentity GF(2^128) mixing, the exact F4 and F9
-  generator action including in-place calls, and lane-wise FVec<F4> mixing.
+- `Field_Audit_Test` checks that the GF(2^128) constant is outside every proper
+  subfield, the exact F4 and F9 generator action including in-place calls, and
+  lane-wise FVec<F4> mixing.
