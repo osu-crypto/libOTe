@@ -739,10 +739,15 @@ namespace osuCrypto
 						continue;
 					if (points.size() == 1)
 					{
-						leafValues[r][0] = prng.get();
-						leafTags[r][0] = mPartyIdx;
+						block seed = prng.get();
 						if (gamma.size())
-							gamma[r] = gamma[r] ^ leafValues[r][0];
+						{
+							leafValues[r][0] = seed;
+							leafTags[r][0] = mPartyIdx;
+							gamma[r] = gamma[r] ^ seed;
+						}
+						else
+							directLeaves.push_back({ r, 0, seed, static_cast<u8>(mPartyIdx) });
 						continue;
 					}
 					// (δ,b) := PARTITION((1,|S|), S)
