@@ -106,6 +106,7 @@ namespace tests_libOTe
 			tc.add("BinSolver_firstOneBit_test              ", BinSolver_firstOneBit_test);
 			tc.add("BinSolver_firstOneBitMany_test          ", BinSolver_firstOneBitMany_test);
 			tc.add("BinSolver_solve_test                    ", BinSolver_solve_test);
+			tc.add("BinSolver_rankFailure_test               ", BinSolver_rankFailure_test);
 
 			tc.add("BinSolver_multiplyMany_test             ", BinSolver_multiplyMany_test);
 			tc.add("BinSolver_multiplyMtxMany_test          ", BinSolver_multiplyMtxMany_test);
@@ -123,6 +124,8 @@ namespace tests_libOTe
 			tc.add("RevCuckoo_baseOtSlicing_Test             ", RevCuckoo_baseOtSlicing_Test);
 			tc.add("RevCuckoo_iterative_Test                ", RevCuckoo_iterative_Test);
 			tc.add("RevCuckoo_singlePoint_Test              ", RevCuckoo_singlePoint_Test);
+			tc.add("RevCuckoo_robustness_Test               ", RevCuckoo_robustness_Test);
+			tc.add("RevCuckoo_failurePropagation_Test       ", RevCuckoo_failurePropagation_Test);
 			
 
 			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);

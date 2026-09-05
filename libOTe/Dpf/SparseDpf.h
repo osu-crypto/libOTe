@@ -249,9 +249,12 @@ namespace osuCrypto
 			struct Level
 			{
 				// the nodes for each level of the tree.
-				AlignedUnVector<Node> mNodes_;
-
-				u64 mNodeSize = 0;
+				//
+				// A compressed sparse tree only has O(|S|) live nodes, but the old
+				// representation reserved |S| nodes at every level. For large domains
+				// that turned the setup scratch into O(|S| log N) memory. Grow only the
+				// levels which actually receive nodes and release them once consumed.
+				std::vector<Node> mNodes_;
 
 				// the left right sums for each level of the tree.
 				std::array<block, 2> mZ;
@@ -267,18 +270,19 @@ namespace osuCrypto
 
 				/// Add tuple (j,ρ,b',[s],[t]) to state bucket u_δ
 				void push_back(u8 child, u8 parentLevel, Partition& b, block seed, u8 tag) {
-					auto idx = mNodeSize++;
-					assert(mNodeSize <= mNodes_.size() && "in resize(...) we reserved space so we shouldnt need to reallocate");
-					//if (mNodeSize > mNodes_.size())
-					//	throw RTE_LOC;
-					mNodes_[idx] = Node{ b, seed, tag, child, parentLevel };
+					mNodes_.push_back(Node{ b, seed, tag, child, parentLevel });
 				}
 
-				u64 size() const { return mNodeSize; }
+				u64 size() const { return mNodes_.size(); }
+
+				void releaseNodes()
+				{
+					std::vector<Node>{}.swap(mNodes_);
+				}
 
 				Node& operator[](u64 i)
 				{
-					assert(i < mNodeSize && "index out of bounds");
+					assert(i < mNodes_.size() && "index out of bounds");
 					return mNodes_[i];
 				}
 			};
@@ -290,19 +294,6 @@ namespace osuCrypto
 			void resize(u64 depth, u64 startingDepth, u64 setSize)
 			{
 				mLevels.resize(depth);
-				mLevels[0].mNodes_.resize(setSize);
-
-				// we reserve space for the nodes in each level.
-				// we reserve the worse case of 2^depth nodes.
-				for (u64 j = 0; j < depth; ++j)
-				{
-					auto size = std::min<u64>(setSize, 1ull << (startingDepth + j));
-
-					// Linear scale from 1 to 2 once j >= half
-					//auto half = depth / 2;
-					//double scale = (j >= half) ? 1.0 + double(j - half) / double(depth - 1 - half) : 1.0;
-					mLevels[mLevels.size() - j - 1].mNodes_.resize(size);
-				}
 			}
 
 			Level& operator[](u64 i) { return mLevels[i]; }
@@ -606,6 +597,12 @@ namespace osuCrypto
 						}
 					}
 				}
+
+				// Nodes at dNext have now generated all of their descendants. The
+				// correction word stored in the level remains live, but its node list
+				// will never be read again.
+				for (auto& tree : trees)
+					tree[dNext].releaseNodes();
 			}
 
 			// STEP 7: Leaf processing
@@ -638,6 +635,7 @@ namespace osuCrypto
 					if (gamma.size())
 						gamma[r] = gamma[r] ^ leafValues[r][b];
 				}
+				tree[0].releaseNodes();
 			}
 
 			// STEP 8: Derandomizing the leaves

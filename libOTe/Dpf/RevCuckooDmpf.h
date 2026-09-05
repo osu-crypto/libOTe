@@ -26,8 +26,14 @@ namespace osuCrypto
 		// N
 		u64 mDomain = 0;
 
-		// the required bits to represent the domain plus 1
-		u64 mIndexBitCount = 0; // log2ceil(mDomain+1);
+		// The sparse-DPF universe also contains one unique public dummy key for
+		// every shuffled row. Only [0, mDomain) is emitted to the caller.
+		u64 mHashDomain = 0;
+		u64 mSparseDpfDomain = 0;
+		std::vector<u32> mDummyKeys;
+
+		// Bits required for the output domain and its unique dummy keys.
+		u64 mIndexBitCount = 0;
 
 		// w
 		u64 mNumPartitions = 0;
@@ -58,13 +64,20 @@ namespace osuCrypto
 		SparseDpf mSparseDpf;
 
 		// the leaf values for the sparse DPFs.
-		std::vector<std::vector<block>> mLeafShares;
+		std::vector<std::span<block>> mLeafShares;
+		std::unique_ptr<block[]> mLeafShareBuf;
 
 		// the leaf tags for the sparse DPFs.
-		std::vector<std::vector<u8>> mLeafTags;
+		std::vector<std::span<u8>> mLeafTags;
+		std::unique_ptr<u8[]> mLeafTagBuf;
 
 		std::vector<std::span<u32>> mSparseSets;
 		std::unique_ptr<u32[]> mSparseSetBuf;
+		// Each sparse set is sorted with real indices before the upper-half
+		// dummy keys. Cache the real prefix so repeated expansions do not pay
+		// a dummy-filter branch in their output scatter loop.
+		std::vector<u64> mRealLeafCounts;
+		u64 mRealLeafCount = 0;
 
 		DpfMult mMultiplier;
 
@@ -78,6 +91,20 @@ namespace osuCrypto
 
 
 		bool mCharacteristicTwo = true;
+		bool mHasPoints = false;
+		bool mSetupInProgress = false;
+		bool mExpandInProgress = false;
+		bool mFailed = false;
+
+		u32 dummyKey(u64 i) const
+		{
+			return mDummyKeys[i];
+		}
+
+		u64 realLeafCount() const
+		{
+			return mRealLeafCount;
+		}
 
 		void init(
 			u64 partyIdx,
@@ -89,11 +116,13 @@ namespace osuCrypto
 			u64 linearSecParam = 40,
 			bool characteristicTwo = false)
 		{
+			if (partyIdx > 1 || numPointsPerSet == 0 || numSets == 0 || domain < 2)
+				throw std::invalid_argument("Invalid RevCuckoo parameters. " LOCATION);
+			clear();
 			mPartyIdx = partyIdx;
 			mNumPointsPerSet = numPointsPerSet;
 			mNumSets = numSets;
 			mDomain = domain;
-			mIndexBitCount = log2ceil(mDomain + 1);
 			mNumPartitions = numPartitions;
 			mCuckooSecParam = cuckooSecParam;
 			mLinearSecParam = linearSecParam;
@@ -115,6 +144,32 @@ namespace osuCrypto
 
 			auto f = mNumPartitions * mPartitionSize;
 			auto c = mPartitionSize + mLinearSecParam;
+			if (mDomain > (1ull << 31))
+				throw std::runtime_error("RevCuckoo output domains must fit below the dummy-key half. " LOCATION);
+			mHashDomain = mDomain + f;
+
+			// Consecutive dummies form a low-dimensional algebraic subset for the
+			// Goldreich-style hash and can make the solve rank deficient. Retain i
+			// in the low bits for injectivity and use AES-derived middle bits to
+			// spread the public dummies through a wider, disjoint upper half.
+			auto dummyIndexBits = log2ceil(f);
+			auto outputBits = log2ceil(mDomain);
+			mIndexBitCount = std::min<u64>(32,
+				std::max(outputBits + 1, dummyIndexBits + 13));
+			mSparseDpfDomain = 1ull << mIndexBitCount;
+			auto highBit = 1ull << (mIndexBitCount - 1);
+			auto middleBits = mIndexBitCount - 1 - dummyIndexBits;
+			auto middleMask = middleBits == 32 ? ~0ull : ((1ull << middleBits) - 1);
+			auto lowMask = dummyIndexBits ? ((1ull << dummyIndexBits) - 1) : 0;
+			AES dummyAes(block(0x52435644554d4d59ull, 0x4b45595300000001ull));
+			mDummyKeys.resize(f);
+			for (u64 i = 0; i < f; ++i)
+			{
+				auto hash = dummyAes.hashBlock(block(i, 0x52435644554d4d59ull)).get<u64>(0);
+				auto payload = (i & lowMask) | ((hash & middleMask) << dummyIndexBits);
+				mDummyKeys[i] = static_cast<u32>(highBit | payload);
+			}
+			std::sort(mDummyKeys.begin(), mDummyKeys.end());
 
 			mDedup.resize(mNumSets);
 
@@ -131,10 +186,16 @@ namespace osuCrypto
 
 			//mBinarySolver.resize();
 			//for (auto& solver : mBinarySolver)
-			mBinarySolver.init(mPartyIdx, mPartitionSize, c, log2ceil(mPartitionSize), mNumPartitions * mNumSets);
+			mBinarySolver.init(
+				mPartyIdx,
+				mPartitionSize,
+				c,
+				log2ceil(mPartitionSize),
+				mNumPartitions * mNumSets,
+				mPartitionSize > 1);
 
 			auto denseDepth = log2ceil(f) + 2;
-			mSparseDpf.init(mPartyIdx, mNumSets * f, mDomain, denseDepth);
+			mSparseDpf.init(mPartyIdx, mNumSets * f, mSparseDpfDomain, denseDepth);
 
 
 			mCharacteristicTwo = characteristicTwo;
@@ -303,117 +364,99 @@ namespace osuCrypto
 			u64 f,
 			u64 c,
 			std::vector<Matrix<u8>>& S,
-			Matrix<u8>& H,
-			Matrix<u8>& HDomain)
+			Matrix<u8>& H)
 		{
 			mSparseSets.resize(f * mNumSets);
 			setTimePoint("sparseSets Begin");
-			double expectedLoad = static_cast<double>(mNumPartitions * mDomain) / f;
-
-			// Chernoff bound: for Poisson(λ), Pr[X ≥ λ + t] ≤ exp(-t²/(2(λ + t/3)))
-			// Union bound over every sparse bucket so that the probability that any
-			// bucket exceeds maxLoad is at most 2^(-mLinearSecParam).
-			auto perBucketSecParam = mLinearSecParam + log2ceil(f * mNumSets);
-			u64 maxLoad = static_cast<u64>(expectedLoad + std::sqrt(2 * expectedLoad * perBucketSecParam * std::log(2.0)) + (perBucketSecParam * 2 * std::log(2.0)) / 3) + 1;
-
-			std::vector<u32> sizes(mSparseSets.size());
-			mSparseSetBuf = std::make_unique<u32[]>(f * mNumSets * maxLoad);
-			//for (u64 i =0; i < mSparseSets.size(); ++i)
-			//	mSparseSets[i] = std::span<u32>(mSparseSetsBuf.get() + i * maxLoad, maxLoad);
-
-			setTimePoint("sparseSets alloc");
-
-
 			constexpr auto stepSize = 32;
 			auto stride = H.cols();
-			auto d32 = mDomain / stepSize * stepSize;
-			u8 h[stepSize];
-			//u8 t[stepSize];
-			// we assume at most this many partitions. 
-			// this assumption is in the inner product 
-			// where we assume the values being computed 
-			// over is just a byte. Easily generalized...
-			if (mPartitionSize > 256)
-				throw RTE_LOC;
-
+			auto d32 = mHashDomain / stepSize * stepSize;
 			assert(stride == divCeil(c, 8));
 
-
-
-			for (u64 s = 0; s < mNumSets; ++s)
+			// Build a CSR-style layout. The old fixed-capacity bucket allocation
+			// reserved maxLoad entries for every bucket and could waste most of its
+			// memory. Two linear passes cost little relative to sparse-DPF setup and
+			// allocate exactly the w * hashDomain entries that will be consumed.
+			auto forEachMapping = [&](auto&& fn)
 			{
-				if (S[s].cols() != 1)
-					throw RTE_LOC; // same assumption as mPartitionSize <= 256
-
-				for (u64 j = 0; j < mNumPartitions; ++j)
+				for (u64 s = 0; s < mNumSets; ++s)
 				{
-					auto HDj = HDomain.data(j);
-					//auto* setj = mSparseSets.data() + s * f + j * mPartitionSize;
-					auto setj = mSparseSetBuf.get() + (s * f + j * mPartitionSize) * maxLoad;
-					auto sizej = &sizes[s * f + j * mPartitionSize];
-					auto Hj = H.data(j * mDomain);
+					auto positionBytes = std::max<u64>(1, divCeil(log2ceil(mPartitionSize), 8));
+					if (S[s].cols() != positionBytes)
+						throw RTE_LOC;
 
-					std::vector<u8> Ssj(stride * 8);
-					for (u64 i = 0; i < c; ++i)
-						Ssj[i] = S[s](j* c + i);
-
-					u8 HDOffset = 0;
-					innerProd(HDj, 1, Ssj.data(), stride, &HDOffset);
-
-					for (u64 i = 0; i < d32; i += stepSize)
+					for (u64 j = 0; j < mNumPartitions; ++j)
 					{
-						//for (u64 k = 0; k < stepSize; ++k)
-						//{
-						//	auto Hij = Hj + (i+k) * stride;
-						//	t[k] = HDOffset;
-						//	innerProd(Hij, 1, Ssj.data(), stride, &t[k]);
-						//}
+						auto Hj = H.data(j * mHashDomain);
+						std::vector<u8> Ssj(stride * 8);
+						std::array<u8, stepSize> h;
+						std::array<u32, stepSize> buckets;
 
-						auto Hij = Hj + i * stride;
-						memset(h, HDOffset, stepSize);
-						innerProd(Hij, stepSize, Ssj.data(), stride, h);
-
-						for (u64 k = 0; k < stepSize; ++k)
+						for (u64 i = 0; i < d32; i += stepSize)
 						{
-							//if (t[k] != h[k])
-							//	throw RTE_LOC;
-							assert(h[k] < mPartitionSize && "bad sparse set index ");
+							buckets.fill(0);
+							for (u64 b = 0; b < positionBytes; ++b)
+							{
+								for (u64 k = 0; k < c; ++k)
+									Ssj[k] = S[s](j * c + k, b);
+								h.fill(0);
+								innerProd(Hj + i * stride, stepSize, Ssj.data(), stride, h.data());
+								for (u64 k = 0; k < stepSize; ++k)
+									buckets[k] |= static_cast<u32>(h[k]) << (8 * b);
+							}
+							for (u64 k = 0; k < stepSize; ++k)
+							{
+								if (buckets[k] >= mPartitionSize)
+									throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
+								fn(s * f + j * mPartitionSize + buckets[k],
+									i + k < mDomain ? i + k : dummyKey(i + k - mDomain));
+							}
+						}
 
-							auto setjh = setj + h[k] * maxLoad;
-							auto idx = sizej[h[k]];
-							if (idx >= maxLoad)
-								throw std::runtime_error("Sparse set overflow. " LOCATION);
-							sizej[h[k]] = idx + 1;
-							setjh[idx] = i + k;
-
-
-							//setj[h[k]].push_back(i + k);
+						for (u64 i = d32; i < mHashDomain; ++i)
+						{
+							u32 bucket = 0;
+							for (u64 b = 0; b < positionBytes; ++b)
+							{
+								for (u64 k = 0; k < c; ++k)
+									Ssj[k] = S[s](j * c + k, b);
+								h[0] = 0;
+								innerProd(Hj + i * stride, 1, Ssj.data(), stride, h.data());
+								bucket |= static_cast<u32>(h[0]) << (8 * b);
+							}
+							if (bucket >= mPartitionSize)
+								throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
+							fn(s * f + j * mPartitionSize + bucket,
+								i < mDomain ? i : dummyKey(i - mDomain));
 						}
 					}
-
-					for (u64 i = d32; i < mDomain; ++i)
-					{
-						auto Hij = Hj + i * stride;
-
-						h[0] = HDOffset;
-						innerProd(Hij, 1, Ssj.data(), stride, h);
-
-						assert(h[0] < mPartitionSize);
-						//setj[h[0]].push_back(i);
-
-						auto setjh = setj + h[0] * maxLoad;
-						auto idx = sizej[h[0]];
-						if (idx >= maxLoad)
-							throw std::runtime_error("Sparse set overflow. " LOCATION);
-						sizej[h[0]] = idx + 1;
-						setjh[idx] = i;
-					}
 				}
-			}
+			};
 
+			std::vector<u64> offsets(mSparseSets.size() + 1);
+			forEachMapping([&](u64 bucket, u64) { ++offsets[bucket + 1]; });
+			for (u64 i = 1; i < offsets.size(); ++i)
+				offsets[i] += offsets[i - 1];
 
+			mSparseSetBuf = std::make_unique<u32[]>(offsets.back());
+			auto cursors = offsets;
+			forEachMapping([&](u64 bucket, u64 index) {
+				mSparseSetBuf[cursors[bucket]++] = static_cast<u32>(index);
+			});
 			for (u64 i = 0; i < mSparseSets.size(); ++i)
-				mSparseSets[i] = std::span<u32>(mSparseSetBuf.get() + i * maxLoad, sizes[i]);
+				mSparseSets[i] = std::span<u32>(
+					mSparseSetBuf.get() + offsets[i], offsets[i + 1] - offsets[i]);
+
+			mRealLeafCounts.resize(mSparseSets.size());
+			mRealLeafCount = 0;
+			for (u64 i = 0; i < mSparseSets.size(); ++i)
+			{
+				assert(std::is_sorted(mSparseSets[i].begin(), mSparseSets[i].end()));
+				mRealLeafCounts[i] = std::lower_bound(
+					mSparseSets[i].begin(), mSparseSets[i].end(), mDomain) -
+					mSparseSets[i].begin();
+				mRealLeafCount += mRealLeafCounts[i];
+			}
 
 
 			setTimePoint("sparseSets done");
@@ -427,8 +470,17 @@ namespace osuCrypto
 			PRNG& prng,
 			coproto::Socket& sock)
 		{
+			// A second invocation must not poison or close the socket being used by
+			// the active setup. The object itself is otherwise not thread-safe.
+			if (mSetupInProgress)
+				throw std::runtime_error("Concurrent RevCuckoo setup is not supported. " LOCATION);
+			mSetupInProgress = true;
 			MACORO_TRY{
 				setTimePoint("setPoints");
+			if (mFailed)
+				throw std::runtime_error("RevCuckoo must be reinitialized after a failed operation. " LOCATION);
+			if (mHasPoints)
+				throw std::runtime_error("RevCuckoo points have already been set. " LOCATION);
 
 			// Check input parameters
 			if (points.rows() != mNumSets)
@@ -461,7 +513,10 @@ namespace osuCrypto
 				for (u64 i = 0; i < mNumPointsPerSet; ++i)
 				{
 					copyBytesMin(A[s][i], points[s][i]);
-					copyBytesMin(altKeys[s][i], mDomain * mPartyIdx);  // Use indices as alternate keys
+					// Duplicate rows are replaced by unique public dummy keys. Reusing N
+					// here makes the shuffled linear system unsatisfiable whenever two
+					// copies of H(N) are assigned different target buckets.
+					copyBytesMin(altKeys[s][i], dummyKey(i) * mPartyIdx);
 				}
 
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
@@ -492,7 +547,7 @@ namespace osuCrypto
 				// Step 5-6: Setup A and B matrices
 				A[s].resize(f, A[s].cols()); // Resize A to f rows
 				for (u64 i = mNumPointsPerSet; i < f; ++i)
-					copyBytesMin(A[s][i], mDomain * mPartyIdx); // default the extras 
+					copyBytesMin(A[s][i], dummyKey(i) * mPartyIdx);
 
 				av[s] = BitMtxVec(A[s]);
 				// Step 7: Permute (A||b) by π
@@ -566,15 +621,6 @@ namespace osuCrypto
 				r.result();
 			setTimePoint("done Begin");
 
-			// Step 8-9: Create the matrices M_i and solve linear systems
-			Matrix<u8> HDomain(mNumPartitions, M[0].cols());
-			Matrix<u8> ADomain(1, A[0].cols());
-			copyBytesMin(ADomain, mDomain);
-			for (u64 i = 0; i < mNumPartitions; ++i)
-			{
-				mGoldreichHash[i].hash(ADomain, HDomain.submtx(i, 1), hashCache[i]);
-			}
-
 			// Prepare y vector (0, 1, ..., m-1)
 			Matrix<u8> Y(mPartitionSize, positionBytes);
 			for (u64 j = 0; j < mPartitionSize; ++j)
@@ -597,13 +643,6 @@ namespace osuCrypto
 					auto Msih = M[s].submtx(i * mPartitionSize, mPartitionSize);
 
 					//mGoldreichHash[i].mPrint = mPrint && mPartyIdx;
-					if (mPartyIdx)
-					{
-						for (u64 j = 0; j < Msih.rows(); ++j)
-							for (u64 k = 0; k < Msih.cols(); ++k)
-								Msih(j, k) ^= HDomain(i, k); // XOR the hash into M_i
-					}
-
 					M_si[h] = Msih;
 					S_si[h] = S[s].submtx(i * c, c);
 
@@ -660,22 +699,23 @@ namespace osuCrypto
 
 			// Step 11: Calculate h_i,j via hash function
 			// This step is handled by SparseDpf configuration below
-			Matrix<u8> H(mDomain * mNumPartitions, mGoldreichHash[0].mOutBytes);
-			Matrix<u8> I(mDomain, mGoldreichHash[0].mInBytes);
+			Matrix<u8> H(mHashDomain * mNumPartitions, mGoldreichHash[0].mOutBytes);
+			Matrix<u8> I(mHashDomain, mGoldreichHash[0].mInBytes);
 			for (u64 i = 0; i < mDomain; ++i)
 				copyBytesMin(I[i], i);
+			for (u64 i = 0; i < f; ++i)
+				copyBytesMin(I[mDomain + i], dummyKey(i));
 
 			for (u64 j = 0; j < mNumPartitions; ++j)
 				mGoldreichHash[j].hash(I,
-					H.submtx(j * mDomain, mDomain), hashCache[j]);
+					H.submtx(j * mHashDomain, mHashDomain), hashCache[j]);
 
 
 
 			// Step 13-14: Compute S_j and invoke sparse-DPF
-			buildSparseSets(f, c, S, H, HDomain);
+			buildSparseSets(f, c, S, H);
 
 			// Step 15-16: Initialize and compute final output
-			std::vector<block> y(mDomain, ZeroBlock);
 			std::vector<u64> A64(mNumSets * f);
 
 			for (u64 s = 0, j = 0; s < mNumSets; ++s)
@@ -686,10 +726,17 @@ namespace osuCrypto
 
 			mLeafShares.resize(f * mNumSets);
 			mLeafTags.resize(f * mNumSets);
+			u64 totalLeaves = 0;
+			for (auto set : mSparseSets)
+				totalLeaves += set.size();
+			mLeafShareBuf = std::make_unique<block[]>(totalLeaves);
+			mLeafTagBuf = std::make_unique<u8[]>(totalLeaves);
+			u64 leafOffset = 0;
 			for (u64 j = 0; j < f * mNumSets; ++j)
 			{
-				mLeafShares[j].resize(mSparseSets[j].size());
-				mLeafTags[j].resize(mSparseSets[j].size());
+				mLeafShares[j] = std::span<block>(mLeafShareBuf.get() + leafOffset, mSparseSets[j].size());
+				mLeafTags[j] = std::span<u8>(mLeafTagBuf.get() + leafOffset, mSparseSets[j].size());
+				leafOffset += mSparseSets[j].size();
 
 				auto s = j / f;
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
@@ -779,6 +826,8 @@ namespace osuCrypto
 			}
 
 			setTimePoint("negate done");
+			mHasPoints = true;
+			mSetupInProgress = false;
 
 			//if (mPrint)
 			//{
@@ -812,9 +861,12 @@ namespace osuCrypto
 			//	}
 			//}
 			}
-				MACORO_CATCH(ex)
+			MACORO_CATCH(ex)
 			{
-				co_await sock.close();
+				mSetupInProgress = false;
+				mFailed = true;
+				if (!sock.closed())
+					co_await sock.close();
 				std::rethrow_exception(ex);
 			}
 
@@ -833,6 +885,14 @@ namespace osuCrypto
 			Output output,
 			CoeffCtx ctx = {})
 		{
+			// Reject a second expansion without disturbing the one already using
+			// this object's scratch buffers and socket.
+			if (mExpandInProgress)
+				throw std::runtime_error("Concurrent RevCuckoo expansion is not supported. " LOCATION);
+			mExpandInProgress = true;
+			MACORO_TRY {
+			if (mFailed || !mHasPoints)
+				throw std::runtime_error("RevCuckoo points are not available. " LOCATION);
 			setTimePoint("expandValue");
 
 			// Check input parameters
@@ -1049,7 +1109,9 @@ namespace osuCrypto
 
 				for (u64 j = 0; j < f; ++j, ++k)
 				{
-					auto n = mLeafShares[k].size();
+					// Dummies contribute to leafSums and gamma above, but never to
+					// caller output. They occupy the suffix of this sorted set.
+					auto n = mRealLeafCounts[k];
 					auto n8 = n / 8 * 8;
 					auto sIter = mExpanded[k].begin();
 					auto gammaK = gamma[k];
@@ -1067,7 +1129,7 @@ namespace osuCrypto
 							SIMD8(q, idx[q] = setK[i + q]);
 							SIMD8(q, ctx.plus(out[idx[q]], out[idx[q]], temp[q]));
 						}
-						for (u64 i = n8; i < mLeafShares[k].size(); ++i)
+						for (u64 i = n8; i < n; ++i)
 						{
 							auto mask = block::allSame<u8>(-tagK[i]);
 							ctx.mask(temp[0], gammaK, mask);
@@ -1087,7 +1149,7 @@ namespace osuCrypto
 							SIMD8(q, idx[q] = setK[i + q]);
 							SIMD8(q, ctx.plus(out[idx[q]], out[idx[q]], temp[q]));
 						}
-						for (u64 i = n8; i < mLeafShares[k].size(); ++i)
+						for (u64 i = n8; i < n; ++i)
 						{
 							auto mask = block::allSame<u8>(-tagK[i]);
 							ctx.mask(temp[0], gammaK, mask);
@@ -1105,7 +1167,18 @@ namespace osuCrypto
 			}
 
 			setTimePoint("update done");
+			mExpandInProgress = false;
 
+
+			}
+			MACORO_CATCH(ex)
+			{
+				mExpandInProgress = false;
+				mFailed = true;
+				if (!sock.closed())
+					co_await sock.close();
+				std::rethrow_exception(ex);
+			}
 
 			co_return;
 		}
@@ -1273,8 +1346,13 @@ namespace osuCrypto
 		{
 			// Clear the internal state of the DPF
 			mLeafShares.clear();
+			mLeafShareBuf.reset();
 			mLeafTags.clear();
+			mLeafTagBuf.reset();
 			mSparseSets.clear();
+			mSparseSetBuf.reset();
+			mRealLeafCounts.clear();
+			mRealLeafCount = 0;
 			mExpanded.clear();
 			mMultSession.clear();
 			mGoldreichHash.clear();
@@ -1289,12 +1367,19 @@ namespace osuCrypto
 			mPrint = false;
 			mPrintIndex = ~0ull;
 			mCharacteristicTwo = false;
+			mHasPoints = false;
+			mSetupInProgress = false;
+			mExpandInProgress = false;
+			mFailed = false;
 			mNumSets = 0;
 			mNumPointsPerSet = 0;
 			mNumPartitions = 0;
 			mPartitionSize = 0;
 			mIndexBitCount = 0;
 			mDomain = 0;
+			mHashDomain = 0;
+			mSparseDpfDomain = 0;
+			mDummyKeys.clear();
 			mLinearSecParam = 0;
 			mCuckooSecParam = 0;
 		}

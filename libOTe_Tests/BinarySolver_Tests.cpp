@@ -475,6 +475,39 @@ namespace osuCrypto
 		}
 	}
 
+	void BinSolver_rankFailure_test(const oc::CLP&)
+	{
+		constexpr u64 m = 2;
+		constexpr u64 c = 2;
+		constexpr u64 g = 1;
+		std::array<BinarySolver, 2> solver;
+		solver[0].init(0, m, c, g, 1, true);
+		solver[1].init(1, m, c, g, 1, true);
+		setBase(solver);
+
+		std::array<Matrix<u8>, 2> M, Y, X;
+		for (u64 p = 0; p < 2; ++p)
+		{
+			M[p].resize(m, divCeil(c, 8));
+			Y[p].resize(m, divCeil(g, 8));
+			X[p].resize(c, divCeil(g, 8));
+		}
+
+		PRNG prng(block(0x1111, 0x2222));
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		auto results = macoro::sync_wait(macoro::when_all_ready(
+			solver[0].solveOne(M[0], Y[0], X[0], prng, sockets[0]),
+			solver[1].solveOne(M[1], Y[1], X[1], prng, sockets[1])));
+
+		bool failed[2]{};
+		try { std::get<0>(results).result(); }
+		catch (...) { failed[0] = true; }
+		try { std::get<1>(results).result(); }
+		catch (...) { failed[1] = true; }
+		if (!failed[0] || !failed[1])
+			throw std::runtime_error("BinarySolver did not jointly reject a rank-deficient system. " LOCATION);
+	}
+
 	void BinSolver_firstOneBitMany_test(const oc::CLP& cmd)
 	{
 		PRNG prng(block(111, 222));
