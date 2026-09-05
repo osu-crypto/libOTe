@@ -242,6 +242,17 @@ namespace osuCrypto
 		static constexpr u64 DpfSetCount = GroupCount * BlockCount;
 		static constexpr u64 PointsPerDpfSet =
 			BlockCount * PointsPerBlock * PointsPerBlock;
+		// The regular backend evaluates every (left, right, Frobenius-power)
+		// product separately. RevCuckoo instead shares its position trees across
+		// all products of the same polynomial degree. There are 2c-1 such
+		// convolution channels. Its two internal repetitions therefore retain
+		// 2(2c-1)N = O(4cN) leaves, independently of the sparse weight.
+		static constexpr u64 RevProductChannelCount = 2 * CompressionFactor - 1;
+		static constexpr u64 RevPayloadLaneCount =
+			CompressionFactor * Ctx::extensionDegree;
+		static constexpr u64 RevDpfSetCount = RevProductChannelCount * BlockCount;
+		static constexpr u64 RevPointsPerDpfSet = RevPayloadLaneCount *
+			BlockCount * PointsPerBlock * PointsPerBlock;
 		static constexpr bool PacksPublicCoefficients =
 			CompressionFactor * Ctx::fieldBits <= 32;
 		using PackedPublic = std::conditional_t<
@@ -319,6 +330,7 @@ namespace osuCrypto
 				mSparsePositions = std::move(source.mSparsePositions);
 				mSparseCoefficients = std::move(source.mSparseCoefficients);
 				mDpfValues = std::move(source.mDpfValues);
+				mProductShares = std::move(source.mProductShares);
 				mHasPositions = std::exchange(source.mHasPositions, false);
 				mHasSetup = std::exchange(source.mHasSetup, false);
 
@@ -332,6 +344,7 @@ namespace osuCrypto
 				source.mSparsePositions.clear();
 				source.mSparseCoefficients.clear();
 				source.mDpfValues.clear();
+				source.mProductShares.clear();
 			}
 			return *this;
 		}
@@ -616,16 +629,24 @@ namespace osuCrypto
 					sampleSparsePositions(prng);
 					std::vector<u64> pointShares;
 					co_await makePointShares(pointShares, socket);
-					std::vector<u64> orderedPoints(pointShares.size());
+					std::vector<u64> orderedPoints(mDpfOrder.size());
 					for (u64 i = 0; i < orderedPoints.size(); ++i)
-						orderedPoints[i] = pointShares[mDpfOrder[i]];
+						orderedPoints[i] = mDpfOrder[i] == DummyPoint ?
+							0 : pointShares[mDpfOrder[i]];
 					MatrixView<const u64> points(
-						orderedPoints.data(), DpfSetCount, PointsPerDpfSet);
+						orderedPoints.data(), dpfSetCount(), pointsPerDpfSet());
 					co_await std::visit([&](auto& dpf) {
 						if (mTimer)
 							dpf.setTimer(*mTimer);
 						return dpf.setPoints(points, prng, socket);
 					}, mDpf);
+#ifdef ENABLE_SPARSE_DPF
+					if (mDpfMode == AnyFieldDpfMode::RevCuckoo &&
+						std::get<RevCuckooBackend>(mDpf).realLeafCount() !=
+							2 * RevProductChannelCount * mN)
+						throw std::runtime_error(
+							"AnyFieldOle RevCuckoo built the wrong number of real leaves. " LOCATION);
+#endif
 					mHasPositions = true;
 				}
 
@@ -633,7 +654,10 @@ namespace osuCrypto
 
 				std::vector<Ext> productShares(leftCoefficientCount() * rightCoefficientCount());
 				co_await tensorCoefficients(productShares, prng, socket);
-				fillDpfValues(productShares);
+				if (mDpfMode == AnyFieldDpfMode::RegularDpf)
+					fillRegularDpfValues(productShares);
+				else
+					mProductShares = std::move(productShares);
 
 				clearBaseCors();
 				mHasSetup = true;
@@ -720,16 +744,14 @@ namespace osuCrypto
 				}
 
 				std::fill(work.begin(), work.end(), Ext::zero());
-				u64 nextSet = 0;
-				u64 setLeafCount = 0;
-				// Sets are group-major and product-block-major. SumDmpf and
-				// RevCuckoo both combine all point leaves in a set before this
-				// callback. Transform a group as soon as its last block completes,
-				// retaining one O(N) work vector instead of GroupCount dense rows.
-				co_await std::visit([&](auto& dpf) {
+				if (mDpfMode == AnyFieldDpfMode::RegularDpf)
+				{
+					u64 nextSet = 0;
+					u64 setLeafCount = 0;
+					auto& dpf = std::get<RegularBackend>(mDpf);
 					if (mTimer)
 						dpf.setTimer(*mTimer);
-					return dpf.expand(
+					co_await dpf.expand(
 						mDpfValues, prng, socket,
 						[&](u64 set, u64 leaf, const auto& value) {
 							if (set != nextSet || leaf >= mBlockSize)
@@ -751,10 +773,67 @@ namespace osuCrypto
 							}
 						},
 						mCtx.dpfCoeffCtx());
-				}, mDpf);
-				if (nextSet != DpfSetCount || setLeafCount)
-					throw std::runtime_error(
-						"AnyFieldOle DPF expansion ended early. " LOCATION);
+					if (nextSet != DpfSetCount || setLeafCount)
+						throw std::runtime_error(
+							"AnyFieldOle DPF expansion ended early. " LOCATION);
+				}
+				else
+				{
+#ifdef ENABLE_SPARSE_DPF
+					// A product-degree channel contains several algebraically distinct
+					// payload lanes. Reuse the channel's RevCuckoo position trees and
+					// expand the scalar lanes serially. This keeps the retained leaf
+					// buffer at O(4cN), rather than multiplying it by c or by the
+					// extension degree.
+					auto& dpf = std::get<RevCuckooBackend>(mDpf);
+					if (mTimer)
+						dpf.setTimer(*mTimer);
+					for (u64 leftPolynomial = 0;
+						leftPolynomial < CompressionFactor; ++leftPolynomial)
+						for (u64 power = 0; power < Ctx::extensionDegree; ++power)
+						{
+							fillRevDpfValues(leftPolynomial, power);
+							u64 nextSet = 0;
+							u64 setLeafCount = 0;
+							co_await dpf.expand(
+								mDpfValues, prng, socket,
+								[&](u64 set, u64 leaf, const auto& value) {
+									if (set != nextSet || leaf >= mBlockSize)
+										throw std::runtime_error(
+											"AnyFieldOle RevCuckoo emitted an invalid leaf sequence. " LOCATION);
+									const auto channel = set / BlockCount;
+									const auto validChannel = channel >= leftPolynomial &&
+										channel - leftPolynomial < CompressionFactor;
+									if (validChannel)
+									{
+										const auto blockIndex = set % BlockCount;
+										work[blockIndex + BlockCount * leaf] += value;
+									}
+									if (++setLeafCount == mBlockSize)
+									{
+										setLeafCount = 0;
+										++nextSet;
+										if (nextSet % BlockCount == 0)
+										{
+											if (validChannel)
+												accumulateProductPair(
+													power, leftPolynomial,
+													channel - leftPolynomial,
+													publicCount, work, traceFactors, z);
+											std::fill(work.begin(), work.end(), Ext::zero());
+										}
+									}
+								},
+								mCtx.dpfCoeffCtx());
+							if (nextSet != RevDpfSetCount || setLeafCount)
+								throw std::runtime_error(
+									"AnyFieldOle RevCuckoo expansion ended early. " LOCATION);
+						}
+#else
+					throw std::logic_error(
+						"AnyFieldOle RevCuckoo mode requires ENABLE_SPARSE_DPF. " LOCATION);
+#endif
+				}
 
 				clearExpansionState();
 				if (mNoiseMode == AnyFieldNoiseMode::SingleUse)
@@ -821,10 +900,22 @@ namespace osuCrypto
 		std::vector<u64> mSparsePositions;
 		std::vector<Ext> mSparseCoefficients;
 		std::vector<Ext> mDpfValues;
+		std::vector<Ext> mProductShares;
 		bool mHasPositions = false;
 		bool mHasSetup = false;
 
+		static constexpr u64 DummyPoint = std::numeric_limits<u64>::max();
 		static constexpr u64 pointsPerGroup() { return Weight * Weight; }
+		u64 dpfSetCount() const
+		{
+			return mDpfMode == AnyFieldDpfMode::RevCuckoo ?
+				RevDpfSetCount : DpfSetCount;
+		}
+		u64 pointsPerDpfSet() const
+		{
+			return mDpfMode == AnyFieldDpfMode::RevCuckoo ?
+				RevPointsPerDpfSet : PointsPerDpfSet;
+		}
 		u64 positionInstanceCount() const
 		{
 			const auto points = GroupCount * pointsPerGroup();
@@ -866,8 +957,8 @@ namespace osuCrypto
 			mDpf = RevCuckooBackend{};
 			std::get<RevCuckooBackend>(mDpf).init(
 				mPartyIdx,
-				PointsPerDpfSet,
-				DpfSetCount,
+				RevPointsPerDpfSet,
+				RevDpfSetCount,
 				mBlockSize,
 				2,
 				2,
@@ -896,6 +987,7 @@ namespace osuCrypto
 		{
 			mSparseCoefficients.clear();
 			mDpfValues.clear();
+			mProductShares.clear();
 			mHasSetup = false;
 		}
 
@@ -1151,25 +1243,42 @@ namespace osuCrypto
 
 		void buildDpfOrder()
 		{
-			mDpfOrder.resize(DpfSetCount * PointsPerDpfSet);
-			std::vector<u64> next(DpfSetCount);
+			mDpfOrder.assign(dpfSetCount() * pointsPerDpfSet(), DummyPoint);
+			std::vector<u64> next(dpfSetCount());
 			for (u64 group = 0; group < GroupCount; ++group)
+			{
+				const auto pair = group % (CompressionFactor * CompressionFactor);
+				const auto leftPolynomial = pair / CompressionFactor;
+				const auto rightPolynomial = pair % CompressionFactor;
+				const auto productChannel = leftPolynomial + rightPolynomial;
 				for (u64 left = 0; left < Weight; ++left)
 					for (u64 right = 0; right < Weight; ++right)
 					{
-						const auto set = group * BlockCount +
+						const auto setGroup = mDpfMode == AnyFieldDpfMode::RevCuckoo ?
+							productChannel : group;
+						const auto set = setGroup * BlockCount +
 							productBlock(group, left, right);
-						const auto target = set * PointsPerDpfSet + next[set]++;
+						if (next[set] >= pointsPerDpfSet())
+							throw std::logic_error(
+								"AnyFieldOle product block capacity is too small. " LOCATION);
+						const auto target = set * pointsPerDpfSet() + next[set]++;
 						mDpfOrder[target] =
 							group * pointsPerGroup() + left * Weight + right;
 					}
-			for (auto count : next)
-				if (count != PointsPerDpfSet)
+			}
+			if (mDpfMode == AnyFieldDpfMode::RegularDpf)
+				for (auto count : next)
+					if (count != PointsPerDpfSet)
+						throw std::logic_error(
+							"AnyFieldOle product blocks are not regular. " LOCATION);
+			if (mDpfMode == AnyFieldDpfMode::RevCuckoo)
+				for (auto count : next)
+					if (!count || count > RevPointsPerDpfSet)
 					throw std::logic_error(
-						"AnyFieldOle product blocks are not regular. " LOCATION);
+						"AnyFieldOle RevCuckoo product block is invalid. " LOCATION);
 		}
 
-		void fillDpfValues(span<const Ext> productShares)
+		void fillRegularDpfValues(span<const Ext> productShares)
 		{
 			mDpfValues.resize(mDpfOrder.size());
 			for (u64 target = 0; target < mDpfOrder.size(); ++target)
@@ -1191,6 +1300,36 @@ namespace osuCrypto
 			}
 		}
 
+		void fillRevDpfValues(u64 leftPolynomial, u64 frobeniusPower)
+		{
+			if (mProductShares.size() != leftCoefficientCount() * rightCoefficientCount())
+				throw std::logic_error(
+					"AnyFieldOle RevCuckoo tensor state is missing. " LOCATION);
+			mDpfValues.assign(mDpfOrder.size(), Ext::zero());
+			for (u64 target = 0; target < mDpfOrder.size(); ++target)
+			{
+				const auto source = mDpfOrder[target];
+				if (source == DummyPoint)
+					continue;
+				const auto group = source / pointsPerGroup();
+				const auto power = group / (CompressionFactor * CompressionFactor);
+				const auto pair = group % (CompressionFactor * CompressionFactor);
+				if (power != frobeniusPower ||
+					pair / CompressionFactor != leftPolynomial)
+					continue;
+
+				const auto point = source % pointsPerGroup();
+				const auto left = point / Weight;
+				const auto right = point % Weight;
+				const auto rightPolynomial = pair % CompressionFactor;
+				const auto leftOffset = leftPolynomial * Weight;
+				const auto rightOffset =
+					(Ctx::extensionDegree * rightPolynomial + power) * Weight;
+				mDpfValues[target] = mProductShares[
+					(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
+			}
+		}
+
 		void accumulateProductGroup(
 			u64 group,
 			u64 publicCount,
@@ -1199,12 +1338,26 @@ namespace osuCrypto
 				Ctx::extensionDegree>& traceFactors,
 			span<Base> z)
 		{
-			mCtx.transform(work, mDimension);
-
 			const auto frobeniusPower = group / (CompressionFactor * CompressionFactor);
 			const auto pair = group % (CompressionFactor * CompressionFactor);
-			const auto leftPolynomial = pair / CompressionFactor;
-			const auto rightPolynomial = pair % CompressionFactor;
+			accumulateProductPair(
+				frobeniusPower,
+				pair / CompressionFactor,
+				pair % CompressionFactor,
+				publicCount, work, traceFactors, z);
+		}
+
+		void accumulateProductPair(
+			u64 frobeniusPower,
+			u64 leftPolynomial,
+			u64 rightPolynomial,
+			u64 publicCount,
+			std::vector<Ext>& work,
+			const std::array<std::array<Ext, Ctx::extensionDegree>,
+				Ctx::extensionDegree>& traceFactors,
+			span<Base> z)
+		{
+			mCtx.transform(work, mDimension);
 			if constexpr (PacksPublicCoefficients)
 			{
 				if (leftPolynomial && rightPolynomial)

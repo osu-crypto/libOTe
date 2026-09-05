@@ -288,6 +288,18 @@ namespace osuCrypto
 		static constexpr u64 maximumDimension = 6;
 	};
 
+	// Exercise every c=8 convolution channel without approaching a production
+	// output size. This catches channel/lane ordering errors while keeping the
+	// RevCuckoo real-leaf count at 2(2c-1)N = 7290.
+	struct AnyFieldF4RevCuckooChannelTestParams
+	{
+		static constexpr u64 compressionFactor = 8;
+		static constexpr u64 blockDimensions = 1;
+		static constexpr u64 pointsPerBlock = 1;
+		static constexpr u64 minimumDimension = 5;
+		static constexpr u64 maximumDimension = 5;
+	};
+
 	// Test-only comparison policy for measuring the cost that generalized
 	// regular blocks avoid. All 18 points occupy one full-domain block.
 	struct AnyFieldF4FullDomainBenchmarkParams
@@ -496,6 +508,14 @@ namespace osuCrypto
 				runAnyFieldOleCase<RevTestOle>(
 					1, false, "F2 RevCuckoo stationary",
 					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary);
+			if (!cmd.isSet("stationaryOnly"))
+			{
+				using ChannelTestOle = AnyFieldOle<
+					AnyFieldF4Ctx, AnyFieldF4RevCuckooChannelTestParams>;
+				runAnyFieldOleCase<ChannelTestOle>(
+					1, false, "F2 RevCuckoo c=8 channels",
+					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::SingleUse);
+			}
 		}
 #endif
 		if (cmd.isSet("v"))
