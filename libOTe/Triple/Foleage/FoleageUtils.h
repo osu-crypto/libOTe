@@ -73,6 +73,17 @@ namespace osuCrypto
 			return r;
 		}
 
+		// Component-wise negation in (Z_3)^32. Since -1 = 2 mod 3,
+		// negation swaps the two bits in each packed trit.
+		F3x32 operator-() const
+		{
+			F3x32 r;
+			constexpr u64 low = 0x5555555555555555ull;
+			constexpr u64 high = 0xaaaaaaaaaaaaaaaaull;
+			r.mVal = ((mVal & low) << 1) | ((mVal & high) >> 1);
+			return r;
+		}
+
 
 		bool operator==(const F3x32& t) const
 		{
