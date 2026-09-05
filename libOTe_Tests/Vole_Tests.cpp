@@ -122,7 +122,8 @@ namespace
 		F delta,
 		R& recver,
 		S& sender,
-		Ctx ctx)
+		Ctx ctx,
+		SdNoiseDistribution noise)
 	{
 
 		auto count = sender.baseCount();
@@ -153,13 +154,14 @@ namespace
 		typename Ctx::template Vec<G>
 			c(count.mBaseVoleCount);
 
-		if constexpr (std::is_same_v<G, bool>)
+		for (u64 i = 0; i < c.size(); ++i)
 		{
-			for (u64 i = 0; i < c.size(); ++i)
-				c[i] = prng.getBit();
+			if (noise == SdNoiseDistribution::Regular &&
+				i < recver.mNumPartitions)
+				sampleRegularNoiseUnit(c[i], prng, ctx);
+			else
+				ctx.fromBlock(c[i], prng.get<block>());
 		}
-		else
-			prng.get(c.data(), c.size());
 		prng.get(b.data(), b.size());
 		for (auto i : rng(c.size()))
 		{
@@ -206,7 +208,7 @@ void Vole_Silent_test_impl(
 	recv.configure(n, mt, type, SilentBaseType::BaseExtend, noise);
 
 	if (doFakeBase)
-		fakeBase<G>(n, prng, d, recv, send, ctx);
+		fakeBase<G>(n, prng, d, recv, send, ctx, noise);
 
 	u64 l = noise == SdNoiseDistribution::Regular ? 1 : 3;
 	for (u64 t = 0; t < l; ++t)
@@ -218,7 +220,7 @@ void Vole_Silent_test_impl(
 				throw RTE_LOC;
 
 			if (doFakeBase)
-				fakeBase<G>(n, prng, d, recv, send, ctx);
+				fakeBase<G>(n, prng, d, recv, send, ctx, noise);
 		}
 
 		auto p0 = recv.silentReceive(c, a, prng, chls[0]);
@@ -477,17 +479,17 @@ void Vole_Noisy_Audit_Test(const oc::CLP&)
 
 	expectInvalidArgument([] {
 		syndromeDecodingConfigure(1025, 1, DefaultMultType,
-			SdNoiseDistribution::Regular, 1);
+			SdNoiseDistribution::Regular, SdNoiseSecurityModel::binary());
 	});
 	expectInvalidArgument([] {
 		syndromeDecodingConfigure(128,
 			static_cast<u64>(std::numeric_limits<u32>::max()) + 1,
-			DefaultMultType, SdNoiseDistribution::Regular, 1);
+			DefaultMultType, SdNoiseDistribution::Regular,
+			SdNoiseSecurityModel::binary());
 	});
 	expectInvalidArgument([] {
 		syndromeDecodingConfigure(128, 1, DefaultMultType,
-			SdNoiseDistribution::Regular,
-			static_cast<u64>(std::numeric_limits<u16>::max()) + 1);
+			SdNoiseDistribution::Regular, SdNoiseSecurityModel{ 0.5 });
 	});
 }
 
@@ -533,16 +535,35 @@ void Vole_Silent_stationary_test(const oc::CLP& cmd)
 }
 
 
-void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd)
+void Vole_Silent_QuasiCyclic_test(const oc::CLP&)
 {
-#if defined(ENABLE_BITPOLYMUL)
-	auto debug = cmd.isSet("debug");
-	auto noise = (SdNoiseDistribution)cmd.getOr("noise", 0);
-	for (u64 n : {128, 333})
-		Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, MultType::QuasiCyclic, debug, false, false, noise);
-#else
-	throw UnitTestSkipped("ENABLE_BITPOLYMUL not defined." LOCATION);
-#endif
+	using Sender = SilentVoleSender<block, block, CoeffCtxGF128>;
+	using Receiver = SilentVoleReceiver<block, block, CoeffCtxGF128>;
+	Sender sender;
+	Receiver receiver;
+	bool senderRejected = false;
+	bool receiverRejected = false;
+	try
+	{
+		sender.configure(128, SilentSecType::SemiHonest, MultType::QuasiCyclic,
+			SilentBaseType::Base, SdNoiseDistribution::Regular);
+	}
+	catch (const std::invalid_argument&)
+	{
+		senderRejected = true;
+	}
+	try
+	{
+		receiver.configure(128, SilentSecType::SemiHonest, MultType::QuasiCyclic,
+			SilentBaseType::Base, SdNoiseDistribution::Regular);
+	}
+	catch (const std::invalid_argument&)
+	{
+		receiverRejected = true;
+	}
+	if (!senderRejected || !receiverRejected || sender.isConfigured() ||
+		receiver.isConfigured())
+		throw UnitTestFail("Silent VOLE accepted the binary-only QuasiCyclic code");
 }
 
 void Vole_Silent_BlkAcc_test(const oc::CLP& cmd)
@@ -645,6 +666,8 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 	if (!senderConfigThrew || !receiverConfigThrew ||
 		sender.mState != Sender::State::Configured ||
 		receiver.mState != Receiver::State::Configured ||
+		sender.mNoiseType != SdNoiseDistribution::Stationary ||
+		receiver.mNoiseType != SdNoiseDistribution::Stationary ||
 		sender.mRequestSize != 128 || receiver.mRequestSize != 128 ||
 		sender.mSecurityType != SilentSecType::Malicious ||
 		receiver.mSecurityType != SilentSecType::Malicious ||
@@ -660,12 +683,14 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 	receiver.clear();
 
 	if (sender.mState != Sender::State::Default || sender.isConfigured() ||
+		sender.mNoiseType != SdNoiseDistribution::Regular ||
 		sender.mRequestSize || sender.mNoiseVecSize || sender.mNumPartitions ||
 		sender.mSizePer || sender.mSecParam || sender.mCodeSeed != ZeroBlock ||
 		!sender.mB.empty() || !sender.mBaseB.empty() || sender.mDerandomizeMalCheck)
 		throw RTE_LOC;
 
 	if (receiver.mState != Receiver::State::Default || receiver.isConfigured() ||
+		receiver.mNoiseType != SdNoiseDistribution::Regular ||
 		receiver.mRequestSize || receiver.mNoiseVecSize || receiver.mNumPartitions ||
 		receiver.mSizePer || receiver.mSecParam || receiver.mCodeSeed != ZeroBlock ||
 		!receiver.mA.empty() || !receiver.mC.empty() || !receiver.mBaseA.empty() ||
@@ -739,7 +764,8 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 		SilentBaseType::Base, SdNoiseDistribution::Stationary);
 	const auto productConfig = syndromeDecodingConfigure(
 		128, 128, DefaultMultType, SdNoiseDistribution::Stationary,
-		log2ceil(Fp31::mMod));
+		SdNoiseSecurityModel{
+			coefficientRegularNoiseFactor<Product>(CoeffCtxFVec<Fp31, 2>{}) });
 	if (productSender.mNumPartitions != productConfig.mNumPartitions ||
 		productSender.mSizePer != productConfig.mSizePer ||
 		productSender.mNoiseVecSize != productConfig.mNoiseVectorSize ||
@@ -753,11 +779,157 @@ void Vole_Silent_Clear_test(const oc::CLP&)
 	goldSender.configure(128, SilentSecType::SemiHonest, DefaultMultType,
 		SilentBaseType::Base, SdNoiseDistribution::Stationary);
 	const auto goldConfig = syndromeDecodingConfigure(
-		128, 128, DefaultMultType, SdNoiseDistribution::Stationary, 64);
+		128, 128, DefaultMultType, SdNoiseDistribution::Stationary,
+		SdNoiseSecurityModel{ coefficientRegularNoiseFactor<Goldilocks>(
+			CoeffCtxGoldilocks{}) });
 	if (goldSender.mNumPartitions != goldConfig.mNumPartitions ||
 		goldSender.mSizePer != goldConfig.mSizePer ||
 		goldSender.mNoiseVecSize != goldConfig.mNoiseVectorSize)
 		throw UnitTestFail("Silent VOLE misclassified the Goldilocks additive group");
+}
+
+void Vole_Silent_NoiseSampling_test(const oc::CLP&)
+{
+	{
+		u64 scaler = 0, expanderWeight = 0, accumulatorWeight = 0;
+		u64 sigma = 0, depth = 0;
+		double pseudoDistance = 0;
+
+		EAConfigure(MultType::ExAcc40, scaler, expanderWeight, pseudoDistance);
+		if (scaler != 5 || expanderWeight != 41 || pseudoDistance != 0.20)
+			throw UnitTestFail("EA pseudo-distance parameters changed unexpectedly");
+
+		ExConvConfigure(MultType::ExConv7x24, scaler, expanderWeight,
+			accumulatorWeight, pseudoDistance);
+		if (scaler != 2 || expanderWeight != 7 || accumulatorWeight != 24 ||
+			pseudoDistance != 0.15)
+			throw UnitTestFail("aggressive ExConv pseudo-distance parameters changed unexpectedly");
+
+		ExConvConfigure(MultType::ExConv21x24, scaler, expanderWeight,
+			accumulatorWeight, pseudoDistance);
+		if (scaler != 2 || expanderWeight != 21 || accumulatorWeight != 24 ||
+			pseudoDistance != 0.20)
+			throw UnitTestFail("conservative ExConv pseudo-distance parameters changed unexpectedly");
+
+		BlkAccConfigure(MultType::BlkAcc3x8, scaler, sigma, depth, pseudoDistance);
+		if (scaler != 2 || sigma != 8 || depth != 3 || pseudoDistance != 0.15)
+			throw UnitTestFail("aggressive BlkAcc pseudo-distance parameters changed unexpectedly");
+
+		BlkAccConfigure(MultType::BlkAcc3x32, scaler, sigma, depth, pseudoDistance);
+		if (scaler != 2 || sigma != 32 || depth != 3 || pseudoDistance != 0.20)
+			throw UnitTestFail("conservative BlkAcc pseudo-distance parameters changed unexpectedly");
+
+		TungstenConfigure(scaler, pseudoDistance);
+		if (scaler != 2 || pseudoDistance != 0.20)
+			throw UnitTestFail("Tungsten pseudo-distance parameters changed unexpectedly");
+
+		QuasiCyclicConfigure(scaler, pseudoDistance);
+		if (scaler != 2 || pseudoDistance != 0.25)
+			throw UnitTestFail("quasi-cyclic pseudo-distance parameters changed unexpectedly");
+
+		for (int retired : { 4, 5, 6 })
+		{
+			bool rejected = false;
+			try
+			{
+				(void)syndromeDecodingConfigure(128, 4096,
+					static_cast<MultType>(retired), SdNoiseDistribution::Regular,
+					SdNoiseSecurityModel::binary());
+			}
+			catch (const std::exception&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw UnitTestFail("retired low-weight EA mode was accepted");
+		}
+	}
+
+	const auto binaryLarge = getRegNoiseWeight(
+		0.25, 4096, 128, SdNoiseDistribution::Regular,
+		SdNoiseSecurityModel::binary());
+	const auto binarySmall = getRegNoiseWeight(
+		0.25, 2048, 128, SdNoiseDistribution::Regular,
+		SdNoiseSecurityModel::binary());
+	const auto f9Regular = getRegNoiseWeight(
+		0.25, 4096, 128, SdNoiseDistribution::Regular,
+		SdNoiseSecurityModel{ 9.0 / 8.0 });
+	const auto largeFieldRegular = getRegNoiseWeight(
+		0.25, 4096, 128, SdNoiseDistribution::Regular,
+		SdNoiseSecurityModel{ 1.0 });
+	const auto stationaryWeight = getRegNoiseWeight(
+		0.25, 4096, 128, SdNoiseDistribution::Stationary,
+		SdNoiseSecurityModel::binary());
+	const auto paperDistanceStationary = getRegNoiseWeight(
+		0.20, 4096, 128, SdNoiseDistribution::Stationary,
+		SdNoiseSecurityModel::binary());
+	const auto stationaryAttackFloor = getRegNoiseWeight(
+		0.50, 4096, 128, SdNoiseDistribution::Stationary,
+		SdNoiseSecurityModel::binary());
+	if (binaryLarge != 128 || binarySmall != 144 || f9Regular != 136 ||
+		largeFieldRegular != 160 || stationaryWeight != 160 ||
+		paperDistanceStationary != 200 || stationaryAttackFloor != 128)
+		throw UnitTestFail("Silent-noise security floors selected an unexpected weight");
+
+	PRNG prng(CCBlock);
+	CoeffCtxInteger integerCtx;
+	for (u64 i = 0; i < 256; ++i)
+	{
+		u64 value;
+		sampleRegularNoiseUnit(value, prng, integerCtx);
+		if ((value & 1) == 0 || !isRegularNoiseUnit(value, integerCtx))
+			throw UnitTestFail("Regular integer noise was not sampled from the units");
+	}
+
+	using Product = FVec<Fp31, 2>;
+	CoeffCtxFVec<Fp31, 2> productCtx;
+	for (u64 i = 0; i < 64; ++i)
+	{
+		Product value;
+		sampleRegularNoiseUnit(value, prng, productCtx);
+		if (value.v[0] == Fp31::zero() || value.v[1] == Fp31::zero() ||
+			!isRegularNoiseUnit(value, productCtx))
+			throw UnitTestFail("Regular product-ring noise contained a nonunit lane");
+	}
+
+	SilentVoleReceiver<u64> regular;
+	SilentVoleReceiver<u64> stationary;
+	regular.configure(1024, SilentSecType::SemiHonest, DefaultMultType,
+		SilentBaseType::Base, SdNoiseDistribution::Regular);
+	stationary.configure(1024, SilentSecType::SemiHonest, DefaultMultType,
+		SilentBaseType::Base, SdNoiseDistribution::Stationary);
+	if (regular.mNoiseType != SdNoiseDistribution::Regular ||
+		stationary.mNoiseType != SdNoiseDistribution::Stationary ||
+		stationary.mNumPartitions <= regular.mNumPartitions)
+		throw UnitTestFail("Stationary integer noise did not receive the larger weight");
+
+	const auto count = regular.baseCount();
+	auto choices = regular.sampleBaseChoiceBits(prng);
+	std::vector<block> recvBaseOts(count.mBaseOtCount);
+	SilentVoleReceiver<u64>::VecF baseA(count.mBaseVoleCount);
+	SilentVoleReceiver<u64>::VecG baseC(count.mBaseVoleCount);
+	prng.get(recvBaseOts.data(), recvBaseOts.size());
+	prng.get(baseA.data(), baseA.size());
+	for (u64 i = 0; i < regular.mNumPartitions; ++i)
+		sampleRegularNoiseUnit(baseC[i], prng, integerCtx);
+	baseC[0] = 2;
+
+	bool rejected = false;
+	try
+	{
+		regular.setBaseCors(choices, recvBaseOts, baseA, baseC);
+	}
+	catch (const std::invalid_argument&)
+	{
+		rejected = true;
+	}
+	if (!rejected || regular.mState != SilentVoleReceiver<u64>::State::Configured)
+		throw UnitTestFail("Regular silent VOLE accepted a nonunit base coefficient");
+
+	baseC[0] = 3;
+	regular.setBaseCors(choices, recvBaseOts, baseA, baseC);
+	if (!regular.hasBaseCors())
+		throw UnitTestFail("Regular silent VOLE rejected valid unit coefficients");
 }
 
 

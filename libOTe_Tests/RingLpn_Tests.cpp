@@ -12,12 +12,32 @@
 #include "libOTe/Tools/Field/FVec.h"
 #include "cryptoTools/Common/Log.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
+#include "libOTe/Tools/LpnParameters.h"
 
 namespace osuCrypto
 {
 	void RingLpn_Audit_test(const CLP&)
 	{
 #ifdef ENABLE_RINGLPN
+		static_assert(lpnParameters::decodingWeight128(2) == 64);
+		static_assert(lpnParameters::decodingWeight128(3) == 27);
+		static_assert(lpnParameters::decodingWeight128(4) == 16);
+		static_assert(lpnParameters::decodingWeight128(5) == 12);
+		static_assert(lpnParameters::decodingWeight128(8) == 6);
+		static_assert(lpnParameters::roundUpPower(16, 2) == 16);
+		static_assert(lpnParameters::roundUpPower(17, 2) == 32);
+		static_assert(lpnParameters::roundUpPower(12, 3) == 27);
+
+		const auto f12289C4 = lpnParameters::select(4, 12289.0);
+		if (f12289C4.mCompressionFactor != 4 ||
+			f12289C4.mDecodingWeight != 16 ||
+			f12289C4.mLinearWeight != 9 ||
+			f12289C4.mNoiseWeight != 16)
+			throw UnitTestFail("shared LPN c=4 parameter regression failed");
+		if (lpnParameters::qaSdHasNoExpectedEvaluationPoint(7, 4.0, 3, 27) ||
+			!lpnParameters::qaSdHasNoExpectedEvaluationPoint(8, 4.0, 3, 27))
+			throw UnitTestFail("QA-SD interpolation boundary regression failed");
+
 		using Ring = RingLpnTriple<F12289>;
 		const auto expectRejected = [](Ring& ring, u64 partyIdx, u64 n,
 			Ring::Mode mode, Ring::DpfType dpf, Ring::TensorBaseCorType base,
@@ -37,6 +57,12 @@ namespace osuCrypto
 
 		const auto sum = Ring::DpfType::SumDmpf;
 		const auto precomputed = Ring::TensorBaseCorType::Precomputed;
+		Ring selectedRing;
+		selectedRing.configure(3);
+		selectedRing.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		if (selectedRing.mNumPolys != 3 || selectedRing.mPolyWeight != 32)
+			throw UnitTestFail("RingLPN c=3 secure parameter selection regressed");
+
 		Ring ring;
 		ring.mPartyIdx = 1;
 		ring.mNumPolys = 2;

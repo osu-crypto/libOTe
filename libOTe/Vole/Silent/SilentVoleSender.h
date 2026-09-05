@@ -24,7 +24,6 @@
 #include <libOTe/Vole/Noisy/NoisyVoleReceiver.h>
 #include <libOTe/Vole/Noisy/NoisyVoleSender.h>
 #include <libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h>
-#include <libOTe/Tools/QuasiCyclicCode.h>
 #include <libOTe/Tools/TungstenCode/TungstenCode.h>
 #include <libOTe/Tools/Pprf/StationaryPprf.h>
 #include <libOTe/Vole/VoleUtil.h>
@@ -138,6 +137,9 @@ namespace osuCrypto
 		// BaseExtend requires less compute but more rounds
 		SilentBaseType mBaseType = SilentBaseType::BaseExtend;
 
+		// Distribution used for the sparse LPN noise.
+		SdNoiseDistribution mNoiseType = SdNoiseDistribution::Regular;
+
 		// Seed for syndrome decoding
 		block mCodeSeed = ZeroBlock; 
 
@@ -220,7 +222,9 @@ namespace osuCrypto
 		 * @param requestSize Number of VOLE correlations to generate
 		 * @param malType Security type (SemiHonest or Malicious)
 		 * @param type Type of base OT to use (BaseExtend or Base)
-		 * @param noiseType Distribution of the noise vector (Regular or Stationary)
+		 * @param noiseType Distribution of the noise vector. Regular uses a
+		 * multiplicative unit at every selected position. Stationary uses uniform
+		 * coefficients; small-group contexts use a larger weight.
 		 * @param secParam Security parameter (typically 128)
 		 * @param ctx Context object for F, G operations (default constructed if not provided)
 		 * @param mult the lpn compression matrix type to use (default DefaultMultType)
@@ -507,11 +511,15 @@ namespace osuCrypto
 		if (noiseType != SdNoiseDistribution::Regular &&
 			noiseType != SdNoiseDistribution::Stationary)
 			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
+		if (mult == MultType::QuasiCyclic)
+			throw std::invalid_argument(
+				"QuasiCyclic is a binary code supported by Silent OT, not Silent VOLE. " LOCATION);
 
-		const auto bitCount = coefficientGroupBitCount<G>(ctx);
+		const auto securityModel = SdNoiseSecurityModel{
+			coefficientRegularNoiseFactor<G>(ctx) };
 
 		auto config = syndromeDecodingConfigure(
-			secParam, requestSize, mult, noiseType, bitCount);
+			secParam, requestSize, mult, noiseType, securityModel);
 		auto format = PprfOutputFormat{};
 		if (SdNoiseDistribution::Regular == noiseType)
 		{
@@ -534,6 +542,7 @@ namespace osuCrypto
 		mSecParam = secParam;
 		mRequestSize = requestSize;
 		mBaseType = type;
+		mNoiseType = noiseType;
 		mLpnMultType = mult;
 		mSecurityType = malType;
 		mNumPartitions = config.mNumPartitions;
@@ -759,22 +768,8 @@ namespace osuCrypto
 			}
 			case MultType::QuasiCyclic:
 			{
-#ifdef ENABLE_BITPOLYMUL
-				// QuasiCyclic code is only supported for GF(2^128)
-				if constexpr (
-					std::is_same_v<F, block> &&
-					std::is_same_v<G, block> &&
-					std::is_same_v<Ctx, CoeffCtxGF128>)
-				{
-					QuasiCyclicCode encoder;
-					encoder.init2(mRequestSize, mNoiseVecSize, mCodeSeed);
-					encoder.dualEncode(mB);
-				}
-				else
-					throw std::runtime_error("QuasiCyclic is only supported for GF128, i.e. block. " LOCATION);
-#else
-				throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
-#endif
+				throw std::runtime_error(
+					"QuasiCyclic is a binary code supported by Silent OT, not Silent VOLE. " LOCATION);
 				break;
 			}
 			case osuCrypto::MultType::Tungsten:
@@ -863,6 +858,7 @@ namespace osuCrypto
 		mNumPartitions = 0;
 		mSizePer = 0;
 		mSecParam = 0;
+		mNoiseType = SdNoiseDistribution::Regular;
 		mCodeSeed = ZeroBlock;
 		mDerandomizeMalCheck = false;
 	}

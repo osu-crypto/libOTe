@@ -261,7 +261,8 @@ namespace osuCrypto
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);
 
 		constexpr u64 secParam = 128;
-		auto param = syndromeDecodingConfigure(secParam, numOTs, mult, noiseType, 1);
+		auto param = syndromeDecodingConfigure(
+			secParam, numOTs, mult, noiseType, SdNoiseSecurityModel::binary());
 		auto format = PprfOutputFormat{};
 
 		if (SdNoiseDistribution::Regular == noiseType)
@@ -469,7 +470,12 @@ namespace osuCrypto
 		// Copy the results to the output buffer
 		std::memcpy(b.data(), mB.data(), b.size() * sizeof(block));
 		setTimePoint("sender.expand.ldpc.copy");
-		clear();
+
+		// Regular PPRF state is one-shot. Stationary mode retains its
+		// configuration and advanced code seed for the next expansion, matching
+		// the receiver and the random-OT wrapper (AUD-209).
+		if (mGenVar.index() == 0)
+			clear();
 	}
 
 	// Performs Silent correlated OT protocol with internal storage
@@ -633,9 +639,6 @@ namespace osuCrypto
 #endif
 		}
 		break;
-		case osuCrypto::MultType::ExAcc7:
-		case osuCrypto::MultType::ExAcc11:
-		case osuCrypto::MultType::ExAcc21:
 		case osuCrypto::MultType::ExAcc40:
 		{
 			// Use Expander-Accumulator code for compression

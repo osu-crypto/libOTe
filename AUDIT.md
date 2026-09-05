@@ -6386,3 +6386,456 @@ Verification:
 
 - `RingLpn_Audit_test` accepts the boundary-valid offsets and rejects an offset
   equal to the block size.
+
+## AUD-198: Regular integer Silent VOLE sampled nonunit noise coefficients
+
+Status: fixed
+
+Affected code:
+
+- Silent VOLE receiver base-correlation generation and installation.
+- Silent VOLE coefficient-context sampling.
+
+Concern:
+
+Regular sparse noise over an integer ring requires a nonzero unit at every
+selected position. For `Z_{2^k}`, these are exactly the odd elements. The
+current generator sampled uniform ring elements, so projecting modulo two
+removed about half of the selected errors. An older implementation attempted
+to enforce odd coefficients but inverted its parity branch and instead made
+every generated coefficient even.
+
+Stationary noise has different semantics: its coefficients remain uniform ring
+elements, including even elements and zero. Its parameter selection must
+account for the resulting projection through a larger noise weight rather than
+conditioning each coefficient to be a unit.
+
+Impact:
+
+Regular integer Silent VOLE used less effective noise than its regular-weight
+parameter selection assumed. In the older all-even implementation, reduction
+modulo two removed the noise entirely. The current uniform implementation did
+not remove it entirely, but still reduced the effective binary noise weight.
+
+Resolution:
+
+Regular base generation now samples multiplicative units through the
+coefficient context. The default integer context maps one uniform sample to a
+uniform odd element; fields reject zero; product-ring contexts sample a unit in
+every lane. Externally supplied regular bases are validated before protocol
+state changes. Stationary generation deliberately retains uniform
+coefficients, and the existing stationary integer parameter path supplies its
+larger weight. Sampling and validation occur only during setup; expansion and
+encoding loops are unchanged.
+
+Verification:
+
+- `Vole_Silent_NoiseSampling_test` checks integer and product-ring unit
+  sampling, rejects an externally supplied even regular coefficient, and
+  verifies that stationary integer parameters use a larger weight.
+- The regular Silent VOLE parameter sweep, stationary Silent VOLE test,
+  external-base test, and state-clear test pass in the Release AVX2 build.
+
+## AUD-200: Silent LPN noise selection conflated binary and large-field bias
+
+Status: fixed
+
+Affected code:
+
+- Silent OT and Silent VOLE syndrome-decoding parameter selection.
+
+Concern:
+
+The regular-noise selector always used the binary linear-character decay
+`(1 - 2 delta)^t`. For coefficients uniform in `F_q^*`, the corresponding
+factor is `q/(q-1)`, so the decay approaches the stationary-noise expression
+`(1 - delta)^t` over large fields. The stationary large-field path compensated
+by silently selecting regular parameters, but those parameters still used the
+binary formula and did not describe the noise distribution actually sampled.
+The distance calculation also stood alone rather than being combined with a
+separate floor for known decoding and algebraic attacks.
+
+Impact:
+
+Large-field regular and stationary Silent VOLE could select substantially less
+noise than their pseudo-distance estimates required. At pseudo distance 0.25,
+the old large-field stationary path selected weight 128, corresponding to only
+about 53 bits under the stationary linear-character calculation.
+
+Resolution:
+
+Parameter selection now takes the maximum of a 64-bit pseudo-distance guard, a
+128-bit attack-oriented weight floor (scaled from the requested security
+parameter), and the existing small-instance implementation floor. Regular
+field noise uses the field-specific factor `q/(q-1)`; binary and odd integer
+units use factor 2; stationary noise uses factor 1. The selector also adds a
+9/8 margin to small binary regular instances, where current estimators place
+the former `N=2048, t=128` parameters below 128 bits. The rationale, formulas,
+tradeoff, and remaining estimator uncertainty are documented beside the code.
+For stationary noise, the independent attack floor counts secret support
+positions rather than the nonzero coefficients in one sample. This matches the
+zero-inclusive SSD algebraic model; compensating again for zeros would partially
+turn the explicitly chosen 64-bit linear-test guard back into a 128-bit guard.
+All calculations occur during configuration and do not affect expansion loops.
+
+Verification:
+
+- `Vole_Silent_NoiseSampling_test` checks the binary large-instance floor, the
+  small-instance attack margin, an `F_9` regular-noise case, the large-field
+  limit, the stationary 64-bit pseudo-distance floor at distances 0.2 and 0.25,
+  and the independent 128-position stationary attack floor.
+
+## AUD-201: Quasi-cyclic Silent VOLE decomposed extension-field elements
+
+Status: fixed
+
+Affected code:
+
+- Quasi-cyclic compression in `SilentVoleSender` and `SilentVoleReceiver`.
+
+Concern:
+
+The quasi-cyclic encoder is a binary linear code. Applying it independently to
+the bits of a `block` does not turn it into a code over GF(2^128); it produces
+128 copies of the same binary code. In particular, stationary GF(2^128) noise
+projects to many binary noise vectors with the same support and the same code
+matrix. This falls outside the extension-field model and resembles the fixed-code
+correlation that the SSD analysis warns must be avoided. Unlike the other
+structured encoders, the quasi-cyclic encoder has no `mulConst` operation that
+couples extension components.
+
+Impact:
+
+The public Silent VOLE API admitted a nominal GF(2^128) construction whose
+security could only be analyzed through its correlated binary projections. The
+large-field parameter model therefore did not describe the instantiated code.
+
+Resolution:
+
+Quasi-cyclic compression is now explicitly binary-only. Silent OT retains it:
+although Silent OT stores 128 instances in each `block`, each bit lane is a
+separate binary protocol instance. Silent VOLE rejects `MultType::QuasiCyclic`
+during configuration, before allocating or consuming setup state, and retains a
+defensive rejection in the unreachable compression branch. Extension-field
+Silent VOLE must use an encoder that invokes the coefficient context's
+component-mixing operation.
+
+Verification:
+
+- `Vole_Silent_QuasiCyclic_test` verifies that both Silent VOLE roles reject QC
+  without becoming configured.
+- The existing quasi-cyclic Silent OT test continues to exercise the supported
+  binary construction.
+
+## AUD-202: Small extension-field contexts did not mix base-field components
+
+Status: fixed
+
+Affected code:
+
+- `CoeffCtxF4`, `CoeffCtxF9`, and extension-field lanes in `CoeffCtxFVec`.
+- Binary structured LPN encoders that invoke `CoeffCtx::mulConst`.
+
+Concern:
+
+The EA, ExConv, block-accumulator, and Tungsten encoders use `mulConst` to stop
+an extension-field code from decomposing into independent codes over its prime
+subfield. `CoeffCtxGF128` implemented this operation, but the F4 and F9 contexts
+inherited the scalar identity operation. FVec also inherited identity instead
+of forwarding the scalar operation to its lanes.
+
+Impact:
+
+Silent LPN over F4 or F9 could be projected component-wise to the underlying F2
+or F3 code. This invalidated the intended full-field attack model and could
+reduce the attack-visible noise weight. Vectors of extension-field elements had
+the same problem within every lane.
+
+Resolution:
+
+F4 and F9 now multiply by their extension generator `u`. Since both extensions
+have prime degree two, `u` has full algebraic degree and its multiplication
+orbit spans both stored components. FVec applies its scalar context's operation
+independently to every lane. The coefficient-context contract now requires an
+extension field to use a full-degree constant, requires product contexts to
+delegate lane-wise, and explicitly requires in-place operation because the
+encoding kernels alias the input and output. Scalar prime fields and base rings
+retain identity. A denser multiplication matrix could provide faster component
+diffusion and might improve heuristic security, but the current parameter
+analysis does not prove or require that stronger property.
+
+Verification:
+
+- `Field_Audit_Test` checks that the GF(2^128) constant is outside every proper
+  subfield, the exact F4 and F9 generator action including in-place calls, and
+  lane-wise FVec<F4> mixing.
+
+## AUD-203: Quasi-cyclic modulus selection admitted small algebraic factors
+
+Status: fixed
+
+Affected code:
+
+- Quasi-cyclic Silent OT modulus selection.
+
+Concern:
+
+The quasi-cyclic encoder selected the first prime `p` at least as large as the
+requested output dimension. Primality alone does not make
+`(X^p - 1) / (X - 1)` irreducible over `F_2`; irreducibility additionally
+requires 2 to have multiplicative order `p - 1` modulo `p`. Some common request
+sizes selected highly reducible quotients. For example, a request of `2^16`
+selected `p = 65537`, where the order of 2 is only 32, producing 2048
+degree-32 factors. At least one of those factors has polynomial weight five.
+
+Impact:
+
+An attacker could project the quasi-cyclic LPN instance into much smaller
+factor rings. The projected regular error may become dense enough to prevent a
+practical attack, so this audit did not establish a concrete break. However,
+the generic pseudo-distance and decoding-attack floors did not model these
+reduced instances, leaving an unnecessary algebraic assumption in the QC
+parameter selection.
+
+Resolution:
+
+QC now selects the first prime `p` for which 2 is a primitive root. The
+distinct prime factors of `p - 1` are checked using modular exponentiation, so
+the selected quotient is irreducible over `F_2`. The padding cost is negligible
+at the target dimensions: requests of `2^16`, `2^17`, and `2^20` select 65539,
+131213, and 1048589, respectively, adding 3, 141, and 13 positions.
+
+Verification:
+
+- The deterministic number-theory audit test checks all three representative
+  modulus selections.
+- The existing quasi-cyclic encoder and Silent OT tests exercise the new
+  modulus through the supported binary protocol path.
+
+## AUD-204: Structured-code pseudo distances exceeded available evidence
+
+Status: fixed
+
+Affected code:
+
+- Silent OT and Silent VOLE structured-code parameter selection.
+- Protocol-facing low-weight expand-accumulate modes.
+
+Concern:
+
+Several compression modes used a pseudo minimum-distance ratio of 0.25 with no
+explicit margin. Expand-accumulate weights 7 and 11 were contradicted by both
+generator-row estimates and the efficient signature-collision attack of the
+Expand-Convolute analysis. Weight 21 also lacked enough evidence to retain as a
+production security choice. The block-accumulate paper estimates actual
+relative distance near 0.1, while its larger pseudo distance remains a
+computational-hardness heuristic. ExConv and experimental Tungsten similarly
+did not justify treating the generator-row mean as a lower bound.
+
+Impact:
+
+Overstating pseudo distance selected too few stationary or large-field noise
+positions for the intended 64-bit linear-test guard. Low-weight EA additionally
+admitted efficiently findable codewords far below its configured ratio. Binary
+regular noise was often protected by the independent 128-position attack
+floor, but that did not make the documented pseudo-distance claims accurate.
+
+Resolution:
+
+The protocol API removes EA weights 7, 11, and 21, retaining only weight 41 at
+pseudo distance 0.20. ExConv weights 7 and 21 now use 0.15 and 0.20. BA-3 with
+sigma 8 and 32 now uses 0.15 and 0.20. Tungsten remains explicitly experimental
+and uses 0.20. QC retains 0.25 after AUD-203 removes its separate algebraic
+factor concern. These are attack-visible pseudo-distance judgments, not claims
+about literal minimum distance; the distinction and construction-specific
+uncertainty are documented beside the selectors.
+
+Verification:
+
+- `EACode_config_test` checks that only the retained weight-41 production
+  configuration is selected.
+- `Vole_Silent_NoiseSampling_test` checks every approved pseudo-distance value
+  and rejects the retired numeric EA modes.
+- The Silent OT EA integration test now exercises only the retained mode.
+
+## AUD-205: Quasi-cyclic encoding could retain the public parity component
+
+Status: fixed
+
+Affected code:
+
+- Quasi-cyclic Silent OT modulus selection and syndrome truncation.
+
+Concern:
+
+The encoder selected the first suitable prime `p` greater than or equal to the
+requested output dimension. When the requested dimension was itself such a
+prime, the encoder returned all `p` cyclic syndrome coordinates. This retained
+the `X - 1` component that the construction explicitly removes. The all-ones
+output character then mapped to a coefficient vector that was constant on each
+quasi-cyclic input block.
+
+Impact:
+
+For regular noise, only partitions crossing quasi-cyclic block boundaries
+randomized this character. At the representative supported dimension
+`p = 1048589`, the configured 128 noise partitions had only two such boundary
+crossings, giving the character bias at least 0.959 independently of the
+sampled circulants. This was a practical linear distinguisher.
+
+Resolution:
+
+QC now selects the first suitable prime strictly greater than the requested
+output dimension. Truncating at least one syndrome coordinate excludes the
+all-ones polynomial and removes the public `X - 1` component.
+
+Verification:
+
+- The QC utility test uses a requested dimension that is itself a suitable
+  prime and compares the optimized encoder with an independent scalar
+  polynomial implementation using the required strictly larger modulus.
+
+## AUD-206: Quasi-cyclic tests were skipped by continuous integration
+
+Status: fixed
+
+Affected code:
+
+- Ubuntu continuous-integration configuration.
+- Quasi-cyclic utility and Silent OT integration tests.
+
+Concern:
+
+`ENABLE_ALL_OT` enabled Silent OT but did not enable the independent bitpolymul
+dependency. All QC tests therefore reported skips in every normal CI build.
+
+Impact:
+
+Changes to the QC encoder and its Silent OT integration could reach the main
+branch without being compiled or executed by CI. In particular, no regression
+would have detected AUD-205.
+
+Resolution:
+
+The primary Ubuntu CI build now enables bitpolymul. Its existing unit-test step
+therefore compiles and runs the QC arithmetic, encoder, and end-to-end Silent OT
+tests under ASan.
+
+Verification:
+
+- The CI build configuration explicitly sets `ENABLE_BITPOLYMUL=ON`.
+
+## AUD-207: Quasi-cyclic matrix utility probabilistically rejected valid codes
+
+Status: fixed
+
+Affected code:
+
+- `QuasiCyclicCode::getMatrix()` diagnostic utility.
+
+Concern:
+
+While constructing the explicit matrix, the utility applied a one-sided random
+row-weight check using the prime modulus rather than deviation from the
+expected parity-row weight. A valid sampled matrix could therefore cause the
+utility to throw, with the failure becoming increasingly likely as more rows
+were inspected.
+
+Impact:
+
+This did not affect protocol encoding, but made the diagnostic API unreliable
+and unsuitable as deterministic regression coverage.
+
+Resolution:
+
+The probabilistic rejection was removed. Correctness is checked deterministically
+against the independent scalar encoder instead of treating an ordinary random
+weight fluctuation as an implementation failure.
+
+Verification:
+
+- The scalar QC regression checks the complete optimized result for four small
+  inputs using strict syndrome truncation and two circulant blocks.
+
+## AUD-208: Quasi-cyclic parity blocks used the padded transpose stride
+
+Status: fixed
+
+Affected code:
+
+- Quasi-cyclic bit-matrix transposition before polynomial multiplication.
+
+Concern:
+
+The encoder transposed the complete parity span into a matrix whose polynomial
+columns were padded to `128 * ceil(p / 128)` bits, but it computed polynomial
+boundaries at multiples of the prime modulus `p`. Since `p` is not divisible
+by 128, coordinates after each `p`-boundary remained in the preceding padded
+block. Reduction modulo `X^p - 1` then folded those coordinates onto existing
+columns, while the following random circulant started only at the padded
+128-bit boundary.
+
+Impact:
+
+The implemented matrix deviated from the analyzed quasi-cyclic family whenever
+the parity region contained more than one modulus block. Up to 127 positions at
+each boundary were assigned to the wrong circulant and some input rows became
+duplicates. This could be a substantial fraction of the matrix for small
+configured dimensions. No concrete decoding attack was established, but the
+intended independent random-block structure did not hold.
+
+Resolution:
+
+The encoder now packs each `p`-coordinate polynomial independently in
+128-coordinate chunks. A single aligned stack buffer is zero-padded only for a
+partial chunk, transposed in place, and stored directly into the existing FFT
+input matrix. The matrix allocation is uninitialized because every used and
+padded cell is now written explicitly. The hot loop adds no allocation,
+dynamic dispatch, or per-coordinate abstraction.
+
+Verification:
+
+- The scalar QC regression spans two circulant blocks and checks basis vectors
+  in both blocks as well as random inputs.
+- The bit-shift, modular-reduction, bitpolymul, explicit-matrix, QC encoder, and
+  end-to-end Silent OT tests pass.
+- Five sequential `k = 2^18` single-block encodes averaged 62.4 ms before and
+  61.3 ms after the change. The difference is within run-to-run noise; no
+  slowdown was observed.
+
+## AUD-209: Stationary correlated OT reset only the sender's encoder state
+
+Status: fixed
+
+Affected code:
+
+- Silent correlated-OT output wrapper with stationary noise.
+- Every compression mode when reused through that wrapper, including QC.
+
+Concern:
+
+After copying correlated OT output, the sender unconditionally cleared its
+configuration while the receiver cleared only regular-noise state. On a second
+stationary expansion, the sender therefore reconfigured and restarted from the
+initial code seed while the receiver retained its configuration and advanced
+code seed.
+
+Impact:
+
+The parties compressed their second stationary correlation with different
+matrices. The resulting outputs did not satisfy the requested correlation. The
+random-OT wrapper already retained stationary state symmetrically and was not
+affected.
+
+Resolution:
+
+The correlated sender wrapper now follows the same lifecycle rule as both
+random-OT wrappers: regular PPRF state is cleared after use, while stationary
+state and its advanced code seed are retained. Fresh base correlations are
+still required and consumed for every expansion.
+
+Verification:
+
+- The QC integration test performs two consecutive stationary correlated-OT
+  expansions with the same sender, receiver, and delta, replenishing base
+  correlations between expansions and checking every output correlation.

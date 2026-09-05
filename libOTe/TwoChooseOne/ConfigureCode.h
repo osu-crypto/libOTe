@@ -14,6 +14,19 @@ namespace osuCrypto
         Stationary, // use the stationary noise model
     };
 
+    // Describes the worst-case linear-character decay caused by one selected
+    // regular-noise position. If delta is the codeword's relative weight, the
+    // one-sample bias is 1 - mRegularNoiseFactor * delta.
+    struct SdNoiseSecurityModel
+    {
+        double mRegularNoiseFactor = 2.0;
+
+        static constexpr SdNoiseSecurityModel binary()
+        {
+            return { 2.0 };
+        }
+    };
+
 
     inline std::ostream& operator<<(std::ostream& o, SdNoiseDistribution m)
     {
@@ -35,14 +48,15 @@ namespace osuCrypto
 
     enum class MultType
     {
+        // Binary quasi-cyclic code. Supported by Silent OT; extension-field
+        // Silent VOLE requires a code that mixes extension components.
         // https://eprint.iacr.org/2019/1159.pdf
         QuasiCyclic = 1,
 
         // https://eprint.iacr.org/2022/1014
-        ExAcc7 = 4, // fast
-        ExAcc11 = 5,// fast but more conservative
-        ExAcc21 = 6,
-        ExAcc40 = 7, // conservative
+        // Low fixed-weight EA parameters admit efficiently findable low-weight
+        // codewords. Only the conservative weight-41 mode is exposed.
+        ExAcc40 = 7,
 
         // https://eprint.iacr.org/2023/882
         ExConv7x24 = 8, //fast
@@ -64,15 +78,6 @@ namespace osuCrypto
             o << "QuasiCyclic";
             break;
 
-        case osuCrypto::MultType::ExAcc7:
-            o << "ExAcc7";
-            break;
-        case osuCrypto::MultType::ExAcc11:
-            o << "ExAcc11";
-            break;
-        case osuCrypto::MultType::ExAcc21:
-            o << "ExAcc21";
-            break;
         case osuCrypto::MultType::ExAcc40:
             o << "ExAcc40";
             break;
@@ -102,21 +107,12 @@ namespace osuCrypto
     constexpr MultType DefaultMultType = MultType::BlkAcc3x32;
 
 
-    // We get e^{-2t d/N} security against linear attacks, 
-    // with noise weight t and minDist d and code size N. 
-    // For regular we can be slightly more accurate with
-    //    (1 − 2d/N)^t
-    // which implies a bit security level of
-    // k = -t * log2(1 - 2d/N)
-    // t = -k / log2(1 - 2d/N)
-    //
-    //
-    // For stationary, we get
-    //    (1-d/N)^t
-    // 
-    // minDistRatio = d / N
-    // where d is the min dist and N is the code size.
-    u64 getRegNoiseWeight(double minDistRatio, u64 N, u64 secParam, SdNoiseDistribution noiseType);
+    u64 getRegNoiseWeight(
+        double pseudoMinDistRatio,
+        u64 N,
+        u64 secParam,
+        SdNoiseDistribution noiseType,
+        SdNoiseSecurityModel securityModel);
 
 
     class EACode;
@@ -141,7 +137,10 @@ namespace osuCrypto
     )
     {
         scaler = 2;
-        minDist = 0.25; // estimated psuedo min dist
+        // A generator row has relative weight close to 1/4. This is a pseudo
+        // distance estimate; algebraic attacks are handled separately by
+        // requiring an irreducible quasi-cyclic modulus.
+        minDist = 0.25;
     }
 
 
@@ -156,16 +155,22 @@ namespace osuCrypto
         {
             sigma = 8;
             depth = 3;
+            // The concrete minimum distance is about 0.1. We use 0.15 as an
+            // aggressive pseudo-distance estimate: finding the lowest-weight
+            // words still requires exploiting the sampled global code.
+            minDist = 0.15;
         }
         else if (mult == MultType::BlkAcc3x32)
         {
             sigma = 32;
             depth = 3;
+            // The larger local state makes the known low-weight mechanism
+            // substantially harder to search than for sigma=8.
+            minDist = 0.20;
         }
         else
             throw RTE_LOC;
         scaler = 2;
-        minDist = 0.25; // estimated psuedo min dist
     }
 
     inline void TungstenConfigure(
@@ -173,7 +178,9 @@ namespace osuCrypto
         double& minDist)
     {
         mScaler = 2;
-        minDist = 0.25; // estimated psuedo min dist
+        // Tungsten is experimental and has no proof. Generator-row checks are
+        // consistent with a value near 1/4; retain explicit heuristic margin.
+        minDist = 0.20;
 
     }
 
@@ -202,33 +209,26 @@ namespace osuCrypto
     // * requestSize the compressed vector size. 
     // * multType the code to be used.
     // * noiseType the choice distribution
-    // * groupBitCount the bit count of the subfield or smallest subgroup. 
-    //   For example, Z2k should be 1 because you have the Z2 subgroup.
+    // * securityModel describes the regular-noise coefficient distribution.
     inline SdConfig syndromeDecodingConfigure(
         u64 secParam,
         u64 requestSize,
         MultType multType, 
         SdNoiseDistribution noiseType,
-        u64 groupBitCount)
+        SdNoiseSecurityModel securityModel)
     {
 		constexpr u64 maxSecurityParameter = 1024;
 		constexpr u64 maxRequestSize = std::numeric_limits<u32>::max();
-		constexpr u64 maxGroupBitCount = std::numeric_limits<u16>::max();
 
 		if (secParam > maxSecurityParameter)
 			throw std::invalid_argument("Syndrome-decoding security parameter exceeds the supported range. " LOCATION);
 		if (requestSize > maxRequestSize)
 			throw std::invalid_argument("Syndrome-decoding request size exceeds the supported range. " LOCATION);
-		if (groupBitCount > maxGroupBitCount)
-			throw std::invalid_argument("Syndrome-decoding group bit count exceeds the supported range. " LOCATION);
 
         double minDist = 0;
         u64 scaler = 0;
         switch (multType)
         {
-        case osuCrypto::MultType::ExAcc7:
-        case osuCrypto::MultType::ExAcc11:
-        case osuCrypto::MultType::ExAcc21:
         case osuCrypto::MultType::ExAcc40:
         {
             u64 _1;
@@ -263,11 +263,6 @@ namespace osuCrypto
             break;
         }
 
-        // for small fields and SD we use the conservative parameters.
-        // otherwise just use the normal SD parameters. 
-        if (groupBitCount > 4 && noiseType == SdNoiseDistribution::Stationary)
-            noiseType = SdNoiseDistribution::Regular;
-
         SdConfig config;
 
         auto baseSize = roundUpTo(requestSize * scaler, 2);
@@ -278,7 +273,8 @@ namespace osuCrypto
 
         if (preferPow2)
         {
-            config.mNumPartitions = roundUpTo(getRegNoiseWeight(minDist, baseSize, secParam, noiseType), 2);
+            config.mNumPartitions = roundUpTo(getRegNoiseWeight(
+                minDist, baseSize, secParam, noiseType, securityModel), 2);
             config.mSizePer = std::max<u64>(4, roundUpTo(baseSize / config.mNumPartitions, 2));
 		    config.mNoiseVectorSize =  std::max(baseSize, config.mNumPartitions * config.mSizePer);
 
@@ -295,7 +291,8 @@ namespace osuCrypto
 			(config.mNoiseVectorSize > (config.mNumPartitions * config.mSizePer * 1.05)))
         {
 			// non power of two case. 
-            config.mNumPartitions = roundUpTo(getRegNoiseWeight(minDist, baseSize, secParam, noiseType), 2);
+            config.mNumPartitions = roundUpTo(getRegNoiseWeight(
+                minDist, baseSize, secParam, noiseType, securityModel), 2);
             config.mSizePer = std::max<u64>(4, roundUpTo(divCeil(baseSize, config.mNumPartitions), 2));
 			config.mNoiseVectorSize = config.mNumPartitions * config.mSizePer;
         }

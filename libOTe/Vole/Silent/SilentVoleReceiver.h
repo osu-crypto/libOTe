@@ -25,7 +25,6 @@
 #include <libOTe/Vole/Noisy/NoisyVoleReceiver.h>
 #include <libOTe/Vole/Noisy/NoisyVoleSender.h>
 #include <numeric>
-#include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h"
 #include <libOTe/Tools/TungstenCode/TungstenCode.h>
 #include <libOTe/Vole/VoleUtil.h>
@@ -131,6 +130,9 @@ namespace osuCrypto
 		// What type of Base OTs should be performed.
 		SilentBaseType mBaseType = SilentBaseType::BaseExtend;
 
+		// Distribution used for the sparse LPN noise.
+		SdNoiseDistribution mNoiseType = SdNoiseDistribution::Regular;
+
 		// The matrix multiplication type which compresses the sparse vector
 		MultType mLpnMultType = DefaultMultType;
 
@@ -191,8 +193,10 @@ namespace osuCrypto
 		 * @param requestSize Number of VOLE correlations to generate
 		 * @param malType Security type (SemiHonest or Malicious)
 		 * @param type Type of base OT to use (BaseExtend or Base)
-		 * @param noiseType Distribution of the noise vector (Regular or Stationary)
-		 * if stationary is used, the base OTs are reusable.
+		 * @param noiseType Distribution of the noise vector. Regular samples a
+		 * multiplicative unit at every selected position. Stationary samples
+		 * uniform coefficients; small-group contexts use a larger weight and its
+		 * base OTs are reusable.
 		 * @param secParam Security parameter (typically 128)
 		 * @param ctx Context object for F, G operations (default constructed if not provided)
 		 * @param mult Type of matrix multiplication to use for compressing the sparse vector
@@ -301,7 +305,8 @@ namespace osuCrypto
 		 * @param choice The choice bits used for base OTs (from sampleBaseChoiceBits)
 		 * @param recvBaseOts The received base OT messages
 		 * @param baseA The receiver's base VOLE shares. should be a vector like type of Fs
-		 * @param baseC The receiver's base VOLE multiplication values. should be a vector like type of Gs
+		 * @param baseC The receiver's base VOLE multiplication values. Regular
+		 * noise requires the first mNumPartitions values to be multiplicative units.
 		 */
 		void setBaseCors(
 			const BitVector& choice,
@@ -468,8 +473,13 @@ namespace osuCrypto
 			VecG baseC;
 			mCtx.resize(baseA, count.mBaseVoleCount);
 			mCtx.resize(baseC, count.mBaseVoleCount);
-			for (u64 i = 0; i < count.mBaseVoleCount; ++i)
-				mCtx.fromBlock(baseC[i], prng.get<block>());
+			for (u64 i = 0; i < mNumPartitions; ++i)
+			{
+				if (mNoiseType == SdNoiseDistribution::Regular)
+					sampleRegularNoiseUnit(baseC[i], prng, mCtx);
+				else
+					mCtx.fromBlock(baseC[i], prng.get<block>());
+			}
 
 
 			// For malicious security, compute checksum in the last position
@@ -608,10 +618,15 @@ namespace osuCrypto
 		if (noiseType != SdNoiseDistribution::Regular &&
 			noiseType != SdNoiseDistribution::Stationary)
 			throw std::invalid_argument("Unknown noise type. " LOCATION);
+		if (mult == MultType::QuasiCyclic)
+			throw std::invalid_argument(
+				"QuasiCyclic is a binary code supported by Silent OT, not Silent VOLE. " LOCATION);
 
-		const auto bitCount = coefficientGroupBitCount<G>(ctx);
+		const auto securityModel = SdNoiseSecurityModel{
+			coefficientRegularNoiseFactor<G>(ctx) };
 
-		auto param = syndromeDecodingConfigure(secParam, requestSize, mult, noiseType, bitCount);
+		auto param = syndromeDecodingConfigure(
+			secParam, requestSize, mult, noiseType, securityModel);
 		auto format = PprfOutputFormat{};
 		if (noiseType == SdNoiseDistribution::Regular)
 		{
@@ -634,6 +649,7 @@ namespace osuCrypto
 		mSecParam = secParam;
 		mRequestSize = requestSize;
 		mBaseType = type;
+		mNoiseType = noiseType;
 		mLpnMultType = mult;
 		mSecurityType = malType;
 		mNumPartitions = param.mNumPartitions;
@@ -686,6 +702,15 @@ namespace osuCrypto
 			throw std::runtime_error("wrong number of silent base Vole values." LOCATION);
 		if (baseC.size() != count.mBaseVoleCount)
 			throw std::runtime_error("wrong number of silent base Vole values." LOCATION);
+		if (mNoiseType == SdNoiseDistribution::Regular)
+		{
+			for (u64 i = 0; i < mNumPartitions; ++i)
+			{
+				if (!isRegularNoiseUnit(baseC[i], mCtx))
+					throw std::invalid_argument(
+						"Regular silent VOLE base coefficients must be units." LOCATION);
+			}
+		}
 
 		if (count.mBaseOtCount)
 		{
@@ -908,25 +933,8 @@ namespace osuCrypto
 		}
 		case osuCrypto::MultType::QuasiCyclic:
 		{
-#ifdef ENABLE_BITPOLYMUL
-			// QuasiCyclic code is only supported for GF(2^128)
-			if constexpr (
-				std::is_same_v<F, block> &&
-				std::is_same_v<G, block> &&
-				std::is_same_v<Ctx, CoeffCtxGF128>)
-			{
-				QuasiCyclicCode encoder;
-				encoder.init2(mRequestSize, mNoiseVecSize, mCodeSeed);
-				encoder.dualEncode(mA);
-				encoder.dualEncode(mC);
-			}
-			else
-			{
-				throw std::runtime_error("QuasiCyclic is only supported for GF128, i.e. block. " LOCATION);
-			}
-#else
-			throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
-#endif
+			throw std::runtime_error(
+				"QuasiCyclic is a binary code supported by Silent OT, not Silent VOLE. " LOCATION);
 			break;
 		}
 		case osuCrypto::MultType::Tungsten:
@@ -1148,6 +1156,7 @@ namespace osuCrypto
 		mNumPartitions = 0;
 		mSizePer = 0;
 		mSecParam = 0;
+		mNoiseType = SdNoiseDistribution::Regular;
 		mCodeSeed = ZeroBlock;
 		mMalCheckSeed.reset();
 		mDerandomizeMalCheck = false;
