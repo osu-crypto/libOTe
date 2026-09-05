@@ -74,9 +74,6 @@ namespace osuCrypto
 			mOutBytes = outBytes;
 			mNumIntermediateBytes = mOutBytes * 1;
 
-			if (mNumIntermediateBytes * 8 > mInBytes * mInBytes * 8 * 8)
-				throw std::runtime_error("GoldreichHash: mOutBytes * 2 <= mInBytes * mInBytes. " LOCATION);
-
 			mMult.init(mPartyIdx, mN * mNumIntermediateBytes * 8);
 		}
 
