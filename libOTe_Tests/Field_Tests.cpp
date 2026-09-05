@@ -3,6 +3,8 @@
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Tools/Field/GF128.h"
 #include "libOTe/Tools/Field/FVec.h"
+#include "libOTe/Tools/Field/F4.h"
+#include "libOTe/Tools/Field/F9.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
 
 #include "libOTe/Tools/Ntt/Poly.h"
@@ -251,6 +253,33 @@ namespace tests_libOTe
 		const auto gf128Expected = gf128Mixed.gf128Mul(gf128Mixed);
 		gf128Ctx.mulConst(gf128Mixed, gf128Mixed);
 		if (gf128Mixed != gf128Expected)
+			throw RTE_LOC;
+
+		CoeffCtxF4 f4Ctx;
+		F4 f4Mixed;
+		f4Ctx.mulConst(f4Mixed, F4::one());
+		if (f4Mixed != F4::fromCoefficients(0, 1))
+			throw RTE_LOC;
+		f4Ctx.mulConst(f4Mixed, f4Mixed);
+		if (f4Mixed != F4::fromCoefficients(1, 1))
+			throw RTE_LOC;
+
+		CoeffCtxF9 f9Ctx;
+		F9 f9Mixed;
+		f9Ctx.mulConst(f9Mixed, F9::one());
+		if (f9Mixed != F9::fromCoefficients(0, 1))
+			throw RTE_LOC;
+		f9Ctx.mulConst(f9Mixed, f9Mixed);
+		if (f9Mixed != F9(2))
+			throw RTE_LOC;
+
+		using F4Vector = FVec<F4, 2>;
+		CoeffCtxFVec<F4, 2> f4VectorCtx;
+		F4Vector f4Vector{
+			F4::one(), F4::fromCoefficients(0, 1) };
+		f4VectorCtx.mulConst(f4Vector, f4Vector);
+		if (f4Vector.v[0] != F4::fromCoefficients(0, 1) ||
+			f4Vector.v[1] != F4::fromCoefficients(1, 1))
 			throw RTE_LOC;
 
 		F minusOne = F::order() - 1;
