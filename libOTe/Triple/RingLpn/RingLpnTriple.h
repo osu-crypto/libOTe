@@ -60,7 +60,7 @@ namespace osuCrypto
 		// log2 polynomial size
 		u64 mLogN = 0;
 
-		// The A poly in FFT format. There will be mNumPolys rows. 
+		// This expansion's public masks in FFT format; row zero is the identity.
 		Matrix<F> mFftA;
 
 		// The A^2 poly in FFT format. There will be mNumPolys^2 rows. 
@@ -467,7 +467,8 @@ namespace osuCrypto
 
 		mGmw.init(mPartyIdx, weight * weight, mAdder);
 
-		sampleA(block(3127894527893612049, 240925987420932408));
+		mFftA.resize(0, 0);
+		mFftASquared.resize(0, 0);
 	}
 
 
@@ -809,6 +810,11 @@ namespace osuCrypto
 
 
 	template<typename F, typename CoeffCtx>
+#if defined(_MSC_VER)
+	__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+	__attribute__((noinline))
+#endif
 	void RingLpnTriple<F, CoeffCtx>::sampleA(block seed)
 	{
 
@@ -817,9 +823,7 @@ namespace osuCrypto
 
 		PRNG prng(seed);
 		mFftA.resize(mNumPolys, mN);
-		mFftASquared.resize(0, 0);
 		mFftASquared.resize(mNumPolys * mNumPolys, mN);
-		//prng.get(mFftA.data() + mN, mFftA.size() - mN);
 
 		// make a_0 the identity polynomial (in FFT space) polyIdx.e., all 1s
 		for (size_t i = 0; i < mN; i++) {
@@ -1184,6 +1188,26 @@ namespace osuCrypto
 		}
 		else if (hasTensor() == false)
 			co_await tensor(prng, sock);
+
+		// Fixed supports require fresh public masks on every expansion.
+		// Word arrays remain owned by this frame across socket suspensions;
+		// sampleA keeps its aligned PRNG scratch in a non-coroutine stack frame.
+		std::array<u64, 2> maskSeed, peerMaskSeed;
+		prng.get<u64>(maskSeed.data(), maskSeed.size());
+		if (mPartyIdx == 0)
+		{
+			co_await sock.send(maskSeed);
+			co_await sock.recv(peerMaskSeed);
+		}
+		else
+		{
+			co_await sock.recv(peerMaskSeed);
+			co_await sock.send(maskSeed);
+		}
+		for (u64 i = 0; i < maskSeed.size(); ++i)
+			maskSeed[i] ^= peerMaskSeed[i];
+		sampleA(block(maskSeed[1], maskSeed[0]));
+		setTimePoint("public masks");
 
 		if (mDebug)
 			co_await checkTensor(sock);

@@ -744,6 +744,9 @@ namespace osuCrypto
 		if (verbose)
 			oles[0].setTimer(timer);
 
+		std::vector<F> previousMasks;
+		std::array<std::vector<u64>, 2> previousPositions;
+
 		for (u64 tt = 0; tt < trials; ++tt)
 		{
 			if (tt)
@@ -794,6 +797,33 @@ namespace osuCrypto
 				oles[1].expand(B, C1, prng1, sock[1])));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
+
+			const auto& masks = oles[0].mFftA;
+			if (masks.rows() != oles[0].mNumPolys || masks.cols() != n ||
+				oles[1].mFftA.rows() != masks.rows() || oles[1].mFftA.cols() != n)
+				throw UnitTestFail("RingLPN public mask dimensions are incorrect");
+			if (!std::equal(masks.begin(), masks.end(), oles[1].mFftA.begin()))
+				throw UnitTestFail("RingLPN parties used different public masks");
+			if (tt && std::equal(masks.begin(), masks.end(), previousMasks.begin()))
+				throw UnitTestFail("RingLPN reused public masks across expansions");
+			previousMasks.assign(masks.begin(), masks.end());
+			for (u64 i = 0; i < n; ++i)
+			{
+				if (masks(0, i) != F::one())
+					throw UnitTestFail("RingLPN mask zero is not the identity");
+				for (u64 j = 0; j < masks.rows(); ++j)
+					for (u64 k = 0; k < masks.rows(); ++k)
+						for (u64 p = 0; p < 2; ++p)
+							if (oles[p].mFftASquared(j * masks.rows() + k, i) != masks(j, i) * masks(k, i))
+								throw UnitTestFail("RingLPN product masks were not refreshed");
+			}
+			for (u64 p = 0; p < 2; ++p)
+			{
+				const auto& positions = oles[p].mSparsePositions;
+				if (tt && !std::equal(positions.begin(), positions.end(), previousPositions[p].begin()))
+					throw UnitTestFail("RingLPN mask refresh changed the cached support");
+				previousPositions[p].assign(positions.begin(), positions.end());
+			}
 
 			//Now we check that we got the correct OLE correlations and fail
 			//the test otherwise.
