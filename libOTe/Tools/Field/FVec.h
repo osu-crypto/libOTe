@@ -339,6 +339,19 @@ namespace osuCrypto
         }
 
     public:
+		// Preserve the scalar mulConst contract lane by lane. This is required
+		// when F is itself an extension field: vector lanes are intentionally a
+		// product, but the field components within each lane must still mix.
+		template<typename V>
+		OC_FORCEINLINE void mulConst(V& ret, const V& value) const
+		{
+			requireVector<V>();
+			static_for<N>([&](auto i)
+			{
+				mScalarCtx.mulConst(ret.v[i], value.v[i]);
+			});
+		}
+
 		template<typename V>
 		constexpr double regularNoiseFactor() const
 		{

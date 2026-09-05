@@ -6479,3 +6479,42 @@ Verification:
 - `Vole_Silent_NoiseSampling_test` checks the binary large-instance floor, the
   small-instance attack margin, an `F_9` regular-noise case, the large-field
   limit, and the stationary 64-bit pseudo-distance floor.
+
+## AUD-202: Small extension-field contexts did not mix base-field components
+
+Status: fixed
+
+Affected code:
+
+- `CoeffCtxF4`, `CoeffCtxF9`, and extension-field lanes in `CoeffCtxFVec`.
+- Binary structured LPN encoders that invoke `CoeffCtx::mulConst`.
+
+Concern:
+
+The EA, ExConv, block-accumulator, and Tungsten encoders use `mulConst` to stop
+an extension-field code from decomposing into independent codes over its prime
+subfield. `CoeffCtxGF128` implemented this operation, but the F4 and F9 contexts
+inherited the scalar identity operation. FVec also inherited identity instead
+of forwarding the scalar operation to its lanes.
+
+Impact:
+
+Silent LPN over F4 or F9 could be projected component-wise to the underlying F2
+or F3 code. This invalidated the intended full-field attack model and could
+reduce the attack-visible noise weight. Vectors of extension-field elements had
+the same problem within every lane.
+
+Resolution:
+
+F4 and F9 now multiply by their extension generator `u`, which maps the prime-
+subfield basis element `1` outside the prime subfield and mixes the two stored
+components. FVec applies its scalar context's operation independently to every
+lane. The coefficient-context contract now requires every extension-field
+context to override `mulConst`, requires product contexts to delegate lane-wise,
+and explicitly requires in-place operation because the encoding kernels alias
+the input and output. Scalar prime fields and base rings retain identity.
+
+Verification:
+
+- `Field_Audit_Test` checks nonidentity GF(2^128) mixing, the exact F4 and F9
+  generator action including in-place calls, and lane-wise FVec<F4> mixing.
