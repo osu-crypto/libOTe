@@ -40,27 +40,39 @@ namespace osuCrypto
 			throw std::invalid_argument("FoleageTriple party index must be zero or one");
 		if (!n)
 			throw std::invalid_argument("FoleageTriple size must be positive");
-		if (!mT)
-			throw std::invalid_argument("FoleageTriple mT must be positive");
 		if (!mC || mC > 8)
 			throw std::invalid_argument("FoleageTriple mC must be in [1, 8]");
-		if (mT > 128 / mC)
-			throw std::invalid_argument("FoleageTriple supports at most 128 sparse coefficients");
 		if (mode != FoleageMode::F4Ole && mode != FoleageMode::F2TraceOle)
 			throw std::invalid_argument("Foleage mode is invalid");
 		if (dpfMode != FoleageDpfMode::TernaryDpf)
 			throw std::invalid_argument("Foleage RevCuckoo mode is not implemented");
 
 		const auto log3N = log3ceil(n);
-		const auto log3T = log3ceil(mT);
+		auto noiseWeight = mT;
+		if (!noiseWeight)
+		{
+			const auto selected = lpnParameters::select(
+				mC, 4.0, LpnCoefficientDistribution::Uniform);
+			noiseWeight = lpnParameters::roundUpPower(
+				selected.mNoiseWeight, 3);
+			if (!lpnParameters::qaSdHasNoExpectedEvaluationPoint(
+				mC, 4.0, 3, log3N))
+				throw std::invalid_argument(
+					"FOLEAGE compression factor is too small for the requested dimension under the QA-SD interpolation check. " LOCATION);
+		}
+		if (!noiseWeight)
+			throw std::invalid_argument("FoleageTriple mT must be positive");
+		if (noiseWeight > 128 / mC)
+			throw std::invalid_argument("FoleageTriple supports at most 128 sparse coefficients");
+		const auto log3T = log3ceil(noiseWeight);
 
-		if (mT != ipow(3, log3T))
+		if (noiseWeight != ipow(3, log3T))
 			throw std::invalid_argument("FoleageTriple mT must be a power of three");
 		if (log3N <= log3T)
 			throw std::invalid_argument("FoleageTriple requires at least two positions per sparse block");
 
 		const auto N = ipow(3, log3N);
-		const auto blockSize = N / mT;
+		const auto blockSize = N / noiseWeight;
 		const auto blockDepth = log3N - log3T;
 		if (blockDepth > 32)
 			throw std::invalid_argument("FoleageTriple block depth exceeds F3x32 capacity");
@@ -69,6 +81,7 @@ namespace osuCrypto
 		mPartyIdx = partyIdx;
 		mMode = mode;
 		mDpfMode = dpfMode;
+		mT = noiseWeight;
 		mLog3N = log3N;
 		mLog3T = log3T;
 		mN = N;

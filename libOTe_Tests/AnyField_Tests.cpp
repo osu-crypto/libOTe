@@ -334,6 +334,15 @@ namespace osuCrypto
 		static constexpr u64 maximumDimension = 16;
 	};
 
+	// Uses the production eight-region layout and runtime security selector, but
+	// keeps calibration runs far below the production 2^20 domain.
+	struct AnyFieldGoldilocksCostBenchmarkParams
+	{
+		static constexpr u64 blockDimensions = 3;
+		static constexpr u64 minimumDimension = 16;
+		static constexpr u64 maximumDimension = 16;
+	};
+
 	// Test-only comparison policy for measuring the cost that generalized
 	// regular blocks avoid. All 18 points occupy one full-domain block.
 	struct AnyFieldF4FullDomainBenchmarkParams
@@ -354,8 +363,8 @@ namespace osuCrypto
 		static constexpr u64 maximumDimension = 4;
 	};
 
-	// Exercise the production Goldilocks layout at a bounded domain: eight
-	// public polynomials, eight regular blocks, and three points per block. A
+	// Exercise the former high-weight Goldilocks layout at a bounded domain:
+	// eight public polynomials, eight regular blocks, and three points per block. A
 	// request for 16 OLEs rounds to N=32, which also checks the truncated public
 	// coefficient storage without launching the full N=2^20 expansion.
 	struct AnyFieldGoldilocksTestParams
@@ -373,15 +382,29 @@ namespace osuCrypto
 		bool printTiming,
 		const char* fieldName,
 		AnyFieldDpfMode dpfMode = AnyFieldDpfMode::RegularDpf,
-		AnyFieldNoiseMode noiseMode = AnyFieldNoiseMode::SingleUse)
+		AnyFieldNoiseMode noiseMode = AnyFieldNoiseMode::SingleUse,
+		u64 benchmarkRepetitions = 0,
+		u64 runtimeCompressionFactor = 0)
 	{
 		using Base = typename Ole::Base;
 		using Ctx = typename Ole::Ctx;
 		std::array<Ole, 2> ole;
 		const block publicSeed(0x9132749812374981, 0x1239874192387491);
 		for (u64 party = 0; party < 2; ++party)
-			ole[party].init(party, numOles, publicSeed, dpfMode, noiseMode);
+		{
+			if (runtimeCompressionFactor)
+				ole[party].init(
+					party, numOles, publicSeed, dpfMode, noiseMode,
+					LpnParameterConfig{ runtimeCompressionFactor });
+			else
+				ole[party].init(party, numOles, publicSeed, dpfMode, noiseMode);
+		}
 		const auto initialCorCount = ole[0].baseCorCount();
+		const auto cost = ole[0].costEstimate();
+		if (cost.mProductPointCount != cost.mTensorProductCount ||
+			cost.mRegularDpfPointCount + cost.mRevCuckooPointCount !=
+				cost.mProductPointCount)
+			throw UnitTestFail("AnyFieldOle structural cost accounting disagrees");
 		if (ole[0].outputSize() != numOles || ole[1].outputSize() != numOles)
 			throw UnitTestFail("AnyFieldOle did not preserve the requested output count");
 
@@ -396,7 +419,14 @@ namespace osuCrypto
 
 		double setupMs = 0;
 		double expandMs = 0;
-		const auto repetitions = printTiming ? 1 : 2;
+		std::vector<double> setupTimes;
+		std::vector<double> expandTimes;
+		const auto repetitions = benchmarkRepetitions ?
+			benchmarkRepetitions : (printTiming ? 1 : 2);
+		if (!repetitions)
+			throw UnitTestFail("AnyFieldOle benchmark requires at least one repetition");
+		setupTimes.reserve(repetitions);
+		expandTimes.reserve(repetitions);
 		for (u64 repetition = 0; repetition < repetitions; ++repetition)
 		{
 			const auto count0 = ole[0].baseCorCount();
@@ -485,30 +515,59 @@ namespace osuCrypto
 
 			for (u64 i = 0; i < x[0].size(); ++i)
 				if (x[0][i] * x[1][i] != z[0][i] + z[1][i])
+				{
+					std::cout << "AnyField " << fieldName
+						<< " correlation failed in repetition " << repetition
+						<< " at output " << i << "\n";
 					throw UnitTestFail("AnyFieldOle correlation failed");
+				}
 			if (ole[0].hasSetup() || ole[1].hasSetup() ||
 				ole[0].hasPositions() != (noiseMode == AnyFieldNoiseMode::Stationary) ||
 				ole[1].hasPositions() != (noiseMode == AnyFieldNoiseMode::Stationary))
 				throw UnitTestFail("AnyFieldOle expansion consumed the wrong state");
 
-			setupMs += std::chrono::duration<double, std::milli>(
+			const auto setupDuration = std::chrono::duration<double, std::milli>(
 				setupEnd - setupStart).count();
-			expandMs += std::chrono::duration<double, std::milli>(
+			const auto expandDuration = std::chrono::duration<double, std::milli>(
 				expandEnd - setupEnd).count();
+			setupMs += setupDuration;
+			expandMs += expandDuration;
+			setupTimes.push_back(setupDuration);
+			expandTimes.push_back(expandDuration);
 		}
 		if (printTiming)
 		{
 			std::cout << "AnyField " << fieldName << " OLE: N="
 				<< ole[0].expandedOutputSize() / Ctx::extensionDegree
 				<< ", requested=" << ole[0].outputSize()
-				<< ", c=" << Ole::CompressionFactor
+				<< ", c=" << ole[0].compressionFactor()
 				<< ", blocks=" << Ole::BlockCount
-				<< ", points/block=" << Ole::PointsPerBlock
+				<< ", points/block=" << ole[0].pointsPerBlock()
 				<< ", base-OTs=" <<
 					initialCorCount.mSendOtCount + initialCorCount.mRecvOtCount
 				<< ", binary-OLEs=" << initialCorCount.mOleCount
+				<< ", product-points=" << cost.mProductPointCount
+				<< ", DPF-leaf-visits=" <<
+					cost.mRegularDpfLeafCount + cost.mRevCuckooLeafVisitCount
+				<< ", transforms=" <<
+					cost.mInputTransformCount + cost.mProductTransformCount
+				<< ", Rev-cached-leaves=" << cost.mRevCuckooCachedLeafCount
+				<< ", Rev-waves=" << cost.mRevCuckooCriticalWaveCount
 				<< ", setup=" << setupMs
 				<< " ms, expand=" << expandMs << " ms\n";
+			if (repetitions > 1)
+			{
+				auto steadySetup = std::vector<double>(setupTimes.begin() + 1, setupTimes.end());
+				auto steadyExpand = std::vector<double>(expandTimes.begin() + 1, expandTimes.end());
+				std::sort(steadySetup.begin(), steadySetup.end());
+				std::sort(steadyExpand.begin(), steadyExpand.end());
+				std::cout << "  initial setup=" << setupTimes.front()
+					<< " ms, initial expand=" << expandTimes.front()
+					<< " ms, steady setup median="
+					<< steadySetup[steadySetup.size() / 2]
+					<< " ms, steady expand median="
+					<< steadyExpand[steadyExpand.size() / 2] << " ms\n";
+			}
 		}
 	}
 #endif
@@ -516,6 +575,13 @@ namespace osuCrypto
 	void AnyField_F3Ole_Test(const CLP& cmd)
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+		AnyFieldF3Ole productionParameters;
+		productionParameters.init(0, 1, block(0x1234, 0x5678));
+		if (productionParameters.compressionFactor() != 7 ||
+			productionParameters.noiseWeight() != 8)
+			throw UnitTestFail("AnyField F3 automatic parameter selection regressed");
+		productionParameters.clear();
+
 		using TestOle = AnyFieldOle<AnyFieldF9Ctx, AnyFieldOleTestParams>;
 		runAnyFieldOleCase<TestOle>(1, false, "F3");
 		runAnyFieldOleCase<TestOle>(128, false, "F3");
@@ -539,6 +605,13 @@ namespace osuCrypto
 	void AnyField_F2Ole_Test(const CLP& cmd)
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+		AnyFieldF2Ole productionParameters;
+		productionParameters.init(0, 1, block(0x1234, 0x5678));
+		if (productionParameters.compressionFactor() != 6 ||
+			productionParameters.noiseWeight() != 9)
+			throw UnitTestFail("AnyField F2 automatic parameter selection regressed");
+		productionParameters.clear();
+
 		using TestOle = AnyFieldOle<AnyFieldF4Ctx, AnyFieldOleTestParams>;
 		if (cmd.isSet("channelBench"))
 		{
@@ -618,7 +691,104 @@ namespace osuCrypto
 	void AnyField_GoldilocksOle_Test(const CLP& cmd)
 	{
 #if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+		const block publicSeed(0x9132749812374981, 0x1239874192387491);
+		AnyFieldGoldilocksOle productionParameters;
+		productionParameters.init(0, 1, publicSeed);
+		if (productionParameters.outputSize() != 1 ||
+			productionParameters.compressionFactor() != 7 ||
+			productionParameters.noiseWeight() != 8)
+			throw UnitTestFail("AnyField production parameter selection regressed");
+		productionParameters.clear();
+		productionParameters.init(
+			0, 1, publicSeed,
+			AnyFieldDpfMode::RegularDpf, AnyFieldNoiseMode::SingleUse,
+			LpnParameterConfig{ 4 });
+		if (productionParameters.compressionFactor() != 4 ||
+			productionParameters.noiseWeight() != 16 ||
+			productionParameters.pointsPerBlock() != 2)
+			throw UnitTestFail("AnyField runtime parameter selection regressed");
+		productionParameters.clear();
 #ifdef ENABLE_SPARSE_DPF
+		if (cmd.isSet("costBench"))
+		{
+			using CostOle = AnyFieldOle<
+				AnyFieldGoldilocksCtx, AnyFieldGoldilocksCostBenchmarkParams>;
+			const auto requested = cmd.getOr("n", 1ull << 16);
+			const auto repetitions = cmd.getOr("exp", 2ull);
+			const auto onlyCompressionFactor = cmd.getOr("c", 0ull);
+			if (onlyCompressionFactor && onlyCompressionFactor != 4 &&
+				onlyCompressionFactor != 7)
+				throw UnitTestFail("AnyField cost benchmark c must be 4 or 7");
+
+			// Each complete two-party benchmark finishes before the next begins.
+			if (!cmd.isSet("revOnly"))
+			{
+				if (!onlyCompressionFactor || onlyCompressionFactor == 4)
+					runAnyFieldOleCase<CostOle>(
+						requested, true, "Goldilocks Sum-DPF c=4",
+						AnyFieldDpfMode::RegularDpf, AnyFieldNoiseMode::Stationary,
+						repetitions, 4);
+				if (!onlyCompressionFactor || onlyCompressionFactor == 7)
+					runAnyFieldOleCase<CostOle>(
+						requested, true, "Goldilocks Sum-DPF c=7",
+						AnyFieldDpfMode::RegularDpf, AnyFieldNoiseMode::Stationary,
+						repetitions, 7);
+			}
+			if (!cmd.isSet("sumOnly"))
+			{
+				if (!onlyCompressionFactor || onlyCompressionFactor == 4)
+					runAnyFieldOleCase<CostOle>(
+						requested, true, "Goldilocks RevCuckoo c=4",
+						AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary,
+						repetitions, 4);
+				if (!onlyCompressionFactor || onlyCompressionFactor == 7)
+					runAnyFieldOleCase<CostOle>(
+						requested, true, "Goldilocks RevCuckoo c=7",
+						AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary,
+						repetitions, 7);
+			}
+			return;
+		}
+		if (cmd.isSet("prodRevBench"))
+		{
+			const auto requested = cmd.getOr("n", 1ull << 20);
+			const block publicSeed(0x9132749812374981, 0x1239874192387491);
+			std::array<AnyFieldGoldilocksOle, 2> preflight;
+			u64 syntheticBytes = 0;
+			for (u64 party = 0; party < 2; ++party)
+			{
+				preflight[party].init(
+					party, requested, publicSeed,
+					AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary);
+				const auto count = preflight[party].baseCorCount();
+				const auto partyBytes =
+					count.mSendOtCount * sizeof(std::array<block, 2>) +
+					count.mRecvOtCount * sizeof(block) +
+					divCeil(count.mRecvOtCount, 8);
+				if (syntheticBytes > std::numeric_limits<u64>::max() - partyBytes)
+					throw UnitTestFail("AnyFieldOle benchmark storage estimate overflowed");
+				syntheticBytes += partyBytes;
+				std::cout << "AnyField production RevCuckoo party " << party
+					<< ": send base-OTs=" << count.mSendOtCount
+					<< ", receive base-OTs=" << count.mRecvOtCount
+					<< ", binary-OLEs=" << count.mOleCount << "\n";
+			}
+			constexpr u64 MaxSyntheticBytes = 4ull << 30;
+			std::cout << "AnyField production RevCuckoo synthetic base-correlation storage: "
+				<< syntheticBytes / double(1ull << 30) << " GiB\n";
+			if (syntheticBytes > MaxSyntheticBytes)
+			{
+				std::cout << "Skipping benchmark: synthetic base correlations exceed the "
+					<< MaxSyntheticBytes / double(1ull << 30) << " GiB safety limit.\n";
+				return;
+			}
+			runAnyFieldOleCase<AnyFieldGoldilocksOle>(
+				requested, true,
+				"Goldilocks production RevCuckoo stationary",
+				AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary,
+				cmd.getOr("exp", 3ull));
+			return;
+		}
 		if (cmd.isSet("safeRevBench"))
 		{
 			using BenchmarkOle = AnyFieldOle<
@@ -641,7 +811,6 @@ namespace osuCrypto
 			AnyFieldDpfMode::RevCuckoo, AnyFieldNoiseMode::Stationary);
 #endif
 
-		const block publicSeed(0x9132749812374981, 0x1239874192387491);
 		TestOle source;
 		source.init(0, 16, publicSeed);
 		TestOle destination(std::move(source));

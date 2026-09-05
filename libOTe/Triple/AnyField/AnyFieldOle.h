@@ -192,9 +192,10 @@ namespace osuCrypto
 	// field. For each output index, the parties' shares satisfy
 	// x_0 * x_1 = z_0 + z_1.
 	//
-	// Callers request a number of OLEs. The implementation fixes its 128-bit
-	// QA-SD parameters, rounds small requests up to the minimum secure domain,
-	// and returns exactly the requested prefix. Noise is generalized regular:
+	// Callers request a number of OLEs and choose the runtime compression factor
+	// c through LpnParameterConfig. The implementation derives t from the shared
+	// 128-bit policy, rounds small requests up to the minimum secure domain, and
+	// returns exactly the requested prefix. Noise is generalized regular:
 	// every sparse polynomial has a fixed number of points in each public coset,
 	// allowing each product DPF to expand over a domain smaller by BlockCount.
 	// The DPF backend and noise lifecycle are independent runtime choices.
@@ -227,38 +228,28 @@ namespace osuCrypto
 		using Ext = typename Ctx::Ext;
 		using DpfCoeffCtx = typename Ctx::DpfCoeffCtx;
 
-		static constexpr u64 CompressionFactor = Params::compressionFactor;
 		static constexpr u64 BlockDimensions = Params::blockDimensions;
-		static constexpr u64 PointsPerBlock = Params::pointsPerBlock;
 		static constexpr u64 BlockCount = [] {
 			u64 result = 1;
 			for (u64 i = 0; i < BlockDimensions; ++i)
 				result *= Ctx::coordinateSize;
 			return result;
 		}();
-		static constexpr u64 Weight = BlockCount * PointsPerBlock;
-		static constexpr u64 GroupCount =
-			CompressionFactor * CompressionFactor * Ctx::extensionDegree;
-		static constexpr u64 DpfSetCount = GroupCount * BlockCount;
-		static constexpr u64 PointsPerDpfSet =
-			BlockCount * PointsPerBlock * PointsPerBlock;
+		static constexpr u64 MaxCompressionFactor = 8;
 		// Product-degree channels have multiplicities 1,2,...,c,...,2,1. Ordinary
 		// DPFs handle multiplicities one and two. RevCuckoo handles multiplicities
 		// three through c, grouping the two channels of each equal multiplicity into
 		// one rectangular multi-set instance. The center channel is the sole set
 		// group at multiplicity c.
-		static constexpr u64 RevProductChannelCount = 2 * CompressionFactor - 1;
 		static constexpr u64 SmallPairCountLimit = 2;
-		static constexpr u64 RevCountClassCount = CompressionFactor > SmallPairCountLimit ?
-			CompressionFactor - SmallPairCountLimit : 0;
 		static constexpr bool PacksPublicCoefficients =
-			CompressionFactor * Ctx::fieldBits <= 32;
+			MaxCompressionFactor * Ctx::fieldBits <= 32;
 		using PackedPublic = std::conditional_t<
 			!PacksPublicCoefficients,
 			Ext,
-			std::conditional_t<CompressionFactor * Ctx::fieldBits <= 8,
+			std::conditional_t<MaxCompressionFactor * Ctx::fieldBits <= 8,
 			u8,
-			std::conditional_t<CompressionFactor * Ctx::fieldBits <= 16, u16, u32>>>;
+			std::conditional_t<MaxCompressionFactor * Ctx::fieldBits <= 16, u16, u32>>>;
 		static constexpr bool PowerOfTwoCoordinates =
 			Ctx::coordinateSize == (u64{ 1 } << Ctx::coordinateBits);
 		static_assert(Ctx::extensionDegree > 0,
@@ -268,8 +259,8 @@ namespace osuCrypto
 		static_assert(Ctx::coordinateSize > (u64{ 1 } << (Ctx::coordinateBits - 1)) &&
 			Ctx::coordinateSize <= (u64{ 1 } << Ctx::coordinateBits),
 			"AnyFieldOle coordinateBits must be ceil(log2(coordinateSize)).");
-		static_assert(CompressionFactor > 1 && Ctx::fieldBits > 0,
-			"AnyFieldOle requires at least two public polynomials and a nonzero field width.");
+		static_assert(Ctx::fieldBits > 0,
+			"AnyFieldOle requires a nonzero field width.");
 		static_assert(Params::minimumDimension > BlockDimensions,
 			"AnyFieldOle requires a nontrivial within-block DPF domain.");
 		static_assert(Params::minimumDimension <= Params::maximumDimension,
@@ -280,6 +271,28 @@ namespace osuCrypto
 			u64 mSendOtCount = 0;
 			u64 mRecvOtCount = 0;
 			u64 mOleCount = 0;
+		};
+
+		// Exact structural counts for this implementation. These are operation
+		// counts, not timing predictions: DPF leaves, field transforms, network
+		// rounds, and tensor products have backend- and field-dependent costs.
+		struct CostEstimate
+		{
+			u64 mRingSize = 0;
+			u64 mProductPointCount = 0;
+			u64 mPositionGmwInstanceCount = 0;
+			u64 mTensorProductCount = 0;
+			u64 mInputTransformCount = 0;
+			u64 mProductTransformCount = 0;
+			u64 mRegularDpfPointCount = 0;
+			u64 mRegularDpfLeafCount = 0;
+			u64 mRevCuckooPointCount = 0;
+			u64 mRevCuckooCachedLeafCount = 0;
+			u64 mRevCuckooLeafVisitCount = 0;
+			u64 mRevCuckooValueExpansionCount = 0;
+			u64 mRevCuckooCriticalWaveCount = 0;
+			BaseCorCount mInitialBaseCorCount;
+			BaseCorCount mStationaryBaseCorCount;
 		};
 
 		using RegularBackend = SumDmpf<Ext, DpfCoeffCtx>;
@@ -326,6 +339,9 @@ namespace osuCrypto
 				mPartyIdx = std::exchange(source.mPartyIdx, 0);
 				mDpfMode = std::exchange(source.mDpfMode, AnyFieldDpfMode::RegularDpf);
 				mNoiseMode = std::exchange(source.mNoiseMode, AnyFieldNoiseMode::SingleUse);
+				mCompressionFactor = std::exchange(source.mCompressionFactor, 0);
+				mPointsPerBlock = std::exchange(source.mPointsPerBlock, 0);
+				mWeight = std::exchange(source.mWeight, 0);
 				mDimension = std::exchange(source.mDimension, 0);
 				mRequestedOleCount = std::exchange(source.mRequestedOleCount, 0);
 				mN = std::exchange(source.mN, 0);
@@ -342,6 +358,10 @@ namespace osuCrypto
 				mBaseCorsAvailable = std::exchange(source.mBaseCorsAvailable, false);
 				mInstalledDpfSendOtCount = std::exchange(source.mInstalledDpfSendOtCount, 0);
 				mInstalledDpfRecvOtCount = std::exchange(source.mInstalledDpfRecvOtCount, 0);
+				mInitialBaseCorEstimate = std::exchange(
+					source.mInitialBaseCorEstimate, BaseCorCount{});
+				mStationaryBaseCorEstimate = std::exchange(
+					source.mStationaryBaseCorEstimate, BaseCorCount{});
 				mDpfOrder = std::move(source.mDpfOrder);
 				mSparsePositions = std::move(source.mSparsePositions);
 				mSparseCoefficients = std::move(source.mSparseCoefficients);
@@ -373,6 +393,50 @@ namespace osuCrypto
 			AnyFieldNoiseMode noiseMode = AnyFieldNoiseMode::SingleUse,
 			Ctx ctx = {})
 		{
+			if constexpr (requires { Params::compressionFactor; Params::pointsPerBlock; })
+			{
+				// Legacy test/benchmark policies select deliberately tiny insecure
+				// layouts. They feed runtime state and do not specialize hot code.
+				initImpl(
+					partyIdx, numOles, publicSeed, dpfMode, noiseMode,
+					Params::compressionFactor, Params::pointsPerBlock, false,
+					std::move(ctx));
+			}
+			else
+			{
+				init(
+					partyIdx, numOles, publicSeed, dpfMode, noiseMode,
+					LpnParameterConfig{}, std::move(ctx));
+			}
+		}
+
+		void init(
+			u64 partyIdx,
+			u64 numOles,
+			block publicSeed,
+			AnyFieldDpfMode dpfMode,
+			AnyFieldNoiseMode noiseMode,
+			LpnParameterConfig parameters,
+			Ctx ctx = {})
+		{
+			initImpl(
+				partyIdx, numOles, publicSeed, dpfMode, noiseMode,
+				parameters.mCompressionFactor, 0, true,
+				std::move(ctx));
+		}
+
+	private:
+		void initImpl(
+			u64 partyIdx,
+			u64 numOles,
+			block publicSeed,
+			AnyFieldDpfMode dpfMode,
+			AnyFieldNoiseMode noiseMode,
+			u64 compressionFactor,
+			u64 pointsPerBlock,
+			bool enforceSecurity,
+			Ctx ctx)
+		{
 			if (partyIdx > 1)
 				throw std::invalid_argument("AnyFieldOle party index must be zero or one. " LOCATION);
 			if (!numOles)
@@ -402,16 +466,56 @@ namespace osuCrypto
 			dimension = std::max<u64>(dimension, Params::minimumDimension);
 			if (dimension > Params::maximumDimension)
 				throw std::invalid_argument("AnyFieldOle request exceeds one secure expansion domain. " LOCATION);
+			if (enforceSecurity && !compressionFactor)
+				compressionFactor = selectAutomaticCompressionFactor(dpfMode, dimension);
+			if (compressionFactor < 2 || compressionFactor > MaxCompressionFactor)
+				throw std::invalid_argument(
+					"AnyFieldOle compression factor must be in [2, 8]. " LOCATION);
+			if (enforceSecurity)
+			{
+				const auto selected = lpnParameters::select(
+					compressionFactor,
+					static_cast<double>(Ctx::fieldCardinality),
+					LpnCoefficientDistribution::NonZero);
+				pointsPerBlock = lpnParameters::divCeil(
+					selected.mNoiseWeight, BlockCount);
+			}
+			if (!pointsPerBlock)
+				throw std::invalid_argument(
+					"AnyFieldOle requires at least one point per regular block. " LOCATION);
+			if (pointsPerBlock > std::numeric_limits<u64>::max() / BlockCount)
+				throw std::length_error("AnyFieldOle noise weight overflows u64. " LOCATION);
+			const auto weight = BlockCount * pointsPerBlock;
+			if (enforceSecurity)
+			{
+				const auto selected = lpnParameters::select(
+					compressionFactor,
+					static_cast<double>(Ctx::fieldCardinality),
+					LpnCoefficientDistribution::NonZero);
+				if (weight < selected.mNoiseWeight)
+					throw std::logic_error(
+						"AnyFieldOle parameter policy is below its linear or decoding floor. " LOCATION);
+				if (!lpnParameters::qaSdHasNoExpectedEvaluationPoint(
+					compressionFactor,
+					static_cast<double>(Ctx::fieldCardinality),
+					Ctx::coordinateSize,
+					dimension))
+					throw std::invalid_argument(
+						"AnyFieldOle compression factor is too small for the requested dimension under the QA-SD interpolation check. " LOCATION);
+			}
 			domain = Ctx::domainSize(dimension);
 			if (domain < requestedRingSize)
 				throw std::invalid_argument("AnyFieldOle request exceeds one secure expansion domain. " LOCATION);
 			if (Ctx::coordinateBits * dimension >= 64)
 				throw std::invalid_argument("AnyFieldOle binary DPF depth must be below 64. " LOCATION);
 
-			constexpr auto pointsPerGroup = Weight * Weight;
-			if (pointsPerGroup > std::numeric_limits<u64>::max() / GroupCount)
+			if (weight > std::numeric_limits<u64>::max() / weight)
+				throw std::length_error("AnyFieldOle points per product group overflow u64. " LOCATION);
+			const auto pointsPerGroup = weight * weight;
+			const auto groupCount = compressionFactor * compressionFactor * Ctx::extensionDegree;
+			if (pointsPerGroup > std::numeric_limits<u64>::max() / groupCount)
 				throw std::length_error("AnyFieldOle total point count overflows u64. " LOCATION);
-			const auto pointCount = GroupCount * pointsPerGroup;
+			const auto pointCount = groupCount * pointsPerGroup;
 			const auto localDimensions = dimension - BlockDimensions;
 			if (pointCount > std::numeric_limits<u64>::max() / localDimensions)
 				throw std::length_error("AnyFieldOle coordinate conversion count overflows u64. " LOCATION);
@@ -423,7 +527,7 @@ namespace osuCrypto
 			if (domain > std::numeric_limits<u64>::max() / Ctx::extensionDegree)
 				throw std::length_error("AnyFieldOle output size overflows u64. " LOCATION);
 			const auto blockSize = domain / BlockCount;
-			if (PointsPerBlock > blockSize)
+			if (pointsPerBlock > blockSize)
 				throw std::invalid_argument("AnyFieldOle regular block is too small for its points. " LOCATION);
 
 			BetaCircuit positionCircuit;
@@ -459,7 +563,7 @@ namespace osuCrypto
 				for (auto& output : publicA)
 				{
 					u32 packed = Ext::one().index();
-					for (u64 polynomial = 1; polynomial < CompressionFactor; ++polynomial)
+					for (u64 polynomial = 1; polynomial < compressionFactor; ++polynomial)
 						packed |= u32(coeffCtx.sample(publicPrng).index()) <<
 							(polynomial * Ctx::fieldBits);
 					output = static_cast<PackedPublic>(packed);
@@ -467,10 +571,10 @@ namespace osuCrypto
 			}
 			else
 			{
-				if (publicCount > std::numeric_limits<u64>::max() / (CompressionFactor - 1))
+				if (publicCount > std::numeric_limits<u64>::max() / (compressionFactor - 1))
 					throw std::length_error("AnyFieldOle public coefficient count overflows u64. " LOCATION);
-				publicA.resize(publicCount * (CompressionFactor - 1));
-				for (u64 polynomial = 1; polynomial < CompressionFactor; ++polynomial)
+				publicA.resize(publicCount * (compressionFactor - 1));
+				for (u64 polynomial = 1; polynomial < compressionFactor; ++polynomial)
 					for (u64 index = 0; index < publicCount; ++index)
 						publicA[(polynomial - 1) * publicCount + index] = coeffCtx.sample(publicPrng);
 			}
@@ -480,6 +584,9 @@ namespace osuCrypto
 			mPartyIdx = partyIdx;
 			mDpfMode = dpfMode;
 			mNoiseMode = noiseMode;
+			mCompressionFactor = compressionFactor;
+			mPointsPerBlock = pointsPerBlock;
+			mWeight = weight;
 			mDimension = dimension;
 			mRequestedOleCount = numOles;
 			mN = domain;
@@ -490,14 +597,67 @@ namespace osuCrypto
 			mPositionGmw = std::move(positionGmw);
 			mPositionOleCount = positionOleCount;
 			initDpfBackend();
+			mInitialBaseCorEstimate = baseCorCountFor(false);
+			mStationaryBaseCorEstimate = baseCorCountFor(true);
 			buildDpfOrder();
 		}
 
+	public:
 		bool isInitialized() const { return mN != 0; }
 		bool hasSetup() const { return mHasSetup; }
 		bool hasPositions() const { return mHasPositions; }
 		AnyFieldDpfMode dpfMode() const { return mDpfMode; }
 		AnyFieldNoiseMode noiseMode() const { return mNoiseMode; }
+		u64 compressionFactor() const { return mCompressionFactor; }
+		u64 noiseWeight() const { return mWeight; }
+		u64 pointsPerBlock() const { return mPointsPerBlock; }
+
+		CostEstimate costEstimate() const
+		{
+			if (!isInitialized())
+				throw std::logic_error("AnyFieldOle::init must be called first. " LOCATION);
+
+			CostEstimate result;
+			result.mRingSize = mN;
+			result.mProductPointCount = groupCount() * pointsPerGroup();
+			result.mPositionGmwInstanceCount = positionInstanceCount();
+			result.mTensorProductCount =
+				leftCoefficientCount() * rightCoefficientCount();
+			result.mInputTransformCount = mCompressionFactor;
+			result.mProductTransformCount = groupCount();
+			result.mInitialBaseCorCount = mInitialBaseCorEstimate;
+			result.mStationaryBaseCorCount = mStationaryBaseCorEstimate;
+
+			if (mDpfMode == AnyFieldDpfMode::RegularDpf)
+			{
+				result.mRegularDpfPointCount = result.mProductPointCount;
+				result.mRegularDpfLeafCount =
+					result.mRegularDpfPointCount * mBlockSize;
+				return result;
+			}
+
+#ifdef ENABLE_SPARSE_DPF
+			result.mRegularDpfPointCount = smallDpfPointCount();
+			result.mRegularDpfLeafCount =
+				result.mRegularDpfPointCount * mBlockSize;
+			result.mRevCuckooPointCount =
+				result.mProductPointCount - result.mRegularDpfPointCount;
+			for (u64 pairCount = SmallPairCountLimit + 1;
+				pairCount <= mCompressionFactor; ++pairCount)
+			{
+				const auto cachedLeaves =
+					2 * revChannelCount(pairCount) * mN;
+				const auto expansions = pairCount * Ctx::extensionDegree;
+				result.mRevCuckooCachedLeafCount += cachedLeaves;
+				result.mRevCuckooLeafVisitCount += cachedLeaves * expansions;
+				result.mRevCuckooValueExpansionCount += expansions;
+			}
+			if (result.mRevCuckooValueExpansionCount)
+				result.mRevCuckooCriticalWaveCount =
+					mCompressionFactor * Ctx::extensionDegree;
+#endif
+			return result;
+		}
 
 		u64 outputSize() const
 		{
@@ -520,23 +680,7 @@ namespace osuCrypto
 			if (mHasSetup)
 				return {};
 
-			BaseCorCount result;
-			const auto dpfCount = dpfBaseOtCount();
-			result.mSendOtCount = dpfCount.mSendCount;
-			result.mRecvOtCount = dpfCount.mRecvCount;
-
-			const auto tensorOtCount = rightCoefficientCount() *
-				mCtx.dpfCoeffCtx().template bitSize<Ext>();
-			if ((mPartyIdx ? result.mRecvOtCount : result.mSendOtCount) >
-				std::numeric_limits<u64>::max() - tensorOtCount)
-				throw std::length_error("AnyFieldOle base-OT count overflows u64. " LOCATION);
-			if (mPartyIdx)
-				result.mRecvOtCount += tensorOtCount;
-			else
-				result.mSendOtCount += tensorOtCount;
-
-			result.mOleCount = mHasPositions ? 0 : mPositionOleCount;
-			return result;
+			return baseCorCountFor(mHasPositions);
 		}
 
 		void setBaseCors(
@@ -607,8 +751,8 @@ namespace osuCrypto
 					block(mDimension, mRequestedOleCount),
 					block(mN, mPartyIdx),
 					block(Ctx::baseCharacteristic, Ctx::extensionDegree),
-					block(CompressionFactor, Weight),
-					block(BlockCount, PointsPerBlock),
+					block(mCompressionFactor, mWeight),
+					block(BlockCount, mPointsPerBlock),
 					block(static_cast<u64>(mDpfMode), static_cast<u64>(mNoiseMode)),
 					block(mHasPositions, 0)
 				};
@@ -619,8 +763,8 @@ namespace osuCrypto
 					peerParams[1] != block(mDimension, mRequestedOleCount) ||
 					peerParams[2] != block(mN, 1 ^ mPartyIdx) ||
 					peerParams[3] != block(Ctx::baseCharacteristic, Ctx::extensionDegree) ||
-					peerParams[4] != block(CompressionFactor, Weight) ||
-					peerParams[5] != block(BlockCount, PointsPerBlock) ||
+					peerParams[4] != block(mCompressionFactor, mWeight) ||
+					peerParams[5] != block(BlockCount, mPointsPerBlock) ||
 					peerParams[6] != block(
 						static_cast<u64>(mDpfMode), static_cast<u64>(mNoiseMode)) ||
 					peerParams[7] != block(mHasPositions, 0))
@@ -641,7 +785,7 @@ namespace osuCrypto
 						if (mTimer)
 							dpf.setTimer(*mTimer);
 						MatrixView<const u64> points(
-							orderedPoints.data(), DpfSetCount, PointsPerDpfSet);
+							orderedPoints.data(), dpfSetCount(), pointsPerDpfSet());
 						co_await dpf.setPoints(points, prng, socket);
 					}
 #ifdef ENABLE_SPARSE_DPF
@@ -651,14 +795,14 @@ namespace osuCrypto
 						if (mTimer)
 							hybrid.mSmall.setTimer(*mTimer);
 						MatrixView<const u64> smallPoints(
-							orderedPoints.data(), smallDpfSetCount(), PointsPerDpfSet);
+							orderedPoints.data(), smallDpfSetCount(), pointsPerDpfSet());
 						co_await hybrid.mSmall.setPoints(smallPoints, prng, socket);
 
-						std::vector<coproto::Socket> sockets(RevCountClassCount);
-						std::vector<PRNG> prngs(RevCountClassCount);
-						std::vector<macoro::task<>> tasks(RevCountClassCount);
+						std::vector<coproto::Socket> sockets(revCountClassCount());
+						std::vector<PRNG> prngs(revCountClassCount());
+						std::vector<macoro::task<>> tasks(revCountClassCount());
 						for (u64 pairCount = SmallPairCountLimit + 1;
-							pairCount <= CompressionFactor; ++pairCount)
+							pairCount <= mCompressionFactor; ++pairCount)
 						{
 							const auto instance = revCountClassIndex(pairCount);
 							auto& dpf = hybrid.mLarge[instance];
@@ -747,11 +891,11 @@ namespace osuCrypto
 				// set O(N). Small-field public multipliers remain packed in one
 				// integral word; large-field multipliers are stored polynomial-major.
 				std::vector<Ext> work(mN, Ext::zero());
-				for (u64 polynomial = 0; polynomial < CompressionFactor; ++polynomial)
+				for (u64 polynomial = 0; polynomial < mCompressionFactor; ++polynomial)
 				{
 					std::fill(work.begin(), work.end(), Ext::zero());
-					const auto coefficientOffset = polynomial * Weight;
-					for (u64 point = 0; point < Weight; ++point)
+					const auto coefficientOffset = polynomial * mWeight;
+					for (u64 point = 0; point < mWeight; ++point)
 						work[fullPosition(point, mSparsePositions[coefficientOffset + point])] +=
 							mSparseCoefficients[coefficientOffset + point];
 					mCtx.transform(work, mDimension);
@@ -813,7 +957,7 @@ namespace osuCrypto
 							}
 						},
 						mCtx.dpfCoeffCtx());
-					if (nextSet != DpfSetCount || setLeafCount)
+					if (nextSet != dpfSetCount() || setLeafCount)
 						throw std::runtime_error(
 							"AnyFieldOle DPF expansion ended early. " LOCATION);
 				}
@@ -857,28 +1001,28 @@ namespace osuCrypto
 					// scalar product from every count class in the same wave; the first
 					// wave also carries the ordinary DPF above. The two symmetric channels
 					// of a class are emitted by the same expansion.
-					std::vector<std::vector<Ext>> values(RevCountClassCount);
-					std::vector<std::vector<Ext>> productWork(RevCountClassCount);
+					std::vector<std::vector<Ext>> values(revCountClassCount());
+					std::vector<std::vector<Ext>> productWork(revCountClassCount());
 					for (u64 pairCount = SmallPairCountLimit + 1;
-						pairCount <= CompressionFactor; ++pairCount)
+						pairCount <= mCompressionFactor; ++pairCount)
 						productWork[revCountClassIndex(pairCount)].resize(
 							revChannelCount(pairCount) * mN);
 
-					const auto waveCount = CompressionFactor * Ctx::extensionDegree;
+					const auto waveCount = mCompressionFactor * Ctx::extensionDegree;
 					for (u64 wave = 0; wave < waveCount; ++wave)
 					{
-						std::vector<coproto::Socket> sockets(RevCountClassCount);
-						std::vector<PRNG> prngs(RevCountClassCount);
+						std::vector<coproto::Socket> sockets(revCountClassCount());
+						std::vector<PRNG> prngs(revCountClassCount());
 						std::vector<macoro::task<>> tasks;
 						std::vector<u64> active;
-						std::vector<u64> nextSet(RevCountClassCount);
-						std::vector<u64> setLeafCount(RevCountClassCount);
-						tasks.reserve(RevCountClassCount + 1);
-						active.reserve(RevCountClassCount);
+						std::vector<u64> nextSet(revCountClassCount());
+						std::vector<u64> setLeafCount(revCountClassCount());
+						tasks.reserve(revCountClassCount() + 1);
+						active.reserve(revCountClassCount());
 						if (wave == 0)
 							tasks.push_back(std::move(smallTask));
 						for (u64 pairCount = SmallPairCountLimit + 1;
-							pairCount <= CompressionFactor; ++pairCount)
+							pairCount <= mCompressionFactor; ++pairCount)
 						{
 							if (wave >= pairCount * Ctx::extensionDegree)
 								continue;
@@ -926,7 +1070,7 @@ namespace osuCrypto
 								channelSlot < revChannelCount(pairCount); ++channelSlot)
 							{
 								const auto channel = channelSlot == 0 ?
-									pairCount - 1 : RevProductChannelCount - pairCount;
+									pairCount - 1 : revProductChannelCount() - pairCount;
 								const auto group = revGroup(channel, wave);
 								accumulateProductGroup(
 									group, publicCount,
@@ -966,6 +1110,9 @@ namespace osuCrypto
 			mPartyIdx = 0;
 			mDpfMode = AnyFieldDpfMode::RegularDpf;
 			mNoiseMode = AnyFieldNoiseMode::SingleUse;
+			mCompressionFactor = 0;
+			mPointsPerBlock = 0;
+			mWeight = 0;
 			mDimension = 0;
 			mRequestedOleCount = 0;
 			mN = 0;
@@ -978,6 +1125,8 @@ namespace osuCrypto
 			mPositionGmw.clear();
 			mPositionCircuit = {};
 			mPositionOleCount = 0;
+			mInitialBaseCorEstimate = {};
+			mStationaryBaseCorEstimate = {};
 		}
 
 	private:
@@ -985,6 +1134,9 @@ namespace osuCrypto
 		u64 mPartyIdx = 0;
 		AnyFieldDpfMode mDpfMode = AnyFieldDpfMode::RegularDpf;
 		AnyFieldNoiseMode mNoiseMode = AnyFieldNoiseMode::SingleUse;
+		u64 mCompressionFactor = 0;
+		u64 mPointsPerBlock = 0;
+		u64 mWeight = 0;
 		u64 mDimension = 0;
 		u64 mRequestedOleCount = 0;
 		u64 mN = 0;
@@ -1002,6 +1154,8 @@ namespace osuCrypto
 		bool mBaseCorsAvailable = false;
 		u64 mInstalledDpfSendOtCount = 0;
 		u64 mInstalledDpfRecvOtCount = 0;
+		BaseCorCount mInitialBaseCorEstimate;
+		BaseCorCount mStationaryBaseCorEstimate;
 
 		std::vector<u64> mDpfOrder;
 		std::vector<u64> mSparsePositions;
@@ -1011,53 +1165,129 @@ namespace osuCrypto
 		bool mHasPositions = false;
 		bool mHasSetup = false;
 
-		static constexpr u64 pointsPerGroup() { return Weight * Weight; }
-		static constexpr u64 revPairCount(u64 channel)
+		static u64 selectAutomaticCompressionFactor(
+			AnyFieldDpfMode dpfMode,
+			u64 dimension)
 		{
-			return channel < CompressionFactor ?
-				channel + 1 : RevProductChannelCount - channel;
+			u64 bestCompressionFactor = 0;
+			u64 bestLeafCoefficient = std::numeric_limits<u64>::max();
+			for (u64 compressionFactor = 2;
+				compressionFactor <= MaxCompressionFactor; ++compressionFactor)
+			{
+				if (!lpnParameters::qaSdHasNoExpectedEvaluationPoint(
+					compressionFactor,
+					static_cast<double>(Ctx::fieldCardinality),
+					Ctx::coordinateSize,
+					dimension))
+					continue;
+
+				const auto selected = lpnParameters::select(
+					compressionFactor,
+					static_cast<double>(Ctx::fieldCardinality),
+					LpnCoefficientDistribution::NonZero);
+				const auto pointsPerBlock = lpnParameters::divCeil(
+					selected.mNoiseWeight, BlockCount);
+				const auto weight = BlockCount * pointsPerBlock;
+				u64 leafCoefficient;
+				if (dpfMode == AnyFieldDpfMode::RegularDpf)
+				{
+					leafCoefficient = compressionFactor * compressionFactor *
+						weight * weight / BlockCount;
+				}
+				else
+				{
+					u64 smallProductGroups = 0;
+					u64 largeWeightedChannels = 0;
+					const auto channelCount = 2 * compressionFactor - 1;
+					for (u64 channel = 0; channel < channelCount; ++channel)
+					{
+						const auto pairCount = channel < compressionFactor ?
+							channel + 1 : channelCount - channel;
+						if (pairCount <= SmallPairCountLimit)
+							smallProductGroups += pairCount;
+						else
+							largeWeightedChannels += pairCount;
+					}
+					leafCoefficient = smallProductGroups * weight * weight /
+						BlockCount + 2 * largeWeightedChannels;
+				}
+
+				// Prefer lower c on an exact tie: it uses fewer transforms and fewer
+				// RevCuckoo value-expansion waves.
+				if (leafCoefficient < bestLeafCoefficient)
+				{
+					bestLeafCoefficient = leafCoefficient;
+					bestCompressionFactor = compressionFactor;
+				}
+			}
+			if (!bestCompressionFactor)
+				throw std::invalid_argument(
+					"AnyFieldOle has no secure compression factor for the requested dimension. " LOCATION);
+			return bestCompressionFactor;
 		}
-		static constexpr bool useSmallDpf(u64 channel)
+
+		u64 groupCount() const
+		{
+			return mCompressionFactor * mCompressionFactor * Ctx::extensionDegree;
+		}
+		u64 dpfSetCount() const { return groupCount() * BlockCount; }
+		u64 pointsPerDpfSet() const
+		{
+			return BlockCount * mPointsPerBlock * mPointsPerBlock;
+		}
+		u64 revProductChannelCount() const { return 2 * mCompressionFactor - 1; }
+		u64 revCountClassCount() const
+		{
+			return mCompressionFactor > SmallPairCountLimit ?
+				mCompressionFactor - SmallPairCountLimit : 0;
+		}
+		u64 pointsPerGroup() const { return mWeight * mWeight; }
+		u64 revPairCount(u64 channel) const
+		{
+			return channel < mCompressionFactor ?
+				channel + 1 : revProductChannelCount() - channel;
+		}
+		bool useSmallDpf(u64 channel) const
 		{
 			return revPairCount(channel) <= SmallPairCountLimit;
 		}
-		static constexpr u64 smallProductGroupCount()
+		u64 smallProductGroupCount() const
 		{
 			u64 result = 0;
-			for (u64 group = 0; group < GroupCount; ++group)
+			for (u64 group = 0; group < groupCount(); ++group)
 			{
-				const auto pair = group % (CompressionFactor * CompressionFactor);
-				const auto channel = pair / CompressionFactor + pair % CompressionFactor;
+				const auto pair = group % (mCompressionFactor * mCompressionFactor);
+				const auto channel = pair / mCompressionFactor + pair % mCompressionFactor;
 				result += useSmallDpf(channel);
 			}
 			return result;
 		}
-		static constexpr u64 smallDpfSetCount()
+		u64 smallDpfSetCount() const
 		{
 			return smallProductGroupCount() * BlockCount;
 		}
-		static constexpr u64 smallDpfPointCount()
+		u64 smallDpfPointCount() const
 		{
-			return smallDpfSetCount() * PointsPerDpfSet;
+			return smallDpfSetCount() * pointsPerDpfSet();
 		}
-		static constexpr u64 revPointsPerDpfSet(u64 pairCount)
+		u64 revPointsPerDpfSet(u64 pairCount) const
 		{
 			return pairCount * Ctx::extensionDegree *
-				BlockCount * PointsPerBlock * PointsPerBlock;
+				BlockCount * mPointsPerBlock * mPointsPerBlock;
 		}
-		static constexpr u64 revChannelCount(u64 pairCount)
+		u64 revChannelCount(u64 pairCount) const
 		{
-			return pairCount == CompressionFactor ? 1 : 2;
+			return pairCount == mCompressionFactor ? 1 : 2;
 		}
-		static constexpr u64 revSetCount(u64 pairCount)
+		u64 revSetCount(u64 pairCount) const
 		{
 			return revChannelCount(pairCount) * BlockCount;
 		}
-		static constexpr u64 revCountClassIndex(u64 pairCount)
+		u64 revCountClassIndex(u64 pairCount) const
 		{
 			return pairCount - (SmallPairCountLimit + 1);
 		}
-		static constexpr u64 revClassSetOffset(u64 pairCount)
+		u64 revClassSetOffset(u64 pairCount) const
 		{
 			u64 result = smallDpfSetCount();
 			for (u64 previous = SmallPairCountLimit + 1;
@@ -1065,23 +1295,23 @@ namespace osuCrypto
 				result += revSetCount(previous);
 			return result;
 		}
-		static constexpr u64 hybridSetCount()
+		u64 hybridSetCount() const
 		{
 			u64 result = smallDpfSetCount();
 			for (u64 pairCount = SmallPairCountLimit + 1;
-				pairCount <= CompressionFactor; ++pairCount)
+				pairCount <= mCompressionFactor; ++pairCount)
 				result += revSetCount(pairCount);
 			return result;
 		}
-		static constexpr u64 largeRevChannelCount()
+		u64 largeRevChannelCount() const
 		{
 			u64 result = 0;
 			for (u64 pairCount = SmallPairCountLimit + 1;
-				pairCount <= CompressionFactor; ++pairCount)
+				pairCount <= mCompressionFactor; ++pairCount)
 				result += revChannelCount(pairCount);
 			return result;
 		}
-		static constexpr u64 revClassPointOffset(u64 pairCount)
+		u64 revClassPointOffset(u64 pairCount) const
 		{
 			u64 result = smallDpfPointCount();
 			for (u64 previous = SmallPairCountLimit + 1;
@@ -1089,30 +1319,30 @@ namespace osuCrypto
 				result += revSetCount(previous) * revPointsPerDpfSet(previous);
 			return result;
 		}
-		static constexpr u64 revSetIndex(u64 channel, u64 region)
+		u64 revSetIndex(u64 channel, u64 region) const
 		{
 			const auto pairCount = revPairCount(channel);
 			const auto firstChannel = pairCount - 1;
 			return (channel == firstChannel ? 0 : BlockCount) + region;
 		}
-		static constexpr u64 revGroup(u64 channel, u64 groupSlot)
+		u64 revGroup(u64 channel, u64 groupSlot) const
 		{
 			const auto pairCount = revPairCount(channel);
 			const auto power = groupSlot / pairCount;
 			const auto pairSlot = groupSlot % pairCount;
-			const auto firstLeft = channel < CompressionFactor ?
-				0 : channel - (CompressionFactor - 1);
+			const auto firstLeft = channel < mCompressionFactor ?
+				0 : channel - (mCompressionFactor - 1);
 			const auto leftPolynomial = firstLeft + pairSlot;
 			const auto rightPolynomial = channel - leftPolynomial;
-			return power * CompressionFactor * CompressionFactor +
-				leftPolynomial * CompressionFactor + rightPolynomial;
+			return power * mCompressionFactor * mCompressionFactor +
+				leftPolynomial * mCompressionFactor + rightPolynomial;
 		}
 		u64 smallGroup(u64 ordinal) const
 		{
-			for (u64 group = 0; group < GroupCount; ++group)
+			for (u64 group = 0; group < groupCount(); ++group)
 			{
-				const auto pair = group % (CompressionFactor * CompressionFactor);
-				const auto channel = pair / CompressionFactor + pair % CompressionFactor;
+				const auto pair = group % (mCompressionFactor * mCompressionFactor);
+				const auto channel = pair / mCompressionFactor + pair % mCompressionFactor;
 				if (useSmallDpf(channel) && ordinal-- == 0)
 					return group;
 			}
@@ -1120,13 +1350,13 @@ namespace osuCrypto
 		}
 		u64 positionInstanceCount() const
 		{
-			const auto points = GroupCount * pointsPerGroup();
+			const auto points = groupCount() * pointsPerGroup();
 			return PowerOfTwoCoordinates ? points * localDimensions() : points;
 		}
-		static constexpr u64 leftCoefficientCount() { return CompressionFactor * Weight; }
-		static constexpr u64 rightCoefficientCount()
+		u64 leftCoefficientCount() const { return mCompressionFactor * mWeight; }
+		u64 rightCoefficientCount() const
 		{
-			return CompressionFactor * Ctx::extensionDegree * Weight;
+			return mCompressionFactor * Ctx::extensionDegree * mWeight;
 		}
 
 		struct DpfBaseOtCount
@@ -1134,6 +1364,27 @@ namespace osuCrypto
 			u64 mSendCount = 0;
 			u64 mRecvCount = 0;
 		};
+
+		BaseCorCount baseCorCountFor(bool positionsCached) const
+		{
+			BaseCorCount result;
+			const auto dpfCount = dpfBaseOtCount(positionsCached);
+			result.mSendOtCount = dpfCount.mSendCount;
+			result.mRecvOtCount = dpfCount.mRecvCount;
+
+			const auto tensorOtCount = rightCoefficientCount() *
+				mCtx.dpfCoeffCtx().template bitSize<Ext>();
+			if ((mPartyIdx ? result.mRecvOtCount : result.mSendOtCount) >
+				std::numeric_limits<u64>::max() - tensorOtCount)
+				throw std::length_error("AnyFieldOle base-OT count overflows u64. " LOCATION);
+			if (mPartyIdx)
+				result.mRecvOtCount += tensorOtCount;
+			else
+				result.mSendOtCount += tensorOtCount;
+
+			result.mOleCount = positionsCached ? 0 : mPositionOleCount;
+			return result;
+		}
 
 		void setBaseCorsOwned(
 			std::vector<std::array<block, 2>>&& newSendOts,
@@ -1221,6 +1472,11 @@ namespace osuCrypto
 
 		DpfBaseOtCount dpfBaseOtCount() const
 		{
+			return dpfBaseOtCount(mHasPositions);
+		}
+
+		DpfBaseOtCount dpfBaseOtCount(bool positionsCached) const
+		{
 			if (mDpfMode == AnyFieldDpfMode::RegularDpf)
 			{
 				const auto count = std::get<RegularBackend>(mDpf).baseOtCount();
@@ -1230,7 +1486,7 @@ namespace osuCrypto
 			const auto& hybrid = std::get<HybridBackend>(mDpf);
 			const auto smallCount = hybrid.mSmall.baseOtCount();
 			DpfBaseOtCount result{ smallCount.mSendCount, smallCount.mRecvCount };
-			if (mHasPositions)
+			if (positionsCached)
 				return result;
 			for (const auto& dpf : hybrid.mLarge)
 			{
@@ -1251,7 +1507,7 @@ namespace osuCrypto
 			{
 				mDpf = RegularBackend{};
 				std::get<RegularBackend>(mDpf).init(
-					mPartyIdx, mBlockSize, PointsPerDpfSet, DpfSetCount,
+					mPartyIdx, mBlockSize, pointsPerDpfSet(), dpfSetCount(),
 					mCtx.dpfCoeffCtx());
 				return;
 			}
@@ -1259,11 +1515,11 @@ namespace osuCrypto
 			mDpf = HybridBackend{};
 			auto& hybrid = std::get<HybridBackend>(mDpf);
 			hybrid.mSmall.init(
-				mPartyIdx, mBlockSize, PointsPerDpfSet, smallDpfSetCount(),
+				mPartyIdx, mBlockSize, pointsPerDpfSet(), smallDpfSetCount(),
 				mCtx.dpfCoeffCtx());
-			hybrid.mLarge.resize(RevCountClassCount);
+			hybrid.mLarge.resize(revCountClassCount());
 			for (u64 pairCount = SmallPairCountLimit + 1;
-				pairCount <= CompressionFactor; ++pairCount)
+				pairCount <= mCompressionFactor; ++pairCount)
 				hybrid.mLarge[revCountClassIndex(pairCount)].init(
 					mPartyIdx,
 					revPointsPerDpfSet(pairCount),
@@ -1311,13 +1567,13 @@ namespace osuCrypto
 		void sampleSparsePositions(PRNG& prng)
 		{
 			mSparsePositions.resize(leftCoefficientCount());
-			for (u64 polynomial = 0; polynomial < CompressionFactor; ++polynomial)
+			for (u64 polynomial = 0; polynomial < mCompressionFactor; ++polynomial)
 			{
-				const auto polynomialOffset = polynomial * Weight;
+				const auto polynomialOffset = polynomial * mWeight;
 				for (u64 blockIndex = 0; blockIndex < BlockCount; ++blockIndex)
 				{
-					const auto blockOffset = polynomialOffset + blockIndex * PointsPerBlock;
-					for (u64 slot = 0; slot < PointsPerBlock; ++slot)
+					const auto blockOffset = polynomialOffset + blockIndex * mPointsPerBlock;
+					for (u64 slot = 0; slot < mPointsPerBlock; ++slot)
 					{
 						u64 position;
 						bool duplicate;
@@ -1354,11 +1610,11 @@ namespace osuCrypto
 			if (mPartyIdx)
 			{
 				std::vector<Ext> right(rightCoefficientCount());
-				for (u64 polynomial = 0; polynomial < CompressionFactor; ++polynomial)
+				for (u64 polynomial = 0; polynomial < mCompressionFactor; ++polynomial)
 					for (u64 power = 0; power < Ctx::extensionDegree; ++power)
-						for (u64 i = 0; i < Weight; ++i)
-							right[(Ctx::extensionDegree * polynomial + power) * Weight + i] =
-								mCtx.frobenius(mSparseCoefficients[polynomial * Weight + i], power);
+						for (u64 i = 0; i < mWeight; ++i)
+							right[(Ctx::extensionDegree * polynomial + power) * mWeight + i] =
+								mCtx.frobenius(mSparseCoefficients[polynomial * mWeight + i], power);
 
 				auto tensorOts = span<block>(mRecvOts).subspan(mInstalledDpfRecvOtCount);
 				BitVector choices = mRecvChoices.subvec(
@@ -1425,24 +1681,24 @@ namespace osuCrypto
 
 		macoro::task<> makePointShares(std::vector<u64>& pointShares, coproto::Socket& socket)
 		{
-			const auto pointCount = GroupCount * pointsPerGroup();
+			const auto pointCount = groupCount() * pointsPerGroup();
 			const auto positionInstances = positionInstanceCount();
 			std::vector<u64> localPositions(positionInstances);
-			for (u64 group = 0; group < GroupCount; ++group)
+			for (u64 group = 0; group < groupCount(); ++group)
 			{
-				const auto power = group / (CompressionFactor * CompressionFactor);
-				const auto pair = group % (CompressionFactor * CompressionFactor);
-				const auto leftPolynomial = pair / CompressionFactor;
-				const auto rightPolynomial = pair % CompressionFactor;
-				for (u64 left = 0; left < Weight; ++left)
+				const auto power = group / (mCompressionFactor * mCompressionFactor);
+				const auto pair = group % (mCompressionFactor * mCompressionFactor);
+				const auto leftPolynomial = pair / mCompressionFactor;
+				const auto rightPolynomial = pair % mCompressionFactor;
+				for (u64 left = 0; left < mWeight; ++left)
 				{
 					const auto leftPosition =
-						mSparsePositions[leftPolynomial * Weight + left];
-					for (u64 right = 0; right < Weight; ++right)
+						mSparsePositions[leftPolynomial * mWeight + left];
+					for (u64 right = 0; right < mWeight; ++right)
 					{
 						const auto rightPosition =
-							mSparsePositions[rightPolynomial * Weight + right];
-						const auto point = group * pointsPerGroup() + left * Weight + right;
+							mSparsePositions[rightPolynomial * mWeight + right];
+						const auto point = group * pointsPerGroup() + left * mWeight + right;
 						if constexpr (PowerOfTwoCoordinates)
 						{
 							for (u64 coordinate = 0; coordinate < localDimensions(); ++coordinate)
@@ -1509,7 +1765,7 @@ namespace osuCrypto
 
 		u64 fullPosition(u64 point, u64 localPosition) const
 		{
-			return point / PointsPerBlock + BlockCount * localPosition;
+			return point / mPointsPerBlock + BlockCount * localPosition;
 		}
 
 		OC_FORCEINLINE Ext publicValue(u64 index, u64 polynomial) const
@@ -1532,9 +1788,9 @@ namespace osuCrypto
 
 		u64 productBlock(u64 group, u64 leftPoint, u64 rightPoint) const
 		{
-			const auto power = group / (CompressionFactor * CompressionFactor);
-			auto leftBlock = leftPoint / PointsPerBlock;
-			auto rightBlock = rightPoint / PointsPerBlock;
+			const auto power = group / (mCompressionFactor * mCompressionFactor);
+			auto leftBlock = leftPoint / mPointsPerBlock;
+			auto rightBlock = rightPoint / mPointsPerBlock;
 			u64 result = 0;
 			u64 radix = 1;
 			for (u64 coordinate = 0; coordinate < BlockDimensions; ++coordinate)
@@ -1553,18 +1809,18 @@ namespace osuCrypto
 		void buildDpfOrder()
 		{
 			const auto revMode = mDpfMode == AnyFieldDpfMode::RevCuckoo;
-			mDpfOrder.resize(GroupCount * pointsPerGroup());
-			std::vector<u64> next(revMode ? hybridSetCount() : DpfSetCount);
+			mDpfOrder.resize(groupCount() * pointsPerGroup());
+			std::vector<u64> next(revMode ? hybridSetCount() : dpfSetCount());
 			u64 smallOrdinal = 0;
-			for (u64 group = 0; group < GroupCount; ++group)
+			for (u64 group = 0; group < groupCount(); ++group)
 			{
-				const auto pair = group % (CompressionFactor * CompressionFactor);
-				const auto leftPolynomial = pair / CompressionFactor;
-				const auto rightPolynomial = pair % CompressionFactor;
+				const auto pair = group % (mCompressionFactor * mCompressionFactor);
+				const auto leftPolynomial = pair / mCompressionFactor;
+				const auto rightPolynomial = pair % mCompressionFactor;
 				const auto productChannel = leftPolynomial + rightPolynomial;
 				const auto small = revMode && useSmallDpf(productChannel);
-				for (u64 left = 0; left < Weight; ++left)
-					for (u64 right = 0; right < Weight; ++right)
+				for (u64 left = 0; left < mWeight; ++left)
+					for (u64 right = 0; right < mWeight; ++right)
 					{
 						const auto region = productBlock(group, left, right);
 						u64 set;
@@ -1573,13 +1829,13 @@ namespace osuCrypto
 						if (!revMode)
 						{
 							set = group * BlockCount + region;
-							capacity = PointsPerDpfSet;
+							capacity = pointsPerDpfSet();
 							targetOffset = set * capacity;
 						}
 						else if (small)
 						{
 							set = smallOrdinal * BlockCount + region;
-							capacity = PointsPerDpfSet;
+							capacity = pointsPerDpfSet();
 							targetOffset = set * capacity;
 						}
 						else
@@ -1596,14 +1852,14 @@ namespace osuCrypto
 								"AnyFieldOle product block capacity is too small. " LOCATION);
 						const auto target = targetOffset + next[set]++;
 						mDpfOrder[target] =
-							group * pointsPerGroup() + left * Weight + right;
+							group * pointsPerGroup() + left * mWeight + right;
 					}
 				if (small)
 					++smallOrdinal;
 			}
 			if (mDpfMode == AnyFieldDpfMode::RegularDpf)
 				for (auto count : next)
-					if (count != PointsPerDpfSet)
+					if (count != pointsPerDpfSet())
 						throw std::logic_error(
 							"AnyFieldOle product blocks are not regular. " LOCATION);
 			if (revMode)
@@ -1612,11 +1868,11 @@ namespace osuCrypto
 					throw std::logic_error(
 						"AnyFieldOle small DPF group count is invalid. " LOCATION);
 				for (u64 set = 0; set < smallDpfSetCount(); ++set)
-					if (next[set] != PointsPerDpfSet)
+					if (next[set] != pointsPerDpfSet())
 						throw std::logic_error(
 							"AnyFieldOle small DPF product block is invalid. " LOCATION);
 				for (u64 pairCount = SmallPairCountLimit + 1;
-					pairCount <= CompressionFactor; ++pairCount)
+					pairCount <= mCompressionFactor; ++pairCount)
 					for (u64 classSet = 0; classSet < revSetCount(pairCount); ++classSet)
 						if (next[revClassSetOffset(pairCount) + classSet] !=
 							revPointsPerDpfSet(pairCount))
@@ -1629,15 +1885,15 @@ namespace osuCrypto
 		{
 			const auto group = source / pointsPerGroup();
 			const auto point = source % pointsPerGroup();
-			const auto left = point / Weight;
-			const auto right = point % Weight;
-			const auto power = group / (CompressionFactor * CompressionFactor);
-			const auto pair = group % (CompressionFactor * CompressionFactor);
-			const auto leftPolynomial = pair / CompressionFactor;
-			const auto rightPolynomial = pair % CompressionFactor;
-			const auto leftOffset = leftPolynomial * Weight;
+			const auto left = point / mWeight;
+			const auto right = point % mWeight;
+			const auto power = group / (mCompressionFactor * mCompressionFactor);
+			const auto pair = group % (mCompressionFactor * mCompressionFactor);
+			const auto leftPolynomial = pair / mCompressionFactor;
+			const auto rightPolynomial = pair % mCompressionFactor;
+			const auto leftOffset = leftPolynomial * mWeight;
 			const auto rightOffset =
-				(Ctx::extensionDegree * rightPolynomial + power) * Weight;
+				(Ctx::extensionDegree * rightPolynomial + power) * mWeight;
 			return productShares[
 				(leftOffset + left) * rightCoefficientCount() + rightOffset + right];
 		}
@@ -1675,7 +1931,7 @@ namespace osuCrypto
 			{
 				const auto channelSlot = set / BlockCount;
 				const auto channel = channelSlot == 0 ?
-					pairCount - 1 : RevProductChannelCount - pairCount;
+					pairCount - 1 : revProductChannelCount() - pairCount;
 				const auto group = revGroup(channel, groupSlot);
 				const auto orderOffset = revClassPointOffset(pairCount) + set * pointCount;
 				const auto valueOffset = set * pointCount;
@@ -1698,12 +1954,12 @@ namespace osuCrypto
 				Ctx::extensionDegree>& traceFactors,
 			span<Base> z)
 		{
-			const auto frobeniusPower = group / (CompressionFactor * CompressionFactor);
-			const auto pair = group % (CompressionFactor * CompressionFactor);
+			const auto frobeniusPower = group / (mCompressionFactor * mCompressionFactor);
+			const auto pair = group % (mCompressionFactor * mCompressionFactor);
 			accumulateProductPair(
 				frobeniusPower,
-				pair / CompressionFactor,
-				pair % CompressionFactor,
+				pair / mCompressionFactor,
+				pair % mCompressionFactor,
 				publicCount, work, traceFactors, z);
 		}
 

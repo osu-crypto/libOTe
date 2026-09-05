@@ -236,6 +236,23 @@ namespace osuCrypto
 				throw UnitTestFail(message);
 		};
 
+		{
+			FoleageTriple selected;
+			selected.configure(3);
+			selected.init(0, ipow(3, 8));
+			if (selected.mC != 3 || selected.mT != 27)
+				throw UnitTestFail("FOLEAGE c=3 secure parameter selection regressed");
+		}
+		expectRejected([] {
+			FoleageTriple triple;
+			triple.configure(7);
+			triple.init(0, ipow(3, 27));
+		}, "FOLEAGE accepted a compression factor below the interpolation boundary");
+		expectRejected([] {
+			FoleageTriple triple;
+			triple.configure(5);
+		}, "FOLEAGE accepted a secure weight that exceeds its tensor capacity");
+
 		expectRejected([] {
 			FoleageTriple triple;
 			triple.init(0, 0);
@@ -351,7 +368,7 @@ namespace osuCrypto
 			moved.mN == 0 || moved.mSendOts.size() != 2 * moved.mC * moved.mT)
 			throw UnitTestFail("Foleage move construction lost active state");
 		if (triple.isInitialized() || triple.hasBaseOts() || triple.mTimer ||
-			triple.mT != 9 || triple.mC != 8 || triple.mN ||
+			triple.mT != 0 || triple.mC != 8 || triple.mN ||
 			triple.mMode != FoleageMode::F4Ole ||
 			triple.mDpfMode != FoleageDpfMode::TernaryDpf ||
 			triple.mFftA.size() || triple.mFftASquared.size() ||
@@ -364,7 +381,7 @@ namespace osuCrypto
 		assigned = std::move(moved);
 		if (!assigned.isInitialized() || !assigned.hasBaseOts() ||
 			moved.isInitialized() || moved.hasBaseOts() || moved.mTimer ||
-			moved.mT != 9 || moved.mC != 8 || moved.mN ||
+			moved.mT != 0 || moved.mC != 8 || moved.mN ||
 			moved.mMode != FoleageMode::F4Ole ||
 			moved.mDpfMode != FoleageDpfMode::TernaryDpf ||
 			moved.mFftA.size() || moved.mFftASquared.size() ||

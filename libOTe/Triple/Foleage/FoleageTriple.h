@@ -22,6 +22,7 @@
 #include "libOTe/Dpf/TernaryDpf.h"
 #include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
 #include "libOTe/Tools/Coproto.h"
+#include "libOTe/Tools/LpnParameters.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include <utility>
 
@@ -67,7 +68,7 @@ namespace osuCrypto
 			mPartyIdx = std::exchange(src.mPartyIdx, 0);
 			mMode = std::exchange(src.mMode, FoleageMode::F4Ole);
 			mDpfMode = std::exchange(src.mDpfMode, FoleageDpfMode::TernaryDpf);
-			mT = std::exchange(src.mT, 9);
+			mT = std::exchange(src.mT, 0);
 			mLog3T = std::exchange(src.mLog3T, 0);
 			mC = std::exchange(src.mC, 8);
 			mN = std::exchange(src.mN, 0);
@@ -112,13 +113,33 @@ namespace osuCrypto
 		FoleageDpfMode mDpfMode = FoleageDpfMode::TernaryDpf;
 
 		// the number of noisy positions per polynomial
-		u64 mT = 9;
+		u64 mT = 0;
 
 		// will be set to the log3 of mT.
 		u64 mLog3T = 0;
 
 		// the number of polynomials.
 		u64 mC = 8;
+
+		// Select c and let init() derive the minimum 128-bit t, rounded up to
+		// a power of three. Directly setting mC and mT remains an expert/testing
+		// interface and does not claim that the pair meets this policy.
+		void configure(u64 compressionFactor)
+		{
+			if (!lpnParameters::decodingWeight128(compressionFactor))
+				throw std::invalid_argument(
+					"FOLEAGE compression factor must be in [2, 8]. " LOCATION);
+			const auto selected = lpnParameters::select(
+				compressionFactor, 4.0,
+				LpnCoefficientDistribution::Uniform);
+			const auto roundedWeight = lpnParameters::roundUpPower(
+				selected.mNoiseWeight, 3);
+			if (roundedWeight > 128 / compressionFactor)
+				throw std::invalid_argument(
+					"FOLEAGE cannot represent the selected secure weight within its 128-coefficient tensor limit. " LOCATION);
+			mC = compressionFactor;
+			mT = 0;
+		}
 
 		// the size of a polynomial, 3^mLog3N. 
 		// We will produce this many OLEs.
