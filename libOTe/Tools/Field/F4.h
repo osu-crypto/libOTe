@@ -158,6 +158,14 @@ namespace osuCrypto
 
 	struct CoeffCtxF4 : CoeffCtxInteger
 	{
+		// Multiplication by u mixes the two F2 components. In particular, the
+		// prime-subfield basis element 1 maps outside F2. Binary structured LPN
+		// codes require this instead of the scalar context's identity mulConst.
+		OC_FORCEINLINE void mulConst(F4& ret, const F4& value) const
+		{
+			ret = value * F4::fromCoefficients(0, 1);
+		}
+
 		template<typename F>
 		constexpr double regularNoiseFactor() const
 		{
