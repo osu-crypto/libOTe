@@ -503,6 +503,7 @@ namespace osuCrypto
 
 				const auto dpfOtCount = dpfBaseOtCount();
 				mDpfKeys = {};
+				typename RegularDpf<Ext, DpfCoeffCtx>::CompactScratch dpfScratch;
 				for (u64 group = 0; group < GroupCount; ++group)
 				{
 					RegularDpf<Ext, DpfCoeffCtx> dpf;
@@ -522,6 +523,7 @@ namespace osuCrypto
 						groupValues,
 						prng,
 						mDpfKeys[group],
+						dpfScratch,
 						socket,
 						mCtx.dpfCoeffCtx());
 				}
@@ -594,6 +596,7 @@ namespace osuCrypto
 				}
 
 				std::vector<Ext> product(mN);
+				typename RegularDpf<Ext, DpfCoeffCtx>::CompactScratch dpfScratch;
 				for (u64 group = 0; group < GroupCount; ++group)
 				{
 					std::fill(product.begin(), product.end(), Ext::zero());
@@ -601,6 +604,7 @@ namespace osuCrypto
 						mPartyIdx,
 						mBlockSize,
 						mDpfKeys[group],
+						dpfScratch,
 						[&](u64 tree, u64 leaf, Ext value, block) {
 							const auto left = tree / Weight;
 							const auto right = tree - left * Weight;
