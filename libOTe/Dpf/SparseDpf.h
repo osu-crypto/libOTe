@@ -354,8 +354,6 @@ namespace osuCrypto
 			for (u64 i = 0; i < mNumPoints; ++i)
 			{
 				auto&& set = sparsePoints[i];
-				if (set.size() == 0)
-					throw RTE_LOC;
 				for (u64 j = 0; j < set.size(); ++j)
 				{
 					if (static_cast<u64>(set[j]) >= mDomain ||
@@ -411,7 +409,12 @@ namespace osuCrypto
 				// Extract upper bits for dense evaluation
 				std::vector<u64> densePoints(points.size());
 				for (u64 i = 0; i < points.size(); ++i)
-					densePoints[i] = points[i] >> depth;
+				{
+					// Figure 7 permits an empty public sparse set. Such an instance has
+					// no output leaves, so use a public in-domain point for the batched
+					// dense expansion and discard its tree below.
+					densePoints[i] = sparsePoints[i].size() ? points[i] >> depth : 0;
+				}
 				Matrix<block> seeds(points.size(), 1ull << mDenseDepth);
 				Matrix<u8> tags(points.size(), 1ull << mDenseDepth);
 
@@ -477,6 +480,8 @@ namespace osuCrypto
 				{
 					Range points{ sparsePoints[r].data(), sparsePoints[r].data() + sparsePoints[r].size() };
 					auto& tree = trees[r];
+					if (points.size() == 0)
+						continue;
 					if (points.size() == 1)
 					{
 						leafValues[r][0] = prng.get();
@@ -523,7 +528,8 @@ namespace osuCrypto
 						used = true;
 
 					// Extract bit α_d from secret point α
-					auto alphaD = (points[r] >> (d - 1)) & 1;
+					auto alphaD = sparsePoints[r].size() ?
+						(points[r] >> (d - 1)) & 1 : 0;
 
 					// Prepare for correctionWord protocol
 					taus[r][0] = lsb(tree[d].mZ[0]) ^ alphaD ^ mPartyIdx;

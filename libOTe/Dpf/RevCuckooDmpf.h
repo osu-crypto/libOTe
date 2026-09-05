@@ -26,13 +26,7 @@ namespace osuCrypto
 		// N
 		u64 mDomain = 0;
 
-		// The sparse-DPF universe also contains one unique public dummy key for
-		// every shuffled row. Only [0, mDomain) is emitted to the caller.
-		u64 mHashDomain = 0;
-		u64 mSparseDpfDomain = 0;
-		std::vector<u32> mDummyKeys;
-
-		// Bits required for the output domain and its unique dummy keys.
+		// Bits required to represent the paper's domain plus dummy key N.
 		u64 mIndexBitCount = 0;
 
 		// w
@@ -73,9 +67,8 @@ namespace osuCrypto
 
 		std::vector<std::span<u32>> mSparseSets;
 		std::unique_ptr<u32[]> mSparseSetBuf;
-		// Each sparse set is sorted with real indices before the upper-half
-		// dummy keys. Cache the real prefix so repeated expansions do not pay
-		// a dummy-filter branch in their output scatter loop.
+		// Cache the bucket sizes used by repeated output scatter loops and by
+		// callers accounting for the total number of expanded leaves.
 		std::vector<u64> mRealLeafCounts;
 		u64 mRealLeafCount = 0;
 
@@ -95,11 +88,6 @@ namespace osuCrypto
 		bool mSetupInProgress = false;
 		bool mExpandInProgress = false;
 		bool mFailed = false;
-
-		u32 dummyKey(u64 i) const
-		{
-			return mDummyKeys[i];
-		}
 
 		u64 realLeafCount() const
 		{
@@ -123,6 +111,7 @@ namespace osuCrypto
 			mNumPointsPerSet = numPointsPerSet;
 			mNumSets = numSets;
 			mDomain = domain;
+			mIndexBitCount = log2ceil(mDomain + 1);
 			mNumPartitions = numPartitions;
 			mCuckooSecParam = cuckooSecParam;
 			mLinearSecParam = linearSecParam;
@@ -144,32 +133,6 @@ namespace osuCrypto
 
 			auto f = mNumPartitions * mPartitionSize;
 			auto c = mPartitionSize + mLinearSecParam;
-			if (mDomain > (1ull << 31))
-				throw std::runtime_error("RevCuckoo output domains must fit below the dummy-key half. " LOCATION);
-			mHashDomain = mDomain + f;
-
-			// Consecutive dummies form a low-dimensional algebraic subset for the
-			// Goldreich-style hash and can make the solve rank deficient. Retain i
-			// in the low bits for injectivity and use AES-derived middle bits to
-			// spread the public dummies through a wider, disjoint upper half.
-			auto dummyIndexBits = log2ceil(f);
-			auto outputBits = log2ceil(mDomain);
-			mIndexBitCount = std::min<u64>(32,
-				std::max(outputBits + 1, dummyIndexBits + 13));
-			mSparseDpfDomain = 1ull << mIndexBitCount;
-			auto highBit = 1ull << (mIndexBitCount - 1);
-			auto middleBits = mIndexBitCount - 1 - dummyIndexBits;
-			auto middleMask = middleBits == 32 ? ~0ull : ((1ull << middleBits) - 1);
-			auto lowMask = dummyIndexBits ? ((1ull << dummyIndexBits) - 1) : 0;
-			AES dummyAes(block(0x52435644554d4d59ull, 0x4b45595300000001ull));
-			mDummyKeys.resize(f);
-			for (u64 i = 0; i < f; ++i)
-			{
-				auto hash = dummyAes.hashBlock(block(i, 0x52435644554d4d59ull)).get<u64>(0);
-				auto payload = (i & lowMask) | ((hash & middleMask) << dummyIndexBits);
-				mDummyKeys[i] = static_cast<u32>(highBit | payload);
-			}
-			std::sort(mDummyKeys.begin(), mDummyKeys.end());
 
 			mDedup.resize(mNumSets);
 
@@ -191,11 +154,10 @@ namespace osuCrypto
 				mPartitionSize,
 				c,
 				log2ceil(mPartitionSize),
-				mNumPartitions * mNumSets,
-				mPartitionSize > 1);
+				mNumPartitions * mNumSets);
 
 			auto denseDepth = log2ceil(f) + 2;
-			mSparseDpf.init(mPartyIdx, mNumSets * f, mSparseDpfDomain, denseDepth);
+			mSparseDpf.init(mPartyIdx, mNumSets * f, mDomain, denseDepth);
 
 
 			mCharacteristicTwo = characteristicTwo;
@@ -370,13 +332,13 @@ namespace osuCrypto
 			setTimePoint("sparseSets Begin");
 			constexpr auto stepSize = 32;
 			auto stride = H.cols();
-			auto d32 = mHashDomain / stepSize * stepSize;
+			auto d32 = mDomain / stepSize * stepSize;
 			assert(stride == divCeil(c, 8));
 
 			// Build a CSR-style layout. The old fixed-capacity bucket allocation
 			// reserved maxLoad entries for every bucket and could waste most of its
 			// memory. Two linear passes cost little relative to sparse-DPF setup and
-			// allocate exactly the w * hashDomain entries that will be consumed.
+			// allocate exactly the w * N entries that will be consumed.
 			auto forEachMapping = [&](auto&& fn)
 			{
 				for (u64 s = 0; s < mNumSets; ++s)
@@ -387,7 +349,7 @@ namespace osuCrypto
 
 					for (u64 j = 0; j < mNumPartitions; ++j)
 					{
-						auto Hj = H.data(j * mHashDomain);
+						auto Hj = H.data(j * mDomain);
 						std::vector<u8> Ssj(stride * 8);
 						std::array<u8, stepSize> h;
 						std::array<u32, stepSize> buckets;
@@ -408,12 +370,11 @@ namespace osuCrypto
 							{
 								if (buckets[k] >= mPartitionSize)
 									throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
-								fn(s * f + j * mPartitionSize + buckets[k],
-									i + k < mDomain ? i + k : dummyKey(i + k - mDomain));
+								fn(s * f + j * mPartitionSize + buckets[k], i + k);
 							}
 						}
 
-						for (u64 i = d32; i < mHashDomain; ++i)
+						for (u64 i = d32; i < mDomain; ++i)
 						{
 							u32 bucket = 0;
 							for (u64 b = 0; b < positionBytes; ++b)
@@ -426,8 +387,7 @@ namespace osuCrypto
 							}
 							if (bucket >= mPartitionSize)
 								throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
-							fn(s * f + j * mPartitionSize + bucket,
-								i < mDomain ? i : dummyKey(i - mDomain));
+							fn(s * f + j * mPartitionSize + bucket, i);
 						}
 					}
 				}
@@ -452,9 +412,7 @@ namespace osuCrypto
 			for (u64 i = 0; i < mSparseSets.size(); ++i)
 			{
 				assert(std::is_sorted(mSparseSets[i].begin(), mSparseSets[i].end()));
-				mRealLeafCounts[i] = std::lower_bound(
-					mSparseSets[i].begin(), mSparseSets[i].end(), mDomain) -
-					mSparseSets[i].begin();
+				mRealLeafCounts[i] = mSparseSets[i].size();
 				mRealLeafCount += mRealLeafCounts[i];
 			}
 
@@ -513,10 +471,7 @@ namespace osuCrypto
 				for (u64 i = 0; i < mNumPointsPerSet; ++i)
 				{
 					copyBytesMin(A[s][i], points[s][i]);
-					// Duplicate rows are replaced by unique public dummy keys. Reusing N
-					// here makes the shuffled linear system unsatisfiable whenever two
-					// copies of H(N) are assigned different target buckets.
-					copyBytesMin(altKeys[s][i], dummyKey(i) * mPartyIdx);
+					copyBytesMin(altKeys[s][i], mDomain * mPartyIdx);
 				}
 
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
@@ -547,7 +502,7 @@ namespace osuCrypto
 				// Step 5-6: Setup A and B matrices
 				A[s].resize(f, A[s].cols()); // Resize A to f rows
 				for (u64 i = mNumPointsPerSet; i < f; ++i)
-					copyBytesMin(A[s][i], dummyKey(i) * mPartyIdx);
+					copyBytesMin(A[s][i], mDomain * mPartyIdx);
 
 				av[s] = BitMtxVec(A[s]);
 				// Step 7: Permute (A||b) by π
@@ -621,6 +576,15 @@ namespace osuCrypto
 				r.result();
 			setTimePoint("done Begin");
 
+			// The paper defines H_i(N) = 0 for the common dummy N. Compute the
+			// public offset once and apply it to both the secret-shared rows and
+			// the public domain hashes below.
+			Matrix<u8> HDomain(mNumPartitions, M[0].cols());
+			Matrix<u8> ADomain(1, A[0].cols());
+			copyBytesMin(ADomain, mDomain);
+			for (u64 i = 0; i < mNumPartitions; ++i)
+				mGoldreichHash[i].hash(ADomain, HDomain.submtx(i, 1), hashCache[i]);
+
 			// Prepare y vector (0, 1, ..., m-1)
 			Matrix<u8> Y(mPartitionSize, positionBytes);
 			for (u64 j = 0; j < mPartitionSize; ++j)
@@ -643,6 +607,12 @@ namespace osuCrypto
 					auto Msih = M[s].submtx(i * mPartitionSize, mPartitionSize);
 
 					//mGoldreichHash[i].mPrint = mPrint && mPartyIdx;
+					if (mPartyIdx)
+					{
+						for (u64 j = 0; j < Msih.rows(); ++j)
+							for (u64 k = 0; k < Msih.cols(); ++k)
+								Msih(j, k) ^= HDomain(i, k);
+					}
 					M_si[h] = Msih;
 					S_si[h] = S[s].submtx(i * c, c);
 
@@ -699,16 +669,19 @@ namespace osuCrypto
 
 			// Step 11: Calculate h_i,j via hash function
 			// This step is handled by SparseDpf configuration below
-			Matrix<u8> H(mHashDomain * mNumPartitions, mGoldreichHash[0].mOutBytes);
-			Matrix<u8> I(mHashDomain, mGoldreichHash[0].mInBytes);
+			Matrix<u8> H(mDomain * mNumPartitions, mGoldreichHash[0].mOutBytes);
+			Matrix<u8> I(mDomain, mGoldreichHash[0].mInBytes);
 			for (u64 i = 0; i < mDomain; ++i)
 				copyBytesMin(I[i], i);
-			for (u64 i = 0; i < f; ++i)
-				copyBytesMin(I[mDomain + i], dummyKey(i));
 
 			for (u64 j = 0; j < mNumPartitions; ++j)
+			{
 				mGoldreichHash[j].hash(I,
-					H.submtx(j * mHashDomain, mHashDomain), hashCache[j]);
+					H.submtx(j * mDomain, mDomain), hashCache[j]);
+				for (u64 i = 0; i < mDomain; ++i)
+					for (u64 k = 0; k < H.cols(); ++k)
+						H(j * mDomain + i, k) ^= HDomain(j, k);
+			}
 
 
 
@@ -1109,8 +1082,6 @@ namespace osuCrypto
 
 				for (u64 j = 0; j < f; ++j, ++k)
 				{
-					// Dummies contribute to leafSums and gamma above, but never to
-					// caller output. They occupy the suffix of this sorted set.
 					auto n = mRealLeafCounts[k];
 					auto n8 = n / 8 * 8;
 					auto sIter = mExpanded[k].begin();
@@ -1377,9 +1348,6 @@ namespace osuCrypto
 			mPartitionSize = 0;
 			mIndexBitCount = 0;
 			mDomain = 0;
-			mHashDomain = 0;
-			mSparseDpfDomain = 0;
-			mDummyKeys.clear();
 			mLinearSecParam = 0;
 			mCuckooSecParam = 0;
 		}
