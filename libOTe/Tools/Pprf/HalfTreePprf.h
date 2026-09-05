@@ -1167,4 +1167,3 @@ namespace osuCrypto
 #undef HALF_TREE_PPRF_ROUND_BARRIER
 
 #endif
-
