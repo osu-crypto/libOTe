@@ -4,7 +4,7 @@ on:
   push:
     branches: [master, stage, stationaryOt, newAes, dmpf, cpp20]
   pull_request:
-    branches: [master, stage, newAes]
+    branches: [master, stage, newAes, 'codex/pr-*']
   workflow_dispatch:
 
 jobs:

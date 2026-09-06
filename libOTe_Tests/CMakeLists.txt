@@ -10,7 +10,6 @@ set(SRCS
     Pprf_Tests.cpp
     Dpf_Tests.cpp
     RevCuckoo_Tests.cpp
-    Waterfall_Tests.cpp
     SilentOT_Tests.cpp
     SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp
