@@ -14,6 +14,31 @@ Audit status: closed on 2026-08-27 after the cleanup and verification pass.
 The RevCuckoo implementation was excluded because it is undergoing a separate
 set of substantial changes. AUD-001 remains intentionally deferred.
 
+## AUD-214: Half-tree expansion exposed an invertible child
+
+Status: fixed
+
+The internal hash in `HalfTreePprf.h` used `H(x) = AES(x) XOR x`.
+The other child, `x XOR H(x)`, was therefore `AES(x)`. A receiver could
+invert a revealed right sibling under the public AES key, recover its parent,
+and expand the hidden subtree. A domain-four reproduction recovered the
+punctured sender leaf and programmed delta in 100/100 trials.
+
+Internal expansion now uses `H(x) = AES(sigma(x)) XOR sigma(x)`, with the
+linear orthomorphism from Section 2.3 of
+[Half-Tree](https://eprint.iacr.org/2022/1431). Both scalar paths and the
+eight-lane kernel use this hash and derive the other child as `x XOR H(x)`.
+
+Verification: `HalfTreePprf_test` compares scalar and batched expansion with
+an independent word-based reference on all 128 basis vectors and random
+inputs. Protocol tests cover small, full, and truncated trees across output
+formats and coefficient types. Pipelined level expansion is checked against
+scalar hashes under random AES keys, including empty levels and final batches.
+Paired AVX2 preparation and its scalar fallback are checked against the same
+word-based reference at both 16-byte and 32-byte aligned offsets.
+The prior recovery attack fails in 100/100
+trials with a fixed delta and fresh roots; the PPRF outputs remain correct.
+
 ## AUD-213: Punctured SparseDpf singleton expansion wrote through empty spans
 
 Status: fixed
