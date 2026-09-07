@@ -810,6 +810,8 @@ namespace osuCrypto
 		// Allocate and initialize mA
 		mCtx.resize(mA, 0);
 		mCtx.resize(mA, mNoiseVecSize);
+		// Keep capacity for code padding, but expose only tree outputs to PPRF.
+		mCtx.resize(mA, mNumPartitions * mSizePer);
 		setTimePoint("SilentVoleReceiver.alloc");
 
 		// Allocate and zero-initialize mC
@@ -842,6 +844,7 @@ namespace osuCrypto
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, mCtx);
 
 		// Zero out the remaining positions in mA
+		mCtx.resize(mA, mNoiseVecSize);
 		mCtx.zero(mA.begin() + mNumPartitions * mSizePer, mA.end());
 
 		setTimePoint("SilentVoleReceiver.expand.pprf_transpose");

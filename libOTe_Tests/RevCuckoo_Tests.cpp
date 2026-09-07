@@ -1,4 +1,5 @@
 #include "RevCuckoo_Tests.h"
+#include "LocalSocketTestPair.h"
 #include "libOTe/Dpf/RevCuckooDmpf.h"
 
 namespace osuCrypto
@@ -156,7 +157,7 @@ namespace osuCrypto
 		dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
 		// Create sockets for communication
-		auto sock = coproto::LocalAsyncSocket::makePair();
+		tests_libOTe::LocalSocketTestPair sock;
 		//sock[0].enableLogging();
 		//sock[1].enableLogging();
 
@@ -165,10 +166,10 @@ namespace osuCrypto
 		{
 			std::cout << "Setting up points..." << std::endl;
 		}
-		auto r = macoro::sync_wait(macoro::when_all_ready(
+		auto r = sock.run(
 			dpf[0].setPoints(points0, prng, sock[0]),
 			dpf[1].setPoints(points1, prng, sock[1])
-		));
+		);
 		std::get<0>(r).result();
 		std::get<1>(r).result();
 
@@ -246,10 +247,10 @@ namespace osuCrypto
 			output[1].resize(numSets, domain);
 
 			// Expand values using the cached point setup
-			auto r = macoro::sync_wait(macoro::when_all_ready(
+			auto r = sock.run(
 				dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }),
 				dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; })
-			));
+			);
 			std::get<0>(r).result();
 			std::get<1>(r).result();
 			F zero;
@@ -418,10 +419,10 @@ namespace osuCrypto
 		Matrix<u64> valid(sets, points);
 		prng.get(invalid.data(), invalid.size());
 		prng.get(valid.data(), valid.size());
-		auto sockets = coproto::LocalAsyncSocket::makePair();
-		auto results = macoro::sync_wait(macoro::when_all_ready(
+		tests_libOTe::LocalSocketTestPair sockets;
+		auto results = sockets.run(
 			dpf[0].setPoints(invalid, prng, sockets[0]),
-			dpf[1].setPoints(valid, prng, sockets[1])));
+			dpf[1].setPoints(valid, prng, sockets[1]));
 
 		bool failed[2]{};
 		try { std::get<0>(results).result(); }
@@ -486,11 +487,11 @@ namespace osuCrypto
 		output[0].resize(n, out);
 		output[1].resize(n, out);
 
-		auto sock = coproto::LocalAsyncSocket::makePair();
-		macoro::sync_wait(macoro::when_all_ready(
+		tests_libOTe::LocalSocketTestPair sock;
+		sock.run(
 			hash[0].hash(input[0], output[0], sock[0], seed),
 			hash[1].hash(input[1], output[1], sock[1], seed)
-		));
+		);
 
 		Matrix<u8> rIn(n, in), rOut(n, out);
 		for (u64 j = 0; j < n; ++j)

@@ -544,9 +544,12 @@ namespace osuCrypto
 
 		// Allocate and expand the B vector
 		mB.resize(mNoiseVecSize);
+		// Keep capacity for code padding, but expose only tree outputs to PPRF.
+		mB.resize(mNumPartitions * mSizePer);
 		co_await gen().expand(chl, delta, prng.get(), mB, mPprfFormat, true, mNumThreads, CoeffCtxGF2{});
 
 		// fill remaining with zeros
+		mB.resize(mNoiseVecSize);
 		for (u64 i = mNumPartitions * mSizePer; i < mB.size(); ++i)
 			mB[i] = ZeroBlock;
 

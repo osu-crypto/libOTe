@@ -688,6 +688,8 @@ namespace osuCrypto
 			// Allocate and initialize mB
 			mCtx.resize(mB, 0);
 			mCtx.resize(mB, mNoiseVecSize);
+			// Keep capacity for code padding, but expose only tree outputs to PPRF.
+			mCtx.resize(mB, mNumPartitions * mSizePer);
 
 			if (mTimer)
 				gen().setTimer(*mTimer);
@@ -706,6 +708,7 @@ namespace osuCrypto
 			setTimePoint("SilentVoleSender.expand.pprf");
 
 			// Zero out the remaining positions in mB
+			mCtx.resize(mB, mNoiseVecSize);
 			mCtx.zero(mB.begin() + mNumPartitions * mSizePer, mB.end());
 
 			// Debug consistency check
