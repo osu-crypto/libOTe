@@ -498,7 +498,7 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
 {
 	auto debug = cmd.isSet("debug");
 	auto noise = (SdNoiseDistribution)cmd.getOr("noise", 0);
-	for (u64 n : {128, 45364})
+	for (u64 n : {128, 1024, 2048, 4096, 45364})
 	{
 		Vole_Silent_test_impl<u64, u64, CoeffCtxInteger>(n, DefaultMultType, debug, false, false, noise);
 		Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, DefaultMultType, debug, false, false, noise);
@@ -527,7 +527,7 @@ void Vole_Silent_stationary_test(const oc::CLP& cmd)
 {
 	auto debug = cmd.isSet("debug");
 	auto noise = (SdNoiseDistribution)cmd.getOr("noise", 1);
-	for (u64 n : {128, 45364})
+	for (u64 n : {128, 1024, 2048, 4096, 45364})
 	{
 		Vole_Silent_test_impl<u64, u64, CoeffCtxInteger>(n, DefaultMultType, debug, false, false, noise);
 		Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, DefaultMultType, debug, false, false, noise);

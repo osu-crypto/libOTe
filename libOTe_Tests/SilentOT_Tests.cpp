@@ -1064,7 +1064,7 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
 
     // Test different sizes of OTs
     std::vector<u64> nn = cmd.getManyOr<u64>("n",
-        { 12, 433, 2048, 5466 });
+        { 12, 433, 1024, 2048, 4096, 5466 });
 
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
@@ -1076,11 +1076,12 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
 
-    // Run tests with different OT counts
+    // Power-of-two requests exercise code padding beyond the PPRF outputs.
+    for (auto noise : { SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary })
     for (auto n : nn)
     {
-        sender.configure(n);
-        recver.configure(n);
+        sender.configure(n, s, threads, SilentSecType::SemiHonest, noise);
+        recver.configure(n, s, threads, SilentSecType::SemiHonest, noise);
         fakeBase(n, s, threads, prng, recver, sender);
         auto delta = *sender.mDelta;
 
