@@ -10,7 +10,5 @@ namespace osuCrypto
 	void RevCuckoo_baseOtSlicing_Test(const oc::CLP& cmd);
 	void RevCuckoo_iterative_Test(const oc::CLP& cmd);
 	void RevCuckoo_singlePoint_Test(const oc::CLP& cmd);
-	void RevCuckoo_robustness_Test(const oc::CLP& cmd);
-	void RevCuckoo_failurePropagation_Test(const oc::CLP& cmd);
 
 }

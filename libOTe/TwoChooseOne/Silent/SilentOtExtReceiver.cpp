@@ -298,7 +298,7 @@ namespace osuCrypto
 
 		if (SdNoiseDistribution::Regular == noiseType)
 		{
-			format = PprfOutputFormat::ByPhysicalIndex;
+			format = PprfOutputFormat::Interleaved;
 		}
 		else if (SdNoiseDistribution::Stationary == noiseType)
 		{
