@@ -610,6 +610,29 @@ namespace osuCrypto {
 	struct CoeffCtxArray : CoeffCtxInteger
 	{
 		using F = std::array<G, N>;
+		using CoeffCtxInteger::one;
+		using CoeffCtxInteger::zero;
+
+		OC_FORCEINLINE void zero(F& ret) const
+		{
+			for (auto& value : ret)
+				CoeffCtxInteger::zero(value);
+		}
+
+		OC_FORCEINLINE void one(F& ret) const
+		{
+			for (auto& value : ret)
+				CoeffCtxInteger::one(value);
+		}
+
+		template<typename T>
+		bool characteristicTwo() const
+		{
+			if constexpr (std::is_same_v<std::remove_cvref_t<T>, F>)
+				return CoeffCtxInteger::template characteristicTwo<G>();
+			else
+				return CoeffCtxInteger::template characteristicTwo<T>();
+		}
 
 		OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) const {
 			for (u64 i = 0; i < lhs.size(); ++i) {

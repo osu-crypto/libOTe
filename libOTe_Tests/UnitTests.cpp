@@ -123,6 +123,8 @@ namespace tests_libOTe
 			tc.add("RevCuckoo_baseOtSlicing_Test             ", RevCuckoo_baseOtSlicing_Test);
 			tc.add("RevCuckoo_iterative_Test                ", RevCuckoo_iterative_Test);
 			tc.add("RevCuckoo_singlePoint_Test              ", RevCuckoo_singlePoint_Test);
+			tc.add("RevCuckoo_robustness_Test               ", RevCuckoo_robustness_Test);
+			tc.add("RevCuckoo_failurePropagation_Test       ", RevCuckoo_failurePropagation_Test);
 			
 
 			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);
@@ -188,10 +190,11 @@ namespace tests_libOTe
 			tc.add("BlkAccCode_Audit_Test                   ", BlkAccCode_Audit_Test);
 			
 			tc.add("RegularPprf_expandOne_test               ", RegularPprf_expandOne_test);
-			tc.add("RegularPprf_inter_test                   ", RegularPprf_inter_test);
+			tc.add("RegularPprf_PhysicalIndex_test           ", RegularPprf_PhysicalIndex_test);
 			tc.add("RegularPprf_ByLeafIndex_test             ", RegularPprf_ByLeafIndex_test);
 			tc.add("RegularPprf_ByTreeIndex_test             ", RegularPprf_ByTreeIndex_test);
 			tc.add("RegularPprf_callback_test                ", RegularPprf_callback_test);
+			tc.add("HalfTreePprf_test                         ", HalfTreePprf_test);
 			tc.add("Pprf_Audit_Test                           ", Pprf_Audit_Test);
 			tc.add("StationaryPprf_inter_test                ", StationaryPprf_inter_test);
 

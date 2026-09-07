@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cryptoTools/Common/Defines.h"
+#include "libOTe/Dpf/CachedDpfExpansion.h"
 #include "libOTe/Dpf/SparseDpf.h"
 #include "RevCuckoo/Dedup.h"
 #include "RevCuckoo/GoldreichHash.h"
@@ -26,8 +27,8 @@ namespace osuCrypto
 		// N
 		u64 mDomain = 0;
 
-		// the required bits to represent the domain plus 1
-		u64 mIndexBitCount = 0; // log2ceil(mDomain+1);
+		// Bits required to represent the paper's domain plus dummy key N.
+		u64 mIndexBitCount = 0;
 
 		// w
 		u64 mNumPartitions = 0;
@@ -37,6 +38,10 @@ namespace osuCrypto
 
 		// lambda
 		u64 mLinearSecParam = 0;
+
+		// Fixed margin for batching and the structured-relation loss analyzed in
+		// REV_CUCKOO_HASH_ANALYSIS.md. This is independent of lambda.
+		static constexpr u64 HashWidthSlack = 8;
 
 		u64 mCuckooSecParam = 0;
 
@@ -49,7 +54,7 @@ namespace osuCrypto
 
 		bool mPrint = false;
 
-		u64 mPrintIndex = ~0;
+		u64 mPrintIndex = ~u64{ 0 };
 
 		std::vector<Dedup> mDedup;
 		std::vector<GoldreichHash> mGoldreichHash;
@@ -58,13 +63,19 @@ namespace osuCrypto
 		SparseDpf mSparseDpf;
 
 		// the leaf values for the sparse DPFs.
-		std::vector<std::vector<block>> mLeafShares;
+		std::vector<std::span<block>> mLeafShares;
+		std::unique_ptr<block[]> mLeafShareBuf;
 
 		// the leaf tags for the sparse DPFs.
-		std::vector<std::vector<u8>> mLeafTags;
+		std::vector<std::span<u8>> mLeafTags;
+		std::unique_ptr<u8[]> mLeafTagBuf;
 
 		std::vector<std::span<u32>> mSparseSets;
 		std::unique_ptr<u32[]> mSparseSetBuf;
+		// Cache the bucket sizes used by repeated output scatter loops and by
+		// callers accounting for the total number of expanded leaves.
+		std::vector<u64> mRealLeafCounts;
+		u64 mRealLeafCount = 0;
 
 		DpfMult mMultiplier;
 
@@ -78,6 +89,20 @@ namespace osuCrypto
 
 
 		bool mCharacteristicTwo = true;
+		bool mHasPoints = false;
+		bool mSetupInProgress = false;
+		bool mExpandInProgress = false;
+		bool mFailed = false;
+
+		u64 realLeafCount() const
+		{
+			return mRealLeafCount;
+		}
+
+		u64 hashWidth() const
+		{
+			return mPartitionSize + mLinearSecParam + HashWidthSlack;
+		}
 
 		void init(
 			u64 partyIdx,
@@ -86,9 +111,12 @@ namespace osuCrypto
 			u64 domain,
 			u64 numPartitions = 2,
 			u64 cuckooSecParam = 2,
-			u64 linearSecParam = 10,
+			u64 linearSecParam = 40,
 			bool characteristicTwo = false)
 		{
+			if (partyIdx > 1 || numPointsPerSet == 0 || numSets == 0 || domain < 2)
+				throw std::invalid_argument("Invalid RevCuckoo parameters. " LOCATION);
+			clear();
 			mPartyIdx = partyIdx;
 			mNumPointsPerSet = numPointsPerSet;
 			mNumSets = numSets;
@@ -114,7 +142,7 @@ namespace osuCrypto
 			}
 
 			auto f = mNumPartitions * mPartitionSize;
-			auto c = mPartitionSize + mLinearSecParam;
+			auto c = hashWidth();
 
 			mDedup.resize(mNumSets);
 
@@ -131,7 +159,12 @@ namespace osuCrypto
 
 			//mBinarySolver.resize();
 			//for (auto& solver : mBinarySolver)
-			mBinarySolver.init(mPartyIdx, mPartitionSize, c, log2ceil(mPartitionSize), mNumPartitions * mNumSets);
+			mBinarySolver.init(
+				mPartyIdx,
+				mPartitionSize,
+				c,
+				log2ceil(mPartitionSize),
+				mNumPartitions * mNumSets);
 
 			auto denseDepth = log2ceil(f) + 2;
 			mSparseDpf.init(mPartyIdx, mNumSets * f, mDomain, denseDepth);
@@ -303,115 +336,95 @@ namespace osuCrypto
 			u64 f,
 			u64 c,
 			std::vector<Matrix<u8>>& S,
-			Matrix<u8>& H,
-			Matrix<u8>& HDomain)
+			Matrix<u8>& H)
 		{
 			mSparseSets.resize(f * mNumSets);
 			setTimePoint("sparseSets Begin");
-			double expectedLoad = static_cast<double>(mNumPartitions * mDomain) / f;
-
-			// Chernoff bound: for Poisson(λ), Pr[X ≥ λ + t] ≤ exp(-t²/(2(λ + t/3)))
-			// Setting failure probability to 2^(-40), we get maxLoad ≈ λ + sqrt(2λ * 40 * ln(2)) + (80 * ln(2))/3
-			u64 maxLoad = static_cast<u64>(expectedLoad + std::sqrt(2 * expectedLoad * mLinearSecParam * std::log(2.0)) + (mLinearSecParam * 2 * std::log(2.0)) / 3) + 1;
-
-			std::vector<u32> sizes(mSparseSets.size());
-			mSparseSetBuf = std::make_unique<u32[]>(f * mNumSets * maxLoad);
-			//for (u64 i =0; i < mSparseSets.size(); ++i)
-			//	mSparseSets[i] = std::span<u32>(mSparseSetsBuf.get() + i * maxLoad, maxLoad);
-
-			setTimePoint("sparseSets alloc");
-
-
 			constexpr auto stepSize = 32;
 			auto stride = H.cols();
 			auto d32 = mDomain / stepSize * stepSize;
-			u8 h[stepSize];
-			//u8 t[stepSize];
-			// we assume at most this many partitions. 
-			// this assumption is in the inner product 
-			// where we assume the values being computed 
-			// over is just a byte. Easily generalized...
-			if (mPartitionSize > 256)
-				throw RTE_LOC;
-
 			assert(stride == divCeil(c, 8));
 
-
-
-			for (u64 s = 0; s < mNumSets; ++s)
+			// Build a CSR-style layout. The old fixed-capacity bucket allocation
+			// reserved maxLoad entries for every bucket and could waste most of its
+			// memory. Two linear passes cost little relative to sparse-DPF setup and
+			// allocate exactly the w * N entries that will be consumed.
+			auto forEachMapping = [&](auto&& fn)
 			{
-				if (S[s].cols() != 1)
-					throw RTE_LOC; // same assumption as mPartitionSize <= 256
-
-				for (u64 j = 0; j < mNumPartitions; ++j)
+				for (u64 s = 0; s < mNumSets; ++s)
 				{
-					auto HDj = HDomain.data(j);
-					//auto* setj = mSparseSets.data() + s * f + j * mPartitionSize;
-					auto setj = mSparseSetBuf.get() + (s * f + j * mPartitionSize) * maxLoad;
-					auto sizej = &sizes[s * f + j * mPartitionSize];
-					auto Hj = H.data(j * mDomain);
+					auto positionBytes = std::max<u64>(1, divCeil(log2ceil(mPartitionSize), 8));
+					if (S[s].cols() != positionBytes)
+						throw RTE_LOC;
 
-					std::vector<u8> Ssj(stride * 8);
-					for (u64 i = 0; i < c; ++i)
-						Ssj[i] = S[s](j* c + i);
-
-					u8 HDOffset = 0;
-					innerProd(HDj, 1, Ssj.data(), stride, &HDOffset);
-
-					for (u64 i = 0; i < d32; i += stepSize)
+					for (u64 j = 0; j < mNumPartitions; ++j)
 					{
-						//for (u64 k = 0; k < stepSize; ++k)
-						//{
-						//	auto Hij = Hj + (i+k) * stride;
-						//	t[k] = HDOffset;
-						//	innerProd(Hij, 1, Ssj.data(), stride, &t[k]);
-						//}
+						auto Hj = H.data(j * mDomain);
+						std::vector<u8> Ssj(stride * 8);
+						std::array<u8, stepSize> h;
+						std::array<u32, stepSize> buckets;
 
-						auto Hij = Hj + i * stride;
-						memset(h, HDOffset, stepSize);
-						innerProd(Hij, stepSize, Ssj.data(), stride, h);
-
-						for (u64 k = 0; k < stepSize; ++k)
+						for (u64 i = 0; i < d32; i += stepSize)
 						{
-							//if (t[k] != h[k])
-							//	throw RTE_LOC;
-							assert(h[k] < mPartitionSize && "bad sparse set index ");
+							buckets.fill(0);
+							for (u64 b = 0; b < positionBytes; ++b)
+							{
+								for (u64 k = 0; k < c; ++k)
+									Ssj[k] = S[s](j * c + k, b);
+								h.fill(0);
+								innerProd(Hj + i * stride, stepSize, Ssj.data(), stride, h.data());
+								for (u64 k = 0; k < stepSize; ++k)
+									buckets[k] |= static_cast<u32>(h[k]) << (8 * b);
+							}
+							for (u64 k = 0; k < stepSize; ++k)
+							{
+								if (buckets[k] >= mPartitionSize)
+									throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
+								fn(s * f + j * mPartitionSize + buckets[k], i + k);
+							}
+						}
 
-							auto setjh = setj + h[k] * maxLoad;
-							auto idx = sizej[h[k]];
-							if (idx >= maxLoad)
-								throw std::runtime_error("Sparse set overflow. " LOCATION);
-							sizej[h[k]] = idx + 1;
-							setjh[idx] = i + k;
-
-
-							//setj[h[k]].push_back(i + k);
+						for (u64 i = d32; i < mDomain; ++i)
+						{
+							u32 bucket = 0;
+							for (u64 b = 0; b < positionBytes; ++b)
+							{
+								for (u64 k = 0; k < c; ++k)
+									Ssj[k] = S[s](j * c + k, b);
+								h[0] = 0;
+								innerProd(Hj + i * stride, 1, Ssj.data(), stride, h.data());
+								bucket |= static_cast<u32>(h[0]) << (8 * b);
+							}
+							if (bucket >= mPartitionSize)
+								throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
+							fn(s * f + j * mPartitionSize + bucket, i);
 						}
 					}
-
-					for (u64 i = d32; i < mDomain; ++i)
-					{
-						auto Hij = Hj + i * stride;
-
-						h[0] = HDOffset;
-						innerProd(Hij, 1, Ssj.data(), stride, h);
-
-						assert(h[0] < mPartitionSize);
-						//setj[h[0]].push_back(i);
-
-						auto setjh = setj + h[0] * maxLoad;
-						auto idx = sizej[h[0]];
-						if (idx >= maxLoad)
-							throw std::runtime_error("Sparse set overflow. " LOCATION);
-						sizej[h[0]] = idx + 1;
-						setjh[idx] = i;
-					}
 				}
-			}
+			};
 
+			std::vector<u64> offsets(mSparseSets.size() + 1);
+			forEachMapping([&](u64 bucket, u64) { ++offsets[bucket + 1]; });
+			for (u64 i = 1; i < offsets.size(); ++i)
+				offsets[i] += offsets[i - 1];
 
+			mSparseSetBuf = std::make_unique<u32[]>(offsets.back());
+			auto cursors = offsets;
+			forEachMapping([&](u64 bucket, u64 index) {
+				mSparseSetBuf[cursors[bucket]++] = static_cast<u32>(index);
+			});
 			for (u64 i = 0; i < mSparseSets.size(); ++i)
-				mSparseSets[i] = std::span<u32>(mSparseSetBuf.get() + i * maxLoad, sizes[i]);
+				mSparseSets[i] = std::span<u32>(
+					mSparseSetBuf.get() + offsets[i], offsets[i + 1] - offsets[i]);
+
+			mRealLeafCounts.resize(mSparseSets.size());
+			mRealLeafCount = 0;
+			for (u64 i = 0; i < mSparseSets.size(); ++i)
+			{
+				assert(std::is_sorted(mSparseSets[i].begin(), mSparseSets[i].end()));
+				mRealLeafCounts[i] = mSparseSets[i].size();
+				mRealLeafCount += mRealLeafCounts[i];
+			}
 
 
 			setTimePoint("sparseSets done");
@@ -425,8 +438,17 @@ namespace osuCrypto
 			PRNG& prng,
 			coproto::Socket& sock)
 		{
+			// A second invocation must not poison or close the socket being used by
+			// the active setup. The object itself is otherwise not thread-safe.
+			if (mSetupInProgress)
+				throw std::runtime_error("Concurrent RevCuckoo setup is not supported. " LOCATION);
+			mSetupInProgress = true;
 			MACORO_TRY{
 				setTimePoint("setPoints");
+			if (mFailed)
+				throw std::runtime_error("RevCuckoo must be reinitialized after a failed operation. " LOCATION);
+			if (mHasPoints)
+				throw std::runtime_error("RevCuckoo points have already been set. " LOCATION);
 
 			// Check input parameters
 			if (points.rows() != mNumSets)
@@ -459,7 +481,7 @@ namespace osuCrypto
 				for (u64 i = 0; i < mNumPointsPerSet; ++i)
 				{
 					copyBytesMin(A[s][i], points[s][i]);
-					copyBytesMin(altKeys[s][i], mDomain * mPartyIdx);  // Use indices as alternate keys
+					copyBytesMin(altKeys[s][i], mDomain * mPartyIdx);
 				}
 
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
@@ -478,7 +500,7 @@ namespace osuCrypto
 
 			// Step 3-4: Apply hash functions and generate permutation
 			auto f = mNumPartitions * mPartitionSize;
-			auto c = mPartitionSize + mLinearSecParam;
+			auto c = hashWidth();
 			auto piCtx = DpfMult::BitMatrixCoeffCtx(A[0].cols() * 8);
 			using BitMtxVec = decltype(piCtx)::View<u8>;
 			std::vector<BitMtxVec> av(mNumSets);
@@ -490,7 +512,7 @@ namespace osuCrypto
 				// Step 5-6: Setup A and B matrices
 				A[s].resize(f, A[s].cols()); // Resize A to f rows
 				for (u64 i = mNumPointsPerSet; i < f; ++i)
-					copyBytesMin(A[s][i], mDomain * mPartyIdx); // default the extras 
+					copyBytesMin(A[s][i], mDomain * mPartyIdx);
 
 				av[s] = BitMtxVec(A[s]);
 				// Step 7: Permute (A||b) by π
@@ -564,14 +586,14 @@ namespace osuCrypto
 				r.result();
 			setTimePoint("done Begin");
 
-			// Step 8-9: Create the matrices M_i and solve linear systems
+			// The paper defines H_i(N) = 0 for the common dummy N. Compute the
+			// public offset once and apply it to both the secret-shared rows and
+			// the public domain hashes below.
 			Matrix<u8> HDomain(mNumPartitions, M[0].cols());
 			Matrix<u8> ADomain(1, A[0].cols());
 			copyBytesMin(ADomain, mDomain);
 			for (u64 i = 0; i < mNumPartitions; ++i)
-			{
 				mGoldreichHash[i].hash(ADomain, HDomain.submtx(i, 1), hashCache[i]);
-			}
 
 			// Prepare y vector (0, 1, ..., m-1)
 			Matrix<u8> Y(mPartitionSize, positionBytes);
@@ -599,9 +621,8 @@ namespace osuCrypto
 					{
 						for (u64 j = 0; j < Msih.rows(); ++j)
 							for (u64 k = 0; k < Msih.cols(); ++k)
-								Msih(j, k) ^= HDomain(i, k); // XOR the hash into M_i
+								Msih(j, k) ^= HDomain(i, k);
 					}
-
 					M_si[h] = Msih;
 					S_si[h] = S[s].submtx(i * c, c);
 
@@ -664,16 +685,20 @@ namespace osuCrypto
 				copyBytesMin(I[i], i);
 
 			for (u64 j = 0; j < mNumPartitions; ++j)
+			{
 				mGoldreichHash[j].hash(I,
 					H.submtx(j * mDomain, mDomain), hashCache[j]);
+				for (u64 i = 0; i < mDomain; ++i)
+					for (u64 k = 0; k < H.cols(); ++k)
+						H(j * mDomain + i, k) ^= HDomain(j, k);
+			}
 
 
 
 			// Step 13-14: Compute S_j and invoke sparse-DPF
-			buildSparseSets(f, c, S, H, HDomain);
+			buildSparseSets(f, c, S, H);
 
 			// Step 15-16: Initialize and compute final output
-			std::vector<block> y(mDomain, ZeroBlock);
 			std::vector<u64> A64(mNumSets * f);
 
 			for (u64 s = 0, j = 0; s < mNumSets; ++s)
@@ -684,10 +709,17 @@ namespace osuCrypto
 
 			mLeafShares.resize(f * mNumSets);
 			mLeafTags.resize(f * mNumSets);
+			u64 totalLeaves = 0;
+			for (auto set : mSparseSets)
+				totalLeaves += set.size();
+			mLeafShareBuf = std::make_unique<block[]>(totalLeaves);
+			mLeafTagBuf = std::make_unique<u8[]>(totalLeaves);
+			u64 leafOffset = 0;
 			for (u64 j = 0; j < f * mNumSets; ++j)
 			{
-				mLeafShares[j].resize(mSparseSets[j].size());
-				mLeafTags[j].resize(mSparseSets[j].size());
+				mLeafShares[j] = std::span<block>(mLeafShareBuf.get() + leafOffset, mSparseSets[j].size());
+				mLeafTags[j] = std::span<u8>(mLeafTagBuf.get() + leafOffset, mSparseSets[j].size());
+				leafOffset += mSparseSets[j].size();
 
 				auto s = j / f;
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
@@ -777,6 +809,8 @@ namespace osuCrypto
 			}
 
 			setTimePoint("negate done");
+			mHasPoints = true;
+			mSetupInProgress = false;
 
 			//if (mPrint)
 			//{
@@ -810,9 +844,12 @@ namespace osuCrypto
 			//	}
 			//}
 			}
-				MACORO_CATCH(ex)
+			MACORO_CATCH(ex)
 			{
-				co_await sock.close();
+				mSetupInProgress = false;
+				mFailed = true;
+				if (!sock.closed())
+					co_await sock.close();
 				std::rethrow_exception(ex);
 			}
 
@@ -831,6 +868,14 @@ namespace osuCrypto
 			Output output,
 			CoeffCtx ctx = {})
 		{
+			// Reject a second expansion without disturbing the one already using
+			// this object's scratch buffers and socket.
+			if (mExpandInProgress)
+				throw std::runtime_error("Concurrent RevCuckoo expansion is not supported. " LOCATION);
+			mExpandInProgress = true;
+			MACORO_TRY {
+			if (mFailed || !mHasPoints)
+				throw std::runtime_error("RevCuckoo points are not available. " LOCATION);
 			setTimePoint("expandValue");
 
 			// Check input parameters
@@ -870,7 +915,7 @@ namespace osuCrypto
 
 			// Step 3-4: Apply hash functions and generate permutation
 			auto f = mNumPartitions * mPartitionSize;
-			//auto c = mPartitionSize + mLinearSecParam;
+			//auto c = hashWidth();
 
 
 			for (u64 s = 0; s < mNumSets; ++s)
@@ -896,16 +941,7 @@ namespace osuCrypto
 			co_await mWaksmanPermute.applyMany<T, VecT>(B, sock, ctx);
 			setTimePoint("perm done");
 
-			ctx.resize(mExpanded, f * mNumSets);
-			for (u64 j = 0; j < mExpanded.size(); ++j)
-			{
-				if (mExpanded[j].size() != mSparseSets[j].size())
-					ctx.resize(mExpanded[j], mSparseSets[j].size());
-			}
-			setTimePoint("expanded alloc done");
-
-			VecT leafSums(f * mNumSets);
-			ctx.zero(leafSums.begin(), leafSums.end());
+			VecT leafSums;
 
 			for (u64 s = 0; s < mNumSets; ++s)
 			{
@@ -914,6 +950,7 @@ namespace osuCrypto
 			}
 
 			// Step 15-16: Initialize and compute final output
+			ctx.resize(mExpanded, mSparseSets.size());
 			auto BB = ctx.template makeVec<T>(mExpanded.size());
 
 			auto BBIter = BB.begin();
@@ -924,61 +961,14 @@ namespace osuCrypto
 			}
 
 
-#define SIMD8(VAR, STATEMENT) do{\
-	{ constexpr u64 VAR = 0; STATEMENT; }\
-	{ constexpr u64 VAR = 1; STATEMENT; }\
-	{ constexpr u64 VAR = 2; STATEMENT; }\
-	{ constexpr u64 VAR = 3; STATEMENT; }\
-	{ constexpr u64 VAR = 4; STATEMENT; }\
-	{ constexpr u64 VAR = 5; STATEMENT; }\
-	{ constexpr u64 VAR = 6; STATEMENT; }\
-	{ constexpr u64 VAR = 7; STATEMENT; }\
-	}while(0)
-
-			auto zero = ctx.template make<T>();
-			ctx.zero(zero);
-			for (u64 j = 0; j < mExpanded.size(); ++j)
-			{
-				AES aes(mHashSeed);
-				mHashSeed = aes.hashBlock(block(35434523452345, 2345324523452345234));
-
-				auto n8 = mSparseSets[j].size() / 8 * 8;
-
-				auto sIter = mExpanded[j].begin();
-				auto lIter = mLeafShares[j].begin();
-				if (mPartyIdx)
-				{
-
-					for (u64 i = 0; i < n8; i+=8)
-					{
-						SIMD8(q, ctx.fromBlock(sIter[i+q], aes.hashBlock(lIter[i+q])));
-						SIMD8(q, ctx.minus(sIter[i+q], zero, sIter[i+q]));
-						SIMD8(q, ctx.plus(leafSums[j], leafSums[j], sIter[i+q]));
-					}
-
-					for (u64 i = n8; i < mSparseSets[j].size(); ++i)
-					{
-						ctx.fromBlock(sIter[i], aes.hashBlock(lIter[i]));
-						ctx.minus(sIter[i], zero, sIter[i]);
-						ctx.plus(leafSums[j], leafSums[j], sIter[i]);
-					}
-				}
-				else
-				{
-
-					for (u64 i = 0; i <n8; i+=8)
-					{
-						SIMD8(q, ctx.fromBlock(sIter[i+q], aes.hashBlock(lIter[i+q])));
-						SIMD8(q, ctx.plus(leafSums[j], leafSums[j], sIter[i+q]));
-					}
-					for (u64 i = n8; i < mSparseSets[j].size(); ++i)
-					{
-						ctx.fromBlock(sIter[i], aes.hashBlock(lIter[i]));
-						ctx.plus(leafSums[j], leafSums[j], sIter[i]);
-					}
-				}
-
-			}
+			details::expandCachedDpfLeaves<T>(
+				mPartyIdx,
+				mSparseSets,
+				mLeafShares,
+				mExpanded,
+				leafSums,
+				mHashSeed,
+				ctx);
 			setTimePoint("expandLeaves done");
 
 
@@ -1011,21 +1001,24 @@ namespace osuCrypto
 				//   = gamma - d * (gamma - (-gamma))
 				//   = (1-d) gamma + d * (-gamma)
 
-				auto diff = ctx.template makeVec<T>(mLeafTags.size());
-				for (u64 k = 0; k < mLeafTags.size(); ++k)
+				if constexpr (
+					std::is_same_v<std::remove_cvref_t<T>, u64> &&
+					std::is_same_v<std::remove_cvref_t<CoeffCtx>, CoeffCtxInteger>)
 				{
-					// diff[k] = gamma[k] - (-gamma[k]);
-					ctx.plus(diff[k], gamma[k], gamma[k]);
+					co_await mMultSession.conditionalNegateU64(
+						gamma.begin(), gamma.end(), sock);
 				}
-
-				co_await mMultSession.multiply<T>(diff.begin(), diff.end(), diff.begin(), sock, ctx);
-
-				// now we have d * diff
-				for (u64 k = 0; k < gamma.size(); ++k)
+				else
 				{
-					// leadSums[k] = gamma[k] - diff[k];
-					//             = (1-d) gamma[k] + d * (-gamma[k])
-					ctx.minus(gamma[k], gamma[k], diff[k]);
+					auto diff = ctx.template makeVec<T>(mLeafTags.size());
+					for (u64 k = 0; k < mLeafTags.size(); ++k)
+						ctx.plus(diff[k], gamma[k], gamma[k]);
+
+					co_await mMultSession.multiply<T>(
+						diff.begin(), diff.end(), diff.begin(), sock, ctx);
+
+					for (u64 k = 0; k < gamma.size(); ++k)
+						ctx.minus(gamma[k], gamma[k], diff[k]);
 				}
 			}
 
@@ -1035,75 +1028,32 @@ namespace osuCrypto
 
 			setTimePoint("gamma done");
 
-			auto temp = ctx.template makeVec<T>(8);
-			if (mTempOutput.size() != mDomain)
-				ctx.resize(mTempOutput, mDomain);
-
-			for (u64 s = 0, k = 0; s < mNumSets; ++s)
-			{
-				//if (s)
-				ctx.zero(mTempOutput.begin(), mTempOutput.end());
-				auto out = mTempOutput.begin();;
-
-				for (u64 j = 0; j < f; ++j, ++k)
-				{
-					auto n = mLeafShares[k].size();
-					auto n8 = n / 8 * 8;
-					auto sIter = mExpanded[k].begin();
-					auto gammaK = gamma[k];
-					auto setK = mSparseSets[k].data();
-					auto tagK = mLeafTags[k].data();
-
-					if (mPartyIdx)
-					{
-						for (u64 i = 0; i < n8; i += 8)
-						{
-							SIMD8(q, ctx.mask(temp[q], gammaK, block::allSame<u8>(-tagK[i + q])));
-							SIMD8(q, ctx.minus(temp[q], sIter[i + q], temp[q]));
-							//ctx.plus(temp[q], shares[k][i + q], temp[q]);
-							u32 idx[8];
-							SIMD8(q, idx[q] = setK[i + q]);
-							SIMD8(q, ctx.plus(out[idx[q]], out[idx[q]], temp[q]));
-						}
-						for (u64 i = n8; i < mLeafShares[k].size(); ++i)
-						{
-							auto mask = block::allSame<u8>(-tagK[i]);
-							ctx.mask(temp[0], gammaK, mask);
-							ctx.minus(temp[0], sIter[i], temp[0]);
-							//ctx.plus(temp[0], shares[k][i], temp[0]);
-							auto idx = setK[i];
-							ctx.plus(out[idx], out[idx], temp[0]);
-						}
-					}
-					else
-					{
-						for (u64 i = 0; i < n8; i += 8)
-						{
-							SIMD8(q, ctx.mask(temp[q], gammaK, block::allSame<u8>(-tagK[i + q])));
-							SIMD8(q, ctx.plus(temp[q], sIter[i+q], temp[q]));
-							u32 idx[8];
-							SIMD8(q, idx[q] = setK[i + q]);
-							SIMD8(q, ctx.plus(out[idx[q]], out[idx[q]], temp[q]));
-						}
-						for (u64 i = n8; i < mLeafShares[k].size(); ++i)
-						{
-							auto mask = block::allSame<u8>(-tagK[i]);
-							ctx.mask(temp[0], gammaK, mask);
-							//ctx.minus(temp[0], shares[k][i], temp[0]);
-							ctx.plus(temp[0], sIter[i], temp[0]);
-							auto idx = setK[i];
-							ctx.plus(out[idx], out[idx], temp[0]);
-						}
-					}
-				}
-				for (u64 i = 0; i < mDomain; ++i)
-				{
-					output(s, i, out[i]);
-				}
-			}
+			details::applyCachedDpfUpdates<T>(
+				mPartyIdx,
+				mNumSets,
+				f,
+				mDomain,
+				mSparseSets,
+				mLeafTags,
+				mExpanded,
+				gamma,
+				mTempOutput,
+				output,
+				ctx);
 
 			setTimePoint("update done");
+			mExpandInProgress = false;
 
+
+			}
+			MACORO_CATCH(ex)
+			{
+				mExpandInProgress = false;
+				mFailed = true;
+				if (!sock.closed())
+					co_await sock.close();
+				std::rethrow_exception(ex);
+			}
 
 			co_return;
 		}
@@ -1255,15 +1205,29 @@ namespace osuCrypto
 
 		task<> reveal(auto&& gamma, Socket& sock, auto&& ctx)
 		{
-			auto other = ctx.template makeVec<T>(gamma.size());
-			std::vector<u8> buffer(gamma.size() * ctx.template byteSize<T>());
-			ctx.serialize(gamma.begin(), gamma.end(), buffer.begin());
-			co_await sock.send(std::move(buffer));
-			buffer.resize(gamma.size() * ctx.template byteSize<T>());
-			co_await sock.recv(buffer);
-			ctx.deserialize(buffer.begin(), buffer.end(), other.begin());
-			for (u64 k = 0; k < gamma.size(); ++k)
-				ctx.plus(gamma[k], gamma[k], other[k]);
+			if constexpr (
+				std::is_same_v<std::remove_cvref_t<T>, u64> &&
+				std::is_same_v<std::remove_cvref_t<CoeffCtx>, CoeffCtxInteger>)
+			{
+				std::vector<u64> wire(gamma.begin(), gamma.end());
+				co_await sock.send(std::move(wire));
+				wire.resize(gamma.size());
+				co_await sock.recv(wire);
+				for (u64 k = 0; k < gamma.size(); ++k)
+					gamma[k] += wire[k];
+			}
+			else
+			{
+				auto other = ctx.template makeVec<T>(gamma.size());
+				std::vector<u8> buffer(gamma.size() * ctx.template byteSize<T>());
+				ctx.serialize(gamma.begin(), gamma.end(), buffer.begin());
+				co_await sock.send(std::move(buffer));
+				buffer.resize(gamma.size() * ctx.template byteSize<T>());
+				co_await sock.recv(buffer);
+				ctx.deserialize(buffer.begin(), buffer.end(), other.begin());
+				for (u64 k = 0; k < gamma.size(); ++k)
+					ctx.plus(gamma[k], gamma[k], other[k]);
+			}
 		}
 
 
@@ -1271,8 +1235,13 @@ namespace osuCrypto
 		{
 			// Clear the internal state of the DPF
 			mLeafShares.clear();
+			mLeafShareBuf.reset();
 			mLeafTags.clear();
+			mLeafTagBuf.reset();
 			mSparseSets.clear();
+			mSparseSetBuf.reset();
+			mRealLeafCounts.clear();
+			mRealLeafCount = 0;
 			mExpanded.clear();
 			mMultSession.clear();
 			mGoldreichHash.clear();
@@ -1287,6 +1256,10 @@ namespace osuCrypto
 			mPrint = false;
 			mPrintIndex = ~0ull;
 			mCharacteristicTwo = false;
+			mHasPoints = false;
+			mSetupInProgress = false;
+			mExpandInProgress = false;
+			mFailed = false;
 			mNumSets = 0;
 			mNumPointsPerSet = 0;
 			mNumPartitions = 0;
@@ -1336,7 +1309,7 @@ namespace osuCrypto
 
 //	// Step 3-4: Apply hash functions and generate permutation
 //	auto f = mNumPartitions * mPartitionSize;
-//	auto c = mPartitionSize + mLinearSecParam;
+//	auto c = hashWidth();
 
 //	// Step 5-6: Setup A and B matrices
 //	Matrix<u8> AB(f, A.cols() + B.cols());
@@ -1593,4 +1566,3 @@ namespace osuCrypto
 	};
 
 }
-#undef SIMD8
