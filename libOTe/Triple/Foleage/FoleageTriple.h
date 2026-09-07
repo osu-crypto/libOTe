@@ -193,6 +193,20 @@ namespace osuCrypto
 
 		struct FoleageCoeffCtx : CoeffCtxGF2
 		{
+			using CoeffCtxGF2::mask;
+
+			// Mask the four blocks directly. The generic memcpy-based mask creates
+			// SIMD scratch storage that GCC can over-align when inlined into the
+			// ternary DPF coroutine, whose frame need only have normal alignment.
+			OC_FORCEINLINE void mask(FoleageF4x243& ret,
+				const FoleageF4x243& value, const block& bits) const
+			{
+				ret.mVal[0] = value.mVal[0] & bits;
+				ret.mVal[1] = value.mVal[1] & bits;
+				ret.mVal[2] = value.mVal[2] & bits;
+				ret.mVal[3] = value.mVal[3] & bits;
+			}
+
 			OC_FORCEINLINE void fromBlock(FoleageF4x243& ret, const block& b) {
 				ret.mVal[0] = b;
 				ret.mVal[1] = b ^ block(2314523225322345310, 3520873105824273452);
