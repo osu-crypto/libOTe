@@ -26,22 +26,12 @@ namespace osuCrypto
         // The j'th leaf is in the j'th column.
         ByTreeIndex,
 
-        // The native output mode. The output will be 
-        // a single row with all leaf values.
-        // Every 8 trees are mixed together where the 
-        // i'th leaf for each of the 8 tree will be next 
-        // to each other. For example, let tij be the j'th 
-        // leaf of the i'th tree. If we have m leaves, then
-        // 
-        // t00 t10 ... t70       t01 t11 ... t71      ...  t0m t1m ... t7m
-        // t80 t90 ... t_{15,0}  t81 t91 ... t_{15,1} ...  t8m t9m ... t_{15,m}
-        // ...
-        // 
-        // These are all flattened into a single row.
-        Interleaved,
+        // The native one-tree-at-a-time layout. Each tree is contiguous. Within
+        // a tree, eight physical lanes are eight public subtrees. Invalid padded
+        // leaves are omitted for non-power-of-two domains.
+        ByPhysicalIndex,
 
-        // call the user's callback. The leaves will be in
-        // Interleaved format.
+        // Call the user's callback once per tree. Leaves use ByPhysicalIndex.
         Callback
     };
 
@@ -182,7 +172,6 @@ namespace osuCrypto
 
             checkedSize(checkedMul(domainSize, pointCount));
             checkedSize(checkedMul(depth, pointCount));
-            checkedRoundUpTo(pointCount, 8);
             return depth;
         }
 
@@ -226,83 +215,28 @@ namespace osuCrypto
             return reduce128Mod(sample[0], sample[1], modulus);
         }
 
-        template<typename VecF, typename CoeffCtx>
-        void copyOut(
-            VecF& leaf,
-            VecF& output,
-            u64 totalTrees,
-            u64 treeIndex,
-            PprfOutputFormat oFormat,
-            std::function<void(u64 treeIdx, VecF& lvl)>& callback)
+        inline u64 paddedDomain(u64 domain)
         {
-            auto curSize = std::min<u64>(totalTrees - treeIndex, 8);
-            auto domain = leaf.size() / 8;
-            if (oFormat == PprfOutputFormat::ByLeafIndex)
-            {
-                if (curSize == 8)
-                {
-                    for (u64 leafIndex = 0; leafIndex < domain; ++leafIndex)
-                    {
-                        auto oIdx = totalTrees * leafIndex + treeIndex;
-                        auto iIdx = leafIndex * 8;
-                        output[oIdx + 0] = leaf[iIdx + 0];
-                        output[oIdx + 1] = leaf[iIdx + 1];
-                        output[oIdx + 2] = leaf[iIdx + 2];
-                        output[oIdx + 3] = leaf[iIdx + 3];
-                        output[oIdx + 4] = leaf[iIdx + 4];
-                        output[oIdx + 5] = leaf[iIdx + 5];
-                        output[oIdx + 6] = leaf[iIdx + 6];
-                        output[oIdx + 7] = leaf[iIdx + 7];
-                    }
-                }
-                else
-                {
-                    for (u64 leafIndex = 0; leafIndex < domain; ++leafIndex)
-                    {
-                        //auto oi = output[leafIndex].subspan(treeIndex, curSize);
-                        //auto& ii = leaf[leafIndex];
-                        auto oIdx = totalTrees * leafIndex + treeIndex;
-                        auto iIdx = leafIndex * 8;
-                        for (u64 j = 0; j < curSize; ++j)
-                            output[oIdx + j] = leaf[iIdx + j];
-                    }
-                }
+            return u64{ 1 } << log2ceil(domain);
+        }
 
-            }
-            else if (oFormat == PprfOutputFormat::ByTreeIndex)
-            {
-
-                if (curSize == 8)
-                {
-                    for (u64 leafIndex = 0; leafIndex < domain; ++leafIndex)
-                    {
-                        auto iIdx = leafIndex * 8;
-
-                        output[(treeIndex + 0) * domain + leafIndex] = leaf[iIdx + 0];
-                        output[(treeIndex + 1) * domain + leafIndex] = leaf[iIdx + 1];
-                        output[(treeIndex + 2) * domain + leafIndex] = leaf[iIdx + 2];
-                        output[(treeIndex + 3) * domain + leafIndex] = leaf[iIdx + 3];
-                        output[(treeIndex + 4) * domain + leafIndex] = leaf[iIdx + 4];
-                        output[(treeIndex + 5) * domain + leafIndex] = leaf[iIdx + 5];
-                        output[(treeIndex + 6) * domain + leafIndex] = leaf[iIdx + 6];
-                        output[(treeIndex + 7) * domain + leafIndex] = leaf[iIdx + 7];
-                    }
-                }
-                else
-                {
-                    for (u64 leafIndex = 0; leafIndex < domain; ++leafIndex)
-                    {
-                        auto iIdx = leafIndex * 8;
-                        for (u64 j = 0; j < curSize; ++j)
-                            output[(treeIndex + j) * domain + leafIndex] = leaf[iIdx + j];
-                    }
-                }
-
-            }
-            else if (oFormat == PprfOutputFormat::Callback)
-                callback(treeIndex, leaf);
-            else
-                throw RTE_LOC;
+        // Convert a logical leaf to its compact native index. The conceptual
+        // padded tree is split into up to eight public subtrees. Physical order
+        // visits one local leaf across the valid subtrees before the next local
+        // leaf, while omitting padded leaves.
+        inline u64 physicalLeafIndex(u64 domain, u64 logicalLeaf)
+        {
+            if (logicalLeaf >= domain)
+                throw std::invalid_argument("PPRF logical leaf is outside the domain. " LOCATION);
+            const auto padded = paddedDomain(domain);
+            const auto laneCount = std::min<u64>(8, padded);
+            const auto subtreeDomain = padded / laneCount;
+            const auto fullLanes = domain / subtreeDomain;
+            const auto partialLaneSize = domain % subtreeDomain;
+            const auto lane = logicalLeaf / subtreeDomain;
+            const auto localLeaf = logicalLeaf % subtreeDomain;
+            return localLeaf * fullLanes +
+                std::min(localLeaf, partialLaneSize) + lane;
         }
 
         template<typename F, typename CoeffCtx>
@@ -346,15 +280,11 @@ namespace osuCrypto
             u64 domain,
             u64 pntCount)
         {
-            if (oFormat == PprfOutputFormat::Interleaved && pntCount % 8)
-                throw std::runtime_error("For Interleaved output format, pointCount must be a multiple of 8 (general case not impl). " LOCATION);
-
-
             switch (oFormat)
             {
             case osuCrypto::PprfOutputFormat::ByLeafIndex:
             case osuCrypto::PprfOutputFormat::ByTreeIndex:
-            case osuCrypto::PprfOutputFormat::Interleaved:
+            case osuCrypto::PprfOutputFormat::ByPhysicalIndex:
                 if (output.size() != checkedMul(domain, pntCount))
                     throw RTE_LOC;
                 break;
@@ -373,79 +303,36 @@ namespace osuCrypto
         inline void allocateExpandTree(
             u64 domainSize,
             ExpandTreeBuffer& alloc,
-            std::vector<span<AlignedArray<block, 8>>>& levels,
-            bool reuseLevel = true)
+            std::vector<span<AlignedArray<block, 8>>>& levels)
         {
             if (domainSize == 0)
                 throw std::invalid_argument("Invalid PPRF expansion-tree domain. " LOCATION);
-            auto depth = log2ceil(domainSize);
+            const auto depth = log2ceil(domainSize);
             if (depth >= 64)
                 throw std::invalid_argument("Invalid PPRF expansion-tree domain. " LOCATION);
             levels.resize(depth + 1);
 
-            if (reuseLevel)
+            const auto secondLast =
+                checkedRoundUpTo(checkedAdd(domainSize, 1) / 2, 2);
+            const auto size =
+                checkedRoundUpTo(checkedAdd(domainSize, secondLast), 2);
+
+            // The largest two physical levels alternate as scratch for all
+            // preceding levels.
+            alloc.clear();
+            alloc.resize(checkedSize(size));
+            std::array<span<AlignedArray<block, 8>>, 2> buffers{
+                span<AlignedArray<block, 8>>(alloc.data(), secondLast),
+                span<AlignedArray<block, 8>>(alloc.data() + secondLast, domainSize)
+            };
+
+            levels.back() = buffers[1].subspan(0, domainSize);
+            for (u64 i = levels.size() - 2, j = 0; i < levels.size(); --i, ++j)
             {
-                auto secondLast = checkedRoundUpTo(checkedAdd(domainSize, 1) / 2, 2);
-                auto size = checkedRoundUpTo(checkedAdd(domainSize, secondLast), 2);
-
-                // we will allocate the last twoo levels of the tree. 
-                // these levels will be used for the smaller levels as
-                // well. We will alternate between the two.
-                alloc.clear();
-                auto blockCount = checkedMul(size, 8);
-                alloc.resize(checkedSize(blockCount / 8));
-
-                std::array<span<AlignedArray<block, 8>>, 2>  buffs;
-                buffs[0] = { alloc.data(), secondLast };
-                buffs[1] = { alloc.data() + secondLast, domainSize };
-
-                // give the last level the big buffer.
-                levels.back() = buffs[1].subspan(0, domainSize);
-                for (u64 i = levels.size() - 2, j = 0ull; i < levels.size(); --i, ++j)
-                {
-                    auto width = divCeil(domainSize, 1ull << (depth - i));
-                    assert(
-                        levels[i + 1].size() == 2 * width || 
-                        levels[i + 1].size() == 2 * width - 1);
-
-                    if (width > 1)
-                        width = roundUpTo(width, 2);
-
-                    // each level will be half the size of the next level.
-                    // we alternate which buffer we use.
-                    levels[i] = buffs[j % 2].subspan(0, width);
-                }
-            }
-            else
-            {
-                u64 totalSize = 0;
-                for (u64 i = 0; i < levels.size(); ++i)
-                {
-                    auto width = divCeil(domainSize, 1ull << (depth - i));
-                    totalSize = checkedAdd(totalSize, checkedRoundUpTo(width, 2));
-                }
-
-                alloc.clear();
-                auto blockCount = checkedMul(totalSize, 8);
-                alloc.resize(checkedSize(blockCount / 8));
-                span<AlignedArray<block, 8>> buff(alloc.data(), totalSize);
-
-                levels.back() = buff.subspan(0, domainSize);
-                buff = buff.subspan(domainSize);
-                for (u64 i = levels.size() - 2, j = 0ull; i < levels.size(); --i, ++j)
-                {
-                    // each level will be half the size of the next level.
-                    auto width = divCeil(domainSize, 1ull << (depth - i));
-                    assert(
-                        levels[i + 1].size() == 2 * width ||
-                        levels[i + 1].size() == 2 * width - 1);
-
-                    if(width > 1)
-                        width = roundUpTo(width, 2);
-
-                    levels[i] = buff.subspan(0, width);
-                    buff = buff.subspan(levels[i].size());
-                }
+                auto width = divCeil(domainSize, u64{ 1 } << (depth - i));
+                if (width > 1)
+                    width = roundUpTo(width, 2);
+                levels[i] = buffers[j & 1].subspan(0, width);
             }
 
             if (levels[0].size() != 1)
