@@ -2,7 +2,7 @@
 #include "libOTe/Triple/AnyField/AnyFieldCtx.h"
 #include "libOTe/Triple/AnyField/AnyFieldOle.h"
 #include "cryptoTools/Common/TestCollection.h"
-#include "coproto/Socket/LocalAsyncSock.h"
+#include "LocalSocketTestPair.h"
 #include <array>
 #include <bit>
 #include <chrono>
@@ -491,11 +491,11 @@ namespace osuCrypto
 						oleMult[party], oleAdd[party]);
 			}
 
-			auto setupSockets = coproto::LocalAsyncSocket::makePair();
+			tests_libOTe::LocalSocketTestPair setupSockets;
 			const auto setupStart = std::chrono::steady_clock::now();
-			auto setupResult = macoro::sync_wait(macoro::when_all_ready(
+			auto setupResult = setupSockets.run(
 				ole[0].setup(prng0, setupSockets[0]),
-				ole[1].setup(prng1, setupSockets[1])));
+				ole[1].setup(prng1, setupSockets[1]));
 			std::get<0>(setupResult).result();
 			std::get<1>(setupResult).result();
 			const auto setupEnd = std::chrono::steady_clock::now();
@@ -505,10 +505,10 @@ namespace osuCrypto
 				ole[0].hasBaseCors() || ole[1].hasBaseCors())
 				throw UnitTestFail("AnyFieldOle setup retained or lost protocol state");
 
-			auto expandSockets = coproto::LocalAsyncSocket::makePair();
-			auto expandResult = macoro::sync_wait(macoro::when_all_ready(
+			tests_libOTe::LocalSocketTestPair expandSockets;
+			auto expandResult = expandSockets.run(
 				ole[0].expand(x[0], z[0], prng0, expandSockets[0]),
-				ole[1].expand(x[1], z[1], prng1, expandSockets[1])));
+				ole[1].expand(x[1], z[1], prng1, expandSockets[1]));
 			std::get<0>(expandResult).result();
 			std::get<1>(expandResult).result();
 			const auto expandEnd = std::chrono::steady_clock::now();
