@@ -123,9 +123,6 @@ namespace osuCrypto
         };
 
         const TestCase tests[] = {
-            { MultType::ExAcc7, 7 },
-            { MultType::ExAcc11, 11 },
-            { MultType::ExAcc21, 21 },
             { MultType::ExAcc40, 41 }
         };
 
@@ -137,7 +134,7 @@ namespace osuCrypto
             EAConfigure(test.mType, scaler, expanderWeight, minDistance);
 
             if (scaler != 5 || expanderWeight != test.mExpanderWeight ||
-                minDistance <= 0 || minDistance >= 1)
+                minDistance != 0.20)
                 throw RTE_LOC;
         }
     }

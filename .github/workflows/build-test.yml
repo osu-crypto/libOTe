@@ -17,7 +17,7 @@ jobs:
           submodules: recursive
 
       - name: Build libOTe
-        run: python3 build.py --par=4 -DENABLE_ALL_OT=ON -DENABLE_CIRCUITS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_ASAN=ON -DENABLE_MOCK_OT=ON
+        run: python3 build.py --par=4 -DENABLE_ALL_OT=ON -DENABLE_BITPOLYMUL=ON -DENABLE_CIRCUITS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_ASAN=ON -DENABLE_MOCK_OT=ON
 
       - name: Unit tests
         run: ./out/build/linux/frontend/frontend_libOTe -u

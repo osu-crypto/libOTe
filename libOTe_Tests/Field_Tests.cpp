@@ -231,6 +231,28 @@ namespace tests_libOTe
 		if (!divisionRejected)
 			throw RTE_LOC;
 
+		// Extension-field contexts must not inherit the scalar identity
+		// mulConst: structured binary encoders rely on it to mix components.
+		CoeffCtxGF128 gf128Ctx;
+		block gf128Mixed;
+		gf128Ctx.mulConst(gf128Mixed, OneBlock);
+		if (gf128Mixed != block(0, 4234123421))
+			throw RTE_LOC;
+
+		// The subfields of GF(2^128) have degrees dividing 128. Consequently,
+		// every proper subfield lies in GF(2^64), whose elements are exactly the
+		// roots of x^(2^64) - x. Reject a mulConst element in that subfield.
+		auto gf128Frobenius = gf128Mixed;
+		for (u64 i = 0; i < 64; ++i)
+			gf128Frobenius = gf128Frobenius.gf128Mul(gf128Frobenius);
+		if (gf128Frobenius == gf128Mixed)
+			throw RTE_LOC;
+
+		const auto gf128Expected = gf128Mixed.gf128Mul(gf128Mixed);
+		gf128Ctx.mulConst(gf128Mixed, gf128Mixed);
+		if (gf128Mixed != gf128Expected)
+			throw RTE_LOC;
+
 		F minusOne = F::order() - 1;
 		if (isPrimRootOfUnity<F>(8, minusOne))
 			throw RTE_LOC;

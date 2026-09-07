@@ -20,7 +20,6 @@
 #include "Tools.h"
 #include "LDPC/Mtx.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
-#include <cmath>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -40,8 +39,8 @@ namespace osuCrypto
         // the length of the input. mCodeSize = mMessageSize * mScaler;
         u64 mCodeSize = 0;
 
-        // the next prime starting at mMessageSize. The 
-        // real code size will in fact be of size mScaler * mPrimeMosulus
+        // A prime strictly greater than mMessageSize. The internal cyclic
+        // blocks use this modulus and the output is truncated to mMessageSize.
         u64 mPrimeModulus = 0;
 
         // the randomness used to generate the code.
@@ -59,7 +58,17 @@ namespace osuCrypto
 			if (codeSize <= messageSize)
 				throw std::invalid_argument("Quasi-cyclic code size must exceed its message size. " LOCATION);
 
-			const auto primeModulus = nextPrime(messageSize);
+            // The quotient Phi_p(X) = (X^p - 1) / (X - 1) is irreducible
+            // over F_2 exactly when 2 is primitive modulo p. Merely choosing
+            // p prime can leave many small factors and enables reduced-ring
+            // attacks that the generic pseudo-distance estimate does not model.
+            //
+            // The strict inequality p > messageSize is equally important. It
+            // guarantees that at least one syndrome coordinate is truncated,
+            // removing the X - 1 component whose parity is otherwise a public
+            // linear distinguisher for regular noise (AUD-205).
+            const auto primeModulus =
+                nextPrimeWithPrimitiveRootTwo(messageSize + 1);
 			const auto paritySize = codeSize - messageSize;
 			const auto scalerMinusOne = 1 + (paritySize - 1) / primeModulus;
 			const auto polyBlockSize = 1 + (primeModulus - 1) / 128;
@@ -296,8 +305,42 @@ namespace osuCrypto
             // the number of blocks required to represent scalerMinusOne poly's
             auto multiPolyBlockSize = polyBlockSize * scalerMinusOne;
 
-            Matrix<block> XT(rows, multiPolyBlockSize);
-            transpose(X.subspan(mMessageSize), XT);
+            // Pack each polynomial at a p-coordinate boundary before the bit
+            // transpose. Packing the complete parity span at once would place
+            // successive polynomials at 128*ceil(p/128) boundaries instead,
+            // folding the padding columns into the preceding polynomial and
+            // creating duplicate matrix rows (AUD-208).
+            Matrix<block> XT(rows, multiPolyBlockSize, AllocType::Uninitialized);
+            AlignedArray<block, 128> transposeBuffer;
+            auto parity = X.subspan(mMessageSize);
+            for (u64 s = 0; s < scalerMinusOne; ++s)
+            {
+                const auto polyBegin = s * mPrimeModulus;
+                const auto polySize = std::min<u64>(
+                    mPrimeModulus, parity.size() - polyBegin);
+                const auto usedBlocks = divCeil(polySize, u64{ 128 });
+                const auto outputBegin = s * polyBlockSize;
+
+                for (u64 b = 0; b < usedBlocks; ++b)
+                {
+                    const auto inputBegin = polyBegin + b * 128;
+                    const auto count = std::min<u64>(
+                        128, polySize - b * 128);
+                    std::memcpy(transposeBuffer.data(),
+                        parity.data() + inputBegin, count * sizeof(block));
+                    if (count != 128)
+                        std::memset(transposeBuffer.data() + count, 0,
+                            (128 - count) * sizeof(block));
+
+                    transpose128(transposeBuffer.data());
+                    for (u64 row = 0; row < rows; ++row)
+                        XT(row, outputBegin + b) = transposeBuffer[row];
+                }
+
+                for (u64 row = 0; row < rows; ++row)
+                    for (u64 b = usedBlocks; b < polyBlockSize; ++b)
+                        XT(row, outputBegin + b) = ZeroBlock;
+            }
 
             auto polyU64Size = i64(polyBlockSize * 2);
 
@@ -381,12 +424,10 @@ namespace osuCrypto
 
                 dualEncode(in);
 
-                u64 w = 0;
                 for (u64 j = 0; j < mMessageSize; ++j)
                 {
                     if (in[j] == oc::AllOneBlock)
                     {
-                        ++w;
                         mtx(i, j) = 1;
                     }
                     else if (in[j] == oc::ZeroBlock)
@@ -395,9 +436,6 @@ namespace osuCrypto
                     else
                         throw RTE_LOC;
                 }
-
-                if (std::abs((long long)(mPrimeModulus - w)) < mPrimeModulus / 2 - std::sqrt(mPrimeModulus))
-                    throw RTE_LOC;
             }
 
             return mtx;

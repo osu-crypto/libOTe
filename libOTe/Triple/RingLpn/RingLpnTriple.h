@@ -24,6 +24,7 @@
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Tools/Gmw/Gmw.h"
 #include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Tools/LpnParameters.h"
 #include "cryptoTools/Circuit/BetaLibrary.h"
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
@@ -52,6 +53,18 @@ namespace osuCrypto
 
 		// c, the number of polynomials.
 		u64 mNumPolys = 0;
+
+		// Select c and let init() derive the minimum 128-bit t. Directly setting
+		// mNumPolys and mPolyWeight remains an expert/testing interface and does
+		// not claim that the resulting pair meets the security policy.
+		void configure(u64 compressionFactor)
+		{
+			if (!lpnParameters::decodingWeight128(compressionFactor))
+				throw std::invalid_argument(
+					"RingLPN compression factor must be in [2, 8]. " LOCATION);
+			mNumPolys = compressionFactor;
+			mPolyWeight = 0;
+		}
 
 		// the size of a polynomial, 2^mLogN. 
 		// We will produce this many OLEs.
@@ -385,9 +398,19 @@ namespace osuCrypto
 		auto numPolys = mNumPolys;
 		auto polyWeight = mPolyWeight;
 		if (numPolys == 0)
-		{
 			numPolys = 4;
-			polyWeight = 16;
+		if (polyWeight == 0)
+		{
+			const auto fieldBits = ctx.template bitSize<F>();
+			const auto exponent = fieldBits > 1 ?
+				std::min<u64>(fieldBits - 1, 1023) : 1;
+			const auto fieldCardinalityLowerBound = std::ldexp(1.0,
+				static_cast<int>(exponent));
+			const auto selected = lpnParameters::select(
+				numPolys, fieldCardinalityLowerBound,
+				LpnCoefficientDistribution::Uniform);
+			polyWeight = lpnParameters::roundUpPower(
+				selected.mNoiseWeight, 2);
 		}
 		if (numPolys > 8)
 			throw std::invalid_argument("RingLPN supports at most eight polynomials. " LOCATION);

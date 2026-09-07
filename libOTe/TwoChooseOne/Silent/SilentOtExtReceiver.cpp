@@ -293,7 +293,8 @@ namespace osuCrypto
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);
 
 		constexpr u64 secParam = 128;
-		auto param = syndromeDecodingConfigure(secParam, numOTs, multType, noiseType, 1);
+		auto param = syndromeDecodingConfigure(
+			secParam, numOTs, multType, noiseType, SdNoiseSecurityModel::binary());
 		auto format = PprfOutputFormat{};
 
 		if (SdNoiseDistribution::Regular == noiseType)
@@ -527,12 +528,15 @@ namespace osuCrypto
 
 		setTimePoint("recver.expand.start");
 		mA.resize(mNoiseVecSize);
+		// Keep capacity for code padding, but expose only tree outputs to PPRF.
+		mA.resize(mNumPartitions * mSizePer);
 		mC.resize(0);
 
 		// Expand PPRF to generate sparse vector
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, {});
 
 		// Zero out any excess values beyond the noise vector size
+		mA.resize(mNoiseVecSize);
 		for (u64 i = mNumPartitions * mSizePer; i < mA.size(); ++i)
 			mA[i] = ZeroBlock;
 
@@ -801,9 +805,6 @@ namespace osuCrypto
 #endif
 			}
 			break;
-			case osuCrypto::MultType::ExAcc7:
-			case osuCrypto::MultType::ExAcc11:
-			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
 				// Use Expander-Accumulator code for compression
@@ -886,9 +887,6 @@ namespace osuCrypto
 #endif
 			}
 			break;
-			case osuCrypto::MultType::ExAcc7:
-			case osuCrypto::MultType::ExAcc11:
-			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
 				// Use Expander-Accumulator code for both A and C

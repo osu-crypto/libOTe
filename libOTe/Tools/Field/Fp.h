@@ -527,6 +527,15 @@ namespace osuCrypto
 	struct CoeffCtxFp : CoeffCtxInteger
 	{
 		template<typename F>
+		constexpr double regularNoiseFactor() const
+		{
+			using traits = FpTraits<std::remove_cvref_t<F>>;
+			static_assert(traits::is_fp, "F must be an Fp type.");
+			return static_cast<double>(traits::modulus_value) /
+				static_cast<double>(traits::modulus_value - 1);
+		}
+
+		template<typename F>
 		OC_FORCEINLINE bool isCanonical(const F& value) const
 		{
 			using traits = FpTraits<std::remove_cvref_t<F>>;

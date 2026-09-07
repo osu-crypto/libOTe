@@ -142,15 +142,28 @@ namespace osuCrypto {
 			return eq(v, z); // char 2 if 1+1 = 0;
 		}
 
-		// For the base field G is an extension fields, 
-		// mulConst should multiply x by some constant in G to linearly
-		// mix the components. Most of the LPN codes this library
-		// uses are binary and so for extension field this would
-		// result in the componets not interactive. This can lead 
-		// to a splitting attack. To fix this we multiply by some 
-		// non-zero G element.
+		// Contract for the fixed linear mixing operation used by the binary
+		// structured LPN encoders (EA, ExConv, BlkAcc, and Tungsten):
 		//
-		// If your type is a scaler, e.g. Fp or Z2k, just return x.
+		// * A scalar prime-field or base-ring context, such as Fp or Z_(2^k),
+		//   may use the identity below.
+		// * Every extension-field context must override mulConst and multiply by
+		//   a fixed element of full algebraic degree over its prime field. Thus
+		//   the powers of the multiplication map span every extension component,
+		//   instead of preserving a proper base-field subspace. Merely choosing
+		//   an element outside the prime field is sufficient only when the
+		//   extension degree is prime.
+		// * A dense multiplication matrix can mix the stored components in fewer
+		//   applications and might improve resistance to splitting or low-weight
+		//   attacks. That is a useful heuristic, not a proved requirement of the
+		//   current parameter analysis; orbit-spanning mixing is the contract.
+		// * Product/vector contexts must apply the scalar context's mulConst to
+		//   every lane. Product lanes remain independent, while the components
+		//   inside each extension-field lane are mixed.
+		//
+		// Implementations must support ret aliasing x; the encoding kernels use
+		// mulConst in place. The operation is fixed and deterministic so sender
+		// and receiver instantiate the same linear code.
 		template<typename F>
 		OC_FORCEINLINE void mulConst(F& ret, const F& x)const
 		{
@@ -211,6 +224,20 @@ namespace osuCrypto {
                 memcpy(&ret, buffer.data(), sizeof(ret));
             }
         }
+
+		// Uniformly sample a unit of the default integer ring Z_{2^k}. Setting
+		// the low bit maps a uniform ring element to a uniform odd element.
+		template<typename G>
+		OC_FORCEINLINE void sampleUnit(G& ret, PRNG& prng) const
+		{
+			fromBlock(ret, prng.get<block>());
+			if (!binaryDecomposition(ret)[0])
+			{
+				auto oneValue = make<G>();
+				one(oneValue);
+				plus(ret, ret, oneValue);
+			}
+		}
 
 		// Return the F element with value 2^power. The unchecked form is for
 		// callers that validate a whole decomposition domain before a hot loop.
@@ -521,6 +548,15 @@ namespace osuCrypto {
 	struct CoeffCtxGF2 : CoeffCtxInteger
 	{
 		template<typename F>
+		constexpr double regularNoiseFactor() const
+		{
+			// CoeffCtxGF2 is also the base of CoeffCtxGF128. A nonzero
+			// coefficient has factor q/(q-1): 2 for GF(2), effectively 1
+			// for the block-sized extension field.
+			return std::is_same_v<std::remove_cvref_t<F>, bool> ? 2.0 : 1.0;
+		}
+
+		template<typename F>
 		OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs)const {
 			ret = lhs ^ rhs;
 		}
@@ -581,7 +617,10 @@ namespace osuCrypto {
 			ret = lhs.gf128Mul(rhs);
 		}
 
-		// ret = x * 4234123421 mod 2^127 - 135
+		// Multiply by a fixed full-degree element so repeated applications span
+		// all GF(2^128) components. Field_Audit_Test verifies that this element
+		// is outside GF(2^64), and therefore every proper subfield of GF(2^128).
+		// See the extension-field mulConst contract in CoeffCtxInteger.
 		OC_FORCEINLINE void mulConst(block& ret, const block& x)const
 		{
 			// multiplication y modulo mod
@@ -729,6 +768,57 @@ namespace osuCrypto {
 	template<typename F, typename G = F>
 	using DefaultCoeffCtx = typename DefaultCoeffCtx_t<F, G>::type;
 
+	// Regular-noise LPN samples require every selected coefficient to be a
+	// multiplicative unit. This is nonzero for fields and odd for the default
+	// integer rings Z_{2^k}. Product and other nonfield contexts can override
+	// the fallback by providing sampleUnit(G&, PRNG&) and isUnit(const G&).
+	template<typename G, typename Ctx>
+	OC_FORCEINLINE bool isRegularNoiseUnit(const G& value, const Ctx& ctx)
+	{
+		if (ctx.template isField<G>())
+		{
+			auto zero = ctx.template make<G>();
+			ctx.zero(zero);
+			return !ctx.eq(value, zero);
+		}
+
+		if constexpr (requires { ctx.isUnit(value); })
+			return ctx.isUnit(value);
+
+		// CoeffCtxInteger models Z_{2^k}, whose units are exactly the odd
+		// elements. Custom nonfield rings should provide isUnit().
+		auto copy = value;
+		return ctx.binaryDecomposition(copy)[0];
+	}
+
+	template<typename G, typename Ctx>
+	OC_FORCEINLINE void sampleRegularNoiseUnit(G& value, PRNG& prng, const Ctx& ctx)
+	{
+		if (ctx.template isField<G>())
+		{
+			if constexpr (requires { value = ctx.sampleNonZero(prng); })
+			{
+				value = ctx.sampleNonZero(prng);
+			}
+			else
+			{
+				do
+					ctx.fromBlock(value, prng.get<block>());
+				while (!isRegularNoiseUnit(value, ctx));
+			}
+		}
+		else if constexpr (requires { ctx.sampleUnit(value, prng); })
+		{
+			ctx.sampleUnit(value, prng);
+		}
+		else
+		{
+			do
+				ctx.fromBlock(value, prng.get<block>());
+			while (!isRegularNoiseUnit(value, ctx));
+		}
+	}
+
 	// Preserve compatibility with custom coefficient contexts that predate the
 	// explicit additive-group interface.
 	template<typename G, typename Ctx>
@@ -738,5 +828,18 @@ namespace osuCrypto {
 			return ctx.template additiveGroupBitCount<G>();
 		else
 			return ctx.template isField<G>() ? ctx.template bitSize<G>() : 1;
+	}
+
+	// For regular noise, the worst nontrivial additive character has one-hit
+	// factor q/(q-1) when coefficients are uniform in F_q^*. Integer-like
+	// contexts use odd units and therefore the binary factor 2. Unknown field
+	// contexts conservatively use the limiting large-field factor 1.
+	template<typename G, typename Ctx>
+	constexpr double coefficientRegularNoiseFactor(const Ctx& ctx)
+	{
+		if constexpr (requires { ctx.template regularNoiseFactor<G>(); })
+			return ctx.template regularNoiseFactor<G>();
+		else
+			return ctx.template isField<G>() ? 1.0 : 2.0;
 	}
 }
