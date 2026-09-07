@@ -53,7 +53,18 @@ namespace osuCrypto
         BlkAcc3x32 = 11,// almost fastest with very high minimum distance.
 
         // experimental
-        Tungsten = 12 // very fast, based on turbo codes. Unknown min distance. 
+        Tungsten = 12, // very fast, based on turbo codes. Unknown min distance.
+
+        // Binary, two-sided-regular, rate-one-half expand-convolute code for
+        // Silent OT. The expander degrees are 10/5 and the wrapped
+        // convolution memory is 15.
+        RegularEc10x5x15 = 13,
+
+        // Experimental field-valued streaming expand-convolute code for
+        // Silent VOLE. The expander degrees are 26/13 and the wrapped
+        // convolution memory is 4. Its structured schedule is not the proved
+        // ensemble.
+        RegularEc26x13x4 = 14
     };
 
     inline std::ostream& operator<<(std::ostream& o, MultType m)
@@ -90,6 +101,12 @@ namespace osuCrypto
             break;
         case osuCrypto::MultType::Tungsten:
             o << "Tungsten";
+            break;
+        case osuCrypto::MultType::RegularEc10x5x15:
+            o << "RegularEc10x5x15";
+            break;
+        case osuCrypto::MultType::RegularEc26x13x4:
+            o << "RegularEc26x13x4";
             break;
         default:
             throw RTE_LOC;
@@ -177,6 +194,69 @@ namespace osuCrypto
 
     }
 
+    inline void RegularEcConfigure(
+        u64& scaler,
+        double& minDist)
+    {
+        scaler = 2;
+        // The finite certificate at k=1,048,575 proves relative distance
+        // above 0.110020. Use a rounded-down value in noise selection. Other
+        // padded lengths instantiate the same experimental ensemble but need
+        // their own finite certificates before being called proved parameters.
+        minDist = 0.10;
+    }
+
+    inline void RegularEcFieldConfigure(
+        u64& scaler,
+        double& minDist)
+    {
+        scaler = 2;
+        // The streaming schedule and its +/-1 labels are heuristic. The
+        // paper-correct Goldilocks ensemble is certified through relative
+        // distance 0.4843, while intended-degree streaming searches return
+        // their lightest candidates near relative weight 0.49. Those searches
+        // are not a lower-bound proof, so retain substantial margin. At 0.30
+        // the independent 128-position
+        // attack floor already dominates large-field VOLE noise selection;
+        // larger pseudo-distances would not reduce the selected weight.
+        minDist = 0.30;
+    }
+
+    inline u64 RegularEcPaddedMessageSize(u64 requestedSize)
+    {
+        // k=525 is the smallest size checked so far whose finite distance-0.10
+        // certificate exceeds the 20-bit target. The current complement proof
+        // uses odd k, while exact rate-half degrees 10/5 require k divisible
+        // by five.
+        constexpr u64 minimumCertifiedSize = 525;
+        constexpr u64 maximumSize = std::numeric_limits<u32>::max() / 2;
+        u64 padded = std::max(requestedSize, minimumCertifiedSize);
+        if (padded > maximumSize)
+            throw std::invalid_argument(
+                "Regular EC message size exceeds its 32-bit index space. " LOCATION);
+        padded = roundUpTo(padded, 5);
+        if ((padded & 1) == 0)
+            padded += 5;
+        if (padded > maximumSize)
+            throw std::invalid_argument(
+                "Regular EC message size exceeds its 32-bit index space. " LOCATION);
+        return padded;
+    }
+
+    inline u64 RegularEcFieldPaddedMessageSize(u64 requestedSize)
+    {
+        constexpr u64 rightDegree = 13;
+        constexpr u64 maximumSize = std::numeric_limits<u32>::max() / 2;
+        if (requestedSize > maximumSize)
+            throw std::invalid_argument(
+                "Streaming field regular EC message size exceeds its 32-bit index space. " LOCATION);
+        const u64 padded = roundUpTo(requestedSize, rightDegree);
+        if (padded > maximumSize)
+            throw std::invalid_argument(
+                "Streaming field regular EC message size exceeds its 32-bit index space. " LOCATION);
+        return padded;
+    }
+
     struct SdConfig
     {
         // the total size of the noise vector, this will
@@ -258,6 +338,12 @@ namespace osuCrypto
             TungstenConfigure(scaler, minDist);
             break;
         }
+        case osuCrypto::MultType::RegularEc10x5x15:
+            RegularEcConfigure(scaler, minDist);
+            break;
+        case osuCrypto::MultType::RegularEc26x13x4:
+            RegularEcFieldConfigure(scaler, minDist);
+            break;
         default:
             throw RTE_LOC;
             break;
@@ -298,6 +384,44 @@ namespace osuCrypto
             config.mNumPartitions = roundUpTo(getRegNoiseWeight(minDist, baseSize, secParam, noiseType), 2);
             config.mSizePer = std::max<u64>(4, roundUpTo(divCeil(baseSize, config.mNumPartitions), 2));
 			config.mNoiseVectorSize = config.mNumPartitions * config.mSizePer;
+        }
+        if (multType == MultType::RegularEc10x5x15)
+        {
+            const u64 minimumNoiseSize =
+                2 * RegularEcPaddedMessageSize(requestSize);
+            const u64 physicalNoiseSize =
+                config.mNumPartitions * config.mSizePer;
+            if (physicalNoiseSize < minimumNoiseSize)
+            {
+                config.mSizePer = roundUpTo(
+                    divCeil(minimumNoiseSize, config.mNumPartitions), 2);
+            }
+            const u64 paddedPhysicalNoiseSize =
+                config.mNumPartitions * config.mSizePer;
+            const u64 minimumMessageSize = std::max(
+                requestSize,
+                divCeil(paddedPhysicalNoiseSize, u64{ 2 }));
+            config.mNoiseVectorSize =
+                2 * RegularEcPaddedMessageSize(minimumMessageSize);
+        }
+        else if (multType == MultType::RegularEc26x13x4)
+        {
+            const u64 minimumNoiseSize =
+                2 * RegularEcFieldPaddedMessageSize(requestSize);
+            const u64 physicalNoiseSize =
+                config.mNumPartitions * config.mSizePer;
+            if (physicalNoiseSize < minimumNoiseSize)
+            {
+                config.mSizePer = roundUpTo(
+                    divCeil(minimumNoiseSize, config.mNumPartitions), 2);
+            }
+            const u64 paddedPhysicalNoiseSize =
+                config.mNumPartitions * config.mSizePer;
+            const u64 minimumMessageSize = std::max(
+                requestSize,
+                divCeil(paddedPhysicalNoiseSize, u64{ 2 }));
+            config.mNoiseVectorSize =
+                2 * RegularEcFieldPaddedMessageSize(minimumMessageSize);
         }
         return config;
     }

@@ -21,6 +21,8 @@
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/Tools/ExConvCode/ExConvCode.h>
+#include <libOTe/Tools/ExConvCode/RegularEcCode.h>
+#include <libOTe/Tools/ExConvCode/RegularEcStreamingFieldCode.h>
 #include <libOTe/Base/BaseOT.h>
 #include <libOTe/Vole/Noisy/NoisyVoleReceiver.h>
 #include <libOTe/Vole/Noisy/NoisyVoleSender.h>
@@ -608,6 +610,21 @@ namespace osuCrypto
 		if (noiseType != SdNoiseDistribution::Regular &&
 			noiseType != SdNoiseDistribution::Stationary)
 			throw std::invalid_argument("Unknown noise type. " LOCATION);
+		if (mult == MultType::RegularEc10x5x15)
+			throw std::invalid_argument(
+				"RegularEc10x5x15 is a binary Silent OT profile; use RegularEc26x13x4 for field-valued Silent VOLE. " LOCATION);
+		if (mult == MultType::RegularEc26x13x4)
+		{
+			if constexpr (!RegularEcStreamingFieldCompatible<F, G, Ctx>)
+				throw std::invalid_argument(
+					"The VOLE coefficient context does not support streaming field regular EC. " LOCATION);
+			else if (!ctx.template isField<G>())
+				throw std::invalid_argument(
+					"Streaming field regular EC requires a field-valued VOLE scalar. " LOCATION);
+			else if (ctx.template bitSize<G>() < 64)
+				throw std::invalid_argument(
+					"The tuned streaming regular EC profile requires a field of at least 64 bits. " LOCATION);
+		}
 
 		const auto bitCount = coefficientGroupBitCount<G>(ctx);
 
@@ -782,9 +799,11 @@ namespace osuCrypto
 		}
 
 
-		// Allocate and initialize mA
+		// Expand the physical PPRF prefix. Some encoders require a
+		// slightly longer, aligned codeword; that suffix is public zero.
+		const u64 physicalNoiseSize = mNumPartitions * mSizePer;
 		mCtx.resize(mA, 0);
-		mCtx.resize(mA, mNoiseVecSize);
+		mCtx.resize(mA, physicalNoiseSize);
 		setTimePoint("SilentVoleReceiver.alloc");
 
 		// Allocate and zero-initialize mC
@@ -816,8 +835,8 @@ namespace osuCrypto
 		//
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, mCtx);
 
-		// Zero out the remaining positions in mA
-		mCtx.zero(mA.begin() + mNumPartitions * mSizePer, mA.end());
+		mCtx.resize(mA, mNoiseVecSize);
+		mCtx.zero(mA.begin() + physicalNoiseSize, mA.end());
 
 		setTimePoint("SilentVoleReceiver.expand.pprf_transpose");
 
@@ -904,6 +923,29 @@ namespace osuCrypto
 			code.dualEncode<G, Ctx>(mC.begin(), mCtx);
 
 
+			break;
+		}
+		case MultType::RegularEc26x13x4:
+		{
+			if constexpr (RegularEcStreamingFieldCompatible<F, G, Ctx>)
+			{
+				RegularEcStreamingFieldCode<26, 4, G> encoder;
+				encoder.config(
+					mNoiseVecSize / 2, mNoiseVecSize, mCodeSeed, mCtx);
+				encoder.template dualEncode2<F, G>(
+					mA.begin(), mC.begin(), mCtx);
+			}
+			else
+			{
+				throw std::runtime_error(
+					"The VOLE coefficient context does not support streaming field regular EC. " LOCATION);
+			}
+			break;
+		}
+		case MultType::RegularEc10x5x15:
+		{
+			throw std::runtime_error(
+				"RegularEc10x5x15 is a binary Silent OT profile. " LOCATION);
 			break;
 		}
 		case osuCrypto::MultType::QuasiCyclic:

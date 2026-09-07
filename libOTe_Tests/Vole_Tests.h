@@ -16,6 +16,8 @@ void Vole_Silent_stationary_test(const oc::CLP& cmd);
 void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd);
 void Vole_Silent_BlkAcc_test(const oc::CLP& cmd);
 void Vole_Silent_Tungsten_test(const oc::CLP& cmd);
+void Vole_Silent_RegularEcGF128_test(const oc::CLP& cmd);
+void Vole_Silent_RegularEcField_test(const oc::CLP& cmd);
 void Vole_Silent_baseOT_test(const oc::CLP& cmd);
 void Vole_Silent_mal_test(const oc::CLP& cmd);
 void Vole_Silent_malBase_test(const oc::CLP& cmd);

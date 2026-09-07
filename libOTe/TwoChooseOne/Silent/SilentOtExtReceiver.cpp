@@ -15,6 +15,7 @@
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
 #include "libOTe/Tools/BlkAccCode/BlkAccCode.h"
+#include "libOTe/Tools/ExConvCode/RegularEcCode.h"
 namespace osuCrypto
 {
 
@@ -291,6 +292,9 @@ namespace osuCrypto
 		if (malType != SilentSecType::SemiHonest &&
 			malType != SilentSecType::Malicious)
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);
+		if (multType == MultType::RegularEc26x13x4)
+			throw std::invalid_argument(
+				"Streaming field regular EC is supported by Silent VOLE, not Silent OT. " LOCATION);
 
 		constexpr u64 secParam = 128;
 		auto param = syndromeDecodingConfigure(secParam, numOTs, multType, noiseType, 1);
@@ -526,14 +530,18 @@ namespace osuCrypto
 		}
 
 		setTimePoint("recver.expand.start");
-		mA.resize(mNoiseVecSize);
+		const u64 physicalNoiseSize = mNumPartitions * mSizePer;
+		mA.resize(physicalNoiseSize);
 		mC.resize(0);
 
 		// Expand PPRF to generate sparse vector
-		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, {});
+		co_await gen().expand(
+			chl, mA, mPprfFormat, true, mNumThreads, {});
 
-		// Zero out any excess values beyond the noise vector size
-		for (u64 i = mNumPartitions * mSizePer; i < mA.size(); ++i)
+		// The regular EC adapter may pad the codeword beyond the PPRF's
+		// physical prefix. Extend that prefix with public zeros.
+		mA.resize(mNoiseVecSize);
+		for (u64 i = physicalNoiseSize; i < mA.size(); ++i)
 			mA[i] = ZeroBlock;
 
 		setTimePoint("recver.expand.pprf");
@@ -830,6 +838,14 @@ namespace osuCrypto
 				exConvEncoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
 				break;
 			}
+			case osuCrypto::MultType::RegularEc10x5x15:
+			{
+				RegularEcCode<10, 15> encoder;
+				encoder.config(
+					mNoiseVecSize / 2, mNoiseVecSize, mCodeSeed);
+				encoder.dualEncode<block>(mA.begin(), CoeffCtxGF2{});
+				break;
+			}
 			case MultType::BlkAcc3x8:
 			case MultType::BlkAcc3x32:
 			{
@@ -926,6 +942,15 @@ namespace osuCrypto
 					mC.begin(),
 					{});
 
+				break;
+			}
+			case osuCrypto::MultType::RegularEc10x5x15:
+			{
+				RegularEcCode<10, 15> encoder;
+				encoder.config(
+					mNoiseVecSize / 2, mNoiseVecSize, mCodeSeed);
+				encoder.dualEncode2<block, u8, CoeffCtxGF2>(
+					mA.begin(), mC.begin(), {});
 				break;
 			}
 			case MultType::BlkAcc3x8:
