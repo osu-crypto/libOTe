@@ -24,7 +24,6 @@ namespace osuCrypto
 		u64 mLogG = 0;
 
 		u64 mBatchSize = 0;
-
 		DpfMult mMult;
 
 		bool mPrint = false;
@@ -1203,7 +1202,6 @@ namespace osuCrypto
 
 			if (mPrint)
 				co_await printMtxV(mLogG, X, "Final solution X", sock);
-
 
 			if (mMult.mOtIdx != mMult.mTotalMults)
 				throw RTE_LOC;

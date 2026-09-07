@@ -14,6 +14,7 @@
 #include "libOTe/Vole/Silent/SilentVoleSender.h"
 #include "libOTe/Vole/Silent/SilentVoleReceiver.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Tools/Pprf/HalfTreePprf.h"
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
 #include "libOTe/Tools/ExConvCodeOld/ExConvCodeOld.h"
 #include "libOTe/Dpf/RegularDpf.h"
@@ -261,61 +262,66 @@ namespace osuCrypto
 
 		try
 		{
-			using Ctx = CoeffCtxGF2;
-			RegularPprfReceiver<block, Ctx> recver;
-			RegularPprfSender<block, Ctx> sender;
-
-			u64 trials = cmd.getOr("t", 10);
-
-			u64 w = cmd.getOr("w", 32);
-			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 14));
-
-			PRNG prng0(ZeroBlock), prng1(ZeroBlock);
-			//block delta = prng0.get();
-
-			auto sock = coproto::LocalAsyncSocket::makePair();
-
-			Timer rTimer;
-			auto s = rTimer.setTimePoint("start");
-			auto ctx = Ctx{};
-			auto vals = Ctx::Vec<block>(w);
-			auto out0 = Ctx::Vec<block>(n / w * w);
-			auto out1 = Ctx::Vec<block>(n / w * w);
-
-
-
-			for (u64 t = 0; t < trials; ++t)
+			auto run = [&]<typename Sender, typename Receiver>(const char* name)
 			{
-				sender.configure(n / w, w);
-				recver.configure(n / w, w);
+				using Ctx = CoeffCtxGF2;
+				Receiver recver;
+				Sender sender;
 
-				std::vector<std::array<block, 2>> baseSend(sender.baseOtCount());
-				std::vector<block> baseRecv(sender.baseOtCount());
-				BitVector baseChoice(sender.baseOtCount());
-				sender.setBase(baseSend);
-				recver.setBase(baseRecv);
-				recver.setChoiceBits(baseChoice);
+				u64 trials = cmd.getOr("t", 10);
+				u64 w = cmd.getOr("w", 32);
+				u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 14));
 
-				auto p0 = sender.expand(sock[0], vals, prng0.get(), out0, PprfOutputFormat::Interleaved, true, 1, ctx);
-				auto p1 = recver.expand(sock[1], out1, PprfOutputFormat::Interleaved, true, 1, ctx);
+				PRNG prng0(ZeroBlock), prng1(ZeroBlock);
+				auto sock = coproto::LocalAsyncSocket::makePair();
 
-				rTimer.setTimePoint("r start");
-				coproto::sync_wait(macoro::when_all_ready(
-					std::move(p0), std::move(p1)));
-				rTimer.setTimePoint("r done");
+				Timer rTimer;
+				auto s = rTimer.setTimePoint("start");
+				auto ctx = Ctx{};
+				auto vals = Ctx::Vec<block>(w);
+				auto out0 = Ctx::Vec<block>(n / w * w);
+				auto out1 = Ctx::Vec<block>(n / w * w);
 
-			}
-			auto e = rTimer.setTimePoint("end");
+				for (u64 t = 0; t < trials; ++t)
+				{
+					sender.configure(n / w, w);
+					recver.configure(n / w, w);
 
-			auto time = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
-			auto avgTime = time / double(trials);
-			auto timePer512 = avgTime / n * 512;
-			std::cout << "OT n:" << n << ", " <<
-				avgTime << "ms/batch, " << timePer512 << "ms/512ot" << std::endl;
+					std::vector<std::array<block, 2>> baseSend(sender.baseOtCount());
+					std::vector<block> baseRecv(sender.baseOtCount());
+					BitVector baseChoice(sender.baseOtCount());
+					sender.setBase(baseSend);
+					recver.setBase(baseRecv);
+					recver.setChoiceBits(baseChoice);
 
-			std::cout << rTimer << std::endl;
+					auto p0 = sender.expand(sock[0], vals, prng0.get(), out0, PprfOutputFormat::ByPhysicalIndex, true, 1, ctx);
+					auto p1 = recver.expand(sock[1], out1, PprfOutputFormat::ByPhysicalIndex, true, 1, ctx);
 
-			std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+					rTimer.setTimePoint("r start");
+					coproto::sync_wait(macoro::when_all_ready(
+						std::move(p0), std::move(p1)));
+					rTimer.setTimePoint("r done");
+				}
+				auto e = rTimer.setTimePoint("end");
+
+				auto time = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+				auto avgTime = time / double(trials);
+				auto timePer512 = avgTime / n * 512;
+				std::cout << name << " PPRF, OT n:" << n << ", " <<
+					avgTime << "ms/batch, " << timePer512 << "ms/512ot" << std::endl;
+
+				std::cout << rTimer << std::endl;
+				std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+			};
+
+			if (cmd.isSet("halfTree"))
+				run.template operator()<
+					HalfTreePprfSender<block, CoeffCtxGF2>,
+					HalfTreePprfReceiver<block, CoeffCtxGF2>>("half-tree");
+			else
+				run.template operator()<
+					RegularPprfSender<block, CoeffCtxGF2>,
+					RegularPprfReceiver<block, CoeffCtxGF2>>("regular");
 		}
 		catch (std::exception& e)
 		{
@@ -1239,6 +1245,7 @@ namespace osuCrypto
 		u64 iterations = cmd.getOr("iters", 3); // Number of different value sets to test
 		bool print = cmd.isSet("print"); // Print flag
 		bool quiet = cmd.isSet("quiet");
+		bool serialParties = cmd.isSet("serialParties");
 
 		// Helper function to format bytes
 		auto formatBytes = [](u64 bytes) {
@@ -1277,6 +1284,7 @@ namespace osuCrypto
 			std::cout << "  Number of partitions: " << numPartitions << std::endl;
 			std::cout << "  Linear security parameter: " << linearSecParam << std::endl;
 			std::cout << "  Cuckoo security parameter: " << cuckooSecParam << std::endl;
+			std::cout << "  Party scheduling: " << (serialParties ? "serial" : "parallel") << std::endl;
 			std::cout << "  Expansion iterations: " << iterations << std::endl;
 			std::cout << std::endl;
 		}
@@ -1365,12 +1373,24 @@ namespace osuCrypto
 		auto setupStartBytes1 = sock[1].bytesReceived();
 		auto setupStartTime = std::chrono::high_resolution_clock::now();
 
-		auto r = macoro::sync_wait(macoro::when_all_ready(
-			dpf[0].setPoints(points0, prng, sock[0]) | macoro::start_on(threadPools[0]),
-			dpf[1].setPoints(points1, prng, sock[1]) | macoro::start_on(threadPools[1])
-		));
-		std::get<0>(r).result();
-		std::get<1>(r).result();
+		if (serialParties)
+		{
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].setPoints(points0, prng, sock[0]),
+				dpf[1].setPoints(points1, prng, sock[1])
+			));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+		}
+		else
+		{
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].setPoints(points0, prng, sock[0]) | macoro::start_on(threadPools[0]),
+				dpf[1].setPoints(points1, prng, sock[1]) | macoro::start_on(threadPools[1])
+			));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+		}
 
 		auto setupEndTime = std::chrono::high_resolution_clock::now();
 		auto setupEndBytes0 = sock[0].bytesReceived();
@@ -1425,12 +1445,24 @@ namespace osuCrypto
 			auto expStartTime = std::chrono::high_resolution_clock::now();
 
 			// Expand values using the cached point setup
-			auto r = macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }) | macoro::start_on(threadPools[0]),
-				dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; }) | macoro::start_on(threadPools[1])
-			));
-			std::get<0>(r).result();
-			std::get<1>(r).result();
+			if (serialParties)
+			{
+				auto r = macoro::sync_wait(macoro::when_all_ready(
+					dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }),
+					dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; })
+				));
+				std::get<0>(r).result();
+				std::get<1>(r).result();
+			}
+			else
+			{
+				auto r = macoro::sync_wait(macoro::when_all_ready(
+					dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }) | macoro::start_on(threadPools[0]),
+					dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; }) | macoro::start_on(threadPools[1])
+				));
+				std::get<0>(r).result();
+				std::get<1>(r).result();
+			}
 
 			auto expEndTime = std::chrono::high_resolution_clock::now();
 			auto expEndBytes0 = sock[0].bytesReceived();
@@ -2620,7 +2652,7 @@ namespace osuCrypto
 			std::cout << "unknown benchmark, opts:" << std::endl;
 			std::cout << "  -QC" << std::endl;
 			std::cout << "  -silent" << std::endl;
-			std::cout << "  -pprf" << std::endl;
+			std::cout << "  -pprf [-halfTree]" << std::endl;
 			std::cout << "  -vole2" << std::endl;
 			std::cout << "  -ea" << std::endl;
 			std::cout << "  -ec" << std::endl;
