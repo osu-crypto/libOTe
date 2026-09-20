@@ -20,7 +20,7 @@ Dependency selection follows libOTe's normal pattern:
 - `FETCH_SPIN=ON`, or `FETCH_AUTO=ON` without a SPIN-specific override, fetches
   the dependency when needed. `FETCH_SPIN=OFF` suppresses automatic fetching.
 
-The fetcher obtains exactly commit `5abbb3312a9d02a2f7650d267c357920e041f955`
+The fetcher obtains exactly commit `b5a81b1d7fc98626419af184ce354cc2d4cf1b06`
 from [ladnir/spin_codes](https://github.com/ladnir/spin_codes) with Git depth one
 and builds only `spin/`. It does not download historical experiment binaries.
 The repository is public; fetching does not require GitHub credentials.
@@ -163,16 +163,18 @@ descriptors, both seed halves, synchronized hash advancement, and OT correlation
 `SpinOptions` checks defaults for each code-based feature, explicit OFF, local
 source selection, and the fetch overrides without compiling dependencies.
 
-The pinned public snapshot was fetched, built, and tested through
+The public dependency was fetched, built, and tested through
 `FETCH_SPIN=ON` on Linux. CI runs the integration and option tests on Linux
 and Windows, and exercises an installed-package consumer on Linux. The
 ARM/macOS job explicitly disables the currently x86-only dependency.
 
-Known upstream issue: at this pin, SPIN's standalone Windows CI with MSVC
-19.51 fails the packed-bit forward comparison (`spin_api`). The same standalone
-test passes locally with MSVC 19.50; the cause remains unresolved. libOTe uses
-the transpose API, not packed-bit forward encoding. Do not interpret local
-integration results as validation of that newer compiler.
+The current pin fixes an MSVC 19.51 miscompilation in the packed-bit forward
+encoder's runtime feedback-table initializer. The fixed tables are now
+`constexpr`; optimization remains enabled. SPIN's full Linux/Windows CI passed
+with the fix, including MSVC 19.51, and the libOTe integration and option tests
+passed again against the fixed source. libOTe uses the transpose API, not
+packed-bit forward encoding. See SPIN's README and compiler probe for the
+diagnosis and reproducer.
 
 The separate `libOTe_Tests/spin_consumer` project passed a build-tree package
 consumer check: it resolves `libOTe`, links the SPIN dependency transitively,
