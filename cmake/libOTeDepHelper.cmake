@@ -136,6 +136,42 @@ endif()
 
 
 
-# resort the previous prefix path
+## SPIN (source override, installed package, or pinned shallow fetch)
+###########################################################################
+if(ENABLE_SPIN AND NOT TARGET spin::spin)
+    if(LIBOTE_BUILD AND LIBOTE_SPIN_SOURCE)
+        add_subdirectory("${LIBOTE_SPIN_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/spin")
+    else()
+        if(FETCH_SPIN)
+            set(SPIN_DP NO_DEFAULT_PATH PATHS ${OC_THIRDPARTY_HINT})
+        elseif(NO_CMAKE_SYSTEM_PATH)
+            set(SPIN_DP NO_DEFAULT_PATH PATHS ${CMAKE_PREFIX_PATH})
+        else()
+            unset(SPIN_DP)
+        endif()
+        set(SPIN_REFRESH_MANAGED OFF)
+        if(LIBOTE_BUILD AND FETCH_SPIN_IMPL AND LIBOTE_SPIN_FETCH_INSTALL_DIR AND
+           (spin_DIR STREQUAL "${LIBOTE_SPIN_FETCH_INSTALL_DIR}/lib/cmake/spin" OR
+            spin_DIR STREQUAL "${LIBOTE_SPIN_FETCH_INSTALL_DIR}/lib64/cmake/spin"))
+            # Re-evaluate the pin and toolchain key before importing our own cache.
+            # The dependency build is incremental when neither has changed.
+            unset(spin_DIR CACHE)
+            unset(spin_DIR)
+            set(SPIN_REFRESH_MANAGED ON)
+        endif()
+        if(NOT SPIN_REFRESH_MANAGED)
+            find_package(spin 0.1 CONFIG QUIET ${SPIN_DP})
+        endif()
+        if(LIBOTE_BUILD AND (FETCH_SPIN_IMPL OR
+           (TARGET spin::spin AND LIBOTE_SPIN_FETCH_INSTALL_DIR)))
+            include("${CMAKE_CURRENT_LIST_DIR}/../thirdparty/getSpin.cmake")
+        endif()
+        if(NOT TARGET spin::spin)
+            message(FATAL_ERROR "SPIN was not found. Install spin 0.1, set LIBOTE_SPIN_SOURCE, or enable FETCH_SPIN/FETCH_AUTO. Set ENABLE_SPIN=OFF to omit it.")
+        endif()
+    endif()
+endif()
+
+# restore the previous prefix path
 set(CMAKE_PREFIX_PATH ${PUSHED_CMAKE_PREFIX_PATH})
 cmake_policy(POP)

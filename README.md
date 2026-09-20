@@ -65,7 +65,7 @@ and two **optional dependencies** on [libsodium](https://doc.libsodium.org/) or
 [Relic](https://github.com/relic-toolkit/relic) for some Base OTs.
 [Boost Asio](https://www.boost.org/doc/libs/1_84_0/doc/html/boost_asio.html)
 tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
-CMake 3.15+ is required and the build script assumes python 3.
+CMake 3.15+ is required (3.20+ with SPIN) and the build script assumes python 3.
  
 The library can be built with libsodium, all OT protocols enabled and boost asio TCP networking as
 ```
@@ -122,6 +122,20 @@ on platform/dependencies. The `ON`/`OFF` options include
 
 
  Addition options can be set for cryptoTools. See the cmake output.
+
+### SPIN Encoder
+
+Silent OT supports `MultType::Spin`, backed by the standalone MIT-licensed
+[SPIN library](https://github.com/ladnir/spin_codes). libOTe chooses the code
+parameters and rounds small requests up internally; callers need no extra
+SPIN configuration. The default Silent OT encoder is unchanged.
+
+`ENABLE_SPIN` defaults on when a code-based feature is enabled. The dependency
+can be installed, supplied with `LIBOTE_SPIN_SOURCE`, or fetched at a pinned
+revision with `FETCH_SPIN=ON` (also covered by `FETCH_AUTO`). The current SPIN
+library requires x86-64 with AVX2; use `ENABLE_SPIN=OFF` on ARM.
+See the [SPIN integration guide](libOTe/Tools/Spin/README.md) for build options,
+generic coefficient contexts, and the internal parameter policy.
 
 ### Dependencies
 

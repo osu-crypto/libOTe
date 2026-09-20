@@ -213,7 +213,8 @@ GeneratedArtifacts/
 _Pvt_Extensions/
 ModelManifest.xml
 /WeGarbleTests__
-/thirdparty
+/thirdparty/*
+!/thirdparty/getSpin.cmake
 kProbe_*
 
 CodeDB

@@ -97,6 +97,9 @@ add_subdirectory(cryptoTools)
 #############################################
 include(cmake/buildOptions.cmake)
 include(cmake/libOTeDepHelper.cmake)
+if(ENABLE_SPIN)
+    enable_testing()
+endif()
 
 
 

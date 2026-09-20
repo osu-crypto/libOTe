@@ -293,7 +293,13 @@ namespace osuCrypto
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);
 
 		constexpr u64 secParam = 128;
-		auto param = syndromeDecodingConfigure(secParam, numOTs, multType, noiseType, 1);
+        auto param = syndromeDecodingConfigure(secParam,numOTs,multType,noiseType,1);
+        const auto codeSeed=block(12528943721987127,98743297823479812);
+#ifdef ENABLE_SPIN
+        std::unique_ptr<SpinOtState> spinState;
+        if(multType==MultType::Spin)
+            spinState=std::make_unique<SpinOtState>(numOTs,codeSeed,true);
+#endif
 		auto format = PprfOutputFormat{};
 
 		if (SdNoiseDistribution::Regular == noiseType)
@@ -326,7 +332,10 @@ namespace osuCrypto
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNoiseVectorSize;
 		mPprfFormat = format;
-		mCodeSeed = block(12528943721987127, 98743297823479812);
+		mCodeSeed = codeSeed;
+#ifdef ENABLE_SPIN
+        mSpin=std::move(spinState);
+#endif
 		mC = {};
 		mA = {};
 		mEncodeTemp = {};
@@ -530,7 +539,13 @@ namespace osuCrypto
 		mC.resize(0);
 
 		// Expand PPRF to generate sparse vector
+#ifdef ENABLE_SPIN
+        if(mLpnMultType==MultType::Spin) mA.resize(mNumPartitions*mSizePer);
+#endif
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, {});
+#ifdef ENABLE_SPIN
+        if(mLpnMultType==MultType::Spin) mA.resize(mNoiseVecSize);
+#endif
 
 		// Zero out any excess values beyond the noise vector size
 		for (u64 i = mNumPartitions * mSizePer; i < mA.size(); ++i)
@@ -747,6 +762,10 @@ namespace osuCrypto
 			throw std::invalid_argument("Silent choice-bit packing not supported. " LOCATION);
 
 		auto points = getPoints();
+#ifdef ENABLE_SPIN
+        if(mLpnMultType==MultType::Spin)
+            prepareSpin(mSpin,mRequestNumOts,mCodeSeed,true);
+#endif
 
 		if (packing == ChoiceBitPacking::True)
 		{
@@ -787,6 +806,12 @@ namespace osuCrypto
 			// Apply appropriate compression method based on configuration
 			switch (mLpnMultType)
 			{
+#ifdef ENABLE_SPIN
+            case MultType::Spin:
+                if(!mSpin) throw std::logic_error("SPIN is not configured");
+                mSpin->transpose(mA);
+                break;
+#endif
 			case osuCrypto::MultType::QuasiCyclic:
 			{
 #ifdef ENABLE_BITPOLYMUL
@@ -870,6 +895,13 @@ namespace osuCrypto
 			// Apply appropriate compression method based on configuration
 			switch (mLpnMultType)
 			{
+#ifdef ENABLE_SPIN
+            case MultType::Spin:
+                if(!mSpin) throw std::logic_error("SPIN is not configured");
+                mSpin->transpose(mA);
+                mSpin->transpose(mC);
+                break;
+#endif
 			case osuCrypto::MultType::QuasiCyclic:
 			{
 #ifdef ENABLE_BITPOLYMUL
@@ -964,6 +996,9 @@ namespace osuCrypto
 	// Clears internal buffers and state
 	void SilentOtExtReceiver::clear()
 	{
+#ifdef ENABLE_SPIN
+        mSpin.reset();
+#endif
 		std::visit([](auto& gen) { gen.clear(); }, mGenVar);
 		mNoiseVecSize = 0;
 		mRequestNumOts = 0;

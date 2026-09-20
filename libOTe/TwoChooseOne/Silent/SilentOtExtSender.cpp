@@ -261,7 +261,13 @@ namespace osuCrypto
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);
 
 		constexpr u64 secParam = 128;
-		auto param = syndromeDecodingConfigure(secParam, numOTs, mult, noiseType, 1);
+        auto param = syndromeDecodingConfigure(secParam,numOTs,mult,noiseType,1);
+        const auto codeSeed=block(12528943721987127,98743297823479812);
+#ifdef ENABLE_SPIN
+        std::unique_ptr<SpinOtState> spinState;
+        if(mult==MultType::Spin)
+            spinState=std::make_unique<SpinOtState>(numOTs,codeSeed,false);
+#endif
 		auto format = PprfOutputFormat{};
 
 		if (SdNoiseDistribution::Regular == noiseType)
@@ -294,7 +300,10 @@ namespace osuCrypto
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNoiseVectorSize;
 		mPprfFormat = format;
-		mCodeSeed = block(12528943721987127, 98743297823479812);
+		mCodeSeed = codeSeed;
+#ifdef ENABLE_SPIN
+        mSpin=std::move(spinState);
+#endif
 		mB = {};
 		mEncodeTemp = {};
 		mDelta.reset();
@@ -314,6 +323,9 @@ namespace osuCrypto
 	// Clears internal buffers and state
 	void SilentOtExtSender::clear()
 	{
+#ifdef ENABLE_SPIN
+        mSpin.reset();
+#endif
 		std::visit([](auto& gen) { gen.clear(); }, mGenVar);
 		mNoiseVecSize = 0;
 		mRequestNumOts = 0;
@@ -538,7 +550,13 @@ namespace osuCrypto
 
 		// Allocate and expand the B vector
 		mB.resize(mNoiseVecSize);
+#ifdef ENABLE_SPIN
+        if(mLpnMultType==MultType::Spin) mB.resize(mNumPartitions*mSizePer);
+#endif
 		co_await gen().expand(chl, delta, prng.get(), mB, mPprfFormat, true, mNumThreads, CoeffCtxGF2{});
+#ifdef ENABLE_SPIN
+        if(mLpnMultType==MultType::Spin) mB.resize(mNoiseVecSize);
+#endif
 
 		// fill remaining with zeros
 		for (u64 i = mNumPartitions * mSizePer; i < mB.size(); ++i)
@@ -621,6 +639,12 @@ namespace osuCrypto
 		// Apply appropriate compression method based on configuration
 		switch (mLpnMultType)
 		{
+#ifdef ENABLE_SPIN
+        case MultType::Spin:
+            prepareSpin(mSpin,mRequestNumOts,mCodeSeed,false);
+            mSpin->transpose(mB);
+            break;
+#endif
 		case osuCrypto::MultType::QuasiCyclic:
 		{
 #ifdef ENABLE_BITPOLYMUL
