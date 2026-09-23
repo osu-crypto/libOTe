@@ -38,8 +38,28 @@
   `ladnir/cryptoTools`, branch `codex/vaes-aes256`.
 - libOTe pins both exact commits. No raw experiment data is included.
 
-The final clean fetched-dependency build and installed-consumer check against
-these public pins remain to be completed before release validation is closed.
+## Public-pin validation (2026-09-23)
+
+A fresh shallow clone of libOTe commit
+`c575f1606f648e4b029b9cead060472cb1539b9f` fetched both published dependencies.
+SPIN was built through `FETCH_SPIN=ON`, with no local-source override and a
+fresh source cache. The GCC 13.4 Release build enabled VAES, real
+SimplestOT/Edwards25519, DPF, and RingLPN.
+
+- `SpinIntegration` and `SpinOptions` passed.
+- libOTe, cryptoTools, SPIN, and both test archives built and installed.
+- A separate installed-package consumer passed `SpinConsumer`, covering full
+  and banked modes, seed changes, and optimized/generic coefficient agreement.
+  All three package configurations resolved from the new installation.
+- The published VAES code passed AES correctness tests on GCC and MSVC.
+- The MSVC local-source SPIN integration and option tests passed again.
+
+The clean validation is retained at `/tmp/libote-spin-public-TcazgY` on the
+measurement host. Existing installed coproto/macoro/libdivide dependencies
+were reused; SPIN, libOTe, and cryptoTools were freshly fetched and built.
+This was correctness and packaging validation, not another performance run.
+The libOTe and cryptoTools changes are published on integration branches;
+they have not been merged into those repositories' default branches.
 
 The reduced benchmark configuration cannot build/install libOTe's
 unconditional full test library: with DPF disabled, `Dedup.h` references `DpfMult`;
