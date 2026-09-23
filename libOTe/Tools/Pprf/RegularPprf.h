@@ -17,172 +17,7 @@
 namespace osuCrypto
 {
 
-#define REGULAR_PPRF_SIMD8(VAR, STATEMENT) do { \
-	{ constexpr u64 VAR = 0; STATEMENT; } \
-	{ constexpr u64 VAR = 1; STATEMENT; } \
-	{ constexpr u64 VAR = 2; STATEMENT; } \
-	{ constexpr u64 VAR = 3; STATEMENT; } \
-	{ constexpr u64 VAR = 4; STATEMENT; } \
-	{ constexpr u64 VAR = 5; STATEMENT; } \
-	{ constexpr u64 VAR = 6; STATEMENT; } \
-	{ constexpr u64 VAR = 7; STATEMENT; } \
-} while (0)
-
-#if defined(_MSC_VER) && defined(_M_X64)
-// MSVC otherwise serializes the eight independent AES-NI chains. This is a
-// compiler barrier only; it emits no machine instruction.
-#define REGULAR_PPRF_ROUND_BARRIER() _ReadWriteBarrier()
-#else
-#define REGULAR_PPRF_ROUND_BARRIER() do {} while (0)
-#endif
-
 	extern const std::array<AES, 2> gGgmAes;
-
-	namespace pprf
-	{
-		// Expand eight GGM parents while keeping the raw AES outputs in
-		// registers. Calling ecbEncBlocks followed by the two child transforms
-		// makes MSVC store and reload every raw AES output.
-		OC_FORCEINLINE void expandGgm8(
-			const AES& aes,
-			const block* parents,
-			block* left,
-			block* right,
-			block& leftAccumulator,
-			block& rightAccumulator)
-		{
-			const auto& k = aes.mRoundKey;
-			block x0 = AES::firstFn(parents[0], k[0]);
-			block x1 = AES::firstFn(parents[1], k[0]);
-			block x2 = AES::firstFn(parents[2], k[0]);
-			block x3 = AES::firstFn(parents[3], k[0]);
-			block x4 = AES::firstFn(parents[4], k[0]);
-			block x5 = AES::firstFn(parents[5], k[0]);
-			block x6 = AES::firstFn(parents[6], k[0]);
-			block x7 = AES::firstFn(parents[7], k[0]);
-			REGULAR_PPRF_ROUND_BARRIER();
-
-#define REGULAR_PPRF_AES_ROUND(R, FN) do { \
-			x0 = AES::FN(x0, k[R]); \
-			x1 = AES::FN(x1, k[R]); \
-			x2 = AES::FN(x2, k[R]); \
-			x3 = AES::FN(x3, k[R]); \
-			x4 = AES::FN(x4, k[R]); \
-			x5 = AES::FN(x5, k[R]); \
-			x6 = AES::FN(x6, k[R]); \
-			x7 = AES::FN(x7, k[R]); \
-		} while (0)
-
-			REGULAR_PPRF_AES_ROUND(1, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(2, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(3, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(4, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(5, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(6, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(7, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(8, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_AES_ROUND(9, penultimateFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-
-#undef REGULAR_PPRF_AES_ROUND
-
-#define REGULAR_PPRF_STORE_CHILD(I) do { \
-			const auto encrypted = AES::finalFn(x##I, k[10]); \
-			const auto leftChild = AES::roundEnc(encrypted, parents[I]); \
-			const auto rightChild = encrypted.add_epi64(parents[I]); \
-			left[I] = leftChild; \
-			right[I] = rightChild; \
-			leftAccumulator = leftAccumulator ^ leftChild; \
-			rightAccumulator = rightAccumulator ^ rightChild; \
-		} while (0)
-
-			REGULAR_PPRF_STORE_CHILD(0);
-			REGULAR_PPRF_STORE_CHILD(1);
-			REGULAR_PPRF_STORE_CHILD(2);
-			REGULAR_PPRF_STORE_CHILD(3);
-			REGULAR_PPRF_STORE_CHILD(4);
-			REGULAR_PPRF_STORE_CHILD(5);
-			REGULAR_PPRF_STORE_CHILD(6);
-			REGULAR_PPRF_STORE_CHILD(7);
-
-#undef REGULAR_PPRF_STORE_CHILD
-		}
-
-		OC_FORCEINLINE void hashGgmLeaves8(
-			const AES& aes,
-			const block* parents,
-			block* output,
-			block& accumulator)
-		{
-			const auto& k = aes.mRoundKey;
-			block x0 = AES::firstFn(parents[0], k[0]);
-			block x1 = AES::firstFn(parents[1], k[0]);
-			block x2 = AES::firstFn(parents[2], k[0]);
-			block x3 = AES::firstFn(parents[3], k[0]);
-			block x4 = AES::firstFn(parents[4], k[0]);
-			block x5 = AES::firstFn(parents[5], k[0]);
-			block x6 = AES::firstFn(parents[6], k[0]);
-			block x7 = AES::firstFn(parents[7], k[0]);
-			REGULAR_PPRF_ROUND_BARRIER();
-
-#define REGULAR_PPRF_HASH_ROUND(R, FN) do { \
-			x0 = AES::FN(x0, k[R]); \
-			x1 = AES::FN(x1, k[R]); \
-			x2 = AES::FN(x2, k[R]); \
-			x3 = AES::FN(x3, k[R]); \
-			x4 = AES::FN(x4, k[R]); \
-			x5 = AES::FN(x5, k[R]); \
-			x6 = AES::FN(x6, k[R]); \
-			x7 = AES::FN(x7, k[R]); \
-		} while (0)
-
-			REGULAR_PPRF_HASH_ROUND(1, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(2, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(3, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(4, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(5, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(6, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(7, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(8, roundFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-			REGULAR_PPRF_HASH_ROUND(9, penultimateFn);
-			REGULAR_PPRF_ROUND_BARRIER();
-
-#undef REGULAR_PPRF_HASH_ROUND
-
-#define REGULAR_PPRF_STORE_HASH(I) do { \
-			const auto hash = AES::finalFn(x##I, k[10]) ^ parents[I]; \
-			output[I] = hash; \
-			accumulator = accumulator ^ hash; \
-		} while (0)
-
-			REGULAR_PPRF_STORE_HASH(0);
-			REGULAR_PPRF_STORE_HASH(1);
-			REGULAR_PPRF_STORE_HASH(2);
-			REGULAR_PPRF_STORE_HASH(3);
-			REGULAR_PPRF_STORE_HASH(4);
-			REGULAR_PPRF_STORE_HASH(5);
-			REGULAR_PPRF_STORE_HASH(6);
-			REGULAR_PPRF_STORE_HASH(7);
-
-#undef REGULAR_PPRF_STORE_HASH
-		}
-	}
 
 
 	template<
@@ -198,7 +33,7 @@ namespace osuCrypto
 		// the depth of each tree.
 		u64 mDepth = 0;
 
-		// the number of trees.
+		// the number of trees, must be a multiple of 8.
 		u64 mPntCount = 0;
 
 		// the values that should be programmed at the punctured points.
@@ -216,7 +51,7 @@ namespace osuCrypto
 		// a function that can be used to output the result of the PPRF.
 		std::function<void(u64 treeIdx, VecF& leaf)> mOutputFn;
 
-		// Compact two-level scratch reused one tree at a time.
+		// an internal buffer that is used to expand the tree.
 		pprf::ExpandTreeBuffer mTempBuffer;
 
 		RegularPprfSender() = default;
@@ -272,100 +107,126 @@ namespace osuCrypto
 			PprfOutputFormat oFormat,
 			bool programPuncturedPoint,
 			u64 numThreads,
-			CoeffCtx ctx = {}) override
+			CoeffCtx ctx = {}) override 
 		{
-			(void)numThreads;
 			auto consumeBaseOts = false;
-			MACORO_TRY {
-				pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
-				if (!hasBaseOts())
-					throw std::runtime_error("PPRF sender base OTs are not set. " LOCATION);
-				if (oFormat == PprfOutputFormat::Callback && !mOutputFn)
-					throw std::runtime_error("PPRF callback output requires a callback. " LOCATION);
-				if (programPuncturedPoint)
-					setValue(value);
+			MACORO_TRY{
+			pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
+			if (!hasBaseOts())
+				throw std::runtime_error("PPRF sender base OTs are not set. " LOCATION);
+			if (oFormat == PprfOutputFormat::Callback && !mOutputFn)
+				throw std::runtime_error("PPRF callback output requires a callback. " LOCATION);
+			if (programPuncturedPoint)
+				setValue(value);
 
-				this->setTimePoint("SilentMultiPprfSender.start");
+			this->setTimePoint("SilentMultiPprfSender.start");
+
+			//auto tree = span<AlignedArray<block, 8>>{};
+			auto levels = std::vector<span<AlignedArray<block, 8>> >{};
+			auto leafIndex = u64{};
+			auto leafLevelPtr = (VecF*)nullptr;
+			auto leafLevel = VecF{};
+			auto buff = std::vector<u8>{};
+			auto encSums = span<std::array<block, 2>>{};
+			auto leafMsgs = span<u8>{};
+			auto encStepSize = u64{};
+			auto leafStepSize = u64{};
+			auto encOffset = u64{};
+			auto leafOffset = u64{};
+
+			auto dd = mDomain > 2 ? pprf::checkedRoundUpTo(pprf::checkedAdd(mDomain, 1) / 2, 2) : 1;
+			pprf::allocateExpandTree(dd, mTempBuffer, levels);
+			assert(levels.size() == mDepth);
+
+			if (!mEagerSend)
+			{
+				// we need to allocate one large buffer that will store all OT messages.
+				pprf::allocateExpandBuffer<F>(
+					mDepth - 1, mPntCount, programPuncturedPoint, buff, encSums, leafMsgs, ctx);
+				encStepSize = encSums.size() / mPntCount;
+				leafStepSize = leafMsgs.size() / mPntCount;
+				encOffset = 0;
+				leafOffset = 0;
+			}
+
+			for (auto treeIndex = 0ull; treeIndex < mPntCount; treeIndex += 8)
+			{
+				// for interleaved format, the leaf level of the tree
+				// is simply the output.
+				if (oFormat == PprfOutputFormat::Interleaved)
+				{
+					leafIndex = treeIndex * mDomain;
+					leafLevelPtr = &output;
+				}
+				else
+				{
+					// we will use leaf level as a buffer before
+					// copying the result to the output.
+					leafIndex = 0;
+					ctx.resize(leafLevel, pprf::checkedSize(pprf::checkedMul(mDomain, 8)));
+					leafLevelPtr = &leafLevel;
+				}
+
+				auto min = std::min<u64>(8, mPntCount - treeIndex);
+				if (mEagerSend)
+				{
+					// allocate a send buffer for the next 8 trees.
+					pprf::allocateExpandBuffer<F>(
+						mDepth - 1, min, programPuncturedPoint, buff, encSums, leafMsgs, ctx);
+					encStepSize = encSums.size() / min;
+					leafStepSize = leafMsgs.size() / min;
+					encOffset = 0;
+					leafOffset = 0;
+				}
+
+				// Reserve the complete base-OT set before its first use. Once
+				// reserved, every exit consumes it.
 				consumeBaseOts = true;
 
-				std::vector<span<AlignedArray<block, 8>>> levels;
-				if (mDepth > 3)
+				// exapnd the tree
+				expandOne(
+					seed,
+					treeIndex,
+					programPuncturedPoint,
+					levels,
+					*leafLevelPtr,
+					leafIndex,
+					encSums.subspan(encOffset, encStepSize * min),
+					leafMsgs.subspan(leafOffset, leafStepSize * min),
+					ctx);
+
+				encOffset += encStepSize * min;
+				leafOffset += leafStepSize * min;
+
+				if (mEagerSend)
 				{
-					const auto parentDomain = pprf::paddedDomain(mDomain) / 16;
-					pprf::allocateExpandTree(parentDomain, mTempBuffer, levels);
+					// send the buffer for the current set of trees.
+					co_await(chl.send(std::move(buff)));
 				}
 
-				VecF callbackLeaves;
-				if (oFormat == PprfOutputFormat::Callback)
-					ctx.resize(callbackLeaves, mDomain);
+				// if we aren't interleaved, we need to copy the
+				// leaf layer to the output.
+				if (oFormat != PprfOutputFormat::Interleaved)
+					pprf::copyOut<VecF, CoeffCtx>(leafLevel, output, mPntCount, treeIndex, oFormat, mOutputFn);
 
-				auto buff = std::vector<u8>{};
-				auto encSums = span<std::array<block, 2>>{};
-				auto leafMsgs = span<u8>{};
-				const auto encPerTree = mDepth - 1;
-				const auto leafPerTree =
-					ctx.template byteSize<F>() * (2 + 2 * u64(programPuncturedPoint));
-
-				for (u64 batch = 0; batch < mPntCount;)
-				{
-					const auto count = mEagerSend ?
-						std::min<u64>(8, mPntCount - batch) :
-						mPntCount;
-					pprf::allocateExpandBuffer<F>(
-						encPerTree, count, programPuncturedPoint,
-						buff, encSums, leafMsgs, ctx);
-
-					for (u64 j = 0; j < count; ++j)
-					{
-						const auto tree = batch + j;
-						const auto root = mAesFixedKey.ecbEncBlock(seed ^ block(tree));
-						auto treeSums = encSums.subspan(j * encPerTree, encPerTree);
-						auto treeLeaves = leafMsgs.subspan(j * leafPerTree, leafPerTree);
-						auto levelSpan = span<span<AlignedArray<block, 8>>>(levels);
-
-						switch (oFormat)
-						{
-						case PprfOutputFormat::ByLeafIndex:
-							expandOne<PprfOutputFormat::ByLeafIndex>(
-								root, tree, programPuncturedPoint, levelSpan,
-								output, callbackLeaves, treeSums, treeLeaves, ctx);
-							break;
-						case PprfOutputFormat::ByTreeIndex:
-							expandOne<PprfOutputFormat::ByTreeIndex>(
-								root, tree, programPuncturedPoint, levelSpan,
-								output, callbackLeaves, treeSums, treeLeaves, ctx);
-							break;
-						case PprfOutputFormat::ByPhysicalIndex:
-							expandOne<PprfOutputFormat::ByPhysicalIndex>(
-								root, tree, programPuncturedPoint, levelSpan,
-								output, callbackLeaves, treeSums, treeLeaves, ctx);
-							break;
-						case PprfOutputFormat::Callback:
-							expandOne<PprfOutputFormat::Callback>(
-								root, tree, programPuncturedPoint, levelSpan,
-								output, callbackLeaves, treeSums, treeLeaves, ctx);
-							mOutputFn(tree, callbackLeaves);
-							break;
-						default:
-							throw RTE_LOC;
-						}
-					}
-
-					co_await chl.send(std::move(buff));
-					batch += count;
-					if (!mEagerSend)
-						break;
-				}
-
-				mBaseOTs = {};
-				consumeBaseOts = false;
-				this->setTimePoint("SilentMultiPprfSender.de-alloc");
 			}
-			MACORO_CATCH(eptr) {
+
+
+			if (!mEagerSend)
+			{
+				// send the buffer for all of the trees.
+				co_await(chl.send(std::move(buff)));
+			}
+
+			mBaseOTs = {};
+			consumeBaseOts = false;
+
+			this->setTimePoint("SilentMultiPprfSender.de-alloc");
+
+			} MACORO_CATCH(eptr) {
 				if (consumeBaseOts)
 					mBaseOTs = {};
-				if (!chl.closed())
-					co_await chl.close();
+				if (!chl.closed()) co_await chl.close();
 				std::rethrow_exception(eptr);
 			}
 		}
@@ -394,218 +255,279 @@ namespace osuCrypto
 			mPntCount = 0;
 		}
 
-		template<PprfOutputFormat Format>
 		void expandOne(
-			block root,
+			block aesSeed,
 			u64 treeIdx,
 			bool programPuncturedPoint,
 			span<span<AlignedArray<block, 8>>> levels,
-			VecF& output,
-			VecF& callbackLeaves,
-			span<std::array<block, 2>> encSums,
+			VecF& leafLevel,
+			const u64 leafOffset,
+			span<std::array<block, 2>>  encSums,
 			span<u8> leafMsgs,
-			CoeffCtx& ctx)
+			CoeffCtx ctx)
 		{
-			assert(encSums.size() == mDepth - 1);
+			auto remTrees = std::min<u64>(8, mPntCount - treeIdx);
+
+			// the first level should be size 1, the root of the tree.
+			// we will populate it with random seeds using aesSeed in counter mode
+			// based on the tree index.
+			assert(levels[0].size() == 1);
+			mAesFixedKey.ecbEncCounterMode(aesSeed ^ block(treeIdx), levels[0][0]);
+
+			assert(encSums.size() == (mDepth - 1) * remTrees);
 			auto encSumIter = encSums.begin();
-			std::array<block, 8> current{};
-			std::array<block, 8> next{};
-			current[0] = root;
 
-			const auto topInternalDepth = std::min<u64>(3, mDepth - 1);
-			for (u64 d = 0; d < topInternalDepth; ++d)
+			// space for our sums of each level. Should always be less then
+			// 24 levels... If not increase the limit or make it a vector.
+			std::array<std::array<block, 8>, 2> sums;
+
+			// use the optimized approach for intern nodes of the tree
+			// For each level perform the following.
+			for (u64 d = 0; d < mDepth - 1; ++d)
 			{
-				block leftAccumulator = ZeroBlock;
-				block rightAccumulator = ZeroBlock;
-				const auto width = u64{ 1 } << d;
-				for (u64 parentIdx = 0; parentIdx < width; ++parentIdx)
+				// clear the sums
+				memset(&sums, 0, sizeof(sums));
+
+				// The total number of parents in this level.
+				auto width = divCeil(mDomain, 1ull << (mDepth - d));
+
+				// The previous level of the GGM tree.
+				auto parents = levels[d];
+
+				// The next level of theGGM tree that we are populating.
+				auto children = levels[d + 1]; 
+				assert((u64)parents.data() % sizeof(block) == 0 && "levels requires aligment");
+				assert((u64)children.data() % sizeof(block) == 0 && "levels requires aligment");
+
+
+				// For each child, populate the child by expanding the parent.
+				for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx, childIdx += 2)
 				{
-					const auto parent = current[parentIdx];
-					const auto aes = mAesFixedKey.ecbEncBlock(parent);
-					const auto left = AES::roundEnc(aes, parent);
-					const auto right = aes.add_epi64(parent);
-					next[2 * parentIdx] = left;
-					next[2 * parentIdx + 1] = right;
-					leftAccumulator = leftAccumulator ^ left;
-					rightAccumulator = rightAccumulator ^ right;
+					// The value of the parent.
+					auto& parent = parents.data()[parentIdx];
+
+					auto& child0 = children.data()[childIdx];
+					auto& child1 = children.data()[childIdx + 1];
+					mAesFixedKey.ecbEncBlocks<8>(parent.data(), child1.data());
+
+					// inspired by the Expand Accumualte idea to
+					// use 
+					// 
+					// child0 = AES(parent) ^ parent
+					// child1 = AES(parent) + parent
+					//
+					// but instead we are a bit more conservative and
+					// compute 
+					//
+					// child0 = AES:Round(AES(parent),      parent)
+					//        = AES:Round(AES(parent), 0) ^ parent
+					// child1 =           AES(parent)     + parent
+					//
+					// That is, we applies an additional AES round function
+					// to the first child before XORing it with parent.
+					child0[0] = AES::roundEnc(child1[0], parent[0]);
+					child0[1] = AES::roundEnc(child1[1], parent[1]);
+					child0[2] = AES::roundEnc(child1[2], parent[2]);
+					child0[3] = AES::roundEnc(child1[3], parent[3]);
+					child0[4] = AES::roundEnc(child1[4], parent[4]);
+					child0[5] = AES::roundEnc(child1[5], parent[5]);
+					child0[6] = AES::roundEnc(child1[6], parent[6]);
+					child0[7] = AES::roundEnc(child1[7], parent[7]);
+
+					// Update the running sums for this level. We keep
+					// a left and right totals for each level.
+					sums[0][0] = sums[0][0] ^ child0[0];
+					sums[0][1] = sums[0][1] ^ child0[1];
+					sums[0][2] = sums[0][2] ^ child0[2];
+					sums[0][3] = sums[0][3] ^ child0[3];
+					sums[0][4] = sums[0][4] ^ child0[4];
+					sums[0][5] = sums[0][5] ^ child0[5];
+					sums[0][6] = sums[0][6] ^ child0[6];
+					sums[0][7] = sums[0][7] ^ child0[7];
+
+					// child1 = AES(parent) + parent
+					child1[0] = child1[0].add_epi64(parent[0]);
+					child1[1] = child1[1].add_epi64(parent[1]);
+					child1[2] = child1[2].add_epi64(parent[2]);
+					child1[3] = child1[3].add_epi64(parent[3]);
+					child1[4] = child1[4].add_epi64(parent[4]);
+					child1[5] = child1[5].add_epi64(parent[5]);
+					child1[6] = child1[6].add_epi64(parent[6]);
+					child1[7] = child1[7].add_epi64(parent[7]);
+
+					sums[1][0] = sums[1][0] ^ child1[0];
+					sums[1][1] = sums[1][1] ^ child1[1];
+					sums[1][2] = sums[1][2] ^ child1[2];
+					sums[1][3] = sums[1][3] ^ child1[3];
+					sums[1][4] = sums[1][4] ^ child1[4];
+					sums[1][5] = sums[1][5] ^ child1[5];
+					sums[1][6] = sums[1][6] ^ child1[6];
+					sums[1][7] = sums[1][7] ^ child1[7];
+
 				}
-				(*encSumIter)[0] = leftAccumulator ^
-					mBaseOTs(treeIdx, mDepth - 1 - d)[1];
-				(*encSumIter)[1] = rightAccumulator ^
-					mBaseOTs(treeIdx, mDepth - 1 - d)[0];
-				++encSumIter;
-				current = next;
-			}
 
-			if (mDepth > 3)
-			{
-				assert(levels.size() == mDepth - 3);
-				REGULAR_PPRF_SIMD8(lane, {
-					levels[0][0][lane] = current[lane];
-				});
-
-				for (u64 localDepth = 0; localDepth + 1 < levels.size(); ++localDepth)
+				// encrypt the sums and write them to the output.
+				for (u64 j = 0; j < remTrees; ++j)
 				{
-					block leftAccumulator = ZeroBlock;
-					block rightAccumulator = ZeroBlock;
-					auto parents = levels[localDepth];
-					auto children = levels[localDepth + 1];
-					const auto width = u64{ 1 } << localDepth;
-					for (u64 parentIdx = 0; parentIdx < width; ++parentIdx)
-					{
-						auto& parent = parents[parentIdx];
-						auto& left = children[2 * parentIdx];
-						auto& right = children[2 * parentIdx + 1];
-						pprf::expandGgm8(
-							mAesFixedKey, parent.data(), left.data(), right.data(),
-							leftAccumulator, rightAccumulator);
-					}
-
-					const auto globalDepth = 3 + localDepth;
-					(*encSumIter)[0] = leftAccumulator ^
-						mBaseOTs(treeIdx, mDepth - 1 - globalDepth)[1];
-					(*encSumIter)[1] = rightAccumulator ^
-						mBaseOTs(treeIdx, mDepth - 1 - globalDepth)[0];
+					(*encSumIter)[0] = sums[0][j] ^ mBaseOTs(treeIdx + j, mDepth - 1 - d)[1];
+					(*encSumIter)[1] = sums[1][j] ^ mBaseOTs(treeIdx + j, mDepth - 1 - d)[0];
 					++encSumIter;
 				}
 			}
 			assert(encSumIter == encSums.end());
 
-			auto leafSums = ctx.template makeVec<F>(2);
-			ctx.zero(leafSums.begin(), leafSums.end());
-			const auto padded = pprf::paddedDomain(mDomain);
-			const auto subtreeDomain = mDepth > 3 ? padded / 8 : padded;
-			u64 nativeLeaf = 0;
+			auto d = mDepth - 1;
 
-			auto storeLeaf = [&](u64 logicalLeaf, u64 physicalLeaf, const F& value) {
-				if constexpr (Format == PprfOutputFormat::ByLeafIndex)
-					ctx.copy(output[logicalLeaf * mPntCount + treeIdx], value);
-				else if constexpr (Format == PprfOutputFormat::ByTreeIndex)
-					ctx.copy(output[treeIdx * mDomain + logicalLeaf], value);
-				else if constexpr (Format == PprfOutputFormat::ByPhysicalIndex)
-					ctx.copy(output[treeIdx * mDomain + physicalLeaf], value);
-				else
-					ctx.copy(callbackLeaves[physicalLeaf], value);
-			};
+			// The previous level of the GGM tree.
+			auto level0 = levels[d];
 
-			auto addLeaf = [&](u64 side, const block& hashed, u64 logicalLeaf) {
-				F value;
-				if constexpr (std::is_same_v<F, block>)
-					value = hashed;
-				else
-					ctx.fromBlock(value, hashed);
-				ctx.plus(leafSums[side], leafSums[side], value);
-				if (logicalLeaf < mDomain)
-					storeLeaf(logicalLeaf, nativeLeaf++, value);
-			};
+			// The total number of parents in this level.
+			auto width = divCeil(mDomain, 1ull << (mDepth - d));
 
-			if (mDepth <= 3)
+			// The next level of theGGM tree that we are populating.
+			std::array<block, 8> child;
+
+			// clear the sums
+			std::array<VecF, 2> leafSums;
+			ctx.resize(leafSums[0], 8);
+			ctx.resize(leafSums[1], 8);
+			ctx.zero(leafSums[0].begin(), leafSums[0].end());
+			ctx.zero(leafSums[1].begin(), leafSums[1].end());
+
+			auto outIter = leafLevel.data() + leafOffset;
+
+			// for the leaf nodes we need to hash both children.
+			for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx)
 			{
-				const auto parentWidth = padded / 2;
-				for (u64 parentIdx = 0; parentIdx < parentWidth; ++parentIdx)
+				// The value of the parent.
+				auto& parent = level0.data()[parentIdx];
+
+				// The bit that indicates if we are on the left child (0)
+				// or on the right child (1).
+				for (u64 keep = 0; keep < 2; ++keep, ++childIdx)
 				{
-					const auto parent = current[parentIdx];
-					addLeaf(0, gGgmAes[0].hashBlock(parent), 2 * parentIdx);
-					addLeaf(1, gGgmAes[1].hashBlock(parent), 2 * parentIdx + 1);
+					// The child that we will write in this iteration.
+
+					if constexpr (std::is_same_v<F, block> && (
+						std::is_same_v<CoeffCtx, CoeffCtxGF2> ||
+						std::is_same_v<CoeffCtx, CoeffCtxGF128>)
+						)
+					{
+						gGgmAes.data()[keep].hashBlocks<8>(parent.data(), outIter);
+					}
+					else
+					{
+						// Each parent is expanded into the left and right children
+						// using a different AES fixed-key. Therefore our OWF is:
+						//
+						//    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
+						//
+						// where each half defines one of the children.
+						gGgmAes.data()[keep].hashBlocks<8>(parent.data(), child.data());
+
+						ctx.fromBlock(*(outIter + 0), child.data()[0]);
+						ctx.fromBlock(*(outIter + 1), child.data()[1]);
+						ctx.fromBlock(*(outIter + 2), child.data()[2]);
+						ctx.fromBlock(*(outIter + 3), child.data()[3]);
+						ctx.fromBlock(*(outIter + 4), child.data()[4]);
+						ctx.fromBlock(*(outIter + 5), child.data()[5]);
+						ctx.fromBlock(*(outIter + 6), child.data()[6]);
+						ctx.fromBlock(*(outIter + 7), child.data()[7]);
+					}
+
+					// leafSum += child
+					auto& leafSum = leafSums[keep];
+					ctx.plus(leafSum.data()[0], leafSum.data()[0], *(outIter + 0));
+					ctx.plus(leafSum.data()[1], leafSum.data()[1], *(outIter + 1));
+					ctx.plus(leafSum.data()[2], leafSum.data()[2], *(outIter + 2));
+					ctx.plus(leafSum.data()[3], leafSum.data()[3], *(outIter + 3));
+					ctx.plus(leafSum.data()[4], leafSum.data()[4], *(outIter + 4));
+					ctx.plus(leafSum.data()[5], leafSum.data()[5], *(outIter + 5));
+					ctx.plus(leafSum.data()[6], leafSum.data()[6], *(outIter + 6));
+					ctx.plus(leafSum.data()[7], leafSum.data()[7], *(outIter + 7));
+
+					outIter += 8;
+					assert(outIter <= leafLevel.data() + leafLevel.size());
+				}
+
+			}
+
+			if (programPuncturedPoint)
+			{
+				// For the leaf level, we are going to do something special.
+				// The other party is currently missing both leaf children of
+				// the active parent. Since this is the leaf level, we want
+				// the inactive child to just be the normal value but the
+				// active child should be the correct value XOR the delta.
+				// This will be done by sending the sums and the sums plus
+				// delta and ensure that they can only decrypt the correct ones.
+				VecF leafOts;
+				ctx.resize(leafOts, 2);
+				PRNG otMasker;
+
+				for (u64 j = 0; j < remTrees; ++j)
+				{
+					// we will construct two OT strings. Let
+					// s0, s1 be the left and right child sums.
+					// 
+					// m0 = (s0      , s1 + val)
+					// m1 = (s0 + val, s1      )
+					//
+					// these will be encrypted by the OT keys 
+					for (u64 k = 0; k < 2; ++k)
+					{
+						if (k == 0)
+						{
+							// m0 = (s0, s1 + val)
+							ctx.copy(leafOts[0], leafSums[0][j]);
+							ctx.plus(leafOts[1], leafSums[1][j], mValue[treeIdx + j]);
+						}
+						else
+						{
+							// m1 = (s0+val, s1)
+							ctx.plus(leafOts[0], leafSums[0][j], mValue[treeIdx + j]);
+							ctx.copy(leafOts[1], leafSums[1][j]);
+						}
+
+						// copy m0 into the output buffer.
+						span<u8> buff = leafMsgs.subspan(0, 2 * ctx.template byteSize<F>());
+						leafMsgs = leafMsgs.subspan(buff.size());
+						ctx.serialize(leafOts.begin(), leafOts.end(), buff.begin());
+
+						// encrypt the output buffer.
+						otMasker.SetSeed(mBaseOTs[treeIdx + j][0][1 ^ k], divCeil(buff.size(), sizeof(block)));
+						for (u64 i = 0; i < buff.size(); ++i)
+							buff[i] ^= otMasker.get<u8>();
+
+					}
 				}
 			}
 			else
 			{
-				auto parents = levels.back();
-				auto generateGeneric = [&] {
-					std::array<block, 8> hashed;
-					for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
-					{
-						for (u64 side = 0; side < 2; ++side)
-						{
-							gGgmAes[side].hashBlocks<8>(
-								parents[parentIdx].data(), hashed.data());
-							const auto localLeaf = 2 * parentIdx + side;
-							REGULAR_PPRF_SIMD8(lane, {
-								addLeaf(
-									side, hashed[lane],
-									lane * subtreeDomain + localLeaf);
-							});
-						}
-					}
-				};
+				VecF leafOts;
+				ctx.resize(leafOts, 1);
+				PRNG otMasker;
 
-				if constexpr (
-					std::is_same_v<F, block> &&
-					std::is_base_of_v<CoeffCtxGF2, CoeffCtx> &&
-					(Format == PprfOutputFormat::ByPhysicalIndex ||
-						Format == PprfOutputFormat::Callback))
+				for (u64 j = 0; j < remTrees; ++j)
 				{
-					if (mDomain == padded)
+					for (u64 k = 0; k < 2; ++k)
 					{
-						block* dest;
-						if constexpr (Format == PprfOutputFormat::ByPhysicalIndex)
-							dest = output.data() + treeIdx * mDomain;
-						else
-							dest = callbackLeaves.data();
+						// copy the sum k into the output buffer.
+						ctx.copy(leafOts[0], leafSums[k][j]);
+						span<u8> buff = leafMsgs.subspan(0, ctx.template byteSize<F>());
+						leafMsgs = leafMsgs.subspan(buff.size());
+						ctx.serialize(leafOts.begin(), leafOts.end(), buff.begin());
 
-						block leftAccumulator = ZeroBlock;
-						block rightAccumulator = ZeroBlock;
-						for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
-						{
-							pprf::hashGgmLeaves8(gGgmAes[0],
-								parents[parentIdx].data(), dest + nativeLeaf,
-								leftAccumulator);
-							nativeLeaf += 8;
-							pprf::hashGgmLeaves8(gGgmAes[1],
-								parents[parentIdx].data(), dest + nativeLeaf,
-								rightAccumulator);
-							nativeLeaf += 8;
-						}
-						leafSums[0] = leftAccumulator;
-						leafSums[1] = rightAccumulator;
+						// encrypt the output buffer.
+						otMasker.SetSeed(mBaseOTs[treeIdx + j][0][1 ^ k], divCeil(buff.size(), sizeof(block)));
+						for (u64 i = 0; i < buff.size(); ++i)
+							buff[i] ^= otMasker.get<u8>();
+
 					}
-					else
-					{
-						generateGeneric();
-					}
-				}
-				else
-				{
-					generateGeneric();
 				}
 			}
-			assert(nativeLeaf == mDomain);
 
-			auto leafOts = ctx.template makeVec<F>(2);
-			PRNG otMasker;
-			for (u64 choice = 0; choice < 2; ++choice)
-			{
-				if (programPuncturedPoint)
-				{
-					if (choice == 0)
-					{
-						ctx.copy(leafOts[0], leafSums[0]);
-						ctx.plus(leafOts[1], leafSums[1], mValue[treeIdx]);
-					}
-					else
-					{
-						ctx.plus(leafOts[0], leafSums[0], mValue[treeIdx]);
-						ctx.copy(leafOts[1], leafSums[1]);
-					}
-				}
-				else
-				{
-					ctx.copy(leafOts[0], leafSums[choice]);
-				}
-
-				const auto count = 1 + u64(programPuncturedPoint);
-				auto msg = leafMsgs.subspan(
-					0, count * ctx.template byteSize<F>());
-				leafMsgs = leafMsgs.subspan(msg.size());
-				ctx.serialize(leafOts.begin(), leafOts.begin() + count, msg.begin());
-				otMasker.SetSeed(
-					mBaseOTs(treeIdx, 0)[1 ^ choice],
-					divCeil(msg.size(), sizeof(block)));
-				for (u64 i = 0; i < msg.size(); ++i)
-					msg[i] ^= otMasker.get<u8>();
-			}
-			assert(leafMsgs.empty());
+			assert(leafMsgs.size() == 0);
 		}
 
 
@@ -626,7 +548,7 @@ namespace osuCrypto
 		// the depth of each tree.
 		u64 mDepth = 0;
 
-		// the number of trees.
+		// the number of trees, must be a multiple of 8.
 		u64 mPntCount = 0;
 
 		using VecF = typename CoeffCtx::template Vec<F>;
@@ -644,7 +566,7 @@ namespace osuCrypto
 		// a function that can be used to output the result of the PPRF.
 		std::function<void(u64 treeIdx, VecF& leafs)> mOutputFn;
 
-		// Compact two-level scratch reused one tree at a time.
+		// an internal buffer that is used to expand the tree.
 		pprf::ExpandTreeBuffer mTempBuffer;
 
 		RegularPprfReceiver() = default;
@@ -671,6 +593,8 @@ namespace osuCrypto
 				throw std::runtime_error("PPRF must be configured before sampling choices. " LOCATION);
 			BitVector choices(mPntCount * mDepth);
 
+			// The points are read in blocks of 8, so make sure that there is a
+			// whole number of blocks.
 			mBaseChoices.resize(mPntCount, mDepth);
 			for (u64 i = 0; i < mPntCount; ++i)
 			{
@@ -722,7 +646,7 @@ namespace osuCrypto
 		// returns true if the base OTs are currently set.
 		bool hasBaseOts() const override
 		{
-			return mBaseOTs.rows() == mPntCount &&
+			return mBaseOTs.rows() == pprf::checkedRoundUpTo(mPntCount, 8) &&
 				mBaseOTs.cols() == mDepth && mBaseOTs.size();
 		}
 
@@ -740,7 +664,11 @@ namespace osuCrypto
 			if (baseOtCount() != static_cast<u64>(baseMessages.size()))
 				throw RTE_LOC;
 
-			mBaseOTs.resize(mPntCount, mDepth);
+			// The OTs are used in blocks of 8, so make sure that there is a whole
+			// number of blocks.
+			mBaseOTs.resize(pprf::checkedRoundUpTo(mPntCount, 8), mDepth);
+			if (mBaseOTs.size() < baseMessages.size())
+				throw RTE_LOC;
 			memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
 		}
 
@@ -776,13 +704,21 @@ namespace osuCrypto
 
 
 				break;
-			case PprfOutputFormat::ByPhysicalIndex:
+			case PprfOutputFormat::Interleaved:
 			case PprfOutputFormat::Callback:
 
 				getPoints(points, PprfOutputFormat::ByLeafIndex);
+
+				// in interleaved mode we generate 8 trees in a batch.
+				// the i'th leaf of these 8 trees are next to eachother.
 				for (u64 j = 0; j < points.size(); ++j)
-					points[j] = j * mDomain +
-						pprf::physicalLeafIndex(mDomain, points[j]);
+				{
+					auto subTree = j % 8;
+					auto batch = j / 8;
+					points[j] = (batch * mDomain + points[j]) * 8 + subTree;
+				}
+
+				//interleavedPoints(points, mDomain, format);
 
 				break;
 			default:
@@ -803,9 +739,8 @@ namespace osuCrypto
 			u64 numThreads,
 			CoeffCtx ctx = {}) override
 		{
-			(void)numThreads;
 			auto consumeBaseOts = false;
-			MACORO_TRY {
+			MACORO_TRY{
 				pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
 				if (!hasBaseOts())
 					throw std::runtime_error("PPRF receiver base OTs are not set. " LOCATION);
@@ -814,92 +749,109 @@ namespace osuCrypto
 				if (oFormat == PprfOutputFormat::Callback && !mOutputFn)
 					throw std::runtime_error("PPRF callback output requires a callback. " LOCATION);
 
+				auto treeIndex = u64{};
+				auto levels = std::vector<span<AlignedArray<block, 8>>>{};
+				auto leafIndex = u64{};
+				auto leafLevelPtr = (VecF*)nullptr;
+				auto leafLevel = VecF{};
+				auto buff = std::vector<u8>{};
+				auto encSums = span<std::array<block, 2>>{};
+				auto leafMsgs = span<u8>{};
+				auto points = std::vector<u64>{};
+				auto encStepSize = u64{};
+				auto leafStepSize = u64{};
+				auto encOffset = u64{};
+				auto leafOffset = u64{};
+
 				this->setTimePoint("SilentMultiPprfReceiver.start");
+				points.resize(mPntCount);
+				getPoints(points, PprfOutputFormat::ByLeafIndex);
+
+				//setTimePoint("SilentMultiPprfSender.reserve");
+
+				auto dd = mDomain > 2 ? pprf::checkedRoundUpTo(pprf::checkedAdd(mDomain, 1) / 2, 2) : 1;
+				pprf::allocateExpandTree(dd, mTempBuffer, levels);
+				assert(levels.size() == mDepth);
 				consumeBaseOts = true;
 
-				auto points = getPoints(PprfOutputFormat::ByTreeIndex);
-				std::vector<span<AlignedArray<block, 8>>> levels;
-				if (mDepth > 3)
+
+				if (!mEagerSend)
 				{
-					const auto parentDomain = pprf::paddedDomain(mDomain) / 16;
-					pprf::allocateExpandTree(parentDomain, mTempBuffer, levels);
+					// we need to allocate one large buffer that will store all OT messages.
+					pprf::allocateExpandBuffer<F>(
+						mDepth - 1, mPntCount, programPuncturedPoint, buff, encSums, leafMsgs, ctx);
+					encStepSize = encSums.size() / mPntCount;
+					leafStepSize = leafMsgs.size() / mPntCount;
+					encOffset = 0;
+					leafOffset = 0;
+
+					co_await(chl.recv(buff));
 				}
 
-				VecF callbackLeaves;
-				if (oFormat == PprfOutputFormat::Callback)
-					ctx.resize(callbackLeaves, mDomain);
-
-				auto buff = std::vector<u8>{};
-				auto theirSums = span<std::array<block, 2>>{};
-				auto leafMsgs = span<u8>{};
-				const auto sumsPerTree = mDepth - 1;
-				const auto leafPerTree =
-					ctx.template byteSize<F>() * (2 + 2 * u64(programPuncturedPoint));
-
-				for (u64 batch = 0; batch < mPntCount;)
+				for (treeIndex = 0ull; treeIndex < mPntCount; treeIndex += 8)
 				{
-					const auto count = mEagerSend ?
-						std::min<u64>(8, mPntCount - batch) :
-						mPntCount;
-					pprf::allocateExpandBuffer<F>(
-						sumsPerTree, count, programPuncturedPoint,
-						buff, theirSums, leafMsgs, ctx);
-					co_await chl.recv(buff);
-
-					for (u64 j = 0; j < count; ++j)
+					// for interleaved format, the leaf level of the tree
+					// is simply the output.
+					if (oFormat == PprfOutputFormat::Interleaved)
 					{
-						const auto tree = batch + j;
-						auto treeSums = theirSums.subspan(j * sumsPerTree, sumsPerTree);
-						auto treeLeaves = leafMsgs.subspan(j * leafPerTree, leafPerTree);
-						auto levelSpan = span<span<AlignedArray<block, 8>>>(levels);
-
-						switch (oFormat)
-						{
-						case PprfOutputFormat::ByLeafIndex:
-							expandOne<PprfOutputFormat::ByLeafIndex>(
-								tree, programPuncturedPoint, levelSpan,
-								output, callbackLeaves, treeSums, treeLeaves,
-								points[tree], ctx);
-							break;
-						case PprfOutputFormat::ByTreeIndex:
-							expandOne<PprfOutputFormat::ByTreeIndex>(
-								tree, programPuncturedPoint, levelSpan,
-								output, callbackLeaves, treeSums, treeLeaves,
-								points[tree], ctx);
-							break;
-						case PprfOutputFormat::ByPhysicalIndex:
-							expandOne<PprfOutputFormat::ByPhysicalIndex>(
-								tree, programPuncturedPoint, levelSpan,
-								output, callbackLeaves, treeSums, treeLeaves,
-								points[tree], ctx);
-							break;
-						case PprfOutputFormat::Callback:
-							expandOne<PprfOutputFormat::Callback>(
-								tree, programPuncturedPoint, levelSpan,
-								output, callbackLeaves, treeSums, treeLeaves,
-								points[tree], ctx);
-							mOutputFn(tree, callbackLeaves);
-							break;
-						default:
-							throw RTE_LOC;
-						}
+						leafIndex = treeIndex * mDomain;
+						leafLevelPtr = &output;
+					}
+					else
+					{
+						// we will use leaf level as a buffer before
+						// copying the result to the output.
+						leafIndex = 0;
+						ctx.resize(leafLevel, pprf::checkedSize(pprf::checkedMul(mDomain, 8)));
+						leafLevelPtr = &leafLevel;
 					}
 
-					batch += count;
-					if (!mEagerSend)
-						break;
+					auto min = std::min<u64>(8, mPntCount - treeIndex);
+					if (mEagerSend)
+					{
+
+						// allocate the send buffer and partition it.
+						pprf::allocateExpandBuffer<F>(mDepth - 1, min,
+							programPuncturedPoint, buff, encSums, leafMsgs, ctx);
+						encStepSize = encSums.size() / min;
+						leafStepSize = leafMsgs.size() / min;
+						encOffset = 0;
+						leafOffset = 0;
+						co_await(chl.recv(buff));
+					}
+
+					// exapnd the tree
+					expandOne(
+						treeIndex,
+						programPuncturedPoint,
+						levels,
+						*leafLevelPtr,
+						leafIndex,
+						encSums.subspan(encOffset, encStepSize * min),
+						leafMsgs.subspan(leafOffset, leafStepSize * min),
+						points,
+						ctx);
+
+					encOffset += encStepSize * min;
+					leafOffset += leafStepSize * min;
+
+					// if we aren't interleaved, we need to copy the
+					// leaf layer to the output.
+					if (oFormat != PprfOutputFormat::Interleaved)
+						pprf::copyOut<VecF, CoeffCtx>(leafLevel, output, mPntCount, treeIndex, oFormat, mOutputFn);
 				}
 
 				this->setTimePoint("SilentMultiPprfReceiver.join");
+
 				mBaseOTs = {};
 				consumeBaseOts = false;
+
 				this->setTimePoint("SilentMultiPprfReceiver.de-alloc");
-			}
-			MACORO_CATCH(eptr) {
+
+			} MACORO_CATCH(eptr) {
 				if (consumeBaseOts)
 					mBaseOTs = {};
-				if (!chl.closed())
-					co_await chl.close();
+				if (!chl.closed()) co_await chl.close();
 				std::rethrow_exception(eptr);
 			}
 		}
@@ -914,257 +866,355 @@ namespace osuCrypto
 			mPntCount = 0;
 		}
 
-		template<PprfOutputFormat Format>
 		void expandOne(
 			u64 treeIdx,
 			bool programPuncturedPoint,
 			span<span<AlignedArray<block, 8>>> levels,
-			VecF& output,
-			VecF& callbackLeaves,
+			VecF& leafLevel,
+			const u64 outputOffset,
 			span<std::array<block, 2>> theirSums,
-			span<u8> leafMsgs,
-			u64 point,
+			span<u8> leafMsg,
+			span<u64> points,
 			CoeffCtx& ctx)
 		{
-			assert(theirSums.size() == mDepth - 1);
-			auto theirSumsIter = theirSums.begin();
-			std::array<block, 8> current{};
-			std::array<block, 8> next{};
+			auto remTrees = std::min<u64>(8, mPntCount - treeIdx);
+			assert(theirSums.size() == remTrees * (mDepth - 1));
 
-			const auto zeroAes = mAesFixedKey.ecbEncBlock(ZeroBlock);
-			const std::array<block, 2> inactiveInternal{
-				AES::roundEnc(zeroAes, ZeroBlock),
-				zeroAes.add_epi64(ZeroBlock)
-			};
-
-			const auto topInternalDepth = std::min<u64>(3, mDepth - 1);
-			for (u64 d = 0; d < topInternalDepth; ++d)
+			// We change the hash function for the leaf so lets update  
+			// inactiveChildValues to use the new hash and subtract
+			// these from the leafSums
+			std::array<VecF, 2> leafSums;
+			if (mDepth > 1)
 			{
-				block leftAccumulator = inactiveInternal[0];
-				block rightAccumulator = inactiveInternal[1];
-				const auto width = u64{ 1 } << d;
-				for (u64 parentIdx = 0; parentIdx < width; ++parentIdx)
+				auto theirSumsIter = theirSums.begin();
+
+				// special case for the first level.
+				auto l1 = levels[1];
+				for (u64 i = 0; i < remTrees; ++i)
 				{
-					const auto parent = current[parentIdx];
-					const auto aes = mAesFixedKey.ecbEncBlock(parent);
-					const auto left = AES::roundEnc(aes, parent);
-					const auto right = aes.add_epi64(parent);
-					next[2 * parentIdx] = left;
-					next[2 * parentIdx + 1] = right;
-					leftAccumulator = leftAccumulator ^ left;
-					rightAccumulator = rightAccumulator ^ right;
+					// For the non-active path, set the child of the root node
+					// as the OT message XOR'ed with the correction sum.
+
+					int active = mBaseChoices[i + treeIdx].back();
+					l1[active ^ 1][i] = mBaseOTs[i + treeIdx].back() ^ (*theirSumsIter)[active ^ 1];
+					l1[active][i] = ZeroBlock;
+					++theirSumsIter;
+					//if (!i)
+					//    std::cout << " unmask " 
+					//    << mBaseOTs[i + treeIdx].back() << " ^ "
+					//    << theirSums[0][active ^ 1][i] << " = "
+					//    << l1[active ^ 1][i] << std::endl;
+
 				}
 
-				const auto missing = point >> (mDepth - 1 - d);
-				const auto sibling = missing ^ 1;
-				const auto branch = sibling & 1;
-				const std::array<block, 2> sums{
-					leftAccumulator, rightAccumulator
-				};
-				next[sibling] = (*theirSumsIter)[branch] ^ sums[branch] ^
-					mBaseOTs(treeIdx, mDepth - 1 - d);
-				next[missing] = ZeroBlock;
-				++theirSumsIter;
-				current = next;
-			}
+				// space for our sums of each level.
+				std::array<std::array<block, 8>, 2> mySums;
 
-			if (mDepth > 3)
-			{
-				assert(levels.size() == mDepth - 3);
-				REGULAR_PPRF_SIMD8(lane, {
-					levels[0][0][lane] = current[lane];
-				});
+				// this will be the value of both children of active an parent
+				// before the active child is updated. We will need to subtract 
+				// this value as the main loop does not distinguish active parents.
+				std::array<block, 2> inactiveChildValues;
+				inactiveChildValues[0] = AES::roundEnc(mAesFixedKey.ecbEncBlock(ZeroBlock), ZeroBlock);
+				inactiveChildValues[1] = mAesFixedKey.ecbEncBlock(ZeroBlock);
 
-				for (u64 localDepth = 0; localDepth + 1 < levels.size(); ++localDepth)
+				// For all other levels, expand the GGM tree and add in
+				// the correction along the active path.
+				for (u64 d = 1; d < mDepth - 1; ++d)
 				{
-					block leftAccumulator = inactiveInternal[0];
-					block rightAccumulator = inactiveInternal[1];
-					auto parents = levels[localDepth];
-					auto children = levels[localDepth + 1];
-					const auto width = u64{ 1 } << localDepth;
-					for (u64 parentIdx = 0; parentIdx < width; ++parentIdx)
+					// initialized the sums with inactiveChildValue so that
+					// it will cancel when we expand the actual inactive child.
+					std::fill(mySums[0].begin(), mySums[0].end(), inactiveChildValues[0]);
+					std::fill(mySums[1].begin(), mySums[1].end(), inactiveChildValues[1]);
+
+					// We will iterate over each node on this level and
+					// expand it into it's two children. Note that the
+					// active node will also be expanded. Later we will just
+					// overwrite whatever the value was. This is an optimization.
+					auto width = divCeil(mDomain, 1ull << (mDepth - d));
+
+					// The already constructed level. Only missing the
+					// GGM tree node value along the active path.
+					auto level0 = levels[d];
+					assert(level0.size() == width || level0.size() == width + 1);
+
+					// The next level that we want to construct.
+					auto level1 = levels[d + 1];
+					assert(level1.size() == width * 2);
+					assert((u64)level0.data() % sizeof(block) == 0 && "levels requires aligment");
+					assert((u64)level1.data() % sizeof(block) == 0 && "levels requires aligment");
+
+					for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx, childIdx += 2)
 					{
-						auto& parent = parents[parentIdx];
-						auto& left = children[2 * parentIdx];
-						auto& right = children[2 * parentIdx + 1];
-						pprf::expandGgm8(
-							mAesFixedKey, parent.data(), left.data(), right.data(),
-							leftAccumulator, rightAccumulator);
+						// The value of the parent.
+						auto parent = level0[parentIdx];
+
+						auto& child0 = level1.data()[childIdx];
+						auto& child1 = level1.data()[childIdx + 1];
+						mAesFixedKey.ecbEncBlocks<8>(parent.data(), child1.data());
+
+						// inspired by the Expand Accumualte idea to
+						// use 
+						// 
+						// child0 = AES(parent) ^ parent
+						// child1 = AES(parent) + parent
+						//
+						// but instead we are a bit more conservative and
+						// compute 
+						//
+						// child0 = AES:Round(AES(parent),      parent)
+						//        = AES:Round(AES(parent), 0) ^ parent
+						// child1 =           AES(parent)     + parent
+						//
+						// That is, we applies an additional AES round function
+						// to the first child before XORing it with parent.
+						child0[0] = AES::roundEnc(child1[0], parent[0]);
+						child0[1] = AES::roundEnc(child1[1], parent[1]);
+						child0[2] = AES::roundEnc(child1[2], parent[2]);
+						child0[3] = AES::roundEnc(child1[3], parent[3]);
+						child0[4] = AES::roundEnc(child1[4], parent[4]);
+						child0[5] = AES::roundEnc(child1[5], parent[5]);
+						child0[6] = AES::roundEnc(child1[6], parent[6]);
+						child0[7] = AES::roundEnc(child1[7], parent[7]);
+
+						// Update the running sums for this level. We keep
+						// a left and right totals for each level. Note that
+						// we are actually XOR in the incorrect value of the
+						// children of the active parent but this will cancel 
+						// with inactiveChildValue thats already there.
+						mySums[0][0] = mySums[0][0] ^ child0[0];
+						mySums[0][1] = mySums[0][1] ^ child0[1];
+						mySums[0][2] = mySums[0][2] ^ child0[2];
+						mySums[0][3] = mySums[0][3] ^ child0[3];
+						mySums[0][4] = mySums[0][4] ^ child0[4];
+						mySums[0][5] = mySums[0][5] ^ child0[5];
+						mySums[0][6] = mySums[0][6] ^ child0[6];
+						mySums[0][7] = mySums[0][7] ^ child0[7];
+
+						// child1 = AES(parent) + parent
+						child1[0] = child1[0].add_epi64(parent[0]);
+						child1[1] = child1[1].add_epi64(parent[1]);
+						child1[2] = child1[2].add_epi64(parent[2]);
+						child1[3] = child1[3].add_epi64(parent[3]);
+						child1[4] = child1[4].add_epi64(parent[4]);
+						child1[5] = child1[5].add_epi64(parent[5]);
+						child1[6] = child1[6].add_epi64(parent[6]);
+						child1[7] = child1[7].add_epi64(parent[7]);
+
+						mySums[1][0] = mySums[1][0] ^ child1[0];
+						mySums[1][1] = mySums[1][1] ^ child1[1];
+						mySums[1][2] = mySums[1][2] ^ child1[2];
+						mySums[1][3] = mySums[1][3] ^ child1[3];
+						mySums[1][4] = mySums[1][4] ^ child1[4];
+						mySums[1][5] = mySums[1][5] ^ child1[5];
+						mySums[1][6] = mySums[1][6] ^ child1[6];
+						mySums[1][7] = mySums[1][7] ^ child1[7];
+
 					}
 
-					const auto globalDepth = 3 + localDepth;
-					const auto childDepth = globalDepth + 1;
-					const auto missingPrefix = point >> (mDepth - childDepth);
-					const auto localChildDepth = childDepth - 3;
-					const auto lane = missingPrefix >> localChildDepth;
-					const auto localMask = (u64{ 1 } << localChildDepth) - 1;
-					const auto missing = missingPrefix & localMask;
-					const auto sibling = missing ^ 1;
-					const auto branch = sibling & 1;
-					const std::array<block, 2> sums{
-						leftAccumulator, rightAccumulator
-					};
-					children[sibling][lane] = (*theirSumsIter)[branch] ^
-						sums[branch] ^ mBaseOTs(treeIdx, mDepth - 1 - globalDepth);
-					children[missing][lane] = ZeroBlock;
-					++theirSumsIter;
+
+					// we have to update the non-active child of the active parent.
+					for (u64 i = 0; i < remTrees; ++i)
+					{
+						// the index of the leaf node that is active.
+						auto leafIdx = points[i + treeIdx];
+
+						// The index of the active (missing) child node.
+						auto missingChildIdx = leafIdx >> (mDepth - 1 - d);
+
+						// The index of the active child node sibling.
+						auto siblingIdx = missingChildIdx ^ 1;
+
+						// The indicator as to the left or right child is inactive
+						auto notAi = siblingIdx & 1;
+
+						// our sums & OTs cancel and we are leaf with the 
+						// correct value for the inactive child.
+						level1[siblingIdx][i] =
+							(*theirSumsIter)[notAi] ^
+							mySums[notAi][i] ^
+							mBaseOTs(i + treeIdx, mDepth - 1 - d);
+
+						++theirSumsIter;
+
+						// we have to set the active child to zero so 
+						// the next children are predictable.
+						level1[missingChildIdx][i] = ZeroBlock;
+					}
 				}
-			}
-			assert(theirSumsIter == theirSums.end());
 
-			auto leafSums = ctx.template makeVec<F>(2);
-			auto zero = ctx.template makeVec<F>(1);
-			ctx.zero(zero.begin(), zero.end());
-			for (u64 side = 0; side < 2; ++side)
-			{
-				F inactive;
-				if constexpr (std::is_same_v<F, block>)
-					inactive = gGgmAes[side].hashBlock(ZeroBlock);
-				else
-					ctx.fromBlock(inactive, gGgmAes[side].hashBlock(ZeroBlock));
-				ctx.minus(leafSums[side], zero[0], inactive);
-			}
+				auto d = mDepth - 1;
+				// The already constructed level. Only missing the
+				// GGM tree node value along the active path.
+				auto level0 = levels[d];
 
-			const auto padded = pprf::paddedDomain(mDomain);
-			const auto subtreeDomain = mDepth > 3 ? padded / 8 : padded;
-			u64 nativeLeaf = 0;
+				// The next level of theGGM tree that we are populating.
+				std::array<block, 8> child;
 
-			auto storeLeaf = [&](u64 logicalLeaf, u64 physicalLeaf, const F& value) {
-				if constexpr (Format == PprfOutputFormat::ByLeafIndex)
-					ctx.copy(output[logicalLeaf * mPntCount + treeIdx], value);
-				else if constexpr (Format == PprfOutputFormat::ByTreeIndex)
-					ctx.copy(output[treeIdx * mDomain + logicalLeaf], value);
-				else if constexpr (Format == PprfOutputFormat::ByPhysicalIndex)
-					ctx.copy(output[treeIdx * mDomain + physicalLeaf], value);
-				else
-					ctx.copy(callbackLeaves[physicalLeaf], value);
-			};
+				// We will iterate over each node on this level and
+				// expand it into it's two children. Note that the
+				// active node will also be expanded. Later we will just
+				// overwrite whatever the value was. This is an optimization.
+				auto width = divCeil(mDomain, 1ull << (mDepth - d));
 
-			auto addLeaf = [&](u64 side, const block& hashed, u64 logicalLeaf) {
-				F value;
-				if constexpr (std::is_same_v<F, block>)
-					value = hashed;
-				else
-					ctx.fromBlock(value, hashed);
-				ctx.plus(leafSums[side], leafSums[side], value);
-				if (logicalLeaf < mDomain)
-					storeLeaf(logicalLeaf, nativeLeaf++, value);
-			};
-
-			if (mDepth <= 3)
-			{
-				const auto parentWidth = padded / 2;
-				for (u64 parentIdx = 0; parentIdx < parentWidth; ++parentIdx)
+				VecF temp;
+				ctx.resize(temp, 2);
+				for (u64 k = 0; k < 2; ++k)
 				{
-					const auto parent = current[parentIdx];
-					addLeaf(0, gGgmAes[0].hashBlock(parent), 2 * parentIdx);
-					addLeaf(1, gGgmAes[1].hashBlock(parent), 2 * parentIdx + 1);
+					ctx.resize(leafSums[k], 8);
+					ctx.zero(leafSums[k].begin(), leafSums[k].end());
+					ctx.fromBlock(temp[k], gGgmAes[k].hashBlock(ZeroBlock));
+					ctx.minus(leafSums[k][0], leafSums[k][0], temp[k]);
+					for (u64 i = 1; i < 8; ++i)
+						ctx.copy(leafSums[k][i], leafSums[k][0]);
+				}
+
+				auto outIter = leafLevel.data() + outputOffset;
+				// for leaf nodes both children should be hashed.
+				for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx)
+				{
+					// The value of the parent.
+					auto parent = level0.data()[parentIdx];
+
+					for (u64 keep = 0; keep < 2; ++keep, ++childIdx)
+					{
+						if constexpr (std::is_same_v<F, block> && (
+							std::is_same_v<CoeffCtx, CoeffCtxGF2> ||
+							std::is_same_v<CoeffCtx, CoeffCtxGF128>
+							))
+							{
+								gGgmAes.data()[keep].hashBlocks<8>(parent.data(), outIter);
+						}
+						else
+						{
+							// Each parent is expanded into the left and right children
+							// using a different AES fixed-key. Therefore our OWF is:
+							//
+							//    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
+							//
+							// where each half defines one of the children.
+							gGgmAes.data()[keep].hashBlocks<8>(parent.data(), child.data());
+
+							ctx.fromBlock(*(outIter + 0), child.data()[0]);
+							ctx.fromBlock(*(outIter + 1), child.data()[1]);
+							ctx.fromBlock(*(outIter + 2), child.data()[2]);
+							ctx.fromBlock(*(outIter + 3), child.data()[3]);
+							ctx.fromBlock(*(outIter + 4), child.data()[4]);
+							ctx.fromBlock(*(outIter + 5), child.data()[5]);
+							ctx.fromBlock(*(outIter + 6), child.data()[6]);
+							ctx.fromBlock(*(outIter + 7), child.data()[7]);
+						}
+						auto& leafSum = leafSums[keep];
+						ctx.plus(leafSum.data()[0], leafSum.data()[0], *(outIter + 0));
+						ctx.plus(leafSum.data()[1], leafSum.data()[1], *(outIter + 1));
+						ctx.plus(leafSum.data()[2], leafSum.data()[2], *(outIter + 2));
+						ctx.plus(leafSum.data()[3], leafSum.data()[3], *(outIter + 3));
+						ctx.plus(leafSum.data()[4], leafSum.data()[4], *(outIter + 4));
+						ctx.plus(leafSum.data()[5], leafSum.data()[5], *(outIter + 5));
+						ctx.plus(leafSum.data()[6], leafSum.data()[6], *(outIter + 6));
+						ctx.plus(leafSum.data()[7], leafSum.data()[7], *(outIter + 7));
+
+						outIter += 8;
+						assert(outIter <= leafLevel.data() + leafLevel.size());
+					}
 				}
 			}
 			else
 			{
-				auto parents = levels.back();
-				auto generateGeneric = [&] {
-					std::array<block, 8> hashed;
-					for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
-					{
-						for (u64 side = 0; side < 2; ++side)
-						{
-							gGgmAes[side].hashBlocks<8>(
-								parents[parentIdx].data(), hashed.data());
-							const auto localLeaf = 2 * parentIdx + side;
-							REGULAR_PPRF_SIMD8(lane, {
-								addLeaf(
-									side, hashed[lane],
-									lane * subtreeDomain + localLeaf);
-							});
-						}
-					}
-				};
-
-				if constexpr (
-					std::is_same_v<F, block> &&
-					std::is_base_of_v<CoeffCtxGF2, CoeffCtx> &&
-					(Format == PprfOutputFormat::ByPhysicalIndex ||
-						Format == PprfOutputFormat::Callback))
+				for (u64 k = 0; k < 2; ++k)
 				{
-					if (mDomain == padded)
-					{
-						block* dest;
-						if constexpr (Format == PprfOutputFormat::ByPhysicalIndex)
-							dest = output.data() + treeIdx * mDomain;
-						else
-							dest = callbackLeaves.data();
-
-						block leftAccumulator = gGgmAes[0].hashBlock(ZeroBlock);
-						block rightAccumulator = gGgmAes[1].hashBlock(ZeroBlock);
-						for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
-						{
-							pprf::hashGgmLeaves8(gGgmAes[0],
-								parents[parentIdx].data(), dest + nativeLeaf,
-								leftAccumulator);
-							nativeLeaf += 8;
-							pprf::hashGgmLeaves8(gGgmAes[1],
-								parents[parentIdx].data(), dest + nativeLeaf,
-								rightAccumulator);
-							nativeLeaf += 8;
-						}
-						leafSums[0] = leftAccumulator;
-						leafSums[1] = rightAccumulator;
-					}
-					else
-					{
-						generateGeneric();
-					}
-				}
-				else
-				{
-					generateGeneric();
+					ctx.resize(leafSums[k], 8);
+					ctx.zero(leafSums[k].begin(), leafSums[k].end());
 				}
 			}
-			assert(nativeLeaf == mDomain);
 
-			const auto active = point;
-			const auto inactive = active ^ 1;
-			const auto inactiveSide = inactive & 1;
-			const auto valueCount = 1 + u64(programPuncturedPoint);
-			const auto valueBytes = valueCount * ctx.template byteSize<F>();
-			auto selected = leafMsgs.subspan(inactiveSide * valueBytes, valueBytes);
-			PRNG otMasker(
-				mBaseOTs(treeIdx, 0),
-				divCeil(selected.size(), sizeof(block)));
-			for (u64 i = 0; i < selected.size(); ++i)
-				selected[i] ^= otMasker.get<u8>();
-
-			auto leafOts = ctx.template makeVec<F>(valueCount);
-			ctx.deserialize(selected.begin(), selected.end(), leafOts.begin());
+			// leaf level.
 			if (programPuncturedPoint)
 			{
-				F left;
-				F right;
-				ctx.minus(left, leafOts[0], leafSums[0]);
-				ctx.minus(right, leafOts[1], leafSums[1]);
-				storeLeaf(active & ~u64{ 1 },
-					pprf::physicalLeafIndex(mDomain, active & ~u64{ 1 }), left);
-				storeLeaf(active | 1,
-					pprf::physicalLeafIndex(mDomain, active | 1), right);
+				// Now processes the leaf level. This one is special
+				// because we must XOR in the correction value as
+				// before but we must also fixed the child value for
+				// the active child. To do this, we will receive 4
+				// values. Two for each case (left active or right active).
+				//timer.setTimePoint("recv.recvleaf");
+				VecF leafOts;
+				ctx.resize(leafOts, 2);
+				PRNG otMasker;
+
+				for (u64 j = 0; j < remTrees; ++j)
+				{
+
+					// The index of the child on the active path.
+					auto activeChildIdx = points[j + treeIdx];
+
+					// The index of the other (inactive) child.
+					auto inactiveChildIdx = activeChildIdx ^ 1;
+
+					// The indicator as to the left or right child is inactive
+					auto notAi = inactiveChildIdx & 1;
+
+					// offset to the first or second ot message, based on the one we want
+					auto offset = ctx.template byteSize<F>() * 2 * notAi;
+
+
+					// decrypt the ot string
+					span<u8> buff = leafMsg.subspan(offset, ctx.template byteSize<F>() * 2);
+					leafMsg = leafMsg.subspan(buff.size() * 2);
+					otMasker.SetSeed(mBaseOTs[j + treeIdx][0], divCeil(buff.size(), sizeof(block)));
+					for (u64 i = 0; i < buff.size(); ++i)
+						buff[i] ^= otMasker.get<u8>();
+
+					ctx.deserialize(buff.begin(), buff.end(), leafOts.begin());
+
+					auto out0 = (activeChildIdx & ~1ull) * 8 + j + outputOffset;
+					auto out1 = (activeChildIdx | 1ull) * 8 + j + outputOffset;
+
+					ctx.minus(leafLevel[out0], leafOts[0], leafSums[0][j]);
+					ctx.minus(leafLevel[out1], leafOts[1], leafSums[1][j]);
+				}
 			}
 			else
 			{
-				F keep;
-				ctx.minus(keep, leafOts[0], leafSums[inactiveSide]);
-				storeLeaf(inactive,
-					pprf::physicalLeafIndex(mDomain, inactive), keep);
-				storeLeaf(active,
-					pprf::physicalLeafIndex(mDomain, active), zero[0]);
+				VecF leafOts;
+				ctx.resize(leafOts, 1);
+				PRNG otMasker;
+
+				for (u64 j = 0; j < remTrees; ++j)
+				{
+					// The index of the child on the active path.
+					auto activeChildIdx = points[j + treeIdx];
+
+					// The index of the other (inactive) child.
+					auto inactiveChildIdx = activeChildIdx ^ 1;
+
+					// The indicator as to the left or right child is inactive
+					auto notAi = inactiveChildIdx & 1;
+
+					// offset to the first or second ot message, based on the one we want
+					auto offset = ctx.template byteSize<F>() * notAi;
+
+					// decrypt the ot string
+					span<u8> buff = leafMsg.subspan(offset, ctx.template byteSize<F>());
+					leafMsg = leafMsg.subspan(buff.size() * 2);
+					otMasker.SetSeed(mBaseOTs[j + treeIdx][0], divCeil(buff.size(), sizeof(block)));
+					for (u64 i = 0; i < buff.size(); ++i)
+						buff[i] ^= otMasker.get<u8>();
+
+					ctx.deserialize(buff.begin(), buff.end(), leafOts.begin());
+
+					std::array<u64, 2> out{
+						(activeChildIdx & ~1ull) * 8 + j + outputOffset,
+						(activeChildIdx | 1ull) * 8 + j + outputOffset
+					};
+
+					auto keep = leafLevel.begin() + out[notAi];
+					auto zero = leafLevel.begin() + out[notAi ^ 1];
+
+					ctx.minus(*keep, leafOts[0], leafSums[notAi][j]);
+					ctx.zero(zero, zero + 1);
+				}
 			}
 		}
-
 	};
-
 }
-
-#undef REGULAR_PPRF_SIMD8
-#undef REGULAR_PPRF_ROUND_BARRIER
 
 #endif

@@ -112,9 +112,7 @@ on platform/dependencies. The `ON`/`OFF` options include
  **DPF:**
  * `ENABLE_REGULAR_DPF` the Boyle et al [[BGI18]](https://eprint.iacr.org/2018/707.pdf) semi-honest protocol.
  * `ENABLE_TERNARY_DPF` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
- * `ENABLE_SPARSE_DPF` the sparse-DPF core and the reusable `RevCuckooDmpf`
-   construction, analyzed for its intended Ring-LPN input distribution. See
-   [`REV_CUCKOO_HASH_ANALYSIS.md`](REV_CUCKOO_HASH_ANALYSIS.md).
+ * `ENABLE_SPARSE_DPF` experimental protocol allowing a sparse set of DPF leaf values.
 
  **Beaver Triples:**
  * `ENABLE_FOLEAGE` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
