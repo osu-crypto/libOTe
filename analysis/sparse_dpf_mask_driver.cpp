@@ -36,6 +36,7 @@ int main(int argc, char** argv)
         run("Waterfall_validation", osuCrypto::Waterfall_validation_Test);
         run("Waterfall_dmpfEndToEnd", osuCrypto::Waterfall_dmpfEndToEnd_Test);
         run("RevCuckoo_baseOtSlicing", osuCrypto::RevCuckoo_baseOtSlicing_Test);
+        run("RevCuckoo_seededSparseSets", osuCrypto::RevCuckoo_seededSparseSets_Test);
         run("RevCuckoo_iterative", osuCrypto::RevCuckoo_iterative_Test);
         run("RevCuckoo_singlePoint", osuCrypto::RevCuckoo_singlePoint_Test);
         run("RevCuckoo_robustness", osuCrypto::RevCuckoo_robustness_Test);

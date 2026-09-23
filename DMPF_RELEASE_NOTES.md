@@ -5,6 +5,18 @@ It is not a claim of production security for every caller or parameter set.
 
 ## Upgrade both parties together
 
+Reverse-Cuckoo setup now uses two serial privately controlled Waksman passes,
+with an independently sampled uniform permutation for each set and party.
+The composed permutation is retained across expansions. Setup also exchanges
+independent seed contributions for every (set, partition), rather than
+reusing each partition evaluator across the batch. This changes the setup
+wire format and permutation preprocessing; upgrade both peers and rerun setup.
+The seed exchange sends `16 * (1 + numSets * numPartitions)` bytes per party,
+including the separate DPF root. Sparse-set construction streams one evaluator
+at a time and retains the batched inner-product kernel. Repeated expansion
+still uses the cached leaf seeds, but the shuffle now has two serial passes.
+Historical timings do not measure these changes.
+
 The sparse-DPF setup protocol now masks inactive levels and omits the
 selected correction's low bit. The masking step changes the OT reservation
 and consumption schedule. Recompute reservations through `baseOtCount()`;
@@ -46,8 +58,23 @@ the inherited AES evaluator.
   separate from the DMPF proof. Historical timing tables predate the full
   set of mask, filtering, and AES changes; they are not current-release
   benchmarks.
+- Ring-LPN tensor sampling retains uniform field coefficients, including
+  zero, matching the paper's revised assumption. Correctness supports zero
+  payloads; no zero rejection is required. Relative to independent nonzero sampling, the
+  ideal uniform-field distributions differ by at most `2 * P * t * Q / q`
+  over `Q` expansions. For the analyzed Goldilocks profile this is about
+  `Q * 2^-57`; this accounting is separate from primitive-security losses.
 
 ## Validation
+
+The exact-permutation/per-list-seed update passes the 24-suite focused WSL/GCC
+runner at defaults and at domain 4097 with 16 points, three sets, four
+expansions, and either two or three partitions. The registered sparse-set
+regression checks per-instance evaluator indexing against scalar hashing,
+including empty and fully loaded buckets. The four-suite Ring-LPN runner
+passes with `-trials 2` (support filter, audit, stationary reuse, and OLE).
+Seven Python hash-conditioning checks pass. These are local regression tests,
+not new benchmarks or a completed cross-platform CI run.
 
 The registered unit tests include the correction-encoding and inactive-level
 regressions, both rekeying schedules, and Waterfall/Reverse-Cuckoo integration.

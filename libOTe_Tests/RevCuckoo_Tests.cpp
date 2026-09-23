@@ -3,6 +3,63 @@
 
 namespace osuCrypto
 {
+	void RevCuckoo_seededSparseSets_Test(const oc::CLP&)
+	{
+		PRNG prng(block(0x7263767365656473ull, 17));
+		for (u64 partitions : { 2ull, 3ull })
+			for (u64 domain : { 7ull, 32ull, 65ull })
+			{
+				RevCuckooDmpf<block> dpf;
+				dpf.init(0, 4, 3, domain, partitions, 2, 40, true);
+				const auto count = partitions * dpf.mNumSets;
+				const auto width = dpf.hashWidth();
+				const auto columns = partitions * dpf.mPartitionSize;
+				std::vector<GoldreichHash::Cache> caches(count);
+				std::vector<Matrix<u8>> descriptors(dpf.mNumSets);
+				Matrix<u8> dummy(1, dpf.mGoldreichHash[0].mInBytes);
+				Matrix<u8> anchors(count, divCeil(width, 8));
+				copyBytesMin(dummy[0], domain);
+				for (u64 k = 0; k < count; ++k)
+				{
+					caches[k] = dpf.mGoldreichHash[k].cache(prng.get());
+					dpf.mGoldreichHash[k].hash(dummy, anchors.submtx(k, 1), caches[k]);
+				}
+				for (auto& descriptor : descriptors)
+				{
+					descriptor.resize(partitions * width, 1);
+					for (auto& value : descriptor)
+						value = prng.get<u8>() & (dpf.mPartitionSize - 1);
+				}
+				// Exercise a maximally loaded bucket, not a fixed-capacity average.
+				std::fill_n(descriptors[0].begin(), width, 0);
+				dpf.buildSparseSets(columns, width, descriptors, caches, anchors);
+				if (dpf.realLeafCount() != count * domain || dpf.mSparseSets[0].size() != domain)
+					throw RTE_LOC;
+
+				Matrix<u8> input(1, dummy.cols()), output(1, anchors.cols());
+				for (u64 k = 0; k < count; ++k)
+				{
+					std::vector<std::vector<u32>> expected(dpf.mPartitionSize);
+					const MatrixView<const u8> descriptor(
+						descriptors[k / partitions].data((k % partitions) * width), width, 1);
+					for (u64 x = 0; x < domain; ++x)
+					{
+						copyBytesMin(input[0], x);
+						dpf.mGoldreichHash[k].hash(input, output, caches[k]);
+						for (u64 b = 0; b < output.cols(); ++b)
+							output(0, b) ^= anchors(k, b);
+						const auto bucket = dpf.innerProd(span<const u8>(output.data(), output.size()), descriptor);
+						expected.at(bucket).push_back(static_cast<u32>(x));
+					}
+					for (u64 b = 0; b < dpf.mPartitionSize; ++b)
+					{
+						const auto actual = dpf.mSparseSets[k * dpf.mPartitionSize + b];
+						if (!std::equal(actual.begin(), actual.end(), expected[b].begin(), expected[b].end()))
+							throw std::runtime_error("RevCuckoo seeded sparse mapping mismatch. " LOCATION);
+					}
+				}
+			}
+	}
 
 	void RevCuckoo_baseOtSlicing_Test(const oc::CLP&)
 	{
@@ -56,8 +113,14 @@ namespace osuCrypto
 			recvIdx += subCount.mRecvCount;
 		}
 
-		check(dpf.mWaksmanPermute.mMult, sendIdx, recvIdx);
+		static_assert(std::is_same_v<decltype(dpf.mWaksmanPermute), SerialWaksmanPermute>);
 		auto permCount = dpf.mWaksmanPermute.baseOtCount();
+		SerialWaksmanPermute referencePermutation;
+		referencePermutation.init(0, dpf.mNumPartitions * dpf.mPartitionSize, dpf.mNumSets);
+		auto referenceCount = referencePermutation.baseOtCount();
+		if (permCount.mSendCount != referenceCount.mSendCount ||
+			permCount.mRecvCount != referenceCount.mRecvCount)
+			throw std::runtime_error("RevCuckoo serial permutation OT count mismatch. " LOCATION);
 		sendIdx += permCount.mSendCount;
 		recvIdx += permCount.mRecvCount;
 
@@ -177,12 +240,25 @@ namespace osuCrypto
 			dpf[0].mHashSeed != details::cachedDpfLeafRoot(dpf[0].mPublicHashSeed, 0) ||
 			dpf[0].mGoldreichHashSeeds != dpf[1].mGoldreichHashSeeds)
 			throw std::runtime_error("RevCuckoo public hash seeds disagree. " LOCATION);
-		if (dpf[0].mGoldreichHashSeeds.size() != numPartitions)
+		if (dpf[0].mGoldreichHashSeeds.size() != numSets * numPartitions)
 			throw std::runtime_error("RevCuckoo public hash seed count mismatch. " LOCATION);
 		for (u64 i = 0; i < dpf[0].mGoldreichHashSeeds.size(); ++i)
 			for (u64 j = 0; j < i; ++j)
 				if (dpf[0].mGoldreichHashSeeds[i] == dpf[0].mGoldreichHashSeeds[j])
 					throw std::runtime_error("RevCuckoo public hash seeds overlap. " LOCATION);
+		std::array<std::vector<std::vector<u32>>, 2> permutations;
+		for (u64 p = 0; p < 2; ++p)
+			for (u64 s = 0; s < numSets; ++s)
+			{
+				permutations[p].push_back(dpf[p].mWaksmanPermute.privatePermutation(s));
+				auto sorted = permutations[p].back();
+				std::sort(sorted.begin(), sorted.end());
+				if (sorted.size() != dpf[p].mNumPartitions * dpf[p].mPartitionSize)
+					throw RTE_LOC;
+				for (u64 i = 0; i < sorted.size(); ++i)
+					if (sorted[i] != i)
+						throw std::runtime_error("RevCuckoo private controls are not a permutation. " LOCATION);
+			}
 
 		// verify that the internal shares are correct.
 		for (u64 s = 0, k = 0; s < numSets; ++s)
@@ -254,6 +330,10 @@ namespace osuCrypto
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
+			for (u64 p = 0; p < 2; ++p)
+				for (u64 s = 0; s < numSets; ++s)
+					if (permutations[p][s] != dpf[p].mWaksmanPermute.privatePermutation(s))
+						throw std::runtime_error("RevCuckoo permutation changed across expansions. " LOCATION);
 			F zero;
 			ctx.zero(zero);
 

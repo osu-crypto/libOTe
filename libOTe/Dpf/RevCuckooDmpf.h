@@ -5,7 +5,7 @@
 #include "libOTe/Dpf/SparseDpf.h"
 #include "RevCuckoo/Dedup.h"
 #include "RevCuckoo/GoldreichHash.h"
-#include "RevCuckoo/WaksmanPermute.h"
+#include "Waterfall/SerialWaksmanPermute.h"
 #include "RevCuckoo/BinarySolver.h"
 #include "SparseDpf.h"
 #include "libOTe/Tools/CoeffCtx.h"
@@ -49,7 +49,8 @@ namespace osuCrypto
 		// Initialized from the public setup seed; advanced on each expansion.
 		block mHashSeed = ZeroBlock;
 
-		// Jointly sampled public root and the per-partition hash seeds.
+		// Jointly sampled DPF root and independent per-(set, partition) seeds.
+		// Hash instance (s, j) has index s * mNumPartitions + j.
 		block mPublicHashSeed = ZeroBlock;
 		std::vector<block> mGoldreichHashSeeds;
 
@@ -59,7 +60,7 @@ namespace osuCrypto
 
 		std::vector<Dedup> mDedup;
 		std::vector<GoldreichHash> mGoldreichHash;
-		WaksmanPermute mWaksmanPermute;
+		SerialWaksmanPermute mWaksmanPermute;
 		BinarySolver mBinarySolver;
 		SparseDpf mSparseDpf;
 
@@ -333,37 +334,55 @@ namespace osuCrypto
 			return res;
 		}
 
+		// Keep public hashing and its scratch out of the coroutine frame.
+#ifdef _MSC_VER
+		__declspec(noinline)
+#else
+		__attribute__((noinline))
+#endif
 		void buildSparseSets(
 			u64 f,
 			u64 c,
-			std::vector<Matrix<u8>>& S,
-			Matrix<u8>& H)
+			const std::vector<Matrix<u8>>& S,
+			std::vector<GoldreichHash::Cache>& hashCache,
+			const Matrix<u8>& HDomain)
 		{
 			mSparseSets.resize(f * mNumSets);
 			setTimePoint("sparseSets Begin");
 			constexpr auto stepSize = 32;
-			auto stride = H.cols();
+			auto stride = mGoldreichHash[0].mOutBytes;
 			auto d32 = mDomain / stepSize * stepSize;
 			assert(stride == divCeil(c, 8));
+			auto positionBytes = std::max<u64>(1, divCeil(log2ceil(mPartitionSize), 8));
 
-			// Build a CSR-style layout. The old fixed-capacity bucket allocation
-			// reserved maxLoad entries for every bucket and could waste most of its
-			// memory. Two linear passes cost little relative to sparse-DPF setup and
-			// allocate exactly the w * N entries that will be consumed.
-			auto forEachMapping = [&](auto&& fn)
+			// Stream one evaluator at a time, hashing it only once. Retain the
+			// 32-row inner-product kernel and exact CSR allocation, without an
+			// O(numSets * w * N * hashWidth) table of public feature vectors.
+			Matrix<u8> I(mDomain, mGoldreichHash[0].mInBytes);
+			Matrix<u8> H(mDomain, stride);
+			for (u64 i = 0; i < mDomain; ++i)
+				copyBytesMin(I[i], i);
+			mSparseSetBuf = std::make_unique<u32[]>(mNumSets * mNumPartitions * mDomain);
+			mRealLeafCounts.resize(mSparseSets.size());
+			std::vector<u64> offsets(mPartitionSize + 1), cursors(mPartitionSize);
+			std::vector<u8> Ssj(stride * 8);
+			std::array<u8, stepSize> h;
+			std::array<u32, stepSize> buckets;
+			for (u64 s = 0; s < mNumSets; ++s)
 			{
-				for (u64 s = 0; s < mNumSets; ++s)
+				if (S[s].cols() != positionBytes)
+					throw RTE_LOC;
+				for (u64 j = 0; j < mNumPartitions; ++j)
 				{
-					auto positionBytes = std::max<u64>(1, divCeil(log2ceil(mPartitionSize), 8));
-					if (S[s].cols() != positionBytes)
-						throw RTE_LOC;
+					const auto instance = s * mNumPartitions + j;
+					mGoldreichHash[instance].hash(I, H, hashCache[instance]);
+					for (u64 i = 0; i < mDomain; ++i)
+						for (u64 k = 0; k < stride; ++k)
+							H(i, k) ^= HDomain(instance, k);
 
-					for (u64 j = 0; j < mNumPartitions; ++j)
+					auto forEachMapping = [&](auto&& fn)
 					{
-						auto Hj = H.data(j * mDomain);
-						std::vector<u8> Ssj(stride * 8);
-						std::array<u8, stepSize> h;
-						std::array<u32, stepSize> buckets;
+						auto Hj = H.data();
 
 						for (u64 i = 0; i < d32; i += stepSize)
 						{
@@ -381,7 +400,7 @@ namespace osuCrypto
 							{
 								if (buckets[k] >= mPartitionSize)
 									throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
-								fn(s * f + j * mPartitionSize + buckets[k], i + k);
+								fn(buckets[k], i + k);
 							}
 						}
 
@@ -398,36 +417,29 @@ namespace osuCrypto
 							}
 							if (bucket >= mPartitionSize)
 								throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
-							fn(s * f + j * mPartitionSize + bucket, i);
+							fn(bucket, i);
 						}
+					};
+
+					std::fill(offsets.begin(), offsets.end(), 0);
+					forEachMapping([&](u64 bucket, u64) { ++offsets[bucket + 1]; });
+					for (u64 i = 1; i < offsets.size(); ++i)
+						offsets[i] += offsets[i - 1];
+					std::copy_n(offsets.begin(), mPartitionSize, cursors.begin());
+					auto data = mSparseSetBuf.get() + instance * mDomain;
+					forEachMapping([&](u64 bucket, u64 index) {
+						data[cursors[bucket]++] = static_cast<u32>(index);
+					});
+					for (u64 b = 0; b < mPartitionSize; ++b)
+					{
+						auto column = s * f + j * mPartitionSize + b;
+						mRealLeafCounts[column] = offsets[b + 1] - offsets[b];
+						mSparseSets[column] = std::span<u32>(data + offsets[b], mRealLeafCounts[column]);
+						assert(std::is_sorted(mSparseSets[column].begin(), mSparseSets[column].end()));
 					}
 				}
-			};
-
-			std::vector<u64> offsets(mSparseSets.size() + 1);
-			forEachMapping([&](u64 bucket, u64) { ++offsets[bucket + 1]; });
-			for (u64 i = 1; i < offsets.size(); ++i)
-				offsets[i] += offsets[i - 1];
-
-			mSparseSetBuf = std::make_unique<u32[]>(offsets.back());
-			auto cursors = offsets;
-			forEachMapping([&](u64 bucket, u64 index) {
-				mSparseSetBuf[cursors[bucket]++] = static_cast<u32>(index);
-			});
-			for (u64 i = 0; i < mSparseSets.size(); ++i)
-				mSparseSets[i] = std::span<u32>(
-					mSparseSetBuf.get() + offsets[i], offsets[i + 1] - offsets[i]);
-
-			mRealLeafCounts.resize(mSparseSets.size());
-			mRealLeafCount = 0;
-			for (u64 i = 0; i < mSparseSets.size(); ++i)
-			{
-				assert(std::is_sorted(mSparseSets[i].begin(), mSparseSets[i].end()));
-				mRealLeafCounts[i] = mSparseSets[i].size();
-				mRealLeafCount += mRealLeafCounts[i];
 			}
-
-
+			mRealLeafCount = mNumSets * mNumPartitions * mDomain;
 			setTimePoint("sparseSets done");
 		}
 
@@ -527,33 +539,28 @@ namespace osuCrypto
 			//res = co_await macoro::when_all_ready(std::move(tasks));
 			//for (auto& r : res)
 			//	r.result();
+			mWaksmanPermute.sample(prng);
 			co_await mWaksmanPermute.applyMany<u8, BitMtxVec>(av, sock, piCtx);
 
 			setTimePoint("perm done");
 
-			// Jointly sample a fresh public root after the inputs have been fixed,
-			// then domain-separate every partition hash instance. The same public
-			// partition hash is reused across the sets in this batch.
-			block localHashSeed = prng.get();
-			block remoteHashSeed;
-			co_await sock.send(coproto::copy(localHashSeed));
-			co_await sock.recv(remoteHashSeed);
-			mPublicHashSeed = localHashSeed ^ remoteHashSeed;
+			// Each product list gets independent evaluator randomness. Exchange
+			// all contributions together; owned, aligned vectors survive suspension.
+			auto hashCount = mNumSets * mNumPartitions;
+			std::vector<block> localSeeds(hashCount + 1), remoteSeeds(hashCount + 1);
+			prng.get<block>(localSeeds.data(), localSeeds.size());
+			co_await sock.send(coproto::copy(localSeeds));
+			co_await sock.recv(remoteSeeds);
+			mPublicHashSeed = localSeeds[0] ^ remoteSeeds[0];
 			mHashSeed = details::cachedDpfLeafRoot(mPublicHashSeed, 0);
 			mSparseDpf.setTreeHashSeed(details::dpfTreeRoot(mPublicHashSeed, 0));
 
-			auto hashCount = mNumPartitions;
 			mGoldreichHashSeeds.resize(hashCount);
 			std::vector<GoldreichHash::Cache> hashCache(hashCount);
+			for (u64 i = 0; i < hashCount; ++i)
 			{
-				AES aes(mPublicHashSeed);
-				for (u64 i = 0; i < hashCount; ++i)
-				{
-					// AES is a permutation, so distinct inputs give distinct seeds.
-					auto seed = aes.ecbEncBlock(block(i, 0x5243564841534801ull));
-					mGoldreichHashSeeds[i] = seed;
-					hashCache[i] = mGoldreichHash[i].cache(seed);
-				}
+				mGoldreichHashSeeds[i] = localSeeds[i + 1] ^ remoteSeeds[i + 1];
+				hashCache[i] = mGoldreichHash[i].cache(mGoldreichHashSeeds[i]);
 			}
 
 			std::vector<Matrix<u8>> M(mNumSets);
@@ -578,7 +585,7 @@ namespace osuCrypto
 
 					//mGoldreichHash[i].mPrint = true;
 					tasks.push_back(mGoldreichHash[k].hash(
-						A_i, M_i, socks[k], hashCache[i]));
+						A_i, M_i, socks[k], hashCache[k]));
 				}
 
 			}
@@ -592,10 +599,10 @@ namespace osuCrypto
 			// The paper defines H_i(N) = 0 for the common dummy N. Compute the
 			// public offset once and apply it to both the secret-shared rows and
 			// the public domain hashes below.
-			Matrix<u8> HDomain(mNumPartitions, M[0].cols());
+			Matrix<u8> HDomain(hashCount, M[0].cols());
 			Matrix<u8> ADomain(1, A[0].cols());
 			copyBytesMin(ADomain, mDomain);
-			for (u64 i = 0; i < mNumPartitions; ++i)
+			for (u64 i = 0; i < hashCount; ++i)
 				mGoldreichHash[i].hash(ADomain, HDomain.submtx(i, 1), hashCache[i]);
 
 			// Prepare y vector (0, 1, ..., m-1)
@@ -624,7 +631,7 @@ namespace osuCrypto
 					{
 						for (u64 j = 0; j < Msih.rows(); ++j)
 							for (u64 k = 0; k < Msih.cols(); ++k)
-								Msih(j, k) ^= HDomain(i, k);
+								Msih(j, k) ^= HDomain(h, k);
 					}
 					M_si[h] = Msih;
 					S_si[h] = S[s].submtx(i * c, c);
@@ -682,24 +689,8 @@ namespace osuCrypto
 
 			// Step 11: Calculate h_i,j via hash function
 			// This step is handled by SparseDpf configuration below
-			Matrix<u8> H(mDomain * mNumPartitions, mGoldreichHash[0].mOutBytes);
-			Matrix<u8> I(mDomain, mGoldreichHash[0].mInBytes);
-			for (u64 i = 0; i < mDomain; ++i)
-				copyBytesMin(I[i], i);
-
-			for (u64 j = 0; j < mNumPartitions; ++j)
-			{
-				mGoldreichHash[j].hash(I,
-					H.submtx(j * mDomain, mDomain), hashCache[j]);
-				for (u64 i = 0; i < mDomain; ++i)
-					for (u64 k = 0; k < H.cols(); ++k)
-						H(j * mDomain + i, k) ^= HDomain(j, k);
-			}
-
-
-
 			// Step 13-14: Compute S_j and invoke sparse-DPF
-			buildSparseSets(f, c, S, H);
+			buildSparseSets(f, c, S, hashCache, HDomain);
 
 			// Step 15-16: Initialize and compute final output
 			std::vector<u64> A64(mNumSets * f);

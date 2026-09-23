@@ -136,6 +136,7 @@ namespace tests_libOTe
 			tc.add("WaksmanPermute_Many_Test                ", WaksmanPermute_Many_Test);
 			
 			tc.add("RevCuckoo_baseOtSlicing_Test             ", RevCuckoo_baseOtSlicing_Test);
+			tc.add("RevCuckoo_seededSparseSets_Test         ", RevCuckoo_seededSparseSets_Test);
 			tc.add("RevCuckoo_iterative_Test                ", RevCuckoo_iterative_Test);
 			tc.add("RevCuckoo_singlePoint_Test              ", RevCuckoo_singlePoint_Test);
 			tc.add("RevCuckoo_robustness_Test               ", RevCuckoo_robustness_Test);

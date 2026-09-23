@@ -353,11 +353,12 @@ overstate the real probability. In particular, the high power of `r` in the
 cube count makes the answer sensitive to the exact number of points per
 partition and to correlations in their generation.
 
-The same public partition hash is reused across several sets in one batch.
-This reuse correlates failure events across those systems. A per-system
-`linearSecParam = 40` estimate is therefore not automatically a 40-bit bound
-for the entire batch; the batch-level accounting must include the number and
-dependence of the systems being solved.
+The earlier implementation reused each public partition hash across several
+sets in a batch. Setup now samples an independent evaluator seed for every
+(set, partition), and uses the exact-uniform serial permutation. A per-system
+`linearSecParam = 40` estimate is still not automatically a 40-bit bound for
+the entire batch. The union-bound accounting below remains valid without
+assuming independent failure events; product lists can share input noises.
 
 ## 8. Bounded RingLPN analyzer
 
@@ -381,8 +382,9 @@ three-cubes, and all intermediate low-rank relations.
 Under the ideal-uniform-shuffle model, the analyzer applies two exact factors.
 The first is the probability that every row in a relation enters one
 partition. The second is the probability that the assigned row labels have
-nonzero XOR. The same hash is reused across all sets, so the final accounting
-uses a union bound. It does not assume independent hash failures.
+nonzero XOR. The final accounting uses a union bound and does not assume
+independent hash failures. It therefore also applies after replacing the
+original shared evaluator seeds with independent per-set seeds.
 
 For the current RingLPN parameters `P = 4`, `t = 16`, `N = 2^20`, and
 RevCuckoo profile `w = 2`, `d = 16`, 5,000 seeded batches gave:
