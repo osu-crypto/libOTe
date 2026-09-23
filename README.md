@@ -118,6 +118,9 @@ on platform/dependencies. The `ON`/`OFF` options include
    intended Ring-LPN input distribution. See
    [`libOTe/Dpf/Waterfall/README.md`](libOTe/Dpf/Waterfall/README.md) and
    [`REV_CUCKOO_HASH_ANALYSIS.md`](REV_CUCKOO_HASH_ANALYSIS.md).
+   These constructions remain experimental. See
+   [`DMPF_RELEASE_NOTES.md`](DMPF_RELEASE_NOTES.md) before upgrading peers
+   or loading previously serialized DPF keys.
 
  **Beaver Triples:**
  * `ENABLE_FOLEAGE` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
