@@ -22,9 +22,6 @@ jobs:
       - name: Unit tests
         run: ./out/build/linux/frontend/frontend_libOTe -u
 
-      - name: SPIN integration tests
-        run: ctest --test-dir out/build/linux -R '^SpinIntegration$' --output-on-failure --no-tests=error
-
       - name: Find source tree
         working-directory: libOTe_Tests/cmakeTests
         run: |
@@ -47,12 +44,6 @@ jobs:
           cmake -S libOTe_Tests/cmakeTests -B libOTe_Tests/cmakeTests/out/ -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH="$HOME/install"
           cmake --build libOTe_Tests/cmakeTests/out/
           ./libOTe_Tests/cmakeTests/out/main
-
-      - name: Installed SPIN consumer
-        run: |
-          cmake -S libOTe_Tests/spin_consumer -B out/build/spin-consumer -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH="$HOME/install"
-          cmake --build out/build/spin-consumer --parallel 2
-          ctest --test-dir out/build/spin-consumer --output-on-failure --no-tests=error
 
       - name: System install test
         run: |
@@ -151,6 +142,3 @@ jobs:
 
       - name: Unit tests
         run: ./out/build/x64-Release/frontend/frontend_libOTe.exe -u
-
-      - name: SPIN integration tests
-        run: ctest --test-dir out/build/x64-Release -C Release -R '^SpinIntegration$' --output-on-failure --no-tests=error

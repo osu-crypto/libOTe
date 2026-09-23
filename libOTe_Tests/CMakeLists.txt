@@ -11,6 +11,7 @@ set(SRCS
     Dpf_Tests.cpp
     RevCuckoo_Tests.cpp
     SilentOT_Tests.cpp
+    SpinIntegration.cpp
     SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp
     UnitTests.cpp
@@ -57,15 +58,6 @@ target_compile_definitions(libOTe_Tests PRIVATE
 
 
 target_link_libraries(libOTe_Tests libOTe)
-if(ENABLE_SPIN AND ENABLE_SILENTOT)
-    add_executable(spin_integration_tests SpinIntegration.cpp)
-    target_link_libraries(spin_integration_tests PRIVATE libOTe)
-    if(MSVC)
-        target_compile_options(spin_integration_tests PRIVATE /bigobj)
-    endif()
-    add_test(NAME SpinIntegration COMMAND spin_integration_tests)
-    set_tests_properties(SpinIntegration PROPERTIES SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
-endif()
 
 
 # make projects that include libOTe_Tests use this as an include folder

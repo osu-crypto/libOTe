@@ -1,11 +1,16 @@
+#include "SpinIntegration.h"
+#include "libOTe/config.h"
+#include <cryptoTools/Common/TestCollection.h>
+
+#if defined(ENABLE_SPIN) && defined(ENABLE_SILENTOT)
 #include "libOTe/Tools/Spin/SpinCode.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "Common.h"
-#include <iostream>
 #include <cmath>
 #include <source_location>
 using namespace osuCrypto;
+namespace {
 static void require(bool b,const std::source_location where=std::source_location::current()) {
     if(!b) throw std::runtime_error(std::string(where.file_name())+":"+
         std::to_string(where.line())+": SPIN integration assertion failed");
@@ -46,7 +51,6 @@ static void arithmetic() {
         auto moved=std::move(wu);
         rejects([&] {code.transpose_inplace<u64>(u,wu);});
         code.transpose_inplace<u64>(u,moved);
-        std::cout<<"coefficient contexts: "<<int(p)<<" mode="<<int(mode)<<" PASS\n";
     }
 }
 static void base(SilentOtExtSender& s,SilentOtExtReceiver& r,PRNG& prng,block d) {
@@ -103,7 +107,6 @@ static void lifecycle() {
     r.configure(1ull<<26,2,1,SilentSecType::SemiHonest,SdNoiseDistribution::Regular,MultType::Spin);
     require(!s.mSpin && !r.mSpin && s.mB.capacity()==0 && r.mA.capacity()==0);
     s.clear();r.clear();
-    std::cout<<"setup reuse and reconfiguration PASS\n";
 }
 static void protocol(u64 requested,SdNoiseDistribution noise,ChoiceBitPacking packed,SilentSecType security) {
     auto sockets=cp::LocalAsyncSocket::makePair();
@@ -181,11 +184,9 @@ static void protocol(u64 requested,SdNoiseDistribution noise,ChoiceBitPacking pa
         auto tr=r.silentReceive(choices,received,pr,sockets[1]);
         tests_libOTe::eval(ts,tr);
         for(u64 i=0;i<requested;++i) require(received[i]==pairs[i][choices[i]]);
-        std::cout<<"hashed random OT PASS\n";
     }
     s.clear();r.clear();require(!s.mSpin && !r.mSpin);
     require(s.mB.capacity()==0 && r.mA.capacity()==0 && r.mC.capacity()==0);
-    std::cout<<"OT K="<<k<<" params="<<int(p)<<" noise="<<int(noise)<<" packed="<<int(packed)<<" security="<<int(security)<<" pad="<<pad<<" PASS\n";
 }
 static void hashStoreModes() {
     // Force a 16-byte offset from 32-byte alignment and cover every tail.
@@ -207,41 +208,46 @@ static void hashStoreModes() {
         require(output.guard==block(123) && output.data[n][0]==block(123) && output.data[n][1]==block(456));
     }
 }
-int main() {
-    try {
-        hashStoreModes();
-        if(!spin::capabilities().avx2) return 77;
-        arithmetic();
-        lifecycle();
-        rejects([&]{detail::spinProfile(0);});
-        rejects([&]{detail::spinProfile(u64(1)<<31);});
-        for(u64 requested:{1ull,4096ull,8191ull,8192ull,8193ull}) {
-            const auto spec=detail::spinProfile(requested);
-            require(spec.message_size==(requested<=8192?8192:16384));
-            require(spec.parameters==spin::Parameters::T64S12R2);
+} // namespace
+
+void tests_libOTe::Spin_Integration_Test() {
+    hashStoreModes();
+    if(!spin::capabilities().avx2) throw UnitTestSkipped("SPIN requires AVX2");
+    arithmetic();
+    lifecycle();
+    rejects([&]{detail::spinProfile(0);});
+    rejects([&]{detail::spinProfile(u64(1)<<31);});
+    for(u64 requested:{1ull,4096ull,8191ull,8192ull,8193ull}) {
+        const auto spec=detail::spinProfile(requested);
+        require(spec.message_size==(requested<=8192?8192:16384));
+        require(spec.parameters==spin::Parameters::T64S12R2);
+    }
+    for(u64 requested:{1ull,4096ull,8191ull,8192ull,8193ull,24539ull,65499ull,65537ull,131072ull,262107ull})
+        for(auto packed:{ChoiceBitPacking::False,ChoiceBitPacking::True})
+            protocol(requested,SdNoiseDistribution::Regular,packed,SilentSecType::SemiHonest);
+    // Large configuration tests do not allocate encoder buffers.
+    for(u64 requested:{1ull,4096ull,8191ull,8192ull,8193ull,24539ull,65536ull,65537ull,(1ull<<24)+1,1ull<<26,(1ull<<31)-16384}) {
+        const auto spec=detail::spinProfile(requested);
+        for(auto noise:{SdNoiseDistribution::Regular,SdNoiseDistribution::Stationary}) {
+            auto cfg=syndromeDecodingConfigure(128,requested,MultType::Spin,noise,1);
+            const auto n=cfg.mNoiseVectorSize,active=cfg.mNumPartitions*cfg.mSizePer;
+            require(n==2*spec.message_size && active<=n && active>0);
+            const double effective=(double(n/4)-double(n-active))/double(active);
+            require(effective>0 && effective<0.5);
+            require(-double(cfg.mNumPartitions)*std::log2(1-(noise==SdNoiseDistribution::Regular?2:1)*effective)>=128);
+            if(noise==SdNoiseDistribution::Regular) require(cfg.mNumPartitions==128 && active==n);
         }
-        for(u64 requested:{1ull,4096ull,8191ull,8192ull,8193ull,24539ull,65499ull,65537ull,131072ull,262107ull})
-            for(auto packed:{ChoiceBitPacking::False,ChoiceBitPacking::True})
-                protocol(requested,SdNoiseDistribution::Regular,packed,SilentSecType::SemiHonest);
-        // Large configuration tests do not allocate encoder buffers.
-        for(u64 requested:{1ull,4096ull,8191ull,8192ull,8193ull,24539ull,65536ull,65537ull,(1ull<<24)+1,1ull<<26,(1ull<<31)-16384}) {
-            const auto spec=detail::spinProfile(requested);
-            for(auto noise:{SdNoiseDistribution::Regular,SdNoiseDistribution::Stationary}) {
-                auto cfg=syndromeDecodingConfigure(128,requested,MultType::Spin,noise,1);
-                const auto n=cfg.mNoiseVectorSize,active=cfg.mNumPartitions*cfg.mSizePer;
-                require(n==2*spec.message_size && active<=n && active>0);
-                const double effective=(double(n/4)-double(n-active))/double(active);
-                require(effective>0 && effective<0.5);
-                require(-double(cfg.mNumPartitions)*std::log2(1-(noise==SdNoiseDistribution::Regular?2:1)*effective)>=128);
-                if(noise==SdNoiseDistribution::Regular) require(cfg.mNumPartitions==128 && active==n);
-            }
-        }
-        for(auto packed:{ChoiceBitPacking::False,ChoiceBitPacking::True}) {
-            protocol(65536,SdNoiseDistribution::Stationary,packed,SilentSecType::SemiHonest);
-            for(u64 requested:{1ull,8193ull,65537ull,262107ull})
-                protocol(requested,SdNoiseDistribution::Stationary,packed,SilentSecType::SemiHonest);
-            protocol(65537,SdNoiseDistribution::Stationary,packed,SilentSecType::Malicious);
-            protocol(65536,SdNoiseDistribution::Regular,packed,SilentSecType::Malicious);
-        }
-    } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
+    }
+    for(auto packed:{ChoiceBitPacking::False,ChoiceBitPacking::True}) {
+        protocol(65536,SdNoiseDistribution::Stationary,packed,SilentSecType::SemiHonest);
+        for(u64 requested:{1ull,8193ull,65537ull,262107ull})
+            protocol(requested,SdNoiseDistribution::Stationary,packed,SilentSecType::SemiHonest);
+        protocol(65537,SdNoiseDistribution::Stationary,packed,SilentSecType::Malicious);
+        protocol(65536,SdNoiseDistribution::Regular,packed,SilentSecType::Malicious);
+    }
 }
+#else
+void tests_libOTe::Spin_Integration_Test() {
+    throw osuCrypto::UnitTestSkipped("SPIN or Silent OT is disabled");
+}
+#endif
