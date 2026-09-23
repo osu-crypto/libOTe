@@ -125,6 +125,10 @@ target_include_directories(libOTe PUBLIC
 
                     
 target_link_libraries(libOTe cryptoTools)
+if(ENABLE_SPIN)
+    target_sources(libOTe PRIVATE Tools/Spin/SpinOt.cpp)
+    target_link_libraries(libOTe spin::spin)
+endif()
 
 
 target_compile_definitions(libOTe PRIVATE

@@ -11,6 +11,7 @@ set(SRCS
     Dpf_Tests.cpp
     RevCuckoo_Tests.cpp
     SilentOT_Tests.cpp
+    SpinIntegration.cpp
     SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp
     UnitTests.cpp

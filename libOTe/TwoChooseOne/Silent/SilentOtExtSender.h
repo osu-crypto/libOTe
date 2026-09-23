@@ -11,6 +11,9 @@
 
 #include <libOTe/config.h>
 #ifdef ENABLE_SILENTOT
+#ifdef ENABLE_SPIN
+#include "libOTe/Tools/Spin/SpinOt.h"
+#endif
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
@@ -130,6 +133,11 @@ namespace osuCrypto
         // The type of compress we will use to generate the
         // dense vectors from the sparse vectors.
         MultType mLpnMultType = DefaultMultType;
+#ifdef ENABLE_SPIN
+        // Optional preparation after configure(): initialize from
+        // (mRequestNumOts, mCodeSeed, false, mNoiseDist). clear() releases it.
+        std::unique_ptr<SpinOtState> mSpin;
+#endif
 
         // The flag which controls whether the malicious check is performed.
         SilentSecType mSecurityType = SilentSecType::SemiHonest;
@@ -384,8 +392,10 @@ namespace osuCrypto
          *
          * @param messages Output buffer for the hashed messages
          * @param type The choice bit packing format
+         * @param streamingStores Opt-in non-temporal output stores on x86.
+         *        Stores are fenced before return. Other platforms use normal stores.
          */
-        void hash(span<std::array<block, 2>> messages, ChoiceBitPacking type);
+        void hash(span<std::array<block, 2>> messages, ChoiceBitPacking type, bool streamingStores = false);
 
         /**
          * @brief Debugging check on the sparse vector (insecure for production).

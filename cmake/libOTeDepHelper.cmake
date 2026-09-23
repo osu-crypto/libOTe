@@ -136,6 +136,31 @@ endif()
 
 
 
-# resort the previous prefix path
+## SPIN
+###########################################################################
+macro(FIND_SPIN)
+    if(FETCH_SPIN)
+        set(SPIN_DP NO_DEFAULT_PATH PATHS ${OC_THIRDPARTY_HINT})
+    elseif(NO_CMAKE_SYSTEM_PATH)
+        set(SPIN_DP NO_DEFAULT_PATH PATHS ${CMAKE_PREFIX_PATH})
+    else()
+        unset(SPIN_DP)
+    endif()
+    find_package(spin 0.2 CONFIG ${SPIN_DP} ${ARGN})
+endmacro()
+
+if(ENABLE_SPIN AND NOT TARGET spin::spin)
+    if(LIBOTE_BUILD AND LIBOTE_SPIN_SOURCE)
+        add_subdirectory("${LIBOTE_SPIN_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/spin")
+    else()
+        if(FETCH_SPIN_IMPL)
+            FIND_SPIN(QUIET)
+            include("${CMAKE_CURRENT_LIST_DIR}/../thirdparty/getSpin.cmake")
+        endif()
+        FIND_SPIN(REQUIRED)
+    endif()
+endif()
+
+# restore the previous prefix path
 set(CMAKE_PREFIX_PATH ${PUSHED_CMAKE_PREFIX_PATH})
 cmake_policy(POP)

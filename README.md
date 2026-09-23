@@ -65,7 +65,7 @@ and two **optional dependencies** on [libsodium](https://doc.libsodium.org/) or
 [Relic](https://github.com/relic-toolkit/relic) for some Base OTs.
 [Boost Asio](https://www.boost.org/doc/libs/1_84_0/doc/html/boost_asio.html)
 tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
-CMake 3.15+ is required and the build script assumes python 3.
+CMake 3.15+ is required (3.20+ with SPIN) and the build script assumes python 3.
  
 The library can be built with libsodium, all OT protocols enabled and boost asio TCP networking as
 ```
@@ -129,6 +129,11 @@ Dependencies can be managed by cmake/build.py or installed via an external tool.
 ```
 . This tells cmake to first look for dependencies on *the system* and if not found then it will be downloaded and built automatically. If set to `false` then the build will fail if not found. Each dependency can downloaded and build for you by explicitly setting it's `FETCH_***` variable to `true`. See blow. The python `build.py` script by default sets `FETCH_AUTO=true` and can be set to `false` by calling it with `--noauto`.
 
+
+**[SPIN](https://github.com/ladnir/spin_codes) (Silent OT encoder):**
+`ENABLE_SPIN` defaults on with Silent OT or Silent VOLE. Install SPIN 0.2 or
+use `FETCH_SPIN=ON` / `FETCH_AUTO`. Requires CMake 3.20+ and x86-64 with AVX2;
+set `ENABLE_SPIN=OFF` to omit it. See the [usage guide](libOTe/Tools/Spin/README.md).
 
 **Enabling/Disabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
  The library can be built with Relic as

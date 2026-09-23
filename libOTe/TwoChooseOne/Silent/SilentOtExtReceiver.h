@@ -11,6 +11,9 @@
 
 #include <libOTe/config.h>
 #ifdef ENABLE_SILENTOT
+#ifdef ENABLE_SPIN
+#include "libOTe/Tools/Spin/SpinOt.h"
+#endif
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/Timer.h>
@@ -140,6 +143,11 @@ namespace osuCrypto
 		// The type of compress we will use to generate the
 		// dense vectors from the sparse vectors.
 		MultType mLpnMultType = DefaultMultType;
+#ifdef ENABLE_SPIN
+        // Optional preparation after configure(): initialize from
+        // (mRequestNumOts, mCodeSeed, true, mNoiseDist). clear() releases it.
+        std::unique_ptr<SpinOtState> mSpin;
+#endif
 
 		// The flag which controls whether the malicious check is performed.
 		SilentSecType mSecurityType = SilentSecType::SemiHonest;

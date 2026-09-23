@@ -53,13 +53,17 @@ namespace osuCrypto
         BlkAcc3x32 = 11,// almost fastest with very high minimum distance.
 
         // experimental
-        Tungsten = 12 // very fast, based on turbo codes. Unknown min distance. 
+        Tungsten = 12, // very fast, based on turbo codes. Unknown min distance.
+        Spin = 13 // BCH-SPIN; BAA-style 0.25 linear-attack tuning (not minimum distance).
     };
 
     inline std::ostream& operator<<(std::ostream& o, MultType m)
     {
         switch (m)
         {
+        case MultType::Spin:
+            o << "Spin";
+            break;
         case osuCrypto::MultType::QuasiCyclic:
             o << "QuasiCyclic";
             break;
@@ -196,6 +200,10 @@ namespace osuCrypto
         u64 mSizePer = 0;
 	};
 
+#ifdef ENABLE_SPIN
+    SdConfig SpinConfigure(u64 secParam,u64 requestSize,SdNoiseDistribution noiseType);
+#endif
+
     // routine for choosing SD parameters.
     //
     // * secParam is the desired computational security parameter.
@@ -226,6 +234,12 @@ namespace osuCrypto
         u64 scaler = 0;
         switch (multType)
         {
+#ifdef ENABLE_SPIN
+        case MultType::Spin:
+            if(groupBitCount>4 && noiseType==SdNoiseDistribution::Stationary)
+                noiseType=SdNoiseDistribution::Regular;
+            return SpinConfigure(secParam,requestSize,noiseType);
+#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
