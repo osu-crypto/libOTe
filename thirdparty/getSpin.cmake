@@ -11,7 +11,7 @@ function(libote_fetch_spin)
         endif()
         return()
     endif()
-    set(SPIN_REVISION "b5a81b1d7fc98626419af184ce354cc2d4cf1b06")
+    set(SPIN_REVISION "f2010e03d2dbe5003e90c89ba346c743793536a6")
     set(SPIN_REPOSITORY "https://github.com/ladnir/spin_codes.git")
     set(CLONE_DIR "${OC_THIRDPARTY_CLONE_DIR}/spin-${SPIN_REVISION}")
     set(LOG_FILE "${CMAKE_CURRENT_BINARY_DIR}/log-spin.txt")
@@ -73,7 +73,7 @@ function(libote_fetch_spin)
     run(NAME "Install SPIN" CMD ${CMAKE_COMMAND} --install "${BUILD_DIR}" --config "${SPIN_CONFIG}"
         WD "${CLONE_DIR}")
     # A normal installed dependency thereafter; export it transitively with libOTe.
-    find_package(spin 0.1 CONFIG REQUIRED PATHS "${INSTALL_DIR}/lib/cmake/spin"
+    find_package(spin 0.2 CONFIG REQUIRED PATHS "${INSTALL_DIR}/lib/cmake/spin"
         "${INSTALL_DIR}/lib64/cmake/spin" NO_DEFAULT_PATH)
     set(LIBOTE_SPIN_FETCH_INSTALL_DIR "${INSTALL_DIR}" CACHE INTERNAL "This build's fetched SPIN installation" FORCE)
     install(DIRECTORY "${INSTALL_DIR}/" DESTINATION ".")

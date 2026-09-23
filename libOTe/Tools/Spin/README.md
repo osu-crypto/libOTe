@@ -6,6 +6,10 @@ it does not vendor another encoder implementation.
 
 ## Build
 
+The integration requires SPIN 0.2's `PreparedEncoder` API. The pinned public
+dependency below provides it. An editable source override or an installed
+0.2 package also works. See [the integration checkpoint](INTEGRATION_STATUS.md).
+
 SPIN defaults on when Silent OT, Silent VOLE, LogVole, Foleage, RingLPN, or
 bitpolymul is enabled. An explicit `ENABLE_SPIN=OFF` is respected.
 This makes the encoder available; it does not change libOTe's default `MultType`
@@ -16,11 +20,12 @@ On unsupported platforms, disable SPIN explicitly. SPIN requires CMake 3.20+.
 Dependency selection follows libOTe's normal pattern:
 
 - `LIBOTE_SPIN_SOURCE=/path/to/spin` uses editable local sources, without fetching.
-- Otherwise, an installed `spin` package can be found through `CMAKE_PREFIX_PATH`.
+- Otherwise, an installed `spin` 0.2.x package can be found through
+  `CMAKE_PREFIX_PATH`. Version 0.2 introduces the required `PreparedEncoder` API.
 - `FETCH_SPIN=ON`, or `FETCH_AUTO=ON` without a SPIN-specific override, fetches
   the dependency when needed. `FETCH_SPIN=OFF` suppresses automatic fetching.
 
-The fetcher obtains exactly commit `b5a81b1d7fc98626419af184ce354cc2d4cf1b06`
+The fetcher obtains exactly commit `f2010e03d2dbe5003e90c89ba346c743793536a6`
 from [ladnir/spin_codes](https://github.com/ladnir/spin_codes) with Git depth one
 and builds only `spin/`. It does not download historical experiment binaries.
 The repository is public; fetching does not require GitHub credentials.
@@ -111,20 +116,50 @@ The internal policy can change without changing the caller interface.
 Only routing representation and available memory limit the encoder size;
 there is no certificate-range cap. The largest supported K is 2^31-16384.
 
-Configuration prepares the first map and endpoint-owned scratch. After each
-successful compression, both endpoints advance `mCodeSeed` with libOTe's existing
-fixed-key hash. Before the next compression, SPIN rebuilds its plan and scratch
-if the seed changed. Changing `mCodeSeed` explicitly is handled by the same check.
-The preparation helper also checks code size, inner parameters, and workspace role
-before reusing a plan.
-Block and separate-choice encoding use one shared map before advancing the seed.
-Reconfiguration creates a new plan, and `clear()` releases it. `split()` copies
-the MultType but leaves the new endpoint to create its own scratch.
+`configure()` selects parameters without constructing the SPIN map or scratch.
+Ordinary callers get lazy preparation on the first compression. To move that
+work outside the expansion path, initialize the public members after configuring:
+
+```cpp
+// Optional: both endpoints must use the same agreed seed.
+sender.mCodeSeed = receiver.mCodeSeed = agreedSeed;
+sender.mSpin = std::make_unique<osuCrypto::SpinOtState>(
+    sender.mRequestNumOts, sender.mCodeSeed, false, sender.mNoiseDist);
+receiver.mSpin = std::make_unique<osuCrypto::SpinOtState>(
+    receiver.mRequestNumOts, receiver.mCodeSeed, true, receiver.mNoiseDist);
+
+sender.mB.reserve(sender.mNoiseVecSize);
+receiver.mA.reserve(receiver.mNoiseVecSize);
+receiver.mC.reserve(receiver.mNoiseVecSize); // Only needed for separate choices.
+```
+
+The default seed works without assignment. The buffers also accept moved
+`AlignedUnVector` allocations; they own their memory, rather than borrowing raw pointers.
+Preparation covers the encoder and these output buffers, not every protocol allocation.
+
+Regular-noise SPIN selects `SetupMode::Full`, keeps its code seed, and reuses the
+prepared map and scratch across compatible inplace calls. Changing `mCodeSeed`
+rebuilds the map at the next compression but retains compatible scratch allocations.
+Both endpoints must make the same seed change. The preparation check also compares
+code size, inner parameters, setup mode, and workspace role.
+
+Stationary noise selects `SetupMode::BankedHeuristic` internally and advances
+`mCodeSeed` after compression using libOTe's existing fixed-key hash. The next
+compression refreshes the small per-round parameters and IMT masks in place.
+The bank and allocations remain unchanged; no full per-round route is built.
+Both endpoints use SPIN's default bank seed, separately from `mCodeSeed`.
+This heuristic family does not inherit the original distance certificates above.
+Block and separate-choice encoding use the same map within each batch.
+
+Reconfiguration discards prepared state and buffers, so apply overrides afterward.
+`clear()` releases the map, scratch, and protocol buffers; no hidden cache retains them.
+`split()` copies the MultType but leaves the new endpoint to create its own scratch.
 Packed and separate choices are supported. Output is truncated only after encoding,
 from K to the requested number of OTs.
 The existing copying convenience methods can call `clear()` after a batch.
-Encoding itself remains allocation-free after preparation; repeated-batch timing
-must account separately for rebuilding setup under the updated seed.
+Encoding and stationary seed refresh remain allocation-free after preparation.
+Stationary repeated-batch timing includes refresh, but excludes bank preparation
+only when the caller actually prepares it before timing.
 
 The PPRF expands into its exact domain. The adapter then restores the full 2K
 buffer and zero-fills the uncovered suffix. If that suffix has p coordinates,
@@ -141,30 +176,49 @@ The encoding helpers are synchronous; SIMD scratch is not stored in coroutine lo
 
 ## Checks
 
+The [regular-noise benchmark](REGULAR_PERFORMANCE.md) measures 89.05 million
+hashed OTs/s at K=2^18 and 61.01 million at K=2^20 with VAES and streaming stores.
+It reuses full precomputed setup without heuristic refresh. Both results exclude
+base-correlation generation and network transport, as does the stationary result.
+
 `spin_integration_tests` compares block, byte, 64-bit, and custom context outputs.
 The custom type has no XOR operator, and its stateful context records additions.
 The test also rejects non-characteristic-two contexts and mismatched workspaces.
 Protocol tests exercise the automatic parameter choices, non-power-of-two
 requests, both choice layouts, repeated batches, regular and stationary noise,
-and the malicious consistency check. Lifecycle tests cover setup reuse, changed
-geometry, seed changes, and reconfiguration between SPIN and BAA.
+and the malicious consistency check. Lifecycle tests cover lazy and explicit
+preparation, fixed-code reuse, moved and reserved buffer retention, seed changes,
+deallocation, and reconfiguration between SPIN and BAA.
 Test base correlations are supplied locally;
 these tests do not measure or exercise base-OT generation.
 
 Large configuration-only tests cover requests above 2^24 and the routing limit
-without allocating encoder buffers. The libOTe integration has not yet been
-benchmarked.
+without allocating encoder buffers. The cached-leaf stationary sender now has a
+[stage-separated benchmark](STREAMING_HASH.md): 3.101 ms for K=2^18 with VAES
+and opt-in streaming stores, or 84.54 million hashed random OTs/s.
+With normal cached stores, the matched run takes 3.577 ms (73.29 million OTs/s).
+Initial setup and generation of supplied base correlations
+are excluded; fresh leaves, heuristic refresh, compression, and hashing are included.
 Release tests passed with GCC 13.3 on Linux (pinned fetch) and MSVC 19.50 on
 Windows (local source): all 24 protocol cases with three batches each, including
 explicit seed changes, plus hashed random OT and the arithmetic and configuration
-checks. The seed-lifecycle regression checks matching
-descriptors, both seed halves, synchronized hash advancement, and OT correlations.
+checks. These earlier runs used the eager-setup lifecycle. The updated lifecycle
+and option tests passed with GCC 13.3 on Linux using local SPIN sources.
+The lifecycle regression checks matching descriptors, both seed halves, fixed regular seeds,
+synchronized stationary hash advancement, and OT correlations.
+
+The banked-refresh integration passes 34 protocol configurations with three batches
+each on GCC 13.3/Linux, plus hashed random OT and both modes' coefficient-context tests.
+SSD cases include small and non-power-of-two lengths, separate and packed choices,
+and malicious-mode consistency checks. These checks establish implementation
+agreement, not a distance certificate for the heuristic family.
 
 `SpinOptions` checks defaults for each code-based feature, explicit OFF, local
 source selection, and the fetch overrides without compiling dependencies.
 
-The public dependency was fetched, built, and tested through
-`FETCH_SPIN=ON` on Linux. CI runs the integration and option tests on Linux
+The preceding immutable-Code integration was fetched, built, and tested through
+`FETCH_SPIN=ON` on Linux. This has not yet been repeated for PreparedEncoder.
+CI runs the integration and option tests on Linux
 and Windows, and exercises an installed-package consumer on Linux. The
 ARM/macOS job explicitly disables the currently x86-only dependency.
 
@@ -195,3 +249,10 @@ The example above assumes a local-source build. For an installed or fetched
 SPIN package, set `spin_DIR` to its `lib/cmake/spin` directory (reported in the
 libOTe build's CMake cache).
 CMake configuration with `ENABLE_SPIN=OFF` also passed without a SPIN dependency.
+
+The updated consumer also passes against fully installed SPIN 0.2, libOTe, and
+cryptoTools packages with VAES enabled. It retains optimized and generic
+workspaces across three seed changes in both full and banked modes. The release
+build enables real SimplestOT, DPF, and RingLPN and builds both libraries' test
+archives before installation. This checks package exports; a public-fetch rerun
+still awaits the new dependency pins.

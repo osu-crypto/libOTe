@@ -22,9 +22,10 @@ struct Context {
     void plus(Value& r,const Value& a,const Value& b) const {++*calls;r.v=a.v^b.v;}
 };
 static void arithmetic() {
+    for(auto mode:{spin::SetupMode::Full,spin::SetupMode::BankedHeuristic})
     for(auto p:{spin::Parameters::T128S19,spin::Parameters::T64S12,spin::Parameters::T64S12R2}) {
         const auto k=3*spin::message_alignment(p),n=2*k;
-        SpinCode code({k,p,17,29});
+        SpinCode code({k,p,17,29},{},{mode});
         auto wb=code.make_workspace<block>(); auto wu=code.make_workspace<u64>();
         auto wy=code.make_workspace<u8>(); u64 calls=0;
         auto wc=code.make_workspace<Value>(Context{&calls});
@@ -40,12 +41,12 @@ static void arithmetic() {
         for(u64 i=0;i<n;++i) {require(b[i]==f[i]);require(b[i].get<u64>(0)==u[i]);require((u[i]&255)==y[i]);require(c[i].v==u[i]);}
         require(calls>0);
         rejects([&] {auto w=code.make_workspace<u64>(CoeffCtxInteger{});(void)w;});
-        SpinCode other({k,p,18,29});
+        SpinCode other({k,p,18,29},{},{mode});
         rejects([&] {other.transpose_inplace<u64>(u,wu);});
         auto moved=std::move(wu);
         rejects([&] {code.transpose_inplace<u64>(u,wu);});
         code.transpose_inplace<u64>(u,moved);
-        std::cout<<"coefficient contexts: "<<int(p)<<" PASS\n";
+        std::cout<<"coefficient contexts: "<<int(p)<<" mode="<<int(mode)<<" PASS\n";
     }
 }
 static void base(SilentOtExtSender& s,SilentOtExtReceiver& r,PRNG& prng,block d) {
@@ -86,11 +87,22 @@ static void lifecycle() {
     for(auto mult:{MultType::Spin,MultType::BlkAcc3x32,MultType::Spin}) {
         s.configure(4096,2,1,SilentSecType::SemiHonest,SdNoiseDistribution::Regular,mult);
         r.configure(4096,2,1,SilentSecType::SemiHonest,SdNoiseDistribution::Regular,mult);
-        require(bool(s.mSpin)==(mult==MultType::Spin));
-        require(bool(r.mSpin)==(mult==MultType::Spin));
-        if(s.mSpin) require(s.mSpin->code.descriptor()==r.mSpin->code.descriptor());
+        require(!s.mSpin && !r.mSpin);
+        require(s.mB.capacity()==0 && r.mA.capacity()==0 && r.mC.capacity()==0);
+        if(mult==MultType::Spin) {
+            s.mSpin=std::make_unique<SpinOtState>(s.mRequestNumOts,s.mCodeSeed,false);
+            r.mSpin=std::make_unique<SpinOtState>(r.mRequestNumOts,r.mCodeSeed,true);
+            require(s.mSpin->code.descriptor()==r.mSpin->code.descriptor());
+        }
+        s.mB.reserve(s.mNoiseVecSize);r.mA.reserve(r.mNoiseVecSize);r.mC.reserve(r.mNoiseVecSize);
     }
     s.clear();r.clear();require(!s.mSpin && !r.mSpin);
+    require(s.mB.capacity()==0 && r.mA.capacity()==0 && r.mC.capacity()==0);
+    // configure() must not construct a huge encoder or its scratch.
+    s.configure(1ull<<26,2,1,SilentSecType::SemiHonest,SdNoiseDistribution::Regular,MultType::Spin);
+    r.configure(1ull<<26,2,1,SilentSecType::SemiHonest,SdNoiseDistribution::Regular,MultType::Spin);
+    require(!s.mSpin && !r.mSpin && s.mB.capacity()==0 && r.mA.capacity()==0);
+    s.clear();r.clear();
     std::cout<<"setup reuse and reconfiguration PASS\n";
 }
 static void protocol(u64 requested,SdNoiseDistribution noise,ChoiceBitPacking packed,SilentSecType security) {
@@ -102,17 +114,33 @@ static void protocol(u64 requested,SdNoiseDistribution noise,ChoiceBitPacking pa
     const auto k=spec.message_size;
     const auto p=spec.parameters;
     require(k>=requested && k-requested<spin::message_alignment(p));
-    require(s.mSpin->code.descriptor()==r.mSpin->code.descriptor());
+    require(!s.mSpin && !r.mSpin);
+    // Exercise both ordinary lazy setup and explicit member preparation.
+    const bool prepared=packed==ChoiceBitPacking::False;
+    if(prepared) {
+        s.mCodeSeed=r.mCodeSeed=block(41,59);
+        s.mSpin=std::make_unique<SpinOtState>(requested,s.mCodeSeed,false,noise);
+        r.mSpin=std::make_unique<SpinOtState>(requested,r.mCodeSeed,true,noise);
+    }
+    // Owned allocations can be moved in or reserved directly after configure.
+    AlignedUnVector<block> supplied;supplied.reserve(s.mNoiseVecSize);
+    const auto* suppliedPtr=supplied.data();
+    s.mB=std::move(supplied);
+    require(s.mB.data()==suppliedPtr);
+    r.mA.reserve(r.mNoiseVecSize);r.mC.reserve(r.mNoiseVecSize);
+    const auto* aPtr=r.mA.data();const auto* cPtr=r.mC.data();
+    const auto bCapacity=s.mB.capacity(),aCapacity=r.mA.capacity(),cCapacity=r.mC.capacity();
     require(s.mNoiseVecSize==2*k && s.mNumPartitions*s.mSizePer<=2*k);
     const auto pad=2*k-s.mNumPartitions*s.mSizePer;
     // Check the heuristic configuration formula, not a distance certificate.
     const double effective=(std::floor(0.25*2*k)-pad)/(2*k-pad);
     require(-double(s.mNumPartitions)*std::log2(1-(noise==SdNoiseDistribution::Regular?2:1)*effective)>=128);
     if(noise==SdNoiseDistribution::Regular) require(s.mNumPartitions==128 && pad==0);
-    auto previous=s.mSpin->code.descriptor();
+    decltype(s.mSpin->code.descriptor()) previous{};
     for(unsigned batch=0;batch<3;++batch) {
         if(batch==2) s.mCodeSeed=r.mCodeSeed=block(987,654);
         const auto currentSeed=s.mCodeSeed;
+        const auto* preparedSender=s.mSpin.get();const auto* preparedReceiver=r.mSpin.get();
         require(currentSeed==r.mCodeSeed);
         const block d=block(345,678)|OneBlock;
         base(s,r,ps,d);
@@ -120,14 +148,22 @@ static void protocol(u64 requested,SdNoiseDistribution noise,ChoiceBitPacking pa
         auto tr=r.silentReceiveInplace(requested,pr,sockets[1],packed);
         tests_libOTe::eval(ts,tr);
         require(s.mB.size()==requested && r.mA.size()==requested);
-        require(s.mCodeSeed==mAesFixedKey.hashBlock(currentSeed));
+        require(s.mCodeSeed==(noise==SdNoiseDistribution::Stationary?mAesFixedKey.hashBlock(currentSeed):currentSeed));
+        require(s.mB.data()==suppliedPtr && r.mA.data()==aPtr && r.mC.data()==cPtr);
+        require(s.mB.capacity()==bCapacity && r.mA.capacity()==aCapacity && r.mC.capacity()==cCapacity);
+        if(preparedSender) {
+            require(s.mSpin.get()==preparedSender && r.mSpin.get()==preparedReceiver);
+        }
+        require(s.mSpin->code.code().setup_options().mode==
+            (noise==SdNoiseDistribution::Stationary?spin::SetupMode::BankedHeuristic:spin::SetupMode::Full));
         require(s.mCodeSeed==r.mCodeSeed);
         require(s.mSpin->seed==currentSeed && r.mSpin->seed==currentSeed);
         require(s.mSpin->code.descriptor()==r.mSpin->code.descriptor());
         const auto realized=s.mSpin->code.code().specification();
         require(realized.route_seed==currentSeed.get<u64>(0));
         require(realized.inner_seed==currentSeed.get<u64>(1));
-        if(batch) require(previous!=s.mSpin->code.descriptor());
+        if(batch) require((previous!=s.mSpin->code.descriptor())==
+            (noise==SdNoiseDistribution::Stationary || batch==2));
         previous=s.mSpin->code.descriptor();
         for(u64 i=0;i<requested;++i) {
             auto c=packed==ChoiceBitPacking::True?(r.mA[i].get<u64>(0)&1):r.mC[i];
@@ -148,10 +184,32 @@ static void protocol(u64 requested,SdNoiseDistribution noise,ChoiceBitPacking pa
         std::cout<<"hashed random OT PASS\n";
     }
     s.clear();r.clear();require(!s.mSpin && !r.mSpin);
+    require(s.mB.capacity()==0 && r.mA.capacity()==0 && r.mC.capacity()==0);
     std::cout<<"OT K="<<k<<" params="<<int(p)<<" noise="<<int(noise)<<" packed="<<int(packed)<<" security="<<int(security)<<" pad="<<pad<<" PASS\n";
+}
+static void hashStoreModes() {
+    // Force a 16-byte offset from 32-byte alignment and cover every tail.
+    struct alignas(32) Output {block guard;std::array<block,2> data[34];};
+    Output output{};
+    require(reinterpret_cast<std::uintptr_t>(output.data)%32==16);
+    for(u64 n=0;n<=33;++n) for(bool streaming:{false,true}) {
+        SilentOtExtSender s;
+        s.mRequestNumOts=n;s.mDelta=block(345,679);s.mB.resize(n);
+        output.guard=block(123);output.data[n]={block(123),block(456)};
+        for(u64 i=0;i<n;++i)s.mB[i]=block(7*i+1,13*i+4);
+        s.hash({output.data,n},ChoiceBitPacking::True,streaming);
+        const auto mask=AllOneBlock^OneBlock;
+        for(u64 i=0;i<n;++i) {
+            const auto x=block(7*i+1,13*i+4);
+            require(output.data[i][0]==mAesFixedKey.hashBlock(x&mask));
+            require(output.data[i][1]==mAesFixedKey.hashBlock((x^*s.mDelta)&mask));
+        }
+        require(output.guard==block(123) && output.data[n][0]==block(123) && output.data[n][1]==block(456));
+    }
 }
 int main() {
     try {
+        hashStoreModes();
         if(!spin::capabilities().avx2) return 77;
         arithmetic();
         lifecycle();
@@ -180,6 +238,9 @@ int main() {
         }
         for(auto packed:{ChoiceBitPacking::False,ChoiceBitPacking::True}) {
             protocol(65536,SdNoiseDistribution::Stationary,packed,SilentSecType::SemiHonest);
+            for(u64 requested:{1ull,8193ull,65537ull,262107ull})
+                protocol(requested,SdNoiseDistribution::Stationary,packed,SilentSecType::SemiHonest);
+            protocol(65537,SdNoiseDistribution::Stationary,packed,SilentSecType::Malicious);
             protocol(65536,SdNoiseDistribution::Regular,packed,SilentSecType::Malicious);
         }
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

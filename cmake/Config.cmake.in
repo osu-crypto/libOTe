@@ -9,7 +9,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/buildOptions.cmake")
 find_package(cryptoTools REQUIRED HINTS "${CMAKE_CURRENT_LIST_DIR}/.." ${CMAKE_CURRENT_LIST_DIR})
 if(@ENABLE_SPIN@)
     include(CMakeFindDependencyMacro)
-    find_dependency(spin 0.1 CONFIG)
+    find_dependency(spin 0.2 CONFIG)
 endif()
 
 

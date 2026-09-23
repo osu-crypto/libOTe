@@ -45,16 +45,23 @@ SdConfig SpinConfigure(u64 secParam,u64 requested,SdNoiseDistribution noise) {
     throw std::invalid_argument("SPIN noise configuration has no supported solution");
 }
 
-SpinOtState::SpinOtState(u64 requested,block codeSeed,bool receiver)
-    :seed(codeSeed),code(detail::spinProfile(requested,codeSeed)),blocks(code.make_workspace<block>()) {
+static spin::SetupOptions spinSetup(SdNoiseDistribution noise) {
+    if(noise!=SdNoiseDistribution::Regular && noise!=SdNoiseDistribution::Stationary)
+        throw std::invalid_argument("Invalid SPIN noise configuration");
+    return {noise==SdNoiseDistribution::Stationary?spin::SetupMode::BankedHeuristic:spin::SetupMode::Full};
+}
+SpinOtState::SpinOtState(u64 requested,block codeSeed,bool receiver,SdNoiseDistribution noise)
+    :seed(codeSeed),code(detail::spinProfile(requested,codeSeed),{},spinSetup(noise)),blocks(code.make_workspace<block>()) {
     if(receiver) choices.emplace(code.make_workspace<u8>());
 }
-void prepareSpin(std::unique_ptr<SpinOtState>& state,u64 requested,block seed,bool receiver) {
+void prepareSpin(std::unique_ptr<SpinOtState>& state,u64 requested,block seed,bool receiver,SdNoiseDistribution noise) {
     const auto spec=detail::spinProfile(requested,seed);
-    if(!state || state->seed!=seed || state->code.messageSize()!=spec.message_size ||
+    const auto mode=spinSetup(noise).mode;
+    if(!state || state->code.messageSize()!=spec.message_size ||
        state->code.code().specification().parameters!=spec.parameters ||
-       state->choices.has_value()!=receiver)
-        state=std::make_unique<SpinOtState>(requested,seed,receiver);
+       state->code.code().setup_options().mode!=mode || state->choices.has_value()!=receiver)
+        state=std::make_unique<SpinOtState>(requested,seed,receiver,noise);
+    else {state->code.setCodeSeed(seed);state->seed=seed;}
 }
 void SpinOtState::transpose(span<block> x) {code.transpose_inplace<block>(x,blocks);}
 void SpinOtState::transpose(span<u8> x) {

@@ -263,11 +263,6 @@ namespace osuCrypto
 		constexpr u64 secParam = 128;
         auto param = syndromeDecodingConfigure(secParam,numOTs,mult,noiseType,1);
         const auto codeSeed=block(12528943721987127,98743297823479812);
-#ifdef ENABLE_SPIN
-        std::unique_ptr<SpinOtState> spinState;
-        if(mult==MultType::Spin)
-            spinState=std::make_unique<SpinOtState>(numOTs,codeSeed,false);
-#endif
 		auto format = PprfOutputFormat{};
 
 		if (SdNoiseDistribution::Regular == noiseType)
@@ -302,7 +297,8 @@ namespace osuCrypto
 		mPprfFormat = format;
 		mCodeSeed = codeSeed;
 #ifdef ENABLE_SPIN
-        mSpin=std::move(spinState);
+        // Callers may initialize mSpin and buffers after configure().
+        mSpin.reset();
 #endif
 		mB = {};
 		mEncodeTemp = {};
@@ -399,7 +395,7 @@ namespace osuCrypto
 	// Hashes the OT messages for security
 	void SilentOtExtSender::hash(
 		span<std::array<block, 2>> messages,
-		ChoiceBitPacking type)
+		ChoiceBitPacking type, bool streamingStores)
 	{
 		if (type == ChoiceBitPacking::True)
 		{
@@ -408,12 +404,15 @@ namespace osuCrypto
 			if ((u64)mB.size() != mRequestNumOts || !mDelta)
 				throw std::logic_error("Silent OT sender hash state is not ready. " LOCATION);
 
+			// Dispatch once, outside the hot loop. This is not a coroutine;
+			// aligned SIMD scratch stays in an ordinary stack frame.
+			auto run = [&]<bool streaming>() {
 			// Mask to clear the least significant bit (used for choice bit)
 			block mask = OneBlock ^ AllOneBlock;
 			auto d = *mDelta & mask;
 
 			auto n8 = (u64)messages.size() / 8 * 8;
-			std::array<block, 16> hashBatch;
+			alignas(32) std::array<block, 16> hashBatch;
 
 			std::array<block, 2>* m = messages.data();
 			auto r = mB.data();
@@ -435,21 +434,53 @@ namespace osuCrypto
 				// std::array<block, 2> output objects.
 				for (u64 j = 0; j < 8; ++j)
 				{
+#ifdef OC_ENABLE_VAES
+					// Pack a complete VAES lane pair. Two separate 16-byte stores
+					// followed by a 32-byte load incur store-forwarding stalls.
+					auto pair = _mm256_set_m128i((r[j] ^ d).mData, r[j].mData);
+					std::memcpy(hashBatch.data() + 2 * j, &pair, sizeof(pair));
+#else
 					hashBatch[2 * j] = r[j];
 					hashBatch[2 * j + 1] = r[j] ^ d;
+#endif
 				}
+#ifdef OC_ENABLE_VAES
+				mAesFixedKey.hashBlocks<16>(hashBatch.data(), hashBatch.data());
+#else
 				mAesFixedKey.hashBlocks<8>(hashBatch.data(), hashBatch.data());
 				mAesFixedKey.hashBlocks<8>(hashBatch.data() + 8, hashBatch.data() + 8);
+#endif
+#ifdef OC_ENABLE_SSE2
+				if constexpr(streaming) {
+					// The API promises 16-byte, not 32-byte, output alignment.
+					for (u64 j = 0; j < 8; ++j) {
+						_mm_stream_si128(&m[j][0].mData, hashBatch[2*j].mData);
+						_mm_stream_si128(&m[j][1].mData, hashBatch[2*j+1].mData);
+					}
+				} else
+#endif
+				{
+#ifdef OC_ENABLE_VAES
+				// Copy object representations rather than flattening nested arrays.
+				std::memcpy(m, hashBatch.data(), sizeof(hashBatch));
+#else
 				for (u64 j = 0; j < 8; ++j)
 				{
 					m[j][0] = hashBatch[2 * j];
 					m[j][1] = hashBatch[2 * j + 1];
+				}
+#endif
 				}
 
 				m += 8;
 				r += 8;
 			}
 			
+#ifdef OC_ENABLE_SSE2
+			// Finish streaming stores before cached tail stores (which can share
+			// a cache line when the caller supplies only 16-byte alignment).
+			if constexpr(streaming) _mm_sfence();
+#endif
 			// Process any remaining messages
 			for (u64 i = n8; i < (u64)messages.size(); ++i)
 			{
@@ -459,6 +490,9 @@ namespace osuCrypto
 				messages[i][0] = mAesFixedKey.hashBlock(messages[i][0]);
 				messages[i][1] = mAesFixedKey.hashBlock(messages[i][1]);
 			}
+			};
+			if(streamingStores) run.template operator()<true>();
+			else run.template operator()<false>();
 		}
 		else
 		{
@@ -641,7 +675,7 @@ namespace osuCrypto
 		{
 #ifdef ENABLE_SPIN
         case MultType::Spin:
-            prepareSpin(mSpin,mRequestNumOts,mCodeSeed,false);
+            prepareSpin(mSpin,mRequestNumOts,mCodeSeed,false,mNoiseDist);
             mSpin->transpose(mB);
             break;
 #endif
@@ -715,8 +749,10 @@ namespace osuCrypto
 			break;
 		}
 
-		// Update code seed for future use
-		mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
+		// Regular SPIN reuses its prepared code. Stationary noise needs a fresh
+		// instance each round; leave other encoders' seed schedules unchanged.
+		if (mLpnMultType != MultType::Spin || mNoiseDist == SdNoiseDistribution::Stationary)
+			mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
 	}
 }
 

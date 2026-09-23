@@ -144,6 +144,8 @@ namespace osuCrypto
 		// dense vectors from the sparse vectors.
 		MultType mLpnMultType = DefaultMultType;
 #ifdef ENABLE_SPIN
+        // Optional preparation after configure(): initialize from
+        // (mRequestNumOts, mCodeSeed, true, mNoiseDist). clear() releases it.
         std::unique_ptr<SpinOtState> mSpin;
 #endif
 

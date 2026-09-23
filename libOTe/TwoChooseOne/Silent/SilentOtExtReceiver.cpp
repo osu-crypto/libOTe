@@ -295,11 +295,6 @@ namespace osuCrypto
 		constexpr u64 secParam = 128;
         auto param = syndromeDecodingConfigure(secParam,numOTs,multType,noiseType,1);
         const auto codeSeed=block(12528943721987127,98743297823479812);
-#ifdef ENABLE_SPIN
-        std::unique_ptr<SpinOtState> spinState;
-        if(multType==MultType::Spin)
-            spinState=std::make_unique<SpinOtState>(numOTs,codeSeed,true);
-#endif
 		auto format = PprfOutputFormat{};
 
 		if (SdNoiseDistribution::Regular == noiseType)
@@ -334,7 +329,8 @@ namespace osuCrypto
 		mPprfFormat = format;
 		mCodeSeed = codeSeed;
 #ifdef ENABLE_SPIN
-        mSpin=std::move(spinState);
+        // Callers may initialize mSpin and buffers after configure().
+        mSpin.reset();
 #endif
 		mC = {};
 		mA = {};
@@ -764,7 +760,7 @@ namespace osuCrypto
 		auto points = getPoints();
 #ifdef ENABLE_SPIN
         if(mLpnMultType==MultType::Spin)
-            prepareSpin(mSpin,mRequestNumOts,mCodeSeed,true);
+            prepareSpin(mSpin,mRequestNumOts,mCodeSeed,true,mNoiseDist);
 #endif
 
 		if (packing == ChoiceBitPacking::True)
@@ -989,8 +985,9 @@ namespace osuCrypto
 			setTimePoint("recver.expand.dualEncode2");
 		}
 
-		// Update code seed for next use
-		mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
+		// Match the sender: fixed regular SPIN, fresh stationary instances.
+		if (mLpnMultType != MultType::Spin || mNoiseDist == SdNoiseDistribution::Stationary)
+			mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
 	}
 
 	// Clears internal buffers and state
