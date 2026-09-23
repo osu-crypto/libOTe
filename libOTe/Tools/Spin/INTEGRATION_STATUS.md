@@ -34,8 +34,9 @@
 ## Published dependencies
 
 - SPIN 0.2: `f2010e03d2dbe5003e90c89ba346c743793536a6` on `ladnir/spin_codes` main.
-- cryptoTools VAES: `3e05277bfb5ed11171cd8ec37de04ba354211e69` on
-  `ladnir/cryptoTools`, branch `codex/vaes-aes256`.
+- cryptoTools VAES: `cc54d946a7643795b5f523fe235392de8271a5b3` on
+  `ladnir/cryptoTools` master. AES profiling uses the existing
+  `frontend_cryptoTools -aesBench`; there is no separate benchmark executable.
 - libOTe pins both exact commits. No raw experiment data is included.
 
 ## Public-pin validation (2026-09-23)
@@ -58,8 +59,9 @@ The clean validation is retained at `/tmp/libote-spin-public-TcazgY` on the
 measurement host. Existing installed coproto/macoro/libdivide dependencies
 were reused; SPIN, libOTe, and cryptoTools were freshly fetched and built.
 This was correctness and packaging validation, not another performance run.
-The libOTe and cryptoTools changes are published on integration branches;
-they have not been merged into those repositories' default branches.
+The cryptoTools changes are merged into master. libOTe remains on its integration
+branch. After moving AES profiling into the existing frontend, Linux AES,
+SpinIntegration, and SpinOptions checks passed again at the new cryptoTools pin.
 
 The reduced benchmark configuration cannot build/install libOTe's
 unconditional full test library: with DPF disabled, `Dedup.h` references `DpfMult`;
