@@ -46,7 +46,8 @@ namespace osuCrypto
 		u64 mCuckooSecParam = 0;
 
 		// arbitrary seed for the hash function
-		block mHashSeed = block(3498747860745238796ull, 2347966293789782347ull);
+		// Initialized from the public setup seed; advanced on each expansion.
+		block mHashSeed = ZeroBlock;
 
 		// Jointly sampled public root and the per-partition hash seeds.
 		block mPublicHashSeed = ZeroBlock;
@@ -538,6 +539,8 @@ namespace osuCrypto
 			co_await sock.send(coproto::copy(localHashSeed));
 			co_await sock.recv(remoteHashSeed);
 			mPublicHashSeed = localHashSeed ^ remoteHashSeed;
+			mHashSeed = details::cachedDpfLeafRoot(mPublicHashSeed, 0);
+			mSparseDpf.setTreeHashSeed(details::dpfTreeRoot(mPublicHashSeed, 0));
 
 			auto hashCount = mNumPartitions;
 			mGoldreichHashSeeds.resize(hashCount);
@@ -1250,7 +1253,7 @@ namespace osuCrypto
 			mDedup.clear();
 			mSparseDpf.clear();
 			mTempOutput.clear();
-			mHashSeed = block(3498747860745238796ull, 2347966293789782347ull);
+			mHashSeed = ZeroBlock;
 			mPublicHashSeed = ZeroBlock;
 			mGoldreichHashSeeds.clear();
 			mPrint = false;

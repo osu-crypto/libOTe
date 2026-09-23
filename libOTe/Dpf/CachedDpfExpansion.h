@@ -2,18 +2,41 @@
 
 #include "cryptoTools/Crypto/AES.h"
 
+#include <algorithm>
+#include <array>
 #include <stdexcept>
 
 namespace osuCrypto::details
 {
+	inline constexpr u64 CachedDpfLeafKeyInterval = 1024;
+
+	// Derive purpose-separated roots from the setup's existing public coins.
+	// Keep AES schedules out of callers' coroutine frames.
+#if defined(_MSC_VER)
+	__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+	__attribute__((noinline))
+#endif
+	inline block cachedDpfLeafRoot(block publicSeed, u64 purpose)
+	{
+		return ::osuCrypto::AES(publicSeed).ecbEncBlock(block(purpose, 0x4450464c524f4f54ull));
+	}
+
 	/// Expand cached punctured-DPF leaves for one online payload.
 	///
 	/// sparseSets, leafShares, and expanded contain one row per DPF tree; the
 	/// leaves within corresponding rows have identical order and cardinality.
-	/// hashSeed is advanced once per call so repeated expansions use independent
-	/// leaf masks. The explicit eight-lane body is intentional: this is a hot
+	/// hashSeed advances once per call. A public outer AES derives distinct chunk
+	/// keys for each 1,024 leaves in flattened (tree, leaf) order, including across
+	/// empty/short rows. This is a concrete key schedule, not a PRF proof.
+	/// The explicit eight-lane body is intentional: this is a hot
 	/// kernel and produces better code than the previously generic inner loop.
 	template<typename T>
+#if defined(_MSC_VER)
+	__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+	__attribute__((noinline))
+#endif
 	inline void expandCachedDpfLeaves(
 		u64 partyIdx,
 		auto& sparseSets,
@@ -39,8 +62,11 @@ namespace osuCrypto::details
 
 		auto zero = context.template make<T>();
 		context.zero(zero);
-		::osuCrypto::AES aes(hashSeed);
-		hashSeed = aes.hashBlock(block(35434523452345, 2345324523452345234));
+		const ::osuCrypto::AES outer(hashSeed);
+		hashSeed = outer.ecbEncBlock(block(0, 0x4450464c4e455854ull));
+		::osuCrypto::AES aes;
+		u64 chunk = 0;
+		u64 remaining = 0;
 
 #define CACHED_DPF_SIMD8(VAR, STATEMENT) do { \
 	{ constexpr u64 VAR = 0; STATEMENT; } \
@@ -58,22 +84,35 @@ namespace osuCrypto::details
 			for (u64 tree = 0; tree < expanded.size(); ++tree)
 			{
 				const auto leaves = sparseSets[tree].size();
-				const auto leaves8 = leaves / 8 * 8;
 				auto* values = expanded[tree].data();
 				const auto* seeds = leafShares[tree].data();
-				for (u64 leaf = 0; leaf < leaves8; leaf += 8)
+				for (u64 leaf = 0; leaf < leaves;)
 				{
-					CACHED_DPF_SIMD8(q, context.fromBlock(
-						values[leaf + q], aes.hashBlock(seeds[leaf + q])));
-					CACHED_DPF_SIMD8(q, context.minus(values[leaf + q], zero, values[leaf + q]));
-					CACHED_DPF_SIMD8(q, context.plus(
-						leafSums[tree], leafSums[tree], values[leaf + q]));
-				}
-				for (u64 leaf = leaves8; leaf < leaves; ++leaf)
-				{
-					context.fromBlock(values[leaf], aes.hashBlock(seeds[leaf]));
-					context.minus(values[leaf], zero, values[leaf]);
-					context.plus(leafSums[tree], leafSums[tree], values[leaf]);
+					if (!remaining)
+					{
+						aes.setKey(outer.ecbEncBlock(block(chunk++, 0x4450464c43484e4bull)));
+						remaining = CachedDpfLeafKeyInterval;
+					}
+					const auto count = std::min<u64>(remaining, leaves - leaf);
+					const auto end = leaf + count;
+					const auto end8 = leaf + count / 8 * 8;
+					remaining -= count;
+					for (; leaf < end8; leaf += 8)
+					{
+						std::array<block, 8> hashes;
+						// Keep all eight AES chains together before coefficient conversion.
+						aes.hashBlocks<8>(seeds + leaf, hashes.data());
+						CACHED_DPF_SIMD8(q, context.fromBlock(values[leaf + q], hashes[q]));
+						CACHED_DPF_SIMD8(q, context.minus(values[leaf + q], zero, values[leaf + q]));
+						CACHED_DPF_SIMD8(q, context.plus(
+							leafSums[tree], leafSums[tree], values[leaf + q]));
+					}
+					for (; leaf < end; ++leaf)
+					{
+						context.fromBlock(values[leaf], aes.hashBlock(seeds[leaf]));
+						context.minus(values[leaf], zero, values[leaf]);
+						context.plus(leafSums[tree], leafSums[tree], values[leaf]);
+					}
 				}
 			}
 		}
@@ -82,20 +121,32 @@ namespace osuCrypto::details
 			for (u64 tree = 0; tree < expanded.size(); ++tree)
 			{
 				const auto leaves = sparseSets[tree].size();
-				const auto leaves8 = leaves / 8 * 8;
 				auto* values = expanded[tree].data();
 				const auto* seeds = leafShares[tree].data();
-				for (u64 leaf = 0; leaf < leaves8; leaf += 8)
+				for (u64 leaf = 0; leaf < leaves;)
 				{
-					CACHED_DPF_SIMD8(q, context.fromBlock(
-						values[leaf + q], aes.hashBlock(seeds[leaf + q])));
-					CACHED_DPF_SIMD8(q, context.plus(
-						leafSums[tree], leafSums[tree], values[leaf + q]));
-				}
-				for (u64 leaf = leaves8; leaf < leaves; ++leaf)
-				{
-					context.fromBlock(values[leaf], aes.hashBlock(seeds[leaf]));
-					context.plus(leafSums[tree], leafSums[tree], values[leaf]);
+					if (!remaining)
+					{
+						aes.setKey(outer.ecbEncBlock(block(chunk++, 0x4450464c43484e4bull)));
+						remaining = CachedDpfLeafKeyInterval;
+					}
+					const auto count = std::min<u64>(remaining, leaves - leaf);
+					const auto end = leaf + count;
+					const auto end8 = leaf + count / 8 * 8;
+					remaining -= count;
+					for (; leaf < end8; leaf += 8)
+					{
+						std::array<block, 8> hashes;
+						aes.hashBlocks<8>(seeds + leaf, hashes.data());
+						CACHED_DPF_SIMD8(q, context.fromBlock(values[leaf + q], hashes[q]));
+						CACHED_DPF_SIMD8(q, context.plus(
+							leafSums[tree], leafSums[tree], values[leaf + q]));
+					}
+					for (; leaf < end; ++leaf)
+					{
+						context.fromBlock(values[leaf], aes.hashBlock(seeds[leaf]));
+						context.plus(leafSums[tree], leafSums[tree], values[leaf]);
+					}
 				}
 			}
 		}

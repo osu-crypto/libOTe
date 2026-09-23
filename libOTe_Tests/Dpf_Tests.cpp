@@ -16,6 +16,124 @@
 
 using namespace oc;
 
+void DpfTreeHash_Rekey_Test(const CLP&)
+{
+#ifdef ENABLE_REGULAR_DPF
+	const block seed(731, 927);
+	const AES outer(seed);
+	details::DpfTreeHash hash(seed);
+	// Replayed chunks must agree, regardless of traversal direction.
+	for (u64 counter : { 0ull, 1023ull, 1024ull, 2048ull, 1024ull, 0ull, 2047ull })
+	{
+		const AES expected(outer.ecbEncBlock(block(counter / 1024, 0x445046545245454bull)));
+		if (hash.at(counter).ecbEncBlock(OneBlock) != expected.ecbEncBlock(OneBlock))
+			throw RTE_LOC;
+	}
+	PRNG prng(seed);
+	for (u64 domain : { 2ull, 7ull, 8ull, 9ull, 1023ull, 1024ull, 1025ull, 4097ull })
+	{
+		std::vector<u64> points{ 0, domain / 2, domain - 1 };
+		std::vector<u64> values{ 37, 41, 43 };
+		std::array<RegularDpfKey, 2> keys;
+		RegularDpf<u64>::keyGen(domain, points, values, prng, keys);
+		if (keys[0].mTreeHashSeed != keys[1].mTreeHashSeed) throw RTE_LOC;
+		std::array<std::vector<u64>, 2> outputs;
+		for (u64 party = 0; party < 2; ++party)
+		{
+			std::vector<u8> bytes(keys[party].sizeBytes());
+			keys[party].toBytes(bytes);
+			RegularDpfKey restored;
+			restored.resize<u64>(domain, points.size());
+			restored.fromBytes(bytes);
+			if (!(restored == keys[party])) throw RTE_LOC;
+			outputs[party].resize(domain * points.size());
+			RegularDpf<u64>::expand(party, domain, restored,
+				[&](u64 tree, u64 leaf, u64 value, block) {
+					outputs[party][tree * domain + leaf] = value;
+				});
+		}
+		for (u64 tree = 0; tree < points.size(); ++tree)
+			for (u64 leaf = 0; leaf < domain; ++leaf)
+				if (outputs[0][tree * domain + leaf] + outputs[1][tree * domain + leaf] !=
+					(leaf == points[tree] ? values[tree] : 0))
+					throw RTE_LOC;
+	}
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF not defined.");
+#endif
+}
+
+void CachedDpf_LeafRekey_Test(const CLP&)
+{
+	// Include empty rows, partial SIMD batches, exact chunk boundaries, and
+	// boundaries inside a row after a short preceding tree.
+	const std::vector<std::vector<u64>> shapes{
+		{}, { 0, 0 }, { 1 }, { 1023 }, { 1024 }, { 1025 },
+		{ 0, 1, 7, 1015, 0, 2, 1024, 1033, 0 }, { 4097 }
+	};
+	const block publicSeed(123, 456);
+	const auto root = details::cachedDpfLeafRoot(publicSeed, 0);
+	if (root == details::cachedDpfLeafRoot(publicSeed, 1) ||
+		root == details::cachedDpfLeafRoot(publicSeed ^ OneBlock, 0))
+		throw RTE_LOC;
+	auto test = [&]<typename T>(auto context)
+	{
+		for (const auto& shape : shapes)
+		{
+			std::vector<std::vector<u32>> sets(shape.size());
+			std::vector<std::vector<block>> seeds(shape.size());
+			PRNG prng(block(981, 237));
+			for (u64 row = 0; row < shape.size(); ++row)
+			{
+				sets[row].resize(shape[row]);
+				seeds[row].resize(shape[row]);
+				for (auto& seed : seeds[row])
+					seed = prng.get<block>() & ~OneBlock;
+			}
+			std::array<block, 2> roots{ root, root };
+			std::array<std::vector<std::vector<T>>, 2> expanded;
+			std::array<std::vector<T>, 2> sums;
+			for (u64 round = 0; round < 3; ++round)
+			{
+				const AES outer(roots[0]);
+				for (u64 party = 0; party < 2; ++party)
+					details::expandCachedDpfLeaves<T>(party, sets, seeds,
+						expanded[party], sums[party], roots[party], context);
+				if (roots[0] != roots[1] ||
+					roots[0] != outer.ecbEncBlock(block(0, 0x4450464c4e455854ull)))
+					throw RTE_LOC;
+				auto zero = context.template make<T>();
+				context.zero(zero);
+				for (u64 row = 0, ordinal = 0; row < shape.size(); ++row)
+				{
+					auto sum = zero;
+					for (u64 leaf = 0; leaf < shape[row]; ++leaf, ++ordinal)
+					{
+						// Independent scalar oracle, keyed directly by flat position.
+						AES aes(outer.ecbEncBlock(block(ordinal / 1024, 0x4450464c43484e4bull)));
+						auto expected = zero;
+						context.fromBlock(expected, aes.hashBlock(seeds[row][leaf]));
+						if (!context.eq(expected, expanded[0][row][leaf]))
+							throw RTE_LOC;
+						context.plus(sum, sum, expected);
+						context.minus(expected, zero, expected);
+						if (!context.eq(expected, expanded[1][row][leaf]))
+							throw RTE_LOC;
+					}
+					if (!context.eq(sum, sums[0][row]))
+						throw RTE_LOC;
+					context.minus(sum, zero, sum);
+					if (!context.eq(sum, sums[1][row]))
+						throw RTE_LOC;
+				}
+			}
+		}
+	};
+	test.template operator()<u64>(CoeffCtxInteger{});
+	test.template operator()<block>(CoeffCtxGF128{});
+	test.template operator()<std::array<u64, 4>>(CoeffCtxArray<u64, 4>{});
+}
+
 void RegularDpf_Multiply_Test(const CLP& cmd)
 {
 #if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
@@ -1032,6 +1150,15 @@ void RegularDpf_keyGen_impl(const oc::CLP& cmd)
 
 	prng.SetSeed(block(214234, 2341234));
 
+	// The static generator draws two private root seeds, then the public
+	// tree seed. Supply that same public seed to the interactive replay.
+	PRNG replay(block(214234, 2341234));
+	(void)replay.get<block>();
+	(void)replay.get<block>();
+	const auto treeSeed = replay.get<block>();
+	dpf[0].setTreeHashSeed(treeSeed);
+	dpf[1].setTreeHashSeed(treeSeed);
+
 	// generate the keys using MPC
 	macoro::sync_wait(macoro::when_all_ready(
 		dpf[0].keyGen(points0, values0, prng, key[0], sock[0], ctx),
@@ -1744,6 +1871,251 @@ void SparseDpf_Vec_Test(const oc::CLP& cmd)
 #endif
 }
 
+void SparseDpf_CorrectionEncoding_Test(const oc::CLP& cmd)
+{
+#ifdef ENABLE_SPARSE_DPF
+	// Exercise the actual wire encoder with both possible local low bits.
+	// The peer retains the outgoing bytes, rather than just checking the XOR.
+	for (u64 party = 0; party < 2; ++party)
+	{
+		SparseDpf dpf;
+		dpf.mPartyIdx = party;
+		constexpr u64 count = 32;
+		std::vector<block> sigma(count), peerSigma(count), observedSigma(count);
+		std::vector<std::array<u8, 2>> tau(count), peerTau(count), observedTau(count);
+		std::array<std::array<u64, 8>, 2> laws{};
+		for (u64 i = 0; i < count; ++i)
+		{
+			const u64 a = i / 16, z0 = (i / 4) % 4, z1 = i % 4;
+			peerSigma[i] = block(0x12345678, i ^ party);
+			sigma[i] = block(0, a ? z0 : z1) ^ peerSigma[i];
+			peerTau[i] = { static_cast<u8>((i + party) & 1), static_cast<u8>((i >> 1) & 1) };
+			tau[i] = { static_cast<u8>((z0 & 1) ^ a ^ 1 ^ peerTau[i][0]),
+				static_cast<u8>((z1 & 1) ^ a ^ peerTau[i][1]) };
+		}
+		const auto original = sigma;
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		auto peer = [&]() -> macoro::task<> {
+			co_await sockets[1].recv(observedSigma);
+			co_await sockets[1].recv(observedTau);
+			for (auto& value : peerSigma) value &= ~OneBlock;
+			co_await sockets[1].send(coproto::copy(peerSigma));
+			co_await sockets[1].send(coproto::copy(peerTau));
+		};
+		auto results = macoro::sync_wait(macoro::when_all_ready(
+			dpf.reveal(sigma, tau, sockets[0]), peer()));
+		std::get<0>(results).result();
+		std::get<1>(results).result();
+		for (u64 i = 0; i < count; ++i)
+		{
+			if (observedSigma[i] != (original[i] & ~OneBlock) || dpf.lsb(sigma[i]))
+				throw UnitTestFail("Sparse DPF sent the selected correction's low bit");
+			const u64 a = i / 16, z0 = (i / 4) % 4, z1 = i % 4;
+			if (sigma[i] != block(0, (a ? z0 : z1) & ~1ull) ||
+				tau[i][0] != ((z0 & 1) ^ a ^ 1) || tau[i][1] != ((z1 & 1) ^ a))
+				throw UnitTestFail("Sparse DPF packed correction mismatch");
+			++laws[a][(sigma[i].get<u64>(0) << 1) | (tau[i][0] << 1) | tau[i][1]];
+		}
+		if (laws[0] != laws[1])
+			throw UnitTestFail("Sparse DPF packed opening depends on the secret digit");
+	}
+
+	// The full corrected seed must contain the corrected logical tag.
+	for (u64 seed = 0; seed < 16; ++seed)
+		for (u8 parent = 0; parent < 2; ++parent)
+			for (u8 tau = 0; tau < 2; ++tau)
+			{
+				const auto corrected = SparseDpf::correctSeed(block(0, seed), parent, block(0, 6), tau);
+				if (corrected != block(0, seed ^ (parent * (6 | tau))))
+					throw UnitTestFail("Sparse DPF did not repack its corrected tag");
+			}
+#else
+	throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+#endif
+}
+
+void SparseDpf_InactiveLevel_Test(const oc::CLP& cmd)
+{
+#ifdef ENABLE_SPARSE_DPF
+	PRNG prng(block(0x737061727365ull, 0x6163746976697479ull));
+	const auto provision = [&](auto& dpf) {
+		const auto count = dpf[0].baseOtCount();
+		if (dpf[1].baseOtCount() != count)
+			throw UnitTestFail("Sparse DPF OT counts disagree");
+		std::array<std::vector<std::array<block, 2>>, 2> send;
+		std::array<std::vector<block>, 2> recv;
+		std::array<BitVector, 2> choices;
+		for (u64 p = 0; p < 2; ++p)
+		{
+			send[p].resize(count);
+			recv[p].resize(count);
+			choices[p].resize(count);
+			choices[p].randomize(prng);
+			prng.get(send[p].data(), count);
+			for (u64 j = 0; j < count; ++j)
+				recv[p][j] = send[p][j][choices[p][j]];
+		}
+		dpf[0].setBaseOts(send[0], recv[1], choices[1]);
+		dpf[1].setBaseOts(send[1], recv[0], choices[0]);
+	};
+
+	// Test the actual 256-bit MPC mask with all activity-share combinations,
+	// including a partial packed byte. Public occupancy is always true here.
+	{
+		constexpr u64 n = 13;
+		std::array<SparseDpf, 2> dpf;
+		std::array<std::vector<SparseDpf::Tree>, 2> trees;
+		std::array<BitVector, 2> inactive{ BitVector(n), BitVector(n) };
+		std::array<Matrix<block>, 2> masks{ Matrix<block>(n, 2), Matrix<block>(n, 2) };
+		std::array<Matrix<block>, 2> original{ Matrix<block>(n, 2), Matrix<block>(n, 2) };
+		std::array<Matrix<block>, 2> random{ Matrix<block>(n, 2), Matrix<block>(n, 2) };
+		std::array<PRNG, 2> coins;
+		for (u64 p = 0; p < 2; ++p)
+		{
+			dpf[p].init(p, n, 2, 0);
+			trees[p].resize(n);
+			const auto seed = prng.get<block>();
+			coins[p].SetSeed(seed);
+			PRNG expected(seed);
+			expected.get(random[p].data(), random[p].size());
+			for (u64 r = 0; r < n; ++r)
+			{
+				trees[p][r].mLevels.resize(2);
+				trees[p][r][1].mHasSplit = true;
+				trees[p][r][1].mActivity = (r >> p) & 1;
+				for (u64 j = 0; j < 2; ++j)
+					trees[p][r][1].mZ[j] = original[p](r, j) = prng.get<block>();
+			}
+		}
+		provision(dpf);
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		auto results = macoro::sync_wait(macoro::when_all_ready(
+			dpf[0].maskInactiveLevel(trees[0], 1, inactive[0], masks[0], coins[0], sockets[0]),
+			dpf[1].maskInactiveLevel(trees[1], 1, inactive[1], masks[1], coins[1], sockets[1])));
+		std::get<0>(results).result();
+		std::get<1>(results).result();
+		for (u64 r = 0; r < n; ++r)
+			for (u64 j = 0; j < 2; ++j)
+			{
+				const bool active = ((r ^ (r >> 1)) & 1) != 0;
+				const auto delta = active ? ZeroBlock : random[0](r, j) ^ random[1](r, j);
+				if ((trees[0][r][1].mZ[j] ^ trees[1][r][1].mZ[j]) !=
+					(original[0](r, j) ^ original[1](r, j) ^ delta))
+					throw UnitTestFail("Sparse DPF secret-activity mask is incorrect");
+			}
+		if (dpf[0].mMultiplier.mOtIdx != n || dpf[1].mMultiplier.mOtIdx != n)
+			throw UnitTestFail("Sparse DPF mask did not use one OT per direction per row");
+	}
+
+	// Check activity accumulation in the eight-node kernel and its scalar tail.
+	for (u64 count : { 1ull, 8ull, 13ull, 1023ull, 1024ull, 1025ull })
+	{
+		const block hashSeed(123, 987);
+		const AES outer(hashSeed);
+		details::DpfTreeHash hash(hashSeed);
+		hash.mCounter = 1019; // A chunk ends inside the first SIMD packet.
+		std::vector<u32> support(2 * count);
+		std::iota(support.begin(), support.end(), 0);
+		std::array<u64, 3> capacities{ 2 * count, count, 0 };
+		SparseDpf dpf;
+		SparseDpf::Tree tree;
+		tree.resize(capacities, support.data());
+		tree[2].mSigma = ZeroBlock;
+		tree[2].mTau = { 1, 0 };
+		u8 expected = 0;
+		std::vector<block> expectedSeeds(2 * count);
+		for (u64 i = 0; i < count; ++i)
+		{
+			SparseDpf::Partition part{ support.data() + 2 * i,
+				support.data() + 2 * i + 1, support.data() + 2 * i + 2 };
+			const auto seed = prng.get<block>();
+			const u8 tag = i & 1;
+			expected ^= dpf.lsb(seed) ^ tag;
+			const auto corrected = seed ^ block(0, tag);
+			const AES aes(outer.ecbEncBlock(block((1019 + i) / 1024, 0x445046545245454bull)));
+			expectedSeeds[2 * i] = aes.hashBlock(corrected);
+			expectedSeeds[2 * i + 1] = aes.hashBlock(corrected ^ OneBlock);
+			tree[1].push_back(0, 2, part, seed, tag);
+		}
+		dpf.expandSparseLevel(tree, 1, hash);
+		if (hash.mCounter != 1019 + count) throw RTE_LOC;
+		if (!tree[1].mHasSplit || tree[1].mActivity != expected)
+			throw UnitTestFail("Sparse DPF accumulated uncorrected or duplicate activity tags");
+		for (u64 i = 0; i < 2 * count; ++i)
+			if (tree[0][i].mSeed != expectedSeeds[i])
+				throw UnitTestFail("Sparse DPF expanded a seed with an uncorrected low bit");
+	}
+
+	// The original witness, then uneven subtrees below a dense prefix. Run
+	// both value-producing and cached-seed modes, with every supported alpha.
+	for (u64 profile = 0; profile < 12; ++profile)
+		for (bool cached : { false, true })
+		{
+			const u64 dense = std::array<u64, 4>{ 0, 1, 2, 6 }[profile % 4];
+			const std::vector<u32> support = profile < 4 ? std::vector<u32>{ 1 }
+				: profile < 8 ? std::vector<u32>{ 0, 4 } : dense == 0
+				? std::vector<u32>{ 0, 1, 4 }
+				: std::vector<u32>{ 0, 1, 4, 16, 32, 33, 36, 48 };
+			const u64 n = support.size();
+			const u64 domain = dense == 0 ? 8 : 64;
+			std::vector<std::vector<u32>> sets(n, support);
+			std::array<SparseDpf, 2> dpf;
+			std::array<std::vector<u64>, 2> points{ std::vector<u64>(n), std::vector<u64>(n) };
+			std::array<std::vector<block>, 2> values;
+			std::array<Matrix<block>, 2> output{ Matrix<block>(n, n), Matrix<block>(n, n) };
+			std::array<Matrix<u8>, 2> tags{ Matrix<u8>(n, n), Matrix<u8>(n, n) };
+			std::vector<block> beta(n);
+			std::array<PRNG, 2> coins;
+			for (u64 p = 0; p < 2; ++p)
+			{
+				dpf[p].init(p, n, domain, dense);
+				coins[p].SetSeed(prng.get<block>());
+				if (!cached) values[p].resize(n);
+			}
+			const auto sparseDepth = log2ceil(domain) - dense;
+			if (dpf[0].baseOtCount() != n * (dense + 2 * sparseDepth))
+				throw UnitTestFail("Sparse DPF did not budget mask OTs");
+			for (u64 r = 0; r < n; ++r)
+			{
+				points[0][r] = prng.get<u64>() % domain;
+				points[1][r] = points[0][r] ^ support[r];
+				beta[r] = prng.get<block>();
+				if (!cached)
+				{
+					values[0][r] = prng.get<block>();
+					values[1][r] = values[0][r] ^ beta[r];
+				}
+			}
+			provision(dpf);
+			auto sockets = coproto::LocalAsyncSocket::makePair();
+			auto results = macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].expand(points[0], values[0], [&](auto r, auto x, auto y, auto t) {
+					output[0](r, x) = y; tags[0](r, x) = t;
+				}, coins[0], sets, sockets[0]),
+				dpf[1].expand(points[1], values[1], [&](auto r, auto x, auto y, auto t) {
+					output[1](r, x) = y; tags[1](r, x) = t;
+				}, coins[1], sets, sockets[1])));
+			std::get<0>(results).result();
+			std::get<1>(results).result();
+			for (u64 r = 0; r < n; ++r)
+				for (u64 x = 0; x < n; ++x)
+				{
+					if (cached && ((output[0](r, x) | output[1](r, x)) & OneBlock) != ZeroBlock)
+						throw UnitTestFail("Sparse DPF exported a tag as cached seed entropy");
+					if ((tags[0](r, x) ^ tags[1](r, x)) != (r == x))
+						throw UnitTestFail("Sparse DPF tag invariant failed after masking");
+					if ((!cached || r != x) && (output[0](r, x) ^ output[1](r, x)) !=
+						(r == x ? beta[r] : ZeroBlock))
+						throw UnitTestFail("Sparse DPF output invariant failed after masking");
+				}
+			if (profile >= 8 && dense == 0 && dpf[0].mMultiplier.mOtIdx != 4 * n)
+				throw UnitTestFail("Sparse DPF witness did not mask both public split levels");
+		}
+#else
+	throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+#endif
+}
+
 void SparseDpf_Punct_Test(const oc::CLP& cmd)
 {
 
@@ -2240,7 +2612,7 @@ void Dpf_Audit_Test(const oc::CLP&)
 		std::vector<u8> malformedKey(keys[0].sizeBytes());
 		keys[0].toBytes(malformedKey);
 		auto correctionBitOffset = sizeof(block) *
-			(1 + keys[0].mCorrectionWords.size());
+			(2 + keys[0].mCorrectionWords.size());
 		malformedKey[correctionBitOffset] = 2;
 		auto unchangedKey = keys[0];
 		expectRejected([&] {
@@ -2377,18 +2749,29 @@ void Dpf_Audit_Test(const oc::CLP&)
 					[](auto, auto, auto, auto) {}, prng, sets, sock));
 			}, message);
 		};
-		rejectSet({}, "Sparse DPF accepted an empty sparse set");
 		rejectSet({ 2, 1 }, "Sparse DPF accepted an unsorted sparse set");
 		rejectSet({ 1, 1 }, "Sparse DPF accepted duplicate sparse points");
 		rejectSet({ 1, 8 }, "Sparse DPF accepted an out-of-domain sparse point");
 
 		SparseDpf singleton;
 		singleton.init(0, 1, 8, 0);
+		// These local-only fixtures have no internal nodes or connected peer.
+		singleton.setTreeHashSeed(block(0x4155444954ull, 1));
 		u64 outputs = 0;
 		macoro::sync_wait(singleton.expand(onePoint, noValues,
 			[&](auto, auto, auto, auto) { ++outputs; }, prng, oneSet, sock));
 		if (outputs != 1)
 			throw UnitTestFail("Sparse DPF did not expand a singleton sparse set");
+
+		SparseDpf empty;
+		empty.init(0, 1, 8, 0);
+		empty.setTreeHashSeed(block(0x4155444954ull, 2));
+		std::vector<std::vector<u32>> emptySet(1);
+		outputs = 0;
+		macoro::sync_wait(empty.expand(onePoint, noValues,
+			[&](auto, auto, auto, auto) { ++outputs; }, prng, emptySet, sock));
+		if (outputs != 0)
+			throw UnitTestFail("Sparse DPF emitted a leaf for an empty sparse set");
 
 		{
 			SparseDpf sparse;

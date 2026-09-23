@@ -45,6 +45,7 @@ namespace osuCrypto
 				mProfileEnabled = src.mProfileEnabled;
 				mRegDpf = std::move(src.mRegDpf);
 				mMultiplier = std::move(src.mMultiplier);
+				mNextTreeHashSeed = src.mNextTreeHashSeed;
 				src.clear();
 			}
 			return *this;
@@ -83,6 +84,9 @@ namespace osuCrypto
 
 		/// Multiplier for computing correction words σ using correctionWord protocol
 		DpfMult mMultiplier;
+		std::optional<block> mNextTreeHashSeed;
+		// Public coins for the next expansion only; otherwise agree fresh coins.
+		void setTreeHashSeed(block seed) { mNextTreeHashSeed = seed; }
 
 		/// Initialize sparse DPF with domain size and sparse set
 		/// @param partyIdx Index of the party (0 or 1)
@@ -105,9 +109,11 @@ namespace osuCrypto
 			auto domainDepth = log2ceil(domain);
 			auto actualDenseDepth = std::min(denseDepth, domainDepth);
 			auto depth = domainDepth - actualDenseDepth;
-			if (depth && numPoints > std::numeric_limits<u64>::max() / depth)
+			const auto otDepth = actualDenseDepth + 2 * depth;
+			if (numPoints > std::numeric_limits<u64>::max() / otDepth)
 				throw RTE_LOC;
 
+			mNextTreeHashSeed.reset();
 			mRegDpf.clear();
 			mMultiplier.clear();
 			mNumPoints = numPoints;
@@ -115,13 +121,27 @@ namespace osuCrypto
 			mDomain = domain;
 			mDenseDepth = actualDenseDepth;
 
-			// Initialize multiplier for correction word computation at each level
-			mMultiplier.init(mPartyIdx, depth * mNumPoints);
+			// One bit-times-256-bit mask and one correction selection per sparse level.
+			mMultiplier.init(mPartyIdx, 2 * depth * mNumPoints);
 			if (mDenseDepth)
 				mRegDpf.init(mPartyIdx, 1ull << mDenseDepth, numPoints);
 		}
 
 		u8 lsb(const block& b) { return b.get<u8>(0) & 1; }
+
+		// The correction carries only a seed prefix; its branch-specific low bit
+		// is the logical tag correction. Never expose the selected child's low bit.
+		static block correctSeed(block seed, u8 parentTag, block prefix, u8 tau)
+		{
+			return seed ^ ((prefix | block(0, tau)) & block::allSame<u8>(-parentTag));
+		}
+
+		static block seedPrefix(block seed) { return seed & ~OneBlock; }
+
+		// Only the immediate-payload API needs this conversion. Cached callers
+		// receive the 127-bit prefix and perform their round-specific conversion.
+		// A distinct public key separates leaf conversion from tree expansion.
+		inline static const AES mLeafAes{ block(0x7370617273656470ull, 0x662d6c6561662d31ull) };
 
 
 		bool hasBaseOts() const
@@ -131,7 +151,10 @@ namespace osuCrypto
 		}
 
 		// the number of base OTs required for the protocol. Requires OTs in both directions.
-		u64 baseOtCount() const { return log2ceil(mDomain) * mNumPoints; }
+		u64 baseOtCount() const
+		{
+			return mRegDpf.baseOtCount() + mMultiplier.baseOtCount();
+		}
 
 		/// Set the base OTs for the sparse DPF protocol.
 		void setBaseOts(
@@ -293,8 +316,10 @@ namespace osuCrypto
 				// the left right sums for each level of the tree.
 				std::array<block, 2> mZ;
 
-				// flags to detect if a level of the tree is used.
-				u8 mC = 0;
+				// Public scheduling flag; never use this as the secret activity bit.
+				bool mHasSplit = false;
+				// XOR share of the tags of parents splitting at this level.
+				u8 mActivity = 0;
 
 				// the tau correction bits for each level of the tree.
 				std::array<u8, 2> mTau;
@@ -356,6 +381,9 @@ namespace osuCrypto
 					dst.mNodes_ = span<Node>(nodeData, levelSizes[level]);
 					dst.mPointBase = pointBase;
 					dst.mNodeSize = 0;
+					dst.mZ = { ZeroBlock, ZeroBlock };
+					dst.mHasSplit = false;
+					dst.mActivity = 0;
 					offset += levelSizes[level];
 				}
 			}
@@ -423,7 +451,7 @@ namespace osuCrypto
 #elif defined(__GNUC__) || defined(__clang__)
 		__attribute__((noinline))
 #endif
-		void expandSparseLevel(Tree& tree, u64 level)
+		void expandSparseLevel(Tree& tree, u64 level, details::DpfTreeHash& hash)
 		{
 			const auto size = tree[level].size();
 			auto z0 = tree[level].mZ[0];
@@ -432,88 +460,120 @@ namespace osuCrypto
 			if (mProfileEnabled)
 			{
 				mLastProfile.mExpandedNodes += size;
-				mLastProfile.mBatchedNodes += size / 8 * 8;
-				mLastProfile.mTailNodes += size % 8;
 			}
 
-			// Expand eight independent active subtrees with one SIMD AES kernel.
-			for (; i + 8 <= size; i += 8)
+			while (i < size)
 			{
-				AlignedArray<block, 8> cSeed0;
-				AlignedArray<block, 8> cSeed1;
-				std::array<u8, 8> cTag;
-
-				for (u64 lane = 0; lane < 8; ++lane)
+				const auto count = std::min<u64>(hash.remaining(), size - i);
+				if (mProfileEnabled)
 				{
-					auto& node = tree[level][i + lane];
+					mLastProfile.mBatchedNodes += count / 8 * 8;
+					mLastProfile.mTailNodes += count % 8;
+				}
+				const auto end = i + count;
+				const auto& aes = hash.at(hash.mCounter);
+				hash.mCounter += count;
+				// Expand eight independent active subtrees with one SIMD AES kernel.
+				for (; i + 8 <= end; i += 8)
+				{
+					AlignedArray<block, 8> cSeed0;
+					AlignedArray<block, 8> cSeed1;
+					std::array<u8, 8> cTag;
+
+					for (u64 lane = 0; lane < 8; ++lane)
+					{
+						auto& node = tree[level][i + lane];
+						const auto tag = node.mTag;
+						const auto child = node.mChild;
+						const auto parent = node.mParent;
+						const auto pTau = tree[parent].mTau[child];
+						const auto pSigma = tree[parent].mSigma;
+						const auto seed = correctSeed(node.mSeed, tag, pSigma, pTau);
+
+						cTag[lane] = lsb(node.mSeed) ^ tag * pTau;
+						tree[level].mActivity ^= cTag[lane];
+						cSeed0[lane] = seed ^ ZeroBlock;
+						cSeed1[lane] = seed ^ OneBlock;
+					}
+
+					aes.hashBlocks<8>(cSeed0.data(), cSeed0.data());
+					aes.hashBlocks<8>(cSeed1.data(), cSeed1.data());
+
+					for (u64 lane = 0; lane < 8; ++lane)
+					{
+						z0 ^= cSeed0[lane];
+						z1 ^= cSeed1[lane];
+						auto par = tree[level][i + lane].partition(tree.mPointBase);
+						auto children = par.children();
+
+						auto [leftLevel, leftPartition] = partition(children[0], level);
+						tree[leftLevel].push_back(
+							0, static_cast<u8>(level), leftPartition, cSeed0[lane], cTag[lane]);
+
+						auto [rightLevel, rightPartition] = partition(children[1], level);
+						tree[rightLevel].push_back(
+							1, static_cast<u8>(level), rightPartition, cSeed1[lane], cTag[lane]);
+					}
+				}
+
+				// Scalar tail for levels whose active-node count is not a multiple of eight.
+				for (; i < end; ++i)
+				{
+					auto& node = tree[level][i];
+					auto par = node.partition(tree.mPointBase);
 					const auto tag = node.mTag;
 					const auto child = node.mChild;
 					const auto parent = node.mParent;
 					const auto pTau = tree[parent].mTau[child];
 					const auto pSigma = tree[parent].mSigma;
-					const auto seed = node.mSeed ^
-						(pSigma & block::allSame<u8>(-tag));
+					const auto cTag = lsb(node.mSeed) ^ tag * pTau;
+					tree[level].mActivity ^= cTag;
+					const auto seed = correctSeed(node.mSeed, tag, pSigma, pTau);
 
-					cTag[lane] = lsb(node.mSeed) ^ tag * pTau;
-					cSeed0[lane] = seed ^ ZeroBlock;
-					cSeed1[lane] = seed ^ OneBlock;
-				}
+					std::array<block, 2> cSeed;
+					cSeed[0] = aes.hashBlock(seed ^ ZeroBlock);
+					cSeed[1] = aes.hashBlock(seed ^ OneBlock);
+					z0 ^= cSeed[0];
+					z1 ^= cSeed[1];
 
-				mAesFixedKey.hashBlocks<8>(cSeed0.data(), cSeed0.data());
-				mAesFixedKey.hashBlocks<8>(cSeed1.data(), cSeed1.data());
-
-				for (u64 lane = 0; lane < 8; ++lane)
-				{
-					z0 ^= cSeed0[lane];
-					z1 ^= cSeed1[lane];
-					auto par = tree[level][i + lane].partition(tree.mPointBase);
 					auto children = par.children();
-
-					auto [leftLevel, leftPartition] = partition(children[0], level);
-					tree[leftLevel].push_back(
-						0, static_cast<u8>(level), leftPartition, cSeed0[lane], cTag[lane]);
-
-					auto [rightLevel, rightPartition] = partition(children[1], level);
-					tree[rightLevel].push_back(
-						1, static_cast<u8>(level), rightPartition, cSeed1[lane], cTag[lane]);
+					for (u64 childIndex = 0; childIndex < 2; ++childIndex)
+					{
+						auto [childLevel, childPartition] = partition(children[childIndex], level);
+						tree[childLevel].push_back(
+							static_cast<u8>(childIndex), static_cast<u8>(level),
+							childPartition, cSeed[childIndex], cTag);
+					}
 				}
-			}
 
-			// Scalar tail for levels whose active-node count is not a multiple of eight.
-			for (; i < size; ++i)
-			{
-				auto& node = tree[level][i];
-				auto par = node.partition(tree.mPointBase);
-				const auto tag = node.mTag;
-				const auto child = node.mChild;
-				const auto parent = node.mParent;
-				const auto pTau = tree[parent].mTau[child];
-				const auto pSigma = tree[parent].mSigma;
-				const auto cTag = lsb(node.mSeed) ^ tag * pTau;
-				const auto seed = node.mSeed ^
-					(pSigma & block::allSame<u8>(-tag));
-
-				std::array<block, 2> cSeed;
-				cSeed[0] = mAesFixedKey.hashBlock(seed ^ ZeroBlock);
-				cSeed[1] = mAesFixedKey.hashBlock(seed ^ OneBlock);
-				z0 ^= cSeed[0];
-				z1 ^= cSeed[1];
-
-				auto children = par.children();
-				for (u64 childIndex = 0; childIndex < 2; ++childIndex)
-				{
-					auto [childLevel, childPartition] = partition(children[childIndex], level);
-					tree[childLevel].push_back(
-						static_cast<u8>(childIndex), static_cast<u8>(level),
-						childPartition, cSeed[childIndex], cTag);
-				}
 			}
 
 			if (size)
 			{
 				tree[level].mZ[0] = z0;
 				tree[level].mZ[1] = z1;
-				tree[level].mC = 1;
+				tree[level].mHasSplit = true;
+			}
+		}
+
+		// The buffers are owned by expand and reused across levels. A single
+		// multiplication masks both children, costing one OT in each direction.
+		macoro::task<> maskInactiveLevel(span<Tree> trees, u64 level,
+			BitVector& inactive, Matrix<block>& masks, PRNG& prng,
+			coproto::Socket& sock)
+		{
+			if (inactive.size() != trees.size() || masks.rows() != trees.size() || masks.cols() != 2)
+				throw RTE_LOC;
+			for (u64 r = 0; r < trees.size(); ++r)
+				inactive[r] = trees[r][level].mActivity ^ mPartyIdx;
+			prng.get(masks.data(), masks.size());
+			co_await mMultiplier.multiply(256, inactive.getSpan<u8>(),
+				MatrixView<const u8>(reinterpret_cast<const u8*>(masks.data()), trees.size(), 32),
+				MatrixView<u8>(reinterpret_cast<u8*>(masks.data()), trees.size(), 32), sock);
+			for (u64 r = 0; r < trees.size(); ++r)
+			{
+				trees[r][level].mZ[0] ^= masks(r, 0);
+				trees[r][level].mZ[1] ^= masks(r, 1);
 			}
 		}
 
@@ -532,8 +592,10 @@ namespace osuCrypto
 		/// @tparam SparsePoints Type representing sparse points S. vector<vectors<u32>> or MatrixView<u32>
 		/// 
 		/// @param points Sparse points S represented as indices in [0, 2^D)
-		/// @param values Optional values for each point in S, can be empty
-		/// in which case the active leaf will be random.
+		/// @param values Optional payload shares, one per tree. If empty, output
+		/// cached seed prefixes (blocks with low bit zero) and separate logical
+		/// tags. Convert those prefixes with a round-specific PRG before use as
+		/// value masks. Nonempty payloads use the one-shot leaf hash internally.
 		/// @param output Output callback to receive expanded values. Output(treeIdx, leafIdx, value, tag)
 		/// should be callable.
 		/// @param prng Pseudo-random number generator
@@ -593,6 +655,13 @@ namespace osuCrypto
 						throw RTE_LOC;
 				}
 			}
+
+			const auto setupSeed = co_await details::takeDpfTreeSeed(mNextTreeHashSeed, prng, sock);
+			// Explicit ownership keeps AES schedules out of the coroutine frame.
+			auto treeHash = std::make_unique<details::DpfTreeHash>(
+				details::dpfTreeRoot(setupSeed, 4));
+			if (mDenseDepth)
+				mRegDpf.setTreeHashSeed(details::dpfTreeRoot(setupSeed, 3));
 
 			// the number of levels in the sparse tree.
 			u64 depth = log2ceil(mDomain) - mDenseDepth;
@@ -684,8 +753,10 @@ namespace osuCrypto
 					{
 						auto p = *iter;
 						auto bin = p >> depth;
-						auto seed = seeds(r, bin);
 						auto tag = tags(r, bin);
+						// RegularDpf exports a converted block and a separate tag.
+						// Canonicalize the low bit before entering the sparse tree.
+						auto seed = seedPrefix(seeds(r, bin)) | block(0, tag);
 
 						// Group sparse points by dense bin
 						auto e = std::find_if(iter, end, [bin, depth](auto v) {return (v >> depth) != bin; });
@@ -696,12 +767,12 @@ namespace osuCrypto
 							auto idx = std::distance(sparsePoints[r].data(), points.begin());
 							if (gamma.size())
 							{
-								leafValues[r][idx] = seed;
+								leafValues[r][idx] = mLeafAes.hashBlock(seedPrefix(seed));
 								leafTags[r][idx] = tag;
-								gamma[r] ^= seed;
+								gamma[r] ^= leafValues[r][idx];
 							}
 							else
-								directLeaves.push_back({ r, static_cast<u64>(idx), seed, tag });
+								directLeaves.push_back({ r, static_cast<u64>(idx), seedPrefix(seed), tag });
 						}
 						else if (points.size())
 						{
@@ -711,15 +782,15 @@ namespace osuCrypto
 
 							// Generate children seeds: s'_p := G(s_p)
 							block cSeeds[2];
-							cSeeds[0] = mAesFixedKey.hashBlock(seed ^ ZeroBlock);
-							cSeeds[1] = mAesFixedKey.hashBlock(seed ^ OneBlock);
+							treeHash->children(seed, cSeeds);
 							auto children = root.children();
+							tree[delta].mActivity ^= tag;
 							for (u64 j = 0; j < 2; ++j)
 							{
 								auto [delta2, b2] = partition(children[j], delta);
 								tree[delta2].push_back(j, delta, b2, cSeeds[j], tag);
 								tree[delta].mZ[j] ^= cSeeds[j];
-								tree[delta].mC = 1;
+								tree[delta].mHasSplit = true;
 							}
 						}
 						iter = e;
@@ -739,15 +810,21 @@ namespace osuCrypto
 						continue;
 					if (points.size() == 1)
 					{
-						leafValues[r][0] = prng.get();
-						leafTags[r][0] = mPartyIdx;
+						const auto seed = seedPrefix(prng.get());
 						if (gamma.size())
+						{
+							leafValues[r][0] = mLeafAes.hashBlock(seed);
+							leafTags[r][0] = mPartyIdx;
 							gamma[r] = gamma[r] ^ leafValues[r][0];
+						}
+						else
+							directLeaves.push_back({ r, 0, seed, static_cast<u8>(mPartyIdx) });
 						continue;
 					}
 					// (δ,b) := PARTITION((1,|S|), S)
 					auto [delta, b] = partition(points, depth);
 					auto children = b.children();
+					tree[delta].mActivity = mPartyIdx; // XOR shares of one.
 					for (u64 j = 0; j < 2; ++j)
 					{
 						// (δ',b') := PARTITION(b_j, S)
@@ -756,13 +833,16 @@ namespace osuCrypto
 						// state_δ' := append(state_δ', (j,δ,b',[s],[1]))
 						tree[delta2].push_back(j, delta, b2, seed, mPartyIdx);
 						tree[delta].mZ[j] = seed; // z_{δ,j} := [s]
-						tree[delta].mC = 1; // v_δ = 1
+						tree[delta].mHasSplit = true;
 					}
 				}
 				addTime(mLastProfile.mDenseInitializeMs, profileBegin);
 			}
 
 
+			// Heap-backed masking buffers survive suspension and are reused by all levels.
+			BitVector inactive(depth ? mNumPoints : 0);
+			Matrix<block> masks(depth ? mNumPoints : 0, 2);
 			// STEP 5,6: Top-down expansion (d ∈ {D, D-1, ..., 1})
 			for (u64 d = depth; d; --d)
 			{
@@ -771,18 +851,20 @@ namespace osuCrypto
 				BitVector negAlpha(mNumPoints);
 				std::vector<std::array<u8, 2>> taus(mNumPoints);
 				std::vector<block>  sigmas(mNumPoints);
-				bool used = false;
+				const bool used = std::any_of(trees.begin(), trees.end(),
+					[d](const auto& tree) { return tree.mLevels[d].mHasSplit; });
+				addTime(mLastProfile.mCorrectionPrepareMs, profileBegin);
+				if (used)
+				{
+					profileBegin = profileNow();
+					co_await maskInactiveLevel(trees, d, inactive, masks, prng, sock);
+					addTime(mLastProfile.mCorrectionProtocolMs, profileBegin);
+				}
 
+				profileBegin = profileNow();
 				for (u64 r = 0; r < mNumPoints; ++r)
 				{
 					auto& tree = trees[r];
-
-					// 6a: Randomizing the sums if level unused
-					// z_d := z_d ⊕ (¬v_d) · r where r ← {0,1}^{2×κ}
-					if (tree[d].mC == 0)
-						tree[d].mZ = prng.get();
-					else
-						used = true;
 
 					// Extract bit α_d from secret point α
 					auto alphaD = sparsePoints[r].size() ?
@@ -823,7 +905,7 @@ namespace osuCrypto
 				for (u64 r = 0; r < mNumPoints; ++r)
 				{
 					auto& tree = trees[r];
-					expandSparseLevel(tree, dNext);
+					expandSparseLevel(tree, dNext, *treeHash);
 				}
 				addTime(mLastProfile.mSparseExpandMs, profileBegin);
 			}
@@ -850,21 +932,22 @@ namespace osuCrypto
 					// Apply final correction: [s] := [s] ⊕ [t] · σ_{ρ,j}
 					auto pTau = tree[parent].mTau[j];
 					auto pSigma = tree[parent].mSigma;
-					
+
 					// Convert to leaf values:
 					// [t_{b₁}] := lsb([s])
 					// [y_{b₁}] := (1-2p) · convert_G(msbs([s]))
 					auto b = tree[0][i].mBegin;
 					const auto leafTag = lsb(seed) ^ tag * pTau;
-					const auto leafValue = seed ^ (pSigma & block::allSame<u8>(-tag));
+					const auto leafSeed = seedPrefix(correctSeed(seed, tag, pSigma, pTau));
 					if (gamma.size())
 					{
+						const auto leafValue = mLeafAes.hashBlock(leafSeed);
 						leafTags[r][b] = leafTag;
 						leafValues[r][b] = leafValue;
 						gamma[r] ^= leafValue;
 					}
 					else
-						output(r, b, leafValue, leafTag);
+						output(r, b, leafSeed, leafTag);
 				}
 			}
 			addTime(mLastProfile.mLeafMs, profileBegin);
@@ -917,6 +1000,10 @@ namespace osuCrypto
 		{
 			if (sigma.size() != tau.size())
 				throw RTE_LOC;
+			// Erase each local share's bit before serialization, not just after
+			// reconstruction. Opening it alongside tau leaks the secret branch.
+			for (auto& share : sigma)
+				share = seedPrefix(share);
 			std::vector<block> sBuff(sigma.begin(), sigma.end());
 			std::vector<std::array<u8, 2>> tBuff(tau.begin(), tau.end());
 			auto sendResults = co_await macoro::when_all_ready(
@@ -938,7 +1025,7 @@ namespace osuCrypto
 					throw std::runtime_error("SparseDpf received a non-bit tau value. " LOCATION);
 			for (u64 i = 0; i < sigma.size(); ++i)
 			{
-				sigma[i] = sigma[i] ^ sBuff[i];
+				sigma[i] = seedPrefix(sigma[i] ^ sBuff[i]);
 				tau[i][0] = tau[i][0] ^ tBuff[i][0];
 				tau[i][1] = tau[i][1] ^ tBuff[i][1];
 			}
@@ -956,7 +1043,7 @@ namespace osuCrypto
 				sigma[i] = sigma[i] ^ sBuff[i];
 			}
 		}
-		
+
 
 		void clear()
 		{
@@ -966,6 +1053,7 @@ namespace osuCrypto
 			mDenseDepth = 0;         // Optimization: use regular DPF for dense levels
 			mLastProfile = {};
 			mProfileEnabled = false;
+			mNextTreeHashSeed.reset();
 			mRegDpf.clear();
 			mMultiplier.clear();
 

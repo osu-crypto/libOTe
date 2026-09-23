@@ -173,6 +173,8 @@ namespace osuCrypto
 		std::get<1>(r).result();
 
 		if (dpf[0].mPublicHashSeed != dpf[1].mPublicHashSeed ||
+			dpf[0].mHashSeed != dpf[1].mHashSeed ||
+			dpf[0].mHashSeed != details::cachedDpfLeafRoot(dpf[0].mPublicHashSeed, 0) ||
 			dpf[0].mGoldreichHashSeeds != dpf[1].mGoldreichHashSeeds)
 			throw std::runtime_error("RevCuckoo public hash seeds disagree. " LOCATION);
 		if (dpf[0].mGoldreichHashSeeds.size() != numPartitions)

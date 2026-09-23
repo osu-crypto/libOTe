@@ -11,6 +11,7 @@
 #include "cryptoTools/Common/Matrix.h"
 
 #include "DpfMult.h"
+#include "DpfTreeHash.h"
 #include "libOTe/Tools/CoeffCtx.h" 
 #include <limits>
 
@@ -47,6 +48,7 @@ namespace osuCrypto
 				mLeafVals.clear();
 		}
 		block mSeed;
+		block mTreeHashSeed = ZeroBlock; // Public; serialized with the correction words.
 		Matrix<block> mCorrectionWords;
 		Matrix<u8> mCorrectionBits;
 		std::vector<u8> mLeafVals;
@@ -55,17 +57,20 @@ namespace osuCrypto
 		{
 			return
 				mSeed == o.mSeed &&
+				mTreeHashSeed == o.mTreeHashSeed &&
 				mCorrectionWords == o.mCorrectionWords &&
 				mCorrectionBits == o.mCorrectionBits &&
 				mLeafVals == o.mLeafVals;
 		}
 
-		u64 sizeBytes() { return sizeof(block) * (1 + mCorrectionWords.size()) + mCorrectionBits.size() + mLeafVals.size(); }
+		u64 sizeBytes() { return sizeof(block) * (2 + mCorrectionWords.size()) + mCorrectionBits.size() + mLeafVals.size(); }
 		void toBytes(span<u8> dest)
 		{
 			if (dest.size() != sizeBytes())
 				throw RTE_LOC;
 			copyBytesMin(dest, mSeed);
+			dest = dest.subspan(sizeof(block));
+			copyBytesMin(dest, mTreeHashSeed);
 			dest = dest.subspan(sizeof(block));
 			copyBytesMin(dest, mCorrectionWords);
 			dest = dest.subspan(mCorrectionWords.size() * sizeof(block));
@@ -80,13 +85,15 @@ namespace osuCrypto
 				throw RTE_LOC;
 
 			auto correctionBits = src.subspan(
-				sizeof(block) + mCorrectionWords.size() * sizeof(block),
+				2 * sizeof(block) + mCorrectionWords.size() * sizeof(block),
 				mCorrectionBits.size());
 			for (auto bit : correctionBits)
 				if (bit > 1)
 					throw RTE_LOC;
 
 			copyBytesMin(mSeed, src);
+			src = src.subspan(sizeof(block));
+			copyBytesMin(mTreeHashSeed, src);
 			src = src.subspan(sizeof(block));
 			copyBytesMin(mCorrectionWords, src);
 			src = src.subspan(mCorrectionWords.size() * sizeof(block));
@@ -112,6 +119,14 @@ namespace osuCrypto
 		return o;
 	}
 
+	// Conjectural dense-tree optimization: for t = AES_k(s), the children are
+	// AES::roundEnc(t, s) and t.add_epi64(s). The extra AES round is intended to
+	// disrupt direct bit/carry relations in the related XOR/addition candidate
+	// of Boyle et al., "Correlated Pseudorandomness from Expand-Accumulate Codes",
+	// Section 6.2, Conjecture 6.4: https://eprint.iacr.org/2022/1014.
+	// That work conjectures punctured-function unpredictability; it does not
+	// prove this variant or the DPF simulation claim. Ideal AES alone is not
+	// a proof for this postprocessing or the single-round leaf export below.
 	template<typename T, typename CoeffCtx = DefaultCoeffCtx<T>>
 	struct RegularDpf
 	{
@@ -135,6 +150,7 @@ namespace osuCrypto
 				mDepth = src.mDepth;
 				mNumPoints = src.mNumPoints;
 				mMultiplier = std::move(src.mMultiplier);
+				mNextTreeHashSeed = src.mNextTreeHashSeed;
 				src.clear();
 			}
 			return *this;
@@ -149,6 +165,9 @@ namespace osuCrypto
 		u64 mNumPoints = 0;
 
 		DpfMult mMultiplier;
+		// Optional, already-agreed public seed for the next key generation only.
+		std::optional<block> mNextTreeHashSeed;
+		void setTreeHashSeed(block seed) { mNextTreeHashSeed = seed; }
 
 		// used to initialize the interactive protocols.
 		void init(
@@ -227,6 +246,11 @@ namespace osuCrypto
 		// - values is the plaintext list of values.
 		// - prng is the source of randomness.
 		// - keys is a list of two keys where the result is written.
+#if defined(_MSC_VER)
+		__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+		__attribute__((noinline))
+#endif
 		static void keyGen(
 			u64 domain,
 			span<u64> points,
@@ -246,6 +270,11 @@ namespace osuCrypto
 		// leaves use the physical order of the compact tree kernel. leadIdx is the
 		// logical domain index and must be used if ordered output is required.
 		template<typename Output>
+#if defined(_MSC_VER)
+		__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+		__attribute__((noinline))
+#endif
 		static void expand(
 			u64 partyIdx,
 			u64 domain,
@@ -256,6 +285,11 @@ namespace osuCrypto
 		// As above, but reuse caller-owned scratch independent of the number of
 		// DPF trees. Eight physical lanes are eight public subtrees of one tree.
 		template<typename Output>
+#if defined(_MSC_VER)
+		__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+		__attribute__((noinline))
+#endif
 		static void expand(
 			u64 partyIdx,
 			u64 domain,
@@ -291,6 +325,11 @@ namespace osuCrypto
 			}
 		};
 
+#if defined(_MSC_VER)
+		__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+		__attribute__((noinline))
+#endif
 		static void compactChildSums(
 			u64 partyIdx,
 			u64 targetDepth,
@@ -324,6 +363,7 @@ namespace osuCrypto
 			mDepth = 0;
 			mNumPoints = 0;
 			mMultiplier.clear();
+			mNextTreeHashSeed.reset();
 		}
 	};
 
@@ -350,6 +390,7 @@ namespace osuCrypto
 		if (numPoints > std::numeric_limits<u64>::max() / roundedDomain)
 			throw RTE_LOC;
 
+		mNextTreeHashSeed.reset();
 		mDepth = depth;
 		mPartyIdx = partyIdx;
 		mDomain = domain;
@@ -429,6 +470,8 @@ namespace osuCrypto
 		if (targetDepth == 0 || targetDepth > key.mCorrectionWords.rows())
 			throw RTE_LOC;
 
+		details::DpfTreeHash treeHash(key.mTreeHashSeed);
+		const auto depth = key.mCorrectionWords.rows();
 		std::array<block, 8> currentSeeds{};
 		std::array<block, 8> nextSeeds{};
 		std::array<block, 8> currentTags{};
@@ -449,7 +492,7 @@ namespace osuCrypto
 				if (branch)
 					*BitIterator(&sigma) = key.mCorrectionBits(d - 1, tree);
 				auto corrected = currentSeeds[node] ^ (currentTags[node] & sigma);
-				auto aes = mAesFixedKey.ecbEncBlock(corrected);
+				auto aes = treeHash.at(details::DpfTreeHash::denseStart(tree, depth, d) + node).ecbEncBlock(corrected);
 				nextSeeds[2 * node] = AES::roundEnc(aes, corrected);
 				nextSeeds[2 * node + 1] = aes.add_epi64(corrected);
 				nextTags[2 * node] = tagBit(corrected);
@@ -471,7 +514,7 @@ namespace osuCrypto
 				if (branch)
 					*BitIterator(&sigma) = key.mCorrectionBits(targetDepth - 1, tree);
 				auto corrected = currentSeeds[node] ^ (currentTags[node] & sigma);
-				auto aes = mAesFixedKey.ecbEncBlock(corrected);
+				auto aes = treeHash.at(details::DpfTreeHash::denseStart(tree, depth, targetDepth) + node).ecbEncBlock(corrected);
 				leftAccumulator = leftAccumulator ^ AES::roundEnc(aes, corrected);
 				rightAccumulator = rightAccumulator ^ aes.add_epi64(corrected);
 			}
@@ -527,7 +570,8 @@ namespace osuCrypto
 						childTagBits |= lsb(corrected[lane]) << lane;
 					});
 				}
-				mAesFixedKey.ecbEncBlocks<8>(corrected.data(), aes.data());
+				treeHash.at(details::DpfTreeHash::denseStart(tree, depth, d) + 8 * node)
+				.ecbEncBlocks<8>(corrected.data(), aes.data());
 				REGULAR_DPF_SIMD8(lane, {
 					left[lane] = AES::roundEnc(aes[lane], corrected[lane]);
 					right[lane] = aes[lane].add_epi64(corrected[lane]);
@@ -552,7 +596,8 @@ namespace osuCrypto
 					-static_cast<i8>((parentTagBits >> lane) & 1));
 				corrected[lane] = parent[lane] ^ (tagMask & sigma);
 			});
-			mAesFixedKey.ecbEncBlocks<8>(corrected.data(), aes.data());
+			treeHash.at(details::DpfTreeHash::denseStart(tree, depth, targetDepth) + 8 * node)
+				.ecbEncBlocks<8>(corrected.data(), aes.data());
 
 			// One accumulator pair is shared by all eight subtrees. Keeping this
 			// reduction independent of the physical lanes gives substantially
@@ -598,6 +643,7 @@ namespace osuCrypto
 		const auto numPoints = mNumPoints;
 		outputKey.resize<T>(mDomain, numPoints, ctx, false);
 		outputKey.mSeed = prng.get<block>();
+		outputKey.mTreeHashSeed = co_await details::takeDpfTreeSeed(mNextTreeHashSeed, prng, sock);
 
 		std::vector<std::array<block, 2>> roots(numPoints);
 		std::array<AlignedUnVector<block>, 2> z;
@@ -736,7 +782,7 @@ namespace osuCrypto
 
 
 	template<typename T, typename CoeffCtx>
-	inline void RegularDpf<T, CoeffCtx>::keyGen(
+	void RegularDpf<T, CoeffCtx>::keyGen(
 		u64 domain,
 		span<u64> points,
 		auto&& values,
@@ -755,6 +801,8 @@ namespace osuCrypto
 			throw RTE_LOC;
 
 		auto depth = log2ceil(domain);
+		if (points.size() > std::numeric_limits<u64>::max() / (u64(1) << depth))
+			throw RTE_LOC;
 		keys[0].resize<T>(domain, points.size(), ctx, false);
 		keys[1].resize<T>(domain, points.size(), ctx, false);
 
@@ -763,6 +811,9 @@ namespace osuCrypto
 		std::array<PRNG, 2> prngs{ seed0, seed1 };
 		keys[0].mSeed = prngs[0].getSeed();
 		keys[1].mSeed = prngs[1].getSeed();
+		keys[0].mTreeHashSeed = prng.get<block>();
+		keys[1].mTreeHashSeed = keys[0].mTreeHashSeed;
+		details::DpfTreeHash treeHash(keys[0].mTreeHashSeed);
 		for (u64 i = 0; i < points.size(); ++i)
 		{
 			std::array<block, 2> parentTags;
@@ -814,7 +865,10 @@ namespace osuCrypto
 					if (iter != depth)
 					{
 						auto seed = seeds[p][a];
-						auto temp = mAesFixedKey.ecbEncBlock(seed);
+						const auto prefix = points[i] >> (depth - iter);
+						const auto counter = details::DpfTreeHash::denseStart(i, depth, iter) +
+							details::DpfTreeHash::physicalIndex(prefix, iter);
+						auto temp = treeHash.at(counter).ecbEncBlock(seed);
 						seeds[p][0] = AES::roundEnc(temp, seed);
 						seeds[p][1] = temp.add_epi64(seed);
 					}
@@ -906,6 +960,8 @@ namespace osuCrypto
 		if (!numTrees || depth == 0 || depth >= 64)
 			throw RTE_LOC;
 
+		if (numTrees > std::numeric_limits<u64>::max() / (u64(1) << depth))
+			throw RTE_LOC;
 		const auto leafByteSize = ctx.template byteSize<T>();
 		if (numTrees && leafByteSize > std::numeric_limits<u64>::max() / numTrees)
 			throw RTE_LOC;
@@ -940,6 +996,7 @@ namespace osuCrypto
 		auto leaf = ctx.template make<T>();
 		auto maskedGamma = ctx.template make<T>();
 
+		details::DpfTreeHash treeHash(key.mTreeHashSeed);
 		PRNG basePrng(key.mSeed, 2 * numTrees);
 		for (u64 tree = 0; tree < numTrees; ++tree)
 		{
@@ -964,7 +1021,7 @@ namespace osuCrypto
 					if (branch)
 						*BitIterator(&sigma) = key.mCorrectionBits(d - 1, tree);
 					auto corrected = currentSeeds[node] ^ (currentTags[node] & sigma);
-					auto aes = mAesFixedKey.ecbEncBlock(corrected);
+					auto aes = treeHash.at(details::DpfTreeHash::denseStart(tree, depth, d) + node).ecbEncBlock(corrected);
 					nextSeeds[2 * node] = AES::roundEnc(aes, corrected);
 					nextSeeds[2 * node + 1] = aes.add_epi64(corrected);
 					nextTags[2 * node] = tagBit(corrected);
@@ -1048,7 +1105,8 @@ namespace osuCrypto
 						});
 					}
 
-					mAesFixedKey.ecbEncBlocks<8>(corrected.data(), aes.data());
+					treeHash.at(details::DpfTreeHash::denseStart(tree, depth, d) + 8 * node)
+						.ecbEncBlocks<8>(corrected.data(), aes.data());
 					REGULAR_DPF_SIMD8(lane, {
 						left[lane] = AES::roundEnc(aes[lane], corrected[lane]);
 						right[lane] = aes[lane].add_epi64(corrected[lane]);

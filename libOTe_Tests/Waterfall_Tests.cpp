@@ -1078,6 +1078,11 @@ namespace osuCrypto
 		std::get<1>(setup).result();
 
 		if (!dmpf[0].mSetupComplete || !dmpf[1].mSetupComplete ||
+			dmpf[0].mLeafHashSeed != dmpf[1].mLeafHashSeed ||
+			dmpf[0].mValueScatterHashSeed != dmpf[1].mValueScatterHashSeed ||
+			dmpf[0].mLeafHashSeed == dmpf[0].mValueScatterHashSeed ||
+			dmpf[0].mLeafHashSeed != details::cachedDpfLeafRoot(dmpf[0].mProposal.mPublicSeed, 1) ||
+			dmpf[0].mValueScatterHashSeed != details::cachedDpfLeafRoot(dmpf[0].mProposal.mPublicSeed, 2) ||
 			dmpf[0].mProposal.mPublicSeed != dmpf[1].mProposal.mPublicSeed ||
 			dmpf[0].mProposal.mCoefficients != dmpf[1].mProposal.mCoefficients)
 			throw RTE_LOC;

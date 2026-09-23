@@ -6872,3 +6872,74 @@ Verification:
 
 - The setup protocol continues to reject peers that provide different public
   seeds.
+
+## AUD-213: Sparse-DPF selected correction bit disclosed the secret branch
+
+Status: fixed
+
+The sparse correction opened a full selected child sum alongside both tag
+corrections. Whenever the tags differed, the selected block's low bit
+identified the secret branch. At a directly sampled root this occurred with
+probability 1/2. This defect was independent of AES and of AUD-212's activity
+masking issue.
+
+`SparseDpf::reveal` now erases each local correction share's low bit before
+transmission. Tree correction uses the 127-bit prefix plus the branch's tag
+correction. Scalar, eight-node, leaf, and dense-boundary paths now follow
+that representation. Cached output excludes the tag from seed entropy;
+the immediate-payload API hashes the prefix before using it as a block mask.
+The singleton cached path also avoids unallocated payload storage.
+
+No OT count or wire length changes. Both peers must use the new setup
+encoding. Cached expansion adds no AES calls; immediate-payload output adds
+one leaf-hash call per leaf. The dense AES construction is unchanged and its
+separate proof obligations remain open.
+
+Verification uses `SparseDpf_CorrectionEncoding_Test` (actual socket bytes
+and exact small opening laws) and expanded `SparseDpf_InactiveLevel_Test`
+coverage. All 17 focused WSL/GCC tests passed, including Waterfall and
+Reverse-Cuckoo integration. All nine exact Python encoding checks passed.
+See `analysis/sparse_dpf_correction_encoding.md` for details.
+
+## AUD-212: Sparse-DPF corrections exposed publicly present inactive levels
+
+Status: fixed
+
+Affected code:
+
+- `libOTe/Dpf/SparseDpf.h`, sparse-level activity and correction preparation.
+
+Concern:
+
+The implementation randomized child sums only when a level had no public
+nodes. A public level can contain only off-path parents: their corrected seeds
+agree between parties, so both reconstructed child sums vanish. Opening an
+unmasked correction then reveals information about the secret active path.
+For support `{0,1,4}` and active index `4`, the lower split opens raw sigma
+zero and tag corrections `(1,0)`.
+
+Resolution:
+
+Public scheduling now uses `mHasSplit`; a separate secret share `mActivity`
+accumulates corrected parent tags. Before each scheduled correction, an MPC
+bit-times-256-bit-string multiplication masks both sums when reconstructed
+activity is zero. Each parent contributes once, including at the dense/sparse
+boundary and in the eight-node expansion kernel. Activity is never opened.
+The base-OT reservation includes one additional OT per direction per instance
+and sparse level. Both peers must use the updated provisioning and schedule.
+Cached expansion is unchanged.
+
+The generic multiplication path now owns its aligned AES/SIMD scratch, and
+its OT-swap loop runs in a non-inlined non-coroutine helper. Its arithmetic
+and eight-way unrolling are unchanged.
+
+Verification:
+
+- `SparseDpf_InactiveLevel_Test` checks exact MPC masking for all activity-share
+  combinations, corrected-tag accumulation, the three-point witness, uneven
+  dense-prefix subtrees, output modes, and OT reservation/consumption.
+- All 16 tests in `analysis/run_sparse_dpf_mask_tests.sh` passed under WSL/GCC,
+  including multiplication, sparse-DPF, Waterfall, and Reverse-Cuckoo tests.
+- See `analysis/sparse_dpf_activity_mask.md` for cost, compatibility, and scope.
+  No MSVC build or new performance benchmark was run. The separate concrete
+  generator-security obligations are not resolved by this masking fix.

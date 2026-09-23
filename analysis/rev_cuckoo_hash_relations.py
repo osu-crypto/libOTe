@@ -625,9 +625,11 @@ def relation_factor(parameters: Parameters, relation_weight: int, rank: int) -> 
 def compression_rank_loss_union_bound(parameters: Parameters) -> float:
     """Bound batch rank loss from the final random linear compression.
 
-    The bound conditions on independent lifted rows.  It averages the active
-    row count in one partition over a uniform shuffle, then unions over every
-    partition and set.  Deduplication can only reduce the active row count.
+    Fix the lifted rows and union over at most 2^r-1 nonzero lifted relations,
+    each killed by the independent final matrix with probability 2^-q.
+    This needs no full-row-rank premise and is pointwise in the supports.
+    Average the row count over a uniform shuffle, then union over partitions
+    and sets. Deduplication can only reduce the active row count.
     """
     slots = parameters.partitions * parameters.partition_size
     real_rows = parameters.weight

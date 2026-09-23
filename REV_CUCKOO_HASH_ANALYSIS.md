@@ -494,9 +494,11 @@ bound is `1.517623e-12 = 2^-39.261` at the 56-bit widths. At the 64-bit
 widths, the structural bound is `2.262496e-13 = 2^-42.007`. These bounds are
 independent of the Monte Carlo run.
 
-The final compression requires separate accounting. Conditioned on
-independent lifted rows, a partition containing `r` real rows loses rank with
-probability less than `2^(r-q)`. Averaging this expression over the exact
+The final compression requires separate accounting. Fix the lifted rows in a
+partition containing `r` real rows. Each nonzero lifted relation is killed by
+the independent final matrix with probability `2^-q`; a union bound over at
+most `2^r-1` relations gives less than `2^(r-q)`. This is pointwise in the
+supports and does not require independent lifted rows. Averaging over the exact
 hypergeometric occupancy distribution and taking a union bound over all sets
 and partitions gives:
 
@@ -537,7 +539,79 @@ This raises both widths to 64 bits and gives 41.935 bits under the stated
 model. A higher-degree layer is unnecessary for this target and would require
 a separate analysis.
 
-## 9. Scope limits
+## 9. Correctness after local folded-support rejection
+
+The proposed weak-factor filter is local to each party. It resamples that
+party's four complete regular supports until the sum of their occupied
+residues modulo 128 is at least 61. Count residues separately per polynomial,
+before coefficient cancellation. The two parties reject independently; shuffle
+and evaluator seeds are independent of rejection. This filter is still a
+prototype TODO, not an implemented feature.
+
+The original bound assumes unfiltered supports. Dividing the complete bound
+by the probability that both parties accept gives only 39.946 bits. That
+blanket transfer is unnecessarily loose: each product list depends on just
+one polynomial from each party.
+
+Let $D$ be the number of occupied bins after 16 independent uniform draws
+into 128 bins. This is the unfiltered folded-weight law because 128 divides
+the block length $L=65536$. For independent copies $D_1,\ldots,D_4$, define
+
+\[
+ \alpha:=\Pr[D_1+D_2+D_3+D_4\ge61],
+ \qquad \beta:=\Pr[D_1+D_2+D_3\ge45].
+\]
+
+The exact occupancy recurrence gives
+$\alpha\approx0.5019144582520826$ and $\beta\approx0.7174085983980496$.
+Fix any one polynomial's complete support. Its folded weight is at most 16,
+so the probability that the other three polynomials complete acceptance is
+at most $\beta$. Bayes' rule bounds its marginal density after rejection by
+$\beta/\alpha$ times the unfiltered density.
+
+Independent local rejection therefore multiplies the expectation of any
+nonnegative function of one polynomial pair and independent setup coins by
+at most $(\beta/\alpha)^2\approx2.0430252897413577$. Apply this to each
+product list's structural union contribution, then sum. Do not apply this
+factor directly to an arbitrary event involving all eight polynomials.
+The argument needs no independence between different lists or hash failures.
+
+The compression bound is pointwise in the supports, so it does not incur
+this factor. With the original structural and compression contributions,
+
+\[
+ \epsilon_{\mathrm{filtered}}
+ \le (\beta/\alpha)^2\epsilon_{\mathrm{str}}+\epsilon_{\mathrm{cmp}}
+ = 4.738726728814093\ldots\cdot10^{-13}
+ <2^{-40.940}.
+\]
+
+Thus the support-only rejection rule preserves the 40-bit correctness target
+at $N_{\mathsf R}=2^{20}$, $P=4$, $t=16$, $w=2$, $d=16$, and $q'=q=64$.
+No evaluator, width, or protocol change is needed to close this proof gap.
+This result does not bound leakage, establish rejection-conditioned attack
+costs, or cover coefficient-dependent rejection.
+
+The calculation is implemented in
+`analysis/rev_cuckoo_hash_conditioning.py`. It uses integer occupancy counts,
+an integer Walsh transform for triangular affine-plane counts, the existing
+exact rank enumerator, and rational arithmetic for the final bound. Decimal
+exponents are display values; the comparison with $2^{-40}$ is exact.
+The original unfiltered exponent is 41.934779..., conventionally displayed
+as 41.935; a literal upper-bound statement should round down to 41.934.
+
+From this worktree, reproduce the deterministic calculation and its tests:
+
+```text
+python -m analysis.rev_cuckoo_hash_conditioning
+python -m unittest -v analysis.test_rev_cuckoo_hash_conditioning analysis.test_rev_cuckoo_hash_relations
+```
+
+On 2026-09-05 all 20 tests passed, including exhaustive small-domain checks
+of the occupancy counts, pair-marginal density bound, and integer Walsh
+calculation. The paper records the proof in Appendix B.4.
+
+## 10. Scope limits
 
 This report analyzes rank and consistency of the one-AND-layer hash after the
 input partition is fixed. It does not claim an end-to-end attack probability
@@ -545,7 +619,8 @@ for the current PCGs, and it does not analyze malicious bias of the joint
 coin-tossing step. The current RevCuckoo use is semi-honest, so malicious
 coin-tossing is a separate question.
 
-For RingLPN, the complete bound assumes an ideal uniform shuffle, ideal random
-linear maps, and uniform block offsets. It does not cover a malicious party
+For RingLPN, the unfiltered bound assumes an ideal uniform shuffle, ideal random
+linear maps, and uniform block offsets. Section 9 extends it to the specified
+independent local support-only filter. Neither covers a malicious party
 that biases joint sampling. The AnyField caller still needs its own
 input-distribution analysis.

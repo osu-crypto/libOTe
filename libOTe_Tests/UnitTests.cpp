@@ -109,6 +109,10 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Mtx_Test                      ", SparseDpf_Mtx_Test);
 			tc.add("SparseDpf_Vec_Test                      ", SparseDpf_Vec_Test);
 			tc.add("SparseDpf_Punct_Test                    ", SparseDpf_Punct_Test);
+			tc.add("SparseDpf_InactiveLevel_Test            ", SparseDpf_InactiveLevel_Test);
+			tc.add("CachedDpf_LeafRekey_Test                ", CachedDpf_LeafRekey_Test);
+			tc.add("DpfTreeHash_Rekey_Test                  ", DpfTreeHash_Rekey_Test);
+			tc.add("SparseDpf_CorrectionEncoding_Test       ", SparseDpf_CorrectionEncoding_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
 			tc.add("Dpf_Audit_Test                          ", Dpf_Audit_Test);
 
@@ -229,6 +233,10 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Mtx_Test                       ", SparseDpf_Mtx_Test);
 			tc.add("SparseDpf_Vec_Test                       ", SparseDpf_Vec_Test);
 			tc.add("SparseDpf_Punct_Test                     ", SparseDpf_Punct_Test);
+			tc.add("SparseDpf_InactiveLevel_Test             ", SparseDpf_InactiveLevel_Test);
+			tc.add("CachedDpf_LeafRekey_Test                 ", CachedDpf_LeafRekey_Test);
+			tc.add("DpfTreeHash_Rekey_Test                   ", DpfTreeHash_Rekey_Test);
+			tc.add("SparseDpf_CorrectionEncoding_Test        ", SparseDpf_CorrectionEncoding_Test);
 			
 			tc.add("TritDpf_Proto_Test                       ", TritDpf_Proto_Test);
 			tc.add("Dpf_Audit_Test                           ", Dpf_Audit_Test);

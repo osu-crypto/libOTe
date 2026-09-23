@@ -12,6 +12,7 @@
 
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -839,6 +840,16 @@ namespace osuCrypto
 
 			// Multiply a new vector y with the stored x
 			// Returns xy as secret shares
+			struct MultiplyScratch
+			{
+				AES mHash;
+				AlignedArray<block, 8> mMasks;
+
+				explicit MultiplyScratch(u64 index)
+					: mHash(block(22523656326434, 4523453452346423 * index))
+				{}
+			};
+
 			template<typename F, typename CoeffCtx>
 			macoro::task<> multiply(
 				auto&& yBegin,
@@ -953,7 +964,11 @@ namespace osuCrypto
 
 				ctx.zero(zero[0]);
 
-				AES hash(block(22523656326434, 4523453452346423 * mExpandIdx++));
+				// Explicitly aligned owned storage: neither AES nor SIMD scratch may
+				// reside in a coroutine frame whose allocator might under-align it.
+				auto scratch = std::make_unique<MultiplyScratch>(mExpandIdx++);
+				auto& hash = scratch->mHash;
+				auto& xi = scratch->mMasks;
 
 				for (u64 i = 0; i < n8; i+= 8)
 				{
@@ -961,7 +976,6 @@ namespace osuCrypto
 						t0[q], hash.hashBlock(mSendOts.data()[i + q][0])));
 				
 					// xi = mX[i]
-					block xi[8];
 					u8 xx = mX.data()[i / 8];
 					SIMD8(q, xi[q] = block::allSame<u32>(-((xx >> q) & 1)));
 
@@ -1024,7 +1038,6 @@ namespace osuCrypto
 						mx[q], hash.hashBlock(mRecvOts.data()[i + q])));
 
 					//u8 xi = mX[i];
-					block xi[8];
 					u8 xx = mX.data()[i / 8];
 					SIMD8(q, xi[q] = block::allSame<u32>(-((xx >> q) & 1)));
 
@@ -1097,6 +1110,34 @@ namespace osuCrypto
 
 
 
+#if defined(_MSC_VER)
+		__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+		__attribute__((noinline))
+#endif
+		static void derandomizeSendOts(span<std::array<block, 2>> sendOts,
+			span<const u8> phi)
+		{
+			const auto n = sendOts.size();
+			const auto n8 = n / 8 * 8;
+			for (u64 i = 0; i < n8; i += 8)
+			{
+				const u8 pb = phi[i / 8];
+				block diff[8];
+				SIMD8(q, diff[q] = sendOts[i + q][0] ^ sendOts[i + q][1]);
+				SIMD8(q, diff[q] &= block::allSame<i32>(-i32((pb >> q) & 1)));
+				SIMD8(q, sendOts[i + q][0] ^= diff[q]);
+				SIMD8(q, sendOts[i + q][1] ^= diff[q]);
+			}
+			for (u64 i = n8; i < n; ++i)
+			{
+				auto diff = sendOts[i][0] ^ sendOts[i][1];
+				diff &= block::allSame<u32>(-u32((phi[i / 8] >> (i % 8)) & 1));
+				sendOts[i][0] ^= diff;
+				sendOts[i][1] ^= diff;
+			}
+		}
+
 		// Setup phase for multiplication session
 		// Input: shared bit vector x
 		// Returns: MultSession that can be used for multiple multiplications
@@ -1147,25 +1188,8 @@ namespace osuCrypto
 			AlignedUnVector<u8> phi1(x.size());
 			co_await sock.recv(phi1);
 
-			// if(phi1[i]) swap(mSendOts[i][0], mSendOts[i][1]);
-			auto n8 = n / 8 * 8;
-			for (u64 i = 0; i < n8; i += 8)
-			{
-				u8 pb = phi1[i/8];
-				block diff[8];
-				SIMD8(q, diff[q] = session.mSendOts[i + q][0] ^ session.mSendOts[i + q][1]);
-				SIMD8(q, diff[q] &= block::allSame<i32>(-i32((pb >> q) & 1)));
-				SIMD8(q, session.mSendOts[i+q][0] ^= diff[q]);
-				SIMD8(q, session.mSendOts[i+q][1] ^= diff[q]);
-
-			}
-			for (u64 i = n8; i < n; ++i)
-			{
-				auto diff = session.mSendOts[i][0] ^ session.mSendOts[i][1];
-				diff &= block::allSame<u32>(-u32(bit(phi1, i)));
-				session.mSendOts[i][0] ^= diff;
-				session.mSendOts[i][1] ^= diff;
-			}
+			// Keep the unrolled SIMD swap kernel outside the coroutine frame.
+			derandomizeSendOts(session.mSendOts, phi1);
 
 			co_return session;
 		}

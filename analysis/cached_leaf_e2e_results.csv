@@ -1,0 +1,13 @@
+variant,profile,logN,setup_ms,median_expand_ms,min_expand_ms,max_expand_ms,expand_bytes,result
+before,waterfall4,20,792.2702,47.8237,45.8838,49.1148,4800,checked
+after,waterfall4,20,676.3447,46.1168,41.6495,48.0783,4800,checked
+after,waterfall4,20,687.4215,44.7006,41.2604,47.8014,4800,checked
+before,waterfall4,20,671.3316,48.3446,46.1339,54.1900,4800,checked
+before,waterfall3,20,529.3922,38.4365,36.5234,42.0001,12992,checked
+after,waterfall3,20,484.4075,36.5984,34.6102,40.4385,12992,checked
+after,waterfall3,20,488.8910,37.3634,35.9803,46.3258,12992,checked
+before,waterfall3,20,468.9061,36.8245,35.6128,42.0730,12992,checked
+before,rev3,20,1891.2291,31.0824,28.6138,36.2018,4656,checked
+after,rev3,20,1991.4576,29.1517,27.4675,41.0397,4656,checked
+after,rev3,20,2001.3501,26.9536,26.4240,30.8127,4656,checked
+before,rev3,20,2018.5668,30.9982,28.0081,32.0670,4656,checked

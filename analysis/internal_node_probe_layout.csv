@@ -1,0 +1,5 @@
+profile,input_offset_bytes,median_leaf_ms,first_output_offset_bytes,result
+rev3,0,5.2399,800,checked
+rev3,64,5.1635,800,checked
+rev3,512,5.3261,800,checked
+rev3,2048,5.2797,800,checked

@@ -92,8 +92,9 @@ namespace osuCrypto
 		VecT mValueScatterGamma;
 		VecT mValueScatterDifference;
 		VecT mDedupBatchWork;
-		block mValueScatterHashSeed = block(0x7363617474657221ull, 0x76616c75652d6470ull);
-		block mLeafHashSeed = block(3498747860745238796ull, 2347966293789782347ull);
+		// Purpose-separated roots from public setup coins, advanced per expansion.
+		block mValueScatterHashSeed = ZeroBlock;
+		block mLeafHashSeed = ZeroBlock;
 
 		struct BaseCount
 		{
@@ -129,8 +130,8 @@ namespace osuCrypto
 			mIndexBitCount = log2ceil(domain + 1);
 			mConfig = std::move(config);
 			mCharacteristicTwo = characteristicTwo;
-			mValueScatterHashSeed = block(0x7363617474657221ull, 0x76616c75652d6470ull);
-			mLeafHashSeed = block(3498747860745238796ull, 2347966293789782347ull);
+			mValueScatterHashSeed = ZeroBlock;
+			mLeafHashSeed = ZeroBlock;
 
 			mDedup.resize(mNumSets);
 			for (auto& dedup : mDedup)
@@ -535,6 +536,10 @@ namespace osuCrypto
 
 				auto candidateState = co_await mCandidateGenerator.prepare(addresses, prng, socket);
 				mProposal = co_await mCandidateGenerator.sample(candidateState, prng, socket);
+				mLeafHashSeed = details::cachedDpfLeafRoot(mProposal.mPublicSeed, 1);
+				mValueScatterHashSeed = details::cachedDpfLeafRoot(mProposal.mPublicSeed, 2);
+				mSparseDpf.setTreeHashSeed(details::dpfTreeRoot(mProposal.mPublicSeed, 1));
+				mValueScatterDpf.setTreeHashSeed(details::dpfTreeRoot(mProposal.mPublicSeed, 2));
 				setTimePoint("candidates done");
 
 				auto placement = co_await route(mProposal.mCandidates, socket);
@@ -759,48 +764,14 @@ namespace osuCrypto
 			if (mValuePayload.size() != mNumSets * columns)
 				context.resize(mValuePayload, mNumSets * columns);
 			context.zero(mValuePayload.begin(), mValuePayload.end());
-			if (mValueScatterExpanded.size() != rows)
-				mValueScatterExpanded.resize(rows);
-			if (mValueScatterSums.size() != rows)
-				context.resize(mValueScatterSums, rows);
-			context.zero(mValueScatterSums.begin(), mValueScatterSums.end());
-			auto scatterZero = context.template make<T>();
-			context.zero(scatterZero);
-			AES scatterAes(mValueScatterHashSeed);
-			mValueScatterHashSeed = scatterAes.hashBlock(
-				block(0x7363617474657221ull, 0x686173682d736565ull));
-			for (u64 row = 0; row < rows; ++row)
-			{
-				if (mValueScatterExpanded[row].size() != columns)
-					context.resize(mValueScatterExpanded[row], columns);
-				auto* expanded = mValueScatterExpanded[row].data();
-				const auto* shares = mValueScatterLeafShares[row].data();
-				const auto columns8 = columns / 8 * 8;
-				for (u64 column = 0; column < columns8; column += 8)
-				{
-					WATERFALL_SIMD8(q, context.fromBlock(
-						expanded[column + q],
-						scatterAes.hashBlock(shares[column + q])));
-					if (mPartyIdx)
-						WATERFALL_SIMD8(q, context.minus(
-							expanded[column + q], scatterZero, expanded[column + q]));
-					WATERFALL_SIMD8(q, context.plus(
-						mValueScatterSums[row],
-						mValueScatterSums[row],
-						expanded[column + q]));
-				}
-				for (u64 column = columns8; column < columns; ++column)
-				{
-					context.fromBlock(
-						expanded[column], scatterAes.hashBlock(shares[column]));
-					if (mPartyIdx)
-						context.minus(expanded[column], scatterZero, expanded[column]);
-					context.plus(
-						mValueScatterSums[row],
-						mValueScatterSums[row],
-						expanded[column]);
-				}
-			}
+			details::expandCachedDpfLeaves<T>(
+				mPartyIdx,
+				mValueScatterSets,
+				mValueScatterLeafShares,
+				mValueScatterExpanded,
+				mValueScatterSums,
+				mValueScatterHashSeed,
+				context);
 
 			if (mValueScatterGamma.size() != rows)
 				context.resize(mValueScatterGamma, rows);
