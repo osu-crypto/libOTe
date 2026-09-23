@@ -24,6 +24,7 @@ set(SRCS
     Ntt_Tests.cpp
     Poly_Tests.cpp
     RingLpn_Tests.cpp
+    RingLpnSupport_Tests.cpp
     BinarySolver_Tests.cpp
     Goldilocks_Tests.cpp
     Gmw_Tests.cpp

@@ -28,6 +28,7 @@
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Dpf/RevCuckooDmpf.h"
+#include "libOTe/Triple/RingLpn/RingLpnSupport.h"
 #include "cryptoTools/Circuit/BetaCircuit.h"
 
 namespace osuCrypto
@@ -246,6 +247,26 @@ namespace osuCrypto
 
 		// samples the sparse polynomial coefficients and their product.
 		task<> tensor(PRNG& prng, Socket& sock);
+
+		// Other parameter sets retain their experimental, unfiltered sampler.
+		bool usesSupportFilter() const
+		{
+			return SF::order() == RingLpnSupportFilter::FieldOrder &&
+				RingLpnSupportFilter::matches(mN, mNumPolys, mPolyWeight);
+		}
+
+		// Non-coroutine: rejection and its scratch storage finish before routing.
+		void sampleSparsePositions(PRNG& prng)
+		{
+			if (!isInitialized() || hasDpf())
+				throw std::logic_error("RingLPN supports must be sampled before DPF setup.");
+			mSparsePositions.resize(mNumPolys, mPolyWeight);
+			if (usesSupportFilter())
+				RingLpnSupportFilter::sample(mSparsePositions, prng);
+			else
+				for (auto& offset : mSparsePositions)
+					offset = prng.get<u64>() % mBlockSize;
+		}
 
 		// sample random coefficients for the sparse polynomial and tensor
 		// them with the other parties coefficients. The result is shared
@@ -1031,21 +1052,7 @@ namespace osuCrypto
 		// the polyIdx'th row contains the coeffs for the polyIdx'th poly.
 		// the position is within the corresponding block, not the
 		// overall polynomial.
-		mSparsePositions.resize(mNumPolys, mPolyWeight);
-
-		// TODO(Security): Rejection-sample the complete regular support against
-		// the smallest relevant 1-sparse factor before committing to it. For the
-		// current (mNumPolys, mPolyWeight) = (4, 16) parameter set, fold each
-		// absolute position blockIdx * mBlockSize + offset modulo 128, separately
-		// for each polynomial, and require at least 61 distinct folded positions
-		// in total. This accepts with probability about 0.502. Generalize the
-		// factor degree and minimum weight as Ring-LPN parameters rather than
-		// hard-coding them here. See AUD-001 in the repository audit tracker.
-
-		// select random positions for the sparse polynomial.
-		// The polyIdx'th is the noise position in the polyIdx'th block.
-		for (u64 i = 0; i < mSparsePositions.size(); ++i)
-			mSparsePositions(i) = prng.get<u64>() % mBlockSize;
+		sampleSparsePositions(prng);
 
 
 		// we will expand them the main DPF to get the full shared polynomial. 

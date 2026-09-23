@@ -541,12 +541,14 @@ a separate analysis.
 
 ## 9. Correctness after local folded-support rejection
 
-The proposed weak-factor filter is local to each party. It resamples that
+The weak-factor filter is local to each party. It resamples that
 party's four complete regular supports until the sum of their occupied
 residues modulo 128 is at least 61. Count residues separately per polynomial,
 before coefficient cancellation. The two parties reject independently; shuffle
-and evaluator seeds are independent of rejection. This filter is still a
-prototype TODO, not an implemented feature.
+and evaluator seeds are independent of rejection. `RingLpnTriple` implements
+this filter for the Goldilocks, degree-2^20, four-polynomial, weight-16 profile.
+Other profiles retain the unfiltered sampler. See
+`analysis/ring_lpn_support_filter.md` for selection and regression coverage.
 
 The original bound assumes unfiltered supports. Dividing the complete bound
 by the probability that both parties accept gives only 39.946 bits. That

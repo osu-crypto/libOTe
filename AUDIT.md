@@ -13,11 +13,12 @@ Status values:
 The original general audit closed on 2026-08-27 after the cleanup and
 verification pass. Follow-up reviews retain the same finding sequence.
 The RevCuckoo implementation was excluded because it is undergoing a separate
-set of substantial changes. AUD-001 remains intentionally deferred.
+set of substantial changes. AUD-001 is now fixed for the analyzed profile;
+other Ring-LPN profiles still require separate parameter analysis.
 
 ## AUD-001: Ring-LPN regular support can lose effective weight after factor folding
 
-Status: deferred
+Status: fixed (analyzed Goldilocks profile only)
 
 Affected code:
 
@@ -45,15 +46,29 @@ reduce the effective noise weight and weaken the intended concrete security.
 The precise security loss is not reproduced in this repository, so no numeric
 severity is assigned here.
 
-Resolution plan:
+Resolution:
 
-1. Make the relevant factor degree and minimum folded weight explicit Ring-LPN
-   parameters.
-2. Rejection-sample the complete regular support before committing to it.
-3. Add a deterministic regression test that constructs collision-heavy
-   candidates and verifies rejection at weights below the configured bound.
-4. Reassess the concrete threshold when the supporting attack analysis is
-   available.
+`RingLpnSupportFilter` names the analyzed profile and its fixed degree-128,
+minimum-weight-61 rule. `genDpf` calls the non-coroutine support sampler
+before routing. Filtering activates only for scalar field order
+`0xffffffff00000001`, ring degree 2^20, four polynomials, and weight 16.
+It applies to both DMPF backends and both output modes. Each rejected tuple
+is replaced in full. Repeated expansions retain the accepted supports.
+Other parameter sets retain the legacy sampler and remain unvalidated;
+the threshold is not a general Ring-LPN parameter generator.
+
+Regression coverage:
+
+`RingLpn_SupportFilter_test` checks weights 4, 60, 61, and 64; distinct
+polynomial identities; residues in both halves of the degree-128 factor;
+full-tuple rejection; and agreement with an independent set-based sampler.
+It also checks field/dimension selection, OLE versus triple ring sizing,
+reinitialization, and preservation of the unsupported profiles' sampler.
+This is a support-distribution fix, not a proof of the full OLE construction.
+
+The focused WSL/GCC support-filter, audit, stationary, and OLE tests pass
+(`-trials 2`, with both DMPF backends for reuse), as do all seven exact Python
+hash-conditioning checks.
 
 ## AUD-002: KOS and IKNP receiver splitting derived incomplete child state
 

@@ -35,9 +35,13 @@ the inherited AES evaluator.
   parameter generators. Other sizes require their own routing-error analysis.
 - Reverse Cuckoo leaks support information and requires the stated
   application-specific assumption. Do not use it as a generic private DMPF.
-- Ring-LPN support rejection is still deferred as AUD-001. The current
-  sampler does not implement the filtered parameter recipe used by the
-  paper. Do not claim that the unfiltered implementation meets that recipe.
+- Ring-LPN setup filters the analyzed Goldilocks profile: ring degree 2^20,
+  four polynomials, and weight 16. Each party resamples its complete support
+  tuple until at least 61 residues modulo 128 are occupied, counting each
+  polynomial separately. The filter applies to both DMPF backends and both
+  OLE/triple output modes, based on the rounded ring degree. Other fields,
+  degrees, and noise dimensions retain unfiltered sampling; they have no
+  security claim from this profile. Accepted supports persist across reuse.
 - A complete application-level OLE simulation/composition argument remains
   separate from the DMPF proof. Historical timing tables predate the full
   set of mask, filtering, and AES changes; they are not current-release
