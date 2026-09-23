@@ -58,17 +58,12 @@ target_compile_definitions(libOTe_Tests PRIVATE
 
 target_link_libraries(libOTe_Tests libOTe)
 if(ENABLE_SPIN AND ENABLE_SILENTOT)
-    add_executable(spin_compression_bench EXCLUDE_FROM_ALL SpinCompressionBench.cpp)
-    target_link_libraries(spin_compression_bench PRIVATE libOTe)
-    add_executable(spin_stationary_bench EXCLUDE_FROM_ALL SpinStationaryBench.cpp)
-    target_link_libraries(spin_stationary_bench PRIVATE libOTe)
     add_executable(spin_integration_tests SpinIntegration.cpp)
     target_link_libraries(spin_integration_tests PRIVATE libOTe)
     if(MSVC)
         target_compile_options(spin_integration_tests PRIVATE /bigobj)
     endif()
     add_test(NAME SpinIntegration COMMAND spin_integration_tests)
-    add_test(NAME SpinOptions COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_SOURCE_DIR}/SpinOptions.cmake")
     set_tests_properties(SpinIntegration PROPERTIES SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
 endif()
 

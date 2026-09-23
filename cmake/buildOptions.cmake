@@ -99,9 +99,8 @@ option(ENABLE_LOGVOLE        "Build the LogVole protocol." ON)
 option(ENABLE_FOLEAGE        "Build the Foleage OLE protocol." OFF)
 option(ENABLE_RINGLPN        "Build the Foleage OLE protocol." OFF)
 
-# Make the encoder available with code-based protocols; preserve an explicit OFF.
-EVAL(LIBOTE_SPIN_DEFAULT ENABLE_SILENTOT OR ENABLE_SILENT_VOLE OR
-    ENABLE_LOGVOLE OR ENABLE_FOLEAGE OR ENABLE_RINGLPN OR ENABLE_BITPOLYMUL)
+# Make the encoder available with Silent OT/VOLE; preserve an explicit OFF.
+EVAL(LIBOTE_SPIN_DEFAULT ENABLE_SILENTOT OR ENABLE_SILENT_VOLE)
 option(ENABLE_SPIN "Enable the standalone SPIN encoder and Silent OT integration" ${LIBOTE_SPIN_DEFAULT})
 if(ENABLE_SPIN AND CMAKE_VERSION VERSION_LESS 3.20)
     message(FATAL_ERROR "SPIN requires CMake 3.20 or newer. Set ENABLE_SPIN=OFF to omit it.")

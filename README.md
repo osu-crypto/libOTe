@@ -123,20 +123,6 @@ on platform/dependencies. The `ON`/`OFF` options include
 
  Addition options can be set for cryptoTools. See the cmake output.
 
-### SPIN Encoder
-
-Silent OT supports `MultType::Spin`, backed by the standalone MIT-licensed
-[SPIN library](https://github.com/ladnir/spin_codes). libOTe chooses the code
-parameters and rounds small requests up internally; callers need no extra
-SPIN configuration. The default Silent OT encoder is unchanged.
-
-`ENABLE_SPIN` defaults on when a code-based feature is enabled. The dependency
-can be installed, supplied with `LIBOTE_SPIN_SOURCE`, or fetched at a pinned
-revision with `FETCH_SPIN=ON` (also covered by `FETCH_AUTO`). The current SPIN
-library requires x86-64 with AVX2; use `ENABLE_SPIN=OFF` on ARM.
-See the [SPIN integration guide](libOTe/Tools/Spin/README.md) for build options,
-generic coefficient contexts, and the internal parameter policy.
-
 ### Dependencies
 
 Dependencies can be managed by cmake/build.py or installed via an external tool. If an external tool is used install to system location or set  `-D CMAKE_PREFIX_PATH=path/to/install`. By default `build.py` calls cmake with the command line argument
@@ -145,6 +131,11 @@ Dependencies can be managed by cmake/build.py or installed via an external tool.
 ```
 . This tells cmake to first look for dependencies on *the system* and if not found then it will be downloaded and built automatically. If set to `false` then the build will fail if not found. Each dependency can downloaded and build for you by explicitly setting it's `FETCH_***` variable to `true`. See blow. The python `build.py` script by default sets `FETCH_AUTO=true` and can be set to `false` by calling it with `--noauto`.
 
+
+**[SPIN](https://github.com/ladnir/spin_codes) (Silent OT encoder):**
+`ENABLE_SPIN` defaults on with Silent OT or Silent VOLE. Install SPIN 0.2 or
+use `FETCH_SPIN=ON` / `FETCH_AUTO`. Requires CMake 3.20+ and x86-64 with AVX2;
+set `ENABLE_SPIN=OFF` to omit it. See the [usage guide](libOTe/Tools/Spin/README.md).
 
 **Enabling/Disabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
  The library can be built with Relic as

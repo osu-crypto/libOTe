@@ -1,5 +1,9 @@
 // Diagnostic only: cached seeds are synthetic. Uses the production leaf,
 // SPIN adapter, and sender-hash paths; this is not a full OT benchmark.
+#include "SpinBench.h"
+#include "libOTe/config.h"
+#include <iostream>
+#if defined(ENABLE_SPIN) && defined(ENABLE_SILENTOT)
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "libOTe/Tools/Pprf/StationaryPprf.h"
 #include "coproto/Socket/BufferingSocket.h"
@@ -8,14 +12,16 @@
 #include <iomanip>
 #include <iostream>
 using namespace osuCrypto;
+namespace {
 using Clock=std::chrono::steady_clock;
 static double ms(Clock::time_point a,Clock::time_point b) {
     return std::chrono::duration<double,std::milli>(b-a).count();
 }
-int main(int argc,char** argv) {try {
-    if(argc!=4) throw std::invalid_argument("fixed|frozen|fresh bare|copy|leaves|resident|stream|stream-nt|pipeline trials");
-    const std::string family=argv[1],context=argv[2];
-    const unsigned trials=std::stoul(argv[3]);
+} // namespace
+int spinCompressionBenchmark(CLP& cmd) {try {
+    const auto family=cmd.getOr<std::string>("family","fixed");
+    const auto context=cmd.getOr<std::string>("context","bare");
+    const unsigned trials=cmd.getOr<unsigned>("trials",31);
     if((family!="fixed" && family!="frozen" && family!="fresh") ||
        (context!="bare" && context!="copy" && context!="leaves" && context!="resident" && context!="stream" && context!="stream-nt" && context!="pipeline") || !trials)
         throw std::invalid_argument("invalid diagnostic mode");
@@ -96,4 +102,10 @@ int main(int argc,char** argv) {try {
     for(size_t i=0;i<samples.size();++i) {if(i)std::cout<<',';auto x=samples[i];
         std::cout<<'['<<x[0]<<','<<x[1]<<','<<x[2]<<','<<x[3]<<']';}
     std::cout<<"]}\n";
+    return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+#else
+int spinCompressionBenchmark(osuCrypto::CLP&) {
+    std::cerr<<"SPIN compression benchmark requires ENABLE_SPIN and ENABLE_SILENTOT\n";return 1;
+}
+#endif

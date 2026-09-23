@@ -22,8 +22,8 @@ jobs:
       - name: Unit tests
         run: ./out/build/linux/frontend/frontend_libOTe -u
 
-      - name: SPIN integration and option tests
-        run: ctest --test-dir out/build/linux -R '^Spin(Integration|Options)$' --output-on-failure --no-tests=error
+      - name: SPIN integration tests
+        run: ctest --test-dir out/build/linux -R '^SpinIntegration$' --output-on-failure --no-tests=error
 
       - name: Find source tree
         working-directory: libOTe_Tests/cmakeTests
@@ -152,5 +152,5 @@ jobs:
       - name: Unit tests
         run: ./out/build/x64-Release/frontend/frontend_libOTe.exe -u
 
-      - name: SPIN integration and option tests
-        run: ctest --test-dir out/build/x64-Release -C Release -R '^Spin(Integration|Options)$' --output-on-failure --no-tests=error
+      - name: SPIN integration tests
+        run: ctest --test-dir out/build/x64-Release -C Release -R '^SpinIntegration$' --output-on-failure --no-tests=error

@@ -1,14 +1,20 @@
 // Stationary or regular-noise Silent OT, one party at a time. No network timing.
+#include "SpinBench.h"
+#include "libOTe/config.h"
+#include <iostream>
+#if defined(ENABLE_SPIN) && defined(ENABLE_SILENTOT)
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "libOTe/Tools/Pprf/StationaryPprf.h"
 #include "coproto/Socket/BufferingSocket.h"
-#include "Common.h"
+#include "macoro/when_all.h"
+#include "macoro/sync_wait.h"
 #include <algorithm>
 #include <chrono>
 #include <iomanip>
 #include <iostream>
 using namespace osuCrypto;
+namespace {
 using Clock = std::chrono::steady_clock;
 static void require(bool ok) { if(!ok) throw std::runtime_error("SPIN OT benchmark check failed"); }
 static void base(SilentOtExtSender& s, SilentOtExtReceiver& r, PRNG& rng, block delta) {
@@ -54,20 +60,14 @@ static void report(const char* role,u64 k,const std::vector<Sample>& samples,boo
         std::cout<<'['<<x.leaves<<','<<x.compress<<','<<x.hash<<','<<x.total<<','<<x.consume<<']';}
     std::cout<<"]}\n";
 }
-int main(int argc,char** argv) {try {
-    const unsigned exponent=argc>1?std::stoul(argv[1]):18;
-    const unsigned trials=argc>2?std::stoul(argv[2]):31;
-    bool paired=false,streaming=false,readOutput=false,regular=false;
-    for(int i=3;i<argc;++i) {
-        const std::string flag=argv[i];
-        if(flag=="paired") paired=true;
-        else if(flag=="nt") streaming=true;
-        else if(flag=="consume") readOutput=true;
-        else if(flag=="regular") regular=true;
-        else throw std::invalid_argument("unknown benchmark flag");
-    }
+} // namespace
+int spinOtBenchmark(CLP& cmd) {try {
+    const unsigned exponent=cmd.getOr<unsigned>("logN",18);
+    const unsigned trials=cmd.getOr<unsigned>("trials",31);
+    const bool paired=cmd.isSet("paired"),streaming=cmd.isSet("nt"),
+        readOutput=cmd.isSet("consume"),regular=cmd.isSet("regular");
     if(exponent<13 || exponent>24 || !trials || !(trials&1))
-        throw std::invalid_argument("usage: spin_stationary_bench [exponent 13..24] [odd trials] [paired] [nt] [consume] [regular]");
+        throw std::invalid_argument("-spinOtBench [-logN 13..24] [-trials odd] [-paired] [-nt] [-consume] [-regular] [-check]");
     const u64 k=1ull<<exponent;
     SilentOtExtSender s; SilentOtExtReceiver r;
     PRNG ps(block(1,4)),pr(block(3,7)),bases(block(17,19));
@@ -85,7 +85,8 @@ int main(int argc,char** argv) {try {
     base(s,r,bases,delta);
     auto ts=s.silentSendInplace(delta,k,ps,sockets[0]);
     auto tr=r.silentReceiveInplace(k,pr,sockets[1],ChoiceBitPacking::True);
-    tests_libOTe::eval(ts,tr);
+    auto completed=macoro::sync_wait(macoro::when_all_ready(std::move(ts),std::move(tr)));
+    std::get<0>(completed).result();std::get<1>(completed).result();
     auto* sg=regular?nullptr:dynamic_cast<StationaryPprfSender<block,CoeffCtxGF2>*>(&s.gen());
     auto* rg=regular?nullptr:dynamic_cast<StationaryPprfReceiver<block,CoeffCtxGF2>*>(&r.gen());
     require(regular || (sg && rg && sg->mExpanded && rg->mExpanded));
@@ -93,6 +94,7 @@ int main(int argc,char** argv) {try {
         (regular?spin::SetupMode::Full:spin::SetupMode::BankedHeuristic));
     s.hash(sent,ChoiceBitPacking::True,streaming);r.hash(choices,received,ChoiceBitPacking::True);
     for(u64 i=0;i<k;++i) require(received[i]==sent[i][choices[i]]);
+    if(cmd.isSet("check")) {std::cout<<"SPIN hashed OT correctness: passed\n";return 0;}
     const auto* ss=sg?sg->mShare.data():nullptr;const auto* rs=rg?rg->mShare.data():nullptr;
     const auto* sw=s.mSpin.get();const auto* rw=r.mSpin.get();
     const auto fixedDescriptor=s.mSpin->code.descriptor();
@@ -169,4 +171,10 @@ int main(int argc,char** argv) {try {
         <<",\"cached_leaves_reused\":"<<(regular?"false":"true")
         <<",\"fresh_code_each_batch\":"<<(regular?"false":"true")
         <<",\"fixed_full_code_reused\":"<<(regular?"true":"false")<<"}\n";
+    return 0;
 }catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}
+#else
+int spinOtBenchmark(osuCrypto::CLP&) {
+    std::cerr<<"SPIN OT benchmark requires ENABLE_SPIN and ENABLE_SILENTOT\n";return 1;
+}
+#endif
