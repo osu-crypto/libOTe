@@ -129,6 +129,13 @@ on platform/dependencies. The `ON`/`OFF` options include
 
  Addition options can be set for cryptoTools. See the cmake output.
 
+With `-DENABLE_ASAN=ON`, GCC 13–16 builds disable ASan stack instrumentation
+(`--param=asan-stack=0`) to avoid unbounded native-stack growth during coroutine
+symmetric transfer. Heap and global checks remain enabled. The workaround also
+propagates to C++ consumers of the CMake target, since headers contain coroutine
+templates. Clang retains full ASan coverage. GCC 17 and later are outside this
+temporary range and should be retested before extending it.
+
 ### Dependencies
 
 Dependencies can be managed by cmake/build.py or installed via an external tool. If an external tool is used install to system location or set  `-D CMAKE_PREFIX_PATH=path/to/install`. By default `build.py` calls cmake with the command line argument

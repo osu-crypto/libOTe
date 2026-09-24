@@ -1064,7 +1064,7 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
 
     // Test different sizes of OTs
     std::vector<u64> nn = cmd.getManyOr<u64>("n",
-        { 12, 433, 2048, 5466 });
+        { 12, 433, 1024, 2048, 5466 });
 
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);

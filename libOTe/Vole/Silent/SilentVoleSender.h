@@ -701,8 +701,11 @@ namespace osuCrypto
 			// our secret share of delta * noiseVals. The receiver
 			// can then manually add their shares of this to the
 			// output of the PPRF at the correct locations.
+			// Limit the logical size without discarding the padded allocation.
+			mCtx.resize(mB, mNumPartitions * mSizePer);
 			co_await gen().expand(chl, baseB, prng.get(), mB,
 				mPprfFormat, true, 1, mCtx);
+			mCtx.resize(mB, mNoiseVecSize);
 			setTimePoint("SilentVoleSender.expand.pprf");
 
 			// Zero out the remaining positions in mB

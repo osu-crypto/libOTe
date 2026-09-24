@@ -531,7 +531,10 @@ namespace osuCrypto
 		mC.resize(0);
 
 		// Expand PPRF to generate sparse vector
+		// PPRF owns only the unpadded prefix. Retain the allocation for encoding.
+		mA.resize(mNumPartitions * mSizePer);
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, {});
+		mA.resize(mNoiseVecSize);
 
 		// Zero out any excess values beyond the noise vector size
 		for (u64 i = mNumPartitions * mSizePer; i < mA.size(); ++i)

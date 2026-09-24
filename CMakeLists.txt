@@ -90,6 +90,9 @@ endif()
 if(NOT DEFINED ENABLE_CIRCUITS)
     set(ENABLE_CIRCUITS true)
 endif()
+
+# Apply before creating dependency targets: coroutine transfers also occur there.
+include(cmake/asanWorkaround.cmake)
 add_subdirectory(cryptoTools)
 
 #############################################

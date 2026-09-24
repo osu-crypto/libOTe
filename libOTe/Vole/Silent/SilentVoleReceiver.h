@@ -839,7 +839,10 @@ namespace osuCrypto
 		// 
 		//    mA = mB + points(mBaseC * mDelta)
 		//
+		// Limit the logical size without discarding the padded allocation.
+		mCtx.resize(mA, mNumPartitions * mSizePer);
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, mCtx);
+		mCtx.resize(mA, mNoiseVecSize);
 
 		// Zero out the remaining positions in mA
 		mCtx.zero(mA.begin() + mNumPartitions * mSizePer, mA.end());

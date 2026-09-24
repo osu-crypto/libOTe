@@ -113,6 +113,9 @@ set(SRCS "${SRCS}")
 
 add_library(libOTe STATIC ${SRCS})
 
+# Source/dependency targets inherit the directory option. Export it as well for
+# consumers that instantiate coroutine templates from the installed headers.
+target_compile_options(libOTe INTERFACE ${LIBOTE_ASAN_COMPILE_OPTIONS})
 
 
 # make projects that include libOTe use this as an include folder

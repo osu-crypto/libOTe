@@ -544,7 +544,10 @@ namespace osuCrypto
 
 		// Allocate and expand the B vector
 		mB.resize(mNoiseVecSize);
+		// PPRF owns only the unpadded prefix. Retain the allocation for encoding.
+		mB.resize(mNumPartitions * mSizePer);
 		co_await gen().expand(chl, delta, prng.get(), mB, mPprfFormat, true, mNumThreads, CoeffCtxGF2{});
+		mB.resize(mNoiseVecSize);
 
 		// fill remaining with zeros
 		for (u64 i = mNumPartitions * mSizePer; i < mB.size(); ++i)
