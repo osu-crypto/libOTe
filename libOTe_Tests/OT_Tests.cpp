@@ -1386,6 +1386,40 @@ namespace tests_libOTe
     {
 #if defined(ENABLE_DELTA_KOS)
         PRNG prng(block(0x4b6f73446f744368, 1));
+        // Check both transposed halves and zero padding independently of the
+        // correlation identity below. Full ASan can mask scratch misalignment;
+        // this also runs in release builds and GCC's ASan-without-stack mode.
+        std::array<details::KosDotCheckRow, 129> transposeRows;
+        for (auto& row : transposeRows)
+            row = { prng.get<block>(), prng.get<block>() };
+        for (u64 count : { 0ull, 1ull, 63ull, 64ull, 127ull, 128ull })
+        {
+            auto columns = details::kosDotTransposeCheckChunk(
+                span<const details::KosDotCheckRow>(transposeRows.data(), count));
+            for (u64 column = 0; column < details::KosDotCheckColumns; ++column)
+            {
+                BitVector expected(128);
+                for (u64 row = 0; row < count; ++row)
+                {
+                    auto bits = reinterpret_cast<const u8*>(transposeRows[row].data());
+                    expected[row] = (bits[column / 8] >> (column % 8)) & 1;
+                }
+                if (columns[column] != expected.blocks()[0])
+                    throw UnitTestFail(LOCATION);
+            }
+        }
+        bool oversizedRejected = false;
+        try
+        {
+            details::kosDotTransposeCheckChunk(transposeRows);
+        }
+        catch (const std::runtime_error&)
+        {
+            oversizedRejected = true;
+        }
+        if (!oversizedRejected)
+            throw UnitTestFail(LOCATION);
+
         constexpr u64 numRows = 257;
         std::vector<details::KosDotCheckRow> tRows(numRows), qRows(numRows);
         std::array<details::KosDotCheckRow, 128> tExtra, qExtra;

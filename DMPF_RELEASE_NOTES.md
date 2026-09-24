@@ -67,6 +67,19 @@ the inherited AES evaluator.
 
 ## Validation
 
+Release follow-up fixes the Silent OT/VOLE PPRF buffer sizing and gates the
+GCC 13–16 ASan stack workaround. CI then passed the previously failing
+`AnyField_F2Ole_Test`, but exposed a separate KOS-Dot scratch-alignment bug.
+The transpose helper now uses 32-byte-aligned arrays in a non-inlined,
+non-coroutine function. It adds no heap allocation or protocol change.
+`DotExt_Kos_Check_Test` also checks the transpose against a scalar reference
+for empty, partial, and full chunks, and rejects oversized chunks.
+All five focused KOS-Dot tests pass with the test and protocol translation
+units built under GCC 13 ASan with stack checks disabled. This focused runner
+links existing non-ASan dependency archives; it does not replace full CI.
+Cross-platform validation of this follow-up is still pending; earlier failed
+Ubuntu runs skipped the source-tree and installed-consumer checks.
+
 The exact-permutation/per-list-seed update passes the 24-suite focused WSL/GCC
 runner at defaults and at domain 4097 with 16 points, three sets, four
 expansions, and either two or three partitions. The registered sparse-set
