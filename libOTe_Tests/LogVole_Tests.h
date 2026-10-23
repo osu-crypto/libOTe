@@ -13,6 +13,8 @@
     X(Core, TwoLevelCoprotoRelation) \
     X(Core, ThreeLevelOfflineReuseAndInvalidWidth) \
     X(Core, TwoLevelCoprotoMultiThreadSkipTbkOutput) \
+    X(Core, LeafGoldenSeedChecksOutputRounding) \
+    X(Core, LeafGoldenSeedMatchesDecoder) \
     X(Encoding, AllMessageRoundTrips) \
     X(KeyDeriveCore, AlgebraicRelation) \
     X(KeyDeriveCore, DeterministicRegressionSeeds) \

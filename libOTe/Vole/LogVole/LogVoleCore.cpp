@@ -1,5 +1,6 @@
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 
+#include "libOTe/Vole/LogVole/LogVole.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
@@ -1482,12 +1483,100 @@ namespace osuCrypto::LogVole
         return denoiseAndAggRootKey(ctx, tbkRt, tauHi, rootKey);
     }
 
+    bool validateLeafGoldenSeedCandidate(
+        const Params& seedParams,
+        const std::vector<RnsPoly>& tbkPerSampledPoly,
+        bool& out)
+    {
+        ZpCrtContext zp{};
+        if (tbkPerSampledPoly.size() != seedParams.mW ||
+            !validateRingBatchShape(std::span<const RnsPoly>(tbkPerSampledPoly.data(), tbkPerSampledPoly.size()), seedParams.mShrinkExpand.mRing) ||
+            !makeZpCrtContext(seedParams.mShrinkExpand.mRing, seedParams.mShrinkExpand.mPlaintextModulusBits, zp))
+        {
+            return false;
+        }
+        const RingNttContext& ctx = zp.mRing;
+        auto contextData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
+        const double log2B = estimateNoiseBoundLog2(seedParams);
+        if (!contextData || !std::isfinite(log2B))
+        {
+            return false;
+        }
+
+        // Parameters for the margin check. Noise moves p*V/q by at most p*B/q, and the plaintext lift
+        // floor(q/p)*m falls short of (q/p)*m by less than p^2/q.
+        const std::size_t n = seedParams.mShrinkExpand.mRing.mPolyModulusDegree;
+        const std::size_t rho = ctx.mModuli.size();
+        const u64 p = zp.mPlaintextModulus;
+        const double log2P = safeLog2(static_cast<double>(p));
+        double log2Q = 0.0;
+        wideU64 undershoot{};
+        for (const auto& m : ctx.mModuli)
+        {
+            log2Q += safeLog2(static_cast<double>(m.value()));
+            undershoot = wideU64Add(undershoot, makeWideU64(m.value(), 0));
+        }
+        const double log2MarginFrac = log2Sum(log2B, log2P) + log2P - log2Q;
+        if (!std::isfinite(log2MarginFrac) || log2MarginFrac > -1.0)
+        {
+            return false;
+        }
+        // In units of 2^-128, rounded up. Each term y * floor(2^128 / q_i) of the sum below undershoots by
+        // less than q_i, here and again in the decoder, so the margin adds `undershoot` (the sum of the q_i).
+        // The exponent slack covers the double rounding in log2MarginFrac.
+        constexpr double log2MarginSlack = 0x1p-32;
+        const wideU64 margin = wideU64Add(
+            wideU64Add(
+                floorToWideU64(std::exp2(static_cast<long double>(log2MarginFrac + log2MarginSlack + 128.0))),
+                makeWideU64(1, 0)),
+            undershoot);
+        const wideU64 half = wideU64OneShift(127);
+        if (!wideU64Less(margin, half))
+        {
+            return false;
+        }
+
+        auto pool = seal::MemoryManager::GetPool();
+        seal::util::RNSBase fullBase(contextData->parms().coeff_modulus(), pool);
+        auto invPunct = fullBase.inv_punctured_prod_mod_base_array();
+        std::vector<u64> crtInv(rho);
+        std::vector<wideU64> invQ(rho);
+        for (std::size_t i = 0; i < rho; ++i)
+        {
+            crtInv[i] = seal::util::multiply_uint_mod(invPunct[i].operand, p, ctx.mModuli[i]);
+            invQ[i] = reciprocal2Pow128Wide(ctx.mModuli[i].value());
+        }
+
+        // Margin check
+        for (std::size_t polyIdx = 0; polyIdx < tbkPerSampledPoly.size(); ++polyIdx)
+        {
+            const u64* values = tbkPerSampledPoly[polyIdx].mCoeffs.data();
+            for (std::size_t c = 0; c < n; ++c)
+            {
+                wideU64 fracSum = half;
+                for (std::size_t i = 0; i < rho; ++i)
+                {
+                    const u64 y = seal::util::multiply_uint_mod(values[i * n + c], crtInv[i], ctx.mModuli[i]);
+                    fracSum = wideU64Add(fracSum, wideU64MulLow(y, invQ[i]));
+                }
+                if (wideU64Less(fracSum, margin) || wideU64Less(wideU64Negate(fracSum), margin))
+                {
+                    out = false;
+                    return true;
+                }
+            }
+        }
+        out = true;
+        return true;
+    }
+
     namespace
     {
         bool evaluateSenderSeedCandidate(
             const SenderState& state,
             std::span<const u8> seed,
-            RecursiveSeedEvalOutput& out)
+            RecursiveSeedEvalOutput& out,
+            bool isLeaf)
         {
             u32 tauHi = 0;
             u32 muHi = 0;
@@ -1533,7 +1622,9 @@ namespace osuCrypto::LogVole
                 const Params seedParams = makeSeedParams(state.mParams, state.mShrinkExpandState.mParams);
                 bool candidateOk = false;
                 if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
-                    !validateGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk))
+                    !(isLeaf
+                        ? validateLeafGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk)
+                        : validateGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk)))
                 {
                     return false;
                 }
@@ -1558,7 +1649,7 @@ namespace osuCrypto::LogVole
             }
 
             RecursiveSeedEvalOutput childEval{};
-            if (!evaluateSenderSeedCandidate(*state.mNextLevelState, seed, childEval))
+            if (!evaluateSenderSeedCandidate(*state.mNextLevelState, seed, childEval, false))
             {
                 return false;
             }
@@ -1599,7 +1690,7 @@ namespace osuCrypto::LogVole
 
             const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
             std::vector<RnsPoly> finalTbk(state.mParams.mW);
-            std::vector<RnsPoly> sampledTbk(static_cast<std::size_t>(wDoublePrime) * muHi);
+            std::vector<RnsPoly> sampledTbk(isLeaf ? 0 : static_cast<std::size_t>(wDoublePrime) * muHi);
             if (!detail::runParallelTasks(
                     wDoublePrime,
                     state.mShrinkExpandState.mParams.mNumWorkerThreads,
@@ -1624,10 +1715,13 @@ namespace osuCrypto::LogVole
                             return false;
                         }
 
-                        const std::size_t sampledStart = static_cast<std::size_t>(chunkIdx) * muHi;
-                        for (std::size_t idx = 0; idx < expandOutput.mTbk.size(); ++idx)
+                        if (!isLeaf)
                         {
-                            sampledTbk[sampledStart + idx] = expandOutput.mTbk[idx];
+                            const std::size_t sampledStart = static_cast<std::size_t>(chunkIdx) * muHi;
+                            for (std::size_t idx = 0; idx < expandOutput.mTbk.size(); ++idx)
+                            {
+                                sampledTbk[sampledStart + idx] = expandOutput.mTbk[idx];
+                            }
                         }
 
                         for (std::size_t idx = 0; idx < end - start; ++idx)
@@ -1642,7 +1736,9 @@ namespace osuCrypto::LogVole
 
             bool candidateOk = false;
             const Params seedParams = makeSeedParams(state.mParams, state.mShrinkExpandState.mParams);
-            if (!validateGoldenSeedCandidate(seedParams, sampledTbk, candidateOk))
+            if (!(isLeaf
+                    ? validateLeafGoldenSeedCandidate(seedParams, finalTbk, candidateOk)
+                    : validateGoldenSeedCandidate(seedParams, sampledTbk, candidateOk)))
             {
                 return false;
             }
@@ -1673,7 +1769,7 @@ namespace osuCrypto::LogVole
                 prng.get(seed.data(), seed.size());
 
                 RecursiveSeedEvalOutput eval{};
-                if (!evaluateSenderSeedCandidate(state, seed, eval))
+                if (!evaluateSenderSeedCandidate(state, seed, eval, true))
                 {
                     return false;
                 }
@@ -1702,7 +1798,7 @@ namespace osuCrypto::LogVole
             RecursiveSeedEvalOutput eval{};
             const bool ok = state.mGoldenSeed.empty() ?
                 findRecursiveGoldenSeedAndEvaluate(state, prng, eval) :
-                evaluateSenderSeedCandidate(state, state.mGoldenSeed, eval);
+                evaluateSenderSeedCandidate(state, state.mGoldenSeed, eval, true);
             if (!ok || !eval.mValid)
             {
                 return false;
@@ -2724,6 +2820,11 @@ namespace osuCrypto::LogVole
         }
 
         return buildHashedCt2(ctx, coeffCount, seed, sid, digest, static_cast<u64>(instanceIdx), out);
+    }
+
+    double noiseBoundLog2(const Params& params)
+    {
+        return estimateNoiseBoundLog2(params);
     }
 
     bool validateGoldenSeedSearch(const Params& params)
