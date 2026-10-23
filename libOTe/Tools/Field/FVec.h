@@ -339,6 +339,44 @@ namespace osuCrypto
         }
 
     public:
+		// Preserve the scalar mulConst contract lane by lane. This is required
+		// when F is itself an extension field: vector lanes are intentionally a
+		// product, but the field components within each lane must still mix.
+		template<typename V>
+		OC_FORCEINLINE void mulConst(V& ret, const V& value) const
+		{
+			requireVector<V>();
+			static_for<N>([&](auto i)
+			{
+				mScalarCtx.mulConst(ret.v[i], value.v[i]);
+			});
+		}
+
+		template<typename V>
+		constexpr double regularNoiseFactor() const
+		{
+			requireVector<V>();
+			return coefficientRegularNoiseFactor<F>(mScalarCtx);
+		}
+
+		OC_FORCEINLINE bool isUnit(const Vector& value) const
+		{
+			bool result = true;
+			static_for<N>([&](auto i)
+			{
+				result &= isRegularNoiseUnit(value.v[i], mScalarCtx);
+			});
+			return result;
+		}
+
+		OC_FORCEINLINE void sampleUnit(Vector& value, PRNG& prng) const
+		{
+			static_for<N>([&](auto i)
+			{
+				sampleRegularNoiseUnit(value.v[i], prng, mScalarCtx);
+			});
+		}
+
         template<typename V>
         bool characteristicTwo() const
         {

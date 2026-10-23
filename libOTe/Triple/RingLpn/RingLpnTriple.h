@@ -28,6 +28,7 @@
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Dpf/RevCuckooDmpf.h"
+#include "libOTe/Triple/RingLpn/RingLpnSupport.h"
 #include "cryptoTools/Circuit/BetaCircuit.h"
 
 namespace osuCrypto
@@ -60,7 +61,7 @@ namespace osuCrypto
 		// log2 polynomial size
 		u64 mLogN = 0;
 
-		// The A poly in FFT format. There will be mNumPolys rows. 
+		// This expansion's public masks in FFT format; row zero is the identity.
 		Matrix<F> mFftA;
 
 		// The A^2 poly in FFT format. There will be mNumPolys^2 rows. 
@@ -246,6 +247,26 @@ namespace osuCrypto
 
 		// samples the sparse polynomial coefficients and their product.
 		task<> tensor(PRNG& prng, Socket& sock);
+
+		// Other parameter sets retain their experimental, unfiltered sampler.
+		bool usesSupportFilter() const
+		{
+			return SF::order() == RingLpnSupportFilter::FieldOrder &&
+				RingLpnSupportFilter::matches(mN, mNumPolys, mPolyWeight);
+		}
+
+		// Non-coroutine: rejection and its scratch storage finish before routing.
+		void sampleSparsePositions(PRNG& prng)
+		{
+			if (!isInitialized() || hasDpf())
+				throw std::logic_error("RingLPN supports must be sampled before DPF setup.");
+			mSparsePositions.resize(mNumPolys, mPolyWeight);
+			if (usesSupportFilter())
+				RingLpnSupportFilter::sample(mSparsePositions, prng);
+			else
+				for (auto& offset : mSparsePositions)
+					offset = prng.get<u64>() % mBlockSize;
+		}
 
 		// sample random coefficients for the sparse polynomial and tensor
 		// them with the other parties coefficients. The result is shared
@@ -440,12 +461,18 @@ namespace osuCrypto
 
 		if (dpfType == DpfType::RevCuckooDmpf)
 		{
+			constexpr u64 numPartitions = 2;
+			constexpr u64 cuckooSecParam = 2;
+			constexpr u64 sparseSetSecParam = 40;
 			mDpf = RevCuckooDmpf<F, CoeffCtx>();
 			std::get<0>(mDpf).init(
 				partyIdx,
 				polyWeight,
 				numPolys * numPolys * polyWeight,
-				mDpfTreeSize);
+				mDpfTreeSize,
+				numPartitions,
+				cuckooSecParam,
+				sparseSetSecParam);
 		}
 		else if (dpfType == DpfType::SumDmpf)
 		{
@@ -461,7 +488,8 @@ namespace osuCrypto
 
 		mGmw.init(mPartyIdx, weight * weight, mAdder);
 
-		sampleA(block(3127894527893612049, 240925987420932408));
+		mFftA.resize(0, 0);
+		mFftASquared.resize(0, 0);
 	}
 
 
@@ -656,6 +684,7 @@ namespace osuCrypto
 			{
 				extSenderCount = mOtExtSender->baseOtCount();
 				BitVector cc(extSenderCount);
+				cc.randomize(prng);
 				choice.append(cc);
 				recvMsg.resize(choice.size());
 			}
@@ -803,6 +832,11 @@ namespace osuCrypto
 
 
 	template<typename F, typename CoeffCtx>
+#if defined(_MSC_VER)
+	__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+	__attribute__((noinline))
+#endif
 	void RingLpnTriple<F, CoeffCtx>::sampleA(block seed)
 	{
 
@@ -811,9 +845,7 @@ namespace osuCrypto
 
 		PRNG prng(seed);
 		mFftA.resize(mNumPolys, mN);
-		mFftASquared.resize(0, 0);
 		mFftASquared.resize(mNumPolys * mNumPolys, mN);
-		//prng.get(mFftA.data() + mN, mFftA.size() - mN);
 
 		// make a_0 the identity polynomial (in FFT space) polyIdx.e., all 1s
 		for (size_t i = 0; i < mN; i++) {
@@ -1021,21 +1053,7 @@ namespace osuCrypto
 		// the polyIdx'th row contains the coeffs for the polyIdx'th poly.
 		// the position is within the corresponding block, not the
 		// overall polynomial.
-		mSparsePositions.resize(mNumPolys, mPolyWeight);
-
-		// TODO(Security): Rejection-sample the complete regular support against
-		// the smallest relevant 1-sparse factor before committing to it. For the
-		// current (mNumPolys, mPolyWeight) = (4, 16) parameter set, fold each
-		// absolute position blockIdx * mBlockSize + offset modulo 128, separately
-		// for each polynomial, and require at least 61 distinct folded positions
-		// in total. This accepts with probability about 0.502. Generalize the
-		// factor degree and minimum weight as Ring-LPN parameters rather than
-		// hard-coding them here. See AUD-001 in the repository audit tracker.
-
-		// select random positions for the sparse polynomial.
-		// The polyIdx'th is the noise position in the polyIdx'th block.
-		for (u64 i = 0; i < mSparsePositions.size(); ++i)
-			mSparsePositions(i) = prng.get<u64>() % mBlockSize;
+		sampleSparsePositions(prng);
 
 
 		// we will expand them the main DPF to get the full shared polynomial. 
@@ -1178,6 +1196,26 @@ namespace osuCrypto
 		}
 		else if (hasTensor() == false)
 			co_await tensor(prng, sock);
+
+		// Fixed supports require fresh public masks on every expansion.
+		// Word arrays remain owned by this frame across socket suspensions;
+		// sampleA keeps its aligned PRNG scratch in a non-coroutine stack frame.
+		std::array<u64, 2> maskSeed, peerMaskSeed;
+		prng.get<u64>(maskSeed.data(), maskSeed.size());
+		if (mPartyIdx == 0)
+		{
+			co_await sock.send(maskSeed);
+			co_await sock.recv(peerMaskSeed);
+		}
+		else
+		{
+			co_await sock.recv(peerMaskSeed);
+			co_await sock.send(maskSeed);
+		}
+		for (u64 i = 0; i < maskSeed.size(); ++i)
+			maskSeed[i] ^= peerMaskSeed[i];
+		sampleA(block(maskSeed[1], maskSeed[0]));
+		setTimePoint("public masks");
 
 		if (mDebug)
 			co_await checkTensor(sock);

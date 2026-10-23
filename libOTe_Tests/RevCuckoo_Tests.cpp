@@ -3,11 +3,72 @@
 
 namespace osuCrypto
 {
+	void RevCuckoo_seededSparseSets_Test(const oc::CLP&)
+	{
+		PRNG prng(block(0x7263767365656473ull, 17));
+		for (u64 partitions : { 2ull, 3ull })
+			for (u64 domain : { 7ull, 32ull, 65ull })
+			{
+				RevCuckooDmpf<block> dpf;
+				dpf.init(0, 4, 3, domain, partitions, 2, 40, true);
+				const auto count = partitions * dpf.mNumSets;
+				const auto width = dpf.hashWidth();
+				const auto columns = partitions * dpf.mPartitionSize;
+				std::vector<GoldreichHash::Cache> caches(count);
+				std::vector<Matrix<u8>> descriptors(dpf.mNumSets);
+				Matrix<u8> dummy(1, dpf.mGoldreichHash[0].mInBytes);
+				Matrix<u8> anchors(count, divCeil(width, 8));
+				copyBytesMin(dummy[0], domain);
+				for (u64 k = 0; k < count; ++k)
+				{
+					caches[k] = dpf.mGoldreichHash[k].cache(prng.get());
+					dpf.mGoldreichHash[k].hash(dummy, anchors.submtx(k, 1), caches[k]);
+				}
+				for (auto& descriptor : descriptors)
+				{
+					descriptor.resize(partitions * width, 1);
+					for (auto& value : descriptor)
+						value = prng.get<u8>() & (dpf.mPartitionSize - 1);
+				}
+				// Exercise a maximally loaded bucket, not a fixed-capacity average.
+				std::fill_n(descriptors[0].begin(), width, 0);
+				dpf.buildSparseSets(columns, width, descriptors, caches, anchors);
+				if (dpf.realLeafCount() != count * domain || dpf.mSparseSets[0].size() != domain)
+					throw RTE_LOC;
+
+				Matrix<u8> input(1, dummy.cols()), output(1, anchors.cols());
+				for (u64 k = 0; k < count; ++k)
+				{
+					std::vector<std::vector<u32>> expected(dpf.mPartitionSize);
+					const MatrixView<const u8> descriptor(
+						descriptors[k / partitions].data((k % partitions) * width), width, 1);
+					for (u64 x = 0; x < domain; ++x)
+					{
+						copyBytesMin(input[0], x);
+						dpf.mGoldreichHash[k].hash(input, output, caches[k]);
+						for (u64 b = 0; b < output.cols(); ++b)
+							output(0, b) ^= anchors(k, b);
+						const auto bucket = dpf.innerProd(span<const u8>(output.data(), output.size()), descriptor);
+						expected.at(bucket).push_back(static_cast<u32>(x));
+					}
+					for (u64 b = 0; b < dpf.mPartitionSize; ++b)
+					{
+						const auto actual = dpf.mSparseSets[k * dpf.mPartitionSize + b];
+						if (!std::equal(actual.begin(), actual.end(), expected[b].begin(), expected[b].end()))
+							throw std::runtime_error("RevCuckoo seeded sparse mapping mismatch. " LOCATION);
+					}
+				}
+			}
+	}
 
 	void RevCuckoo_baseOtSlicing_Test(const oc::CLP&)
 	{
 		RevCuckooDmpf<block> dpf;
 		dpf.init(0, 4, 2, 32, 2, 2, 10, false);
+		if (dpf.mLinearSecParam != 10 ||
+			dpf.hashWidth() != dpf.mPartitionSize + 10 + 8 ||
+			dpf.mBinarySolver.mC != dpf.hashWidth())
+			throw std::runtime_error("RevCuckoo hash-width slack regression. " LOCATION);
 
 		auto count = dpf.baseOtCount();
 		std::vector<std::array<block, 2>> baseSend(count.mSendCount);
@@ -52,8 +113,14 @@ namespace osuCrypto
 			recvIdx += subCount.mRecvCount;
 		}
 
-		check(dpf.mWaksmanPermute.mMult, sendIdx, recvIdx);
+		static_assert(std::is_same_v<decltype(dpf.mWaksmanPermute), SerialWaksmanPermute>);
 		auto permCount = dpf.mWaksmanPermute.baseOtCount();
+		SerialWaksmanPermute referencePermutation;
+		referencePermutation.init(0, dpf.mNumPartitions * dpf.mPartitionSize, dpf.mNumSets);
+		auto referenceCount = referencePermutation.baseOtCount();
+		if (permCount.mSendCount != referenceCount.mSendCount ||
+			permCount.mRecvCount != referenceCount.mRecvCount)
+			throw std::runtime_error("RevCuckoo serial permutation OT count mismatch. " LOCATION);
 		sendIdx += permCount.mSendCount;
 		recvIdx += permCount.mRecvCount;
 
@@ -169,14 +236,29 @@ namespace osuCrypto
 		std::get<1>(r).result();
 
 		if (dpf[0].mPublicHashSeed != dpf[1].mPublicHashSeed ||
+			dpf[0].mHashSeed != dpf[1].mHashSeed ||
+			dpf[0].mHashSeed != details::cachedDpfLeafRoot(dpf[0].mPublicHashSeed, 0) ||
 			dpf[0].mGoldreichHashSeeds != dpf[1].mGoldreichHashSeeds)
 			throw std::runtime_error("RevCuckoo public hash seeds disagree. " LOCATION);
-		if (dpf[0].mGoldreichHashSeeds.size() != numPartitions)
+		if (dpf[0].mGoldreichHashSeeds.size() != numSets * numPartitions)
 			throw std::runtime_error("RevCuckoo public hash seed count mismatch. " LOCATION);
 		for (u64 i = 0; i < dpf[0].mGoldreichHashSeeds.size(); ++i)
 			for (u64 j = 0; j < i; ++j)
 				if (dpf[0].mGoldreichHashSeeds[i] == dpf[0].mGoldreichHashSeeds[j])
 					throw std::runtime_error("RevCuckoo public hash seeds overlap. " LOCATION);
+		std::array<std::vector<std::vector<u32>>, 2> permutations;
+		for (u64 p = 0; p < 2; ++p)
+			for (u64 s = 0; s < numSets; ++s)
+			{
+				permutations[p].push_back(dpf[p].mWaksmanPermute.privatePermutation(s));
+				auto sorted = permutations[p].back();
+				std::sort(sorted.begin(), sorted.end());
+				if (sorted.size() != dpf[p].mNumPartitions * dpf[p].mPartitionSize)
+					throw RTE_LOC;
+				for (u64 i = 0; i < sorted.size(); ++i)
+					if (sorted[i] != i)
+						throw std::runtime_error("RevCuckoo private controls are not a permutation. " LOCATION);
+			}
 
 		// verify that the internal shares are correct.
 		for (u64 s = 0, k = 0; s < numSets; ++s)
@@ -248,6 +330,10 @@ namespace osuCrypto
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
+			for (u64 p = 0; p < 2; ++p)
+				for (u64 s = 0; s < numSets; ++s)
+					if (permutations[p][s] != dpf[p].mWaksmanPermute.privatePermutation(s))
+						throw std::runtime_error("RevCuckoo permutation changed across expansions. " LOCATION);
 			F zero;
 			ctx.zero(zero);
 
@@ -343,6 +429,89 @@ namespace osuCrypto
 		cmd.setDefault("numValueSets", 1);
 		RevCuckoo_iterative_impl<block, CoeffCtxGF128>(cmd);
 		RevCuckoo_iterative_impl<u64, CoeffCtxInteger>(cmd);
+	}
+
+	void RevCuckoo_robustness_Test(const oc::CLP&)
+	{
+		struct Params
+		{
+			u64 mDomain;
+			u64 mPoints;
+			u64 mSets;
+			u64 mPartitions;
+			u64 mExpansions;
+		};
+
+		// These remain intentionally bounded. They cover the former empty-bucket
+		// failure, non-power-of-two domains, three partitions, and repeated expansion
+		// without selecting parameters outside the paper hash's quadratic feature bound.
+		for (auto p : {
+			Params{ 32, 8, 16, 2, 3 },
+			Params{ 257, 17, 5, 3, 2 }
+			})
+		{
+			CLP cmd;
+			cmd.setDefault("domain", p.mDomain);
+			cmd.setDefault("numPoints", p.mPoints);
+			cmd.setDefault("numSets", p.mSets);
+			cmd.setDefault("numPartitions", p.mPartitions);
+			cmd.setDefault("linearSecParam", 40);
+			cmd.setDefault("numValueSets", p.mExpansions);
+			RevCuckoo_iterative_impl<block, CoeffCtxGF128>(cmd);
+		}
+	}
+
+	void RevCuckoo_failurePropagation_Test(const oc::CLP&)
+	{
+		constexpr u64 points = 4;
+		constexpr u64 sets = 2;
+		constexpr u64 domain = 32;
+		PRNG prng(block(0x1234, 0x5678));
+		std::array<RevCuckooDmpf<block>, 2> dpf;
+		for (u64 p = 0; p < 2; ++p)
+			dpf[p].init(p, points, sets, domain);
+
+		auto count0 = dpf[0].baseOtCount();
+		auto count1 = dpf[1].baseOtCount();
+		std::array<std::vector<block>, 2> recv{
+			std::vector<block>(count0.mRecvCount),
+			std::vector<block>(count1.mRecvCount) };
+		std::array<std::vector<std::array<block, 2>>, 2> send{
+			std::vector<std::array<block, 2>>(count0.mSendCount),
+			std::vector<std::array<block, 2>>(count1.mSendCount) };
+		std::array<BitVector, 2> choices{
+			BitVector(count0.mRecvCount), BitVector(count1.mRecvCount) };
+		choices[0].randomize(prng);
+		choices[1].randomize(prng);
+		for (u64 i = 0; i < recv[0].size(); ++i)
+		{
+			send[1][i] = prng.get();
+			recv[0][i] = send[1][i][choices[0][i]];
+		}
+		for (u64 i = 0; i < recv[1].size(); ++i)
+		{
+			send[0][i] = prng.get();
+			recv[1][i] = send[0][i][choices[1][i]];
+		}
+		dpf[0].setBaseOts(send[0], recv[0], choices[0]);
+		dpf[1].setBaseOts(send[1], recv[1], choices[1]);
+
+		Matrix<u64> invalid(sets - 1, points);
+		Matrix<u64> valid(sets, points);
+		prng.get(invalid.data(), invalid.size());
+		prng.get(valid.data(), valid.size());
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		auto results = macoro::sync_wait(macoro::when_all_ready(
+			dpf[0].setPoints(invalid, prng, sockets[0]),
+			dpf[1].setPoints(valid, prng, sockets[1])));
+
+		bool failed[2]{};
+		try { std::get<0>(results).result(); }
+		catch (...) { failed[0] = true; }
+		try { std::get<1>(results).result(); }
+		catch (...) { failed[1] = true; }
+		if (!failed[0] || !failed[1])
+			throw std::runtime_error("RevCuckoo did not propagate a one-sided setup failure. " LOCATION);
 	}
 
 

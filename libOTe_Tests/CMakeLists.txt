@@ -10,6 +10,7 @@ set(SRCS
     Pprf_Tests.cpp
     Dpf_Tests.cpp
     RevCuckoo_Tests.cpp
+    Waterfall_Tests.cpp
     SilentOT_Tests.cpp
     SpinIntegration.cpp
     SoftSpoken_Tests.cpp
@@ -24,12 +25,14 @@ set(SRCS
     Ntt_Tests.cpp
     Poly_Tests.cpp
     RingLpn_Tests.cpp
+    RingLpnSupport_Tests.cpp
     BinarySolver_Tests.cpp
     Goldilocks_Tests.cpp
     Gmw_Tests.cpp
     UInt_Tests.cpp
     Permutation_Tests.cpp
     BlkAccCode_Tests.cpp
+    AnyField_Tests.cpp
 )
 
 add_library(libOTe_Tests STATIC ${SRCS})

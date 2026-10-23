@@ -416,6 +416,8 @@ namespace osuCrypto
 					for (u64 j = 0; j < m8; ++j)
 					{
 						auto aij = ai[j];
+						if (j + 1 == m8 && (mM & 7))
+							aij &= static_cast<u8>((1u << (mM & 7)) - 1);
 
 						auto outByteIdx = outIndex / 8;
 						auto outBitShift = outIndex % 8;
@@ -478,6 +480,8 @@ namespace osuCrypto
 					for (u64 k = 0; k < m8; ++k, outIndex += 8)
 					{
 						u8 packedByte = Ai[k];
+						if (k + 1 == m8 && (mM & 7))
+							packedByte &= static_cast<u8>((1u << (mM & 7)) - 1);
 						// Unpack 8 bits into 8 bytes using bit manipulation
 						for (u64 bit = 0; bit < 8; ++bit)
 							ABits.data()[outIndex + bit] = (packedByte >> bit) & 1;

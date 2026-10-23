@@ -293,13 +293,13 @@ namespace osuCrypto
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);
 
 		constexpr u64 secParam = 128;
-        auto param = syndromeDecodingConfigure(secParam,numOTs,multType,noiseType,1);
-        const auto codeSeed=block(12528943721987127,98743297823479812);
+		auto param = syndromeDecodingConfigure(
+			secParam, numOTs, multType, noiseType, SdNoiseSecurityModel::binary());
 		auto format = PprfOutputFormat{};
 
 		if (SdNoiseDistribution::Regular == noiseType)
 		{
-			format = PprfOutputFormat::Interleaved;
+			format = PprfOutputFormat::ByPhysicalIndex;
 		}
 		else if (SdNoiseDistribution::Stationary == noiseType)
 		{
@@ -327,7 +327,7 @@ namespace osuCrypto
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNoiseVectorSize;
 		mPprfFormat = format;
-		mCodeSeed = codeSeed;
+		mCodeSeed = block(12528943721987127, 98743297823479812);
 #ifdef ENABLE_SPIN
         // Callers may initialize mSpin and buffers after configure().
         mSpin.reset();
@@ -535,13 +535,10 @@ namespace osuCrypto
 		mC.resize(0);
 
 		// Expand PPRF to generate sparse vector
-#ifdef ENABLE_SPIN
-        if(mLpnMultType==MultType::Spin) mA.resize(mNumPartitions*mSizePer);
-#endif
+		// PPRF owns only the unpadded prefix. Retain the allocation for encoding.
+		mA.resize(mNumPartitions * mSizePer);
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, {});
-#ifdef ENABLE_SPIN
-        if(mLpnMultType==MultType::Spin) mA.resize(mNoiseVecSize);
-#endif
+		mA.resize(mNoiseVecSize);
 
 		// Zero out any excess values beyond the noise vector size
 		for (u64 i = mNumPartitions * mSizePer; i < mA.size(); ++i)
@@ -822,9 +819,6 @@ namespace osuCrypto
 #endif
 			}
 			break;
-			case osuCrypto::MultType::ExAcc7:
-			case osuCrypto::MultType::ExAcc11:
-			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
 				// Use Expander-Accumulator code for compression
@@ -914,9 +908,6 @@ namespace osuCrypto
 #endif
 			}
 			break;
-			case osuCrypto::MultType::ExAcc7:
-			case osuCrypto::MultType::ExAcc11:
-			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
 				// Use Expander-Accumulator code for both A and C

@@ -575,6 +575,39 @@ namespace osuCrypto
 		if (verbose)
 			oles[0].setTimer(timer);
 
+		// Exercise the built-in base OT bootstrap, including the party-1
+		// SoftSpoken sender whose base choices must remain secret and random.
+		auto base = macoro::sync_wait(macoro::when_all_ready(
+			oles[0].genBaseCors(prng0, sock[0]),
+			oles[1].genBaseCors(prng1, sock[1])));
+		std::get<0>(base).result();
+		std::get<1>(base).result();
+
+#ifdef ENABLE_SOFTSPOKEN_OT
+		if (!oles[1].mOtExtSender ||
+			!oles[1].mOtExtSender->hasBaseOts() ||
+			!oles[0].mOtExtRecver ||
+			!oles[0].mOtExtRecver->hasBaseOts() ||
+			oles[1].mOtExtSender->delta() == ZeroBlock)
+			throw RTE_LOC;
+
+		BitVector probeChoices(128);
+		probeChoices.randomize(prng0);
+		AlignedUnVector<block> probeRecv(probeChoices.size());
+		AlignedUnVector<std::array<block, 2>> probeSend(probeChoices.size());
+		auto probe = macoro::sync_wait(macoro::when_all_ready(
+			oles[0].mOtExtRecver->receive(probeChoices, probeRecv, prng0, sock[0]),
+			oles[1].mOtExtSender->send(probeSend, prng1, sock[1])));
+		std::get<0>(probe).result();
+		std::get<1>(probe).result();
+		for (u64 i = 0; i < probeChoices.size(); ++i)
+		{
+			if (probeSend[i][0] == probeSend[i][1] ||
+				probeRecv[i] != probeSend[i][probeChoices[i]])
+				throw RTE_LOC;
+		}
+#endif
+
 		auto r = macoro::sync_wait(macoro::when_all_ready(
 			oles[0].expand(A, C0, prng0, sock[0]),
 			oles[1].expand(B, C1, prng1, sock[1])));
@@ -744,6 +777,9 @@ namespace osuCrypto
 		if (verbose)
 			oles[0].setTimer(timer);
 
+		std::vector<F> previousMasks;
+		std::array<std::vector<u64>, 2> previousPositions;
+
 		for (u64 tt = 0; tt < trials; ++tt)
 		{
 			if (tt)
@@ -794,6 +830,33 @@ namespace osuCrypto
 				oles[1].expand(B, C1, prng1, sock[1])));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
+
+			const auto& masks = oles[0].mFftA;
+			if (masks.rows() != oles[0].mNumPolys || masks.cols() != n ||
+				oles[1].mFftA.rows() != masks.rows() || oles[1].mFftA.cols() != n)
+				throw UnitTestFail("RingLPN public mask dimensions are incorrect");
+			if (!std::equal(masks.begin(), masks.end(), oles[1].mFftA.begin()))
+				throw UnitTestFail("RingLPN parties used different public masks");
+			if (tt && std::equal(masks.begin(), masks.end(), previousMasks.begin()))
+				throw UnitTestFail("RingLPN reused public masks across expansions");
+			previousMasks.assign(masks.begin(), masks.end());
+			for (u64 i = 0; i < n; ++i)
+			{
+				if (masks(0, i) != F::one())
+					throw UnitTestFail("RingLPN mask zero is not the identity");
+				for (u64 j = 0; j < masks.rows(); ++j)
+					for (u64 k = 0; k < masks.rows(); ++k)
+						for (u64 p = 0; p < 2; ++p)
+							if (oles[p].mFftASquared(j * masks.rows() + k, i) != masks(j, i) * masks(k, i))
+								throw UnitTestFail("RingLPN product masks were not refreshed");
+			}
+			for (u64 p = 0; p < 2; ++p)
+			{
+				const auto& positions = oles[p].mSparsePositions;
+				if (tt && !std::equal(positions.begin(), positions.end(), previousPositions[p].begin()))
+					throw UnitTestFail("RingLPN mask refresh changed the cached support");
+				previousPositions[p].assign(positions.begin(), positions.end());
+			}
 
 			//Now we check that we got the correct OLE correlations and fail
 			//the test otherwise.

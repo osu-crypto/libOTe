@@ -10,10 +10,11 @@
 #include <cryptoTools/Common/CLP.h>
 
 void RegularPprf_expandOne_test(const oc::CLP& cmd);
-void RegularPprf_inter_test(const oc::CLP& cmd);
+void RegularPprf_PhysicalIndex_test(const oc::CLP& cmd);
 void RegularPprf_ByLeafIndex_test(const oc::CLP& cmd);
 void RegularPprf_ByTreeIndex_test(const oc::CLP& cmd);
 void RegularPprf_callback_test(const oc::CLP& cmd);
+void HalfTreePprf_test(const oc::CLP& cmd);
 void Pprf_Audit_Test(const oc::CLP& cmd);
 
 void StationaryPprf_inter_test(const oc::CLP& cmd);

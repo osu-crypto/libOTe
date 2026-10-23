@@ -1,0 +1,50 @@
+{
+  "date": "2026-09-07",
+  "baseline_commit": "b2e9b7b5c5ab60adf800ba56b087c0d1b4330812",
+  "baseline_override_files": [
+    "CachedDpfExpansion.h",
+    "RevCuckooDmpf.h",
+    "WaterfallDmpf.h"
+  ],
+  "other_code": "Same current worktree, including prior correction-bit and activity-mask fixes.",
+  "platform": "WSL Ubuntu 24.04, Intel Core i7-13700H, GCC 13.3.0, -O2 AES-NI/AVX2",
+  "domain": 1048576,
+  "t": 16,
+  "num_sets": 1,
+  "values": "unsigned 64-bit additive shares",
+  "timed_operation": "Both parties' complete reusable Expand calls over LocalAsyncSocket on one thread, including allocation/reuse, messages, leaf conversion, corrections, routing and output writes.",
+  "excluded_from_expand_timer": [
+    "one-time setPoints/setup",
+    "base-OT/correlation generation",
+    "payload sampling",
+    "correctness checking",
+    "real network latency"
+  ],
+  "repetitions": "Two fresh runs per build/profile in before/after/after/before order. Each run: 3 warmups, 15 measured expansions. Table averages the two per-run medians.",
+  "validation": "All 216 expanded outputs checked pointwise. Bytes per expansion unchanged in both builds.",
+  "setup_interpretation": "One-time setPoints timings are recorded separately; their between-run spread does not resolve the small added root-derivation cost.",
+  "interpretation": "Combined rekeying plus AES batching comparison, not rekeying alone. Small 3N difference is within local run-to-run variation. Not a portable benchmark or paper benchmark replacement.",
+  "summary": [
+    {
+      "profile": "waterfall4",
+      "before_ms": 48.08415,
+      "after_ms": 45.408699999999996,
+      "change_percent": -5.564099604547456,
+      "bytes_per_expand": 4800
+    },
+    {
+      "profile": "waterfall3",
+      "before_ms": 37.6305,
+      "after_ms": 36.9809,
+      "change_percent": -1.7262592843571012,
+      "bytes_per_expand": 12992
+    },
+    {
+      "profile": "rev3",
+      "before_ms": 31.040300000000002,
+      "after_ms": 28.05265,
+      "change_percent": -9.625068056687603,
+      "bytes_per_expand": 4656
+    }
+  ]
+}

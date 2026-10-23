@@ -8,6 +8,7 @@
 
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
+#include <cryptoTools/Common/Aligned.h>
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <algorithm>
@@ -21,14 +22,20 @@ namespace osuCrypto::details
 	using KosDotColumnCheck = std::array<block, KosDotCheckColumns>;
 	using KosDotProof = std::array<block, KosDotCheckColumns + 1>;
 
+	// Keep the AVX-aligned scratch on an ordinary stack, outside coroutine frames.
+#if defined(_MSC_VER)
+	__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+	__attribute__((noinline))
+#endif
 	inline KosDotColumnCheck kosDotTransposeCheckChunk(
 		span<const KosDotCheckRow> rows)
 	{
 		if (rows.size() > 128)
 			throw std::runtime_error("KOS-Dot check chunk exceeds 128 rows. " LOCATION);
 
-		std::array<block, 128> low;
-		std::array<block, 128> high;
+		AlignedArray<block, 128> low;
+		AlignedArray<block, 128> high;
 		low.fill(ZeroBlock);
 		high.fill(ZeroBlock);
 		for (u64 i = 0; i < rows.size(); ++i)

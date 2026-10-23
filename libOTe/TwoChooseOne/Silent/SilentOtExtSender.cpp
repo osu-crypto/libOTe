@@ -261,13 +261,13 @@ namespace osuCrypto
 			throw std::invalid_argument("Silent security type not supported. " LOCATION);
 
 		constexpr u64 secParam = 128;
-        auto param = syndromeDecodingConfigure(secParam,numOTs,mult,noiseType,1);
-        const auto codeSeed=block(12528943721987127,98743297823479812);
+		auto param = syndromeDecodingConfigure(
+			secParam, numOTs, mult, noiseType, SdNoiseSecurityModel::binary());
 		auto format = PprfOutputFormat{};
 
 		if (SdNoiseDistribution::Regular == noiseType)
 		{
-			format = PprfOutputFormat::Interleaved;
+			format = PprfOutputFormat::ByPhysicalIndex;
 		}
 		else if (SdNoiseDistribution::Stationary == noiseType)
 		{
@@ -295,7 +295,7 @@ namespace osuCrypto
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNoiseVectorSize;
 		mPprfFormat = format;
-		mCodeSeed = codeSeed;
+		mCodeSeed = block(12528943721987127, 98743297823479812);
 #ifdef ENABLE_SPIN
         // Callers may initialize mSpin and buffers after configure().
         mSpin.reset();
@@ -515,7 +515,12 @@ namespace osuCrypto
 		// Copy the results to the output buffer
 		std::memcpy(b.data(), mB.data(), b.size() * sizeof(block));
 		setTimePoint("sender.expand.ldpc.copy");
-		clear();
+
+		// Regular PPRF state is one-shot. Stationary mode retains its
+		// configuration and advanced code seed for the next expansion, matching
+		// the receiver and the random-OT wrapper (AUD-209).
+		if (mGenVar.index() == 0)
+			clear();
 	}
 
 	// Performs Silent correlated OT protocol with internal storage
@@ -584,13 +589,10 @@ namespace osuCrypto
 
 		// Allocate and expand the B vector
 		mB.resize(mNoiseVecSize);
-#ifdef ENABLE_SPIN
-        if(mLpnMultType==MultType::Spin) mB.resize(mNumPartitions*mSizePer);
-#endif
+		// PPRF owns only the unpadded prefix. Retain the allocation for encoding.
+		mB.resize(mNumPartitions * mSizePer);
 		co_await gen().expand(chl, delta, prng.get(), mB, mPprfFormat, true, mNumThreads, CoeffCtxGF2{});
-#ifdef ENABLE_SPIN
-        if(mLpnMultType==MultType::Spin) mB.resize(mNoiseVecSize);
-#endif
+		mB.resize(mNoiseVecSize);
 
 		// fill remaining with zeros
 		for (u64 i = mNumPartitions * mSizePer; i < mB.size(); ++i)
@@ -691,9 +693,6 @@ namespace osuCrypto
 #endif
 		}
 		break;
-		case osuCrypto::MultType::ExAcc7:
-		case osuCrypto::MultType::ExAcc11:
-		case osuCrypto::MultType::ExAcc21:
 		case osuCrypto::MultType::ExAcc40:
 		{
 			// Use Expander-Accumulator code for compression
