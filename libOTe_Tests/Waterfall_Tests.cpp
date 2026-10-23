@@ -1158,6 +1158,76 @@ namespace osuCrypto
 		runExpansion();
 	}
 
+	void Waterfall_dmpfNormalProfile_Impl(PRNG& prng, WaterfallConfig config)
+	{
+		constexpr u64 rowsPerSet = 16;
+		constexpr u64 domain = 256;
+		constexpr std::array<u64, rowsPerSet> clearPoints{
+			3, 7, 3, 19, 29, 41, 53, 67,
+			71, 83, 97, 109, 127, 131, 149, 173
+		};
+		std::array<Matrix<u64>, 2> pointShare{
+			Matrix<u64>(1, rowsPerSet), Matrix<u64>(1, rowsPerSet)
+		};
+		for (u64 row = 0; row < rowsPerSet; ++row)
+		{
+			pointShare[0](0, row) = prng.get<u64>() & 0x1ff;
+			pointShare[1](0, row) = pointShare[0](0, row) ^ clearPoints[row];
+		}
+
+		std::array<WaterfallDmpf<u64>, 2> dmpf;
+		for (u64 party = 0; party < 2; ++party)
+			dmpf[party].init(party, rowsPerSet, 1, domain, config);
+		setCorrelatedAsymmetricOts(dmpf, prng);
+		std::array<PRNG, 2> partyPrng{
+			PRNG(prng.get<block>()), PRNG(prng.get<block>())
+		};
+		auto sockets = coproto::LocalAsyncSocket::makePair();
+		auto setup = macoro::sync_wait(macoro::when_all_ready(
+			dmpf[0].setPoints(pointShare[0], partyPrng[0], sockets[0]),
+			dmpf[1].setPoints(pointShare[1], partyPrng[1], sockets[1])
+		));
+		std::get<0>(setup).result();
+		std::get<1>(setup).result();
+		for (u64 row = 0; row < rowsPerSet; ++row)
+			if (dmpf[0].mOverflow[row] ^ dmpf[1].mOverflow[row])
+				throw std::runtime_error("Waterfall normal-profile fixture unexpectedly overflowed. " LOCATION);
+
+		for (u64 expansion = 0; expansion < 2; ++expansion)
+		{
+			std::array<std::vector<u64>, 2> valueShare{
+				std::vector<u64>(rowsPerSet), std::vector<u64>(rowsPerSet)
+			};
+			for (u64 row = 0; row < rowsPerSet; ++row)
+			{
+				valueShare[0][row] = prng.get<u64>();
+				valueShare[1][row] = prng.get<u64>();
+			}
+			std::array<Matrix<u64>, 2> output{
+				Matrix<u64>(1, domain), Matrix<u64>(1, domain)
+			};
+			auto result = macoro::sync_wait(macoro::when_all_ready(
+				dmpf[0].expand(
+					valueShare[0], partyPrng[0], sockets[0],
+					[&](u64, u64 point, u64 value) { output[0](0, point) = value; }),
+				dmpf[1].expand(
+					valueShare[1], partyPrng[1], sockets[1],
+					[&](u64, u64 point, u64 value) { output[1](0, point) = value; })
+			));
+			std::get<0>(result).result();
+			std::get<1>(result).result();
+
+			std::vector<u64> expected(domain);
+			for (u64 row = 0; row < rowsPerSet; ++row)
+				expected[clearPoints[row]] += valueShare[0][row] + valueShare[1][row];
+			for (u64 point = 0; point < domain; ++point)
+				if (output[0](0, point) + output[1](0, point) != expected[point])
+					throw std::runtime_error(
+						"Waterfall normal-profile output mismatch at point " +
+						std::to_string(point) + ". " LOCATION);
+		}
+	}
+
 	void Waterfall_dmpfEndToEnd_Test(const oc::CLP&)
 	{
 		PRNG prng(block(0x574654455354ull, 0x20260807ull));
@@ -1166,5 +1236,7 @@ namespace osuCrypto
 		Waterfall_dmpfEndToEnd_Impl<
 			std::array<u64, 4>,
 			CoeffCtxArray<u64, 4>>(prng);
+		Waterfall_dmpfNormalProfile_Impl(prng, WaterfallConfig::compact4N());
+		Waterfall_dmpfNormalProfile_Impl(prng, WaterfallConfig::compact3N());
 	}
 }
