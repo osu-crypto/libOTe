@@ -449,8 +449,8 @@ namespace osuCrypto
 			~ClearBaseOtsOnExit() { mThis->clearBaseOts(); }
 		} clearBaseOtsOnExit{ this };
 
-		// the coefficient of the sparse polynomial.
-		// the i'th row contains the coefficients for the i'th polynomial.
+		// One sampled position per block for each sparse polynomial.
+		// Row i contains the positions for polynomial i.
 		mSparsePositions.resize(mC, mT);
 
 		// The mT coefficients of the mC sparse polynomials.
@@ -467,7 +467,7 @@ namespace osuCrypto
 		//co_await checkTensor(sparseCoefficients, tensoredCoefficients, sock);
 
 		// select random positions for the sparse polynomial.
-		// The i'th is the noise position in the i'th block.
+		// The i'th entry is the sampled position in the i'th block.
 		// The LPN construction is robust to the small bias introduced by
 		// reducing a 64-bit sample modulo this power of three; exact uniformity
 		// is not required, and the intended parameters retain 30--40 bits of

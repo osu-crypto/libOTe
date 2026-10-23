@@ -111,7 +111,7 @@ namespace osuCrypto
 		FoleageMode mMode = FoleageMode::F4Ole;
 		FoleageDpfMode mDpfMode = FoleageDpfMode::TernaryDpf;
 
-		// the number of noisy positions per polynomial
+		// The number of sampled coefficient positions per polynomial.
 		u64 mT = 9;
 
 		// will be set to the log3 of mT.
@@ -137,8 +137,9 @@ namespace osuCrypto
 		// The packed A_r A_s^2 public coefficients used by trace OLE mode.
 		AlignedVector<block> mFftAFrobenius;
 
-		// the number of F4 values per block. Each block will have 1 non-zero.
-		// A polynomial will have mT blocks. i.e. mN = mT * mBlockSize.
+		// The number of F4 values per block. Each block has one sampled
+		// position, whose coefficient may be zero. A polynomial has mT blocks,
+		// so mN = mT * mBlockSize.
 		u64 mBlockSize = 0;
 
 		// The log3 of mBlockSize. 
@@ -158,8 +159,8 @@ namespace osuCrypto
 		// The log3 of mDpfTreeSize.
 		u64 mDpfTreeDepth = 0;
 
-		// the locations of the non-zeros in the j'th block of the sparse polynomial.
-		// the i'th row contains the coefficients for the i'th polynomial.
+		// The sampled position in each block of each sparse polynomial.
+		// Row i contains the positions for polynomial i.
 		Matrix<u64> mSparsePositions;
 
 		// a dpf used to construct the F4x243 leaf value of the larger DPF.
@@ -288,9 +289,9 @@ namespace osuCrypto
 			}
 		}
 
-		// sample random coefficients for the sparse polynomial and tensor
-		// them with the other parties coefficients. The result is shared
-		// as tensoredCoefficients. We allow the coeff to be zero.
+		// Sample F4 coefficients, including zero, for the sparse polynomial
+		// and tensor them with the other party's coefficients. The result is
+		// shared as tensoredCoefficients.
 		macoro::task<> tensor(span<u16> coeffs, span<u16> prod, coproto::Socket& sock);
 
 		// As tensor(), and additionally shares a_i * b_j^2 without consuming
