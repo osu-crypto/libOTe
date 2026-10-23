@@ -20,4 +20,3 @@ for profile in waterfall4 waterfall3 rev3; do
     ./cached_internal_after "$profile" after "${1:-20}"
     "$baseline" "$profile" before "${1:-20}"
 done
-

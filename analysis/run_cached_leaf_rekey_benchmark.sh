@@ -11,4 +11,3 @@ c++ -pthread -o cached_leaf_rekey_benchmark cached_leaf_rekey_benchmark.o \
     coproto/coproto/libcoproto.a macoro/macoro/libmacoro.a -Wl,--end-group
 # Never run concurrently with another benchmark.
 ./cached_leaf_rekey_benchmark
-
