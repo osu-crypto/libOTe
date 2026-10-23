@@ -535,8 +535,135 @@ void HalfTreePprf_test_impl(
 void HalfTreePprf_test(const oc::CLP& cmd)
 {
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
+	// A receiver puncturing the left half learns the right sibling from its
+	// correction and OT. The old AES(parent) right child let it decrypt that
+	// sibling, reconstruct the punctured leaf, and recover the programmed value.
+	{
+		HalfTreePprfSender<block, CoeffCtxGF2> sender;
+		HalfTreePprfReceiver<block, CoeffCtxGF2> receiver;
+		sender.configure(4, 1);
+		receiver.configure(4, 1);
+		const block root(0x12345678ull, 0x9abcdef0ull);
+		const block delta(0x33ull, 0x44ull);
+		std::array<std::array<block, 2>, 2> base{{
+			{ block(1, 2), block(3, 4) },
+			{ block(5, 6), block(7, 8) }
+		}};
+		sender.setBase(base);
+		sender.mValue = { delta };
+		BitVector choices(2); // Puncture leaf zero.
+		receiver.setChoiceBits(choices);
+		std::array<block, 2> receiverBase{ base[0][0], base[1][0] };
+		receiver.setBase(receiverBase);
+
+		CoeffCtxGF2 ctx;
+		auto senderOutput = ctx.makeVec<block>(4);
+		auto receiverOutput = ctx.makeVec<block>(4);
+		auto callbackLeaves = ctx.makeVec<block>(0);
+		std::array<std::array<block, 2>, 1> corrections{};
+		std::array<u8, 4 * sizeof(block)> leafMessages{};
+		sender.expandOne<PprfOutputFormat::ByTreeIndex>(
+			root, 0, true, {}, senderOutput, callbackLeaves,
+			corrections, leafMessages, ctx);
+		receiver.expandOne<PprfOutputFormat::ByTreeIndex>(
+			0, true, {}, receiverOutput, callbackLeaves,
+			corrections, leafMessages, 0, ctx);
+
+		const block rightSibling = corrections[0][1] ^ receiverBase[1];
+		const block guessedRoot =
+			AESDec(mAesFixedKey.getKey()).ecbDecBlock(rightSibling);
+		const block oldLeft =
+			mAesFixedKey.ecbEncBlock(guessedRoot) ^ guessedRoot;
+		const block guessedLeaf = gGgmAes[0].hashBlock(oldLeft);
+		if (guessedRoot == root || guessedLeaf == senderOutput[0] ||
+			(receiverOutput[0] ^ guessedLeaf) == delta)
+			throw RTE_LOC;
+	}
+
+	// Check the CCR hash against a word-based reference independent of the
+	// SIMD orthomorphism. Include every basis vector and random parents.
+	PRNG prng(block(188, 1));
+	for (u64 batch = 0; batch < 32; ++batch)
+	{
+		std::array<block, 8> parents, left, right;
+		prng.get(parents.data(), parents.size());
+		if (batch < 16)
+		{
+			for (u64 lane = 0; lane < 8; ++lane)
+			{
+				const auto bit = batch * 8 + lane;
+				parents[lane] = bit < 64 ? block(0, u64{ 1 } << bit)
+					: block(u64{ 1 } << (bit - 64), 0);
+			}
+		}
+		block leftSum = prng.get<block>(), rightSum = prng.get<block>();
+		block expectedLeftSum = leftSum, expectedRightSum = rightSum;
+		pprf::expandHalfTree8(mAesFixedKey, parents.data(), left.data(),
+			right.data(), leftSum, rightSum);
+		for (u64 lane = 0; lane < 8; ++lane)
+		{
+			const auto words = parents[lane].get<u64>();
+			const block sigma(words[1] ^ words[0], words[1]);
+			const block expectedLeft = mAesFixedKey.ecbEncBlock(sigma) ^ sigma;
+			const block expectedRight = parents[lane] ^ expectedLeft;
+			if (pprf::halfTreeSigma(parents[lane]) != sigma ||
+				pprf::halfTreeHash(mAesFixedKey, parents[lane]) != expectedLeft ||
+				left[lane] != expectedLeft || right[lane] != expectedRight)
+				throw RTE_LOC;
+			expectedLeftSum = expectedLeftSum ^ expectedLeft;
+			expectedRightSum = expectedRightSum ^ expectedRight;
+		}
+		if (leftSum != expectedLeftSum || rightSum != expectedRightSum)
+			throw RTE_LOC;
+		// Test both preparation backends, including addresses aligned to 16
+		// but not necessarily 32 bytes and nonzero final-round corrections.
+		const block lastKey = prng.get<block>();
+		for (u64 offset = 0; offset < 7; ++offset)
+		{
+			std::array<block, 2> prepared, scalar;
+			pprf::prepareHalfTree2(parents.data() + offset, prepared.data(), lastKey);
+			pprf::prepareHalfTree2<false>(parents.data() + offset, scalar.data(), lastKey);
+			for (u64 lane = 0; lane < 2; ++lane)
+			{
+				const auto words = parents[offset + lane].get<u64>();
+				const block expected = block(words[1] ^ words[0], words[1]) ^ lastKey;
+				if (prepared[lane] != expected || scalar[lane] != expected)
+					throw RTE_LOC;
+			}
+		}
+	}
+
+	// Check the level pipeline, including empty input, prologue-only levels,
+	// and its final batch, against independent scalar hashes and nonzero sums.
+	for (u64 width : { 0, 1, 2, 3, 8, 17 })
+	{
+		AES aes(prng.get<block>());
+		pprf::ExpandTreeBuffer parents(width), children(2 * width);
+		for (auto& parent : parents)
+			prng.get(parent.data(), parent.size());
+		block leftSum = prng.get<block>(), rightSum = prng.get<block>();
+		block expectedLeftSum = leftSum, expectedRightSum = rightSum;
+		pprf::expandHalfTreeLevel(aes, parents, children, leftSum, rightSum);
+		for (u64 i = 0; i < width; ++i)
+		{
+			for (u64 lane = 0; lane < 8; ++lane)
+			{
+				const auto words = parents[i][lane].get<u64>();
+				const block sigma(words[1] ^ words[0], words[1]);
+				const block left = aes.ecbEncBlock(sigma) ^ sigma;
+				const block right = left ^ parents[i][lane];
+				if (children[2 * i][lane] != left || children[2 * i + 1][lane] != right)
+					throw RTE_LOC;
+				expectedLeftSum = expectedLeftSum ^ left;
+				expectedRightSum = expectedRightSum ^ right;
+			}
+		}
+		if (leftSum != expectedLeftSum || rightSum != expectedRightSum)
+			throw RTE_LOC;
+	}
+
 	const auto verbose = cmd.isSet("v");
-	for (auto domain : { 32, 3242 })
+	for (auto domain : { 2, 4, 8, 16, 32, 3242 })
 	{
 		for (auto format : {
 			PprfOutputFormat::ByLeafIndex,
