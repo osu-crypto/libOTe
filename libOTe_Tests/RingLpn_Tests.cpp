@@ -575,6 +575,39 @@ namespace osuCrypto
 		if (verbose)
 			oles[0].setTimer(timer);
 
+		// Exercise the built-in base OT bootstrap, including the party-1
+		// SoftSpoken sender whose base choices must remain secret and random.
+		auto base = macoro::sync_wait(macoro::when_all_ready(
+			oles[0].genBaseCors(prng0, sock[0]),
+			oles[1].genBaseCors(prng1, sock[1])));
+		std::get<0>(base).result();
+		std::get<1>(base).result();
+
+#ifdef ENABLE_SOFTSPOKEN_OT
+		if (!oles[1].mOtExtSender ||
+			!oles[1].mOtExtSender->hasBaseOts() ||
+			!oles[0].mOtExtRecver ||
+			!oles[0].mOtExtRecver->hasBaseOts() ||
+			oles[1].mOtExtSender->delta() == ZeroBlock)
+			throw RTE_LOC;
+
+		BitVector probeChoices(128);
+		probeChoices.randomize(prng0);
+		AlignedUnVector<block> probeRecv(probeChoices.size());
+		AlignedUnVector<std::array<block, 2>> probeSend(probeChoices.size());
+		auto probe = macoro::sync_wait(macoro::when_all_ready(
+			oles[0].mOtExtRecver->receive(probeChoices, probeRecv, prng0, sock[0]),
+			oles[1].mOtExtSender->send(probeSend, prng1, sock[1])));
+		std::get<0>(probe).result();
+		std::get<1>(probe).result();
+		for (u64 i = 0; i < probeChoices.size(); ++i)
+		{
+			if (probeSend[i][0] == probeSend[i][1] ||
+				probeRecv[i] != probeSend[i][probeChoices[i]])
+				throw RTE_LOC;
+		}
+#endif
+
 		auto r = macoro::sync_wait(macoro::when_all_ready(
 			oles[0].expand(A, C0, prng0, sock[0]),
 			oles[1].expand(B, C1, prng1, sock[1])));

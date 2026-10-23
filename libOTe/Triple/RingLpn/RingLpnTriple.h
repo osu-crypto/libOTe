@@ -684,6 +684,7 @@ namespace osuCrypto
 			{
 				extSenderCount = mOtExtSender->baseOtCount();
 				BitVector cc(extSenderCount);
+				cc.randomize(prng);
 				choice.append(cc);
 				recvMsg.resize(choice.size());
 			}
