@@ -1,4 +1,5 @@
 #pragma once
+#cmakedefine ENABLE_SPIN
 #include "libOTe/version.h"
 
 #define LIBOTE_VERSION (LIBOTE_VERSION_MAJOR * 10000 + LIBOTE_VERSION_MINOR * 100 + LIBOTE_VERSION_PATCH)

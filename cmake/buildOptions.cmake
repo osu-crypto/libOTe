@@ -99,6 +99,19 @@ option(ENABLE_LOGVOLE        "Build the LogVole protocol." ON)
 option(ENABLE_FOLEAGE        "Build the Foleage OLE protocol." OFF)
 option(ENABLE_RINGLPN        "Build the Foleage OLE protocol." OFF)
 
+# Make the encoder available with Silent OT/VOLE; preserve an explicit OFF.
+EVAL(LIBOTE_SPIN_DEFAULT ENABLE_SILENTOT OR ENABLE_SILENT_VOLE)
+option(ENABLE_SPIN "Enable the standalone SPIN encoder and Silent OT integration" ${LIBOTE_SPIN_DEFAULT})
+if(ENABLE_SPIN AND CMAKE_VERSION VERSION_LESS 3.20)
+    message(FATAL_ERROR "SPIN requires CMake 3.20 or newer. Set ENABLE_SPIN=OFF to omit it.")
+endif()
+if(NOT DEFINED LIBOTE_SPIN_SOURCE)
+    set(LIBOTE_SPIN_SOURCE "" CACHE PATH "Optional standalone SPIN source directory")
+endif()
+EVAL(FETCH_SPIN_IMPL ENABLE_SPIN AND NOT LIBOTE_SPIN_SOURCE AND
+    ((DEFINED FETCH_SPIN AND FETCH_SPIN) OR
+     (NOT DEFINED FETCH_SPIN AND FETCH_AUTO)))
+
 
 option(ENABLE_REGULAR_DPF    "Build the Regular DPF protocol." OFF)
 option(ENABLE_TERNARY_DPF    "Build the Ternary DPF protocol." OFF)
@@ -135,6 +148,7 @@ message(STATUS "General Options\n===============================================
 message(STATUS "Option: VERBOSE_FETCH         = ${VERBOSE_FETCH}")
 message(STATUS "Option: FETCH_BITPOLYMUL      = ${FETCH_BITPOLYMUL_IMPL}\n")
 message(STATUS "Option: FETCH_SEAL            = ${FETCH_SEAL_IMPL}\n")
+message(STATUS "Option: FETCH_SPIN            = ${FETCH_SPIN_IMPL}\n")
 
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF")
 message(STATUS "Option: ENABLE_BITPOLYMUL     = ${ENABLE_BITPOLYMUL}")
@@ -151,6 +165,7 @@ message(STATUS "1-out-of-2 OT Extension protocols\n=============================
 message(STATUS "Option: ENABLE_KOS            = ${ENABLE_KOS}")
 message(STATUS "Option: ENABLE_IKNP           = ${ENABLE_IKNP}")
 message(STATUS "Option: ENABLE_SILENTOT       = ${ENABLE_SILENTOT}")
+message(STATUS "Option: ENABLE_SPIN           = ${ENABLE_SPIN}")
 message(STATUS "Option: ENABLE_SOFTSPOKEN_OT  = ${ENABLE_SOFTSPOKEN_OT}\n\n")
 
 message(STATUS "1-out-of-2 Delta-OT Extension protocols\n=======================================================")

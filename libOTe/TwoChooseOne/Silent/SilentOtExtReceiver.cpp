@@ -328,6 +328,10 @@ namespace osuCrypto
 		mNoiseVecSize = param.mNoiseVectorSize;
 		mPprfFormat = format;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
+#ifdef ENABLE_SPIN
+        // Callers may initialize mSpin and buffers after configure().
+        mSpin.reset();
+#endif
 		mC = {};
 		mA = {};
 		mEncodeTemp = {};
@@ -751,6 +755,10 @@ namespace osuCrypto
 			throw std::invalid_argument("Silent choice-bit packing not supported. " LOCATION);
 
 		auto points = getPoints();
+#ifdef ENABLE_SPIN
+        if(mLpnMultType==MultType::Spin)
+            prepareSpin(mSpin,mRequestNumOts,mCodeSeed,true,mNoiseDist);
+#endif
 
 		if (packing == ChoiceBitPacking::True)
 		{
@@ -791,6 +799,12 @@ namespace osuCrypto
 			// Apply appropriate compression method based on configuration
 			switch (mLpnMultType)
 			{
+#ifdef ENABLE_SPIN
+            case MultType::Spin:
+                if(!mSpin) throw std::logic_error("SPIN is not configured");
+                mSpin->transpose(mA);
+                break;
+#endif
 			case osuCrypto::MultType::QuasiCyclic:
 			{
 #ifdef ENABLE_BITPOLYMUL
@@ -871,6 +885,13 @@ namespace osuCrypto
 			// Apply appropriate compression method based on configuration
 			switch (mLpnMultType)
 			{
+#ifdef ENABLE_SPIN
+            case MultType::Spin:
+                if(!mSpin) throw std::logic_error("SPIN is not configured");
+                mSpin->transpose(mA);
+                mSpin->transpose(mC);
+                break;
+#endif
 			case osuCrypto::MultType::QuasiCyclic:
 			{
 #ifdef ENABLE_BITPOLYMUL
@@ -955,13 +976,17 @@ namespace osuCrypto
 			setTimePoint("recver.expand.dualEncode2");
 		}
 
-		// Update code seed for next use
-		mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
+		// Match the sender: fixed regular SPIN, fresh stationary instances.
+		if (mLpnMultType != MultType::Spin || mNoiseDist == SdNoiseDistribution::Stationary)
+			mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
 	}
 
 	// Clears internal buffers and state
 	void SilentOtExtReceiver::clear()
 	{
+#ifdef ENABLE_SPIN
+        mSpin.reset();
+#endif
 		std::visit([](auto& gen) { gen.clear(); }, mGenVar);
 		mNoiseVecSize = 0;
 		mRequestNumOts = 0;

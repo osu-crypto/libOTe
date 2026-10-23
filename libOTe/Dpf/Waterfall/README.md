@@ -13,8 +13,10 @@ For `s` independent sets, `t` input rows per set, and a configuration with
 - Each row has one candidate column in every partition.
 - `P` is the logical `t x m` position map within a set, where `m` is the sum of
   the partition sizes. Its MPC representation is a flattened bit vector.
-- A placement is a subvector of `P`: an active row selects exactly one of its
-  candidate columns, while a dummy or unplaced row selects none.
+- A placement is a subvector of `P`: every placed row selects exactly one of its
+  candidate columns. Dummy rows created by deduplication receive independent
+  random candidates and are placed like active rows; only an unplaced row
+  selects none.
 - `mSparseSets` contains `s * m` public sparse sets. Each entry lists all domain
   points hashing to that tree's column.
 
@@ -40,7 +42,9 @@ for `t=16`; they are not generic parameter generators.
 5. **Hide and scatter placement records.** `WaterfallScatter` applies two
    serial Waksman passes. Party `p` privately controls pass `p`, so their
    composition is exactly uniform even conditioned on either party's view.
-   Only the uniformly permuted placement rows are opened. The records are then
+   Only the uniformly permuted placement columns are opened. Because dummy
+   rows are also placed, every row appears once on the no-overflow path, so
+   this opening is independent of the active support. The records are then
    inverse-routed to obtain the active column addresses and XOR shares of each
    input row's destination column.
 6. **Cache punctured DPF leaves.** One sparse DPF is generated for every output

@@ -12,6 +12,7 @@ set(SRCS
     RevCuckoo_Tests.cpp
     Waterfall_Tests.cpp
     SilentOT_Tests.cpp
+    SpinIntegration.cpp
     SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp
     UnitTests.cpp

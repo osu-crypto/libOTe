@@ -14,6 +14,7 @@
 #include <iomanip>
 #include "util.h"
 #include "benchmark.h"
+#include "SpinBench.h"
 
 #include "ExampleBase.h"
 #include "ExampleTwoChooseOne.h"
@@ -110,6 +111,8 @@ int main(int argc, char** argv)
 	}
 
 	// various benchmarks
+	if (cmd.isSet("spinOtBench")) return spinOtBenchmark(cmd);
+	if (cmd.isSet("spinCompressionBench")) return spinCompressionBenchmark(cmd);
 	if (cmd.isSet("bench") || cmd.isSet("benchmark"))
 	{
 		benchmark(cmd);
@@ -166,6 +169,10 @@ int main(int argc, char** argv)
 
 
         std::cout
+            << "SPIN benchmarks (requires ENABLE_SPIN and ENABLE_SILENTOT):\n"
+            << "  -spinOtBench [-logN 18] [-trials 31] [-regular] [-paired] [-nt] [-consume]\n"
+            << "    Add -check for a correctness-only run. Base correlations and transport are excluded.\n"
+            << "  -spinCompressionBench [-family fixed|frozen|fresh] [-context bare|copy|leaves|resident|stream|stream-nt|pipeline] [-trials 31]\n\n"
             << "Example Protocols:\n"
             << Color::Green << "  -simplest       " << Color::Default << "  : to run the SimplestOT      active secure       1-out-of-2  base OT      " << Color::Red << (spEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
             << Color::Green << "  -moellerpopf    " << Color::Default << "  : to run the McRosRoyTwist   active secure       1-out-of-2  base OT      " << Color::Red << (popfotMoellerEnabled ? "" : "(disabled)")   << "\n"   << Color::Default
