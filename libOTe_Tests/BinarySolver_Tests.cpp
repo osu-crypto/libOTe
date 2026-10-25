@@ -709,14 +709,14 @@ namespace osuCrypto
 
 				// Build batch instances
 				std::vector<Matrix<u8>> A(batch), A0(batch), A1(batch);
-				std::vector<Matrix<u8>> B(batch), B0(batch), B1(batch), C0(batch), C1(batch);
+				std::vector<Matrix<u8>> B(batch), BZero(batch), B1(batch), C0(batch), C1(batch);
 				for (u64 b = 0; b < batch; ++b)
 				{
 					A[b].resize(n, m8);
 					A0[b].resize(n, m8);
 					A1[b].resize(n, m8);
 					B[b].resize(m, k8);
-					B0[b].resize(m, k8);
+					BZero[b].resize(m, k8);
 					B1[b].resize(m, k8);
 					C0[b].resize(n, k8);
 					C1[b].resize(n, k8);
@@ -736,10 +736,10 @@ namespace osuCrypto
 						for (u64 j = 0; j < k; ++j)
 						{
 							*BitIterator(B[b][i].data(), j) = prng.getBit();
-							*BitIterator(B0[b][i].data(), j) = prng.getBit();
+							*BitIterator(BZero[b][i].data(), j) = prng.getBit();
 						}
 						for (u64 j = 0; j < B[b].cols(); ++j)
-							B1[b](i, j) = B[b](i, j) ^ B0[b](i, j);
+							B1[b](i, j) = B[b](i, j) ^ BZero[b](i, j);
 					}
 				}
 
@@ -749,7 +749,7 @@ namespace osuCrypto
 				for (u64 b = 0; b < batch; ++b)
 				{
 					A0List.emplace_back(A0[b]); A1List.emplace_back(A1[b]);
-					B0List.emplace_back(B0[b]); B1List.emplace_back(B1[b]);
+					B0List.emplace_back(BZero[b]); B1List.emplace_back(B1[b]);
 					C0List.emplace_back(C0[b]); C1List.emplace_back(C1[b]);
 				}
 

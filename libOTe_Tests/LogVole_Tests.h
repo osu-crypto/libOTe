@@ -3,17 +3,59 @@
 #include <cryptoTools/Common/CLP.h>
 
 #define LIBOTE_LOGVOLE_TESTS(X) \
+    X(Modes, InteractiveGolden) \
+    X(Modes, NonInteractive) \
+    X(Garbled, LayoutAndValidation) \
+    X(Garbled, SequentialRelation) \
+    X(Garbled, GpuPackingMatchesCrt) \
+    X(Cpu, FusedExpandEvalMatchesSeparateOperations) \
+    X(Cpu, LheDecryptMatchesTransformReference) \
+    X(Cpu, ReduceMatchesReference) \
+    X(Cpu, ScaleAndRoundMatchesReference) \
+    X(Cpu, GoldenMarginMatchesIntegerReference) \
+    X(Cpu, FusedGadgetMatchesBalancedReference) \
+    X(Cpu, LowDigitMatchesIntegerReference) \
+    X(Cpu, DenoiseMatchesIntegerRounding) \
+    X(Cpu, NttMatchesReference) \
+    X(Cpu, CrtMatchesSeal) \
+    X(Cpu, CrtMixedWidthsMatchSeal) \
+    X(Cpu, DyadicMatchesReference) \
+    X(Cpu, FusedDotMatchesReference) \
+    X(Cpu, SamplerMatchesSeal) \
+    X(Cpu, ResamplingOverwritesPreviousQuery) \
+    X(Cpu, ErrorSamplingMatchesSeal) \
+    X(Cpu, RecursiveLeafMatchesIntegerReference) \
+    X(Cpu, ZkArithmeticMatchesReference) \
+    X(Cpu, WitnessMatchesSequentialReference) \
+    X(Cpu, GpuZkSeededPreparationMatchesReference) \
+    X(Cpu, GpuZkMatMulSeededInputsMatchReference) \
+    X(Cpu, ZkVectorMatchesReference) \
+    X(Cpu, ZkProofMatchesReference) \
+    X(Zk, FreshMaskCpu) \
+    X(Zk, FreshMaskGpu) \
+    X(Zk, MatMulIndependentRepetitions) \
+    X(Zk, MatMulReconfigure) \
+    X(Cpu, GadgetDigitWidths) \
     X(Civole, RejectsZeroDelta) \
     X(Civole, RejectsPeerOfflineWidth) \
+    X(Civole, GpuSetupDeltaParity) \
     X(Civole, ValidationAndSidReuse) \
+    X(Civole, RejectedHostInputPreservesSid) \
     X(Civole, StateMachineAutoOfflineSequentialSids) \
+    X(Civole, NonInteractiveOracleAndMask) \
+    X(Civole, NonInteractivePublicKeyAndSequentialQueries) \
     X(Core, WideU64OneShiftBounds) \
     X(Core, ZpRingLabelCountCeilNoOverflow) \
     X(Core, RootOnlineLocalRelation) \
+    X(Core, RootOnlineStateReuseAcrossQueries) \
     X(Core, TwoLevelCoprotoRelation) \
     X(Core, ThreeLevelOfflineReuseAndInvalidWidth) \
+    X(Core, GpuResidentSetupState) \
+    X(Core, GpuSetupDeltaChain) \
     X(Core, TwoLevelCoprotoMultiThreadSkipTbkOutput) \
     X(Encoding, AllMessageRoundTrips) \
+    X(Encoding, SingletonOfflinePayloadBound) \
+    X(Encoding, PinnedWireBufferOwnership) \
     X(KeyDeriveCore, AlgebraicRelation) \
     X(KeyDeriveCore, DeterministicRegressionSeeds) \
     X(KeyDeriveCore, MetadataMismatchRejected) \
@@ -26,11 +68,18 @@
     X(LheOps, ApplyCt1AndDeriveSkxRelations) \
     X(LheOps, HashedCt2Deterministic) \
     X(LencOps, EncShapeAndDeterminism) \
+    X(LencOps, SingletonPaddingAndRelation) \
     X(LencOps, DigestTreeDeterministic) \
     X(LencOps, EvalMatchesRmulDigestMinusSmulX) \
     X(LencOps, TruncEvalFromPrebuiltTreeMatchesEvalFromX) \
     X(LencOps, TruncLeafInputsAreGadgetPath) \
     X(RingOps, NttRoundTrip) \
+    X(RingOps, PartyCachesDoNotAlias) \
+    X(RingOps, ScalarUploadLifetimeAndRoleSwitch) \
+    X(RingOps, LightweightProductionContexts) \
+    X(NativeSealBundle, ExactParityAndRollback) \
+    X(NativeSealBundle, ProductionConfigureUsesDeviceAndFreshRuns) \
+    X(RingOps, NttBatchDeviceCanonicalization) \
     X(RingOps, GadgetDecomposeRecomposeBits) \
     X(RingOps, CenteredGadgetDecomposeRecomposeBits) \
     X(ShrinkExpandCoproto, OfflineAndExpandDeterministicRelation) \
@@ -47,22 +96,33 @@
     X(Core, GdecompHiUnbundleLiftsOneLimbPerOutput) \
     X(Core, RepOfflineSenderInputGammaOneRepeats) \
     X(Core, SeedLabelSampleCt2FromSeedDeterministic) \
+    X(RingOps, NttTwoTileInPlaceParity) \
     X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
     X(Core, RootTruncParamsAndKeyReplication) \
     X(Core, RootScaledNttAddMatchesCoeffDomain) \
     X(Core, RootTopCtNoiselessRelation) \
+    X(Core, RootErrorCompactGpuParity) \
+    X(Core, GaussianResidentPublicWireParity) \
     X(Core, RootZetaShapeAndBounds) \
     X(Core, RootInnerProductMatchesCoeffDomain) \
     X(Core, RootOfflineSetupFinalizeShapes) \
     X(Core, RootRandomizerWidthTracksGadgetBase) \
     X(Core, RootOfflineRejectsMetadataMismatch) \
     X(Core, RootOnlineLocalFlow) \
+    X(Core, RootFinalizePrefetchExactAndCleanup) \
+    X(Core, NoGoldenSeedRootFinalizePrefetchTwoQueryExact) \
     X(Core, TwoLevelLocalApiRelation) \
     X(Core, RecursiveGadgetInputSubproblem) \
+    X(Core, PartialRootWidthExperimental) \
     X(Core, RejectsWidthsBelowRandomizedRootBlock) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedRejectsMalformedCandidate) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
+    X(Core, LeafGoldenSeedChecksOutputRounding) \
+    X(Core, LeafGoldenSeedMatchesDecoder) \
+    X(Core, LeafGoldenSeedChecksPlaintextProduct) \
+    X(Core, LeafGoldenSeedGpuParity) \
+    X(Core, EarlyGoldenMatchesFullEvaluation) \
     X(LencOps, EvalFromPrebuiltTreeMatchesEvalFromX) \
     X(LencOps, EvalRejectsMuMismatch) \
     X(LencOps, TruncEncShapeAndDeterminism) \
@@ -73,11 +133,16 @@
     X(RingOps, GadgetDecomposeBitsRangeMatchesSlice) \
     X(RingOps, TensorPackUnpack) \
     X(RingOps, NonceBatchDeterminism) \
+    X(RingOps, PublicUniformRetentionParity) \
+    X(RingOps, GaussianPrefixBatchParity) \
+    X(RingOps, GaussianTransformBatchParity) \
+    X(RingOps, GaussianResidentBatchParity) \
     X(ShrinkExpandCoproto, TruncOfflineAndExpandBoundedRelation) \
     X(ShrinkExpandCoproto, OfflineStateReuseAcrossQueries) \
     X(ShrinkExpandCore, OfflineStateShapes) \
     X(ShrinkExpandCore, OfflineMetadataMismatchRejected) \
-    X(ShrinkExpandCore, DenoiseCombExactness)
+    X(ShrinkExpandCore, DenoiseCombExactness) \
+    X(Civole, ReceiverFirstQueryAllocationOverlapParity)
 
 #define LIBOTE_LOGVOLE_DECLARE_TEST(suite, name) void LogVole_##suite##_##name(const oc::CLP& cmd);
 LIBOTE_LOGVOLE_TESTS(LIBOTE_LOGVOLE_DECLARE_TEST)

@@ -8,6 +8,8 @@
 *.vs
 .vscode/
 
+benchmarks/
+result/
 plots/
 CMakeFiles/*
 */CMakeFiles/*

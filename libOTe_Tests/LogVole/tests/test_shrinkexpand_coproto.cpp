@@ -130,9 +130,9 @@ namespace
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (const auto& poly : batch)
         {
-            for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+            for (std::size_t modIdx = 0; modIdx < ringModulusCount(ctx); ++modIdx)
             {
-                const std::uint64_t mod = ctx.mModuli[modIdx].value();
+                const std::uint64_t mod = ringModulusValue(ctx, modIdx);
                 const std::size_t offset = modIdx * n;
                 for (std::size_t i = 0; i < n; ++i)
                 {
@@ -150,7 +150,9 @@ namespace
     {
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         const std::size_t rho = ctx.mParams.mCoeffModulusBits.size();
-        auto contextData = ctx.mContext->key_context_data();
+        const auto hostContext = getRingHostContext(ctx);
+        LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
+        auto contextData = hostContext->key_context_data();
         seal::util::RNSBase fullBase(contextData->parms().coeff_modulus(), seal::MemoryManager::GetPool());
 
         auto composedPoly = seal::util::allocate_poly(n, rho, seal::MemoryManager::GetPool());

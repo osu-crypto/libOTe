@@ -108,6 +108,7 @@ on platform/dependencies. The `ON`/`OFF` options include
  **Vole:**
  * `ENABLE_SILENT_VOLE` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol.
  * `ENABLE_LOGVOLE` the LogVole chosen-input VOLE protocol [[NRS26]](#citation). This option requires stock Microsoft SEAL 4.1.1.
+ * `ENABLE_LOGVOLE_CUDA` enables the optional CUDA backend for LogVole (OFF by default). See the [LogVole build, modes, and tests](libOTe/Vole/LogVole/README.md).
 
  **DPF:**
  * `ENABLE_REGULAR_DPF` the Boyle et al [[BGI18]](https://eprint.iacr.org/2018/707.pdf) semi-honest protocol.

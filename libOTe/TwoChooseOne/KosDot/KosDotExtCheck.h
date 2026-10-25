@@ -27,8 +27,9 @@ namespace osuCrypto::details
 		if (rows.size() > 128)
 			throw std::runtime_error("KOS-Dot check chunk exceeds 128 rows. " LOCATION);
 
-		std::array<block, 128> low;
-		std::array<block, 128> high;
+		// transpose128 uses aligned 256-bit loads when AVX is enabled.
+		alignas(32) std::array<block, 128> low;
+		alignas(32) std::array<block, 128> high;
 		low.fill(ZeroBlock);
 		high.fill(ZeroBlock);
 		for (u64 i = 0; i < rows.size(); ++i)

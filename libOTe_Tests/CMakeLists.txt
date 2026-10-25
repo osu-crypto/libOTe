@@ -70,14 +70,19 @@ target_include_directories(libOTe_Tests PUBLIC
 
 if(ENABLE_LOGVOLE)
     target_sources(libOTe_Tests PRIVATE
+        LogVole/tests/test_modes.cpp
         LogVole/tests/test_core.cpp
+        LogVole/tests/test_cpu.cpp
+        LogVole/tests/test_zk.cpp
         LogVole/tests/test_civole.cpp
+        LogVole/tests/test_garbled_labels.cpp
         LogVole/tests/test_encoding.cpp
         LogVole/tests/test_keyderive_coproto.cpp
         LogVole/tests/test_keyderive_core.cpp
         LogVole/tests/test_lhe.cpp
         LogVole/tests/test_lenc.cpp
         LogVole/tests/test_ring_ops.cpp
+        LogVole/tests/test_native_seal_bundle.cpp
         LogVole/tests/test_shrinkexpand_coproto.cpp
         LogVole/tests/test_shrinkexpand.cpp
     )

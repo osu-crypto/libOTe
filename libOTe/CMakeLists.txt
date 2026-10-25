@@ -99,14 +99,28 @@ endif()
 if(ENABLE_LOGVOLE)
     list(APPEND SRCS
         Vole/LogVole/LogVole.cpp
+        Vole/LogVole/LogVoleGarbled.cpp
         Vole/LogVole/LogVoleCore.cpp
+        Vole/LogVole/LogVoleCpuArithmetic.cpp
+        Vole/LogVole/LogVoleCpuSampler.cpp
+        Vole/LogVole/LogVoleCpuZk.cpp
         Vole/LogVole/LogVoleEncoding.cpp
         Vole/LogVole/LogVoleLenc.cpp
         Vole/LogVole/LogVoleLhe.cpp
         Vole/LogVole/LogVoleRing.cpp
         Vole/LogVole/LogVoleRingReceiver.cpp
         Vole/LogVole/LogVoleRingSender.cpp
-        Vole/LogVole/LogVoleShrinkExpand.cpp)
+        Vole/LogVole/LogVoleShrinkExpand.cpp
+        Vole/LogVole/LogVoleZk.cpp)
+    if(ENABLE_LOGVOLE_CUDA)
+        list(APPEND SRCS
+            Vole/LogVole/cuda/LogVoleGpuKernels.cu
+            Vole/LogVole/cuda/LogVoleGpuZk.cu
+            Vole/LogVole/cuda/LogVoleGpuBackend.cpp
+            Vole/LogVole/cuda/LogVoleGpuGaussian.cpp
+            Vole/LogVole/cuda/LogVoleGpuGaussianKernels.cu
+            Vole/LogVole/cuda/LogVoleGpuProtocol.cpp)
+    endif()
 endif()
 
 set(SRCS "${SRCS}")
@@ -149,10 +163,10 @@ else()
     endif()
 
     if(ENABLE_SSE)
-        target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)
+        target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-maes;-msse2;-msse3;-msse4.1;-mpclmul>)
     endif()
     if(ENABLE_AVX)
-        target_compile_options(libOTe PRIVATE -mavx2)
+        target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-mavx2>)
     endif()
 endif()
 if (ENABLE_BITPOLYMUL)
@@ -163,6 +177,24 @@ if(ENABLE_LOGVOLE)
 	target_link_libraries(libOTe SEAL::seal)
 endif()
 
+function(configure_logvole_cuda target)
+    if(ENABLE_LOGVOLE_CUDA)
+        set_target_properties(${target} PROPERTIES
+            CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON
+            CUDA_SEPARABLE_COMPILATION OFF CUDA_RESOLVE_DEVICE_SYMBOLS OFF
+            LINKER_LANGUAGE CXX)
+        target_compile_options(${target} PRIVATE
+            $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
+            $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+            $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+        if(NOT MSVC)
+            target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fPIC>)
+        endif()
+        target_link_libraries(${target} CUDA::cudart)
+    endif()
+endfunction()
+configure_logvole_cuda(libOTe)
+
 if(ENABLE_MR_KYBER)
 	target_link_libraries(libOTe KyberOT)
 endif()
@@ -172,16 +204,17 @@ if(LIBOTE_SHARED)
     
     add_library(libOTeShared SHARED ${SRCS} )
     target_link_libraries(libOTeShared libOTe)
+    configure_logvole_cuda(libOTeShared)
     if(MSVC)
         target_compile_options(libOTeShared PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
     else()
         target_compile_options(libOTeShared PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
 
         if(ENABLE_SSE)
-            target_compile_options(libOTeShared PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)
+            target_compile_options(libOTeShared PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-maes;-msse2;-msse3;-msse4.1;-mpclmul>)
         endif()
         if(ENABLE_AVX)
-            target_compile_options(libOTeShared PRIVATE -mavx2)
+            target_compile_options(libOTeShared PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-mavx2>)
         endif()
     endif()
 endif()

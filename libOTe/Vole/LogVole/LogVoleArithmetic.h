@@ -161,6 +161,70 @@ namespace osuCrypto::LogVole
         return seal::util::add_uint_mod(lhs, rhs, modulus);
     }
 
+    // High 128 bits of the 256-bit product of two 128-bit values.
+    inline wideU64 wideU64MulHigh(wideU64 lhs, wideU64 rhs)
+    {
+        const wideU64 t00 = wideU64Mul(lhs.mLo, rhs.mLo);
+        const wideU64 t01 = wideU64Mul(lhs.mLo, rhs.mHi);
+        const wideU64 t10 = wideU64Mul(lhs.mHi, rhs.mLo);
+        const wideU64 t11 = wideU64Mul(lhs.mHi, rhs.mHi);
+
+        // word1 = t00.hi + t01.lo + t10.lo
+        u64 word1 = 0;
+        unsigned char c1 = 0;
+        unsigned char c2 = 0;
+        {
+            unsigned long long acc = 0;
+            c1 = seal::util::add_uint64(t00.mHi, t01.mLo, &acc);
+            unsigned long long acc2 = 0;
+            c2 = seal::util::add_uint64(static_cast<u64>(acc), t10.mLo, &acc2);
+            word1 = static_cast<u64>(acc2);
+        }
+        const u64 carry1 = static_cast<u64>(c1) + static_cast<u64>(c2);
+
+        // word2 = t01.hi + t10.hi + t11.lo + carry1
+        u64 word2 = 0;
+        u64 carry2 = 0;
+        {
+            unsigned long long acc = 0;
+            unsigned char d1 = seal::util::add_uint64(t01.mHi, t10.mHi, &acc);
+            unsigned long long acc2 = 0;
+            unsigned char d2 = seal::util::add_uint64(static_cast<u64>(acc), t11.mLo, &acc2);
+            unsigned long long acc3 = 0;
+            unsigned char d3 = seal::util::add_uint64(static_cast<u64>(acc2), carry1, &acc3);
+            word2 = static_cast<u64>(acc3);
+            carry2 = static_cast<u64>(d1) + static_cast<u64>(d2) + static_cast<u64>(d3);
+        }
+
+        const u64 word3 = t11.mHi + carry2;
+        (void)word1;
+        return { word2, word3 };
+    }
+
+    // Exact floor(numerator / divisor) and numerator mod divisor for a 128-bit
+    // numerator, using v = floor(2^128 / divisor) as produced by
+    // reciprocal2Pow128Wide. Replaces a software 128/64 division with a handful
+    // of multiplies. Requires numerator < 2^127 and divisor >= 2.
+    inline void divModWide128(
+        wideU64 numerator, u64 divisor, wideU64 reciprocal, wideU64& quotient, u64& remainder)
+    {
+        wideU64 q = wideU64MulHigh(numerator, reciprocal);
+
+        // q is either the true quotient or one less, so at most two correction
+        // steps are ever needed.
+        wideU64 prod = wideU64MulLow(divisor, q);
+        wideU64 r = wideU64Sub(numerator, prod);
+        for (int i = 0; i < 2 && (r.mHi != 0 || r.mLo >= divisor); ++i)
+        {
+            r = wideU64Sub(r, wideU64{ divisor, 0 });
+            unsigned char carry = 0;
+            q = wideU64Add(q, wideU64{ 1, 0 }, &carry);
+        }
+
+        quotient = q;
+        remainder = r.mLo;
+    }
+
     inline wideU64 reciprocal2Pow128Wide(u64 modulus)
     {
         u64 numerator[2] = { 0, 1 };

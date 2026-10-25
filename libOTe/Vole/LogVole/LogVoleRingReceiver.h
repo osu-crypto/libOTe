@@ -16,6 +16,17 @@ namespace osuCrypto::LogVole
 
     class LogVoleRingReceiver
     {
+        struct OnlinePrefetchPlan;
+
+        task<> onlineImpl(
+            ReceiverState& state,
+            const ReceiverOnlineInput& input,
+            ReceiverOnlineOutput& output,
+            PRNG& prng,
+            Socket& sock,
+            OnlinePrefetchPlan& prefetchPlan,
+            u32 recursionDepth);
+
     public:
         task<> offline(
             const ShrinkExpandReceiverOfflineInput& input,
@@ -25,7 +36,8 @@ namespace osuCrypto::LogVole
         task<> offline(
             const ReceiverOfflineInput& input,
             ReceiverState& state,
-            Socket& sock);
+            Socket& sock,
+            std::shared_ptr<void>* firstQueryGpuAllocations = nullptr);
 
         task<> keyDerive(
             const KeyDeriveReceiverInput& input,
@@ -37,7 +49,9 @@ namespace osuCrypto::LogVole
             const ReceiverOnlineInput& input,
             ReceiverOnlineOutput& output,
             PRNG& prng,
-            Socket& sock);
+            Socket& sock,
+            const std::shared_ptr<void>& firstQueryGpuAllocations = {},
+            const void* firstQueryOwner = nullptr);
 
         task<> expand(
             const ShrinkExpandReceiverState& state,

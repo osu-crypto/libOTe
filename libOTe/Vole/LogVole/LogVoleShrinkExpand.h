@@ -15,12 +15,24 @@ namespace osuCrypto::LogVole
     {
         ShrinkExpandParams mParams;
         std::vector<RnsPoly> mS;
+        // Internal sender setup only. The exact coefficient batch is borrowed
+        // by LENC before its hostS() view is requested on decline/inspection.
+        std::shared_ptr<const gpu::DeviceBatch> mSDevice;
+        std::shared_ptr<const LazySeedLabelHostState> mLazyS;
         std::vector<RnsPoly> mFixedSk1;
+        std::shared_ptr<const gpu::DeviceBatch> mFixedSk1Device;
+        std::shared_ptr<const LazyRootSecretHostState> mLazyFixedSk1;
+        u64 mFixedSk1OwnerRunId = 0;
+        // Only selected internal transport may defer its private top key.
+        bool mDeferTopSk1Host = false;
+        // Explicit internal transport opt-in; ordinary public setup stays eager.
+        bool mDeferHostCiphertexts = false;
     };
 
     struct ShrinkExpandReceiverOfflineInput
     {
         ShrinkExpandParams mParams;
+        bool mDeferHostSnapshot = false;
     };
 
     struct ShrinkExpandOfflineMessage
@@ -28,7 +40,16 @@ namespace osuCrypto::LogVole
         ShrinkExpandParams mParams;
         RingTensor mCt1;
         ShrinkExpandLacct mLacct;
+        std::shared_ptr<const LazyRingTensorHostState> mLazyCt1;
+        std::shared_ptr<const LazyLacctHostState> mLazyLacct;
     };
+
+    namespace detail
+    {
+        std::shared_ptr<const LazyLacctHostState> makeLazyLacctHostState(
+            const ShrinkExpandLacct& metadata,
+            std::shared_ptr<const LazyRingTensorHostState> tensor);
+    }
 
     struct ShrinkExpandShrinkOutput
     {
@@ -72,6 +93,13 @@ namespace osuCrypto::LogVole
     bool validateShrinkExpandSenderOfflineInput(const ShrinkExpandSenderOfflineInput& input);
     bool validateShrinkExpandReceiverOfflineInput(const ShrinkExpandReceiverOfflineInput& input);
 
+    // Restore independent mutable bulk host storage for an explicit internal
+    // GPU view. Also invalidate its device mirror before caller mutation. For
+    // an ordinary state only the mirror is invalidated; allocation failures
+    // leave an existing view unchanged.
+    void materializeShrinkExpandHostState(ShrinkExpandSenderState& state);
+    void materializeShrinkExpandHostState(ShrinkExpandReceiverState& state);
+
     std::vector<RnsPoly> sampleUniformBatch(
         const RingNttContext& ctx,
         u32 count,
@@ -83,6 +111,8 @@ namespace osuCrypto::LogVole
         ShrinkExpandOfflineMessage& message,
         ShrinkExpandSenderState& senderState);
 
+    // State-only preparation keeps one tensor package and avoids a discarded
+    // message copy. Explicit internal opt-in can defer its host ciphertexts.
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
@@ -93,9 +123,10 @@ namespace osuCrypto::LogVole
         const ShrinkExpandOfflineMessage& message,
         ShrinkExpandReceiverState& receiverState);
 
+    // Consumes ciphertext storage after validation; state is unchanged on failure.
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
-        const ShrinkExpandSenderState& senderState,
+        ShrinkExpandOfflineMessage&& message,
         ShrinkExpandReceiverState& receiverState);
 
     bool shrinkExpandShrink(
@@ -121,5 +152,6 @@ namespace osuCrypto::LogVole
     bool shrinkExpandDenoiseComb(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& tbaPrime,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out,
+        u32 requestedWorkers = 1);
 }
