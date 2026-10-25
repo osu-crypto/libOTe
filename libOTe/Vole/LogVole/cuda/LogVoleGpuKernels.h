@@ -231,69 +231,10 @@ namespace osuCrypto::LogVole::gpu
         u32 polyCount,
         void* stream);
 
-    // Same-binary Stage-88 exactness launchers. `fusedLastTwo == false`
-    // directly names the accepted staged special-input symbol; true names its
-    // S11/S12 sidecar. Unsupported geometry is a soft decline. Once launched,
-    // CUDA failure is terminal and callers must not invoke a fallback.
-    bool tryLaunchNttForwardFromPlainBroadcastTailForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        u64* out,
-        const u32* outIdx,
-        u32 polyCount,
-        bool fusedLastTwo,
-        void* stream,
-        bool& launched);
 
-    bool tryLaunchNttForwardCenteredLimbFromTailForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        const u32* limbSel,
-        u64* out,
-        const u32* outIdx,
-        u32 polyCount,
-        bool fusedLastTwo,
-        void* stream,
-        bool& launched);
 
-    // Same-binary Stage-109 exactness launchers. `warpStages712 == false`
-    // directly names the preceding S11/S12 rollback symbol; true names the
-    // accepted S7--S12 warp-register path. Unsupported geometry, null pointers,
-    // out-of-place aliases and overflowing launch counts decline without a
-    // write. These hooks do not consult the production environment switch.
-    bool tryLaunchNttForwardWarpStages712ForTest(
-        const RingConstView& rc,
-        u64* data,
-        const u32* polyIdx,
-        u32 polyCount,
-        bool warpStages712,
-        void* stream,
-        bool& launched);
 
-    bool tryLaunchNttForwardFromPlainBroadcastWarpStages712ForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        u64* out,
-        const u32* outIdx,
-        u32 polyCount,
-        bool warpStages712,
-        void* stream,
-        bool& launched);
 
-    bool tryLaunchNttForwardCenteredLimbFromWarpStages712ForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        const u32* limbSel,
-        u64* out,
-        const u32* outIdx,
-        u32 polyCount,
-        bool warpStages712,
-        void* stream,
-        bool& launched);
 
     bool launchNttInverse(
         const RingConstView& rc, u64* data, u32 polyCount, const u32* polyIdx, void* stream);
@@ -383,45 +324,7 @@ namespace osuCrypto::LogVole::gpu
         const NttFusedIp& ip,
         bool alphaIsTwo);
 
-    // Same-binary Stage-110 oracle. `warpStages05=false` names the accepted
-    // fused-last-three symbol; true names its S0--S5 warp-register sidecar and
-    // additionally requires `alphaIsTwo`. Unsupported shapes, post operations,
-    // pointers and launch counts are soft declines with no write.
-    bool tryLaunchNttInversePostWarpStages05ForTest(
-        const RingConstView& rc,
-        u64* data,
-        u32 polyCount,
-        const u32* polyIdx,
-        u32 postOp,
-        const u64* postB,
-        bool warpStages05,
-        bool alphaIsTwo,
-        void* stream,
-        bool& launched);
 
-    // Exact fixed-N=8192/rho=4 IP -> inverse sidecars. Unsupported shapes are
-    // not errors: they return true with `launched == false`, so callers retain
-    // the existing indexed-IP and inverse launches as an exact fallback.
-    bool tryLaunchNttInverseOuterMu4ReverseSub(
-        const RingConstView& rc,
-        u64* out,
-        const u64* publicA,
-        const u64* sk,
-        u32 outCount,
-        const u64* ct2,
-        void* stream,
-        bool& launched);
-
-    bool tryLaunchNttInverseOuterMuReverseSub(
-        const RingConstView& rc,
-        u64* out,
-        const u64* publicA,
-        const u64* sk,
-        u32 mu,
-        u32 outCount,
-        const u64* ct2,
-        void* stream,
-        bool& launched);
 
     // Exact fixed-N=8192/rho=4/mu=8-or-16 standalone sender outer product. The
     // implementation retains one chunk coefficient across all public-A rows;
@@ -449,22 +352,6 @@ namespace osuCrypto::LogVole::gpu
         void* stream,
         bool& launched);
 
-    bool tryLaunchNttInverseExpandAccumulatorTau1Add(
-        const RingConstView& rc,
-        u64* out,
-        const u64* ct1,
-        const u64* uDigits,
-        const u64* publicA,
-        const u64* skNtt,
-        const u64* lacct,
-        const u64* nodes,
-        const u32* lacctAIdx,
-        const u32* lacctBIdx,
-        u32 mu,
-        u32 outCount,
-        const u64* ct2,
-        void* stream,
-        bool& launched);
 
     bool tryLaunchNttInverseTreePairNegate(
         const RingConstView& rc,
@@ -550,123 +437,13 @@ namespace osuCrypto::LogVole::gpu
         void* stream,
         bool subtract = false);
 
-    // Test-only entry points for the accepted, default-on q=2^55-c pointwise reducer.
-    // The production-shaped try launchers name either the untouched accepted
-    // symbol or its candidate peer in the same binary. A structural decline is
-    // reported as success with `launched == false`; once a kernel is committed,
-    // a CUDA error is reported as failure with `launched == true` and callers
-    // must never fall back.
-    bool launchPointwisePseudo55ReduceWideForTest(
-        const u64* lo,
-        const u64* hi,
-        u32 count,
-        u64 q,
-        u32 maxTerms,
-        u64* residues,
-        void* stream);
 
-    bool tryLaunchInnerProductFixedIndexedPointwiseForTest(
-        const RingConstView& rc,
-        const u64* aBase,
-        const u64* bBase,
-        const u32* aIdx,
-        const u32* bIdx,
-        u32 terms,
-        u64* out,
-        u32 outCount,
-        bool accumulate,
-        bool subtract,
-        bool usePseudo55,
-        void* stream,
-        bool& launched);
 
-    // Forces either the untouched runtime kernel or the opt-in rolled
-    // pseudo-55 candidate for an otherwise identical 8/10/12/14-term
-    // Accumulate call. Unsupported shapes decline without launching.
-    bool tryLaunchInnerProductPseudo55WideAccumulateForTest(
-        const RingConstView& rc,
-        const u64* aBase,
-        const u64* bBase,
-        const u32* aIdx,
-        const u32* bIdx,
-        u32 terms,
-        u64* out,
-        const u32* outIdx,
-        u32 outCount,
-        bool accumulate,
-        bool negate,
-        bool subtract,
-        bool useCandidate,
-        void* stream,
-        bool& launched);
 
-    bool tryLaunchInnerProductOuterMuRowReusePointwiseForTest(
-        const RingConstView& rc,
-        const u64* publicA,
-        const u64* skNtt,
-        u64* out,
-        u32 mu,
-        u32 chunkCount,
-        bool usePseudo55,
-        void* stream,
-        bool& launched);
 
-    // Test-only default-switch bypass for the distinct mu=32/64/128 pseudo-55
-    // row-reuse symbols. Invalid metadata is a pure decline.
-    bool tryLaunchInnerProductOuterWideMuRowReusePseudo55ForTest(
-        const RingConstView& rc,
-        const u64* publicA,
-        const u64* skNtt,
-        u64* out,
-        u32 mu,
-        u32 chunkCount,
-        void* stream,
-        bool& launched);
 
-    bool tryLaunchNttInverseTreePairNegatePointwiseForTest(
-        const RingConstView& rc,
-        u64* out,
-        const u64* publicB,
-        const u64* nodes,
-        u32 outCount,
-        u32 depth,
-        u32 nodeCount,
-        u32 publicCol,
-        bool usePseudo55,
-        bool useWarpStages,
-        void* stream,
-        bool& launched);
 
-    // Same-binary Stage-112 oracle. `productWarpStages05=false` names the
-    // Stage-104 rollback; true names the direct product/S0 -> S5 path (and its
-    // default vector-pair successor) and additionally requires alphaIsTwo.
-    // Invalid shape, metadata, pointers, aliases, or alpha provenance are pure
-    // declines with no write.
-    bool tryLaunchNttInverseTreePairNegateProductWarpStages05ForTest(
-        const RingConstView& rc,
-        u64* out,
-        const u64* publicB,
-        const u64* nodes,
-        u32 outCount,
-        u32 depth,
-        u32 nodeCount,
-        u32 publicCol,
-        bool productWarpStages05,
-        bool alphaIsTwo,
-        void* stream,
-        bool& launched);
 
-    bool tryLaunchNttInverseRecursiveLeafSparseNoZeroPointwiseForTest(
-        const RingConstView& rc,
-        const u64* nodes,
-        const u64* leftB,
-        const u64* rightB,
-        u64* packed,
-        u64* out,
-        u32 logicalCount,
-        bool usePseudo55,
-        void* stream,
-        bool& launched);
 
     // Reports whether the tauHi=1 receiver can skip its first two pointwise
     // passes and commit to launchExpandAccumulatorTau1. Six-term shapes retain
@@ -726,28 +503,6 @@ namespace osuCrypto::LogVole::gpu
         void* stream,
         bool alphaIsTwo);
 
-    // Same-binary Stage-111 oracle. `dual=false` names the unchanged accepted
-    // fixed pseudo-55 symbol; true names the dual-carry sidecar and additionally
-    // requires alphaIsTwo. Invalid metadata, counts, pointers and aliases are
-    // soft declines (`launched == false`) with no write.
-    bool tryLaunchExpandAccumulatorTau1GoldenPseudo55DualForTest(
-        const RingConstView& rc,
-        const u64* ct1,
-        const u64* uDigits,
-        const u64* publicA,
-        const u64* skNtt,
-        const u64* lacct,
-        const u64* nodes,
-        const u32* lacctAIdx,
-        const u32* lacctBIdx,
-        u32 mu,
-        u32 treeTerms,
-        u64* out,
-        u32 outCount,
-        bool dual,
-        bool alphaIsTwo,
-        void* stream,
-        bool& launched);
 
     // Bypasses the production wide switch and launches one of the exact
     // (mu,treeTerms)=(16,8),(32,10),(64,12),(128,14) pseudo-55 symbols. The
@@ -774,23 +529,6 @@ namespace osuCrypto::LogVole::gpu
         void* stream,
         bool& launched);
 
-    // Focused exactness hook for the accepted production accumulator. This
-    // bypasses all runtime experiment gates and always launches the adaptive
-    // Q64 `<true,true>` symbol, allowing an opt-in test to compare it with the
-    // production dispatch on an independent stream in the same process.
-    bool launchExpandAccumulatorTau1GoldenAcceptedForTest(
-        const RingConstView& rc,
-        const u64* ct1,
-        const u64* uDigits,
-        const u64* publicA,
-        const u64* skNtt,
-        const u64* lacct,
-        const u64* nodes,
-        const u32* lacctAIdx,
-        const u32* lacctBIdx,
-        u64* out,
-        u32 outCount,
-        void* stream);
 
     // out[i] = op(A[aIdx[i]], B[bIdx[i]]) with op in {add, sub}.
     enum class ElemOp : u32
@@ -878,38 +616,8 @@ namespace osuCrypto::LogVole::gpu
         const u32* outIdx,
         void* stream);
 
-    // Same-binary Stage-89 arithmetic and production-shaped launchers. The raw
-    // entry point returns false without writing for an unsupported q. The two
-    // try-launch APIs soft-decline unsupported metadata before launch and set
-    // `launched` as soon as either accepted or candidate work is committed.
-    bool launchGadgetReduceMagnitude110Pseudo55ForTest(
-        const u64* magLo,
-        const u64* magHi,
-        u32 count,
-        u64 q,
-        u64* residues,
-        void* stream);
 
-    bool tryLaunchGadgetDecomposeHi110Pseudo55ForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        u32 inCount,
-        u64* out,
-        const u32* outIdx,
-        bool pseudo55SecondFold,
-        void* stream,
-        bool& launched);
 
-    bool tryLaunchGadgetDecomposeHi110RecursiveLeafSparsePairPseudo55ForTest(
-        const RingConstView& rc,
-        const u64* in,
-        u32 parentCount,
-        u64* out,
-        const u32* outIdx,
-        bool pseudo55SecondFold,
-        void* stream,
-        bool& launched);
 
     // Exact seed-label repetition/projection, including noncanonical input
     // words. gammaOne repeats input[0]; otherwise outputs cycle through
@@ -1192,43 +900,7 @@ namespace osuCrypto::LogVole::gpu
         void* stream,
         bool alphaIsTwo);
 
-    // Exactness hook for the fixed N=8192/rho=4 high-carry fusion. Launches
-    // either ownership variant irrespective of its runtime experiment switch.
-    bool launchScaleNttForwardGatherHiCarryForTest(
-        const RingConstView& ringRc,
-        const RingConstView& plainRc,
-        const u64* in,
-        u32 inCount,
-        u64 plainModulus,
-        const ScaleRoundFastLimb* fastLimbs,
-        const u32* inverseSlotMap,
-        const u32* slotMap,
-        u32 slotCount,
-        u64* out,
-        u64 outCount,
-        bool slotOwned,
-        void* stream);
 
-    // Same-binary Stage-113 oracle launcher. `warpStages712=false` names the
-    // accepted slot-owned symbol; true names the S7--S12 register sidecar and
-    // additionally requires alphaIsTwo. Invalid metadata, pointers, aliases,
-    // counts, or alpha provenance are pure declines with no write.
-    bool tryLaunchScaleNttForwardGatherWarpStages712ForTest(
-        const RingConstView& ringRc,
-        const RingConstView& plainRc,
-        const u64* in,
-        u32 inCount,
-        u64 plainModulus,
-        const ScaleRoundFastLimb* fastLimbs,
-        const u32* inverseSlotMap,
-        const u32* slotMap,
-        u32 slotCount,
-        u64* out,
-        u64 outCount,
-        bool warpStages712,
-        bool alphaIsTwo,
-        void* stream,
-        bool& launched);
 
     // Mirrors the slot-permutation loop at the end of
     // seal::BatchEncoder::decode, applied to `chunkCount` transformed
@@ -1341,10 +1013,6 @@ namespace osuCrypto::LogVole::gpu
     // (540 MB at n = 2^24) and pass a null scratch pointer.
     bool gpuFusedSamplerActive(u32 n, u32 streamWords, u32 outCount);
 
-    // True when the non-materialized path splits each polynomial across
-    // independent 2,048-word CTAs. This route needs the persistent rejection
-    // epochs even though it does not need the materialized stream.
-    bool gpuTiledSamplerActive(u32 n, u32 streamWords, u32 outCount);
 
     // True when the selected non-materialized sampler publishes rare rejection
     // epochs and follows its common kernel with the exact cold replay. Callers use
@@ -1356,23 +1024,6 @@ namespace osuCrypto::LogVole::gpu
     // scan with reduce-time detection and an epoch-gated rare repair pass.
     bool gpuRejectReduceFusionActive();
 
-    // Device replacement for the per-chunk ct2 seed derivation:
-    //   ct2Seed_c = deriveSeedInstanceBlockFromDigestHash(
-    //                   seed, sid, digestHash, instanceBase + c, mu)
-    //   sealSeed  = sealSeedFromBlock(RO(label|ct2Seed|domainTag|row|N|rho))
-    //
-    // `prefix` is a device array of 9 u64 holding the random-oracle message with
-    // slot 3 reserved for the per-chunk instance index:
-    //   label, sid, fallbackNonce, -, seedSize, digestHash.lo, digestHash.hi,
-    //   seed[0], seed[1]
-    // and requires the golden seed to be 16 bytes. `ct2Scratch` needs
-    // 2*chunkCount u64, `outSeeds` needs 8*chunkCount*mu u64.
-    // Measurement hooks that settle "would an AES-CTR PRG beat Blake2xb here?".
-    // Both fill `streamCount` independent streams of `wordsPerStream` u64 from a
-    // 16-byte seed each. Only used by -lvgpu; the protocol's ct2 bytes are
-    // defined by SEAL's sample_poly_uniform.
-    bool launchAesCtrStreamForTest(
-        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount, void* stream);
 
     // Exact cryptoTools PRNG(seed).get<u64>() % modulus, starting at counter
     // zero. The seed is two device u64 words; odd scalar counts are supported.
@@ -1381,19 +1032,6 @@ namespace osuCrypto::LogVole::gpu
     bool launchBlake2xbStreamForTest(
         const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount, void* stream);
 
-    // Focused AES schedule equivalence hook. `keys` is count consecutive
-    // little-endian 128-bit keys, `roundKeys` receives count*176 bytes, and
-    // `outSeeds` receives AES_key(counter=0..3) as count*8 u64. The Boolean
-    // selects the shared-S-box/vector-store schedule directly, bypassing its
-    // production dispatch gate so tests can compare both implementations in
-    // one process.
-    bool launchAes128ExpandAndEncryptForTest(
-        const u64* keys,
-        u32 count,
-        unsigned char* roundKeys,
-        u64* outSeeds,
-        bool sharedVectorExpand,
-        void* stream);
 
     // Exact hashSeedDigest RandomOracle(16) over label, size and coefficients.
     bool launchRootDigestHash(
@@ -1428,12 +1066,18 @@ namespace osuCrypto::LogVole::gpu
         bool forceFirstReject,
         void* stream);
 
-    // Raw-draw oracle hook: masks each four-word draw to 209 bits, writes a
-    // rejection flag, and leaves rejected output coefficients untouched.
-    bool launchRootZetaRho8RawForTest(
-        const RingConstView& rc, const u64* rawWords, u32 count,
-        u32* rejected, u64* out, void* stream);
 
+    // Device replacement for the per-chunk ct2 seed derivation:
+    //   ct2Seed_c = deriveSeedInstanceBlockFromDigestHash(
+    //                   seed, sid, digestHash, instanceBase + c, mu)
+    //   sealSeed  = sealSeedFromBlock(RO(label|ct2Seed|domainTag|row|N|rho))
+    //
+    // `prefix` is a device array of 9 u64 holding the random-oracle message with
+    // slot 3 reserved for the per-chunk instance index:
+    //   label, sid, fallbackNonce, -, seedSize, digestHash.lo, digestHash.hi,
+    //   seed[0], seed[1]
+    // and requires the golden seed to be 16 bytes. `ct2Scratch` needs
+    // 2*chunkCount u64, `outSeeds` needs 8*chunkCount*mu u64.
     bool launchCt2Seeds(
         const u64* prefix,
         u64 instanceBase,
@@ -1463,53 +1107,8 @@ namespace osuCrypto::LogVole::gpu
         unsigned char* roundKeyScratch,
         void* stream);
 
-    // Direct arithmetic oracle for the candidate q=2^55-c sampler fold. Each
-    // input word produces its canonical residue and one exact SEAL-default
-    // rejection bit. The launcher accepts only 0<c<2^21.
-    bool launchSampleUniformPseudo55ReduceWordForTest(
-        const u64* words,
-        u32 count,
-        u64 q,
-        u64* residues,
-        u32* rejected,
-        void* stream);
 
-    // Isolated, opt-in launcher for the candidate pseudo-55 sampler symbols.
-    // It is deliberately not part of production dispatch. `split64` selects
-    // the accepted two-CTA ownership shape and therefore requires outCount=64.
-    // A false default-threshold provenance bit soft-declines before any write.
-    bool launchSampleUniformPolyBlake2xbPseudo55Candidate(
-        const RingConstView& rc,
-        const u64* seeds,
-        u32 streamWords,
-        const u64* maxMultiple,
-        u64* out,
-        const u32* outIdx,
-        u32 outCount,
-        u32* rejectEpochs,
-        u32 rejectEpoch,
-        bool maxMultipleIsSealDefault,
-        bool split64,
-        void* stream);
 
-    // Isolated launcher for the Stage-93 N=8192/rho=4 small-batch sidecar.
-    // The production path accepts only the SEAL-default threshold provenance;
-    // focused validation may explicitly opt into a custom threshold to force
-    // rejection and exercise the same unbounded ordered-repair path. A false
-    // result means either a preflight decline or a committed launch failure.
-    bool launchSampleUniformPolyBlake2xbSmallDirectCandidate(
-        const RingConstView& rc,
-        const u64* seeds,
-        u32 streamWords,
-        const u64* maxMultiple,
-        u64* out,
-        const u32* outIdx,
-        u32 outCount,
-        u32* rejectEpochs,
-        u32 rejectEpoch,
-        bool maxMultipleIsSealDefault,
-        bool allowCustomThresholdForTest,
-        void* stream);
 
     // `maxMultipleIsSealDefault` is provenance, not a value comparison. False
     // keeps custom/forced thresholds on the accepted sampler; true permits the

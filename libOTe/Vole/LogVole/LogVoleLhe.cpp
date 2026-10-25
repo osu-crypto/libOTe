@@ -45,30 +45,6 @@ namespace osuCrypto::LogVole
 #endif
         }
 
-        u64 pow2Mod(u64 exp, u64 mod)
-        {
-            const seal::Modulus modulus(mod);
-            u64 result = 1;
-            u64 base = 2 % mod;
-            u64 e = exp;
-            while (e > 0)
-            {
-                if ((e & 1u) != 0)
-                {
-                    result = mulMod(result, base, modulus);
-                }
-                base = mulMod(base, base, modulus);
-                e >>= 1;
-            }
-            return result;
-        }
-
-        bool zeroPoly(const RingNttContext& ctx, RnsPoly& out)
-        {
-            resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-            return true;
-        }
-
         struct PublicACacheKey
         {
             RingParams mRing;
@@ -227,7 +203,7 @@ namespace osuCrypto::LogVole
             {
                 const u64 mod = moduli[modIdx].value();
                 const std::size_t offset = modIdx * n;
-                const u64 factor = pow2Mod(shift, mod);
+                const u64 factor = detail::pow2Mod(shift, mod);
                 for (std::size_t i = 0; i < n; ++i)
                 {
                     const std::size_t idx = offset + i;
@@ -526,7 +502,7 @@ namespace osuCrypto::LogVole
                 if (shift > std::numeric_limits<u32>::max()) return false;
                 factors[col].resize(moduli.size());
                 for (std::size_t j = 0; j < moduli.size(); ++j)
-                    factors[col][j].set(pow2Mod(shift, moduli[j].value()), moduli[j]);
+                    factors[col][j].set(detail::pow2Mod(shift, moduli[j].value()), moduli[j]);
             }
 
             if (!detail::runParallelTasks(ct1.mPolys.size(), requestedWorkers,
@@ -693,10 +669,7 @@ namespace osuCrypto::LogVole
         for (u32 row = 0; row < ct1.mRows; ++row)
         {
             RnsPoly accNtt{};
-            if (!zeroPoly(ctx, accNtt))
-            {
-                return false;
-            }
+            resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
             for (u32 col = 0; col < tau; ++col)
             {
@@ -750,10 +723,7 @@ namespace osuCrypto::LogVole
         for (u32 row = 0; row < ct1.mRows; ++row)
         {
             RnsPoly accNtt{};
-            if (!zeroPoly(ctx, accNtt))
-            {
-                return false;
-            }
+            resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
             for (u32 col = 0; col < tauHi; ++col)
             {
@@ -843,8 +813,8 @@ namespace osuCrypto::LogVole
             if (!detail::runParallelTasks(result.size(), requestedWorkers,
                 [&](std::size_t row) {
                     auto& product = result[row];
-                    if (!zeroPoly(ctx, product) ||
-                        !dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, product, ctx) ||
+                    resizeZero(product.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+                    if (!dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, product, ctx) ||
                         !inverseNtt(product, ctx)) return false;
                     // The former forward transform canonicalized arbitrary
                     // input coefficients. Preserve that contract explicitly.
@@ -904,8 +874,8 @@ namespace osuCrypto::LogVole
                 return true;
             }
             RnsPoly askNtt{};
-            return zeroPoly(ctx, askNtt) &&
-                   dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, askNtt, ctx) &&
+            resizeZero(askNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+            return dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, askNtt, ctx) &&
                    ringSubInplace(result[row], askNtt, ctx);
         });
         if (!rowsOk)

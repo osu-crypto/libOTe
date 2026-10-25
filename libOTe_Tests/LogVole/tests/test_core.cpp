@@ -3088,8 +3088,8 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
 
     gpu::setEnabled(true);
     // CPU-only CI skips this device-specific exactness gate. CUDA builds exercise
-    // the accepted default path; setting both Root-finalize prefetch switches to
-    // zero deliberately selects the monolithic rollback and skips this test.
+    // the accepted default path; setting LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH
+    // to zero selects the monolithic rollback and skips this test.
     if (!gpu::enabled() || !gpu::rootFinalizeReceiverPrefetchEnabled()) return;
 
     const std::uint64_t runId = allocateProtocolCacheRunId();

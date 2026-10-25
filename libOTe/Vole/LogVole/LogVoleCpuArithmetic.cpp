@@ -392,7 +392,6 @@ namespace osuCrypto::LogVole::detail
                 for (std::size_t j = 0; j < Limbs; ++j)
                 {
                     const u64 mod = base.base()[j].value();
-                    moduli[j] = _mm512_set1_epi64(mod);
                     u64 power = 1;
                     for (std::size_t w = 0; w < Digits; ++w)
                     {

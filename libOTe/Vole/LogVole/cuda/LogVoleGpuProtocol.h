@@ -641,10 +641,8 @@ namespace osuCrypto::LogVole::gpu
 
     // The default LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH path uses a pre-created
     // Root cache stream at the device's greatest priority plus retained device
-    // dPrime; set it to 0 for the monolithic rollback. The independent,
-    // default-off LV_GPU_ROOT_FINALIZE_PREFETCH=1 experiment retains the
-    // original same-stream implementation. Both queue exactly the
-    // response-independent prefix immediately after dPrime is sent and hand
+    // dPrime; set it to 0 for the monolithic rollback. It queues exactly the
+    // response-independent prefix immediately after dPrime is sent and hands
     // readiness to the suffix through one event.
     // A false return may still leave `prepared` non-null: it owns partially
     // queued work for deferred, exception-safe cleanup while the caller runs
@@ -886,9 +884,6 @@ namespace osuCrypto::LogVole::gpu
         const Params& validatedLevelParams,
         DeviceBatchPtr& out,
         u64 logicalInputCount = 0);
-    bool queueGoldenSeedValidation(
-        const Params& params,
-        const DeviceBatch& tbk);
     bool finishGoldenValidationAttempt(bool& ok);
     bool abortGoldenValidationAttempt();
 
@@ -929,14 +924,6 @@ namespace osuCrypto::LogVole::gpu
         u32 index,
         std::vector<RnsPoly>& out,
         std::span<const u64> maxMultipleOverride = {});
-
-    // Exact fixed-root sampler test hook, including the ordered rare repair.
-    bool sampleRootZetaFromSeedsForTest(
-        const RingNttContext& ctx,
-        std::span<const block> taskSeeds,
-        bool forceFirstReject,
-        std::vector<RnsPoly>& out,
-        u32 rangesPerPoly = 8u);
 
     // Test hook for the device ct2 seed derivation. Produces, for chunk c in
     // [0, chunkCount) and row r in [0, mu), the same polynomial as
@@ -994,16 +981,6 @@ namespace osuCrypto::LogVole::gpu
         u64 chunkCount,
         u64 zpLabelCount,
         u64* out);
-
-    // Focused oracle for the final ownership experiment in the fused unwrap.
-    // Both variants consume the same immutable device input and return their
-    // exact scalar outputs for direct comparison by the caller.
-    bool scaleNttForwardGatherSlotOwnedForTest(
-        const ZpCrtContext& ctx,
-        const std::vector<RnsPoly>& labels,
-        u64 zpLabelCount,
-        std::vector<u64>& coefficientOwned,
-        std::vector<u64>& slotOwned);
 
     // Device counterpart of wrapZpLabelsCrt: slot scatter, the inverse
     // plaintext-modulus NTT that seal::BatchEncoder::encode performs, and the

@@ -32,6 +32,7 @@
     X(Cpu, ZkVectorMatchesReference) \
     X(Cpu, ZkProofMatchesReference) \
     X(Zk, FreshMaskCpu) \
+    X(Zk, RequestSizeBounds) \
     X(Zk, FreshMaskGpu) \
     X(Zk, MatMulIndependentRepetitions) \
     X(Zk, MatMulReconfigure) \
@@ -76,6 +77,7 @@
     X(RingOps, NttRoundTrip) \
     X(RingOps, PartyCachesDoNotAlias) \
     X(RingOps, ScalarUploadLifetimeAndRoleSwitch) \
+    X(RingOps, GpuBufferResizeBounds) \
     X(RingOps, LightweightProductionContexts) \
     X(NativeSealBundle, ExactParityAndRollback) \
     X(NativeSealBundle, ProductionConfigureUsesDeviceAndFreshRuns) \

@@ -2189,23 +2189,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPolyBuffer::resize(const GpuRing& ring, std::size_t count)
     {
-        mPolyWords = ring.polyWords();
-        if (count <= mCapacity)
-        {
-            mCount = count;
-            return true;
-        }
-        gpuFree(mData);
-        mData = static_cast<u64*>(gpuMalloc(count * mPolyWords * sizeof(u64)));
-        if (!mData)
-        {
-            mCount = 0;
-            mCapacity = 0;
-            return false;
-        }
-        mCount = count;
-        mCapacity = count;
-        return true;
+        return resizeWords(ring.polyWords(), count);
     }
 
     bool GpuPolyBuffer::resizeWords(std::size_t polyWords, std::size_t count)
@@ -2392,11 +2376,7 @@ namespace osuCrypto::LogVole::gpu
         // One allocation per host thread, reused safely across roles because
         // this synchronous API drains every transfer before returning.
         thread_local PinnedDownload staging;
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         u8* selected = nullptr;
         {
             HostStep stagingStep("setup: pipelined download pinned allocation");
@@ -2540,56 +2520,6 @@ namespace osuCrypto::LogVole::gpu
     bool nttInverse(const GpuRing& ring, u64* polys, u32 count, GpuStream& stream)
     {
         return launchNttInverse(ring.view(), polys, count, nullptr, stream.raw());
-    }
-
-    bool innerProduct(
-        const GpuRing& ring,
-        const u64* aBase,
-        const u64* bBase,
-        std::span<const u32> aIdx,
-        std::span<const u32> bIdx,
-        u32 terms,
-        u64* out,
-        u32 outCount,
-        bool accumulate,
-        bool negate,
-        GpuStream& stream)
-    {
-        const u32* dA = aIdx.empty() ? nullptr : stream.uploadIdx(aIdx);
-        const u32* dB = bIdx.empty() ? nullptr : stream.uploadIdx(bIdx);
-        if ((!aIdx.empty() && !dA) || (!bIdx.empty() && !dB)) return false;
-        return launchInnerProduct(
-            ring.view(), aBase, bBase, dA, dB, terms, out, nullptr, outCount, accumulate, negate,
-            stream.raw());
-    }
-
-    bool gadgetDecomposeBits(
-        const GpuRing& ring,
-        const u64* in,
-        u32 inCount,
-        u32 digitBits,
-        u32 startLevel,
-        u32 levels,
-        bool centered,
-        u64* out,
-        GpuStream& stream)
-    {
-        return launchGadgetDecompose(
-            ring.view(), in, nullptr, inCount, digitBits, startLevel, levels, centered, out, nullptr,
-            stream.raw());
-    }
-
-    bool elementwise(
-        const GpuRing& ring,
-        const u64* aBase,
-        const u64* bBase,
-        u64* out,
-        u32 outCount,
-        ElemOp op,
-        GpuStream& stream)
-    {
-        return launchElementwise(
-            ring.view(), aBase, nullptr, bBase, nullptr, out, nullptr, outCount, op, stream.raw());
     }
 
     bool denoiseComb(const GpuRing& ring, const u64* in, u64* out, u32 outCount, GpuStream& stream)

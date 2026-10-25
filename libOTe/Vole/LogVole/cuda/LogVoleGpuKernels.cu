@@ -13,9 +13,6 @@
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuPseudo52.cuh"
 
 #include <cuda_runtime.h>
-#if CUDART_VERSION >= 12000
-#include <cooperative_groups.h>
-#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -34,6 +31,18 @@ namespace osuCrypto::LogVole::gpu
 {
     namespace
     {
+        bool environmentFlagDefaultOn(const char* name)
+        {
+            const char* value = std::getenv(name);
+            return !(value && value[0] == '0');
+        }
+
+        bool environmentFlagOptIn(const char* name)
+        {
+            const char* value = std::getenv(name);
+            return value && value[0] == '1';
+        }
+
         constexpr u32 kMaxWords = 8;   // generic gadget decomposition limit
         constexpr u32 kMaxRawSetupWords = 16; // bounded GPU-native SEAL setup limit
         static_assert(sizeof(HostModulus) == sizeof(GpuModulus));
@@ -548,10 +557,7 @@ namespace osuCrypto::LogVole::gpu
         // same-binary rollback.
         bool nttLog14H200Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NTT_LOG14_H200");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200");
             return on;
         }
 
@@ -561,11 +567,7 @@ namespace osuCrypto::LogVole::gpu
         // Explicit zero retains the generic same-binary rollback.
         bool nttLog14H200FixedTransformsEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG14_H200_FIXED_TRANSFORMS");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FIXED_TRANSFORMS");
             return on;
         }
 
@@ -575,21 +577,13 @@ namespace osuCrypto::LogVole::gpu
         // Explicit zero retains the original three-pass implementation.
         bool noGoldH200CombinedAccumulatorEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NOGOLD_H200_COMBINED_ACCUMULATOR");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_COMBINED_ACCUMULATOR");
             return on;
         }
 
         bool noGoldH200AccumulatorPseudo52Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NOGOLD_H200_ACCUM_PSEUDO52");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_ACCUM_PSEUDO52");
             return on;
         }
 
@@ -620,10 +614,7 @@ namespace osuCrypto::LogVole::gpu
 
         bool noGoldH200InverseCachedSuffix()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NTT_LOG14_H200_INVERSE_CACHED_SUFFIX");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG14_H200_INVERSE_CACHED_SUFFIX");
             return on;
         }
 
@@ -711,25 +702,6 @@ namespace osuCrypto::LogVole::gpu
             return mode;
         }
 
-        u32 noGoldH200InverseFp52SplitMode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_SPLIT");
-                return v && v[0] >= '1' && v[0] <= '4' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200InverseFp52ClusterMode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_CLUSTER");
-                return v && v[0] >= '1' && v[0] <= '4' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
 
         u32 noGoldH200ForwardFp52Mode()
         {
@@ -908,11 +880,7 @@ namespace osuCrypto::LogVole::gpu
         // of one 107-register CTA serializing all 256 roots and 64 passes.
         bool noGoldH200SplitSamplerEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NOGOLD_H200_SPLIT_SAMPLE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_SPLIT_SAMPLE");
             return on;
         }
 
@@ -948,40 +916,25 @@ namespace osuCrypto::LogVole::gpu
 
         bool noGoldH200SampleSharedPrefixEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_SAMPLE_SHARED_PREFIX");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_SAMPLE_SHARED_PREFIX");
             return on;
         }
 
         bool noGoldH200Gadget208Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NOGOLD_H200_GADGET208");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_GADGET208");
             return on;
         }
 
         bool noGoldH200Gadget208Pseudo52Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NOGOLD_H200_GADGET208_PSEUDO52");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_GADGET208_PSEUDO52");
             return on;
         }
 
         bool nttLog14H200InverseWarp05Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG14_H200_INVERSE_WARP05");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_WARP05");
             return on;
         }
 
@@ -989,11 +942,7 @@ namespace osuCrypto::LogVole::gpu
         // Zero retains the synchronization-safe Stage-126 shared-input path.
         bool nttLog14H200InverseDirectLoadEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG14_H200_INVERSE_DIRECT_LOAD");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_DIRECT_LOAD");
             return on;
         }
 
@@ -1001,21 +950,13 @@ namespace osuCrypto::LogVole::gpu
         // It requires direct loads; zero isolates the Stage-127 input change.
         bool nttLog14H200InversePairedSuffixEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG14_H200_INVERSE_PAIRED_SUFFIX");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_PAIRED_SUFFIX");
             return on;
         }
 
         bool nttLog14H200ForwardWarp712Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG14_H200_FORWARD_WARP712");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FORWARD_WARP712");
             return on;
         }
 
@@ -1023,21 +964,13 @@ namespace osuCrypto::LogVole::gpu
         // CTAs per SM. Zero keeps the preceding 1024-thread single-stage prefix.
         bool nttLog14H200ForwardPairedPrefixEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG14_H200_FORWARD_PAIRED_PREFIX");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FORWARD_PAIRED_PREFIX");
             return on;
         }
 
         bool nttLog14H200CenteredEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG14_H200_CENTERED");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_CENTERED");
             return on;
         }
 
@@ -1132,10 +1065,7 @@ namespace osuCrypto::LogVole::gpu
 
         bool ct2SplitAesEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_CT2_SPLIT_AES");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_CT2_SPLIT_AES");
             return on;
         }
 
@@ -1146,49 +1076,11 @@ namespace osuCrypto::LogVole::gpu
         // setting the switch to zero restores it for full CTAs as well.
         bool ct2AesSharedSboxEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_CT2_AES_SHARED_SBOX");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_CT2_AES_SHARED_SBOX");
             return on;
         }
 
-        // The production Mu8/Mu16 split-AES seed paths can keep each AES round
-        // key as
-        // four little-endian words, stage the divergent key-schedule S-box in
-        // shared memory, and publish each complete round with one aligned
-        // 128-bit store. Keep the scalar byte schedule as the default and exact
-        // fallback while the dedicated symbol is evaluated end to end.
-        bool ct2MuSharedKeyExpandEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_CT2_MU_SHARED_KEY_EXPAND");
-                if (v) return v[0] == '1';
-                // Compatibility with the initial Mu16-only experiment. The
-                // primary spelling above wins when both variables are present.
-                v =
-                    std::getenv("LV_GPU_CT2_MU16_SHARED_KEY_EXPAND");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
-        // For the production mu=4/8/16 CT2 shapes, each warp can derive several
-        // chunk seeds in subgroup leaders and broadcast them directly to the row
-        // threads that derive and expand the per-polynomial AES keys. This removes
-        // the intermediate seed pass and one launch. Keep the two-kernel sequence
-        // as the exact default until the full protocol clears the performance gate.
-        bool ct2FusedSeedExpandEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_CT2_FUSED_SEED_EXPAND");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
         // Scale-and-round's numerator has the special form x*p with x,p<q.
         // A per-limb Shoup quotient therefore replaces the generic 128/64
@@ -1196,10 +1088,7 @@ namespace osuCrypto::LogVole::gpu
         // Keep the reciprocal implementation available for exact A/B and rollback.
         bool scaleAndRoundShoupEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_SCALE_SHOUP");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_SHOUP");
             return on;
         }
 
@@ -1208,10 +1097,7 @@ namespace osuCrypto::LogVole::gpu
         // correction. Keep both changes under one independent arithmetic rollback.
         bool scaleAndRoundFastArithmeticEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_SCALE_FAST_ARITH");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_FAST_ARITH");
             return on;
         }
 
@@ -1220,10 +1106,7 @@ namespace osuCrypto::LogVole::gpu
         // kernel. The accepted Shoup kernel remains the same-binary rollback.
         bool scaleAndRoundHotRho4Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_SCALE_HOT_RHO4");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_HOT_RHO4");
             return on;
         }
 
@@ -1233,10 +1116,7 @@ namespace osuCrypto::LogVole::gpu
         // accepted full-width carry path for exact A/B.
         bool scaleAndRoundHotHiCarryEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_SCALE_HOT_HI_CARRY");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_HOT_HI_CARRY");
             return on;
         }
 
@@ -1246,11 +1126,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback to the established split chain.
         bool scaleNttForwardGatherHiCarryEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_FUSED_SCALE_UNWRAP_HI_CARRY");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SCALE_UNWRAP_HI_CARRY");
             return on;
         }
 
@@ -1262,28 +1138,10 @@ namespace osuCrypto::LogVole::gpu
         // zero selects the separate, codegen-stable coefficient-owned rollback.
         bool scaleNttForwardGatherSlotOwnedEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_FUSED_SCALE_UNWRAP_SLOT_OWNED");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SCALE_UNWRAP_SLOT_OWNED");
             return on;
         }
 
-        // Stage-113 sidecar for the fixed alpha=2 unwrap. Once S6 has
-        // published the one-tile forward layout, all remaining butterflies are
-        // warp-private. Carry S7--S12 in registers, then republish raw S12 into
-        // the same shared tile for the arbitrary slotMap gather. Default off;
-        // the accepted slot-owned symbol remains the exact rollback.
-        bool scaleNttForwardGatherWarpStages712Enabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_FUSED_SCALE_UNWRAP_WARP_STAGES_7_12");
-                return v && std::strcmp(v, "1") == 0;
-            }();
-            return on;
-        }
 
         // The production one-tile transform has fixed N=8192 geometry. Exposing
         // every stage to nvcc removes the runtime stage loop and its variable
@@ -1291,10 +1149,7 @@ namespace osuCrypto::LogVole::gpu
         // complete rollback and handles every other degree/tile count.
         bool nttLog13SpecializedEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NTT_LOG13_SPECIALIZED");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_SPECIALIZED");
             return on;
         }
 
@@ -1303,10 +1158,7 @@ namespace osuCrypto::LogVole::gpu
         // expression can be isolated from the rest of the LogN=13 specialization.
         bool nttLog13SimpleIndexEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NTT_LOG13_SIMPLE_INDEX");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_SIMPLE_INDEX");
             return on;
         }
 
@@ -1318,11 +1170,7 @@ namespace osuCrypto::LogVole::gpu
         // kernel symbols retain the scalar-load path as an exact =0 rollback.
         bool nttLog13VectorShoupLoadsEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_NTT_LOG13_VECTOR_SHOUP_LOADS");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_VECTOR_SHOUP_LOADS");
             return on;
         }
 
@@ -1333,11 +1181,7 @@ namespace osuCrypto::LogVole::gpu
         // geometry and critical-path placement differ on H200.
         bool nttLog13ForwardFusedFirstStageEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_NTT_LOG13_FORWARD_FUSED_FIRST_STAGE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_FUSED_FIRST_STAGE");
             return on;
         }
 
@@ -1351,11 +1195,7 @@ namespace osuCrypto::LogVole::gpu
         // accepted path.
         bool nttLog13ForwardFusedLastTwoStagesEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_FORWARD_FUSED_LAST_TWO_STAGES");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_FUSED_LAST_TWO_STAGES");
             return on;
         }
 
@@ -1374,51 +1214,25 @@ namespace osuCrypto::LogVole::gpu
             return on;
         }
 
-        // The out-of-place identity-leaf transform has the same fixed rho=4
-        // arithmetic as the accepted in-place tail, but independently indexed
-        // source and destination polynomials. Keep it separately selectable so
-        // its two production launches can be isolated without changing the
-        // accepted in-place path or its generic rollback symbol.
-        bool nttLog13ForwardFromFusedLastTwoStagesEnabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_FORWARD_FROM_FUSED_LAST_TWO_STAGES");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
         // Stage-88 sidecars apply the accepted S11/S12 register tail to the
         // two remaining production forward bodies. Keep the families separate
         // so either accepted default can be rolled back independently.
         bool nttLog13ForwardCenteredFromFusedLastTwoStagesEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_FORWARD_CENTERED_FROM_FUSED_LAST_TWO_STAGES");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_CENTERED_FROM_FUSED_LAST_TWO_STAGES");
             return on;
         }
 
         bool nttLog13ForwardPlainBroadcastFusedLastTwoStagesEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_FORWARD_PLAIN_BROADCAST_FUSED_LAST_TWO_STAGES");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_PLAIN_BROADCAST_FUSED_LAST_TWO_STAGES");
             return on;
         }
 
         bool nttLog13InverseFusedFirstStageEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_NTT_LOG13_INVERSE_FUSED_FIRST_STAGE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_FIRST_STAGE");
             return on;
         }
 
@@ -1431,11 +1245,7 @@ namespace osuCrypto::LogVole::gpu
         // is accepted by default; set the switch to 0 for the preceding tail.
         bool nttLog13InverseFusedLastTwoStagesEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_TWO_STAGES");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_TWO_STAGES");
             return on;
         }
 
@@ -1449,11 +1259,7 @@ namespace osuCrypto::LogVole::gpu
         // continues to use that fallback.
         bool nttLog13InverseFusedLastThreeStagesEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_STAGES");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_STAGES");
             return on;
         }
 
@@ -1462,11 +1268,7 @@ namespace osuCrypto::LogVole::gpu
         // restores their exact staged fallbacks without disabling ReverseSub.
         bool nttLog13InverseFusedLastThreeAddNegateEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_ADD_NEGATE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_ADD_NEGATE");
             return on;
         }
 
@@ -1480,11 +1282,7 @@ namespace osuCrypto::LogVole::gpu
         // the protocol caller.
         bool nttLog13InversePostWarpStages05Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_INVERSE_POST_WARP_STAGES_0_5");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_POST_WARP_STAGES_0_5");
             return on;
         }
 
@@ -1494,11 +1292,7 @@ namespace osuCrypto::LogVole::gpu
         // CTA barrier. The legacy materialized path remains an exact rollback.
         bool nttLog13InverseTreeFusedFirstStageEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_INVERSE_TREE_FUSED_FIRST_STAGE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_TREE_FUSED_FIRST_STAGE");
             return on;
         }
 
@@ -1524,11 +1318,7 @@ namespace osuCrypto::LogVole::gpu
         // the protocol caller.
         bool nttLog13InverseTreeProductWarpStages05Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_STAGES_0_5");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_STAGES_0_5");
             return on;
         }
 
@@ -1538,11 +1328,7 @@ namespace osuCrypto::LogVole::gpu
         // 40-register ceiling; `=0` selects the scalar Stage-112a intermediate.
         bool nttLog13InverseTreeProductWarpVectorPairsEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_VECTOR_PAIRS");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_VECTOR_PAIRS");
             return on;
         }
 
@@ -1553,14 +1339,7 @@ namespace osuCrypto::LogVole::gpu
         // retain the shared tail and this independent switch is the exact rollback.
         bool nttLog13DirectStoreEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NTT_LOG13_DIRECT_STORE");
-                // This helps the legacy stage index in isolation, but once the
-                // simpler index is enabled the regular vectorized shared tail is
-                // marginally faster end to end on H200. Retain it for A/B and
-                // other architectures without making it the measured default.
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG13_DIRECT_STORE");
             return on;
         }
 
@@ -1570,10 +1349,7 @@ namespace osuCrypto::LogVole::gpu
         // were mixed at the noise floor, so retain this as an opt-in experiment.
         bool nttCenteredDiagonalIdentityEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NTT_CENTERED_DIAG_IDENTITY");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_NTT_CENTERED_DIAG_IDENTITY");
             return on;
         }
 
@@ -1584,10 +1360,7 @@ namespace osuCrypto::LogVole::gpu
         // measured without changing inverse geometry.
         bool nttLog13InverseSpecializedEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NTT_LOG13_INVERSE_SPECIALIZED");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_SPECIALIZED");
             return on;
         }
 
@@ -1599,10 +1372,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback and for every other pre/post tuple.
         bool nttLog13InverseDirectStoreEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NTT_LOG13_INVERSE_DIRECT_STORE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_DIRECT_STORE");
             return on;
         }
 
@@ -1613,11 +1383,7 @@ namespace osuCrypto::LogVole::gpu
         // opt-in until its positive primitive result clears the full protocol.
         bool nttLog13InverseSmallDirectEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_NTT_LOG13_INVERSE_SMALL_DIRECT");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG13_INVERSE_SMALL_DIRECT");
             return on;
         }
 
@@ -1628,11 +1394,7 @@ namespace osuCrypto::LogVole::gpu
         // pass. Keep the runtime-geometry kernel as the exact toggle-off rollback.
         bool nttLog13InverseScatterFixedEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_NTT_LOG13_INVERSE_SCATTER_FIXED");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_SCATTER_FIXED");
             return on;
         }
 
@@ -1643,29 +1405,10 @@ namespace osuCrypto::LogVole::gpu
         // older LOGVOLE_GPU_FUSED_IP experiment for isolated rollback.
         bool nttLog13InverseFixedIpEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NTT_LOG13_INVERSE_FIXED_IP");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FIXED_IP");
             return on;
         }
 
-        // Fuse the fixed-width sender outer product into inverse S0. The
-        // shipped truncated golden-seed tuple uses mu=8; mu=16 is retained for
-        // the corresponding untruncated/no-golden geometry. This remains an
-        // opt-in experiment until both local and end-to-end A/B gates pass.
-        bool nttLog13InverseOuterMuEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_NTT_LOG13_INVERSE_OUTER_MU");
-                // Retain the original, mu=16-only spelling for reproducibility.
-                if (!v)
-                    v = std::getenv("LV_GPU_NTT_LOG13_INVERSE_OUTER_MU16");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
         // The production sender's fixed-width key product uses one sk polynomial
         // for every public-A row in a chunk. Keep that coefficient in a
@@ -1691,11 +1434,7 @@ namespace osuCrypto::LogVole::gpu
         // row-reuse symbols remain untouched.
         bool fixedIpWideMuRowReuseEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_FIXED_IP_WIDE_MU_ROW_REUSE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FIXED_IP_WIDE_MU_ROW_REUSE");
             return on;
         }
 
@@ -1707,27 +1446,10 @@ namespace osuCrypto::LogVole::gpu
         // to retain the exact same-binary rollback to the generic reducers.
         bool pointwisePseudo55ReduceEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_POINTWISE_PSEUDO55_REDUCE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_POINTWISE_PSEUDO55_REDUCE");
             return on;
         }
 
-        // Wider receiver trees occur only for benchmark alpha overrides. Keep
-        // their specialization opt-in and in a distinct kernel symbol so the
-        // accepted one/two/six-term binaries remain exact same-binary rollback
-        // paths while the 8/10/12/14-term resource envelope is evaluated.
-        bool pointwisePseudo55WideAccumulateEnabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_POINTWISE_PSEUDO55_WIDE_ACCUM");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
         u32 rootZetaSampleThreads()
         {
@@ -1764,10 +1486,7 @@ namespace osuCrypto::LogVole::gpu
         // kernel as the complete rollback and for every other parameter set.
         bool expandAccumulatorSpecializedEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_EXPAND_ACCUM_SPECIALIZED");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_SPECIALIZED");
             return on;
         }
 
@@ -1777,27 +1496,10 @@ namespace osuCrypto::LogVole::gpu
         // its arithmetic contribution can be measured without changing tiling.
         bool expandAccumulatorQ64ComplementEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_EXPAND_ACCUM_Q64_COMPLEMENT");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_Q64_COMPLEMENT");
             return on;
         }
 
-        // For the fixed Q64-complement accumulator, the high word of the exact
-        // sum is below 2q when q < 2^60. Fold that word with 2^64 mod q through
-        // one Shoup multiply instead of running the generic 128-bit Barrett
-        // reduction. Keep a separate kernel symbol and opt-in switch so the
-        // accepted Q64/tiled kernel remains a bit-exact, codegen-stable fallback.
-        bool expandAccumulatorRadix64FoldEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_EXPAND_ACCUM_RADIX64_FOLD");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
         // The production 55-bit coefficient primes have the pseudo-Mersenne
         // form q = 2^55-c with 0<c<2^21. Two radix-2^55 folds can therefore
@@ -1807,11 +1509,7 @@ namespace osuCrypto::LogVole::gpu
         // codegen-stable exact fallback.
         bool expandAccumulatorPseudo55Enabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_EXPAND_ACCUM_PSEUDO55");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55");
             return on;
         }
 
@@ -1823,11 +1521,7 @@ namespace osuCrypto::LogVole::gpu
         // an explicit `=0` retains the accepted symbol byte-for-byte.
         bool expandAccumulatorGoldenPseudo55DualEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_EXPAND_ACCUM_PSEUDO55_GOLDEN_DUAL");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_GOLDEN_DUAL");
             return on;
         }
 
@@ -1838,11 +1532,7 @@ namespace osuCrypto::LogVole::gpu
         // dispatch remains unchanged.
         bool expandAccumulatorPseudo55WideEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_EXPAND_ACCUM_PSEUDO55_WIDE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_WIDE");
             return on;
         }
 
@@ -1852,11 +1542,7 @@ namespace osuCrypto::LogVole::gpu
         // an in-binary rollback.
         bool expandAccumulatorPseudo55DualEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL");
             return on;
         }
 
@@ -1867,28 +1553,10 @@ namespace osuCrypto::LogVole::gpu
         // Stage-101 and Stage-99 bodies as independent same-binary rollbacks.
         bool expandAccumulatorPseudo55DualPackedPairsEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL_PACKED_PAIRS");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL_PACKED_PAIRS");
             return on;
         }
 
-        // The accepted adaptive pseudo-55 kernel reloads eight A/B pointer pairs
-        // from two volatile shared arrays for every coefficient tile. Interleave
-        // each pair and fetch it with one aligned 128-bit shared load instead.
-        // Keep this sidecar default-off and independently selectable so the
-        // accepted pseudo-55 symbol remains a codegen-stable same-binary rollback.
-        bool expandAccumulatorPseudo55PackedPairsEnabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_EXPAND_ACCUM_PSEUDO55_PACKED_PAIRS");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
         // The eight operand bases are constant across all 32 coefficient tiles
         // of one (chunk,row,limb). Amortize their setup and the block barrier over
@@ -1896,76 +1564,10 @@ namespace osuCrypto::LogVole::gpu
         // exact same-binary rollback.
         bool expandAccumulatorTiledEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_EXPAND_ACCUM_TILED");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_TILED");
             return on;
         }
 
-        // In the one-block adaptive geometry, every CTA evaluates all 32
-        // coefficient tiles. Keep the four affine ct1/u/publicA/sk bases on the
-        // uniform path across that loop instead of publishing and reloading them
-        // through shared memory. The six data-dependent tree pairs retain the
-        // accepted volatile shared table. This experiment is deliberately
-        // default-off and has a separate kernel symbol so the accepted Q64/tiled
-        // kernel remains a codegen-stable rollback.
-        bool expandAccumulatorDirectBasesEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_EXPAND_ACCUM_DIRECT_BASES");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
-
-        // At the three largest production chunk counts, keep one coefficient
-        // thread on a small group of chunks. ct1 is row/limb/coefficient-only,
-        // so the thread can retain that value across the group while every
-        // chunk-specific operand and the exact eight-product order stay
-        // unchanged. The accepted one-chunk adaptive kernel is the default and
-        // same-binary rollback.
-        bool expandAccumulatorCt1ReuseEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_EXPAND_ACCUM_CT1_REUSE");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
-
-        // The production eight-product accumulator is consumed immediately by
-        // one fixed inverse. The exact direct-to-shared sidecar is retained for
-        // experimentation, but H200 end-to-end A/B regressed by about 2%, so the
-        // accepted standalone accumulator remains the default.
-        bool expandAccumulatorInverseFusedEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_EXPAND_ACCUM_INVERSE_FUSED");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
-
-        // At eight or more chunks there are enough independent CTAs to assign
-        // one warp to each output row and reuse the chunk-wide u/sk coefficient
-        // values across all eight rows. Keep the accepted coefficient-tiled
-        // kernel as an independent same-binary rollback.
-        bool expandAccumulatorRowReuseEnabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_EXPAND_ACCUM_ROW_REUSE");
-                // Sharing the two row-invariant operands removes their duplicate
-                // L2 requests, but the extra shared-memory round trips made the
-                // 18-call H200 aggregate 1.6% slower than adaptive tiling. Keep
-                // the exact experiment available without penalising the default.
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
         // Materialized sampling almost never rejects under the production
         // moduli. Let a single block-wide vote skip the ballot/prefix/fixup
@@ -1973,10 +1575,7 @@ namespace osuCrypto::LogVole::gpu
         // exact same-binary rollback and forced-rejection validation.
         bool rejectFastpathEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_REJECT_FASTPATH");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_REJECT_FASTPATH");
             return on;
         }
 
@@ -1986,10 +1585,7 @@ namespace osuCrypto::LogVole::gpu
         // The old fixup-then-reduce sequence remains an exact runtime rollback.
         bool rejectReduceFusionEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_REJECT_REDUCE_FUSION");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_REJECT_REDUCE_FUSION");
             return on;
         }
 
@@ -1999,10 +1595,7 @@ namespace osuCrypto::LogVole::gpu
         // A/B and as a conservative fallback.
         bool denoiseSpecializedEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_DENOISE_SPECIALIZED");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_SPECIALIZED");
             return on;
         }
 
@@ -2011,10 +1604,7 @@ namespace osuCrypto::LogVole::gpu
         // reductions; the original specialized kernel remains the exact rollback.
         bool denoiseShoupEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_DENOISE_SHOUP");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_SHOUP");
             return on;
         }
 
@@ -2023,10 +1613,7 @@ namespace osuCrypto::LogVole::gpu
         // Keep this toggle independent of the Shoup arithmetic for isolated A/B.
         bool denoiseHotGeometryEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_DENOISE_HOT_GEOMETRY");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_HOT_GEOMETRY");
             return on;
         }
 
@@ -2036,10 +1623,7 @@ namespace osuCrypto::LogVole::gpu
         // existing specialized and runtime kernels remain exact rollbacks.
         bool goldenValidateShoupEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_GOLDEN_VALIDATE_SHOUP");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_GOLDEN_VALIDATE_SHOUP");
             return on;
         }
 
@@ -2048,10 +1632,7 @@ namespace osuCrypto::LogVole::gpu
         // it available for other GPUs without paying that occupancy cost by default.
         bool denoiseSpecializedRho8Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_DENOISE_SPECIALIZED_RHO8");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_DENOISE_SPECIALIZED_RHO8");
             return on;
         }
 
@@ -2060,19 +1641,13 @@ namespace osuCrypto::LogVole::gpu
         // explicit zero preserves the general/legacy denoising dispatch.
         bool noGoldDenoiseShoupEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_DENOISE_SHOUP");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_DENOISE_SHOUP");
             return on;
         }
 
         bool noGoldDenoiseUnrollEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_DENOISE_UNROLL");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_DENOISE_UNROLL");
             return on;
         }
 
@@ -2093,10 +1668,7 @@ namespace osuCrypto::LogVole::gpu
         // arrays. The general kernel remains the exact same-binary rollback.
         bool gadgetHi110SpecializedEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_GADGET_HI110");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110");
             return on;
         }
 
@@ -2108,11 +1680,7 @@ namespace osuCrypto::LogVole::gpu
         // Hi110 symbol as an exact, codegen-stable =0 fallback.
         bool gadgetHi110CompactCrtEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_GADGET_HI110_COMPACT_CRT");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_COMPACT_CRT");
             return on;
         }
 
@@ -2122,11 +1690,7 @@ namespace osuCrypto::LogVole::gpu
         // n=24 and n=25; zero retains the accepted compact-Barrett rollback.
         bool gadgetHi110Radix55ReduceEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_GADGET_HI110_RADIX55_REDUCE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_RADIX55_REDUCE");
             return on;
         }
 
@@ -2136,11 +1700,7 @@ namespace osuCrypto::LogVole::gpu
         // gates; zero selects the accepted Shoup-fold rollback symbols.
         bool gadgetHi110Pseudo55SecondFoldEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_GADGET_HI110_PSEUDO55_SECOND_FOLD");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_PSEUDO55_SECOND_FOLD");
             return on;
         }
 
@@ -2150,11 +1710,7 @@ namespace osuCrypto::LogVole::gpu
         // the accepted four-term gadget as the complete same-binary fallback.
         bool gadgetHi110SparsePairEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_GADGET_HI110_SPARSE_PAIR");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_SPARSE_PAIR");
             return on;
         }
 
@@ -3583,106 +3139,6 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Out-of-place counterpart of nttForwardFusedLastTwo8192Rho4Kernel.
-        // Only the independently selected source/destination bases differ; the
-        // transform stages, lazy guards, root order, shuffle pairing, and final
-        // canonicalization are deliberately kept in the same order.
-        __global__ __launch_bounds__(kNttThreads, 2)
-        void nttForwardFromFusedLastTwo8192Rho4Kernel(
-            DeviceRing rg,
-            const u64* input,
-            const u32* inputIdx,
-            u64* output,
-            const u32* outputIdx,
-            bool fusedFirstStage)
-        {
-            extern __shared__ u64 sh[];
-            constexpr u32 n = 8192u;
-            constexpr u32 rho = 4u;
-            constexpr u32 half = n >> 1u;
-
-            const u32 limb = blockIdx.x & (rho - 1u);
-            const u32 batchSlot = blockIdx.x >> 2u;
-            const u32 inPoly = inputIdx ? inputIdx[batchSlot] : batchSlot;
-            const u32 outPoly = outputIdx ? outputIdx[batchSlot] : batchSlot;
-            const u64* src = input +
-                (static_cast<size_t>(inPoly) * rho + limb) * n;
-            u64* dst = output +
-                (static_cast<size_t>(outPoly) * rho + limb) * n;
-            const ShoupOperand* roots =
-                rg.mRoots + static_cast<size_t>(limb) * n;
-            const u64 q = rg.mMods[limb].mValue;
-            const u64 twoQ = q << 1u;
-
-            if (fusedFirstStage)
-            {
-                const ShoupOperand r = nttLoadShoup<true>(roots + 1u);
-                for (u32 b = threadIdx.x; b < half; b += blockDim.x)
-                {
-                    const u64 u = nttGuard(src[b], twoQ);
-                    const u64 v = mulShoupLazy(src[b + half], r, q);
-                    sh[b] = u + v;
-                    sh[b + half] = u + twoQ - v;
-                }
-                __syncthreads();
-            }
-            else
-            {
-                for (u32 t = threadIdx.x; t < n; t += blockDim.x)
-                    sh[t] = src[t];
-                __syncthreads();
-                nttForwardStage8192<0u, true, true>(
-                    sh, roots, q, twoQ);
-            }
-
-            nttForwardStage8192<1u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<2u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<3u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<4u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<5u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<6u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<7u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<8u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<9u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<10u, true, true>(sh, roots, q, twoQ);
-
-            for (u32 b = threadIdx.x; b < half; b += blockDim.x)
-            {
-                const u32 group = b >> 1u;
-                const u32 laneInGroup = b & 1u;
-                const u32 ix11 = (group << 2u) + laneInGroup;
-                const ShoupOperand r11 =
-                    nttLoadShoup<true>(roots + 2048u + group);
-                const u64 u11 = nttGuard(sh[ix11], twoQ);
-                const u64 v11 = mulShoupLazy(sh[ix11 + 2u], r11, q);
-                const u64 sum11 = u11 + v11;
-                const u64 diff11 = u11 + twoQ - v11;
-
-                const u64 own = laneInGroup ? diff11 : sum11;
-                const u64 send = laneInGroup ? sum11 : diff11;
-                const u64 peer = __shfl_xor_sync(0xffffffffu, send, 1u);
-                const u64 left = laneInGroup ? peer : own;
-                const u64 right = laneInGroup ? own : peer;
-
-                const ShoupOperand r12 =
-                    nttLoadShoup<true>(roots + 4096u + b);
-                const u64 u12 = nttGuard(left, twoQ);
-                const u64 v12 = mulShoupLazy(right, r12, q);
-                u64 x0 = u12 + v12;
-                u64 x1 = u12 + twoQ - v12;
-                if (x0 >= twoQ) x0 -= twoQ;
-                if (x0 >= q) x0 -= q;
-                if (x1 >= twoQ) x1 -= twoQ;
-                if (x1 >= q) x1 -= q;
-
-                const u32 ix12 = b << 1u;
-                asm volatile(
-                    "st.global.v2.u64 [%0], {%1, %2};"
-                    :
-                    : "l"(dst + ix12), "l"(x0), "l"(x1)
-                    : "memory");
-            }
-        }
 
         // One exact warp-register transition after forward stage S7. At stage
         // s, butterfly b owns the values at
@@ -5105,163 +4561,6 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Hot sender expansion:
-        //   product[c*4+row] = publicA[row] * sk[c]
-        // followed immediately by ct2 - INTT(product).
-        template<bool SimpleIndex>
-        __global__ void nttInverseOuterMu4ReverseSubKernel(
-            DeviceInverseRho4 iv,
-            u64* out,
-            const u64* publicA,
-            const u64* sk,
-            const u64* ct2)
-        {
-            extern __shared__ u64 sh[];
-            const u32 limb = blockIdx.x & 3u;
-            const u32 slot = blockIdx.x >> 2u;
-
-            // Scope all Barrett ratios and operand pointers before the transform;
-            // only the shared tile crosses the barrier.
-            {
-                const GpuModulus mod = iv.mMods[limb];
-                const size_t limbOff = static_cast<size_t>(limb) << 13u;
-                const u64* a =
-                    publicA + (static_cast<size_t>(slot & 3u) << 15u) + limbOff;
-                const u64* b =
-                    sk + (static_cast<size_t>(slot >> 2u) << 15u) + limbOff;
-#pragma unroll 1
-                for (u32 t = threadIdx.x; t < 8192u; t += 512u)
-                    sh[t] = mulMod(a[t], b[t], mod);
-            }
-            __syncthreads();
-            nttInverseFixedIpTransform8192<4u, SimpleIndex>(
-                iv, sh, out, ct2, limb, slot);
-        }
-
-        // Production sender expansion (mu=8 after gadget truncation; mu=16 for
-        // the corresponding full-width tuple):
-        //   product[c*Mu+row] = publicA[row] * sk[c]
-        // followed immediately by ct2 - INTT(product).
-        template<u32 Mu, bool SimpleIndex>
-        __global__ void nttInverseOuterMu16ReverseSubKernel(
-            DeviceInverseRho4 iv,
-            u64* out,
-            const u64* publicA,
-            const u64* sk,
-            const u64* ct2)
-        {
-            extern __shared__ u64 sh[];
-            const u32 limb = blockIdx.x & 3u;
-            const u32 slot = blockIdx.x >> 2u;
-
-            static_assert(Mu == 8u || Mu == 16u);
-            // Output slot c*Mu+row maps to publicA[row] and sk[c]. Keep
-            // ratios and operand pointers dead across the transform barrier.
-            {
-                const GpuModulus mod = iv.mMods[limb];
-                const size_t limbOff = static_cast<size_t>(limb) << 13u;
-                const u64* a = publicA +
-                    (static_cast<size_t>(slot & (Mu - 1u)) << 15u) + limbOff;
-                const u64* b = sk +
-                    (static_cast<size_t>(slot / Mu) << 15u) + limbOff;
-#pragma unroll 1
-                for (u32 t = threadIdx.x; t < 8192u; t += 512u)
-                    sh[t] = mulMod(a[t], b[t], mod);
-            }
-            __syncthreads();
-            nttInverseFixedIpTransform8192<4u, SimpleIndex>(
-                iv, sh, out, ct2, limb, slot);
-        }
-
-        // Production receiver expansion (N=8192, rho=4, mu=8, treeTerms=6).
-        // Materialize the exact eight-product accumulator directly into the
-        // inverse tile, avoiding its global write/read round trip:
-        //
-        //   ct1[row] * u[chunk]
-        //     + sum(k=0..5, lacct[aIdx[slot*6+k]] * nodes[bIdx[slot*6+k]])
-        //     + (q*2^64 - publicA[row] * sk[chunk])
-        //
-        // q*2^64 is the accepted exact Q64 complement. Product and addition
-        // order deliberately match expandAccumulatorTau1GoldenExperimentalKernel.
-        template<bool SimpleIndex>
-        __global__ __launch_bounds__(512, 3)
-        void nttInverseExpandAccumulatorTau1AddKernel(
-            DeviceInverseRho4 iv,
-            u64* out,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            const u64* ct2)
-        {
-            constexpr u32 kTreeTerms = 6u;
-            constexpr u32 kTotalTerms = 2u + kTreeTerms;
-            constexpr size_t kPerPoly = size_t(4u) * 8192u;
-
-            extern __shared__ u64 sh[];
-            __shared__ const u64* shA[kTotalTerms];
-            __shared__ const u64* shB[kTotalTerms];
-
-            const u32 limb = blockIdx.x & 3u;
-            const u32 slot = blockIdx.x >> 2u;
-            const u32 row = slot & 7u;
-            const u32 chunk = slot >> 3u;
-            const size_t limbOff = static_cast<size_t>(limb) << 13u;
-
-            if (threadIdx.x < kTotalTerms)
-            {
-                const u32 k = threadIdx.x;
-                if (k == 0u)
-                {
-                    shA[k] = ct1 + static_cast<size_t>(row) * kPerPoly + limbOff;
-                    shB[k] = uDigits + static_cast<size_t>(chunk) * kPerPoly + limbOff;
-                }
-                else if (k == 1u)
-                {
-                    shA[k] = publicA + static_cast<size_t>(row) * kPerPoly + limbOff;
-                    shB[k] = skNtt + static_cast<size_t>(chunk) * kPerPoly + limbOff;
-                }
-                else
-                {
-                    const size_t idx =
-                        static_cast<size_t>(slot) * kTreeTerms + (k - 2u);
-                    shA[k] = lacct +
-                        static_cast<size_t>(lacctAIdx[idx]) * kPerPoly + limbOff;
-                    shB[k] = nodes +
-                        static_cast<size_t>(lacctBIdx[idx]) * kPerPoly + limbOff;
-                }
-            }
-            __syncthreads();
-
-            // Scope all wide products and the modulus before entering the
-            // transform so their registers die at the tile-completion barrier.
-            {
-                const GpuModulus mod = iv.mMods[limb];
-#pragma unroll 1
-                for (u32 t = threadIdx.x; t < 8192u; t += 512u)
-                {
-                    Wide positiveSum = wideMul(shA[0][t], shB[0][t]);
-#pragma unroll 1
-                    for (u32 k = 2u; k < kTotalTerms; ++k)
-                    {
-                        positiveSum =
-                            wideAdd(positiveSum, wideMul(shA[k][t], shB[k][t]));
-                    }
-                    const Wide keyComplement = wideSub(
-                        Wide{ 0u, mod.mValue },
-                        wideMul(shA[1][t], shB[1][t]));
-                    const Wide signedSum = wideAdd(positiveSum, keyComplement);
-                    sh[t] = barrettReduce128(signedSum.mLo, signedSum.mHi, mod);
-                }
-            }
-            __syncthreads();
-            nttInverseFixedIpTransform8192<0u, SimpleIndex>(
-                iv, sh, out, ct2, limb, slot);
-        }
 
         // Exact canonical reduction for a sum of one, two, or six products
         // under q=2^55-c, 0<c<2^21.  If P=sum(a_i*b_i), then P<K*2^110.
@@ -5307,74 +4606,8 @@ namespace osuCrypto::LogVole::gpu
             return residue;
         }
 
-        template<u32 MaxTerms>
-        __global__ void pointwisePseudo55ReduceWideTestKernel(
-            const u64* lo,
-            const u64* hi,
-            u32 count,
-            u64 q,
-            u32 c,
-            u64* residues)
-        {
-            const u32 idx = blockIdx.x * blockDim.x + threadIdx.x;
-            if (idx >= count) return;
-            residues[idx] = pointwisePseudo55ReduceWideCanonical<MaxTerms>(
-                Wide{ lo[idx], hi[idx] }, q, c);
-        }
 
-        // Separate instantiations for the benchmark-only wider tree sums. For
-        // K<=14, P=sum(a_i*b_i)<14*2^110<2^114. After the first radix-2^55
-        // fold, t1<=K*c<14*2^21<2^25; after the second, the result is below
-        // 2^55+K*c^2<2q. Thus the same two folds and one subtraction are exact.
-        // This is deliberately copied instead of widening the accepted helper's
-        // static assertion, keeping all accepted 1/2/6 instantiations isolated.
-        template<u32 MaxTerms>
-        __device__ __forceinline__ u64
-        pointwisePseudo55ReduceWideCanonicalLong(Wide value, u64 q, u32 c)
-        {
-            static_assert(
-                MaxTerms == 8u || MaxTerms == 10u ||
-                MaxTerms == 12u || MaxTerms == 14u);
-            constexpr u64 kRadix55 = u64{ 1 } << 55u;
-            constexpr u64 kMask55 = kRadix55 - 1u;
 
-            const u64 s0 = value.mLo & kMask55;
-            const u64 s1 =
-                (value.mLo >> 55u) | (value.mHi << 9u);
-            const u64 p0 =
-                static_cast<u64>(static_cast<u32>(s1)) * c;
-            const u64 p1 =
-                static_cast<u64>(static_cast<u32>(s1 >> 32u)) * c;
-
-            u64 tLo = p0 + (p1 << 32u);
-            u64 tHi =
-                (p1 >> 32u) + static_cast<u64>(tLo < p0);
-            const u64 oldTLo = tLo;
-            tLo += s0;
-            tHi += static_cast<u64>(tLo < oldTLo);
-
-            const u64 t0 = tLo & kMask55;
-            const u32 t1 = static_cast<u32>(
-                (tLo >> 55u) | (tHi << 9u));
-            u64 residue = t0 + static_cast<u64>(t1) * c;
-            if (residue >= q) residue -= q;
-            return residue;
-        }
-
-        template<u32 MaxTerms>
-        __global__ void pointwisePseudo55ReduceWideLongTestKernel(
-            const u64* lo,
-            const u64* hi,
-            u32 count,
-            u64 q,
-            u32 c,
-            u64* residues)
-        {
-            const u32 idx = blockIdx.x * blockDim.x + threadIdx.x;
-            if (idx >= count) return;
-            residues[idx] = pointwisePseudo55ReduceWideCanonicalLong<MaxTerms>(
-                Wide{ lo[idx], hi[idx] }, q, c);
-        }
 
         // Hot tau=1 shrink tree. The public columns are [0,2] at the leaf and
         // [1,3] internally. With maxTau=1 the child-node slots are formulaic,
@@ -7844,183 +7077,6 @@ namespace osuCrypto::LogVole::gpu
             inverseFp52StagePair<11u, true, 1u, TileIdx, true, CacheStage>(sh, roots, cache, q, invQ);
         }
 
-        // Experimental two-launch inverse. Each CTA transforms one independent
-        // half through stage 12, without parking the other half in registers.
-        // The merge launch performs the unchanged scaled stage 13 and post-op.
-        // Intermediate doubles are bit-encoded in the in-place u64 storage:
-        // there is no extra allocation, arithmetic rounding or host transfer.
-        // Host dispatch excludes pre-ops and any possibly overlapping post-B;
-        // those cases must retain the single-launch alias-safe implementation.
-        template<u32 Threads, u32 CacheStage, u32 MinBlocks>
-        __global__ __launch_bounds__(Threads, MinBlocks)
-        void nttInverseHalf16384Fp52Kernel(
-            DeviceRing rg, u64* data, const u32* polyIdx, const double* packedRoots)
-        {
-            extern __shared__ double halfFpSh[];
-            double* sh = halfFpSh;
-            const u32 limb = blockIdx.x & 7u, slot = blockIdx.x >> 3u;
-            const u32 poly = polyIdx ? polyIdx[slot] : slot;
-            const size_t off = (static_cast<size_t>(poly) * 8u + limb) * 16384u;
-            const u64 qi = rg.mMods[limb].mValue;
-            const double q = static_cast<double>(qi), invQ = __drcp_rn(q);
-            const double* roots = packedRoots + static_cast<size_t>(limb) * 16384u;
-            double* cache = sh + 8192u;
-            constexpr u32 count = 16384u >> CacheStage;
-            for (u32 i = threadIdx.x; i < count; i += Threads)
-                cache[i] = roots[16384u - count + i];
-            __syncthreads();
-            if (blockIdx.y == 0u)
-                inverseFp52Tile<0u, 4u, CacheStage, Threads, 1u>(
-                    sh, roots, cache, data + off, nullptr, kElemOpNone, qi, q, invQ);
-            else
-                inverseFp52Tile<1u, 4u, CacheStage, Threads, 1u>(
-                    sh, roots, cache, data + off + 8192u, nullptr, kElemOpNone, qi, q, invQ);
-            for (u32 j = threadIdx.x; j < 8192u; j += Threads)
-                data[off + blockIdx.y * 8192u + j] = static_cast<u64>(__double_as_longlong(sh[j]));
-        }
-
-        __global__ __launch_bounds__(256, 8)
-        void nttInverseMerge16384Fp52Kernel(
-            DeviceRing rg, u64* data, const u32* polyIdx, u32 postOp, const u64* postB)
-        {
-            const u32 limb = blockIdx.x & 7u, slot = blockIdx.x >> 3u;
-            const u32 poly = polyIdx ? polyIdx[slot] : slot;
-            const size_t off = (static_cast<size_t>(poly) * 8u + limb) * 16384u;
-            const u32 j = blockIdx.y * 256u + threadIdx.x;
-            const u64 qi = rg.mMods[limb].mValue;
-            const double q = static_cast<double>(qi), invQ = __drcp_rn(q);
-            const double scalar = static_cast<double>(rg.mInvDegree[limb].mOperand);
-            const double scaledR = static_cast<double>(rg.mScaledInvRoot[limb].mOperand);
-            const double u = __longlong_as_double(static_cast<long long>(data[off + j]));
-            const double v = __longlong_as_double(static_cast<long long>(data[off + j + 8192u]));
-            u64 x0 = static_cast<u64>(mulModFp52(addModFp52(u, v, q), scalar, q, invQ));
-            u64 x1 = static_cast<u64>(mulModFp52(__dsub_rn(u, v), scaledR, q, invQ));
-            if (postOp == 2u)
-            {
-                x0 = x0 == 0u ? 0u : qi - x0;
-                x1 = x1 == 0u ? 0u : qi - x1;
-            }
-            else if (postOp == 4u)
-            {
-                x0 = subMod(postB[off + j], x0, qi);
-                x1 = subMod(postB[off + j + 8192u], x1, qi);
-            }
-            else if (postOp != kElemOpNone)
-            {
-                x0 = postOp == 0u ? addMod(x0, postB[off + j], qi) : subMod(x0, postB[off + j], qi);
-                x1 = postOp == 0u ? addMod(x1, postB[off + j + 8192u], qi) : subMod(x1, postB[off + j + 8192u], qi);
-            }
-            data[off + j] = x0;
-            data[off + j + 8192u] = x1;
-        }
-
-#if CUDART_VERSION >= 12000
-        // Hopper-only alternative to the two-launch split: the two blocks in
-        // a cluster exchange completed half transforms through distributed
-        // shared memory. No intermediate global store or merge launch remains.
-        // The second cluster barrier is mandatory: no block may release its
-        // shared allocation while its peer can still be reading that allocation.
-        template<u32 Threads, u32 CacheStage, u32 MinBlocks>
-        __global__ __launch_bounds__(Threads, MinBlocks)
-        void nttInverseCluster16384Fp52Kernel(DeviceRing rg, u64* data, const u32* polyIdx,
-            u32 postOp, const u64* postB, const double* packedRoots)
-        {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-            auto cluster = cooperative_groups::this_cluster();
-            extern __shared__ double clusterFpSh[];
-            const u32 half = blockIdx.x & 1u, plane = blockIdx.x >> 1u;
-            const u32 limb = plane & 7u, slot = plane >> 3u;
-            const u32 poly = polyIdx ? polyIdx[slot] : slot;
-            const size_t off = (static_cast<size_t>(poly) * 8u + limb) * 16384u;
-            const u64 qi = rg.mMods[limb].mValue;
-            const double q = static_cast<double>(qi), invQ = __drcp_rn(q);
-            const double* roots = packedRoots + static_cast<size_t>(limb) * 16384u;
-            double* cache = clusterFpSh + 8192u;
-            constexpr u32 count = 16384u >> CacheStage;
-            for (u32 i = threadIdx.x; i < count; i += Threads)
-                cache[i] = roots[16384u - count + i];
-            __syncthreads();
-            if (half == 0u)
-                inverseFp52Tile<0u, 4u, CacheStage, Threads, 1u>(clusterFpSh, roots, cache,
-                    data + off, nullptr, kElemOpNone, qi, q, invQ);
-            else
-                inverseFp52Tile<1u, 4u, CacheStage, Threads, 1u>(clusterFpSh, roots, cache,
-                    data + off + 8192u, nullptr, kElemOpNone, qi, q, invQ);
-            cluster.sync();
-            const double* peer = cluster.map_shared_rank(clusterFpSh, static_cast<int>(half ^ 1u));
-            const double scalar = static_cast<double>(half == 0u ? rg.mInvDegree[limb].mOperand :
-                rg.mScaledInvRoot[limb].mOperand);
-            for (u32 j = threadIdx.x; j < 8192u; j += Threads)
-            {
-                const double own = clusterFpSh[j], other = peer[j];
-                const double value = half == 0u ? addModFp52(own, other, q) : __dsub_rn(other, own);
-                u64 x = static_cast<u64>(mulModFp52(value, scalar, q, invQ));
-                const size_t index = off + half * 8192u + j;
-                if (postOp == 2u) x = x == 0u ? 0u : qi - x;
-                else if (postOp == 4u) x = subMod(postB[index], x, qi);
-                else if (postOp != kElemOpNone)
-                    x = postOp == 0u ? addMod(x, postB[index], qi) : subMod(x, postB[index], qi);
-                data[index] = x;
-            }
-            cluster.sync();
-#endif
-        }
-
-        bool tryLaunchInverseFp52Cluster(DeviceRing rg, u64* data, const u32* polyIdx,
-            u32 polyCount, u32 postOp, const u64* postB, const double* roots,
-            cudaStream_t stream, u32 mode, bool& launched)
-        {
-            launched = false;
-            const auto launch = [&](auto threads, auto cacheStage, auto blocks) {
-                constexpr u32 t = decltype(threads)::value, c = decltype(cacheStage)::value;
-                constexpr u32 b = decltype(blocks)::value;
-                constexpr int bytes = (8192u + (16384u >> c)) * sizeof(double);
-                cudaFuncAttributes function{};
-                if (!check(cudaFuncGetAttributes(&function, nttInverseCluster16384Fp52Kernel<t, c, b>),
-                        "cluster inverse attributes")) return false;
-                // A build containing only pre-Hopper code must soft-decline;
-                // the empty lower-architecture body is never launched.
-                if (function.binaryVersion < 90) return true;
-                if (!check(cudaFuncSetAttribute(nttInverseCluster16384Fp52Kernel<t, c, b>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "cluster inverse shared"))
-                    return false;
-                cudaLaunchAttribute attribute{};
-                attribute.id = cudaLaunchAttributeClusterDimension;
-                attribute.val.clusterDim.x = 2u;
-                attribute.val.clusterDim.y = 1u;
-                attribute.val.clusterDim.z = 1u;
-                cudaLaunchConfig_t config{};
-                config.gridDim = dim3(polyCount * 16u);
-                config.blockDim = dim3(t);
-                config.dynamicSmemBytes = bytes;
-                config.stream = stream;
-                config.attrs = &attribute;
-                config.numAttrs = 1u;
-                int maximum = 0;
-                if (!check(cudaOccupancyMaxPotentialClusterSize(&maximum,
-                        nttInverseCluster16384Fp52Kernel<t, c, b>, &config), "cluster inverse occupancy"))
-                    return false;
-                if (maximum < 2) return true;
-                const cudaError_t error = cudaLaunchKernelEx(&config, nttInverseCluster16384Fp52Kernel<t, c, b>,
-                    rg, data, polyIdx, postOp, postB, roots);
-                launched = error == cudaSuccess;
-                return check(error, "cluster inverse launch");
-            };
-            using T512 = std::integral_constant<u32, 512u>;
-            using T1024 = std::integral_constant<u32, 1024u>;
-            using U1 = std::integral_constant<u32, 1u>;
-            using U2 = std::integral_constant<u32, 2u>;
-            using U3 = std::integral_constant<u32, 3u>;
-            using U4 = std::integral_constant<u32, 4u>;
-            switch (mode)
-            {
-            case 1u: return launch(T512{}, U2{}, U2{});
-            case 2u: return launch(T512{}, U4{}, U3{});
-            case 3u: return launch(T512{}, U4{}, U2{});
-            default: return launch(T1024{}, U2{}, U1{});
-            }
-        }
-#endif
 
         // Two-tile FP64 layout: normally two 512-thread CTAs, a reused 64 KiB
         // tile, a 32 KiB root cache, and 16 parked doubles per thread. The
@@ -8874,61 +7930,6 @@ namespace osuCrypto::LogVole::gpu
             *dst = acc;
         }
 
-        // Opt-in benchmark specialization for the wider alpha-override trees.
-        // Keep this as a separate rolled, Accumulate-only symbol: retaining one
-        // operand pair at a time avoids the pointer/product live ranges caused
-        // by fully unrolling 8--14 products under the eight-CTA launch bound.
-        template<u32 Terms>
-        __global__ __launch_bounds__(256, 8)
-        void innerProductFixedIndexedPseudo55WideAccumulateKernel(
-            DeviceRing rg,
-            const u64* aBase,
-            const u64* bBase,
-            const u32* aIdx,
-            const u32* bIdx,
-            u64* out)
-        {
-            static_assert(
-                Terms == 8u || Terms == 10u ||
-                Terms == 12u || Terms == 14u);
-            constexpr u64 kRadix55 = u64{ 1 } << 55u;
-            const u32 n = rg.mN;
-            const u32 elem = blockIdx.x * blockDim.x + threadIdx.x;
-            const u32 limb = elem >> rg.mLogN;
-            const u32 coeff = elem & (n - 1u);
-            const u32 o = blockIdx.y;
-            const size_t perPoly = static_cast<size_t>(rg.mRho) * n;
-
-            __shared__ const u64* shA[Terms];
-            __shared__ const u64* shB[Terms];
-            if (threadIdx.x < Terms)
-            {
-                const u32 k = threadIdx.x;
-                const size_t idx = static_cast<size_t>(o) * Terms + k;
-                const u32 ai = aIdx[idx];
-                const u32 bi = bIdx[idx];
-                const size_t limbBase = static_cast<size_t>(limb) * n;
-                shA[k] =
-                    aBase + static_cast<size_t>(ai) * perPoly + limbBase;
-                shB[k] =
-                    bBase + static_cast<size_t>(bi) * perPoly + limbBase;
-            }
-            __syncthreads();
-
-            Wide sum = wideMul(shA[0][coeff], shB[0][coeff]);
-#pragma unroll 1
-            for (u32 k = 1u; k < Terms; ++k)
-                sum = wideAdd(
-                    sum, wideMul(shA[k][coeff], shB[k][coeff]));
-
-            const u64 q = rg.mMods[limb].mValue;
-            const u32 c = static_cast<u32>(kRadix55 - q);
-            const u64 productSum =
-                pointwisePseudo55ReduceWideCanonicalLong<Terms>(sum, q, c);
-            u64* const dst =
-                out + static_cast<size_t>(o) * perPoly + elem;
-            *dst = addMod(*dst, productSum, q);
-        }
 
         // Exact standalone outer product for the production sender tuple. One
         // CTA owns a 256-coefficient tile of one (chunk, limb), and every thread
@@ -10464,590 +9465,6 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Pointer-packed twin of the accepted adaptive pseudo-55 accumulator.
-        // Arithmetic, product order and output ownership deliberately remain
-        // identical to expandAccumulatorTau1GoldenPseudo55Kernel; only the
-        // shared pointer-table representation changes from 16 scalar words to
-        // eight aligned pairs. The separate symbol preserves the accepted
-        // kernel's SASS as a complete same-binary rollback.
-        __global__ __launch_bounds__(256, 8)
-        void expandAccumulatorTau1GoldenPseudo55PackedPairsKernel(
-            DeviceRing rg,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out)
-        {
-            constexpr u32 kN = 8192u;
-            constexpr u32 kRho = 4u;
-            constexpr u32 kMu = 8u;
-            constexpr u32 kTreeTerms = 6u;
-            constexpr u32 kTotalTerms = 2u + kTreeTerms;
-            constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-            constexpr u64 kRadix55 = u64{ 1 } << 55u;
-            constexpr u64 kMask55 = kRadix55 - 1u;
-            static_assert(kTotalTerms == 8u);
-            static_assert(sizeof(const u64*) == sizeof(unsigned long long));
-            static_assert(alignof(ulonglong2) == 16u);
-
-            const u32 rowLimb = blockIdx.y;
-            const u32 limb = rowLimb & (kRho - 1u);
-            const u32 row = rowLimb >> 2u;
-            const u32 chunk = blockIdx.z;
-            const u32 o = chunk * kMu + row;
-            const size_t limbBase = static_cast<size_t>(limb) * kN;
-
-            __shared__ ulonglong2 shPairs[kTotalTerms];
-            __shared__ u32 shC;
-            if (threadIdx.x < kTotalTerms)
-            {
-                const u32 k = threadIdx.x;
-                const u64* a;
-                const u64* b;
-                if (k == 0u)
-                {
-                    a = ct1 + static_cast<size_t>(row) * kPerPoly + limbBase;
-                    b = uDigits +
-                        static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else if (k == 1u)
-                {
-                    a = publicA +
-                        static_cast<size_t>(row) * kPerPoly + limbBase;
-                    b = skNtt +
-                        static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else
-                {
-                    const u32 treeK = k - 2u;
-                    const size_t idx =
-                        static_cast<size_t>(o) * kTreeTerms + treeK;
-                    a = lacct +
-                        static_cast<size_t>(lacctAIdx[idx]) * kPerPoly +
-                        limbBase;
-                    b = nodes +
-                        static_cast<size_t>(lacctBIdx[idx]) * kPerPoly +
-                        limbBase;
-                }
-                shPairs[k] = make_ulonglong2(
-                    reinterpret_cast<unsigned long long>(a),
-                    reinterpret_cast<unsigned long long>(b));
-            }
-            else if (threadIdx.x == kTotalTerms)
-            {
-                // Host dispatch proves this difference is in (0,2^21).
-                shC = static_cast<u32>(kRadix55 - rg.mMods[limb].mValue);
-            }
-            __syncthreads();
-
-            const u32 c = shC;
-            const u64 q = kRadix55 - static_cast<u64>(c);
-            u32 tile = blockIdx.x;
-            for (;;)
-            {
-                const u32 coeff = (tile << 8u) + threadIdx.x;
-                const u32 elem = (limb << 13u) + coeff;
-
-                // Keep the accepted product and carry order exactly: ct1 first,
-                // tree terms 0..5, then the Q64 key complement.
-                Wide positiveSum =
-                    multiplySharedAccumulatorPointerPair(shPairs, coeff);
-#pragma unroll
-                for (u32 k = 2u; k < kTotalTerms; ++k)
-                {
-                    positiveSum = wideAdd(
-                        positiveSum,
-                        multiplySharedAccumulatorPointerPair(
-                            shPairs + k, coeff));
-                }
-                const Wide keyComplement = wideSub(
-                    Wide{ 0u, q },
-                    multiplySharedAccumulatorPointerPair(
-                        shPairs + 1u, coeff));
-                const Wide signedSum = wideAdd(positiveSum, keyComplement);
-
-                const u64 s0 = signedSum.mLo & kMask55;
-                const u64 s1 =
-                    ((signedSum.mLo >> 55u) | (signedSum.mHi << 9u)) &
-                    kMask55;
-                const u32 s2 = static_cast<u32>(signedSum.mHi >> 46u);
-
-                const u64 p0 =
-                    static_cast<u64>(static_cast<u32>(s1)) * c;
-                const u64 p1 =
-                    static_cast<u64>(static_cast<u32>(s1 >> 32u)) * c;
-                u64 tLo = p0 + (p1 << 32u);
-                u64 tCarry = static_cast<u64>(tLo < p0);
-
-                const u32 s2c = s2 * c;
-                const u64 topFold = static_cast<u64>(s2c) * c;
-                const u64 addend = s0 + topFold;
-                const u64 oldTLo = tLo;
-                tLo += addend;
-                tCarry += static_cast<u64>(tLo < oldTLo);
-                const u64 tHi = (p1 >> 32u) + tCarry;
-
-                const u64 t0 = tLo & kMask55;
-                const u32 t1 =
-                    static_cast<u32>((tLo >> 55u) | (tHi << 9u));
-                u64 acc = t0 + static_cast<u64>(t1) * c;
-                if (acc >= q) acc -= q;
-
-                out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
-
-                tile += gridDim.x;
-                if (tile >= 32u) break;
-            }
-        }
-
-        // One-block adaptive variant of the accepted Q64 accumulator. The four
-        // affine bases are visible to nvcc as block-uniform values throughout
-        // the coefficient loop. Only the six index-selected tree pairs cross the
-        // setup barrier through volatile shared memory. Dispatch below guarantees
-        // gridDim.x == 1; retaining the accepted grid-stride loop here keeps the
-        // experiment isolated to pointer residency.
-        __global__ __launch_bounds__(256, 8)
-        void expandAccumulatorTau1GoldenDirectBasesKernel(
-            DeviceRing rg,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out)
-        {
-            constexpr u32 kN = 8192;
-            constexpr u32 kRho = 4;
-            constexpr u32 kMu = 8;
-            constexpr u32 kTreeTerms = 6;
-            constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-
-            const u32 rowLimb = blockIdx.y;
-            const u32 limb = rowLimb & (kRho - 1u);
-            const u32 row = rowLimb >> 2u;
-            const u32 chunk = blockIdx.z;
-            const u32 o = chunk * kMu + row;
-            const size_t limbBase = static_cast<size_t>(limb) * kN;
-            const size_t rowBase = static_cast<size_t>(row) * kPerPoly + limbBase;
-            const size_t chunkBase = static_cast<size_t>(chunk) * kPerPoly + limbBase;
-
-            const u64* const ct1Base = ct1 + rowBase;
-            const u64* const uBase = uDigits + chunkBase;
-            const u64* const publicABase = publicA + rowBase;
-            const u64* const skBase = skNtt + chunkBase;
-
-            using SharedPointer = const u64* volatile;
-            __shared__ SharedPointer shTreeA[kTreeTerms];
-            __shared__ SharedPointer shTreeB[kTreeTerms];
-            if (threadIdx.x < kTreeTerms)
-            {
-                const u32 treeK = threadIdx.x;
-                const size_t idx = static_cast<size_t>(o) * kTreeTerms + treeK;
-                shTreeA[treeK] =
-                    lacct + static_cast<size_t>(lacctAIdx[idx]) * kPerPoly + limbBase;
-                shTreeB[treeK] =
-                    nodes + static_cast<size_t>(lacctBIdx[idx]) * kPerPoly + limbBase;
-            }
-            __syncthreads();
-
-            const GpuModulus mod = rg.mMods[limb];
-            u32 tile = blockIdx.x;
-            for (;;)
-            {
-                const u32 coeff = (tile << 8u) + threadIdx.x;
-                const u32 elem = (limb << 13u) + coeff;
-
-                // Preserve the accepted order exactly: affine ct1 first, then
-                // all six tree products in index order, then the Q64 key
-                // complement.
-                Wide positiveSum = wideMul(ct1Base[coeff], uBase[coeff]);
-#pragma unroll
-                for (u32 k = 0; k < kTreeTerms; ++k)
-                {
-                    positiveSum = wideAdd(
-                        positiveSum,
-                        wideMul(shTreeA[k][coeff], shTreeB[k][coeff]));
-                }
-                const Wide keyComplement = wideSub(
-                    Wide{ 0, mod.mValue },
-                    wideMul(publicABase[coeff], skBase[coeff]));
-                const Wide signedSum = wideAdd(positiveSum, keyComplement);
-                const u64 acc = barrettReduce128(signedSum.mLo, signedSum.mHi, mod);
-                out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
-
-                tile += gridDim.x;
-                if (tile >= 32u) break;
-            }
-        }
-
-        // Grouped large-grid specialization of the accepted Q64/tiled path.
-        // blockIdx.z selects one of 32 chunk groups and every coefficient thread
-        // evaluates the group's G chunks in order. Only ct1 is retained across
-        // that inner loop: publicA is deliberately reloaded for each output so
-        // the live range stays within the 32-register/eight-CTA Hopper gate.
-        template<u32 G>
-        __global__ __launch_bounds__(256, 8)
-        void expandAccumulatorTau1GoldenCt1ReuseKernel(
-            DeviceRing rg,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out)
-        {
-            static_assert(G == 2u || G == 4u || G == 8u);
-            constexpr u32 kN = 8192u;
-            constexpr u32 kRho = 4u;
-            constexpr u32 kMu = 8u;
-            constexpr u32 kTreeTerms = 6u;
-            constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-
-            const u32 rowLimb = blockIdx.y;
-            const u32 limb = rowLimb & (kRho - 1u);
-            const u32 row = rowLimb >> 2u;
-            const u32 firstChunk = blockIdx.z * G;
-            const size_t limbBase = static_cast<size_t>(limb) * kN;
-
-            // Volatile pointer slots give each inner-loop iteration the same
-            // bounded pointer lifetimes as the accepted adaptive kernel. ct1 is
-            // the sole intentional exception and is loaded once per coefficient.
-            using SharedPointer = const u64* volatile;
-            __shared__ SharedPointer shCt1;
-            __shared__ SharedPointer shPublicA;
-            __shared__ SharedPointer shU[G];
-            __shared__ SharedPointer shSk[G];
-            __shared__ SharedPointer shTreeA[G][kTreeTerms];
-            __shared__ SharedPointer shTreeB[G][kTreeTerms];
-
-            if (threadIdx.x == 0u)
-            {
-                shCt1 = ct1 + static_cast<size_t>(row) * kPerPoly + limbBase;
-                shPublicA =
-                    publicA + static_cast<size_t>(row) * kPerPoly + limbBase;
-            }
-
-            // Eight setup lanes per chunk: u, sk, and the six indexed tree
-            // pairs. All G tables are complete before the kernel's sole barrier.
-            constexpr u32 kSetupLanesPerChunk = 2u + kTreeTerms;
-            if (threadIdx.x < G * kSetupLanesPerChunk)
-            {
-                const u32 setupChunk = threadIdx.x / kSetupLanesPerChunk;
-                const u32 setupKind =
-                    threadIdx.x - setupChunk * kSetupLanesPerChunk;
-                const u32 chunk = firstChunk + setupChunk;
-                if (setupKind == 0u)
-                {
-                    shU[setupChunk] =
-                        uDigits + static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else if (setupKind == 1u)
-                {
-                    shSk[setupChunk] =
-                        skNtt + static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else
-                {
-                    const u32 treeK = setupKind - 2u;
-                    const u32 o = chunk * kMu + row;
-                    const size_t idx =
-                        static_cast<size_t>(o) * kTreeTerms + treeK;
-                    shTreeA[setupChunk][treeK] =
-                        lacct + static_cast<size_t>(lacctAIdx[idx]) * kPerPoly +
-                        limbBase;
-                    shTreeB[setupChunk][treeK] =
-                        nodes + static_cast<size_t>(lacctBIdx[idx]) * kPerPoly +
-                        limbBase;
-                }
-            }
-            __syncthreads();
-
-            const GpuModulus mod = rg.mMods[limb];
-            u32 tile = blockIdx.x;
-            for (;;)
-            {
-                const u32 coeff = (tile << 8u) + threadIdx.x;
-                const u32 elem = (limb << 13u) + coeff;
-                u64 ct1Value = shCt1[coeff];
-                // Make the single load an opaque loop input. Without this
-                // compiler barrier nvcc legally rematerializes the cache hit at
-                // the group backedge instead of retaining the value, defeating
-                // the experiment while still producing exact output.
-                asm volatile("" : "+l"(ct1Value));
-
-                // Keep this loop rolled: one ct1 value must remain live while
-                // the accepted arithmetic body is reused for each independent
-                // chunk without multiplying the body's register pressure.
-#pragma unroll 1
-                for (u32 groupOffset = 0u; groupOffset < G; ++groupOffset)
-                {
-                    const u32 chunk = firstChunk + groupOffset;
-                    const u32 o = chunk * kMu + row;
-
-                    // Match the accepted specialization exactly: ct1 first,
-                    // tree terms 0..5, Q64 key complement, then one Barrett.
-                    Wide positiveSum =
-                        wideMul(ct1Value, shU[groupOffset][coeff]);
-#pragma unroll
-                    for (u32 treeK = 0u; treeK < kTreeTerms; ++treeK)
-                    {
-                        positiveSum = wideAdd(
-                            positiveSum,
-                            wideMul(
-                                shTreeA[groupOffset][treeK][coeff],
-                                shTreeB[groupOffset][treeK][coeff]));
-                    }
-                    const Wide keyComplement = wideSub(
-                        Wide{ 0u, mod.mValue },
-                        wideMul(shPublicA[coeff], shSk[groupOffset][coeff]));
-                    const Wide signedSum = wideAdd(positiveSum, keyComplement);
-                    const u64 acc =
-                        barrettReduce128(signedSum.mLo, signedSum.mHi, mod);
-                    out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
-                }
-
-                tile += gridDim.x;
-                if (tile >= 32u) break;
-            }
-        }
-
-        // Exact radix-2^64 fold for the accepted production/Q64 accumulator.
-        // This is deliberately a separate symbol: when the experiment is off,
-        // expandAccumulatorTau1GoldenExperimentalKernel<true,true> and all of its
-        // code generation remain unchanged.
-        __global__ __launch_bounds__(256, 8)
-        void expandAccumulatorTau1GoldenRadix64FoldKernel(
-            DeviceRing rg,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out)
-        {
-            constexpr u32 kN = 8192;
-            constexpr u32 kRho = 4;
-            constexpr u32 kMu = 8;
-            constexpr u32 kTreeTerms = 6;
-            constexpr u32 kTotalTerms = 2 + kTreeTerms;
-            constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-            static_assert(kTotalTerms == 8u, "the radix fold bound assumes seven positive products");
-
-            const u32 rowLimb = blockIdx.y;
-            const u32 limb = rowLimb & (kRho - 1u);
-            const u32 row = rowLimb >> 2u;
-            const u32 chunk = blockIdx.z;
-            const u32 o = chunk * kMu + row;
-            const size_t limbBase = static_cast<size_t>(limb) * kN;
-
-            // Match the accepted adaptive kernel's pointer-lifetime control.
-            // One extra shared word holds R = 2^64 mod q, computed once per CTA.
-            __shared__ const u64* volatile shA[kTotalTerms];
-            __shared__ const u64* volatile shB[kTotalTerms];
-            __shared__ u64 shRadix64;
-            if (threadIdx.x < kTotalTerms)
-            {
-                const u32 k = threadIdx.x;
-                if (k == 0)
-                {
-                    shA[k] = ct1 + static_cast<size_t>(row) * kPerPoly + limbBase;
-                    shB[k] = uDigits + static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else if (k == 1)
-                {
-                    shA[k] = publicA + static_cast<size_t>(row) * kPerPoly + limbBase;
-                    shB[k] = skNtt + static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else
-                {
-                    const u32 treeK = k - 2u;
-                    const size_t idx = static_cast<size_t>(o) * kTreeTerms + treeK;
-                    shA[k] = lacct + static_cast<size_t>(lacctAIdx[idx]) * kPerPoly + limbBase;
-                    shB[k] = nodes + static_cast<size_t>(lacctBIdx[idx]) * kPerPoly + limbBase;
-                }
-            }
-            else if (threadIdx.x == kTotalTerms)
-            {
-                const GpuModulus setupMod = rg.mMods[limb];
-                // ratio1 = floor(2^64/q), hence this non-overflowing product
-                // leaves exactly 2^64 mod q after unsigned wraparound.
-                shRadix64 = 0u - setupMod.mRatio1 * setupMod.mValue;
-            }
-            __syncthreads();
-
-            const GpuModulus mod = rg.mMods[limb];
-            const ShoupOperand radix64Shoup{ shRadix64, mod.mRatio0 };
-            u32 tile = blockIdx.x;
-            for (;;)
-            {
-                const u32 coeff = (tile << 8u) + threadIdx.x;
-                const u32 elem = (limb << 13u) + coeff;
-
-                // Preserve the accepted product and carry order exactly.
-                Wide positiveSum = wideMul(shA[0][coeff], shB[0][coeff]);
-#pragma unroll
-                for (u32 k = 2; k < kTotalTerms; ++k)
-                    positiveSum = wideAdd(positiveSum, wideMul(shA[k][coeff], shB[k][coeff]));
-                const Wide keyComplement = wideSub(
-                    Wide{ 0, mod.mValue },
-                    wideMul(shA[1][coeff], shB[1][coeff]));
-                const Wide signedSum = wideAdd(positiveSum, keyComplement);
-
-                // signedSum = q*2^64 + P - K, with seven positive products P
-                // and one key product K. For canonical operands and q < 2^60,
-                // 0 <= signedSum < q*2^64 + 7q^2 and therefore its high word is
-                // below 2q. Canonicalize that word once, reduce the low word,
-                // and fold the high word with R = 2^64 mod q. mRatio0 is exactly
-                // floor(R*2^64/q), so {R,mRatio0} is R's Shoup operand.
-                u64 high = signedSum.mHi;
-                if (high >= mod.mValue) high -= mod.mValue;
-                const u64 low = barrettReduce64(signedSum.mLo, mod);
-                const u64 foldedHigh = mulShoup(high, radix64Shoup, mod.mValue);
-                const u64 acc = addMod(low, foldedHigh, mod.mValue);
-                out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
-
-                tile += gridDim.x;
-                if (tile >= 32u) break;
-            }
-        }
-
-        // Row-reuse experiment for the production Golden tuple. A 256-thread
-        // block is eight warps; warp w owns output row w and evaluates the
-        // tile's 256 coefficients in eight lane-contiguous groups. uDigits and
-        // skNtt depend on (chunk,limb,coefficient), not row, so the block loads
-        // each value once and shares it across all eight warps.
-        template<bool UseQ64Complement>
-        __global__ __launch_bounds__(256, 8)
-        void expandAccumulatorTau1GoldenRowReuseKernel(
-            DeviceRing rg,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out)
-        {
-            constexpr u32 kN = 8192;
-            constexpr u32 kRho = 4;
-            constexpr u32 kMu = 8;
-            constexpr u32 kTreeTerms = 6;
-            constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-
-            const u32 tid = threadIdx.x;
-            const u32 tile = blockIdx.x;
-            const u32 limb = blockIdx.y;
-            const u32 chunk = blockIdx.z;
-            const size_t limbBase = static_cast<size_t>(limb) * kN;
-            const u32 tileBase = tile << 8u;
-
-            // Four 32-bit planes make all cooperative stores and warp reads
-            // unit-stride over the 32 four-byte shared-memory banks. A u64[256]
-            // layout would make adjacent lanes hit the same bank in pairs.
-            __shared__ u32 shULo[256];
-            __shared__ u32 shUHi[256];
-            __shared__ u32 shSkLo[256];
-            __shared__ u32 shSkHi[256];
-
-            // Row-specific bases are warp broadcasts. Volatile prevents nvcc
-            // from carrying all fourteen bases across the eight-coefficient
-            // loop and spilling them under the eight-CTA register bound.
-            __shared__ const u64* volatile shCt1[kMu];
-            __shared__ const u64* volatile shPublicA[kMu];
-            __shared__ const u64* volatile shTreeA[kMu][kTreeTerms];
-            __shared__ const u64* volatile shTreeB[kMu][kTreeTerms];
-
-            const size_t commonIdx =
-                static_cast<size_t>(chunk) * kPerPoly + limbBase + tileBase + tid;
-            const u64 commonU = uDigits[commonIdx];
-            const u64 commonSk = skNtt[commonIdx];
-            shULo[tid] = static_cast<u32>(commonU);
-            shUHi[tid] = static_cast<u32>(commonU >> 32u);
-            shSkLo[tid] = static_cast<u32>(commonSk);
-            shSkHi[tid] = static_cast<u32>(commonSk >> 32u);
-
-            if (tid < kMu)
-            {
-                shCt1[tid] = ct1 + static_cast<size_t>(tid) * kPerPoly + limbBase;
-                shPublicA[tid] =
-                    publicA + static_cast<size_t>(tid) * kPerPoly + limbBase;
-            }
-            if (tid < kMu * kTreeTerms)
-            {
-                const u32 setupRow = tid / kTreeTerms;
-                const u32 treeK = tid - setupRow * kTreeTerms;
-                const size_t idx =
-                    static_cast<size_t>(chunk * kMu + setupRow) * kTreeTerms + treeK;
-                shTreeA[setupRow][treeK] =
-                    lacct + static_cast<size_t>(lacctAIdx[idx]) * kPerPoly + limbBase;
-                shTreeB[setupRow][treeK] =
-                    nodes + static_cast<size_t>(lacctBIdx[idx]) * kPerPoly + limbBase;
-            }
-            __syncthreads();
-
-            const u32 row = tid >> 5u;
-            const u32 lane = tid & 31u;
-            const u32 o = chunk * kMu + row;
-            const GpuModulus mod = rg.mMods[limb];
-
-            // Keep the accepted kernel's exact per-row order for every output:
-            // ct1, tree terms 0..5, then the key complement, then one Barrett.
-#pragma unroll 1
-            for (u32 group = 0; group < 8u; ++group)
-            {
-                const u32 tileCoeff = (group << 5u) + lane;
-                const u32 coeff = tileBase + tileCoeff;
-                const u32 elem = (limb << 13u) + coeff;
-                const u64 uValue = static_cast<u64>(shULo[tileCoeff]) |
-                    (static_cast<u64>(shUHi[tileCoeff]) << 32u);
-                const u64 skValue = static_cast<u64>(shSkLo[tileCoeff]) |
-                    (static_cast<u64>(shSkHi[tileCoeff]) << 32u);
-
-                Wide positiveSum = wideMul(shCt1[row][coeff], uValue);
-#pragma unroll
-                for (u32 treeK = 0; treeK < kTreeTerms; ++treeK)
-                {
-                    positiveSum = wideAdd(
-                        positiveSum,
-                        wideMul(
-                            shTreeA[row][treeK][coeff],
-                            shTreeB[row][treeK][coeff]));
-                }
-
-                Wide keyComplement{};
-                if constexpr (UseQ64Complement)
-                {
-                    keyComplement = wideSub(
-                        Wide{ 0, mod.mValue },
-                        wideMul(shPublicA[row][coeff], skValue));
-                }
-                else
-                {
-                    keyComplement = wideSub(
-                        wideMul(mod.mValue, mod.mValue),
-                        wideMul(shPublicA[row][coeff], skValue));
-                }
-                const Wide signedSum = wideAdd(positiveSum, keyComplement);
-                const u64 acc = barrettReduce128(signedSum.mLo, signedSum.mHi, mod);
-                out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
-            }
-        }
 
         __global__ void innerProductKernel(
             DeviceRing rg,
@@ -11331,20 +9748,6 @@ namespace osuCrypto::LogVole::gpu
             return y;
         }
 
-        __global__ __launch_bounds__(256)
-        void gadgetReduceMagnitude110Pseudo55TestKernel(
-            const u64* magLo,
-            const u64* magHi,
-            u32 count,
-            u64 q,
-            u32 c,
-            u64* residues)
-        {
-            const u32 idx = blockIdx.x * blockDim.x + threadIdx.x;
-            if (idx >= count) return;
-            residues[idx] = gadgetReduceMagnitude110Pseudo55SecondFold(
-                magLo[idx], magHi[idx], q, c);
-        }
 
         // Fixed production high digit. For B=2^110 and the centred CRT value x,
         // the generic level-zero state is
@@ -14293,191 +12696,6 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Stage-113 alpha=2 sidecar. The scale/high-carry prefix and S0--S6
-        // are deliberately identical to the accepted slot-owned kernel above.
-        // Starting at S7, one thread owns a butterfly pair and the accepted
-        // Stage-109 xor topology supplies every later warp-private peer. Raw
-        // S12 pairs are vector-published back into the same tile because the
-        // final slotMap gather has arbitrary shared-memory ownership.
-        __global__ __launch_bounds__(1024, 2)
-        void scaleNttForwardGather8192Rho4HiCarrySlotOwnedWarpStages712Kernel(
-            ScaleNttForwardGather8192Args args,
-            const u32* slotMap)
-        {
-            constexpr u32 kN = 8192u;
-            constexpr u32 kRho = 4u;
-            constexpr u32 kHalf = kN >> 1u;
-            constexpr u32 kS7Gap = 32u;
-            constexpr u32 kS7RootBase = 128u;
-            constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-            constexpr u64 kReplayMin = ~u64(2); // 2^64 - 3
-            static_assert(kRho - 1u == 3u, "rho=4 low-word carry bound");
-            extern __shared__ u64 sh[];
-
-            {
-                const u64 plainModulus = args.mPlainModulus;
-                const u64* poly =
-                    args.mIn + static_cast<size_t>(blockIdx.x) * kPerPoly;
-                for (u32 coeff = threadIdx.x; coeff < kN;
-                     coeff += blockDim.x)
-                {
-                    u64 scaled = 0;
-                    u64 fracHigh = u64(1) << 63;
-
-#pragma unroll 1
-                    for (u32 j = 0; j < kRho; ++j)
-                    {
-                        const ScaleRoundFastLimb& limb = args.mFastLimbs[j];
-                        const u64 q = limb.mQ;
-                        u64 v =
-                            poly[(static_cast<size_t>(j) << 13u) + coeff];
-                        if (v >= q)
-                        {
-                            const u64 tmp =
-                                mulHi64(v, limb.mBarrettRatio1);
-                            v -= tmp * q;
-                            if (v >= q) v -= q;
-                        }
-
-                        u64 x = limb.mInvOperand * v -
-                            mulHi64(v, limb.mInvQuotient) * q;
-                        if (x >= q) x -= q;
-
-                        u64 quotientLo = mulHi64(x, limb.mPShoup);
-                        u64 rem = x * plainModulus - quotientLo * q;
-                        if (rem >= q)
-                        {
-                            rem -= q;
-                            ++quotientLo;
-                        }
-
-                        const u64 termHigh =
-                            mulHi64(rem, limb.mFracLo) +
-                            rem * limb.mFracHi;
-                        const u64 oldHigh = fracHigh;
-                        fracHigh += termHigh;
-                        const u64 highCarry =
-                            static_cast<u64>(fracHigh < oldHigh);
-
-                        scaled += quotientLo + highCarry;
-                        if (scaled >= plainModulus) scaled -= plainModulus;
-                    }
-
-                    if (fracHigh >= kReplayMin)
-                    {
-                        u64 fracLow = 0;
-                        u32 lowCarry = 0;
-
-#pragma unroll 1
-                        for (u32 j = 0; j < kRho; ++j)
-                        {
-                            const ScaleRoundFastLimb& limb =
-                                args.mFastLimbs[j];
-                            const u64 q = limb.mQ;
-                            u64 v = poly[
-                                (static_cast<size_t>(j) << 13u) + coeff];
-                            if (v >= q)
-                            {
-                                const u64 tmp =
-                                    mulHi64(v, limb.mBarrettRatio1);
-                                v -= tmp * q;
-                                if (v >= q) v -= q;
-                            }
-
-                            u64 x = limb.mInvOperand * v -
-                                mulHi64(v, limb.mInvQuotient) * q;
-                            if (x >= q) x -= q;
-
-                            const u64 quotientLo =
-                                mulHi64(x, limb.mPShoup);
-                            u64 rem =
-                                x * plainModulus - quotientLo * q;
-                            if (rem >= q) rem -= q;
-
-                            const u64 next =
-                                fracLow + rem * limb.mFracLo;
-                            lowCarry +=
-                                static_cast<u32>(next < fracLow);
-                            fracLow = next;
-                        }
-
-                        if (fracHigh > ~static_cast<u64>(lowCarry))
-                        {
-                            ++scaled;
-                            if (scaled == plainModulus) scaled = 0;
-                        }
-                    }
-
-                    sh[coeff] = scaled;
-                }
-            }
-            __syncthreads();
-
-            {
-                const u64 q = args.mPlainModulus;
-                const u64 twoQ = q << 1u;
-                const ShoupOperand* roots = args.mRoots;
-                nttForwardStage8192<0, true>(sh, roots, q, twoQ);
-                nttForwardStage8192<1, true>(sh, roots, q, twoQ);
-                nttForwardStage8192<2, true>(sh, roots, q, twoQ);
-                nttForwardStage8192<3, true>(sh, roots, q, twoQ);
-                nttForwardStage8192<4, true>(sh, roots, q, twoQ);
-                nttForwardStage8192<5, true>(sh, roots, q, twoQ);
-                nttForwardStage8192<6, true>(sh, roots, q, twoQ);
-
-                for (u32 butterfly = threadIdx.x;
-                     butterfly < kHalf;
-                     butterfly += blockDim.x)
-                {
-                    const u32 group = butterfly >> 5u;
-                    const u32 ix = butterfly + (group << 5u);
-                    const ShoupOperand r = nttLoadShoup<true>(
-                        roots + kS7RootBase + group);
-                    const u64 u = nttGuard(sh[ix], twoQ);
-                    const u64 v =
-                        mulShoupLazy(sh[ix + kS7Gap], r, q);
-                    u64 lo = u + v;
-                    u64 hi = u + twoQ - v;
-
-                    nttForwardWarpStage8192<8u>(
-                        lo, hi, roots, butterfly, q, twoQ);
-                    nttForwardWarpStage8192<9u>(
-                        lo, hi, roots, butterfly, q, twoQ);
-                    nttForwardWarpStage8192<10u>(
-                        lo, hi, roots, butterfly, q, twoQ);
-                    nttForwardWarpStage8192<11u>(
-                        lo, hi, roots, butterfly, q, twoQ);
-                    nttForwardWarpStage8192<12u>(
-                        lo, hi, roots, butterfly, q, twoQ);
-
-                    // Every lane must finish its final shuffle/read before any
-                    // lane overwrites the in-place shared tile.
-                    __syncwarp(0xffffffffu);
-                    reinterpret_cast<ulonglong2*>(sh)[butterfly] =
-                        make_ulonglong2(lo, hi);
-                }
-            }
-
-            // S12 was published by coefficient-pair owners. The BatchEncoder
-            // permutation gives the following arbitrary slot owners, so a CTA
-            // barrier (not only a warp barrier) is required before the gather.
-            __syncthreads();
-            for (u32 slot = threadIdx.x; slot < kN;
-                 slot += blockDim.x)
-            {
-                const u64 outIdx =
-                    static_cast<u64>(blockIdx.x) * kN + slot;
-                if (outIdx < args.mOutCount)
-                {
-                    const u32 coeff = slotMap[slot];
-                    u64 x = sh[coeff];
-                    const u64 twoQ = args.mPlainModulus << 1u;
-                    if (x >= twoQ) x -= twoQ;
-                    if (x >= args.mPlainModulus) x -= args.mPlainModulus;
-                    args.mOut[outIdx] = x;
-                }
-            }
-        }
 
         // Mirrors the first loop of seal::BatchEncoder::encode:
         //   plain[matrix_reps_index_map_[i]] = values[i]
@@ -14998,49 +13216,7 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // The byte schedule above interprets each four-byte AES word in memory
-        // order. CUDA is little endian, so packing b0|b1<<8|b2<<16|b3<<24
-        // retains that exact order while exposing an aligned uint4 store.
-        __device__ __forceinline__ u32 aes128ScheduleGShared(
-            u32 key3,
-            u32 rcon,
-            const unsigned char* sharedSbox)
-        {
-            const u32 t0 =
-                static_cast<u32>(sharedSbox[(key3 >> 8u) & 0xFFu]) ^ rcon;
-            const u32 t1 =
-                static_cast<u32>(sharedSbox[(key3 >> 16u) & 0xFFu]);
-            const u32 t2 =
-                static_cast<u32>(sharedSbox[(key3 >> 24u) & 0xFFu]);
-            const u32 t3 = static_cast<u32>(sharedSbox[key3 & 0xFFu]);
-            return t0 | (t1 << 8u) | (t2 << 16u) | (t3 << 24u);
-        }
 
-        __device__ __forceinline__ void aes128ExpandSharedVectorToGlobal(
-            u64 lo,
-            u64 hi,
-            const unsigned char* sharedSbox,
-            unsigned char* out)
-        {
-            u32 key0 = static_cast<u32>(lo);
-            u32 key1 = static_cast<u32>(lo >> 32u);
-            u32 key2 = static_cast<u32>(hi);
-            u32 key3 = static_cast<u32>(hi >> 32u);
-            uint4* const out4 = reinterpret_cast<uint4*>(out);
-            out4[0] = make_uint4(key0, key1, key2, key3);
-
-            u32 rcon = 1u;
-#pragma unroll 1
-            for (u32 round = 1u; round <= 10u; ++round)
-            {
-                key0 ^= aes128ScheduleGShared(key3, rcon, sharedSbox);
-                key1 ^= key0;
-                key2 ^= key1;
-                key3 ^= key2;
-                out4[round] = make_uint4(key0, key1, key2, key3);
-                rcon = static_cast<u32>(xtime(static_cast<unsigned char>(rcon)));
-            }
-        }
 
         __device__ inline void aes128Encrypt(const unsigned char* rk, unsigned char* s)
         {
@@ -15338,19 +13514,6 @@ namespace osuCrypto::LogVole::gpu
             raw[3] &= kRootZeta208SampleMask;
         }
 
-        __global__ void rootZetaRho8RawForTestKernel(
-            const GpuModulus* mods, const u64* rawWords, u32 count,
-            u32* rejected, u64* out)
-        {
-            const u32 i = blockIdx.x * blockDim.x + threadIdx.x;
-            if (i >= count) return;
-            u64 raw[4];
-#pragma unroll
-            for (u32 j = 0u; j < 4u; ++j) raw[j] = rawWords[4u * i + j];
-            raw[3] &= kRootZeta208SampleMask;
-            rejected[i] = rootZeta208Rejected(raw);
-            if (!rejected[i]) storeRootZetaRho8(mods, raw, 0u, i, out);
-        }
 
         __global__ __launch_bounds__(128) void rootZetaExpandKeysRho8Kernel(
             const u64* __restrict__ seeds,
@@ -15578,190 +13741,11 @@ namespace osuCrypto::LogVole::gpu
             aes128ExpandToGlobal(h[0], h[1], roundKeys + static_cast<size_t>(gid) * 176);
         }
 
-        // Production split-AES specialization. Consecutive power-of-two row
-        // groups fill each complete warp, so there is no partial CTA at the
-        // dispatch boundary. The 16-byte ct2 seed and every 176-byte round-key
-        // record are aligned; retain those facts in the types so nvcc can issue
-        // one input LDG.128 and eleven output STG.128 operations per polynomial.
-        template<u32 Mu>
-        __global__ __maxnreg__(48) void ct2PolySeedExpandMuSharedVectorKernel(
-            const u64* __restrict__ ct2Seeds,
-            u64 domainTag,
-            u32 polyModulusDegree,
-            u64 modulusCount,
-            u32 total,
-            unsigned char* __restrict__ roundKeys)
-        {
-            static_assert(Mu == 8u || Mu == 16u);
-            __shared__ __align__(16) unsigned char sharedSbox[256];
-            if (threadIdx.x < 16u)
-            {
-                const uint4 chunk =
-                    reinterpret_cast<const uint4*>(kAesSbox)[threadIdx.x];
-                reinterpret_cast<uint4*>(sharedSbox)[threadIdx.x] = chunk;
-            }
-            __syncthreads();
 
-            const u32 gid = blockIdx.x * blockDim.x + threadIdx.x;
-            if (gid >= total) return;
-            const u32 c = gid / Mu;
-            const u32 index = gid & (Mu - 1u);
-            const ulonglong2 ct2Seed =
-                reinterpret_cast<const ulonglong2*>(ct2Seeds)[c];
 
-            u64 h[8];
-            h[0] = kBlake2bIV[0] ^ roParamWord0(16);
-#pragma unroll
-            for (u32 i = 1u; i < 8u; ++i) h[i] = kBlake2bIV[i];
 
-            constexpr u64 label = 0x4C4F47564F4C5059ull;
-            u64 m[16];
-            m[0] = label;
-            m[1] = ct2Seed.x;
-            m[2] = ct2Seed.y;
-            m[3] = domainTag;
-            m[4] = static_cast<u64>(index) |
-                (static_cast<u64>(polyModulusDegree) << 32u);
-            m[5] = modulusCount;
-#pragma unroll
-            for (u32 j = 6u; j < 16u; ++j) m[j] = 0u;
-            blake2bCompress(h, m, 48ull, 0ull, ~u64(0));
 
-            aes128ExpandSharedVectorToGlobal(
-                h[0], h[1], sharedSbox,
-                roundKeys + static_cast<size_t>(gid) * 176u);
-        }
 
-        __global__ __launch_bounds__(32) void aes128ExpandLegacyForTestKernel(
-            const u64* __restrict__ keys,
-            u32 count,
-            unsigned char* __restrict__ roundKeys)
-        {
-            const u32 gid = blockIdx.x * blockDim.x + threadIdx.x;
-            if (gid >= count) return;
-            aes128ExpandToGlobal(
-                keys[2u * gid], keys[2u * gid + 1u],
-                roundKeys + static_cast<size_t>(gid) * 176u);
-        }
-
-        __global__ __maxnreg__(48) void aes128ExpandSharedVectorForTestKernel(
-            const u64* __restrict__ keys,
-            u32 count,
-            unsigned char* __restrict__ roundKeys)
-        {
-            __shared__ __align__(16) unsigned char sharedSbox[256];
-            if (threadIdx.x < 16u)
-            {
-                const uint4 chunk =
-                    reinterpret_cast<const uint4*>(kAesSbox)[threadIdx.x];
-                reinterpret_cast<uint4*>(sharedSbox)[threadIdx.x] = chunk;
-            }
-            __syncthreads();
-
-            const u32 gid = blockIdx.x * blockDim.x + threadIdx.x;
-            if (gid >= count) return;
-            const ulonglong2 key =
-                reinterpret_cast<const ulonglong2*>(keys)[gid];
-            aes128ExpandSharedVectorToGlobal(
-                key.x, key.y, sharedSbox,
-                roundKeys + static_cast<size_t>(gid) * 176u);
-        }
-
-        __device__ __forceinline__ void ct2DeriveInstanceSeedWords(
-            const u64* prefix,
-            u64 instance,
-            u64& lo,
-            u64& hi)
-        {
-            u64 h[8];
-            h[0] = kBlake2bIV[0] ^ roParamWord0(16);
-#pragma unroll
-            for (u32 i = 1u; i < 8u; ++i) h[i] = kBlake2bIV[i];
-
-            u64 m[16];
-#pragma unroll
-            for (u32 j = 0u; j < 9u; ++j) m[j] = prefix[j];
-            m[3] = instance;
-#pragma unroll
-            for (u32 j = 9u; j < 16u; ++j) m[j] = 0u;
-            blake2bCompress(h, m, kCt2SeedMessageBytes, 0ull, ~u64(0));
-            lo = h[0];
-            hi = h[1];
-        }
-
-        __device__ __forceinline__ void ct2ExpandPolySeedKey(
-            u64 instanceLo,
-            u64 instanceHi,
-            u32 row,
-            u64 domainTag,
-            u32 polyModulusDegree,
-            u64 modulusCount,
-            unsigned char* roundKeys)
-        {
-            u64 h[8];
-            h[0] = kBlake2bIV[0] ^ roParamWord0(16);
-#pragma unroll
-            for (u32 i = 1u; i < 8u; ++i) h[i] = kBlake2bIV[i];
-
-            constexpr u64 label = 0x4C4F47564F4C5059ull;
-            u64 m[16];
-            m[0] = label;
-            m[1] = instanceLo;
-            m[2] = instanceHi;
-            m[3] = domainTag;
-            m[4] = static_cast<u64>(row) |
-                (static_cast<u64>(polyModulusDegree) << 32u);
-            m[5] = modulusCount;
-#pragma unroll
-            for (u32 j = 6u; j < 16u; ++j) m[j] = 0u;
-            blake2bCompress(h, m, 48ull, 0ull, ~u64(0));
-            aes128ExpandToGlobal(h[0], h[1], roundKeys);
-        }
-
-        // Fused CT2 instance seed -> polynomial seed -> global AES key expansion
-        // for the production row counts. One warp contains 32/Mu independent
-        // chunk subgroups. Only lane zero of each subgroup evaluates the instance
-        // Blake compression; its two output words are then broadcast to the Mu
-        // row lanes, which execute the unchanged polynomial Blake compression and
-        // AES key expansion. There is no CTA communication or intermediate seed
-        // traffic, and the separate counter-encryption kernel remains unchanged.
-        template<u32 Mu>
-        __global__ __launch_bounds__(128) void ct2InstancePolySeedExpandKernel(
-            const u64* __restrict__ prefix,
-            u64 instanceBase,
-            u32 chunkCount,
-            u64 domainTag,
-            u32 polyModulusDegree,
-            u64 modulusCount,
-            unsigned char* __restrict__ roundKeys)
-        {
-            static_assert(Mu == 4u || Mu == 8u || Mu == 16u);
-            const u32 groupsPerBlock = blockDim.x / Mu;
-            const u32 subgroup = threadIdx.x / Mu;
-            const u32 row = threadIdx.x & (Mu - 1u);
-            const u32 chunk = blockIdx.x * groupsPerBlock + subgroup;
-            const bool valid = chunk < chunkCount;
-
-            // Every warp reaches the vote. A trailing block can omit whole
-            // subgroups; valid lanes then use the returned participation mask for
-            // both shuffles without naming any exited lane.
-            const u32 validMask = __ballot_sync(0xFFFFFFFFu, valid);
-            if (!valid) return;
-
-            u64 instanceLo = 0u;
-            u64 instanceHi = 0u;
-            if (row == 0u)
-                ct2DeriveInstanceSeedWords(
-                    prefix, instanceBase + chunk, instanceLo, instanceHi);
-
-            instanceLo = __shfl_sync(validMask, instanceLo, 0u, Mu);
-            instanceHi = __shfl_sync(validMask, instanceHi, 0u, Mu);
-
-            const u32 gid = chunk * Mu + row;
-            ct2ExpandPolySeedKey(
-                instanceLo, instanceHi, row, domainTag, polyModulusDegree,
-                modulusCount, roundKeys + static_cast<size_t>(gid) * 176u);
-        }
 
         __global__ __launch_bounds__(128) void ct2PolySeedEncryptKernel(
             const unsigned char* __restrict__ roundKeys,
@@ -15967,29 +13951,6 @@ namespace osuCrypto::LogVole::gpu
             for (u32 i = 0; i < 8; ++i) out8[i] = h[i];
         }
 
-        // Exact output-block specialization for the hot shared-root sampler.
-        // Message words are consumed at each compile-time sigma use instead of
-        // occupying sixteen registers for the full compression lifetime.
-        __device__ __forceinline__ void blake2xbBlockSharedMessage(
-            const volatile u64* root8,
-            u32 nodeOffset,
-            u64* out8)
-        {
-            u64 h[8];
-            h[0] = kBlake2bIV[0] ^ (64ull | (64ull << 32));
-            h[1] = kBlake2bIV[1] ^
-                (static_cast<u64>(nodeOffset) |
-                 (static_cast<u64>(kPrngBufferBytes) << 32));
-            h[2] = kBlake2bIV[2] ^ (64ull << 8);
-#pragma unroll
-            for (u32 i = 3u; i < 8u; ++i) h[i] = kBlake2bIV[i];
-
-            const BlakeSharedMessage8 message{ root8 };
-            blake2bCompressMessageSource(
-                h, message, 64ull, 0ull, ~u64(0));
-#pragma unroll
-            for (u32 i = 0u; i < 8u; ++i) out8[i] = h[i];
-        }
 
         // One vector fetch for each adjacent non-zero message pair at the source
         // level, scoped to one round. Because roots are immutable, ptxas may
@@ -16068,47 +14029,6 @@ namespace osuCrypto::LogVole::gpu
         // this each kernel needs about 90 registers, and the root is still
         // computed once per 4 KiB refill instead of once per 64-byte block.
 
-        // AES-128 counter-mode stream, for measuring against the Blake2xb one.
-        // Not used by the protocol: SEAL's sample_poly_uniform defines the ct2
-        // bytes, so swapping the primitive would change the derivation. The
-        // question "would AES be faster on the GPU?" deserves a number rather
-        // than an instruction count, so this exists to produce one.
-        // One thread per 128-bit output block.
-        __global__ __launch_bounds__(256) void aesCtrStreamKernel(
-            const u64* __restrict__ seeds,   // [streamCount][2]
-            u64* __restrict__ out,
-            u32 wordsPerStream,
-            u32 streamCount)
-        {
-            const u32 s = blockIdx.y;
-            if (s >= streamCount) return;
-            const u32 blocksPerStream = wordsPerStream >> 1;
-            unsigned char rk[176];
-            aes128Expand(reinterpret_cast<const unsigned char*>(seeds + 2 * s), rk);
-
-            for (u32 blk = blockIdx.x * blockDim.x + threadIdx.x; blk < blocksPerStream;
-                 blk += gridDim.x * blockDim.x)
-            {
-                unsigned char st[16];
-#pragma unroll
-                for (u32 i = 0; i < 16; ++i) st[i] = 0;
-                st[0] = static_cast<unsigned char>(blk);
-                st[1] = static_cast<unsigned char>(blk >> 8);
-                st[2] = static_cast<unsigned char>(blk >> 16);
-                st[3] = static_cast<unsigned char>(blk >> 24);
-                aes128Encrypt(rk, st);
-                u64 w0 = 0, w1 = 0;
-#pragma unroll
-                for (u32 i = 0; i < 8; ++i)
-                {
-                    w0 |= static_cast<u64>(st[i]) << (8 * i);
-                    w1 |= static_cast<u64>(st[8 + i]) << (8 * i);
-                }
-                u64* dst = out + static_cast<size_t>(s) * wordsPerStream + 2 * blk;
-                dst[0] = w0;
-                dst[1] = w1;
-            }
-        }
 
         // Input generation uses cryptoTools AES, independently of SEAL's
         // BLAKE2xb correlation sampler. Share the one key schedule per CTA.
@@ -16489,9 +14409,8 @@ namespace osuCrypto::LogVole::gpu
         // max_multiple, which leaves ((2^64-1) mod q) + 2 rejecting values, and for
         // the four 55-bit primes SEAL picks for N = 8192 that remainder is only
         // ~2^27, i.e. 2^-37 per coefficient: about one rejection per million
-        // polynomials. So neither branch is reachable from real parameters, and
-        // both are covered instead by the `uniform sample (rejections)` row of
-        // -lvgpu, which substitutes a 2^-4..2^-7 threshold.
+        // polynomials. Forced-threshold sampler validation exercises both
+        // rejection paths without depending on rare production draws.
         // 256 threads is measured: 512 gives one register-limited block per SM
         // and loses the cross-block overlap that hides the per-pass barriers
         // (13.7 -> 17.2 ms of device time at n = 2^24), 128 costs twice as many
@@ -16534,10 +14453,7 @@ namespace osuCrypto::LogVole::gpu
         // two can be measured against each other on the same build.
         bool fusedSamplerEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LOGVOLE_GPU_FUSED_SAMPLE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LOGVOLE_GPU_FUSED_SAMPLE");
             return on;
         }
 
@@ -16549,10 +14465,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback to the materialized sampler.
         bool speculativeFusedSamplerEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_FUSED_SAMPLE_SPECULATIVE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_SPECULATIVE");
             return on;
         }
 
@@ -16563,10 +14476,7 @@ namespace osuCrypto::LogVole::gpu
         // the wider speculative or materialised rollback controls.
         bool hotSpeculativeFusedSamplerEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_FUSED_SAMPLE_HOT");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_HOT");
             return on;
         }
 
@@ -16577,26 +14487,10 @@ namespace osuCrypto::LogVole::gpu
         // transpose independently of all other sampler switches.
         bool hotSamplerWarpTransposeEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_FUSED_SAMPLE_WARP_TRANSPOSE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_WARP_TRANSPOSE");
             return on;
         }
 
-        // Read the hot output-block message from its warp-uniform shared root at
-        // every compile-time sigma use. This trades broadcast LDS instructions
-        // for a fourth resident CTA only when the dedicated kernel stays within
-        // 64 registers. Strict opt-in retains the accepted REG80 kernel exactly.
-        bool hotSamplerSharedMessageEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_FUSED_SAMPLE_SHARED_MESSAGE");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
         // Cache the four non-zero message pairs only for one Blake round at a
         // time. The dedicated symbol retains 128-bit shared loads and stays
@@ -16604,11 +14498,7 @@ namespace osuCrypto::LogVole::gpu
         // REG80 sampler, while the scalar shared-message experiment is separate.
         bool hotSamplerRoundVectorMessageEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_FUSED_SAMPLE_ROUND_VECTOR_MESSAGE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_ROUND_VECTOR_MESSAGE");
             return on;
         }
 
@@ -16619,11 +14509,7 @@ namespace osuCrypto::LogVole::gpu
         // kernel as an exact same-binary rollback and SASS reference.
         bool hotSamplerSharedRootPrefixEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_FUSED_SAMPLE_SHARED_ROOT_PREFIX");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_SHARED_ROOT_PREFIX");
             return on;
         }
 
@@ -16637,11 +14523,7 @@ namespace osuCrypto::LogVole::gpu
         // zero restores the accepted materialized root/block/reduce chain.
         bool smallSampleDirectReduceEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_SMALL_SAMPLE_DIRECT_REDUCE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_SMALL_SAMPLE_DIRECT_REDUCE");
             return on;
         }
 
@@ -16651,51 +14533,16 @@ namespace osuCrypto::LogVole::gpu
         // accepted launch as a same-binary rollback.
         bool hotSamplerSplit64Enabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_FUSED_SAMPLE_SPLIT64");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_SPLIT64");
             return on;
         }
 
-        // Production coefficient primes have q=2^55-c with 0<c<2^21. A
-        // dedicated candidate folds one raw u64 at radix 2^55 and derives the
-        // exact SEAL-default rejection bit from that same fold. Keep it strictly
-        // opt-in while its isolated resource and performance gates are settled;
-        // the accepted round-vector symbols remain independent rollbacks.
-        bool hotSamplerPseudo55ReduceEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_FUSED_SAMPLE_PSEUDO55_REDUCE");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
-
-        // The hot path only needs to publish whether a polynomial rejected, not
-        // which pass rejected. Accumulating that bit per thread defers sixteen
-        // warp votes to one while leaving the cold ordered replay unchanged.
-        // Keep the dedicated symbol opt-in until its small full-protocol ceiling
-        // clears a stable performance gate.
-        bool hotSamplerDeferredRejectVoteEnabled()
-        {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_FUSED_SAMPLE_DEFER_REJECT_VOTE");
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
         // LV_GPU_COALESCED_SAMPLE=0 retains the direct strided stores for an
         // exact same-binary A/B. The shared transpose is otherwise the default.
         bool coalescedSamplerStoreEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_COALESCED_SAMPLE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_COALESCED_SAMPLE");
             return on;
         }
 
@@ -16788,292 +14635,7 @@ namespace osuCrypto::LogVole::gpu
             kNoGoldSampleRoots == 256u && kNoGoldSamplePasses == 64u &&
             kNoGoldPartRoots == 64u && kNoGoldPartPasses == 16u);
 
-        bool tiledSamplerEnabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_TILED_SAMPLE");
-                // One CTA per 2,048-word tile exposes sixteen times as much
-                // parallelism as the full-polynomial sampler at N=8192. The
-                // original experiment paid for a fresh flag allocation and a
-                // 128-register CTA per polynomial just to discover that no word
-                // rejected. Persistent epochs and the tiny repair gate below
-                // remove those costs. It wins the isolated batch-2048 sampler,
-                // but its much wider CTA footprint reduces useful cross-stream
-                // overlap in the full two-party protocol on H200. Retain it as an
-                // opt-in architecture experiment; the full-polynomial sampler is
-                // the measured end-to-end default.
-                return v && v[0] == '1';
-            }();
-            return on;
-        }
 
-        // Group consecutive 2,048-word tiles under one CTA. One reproduces the
-        // original sixteen-CTA production geometry; sixteen reaches the same
-        // one-CTA footprint as the full-polynomial sampler while retaining the
-        // tiled producer and cold-repair protocol. Invalid values conservatively
-        // select the original group of one.
-        u32 tiledSamplerGroup()
-        {
-            static const u32 value = [] {
-                const char* v = std::getenv("LV_GPU_TILED_SAMPLE_GROUP");
-                if (!v || !v[0]) return 1u;
-                char* end = nullptr;
-                const unsigned long parsed = std::strtoul(v, &end, 10);
-                if (parsed < 1ul || parsed > 16ul ||
-                    (parsed & (parsed - 1ul)) != 0ul || !end || *end != '\0')
-                {
-                    return 1u;
-                }
-                return static_cast<u32>(parsed);
-            }();
-            return value;
-        }
-
-        // The tiled sampler is itself opt-in. Once selected, use the same
-        // bank-conflict-free warp-private transpose accepted by the hot
-        // full-polynomial sampler. Zero restores the original CTA-wide padded
-        // transpose without changing tile grouping or rejection handling.
-        bool tiledSamplerWarpTransposeEnabled()
-        {
-            if (!tiledSamplerEnabled()) return false;
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_TILED_SAMPLE_WARP_TRANSPOSE");
-                return !(v && v[0] == '0');
-            }();
-            return on;
-        }
-
-        __device__ __noinline__ u32 sampleUniformHotPassProducerWarpTranspose(
-            const u64* root8,
-            u32 nodeOffset,
-            const u64* thresholdPtr,
-            const GpuModulus* modPtr,
-            u32* warpLo,
-            u32* warpHi,
-            u32 lane);
-
-        // Derive all four-root sets needed by one consecutive tile group. Kept
-        // out of line so the two Blake compressions used for a root do not inflate
-        // the live set of every output-block thread.
-        template<u32 TileGroup>
-        __device__ __noinline__ void sampleTileRootsToShared(
-            const u64* seed8, u32 firstCounter, u64* shRoots, u32 tid)
-        {
-            constexpr u32 rootCount = TileGroup * kSampleTileRoots;
-            if (tid < rootCount)
-            {
-                u64 root[8];
-                blake2xbRoot(seed8, firstCounter + tid, root);
-                u64* dst = shRoots + static_cast<size_t>(tid) * 8;
-#pragma unroll
-                for (u32 i = 0; i < 8; ++i) dst[i] = root[i];
-            }
-        }
-
-        // Speculative rejection-free sampler. Each CTA owns one consecutive group
-        // of tiles from one logical polynomial. TileGroup=1 is the original 16-CTA
-        // production geometry, while TileGroup=16 processes the full 32K words in
-        // one CTA without adopting the full-polynomial kernel's rejection state.
-        // A rejecting warp stamps one persistent per-polynomial epoch; production
-        // calls almost surely execute no atomic and the next kernel's tiny gate
-        // returns without touching the polynomial.
-        //
-        // Blake2xb gives each producer thread eight consecutive words. Directly
-        // storing them makes lanes in a warp stride by 64 bytes. Coalesced paths
-        // transpose those words through either the accepted warp-private layout
-        // or the original padded CTA-wide layout. Direct stores remain for A/B.
-        template<bool CoalescedStore, bool WarpTranspose, u32 TileGroup>
-        __global__ __launch_bounds__(kSampleTileThreads) void sampleUniformTileKernel(
-            DeviceRing rg,
-            const u64* __restrict__ seeds,
-            const u64* __restrict__ maxMultiple,
-            u64* out,
-            const u32* __restrict__ outIdx,
-            u32 outCount,
-            u32* __restrict__ rejectEpochs,
-            u32 rejectEpoch)
-        {
-            static_assert(
-                TileGroup >= 1u && TileGroup <= 16u &&
-                (TileGroup & (TileGroup - 1u)) == 0u);
-            static_assert(!WarpTranspose || CoalescedStore);
-            __shared__ u64 shRoots[TileGroup * kSampleTileRoots * 8];
-            extern __shared__ u64 shStore[];
-            const u32 poly = blockIdx.y;
-            const u32 tid = threadIdx.x;
-            if (poly >= outCount) return;
-
-            const u32 lane = tid & 31u;
-            const u32 warp = tid >> 5u;
-            u32* const shWarpStore = reinterpret_cast<u32*>(shStore);
-            u32* const warpLo =
-                shWarpStore + warp * kHotWarpStoreWords;
-            u32* const warpHi = shWarpStore + kHotWarpStorePlaneWords +
-                warp * kHotWarpStoreWords;
-
-            const u32 perPoly = rg.mRho * rg.mN;
-            const u64* seed8 = seeds + static_cast<size_t>(poly) * 8;
-            const u32 firstTile = blockIdx.x * TileGroup;
-            const u32 groupWordBase = firstTile * kSampleTileWords;
-            sampleTileRootsToShared<TileGroup>(
-                seed8, groupWordBase / kPrngBufferWords, shRoots, tid);
-            __syncthreads();
-
-            // Keep the grouped body rolled: all groups reuse one Blake live set,
-            // and TileGroup=1 still constant-folds to the original single pass.
-#pragma unroll 1
-            for (u32 tileInGroup = 0; tileInGroup < TileGroup; ++tileInGroup)
-            {
-                const u32 tile = firstTile + tileInGroup;
-                const u32 tileWordBase = tile * kSampleTileWords;
-                const u32 base = tileWordBase + tid * kFusedBlockWords;
-                const u32 limb = base >> rg.mLogN;
-                const size_t tileRootBase =
-                    static_cast<size_t>(tileInGroup) * kSampleTileRoots * 8;
-
-                if constexpr (WarpTranspose)
-                {
-                    const u32 rejected =
-                        sampleUniformHotPassProducerWarpTranspose(
-                            shRoots + tileRootBase +
-                                static_cast<size_t>(tid >> 6) * 8,
-                            tid & 63u,
-                            maxMultiple + limb,
-                            rg.mMods + limb,
-                            warpLo,
-                            warpHi,
-                            lane);
-
-                    // The cold repair needs only a per-polynomial epoch stamp.
-                    // Retain the original per-tile vote so forced-rejection
-                    // validation exercises precisely the same decision points.
-                    const u32 warpRejected =
-                        __ballot_sync(0xFFFFFFFFu, rejected != 0u);
-                    if (lane == 0u && warpRejected != 0u)
-                        atomicExch(rejectEpochs + poly, rejectEpoch);
-
-                    // Each warp publishes and consumes only its own 8x32 tile.
-                    // No block-wide dependency remains after root generation.
-                    __syncwarp();
-                    const u32 oi = outIdx ? outIdx[poly] : poly;
-                    u64* const dst =
-                        out + static_cast<size_t>(oi) * perPoly + tileWordBase +
-                        warp * 256u;
-#pragma unroll
-                    for (u32 j = 0; j < kFusedBlockWords; ++j)
-                    {
-                        const u32 sourceWord = lane & 7u;
-                        const u32 sourceLane = (j << 2u) + (lane >> 3u);
-                        const u32 sh =
-                            sourceWord * kHotWarpStoreStride + sourceLane;
-                        const u64 reduced = static_cast<u64>(warpLo[sh]) |
-                            (static_cast<u64>(warpHi[sh]) << 32u);
-                        dst[j * 32u + lane] = reduced;
-                    }
-
-                    // Protect this warp's tile only when another grouped tile
-                    // will reuse it. Kernel completion protects the final tile.
-                    if (tileInGroup + 1u < TileGroup) __syncwarp();
-                }
-                else
-                {
-                    const u64 mx = maxMultiple[limb];
-                    u64 words[kFusedBlockWords];
-                    blake2xbBlock(
-                        shRoots + tileRootBase +
-                            static_cast<size_t>(tid >> 6) * 8,
-                        tid & 63u, words);
-
-                    u32 rejected = 0;
-#pragma unroll
-                    for (u32 i = 0; i < kFusedBlockWords; ++i)
-                        rejected |= static_cast<u32>(words[i] >= mx);
-
-                    // At most one atomic per rejecting warp and tile, and none at
-                    // all for the overwhelmingly common production case.
-                    const u32 warpRejected =
-                        __ballot_sync(0xFFFFFFFFu, rejected != 0u);
-                    if (lane == 0u && warpRejected != 0u)
-                        atomicExch(rejectEpochs + poly, rejectEpoch);
-
-                    const GpuModulus mod = rg.mMods[limb];
-                    if constexpr (CoalescedStore)
-                    {
-#pragma unroll
-                        for (u32 i = 0; i < kFusedBlockWords; ++i)
-                            shStore[
-                                static_cast<size_t>(i) * kFusedStoreStride + tid] =
-                                barrettReduce64(words[i], mod);
-                        __syncthreads();
-
-                        const u32 oi = outIdx ? outIdx[poly] : poly;
-                        u64* dst =
-                            out + static_cast<size_t>(oi) * perPoly + tileWordBase;
-#pragma unroll
-                        for (u32 i = 0; i < kFusedBlockWords; ++i)
-                        {
-                            const u32 idx = tid + i * kSampleTileThreads;
-                            dst[idx] = shStore[
-                                static_cast<size_t>(idx & 7u) * kFusedStoreStride +
-                                (idx >> 3)];
-                        }
-                        // The next tile reuses shStore. Do not let an early
-                        // producer overwrite values a lagging warp still consumes.
-                        if (tileInGroup + 1u < TileGroup) __syncthreads();
-                    }
-                    else
-                    {
-                        const u32 oi = outIdx ? outIdx[poly] : poly;
-                        u64* dst = out + static_cast<size_t>(oi) * perPoly + base;
-#pragma unroll
-                        for (u32 i = 0; i < kFusedBlockWords; ++i)
-                            dst[i] = barrettReduce64(words[i], mod);
-                    }
-                }
-            }
-        }
-
-        template<u32 TileGroup>
-        void launchSampleUniformTileGroup(
-            DeviceRing rg,
-            const u64* seeds,
-            const u64* maxMultiple,
-            u64* out,
-            const u32* outIdx,
-            u32 outCount,
-            u32 groupsPerPoly,
-            u32* rejectEpochs,
-            u32 rejectEpoch,
-            bool coalescedStore,
-            bool warpTranspose,
-            cudaStream_t stream)
-        {
-            const dim3 grid(groupsPerPoly, outCount, 1u);
-            if (coalescedStore && warpTranspose)
-            {
-                sampleUniformTileKernel<true, true, TileGroup><<<
-                    grid, kSampleTileThreads, kHotWarpStoreBytes, stream>>>(
-                    rg, seeds, maxMultiple, out, outIdx, outCount,
-                    rejectEpochs, rejectEpoch);
-            }
-            else if (coalescedStore)
-            {
-                sampleUniformTileKernel<true, false, TileGroup><<<
-                    grid, kSampleTileThreads,
-                    static_cast<std::size_t>(kFusedStoreWords) * sizeof(u64),
-                    stream>>>(
-                    rg, seeds, maxMultiple, out, outIdx, outCount,
-                    rejectEpochs, rejectEpoch);
-            }
-            else
-            {
-                sampleUniformTileKernel<false, false, TileGroup><<<
-                    grid, kSampleTileThreads, 0, stream>>>(
-                    rg, seeds, maxMultiple, out, outIdx, outCount,
-                    rejectEpochs, rejectEpoch);
-            }
-        }
 
         // Random access to one word of the unbounded logical SEAL Blake2xb
         // stream. This is cold: production thresholds flag roughly one polynomial
@@ -17259,8 +14821,8 @@ namespace osuCrypto::LogVole::gpu
         }
 
         // Past the cached window: recompute the output block that holds word `idx`.
-        // Cold with real parameters, hot under the -lvgpu rejection row, which
-        // consumes ~1000 replacement words per polynomial and so covers it.
+        // Cold with real parameters; forced-threshold validation can consume
+        // enough replacement words to exercise this uncached path.
         __device__ __noinline__ u64 fusedStreamWordCold(const u64* shRoots, u32 rootCount, u32 idx)
         {
             // Clamped so a hypothetical overrun stays inside the shared allocation.
@@ -17458,39 +15020,6 @@ namespace osuCrypto::LogVole::gpu
             return rejected;
         }
 
-        // Register-for-shared experiment: identical reduction, rejection vote,
-        // and split-u32 publication, with only the Blake message source changed.
-        // Force it into the dedicated kernel so no device-call frame is needed.
-        __device__ __forceinline__ u32
-        sampleUniformHotPassProducerSharedMessageWarpTranspose(
-            const volatile u64* root8,
-            u32 nodeOffset,
-            const u64* thresholdPtr,
-            const GpuModulus* modPtr,
-            u32* warpLo,
-            u32* warpHi,
-            u32 lane)
-        {
-            u64 words[kFusedBlockWords];
-            blake2xbBlockSharedMessage(root8, nodeOffset, words);
-
-            const u64 threshold = *thresholdPtr;
-            u32 rejected = 0;
-#pragma unroll
-            for (u32 i = 0; i < kFusedBlockWords; ++i)
-                rejected |= static_cast<u32>(words[i] >= threshold);
-
-            const GpuModulus mod = *modPtr;
-#pragma unroll
-            for (u32 i = 0; i < kFusedBlockWords; ++i)
-            {
-                const u64 reduced = barrettReduce64(words[i], mod);
-                const u32 sh = i * kHotWarpStoreStride + lane;
-                warpLo[sh] = static_cast<u32>(reduced);
-                warpHi[sh] = static_cast<u32>(reduced >> 32u);
-            }
-            return rejected;
-        }
 
         // Round-scoped vector-message twin. Rejection detection, reduction,
         // publication order, and the cold ordered replay contract are identical
@@ -17556,75 +15085,8 @@ namespace osuCrypto::LogVole::gpu
             u32 mRejected;
         };
 
-        // Exact one-fold reduction for the production primes q=2^55-c,
-        // 0<c<2^21. Writing x=x0+h*2^55 gives x mod q=x0+h*c and the bound
-        // x0+h*c<2q, so one conditional subtraction is canonical. For these
-        // primes floor((2^64-1)/q)=512 and SEAL's max_multiple is 512q-1;
-        // therefore the exact rejection predicate is h==511 && t>=q-1.
-        __device__ __forceinline__ SampleUniformPseudo55Word
-        sampleUniformPseudo55ReduceWord(u64 x, u64 q, u32 c)
-        {
-            constexpr u64 kRadix55 = u64{ 1 } << 55u;
-            constexpr u64 kMask55 = kRadix55 - 1u;
-            const u32 h = static_cast<u32>(x >> 55u);
-            // h*c is below 2^30, so deliberately keep the product on the native
-            // 32-bit path rather than recreating a wide multiply.
-            const u32 foldedHigh = h * c;
-            u64 t = (x & kMask55) + static_cast<u64>(foldedHigh);
-            const u32 rejected = static_cast<u32>(
-                h == 511u && t >= q - 1u);
-            if (t >= q) t -= q;
-            return { t, rejected };
-        }
 
-        // Candidate-only twin of the accepted round-vector producer. Blake,
-        // publication layout and the cold-repair epoch contract are unchanged;
-        // only the per-word reduction and default-threshold rejection test differ.
-        __device__ __forceinline__ u32
-        sampleUniformHotPassProducerRoundVectorMessagePseudo55WarpTranspose(
-            const ulonglong2* rootPairs,
-            u32 nodeOffset,
-            const GpuModulus* modPtr,
-            u32* warpLo,
-            u32* warpHi,
-            u32 lane)
-        {
-            constexpr u64 kRadix55 = u64{ 1 } << 55u;
-            u64 words[kFusedBlockWords];
-            blake2xbBlockRoundVectorMessage(rootPairs, nodeOffset, words);
 
-            const u64 q = modPtr->mValue;
-            const u32 c = static_cast<u32>(kRadix55 - q);
-            u32 rejected = 0u;
-#pragma unroll
-            for (u32 i = 0; i < kFusedBlockWords; ++i)
-            {
-                const SampleUniformPseudo55Word result =
-                    sampleUniformPseudo55ReduceWord(words[i], q, c);
-                rejected |= result.mRejected;
-                const u32 sh = i * kHotWarpStoreStride + lane;
-                warpLo[sh] = static_cast<u32>(result.mResidue);
-                warpHi[sh] = static_cast<u32>(result.mResidue >> 32u);
-            }
-            return rejected;
-        }
-
-        __global__ __launch_bounds__(256)
-        void sampleUniformPseudo55ReduceWordTestKernel(
-            const u64* __restrict__ words,
-            u32 count,
-            u64 q,
-            u32 c,
-            u64* __restrict__ residues,
-            u32* __restrict__ rejected)
-        {
-            const u32 idx = blockIdx.x * blockDim.x + threadIdx.x;
-            if (idx >= count) return;
-            const SampleUniformPseudo55Word result =
-                sampleUniformPseudo55ReduceWord(words[idx], q, c);
-            residues[idx] = result.mResidue;
-            rejected[idx] = result.mRejected;
-        }
 
         // Exact hot geometry: N=8192, rho=4, 64 roots and 16 full passes. Static
         // roots make the dynamic shared base be the transpose itself, matching the
@@ -17781,79 +15243,6 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Strict opt-in twin of the accepted warp-private hot sampler. Only its
-        // Blake output-block message representation differs: root words remain
-        // in shared memory and the zero upper half is never materialized.
-        __global__ __launch_bounds__(kFusedThreads, 4)
-        void sampleUniformFusedHotWarpSharedMessageKernel(
-            DeviceRing rg,
-            const u64* __restrict__ seeds,
-            const u64* __restrict__ maxMultiple,
-            u64* out,
-            const u32* __restrict__ outIdx,
-            u32 outCount,
-            u32* __restrict__ rejectEpochs,
-            u32 rejectEpoch)
-        {
-            __shared__ u64 shRoots[kHotSampleRoots * 8];
-            extern __shared__ u32 shWarpStore[];
-            u32* const shLo = shWarpStore;
-            u32* const shHi = shWarpStore + kHotWarpStorePlaneWords;
-
-            const u32 tid = threadIdx.x;
-            const u32 lane = tid & 31u;
-            const u32 warp = tid >> 5u;
-            u32* const warpLo = shLo + warp * kHotWarpStoreWords;
-            u32* const warpHi = shHi + warp * kHotWarpStoreWords;
-
-            for (u32 poly = blockIdx.x; poly < outCount; poly += gridDim.x)
-            {
-                fusedHotRootsToSharedMessageSource(
-                    seeds + static_cast<size_t>(poly) * 8, shRoots, tid);
-                __syncthreads();
-
-                const u32 oi = outIdx ? outIdx[poly] : poly;
-#pragma unroll 1
-                for (u32 pass = 0; pass < kHotSamplePasses; ++pass)
-                {
-                    const u32 limb = pass >> 2;
-                    const u32 root = (pass << 2) + (tid >> 6);
-                    const u32 rejected =
-                        sampleUniformHotPassProducerSharedMessageWarpTranspose(
-                            shRoots + static_cast<size_t>(root) * 8,
-                            tid & 63u,
-                            maxMultiple + limb,
-                            rg.mMods + limb,
-                            warpLo,
-                            warpHi,
-                            lane);
-
-                    const u32 warpRejected =
-                        __ballot_sync(0xFFFFFFFFu, rejected != 0u);
-                    if (lane == 0u && warpRejected != 0u)
-                        atomicExch(rejectEpochs + poly, rejectEpoch);
-
-                    __syncwarp();
-                    u64* const dst =
-                        out + static_cast<size_t>(oi) * kHotSampleWords +
-                        pass * kFusedPassWords + warp * 256u;
-#pragma unroll
-                    for (u32 j = 0; j < kFusedBlockWords; ++j)
-                    {
-                        const u32 sourceWord = lane & 7u;
-                        const u32 sourceLane = (j << 2u) + (lane >> 3u);
-                        const u32 sh =
-                            sourceWord * kHotWarpStoreStride + sourceLane;
-                        const u64 reduced = static_cast<u64>(warpLo[sh]) |
-                            (static_cast<u64>(warpHi[sh]) << 32u);
-                        dst[j * 32u + lane] = reduced;
-                    }
-                    __syncwarp();
-                }
-
-                if (poly + gridDim.x < outCount) __syncthreads();
-            }
-        }
 
         // Strict opt-in round-vector twin. Declaring roots as ulonglong2 proves
         // 16-byte alignment to nvcc; root production still writes the identical
@@ -18090,232 +15479,6 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Candidate-only copy of the accepted full-polynomial round-vector
-        // kernel. Its sole data-path substitution is the pseudo-55 producer;
-        // maxMultiple is intentionally absent because eligibility proves the
-        // exact SEAL-default threshold from q.
-        __global__ __launch_bounds__(kFusedThreads, 4)
-        void sampleUniformFusedHotWarpRoundVectorMessagePseudo55Kernel(
-            DeviceRing rg,
-            const u64* __restrict__ seeds,
-            u64* out,
-            const u32* __restrict__ outIdx,
-            u32 outCount,
-            u32* __restrict__ rejectEpochs,
-            u32 rejectEpoch)
-        {
-            __shared__ ulonglong2 shRootPairs[kHotSampleRoots * 4];
-            u64* const shRoots = reinterpret_cast<u64*>(shRootPairs);
-            extern __shared__ u32 shWarpStore[];
-            u32* const shLo = shWarpStore;
-            u32* const shHi = shWarpStore + kHotWarpStorePlaneWords;
-
-            const u32 tid = threadIdx.x;
-            const u32 lane = tid & 31u;
-            const u32 warp = tid >> 5u;
-            u32* const warpLo = shLo + warp * kHotWarpStoreWords;
-            u32* const warpHi = shHi + warp * kHotWarpStoreWords;
-
-            for (u32 poly = blockIdx.x; poly < outCount; poly += gridDim.x)
-            {
-                fusedHotRootsToSharedMessageSource(
-                    seeds + static_cast<size_t>(poly) * 8, shRoots, tid);
-                __syncthreads();
-
-                const u32 oi = outIdx ? outIdx[poly] : poly;
-#pragma unroll 1
-                for (u32 pass = 0; pass < kHotSamplePasses; ++pass)
-                {
-                    const u32 limb = pass >> 2;
-                    const u32 root = (pass << 2) + (tid >> 6);
-                    const u32 rejected =
-                        sampleUniformHotPassProducerRoundVectorMessagePseudo55WarpTranspose(
-                            shRootPairs + static_cast<size_t>(root) * 4,
-                            tid & 63u,
-                            rg.mMods + limb,
-                            warpLo,
-                            warpHi,
-                            lane);
-
-                    const u32 warpRejected =
-                        __ballot_sync(0xFFFFFFFFu, rejected != 0u);
-                    if (lane == 0u && warpRejected != 0u)
-                        atomicExch(rejectEpochs + poly, rejectEpoch);
-
-                    __syncwarp();
-                    u64* const dst =
-                        out + static_cast<size_t>(oi) * kHotSampleWords +
-                        pass * kFusedPassWords + warp * 256u;
-#pragma unroll
-                    for (u32 j = 0; j < kFusedBlockWords; ++j)
-                    {
-                        const u32 sourceWord = lane & 7u;
-                        const u32 sourceLane = (j << 2u) + (lane >> 3u);
-                        const u32 sh =
-                            sourceWord * kHotWarpStoreStride + sourceLane;
-                        const u64 reduced = static_cast<u64>(warpLo[sh]) |
-                            (static_cast<u64>(warpHi[sh]) << 32u);
-                        dst[j * 32u + lane] = reduced;
-                    }
-                    __syncwarp();
-                }
-
-                if (poly + gridDim.x < outCount) __syncthreads();
-            }
-        }
-
-        // Candidate-only copy of the accepted two-CTA 64-polynomial kernel.
-        // Root/pass ownership and all stores are unchanged from that rollback.
-        __global__ __launch_bounds__(kFusedThreads, 4)
-        void sampleUniformFusedHotWarpRoundVectorMessagePseudo55Split64Kernel(
-            DeviceRing rg,
-            const u64* __restrict__ seeds,
-            u64* out,
-            const u32* __restrict__ outIdx,
-            u32* __restrict__ rejectEpochs,
-            u32 rejectEpoch)
-        {
-            __shared__ ulonglong2 shRootPairs[kHotSplit64Roots * 4];
-            u64* const shRoots = reinterpret_cast<u64*>(shRootPairs);
-            extern __shared__ u32 shWarpStore[];
-            u32* const shLo = shWarpStore;
-            u32* const shHi = shWarpStore + kHotWarpStorePlaneWords;
-
-            const u32 tid = threadIdx.x;
-            const u32 lane = tid & 31u;
-            const u32 warp = tid >> 5u;
-            const u32 part = blockIdx.x & 1u;
-            const u32 poly = blockIdx.x >> 1u;
-            u32* const warpLo = shLo + warp * kHotWarpStoreWords;
-            u32* const warpHi = shHi + warp * kHotWarpStoreWords;
-
-            fusedHotSplit64RootsToSharedMessageSource(
-                seeds + static_cast<size_t>(poly) * 8,
-                shRoots,
-                part * kHotSplit64Roots,
-                tid);
-            __syncthreads();
-
-            const u32 oi = outIdx ? outIdx[poly] : poly;
-#pragma unroll 1
-            for (u32 localPass = 0; localPass < kHotSplit64Passes; ++localPass)
-            {
-                const u32 pass = part * kHotSplit64Passes + localPass;
-                const u32 limb = pass >> 2;
-                const u32 root = (localPass << 2) + (tid >> 6);
-                const u32 rejected =
-                    sampleUniformHotPassProducerRoundVectorMessagePseudo55WarpTranspose(
-                        shRootPairs + static_cast<size_t>(root) * 4,
-                        tid & 63u,
-                        rg.mMods + limb,
-                        warpLo,
-                        warpHi,
-                        lane);
-
-                const u32 warpRejected =
-                    __ballot_sync(0xFFFFFFFFu, rejected != 0u);
-                if (lane == 0u && warpRejected != 0u)
-                    atomicExch(rejectEpochs + poly, rejectEpoch);
-
-                __syncwarp();
-                u64* const dst =
-                    out + static_cast<size_t>(oi) * kHotSampleWords +
-                    pass * kFusedPassWords + warp * 256u;
-#pragma unroll
-                for (u32 j = 0; j < kFusedBlockWords; ++j)
-                {
-                    const u32 sourceWord = lane & 7u;
-                    const u32 sourceLane = (j << 2u) + (lane >> 3u);
-                    const u32 sh =
-                        sourceWord * kHotWarpStoreStride + sourceLane;
-                    const u64 reduced = static_cast<u64>(warpLo[sh]) |
-                        (static_cast<u64>(warpHi[sh]) << 32u);
-                    dst[j * 32u + lane] = reduced;
-                }
-                __syncwarp();
-            }
-        }
-
-        // Exact twin of the accepted round-vector sampler. The provisional
-        // stream and stores are identical; only the Boolean epoch publication is
-        // deferred until all sixteen production passes have completed. The cold
-        // repair regenerates the complete stream and therefore never consumes a
-        // pass-local rejection mask or rank.
-        __global__ __launch_bounds__(kFusedThreads, 4)
-        void sampleUniformFusedHotWarpRoundVectorDeferredRejectVoteKernel(
-            DeviceRing rg,
-            const u64* __restrict__ seeds,
-            const u64* __restrict__ maxMultiple,
-            u64* out,
-            const u32* __restrict__ outIdx,
-            u32 outCount,
-            u32* __restrict__ rejectEpochs,
-            u32 rejectEpoch)
-        {
-            __shared__ ulonglong2 shRootPairs[kHotSampleRoots * 4];
-            u64* const shRoots = reinterpret_cast<u64*>(shRootPairs);
-            extern __shared__ u32 shWarpStore[];
-            u32* const shLo = shWarpStore;
-            u32* const shHi = shWarpStore + kHotWarpStorePlaneWords;
-
-            const u32 tid = threadIdx.x;
-            const u32 lane = tid & 31u;
-            const u32 warp = tid >> 5u;
-            u32* const warpLo = shLo + warp * kHotWarpStoreWords;
-            u32* const warpHi = shHi + warp * kHotWarpStoreWords;
-
-            for (u32 poly = blockIdx.x; poly < outCount; poly += gridDim.x)
-            {
-                fusedHotRootsToSharedMessageSource(
-                    seeds + static_cast<size_t>(poly) * 8, shRoots, tid);
-                __syncthreads();
-
-                const u32 oi = outIdx ? outIdx[poly] : poly;
-                u32 threadRejected = 0u;
-#pragma unroll 1
-                for (u32 pass = 0; pass < kHotSamplePasses; ++pass)
-                {
-                    const u32 limb = pass >> 2;
-                    const u32 root = (pass << 2) + (tid >> 6);
-                    const u32 rejected =
-                        sampleUniformHotPassProducerRoundVectorMessageWarpTranspose(
-                            shRootPairs + static_cast<size_t>(root) * 4,
-                            tid & 63u,
-                            maxMultiple + limb,
-                            rg.mMods + limb,
-                            warpLo,
-                            warpHi,
-                            lane);
-                    threadRejected = rejected != 0u ? 1u : threadRejected;
-
-                    __syncwarp();
-                    u64* const dst =
-                        out + static_cast<size_t>(oi) * kHotSampleWords +
-                        pass * kFusedPassWords + warp * 256u;
-#pragma unroll
-                    for (u32 j = 0; j < kFusedBlockWords; ++j)
-                    {
-                        const u32 sourceWord = lane & 7u;
-                        const u32 sourceLane = (j << 2u) + (lane >> 3u);
-                        const u32 sh =
-                            sourceWord * kHotWarpStoreStride + sourceLane;
-                        const u64 reduced = static_cast<u64>(warpLo[sh]) |
-                            (static_cast<u64>(warpHi[sh]) << 32u);
-                        dst[j * 32u + lane] = reduced;
-                    }
-                    __syncwarp();
-                }
-
-                const u32 warpRejected =
-                    __ballot_sync(0xFFFFFFFFu, threadRejected != 0u);
-                if (lane == 0u && warpRejected != 0u)
-                    atomicExch(rejectEpochs + poly, rejectEpoch);
-
-                // The vote belongs to this polynomial and must precede both the
-                // grid-stride reset and the existing root-overwrite barrier.
-                if (poly + gridDim.x < outCount) __syncthreads();
-            }
-        }
 
         // H200 NoGoldenSeed common sampler. Four CTAs own disjoint contiguous
         // quarters of each polynomial's deterministic stream. Root counters,
@@ -19141,62 +16304,6 @@ namespace osuCrypto::LogVole::gpu
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexCopyDirect)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseOuterMu4ReverseSubKernel<false>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseOuterMu4ReverseSub)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseOuterMu4ReverseSubKernel<true>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseOuterMu4ReverseSubSimpleIndex)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseOuterMu16ReverseSubKernel<8u, false>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseOuterMu8ReverseSub)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseOuterMu16ReverseSubKernel<8u, true>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseOuterMu8ReverseSubSimpleIndex)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseOuterMu16ReverseSubKernel<16u, false>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseOuterMu16ReverseSub)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseOuterMu16ReverseSubKernel<16u, true>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseOuterMu16ReverseSubSimpleIndex)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseExpandAccumulatorTau1AddKernel<false>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseExpandAccumulatorTau1Add)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseExpandAccumulatorTau1AddKernel<true>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseExpandAccumulatorTau1AddSimpleIndex)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
@@ -20264,14 +17371,11 @@ namespace osuCrypto::LogVole::gpu
     // resident 1024-thread blocks, while the 58-register fused kernel is limited
     // to one. LOGVOLE_GPU_FUSED_IP=1 retains the fused path for other devices and
     // for direct A/B measurements.
-    bool gpuFusedIpActive()
-    {
-        static const bool on = [] {
-            const char* v = std::getenv("LOGVOLE_GPU_FUSED_IP");
-            return v && v[0] == '1';
-        }();
-        return on;
-    }
+        bool gpuFusedIpActive()
+        {
+            static const bool on = environmentFlagOptIn("LOGVOLE_GPU_FUSED_IP");
+            return on;
+        }
 
     bool launchNttForward(
         const RingConstView& rc, u64* data, u32 polyCount, const u32* polyIdx, void* stream)
@@ -20620,39 +17724,22 @@ namespace osuCrypto::LogVole::gpu
             {
                 if (nttLog13VectorShoupLoadsEnabled())
                 {
-                    if (nttLog13ForwardFromFusedLastTwoStagesEnabled())
-                    {
-                        if (!check(
-                                cudaFuncSetAttribute(
-                                    nttForwardFromFusedLastTwo8192Rho4Kernel,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(shBytes)),
-                                "cudaFuncSetAttribute(forwardFrom8192FusedLastTwo)"))
-                            return false;
-                        nttForwardFromFusedLastTwo8192Rho4Kernel<<<
-                            polyCount * rc.mRho, nttForwardThreads(), shBytes,
-                            asStream(stream)>>>(
-                            rg, in, inIdx, out, outIdx, fusedFirstStage);
-                    }
-                    else
-                    {
-                        if (!check(
-                                cudaFuncSetAttribute(
-                                    nttForwardKernel<
-                                        true, false, false, true, 4u, true,
-                                        false, false, true>,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(shBytes)),
-                                "cudaFuncSetAttribute(forwardFrom8192SimpleIndexVectorShoup)"))
-                            return false;
-                        nttForwardKernel<
-                            true, false, false, true, 4u, true,
-                            false, false, true><<<
-                            polyCount * rc.mRho, nttForwardThreads(), shBytes,
-                            asStream(stream)>>>(
-                            rg, out, outIdx, 0u, in, inIdx, nullptr,
-                            nullptr, 0u, nullptr, 0u, fusedFirstStage);
-                    }
+                    if (!check(
+                            cudaFuncSetAttribute(
+                                nttForwardKernel<
+                                    true, false, false, true, 4u, true,
+                                    false, false, true>,
+                                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                static_cast<int>(shBytes)),
+                            "cudaFuncSetAttribute(forwardFrom8192SimpleIndexVectorShoup)"))
+                        return false;
+                    nttForwardKernel<
+                        true, false, false, true, 4u, true,
+                        false, false, true><<<
+                        polyCount * rc.mRho, nttForwardThreads(), shBytes,
+                        asStream(stream)>>>(
+                        rg, out, outIdx, 0u, in, inIdx, nullptr,
+                        nullptr, 0u, nullptr, 0u, fusedFirstStage);
                 }
                 else
                 {
@@ -20709,8 +17796,7 @@ namespace osuCrypto::LogVole::gpu
         if (log14H200Shape(rc)) return true;
         return rc.mN == 8192u && rc.mLogN == 13u && rc.mRho == 4u &&
                nttLog13SpecializedEnabled() && nttLog13SimpleIndexEnabled() &&
-               nttLog13VectorShoupLoadsEnabled() &&
-               !nttLog13ForwardFromFusedLastTwoStagesEnabled();
+               nttLog13VectorShoupLoadsEnabled();
     }
 
     bool launchNttForwardFromPlainBroadcast(
@@ -21100,281 +18186,10 @@ namespace osuCrypto::LogVole::gpu
         return check(cudaGetLastError(), "nttForwardCenteredLimbFrom");
     }
 
-    bool tryLaunchNttForwardFromPlainBroadcastTailForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        u64* out,
-        const u32* outIdx,
-        u32 polyCount,
-        bool fusedLastTwo,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (polyCount == 0u) return true;
-        if (rc.mN != 8192u || rc.mLogN != 13u || rc.mRho != 4u ||
-            !rc.mMods || !rc.mRoots || !in || !out || in == out ||
-            polyCount > 0x1fffffffu)
-            return true;
-        if (!configureShared(rc.mN)) return false;
 
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        if (fusedLastTwo)
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardFromPlainBroadcastFusedLastTwo8192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testPlainBroadcastFusedLastTwo)"))
-                return false;
-            nttForwardFromPlainBroadcastFusedLastTwo8192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, out, outIdx,
-                nttLog13ForwardFusedFirstStageEnabled());
-        }
-        else
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardFromPlainBroadcast8192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testPlainBroadcastStaged)"))
-                return false;
-            nttForwardFromPlainBroadcast8192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, out, outIdx,
-                nttLog13ForwardFusedFirstStageEnabled());
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            fusedLastTwo ? "testPlainBroadcastFusedLastTwo" :
-                           "testPlainBroadcastStaged");
-    }
 
-    bool tryLaunchNttForwardCenteredLimbFromTailForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        const u32* limbSel,
-        u64* out,
-        const u32* outIdx,
-        u32 polyCount,
-        bool fusedLastTwo,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (polyCount == 0u) return true;
-        if (rc.mN != 8192u || rc.mLogN != 13u || rc.mRho != 4u ||
-            !rc.mMods || !rc.mRoots || !in || !limbSel || !out ||
-            in == out || polyCount > 0x1fffffffu)
-            return true;
-        if (!configureShared(rc.mN)) return false;
 
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        if (fusedLastTwo)
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardCenteredLimbFromFusedLastTwo8192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testCenteredFromFusedLastTwo)"))
-                return false;
-            nttForwardCenteredLimbFromFusedLastTwo8192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, limbSel, out, outIdx);
-        }
-        else
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardKernel<
-                            true, true, false, true, 4u, true,
-                            false, false, true>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testCenteredFromStaged)"))
-                return false;
-            nttForwardKernel<
-                true, true, false, true, 4u, true,
-                false, false, true><<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), out, outIdx, 0u, in, inIdx, limbSel,
-                nullptr, 0u, nullptr, 0u,
-                nttLog13ForwardFusedFirstStageEnabled());
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            fusedLastTwo ? "testCenteredFromFusedLastTwo" :
-                           "testCenteredFromStaged");
-    }
 
-    bool tryLaunchNttForwardWarpStages712ForTest(
-        const RingConstView& rc,
-        u64* data,
-        const u32* polyIdx,
-        u32 polyCount,
-        bool warpStages712,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (polyCount == 0u) return true;
-        if (rc.mN != 8192u || rc.mLogN != 13u || rc.mRho != 4u ||
-            !rc.mMods || !rc.mRoots || !data || polyCount > 0x1fffffffu)
-            return true;
-        if (!configureShared(rc.mN)) return false;
-
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        if (warpStages712)
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardWarpStages7128192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testForwardWarpStages712)"))
-                return false;
-            nttForwardWarpStages7128192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), data, polyIdx,
-                nttLog13ForwardFusedFirstStageEnabled());
-        }
-        else
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardFusedLastTwo8192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testForwardAcceptedTail)"))
-                return false;
-            nttForwardFusedLastTwo8192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), data, polyIdx,
-                nttLog13ForwardFusedFirstStageEnabled());
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            warpStages712 ? "testForwardWarpStages712" :
-                            "testForwardAcceptedTail");
-    }
-
-    bool tryLaunchNttForwardFromPlainBroadcastWarpStages712ForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        u64* out,
-        const u32* outIdx,
-        u32 polyCount,
-        bool warpStages712,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (polyCount == 0u) return true;
-        if (rc.mN != 8192u || rc.mLogN != 13u || rc.mRho != 4u ||
-            !rc.mMods || !rc.mRoots || !in || !out || in == out ||
-            polyCount > 0x1fffffffu)
-            return true;
-        if (!configureShared(rc.mN)) return false;
-
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        if (warpStages712)
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardFromPlainBroadcastWarpStages7128192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testPlainBroadcastWarpStages712)"))
-                return false;
-            nttForwardFromPlainBroadcastWarpStages7128192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, out, outIdx,
-                nttLog13ForwardFusedFirstStageEnabled());
-        }
-        else
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardFromPlainBroadcastFusedLastTwo8192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testPlainBroadcastAcceptedTail)"))
-                return false;
-            nttForwardFromPlainBroadcastFusedLastTwo8192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, out, outIdx,
-                nttLog13ForwardFusedFirstStageEnabled());
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            warpStages712 ? "testPlainBroadcastWarpStages712" :
-                            "testPlainBroadcastAcceptedTail");
-    }
-
-    bool tryLaunchNttForwardCenteredLimbFromWarpStages712ForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        const u32* limbSel,
-        u64* out,
-        const u32* outIdx,
-        u32 polyCount,
-        bool warpStages712,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (polyCount == 0u) return true;
-        if (rc.mN != 8192u || rc.mLogN != 13u || rc.mRho != 4u ||
-            !rc.mMods || !rc.mRoots || !in || !limbSel || !out ||
-            in == out || polyCount > 0x1fffffffu)
-            return true;
-        if (!configureShared(rc.mN)) return false;
-
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        if (warpStages712)
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardCenteredLimbFromWarpStages7128192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testCenteredWarpStages712)"))
-                return false;
-            nttForwardCenteredLimbFromWarpStages7128192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, limbSel, out, outIdx);
-        }
-        else
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardCenteredLimbFromFusedLastTwo8192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(testCenteredAcceptedTail)"))
-                return false;
-            nttForwardCenteredLimbFromFusedLastTwo8192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, limbSel, out, outIdx);
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            warpStages712 ? "testCenteredWarpStages712" :
-                            "testCenteredAcceptedTail");
-    }
 
     bool launchNttInverse(
         const RingConstView& rc, u64* data, u32 polyCount, const u32* polyIdx, void* stream)
@@ -21383,71 +18198,6 @@ namespace osuCrypto::LogVole::gpu
             rc, data, polyCount, polyIdx, kElemOpNoneHost, nullptr, kElemOpNoneHost, nullptr, stream);
     }
 
-    bool tryLaunchNttInversePostWarpStages05ForTest(
-        const RingConstView& rc,
-        u64* data,
-        u32 polyCount,
-        const u32* polyIdx,
-        u32 postOp,
-        const u64* postB,
-        bool warpStages05,
-        bool alphaIsTwo,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        const bool negate = postOp == static_cast<u32>(ElemOp::Negate);
-        const bool add = postOp == static_cast<u32>(ElemOp::Add);
-        const bool reverseSub =
-            postOp == static_cast<u32>(ElemOp::ReverseSub);
-        if (rc.mN != 8192u || rc.mLogN != 13u || rc.mRho != 4u ||
-            !rc.mMods || !rc.mInvRoots || !rc.mInvDegree ||
-            !rc.mScaledInvRoot || !data || (!negate && !postB) ||
-            ((add || reverseSub) && data == postB) ||
-            (!add && !negate && !reverseSub) || polyCount < 64u ||
-            polyCount > 0x1fffffffu || (warpStages05 && !alphaIsTwo))
-            return true;
-        if (!configureShared(rc.mN) ||
-            (warpStages05 && !configureNttInversePostWarpStages05Shared()))
-            return false;
-
-        const DeviceInverseRho4 iv = toDeviceInverseRho4(rc);
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        const u32 blocks = polyCount * 4u;
-        const auto st = asStream(stream);
-        if (add)
-        {
-            if (warpStages05)
-                nttInversePostWarpStages05Add8192Rho4Kernel<<<
-                    blocks, 512u, shBytes, st>>>(iv, data, polyIdx, postB);
-            else
-                nttInverseFusedLastThree8192Rho4PostKernel<0u><<<
-                    blocks, 512u, shBytes, st>>>(iv, data, polyIdx, postB);
-        }
-        else if (negate)
-        {
-            if (warpStages05)
-                nttInversePostWarpStages05Negate8192Rho4Kernel<<<
-                    blocks, 512u, shBytes, st>>>(iv, data, polyIdx, nullptr);
-            else
-                nttInverseFusedLastThree8192Rho4PostKernel<2u><<<
-                    blocks, 512u, shBytes, st>>>(iv, data, polyIdx, nullptr);
-        }
-        else
-        {
-            if (warpStages05)
-                nttInversePostWarpStages05ReverseSub8192Rho4Kernel<<<
-                    blocks, 512u, shBytes, st>>>(iv, data, polyIdx, postB);
-            else
-                nttInverseFusedLastThree8192Rho4ReverseSubKernel<<<
-                    blocks, 512u, shBytes, st>>>(iv, data, polyIdx, postB);
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            warpStages05 ? "testInversePostWarpStages05" :
-                           "testInversePostAccepted");
-    }
 
     bool canLaunchNttInverseScatterBroadcast(
         const RingConstView& plainRc, const RingConstView& ringRc)
@@ -21669,54 +18419,6 @@ namespace osuCrypto::LogVole::gpu
                 if (fpThreads && rc.mMinModulus > (u64{1} << 51u) &&
                     rc.mMinModulus <= rc.mMaxModulus && rc.mMaxModulus < (u64{1} << 52u))
                 {
-                    const u32 splitMode = noGoldH200InverseFp52SplitMode();
-                    const size_t postSpan = static_cast<size_t>(polyCount) * 8u * 16384u * sizeof(u64);
-                    const size_t dataAddress = reinterpret_cast<size_t>(data);
-                    const size_t postAddress = reinterpret_cast<size_t>(postB);
-                    const bool disjointPost = !polyIdx && postB &&
-                        (dataAddress <= postAddress ? postAddress - dataAddress >= postSpan :
-                            dataAddress - postAddress >= postSpan);
-                    const bool safePost = postOp == kElemOpNone || postOp == 2u || disjointPost;
-#if CUDART_VERSION >= 12000
-                    const u32 clusterMode = noGoldH200InverseFp52ClusterMode();
-                    if (clusterMode && polyCount >= 33u && polyCount <= std::numeric_limits<u32>::max() / 16u &&
-                        rc.mFp52InvRoots && preOp == kElemOpNone && (safePost || data == postB))
-                    {
-                        bool launched = false;
-                        if (!tryLaunchInverseFp52Cluster(rg, data, polyIdx, polyCount, postOp, postB,
-                                rc.mFp52InvRoots, st, clusterMode, launched)) return false;
-                        if (launched) return true;
-                    }
-#endif
-                    if (splitMode && polyCount >= 33u && rc.mFp52InvRoots && preOp == kElemOpNone && safePost)
-                    {
-                        const auto split = [&](auto threads, auto cacheStage, auto blocks) {
-                            constexpr u32 t = decltype(threads)::value, c = decltype(cacheStage)::value;
-                            constexpr u32 b = decltype(blocks)::value;
-                            constexpr int bytes = (8192u + (16384u >> c)) * sizeof(double);
-                            if (!check(cudaFuncSetAttribute(nttInverseHalf16384Fp52Kernel<t, c, b>,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "split inverse shared"))
-                                return false;
-                            nttInverseHalf16384Fp52Kernel<t, c, b><<<dim3(polyCount * 8u, 2u), t, bytes, st>>>(
-                                rg, data, polyIdx, rc.mFp52InvRoots);
-                            if (!check(cudaGetLastError(), "split inverse half")) return false;
-                            nttInverseMerge16384Fp52Kernel<<<dim3(polyCount * 8u, 32u), 256u, 0u, st>>>(
-                                rg, data, polyIdx, postOp, postB);
-                            return check(cudaGetLastError(), "split inverse merge");
-                        };
-                        using T512 = std::integral_constant<u32, 512u>;
-                        using T1024 = std::integral_constant<u32, 1024u>;
-                        using U2 = std::integral_constant<u32, 2u>;
-                        using U3 = std::integral_constant<u32, 3u>;
-                        using U4 = std::integral_constant<u32, 4u>;
-                        switch (splitMode)
-                        {
-                        case 1u: return split(T512{}, U2{}, U2{});
-                        case 2u: return split(T512{}, U4{}, U3{});
-                        case 3u: return split(T1024{}, U2{}, U2{});
-                        case 4u: return split(T1024{}, U4{}, U2{});
-                        }
-                    }
                     const u32 twoTile = noGoldH200InverseFp52TwoTile();
                     if (twoTile)
                     {
@@ -22279,47 +18981,6 @@ namespace osuCrypto::LogVole::gpu
                 outCount <= 65535u && (outCount % 8u) == 0u;
         }
 
-        template<bool Dual>
-        bool launchExpandAccumulatorTau1GoldenPseudo55Impl(
-            const RingConstView& rc,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out,
-            u32 outCount,
-            void* stream)
-        {
-            constexpr u32 kThreads = 256u;
-            const u32 chunks = outCount / 8u;
-            const u32 rawTileBlocks = 1024u / (32u * chunks);
-            const u32 tileBlocks = rawTileBlocks == 0u
-                ? 1u
-                : (rawTileBlocks > 32u ? 32u : rawTileBlocks);
-            const dim3 grid(tileBlocks, 8u * 4u, chunks);
-            if constexpr (Dual)
-            {
-                expandAccumulatorTau1GoldenPseudo55DualKernel<<<
-                    grid, kThreads, 0u, asStream(stream)>>>(
-                    toDevice(rc), ct1, uDigits, publicA, skNtt, lacct,
-                    nodes, lacctAIdx, lacctBIdx, out);
-            }
-            else
-            {
-                expandAccumulatorTau1GoldenPseudo55Kernel<<<
-                    grid, kThreads, 0u, asStream(stream)>>>(
-                    toDevice(rc), ct1, uDigits, publicA, skNtt, lacct,
-                    nodes, lacctAIdx, lacctBIdx, out);
-            }
-            return check(
-                cudaGetLastError(),
-                Dual ? "expandAccumulatorTau1GoldenPseudo55Dual" :
-                       "expandAccumulatorTau1GoldenPseudo55");
-        }
 
         bool expandAccumulatorWideTuple(u32 mu, u32 treeTerms)
         {
@@ -22742,15 +19403,6 @@ namespace osuCrypto::LogVole::gpu
                 "innerProductOuterWideMuRowReusePseudo55");
         }
 
-        bool pointwiseFixedInverseShapeEligible(
-            const RingConstView& rc, u32 outCount)
-        {
-            const u64 blocks = static_cast<u64>(outCount) * 4u;
-            return rc.mN == 8192u && rc.mLogN == 13u && rc.mRho == 4u &&
-                rc.mMods && rc.mInvRoots && rc.mInvDegree &&
-                rc.mScaledInvRoot && outCount != 0u && blocks >= 256u &&
-                blocks <= 0x7fffffffu;
-        }
 
         bool fixedIpInverseEligible(const RingConstView& rc, u32 outCount)
         {
@@ -22799,84 +19451,6 @@ namespace osuCrypto::LogVole::gpu
                 rc, mu, treeTerms, outCount);
     }
 
-    bool tryLaunchNttInverseOuterMu4ReverseSub(
-        const RingConstView& rc,
-        u64* out,
-        const u64* publicA,
-        const u64* sk,
-        u32 outCount,
-        const u64* ct2,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (!fixedIpInverseEligible(rc, outCount) || (outCount & 3u) != 0u ||
-            !out || !publicA || !sk || !ct2 || out == publicA || out == sk || out == ct2)
-            return true;
-        if (!configureShared(rc.mN)) return false;
-
-        const u32 blocks = outCount * 4u;
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        const DeviceInverseRho4 iv = toDeviceInverseRho4(rc);
-        if (nttLog13SimpleIndexEnabled())
-        {
-            nttInverseOuterMu4ReverseSubKernel<true><<<
-                blocks, 512u, shBytes, asStream(stream)>>>(iv, out, publicA, sk, ct2);
-        }
-        else
-        {
-            nttInverseOuterMu4ReverseSubKernel<false><<<
-                blocks, 512u, shBytes, asStream(stream)>>>(iv, out, publicA, sk, ct2);
-        }
-        launched = true;
-        return check(cudaGetLastError(), "nttInverseOuterMu4ReverseSub");
-    }
-
-    bool tryLaunchNttInverseOuterMuReverseSub(
-        const RingConstView& rc,
-        u64* out,
-        const u64* publicA,
-        const u64* sk,
-        u32 mu,
-        u32 outCount,
-        const u64* ct2,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (!nttLog13InverseOuterMuEnabled() || (mu != 8u && mu != 16u) ||
-            !fixedIpInverseEligible(rc, outCount) || (outCount & (mu - 1u)) != 0u ||
-            !out || !publicA || !sk || !ct2 || out == publicA || out == sk || out == ct2)
-            return true;
-        if (!configureShared(rc.mN)) return false;
-
-        const u32 blocks = outCount * 4u;
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        const DeviceInverseRho4 iv = toDeviceInverseRho4(rc);
-        const bool simple = nttLog13SimpleIndexEnabled();
-        if (mu == 8u && simple)
-        {
-            nttInverseOuterMu16ReverseSubKernel<8u, true><<<
-                blocks, 512u, shBytes, asStream(stream)>>>(iv, out, publicA, sk, ct2);
-        }
-        else if (mu == 8u)
-        {
-            nttInverseOuterMu16ReverseSubKernel<8u, false><<<
-                blocks, 512u, shBytes, asStream(stream)>>>(iv, out, publicA, sk, ct2);
-        }
-        else if (simple)
-        {
-            nttInverseOuterMu16ReverseSubKernel<16u, true><<<
-                blocks, 512u, shBytes, asStream(stream)>>>(iv, out, publicA, sk, ct2);
-        }
-        else
-        {
-            nttInverseOuterMu16ReverseSubKernel<16u, false><<<
-                blocks, 512u, shBytes, asStream(stream)>>>(iv, out, publicA, sk, ct2);
-        }
-        launched = true;
-        return check(cudaGetLastError(), "nttInverseOuterMuReverseSub");
-    }
 
     bool tryLaunchInnerProductOuterMuRowReuse(
         const RingConstView& rc,
@@ -22993,57 +19567,6 @@ namespace osuCrypto::LogVole::gpu
             rc, publicA, skNtt, out, chunkCount, stream);
     }
 
-    bool tryLaunchNttInverseExpandAccumulatorTau1Add(
-        const RingConstView& rc,
-        u64* out,
-        const u64* ct1,
-        const u64* uDigits,
-        const u64* publicA,
-        const u64* skNtt,
-        const u64* lacct,
-        const u64* nodes,
-        const u32* lacctAIdx,
-        const u32* lacctBIdx,
-        u32 mu,
-        u32 outCount,
-        const u64* ct2,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (!expandAccumulatorInverseFusedEnabled() ||
-            !expandAccumulatorSpecializedEnabled() ||
-            !expandAccumulatorQ64ComplementEnabled() ||
-            !fixedIpInverseEligible(rc, outCount) || mu != 8u ||
-            (outCount & 7u) != 0u || outCount > 65535u ||
-            !out || !ct1 || !uDigits || !publicA || !skNtt || !lacct || !nodes ||
-            !lacctAIdx || !lacctBIdx || !ct2 || out == ct1 || out == uDigits ||
-            out == publicA || out == skNtt || out == lacct || out == nodes || out == ct2)
-        {
-            return true;
-        }
-        if (!configureShared(rc.mN)) return false;
-
-        const u32 blocks = outCount * 4u;
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        const DeviceInverseRho4 iv = toDeviceInverseRho4(rc);
-        if (nttLog13SimpleIndexEnabled())
-        {
-            nttInverseExpandAccumulatorTau1AddKernel<true><<<
-                blocks, 512u, shBytes, asStream(stream)>>>(
-                iv, out, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                lacctAIdx, lacctBIdx, ct2);
-        }
-        else
-        {
-            nttInverseExpandAccumulatorTau1AddKernel<false><<<
-                blocks, 512u, shBytes, asStream(stream)>>>(
-                iv, out, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                lacctAIdx, lacctBIdx, ct2);
-        }
-        launched = true;
-        return check(cudaGetLastError(), "nttInverseExpandAccumulatorTau1Add");
-    }
 
     bool tryLaunchNttInverseTreePairNegate(
         const RingConstView& rc,
@@ -23260,258 +19783,9 @@ namespace osuCrypto::LogVole::gpu
                 "nttInverseRecursiveLeafSparseNegateNoZero");
     }
 
-    bool launchPointwisePseudo55ReduceWideForTest(
-        const u64* lo,
-        const u64* hi,
-        u32 count,
-        u64 q,
-        u32 maxTerms,
-        u64* residues,
-        void* stream)
-    {
-        constexpr u64 kRadix55 = u64{ 1 } << 55u;
-        constexpr u64 kMaxComplement = u64{ 1 } << 21u;
-        // Validate arithmetic metadata before the count-zero fast return so a
-        // malformed direct-oracle call can never be mistaken for acceptance.
-        if (q <= kRadix55 - kMaxComplement || q >= kRadix55 ||
-            (maxTerms != 1u && maxTerms != 2u && maxTerms != 6u &&
-             maxTerms != 8u && maxTerms != 10u && maxTerms != 12u &&
-             maxTerms != 14u))
-            return false;
-        if (count == 0u) return true;
-        if (!lo || !hi || !residues) return false;
 
-        constexpr u32 threads = 256u;
-        const u32 blocks = (count + threads - 1u) / threads;
-        const u32 c = static_cast<u32>(kRadix55 - q);
-        if (maxTerms == 1u)
-            pointwisePseudo55ReduceWideTestKernel<1u><<<
-                blocks, threads, 0u, asStream(stream)>>>(
-                lo, hi, count, q, c, residues);
-        else if (maxTerms == 2u)
-            pointwisePseudo55ReduceWideTestKernel<2u><<<
-                blocks, threads, 0u, asStream(stream)>>>(
-                    lo, hi, count, q, c, residues);
-        else if (maxTerms == 6u)
-            pointwisePseudo55ReduceWideTestKernel<6u><<<
-                blocks, threads, 0u, asStream(stream)>>>(
-                    lo, hi, count, q, c, residues);
-        else if (maxTerms == 8u)
-            pointwisePseudo55ReduceWideLongTestKernel<8u><<<
-                blocks, threads, 0u, asStream(stream)>>>(
-                    lo, hi, count, q, c, residues);
-        else if (maxTerms == 10u)
-            pointwisePseudo55ReduceWideLongTestKernel<10u><<<
-                blocks, threads, 0u, asStream(stream)>>>(
-                    lo, hi, count, q, c, residues);
-        else if (maxTerms == 12u)
-            pointwisePseudo55ReduceWideLongTestKernel<12u><<<
-                blocks, threads, 0u, asStream(stream)>>>(
-                    lo, hi, count, q, c, residues);
-        else
-            pointwisePseudo55ReduceWideLongTestKernel<14u><<<
-                blocks, threads, 0u, asStream(stream)>>>(
-                    lo, hi, count, q, c, residues);
-        return check(cudaGetLastError(), "pointwisePseudo55ReduceWideForTest");
-    }
 
-    bool tryLaunchInnerProductFixedIndexedPointwiseForTest(
-        const RingConstView& rc,
-        const u64* aBase,
-        const u64* bBase,
-        const u32* aIdx,
-        const u32* bIdx,
-        u32 terms,
-        u64* out,
-        u32 outCount,
-        bool accumulate,
-        bool subtract,
-        bool usePseudo55,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        const bool shape =
-            rc.mN == 8192u && rc.mLogN == 13u && rc.mRho == 4u &&
-            rc.mMods && outCount != 0u && outCount <= 65535u &&
-            aBase && bBase && aIdx && bIdx && out && out != aBase &&
-            out != bBase;
-        const bool mode =
-            (terms == 1u && !accumulate) ||
-            (terms == 2u && !accumulate && !subtract) ||
-            (terms == 6u && accumulate && !subtract);
-        if (!shape || !mode ||
-            (usePseudo55 && !pointwisePseudo55ShapeEligible(rc)))
-            return true;
 
-        constexpr u32 threads = 256u;
-        const dim3 grid = grid2D(rc.mRho * rc.mN, outCount, threads);
-        const DeviceRing rg = toDevice(rc);
-        if (terms == 1u && subtract)
-        {
-            if (usePseudo55)
-                innerProductFixedIndexedPseudo55Kernel<
-                    1u, FixedIpMode::Subtract>
-                    <<<grid, threads, 0u, asStream(stream)>>>(
-                        rg, aBase, bBase, aIdx, bIdx, out);
-            else
-                innerProductFixedIndexedKernel<1u, FixedIpMode::Subtract>
-                    <<<grid, threads, 0u, asStream(stream)>>>(
-                        rg, aBase, bBase, aIdx, bIdx, out);
-        }
-        else if (terms == 1u)
-        {
-            if (usePseudo55)
-                innerProductFixedIndexedPseudo55Kernel<
-                    1u, FixedIpMode::Replace>
-                    <<<grid, threads, 0u, asStream(stream)>>>(
-                        rg, aBase, bBase, aIdx, bIdx, out);
-            else
-                innerProductFixedIndexedKernel<1u, FixedIpMode::Replace>
-                    <<<grid, threads, 0u, asStream(stream)>>>(
-                        rg, aBase, bBase, aIdx, bIdx, out);
-        }
-        else if (terms == 2u)
-        {
-            if (usePseudo55)
-                innerProductFixedIndexedPseudo55Kernel<
-                    2u, FixedIpMode::Replace>
-                    <<<grid, threads, 0u, asStream(stream)>>>(
-                        rg, aBase, bBase, aIdx, bIdx, out);
-            else
-                innerProductFixedIndexedKernel<2u, FixedIpMode::Replace>
-                    <<<grid, threads, 0u, asStream(stream)>>>(
-                        rg, aBase, bBase, aIdx, bIdx, out);
-        }
-        else
-        {
-            if (usePseudo55)
-                innerProductFixedIndexedPseudo55Kernel<
-                    6u, FixedIpMode::Accumulate>
-                    <<<grid, threads, 0u, asStream(stream)>>>(
-                        rg, aBase, bBase, aIdx, bIdx, out);
-            else
-                innerProductFixedIndexedKernel<6u, FixedIpMode::Accumulate>
-                    <<<grid, threads, 0u, asStream(stream)>>>(
-                        rg, aBase, bBase, aIdx, bIdx, out);
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            usePseudo55 ? "innerProductFixedPointwisePseudo55ForTest" :
-                          "innerProductFixedAcceptedForTest");
-    }
-
-    bool tryLaunchInnerProductPseudo55WideAccumulateForTest(
-        const RingConstView& rc,
-        const u64* aBase,
-        const u64* bBase,
-        const u32* aIdx,
-        const u32* bIdx,
-        u32 terms,
-        u64* out,
-        const u32* outIdx,
-        u32 outCount,
-        bool accumulate,
-        bool negate,
-        bool subtract,
-        bool useCandidate,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        const bool wideTerms =
-            terms == 8u || terms == 10u ||
-            terms == 12u || terms == 14u;
-        const bool shape =
-            pointwisePseudo55ShapeEligible(rc) && aBase && bBase && aIdx &&
-            bIdx && out && !outIdx && outCount != 0u &&
-            outCount <= 65535u && (rc.mN % 256u) == 0u &&
-            out != aBase && out != bBase;
-        if (!shape || !wideTerms || !accumulate || negate || subtract)
-            return true;
-
-        constexpr u32 threads = 256u;
-        const dim3 grid = grid2D(rc.mRho * rc.mN, outCount, threads);
-        const DeviceRing rg = toDevice(rc);
-        if (!useCandidate)
-        {
-            innerProductKernel<<<grid, threads, 0u, asStream(stream)>>>(
-                rg, aBase, bBase, aIdx, bIdx, terms, out, nullptr,
-                outCount, true, false, false);
-        }
-        else if (terms == 8u)
-        {
-            innerProductFixedIndexedPseudo55WideAccumulateKernel<8u><<<
-                grid, threads, 0u, asStream(stream)>>>(
-                    rg, aBase, bBase, aIdx, bIdx, out);
-        }
-        else if (terms == 10u)
-        {
-            innerProductFixedIndexedPseudo55WideAccumulateKernel<10u><<<
-                grid, threads, 0u, asStream(stream)>>>(
-                    rg, aBase, bBase, aIdx, bIdx, out);
-        }
-        else if (terms == 12u)
-        {
-            innerProductFixedIndexedPseudo55WideAccumulateKernel<12u><<<
-                grid, threads, 0u, asStream(stream)>>>(
-                    rg, aBase, bBase, aIdx, bIdx, out);
-        }
-        else
-        {
-            innerProductFixedIndexedPseudo55WideAccumulateKernel<14u><<<
-                grid, threads, 0u, asStream(stream)>>>(
-                    rg, aBase, bBase, aIdx, bIdx, out);
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            useCandidate ? "innerProductPseudo55WideAccumulateForTest" :
-                           "innerProductRuntimeWideAccumulateForTest");
-    }
-
-    bool tryLaunchExpandAccumulatorTau1GoldenPseudo55DualForTest(
-        const RingConstView& rc,
-        const u64* ct1,
-        const u64* uDigits,
-        const u64* publicA,
-        const u64* skNtt,
-        const u64* lacct,
-        const u64* nodes,
-        const u32* lacctAIdx,
-        const u32* lacctBIdx,
-        u32 mu,
-        u32 treeTerms,
-        u64* out,
-        u32 outCount,
-        bool dual,
-        bool alphaIsTwo,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (!expandAccumulatorGoldenPseudo55StructuralEligible(
-                rc, mu, treeTerms, outCount) ||
-            (dual && !alphaIsTwo) || !ct1 || !uDigits || !publicA ||
-            !skNtt || !lacct || !nodes || !lacctAIdx || !lacctBIdx ||
-            !out || out == ct1 || out == uDigits || out == publicA ||
-            out == skNtt || out == lacct || out == nodes)
-        {
-            return true;
-        }
-
-        launched = true;
-        if (dual)
-        {
-            return launchExpandAccumulatorTau1GoldenPseudo55Impl<true>(
-                rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                lacctAIdx, lacctBIdx, out, outCount, stream);
-        }
-        return launchExpandAccumulatorTau1GoldenPseudo55Impl<false>(
-            rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
-            lacctAIdx, lacctBIdx, out, outCount, stream);
-    }
 
     bool tryLaunchExpandAccumulatorTau1Pseudo55WideForTest(
         const RingConstView& rc,
@@ -23565,264 +19839,10 @@ namespace osuCrypto::LogVole::gpu
             lacctAIdx, lacctBIdx, out, outCount, stream);
     }
 
-    bool tryLaunchInnerProductOuterMuRowReusePointwiseForTest(
-        const RingConstView& rc,
-        const u64* publicA,
-        const u64* skNtt,
-        u64* out,
-        u32 mu,
-        u32 chunkCount,
-        bool usePseudo55,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if ((mu != 8u && mu != 16u) || rc.mN != 8192u ||
-            rc.mLogN != 13u || rc.mRho != 4u || !rc.mMods ||
-            chunkCount < 8u || chunkCount > 65535u || !publicA ||
-            !skNtt || !out || publicA == skNtt || out == publicA ||
-            out == skNtt ||
-            (usePseudo55 && !pointwisePseudo55ShapeEligible(rc)))
-            return true;
 
-        const dim3 grid(32u, 4u, chunkCount);
-        if (mu == 8u)
-        {
-            if (usePseudo55)
-                innerProductOuterMuRowReusePseudo55Kernel<8u><<<
-                    grid, 256u, 0u, asStream(stream)>>>(
-                    toDevice(rc), publicA, skNtt, out);
-            else
-                innerProductOuterMuRowReuseKernel<8u><<<
-                    grid, 256u, 0u, asStream(stream)>>>(
-                    toDevice(rc), publicA, skNtt, out);
-        }
-        else
-        {
-            if (usePseudo55)
-                innerProductOuterMuRowReusePseudo55Kernel<16u><<<
-                    grid, 256u, 0u, asStream(stream)>>>(
-                    toDevice(rc), publicA, skNtt, out);
-            else
-                innerProductOuterMuRowReuseKernel<16u><<<
-                    grid, 256u, 0u, asStream(stream)>>>(
-                    toDevice(rc), publicA, skNtt, out);
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            usePseudo55 ? "innerProductOuterPseudo55ForTest" :
-                          "innerProductOuterAcceptedForTest");
-    }
 
-    bool tryLaunchInnerProductOuterWideMuRowReusePseudo55ForTest(
-        const RingConstView& rc,
-        const u64* publicA,
-        const u64* skNtt,
-        u64* out,
-        u32 mu,
-        u32 chunkCount,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (!innerProductOuterWideMuStructuralEligible(
-                rc, mu, chunkCount) ||
-            !publicA || !skNtt || !out || publicA == skNtt ||
-            out == publicA || out == skNtt)
-        {
-            return true;
-        }
 
-        launched = true;
-        if (mu == 32u)
-            return launchInnerProductOuterWideMuRowReusePseudo55Impl<32u>(
-                rc, publicA, skNtt, out, chunkCount, stream);
-        if (mu == 64u)
-            return launchInnerProductOuterWideMuRowReusePseudo55Impl<64u>(
-                rc, publicA, skNtt, out, chunkCount, stream);
-        return launchInnerProductOuterWideMuRowReusePseudo55Impl<128u>(
-            rc, publicA, skNtt, out, chunkCount, stream);
-    }
 
-    bool tryLaunchNttInverseTreePairNegatePointwiseForTest(
-        const RingConstView& rc,
-        u64* out,
-        const u64* publicB,
-        const u64* nodes,
-        u32 outCount,
-        u32 depth,
-        u32 nodeCount,
-        u32 publicCol,
-        bool usePseudo55,
-        bool useWarpStages,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (!pointwiseFixedInverseShapeEligible(rc, outCount) || !out ||
-            !publicB || !nodes || out == publicB || out == nodes ||
-            depth >= 30u || publicCol > 1u ||
-            (usePseudo55 && !pointwisePseudo55ShapeEligible(rc)) ||
-            (useWarpStages && !usePseudo55))
-            return true;
-        const u32 nodesAtDepth = 1u << depth;
-        if ((outCount % nodesAtDepth) != 0u ||
-            nodeCount < 4ull * nodesAtDepth - 1ull)
-            return true;
-        if (!configureShared(rc.mN)) return false;
-        if (useWarpStages)
-        {
-            if (!configurePointwisePseudo55TreeWarpShared()) return false;
-        }
-        else if (usePseudo55 && !configurePointwisePseudo55TreeShared())
-            return false;
-
-        const u32 blocks = outCount * 4u;
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        if (useWarpStages)
-            nttInverseTreePairNegateWarpStagesPseudo55Kernel<<<
-                blocks, 512u, shBytes, asStream(stream)>>>(
-                toDeviceInverseRho4(rc), out, publicB, nodes, depth,
-                nodeCount, publicCol);
-        else if (usePseudo55)
-            nttInverseTreePairNegateFusedFirstStagePseudo55Kernel<<<
-                blocks, 512u, shBytes, asStream(stream)>>>(
-                toDeviceInverseRho4(rc), out, publicB, nodes, depth,
-                nodeCount, publicCol);
-        else
-            nttInverseTreePairNegateFusedFirstStageKernel<true><<<
-                blocks, 512u, shBytes, asStream(stream)>>>(
-                toDeviceInverseRho4(rc), out, publicB, nodes, depth,
-                nodeCount, publicCol);
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            useWarpStages ? "inverseTreePairWarpStagesPseudo55ForTest" :
-            usePseudo55 ? "inverseTreePairPseudo55ForTest" :
-                          "inverseTreePairAcceptedForTest");
-    }
-
-    bool tryLaunchNttInverseTreePairNegateProductWarpStages05ForTest(
-        const RingConstView& rc,
-        u64* out,
-        const u64* publicB,
-        const u64* nodes,
-        u32 outCount,
-        u32 depth,
-        u32 nodeCount,
-        u32 publicCol,
-        bool productWarpStages05,
-        bool alphaIsTwo,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        const bool vectorPairs = productWarpStages05 &&
-            nttLog13InverseTreeProductWarpVectorPairsEnabled();
-        const bool vectorPairAligned = publicB && nodes &&
-            ((reinterpret_cast<std::uintptr_t>(publicB) |
-              reinterpret_cast<std::uintptr_t>(nodes)) & 15u) == 0u;
-        if (!pointwiseFixedInverseShapeEligible(rc, outCount) ||
-            !pointwisePseudo55ShapeEligible(rc) || !out || !publicB ||
-            !nodes || out == publicB || out == nodes || depth >= 30u ||
-            publicCol > 1u || (productWarpStages05 && !alphaIsTwo) ||
-            (vectorPairs && !vectorPairAligned))
-        {
-            return true;
-        }
-        const u32 nodesAtDepth = 1u << depth;
-        if ((outCount % nodesAtDepth) != 0u ||
-            nodeCount < 4ull * nodesAtDepth - 1ull)
-        {
-            return true;
-        }
-        if (!configureShared(rc.mN)) return false;
-        if (productWarpStages05)
-        {
-            if (vectorPairs &&
-                !configurePointwisePseudo55TreeProductWarpVectorShared())
-                return false;
-            if (!vectorPairs &&
-                !configurePointwisePseudo55TreeProductWarpShared())
-                return false;
-        }
-        else if (!configurePointwisePseudo55TreeWarpShared())
-        {
-            return false;
-        }
-
-        const u32 blocks = outCount * 4u;
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        if (vectorPairs)
-            nttInverseTreePairNegateProductWarpStages05VectorPairsPseudo55Kernel<<<
-                blocks, 512u, shBytes, asStream(stream)>>>(
-                toDeviceInverseRho4(rc), out, publicB, nodes, depth,
-                nodeCount, publicCol);
-        else if (productWarpStages05)
-            nttInverseTreePairNegateProductWarpStages05Pseudo55Kernel<<<
-                blocks, 512u, shBytes, asStream(stream)>>>(
-                toDeviceInverseRho4(rc), out, publicB, nodes, depth,
-                nodeCount, publicCol);
-        else
-            nttInverseTreePairNegateWarpStagesPseudo55Kernel<<<
-                blocks, 512u, shBytes, asStream(stream)>>>(
-                toDeviceInverseRho4(rc), out, publicB, nodes, depth,
-                nodeCount, publicCol);
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            vectorPairs
-                ? "inverseTreePairProductWarpStages05VectorPairsPseudo55ForTest"
-            : productWarpStages05
-                ? "inverseTreePairProductWarpStages05Pseudo55ForTest"
-                : "inverseTreePairWarpStagesPseudo55AcceptedForTest");
-    }
-
-    bool tryLaunchNttInverseRecursiveLeafSparseNoZeroPointwiseForTest(
-        const RingConstView& rc,
-        const u64* nodes,
-        const u64* leftB,
-        const u64* rightB,
-        u64* packed,
-        u64* out,
-        u32 logicalCount,
-        bool usePseudo55,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (logicalCount < 256u || (logicalCount & 7u) != 0u ||
-            logicalCount > 0x3fffffffu)
-            return true;
-        const u32 parentCount = logicalCount >> 1u;
-        if (!pointwiseFixedInverseShapeEligible(rc, parentCount) || !nodes ||
-            !leftB || !rightB || !packed || !out || packed == nodes ||
-            packed == leftB || packed == rightB || packed == out ||
-            out == nodes || out == leftB || out == rightB ||
-            rightB != leftB + (size_t(4u) << 13u) ||
-            (usePseudo55 && !pointwisePseudo55ShapeEligible(rc)))
-            return true;
-        if (!configureShared(rc.mN)) return false;
-        if (usePseudo55 && !configurePointwisePseudo55SparseShared())
-            return false;
-
-        constexpr u32 threads = 512u;
-        const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        if (usePseudo55)
-            nttInverseRecursiveLeafSparseNegateNoZeroPseudo55Kernel<<<
-                logicalCount, threads, shBytes, asStream(stream)>>>(
-                toDeviceInverseRho4(rc), nodes, leftB, packed, out);
-        else
-            nttInverseRecursiveLeafSparseNegateNoZeroKernel<<<
-                logicalCount, threads, shBytes, asStream(stream)>>>(
-                toDeviceInverseRho4(rc), nodes, leftB, packed, out);
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            usePseudo55 ? "inverseRecursiveSparsePseudo55ForTest" :
-                          "inverseRecursiveSparseAcceptedForTest");
-    }
 
     bool launchInnerProduct(
         const RingConstView& rc,
@@ -23854,11 +19874,6 @@ namespace osuCrypto::LogVole::gpu
         const dim3 grid = grid2D(rc.mRho * rc.mN, outCount, threads);
         const bool usePseudo55 =
             fixedGeometry && pointwisePseudo55ProductionEligible(rc);
-        const bool useWidePseudo55Accumulate =
-            usePseudo55 && pointwisePseudo55WideAccumulateEnabled() &&
-            aBase && bBase && out && accumulate && !negate && !subtract &&
-            (terms == 8u || terms == 10u ||
-             terms == 12u || terms == 14u);
         if (fixedGeometry)
         {
             const u32 h200Arithmetic = noGoldH200PointwiseMode();
@@ -23898,28 +19913,6 @@ namespace osuCrypto::LogVole::gpu
                     byArithmetic(std::integral_constant<u32, 2u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Replace>{});
                 else byArithmetic(std::integral_constant<u32, 6u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Accumulate>{});
                 return check(cudaGetLastError(), "innerProductFixedH200");
-            }
-            if (useWidePseudo55Accumulate)
-            {
-                if (terms == 8u)
-                    innerProductFixedIndexedPseudo55WideAccumulateKernel<8u><<<
-                        grid, threads, 0u, asStream(stream)>>>(
-                            rg, aBase, bBase, aIdx, bIdx, out);
-                else if (terms == 10u)
-                    innerProductFixedIndexedPseudo55WideAccumulateKernel<10u><<<
-                        grid, threads, 0u, asStream(stream)>>>(
-                            rg, aBase, bBase, aIdx, bIdx, out);
-                else if (terms == 12u)
-                    innerProductFixedIndexedPseudo55WideAccumulateKernel<12u><<<
-                        grid, threads, 0u, asStream(stream)>>>(
-                            rg, aBase, bBase, aIdx, bIdx, out);
-                else
-                    innerProductFixedIndexedPseudo55WideAccumulateKernel<14u><<<
-                        grid, threads, 0u, asStream(stream)>>>(
-                            rg, aBase, bBase, aIdx, bIdx, out);
-                return check(
-                    cudaGetLastError(),
-                    "innerProductFixedPseudo55WideAccumulate");
             }
             if (terms == 1u && !accumulate && !negate)
             {
@@ -24065,27 +20058,6 @@ namespace osuCrypto::LogVole::gpu
         {
             const u32 chunks = outCount / 8u;
             const bool useQ64Complement = expandAccumulatorQ64ComplementEnabled();
-            if (chunks >= 8u && expandAccumulatorRowReuseEnabled())
-            {
-                // x = 32 coefficient tiles; y = 4 limbs; z = chunks. Each
-                // block's eight warps own the eight rows for one tile.
-                const dim3 grid(8192u / threads, 4u, chunks);
-                if (useQ64Complement)
-                {
-                    expandAccumulatorTau1GoldenRowReuseKernel<true><<<
-                        grid, threads, 0, asStream(stream)>>>(
-                        rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                        lacctAIdx, lacctBIdx, out);
-                }
-                else
-                {
-                    expandAccumulatorTau1GoldenRowReuseKernel<false><<<
-                        grid, threads, 0, asStream(stream)>>>(
-                        rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                        lacctAIdx, lacctBIdx, out);
-                }
-                return check(cudaGetLastError(), "expandAccumulatorTau1GoldenRowReuse");
-            }
             if (expandAccumulatorTiledEnabled())
             {
                 // Keep about 1024 CTAs at small chunk counts, then let the larger
@@ -24101,7 +20073,6 @@ namespace osuCrypto::LogVole::gpu
                 {
                     constexpr u64 kPseudo55Radix = u64{ 1 } << 55u;
                     constexpr u64 kPseudo55MaxC = u64{ 1 } << 21u;
-                    constexpr u64 kRadixFoldModulusLimit = u64{ 1 } << 60u;
                     // The pseudo-Mersenne proof additionally needs every limb
                     // to satisfy q=2^55-c with 0<c<2^21. Host metadata guards
                     // the whole table before the device reconstructs q from c.
@@ -24119,13 +20090,6 @@ namespace osuCrypto::LogVole::gpu
                                 rg, ct1, uDigits, publicA, skNtt, lacct,
                                 nodes, lacctAIdx, lacctBIdx, out);
                         }
-                        else if (expandAccumulatorPseudo55PackedPairsEnabled())
-                        {
-                            expandAccumulatorTau1GoldenPseudo55PackedPairsKernel<<<
-                                grid, threads, 0, asStream(stream)>>>(
-                                rg, ct1, uDigits, publicA, skNtt, lacct,
-                                nodes, lacctAIdx, lacctBIdx, out);
-                        }
                         else
                         {
                             expandAccumulatorTau1GoldenPseudo55Kernel<<<
@@ -24133,55 +20097,6 @@ namespace osuCrypto::LogVole::gpu
                                 rg, ct1, uDigits, publicA, skNtt, lacct,
                                 nodes, lacctAIdx, lacctBIdx, out);
                         }
-                    }
-                    // The older radix-64 fold proof needs canonical inputs,
-                    // seven positive products, and q < 2^60. Geometry above
-                    // proves the first two invariants for this production route.
-                    else if (expandAccumulatorRadix64FoldEnabled() &&
-                        rc.mMinModulus != 0u &&
-                        rc.mMaxModulus < kRadixFoldModulusLimit)
-                    {
-                        expandAccumulatorTau1GoldenRadix64FoldKernel<<<
-                            grid, threads, 0, asStream(stream)>>>(
-                            rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                            lacctAIdx, lacctBIdx, out);
-                    }
-                    else if (expandAccumulatorCt1ReuseEnabled() &&
-                        chunks == 64u)
-                    {
-                        // G=2 keeps 32 chunk groups and therefore 1024 CTAs
-                        // across the fixed 32 row/limb combinations.
-                        const dim3 reuseGrid(1u, 8u * 4u, 32u);
-                        expandAccumulatorTau1GoldenCt1ReuseKernel<2u><<<
-                            reuseGrid, threads, 0, asStream(stream)>>>(
-                            rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                            lacctAIdx, lacctBIdx, out);
-                    }
-                    else if (expandAccumulatorCt1ReuseEnabled() &&
-                        chunks == 128u)
-                    {
-                        const dim3 reuseGrid(1u, 8u * 4u, 32u);
-                        expandAccumulatorTau1GoldenCt1ReuseKernel<4u><<<
-                            reuseGrid, threads, 0, asStream(stream)>>>(
-                            rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                            lacctAIdx, lacctBIdx, out);
-                    }
-                    else if (expandAccumulatorCt1ReuseEnabled() &&
-                        chunks == 256u)
-                    {
-                        const dim3 reuseGrid(1u, 8u * 4u, 32u);
-                        expandAccumulatorTau1GoldenCt1ReuseKernel<8u><<<
-                            reuseGrid, threads, 0, asStream(stream)>>>(
-                            rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                            lacctAIdx, lacctBIdx, out);
-                    }
-                    else if (expandAccumulatorDirectBasesEnabled() &&
-                        tileBlocks == 1u)
-                    {
-                        expandAccumulatorTau1GoldenDirectBasesKernel<<<
-                            grid, threads, 0, asStream(stream)>>>(
-                            rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                            lacctAIdx, lacctBIdx, out);
                     }
                     else
                     {
@@ -24222,43 +20137,6 @@ namespace osuCrypto::LogVole::gpu
         return check(cudaGetLastError(), "expandAccumulatorTau1");
     }
 
-    bool launchExpandAccumulatorTau1GoldenAcceptedForTest(
-        const RingConstView& rc,
-        const u64* ct1,
-        const u64* uDigits,
-        const u64* publicA,
-        const u64* skNtt,
-        const u64* lacct,
-        const u64* nodes,
-        const u32* lacctAIdx,
-        const u32* lacctBIdx,
-        u64* out,
-        u32 outCount,
-        void* stream)
-    {
-        if (outCount == 0u) return true;
-        if (!ct1 || !uDigits || !publicA || !skNtt || !lacct || !nodes ||
-            !lacctAIdx || !lacctBIdx || !out || rc.mN != 8192u ||
-            rc.mRho != 4u || (outCount % 8u) != 0u || outCount > 65535u)
-        {
-            return false;
-        }
-
-        constexpr u32 threads = 256u;
-        const u32 chunks = outCount / 8u;
-        const u32 rawTileBlocks = 1024u / (32u * chunks);
-        const u32 tileBlocks = rawTileBlocks == 0u
-            ? 1u
-            : (rawTileBlocks > 32u ? 32u : rawTileBlocks);
-        const dim3 grid(tileBlocks, 8u * 4u, chunks);
-        expandAccumulatorTau1GoldenExperimentalKernel<true, true><<<
-            grid, threads, 0, asStream(stream)>>>(
-            toDevice(rc), ct1, uDigits, publicA, skNtt, lacct, nodes,
-            lacctAIdx, lacctBIdx, out);
-        return check(
-            cudaGetLastError(),
-            "expandAccumulatorTau1GoldenAcceptedForTest");
-    }
 
     bool launchElementwise(
         const RingConstView& rc,
@@ -24418,130 +20296,8 @@ namespace osuCrypto::LogVole::gpu
                 : "gadgetDecomposeHi110Rho4SparsePairRadix55First23");
     }
 
-    bool launchGadgetReduceMagnitude110Pseudo55ForTest(
-        const u64* magLo,
-        const u64* magHi,
-        u32 count,
-        u64 q,
-        u64* residues,
-        void* stream)
-    {
-        constexpr u64 radix55 = u64{ 1 } << 55u;
-        constexpr u64 maxComplement = u64{ 1 } << 21u;
-        if (count == 0u) return true;
-        if (!magLo || !magHi || !residues ||
-            q <= radix55 - maxComplement || q >= radix55)
-            return false;
 
-        constexpr u32 threads = 256u;
-        const u32 c = static_cast<u32>(radix55 - q);
-        gadgetReduceMagnitude110Pseudo55TestKernel<<<
-            1u + (count - 1u) / threads, threads, 0,
-            asStream(stream)>>>(magLo, magHi, count, q, c, residues);
-        return check(
-            cudaGetLastError(),
-            "gadgetReduceMagnitude110Pseudo55ForTest");
-    }
 
-    bool tryLaunchGadgetDecomposeHi110Pseudo55ForTest(
-        const RingConstView& rc,
-        const u64* in,
-        const u32* inIdx,
-        u32 inCount,
-        u64* out,
-        const u32* outIdx,
-        bool pseudo55SecondFold,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (inCount == 0u) return true;
-        if (!gadgetHi110Pseudo55SecondFoldEligible(rc) || !in || !out ||
-            in == out || inCount > 1024u)
-            return true;
-
-        constexpr u32 threads = 128u;
-        const dim3 grid = grid2D(8192u, inCount, threads);
-        if (pseudo55SecondFold)
-        {
-            gadgetDecomposeHi110Rho4CompactCrtPseudo55SecondFoldKernel<<<
-                grid, threads, 0, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, inCount, out, outIdx);
-        }
-        else
-        {
-            gadgetDecomposeHi110Rho4CompactCrtRadix55Kernel<<<
-                grid, threads, 0, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, inCount, out, outIdx);
-        }
-        launched = true;
-        return check(
-            cudaGetLastError(),
-            pseudo55SecondFold
-                ? "testGadgetHi110Pseudo55SecondFold"
-                : "testGadgetHi110Radix55");
-    }
-
-    bool tryLaunchGadgetDecomposeHi110RecursiveLeafSparsePairPseudo55ForTest(
-        const RingConstView& rc,
-        const u64* in,
-        u32 parentCount,
-        u64* out,
-        const u32* outIdx,
-        bool pseudo55SecondFold,
-        void* stream,
-        bool& launched)
-    {
-        launched = false;
-        if (!gadgetHi110Pseudo55SecondFoldEligible(rc) || !in || !out ||
-            in == out || parentCount < 128u || parentCount > 1024u ||
-            (parentCount & 3u) != 0u)
-            return true;
-
-        constexpr u32 threads = 128u;
-        const u32 pairCount = parentCount >> 1u;
-        const dim3 grid = grid2D(8192u, pairCount, threads);
-        const DeviceRing rg = toDevice(rc);
-        cudaStream_t st = asStream(stream);
-
-        if (pseudo55SecondFold)
-        {
-            gadgetDecomposeHi110Rho4SparsePairCompactCrtPseudo55SecondFoldKernel<0u><<<
-                grid, threads, 0, st>>>(
-                rg, in, pairCount, out, outIdx);
-        }
-        else
-        {
-            gadgetDecomposeHi110Rho4SparsePairCompactCrtRadix55Kernel<0u><<<
-                grid, threads, 0, st>>>(
-                rg, in, pairCount, out, outIdx);
-        }
-        launched = true;
-        if (!check(
-                cudaGetLastError(),
-                pseudo55SecondFold
-                    ? "testGadgetSparsePairPseudo55SecondFoldFirst01"
-                    : "testGadgetSparsePairRadix55First01"))
-            return false;
-
-        if (pseudo55SecondFold)
-        {
-            gadgetDecomposeHi110Rho4SparsePairCompactCrtPseudo55SecondFoldKernel<2u><<<
-                grid, threads, 0, st>>>(
-                rg, in, pairCount, out, outIdx);
-        }
-        else
-        {
-            gadgetDecomposeHi110Rho4SparsePairCompactCrtRadix55Kernel<2u><<<
-                grid, threads, 0, st>>>(
-                rg, in, pairCount, out, outIdx);
-        }
-        return check(
-            cudaGetLastError(),
-            pseudo55SecondFold
-                ? "testGadgetSparsePairPseudo55SecondFoldFirst23"
-                : "testGadgetSparsePairRadix55First23");
-    }
 
     bool prepareH200RootPersistence(RingConstView& rc)
     {
@@ -25649,7 +21405,7 @@ namespace osuCrypto::LogVole::gpu
         u64* out,
         u64 outCount,
         void* stream,
-        bool alphaIsTwo)
+        bool /*alphaIsTwo*/)
     {
         if (!canLaunchScaleNttForwardGather(
                 ringRc, plainRc, in, inCount, plainModulus, fastLimbs,
@@ -25677,34 +21433,16 @@ namespace osuCrypto::LogVole::gpu
             ringRc.mMaxModulus < (u64(1) << 60u);
         if (hiCarry && scaleNttForwardGatherSlotOwnedEnabled() && slotMap)
         {
-            const bool warpStages712 = alphaIsTwo &&
-                scaleNttForwardGatherWarpStages712Enabled();
-            if (warpStages712)
-            {
-                if (!check(
-                        cudaFuncSetAttribute(
-                            scaleNttForwardGather8192Rho4HiCarrySlotOwnedWarpStages712Kernel,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize,
-                            static_cast<int>(shBytes)),
-                        "cudaFuncSetAttribute(scaleNttGather8192HiCarrySlotOwnedWarpStages712)"))
-                    return false;
-                scaleNttForwardGather8192Rho4HiCarrySlotOwnedWarpStages712Kernel<<<
-                    inCount, threads, shBytes, asStream(stream)>>>(
-                    args, slotMap);
-            }
-            else
-            {
-                if (!check(
-                        cudaFuncSetAttribute(
-                            scaleNttForwardGather8192Rho4HiCarrySlotOwnedKernel,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize,
-                            static_cast<int>(shBytes)),
-                        "cudaFuncSetAttribute(scaleNttGather8192HiCarrySlotOwned)"))
-                    return false;
-                scaleNttForwardGather8192Rho4HiCarrySlotOwnedKernel<<<
-                    inCount, threads, shBytes, asStream(stream)>>>(
-                    args, slotMap);
-            }
+            if (!check(
+                    cudaFuncSetAttribute(
+                        scaleNttForwardGather8192Rho4HiCarrySlotOwnedKernel,
+                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+                        static_cast<int>(shBytes)),
+                    "cudaFuncSetAttribute(scaleNttGather8192HiCarrySlotOwned)"))
+                return false;
+            scaleNttForwardGather8192Rho4HiCarrySlotOwnedKernel<<<
+                inCount, threads, shBytes, asStream(stream)>>>(
+                args, slotMap);
         }
         else if (hiCarry)
         {
@@ -25769,68 +21507,6 @@ namespace osuCrypto::LogVole::gpu
         return check(cudaGetLastError(), "scaleNttForwardGather8192Rho4");
     }
 
-    bool launchScaleNttForwardGatherHiCarryForTest(
-        const RingConstView& ringRc,
-        const RingConstView& plainRc,
-        const u64* in,
-        u32 inCount,
-        u64 plainModulus,
-        const ScaleRoundFastLimb* fastLimbs,
-        const u32* inverseSlotMap,
-        const u32* slotMap,
-        u32 slotCount,
-        u64* out,
-        u64 outCount,
-        bool slotOwned,
-        void* stream)
-    {
-        if (!canLaunchScaleNttForwardGather(
-                ringRc, plainRc, in, inCount, plainModulus, fastLimbs,
-                inverseSlotMap, slotCount, out, outCount) ||
-            (slotOwned && !slotMap) ||
-            !scaleAndRoundFastArithmeticEnabled() ||
-            !nttLog13SimpleIndexEnabled() || nttForwardThreads() != 1024u ||
-            ringRc.mMaxModulus >= (u64(1) << 60u))
-        {
-            return false;
-        }
-
-        ScaleNttForwardGather8192Args args{};
-        args.mIn = in;
-        args.mFastLimbs = fastLimbs;
-        args.mRoots = static_cast<const ShoupOperand*>(plainRc.mRoots);
-        args.mInverseSlotMap = inverseSlotMap;
-        args.mOut = out;
-        args.mOutCount = outCount;
-        args.mPlainModulus = plainModulus;
-
-        constexpr size_t shBytes = 8192u * sizeof(u64);
-        if (slotOwned)
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        scaleNttForwardGather8192Rho4HiCarrySlotOwnedKernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(scaleNttGather8192HiCarrySlotOwnedForTest)"))
-                return false;
-            scaleNttForwardGather8192Rho4HiCarrySlotOwnedKernel<<<
-                inCount, 1024u, shBytes, asStream(stream)>>>(args, slotMap);
-        }
-        else
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        scaleNttForwardGather8192Rho4HiCarryKernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(scaleNttGather8192HiCarryForTest)"))
-                return false;
-            scaleNttForwardGather8192Rho4HiCarryKernel<<<
-                inCount, 1024u, shBytes, asStream(stream)>>>(args);
-        }
-        return check(cudaGetLastError(), "scaleNttForwardGather8192Rho4HiCarryForTest");
-    }
 
     bool launchGatherSlots(
         const u64* plain,
@@ -25894,17 +21570,6 @@ namespace osuCrypto::LogVole::gpu
         return check(cudaGetLastError(), "liftPlainToRing");
     }
 
-    bool launchAesCtrStreamForTest(
-        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount, void* stream)
-    {
-        if (streamCount == 0 || wordsPerStream < 2) return true;
-        const u32 threads = 256;
-        const u32 blocksPerStream = wordsPerStream >> 1;
-        dim3 grid((blocksPerStream + threads - 1u) / threads, streamCount, 1);
-        aesCtrStreamKernel<<<grid, threads, 0, asStream(stream)>>>(
-            seeds, out, wordsPerStream, streamCount);
-        return check(cudaGetLastError(), "aesCtrStream");
-    }
 
     bool launchAesCtrScalars(
         const u64* seed, u64* out, u64 count, u64 modulus, void* stream)
@@ -25934,64 +21599,6 @@ namespace osuCrypto::LogVole::gpu
         return ok;
     }
 
-    bool launchAes128ExpandAndEncryptForTest(
-        const u64* keys,
-        u32 count,
-        unsigned char* roundKeys,
-        u64* outSeeds,
-        bool sharedVectorExpand,
-        void* stream)
-    {
-        if (count == 0u) return true;
-        if (!keys || !roundKeys || !outSeeds) return false;
-        if (sharedVectorExpand &&
-            (((reinterpret_cast<std::uintptr_t>(keys) & 15u) != 0u) ||
-             ((reinterpret_cast<std::uintptr_t>(roundKeys) & 15u) != 0u)))
-        {
-            return false;
-        }
-
-        constexpr u32 expandThreads = 32u;
-        const u32 expandBlocks = (count + expandThreads - 1u) / expandThreads;
-        const auto st = asStream(stream);
-        if (sharedVectorExpand)
-        {
-            aes128ExpandSharedVectorForTestKernel<<<
-                expandBlocks, expandThreads, 0, st>>>(
-                keys, count, roundKeys);
-        }
-        else
-        {
-            aes128ExpandLegacyForTestKernel<<<
-                expandBlocks, expandThreads, 0, st>>>(
-                keys, count, roundKeys);
-        }
-        if (!check(
-                cudaGetLastError(),
-                sharedVectorExpand
-                    ? "aes128ExpandSharedVectorForTest"
-                    : "aes128ExpandLegacyForTest"))
-        {
-            return false;
-        }
-
-        constexpr u32 encryptThreads = 128u;
-        const u32 encryptTotal = count * 4u;
-        const u32 encryptBlocks =
-            (encryptTotal + encryptThreads - 1u) / encryptThreads;
-        if (count >= 32u && (count & 31u) == 0u)
-        {
-            ct2PolySeedEncryptSharedSboxKernel<<<
-                encryptBlocks, encryptThreads, 0, st>>>(
-                roundKeys, count, outSeeds);
-            return check(
-                cudaGetLastError(), "aes128EncryptSharedSboxForTest");
-        }
-        ct2PolySeedEncryptKernel<<<
-            encryptBlocks, encryptThreads, 0, st>>>(
-            roundKeys, count, outSeeds);
-        return check(cudaGetLastError(), "aes128EncryptForTest");
-    }
 
     bool launchRootDigestHash(
         const u64* words, u32 count, u64* out, void* stream)
@@ -26073,41 +21680,12 @@ namespace osuCrypto::LogVole::gpu
         if (ct2SplitAesEnabled())
         {
             if (!roundKeys) return false;
-            const bool muSharedVector =
-                ct2MuSharedKeyExpandEnabled() && threads == 32u &&
-                (perSeedCount == 8u || perSeedCount == 16u) &&
-                polyModulusDegree == 8192u &&
-                modulusCount == 4u && total >= 32u && (total & 31u) == 0u &&
-                (reinterpret_cast<std::uintptr_t>(seeds) & 15u) == 0u &&
-                (reinterpret_cast<std::uintptr_t>(roundKeys) & 15u) == 0u;
-            if (muSharedVector)
-            {
-                if (perSeedCount == 8u)
-                {
-                    ct2PolySeedExpandMuSharedVectorKernel<8u><<<
-                        blocks, threads, 0, asStream(stream)>>>(
-                        seeds, domainTag, polyModulusDegree, modulusCount, total,
-                        roundKeys);
-                }
-                else
-                {
-                    ct2PolySeedExpandMuSharedVectorKernel<16u><<<
-                        blocks, threads, 0, asStream(stream)>>>(
-                        seeds, domainTag, polyModulusDegree, modulusCount, total,
-                        roundKeys);
-                }
-            }
-            else
-            {
-                ct2PolySeedExpandKernel<<<blocks, threads, 0, asStream(stream)>>>(
-                    seeds, perSeedCount, domainTag, polyModulusDegree,
-                    modulusCount, total, roundKeys);
-            }
+            ct2PolySeedExpandKernel<<<blocks, threads, 0, asStream(stream)>>>(
+                seeds, perSeedCount, domainTag, polyModulusDegree,
+                modulusCount, total, roundKeys);
             if (!check(
                     cudaGetLastError(),
-                    muSharedVector
-                        ? "polySeedExpandMuSharedVector"
-                        : "polySeedExpand"))
+                    "polySeedExpand"))
             {
                 return false;
             }
@@ -26163,17 +21741,6 @@ namespace osuCrypto::LogVole::gpu
         return check(cudaGetLastError(), "rootZetaRepairRho8");
     }
 
-    bool launchRootZetaRho8RawForTest(
-        const RingConstView& rc, const u64* rawWords, u32 count,
-        u32* rejected, u64* out, void* stream)
-    {
-        if (!rc.mMods || rc.mN != 16384u || rc.mLogN != 14u || rc.mRho != 8u ||
-            rc.mMaxModulus >= (u64(1) << 63u) || !rawWords || !rejected || !out ||
-            count == 0u || count > rc.mN) return false;
-        rootZetaRho8RawForTestKernel<<<(count + 255u) / 256u, 256u, 0, asStream(stream)>>>(
-            static_cast<const GpuModulus*>(rc.mMods), rawWords, count, rejected, out);
-        return check(cudaGetLastError(), "rootZetaRho8RawForTest");
-    }
 
     bool launchCt2Seeds(
         const u64* prefix,
@@ -26190,52 +21757,6 @@ namespace osuCrypto::LogVole::gpu
     {
         if (chunkCount == 0 || mu == 0) return true;
         cudaStream_t st = asStream(stream);
-        if (ct2FusedSeedExpandEnabled() && ct2SplitAesEnabled() &&
-            (mu == 4u || mu == 8u || mu == 16u))
-        {
-            if (!roundKeyScratch) return false;
-            const u32 threads = ct2PolySeedThreads();
-            const u32 groupsPerBlock = threads / mu;
-            const u32 blocks = (chunkCount + groupsPerBlock - 1u) / groupsPerBlock;
-            if (mu == 4u)
-            {
-                ct2InstancePolySeedExpandKernel<4u><<<blocks, threads, 0, st>>>(
-                    prefix, instanceBase, chunkCount, domainTag,
-                    polyModulusDegree, modulusCount, roundKeyScratch);
-            }
-            else if (mu == 8u)
-            {
-                ct2InstancePolySeedExpandKernel<8u><<<blocks, threads, 0, st>>>(
-                    prefix, instanceBase, chunkCount, domainTag,
-                    polyModulusDegree, modulusCount, roundKeyScratch);
-            }
-            else
-            {
-                ct2InstancePolySeedExpandKernel<16u><<<blocks, threads, 0, st>>>(
-                    prefix, instanceBase, chunkCount, domainTag,
-                    polyModulusDegree, modulusCount, roundKeyScratch);
-            }
-            if (!check(cudaGetLastError(), "ct2InstancePolySeedExpand"))
-                return false;
-
-            const u32 total = chunkCount * mu;
-            constexpr u32 encryptThreads = 128u;
-            const u32 encryptTotal = total * 4u;
-            const u32 encryptBlocks =
-                (encryptTotal + encryptThreads - 1u) / encryptThreads;
-            if (ct2AesSharedSboxEnabled() && total >= 32u &&
-                (total & 31u) == 0u)
-            {
-                ct2PolySeedEncryptSharedSboxKernel<<<
-                    encryptBlocks, encryptThreads, 0, st>>>(
-                    roundKeyScratch, total, outSeeds);
-                return check(
-                    cudaGetLastError(), "polySeedEncryptSharedSbox");
-            }
-            ct2PolySeedEncryptKernel<<<encryptBlocks, encryptThreads, 0, st>>>(
-                roundKeyScratch, total, outSeeds);
-            return check(cudaGetLastError(), "polySeedEncrypt");
-        }
 
         {
             const u32 threads = 128;
@@ -26262,27 +21783,11 @@ namespace osuCrypto::LogVole::gpu
             48u * 1024u;
     }
 
-    bool gpuTiledSamplerActive(u32 n, u32 streamWords, u32 outCount)
-    {
-        // Inherit the measured fused/materialized crossover. The same environment
-        // knob can therefore sweep the tiled crossover, while LV_GPU_TILED_SAMPLE=0
-        // restores the previous routing exactly.
-        if (!gpuFusedSamplerActive(n, streamWords, outCount) || !tiledSamplerEnabled())
-            return false;
-        if (outCount > 65535u || (n % kSampleTileWords) != 0u) return false;
-        if (streamWords < kSampleSlackWords) return false;
-        const u32 perPoly = streamWords - kSampleSlackWords;
-        if ((perPoly % kSampleTileWords) != 0u) return false;
-        const u32 tilesPerPoly = perPoly / kSampleTileWords;
-        const u32 tileGroup = tiledSamplerGroup();
-        return tileGroup <= tilesPerPoly && (tilesPerPoly % tileGroup) == 0u;
-    }
 
     bool gpuFusedSamplerNeedsRejectEpoch(u32 n, u32 streamWords, u32 outCount)
     {
         if (!gpuFusedSamplerActive(n, streamWords, outCount)) return false;
-        return gpuTiledSamplerActive(n, streamWords, outCount) ||
-               speculativeFusedSamplerEnabled();
+        return speculativeFusedSamplerEnabled();
     }
 
     bool gpuRejectReduceFusionActive()
@@ -26290,171 +21795,6 @@ namespace osuCrypto::LogVole::gpu
         return rejectReduceFusionEnabled();
     }
 
-    bool launchSampleUniformPseudo55ReduceWordForTest(
-        const u64* words,
-        u32 count,
-        u64 q,
-        u64* residues,
-        u32* rejected,
-        void* stream)
-    {
-        constexpr u64 kRadix55 = u64{ 1 } << 55u;
-        constexpr u64 kMaxC = u64{ 1 } << 21u;
-        if (q <= kRadix55 - kMaxC || q >= kRadix55) return false;
-        if (count == 0u) return true;
-        if (!words || !residues || !rejected) return false;
-
-        constexpr u32 threads = 256u;
-        const u32 blocks = (count + threads - 1u) / threads;
-        const u32 c = static_cast<u32>(kRadix55 - q);
-        sampleUniformPseudo55ReduceWordTestKernel<<<
-            blocks, threads, 0, asStream(stream)>>>(
-            words, count, q, c, residues, rejected);
-        return check(
-            cudaGetLastError(), "sampleUniformPseudo55ReduceWordForTest");
-    }
-
-    namespace
-    {
-        enum class SampleUniformPseudo55TryResult
-        {
-            Declined,
-            CommittedSuccess,
-            CommittedFailure
-        };
-
-        // Pure preflight: a false result guarantees that no candidate work has
-        // been enqueued and the accepted sampler may safely use the same buffers.
-        bool sampleUniformPseudo55Preflight(
-            const RingConstView& rc,
-            const u64* seeds,
-            u32 streamWords,
-            const u64* maxMultiple,
-            u64* out,
-            u32 outCount,
-            u32* rejectEpochs,
-            u32 rejectEpoch,
-            bool maxMultipleIsSealDefault,
-            bool split64)
-        {
-            constexpr u64 kRadix55 = u64{ 1 } << 55u;
-            constexpr u64 kMaxC = u64{ 1 } << 21u;
-            constexpr u32 kHotStreamWords =
-                kHotSampleWords + kSampleSlackWords;
-
-            if (!maxMultipleIsSealDefault ||
-                !hotSamplerPseudo55ReduceEnabled())
-                return false;
-            if (!seeds || !maxMultiple || !out || !rejectEpochs ||
-                rejectEpoch == 0u || outCount == 0u || !rc.mMods)
-                return false;
-            const std::size_t perPoly =
-                static_cast<std::size_t>(rc.mRho) * rc.mN;
-            if (rc.mN != kHotSampleN || rc.mLogN != 13u ||
-                rc.mRho != kHotSampleRho || perPoly != kHotSampleWords ||
-                streamWords != kHotStreamWords)
-                return false;
-            if (rc.mMinModulus <= kRadix55 - kMaxC ||
-                rc.mMaxModulus >= kRadix55 ||
-                rc.mMaxModulus < rc.mMinModulus)
-                return false;
-
-            // Match the accepted hot route exactly. Rejected experimental
-            // routing switches decline instead of changing ownership.
-            if (!gpuFusedSamplerActive(rc.mN, streamWords, outCount) ||
-                gpuTiledSamplerActive(rc.mN, streamWords, outCount) ||
-                !speculativeFusedSamplerEnabled() ||
-                !hotSpeculativeFusedSamplerEnabled() ||
-                !coalescedSamplerStoreEnabled() ||
-                !hotSamplerWarpTransposeEnabled() ||
-                !hotSamplerRoundVectorMessageEnabled() ||
-                hotSamplerDeferredRejectVoteEnabled())
-                return false;
-            return !split64 ||
-                (outCount == 64u && hotSamplerSplit64Enabled());
-        }
-
-        // Once either kernel launch is attempted this function can no longer
-        // decline: a launch/check failure is terminal and must never fall through
-        // to an accepted kernel that writes the same output concurrently.
-        SampleUniformPseudo55TryResult tryLaunchSampleUniformPseudo55(
-            const RingConstView& rc,
-            const u64* seeds,
-            u32 streamWords,
-            const u64* maxMultiple,
-            u64* out,
-            const u32* outIdx,
-            u32 outCount,
-            u32* rejectEpochs,
-            u32 rejectEpoch,
-            bool maxMultipleIsSealDefault,
-            bool split64,
-            void* stream)
-        {
-            if (!sampleUniformPseudo55Preflight(
-                    rc, seeds, streamWords, maxMultiple, out, outCount,
-                    rejectEpochs, rejectEpoch, maxMultipleIsSealDefault,
-                    split64))
-            {
-                return SampleUniformPseudo55TryResult::Declined;
-            }
-
-            const DeviceRing rg = toDevice(rc);
-            const cudaStream_t st = asStream(stream);
-            constexpr std::size_t sharedBytes = kHotWarpStoreBytes;
-            if (split64)
-            {
-                sampleUniformFusedHotWarpRoundVectorMessagePseudo55Split64Kernel<<<
-                    outCount * kHotSplit64Parts,
-                    kFusedThreads,
-                    sharedBytes,
-                    st>>>(
-                    rg, seeds, out, outIdx, rejectEpochs, rejectEpoch);
-            }
-            else
-            {
-                const u32 blocks = outCount < 65535u ? outCount : 65535u;
-                sampleUniformFusedHotWarpRoundVectorMessagePseudo55Kernel<<<
-                    blocks, kFusedThreads, sharedBytes, st>>>(
-                    rg, seeds, out, outIdx, outCount, rejectEpochs,
-                    rejectEpoch);
-            }
-            if (!check(cudaGetLastError(), "sampleUniformFusedHotPseudo55"))
-                return SampleUniformPseudo55TryResult::CommittedFailure;
-
-            // Preserve the accepted exact cold path. Candidate common kernels
-            // do not load maxMultiple; only a stamped polynomial reaches it.
-            launchSampleUniformRepair(
-                rg, seeds, maxMultiple, rejectEpochs, rejectEpoch,
-                out, outIdx, outCount, st);
-            return check(
-                       cudaGetLastError(),
-                       "sampleUniformFusedHotPseudo55Repair")
-                ? SampleUniformPseudo55TryResult::CommittedSuccess
-                : SampleUniformPseudo55TryResult::CommittedFailure;
-        }
-    }
-
-    bool launchSampleUniformPolyBlake2xbPseudo55Candidate(
-        const RingConstView& rc,
-        const u64* seeds,
-        u32 streamWords,
-        const u64* maxMultiple,
-        u64* out,
-        const u32* outIdx,
-        u32 outCount,
-        u32* rejectEpochs,
-        u32 rejectEpoch,
-        bool maxMultipleIsSealDefault,
-        bool split64,
-        void* stream)
-    {
-        return tryLaunchSampleUniformPseudo55(
-                   rc, seeds, streamWords, maxMultiple, out, outIdx, outCount,
-                   rejectEpochs, rejectEpoch, maxMultipleIsSealDefault,
-                   split64, stream) ==
-               SampleUniformPseudo55TryResult::CommittedSuccess;
-    }
 
     namespace
     {
@@ -26567,26 +21907,6 @@ namespace osuCrypto::LogVole::gpu
         }
     }
 
-    bool launchSampleUniformPolyBlake2xbSmallDirectCandidate(
-        const RingConstView& rc,
-        const u64* seeds,
-        u32 streamWords,
-        const u64* maxMultiple,
-        u64* out,
-        const u32* outIdx,
-        u32 outCount,
-        u32* rejectEpochs,
-        u32 rejectEpoch,
-        bool maxMultipleIsSealDefault,
-        bool allowCustomThresholdForTest,
-        void* stream)
-    {
-        return tryLaunchSmallSampleDirect(
-                   rc, seeds, streamWords, maxMultiple, out, outIdx,
-                   outCount, rejectEpochs, rejectEpoch,
-                   maxMultipleIsSealDefault, allowCustomThresholdForTest,
-                   stream) == SmallSampleDirectTryResult::CommittedSuccess;
-    }
 
     bool launchSampleUniformPolyBlake2xb(
         const RingConstView& rc,
@@ -26605,24 +21925,6 @@ namespace osuCrypto::LogVole::gpu
         if (outCount == 0) return true;
         const std::size_t perPoly = static_cast<std::size_t>(rc.mRho) * rc.mN;
         if (streamWords < perPoly + kSampleSlackWords) return false;
-
-        // Probe the opt-in candidate before any accepted launch. A soft decline
-        // is the only state allowed to fall through. For 64 polynomials, mirror
-        // the accepted ownership decision exactly; direct tests can still select
-        // the normal candidate explicitly through its isolated launcher.
-        const bool pseudo55Split64 =
-            hotSamplerSplit64Enabled() && outCount == 64u;
-        const SampleUniformPseudo55TryResult pseudo55Result =
-            tryLaunchSampleUniformPseudo55(
-                rc, seeds, streamWords, maxMultiple, out, outIdx, outCount,
-                rejectEpochs, rejectEpoch, maxMultipleIsSealDefault,
-                pseudo55Split64, stream);
-        if (pseudo55Result ==
-            SampleUniformPseudo55TryResult::CommittedSuccess)
-            return true;
-        if (pseudo55Result ==
-            SampleUniformPseudo55TryResult::CommittedFailure)
-            return false;
 
         const SmallSampleDirectTryResult smallDirectResult =
             tryLaunchSmallSampleDirect(
@@ -26644,55 +21946,6 @@ namespace osuCrypto::LogVole::gpu
         if (gpuFusedSamplerActive(rc.mN, streamWords, outCount))
         {
             const bool coalescedStore = coalescedSamplerStoreEnabled();
-            if (gpuTiledSamplerActive(rc.mN, streamWords, outCount))
-            {
-                if (!rejectEpochs || rejectEpoch == 0u) return false;
-                const u32 tilesPerPoly = static_cast<u32>(perPoly / kSampleTileWords);
-                const u32 tileGroup = tiledSamplerGroup();
-                const u32 groupsPerPoly = tilesPerPoly / tileGroup;
-                const bool tileWarpTranspose =
-                    coalescedStore && tiledSamplerWarpTransposeEnabled();
-                switch (tileGroup)
-                {
-                case 1u:
-                    launchSampleUniformTileGroup<1u>(
-                        rg, seeds, maxMultiple, out, outIdx, outCount, groupsPerPoly,
-                        rejectEpochs, rejectEpoch, coalescedStore,
-                        tileWarpTranspose, st);
-                    break;
-                case 2u:
-                    launchSampleUniformTileGroup<2u>(
-                        rg, seeds, maxMultiple, out, outIdx, outCount, groupsPerPoly,
-                        rejectEpochs, rejectEpoch, coalescedStore,
-                        tileWarpTranspose, st);
-                    break;
-                case 4u:
-                    launchSampleUniformTileGroup<4u>(
-                        rg, seeds, maxMultiple, out, outIdx, outCount, groupsPerPoly,
-                        rejectEpochs, rejectEpoch, coalescedStore,
-                        tileWarpTranspose, st);
-                    break;
-                case 8u:
-                    launchSampleUniformTileGroup<8u>(
-                        rg, seeds, maxMultiple, out, outIdx, outCount, groupsPerPoly,
-                        rejectEpochs, rejectEpoch, coalescedStore,
-                        tileWarpTranspose, st);
-                    break;
-                case 16u:
-                    launchSampleUniformTileGroup<16u>(
-                        rg, seeds, maxMultiple, out, outIdx, outCount, groupsPerPoly,
-                        rejectEpochs, rejectEpoch, coalescedStore,
-                        tileWarpTranspose, st);
-                    break;
-                default:
-                    return false;
-                }
-                if (!check(cudaGetLastError(), "sampleUniformTile")) return false;
-
-                launchSampleUniformRepair(
-                    rg, seeds, maxMultiple, rejectEpochs, rejectEpoch, out, outIdx, outCount, st);
-                return check(cudaGetLastError(), "sampleUniformTileRepair");
-            }
 
 
             if (speculativeFusedSamplerEnabled())
@@ -26719,12 +21972,7 @@ namespace osuCrypto::LogVole::gpu
                         {
                             if (hotSamplerRoundVectorMessageEnabled())
                             {
-                                if (hotSamplerDeferredRejectVoteEnabled())
-                                    sampleUniformFusedHotWarpRoundVectorDeferredRejectVoteKernel<<<
-                                        blocks, kFusedThreads, sharedBytes, st>>>(
-                                        rg, seeds, maxMultiple, out, outIdx, outCount,
-                                        rejectEpochs, rejectEpoch);
-                                else if (hotSamplerSplit64Enabled() && outCount == 64u)
+                                if (hotSamplerSplit64Enabled() && outCount == 64u)
                                     sampleUniformFusedHotWarpRoundVectorMessageSplit64Kernel<<<
                                         blocks * kHotSplit64Parts,
                                         kFusedThreads,
@@ -26743,11 +21991,6 @@ namespace osuCrypto::LogVole::gpu
                                         rg, seeds, maxMultiple, out, outIdx, outCount,
                                         rejectEpochs, rejectEpoch);
                             }
-                            else if (hotSamplerSharedMessageEnabled())
-                                sampleUniformFusedHotWarpSharedMessageKernel<<<
-                                    blocks, kFusedThreads, sharedBytes, st>>>(
-                                    rg, seeds, maxMultiple, out, outIdx, outCount,
-                                    rejectEpochs, rejectEpoch);
                             else
                                 sampleUniformFusedHotWarpKernel<<<
                                     blocks, kFusedThreads, sharedBytes, st>>>(

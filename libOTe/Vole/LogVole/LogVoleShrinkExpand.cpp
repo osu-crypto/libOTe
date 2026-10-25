@@ -110,77 +110,6 @@ namespace osuCrypto::LogVole
             return logQ;
         }
 
-        struct Ct2CacheEntry
-        {
-            bool mValid = false;
-            RingParams mRing;
-            u32 mMu = 0;
-            u64 mNonce = 0;
-            u64 mSid = 0;
-            u64 mRunId = 0;
-            ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
-            std::vector<RnsPoly> mCt2;
-        };
-
-        bool matchesCt2Cache(
-            const Ct2CacheEntry& cache,
-            const RingParams& ring,
-            u32 mu,
-            u64 nonce,
-            u64 sid,
-            ProtocolCacheScope scope)
-        {
-            (void)cache;
-            (void)ring;
-            (void)mu;
-            (void)nonce;
-            (void)sid;
-            (void)scope;
-            return false;
-#if 0
-            return cache.mValid &&
-                   cache.mRing == ring &&
-                   cache.mMu == mu &&
-                   cache.mNonce == nonce &&
-                   cache.mSid == sid &&
-                   cache.mRunId == scope.mRunId &&
-                   cache.mRole == scope.mRole;
-#endif
-        }
-
-        bool getOrBuildCachedCt2(
-            const RingNttContext& ctx,
-            const ShrinkExpandParams& params,
-            std::span<const u8> seed,
-            u64 sid,
-            const RnsPoly& digest,
-            u64 instanceIdx,
-            u64 nonce,
-            Ct2CacheEntry& cache)
-        {
-            const auto scope = currentProtocolCacheScope();
-            if (matchesCt2Cache(cache, params.mRing, params.mMu, nonce, sid, scope))
-            {
-                return true;
-            }
-
-            // Reuse storage only: query-bound coefficients are always resampled.
-            cache.mValid = false;
-            if (!buildHashedCt2(ctx, params.mMu, seed, sid, digest, instanceIdx, cache.mCt2))
-            {
-                return false;
-            }
-
-            cache.mValid = true;
-            cache.mRing = params.mRing;
-            cache.mMu = params.mMu;
-            cache.mNonce = nonce;
-            cache.mSid = sid;
-            cache.mRunId = scope.mRunId;
-            cache.mRole = scope.mRole;
-            return true;
-        }
-
         double computeSigma(double factor)
         {
             const double normalizedFactor = (factor > 1.0) ? factor : 1.0;
@@ -1041,16 +970,16 @@ namespace osuCrypto::LogVole
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        thread_local Ct2CacheEntry senderCt2Cache{};
-        if (!getOrBuildCachedCt2(
+        // Reuse storage only; query-bound coefficients are always rebuilt.
+        thread_local std::vector<RnsPoly> senderCt2;
+        if (!buildHashedCt2(
                 ctx,
-                state.mParams,
+                state.mParams.mMu,
                 input.mSeed,
                 input.mSid,
                 maskDigest,
                 input.mNonce,
-                input.mNonce,
-                senderCt2Cache))
+                senderCt2))
         {
             return false;
         }
@@ -1058,7 +987,7 @@ namespace osuCrypto::LogVole
         ShrinkExpandSenderExpandOutput next{};
         if (!lheDec(
                 ctx,
-                senderCt2Cache.mCt2,
+                senderCt2,
                 input.mTbkPrime,
                 next.mTbk,
                 state.mPublicANtt ? state.mPublicANtt.get() : nullptr,
@@ -1104,18 +1033,18 @@ namespace osuCrypto::LogVole
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        thread_local Ct2CacheEntry receiverCt2Cache{};
+        // Keep a separate reusable allocation for the receiver's coefficients.
+        thread_local std::vector<RnsPoly> receiverCt2;
         const bool senderRole = currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender;
         HostStep sampleStep(senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling");
-        if (!getOrBuildCachedCt2(
+        if (!buildHashedCt2(
                 ctx,
-                state.mParams,
+                state.mParams.mMu,
                 input.mSeed,
                 input.mSid,
                 maskDigest,
                 input.mNonce,
-                input.mNonce,
-                receiverCt2Cache))
+                receiverCt2))
         {
             return false;
         }
@@ -1216,7 +1145,7 @@ namespace osuCrypto::LogVole
         if (!evalOk ||
             decPartialNtt.size() != state.mParams.mMu ||
             (!fusedEval && evalNtt.size() != state.mParams.mMu) ||
-            receiverCt2Cache.mCt2.size() != state.mParams.mMu)
+            receiverCt2.size() != state.mParams.mMu)
         {
             return false;
         }
@@ -1230,7 +1159,7 @@ namespace osuCrypto::LogVole
             RnsPoly tbm = std::move(decPartialNtt[row]);
             if ((!fusedEval && !ringSubInplace(tbm, evalNtt[row], ctx)) ||
                 !inverseNtt(tbm, ctx) ||
-                !ringAddInplace(tbm, receiverCt2Cache.mCt2[row], ctx))
+                !ringAddInplace(tbm, receiverCt2[row], ctx))
             {
                 return false;
             }

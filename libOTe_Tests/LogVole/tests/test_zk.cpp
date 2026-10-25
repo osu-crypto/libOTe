@@ -21,6 +21,23 @@
 using namespace osuCrypto;
 using namespace osuCrypto::LogVole;
 
+void LogVole_Zk_RequestSizeBounds(const oc::CLP&)
+{
+    constexpr u64 largest = u64{1} << 63;
+    LOGVOLE_REQUIRE_EQ(zkVoleRequestSize(0), 1ull);
+    LOGVOLE_REQUIRE_EQ(zkVoleRequestSize(1), 1ull);
+    LOGVOLE_REQUIRE_EQ(zkVoleRequestSize(3), 4ull);
+    LOGVOLE_REQUIRE_EQ(zkVoleRequestSize(largest - 1), largest);
+    LOGVOLE_REQUIRE_EQ(zkVoleRequestSize(largest), largest);
+    for (u64 invalid : {largest + 1, std::numeric_limits<u64>::max()})
+    {
+        bool rejected = false;
+        try { (void)zkVoleRequestSize(invalid); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        LOGVOLE_REQUIRE_TRUE(rejected);
+    }
+}
+
 namespace
 {
     void checkMatMulCpuTerms()

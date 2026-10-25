@@ -94,6 +94,8 @@ namespace osuCrypto::LogVole
 
     u64 zkVoleRequestSize(u64 voleCount)
     {
+        if (voleCount > (u64{1} << 63))
+            throw std::invalid_argument("LogVole ZK request exceeds the largest representable power of two");
         u64 p = 1;
         while (p < voleCount) p <<= 1;
         return p;
@@ -726,14 +728,12 @@ namespace osuCrypto::LogVole::gpu
             ~DeviceWords() { release(); }
         };
 
-        void* orderAgainstImpl(const DeviceScalars& s)
+        void* orderAgainst(const DeviceScalars& s)
         {
             void* mine = threadStream().raw();
             if (auto* ps = s.producerStream(); ps && ps != mine) gpuStreamSync(ps);
             return mine;
         }
-
-        void* orderAgainst(const DeviceScalars& s) { return orderAgainstImpl(s); }
 
         // The device check has no CPU fallback once the output is on the GPU, so a
         // failure here is fatal to the proof. Report why rather than unwinding with
@@ -776,7 +776,7 @@ namespace osuCrypto::LogVole::gpu
             auto& stream = threadStream();
             DeviceWords storage;
             HostModulus next;
-            struct Drain { GpuStream& stream; ~Drain() { stream.sync(); } } drain{stream};
+            StreamDrain drain{stream};
             static_assert(sizeof(HostModulus) == 3 * sizeof(u64));
             if (!storage.resize(3) ||
                 !launchZkPrepareModulus(modulus, reinterpret_cast<HostModulus*>(storage.mData), stream.raw()) ||
@@ -799,7 +799,7 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = threadStream();
         DeviceWords storage;
         u64 result = 0;
-        struct Drain { GpuStream& stream; ~Drain() { stream.sync(); } } drain{stream};
+        StreamDrain drain{stream};
         if (!storage.resize(1) ||
             !launchZkAccept(proof.mU, proof.mV, verifierValue, delta, mod, storage.mData, stream.raw()) ||
             !gpuMemcpyD2H(&result, storage.mData, sizeof(result), stream.raw()) || !stream.sync()) return false;
@@ -913,7 +913,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (!scalars || !enabled()) return;
         auto s = std::static_pointer_cast<DeviceScalars>(scalars);
-        orderAgainstImpl(*s);
+        orderAgainst(*s);
         // Once the producing stream has been waited on there is nothing left to
         // order against, and the handle is a liability: the producer is a protocol
         // party running on its own host thread, threadStream() is thread_local, and
@@ -1045,11 +1045,7 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = threadStream();
         // H2D copies borrow the caller's challenge/product until the stream
         // drains, including when a later copy or launch fails.
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         const HostModulus mod = toHostModulus(modulus);
         if (!gpuMemcpyH2D(state.mCoefficients.mData, ch.mCoefficients.data(),
                 ch.mCoefficients.size() * sizeof(u64), raw)) return false;
@@ -1085,11 +1081,7 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = threadStream();
         // H2D copies borrow the caller's challenge/product until the stream
         // drains, including when a later copy or launch fails.
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         const HostModulus mod = toHostModulus(modulus);
         // Public C is re-uploaded on every call, including same-shape statements.
         if (!gpuMemcpyH2D(state.mCoefficients.mData, ch.mCoefficients.data(),
@@ -1141,11 +1133,7 @@ namespace osuCrypto::LogVole::gpu
         HostStep preparationStep("gpu: zk detach circuit operands");
         auto& stream = threadStream();
         auto owned = std::make_shared<ZkOperandsDevice>();
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         owned->mData = static_cast<u32*>(gpuMalloc(count * sizeof(u32)));
         if (!owned->mData) return false;
         owned->mCount = count;
@@ -1170,11 +1158,7 @@ namespace osuCrypto::LogVole::gpu
         if (!residues) return false;
         auto& stream = threadStream();
         auto operands = std::make_shared<ZkOperandsDevice>();
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         operands->mData = static_cast<u32*>(gpuMalloc(static_cast<std::size_t>(count) * sizeof(u32)));
         if (!operands->mData) return false;
         operands->mCount = static_cast<std::size_t>(count);
@@ -1202,11 +1186,7 @@ namespace osuCrypto::LogVole::gpu
         AlignedUnVec<u32> next;
         next.resize(count);
         auto& stream = threadStream();
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         if (!gpuMemcpyD2H(next.data(), owned->mData, count * sizeof(u32), stream.raw()) ||
             !stream.sync()) return false;
         circuit.mOperands = std::move(next);
@@ -1227,11 +1207,7 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = threadStream();
         auto wires = std::make_shared<DeviceScalars>();
         std::shared_ptr<ZkOperandsDevice> temp;
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         if (!wires->resize(static_cast<std::size_t>(total))) return nullptr;
 
         // Only the layer-0 values and the mask cross the bus; the rest of the
@@ -1319,11 +1295,7 @@ namespace osuCrypto::LogVole::gpu
         if (!sampled) return nullptr;
         auto& stream = threadStream();
         auto wires = std::make_shared<DeviceScalars>();
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         if (!wires->resize(static_cast<std::size_t>(total)) ||
             !gpuMemcpyD2D(wires->data(), sampled->data(), 2u * entries * sizeof(u64), stream.raw()) ||
             !gpuMemsetZero(wires->data() + 2u * entries,

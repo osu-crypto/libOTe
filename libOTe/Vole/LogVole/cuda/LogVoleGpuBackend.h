@@ -97,6 +97,12 @@ namespace osuCrypto::LogVole::gpu
         std::size_t mStagingBytes = 0;
     };
 
+    struct StreamDrain
+    {
+        GpuStream& mStream;
+        ~StreamDrain() { mStream.sync(); }
+    };
+
     // Stream for the calling thread *and protocol role*, so the sender and the
     // receiver do not serialise on one stream when they are interleaved
     // coroutines on the same host thread. Also publishes the stream to the
@@ -373,39 +379,6 @@ namespace osuCrypto::LogVole::gpu
 
     bool nttForward(const GpuRing& ring, u64* polys, u32 count, GpuStream& stream);
     bool nttInverse(const GpuRing& ring, u64* polys, u32 count, GpuStream& stream);
-
-    bool innerProduct(
-        const GpuRing& ring,
-        const u64* aBase,
-        const u64* bBase,
-        std::span<const u32> aIdx,
-        std::span<const u32> bIdx,
-        u32 terms,
-        u64* out,
-        u32 outCount,
-        bool accumulate,
-        bool negate,
-        GpuStream& stream);
-
-    bool gadgetDecomposeBits(
-        const GpuRing& ring,
-        const u64* in,
-        u32 inCount,
-        u32 digitBits,
-        u32 startLevel,
-        u32 levels,
-        bool centered,
-        u64* out,
-        GpuStream& stream);
-
-    bool elementwise(
-        const GpuRing& ring,
-        const u64* aBase,
-        const u64* bBase,
-        u64* out,
-        u32 outCount,
-        ElemOp op,
-        GpuStream& stream);
 
     bool denoiseComb(const GpuRing& ring, const u64* in, u64* out, u32 outCount, GpuStream& stream);
 }

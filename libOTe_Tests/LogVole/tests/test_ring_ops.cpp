@@ -255,6 +255,53 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
 #endif
 }
 
+void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool requested = cmd.getOr("gpu", 0) != 0;
+    ScopedGpuEnabled gpuScope(requested);
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    RingNttContext smallContext{}, largeContext{};
+    auto largeParams = make_four_limb_params();
+    largeParams.mPolyModulusDegree = 4096;
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), smallContext));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(largeParams, largeContext));
+    auto small = gpu::GpuRing::get(smallContext);
+    auto large = gpu::GpuRing::get(largeContext);
+    LOGVOLE_REQUIRE_TRUE(small && large);
+    gpu::GpuPolyBuffer buffer;
+    LOGVOLE_REQUIRE_TRUE(buffer.resize(*small, 1));
+    const auto oldData = buffer.data();
+    LOGVOLE_REQUIRE_TRUE(buffer.resize(*large, 1));
+    // A geometry change needs a new allocation while the smaller one is live.
+    LOGVOLE_REQUIRE_TRUE(buffer.data() != oldData);
+    std::vector<std::uint64_t> expected(large->polyWords()), fetched(expected.size());
+    for (std::size_t i = 0; i < expected.size(); ++i)
+        expected[i] = 0xfedcba9876543210ull ^ i;
+    auto& stream = gpu::threadStream();
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(buffer.data(), expected.data(), buffer.bytes(), stream.raw()));
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), buffer.data(), buffer.bytes(), stream.raw()));
+    LOGVOLE_REQUIRE_TRUE(stream.sync());
+    LOGVOLE_REQUIRE_TRUE(fetched == expected);
+    const auto preserved = buffer.data();
+    const auto invalid = std::numeric_limits<std::size_t>::max() / large->polyBytes() + 2;
+    LOGVOLE_REQUIRE_TRUE(!buffer.resize(*large, invalid));
+    LOGVOLE_REQUIRE_TRUE(buffer.data() == preserved);
+    LOGVOLE_REQUIRE_EQ(buffer.count(), 1ull);
+    LOGVOLE_REQUIRE_EQ(buffer.polyWords(), large->polyWords());
+    LOGVOLE_REQUIRE_TRUE(buffer.resize(*large, 1));
+    LOGVOLE_REQUIRE_TRUE(buffer.data() == preserved);
+    LOGVOLE_REQUIRE_TRUE(buffer.resize(*small, 0));
+    LOGVOLE_REQUIRE_TRUE(buffer.data() == nullptr);
+    LOGVOLE_REQUIRE_EQ(buffer.count(), 0ull);
+    LOGVOLE_REQUIRE_EQ(buffer.polyWords(), small->polyWords());
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
 void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP&)
 {
     RingNttContext senderCtx{}, receiverCtx{};

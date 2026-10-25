@@ -55,6 +55,18 @@ namespace osuCrypto::LogVole::gpu
 
     namespace
     {
+        bool environmentFlagDefaultOn(const char* name)
+        {
+            const char* value = std::getenv(name);
+            return !(value && value[0] == '0');
+        }
+
+        bool environmentFlagOptIn(const char* name)
+        {
+            const char* value = std::getenv(name);
+            return value && value[0] == '1';
+        }
+
         constexpr std::size_t publicRetentionByteLimit = std::size_t(256) << 20;
         struct PublicRetentionEntry
         {
@@ -370,10 +382,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback while its end-to-end benefit is measured.
         bool rootDirectUploadEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_ROOT_DIRECT_UPLOAD");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_ROOT_DIRECT_UPLOAD");
             return on;
         }
 
@@ -384,10 +393,7 @@ namespace osuCrypto::LogVole::gpu
         // measured; the null-handle path is the exact prior H2D path.
         bool rootKPrimeResidentEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_ROOT_KPRIME_RESIDENT");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_ROOT_KPRIME_RESIDENT");
             return on;
         }
 
@@ -396,51 +402,26 @@ namespace osuCrypto::LogVole::gpu
         // alias still enables every component for exact reproduction.
         bool rootOperandResidencyEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_ROOT_OPERAND_RESIDENCY");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_ROOT_OPERAND_RESIDENCY");
             return on;
         }
 
         bool rootSkNttResidentEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_ROOT_SK_NTT_RESIDENT");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_ROOT_SK_NTT_RESIDENT");
             return on || rootOperandResidencyEnabled();
         }
 
         bool rootKPrimePreuploadEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_ROOT_KPRIME_PREUPLOAD");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_ROOT_KPRIME_PREUPLOAD");
             return on || rootOperandResidencyEnabled();
         }
 
         bool rootDPrimeResidentEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_ROOT_DPRIME_RESIDENT");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_ROOT_DPRIME_RESIDENT");
             return on || rootOperandResidencyEnabled();
-        }
-
-        // Queue the receiver Root finalization's response-independent prefix
-        // while the sender is preparing its reply. The complete monolithic
-        // chain remains the default and exact rollback until the event/launch
-        // overhead is shown to beat the small overlap ceiling.
-        bool rootFinalizePrefetchEnabledImpl()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_ROOT_FINALIZE_PREFETCH");
-                return v && v[0] == '1';
-            }();
-            return on;
         }
 
         // Highest-priority Root prefetch, enabled by default after the Stage-92
@@ -448,15 +429,10 @@ namespace osuCrypto::LogVole::gpu
         // the Root device cache before the wire exchange; after send it queues
         // only the immutable index upload (once per cache) and the six
         // response-independent kernels. LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH=0
-        // restores the monolithic path. Keep the rejected equal-priority
-        // LV_GPU_ROOT_FINALIZE_PREFETCH opt-in independent and default-off.
+        // restores the monolithic path.
         bool rootFinalizePriorityPrefetchEnabledImpl()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH");
             return on;
         }
 
@@ -464,10 +440,7 @@ namespace osuCrypto::LogVole::gpu
         // path for controlled benchmarking and emergency rollback.
         bool identityLeafEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_IDENTITY_LEAF");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_IDENTITY_LEAF");
             return on;
         }
 
@@ -479,10 +452,7 @@ namespace osuCrypto::LogVole::gpu
         // representation as the code-generation-stable rollback.
         bool plainBroadcastSingleLimbEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_WRAP_SINGLE_LIMB");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_WRAP_SINGLE_LIMB");
             return on;
         }
 
@@ -492,10 +462,7 @@ namespace osuCrypto::LogVole::gpu
         // LV_GPU_REUSE_HI_DIGITS=0 is the controlled fallback.
         bool reuseHiDigitsEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_REUSE_HI_DIGITS");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_REUSE_HI_DIGITS");
             return on;
         }
 
@@ -504,10 +471,7 @@ namespace osuCrypto::LogVole::gpu
         // representatives directly from the retained high digits.
         bool directRecursiveLeafEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_DIRECT_RECURSIVE_LEAF");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_DIRECT_RECURSIVE_LEAF");
             return on;
         }
 
@@ -515,10 +479,7 @@ namespace osuCrypto::LogVole::gpu
         // and the producer's later expand. Default on; disable for A/B testing.
         bool recursiveDiagonalEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_RECURSIVE_DIAGONAL");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_RECURSIVE_DIAGONAL");
             return on;
         }
 
@@ -528,11 +489,7 @@ namespace osuCrypto::LogVole::gpu
         // exact rollback.
         bool recursiveLeafSelfZeroEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_RECURSIVE_LEAF_SELF_ZERO");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_RECURSIVE_LEAF_SELF_ZERO");
             return on;
         }
 
@@ -544,11 +501,7 @@ namespace osuCrypto::LogVole::gpu
         // zero retains the accepted two-launch chain as the exact rollback.
         bool recursiveLeafSparseInverseEnabled()
         {
-            static const bool on = [] {
-                const char* v =
-                    std::getenv("LV_GPU_RECURSIVE_LEAF_SPARSE_INVERSE");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_RECURSIVE_LEAF_SPARSE_INVERSE");
             return on;
         }
 
@@ -558,10 +511,7 @@ namespace osuCrypto::LogVole::gpu
         // on; LV_GPU_FUSED_UNWRAP=0 preserves the two-launch path.
         bool fusedUnwrapEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_FUSED_UNWRAP");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_UNWRAP");
             return on;
         }
 
@@ -572,10 +522,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback to the established scratch allocation and split launch chain.
         bool fusedScaleUnwrapEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_FUSED_SCALE_UNWRAP");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SCALE_UNWRAP");
             return on;
         }
 
@@ -586,10 +533,7 @@ namespace osuCrypto::LogVole::gpu
         // the complete scatter -> inverse -> lift chain for exact A/B rollback.
         bool fusedWrapEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_FUSED_WRAP");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_WRAP");
             return on;
         }
 
@@ -598,28 +542,19 @@ namespace osuCrypto::LogVole::gpu
         // seeded replay remains the exact fallback.
         bool rootZetaEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_ROOT_ZETA");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_ROOT_ZETA");
             return on;
         }
 
         bool noGoldRootZetaEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_ROOT_ZETA");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_ROOT_ZETA");
             return on;
         }
 
         bool noGoldRootPinnedSeedsEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_ROOT_PINNED_SEEDS");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_ROOT_PINNED_SEEDS");
             return on;
         }
 
@@ -627,10 +562,7 @@ namespace osuCrypto::LogVole::gpu
         // buffer in place removes a full D2D copy and one live allocation.
         bool senderInplaceKeyEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_SENDER_INPLACE_KEY");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_SENDER_INPLACE_KEY");
             return on;
         }
 
@@ -641,10 +573,7 @@ namespace osuCrypto::LogVole::gpu
         // H2D. Keep this opt-in while its host-scheduling benefit is measured.
         bool ct2PrefixCacheEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_CT2_PREFIX_CACHE");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_CT2_PREFIX_CACHE");
             return on;
         }
 
@@ -655,10 +584,7 @@ namespace osuCrypto::LogVole::gpu
         // remains the complete rollback and the level count permits exact A/Bs.
         bool topSenderCt2PrefetchEnabledImpl()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_TOP_CT2_PREFETCH");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_TOP_CT2_PREFETCH");
             return on;
         }
 
@@ -740,10 +666,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback while the additional launch/event overhead is measured.
         bool receiverShrinkTilePipelineEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_RECEIVER_SHRINK_TILE_PIPELINE");
-                return v && v[0] == '1';
-            }();
+            static const bool on = environmentFlagOptIn("LV_GPU_RECEIVER_SHRINK_TILE_PIPELINE");
             return on;
         }
 
@@ -766,10 +689,7 @@ namespace osuCrypto::LogVole::gpu
         // after the top level instead of draining the stream at every level.
         bool deferredGoldenValidationEnabledImpl()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_DEFER_GOLDEN_VALIDATION");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_DEFER_GOLDEN_VALIDATION");
             return on;
         }
 
@@ -779,10 +699,7 @@ namespace osuCrypto::LogVole::gpu
         // allocation in place. Disable only for same-binary A/B testing.
         bool inplaceHiDigitEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_INPLACE_HI_DIGIT");
-                return !(v && v[0] == '0');
-            }();
+            static const bool on = environmentFlagDefaultOn("LV_GPU_INPLACE_HI_DIGIT");
             return on;
         }
 
@@ -964,8 +881,6 @@ namespace osuCrypto::LogVole::gpu
             GpuPolyBuffer mLacct;      // [levels*width * 2*ctTauMax] (NTT domain)
             u32 mCt1Cols = 0;
             u32 mLacctCols = 0;
-            u32 mWidth = 0;
-            u32 mLevels = 0;
             const u64* mMaxMultiple = nullptr;   // [rho], owned by mRing
         };
 
@@ -1021,11 +936,7 @@ namespace osuCrypto::LogVole::gpu
                                 ~RestoreStream() { gpuSetCurrentStream(previous); }
                             } restoreStream;
                             auto& stream = threadStream();
-                            struct DrainStream
-                            {
-                                GpuStream& stream;
-                                ~DrainStream() { stream.sync(); }
-                            } drain{stream};
+                            StreamDrain drain{stream};
                             HostStep downloadStep("setup receiver: lazy NTT host download");
                             downloaded = downloadReceiverCt1Snapshot(*mCache, next.mPolys, stream, mWorkers);
                         }
@@ -1216,8 +1127,6 @@ namespace osuCrypto::LogVole::gpu
             if (lacctCount)
             {
                 cache->mLacctCols = lacct.mCt.mCols;
-                cache->mWidth = lacct.mWidthPadded;
-                cache->mLevels = lacct.mLevels;
                 if (!cache->mLacct.resize(*ring, lacctCount) ||
                     !(encodedLacct.empty() ? cache->mLacct.upload(lacct.mCt.mPolys, stream)
                         : uploadSetupWire(cache->mLacct.data(), encodedLacct.data(), encodedLacct.size(), stream)))
@@ -1800,11 +1709,7 @@ namespace osuCrypto::LogVole::gpu
         if (encodedLacct && !deferHostSnapshot) nextLacct = encodedLacct->get();
         std::vector<RnsPoly> nextCt1;
         auto& stream = threadStream();
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         {
             HostStep downloadStep("setup receiver: resident NTT host snapshot");
             if (!downloadReceiverCt1Snapshot(*cache, nextCt1, stream, state.mParams.mNumWorkerThreads)) return false;
@@ -1876,11 +1781,7 @@ namespace osuCrypto::LogVole::gpu
                 gpuSetCurrentStream(stream.raw());
                 GpuPolyBuffer coeff;
                 std::vector<RnsPoly> next;
-                struct DrainStream
-                {
-                    GpuStream& stream;
-                    ~DrainStream() { stream.sync(); }
-                } drain{stream};
+                StreamDrain drain{stream};
                 const GpuPolyBuffer* source = &mNtt;
                 if (coefficients)
                 {
@@ -1941,11 +1842,7 @@ namespace osuCrypto::LogVole::gpu
                     GpuStream stream;
                     gpuSetCurrentStream(stream.raw());
                     std::vector<RnsPoly> next;
-                    struct DrainStream
-                    {
-                        GpuStream& stream;
-                        ~DrainStream() { stream.sync(); }
-                    } drain{stream};
+                    StreamDrain drain{stream};
                     const bool downloaded = mBuffer.download(next, stream);
                     if (!stream.sync() || !downloaded)
                         throw std::runtime_error("LogVole deferred tensor download failed");
@@ -2367,11 +2264,9 @@ namespace osuCrypto::LogVole::gpu
         // domain dPrime directly. Retain its owner across the socket wait and
         // every abandoned-work cleanup path.
         DeviceBatchPtr mDPrime;
-        // Non-null only for the priority candidate. The concrete workspace is
-        // owned by mRootCacheOwner and declared with RootDeviceCache below.
+        // The concrete workspace is owned by mRootCacheOwner and declared
+        // with RootDeviceCache below.
         void* mPriorityWorkspace = nullptr;
-        GpuPolyBuffer mAcc;
-        GpuPolyBuffer mPhi;
         u32 mTauHi = 0;
         u32 mLeftWidth = 0;
         u32 mTopCols = 0;
@@ -2866,11 +2761,7 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = threadStream();
         GpuPolyBuffer source, result;
         std::vector<RnsPoly> next;
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         const u32 sources = gamma == 1u ? 1u : tau;
         if (!source.resizeWords(words, sources) || !result.resizeWords(words, count) ||
             !source.upload(input.first(sources), stream) ||
@@ -3177,7 +3068,7 @@ namespace osuCrypto::LogVole::gpu
         std::vector<u32> limbs;
         std::vector<u64> ones;
         std::vector<RnsPoly> next;
-        struct DrainStream { GpuStream& stream; ~DrainStream() { stream.sync(); } } drain{stream};
+        StreamDrain drain{stream};
         if (!samples.resize(*ring, count)) return false;
         const char* directSetting = std::getenv("LV_GPU_SETUP_COMPACT_EXPAND_DIRECT");
         if (!directSetting || directSetting[0] != '0')
@@ -6164,8 +6055,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool rootFinalizeReceiverPrefetchEnabled()
     {
-        return rootFinalizePrefetchEnabledImpl() ||
-               rootFinalizePriorityPrefetchEnabledImpl();
+        return rootFinalizePriorityPrefetchEnabledImpl();
     }
 
     bool prefetchRootFinalizeReceiverDevice(
@@ -6181,16 +6071,12 @@ namespace osuCrypto::LogVole::gpu
     {
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         prepared.reset();
-        const bool priorityPrefetch =
-            rootFinalizePriorityPrefetchEnabledImpl();
-        if (!enabled() ||
-            (!rootFinalizePrefetchEnabledImpl() && !priorityPrefetch))
+        if (!enabled() || !rootFinalizePriorityPrefetchEnabledImpl())
             return false;
 
         // Extend the accepted GoldenSeed priority prefix to the exact
         // NoGoldenSeed shape. The six prefix operations and index construction
         // already use runtime ring dimensions; only their admission was fixed.
-        // Leave the rejected equal-priority prefetch GoldenSeed-only.
         constexpr u32 kProductionN = 8192u;
         constexpr u32 kProductionRho = 4u;
         constexpr u32 kProductionTauHi = 1u;
@@ -6201,7 +6087,7 @@ namespace osuCrypto::LogVole::gpu
             ringModulusCount(ctx) == kProductionRho &&
             leftWidth == kProductionLeftWidth &&
             state.mParams.mShrinkExpand.mGadgetLogBase == kProductionGadgetBits;
-        const bool noGoldGeometry = priorityPrefetch && leftWidth == 8u &&
+        const bool noGoldGeometry = leftWidth == 8u &&
             rootPriorityNoGoldGeometry(ctx.mParams.mPolyModulusDegree,
                 static_cast<u32>(ringModulusCount(ctx)),
                 state.mParams.mShrinkExpand.mGadgetLogBase);
@@ -6216,13 +6102,11 @@ namespace osuCrypto::LogVole::gpu
         auto tree = std::static_pointer_cast<LevelSession>(leftTreeSession);
         if (!tree || !tree->mImpl || !topInputsNttDev || !topInputsNttDev->mImpl)
             return bail("root prefetch: missing device inputs");
-        auto& treeImpl = *tree->mImpl;
 
         auto cache = rootCache(state, ctx);
         auto level = receiverCache(state.mShrinkExpandState);
         if (!cache || !level || !cache->mRing)
             return bail("root prefetch: device caches");
-        auto ring = cache->mRing;
         const u32 topCols = cache->mTopCols;
         if (topCols != tauHi + state.mRootRandomizerWidth ||
             topInputsNttDev->count() != topCols ||
@@ -6234,174 +6118,9 @@ namespace osuCrypto::LogVole::gpu
             return bail("root prefetch: tensor shapes");
         }
 
-        if (priorityPrefetch)
-        {
-            return prefetchRootFinalizeReceiverPriorityDevice(
-                state, cache, level, tree, topInputsNttDev, dPrimeDevice,
-                tauHi, leftWidth, topCols, prepared);
-        }
-
-        auto& stream = threadStream();
-        auto next = std::make_shared<PreparedRootFinalize>();
-        auto& impl = *next->mImpl;
-        impl.mState = &state;
-        impl.mRing = ring;
-        impl.mRootCacheOwner = cache;
-        impl.mLevelCacheOwner = level;
-        impl.mTree = tree;
-        impl.mTopInputs = topInputsNttDev;
-        impl.mTauHi = tauHi;
-        impl.mLeftWidth = leftWidth;
-        impl.mTopCols = topCols;
-        impl.mProducerStream = stream.raw();
-        impl.mReadyEvent = gpuEventCreate();
-        prepared = std::move(next);
-        if (!impl.mReadyEvent) return false;
-
-        GpuPolyBuffer dPrimeDev;
-        if (!dPrimeDev.resize(*ring, 1u)) return false;
-        {
-            Region regUp(regions().mUploadUs, stream.raw());
-            impl.mWorkQueued = true;
-            if (!dPrimeDev.upload(dPrime, 0u, stream)) return false;
-        }
-
-        auto regKern = std::make_unique<Region>(regions().mKernelUs, stream.raw());
-
-        // ---- lheApplyCt1Trunc response-independent prefix -----------------
-        GpuPolyBuffer uHi;
-        if (!uHi.resize(*ring, tauHi) ||
-            !launchGadgetDecompose(
-                ring->view(), dPrimeDev.data(), nullptr, 1,
-                state.mParams.mShrinkExpand.mGadgetLogBase, 1, tauHi, true,
-                uHi.data(), nullptr, stream.raw()) ||
-            !launchNttForward(
-                ring->view(), uHi.data(), tauHi, nullptr, stream.raw()) ||
-            !impl.mAcc.resize(*ring, leftWidth))
-        {
-            return false;
-        }
-        {
-            std::vector<u32> aIdx(static_cast<std::size_t>(leftWidth) * tauHi);
-            std::vector<u32> bIdx(aIdx.size());
-            for (u32 row = 0; row < leftWidth; ++row)
-            {
-                for (u32 col = 0; col < tauHi; ++col)
-                {
-                    aIdx[row * tauHi + col] = row * cache->mCtRCols + col;
-                    bIdx[row * tauHi + col] = col;
-                }
-            }
-            const u32* dA = stream.uploadIdx(aIdx);
-            const u32* dB = stream.uploadIdx(bIdx);
-            if (!dA || !dB ||
-                !launchInnerProduct(
-                    ring->view(), cache->mCtR.data(), uHi.data(), dA, dB,
-                    tauHi, impl.mAcc.data(), nullptr, leftWidth, false, false,
-                    stream.raw()))
-            {
-                return false;
-            }
-        }
-
-        // ---- evalRootTopCtNtt --------------------------------------------
-        if (!impl.mPhi.resize(*ring, leftWidth)) return false;
-        {
-            std::vector<u32> aIdx(static_cast<std::size_t>(leftWidth) * topCols);
-            std::vector<u32> bIdx(aIdx.size());
-            for (u32 row = 0; row < leftWidth; ++row)
-            {
-                for (u32 col = 0; col < topCols; ++col)
-                {
-                    aIdx[row * topCols + col] = row * topCols + col;
-                    bIdx[row * topCols + col] = col;
-                }
-            }
-            const u32* dA = stream.uploadIdx(aIdx);
-            const u32* dB = stream.uploadIdx(bIdx);
-            if (!dA || !dB ||
-                !launchInnerProduct(
-                    ring->view(), cache->mTopCt.data(),
-                    topInputsNttDev->mImpl->mBuf.data(), dA, dB, topCols,
-                    impl.mPhi.data(), nullptr, leftWidth, false, false,
-                    stream.raw()))
-            {
-                return false;
-            }
-        }
-
-        // ---- lencEvalTrunc over the retained left tree, then phi += left ---
-        GpuPolyBuffer leftEval;
-        if (!leftEval.resize(*ring, leftWidth)) return false;
-        {
-            const u32 levels = cache->mLevels;
-            const u32 width = cache->mWidth;
-            const u32 tauLeaf = treeImpl.mTauLeaf;
-            const u32 ctTauMax = treeImpl.mMaxTau;
-            if (levels == 0u || width < leftWidth)
-                return bail("root prefetch: left lacct geometry");
-
-            const u32 terms = 2u * levels * ctTauMax;
-            std::vector<u32> aIdx(static_cast<std::size_t>(leftWidth) * terms, 0u);
-            std::vector<u32> bIdx(aIdx.size(), 0u);
-            for (u32 leaf = 0; leaf < leftWidth; ++leaf)
-            {
-                u32 parent = 0u;
-                u32 t = 0u;
-                for (u32 levelIdx = 0; levelIdx < levels; ++levelIdx)
-                {
-                    const u32 left = (2u * parent) + 1u;
-                    const u32 right = left + 1u;
-                    const u32 activeTau =
-                        (levelIdx == levels - 1u) ? tauLeaf : tauHi;
-                    const u32 row = levelIdx * width + leaf;
-                    for (u32 c = 0; c < activeTau; ++c)
-                    {
-                        aIdx[leaf * terms + t] = row * cache->mLacctCols + c;
-                        bIdx[leaf * terms + t] =
-                            static_cast<u32>(treeImpl.nodeSlot(0, left, c));
-                        ++t;
-                        aIdx[leaf * terms + t] =
-                            row * cache->mLacctCols + ctTauMax + c;
-                        bIdx[leaf * terms + t] =
-                            static_cast<u32>(treeImpl.nodeSlot(0, right, c));
-                        ++t;
-                    }
-                    const u32 bit =
-                        (leaf >> (levels - 1u - levelIdx)) & 1u;
-                    parent = bit == 0u ? left : right;
-                }
-                for (; t < terms; ++t)
-                {
-                    aIdx[leaf * terms + t] = 0u;
-                    bIdx[leaf * terms + t] =
-                        static_cast<u32>(treeImpl.zeroNodeSlot());
-                }
-            }
-            const u32* dA = stream.uploadIdx(aIdx);
-            const u32* dB = stream.uploadIdx(bIdx);
-            if (!dA || !dB ||
-                !launchInnerProduct(
-                    ring->view(), cache->mLacctLeft.data(),
-                    treeImpl.mNodes.data(), dA, dB, terms, leftEval.data(),
-                    nullptr, leftWidth, false, true, stream.raw()))
-            {
-                return false;
-            }
-        }
-        if (!launchElementwise(
-                ring->view(), impl.mPhi.data(), nullptr, leftEval.data(), nullptr,
-                impl.mPhi.data(), nullptr, leftWidth, ElemOp::Add,
-                stream.raw()))
-        {
-            return false;
-        }
-
-        regKern.reset();
-        if (!gpuEventRecord(impl.mReadyEvent, stream.raw())) return false;
-        impl.mEventRecorded = true;
-        impl.mReady = true;
-        return true;
+        return prefetchRootFinalizeReceiverPriorityDevice(
+            state, cache, level, tree, topInputsNttDev, dPrimeDevice,
+            tauHi, leftWidth, topCols, prepared);
     }
 
     bool rootFinalizeReceiverDevice(
@@ -6476,13 +6195,11 @@ namespace osuCrypto::LogVole::gpu
             auto& p = *prepared->mImpl;
             auto* priorityWorkspace = static_cast<
                 RootFinalizePriorityWorkspace*>(p.mPriorityWorkspace);
-            const bool buffersMatch = priorityWorkspace
-                ? cache->mPriorityWorkspace.get() == priorityWorkspace &&
-                      priorityWorkspace->mAcc.count() == leftWidth &&
-                      priorityWorkspace->mPhi.count() == leftWidth &&
-                      p.mDPrime.get() == dPrimeDevice
-                : p.mAcc.count() == leftWidth &&
-                      p.mPhi.count() == leftWidth;
+            const bool buffersMatch = priorityWorkspace &&
+                cache->mPriorityWorkspace.get() == priorityWorkspace &&
+                priorityWorkspace->mAcc.count() == leftWidth &&
+                priorityWorkspace->mPhi.count() == leftWidth &&
+                p.mDPrime.get() == dPrimeDevice;
             const bool metadataMatches =
                 p.mReady && !p.mConsumed && p.mEventRecorded && p.mReadyEvent &&
                 p.mState == &state && p.mRing.get() == ring.get() &&
@@ -6497,24 +6214,15 @@ namespace osuCrypto::LogVole::gpu
             {
                 // The event wait transfers both buffers to this stream. Their
                 // suffix use is ordered exactly like ordinary monolithic
-                // locals. The priority candidate leases cache-owned buffers
-                // and returns their ownership on every success/failure exit;
-                // the original candidate retains its move-only behavior.
-                if (priorityWorkspace)
-                {
-                    // The coroutine may resume on another host thread and thus
-                    // another registered receiver stream. Future releases must
-                    // be ordered on the stream that now owns every suffix use.
-                    priorityWorkspace->mOwnerStream = stream.raw();
-                    acc = std::move(priorityWorkspace->mAcc);
-                    phi = std::move(priorityWorkspace->mPhi);
-                    returnPriorityBuffers.mWorkspace = priorityWorkspace;
-                }
-                else
-                {
-                    acc = std::move(p.mAcc);
-                    phi = std::move(p.mPhi);
-                }
+                // locals. The prefetch leases cache-owned buffers and returns
+                // their ownership on every success/failure exit.
+                // The coroutine may resume on another host thread and thus
+                // another registered receiver stream. Future releases must
+                // be ordered on the stream that now owns every suffix use.
+                priorityWorkspace->mOwnerStream = stream.raw();
+                acc = std::move(priorityWorkspace->mAcc);
+                phi = std::move(priorityWorkspace->mPhi);
+                returnPriorityBuffers.mWorkspace = priorityWorkspace;
                 p.mConsumed = true;
                 consumedPrepared = &p;
                 havePreparedBase = true;
@@ -7455,7 +7163,6 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        bool inverseDone = false;
 
         // ---- lencEvalTrunc, output in the NTT domain and negated ----
         {
@@ -7522,20 +7229,7 @@ namespace osuCrypto::LogVole::gpu
                 // temporary along with its elementwise pass.
                 if (combineExpandAccumulator)
                 {
-                    // The inverse-fused peer is the accepted mu=8/six-term symbol.
-                    // Wider alpha tuples use the high-occupancy pointwise candidate
-                    // below and retain the established inverse transform.
-                    if (treeTerms == 6u &&
-                        !tryLaunchNttInverseExpandAccumulatorTau1Add(
-                            ring->view(), impl.mAcc.data(), cache->mCt1.data(),
-                            uDigits, cache->mPublicA.data(), skXNtt,
-                            cache->mLacct.data(), impl.mNodes.data(), dA, dB, mu,
-                            static_cast<u32>(rowsTotal), impl.mCt2.data(),
-                            stream.raw(), inverseDone))
-                    {
-                        return false;
-                    }
-                    if (!inverseDone && !launchExpandAccumulatorTau1(
+                    if (!launchExpandAccumulatorTau1(
                             ring->view(), cache->mCt1.data(), uDigits, cache->mPublicA.data(),
                             skXNtt, cache->mLacct.data(), impl.mNodes.data(), dA, dB, mu,
                             treeTerms, impl.mAcc.data(), static_cast<u32>(rowsTotal),
@@ -7566,7 +7260,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         // ... then INTT and + ct2, both folded into the transform's store.
-        if (!inverseDone && !launchNttInverseFused(
+        if (!launchNttInverseFused(
                 ring->view(), impl.mAcc.data(), static_cast<u32>(rowsTotal), nullptr, kElemOpNoneHost,
                 nullptr, static_cast<u32>(ElemOp::Add), impl.mCt2.data(), stream.raw(), fusedIp,
                 state.mParams.mAlpha == 2u))
@@ -7739,23 +7433,6 @@ namespace osuCrypto::LogVole::gpu
         GpuPolyBuffer product;
         if (!product.resize(*ring, rowsTotal)) return false;
 
-        bool inverseDone = false;
-        if (!gpuFusedIpActive() && (mu == 8u || mu == 16u))
-        {
-            if (!tryLaunchNttInverseOuterMuReverseSub(
-                    ring->view(), product.data(), cache->mPublicA.data(), skNtt,
-                    mu, static_cast<u32>(rowsTotal), ct2.data(), stream.raw(), inverseDone))
-                return false;
-        }
-        else if (!gpuFusedIpActive() && mu == 4u)
-        {
-            if (!tryLaunchNttInverseOuterMu4ReverseSub(
-                    ring->view(), product.data(), cache->mPublicA.data(), skNtt,
-                    static_cast<u32>(rowsTotal), ct2.data(), stream.raw(), inverseDone))
-                return false;
-        }
-
-        if (!inverseDone)
         {
             bool productDone = false;
             if (mu == 8u || mu == 16u)
@@ -8343,15 +8020,6 @@ namespace osuCrypto::LogVole::gpu
 
         GpuPolyBuffer product;
         if (!product.resize(*ring, leftWidth)) return bail("root sender: product");
-        bool inverseDone = false;
-        if (!gpuFusedIpActive() && tauHi == 1u && leftWidth == 4u)
-        {
-            if (!tryLaunchNttInverseOuterMu4ReverseSub(
-                    ring->view(), product.data(), cache->mPublicA.data(), skNtt.data(),
-                    leftWidth, ctK.data(), stream.raw(), inverseDone))
-                return bail("root sender: fixed a.sk+intt");
-        }
-        if (!inverseDone)
         {
             std::vector<u32> aIdx(leftWidth);
             std::vector<u32> bIdx(leftWidth, 0);
@@ -8576,37 +8244,6 @@ namespace osuCrypto::LogVole::gpu
     }
 
     // ---- device-side golden-seed validation -------------------------------
-
-    bool queueGoldenSeedValidation(const Params& params, const DeviceBatch& tbk)
-    {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
-        if (!enabled() || tbk.empty() || params.mCt2SeedMode != Ct2SeedMode::GoldenSeed)
-            return false;
-
-        RingNttContext ctx{};
-        if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx)) return false;
-        auto ring = GpuRing::get(ctx);
-        if (!ring || !ring->denoiseReady() || !tbk.mImpl || tbk.mImpl->mRing != ring ||
-            tbk.mImpl->mBuf.count() != tbk.count())
-            return false;
-
-        const u32 mu = params.mShrinkExpand.mMu;
-        const u32 rho = ring->rho();
-        if (rho == 0 || mu == 0 || (mu % rho) != 0) return false;
-        const std::size_t expected =
-            ((static_cast<std::size_t>(params.mW) + mu - 1u) / mu) * mu;
-        if (tbk.count() != expected) return false;
-
-        auto& stream = threadStream();
-        auto& scratch = validateScratch();
-        if (!uploadGoldenMargins(params, ctx, *ring, scratch, stream)) return false;
-
-        Region regKern(regions().mKernelUs, stream.raw());
-        return launchValidateGoldenSeed(
-            ring->view(), ring->denoiseView(), tbk.mImpl->mBuf.data(),
-            static_cast<u32>(tbk.count()), mu, scratch.mMarginLo, scratch.mMarginHi,
-            scratch.mFlag, stream.raw());
-    }
 
     bool validateGoldenSeedDevice(const Params& params, const DeviceBatch& tbk, bool& ok)
     {
@@ -8847,44 +8484,6 @@ namespace osuCrypto::LogVole::gpu
         if (ok) ok = dst.download(out, stream, 0, seeds.size());
         gpuFree(dMax);
         return ok;
-    }
-
-    bool sampleRootZetaFromSeedsForTest(
-        const RingNttContext& ctx,
-        std::span<const block> taskSeeds,
-        bool forceFirstReject,
-        std::vector<RnsPoly>& out,
-        u32 rangesPerPoly)
-    {
-        if (!enabled() || rangesPerPoly < 2u || rangesPerPoly > 32u ||
-            taskSeeds.size() != 3u * rangesPerPoly) return false;
-        auto ring = GpuRing::get(ctx);
-        if (!ring) return false;
-        const bool noGold = ring->n() == 16384u && ring->rho() == 8u;
-        if (!noGold && (ring->n() != 8192u || ring->rho() != 4u)) return false;
-
-        auto& stream = threadStream();
-        auto& scratch = sampleScratch();
-        if (!scratch.ensureCt2Seeds(2u * taskSeeds.size()) ||
-            !scratch.ensureRoundKeys(176u * taskSeeds.size()) ||
-            !scratch.ensureRootZetaRejects(taskSeeds.size()))
-            return false;
-
-        GpuPolyBuffer dst;
-        if (!dst.resize(*ring, 3u)) return false;
-        if (!gpuMemcpyH2D(
-                            scratch.mCt2Seeds, taskSeeds.data(),
-                            taskSeeds.size_bytes(), stream.raw())) return false;
-        const bool ok = noGold
-            ? launchRootZetaRho8(
-                ring->view(), scratch.mCt2Seeds, scratch.mRoundKeys,
-                scratch.mRootZetaFirstReject, dst.data(), rangesPerPoly,
-                forceFirstReject, stream.raw())
-            : launchRootZetaRho4(
-                ring->view(), scratch.mCt2Seeds, scratch.mRoundKeys,
-                scratch.mRootZetaFirstReject, dst.data(), rangesPerPoly,
-                forceFirstReject, stream.raw());
-        return ok && dst.download(out, stream, 0, 3u);
     }
 
     bool ct2BatchForTest(
@@ -9136,11 +8735,7 @@ namespace osuCrypto::LogVole::gpu
         Allocation coefficients(nullptr, gpuFree), scalars(nullptr, gpuFree);
         // Every queued operation must finish before source and scratch owners
         // release their role-local bytes, including an error after submission.
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         const std::size_t coeffCount = static_cast<std::size_t>(chunkCount) * ring->n();
         coefficients.reset(gpuMalloc(coeffCount * sizeof(u64)));
         scalars.reset(gpuMalloc(static_cast<std::size_t>(zpLabelCount) * sizeof(u64)));
@@ -9183,72 +8778,6 @@ namespace osuCrypto::LogVole::gpu
                        stream.raw()) && stream.sync();
         }
     }
-
-    bool scaleNttForwardGatherSlotOwnedForTest(
-        const ZpCrtContext& zp,
-        const std::vector<RnsPoly>& labels,
-        u64 zpLabelCount,
-        std::vector<u64>& coefficientOwned,
-        std::vector<u64>& slotOwned)
-    {
-        if (!enabled() || labels.empty() || zpLabelCount == 0u ||
-            labels.size() > std::numeric_limits<u32>::max() ||
-            zp.mPlaintextModulus < 2)
-        {
-            return false;
-        }
-
-        auto ring = GpuRing::get(zp.mRing);
-        if (!ring) return false;
-        auto plain = gpuPlainTables(zp);
-        if (!plain || plain->n() != ring->n() ||
-            zpLabelCount > static_cast<u64>(labels.size()) * plain->slotCount())
-        {
-            return false;
-        }
-
-        ScaleRoundConstView consts{};
-        if (!ring->scaleRoundConstants(zp.mPlaintextModulus, consts))
-        {
-            return false;
-        }
-
-        auto& stream = threadStream();
-        GpuPolyBuffer src;
-        DeviceScalars accepted;
-        DeviceScalars candidate;
-        if (!src.resize(*ring, labels.size()) || !src.upload(labels, stream) ||
-            !accepted.resize(static_cast<std::size_t>(zpLabelCount)) ||
-            !candidate.resize(static_cast<std::size_t>(zpLabelCount)))
-        {
-            return false;
-        }
-
-        const u32 chunks = static_cast<u32>(labels.size());
-        bool ok = launchScaleNttForwardGatherHiCarryForTest(
-            ring->view(), plain->view(), src.data(), chunks,
-            zp.mPlaintextModulus, consts.mFastLimbs,
-            plain->inverseSlotMap(), plain->slotMap(), plain->slotCount(),
-            accepted.data(), zpLabelCount, false, stream.raw());
-        ok = launchScaleNttForwardGatherHiCarryForTest(
-                 ring->view(), plain->view(), src.data(), chunks,
-                 zp.mPlaintextModulus, consts.mFastLimbs,
-                 plain->inverseSlotMap(), plain->slotMap(), plain->slotCount(),
-                 candidate.data(), zpLabelCount, true, stream.raw()) &&
-            ok;
-        if (!ok) return false;
-
-        coefficientOwned.resize(static_cast<std::size_t>(zpLabelCount));
-        slotOwned.resize(static_cast<std::size_t>(zpLabelCount));
-        return gpuMemcpyD2H(
-                   coefficientOwned.data(), accepted.data(),
-                   coefficientOwned.size() * sizeof(u64), stream.raw()) &&
-            gpuMemcpyD2H(
-                   slotOwned.data(), candidate.data(),
-                   slotOwned.size() * sizeof(u64), stream.raw()) &&
-            stream.sync();
-    }
-
 
     namespace
     {
@@ -9507,11 +9036,7 @@ namespace osuCrypto::LogVole::gpu
         // This guard is deliberately constructed after every GPU allocation
         // owner, including slot scratch. An early post-submit decline must
         // finish queued work before any of those owners release their bytes.
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         if (!output.resize(*ring, 1)) return {};
         lift.reset(gpuMalloc(rho * sizeof(u64)));
         if (!lift || !gpuMemcpyH2D(lift.get(),
@@ -9626,7 +9151,7 @@ namespace osuCrypto::LogVole::gpu
             Allocation deviceOutput(nullptr, gpuFree), deviceSlots(nullptr, gpuFree), devicePlain(nullptr, gpuFree);
             std::shared_ptr<GpuPlainNtt> plain;
             RnsPoly next;
-            struct DrainStream { GpuStream& stream; ~DrainStream() { stream.sync(); } } drain{stream};
+            StreamDrain drain{stream};
             const std::size_t words = slots * rho;
             const std::size_t bytes = words * sizeof(u64);
             deviceLift.reset(gpuMalloc(rho * sizeof(u64)));
@@ -9687,7 +9212,7 @@ namespace osuCrypto::LogVole::gpu
         GpuPolyBuffer constantPoly;
         std::unique_ptr<void, decltype(&gpuFree)> constantLift(nullptr, gpuFree);
         std::vector<RnsPoly> next;
-        struct DrainStream { GpuStream& stream; ~DrainStream() { stream.sync(); } } drain{stream};
+        StreamDrain drain{stream};
         auto downloadDelta = [&](const GpuPolyBuffer& values) {
             const char* smallDownload = std::getenv("LV_GPU_SETUP_DELTA_SMALL_DOWNLOAD");
             constexpr std::size_t maxSmallBytes = std::size_t(1) << 20;

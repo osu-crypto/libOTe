@@ -1,11 +1,11 @@
 #include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
-#include <chrono>
 
 #include "libOTe/config.h"
 
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
+#include "libOTe/Vole/LogVole/LogVoleTransport.h"
 
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
@@ -25,8 +25,6 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        constexpr u64 kFrameHeaderSize = sizeof(u64);
-
         bool setupMoveStateEnabled()
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -37,147 +35,10 @@ namespace osuCrypto::LogVole
 #endif
         }
 
-        void writeU64(std::array<u8, kFrameHeaderSize>& out, u64 value)
-        {
-            for (u64 i = 0; i < kFrameHeaderSize; ++i)
-            {
-                out[i] = static_cast<u8>((value >> (8u * i)) & 0xFFu);
-            }
-        }
-
-        u64 readU64(const std::array<u8, kFrameHeaderSize>& in)
-        {
-            u64 value = 0;
-            for (u64 i = 0; i < kFrameHeaderSize; ++i)
-            {
-                value |= static_cast<u64>(in[i]) << (8u * i);
-            }
-            return value;
-        }
-
-        task<> sendFrame(Socket& sock, const Buffer& payload)
-        {
-            std::array<u8, kFrameHeaderSize> header{};
-            writeU64(header, static_cast<u64>(payload.size()));
-
-            co_await sock.send(coproto::copy(header));
-            if (!payload.empty())
-            {
-                co_await sock.send(coproto::copy(payload));
-            }
-        }
-
-        // Root's encoded digest is not used after accounting. Own it in this
-        // coroutine so coproto can transmit it without copying the 256 KiB
-        // payload; the generic const helper remains unchanged for all other
-        // protocol messages and rollback behavior.
-        task<> sendOwnedRootFrame(Socket& sock, Buffer payload)
-        {
-            std::array<u8, kFrameHeaderSize> header{};
-            writeU64(header, static_cast<u64>(payload.size()));
-
-            co_await sock.send(coproto::copy(header));
-            if (!payload.empty())
-            {
-                co_await sock.send(std::move(payload));
-            }
-        }
-
-        task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize)
-        {
-            std::array<u8, kFrameHeaderSize> header{};
-            const auto waitStart = std::chrono::steady_clock::now();
-            co_await sock.recv(header);
-            globalTimingStats.mReceiverWaitUs.fetch_add(
-                static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
-                                     std::chrono::steady_clock::now() - waitStart)
-                                     .count()),
-                std::memory_order_relaxed);
-
-            const auto size = readU64(header);
-            if (size > maxPayloadSize ||
-				size > static_cast<u64>(std::numeric_limits<std::size_t>::max()))
-            {
-                throw std::length_error("LogVole frame is too large");
-            }
-
-            Buffer payload(static_cast<std::size_t>(size));
-            adviseGpuSetupWireBuffer(payload);
-            if (!payload.empty())
-            {
-                HostStep phase("transport receiver: receive frame payload");
-                co_await sock.recv(payload);
-            }
-
-            co_return payload;
-        }
-
-        u64 frameBytes(const Buffer& payload)
-        {
-            return kFrameHeaderSize + static_cast<u64>(payload.size());
-        }
-
-		u64 requirePayloadSize(bool valid, u64 size)
-		{
-			if (!valid)
-				throw std::length_error("LogVole could not derive a frame size bound");
-			return size;
-		}
-
-        bool computeTauHi(const Params& params, u32& out)
-        {
-            if (params.mShrinkExpand.mTau < 2)
-            {
-                return false;
-            }
-            out = params.mShrinkExpand.mTau - 1;
-            return true;
-        }
-
-        bool recursiveMode(const Params& params, RecursiveMode& out)
-        {
-            u32 tauHi = 0;
-            if (!computeTauHi(params, tauHi))
-            {
-                return false;
-            }
-
-            const u32 rho = static_cast<u32>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
-            out = evalRecursiveMode(params.mW, params.mShrinkExpand.mAlpha, tauHi, rho);
-            return true;
-        }
-
-        bool childParams(const Params& params, Params& out)
-        {
-            u32 tauHi = 0;
-            if (!computeTauHi(params, tauHi))
-            {
-                return false;
-            }
-
-            const u32 rho = static_cast<u32>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
-            const u32 muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
-            if (rho == 0 || muHi == 0)
-            {
-                return false;
-            }
-
-            const u32 wDoublePrime = (params.mW + muHi - 1u) / muHi;
-            if (wDoublePrime == 0)
-            {
-                return false;
-            }
-
-            out = params;
-            out.mW = wDoublePrime * tauHi * rho;
-            out.mGamma = tauHi;
-            return true;
-        }
-
         u64 countSeedInstances(const ReceiverState& state)
         {
             u32 tauHi = 0;
-            if (!computeTauHi(state.mParams, tauHi))
+            if (!detail::computeTauHi(state.mParams, tauHi))
             {
                 return 0;
             }
@@ -278,7 +139,7 @@ namespace osuCrypto::LogVole
 
             u32 tauHi = 0u;
             RingNttContext ctx{};
-            if (!computeTauHi(state.mParams, tauHi) ||
+            if (!detail::computeTauHi(state.mParams, tauHi) ||
                 !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
             {
                 return;
@@ -321,7 +182,7 @@ namespace osuCrypto::LogVole
             bool hasReusableState)
         {
             RecursiveMode mode{};
-            if (!recursiveMode(params, mode))
+            if (!detail::recursiveMode(params, mode))
             {
                 throw std::runtime_error("LogVole receiver has invalid recursive offline parameters");
             }
@@ -337,8 +198,8 @@ namespace osuCrypto::LogVole
 				u64 maxPayload = 0;
 				const bool validPayloadSize =
 					shrinkExpandOfflinePayloadSize(params.mShrinkExpand, maxPayload);
-				auto shrinkExpandPayload = co_await recvFrame(
-					shrinkExpandSock, requirePayloadSize(validPayloadSize, maxPayload));
+				auto shrinkExpandPayload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(
+					shrinkExpandSock, detail::requirePayloadSize(validPayloadSize, maxPayload));
                 if (!decodeShrinkExpandOfflineForTransport(std::move(shrinkExpandPayload), message.mShrinkExpandMessage,
                         params.mShrinkExpand.mNumWorkerThreads))
                 {
@@ -356,12 +217,12 @@ namespace osuCrypto::LogVole
                 auto rootSock = sock.fork();
 				u32 tauHi = 0;
 				u64 maxPayload = 0;
-				if (!computeTauHi(params, tauHi))
+				if (!detail::computeTauHi(params, tauHi))
 					throw std::length_error("LogVole root dimension is invalid");
 				const bool validPayloadSize =
 					rootOfflinePayloadSize(params.mShrinkExpand, tauHi, maxPayload);
 				auto rootPayload =
-					co_await recvFrame(rootSock, requirePayloadSize(validPayloadSize, maxPayload));
+					co_await detail::recvFrame<ProtocolCacheRole::Receiver>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload));
                 if (!decodeRootOfflineForTransport(std::move(rootPayload),
                         message.mRootMessage, params.mShrinkExpand.mNumWorkerThreads))
                 {
@@ -371,7 +232,7 @@ namespace osuCrypto::LogVole
             }
 
             Params child{};
-            if (!childParams(params, child))
+            if (!detail::childParams(params, child))
             {
                 throw std::runtime_error("LogVole receiver could not derive child parameters");
             }
@@ -414,8 +275,8 @@ namespace osuCrypto::LogVole
             {
                 u32 tauHi = 0;
                 RecursiveMode mode{};
-                if (!computeTauHi(cursor->mParams, tauHi) ||
-                    !recursiveMode(cursor->mParams, mode) || mode == RecursiveMode::Root ||
+                if (!detail::computeTauHi(cursor->mParams, tauHi) ||
+                    !detail::recursiveMode(cursor->mParams, mode) || mode == RecursiveMode::Root ||
                     !cursor->mNextLevelState)
                 {
                     break;
@@ -533,7 +394,7 @@ namespace osuCrypto::LogVole
             ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
 		u64 maxPayload = 0;
 		const bool validPayloadSize = shrinkExpandOfflinePayloadSize(input.mParams, maxPayload);
-		const auto payload = co_await recvFrame(sock, requirePayloadSize(validPayloadSize, maxPayload));
+		const auto payload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload));
 
         ShrinkExpandOfflineMessage message{};
         if (!decode(payload, message, input.mParams.mNumWorkerThreads))
@@ -601,12 +462,12 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole receiver could not prepare key-derive request");
         }
 
-        co_await sendFrame(sock, encode(request));
+        co_await detail::sendFrame(sock, encode(request));
 
 		u64 maxPayload = 0;
 		const bool validPayloadSize = keyDerivePayloadSize(input.mParams, request.mTau, maxPayload);
 		const auto responsePayload =
-			co_await recvFrame(sock, requirePayloadSize(validPayloadSize, maxPayload));
+			co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload));
 
         KeyDeriveResponse response{};
         if (!decode(responsePayload, response))
@@ -667,7 +528,7 @@ namespace osuCrypto::LogVole
         applySessionId(state, input.mSid);
 
         u32 tauHi = 0;
-        if (!computeTauHi(state.mParams, tauHi))
+        if (!detail::computeTauHi(state.mParams, tauHi))
         {
             throw std::runtime_error("LogVole receiver has invalid recursive online parameters");
         }
@@ -675,7 +536,7 @@ namespace osuCrypto::LogVole
         const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
         const u32 muHi = state.mParams.mShrinkExpand.mAlpha * tauHi * rho;
         RecursiveMode mode{};
-        if (rho == 0 || muHi == 0 || !recursiveMode(state.mParams, mode))
+        if (rho == 0 || muHi == 0 || !detail::recursiveMode(state.mParams, mode))
         {
             throw std::runtime_error("LogVole receiver has invalid recursive online shape");
         }
@@ -723,16 +584,16 @@ namespace osuCrypto::LogVole
                     AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
                     digestPayload = encode(digest);
                 }
-                digestFrameSize = frameBytes(digestPayload);
+                digestFrameSize = detail::frameBytes(digestPayload);
                 {
                     HostStep step("root: send digest", state.mParams.mW);
                     if (ownedFastPath)
                     {
-                        co_await sendOwnedRootFrame(rootSock, std::move(digestPayload));
+                        co_await detail::sendOwnedFrame(rootSock, std::move(digestPayload));
                     }
                     else
                     {
-                        co_await sendFrame(rootSock, digestPayload);
+                        co_await detail::sendFrame(rootSock, digestPayload);
                     }
                 }
 
@@ -767,7 +628,7 @@ namespace osuCrypto::LogVole
                         HostStep step("root: wait for sender response", state.mParams.mW);
                         u64 maxPayload = 0;
                         const bool validPayloadSize = rootResponsePayloadSize(state.mParams.mShrinkExpand.mRing, maxPayload);
-                        responsePayload = co_await recvFrame(rootSock, requirePayloadSize(validPayloadSize, maxPayload));
+                        responsePayload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload));
                     }
                     HostStep step("root: decode response", state.mParams.mW);
                     AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
@@ -800,7 +661,7 @@ namespace osuCrypto::LogVole
 #endif
             }
             output.mComm.mBytesSent = digestFrameSize;
-            output.mComm.mBytesReceived = nonInteractive ? 0 : frameBytes(responsePayload);
+            output.mComm.mBytesReceived = nonInteractive ? 0 : detail::frameBytes(responsePayload);
             co_return;
         }
 
@@ -1162,12 +1023,12 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole receiver could not shrink");
         }
 
-        co_await sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, shrink.mDigest)));
+        co_await detail::sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, shrink.mDigest)));
 
 		u64 maxPayload = 0;
 		const bool validPayloadSize = polyPayloadSize(state.mParams.mRing, maxPayload);
 		const auto skXPayload =
-			co_await recvFrame(sock, requirePayloadSize(validPayloadSize, maxPayload));
+			co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload));
 
         PolyMessage skXMessage{};
         if (!decode(skXPayload, skXMessage))

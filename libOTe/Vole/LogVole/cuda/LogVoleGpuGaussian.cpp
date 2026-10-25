@@ -233,11 +233,7 @@ namespace osuCrypto::LogVole::gpu
         auto pinned = hostOut ? outputCaches[threadStreamSlot()].acquire(outputBytes) : std::shared_ptr<u64>{};
         if (hostOut && !pinned) return false;
         std::vector<u8> completed(seeds.size(), 1), activeCompleted(activeSeeds.size());
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         if (!samples->resize(outputBytes / sizeof(u64)) ||
             !gpuMemsetZero(samples->data(), outputBytes, stream.raw())) return false;
         if (!activeSeeds.empty())
@@ -331,11 +327,7 @@ namespace osuCrypto::LogVole::gpu
         thread_local PinnedPrefixCache prefixCaches[kStreamSlots];
         auto pinned = prefixCaches[threadStreamSlot()].acquire(bytes);
         if (!pinned) return false;
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drain{stream};
+        StreamDrain drain{stream};
         deviceSeeds.reset(gpuMalloc(seeds.size_bytes()));
         devicePrefixes.reset(gpuMalloc(bytes));
         if (!deviceSeeds || !devicePrefixes ||

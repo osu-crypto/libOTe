@@ -151,6 +151,26 @@ namespace osuCrypto::LogVole
         return seal::util::multiply_uint_mod(lhs, rhs, modulus);
     }
 
+    namespace detail
+    {
+        inline u64 pow2Mod(u64 exp, u64 mod)
+        {
+            const seal::Modulus modulus(mod);
+            u64 result = 1;
+            u64 base = 2 % mod;
+            while (exp > 0)
+            {
+                if ((exp & 1u) != 0)
+                {
+                    result = mulMod(result, base, modulus);
+                }
+                base = mulMod(base, base, modulus);
+                exp >>= 1;
+            }
+            return result;
+        }
+    }
+
     inline u64 mulAddMod(u64 lhs, u64 rhs, u64 addend, const seal::Modulus& modulus)
     {
         return seal::util::multiply_add_uint_mod(lhs, rhs, addend, modulus);
@@ -169,8 +189,7 @@ namespace osuCrypto::LogVole
         const wideU64 t10 = wideU64Mul(lhs.mHi, rhs.mLo);
         const wideU64 t11 = wideU64Mul(lhs.mHi, rhs.mHi);
 
-        // word1 = t00.hi + t01.lo + t10.lo
-        u64 word1 = 0;
+        // Carry into word2 from t00.hi + t01.lo + t10.lo.
         unsigned char c1 = 0;
         unsigned char c2 = 0;
         {
@@ -178,7 +197,6 @@ namespace osuCrypto::LogVole
             c1 = seal::util::add_uint64(t00.mHi, t01.mLo, &acc);
             unsigned long long acc2 = 0;
             c2 = seal::util::add_uint64(static_cast<u64>(acc), t10.mLo, &acc2);
-            word1 = static_cast<u64>(acc2);
         }
         const u64 carry1 = static_cast<u64>(c1) + static_cast<u64>(c2);
 
@@ -197,7 +215,6 @@ namespace osuCrypto::LogVole
         }
 
         const u64 word3 = t11.mHi + carry2;
-        (void)word1;
         return { word2, word3 };
     }
 
@@ -217,8 +234,7 @@ namespace osuCrypto::LogVole
         for (int i = 0; i < 2 && (r.mHi != 0 || r.mLo >= divisor); ++i)
         {
             r = wideU64Sub(r, wideU64{ divisor, 0 });
-            unsigned char carry = 0;
-            q = wideU64Add(q, wideU64{ 1, 0 }, &carry);
+            q = wideU64Add(q, wideU64{ 1, 0 });
         }
 
         quotient = q;

@@ -23,14 +23,6 @@
 #include <mutex>
 #include <unordered_map>
 
-#if defined(ENABLE_LOGVOLE_CUDA)
-namespace osuCrypto::LogVole::gpu
-{
-    bool setupLencInputBatchMatches(const RingNttContext&,
-        const DeviceBatch&, std::size_t expectedCount, u64 ownerRunId);
-}
-#endif
-
 namespace osuCrypto::LogVole
 {
     namespace
@@ -56,24 +48,6 @@ namespace osuCrypto::LogVole
 #endif
         }
 
-        u64 pow2Mod(u64 exp, u64 mod)
-        {
-            const seal::Modulus modulus(mod);
-            u64 result = 1;
-            u64 base = 2 % mod;
-            u64 e = exp;
-            while (e > 0)
-            {
-                if ((e & 1u) != 0)
-                {
-                    result = mulMod(result, base, modulus);
-                }
-                base = mulMod(base, base, modulus);
-                e >>= 1;
-            }
-            return result;
-        }
-
         bool lencTreeWidth(std::size_t count, u32 requested, u32& width)
         {
             // A LENC tree needs an internal node for its digest and its first
@@ -96,12 +70,6 @@ namespace osuCrypto::LogVole
                 ++out;
             }
             return out;
-        }
-
-        bool zeroPoly(const RingNttContext& ctx, RnsPoly& out)
-        {
-            resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-            return true;
         }
 
         bool validateKeyDeriveSenderInput(const KeyDeriveSenderInput& input)
@@ -335,10 +303,7 @@ namespace osuCrypto::LogVole
             }
 
             RnsPoly accNtt{};
-            if (!zeroPoly(ctx, accNtt))
-            {
-                return false;
-            }
+            resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
             if (!dyadicInnerProductNttInplace({leftPtrs, size}, {rightPtrs, size}, accNtt, ctx))
                 return false;
@@ -1228,7 +1193,7 @@ namespace osuCrypto::LogVole
                         {
                             const u64 mod = moduli[modIdx].value();
                             const std::size_t offset = modIdx * n;
-                            const u64 factor = pow2Mod(shift, mod);
+                            const u64 factor = detail::pow2Mod(shift, mod);
                             for (std::size_t i = 0; i < n; ++i)
                             {
                                 const std::size_t idx = offset + i;
@@ -1848,7 +1813,7 @@ namespace osuCrypto::LogVole
                                 const auto& modulus = moduli[modIdx];
                                 const u64 mod = modulus.value();
                                 const std::size_t offset = modIdx * n;
-                                const u64 factor = pow2Mod(shift, mod);
+                                const u64 factor = detail::pow2Mod(shift, mod);
                                 seal::util::MultiplyUIntModOperand operand;
                                 if (setupBatch) operand.set(factor, modulus);
                                 for (std::size_t i = 0; i < n; ++i)

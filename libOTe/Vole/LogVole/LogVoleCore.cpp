@@ -29,19 +29,6 @@
 #include <stdexcept>
 #include <utility>
 
-#if defined(ENABLE_LOGVOLE_CUDA)
-namespace osuCrypto::LogVole::gpu
-{
-    // Declared in the CUDA protocol header when the sender producer is wired.
-    bool setupDeltaBatchMatches(const RingNttContext&, const DeviceBatch&,
-        std::size_t expectedCount, u64 ownerRunId);
-    DeviceBatchPtr seedLabelRepResident(const RingNttContext&,
-        const DeviceBatch&, u32 gamma, u32 alpha, u32 tau);
-    bool setupSeedLabelRepBatchMatches(const RingNttContext&,
-        const DeviceBatch&, std::size_t expectedCount, u64 ownerRunId);
-}
-#endif
-
 namespace osuCrypto::LogVole
 {
     namespace
@@ -141,11 +128,6 @@ namespace osuCrypto::LogVole
             }
         };
 
-        bool makeContext(const RingParams& ring, RingNttContext& ctx)
-        {
-            return makeRingNttContext(ring, ctx);
-        }
-
         bool setupBatchNttEnabled()
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -203,25 +185,6 @@ namespace osuCrypto::LogVole
             mutable std::once_flag mOnce;
             mutable RingTensor mHost;
         };
-
-        u64 pow2Mod(u64 exp, u64 mod)
-        {
-            const seal::Modulus modulus(mod);
-            u64 result = 1;
-            u64 base = 2 % mod;
-            while (exp > 0)
-            {
-                if ((exp & 1) != 0)
-                {
-                    result = mulMod(result, base, modulus);
-                }
-
-                base = mulMod(base, base, modulus);
-                exp >>= 1;
-            }
-
-            return result;
-        }
 
         double safeLog2(double value)
         {
@@ -743,7 +706,7 @@ namespace osuCrypto::LogVole
         bool sampleRootKPrime(const SenderState& state, PRNG& prng, RnsPoly& out)
         {
             RingNttContext ctx{};
-            if (!makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+            if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
             {
                 return false;
             }
@@ -1039,24 +1002,6 @@ namespace osuCrypto::LogVole
             Params seedParams = params;
             seedParams.mShrinkExpand = seParams;
             return seedParams;
-        }
-
-        void applySessionId(SenderState& state, u64 sid)
-        {
-            state.mParams.mSessionId = sid;
-            if (state.mNextLevelState)
-            {
-                applySessionId(*state.mNextLevelState, sid);
-            }
-        }
-
-        void applySessionId(ReceiverState& state, u64 sid)
-        {
-            state.mParams.mSessionId = sid;
-            if (state.mNextLevelState)
-            {
-                applySessionId(*state.mNextLevelState, sid);
-            }
         }
 
         bool evalRootTopCtNtt(
@@ -1483,7 +1428,7 @@ namespace osuCrypto::LogVole
         {
             const auto& modulus = hostModuli[modIdx];
             const u64 mod = modulus.value();
-            const u64 factor = pow2Mod(shift, mod);
+            const u64 factor = detail::pow2Mod(shift, mod);
             const std::size_t offset = modIdx * n;
             for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
             {
@@ -2127,7 +2072,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeContext(se.mRing, ctx))
+        if (!makeRingNttContext(se.mRing, ctx))
         {
             return false;
         }
@@ -2526,7 +2471,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeContext(message.mRing, ctx))
+        if (!makeRingNttContext(message.mRing, ctx))
         {
             return false;
         }
@@ -2618,7 +2563,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+        if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
         {
             return false;
         }
@@ -3100,7 +3045,7 @@ namespace osuCrypto::LogVole
         RingNttContext ctx{};
         if (params.mOnlineMode != OnlineMode::NonInteractive ||
             params.mCt2SeedMode != Ct2SeedMode::PublicSeed ||
-            !makeContext(params.mShrinkExpand.mRing, ctx) ||
+            !makeRingNttContext(params.mShrinkExpand.mRing, ctx) ||
             !validateRingPolyShape(dPrime, ctx.mParams)) return false;
         const u64 degree = ctx.mParams.mPolyModulusDegree;
         for (std::size_t limb = 0; limb < ringModulusCount(ctx); ++limb)
@@ -3178,7 +3123,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+        if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
         {
             return false;
         }
@@ -3421,7 +3366,7 @@ namespace osuCrypto::LogVole
         if (deviceOut && gpu::rootKPrimeSamplingEnabled())
         {
             RingNttContext ctx{};
-            if (!makeContext(state.mParams.mShrinkExpand.mRing, ctx)) return false;
+            if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx)) return false;
             const bool production =
                 (ctx.mParams.mPolyModulusDegree == 16384u && ringModulusCount(ctx) == 8u) ||
                 (ctx.mParams.mPolyModulusDegree == 8192u && ringModulusCount(ctx) == 4u);
@@ -3494,7 +3439,7 @@ namespace osuCrypto::LogVole
         const u32 leftWidth = rootLeftWidth(tauHi, rho);
         RingNttContext ctx{};
         if (rho == 0 ||
-            !makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+            !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
         {
             return false;
         }
@@ -3600,7 +3545,7 @@ namespace osuCrypto::LogVole
                         std::static_pointer_cast<gpu::DeviceBatch>(
                             state.mRootKPrimeRtDevice);
                     bool rootOkDev = rootPublicSeed || deferRootValidation;
-                    if (makeContext(state.mParams.mShrinkExpand.mRing, rootCtx) &&
+                    if (makeRingNttContext(state.mParams.mShrinkExpand.mRing, rootCtx) &&
                         gpu::rootSenderTbkDevice(
                             state.mShrinkExpandState, rootCtx, seed, state.mParams.mSessionId,
                             *state.mRootDPrimeRt, state.mRootDPrimeHash, *state.mRootKPrimeRt,
@@ -3761,7 +3706,7 @@ namespace osuCrypto::LogVole
             {
                 HostStep step("send: level expand (device)", state.mParams.mW);
                 RingNttContext gpuCtx{};
-                if (!makeContext(state.mParams.mShrinkExpand.mRing, gpuCtx))
+                if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, gpuCtx))
                 {
                     return false;
                 }
@@ -3868,7 +3813,7 @@ namespace osuCrypto::LogVole
             RingNttContext checkCtx{};
             std::vector<RoundingCheckConstants> rounding;
             RoundingCheckConstants leafRounding;
-            if (earlyCheck && (!makeContext(seedParams.mShrinkExpand.mRing, checkCtx) ||
+            if (earlyCheck && (!makeRingNttContext(seedParams.mShrinkExpand.mRing, checkCtx) ||
                 !(isLeaf ? buildLeafRoundingCheckConstants(seedParams, checkCtx, leafRounding)
                          : buildRoundingCheckConstants(seedParams, checkCtx, rounding)))) return false;
             std::atomic<bool> candidateValid{true};
@@ -4024,7 +3969,7 @@ namespace osuCrypto::LogVole
                 gpu::deferredGoldenValidationEnabled())
             {
                 RingNttContext ctx{};
-                if (makeContext(state.mParams.mShrinkExpand.mRing, ctx) &&
+                if (makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx) &&
                     gpu::beginGoldenValidationAttempt(ctx))
                 {
                     RecursiveSeedEvalOutput deferred{};
@@ -5187,7 +5132,7 @@ namespace osuCrypto::LogVole
             u32 muHiDev = 0;
             RingNttContext devCtx{};
             if (!computeMuHi(state.mParams, muHiDev) ||
-                !makeContext(state.mParams.mShrinkExpand.mRing, devCtx))
+                !makeRingNttContext(state.mParams.mShrinkExpand.mRing, devCtx))
             {
                 return false;
             }
@@ -5357,7 +5302,7 @@ namespace osuCrypto::LogVole
         const bool haveDeviceTree = static_cast<bool>(digestState.mLeftTreeGpu);
         if (rho == 0 ||
             (!haveHostHatD && !haveDeviceTree) ||
-            !makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+            !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
         {
             return false;
         }
@@ -5678,7 +5623,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeContext(ring, ctx))
+        if (!makeRingNttContext(ring, ctx))
         {
             return false;
         }
@@ -5722,7 +5667,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out)
     {
         RingNttContext ctx{};
-        if (!makeContext(ring, ctx))
+        if (!makeRingNttContext(ring, ctx))
         {
             return false;
         }
@@ -5743,7 +5688,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeContext(ring, ctx))
+        if (!makeRingNttContext(ring, ctx))
         {
             return false;
         }
@@ -5820,7 +5765,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeContext(ring, ctx))
+        if (!makeRingNttContext(ring, ctx))
         {
             return false;
         }
@@ -5931,7 +5876,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out)
     {
         RingNttContext ctx{};
-        if (!makeContext(ring, ctx))
+        if (!makeRingNttContext(ring, ctx))
         {
             return false;
         }
@@ -5942,7 +5887,7 @@ namespace osuCrypto::LogVole
     bool validateGoldenSeedSearch(const Params& params)
     {
         RingNttContext ctx{};
-        return makeContext(params.mShrinkExpand.mRing, ctx) && validateGoldenSeedSearchBudget(params, ctx);
+        return makeRingNttContext(params.mShrinkExpand.mRing, ctx) && validateGoldenSeedSearchBudget(params, ctx);
     }
 
     double noiseBoundLog2(const Params& params)
@@ -6028,7 +5973,7 @@ namespace osuCrypto::LogVole
             !validateRingBatchShape(tbk, params.mShrinkExpand.mRing)) return false;
         RingNttContext ctx{};
         RoundingCheckConstants constants;
-        if (!makeContext(params.mShrinkExpand.mRing, ctx) ||
+        if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx) ||
             !buildLeafRoundingCheckConstants(params, ctx, constants)) return false;
         std::atomic<bool> accepted{true};
         if (!detail::runParallelTasks(tbk.size(), params.mShrinkExpand.mNumWorkerThreads,
@@ -6046,13 +5991,13 @@ namespace osuCrypto::LogVole
     bool validateNoGoldenSeedBudget(const Params& params)
     {
         RingNttContext ctx{};
-        return makeContext(params.mShrinkExpand.mRing, ctx) && validateNoGoldenSeedBudgetImpl(params, ctx);
+        return makeRingNttContext(params.mShrinkExpand.mRing, ctx) && validateNoGoldenSeedBudgetImpl(params, ctx);
     }
 
     double noGoldenSeedFailureBits(const Params& params)
     {
         RingNttContext ctx{};
-        if (!makeContext(params.mShrinkExpand.mRing, ctx))
+        if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx))
         {
             return -std::numeric_limits<double>::infinity();
         }
@@ -6116,7 +6061,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeContext(params.mShrinkExpand.mRing, ctx))
+        if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx))
         {
             return false;
         }
@@ -6169,7 +6114,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeContext(params.mShrinkExpand.mRing, ctx) ||
+        if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx) ||
             !validateGoldenSeedSearchBudget(params, ctx))
         {
             return false;

@@ -28,6 +28,7 @@
 #include "seal/util/uintcore.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -283,36 +284,43 @@ namespace osuCrypto::LogVole
             return out;
         }
 
+        enum class RingOp : std::size_t
+        {
+            Ntt,
+            Intt,
+            Add,
+            Sub,
+            Mul,
+            MulScalar,
+            DyadicMulAdd,
+            GadgetDecompose,
+            GadgetRecompose,
+            PrngPoly,
+            ErrorAdd,
+            Count
+        };
+
+        // Keep reset and flush in the public counters' established order.
+        constexpr std::array ringOpCounters{
+            &RingOpsStats::mNttCount,
+            &RingOpsStats::mInttCount,
+            &RingOpsStats::mAddCount,
+            &RingOpsStats::mSubCount,
+            &RingOpsStats::mMulCount,
+            &RingOpsStats::mMulScalarCount,
+            &RingOpsStats::mDyadicMulAddCount,
+            &RingOpsStats::mGadgetDecomposeCount,
+            &RingOpsStats::mGadgetRecomposeCount,
+            &RingOpsStats::mPrngPolyCount,
+            &RingOpsStats::mErrorAddCount
+        };
+        static_assert(ringOpCounters.size() == static_cast<std::size_t>(RingOp::Count));
+
         struct PendingRingOpsStats
         {
             u64 mEpoch = 0;
             bool mEpochInitialized = false;
-            u64 mNttCount = 0;
-            u64 mInttCount = 0;
-            u64 mAddCount = 0;
-            u64 mSubCount = 0;
-            u64 mMulCount = 0;
-            u64 mMulScalarCount = 0;
-            u64 mDyadicMulAddCount = 0;
-            u64 mGadgetDecomposeCount = 0;
-            u64 mGadgetRecomposeCount = 0;
-            u64 mPrngPolyCount = 0;
-            u64 mErrorAddCount = 0;
-
-            void clear()
-            {
-                mNttCount = 0;
-                mInttCount = 0;
-                mAddCount = 0;
-                mSubCount = 0;
-                mMulCount = 0;
-                mMulScalarCount = 0;
-                mDyadicMulAddCount = 0;
-                mGadgetDecomposeCount = 0;
-                mGadgetRecomposeCount = 0;
-                mPrngPolyCount = 0;
-                mErrorAddCount = 0;
-            }
+            std::array<u64, ringOpCounters.size()> mCounts{};
 
             void syncEpoch()
             {
@@ -326,67 +334,19 @@ namespace osuCrypto::LogVole
 
                 if (mEpoch != globalEpoch)
                 {
-                    clear();
+                    mCounts.fill(0);
                     mEpoch = globalEpoch;
                 }
             }
 
             void flush()
             {
-                if (mNttCount)
+                for (std::size_t i = 0; i < mCounts.size(); ++i)
                 {
-                    globalRingOpsStats.mNttCount.fetch_add(mNttCount, std::memory_order_relaxed);
-                    mNttCount = 0;
-                }
-                if (mInttCount)
-                {
-                    globalRingOpsStats.mInttCount.fetch_add(mInttCount, std::memory_order_relaxed);
-                    mInttCount = 0;
-                }
-                if (mAddCount)
-                {
-                    globalRingOpsStats.mAddCount.fetch_add(mAddCount, std::memory_order_relaxed);
-                    mAddCount = 0;
-                }
-                if (mSubCount)
-                {
-                    globalRingOpsStats.mSubCount.fetch_add(mSubCount, std::memory_order_relaxed);
-                    mSubCount = 0;
-                }
-                if (mMulCount)
-                {
-                    globalRingOpsStats.mMulCount.fetch_add(mMulCount, std::memory_order_relaxed);
-                    mMulCount = 0;
-                }
-                if (mMulScalarCount)
-                {
-                    globalRingOpsStats.mMulScalarCount.fetch_add(mMulScalarCount, std::memory_order_relaxed);
-                    mMulScalarCount = 0;
-                }
-                if (mDyadicMulAddCount)
-                {
-                    globalRingOpsStats.mDyadicMulAddCount.fetch_add(mDyadicMulAddCount, std::memory_order_relaxed);
-                    mDyadicMulAddCount = 0;
-                }
-                if (mGadgetDecomposeCount)
-                {
-                    globalRingOpsStats.mGadgetDecomposeCount.fetch_add(mGadgetDecomposeCount, std::memory_order_relaxed);
-                    mGadgetDecomposeCount = 0;
-                }
-                if (mGadgetRecomposeCount)
-                {
-                    globalRingOpsStats.mGadgetRecomposeCount.fetch_add(mGadgetRecomposeCount, std::memory_order_relaxed);
-                    mGadgetRecomposeCount = 0;
-                }
-                if (mPrngPolyCount)
-                {
-                    globalRingOpsStats.mPrngPolyCount.fetch_add(mPrngPolyCount, std::memory_order_relaxed);
-                    mPrngPolyCount = 0;
-                }
-                if (mErrorAddCount)
-                {
-                    globalRingOpsStats.mErrorAddCount.fetch_add(mErrorAddCount, std::memory_order_relaxed);
-                    mErrorAddCount = 0;
+                    auto& count = mCounts[i];
+                    if (!count) continue;
+                    (globalRingOpsStats.*ringOpCounters[i]).fetch_add(count, std::memory_order_relaxed);
+                    count = 0;
                 }
             }
 
@@ -398,14 +358,16 @@ namespace osuCrypto::LogVole
 
         thread_local PendingRingOpsStats tlsRingOpsStats{};
 
-        void bumpRingStat(std::atomic<u64>& global, u64& local)
+        void bumpRingStat(RingOp operation)
         {
             constexpr u64 flushThreshold = 256;
             tlsRingOpsStats.syncEpoch();
+            const auto index = static_cast<std::size_t>(operation);
+            auto& local = tlsRingOpsStats.mCounts[index];
             ++local;
             if (local >= flushThreshold)
             {
-                global.fetch_add(local, std::memory_order_relaxed);
+                (globalRingOpsStats.*ringOpCounters[index]).fetch_add(local, std::memory_order_relaxed);
                 local = 0;
             }
         }
@@ -516,17 +478,8 @@ namespace osuCrypto::LogVole
 
     void RingOpsStats::reset()
     {
-        mNttCount.store(0, std::memory_order_relaxed);
-        mInttCount.store(0, std::memory_order_relaxed);
-        mAddCount.store(0, std::memory_order_relaxed);
-        mSubCount.store(0, std::memory_order_relaxed);
-        mMulCount.store(0, std::memory_order_relaxed);
-        mMulScalarCount.store(0, std::memory_order_relaxed);
-        mDyadicMulAddCount.store(0, std::memory_order_relaxed);
-        mGadgetDecomposeCount.store(0, std::memory_order_relaxed);
-        mGadgetRecomposeCount.store(0, std::memory_order_relaxed);
-        mPrngPolyCount.store(0, std::memory_order_relaxed);
-        mErrorAddCount.store(0, std::memory_order_relaxed);
+        for (auto counter : ringOpCounters)
+            (this->*counter).store(0, std::memory_order_relaxed);
         resetEpoch.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -1222,7 +1175,7 @@ namespace osuCrypto::LogVole
             seal::util::ntt_negacyclic_harvey(poly.mCoeffs.data() + (modIdx * n), tables[modIdx]);
         }
 
-        bumpRingStat(globalRingOpsStats.mNttCount, tlsRingOpsStats.mNttCount);
+        bumpRingStat(RingOp::Ntt);
         return true;
     }
 
@@ -1256,7 +1209,7 @@ namespace osuCrypto::LogVole
             seal::util::inverse_ntt_negacyclic_harvey(poly.mCoeffs.data() + (modIdx * n), tables[modIdx]);
         }
 
-        bumpRingStat(globalRingOpsStats.mInttCount, tlsRingOpsStats.mInttCount);
+        bumpRingStat(RingOp::Intt);
         // SEAL's non-lazy inverse already returns coefficients in [0, q).
         return true;
     }
@@ -1295,7 +1248,7 @@ namespace osuCrypto::LogVole
             if (gpu::nttHostBatch(ctx, polys, false, true))
             {
                 for (std::size_t i = 0; i < polys.size(); ++i)
-                    bumpRingStat(globalRingOpsStats.mNttCount, tlsRingOpsStats.mNttCount);
+                    bumpRingStat(RingOp::Ntt);
                 return true;
             }
             const char* strict = std::getenv("LV_GPU_SETUP_NTT_CANONICALIZE_STRICT");
@@ -1314,7 +1267,7 @@ namespace osuCrypto::LogVole
         {
             for (std::size_t i = 0; i < polys.size(); ++i)
             {
-                bumpRingStat(globalRingOpsStats.mNttCount, tlsRingOpsStats.mNttCount);
+                bumpRingStat(RingOp::Ntt);
             }
             return true;
         }
@@ -1343,7 +1296,7 @@ namespace osuCrypto::LogVole
             {
                 for (auto& poly : polys)
                 {
-                    bumpRingStat(globalRingOpsStats.mInttCount, tlsRingOpsStats.mInttCount);
+                    bumpRingStat(RingOp::Intt);
                     if (!deviceCanonicalize && !canonicalizePoly(poly, ctx)) return false;
                 }
                 return true;
@@ -1406,7 +1359,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(globalRingOpsStats.mDyadicMulAddCount, tlsRingOpsStats.mDyadicMulAddCount);
+        bumpRingStat(RingOp::DyadicMulAdd);
         return true;
     }
 
@@ -1444,7 +1397,7 @@ namespace osuCrypto::LogVole
                             reduceU64(c[i], modulus), modulus);
         }
         for (std::size_t t = 0; t < left.size(); ++t)
-            bumpRingStat(globalRingOpsStats.mDyadicMulAddCount, tlsRingOpsStats.mDyadicMulAddCount);
+            bumpRingStat(RingOp::DyadicMulAdd);
         return true;
     }
 
@@ -1462,7 +1415,7 @@ namespace osuCrypto::LogVole
         seal::util::PolyIter aIter(a.mCoeffs.data(), n, moduli.size());
         seal::util::ConstPolyIter bIter(b.mCoeffs.data(), n, moduli.size());
         seal::util::add_poly_coeffmod(aIter[0], bIter[0], moduli.size(), moduli, aIter[0]);
-        bumpRingStat(globalRingOpsStats.mAddCount, tlsRingOpsStats.mAddCount);
+        bumpRingStat(RingOp::Add);
         return true;
     }
 
@@ -1486,7 +1439,7 @@ namespace osuCrypto::LogVole
         seal::util::PolyIter aIter(a.mCoeffs.data(), n, moduli.size());
         seal::util::ConstPolyIter bIter(b.mCoeffs.data(), n, moduli.size());
         seal::util::sub_poly_coeffmod(aIter[0], bIter[0], moduli.size(), moduli, aIter[0]);
-        bumpRingStat(globalRingOpsStats.mSubCount, tlsRingOpsStats.mSubCount);
+        bumpRingStat(RingOp::Sub);
         return true;
     }
 
@@ -1514,7 +1467,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        bumpRingStat(globalRingOpsStats.mMulCount, tlsRingOpsStats.mMulCount);
+        bumpRingStat(RingOp::Mul);
         return true;
     }
 
@@ -1548,7 +1501,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(globalRingOpsStats.mMulScalarCount, tlsRingOpsStats.mMulScalarCount);
+        bumpRingStat(RingOp::MulScalar);
         return true;
     }
 
@@ -1594,7 +1547,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(globalRingOpsStats.mGadgetDecomposeCount, tlsRingOpsStats.mGadgetDecomposeCount);
+        bumpRingStat(RingOp::GadgetDecompose);
         return true;
     }
 
@@ -1645,7 +1598,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(globalRingOpsStats.mGadgetRecomposeCount, tlsRingOpsStats.mGadgetRecomposeCount);
+        bumpRingStat(RingOp::GadgetRecompose);
         return true;
     }
 
@@ -1700,7 +1653,7 @@ namespace osuCrypto::LogVole
         if (startLevel == 0 && levels == 1 && detail::cpuLowDigitRns(
             canonical.mCoeffs.data(), out[0].mCoeffs.data(), n, digitBits, baseQ))
         {
-            bumpRingStat(globalRingOpsStats.mGadgetDecomposeCount, tlsRingOpsStats.mGadgetDecomposeCount);
+            bumpRingStat(RingOp::GadgetDecompose);
             return true;
         }
         auto pool = seal::MemoryPoolHandle::ThreadLocal();
@@ -1756,7 +1709,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(globalRingOpsStats.mGadgetDecomposeCount, tlsRingOpsStats.mGadgetDecomposeCount);
+        bumpRingStat(RingOp::GadgetDecompose);
         return true;
     }
 
@@ -1798,14 +1751,14 @@ namespace osuCrypto::LogVole
         // compose per coefficient, so the work per byte moved is high.
         if (gpu::gadgetDecomposeHost(ctx, canonical, digitBits, startLevel, levels, true, out))
         {
-            bumpRingStat(globalRingOpsStats.mGadgetDecomposeCount, tlsRingOpsStats.mGadgetDecomposeCount);
+            bumpRingStat(RingOp::GadgetDecompose);
             return true;
         }
 #endif
         const bool ok = centeredDecomposeSlow(canonical, digitBits, startLevel, levels, ctx, out);
         if (ok)
         {
-            bumpRingStat(globalRingOpsStats.mGadgetDecomposeCount, tlsRingOpsStats.mGadgetDecomposeCount);
+            bumpRingStat(RingOp::GadgetDecompose);
         }
         return ok;
     }
@@ -1862,7 +1815,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(globalRingOpsStats.mGadgetRecomposeCount, tlsRingOpsStats.mGadgetRecomposeCount);
+        bumpRingStat(RingOp::GadgetRecompose);
         return true;
     }
 
@@ -1983,7 +1936,7 @@ namespace osuCrypto::LogVole
         {
             auto prng = polySamplingPrngFactory()->create(sealSeedFromBlock(polySeed));
             detail::cpuSamplePolyUniform(prng, contextData->parms(), out.mCoeffs.data());
-            bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+            bumpRingStat(RingOp::PrngPoly);
             return;
         }
 
@@ -2002,7 +1955,7 @@ namespace osuCrypto::LogVole
                 out.mCoeffs[offset + i] = rng.get<u64>() % mod;
             }
         }
-        bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+        bumpRingStat(RingOp::PrngPoly);
     }
 
     RnsPoly deriveUniformPolyFromSeed(const RingNttContext& ctx, block seed, u64 domainTag, u32 index)
@@ -2031,7 +1984,7 @@ namespace osuCrypto::LogVole
         resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
         auto source = polySamplingPrngFactory()->create(seed);
         detail::cpuSamplePolyUniform(source, data->parms(), out.mCoeffs.data());
-        bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+        bumpRingStat(RingOp::PrngPoly);
         return out;
     }
 
@@ -2090,9 +2043,9 @@ namespace osuCrypto::LogVole
         {
             for (std::size_t i = 0; i < seeds.size(); ++i)
             {
-                bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+                bumpRingStat(RingOp::PrngPoly);
                 if (actualNtt)
-                    bumpRingStat(globalRingOpsStats.mNttCount, tlsRingOpsStats.mNttCount);
+                    bumpRingStat(RingOp::Ntt);
             }
             return out;
         }
@@ -2136,7 +2089,7 @@ namespace osuCrypto::LogVole
                 out.mCoeffs[offset + i] = prng.get<u64>() % mod;
             }
         }
-        bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+        bumpRingStat(RingOp::PrngPoly);
         return out;
     }
 
@@ -2191,8 +2144,7 @@ namespace osuCrypto::LogVole
                     currentProtocolCacheScope().mRunId))
             {
                 for (u32 row = 0; row < count; ++row)
-                    bumpRingStat(globalRingOpsStats.mPrngPolyCount,
-                        tlsRingOpsStats.mPrngPolyCount);
+                    bumpRingStat(RingOp::PrngPoly);
                 resident = std::move(next);
                 lazy = std::move(host);
                 eager.clear();
@@ -2256,7 +2208,7 @@ namespace osuCrypto::LogVole
             {
                 for (u32 i = 0; i < count; ++i)
                 {
-                    bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+                    bumpRingStat(RingOp::PrngPoly);
                 }
                 out = std::move(gpuOut);
                 return;
@@ -2345,9 +2297,9 @@ namespace osuCrypto::LogVole
             !next || next->count() != count) return false;
         for (u32 i = 0; i < count; ++i)
         {
-            bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+            bumpRingStat(RingOp::PrngPoly);
             if (actualNtt)
-                bumpRingStat(globalRingOpsStats.mNttCount, tlsRingOpsStats.mNttCount);
+                bumpRingStat(RingOp::Ntt);
         }
         out = std::move(next);
         return true;
@@ -2511,7 +2463,7 @@ namespace osuCrypto::LogVole
         auto sealPrng = errorSamplingPrngFactory()->create(seed);
         samplePolyNormal(sealPrng, hostContext->key_context_data()->parms(),
             limb0.data(), noiseStandardDeviation, noiseMaxDeviation, true);
-        bumpRingStat(globalRingOpsStats.mErrorAddCount, tlsRingOpsStats.mErrorAddCount);
+        bumpRingStat(RingOp::ErrorAdd);
         return true;
     }
 
@@ -2619,7 +2571,7 @@ namespace osuCrypto::LogVole
                     }
                     std::memcpy(destination.data(), sampled.mValues.mData.get() + task * n,
                         destination.size_bytes());
-                    bumpRingStat(globalRingOpsStats.mErrorAddCount, tlsRingOpsStats.mErrorAddCount);
+                    bumpRingStat(RingOp::ErrorAdd);
                     return true;
                 });
         }
@@ -2669,7 +2621,7 @@ namespace osuCrypto::LogVole
             if (!hostContext || !hostContext->key_context_data()) return false;
             samplePolyNormal(source, hostContext->key_context_data()->parms(),
                 destination.data(), noiseStandardDeviation, noiseMaxDeviation, true);
-            bumpRingStat(globalRingOpsStats.mErrorAddCount, tlsRingOpsStats.mErrorAddCount);
+            bumpRingStat(RingOp::ErrorAdd);
             return true;
         });
     }
@@ -2732,7 +2684,7 @@ namespace osuCrypto::LogVole
                             ringModulusValue(ctx, 0), retried,
                             static_cast<u32>(retryWords))) break;
                     auto& stream = gpu::threadSampleStream();
-                    struct Drain { gpu::GpuStream& stream; ~Drain() { stream.sync(); } } drain{stream};
+                    gpu::StreamDrain drain{stream};
                     std::vector<std::size_t> remaining;
                     for (std::size_t i = 0; i < incomplete.size(); ++i)
                     {
@@ -2767,7 +2719,7 @@ namespace osuCrypto::LogVole
                 if (ready && !incomplete.empty())
                 {
                     auto& stream = gpu::threadSampleStream();
-                    struct Drain { gpu::GpuStream& stream; ~Drain() { stream.sync(); } } drain{stream};
+                    gpu::StreamDrain drain{stream};
                     for (std::size_t i = 0; ready && i < incomplete.size(); ++i)
                         ready = gpu::gpuMemcpyH2D(sampled.mValues->data() + incomplete[i] * n,
                             repaired[i].data(), n * sizeof(u64), stream.raw());
@@ -2777,7 +2729,7 @@ namespace osuCrypto::LogVole
                 {
                     for (std::size_t row = 0; row < seeds.size(); ++row)
                         if ((active.empty() || active[row]) && sampled.mComplete[row])
-                            bumpRingStat(globalRingOpsStats.mErrorAddCount, tlsRingOpsStats.mErrorAddCount);
+                            bumpRingStat(RingOp::ErrorAdd);
                     host.clear();
                     device = std::move(sampled.mValues);
                     return true;
@@ -2882,7 +2834,7 @@ namespace osuCrypto::LogVole
         seal::util::PolyIter destinationIter(poly.mCoeffs.data(), coeffCount, coeffModulusSize);
         seal::util::add_poly_coeffmod(destinationIter[0], tempIter, coeffModulusSize, coeffModulus, destinationIter[0]);
 
-        bumpRingStat(globalRingOpsStats.mErrorAddCount, tlsRingOpsStats.mErrorAddCount);
+        bumpRingStat(RingOp::ErrorAdd);
         return true;
     }
 
