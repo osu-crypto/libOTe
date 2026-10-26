@@ -112,14 +112,17 @@ on platform/dependencies. The `ON`/`OFF` options include
  **DPF:**
  * `ENABLE_REGULAR_DPF` the Boyle et al [[BGI18]](https://eprint.iacr.org/2018/707.pdf) semi-honest protocol.
  * `ENABLE_TERNARY_DPF` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
- * `ENABLE_SPARSE_DPF` experimental protocol allowing a sparse set of DPF leaf values.
+ * `ENABLE_SPARSE_DPF` experimental sparse DPF, Waterfall DMPF, and Reverse-Cuckoo DMPF.
 
  **Beaver Triples:**
  * `ENABLE_FOLEAGE` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
  * `ENABLE_SILENTOT` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol. 
 
-
  Addition options can be set for cryptoTools. See the cmake output.
+
+With `-DENABLE_ASAN=ON`, GCC 13–16 builds disable ASan stack instrumentation
+to avoid coroutine stack growth; heap and global checks remain enabled. Clang
+retains full ASan coverage.
 
 ### Dependencies
 
