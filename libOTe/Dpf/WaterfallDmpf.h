@@ -583,16 +583,18 @@ namespace osuCrypto
 
 				mLeafShares.resize(mSparseSets.size());
 				mLeafTags.resize(mSparseSets.size());
-				for (u64 tree = 0; tree < mSparseSets.size(); ++tree)
-				{
-					mLeafShares[tree].resize(mSparseSets[tree].size());
-					mLeafTags[tree].resize(mSparseSets[tree].size());
-				}
 				co_await mSparseDpf.expand(
 					punctures,
 					{},
 					[&](u64 tree, u64 leaf, block value, u8 tag)
 					{
+						// Allocate a row only as its leaves arrive, while SparseDpf
+						// releases completed trees' setup nodes.
+						if (mLeafShares[tree].empty())
+						{
+							mLeafShares[tree].resize(mSparseSets[tree].size());
+							mLeafTags[tree].resize(mSparseSets[tree].size());
+						}
 						mLeafShares[tree][leaf] = value;
 						mLeafTags[tree][leaf] = tag;
 					},

@@ -945,6 +945,10 @@ namespace osuCrypto
 					else
 						output(r, b, leafSeed, leafTag);
 				}
+				// All correction levels for this tree have been consumed. Free its
+				// setup nodes before later trees' leaf outputs are materialized.
+				tree.mLevels.clear();
+				tree.mNodeStorage.clear();
 			}
 			addTime(mLastProfile.mLeafMs, profileBegin);
 
