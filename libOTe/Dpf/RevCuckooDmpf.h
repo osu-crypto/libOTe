@@ -40,8 +40,8 @@ namespace osuCrypto
 		// lambda
 		u64 mLinearSecParam = 0;
 
-		// Fixed margin for batching and the structured-relation loss analyzed in
-		// RevCuckoo/ANALYSIS.md. This is independent of lambda.
+		// Fixed margin for the batch union bound and structured input relations
+		// in the supported Ring-LPN profile; independent of lambda.
 		static constexpr u64 HashWidthSlack = 8;
 
 		u64 mCuckooSecParam = 0;

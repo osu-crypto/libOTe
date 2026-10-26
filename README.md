@@ -113,18 +113,25 @@ on platform/dependencies. The `ON`/`OFF` options include
  * `ENABLE_REGULAR_DPF` the Boyle et al [[BGI18]](https://eprint.iacr.org/2018/707.pdf) semi-honest protocol.
  * `ENABLE_TERNARY_DPF` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
  * `ENABLE_SPARSE_DPF` the sparse-DPF core and the reusable `WaterfallDmpf`
-   and `RevCuckooDmpf` constructions. Waterfall is the generic construction;
-   Rev-Cuckoo is the specialized low-expansion construction analyzed for its
-   intended Ring-LPN input distribution. See
-   [`libOTe/Dpf/Waterfall/README.md`](libOTe/Dpf/Waterfall/README.md) and
-   [Reverse-Cuckoo analysis](libOTe/Dpf/RevCuckoo/ANALYSIS.md).
-   These constructions remain experimental. See
-   [DMPF release notes](libOTe/Dpf/RELEASE_NOTES.md) before upgrading peers
-   or loading previously serialized DPF keys.
+   and `RevCuckooDmpf` constructions. These remain experimental. Waterfall is
+   the generic construction; its built-in `compact3N()` and `compact4N()`
+   profiles require 16 input rows. Rev-Cuckoo leaks support information and is
+   intended only for the analyzed Ring-LPN use, not as a generic private DMPF.
+   The concrete AES security assumptions require separate consideration.
+
+DPF upgrade note: both peers must run the same revision and rerun setup rather
+than reuse cached DPF/DMPF state. Sparse-DPF base-OT reservations changed; use
+`baseOtCount()` instead of a hard-coded count. `RegularDpfKey` serialization now
+contains an additional 16-byte public tree seed, so previously serialized keys
+must be regenerated.
 
  **Beaver Triples:**
  * `ENABLE_FOLEAGE` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
  * `ENABLE_SILENTOT` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol. 
+
+The Ring-LPN support filter is enabled only for the analyzed Goldilocks profile
+(ring degree 2^20, four polynomials, weight 16). Other profiles do not inherit
+the security claim of that analysis.
 
 
  Addition options can be set for cryptoTools. See the cmake output.
