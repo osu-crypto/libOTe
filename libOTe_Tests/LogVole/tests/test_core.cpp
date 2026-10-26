@@ -1859,3 +1859,259 @@ void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
         expect_poly_equal(found.mTbkPerSampledPoly[row], expected);
     }
 }
+
+void LogVole_Core_LeafGoldenSeedChecksOutputRounding(const oc::CLP&)
+{
+    // Five limbs put p*B/q near 2^-68, above the fixed-point undershoot (below 2^-71), and keep the
+    // per-limb margin B*q_j/q near 2^-67, far below the per-limb distance (about 1/p) of the
+    // coefficient built below.
+    Params params = make_golden_params();
+    assignValues<int>(params.mShrinkExpand.mRing.mCoeffModulusBits, { 54, 54, 54, 54, 54 });
+    params.mShrinkExpand.mMu =
+        params.mShrinkExpand.mAlpha *
+        params.mShrinkExpand.mTau *
+        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+    params.mW = params.mShrinkExpand.mMu;
+    ZpCrtContext zp{};
+    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(
+        params.mShrinkExpand.mRing,
+        params.mShrinkExpand.mPlaintextModulusBits,
+        zp));
+    const std::uint64_t p = zp.mPlaintextModulus;
+    const std::size_t n = params.mShrinkExpand.mRing.mPolyModulusDegree;
+    const std::size_t rho = zp.mRing.mModuli.size();
+
+    auto makeZeroBatch = [&](std::size_t count) {
+        std::vector<RnsPoly> polys(count);
+        for (auto& poly : polys)
+        {
+            resizeZero(poly.mCoeffs, ringPolyCoeffCount(params.mShrinkExpand.mRing));
+        }
+        return polys;
+    };
+
+    // V = 0 gives frac(p*V/q) = 0, as far from the rounding boundary as possible.
+    const std::vector<RnsPoly> safe = makeZeroBatch(params.mW);
+    bool candidateOk = false;
+    LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, safe, candidateOk));
+    LOGVOLE_EXPECT_TRUE(candidateOk);
+
+    candidateOk = true;
+    LOGVOLE_EXPECT_FALSE(validateLeafGoldenSeedCandidate(params, makeZeroBatch(params.mW - 1), candidateOk));
+    LOGVOLE_EXPECT_FALSE(validateLeafGoldenSeedCandidate(params, {}, candidateOk));
+
+    // V = (2p)^-1 mod q gives frac(p*V/q) = 1/2 + 1/(2q), so a noise term of -1 already flips the
+    // rounding to Z_p. Modulo each q/q_j, V stays about 1/p or more from the boundary, so the
+    // per-limb check used for intermediate levels accepts it; only the leaf check protects the
+    // output rounding.
+    std::vector<RnsPoly> boundary = safe;
+    for (std::size_t i = 0; i < rho; ++i)
+    {
+        const auto& modulus = zp.mRing.mModuli[i];
+        std::uint64_t inv2p = 0;
+        LOGVOLE_REQUIRE_TRUE(seal::util::try_invert_uint_mod(
+            seal::util::multiply_uint_mod(2, p, modulus),
+            modulus,
+            inv2p));
+        boundary.back().mCoeffs[i * n + (n - 1)] = inv2p;
+    }
+
+    candidateOk = true;
+    LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, boundary, candidateOk));
+    LOGVOLE_EXPECT_FALSE(candidateOk);
+
+    candidateOk = false;
+    LOGVOLE_REQUIRE_TRUE(validateGoldenSeedCandidate(params, boundary, candidateOk));
+    LOGVOLE_EXPECT_TRUE(candidateOk);
+}
+namespace
+{
+    // Non-negative multiprecision integers as little-endian 64-bit words.
+    using Words = std::vector<std::uint64_t>;
+
+    // 2^log2X rounded down to a 53-bit mantissa, so it never exceeds 2^log2X.
+    Words wordsBelowPow2(double log2X, std::size_t wordCount)
+    {
+        Words out(wordCount, 0);
+        const int exponent = static_cast<int>(std::floor(log2X));
+        out[0] = static_cast<std::uint64_t>(std::ldexp(std::exp2(log2X - exponent), 52));
+        if (exponent >= 52)
+        {
+            seal::util::left_shift_uint(out.data(), exponent - 52, wordCount, out.data());
+        }
+        else
+        {
+            out[0] >>= 52 - exponent;
+        }
+        return out;
+    }
+
+    // An accepted s in (lo, hi] whose predecessor is rejected, given that lo is rejected and hi accepted.
+    template<typename Accepts>
+    Words bisectAcceptThreshold(Words lo, Words hi, Accepts&& accepts)
+    {
+        const std::size_t wordCount = lo.size();
+        LOGVOLE_REQUIRE_FALSE(accepts(lo));
+        LOGVOLE_REQUIRE_TRUE(accepts(hi));
+        for (;;)
+        {
+            Words gap(wordCount);
+            seal::util::sub_uint(hi.data(), lo.data(), wordCount, gap.data());
+            if (gap[0] <= 1 && std::all_of(gap.begin() + 1, gap.end(), [](std::uint64_t w) { return w == 0; }))
+            {
+                return hi;
+            }
+            Words mid(wordCount);
+            seal::util::add_uint(lo.data(), hi.data(), wordCount, mid.data());
+            seal::util::right_shift_uint(mid.data(), 1, wordCount, mid.data());
+            (accepts(mid) ? hi : lo) = mid;
+        }
+    }
+
+    // value +/- s mod q_i, with s reduced into the limb.
+    std::uint64_t addOffset(std::uint64_t value, const Words& s, bool add, const seal::Modulus& modulus)
+    {
+        const std::uint64_t sModQi = seal::util::modulo_uint(s.data(), s.size(), modulus);
+        return add ?
+            seal::util::add_uint_mod(value, sModQi, modulus) :
+            seal::util::sub_uint_mod(value, sModQi, modulus);
+    }
+
+    // Five limbs put the margins near 2^-68, close enough to the fixed-point undershoot (about 2^-72)
+    // that a margin without it is visibly too small.
+    Params make_five_limb_golden_params()
+    {
+        Params params = make_golden_params();
+        assignValues<int>(params.mShrinkExpand.mRing.mCoeffModulusBits, { 54, 54, 54, 54, 54 });
+        params.mShrinkExpand.mMu =
+            params.mShrinkExpand.mAlpha *
+            params.mShrinkExpand.mTau *
+            static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        params.mW = params.mShrinkExpand.mMu;
+        return params;
+    }
+
+    std::vector<RnsPoly> makeZeroPolys(const Params& params, std::size_t count)
+    {
+        std::vector<RnsPoly> polys(count);
+        for (auto& poly : polys)
+        {
+            resizeZero(poly.mCoeffs, ringPolyCoeffCount(params.mShrinkExpand.mRing));
+        }
+        return polys;
+    }
+}
+
+void LogVole_Core_LeafGoldenSeedMatchesDecoder(const oc::CLP&)
+{
+    // Every leaf value the check accepts must decode consistently: for |e| <= B and any m in Z_p,
+    // decode(K + floor(q/p)*m + e) = decode(K) + m. The worst accepted K are the ones closest to the
+    // rounding boundary, so the test finds them by bisecting on the check itself instead of assuming
+    // where its threshold lies, then runs both through unwrapRingLabelsCrt.
+    const Params params = make_five_limb_golden_params();
+    ZpCrtContext zp{};
+    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(
+        params.mShrinkExpand.mRing,
+        params.mShrinkExpand.mPlaintextModulusBits,
+        zp));
+    const std::uint64_t p = zp.mPlaintextModulus;
+    const std::size_t n = params.mShrinkExpand.mRing.mPolyModulusDegree;
+    const std::size_t rho = zp.mRing.mModuli.size();
+    const std::size_t coeff = n - 1;
+    const double log2B = noiseBoundLog2(params);
+    LOGVOLE_REQUIRE_TRUE(std::isfinite(log2B));
+    LOGVOLE_REQUIRE_LT(log2B + 2.0, 64.0 * static_cast<double>(rho) - 1.0);
+    const Words noise = wordsBelowPow2(log2B, rho);
+
+    // K0 = (2p)^-1 mod q has frac(p*K0/q) = 1/2 + 1/(2q): exactly on the rounding boundary. K0 + s
+    // sits about p*s/q above it, K0 - s about p*s/q below it.
+    std::vector<std::uint64_t> boundary(rho);
+    for (std::size_t i = 0; i < rho; ++i)
+    {
+        const auto& modulus = zp.mRing.mModuli[i];
+        LOGVOLE_REQUIRE_TRUE(seal::util::try_invert_uint_mod(
+            seal::util::multiply_uint_mod(2, p, modulus),
+            modulus,
+            boundary[i]));
+    }
+    auto setOffset = [&](RnsPoly& poly, const Words& s, bool above) {
+        for (std::size_t i = 0; i < rho; ++i)
+        {
+            poly.mCoeffs[i * n + coeff] = addOffset(boundary[i], s, above, zp.mRing.mModuli[i]);
+        }
+    };
+    auto leafAccepts = [&](const Words& s, bool above) {
+        std::vector<RnsPoly> batch = makeZeroPolys(params, params.mW);
+        setOffset(batch.back(), s, above);
+        bool candidateOk = false;
+        LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, batch, candidateOk));
+        return candidateOk;
+    };
+
+    // decode(K + floor(q/p)*m +/- e) - decode(K) must equal the slot decoding of m*X^coeff.
+    seal::BatchEncoder encoder(*zp.mBatchingContext);
+    auto decodesConsistently = [&](const Words& s, bool above, std::uint64_t m, bool addNoise) {
+        RnsPoly key = makeZeroPolys(params, 1).front();
+        setOffset(key, s, above);
+        RnsPoly mac = key;
+        for (std::size_t i = 0; i < rho; ++i)
+        {
+            const auto& modulus = zp.mRing.mModuli[i];
+            std::uint64_t& value = mac.mCoeffs[i * n + coeff];
+            value = seal::util::add_uint_mod(
+                value,
+                seal::util::multiply_uint_mod(m, zp.mPlaintextLiftModQj[i], modulus),
+                modulus);
+            value = addOffset(value, noise, addNoise, modulus);
+        }
+
+        AlignedUnVec<std::uint64_t> keySlots;
+        AlignedUnVec<std::uint64_t> macSlots;
+        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(zp, { key }, zpSlotCount(zp), true, 1, keySlots));
+        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(zp, { mac }, zpSlotCount(zp), true, 1, macSlots));
+
+        seal::Plaintext plain(n);
+        plain.set_zero();
+        plain[coeff] = m;
+        std::vector<std::uint64_t> expected;
+        encoder.decode(plain, expected);
+
+        LOGVOLE_REQUIRE_EQ(keySlots.size(), expected.size());
+        LOGVOLE_REQUIRE_EQ(macSlots.size(), expected.size());
+        for (std::size_t slot = 0; slot < expected.size(); ++slot)
+        {
+            if (macSlots[slot] != (keySlots[slot] + expected[slot]) % p)
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    for (const bool above : { true, false })
+    {
+        Words one(rho, 0);
+        one[0] = 1;
+        Words fourB(rho);
+        seal::util::left_shift_uint(noise.data(), 2, rho, fourB.data());
+        const Words tightest = bisectAcceptThreshold(
+            one,
+            fourB,
+            [&](const Words& s) { return leafAccepts(s, above); });
+
+        // The tightest accepted offset must survive every noise sign and plaintext, including
+        // m = p - 1, where floor(q/p)*m falls furthest short of (q/p)*m.
+        for (const std::uint64_t m : { std::uint64_t{ 0 }, std::uint64_t{ 1 }, p - 1 })
+        {
+            for (const bool addNoise : { true, false })
+            {
+                LOGVOLE_EXPECT_TRUE(decodesConsistently(tightest, above, m, addNoise));
+            }
+        }
+
+        // Negative control: half the threshold, with noise towards the boundary, must break decoding.
+        Words half(rho);
+        seal::util::right_shift_uint(tightest.data(), 1, rho, half.data());
+        LOGVOLE_EXPECT_FALSE(decodesConsistently(half, above, 0, !above));
+    }
+}

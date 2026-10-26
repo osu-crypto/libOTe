@@ -292,9 +292,17 @@ namespace osuCrypto::LogVole
         const RingParams& ring,
         std::vector<RnsPoly>& out);
 
+    // log2 of the noise bound B that the golden-seed checks protect against.
+    double noiseBoundLog2(const Params& params);
+
     bool validateGoldenSeedSearch(const Params& params);
 
     bool validateGoldenSeedCandidate(
+        const Params& params,
+        const std::vector<RnsPoly>& tbkPerSampledPoly,
+        bool& out);
+
+    bool validateLeafGoldenSeedCandidate(
         const Params& params,
         const std::vector<RnsPoly>& tbkPerSampledPoly,
         bool& out);
