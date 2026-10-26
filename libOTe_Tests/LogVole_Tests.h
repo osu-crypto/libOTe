@@ -54,6 +54,8 @@
     X(Core, GpuResidentSetupState) \
     X(Core, GpuSetupDeltaChain) \
     X(Core, TwoLevelCoprotoMultiThreadSkipTbkOutput) \
+    X(Core, LeafGoldenSeedChecksOutputRounding) \
+    X(Core, LeafGoldenSeedMatchesDecoder) \
     X(Encoding, AllMessageRoundTrips) \
     X(Encoding, SingletonOfflinePayloadBound) \
     X(Encoding, PinnedWireBufferOwnership) \
@@ -120,8 +122,6 @@
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedRejectsMalformedCandidate) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
-    X(Core, LeafGoldenSeedChecksOutputRounding) \
-    X(Core, LeafGoldenSeedMatchesDecoder) \
     X(Core, LeafGoldenSeedChecksPlaintextProduct) \
     X(Core, LeafGoldenSeedGpuParity) \
     X(Core, EarlyGoldenMatchesFullEvaluation) \

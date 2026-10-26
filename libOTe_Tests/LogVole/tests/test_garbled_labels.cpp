@@ -171,7 +171,13 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
                 auto av = a.label(i), bv = b.label(i);
                 for (u32 j = 0; j < 3; ++j)
                 {
-                    const u64 expected = (static_cast<unsigned __int128>(x[i]) * sender.deltas()[j] + bv[j]) % p;
+                    // Exact two-limb arithmetic keeps this oracle portable to MSVC.
+                    unsigned long long product[2];
+                    seal::util::multiply_uint64(x[i], sender.deltas()[j], product);
+                    const u64 low = product[0];
+                    product[0] += bv[j];
+                    product[1] += product[0] < low;
+                    const u64 expected = seal::util::barrett_reduce_128(product, seal::Modulus(p));
                     LOGVOLE_REQUIRE_EQ(av[j], expected);
                 }
                 LOGVOLE_REQUIRE_TRUE(av == b.labelForValue(i, x[i], sender.deltas()));
