@@ -1844,6 +1844,9 @@ namespace osuCrypto
 		auto tensor = RingLpnTriple<F>::TensorBaseCorType::Precomputed;
 		u64 trials = cmd.getOr("trials", 1);
 		u64 exp = cmd.getOr("exp", 10);
+		const u64 numPolys = cmd.getOr("c", 4);
+		const u64 polyWeight = cmd.getOr("t", 16);
+		auto securityParameter = cmd.getOr("sec", 128);
 
 
 		auto sock = coproto::LocalAsyncSocket::makePair();
@@ -1871,10 +1874,10 @@ namespace osuCrypto
 			std::array<RingLpnTriple<F>, 2> oles;
 			oles[0].mDebug = cmd.isSet("debug");
 			oles[1].mDebug = oles[0].mDebug;
-			oles[0].mNumPolys = oles[1].mNumPolys = cmd.getOr("c", 2);
-			oles[0].mPolyWeight = oles[1].mPolyWeight = cmd.getOr("t", 64);
-			oles[0].init(0, n, mode, dpf, tensor);
-			oles[1].init(1, n, mode, dpf, tensor);
+			oles[0].mNumPolys = oles[1].mNumPolys = numPolys;
+			oles[0].mPolyWeight = oles[1].mPolyWeight = polyWeight;
+			oles[0].init(0, n, mode, dpf, tensor, securityParameter);
+			oles[1].init(1, n, mode, dpf, tensor, securityParameter);
 
 			ringSetBase(oles);
 			timer.setTimePoint("setBase");
@@ -1974,6 +1977,8 @@ namespace osuCrypto
 			std::cout.imbue(std::locale("en_US.UTF-8")); // use U.S. formatting
 
 			std::cout << "RingLpnTriple<" << field << "> n=" << n << ", log2=" << logn
+				<< " c=" << numPolys << " t=" << polyWeight
+				<< " sec=" << securityParameter
 				<< " exp=" << exp
 				<< " trials=" << trials
 				<< " total/sec = " << u64(tps)

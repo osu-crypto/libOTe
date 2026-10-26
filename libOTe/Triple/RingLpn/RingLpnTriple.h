@@ -31,6 +31,7 @@
 #include "libOTe/Dpf/RevCuckooDmpf.h"
 #include "libOTe/Triple/RingLpn/RingLpnSupport.h"
 #include "cryptoTools/Circuit/BetaCircuit.h"
+#include <bit>
 
 namespace osuCrypto
 {
@@ -152,7 +153,8 @@ namespace osuCrypto
 
 		// Initializes the protocol to generate n F OLEs. Most efficient when n
 		// is a power of 2. Once called, baseOtCount() can be called to 
-		// determine the required number of base OTs.
+		// determine the required number of base OTs. securityParameter targets
+		// the estimated work of sparse-factor statistical decoding.
 		void init(
 			u64 partyIdx,
 			u64 n,
@@ -160,7 +162,15 @@ namespace osuCrypto
 			DpfType dpfType = DpfType::RevCuckooDmpf,
 			TensorBaseCorType tensorPre =
 			TensorBaseCorType::OtBased,
+			u64 securityParameter = 128,
 			CoeffCtx ctx = {});
+
+		// Preserve callers that supplied a coefficient context as the sixth argument.
+		void init(u64 partyIdx, u64 n, Mode mode, DpfType dpfType,
+			TensorBaseCorType tensorPre, CoeffCtx ctx)
+		{
+			init(partyIdx, n, mode, dpfType, tensorPre, 128, ctx);
+		}
 
 		bool isInitialized() const { return mN > 0; }
 
@@ -249,24 +259,13 @@ namespace osuCrypto
 		// samples the sparse polynomial coefficients and their product.
 		task<> tensor(PRNG& prng, Socket& sock);
 
-		// Other parameter sets retain their experimental, unfiltered sampler.
-		bool usesSupportFilter() const
-		{
-			return SF::order() == GoldilocksRingLpnSupportFilter::FieldOrder &&
-				GoldilocksRingLpnSupportFilter::matches(mN, mNumPolys, mPolyWeight);
-		}
-
 		// Non-coroutine: rejection and its scratch storage finish before routing.
-		void sampleSparsePositions(PRNG& prng)
+		OC_NOINLINE void sampleSparsePositions(PRNG& prng)
 		{
 			if (!isInitialized() || hasDpf())
 				throw std::logic_error("RingLPN supports must be sampled before DPF setup.");
 			mSparsePositions.resize(mNumPolys, mPolyWeight);
-			if (usesSupportFilter())
-				GoldilocksRingLpnSupportFilter::sample(mSparsePositions, prng);
-			else
-				for (auto& offset : mSparsePositions)
-					offset = prng.get<u64>() % mBlockSize;
+			mSupportFilter.sample(mSparsePositions, prng);
 		}
 
 		// sample random coefficients for the sparse polynomial and tensor
@@ -346,6 +345,7 @@ namespace osuCrypto
 			mDpfTreeSize = 0;
 			mDpfTreeDepth = 0;
 			mSparsePositions.resize(0, 0);
+			mSupportFilter = {};
 			mSparseCoefficients.clear();
 			mTensoredCoefficients.clear();
 			std::visit([](auto& dpf) { dpf.clear(); }, mDpf);
@@ -355,6 +355,9 @@ namespace osuCrypto
 			mProdPolyTreePosXor.clear();
 			mProdPolyTreePosArth.clear();
 		}
+
+	private:
+		detail::RingLpnSupportFilter mSupportFilter;
 	};
 
 
@@ -390,7 +393,7 @@ namespace osuCrypto
 		u64 n,
 		Mode mode,
 		DpfType dpfType,
-		TensorBaseCorType base, CoeffCtx ctx)
+		TensorBaseCorType base, u64 securityParameter, CoeffCtx ctx)
 	{
 		if (partyIdx > 1)
 			throw std::invalid_argument("RingLPN party index must be zero or one. " LOCATION);
@@ -438,6 +441,13 @@ namespace osuCrypto
 		if (weight * weight > Gmw::MaxOleDimension)
 			throw std::invalid_argument("RingLPN tensor weight exceeds the supported range. " LOCATION);
 
+		// Derive selected-position occupancy constraints for the requested
+		// sparse-factor statistical-decoding work target. Coefficients may later
+		// be zero or cancel; this is not a general Ring-LPN security certificate.
+		const auto twoAdicity = std::countr_zero(static_cast<u64>(SF::order() - 1));
+		const auto supportFilter = detail::RingLpnSupportFilter(
+			ringSize, numPolys, polyWeight, twoAdicity, securityParameter);
+
 		mSparsePositions.resize(0, 0);
 		mSparseCoefficients.clear();
 		mTensoredCoefficients.clear();
@@ -455,6 +465,7 @@ namespace osuCrypto
 		mBaseCorType = base;
 		mCtx = ctx;
 		mBlockSize = blockSize;
+		mSupportFilter = supportFilter;
 		mBlockDepth = blockDepth;
 		mDpfTreeDepth = dpfTreeDepth;
 		mDpfTreeSize = dpfTreeSize;

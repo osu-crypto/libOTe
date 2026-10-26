@@ -15,6 +15,11 @@
 
 namespace osuCrypto
 {
+#ifdef ENABLE_RINGLPN
+	// Protocol correctness tests use tiny rings that cannot target 128-bit security.
+	constexpr u64 ToyRingLpnSecurityParameter = 1;
+#endif
+
 	void RingLpn_Audit_test(const CLP&)
 	{
 #ifdef ENABLE_RINGLPN
@@ -25,7 +30,7 @@ namespace osuCrypto
 			bool rejected = false;
 			try
 			{
-				ring.init(partyIdx, n, mode, dpf, base);
+				ring.init(partyIdx, n, mode, dpf, base, ToyRingLpnSecurityParameter);
 			}
 			catch (const std::invalid_argument&)
 			{
@@ -79,7 +84,8 @@ namespace osuCrypto
 		Ring invalidProtocol;
 		invalidProtocol.mNumPolys = 2;
 		invalidProtocol.mPolyWeight = 8;
-		invalidProtocol.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		invalidProtocol.init(0, 64, Ring::Mode::Ole, sum, precomputed,
+			ToyRingLpnSecurityParameter);
 		auto badProtocol = static_cast<Ring::Protocol>(255);
 		bool countRejected = false;
 		bool readinessRejected = false;
@@ -120,7 +126,8 @@ namespace osuCrypto
 		Ring reinitialized;
 		reinitialized.mNumPolys = 2;
 		reinitialized.mPolyWeight = 8;
-		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed,
+			ToyRingLpnSecurityParameter);
 		reinitialized.mSparseCoefficients.resize(16);
 		reinitialized.mTensoredCoefficients.resize(16 * 16);
 		reinitialized.mTensorRecvOts.resize(1);
@@ -128,7 +135,8 @@ namespace osuCrypto
 		reinitialized.mTensorSendOts.resize(1);
 		reinitialized.mProdPolyTreePosArth.resize(1);
 		reinitialized.mProdPolyTreePosXor.resize(1);
-		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed,
+			ToyRingLpnSecurityParameter);
 		if (!reinitialized.mSparseCoefficients.empty() ||
 			!reinitialized.mTensoredCoefficients.empty() ||
 			!reinitialized.mTensorRecvOts.empty() ||
@@ -161,7 +169,8 @@ namespace osuCrypto
 		Ring reusableSum;
 		reusableSum.mNumPolys = 2;
 		reusableSum.mPolyWeight = 8;
-		reusableSum.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		reusableSum.init(0, 64, Ring::Mode::Ole, sum, precomputed,
+			ToyRingLpnSecurityParameter);
 		reusableSum.mHasDpf = true;
 		auto& sumDpf = std::get<SumDmpf<F12289>>(reusableSum.mDpf);
 		sumDpf.mDpf.mMultiplier.mOtIdx = sumDpf.mDpf.mMultiplier.mTotalMults;
@@ -458,8 +467,8 @@ namespace osuCrypto
 						PRNG prng1(block(6474567454546, 567546754674345444));
 						Timer timer;
 
-						oles[0].init(0, n, mode, dpf, base);
-						oles[1].init(1, n, mode, dpf, base);
+						oles[0].init(0, n, mode, dpf, base, ToyRingLpnSecurityParameter);
+						oles[1].init(1, n, mode, dpf, base, ToyRingLpnSecurityParameter);
 
 
 						ringSetBase(oles);
@@ -564,8 +573,14 @@ namespace osuCrypto
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
 
-		oles[0].init(0, n);
-		oles[1].init(1, n);
+		oles[0].init(0, n, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
+		oles[1].init(1, n, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
 
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		std::vector<F>
@@ -653,8 +668,14 @@ namespace osuCrypto
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
 
-		triples[0].init(0, n);
-		triples[1].init(1, n);
+		triples[0].init(0, n, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
+		triples[1].init(1, n, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
 
 		ringSetBase(triples);
 
@@ -764,8 +785,8 @@ namespace osuCrypto
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
 
-		oles[0].init(0, n, mode, dpf, tensor);
-		oles[1].init(1, n, mode, dpf, tensor);
+		oles[0].init(0, n, mode, dpf, tensor, ToyRingLpnSecurityParameter);
+		oles[1].init(1, n, mode, dpf, tensor, ToyRingLpnSecurityParameter);
 
 		ringSetBase(oles);
 
@@ -982,8 +1003,14 @@ namespace osuCrypto
 
 		PRNG prng(block(2424523452345, 111124521521455324));
 
-		oles[0].init(0, 1000);
-		oles[1].init(1, 1000);
+		oles[0].init(0, 1000, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
+		oles[1].init(1, 1000, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
 
 		u64 n = oles[0].mNumPolys * oles[0].mPolyWeight;
 		u64 n2 = n * n;
