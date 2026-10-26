@@ -29,6 +29,8 @@ namespace osuCrypto
 	{ constexpr u64 VAR = 7; STATEMENT; } \
 } while (0)
 
+	/// The unversioned byte format includes mTreeHashSeed; keys serialized before
+	/// that field was added must be regenerated.
 	struct RegularDpfKey
 	{
 		template<typename F, typename CoeffCtx = DefaultCoeffCtx<F>>

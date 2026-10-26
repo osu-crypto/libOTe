@@ -14,6 +14,8 @@
 namespace osuCrypto
 {
 
+	/// Application-specific DMPF that leaks support information. Callers must
+	/// account for that leakage; this is not a generic private DMPF.
 	template<typename T, typename CoeffCtx = DefaultCoeffCtx<T>>
 	struct RevCuckooDmpf : TimerAdapter
 	{

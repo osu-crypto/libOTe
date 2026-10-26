@@ -112,36 +112,17 @@ on platform/dependencies. The `ON`/`OFF` options include
  **DPF:**
  * `ENABLE_REGULAR_DPF` the Boyle et al [[BGI18]](https://eprint.iacr.org/2018/707.pdf) semi-honest protocol.
  * `ENABLE_TERNARY_DPF` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
- * `ENABLE_SPARSE_DPF` the sparse-DPF core and the reusable `WaterfallDmpf`
-   and `RevCuckooDmpf` constructions. These remain experimental. Waterfall is
-   the generic construction; its built-in `compact3N()` and `compact4N()`
-   profiles require 16 input rows. Rev-Cuckoo leaks support information and is
-   intended only for the analyzed Ring-LPN use, not as a generic private DMPF.
-   The concrete AES security assumptions require separate consideration.
-
-DPF upgrade note: both peers must run the same revision and rerun setup rather
-than reuse cached DPF/DMPF state. Sparse-DPF base-OT reservations changed; use
-`baseOtCount()` instead of a hard-coded count. `RegularDpfKey` serialization now
-contains an additional 16-byte public tree seed, so previously serialized keys
-must be regenerated.
+ * `ENABLE_SPARSE_DPF` experimental sparse DPF, Waterfall DMPF, and Reverse-Cuckoo DMPF.
 
  **Beaver Triples:**
  * `ENABLE_FOLEAGE` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
  * `ENABLE_SILENTOT` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol. 
 
-The Ring-LPN support filter is enabled only for the analyzed Goldilocks profile
-(ring degree 2^20, four polynomials, weight 16). Other profiles do not inherit
-the security claim of that analysis.
-
-
  Addition options can be set for cryptoTools. See the cmake output.
 
 With `-DENABLE_ASAN=ON`, GCC 13–16 builds disable ASan stack instrumentation
-(`--param=asan-stack=0`) to avoid unbounded native-stack growth during coroutine
-symmetric transfer. Heap and global checks remain enabled. The workaround also
-propagates to C++ consumers of the CMake target, since headers contain coroutine
-templates. Clang retains full ASan coverage. GCC 17 and later are outside this
-temporary range and should be retested before extending it.
+to avoid coroutine stack growth; heap and global checks remain enabled. Clang
+retains full ASan coverage.
 
 ### Dependencies
 

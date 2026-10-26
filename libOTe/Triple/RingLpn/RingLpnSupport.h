@@ -77,7 +77,8 @@ namespace osuCrypto
 		}
 	};
 
-	// The only profile whose folded-support threshold has been analyzed.
+	// The 61-of-128 threshold rejects low folded weight for the analyzed
+	// degree-128 factors. Other parameters need their own threshold analysis.
 	struct GoldilocksRingLpnSupportFilter :
 		RingLpnFoldedSupportFilter<1ull << 20, 4, 16, 128, 61>
 	{
