@@ -16,6 +16,7 @@
 #include "libOTe/Dpf/Waterfall/WaterfallScatter.h"
 #include "libOTe/Tools/CoeffCtx.h"
 
+#include <algorithm>
 #include <bit>
 #include <limits>
 #include <memory>
@@ -92,6 +93,8 @@ namespace osuCrypto
 		VecT mValueScatterGamma;
 		VecT mValueScatterDifference;
 		VecT mDedupBatchWork;
+		VecT mScatterTemporary;
+		VecT mRevealRemote;
 		// Purpose-separated roots from public setup coins, advanced per expansion.
 		block mValueScatterHashSeed = ZeroBlock;
 		block mLeafHashSeed = ZeroBlock;
@@ -305,14 +308,29 @@ namespace osuCrypto
 			std::vector<u32> packedBins;
 			std::vector<u32> bins0;
 			std::vector<u32> bins1;
+			std::vector<std::vector<u32>> sampled;
+			std::vector<u32> zeroCoefficients;
+			std::vector<u32> scratch;
 			if (usePackedAnf)
 			{
-				lowWeightPoints.reserve(mDomain / 64);
+				const auto fieldBits = std::bit_width(mDomain - 1);
+				u64 lowWeightCount = 1, binomial = 1;
+				for (u64 weight = 1; weight <= std::min<u64>(algebraicDegree, fieldBits); ++weight)
+				{
+					binomial = binomial * (fieldBits - weight + 1) / weight;
+					lowWeightCount += binomial;
+				}
+				lowWeightPoints.reserve(lowWeightCount);
 				for (u64 point = 0; point < mDomain; ++point)
 					if (static_cast<u64>(std::popcount(point)) <= algebraicDegree)
 						lowWeightPoints.push_back(static_cast<u32>(point));
 				samples.resize(mDomain);
 				packedBins.resize(mDomain);
+				sampled.resize(w);
+				for (auto& partitionSamples : sampled)
+					partitionSamples.resize(lowWeightPoints.size());
+				zeroCoefficients.resize(mNumPointsPerSet);
+				scratch.resize(lowWeightPoints.size());
 			}
 			else
 			{
@@ -321,6 +339,7 @@ namespace osuCrypto
 			}
 
 			u64 flatOffset = 0;
+			std::vector<u64> counts, cursor;
 			for (u64 set = 0; set < mNumSets; ++set)
 			{
 				u64 columnOffset = 0;
@@ -328,11 +347,11 @@ namespace osuCrypto
 				{
 					const auto size = mConfig.mPartitionSizes[partition];
 					const auto mask = static_cast<u32>(size - 1);
-					std::vector<u64> counts(size, 0);
+					counts.assign(size, 0);
 					for (u64 point = 0; point < mDomain; ++point)
 						++counts[(bins[point] >> shift) & mask];
 
-					std::vector<u64> cursor(size);
+					cursor.resize(size);
 					u64 localOffset = 0;
 					for (u64 bin = 0; bin < size; ++bin)
 					{
@@ -364,12 +383,9 @@ namespace osuCrypto
 
 				if (usePackedAnf)
 				{
-					std::fill(samples.begin(), samples.end(), 0);
 					std::fill(packedBins.begin(), packedBins.end(), 0);
-					std::vector<std::vector<u32>> sampled(
-						w, std::vector<u32>(lowWeightPoints.size()));
-					std::vector<u32> zeroCoefficients(mNumPointsPerSet, 0);
-					std::vector<u32> scratch(lowWeightPoints.size());
+					// Every sample later read is a subset of a low-weight point,
+					// and all low-weight samples are overwritten below.
 					for (u64 partition = 0; partition < w; partition += 2)
 					{
 						const bool hasSecond = partition + 1 < w;
@@ -434,10 +450,10 @@ namespace osuCrypto
 						const auto size = mConfig.mPartitionSizes[partition];
 						const auto coefficients = proposal.mCoefficients[set * w + partition];
 						for (u64 point = 0; point < mDomain; ++point)
-						bins0[point] = mCandidateGenerator.mHash.evaluatePlain(
-							coefficients,
-							static_cast<u32>(point),
-							size);
+							bins0[point] = mCandidateGenerator.mHash.evaluatePlain(
+								coefficients,
+								static_cast<u32>(point),
+								size);
 						materialize(partition, bins0, 0);
 					}
 				}
@@ -813,7 +829,8 @@ namespace osuCrypto
 			}
 			co_await reveal(mValueScatterGamma, socket, context);
 
-			auto scatterTemporary = context.template makeVec<T>(8);
+			if (mScatterTemporary.size() != 8)
+				context.resize(mScatterTemporary, 8);
 			for (u64 row = 0; row < rows; ++row)
 			{
 				const auto set = row / mNumPointsPerSet;
@@ -824,40 +841,40 @@ namespace osuCrypto
 				for (u64 column = 0; column < columns8; column += 8)
 				{
 					WATERFALL_SIMD8(q, context.mask(
-						scatterTemporary[q],
+						mScatterTemporary[q],
 						mValueScatterGamma[row],
 						block::allSame<u8>(-tags[column + q])));
 					if (mPartyIdx)
 						WATERFALL_SIMD8(q, context.minus(
-							scatterTemporary[q],
+							mScatterTemporary[q],
 							expanded[column + q],
-							scatterTemporary[q]));
+							mScatterTemporary[q]));
 					else
 						WATERFALL_SIMD8(q, context.plus(
-							scatterTemporary[q],
+							mScatterTemporary[q],
 							expanded[column + q],
-							scatterTemporary[q]));
+							mScatterTemporary[q]));
 					WATERFALL_SIMD8(q, context.plus(
 						mValuePayload[outputOffset + column + q],
 						mValuePayload[outputOffset + column + q],
-						scatterTemporary[q]));
+						mScatterTemporary[q]));
 				}
 				for (u64 column = columns8; column < columns; ++column)
 				{
 					context.mask(
-						scatterTemporary[0],
+						mScatterTemporary[0],
 						mValueScatterGamma[row],
 						block::allSame<u8>(-tags[column]));
 					if (mPartyIdx)
 						context.minus(
-							scatterTemporary[0], expanded[column], scatterTemporary[0]);
+							mScatterTemporary[0], expanded[column], mScatterTemporary[0]);
 					else
 						context.plus(
-							scatterTemporary[0], expanded[column], scatterTemporary[0]);
+							mScatterTemporary[0], expanded[column], mScatterTemporary[0]);
 					context.plus(
 						mValuePayload[outputOffset + column],
 						mValuePayload[outputOffset + column],
-						scatterTemporary[0]);
+						mScatterTemporary[0]);
 				}
 			}
 			setTimePoint("value scatter done");
@@ -935,15 +952,16 @@ namespace osuCrypto
 			}
 			else
 			{
-				auto remote = context.template makeVec<T>(values.size());
+				if (mRevealRemote.size() != values.size())
+					context.resize(mRevealRemote, values.size());
 				std::vector<u8> buffer(values.size() * context.template byteSize<T>());
 				context.serialize(values.begin(), values.end(), buffer.begin());
 				co_await socket.send(std::move(buffer));
 				buffer.resize(values.size() * context.template byteSize<T>());
 				co_await socket.recv(buffer);
-				context.deserialize(buffer.begin(), buffer.end(), remote.begin());
+				context.deserialize(buffer.begin(), buffer.end(), mRevealRemote.begin());
 				for (u64 i = 0; i < values.size(); ++i)
-					context.plus(values[i], values[i], remote[i]);
+					context.plus(values[i], values[i], mRevealRemote[i]);
 			}
 		}
 
@@ -982,6 +1000,8 @@ namespace osuCrypto
 			mValueScatterGamma.clear();
 			mValueScatterDifference.clear();
 			mDedupBatchWork.clear();
+			mScatterTemporary.clear();
+			mRevealRemote.clear();
 			mPartyIdx = 0;
 			mNumPointsPerSet = 0;
 			mNumSets = 0;

@@ -9,6 +9,7 @@
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Matrix.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Tools/CompilerHints.h"
 
 #include <iterator>
 #include <limits>
@@ -1110,12 +1111,7 @@ namespace osuCrypto
 
 
 
-#if defined(_MSC_VER)
-		__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-		__attribute__((noinline))
-#endif
-		static void derandomizeSendOts(span<std::array<block, 2>> sendOts,
+		OC_NOINLINE static void derandomizeSendOts(span<std::array<block, 2>> sendOts,
 			span<const u8> phi)
 		{
 			const auto n = sendOts.size();

@@ -103,30 +103,24 @@ namespace osuCrypto
 			// The exact uniform permutation hides which original row owns each
 			// placement vector. Opening the permuted vectors therefore exposes only
 			// the shuffled records needed to construct the inverse-routed payload.
-			std::vector<Matrix<u8>> openedPlacement;
-			openedPlacement.reserve(mNumSets);
+			const auto addressBytes = maskedAddresses.cols();
+			const auto recordBytes = 1 + addressBytes + placementBytes;
 			for (u64 set = 0; set < mNumSets; ++set)
 				co_await socket.send(coproto::copy(hiddenPlacement[set]));
-			for (u64 set = 0; set < mNumSets; ++set)
-			{
-				Matrix<u8> remote(mColumns, placementBytes);
-				co_await socket.recv(remote);
-				for (u64 i = 0; i < remote.size(); ++i)
-					remote(i) ^= hiddenPlacement[set](i);
-				openedPlacement.emplace_back(std::move(remote));
-			}
-			const auto addressBytes = maskedAddresses.cols();
-			const auto rowBytes = divCeil(mRowsPerSet, 8);
-			const auto recordBytes = 1 + addressBytes + rowBytes;
 			std::vector<Matrix<u8>> records(
 				mNumSets,
 				Matrix<u8>(mColumns, recordBytes));
 			for (auto& set : records)
 				std::fill(set.begin(), set.end(), 0);
+			Matrix<u8> remote(mColumns, placementBytes);
 			for (u64 set = 0; set < mNumSets; ++set)
+			{
+				co_await socket.recv(remote);
+				for (u64 i = 0; i < remote.size(); ++i)
+					remote(i) ^= hiddenPlacement[set](i);
 				for (u64 column = 0; column < mColumns; ++column)
 					for (u64 row = 0; row < mRowsPerSet; ++row)
-						if (bit(openedPlacement[set][column], row))
+						if (bit(remote[column], row))
 						{
 							const auto globalRow = set * mRowsPerSet + row;
 							records[set](column, 0) ^= activity[globalRow];
@@ -138,6 +132,7 @@ namespace osuCrypto
 									records[set].data(column) + 1 + addressBytes,
 									row) = 1;
 						}
+			}
 			auto recordContext = DpfMult::BitMatrixCoeffCtx(recordBytes * 8);
 			using RecordView = DpfMult::BitMatrixCoeffCtx::View<u8>;
 			std::vector<RecordView> recordView;
@@ -162,7 +157,7 @@ namespace osuCrypto
 					for (u64 row = 0; row < mRowsPerSet; ++row)
 						if (bit(span<const u8>(
 							records[set].data(column) + 1 + addressBytes,
-							rowBytes), row))
+							placementBytes), row))
 							result.mDestinations[set * mRowsPerSet + row] ^= column;
 
 					const auto inactive = result.mActivity[output] ^ mPartyIdx;

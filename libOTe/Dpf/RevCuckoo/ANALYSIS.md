@@ -363,8 +363,8 @@ assuming independent failure events; product lists can share input noises.
 ## 8. Bounded RingLPN analyzer
 
 The first bounded analyzer is implemented in
-`analysis/rev_cuckoo_hash_relations.py`, with regression tests in
-`analysis/test_rev_cuckoo_hash_relations.py`. It samples the actual RingLPN
+`libOTe_Tests/RevCuckooAnalysis/rev_cuckoo_hash_relations.py`, with regression tests in
+`libOTe_Tests/RevCuckooAnalysis/test_rev_cuckoo_hash_relations.py`. It samples the actual RingLPN
 diagonal-sum construction: for each polynomial pair and output block, it forms
 the `t` points
 
@@ -521,9 +521,9 @@ because it also reduces both hash widths.
 The measurements are reproducible with:
 
 ```text
-python analysis/rev_cuckoo_hash_relations.py --trials 1000 --width-slack 0
-python analysis/rev_cuckoo_hash_relations.py --trials 1000
-python -m unittest -v analysis/test_rev_cuckoo_hash_relations.py
+python -m libOTe_Tests.RevCuckooAnalysis.rev_cuckoo_hash_relations --trials 1000 --width-slack 0
+python -m libOTe_Tests.RevCuckooAnalysis.rev_cuckoo_hash_relations --trials 1000
+python -m unittest -v libOTe_Tests.RevCuckooAnalysis.test_rev_cuckoo_hash_relations
 ```
 
 The `--width-slack` option is an analysis override used to compare the old
@@ -550,7 +550,7 @@ before coefficient cancellation. The two parties reject independently; shuffle
 and evaluator seeds are independent of rejection. `RingLpnTriple` implements
 this filter for the Goldilocks, degree-2^20, four-polynomial, weight-16 profile.
 Other profiles retain the unfiltered sampler. See
-`analysis/ring_lpn_support_filter.md` for selection and regression coverage.
+`libOTe/Triple/RingLpn/SUPPORT_ANALYSIS.md` for selection and regression coverage.
 
 The original bound assumes unfiltered supports. Dividing the complete bound
 by the probability that both parties accept gives only 39.946 bits. That
@@ -597,7 +597,7 @@ This result does not bound leakage, establish rejection-conditioned attack
 costs, or cover coefficient-dependent rejection.
 
 The calculation is implemented in
-`analysis/rev_cuckoo_hash_conditioning.py`. It uses integer occupancy counts,
+`libOTe_Tests/RevCuckooAnalysis/rev_cuckoo_hash_conditioning.py`. It uses integer occupancy counts,
 an integer Walsh transform for triangular affine-plane counts, the existing
 exact rank enumerator, and rational arithmetic for the final bound. Decimal
 exponents are display values; the comparison with $2^{-40}$ is exact.
@@ -607,8 +607,8 @@ as 41.935; a literal upper-bound statement should round down to 41.934.
 From this worktree, reproduce the deterministic calculation and its tests:
 
 ```text
-python -m analysis.rev_cuckoo_hash_conditioning
-python -m unittest -v analysis.test_rev_cuckoo_hash_conditioning analysis.test_rev_cuckoo_hash_relations
+python -m libOTe_Tests.RevCuckooAnalysis.rev_cuckoo_hash_conditioning
+python -m unittest -v libOTe_Tests.RevCuckooAnalysis.test_rev_cuckoo_hash_conditioning libOTe_Tests.RevCuckooAnalysis.test_rev_cuckoo_hash_relations
 ```
 
 On 2026-09-05 all 20 tests passed, including exhaustive small-domain checks

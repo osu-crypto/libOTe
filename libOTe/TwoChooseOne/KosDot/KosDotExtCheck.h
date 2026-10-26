@@ -7,6 +7,7 @@
 #pragma once
 
 #include "libOTe/Tools/Tools.h"
+#include "libOTe/Tools/CompilerHints.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include <cryptoTools/Common/Aligned.h>
 #include <cryptoTools/Common/BitVector.h>
@@ -23,12 +24,7 @@ namespace osuCrypto::details
 	using KosDotProof = std::array<block, KosDotCheckColumns + 1>;
 
 	// Keep the AVX-aligned scratch on an ordinary stack, outside coroutine frames.
-#if defined(_MSC_VER)
-	__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-	__attribute__((noinline))
-#endif
-	inline KosDotColumnCheck kosDotTransposeCheckChunk(
+	OC_NOINLINE inline KosDotColumnCheck kosDotTransposeCheckChunk(
 		span<const KosDotCheckRow> rows)
 	{
 		if (rows.size() > 128)

@@ -2,6 +2,7 @@
 
 #include "cryptoTools/Common/Defines.h"
 #include "libOTe/Dpf/CachedDpfExpansion.h"
+#include "libOTe/Tools/CompilerHints.h"
 #include "libOTe/Dpf/SparseDpf.h"
 #include "RevCuckoo/Dedup.h"
 #include "RevCuckoo/GoldreichHash.h"
@@ -40,7 +41,7 @@ namespace osuCrypto
 		u64 mLinearSecParam = 0;
 
 		// Fixed margin for batching and the structured-relation loss analyzed in
-		// REV_CUCKOO_HASH_ANALYSIS.md. This is independent of lambda.
+		// RevCuckoo/ANALYSIS.md. This is independent of lambda.
 		static constexpr u64 HashWidthSlack = 8;
 
 		u64 mCuckooSecParam = 0;
@@ -335,12 +336,7 @@ namespace osuCrypto
 		}
 
 		// Keep public hashing and its scratch out of the coroutine frame.
-#ifdef _MSC_VER
-		__declspec(noinline)
-#else
-		__attribute__((noinline))
-#endif
-		void buildSparseSets(
+		OC_NOINLINE void buildSparseSets(
 			u64 f,
 			u64 c,
 			const std::vector<Matrix<u8>>& S,

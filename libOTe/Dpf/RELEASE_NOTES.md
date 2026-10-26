@@ -67,37 +67,15 @@ the inherited AES evaluator.
 
 ## Validation
 
-The Silent OT/VOLE PPRF sizing and KOS-Dot scratch-alignment fixes have
-focused regression coverage. The transpose helper uses 32-byte-aligned arrays
-in a non-inlined, non-coroutine function; it adds no heap allocation or
-protocol change. `DotExt_Kos_Check_Test` compares the transpose with a scalar
-reference for empty, partial, and full chunks, and rejects oversized chunks.
-All five focused KOS-Dot tests passed with the test and protocol translation
-units built under GCC 13 ASan with stack checks disabled. The GCC 13–16
-workaround retains heap and global checks. The focused runner links existing
-non-ASan dependency archives; full cross-platform status is reported by the
-CI checks on the exact PR head.
+Enable `ENABLE_SPARSE_DPF`, or use the `ENABLE_ALL_OT` CI configuration, to run
+the registered DPF, Waterfall, Reverse-Cuckoo, and Ring-LPN tests. These include
+correction encoding, inactive-level masking, both public rekeying schedules,
+serial permutation and scatter, repeated expansion, and support filtering.
+The hash-conditioning reproducers are in `libOTe_Tests/RevCuckooAnalysis` and
+can be run with Python's `unittest` discovery.
 
-The exact-permutation/per-list-seed update passes the 24-suite focused WSL/GCC
-runner at defaults and at domain 4097 with 16 points, three sets, four
-expansions, and either two or three partitions. The registered sparse-set
-regression checks per-instance evaluator indexing against scalar hashing,
-including empty and fully loaded buckets. The four-suite Ring-LPN runner
-passes with `-trials 2` (support filter, audit, stationary reuse, and OLE).
-Seven Python hash-conditioning checks pass. These are local regression tests,
-not new benchmarks or a completed cross-platform CI run.
-
-The registered unit tests include the correction-encoding and inactive-level
-regressions, both rekeying schedules, and Waterfall/Reverse-Cuckoo integration.
-Enable `ENABLE_SPARSE_DPF`, or use the existing `ENABLE_ALL_OT` CI configuration.
-The focused WSL runner is `bash analysis/run_sparse_dpf_mask_tests.sh` after
-configuring a compatible Ninja build; `SPARSE_DPF_BUILD` selects its directory.
-
-The exact hash-conditioning checks use only the Python standard library:
-
-```sh
-python -m unittest analysis.test_rev_cuckoo_hash_conditioning
-```
-
-Do not run two benchmarks concurrently. Record the tested commit, build
-configuration, hardware, and raw output when refreshing performance results.
+Tests verify the implemented protocol paths; they do not replace the stated
+concrete-security assumptions or the separate application-level composition
+argument. Check CI on the exact commit being released. For performance
+comparisons, record the commit, build configuration, hardware, and raw output,
+and run benchmarks one at a time.

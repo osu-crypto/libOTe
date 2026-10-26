@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cryptoTools/Crypto/AES.h"
+#include "libOTe/Tools/CompilerHints.h"
 
 #include <algorithm>
 #include <array>
@@ -12,12 +13,7 @@ namespace osuCrypto::details
 
 	// Derive purpose-separated roots from the setup's existing public coins.
 	// Keep AES schedules out of callers' coroutine frames.
-#if defined(_MSC_VER)
-	__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-	__attribute__((noinline))
-#endif
-	inline block cachedDpfLeafRoot(block publicSeed, u64 purpose)
+	OC_NOINLINE inline block cachedDpfLeafRoot(block publicSeed, u64 purpose)
 	{
 		return ::osuCrypto::AES(publicSeed).ecbEncBlock(block(purpose, 0x4450464c524f4f54ull));
 	}
@@ -32,12 +28,7 @@ namespace osuCrypto::details
 	/// The explicit eight-lane body is intentional: this is a hot
 	/// kernel and produces better code than the previously generic inner loop.
 	template<typename T>
-#if defined(_MSC_VER)
-	__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-	__attribute__((noinline))
-#endif
-	inline void expandCachedDpfLeaves(
+	OC_NOINLINE inline void expandCachedDpfLeaves(
 		u64 partyIdx,
 		auto& sparseSets,
 		auto& leafShares,

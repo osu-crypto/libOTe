@@ -127,13 +127,13 @@ namespace osuCrypto
 			std::vector<BitVector> current(table.begin(), table.end());
 			std::vector<BitVector> difference(table.size());
 			std::vector<BitVector> selected(table.size());
+			BitVector control(table.size());
 			for (u64 level = 0; current[0].size() > recordBits; ++level)
 			{
 				const auto records = current[0].size() / recordBits;
 				if ((records & 1) != 0)
 					throw RTE_LOC;
 				const auto nextRecords = records / 2;
-				BitVector control(table.size());
 				for (u64 item = 0; item < table.size(); ++item)
 				{
 					control[item] = (indexShare[item] >> level) & 1;
@@ -172,13 +172,13 @@ namespace osuCrypto
 			std::vector<BitVector> difference(table.size());
 			std::vector<BitVector> selected(table.size());
 			sessions.clear();
+			BitVector control(table.size());
 			for (u64 level = 0; current[0].size() > recordBits; ++level)
 			{
 				const auto records = current[0].size() / recordBits;
 				if ((records & 1) != 0)
 					throw RTE_LOC;
 				const auto nextRecords = records / 2;
-				BitVector control(table.size());
 				for (u64 item = 0; item < table.size(); ++item)
 				{
 					control[item] = (indexShare[item] >> level) & 1;
@@ -219,12 +219,12 @@ namespace osuCrypto
 				throw RTE_LOC;
 			std::vector<BitVector> current(indexShare.size(), BitVector(1));
 			std::vector<BitVector> right(indexShare.size());
+			BitVector control(indexShare.size());
 			for (u64 item = 0; item < indexShare.size(); ++item)
 				current[item][0] = valueShare[item];
 			for (u64 remaining = std::bit_width(size - 1); remaining; --remaining)
 			{
 				const auto level = remaining - 1;
-				BitVector control(indexShare.size());
 				for (u64 item = 0; item < indexShare.size(); ++item)
 					control[item] = (indexShare[item] >> level) & 1;
 				co_await multiplyRecords(control, current, right, socket);

@@ -3,6 +3,7 @@
 #include "cryptoTools/Crypto/AES.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "coproto/Socket/Socket.h"
+#include "libOTe/Tools/CompilerHints.h"
 #include <optional>
 
 namespace osuCrypto::details
@@ -35,12 +36,7 @@ namespace osuCrypto::details
 
 		u64 remaining() const { return Interval - mCounter % Interval; }
 
-#if defined(_MSC_VER)
-		__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-		__attribute__((noinline))
-#endif
-		void children(block seed, block* output)
+		OC_NOINLINE void children(block seed, block* output)
 		{
 			const auto& aes = at(mCounter++);
 			output[0] = aes.hashBlock(seed);
@@ -64,12 +60,7 @@ namespace osuCrypto::details
 		}
 	};
 
-#if defined(_MSC_VER)
-	__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-	__attribute__((noinline))
-#endif
-	inline block dpfTreeRoot(block seed, u64 purpose)
+	OC_NOINLINE inline block dpfTreeRoot(block seed, u64 purpose)
 	{
 		return ::osuCrypto::AES(seed).ecbEncBlock(block(purpose, 0x494e5445524e414cull));
 	}

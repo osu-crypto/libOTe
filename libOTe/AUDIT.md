@@ -48,7 +48,7 @@ severity is assigned here.
 
 Resolution:
 
-`RingLpnSupportFilter` names the analyzed profile and its fixed degree-128,
+`GoldilocksRingLpnSupportFilter` names the analyzed profile and its fixed degree-128,
 minimum-weight-61 rule. `genDpf` calls the non-coroutine support sampler
 before routing. Filtering activates only for scalar field order
 `0xffffffff00000001`, ring degree 2^20, four polynomials, and weight 16.
@@ -6914,7 +6914,7 @@ Verification uses `SparseDpf_CorrectionEncoding_Test` (actual socket bytes
 and exact small opening laws) and expanded `SparseDpf_InactiveLevel_Test`
 coverage. All 17 focused WSL/GCC tests passed, including Waterfall and
 Reverse-Cuckoo integration. All nine exact Python encoding checks passed.
-See `analysis/sparse_dpf_correction_encoding.md` for details.
+See `libOTe/Dpf/SPARSE_CORRECTION_ANALYSIS.md` for details.
 
 ## AUD-212: Sparse-DPF corrections exposed publicly present inactive levels
 
@@ -6953,8 +6953,8 @@ Verification:
 - `SparseDpf_InactiveLevel_Test` checks exact MPC masking for all activity-share
   combinations, corrected-tag accumulation, the three-point witness, uneven
   dense-prefix subtrees, output modes, and OT reservation/consumption.
-- All 16 tests in `analysis/run_sparse_dpf_mask_tests.sh` passed under WSL/GCC,
+- All 16 focused tests passed under WSL/GCC,
   including multiplication, sparse-DPF, Waterfall, and Reverse-Cuckoo tests.
-- See `analysis/sparse_dpf_activity_mask.md` for cost, compatibility, and scope.
+- See `libOTe/Dpf/SPARSE_ACTIVITY_ANALYSIS.md` for cost, compatibility, and scope.
   No MSVC build or new performance benchmark was run. The separate concrete
   generator-security obligations are not resolved by this masking fix.

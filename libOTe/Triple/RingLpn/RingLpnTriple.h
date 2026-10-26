@@ -22,6 +22,7 @@
 #include "libOTe/Tools/Ntt/NttNegWrap.h"
 #include "libOTe/Tools/Ntt/Poly.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Tools/CompilerHints.h"
 #include "libOTe/Tools/Gmw/Gmw.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "cryptoTools/Circuit/BetaLibrary.h"
@@ -251,8 +252,8 @@ namespace osuCrypto
 		// Other parameter sets retain their experimental, unfiltered sampler.
 		bool usesSupportFilter() const
 		{
-			return SF::order() == RingLpnSupportFilter::FieldOrder &&
-				RingLpnSupportFilter::matches(mN, mNumPolys, mPolyWeight);
+			return SF::order() == GoldilocksRingLpnSupportFilter::FieldOrder &&
+				GoldilocksRingLpnSupportFilter::matches(mN, mNumPolys, mPolyWeight);
 		}
 
 		// Non-coroutine: rejection and its scratch storage finish before routing.
@@ -262,7 +263,7 @@ namespace osuCrypto
 				throw std::logic_error("RingLPN supports must be sampled before DPF setup.");
 			mSparsePositions.resize(mNumPolys, mPolyWeight);
 			if (usesSupportFilter())
-				RingLpnSupportFilter::sample(mSparsePositions, prng);
+				GoldilocksRingLpnSupportFilter::sample(mSparsePositions, prng);
 			else
 				for (auto& offset : mSparsePositions)
 					offset = prng.get<u64>() % mBlockSize;
@@ -832,12 +833,7 @@ namespace osuCrypto
 
 
 	template<typename F, typename CoeffCtx>
-#if defined(_MSC_VER)
-	__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-	__attribute__((noinline))
-#endif
-	void RingLpnTriple<F, CoeffCtx>::sampleA(block seed)
+	OC_NOINLINE void RingLpnTriple<F, CoeffCtx>::sampleA(block seed)
 	{
 
 		if (mNumPolys > 8)

@@ -5,14 +5,14 @@ import unittest
 from collections import Counter
 from fractions import Fraction
 
-from analysis.rev_cuckoo_hash_conditioning import (
+from libOTe_Tests.RevCuckooAnalysis.rev_cuckoo_hash_conditioning import (
     acceptance_probability,
     conditioned_hash_bound,
     conditioning_factors,
     folded_weight_counts,
     triangular_distinct_xor_probability,
 )
-from analysis.rev_cuckoo_hash_relations import (
+from libOTe_Tests.RevCuckooAnalysis.rev_cuckoo_hash_relations import (
     compression_rank_loss_union_bound,
     make_parameters,
     triangular_distinct_xor_zero_probability,

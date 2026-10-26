@@ -6,18 +6,22 @@
 
 namespace osuCrypto
 {
-	// The analyzed Goldilocks profile, not a parameter generator for other rings.
-	struct RingLpnSupportFilter
+	// Count occupied residues separately for each sparse polynomial. This
+	// helper does not certify a parameter set; only the analyzed profile below
+	// is enabled by RingLpnTriple.
+	template<u64 RingSize_, u64 NumPolys_, u64 PolyWeight_, u64 FactorDegree_, u64 MinWeight_>
+	struct RingLpnFoldedSupportFilter
 	{
-		static constexpr u64 RingSize = 1ull << 20;
-		static constexpr u64 FieldOrder = 0xffffffff00000001ull;
-		static constexpr u64 NumPolys = 4;
-		static constexpr u64 PolyWeight = 16;
+		static constexpr u64 RingSize = RingSize_;
+		static constexpr u64 NumPolys = NumPolys_;
+		static constexpr u64 PolyWeight = PolyWeight_;
 		static constexpr u64 BlockSize = RingSize / PolyWeight;
-		static constexpr u64 FactorDegree = 128;
-		static constexpr u64 MinWeight = 61;
+		static constexpr u64 FactorDegree = FactorDegree_;
+		static constexpr u64 MinWeight = MinWeight_;
 		static constexpr u64 NumPositions = NumPolys * PolyWeight;
-		static_assert(BlockSize % FactorDegree == 0);
+		static_assert(NumPolys > 0 && PolyWeight > 0 && RingSize % PolyWeight == 0);
+		static_assert(FactorDegree > 0);
+		static_assert(RingSize % FactorDegree == 0);
 		static_assert((BlockSize & (BlockSize - 1)) == 0);
 		static_assert(MinWeight <= NumPositions);
 
@@ -31,21 +35,23 @@ namespace osuCrypto
 		static u64 foldedWeight(span<const u64> offsets)
 		{
 			if (offsets.size() != NumPositions)
-				throw std::invalid_argument("RingLPN support filter requires four weight-16 supports.");
+				throw std::invalid_argument("RingLPN support count does not match filter profile.");
 			u64 weight = 0;
 			for (u64 p = 0; p < NumPolys; ++p)
 			{
-				std::array<u64, 2> occupied{};
+				std::array<u64, (FactorDegree + 63) / 64> occupied{};
 				for (u64 i = 0; i < PolyWeight; ++i)
 				{
 					const auto offset = offsets[p * PolyWeight + i];
 					if (offset >= BlockSize)
 						throw std::invalid_argument("RingLPN support offset is outside its block.");
-					// i * BlockSize is divisible by FactorDegree in this profile.
-					const auto residue = offset & (FactorDegree - 1);
+					// FactorDegree is a compile-time constant; the analyzed 128-fold
+					// profile reduces this remainder to a bit mask.
+					const auto residue = ((i * BlockSize) + offset) % FactorDegree;
 					occupied[residue >> 6] |= 1ull << (residue & 63);
 				}
-				weight += std::popcount(occupied[0]) + std::popcount(occupied[1]);
+				for (const auto word : occupied)
+					weight += std::popcount(word);
 			}
 			return weight;
 		}
@@ -62,12 +68,19 @@ namespace osuCrypto
 		static void sample(span<u64> offsets, Rng& prng)
 		{
 			if (offsets.size() != NumPositions)
-				throw std::invalid_argument("RingLPN support filter requires four weight-16 supports.");
+				throw std::invalid_argument("RingLPN support count does not match filter profile.");
 			do
 			{
 				for (auto& offset : offsets)
 					offset = prng.template get<u64>() & (BlockSize - 1);
 			} while (!accepts(offsets));
 		}
+	};
+
+	// The only profile whose folded-support threshold has been analyzed.
+	struct GoldilocksRingLpnSupportFilter :
+		RingLpnFoldedSupportFilter<1ull << 20, 4, 16, 128, 61>
+	{
+		static constexpr u64 FieldOrder = 0xffffffff00000001ull;
 	};
 }

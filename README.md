@@ -117,9 +117,9 @@ on platform/dependencies. The `ON`/`OFF` options include
    Rev-Cuckoo is the specialized low-expansion construction analyzed for its
    intended Ring-LPN input distribution. See
    [`libOTe/Dpf/Waterfall/README.md`](libOTe/Dpf/Waterfall/README.md) and
-   [`REV_CUCKOO_HASH_ANALYSIS.md`](REV_CUCKOO_HASH_ANALYSIS.md).
+   [Reverse-Cuckoo analysis](libOTe/Dpf/RevCuckoo/ANALYSIS.md).
    These constructions remain experimental. See
-   [`DMPF_RELEASE_NOTES.md`](DMPF_RELEASE_NOTES.md) before upgrading peers
+   [DMPF release notes](libOTe/Dpf/RELEASE_NOTES.md) before upgrading peers
    or loading previously serialized DPF keys.
 
  **Beaver Triples:**

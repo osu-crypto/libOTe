@@ -1,8 +1,10 @@
 #pragma once
 
-#include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
+#include "libOTe/Dpf/Waterfall/detail/WaksmanPass.h"
 
 #include <array>
+#include <memory>
+#include <type_traits>
 
 namespace osuCrypto
 {
@@ -12,10 +14,10 @@ namespace osuCrypto
 	class SerialWaksmanPermute
 	{
 		u64 mPartyIdx = 0;
-		std::array<WaksmanPermute, 2> mPass;
+		std::array<detail::WaksmanPass, 2> mPass;
 
 	public:
-		using BaseOtCount = WaksmanPermute::BaseOtCount;
+		using BaseOtCount = detail::WaksmanPass::BaseOtCount;
 
 		void init(u64 partyIdx, u64 n, u64 batches = 1)
 		{
@@ -81,11 +83,27 @@ namespace osuCrypto
 			co_await mPass[1].applyMany<F, VecF>(data, socket, context);
 		}
 
+		template<typename F, typename CoeffCtx>
+		task<> apply(auto& data, Socket& socket, CoeffCtx context)
+		{
+			using VecF = std::remove_reference_t<decltype(data)>;
+			span<VecF> batch(std::addressof(data), 1);
+			co_await applyMany<F, VecF>(batch, socket, context);
+		}
+
 		template<typename F, typename VecF, typename CoeffCtx>
 		task<> applyManyInverse(span<VecF> data, Socket& socket, CoeffCtx context)
 		{
 			co_await mPass[1].applyManyInverse<F, VecF>(data, socket, context);
 			co_await mPass[0].applyManyInverse<F, VecF>(data, socket, context);
+		}
+
+		template<typename F, typename CoeffCtx>
+		task<> applyInverse(auto& data, Socket& socket, CoeffCtx context)
+		{
+			using VecF = std::remove_reference_t<decltype(data)>;
+			span<VecF> batch(std::addressof(data), 1);
+			co_await applyManyInverse<F, VecF>(batch, socket, context);
 		}
 
 		const std::vector<u32>& privatePermutation(u64 batch) const

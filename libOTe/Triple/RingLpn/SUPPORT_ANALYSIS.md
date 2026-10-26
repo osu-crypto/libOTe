@@ -40,14 +40,8 @@ their existing sampler; no security threshold is inferred for those profiles.
   field/dimension profiles;
 - preservation of the setup lifecycle and of legacy sampling outside the profile.
 
-The focused runner also invokes existing Ring-LPN audit, stationary reuse,
-and OLE integration tests:
-
-```sh
-bash analysis/run_ring_lpn_support_tests.sh
-```
-
-Set `RING_LPN_BUILD` to select another compatible Ninja build. The local
+The registered Ring-LPN tests also cover audit, stationary reuse, and OLE
+integration. The local
 production-profile checks exercise sampling and initialization, not a full
 degree-2^20 OLE expansion; the existing integration tests use smaller rings.
 This change does not resolve the separate OLE composition argument or the

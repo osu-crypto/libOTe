@@ -21,7 +21,7 @@ import math
 from fractions import Fraction
 from functools import lru_cache
 
-from analysis.rev_cuckoo_hash_relations import (
+from libOTe_Tests.RevCuckooAnalysis.rev_cuckoo_hash_relations import (
     Parameters,
     falling_factorial,
     make_parameters,

@@ -80,8 +80,8 @@ one-, eight-, and thirteen-node kernels, zero-low-bit cached prefixes,
 singleton/two-point/uneven supports, every supported active index, dense
 depths 0/1/2/6, immediate payloads, cached seeds, and unchanged OT counts.
 
-Run the focused multiplication, sparse-DPF, Waterfall, and Reverse-Cuckoo
-suite with `bash analysis/run_sparse_dpf_mask_tests.sh` in WSL. The paper's
+Run the registered multiplication, sparse-DPF, Waterfall, and Reverse-Cuckoo
+tests in a build with `ENABLE_SPARSE_DPF` enabled. The paper's
 `experiments/test_sparse_dpf_correction_encoding.py` retains the historical
 disclosure equations and checks the corrected abstract encoding independently.
 

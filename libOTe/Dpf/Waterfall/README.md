@@ -91,5 +91,5 @@ unless measurements justify changing them.
 `Waterfall_Tests.cpp` covers configuration validation, cleartext placement,
 hashing, candidate generation, basic placement, repair, exact scatter, and
 end-to-end DMPF expansion over several coefficient types. The frontend
-benchmark accepts `--waterfallDmpf --profile 3|4`; both built-in profiles require
-`--numPoints 16`.
+benchmark accepts `-bench -waterfall -profile 3|4`; both built-in profiles
+require 16 input rows per set.

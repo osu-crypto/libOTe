@@ -10,6 +10,7 @@
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Matrix.h"
 #include "libOTe/Dpf/RegularDpf.h"
+#include "libOTe/Tools/CompilerHints.h"
 #include <limits>
 
 #include <chrono>
@@ -446,12 +447,7 @@ namespace osuCrypto
 		// object requires it. One call handles a complete tree level, so keeping
 		// this helper out of line has negligible dispatch cost and preserves the
 		// eight-node AES batching in the hot loop.
-#if defined(_MSC_VER)
-		__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-		__attribute__((noinline))
-#endif
-		void expandSparseLevel(Tree& tree, u64 level, details::DpfTreeHash& hash)
+		OC_NOINLINE void expandSparseLevel(Tree& tree, u64 level, details::DpfTreeHash& hash)
 		{
 			const auto size = tree[level].size();
 			auto z0 = tree[level].mZ[0];

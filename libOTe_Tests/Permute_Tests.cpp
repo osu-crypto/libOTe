@@ -1,6 +1,6 @@
 #include "Permute_Tests.h"
 
-#include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
+#include "libOTe/Dpf/Waterfall/SerialWaksmanPermute.h"
 #include "cryptoTools/Common/Matrix.h"
 #include "cryptoTools/Common/CLP.h"
 #include "cryptoTools/Crypto/PRNG.h"
@@ -24,7 +24,6 @@ namespace osuCrypto
 		//PRNG prng(block(243573546521, 4532165));
 
 		//// Create a  instance
-		//WaksmanPermute permuter;
 
 		//for (u64 n : N)
 		//{
@@ -86,7 +85,7 @@ namespace osuCrypto
 					<< " - " << testIdx + 1 << "/" << numTests << std::endl;
 
 				// Create permuter instances
-				std::array<WaksmanPermute, 2> permuters;
+				std::array<SerialWaksmanPermute, 2> permuters;
 				permuters[0].init(0, n);
 				permuters[1].init(1, n);
 
@@ -138,6 +137,8 @@ namespace osuCrypto
 
 				permuters[0].setBaseOts(baseSendOts[0], baseRecvOts[0], baseRecvBits[0]);
 				permuters[1].setBaseOts(baseSendOts[1], baseRecvOts[1], baseRecvBits[1]);
+				permuters[0].sample(prng);
+				permuters[1].sample(prng);
 
 				// Apply the permutation protocol
 				auto r = macoro::sync_wait(macoro::when_all_ready(
@@ -215,7 +216,7 @@ namespace osuCrypto
 					<< " - " << testIdx + 1 << "/" << numTests << std::endl;
 
 				// Create permuter instances
-				std::array<WaksmanPermute, 2> permuters;
+				std::array<SerialWaksmanPermute, 2> permuters;
 				permuters[0].init(0, n, batches);
 				permuters[1].init(1, n, batches);
 
@@ -273,6 +274,8 @@ namespace osuCrypto
 
 				permuters[0].setBaseOts(baseSendOts[0], baseRecvOts[0], baseRecvBits[0]);
 				permuters[1].setBaseOts(baseSendOts[1], baseRecvOts[1], baseRecvBits[1]);
+				permuters[0].sample(prng);
+				permuters[1].sample(prng);
 
 				// Apply the permutation protocol
 				auto r = macoro::sync_wait(macoro::when_all_ready(

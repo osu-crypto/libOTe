@@ -28,7 +28,6 @@
 #include "libOTe/Triple/RingLpn/RingLpnTriple.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Tools/Field/FVec.h"
-#include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
 #include "libOTe/Dpf/Waterfall/SerialWaksmanPermute.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
 #include <format>
@@ -2027,11 +2026,9 @@ namespace osuCrypto
 	}
 
 
-	template<typename Permutation>
 	inline void WaterfallScatterPermuteBenchImpl(const CLP& cmd, const char* name)
 	{
 		using coproto::LocalAsyncSocket;
-		constexpr bool serial = std::is_same_v<Permutation, SerialWaksmanPermute>;
 
 		const u64 columns = cmd.getOr<u64>("n", 64);
 		const u64 sets = cmd.getOr<u64>("sets", 256);
@@ -2061,7 +2058,7 @@ namespace osuCrypto
 		for (u64 trial = 0; trial < trials; ++trial)
 		{
 			PRNG prng(block(0x776174657266616cull ^ trial, 0x7363617474657221ull));
-			std::array<Permutation, 2> permutation;
+			std::array<SerialWaksmanPermute, 2> permutation;
 			for (u64 party = 0; party < 2; ++party)
 				permutation[party].init(party, columns, sets);
 
@@ -2094,7 +2091,6 @@ namespace osuCrypto
 
 			double programCpu = 0;
 			double programWallEstimate = 0;
-			if constexpr (serial)
 			{
 				std::array<PRNG, 2> permutationPrng{
 					PRNG(prng.get<block>()),
@@ -2190,28 +2186,7 @@ namespace osuCrypto
 
 	inline void WaterfallScatterPermuteBench(const CLP& cmd)
 	{
-		if (cmd.isSet("paired"))
-		{
-			const auto pairs = cmd.getOr<u64>("pairs", 11);
-			for (u64 pair = 0; pair < pairs; ++pair)
-			{
-				std::cout << "paired sample: " << pair << "\n";
-				if ((pair & 1) == 0)
-				{
-					WaterfallScatterPermuteBenchImpl<SerialWaksmanPermute>(cmd, "exact serial private-control");
-					WaterfallScatterPermuteBenchImpl<WaksmanPermute>(cmd, "legacy shared-control (Reverse-Cuckoo)");
-				}
-				else
-				{
-					WaterfallScatterPermuteBenchImpl<WaksmanPermute>(cmd, "legacy shared-control (Reverse-Cuckoo)");
-					WaterfallScatterPermuteBenchImpl<SerialWaksmanPermute>(cmd, "exact serial private-control");
-				}
-			}
-		}
-		else if (cmd.isSet("legacy"))
-			WaterfallScatterPermuteBenchImpl<WaksmanPermute>(cmd, "legacy shared-control (Reverse-Cuckoo)");
-		else
-			WaterfallScatterPermuteBenchImpl<SerialWaksmanPermute>(cmd, "exact serial private-control");
+		WaterfallScatterPermuteBenchImpl(cmd, "serial private-control");
 	}
 
 	template<typename F, typename Context, u64 ValueBatch = 1>
@@ -2424,7 +2399,7 @@ namespace osuCrypto
 			using F = block;
 			CoeffCtxGF2 ctx;
 
-			std::array<WaksmanPermute, 2> perm;
+			std::array<SerialWaksmanPermute, 2> perm;
 			perm[0].init(0, n);
 			perm[1].init(1, n);
 
@@ -2458,6 +2433,8 @@ namespace osuCrypto
 
 			perm[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
 			perm[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+			perm[0].sample(prng0);
+			perm[1].sample(prng1);
 
 			auto in0 = ctx.makeVec<F>(n);
 			auto in1 = ctx.makeVec<F>(n);
@@ -2468,7 +2445,7 @@ namespace osuCrypto
 			}
 
 			if (verbose)
-				std::cout << "Waksman apply (GF2/block): n=" << n << " trials=" << trials << (cmd.isSet("mt") ? " [mt]" : "") << std::endl;
+				std::cout << "Serial Waksman apply (GF2/block): n=" << n << " trials=" << trials << (cmd.isSet("mt") ? " [mt]" : "") << std::endl;
 
 			timer.setTimePoint("begin");
 			for (u64 t = 0; t < trials; ++t)
@@ -2485,7 +2462,7 @@ namespace osuCrypto
 			if (!cmd.isSet("quiet"))
 			{
 				// Print timer and basic throughput
-				std::cout << "WaksmanPermute (proto, GF2/block) n=" << n << std::endl;
+				std::cout << "Serial Waksman (proto, GF2/block) n=" << n << std::endl;
 				std::cout << timer << std::endl;
 				std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per trial" << std::endl;
 			}
@@ -2496,7 +2473,7 @@ namespace osuCrypto
 			using F = u64;
 			CoeffCtxInteger ctx;
 
-			std::array<WaksmanPermute, 2> perm;
+			std::array<SerialWaksmanPermute, 2> perm;
 			perm[0].init(0, n);
 			perm[1].init(1, n);
 
@@ -2530,6 +2507,8 @@ namespace osuCrypto
 
 			perm[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
 			perm[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+			perm[0].sample(prng0);
+			perm[1].sample(prng1);
 
 			auto in0 = ctx.makeVec<F>(n);
 			auto in1 = ctx.makeVec<F>(n);
@@ -2540,7 +2519,7 @@ namespace osuCrypto
 			}
 
 			if (verbose)
-				std::cout << "Waksman apply (u64/integer): n=" << n << " trials=" << trials << (cmd.isSet("mt") ? " [mt]" : "") << std::endl;
+				std::cout << "Serial Waksman apply (u64/integer): n=" << n << " trials=" << trials << (cmd.isSet("mt") ? " [mt]" : "") << std::endl;
 
 			timer.setTimePoint("begin");
 			for (u64 t = 0; t < trials; ++t)
@@ -2555,7 +2534,7 @@ namespace osuCrypto
 
 			if (!cmd.isSet("quiet"))
 			{
-				std::cout << "WaksmanPermute (proto, u64) n=" << n << std::endl;
+				std::cout << "Serial Waksman (proto, u64) n=" << n << std::endl;
 				std::cout << timer << std::endl;
 				std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per trial" << std::endl;
 			}

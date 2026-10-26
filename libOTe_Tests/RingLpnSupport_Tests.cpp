@@ -9,7 +9,7 @@ namespace osuCrypto
 #ifdef ENABLE_RINGLPN
 	namespace
 	{
-		using Filter = RingLpnSupportFilter;
+		using Filter = GoldilocksRingLpnSupportFilter;
 		using Support = std::array<u64, Filter::NumPositions>;
 
 		struct ScriptedSupportPrng
@@ -43,6 +43,17 @@ namespace osuCrypto
 	void RingLpn_SupportFilter_test(const CLP&)
 	{
 #ifdef ENABLE_RINGLPN
+		using ShiftedFilter = RingLpnFoldedSupportFilter<128, 1, 4, 64, 2>;
+		const std::array<u64, 4> shiftedOffsets{ 0, 0, 0, 0 };
+		if (ShiftedFilter::foldedWeight(shiftedOffsets) != 2 ||
+			!ShiftedFilter::accepts(shiftedOffsets))
+			throw UnitTestFail("Generic support filter ignored block offsets in folded exponents");
+		using NonPowerOfTwoFilter = RingLpnFoldedSupportFilter<96, 1, 3, 6, 3>;
+		const std::array<u64, 3> nonPowerOfTwoOffsets{ 0, 0, 0 };
+		if (NonPowerOfTwoFilter::foldedWeight(nonPowerOfTwoOffsets) != 3 ||
+			!NonPowerOfTwoFilter::accepts(nonPowerOfTwoOffsets))
+			throw UnitTestFail("Generic support filter requires power-of-two factor degree");
+
 		Support full{}, sixty{}, sixtyOne{};
 		for (u64 p = 0; p < Filter::NumPolys; ++p)
 			for (u64 i = 0; i < Filter::PolyWeight; ++i)

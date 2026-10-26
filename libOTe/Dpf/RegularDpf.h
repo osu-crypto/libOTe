@@ -13,6 +13,7 @@
 #include "DpfMult.h"
 #include "DpfTreeHash.h"
 #include "libOTe/Tools/CoeffCtx.h" 
+#include "libOTe/Tools/CompilerHints.h"
 #include <limits>
 
 namespace osuCrypto
@@ -246,11 +247,7 @@ namespace osuCrypto
 		// - values is the plaintext list of values.
 		// - prng is the source of randomness.
 		// - keys is a list of two keys where the result is written.
-#if defined(_MSC_VER)
-		__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-		__attribute__((noinline))
-#endif
+		OC_NOINLINE
 		static void keyGen(
 			u64 domain,
 			span<u64> points,
@@ -270,11 +267,7 @@ namespace osuCrypto
 		// leaves use the physical order of the compact tree kernel. leadIdx is the
 		// logical domain index and must be used if ordered output is required.
 		template<typename Output>
-#if defined(_MSC_VER)
-		__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-		__attribute__((noinline))
-#endif
+		OC_NOINLINE
 		static void expand(
 			u64 partyIdx,
 			u64 domain,
@@ -285,11 +278,7 @@ namespace osuCrypto
 		// As above, but reuse caller-owned scratch independent of the number of
 		// DPF trees. Eight physical lanes are eight public subtrees of one tree.
 		template<typename Output>
-#if defined(_MSC_VER)
-		__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-		__attribute__((noinline))
-#endif
+		OC_NOINLINE
 		static void expand(
 			u64 partyIdx,
 			u64 domain,
@@ -325,11 +314,7 @@ namespace osuCrypto
 			}
 		};
 
-#if defined(_MSC_VER)
-		__declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-		__attribute__((noinline))
-#endif
+		OC_NOINLINE
 		static void compactChildSums(
 			u64 partyIdx,
 			u64 targetDepth,
@@ -719,7 +704,8 @@ namespace osuCrypto
 
 		auto leafSums = ctx.template makeVec<T>(numPoints);
 		ctx.zero(leafSums.begin(), leafSums.end());
-		std::vector<u8> d(numPoints);
+		const auto needsSignAdjustment = !ctx.template characteristicTwo<T>();
+		std::vector<u8> d(needsSignAdjustment ? numPoints : 0);
 		const auto sumDomain = roundUpTo(mDomain, 2);
 		expand(
 			mPartyIdx,
@@ -728,14 +714,15 @@ namespace osuCrypto
 			scratch,
 			[&](u64 tree, u64, const auto& leaf, block tag) {
 				ctx.plus(leafSums[tree], leafSums[tree], leaf);
-				d[tree] += lsb(tag);
+				if (needsSignAdjustment)
+					d[tree] += lsb(tag);
 			},
 			ctx);
 
 		for (u64 point = 0; point < numPoints; ++point)
 			ctx.minus(leafSums[point], values[point], leafSums[point]);
 
-		if (!ctx.template characteristicTwo<T>())
+		if (needsSignAdjustment)
 		{
 			auto signDiff = ctx.template makeVec<T>(numPoints);
 			BitVector dBits(numPoints);
@@ -986,8 +973,8 @@ namespace osuCrypto
 		auto& seeds = scratch.mSeeds;
 		auto& tags = scratch.mTags;
 
-		auto gamma = ctx.template makeVec<T>(numTrees);
 		const auto hasGamma = !key.mLeafVals.empty();
+		auto gamma = ctx.template makeVec<T>(hasGamma ? numTrees : 0);
 		if (hasGamma)
 			ctx.deserialize(key.mLeafVals.begin(), key.mLeafVals.end(), gamma.begin());
 

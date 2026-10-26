@@ -4,13 +4,9 @@ import argparse
 import itertools
 import math
 import random
-import sys
 import unittest
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from analysis.rev_cuckoo_hash_relations import (
+from libOTe_Tests.RevCuckooAnalysis.rev_cuckoo_hash_relations import (
     Parameters,
     alternating_form_count,
     alternating_forms_eigenvalue,

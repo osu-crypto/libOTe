@@ -901,10 +901,12 @@ namespace osuCrypto
 							throw RTE_LOC;
 		}
 		{
-			std::array<WaksmanPermute, 2> permutation;
+			std::array<SerialWaksmanPermute, 2> permutation;
 			for (u64 party = 0; party < 2; ++party)
 				permutation[party].init(party, columns, numSets);
 			setCorrelatedAsymmetricOts(permutation, prng);
+			for (auto& pass : permutation)
+				pass.sample(prng);
 			std::vector<Matrix<u8>> plain(numSets, Matrix<u8>(columns, 1));
 			std::array<std::vector<Matrix<u8>>, 2> shares;
 			for (u64 party = 0; party < 2; ++party)

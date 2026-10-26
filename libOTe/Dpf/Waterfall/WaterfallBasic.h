@@ -27,6 +27,9 @@ namespace osuCrypto
 		WaterfallConfig mConfig;
 		Matrix<u8> mWideInput;
 		Matrix<u8> mWideOutput;
+		BitVector mDecoderControl;
+		std::vector<BitVector> mDecoderPacked;
+		std::vector<BitVector> mDecoderSelected;
 
 		macoro::task<> multiplyWide(
 			const BitVector& control,
@@ -148,21 +151,18 @@ namespace osuCrypto
 			for (u64 remaining = levels; remaining; --remaining)
 			{
 				const auto level = remaining - 1;
-				BitVector control(mNumSets);
-				std::vector<BitVector> packed(mNumSets);
-				std::vector<BitVector> selected(mNumSets);
 				for (u64 set = 0; set < mNumSets; ++set)
 				{
-					control[set] = (indexShare[set] >> level) & 1;
+					mDecoderControl[set] = (indexShare[set] >> level) & 1;
 					const auto width = result.mRaw[set].size();
-					packed[set].resize(2 * width);
+					mDecoderPacked[set].resize(2 * width);
 					for (u64 i = 0; i < width; ++i)
 					{
-						packed[set][i] = result.mRaw[set][i];
-						packed[set][width + i] = result.mGated[set][i];
+						mDecoderPacked[set][i] = result.mRaw[set][i];
+						mDecoderPacked[set][width + i] = result.mGated[set][i];
 					}
 				}
-				co_await multiplyWide(control, packed, selected, socket);
+				co_await multiplyWide(mDecoderControl, mDecoderPacked, mDecoderSelected, socket);
 				for (u64 set = 0; set < mNumSets; ++set)
 				{
 					const auto width = result.mRaw[set].size();
@@ -170,8 +170,8 @@ namespace osuCrypto
 					BitVector gatedNext(2 * width);
 					for (u64 i = 0; i < width; ++i)
 					{
-						const auto rawRight = selected[set][i];
-						const auto gatedRight = selected[set][width + i];
+						const auto rawRight = mDecoderSelected[set][i];
+						const auto gatedRight = mDecoderSelected[set][width + i];
 						rawNext[2 * i] = result.mRaw[set][i] ^ rawRight;
 						rawNext[2 * i + 1] = rawRight;
 						gatedNext[2 * i] = result.mGated[set][i] ^ gatedRight;
@@ -225,6 +225,9 @@ namespace osuCrypto
 			mMultiplier.init(mPartyIdx, mNumRows * productsPerRow);
 			mWideInput.resize(mNumSets, maxBytes);
 			mWideOutput.resize(mNumSets, maxBytes);
+			mDecoderControl.resize(mNumSets);
+			mDecoderPacked.resize(mNumSets);
+			mDecoderSelected.resize(mNumSets);
 		}
 
 		u64 baseOtCount() const
@@ -258,6 +261,7 @@ namespace osuCrypto
 
 			std::vector<u32> candidateShare(mNumSets);
 			std::vector<u8> liveShare(mNumSets);
+			std::vector<u8> winner(mNumSets);
 			for (u64 partition = 0; partition < w; ++partition)
 			{
 				const auto size = mConfig.mPartitionSizes[partition];
@@ -273,7 +277,6 @@ namespace osuCrypto
 
 					auto occupied = co_await read(occupancy, candidateShare, socket);
 					auto loss = co_await multiplyBits(liveShare, occupied, socket);
-					std::vector<u8> winner(mNumSets);
 					for (u64 set = 0; set < mNumSets; ++set)
 						winner[set] = liveShare[set] ^ loss[set];
 					auto decoder = co_await unitVectorPair(candidateShare, winner, size, socket);

@@ -80,17 +80,8 @@ allocation per call; no per-node tree allocation was introduced.
 - consumption of both mask and correction operations at the witness's two
   public split levels.
 
-The focused runner also invokes existing multiplication, sparse-DPF,
-Waterfall, and Reverse-Cuckoo integration tests. From a configured WSL build:
-
-```sh
-bash analysis/run_sparse_dpf_mask_tests.sh
-```
-
-Set `SPARSE_DPF_BUILD` to select another compatible Ninja build directory.
-Use `-maskOnly` for the new regression alone. The runner links configured
-test objects directly to avoid recreating the large aggregate test archive.
-All 16 tests in the focused runner passed under WSL/GCC. The three-point
+The registered multiplication, sparse-DPF, Waterfall, and Reverse-Cuckoo
+integration tests ran under WSL/GCC. All 16 focused tests passed. The three-point
 witness is exercised end to end for reconstruction, cached-leaf invariants,
 and the mask/correction OT schedule. The separate MPC-mask test checks exact
 mask reconstruction; it does not estimate a statistical distance from sampled
