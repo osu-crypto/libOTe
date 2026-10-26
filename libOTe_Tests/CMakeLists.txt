@@ -106,3 +106,14 @@ else()
 
     endif()
 endif()
+
+# GCC 13 can emit 64-byte-aligned block copies/clears into ASan stack slots
+# that are only 32-byte aligned. Cap these generated memory operations in the
+# test target; the library's AVX-512 kernels remain enabled and covered.
+if(ENABLE_ASAN AND ENABLE_AVX512 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+        AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13
+        AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+    target_compile_options(libOTe_Tests PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-mmove-max=256>
+        $<$<COMPILE_LANGUAGE:CXX>:-mstore-max=256>)
+endif()

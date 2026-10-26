@@ -720,7 +720,7 @@ namespace osuCrypto::LogVole
             [&](std::size_t taskIdx) {
                 const auto chunkIdx = static_cast<u32>(taskIdx);
                 const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
-                const std::size_t end = std::min(start + static_cast<std::size_t>(muHi), receiverInputCount(input));
+                const std::size_t end = std::min<std::size_t>(start + static_cast<std::size_t>(muHi), receiverInputCount(input));
 
                 if (start > end)
                 {
@@ -957,7 +957,7 @@ namespace osuCrypto::LogVole
             [&](std::size_t taskIdx) {
                 const auto chunkIdx = static_cast<u32>(taskIdx);
                 const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
-                const std::size_t end = std::min(start + static_cast<std::size_t>(muHi), receiverInputCount(input));
+                const std::size_t end = std::min<std::size_t>(start + static_cast<std::size_t>(muHi), receiverInputCount(input));
 
                 ShrinkExpandExpandReceiverInput expandInput{};
                 expandInput.mSeed = childOutput.mSeed;
