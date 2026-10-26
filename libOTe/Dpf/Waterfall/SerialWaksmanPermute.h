@@ -106,7 +106,7 @@ namespace osuCrypto
 			co_await applyManyInverse<F, VecF>(batch, socket, context);
 		}
 
-		const std::vector<u32>& privatePermutation(u64 batch) const
+		span<const u32> privatePermutation(u64 batch) const
 		{
 			return mPass[mPartyIdx].privatePermutation(batch);
 		}

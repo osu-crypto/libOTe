@@ -153,7 +153,7 @@ namespace detail
 		AlignedUnVector<std::array<block, 2>> mPrivateSendOts;
 		BitVector mPrivateBaseChoices;
 		BitVector mPrivateControlsBits;
-		std::vector<std::vector<u32>> mPrivatePermutations;
+		Matrix<u32> mPrivatePermutations;
 		std::vector<PrivateMultSession> mPrivateSessions;
 
 		u64 mOtIdx = 0;
@@ -675,13 +675,12 @@ namespace detail
 				throw RTE_LOC;
 			mPrivateControlsBits.resize(expected);
 
-			mPrivatePermutations.resize(mBatches);
+			mPrivatePermutations.resize(mBatches, mN, AllocType::Uninitialized);
 			std::vector<u32> work0(mN);
 			std::vector<u32> work1(mN);
 			for (u64 batch = 0; batch < mBatches; ++batch)
 			{
-				auto& permutation = mPrivatePermutations[batch];
-				permutation.resize(mN);
+				auto permutation = mPrivatePermutations[batch];
 				std::iota(permutation.begin(), permutation.end(), 0);
 				std::shuffle(permutation.begin(), permutation.end(), prng);
 				std::copy(permutation.begin(), permutation.end(), work0.begin());
@@ -735,9 +734,9 @@ namespace detail
 			mPrivatePrepared = true;
 		}
 
-		const std::vector<u32>& privatePermutation(u64 batch) const
+		span<const u32> privatePermutation(u64 batch) const
 		{
-			if (mPartyIdx != mControlOwner || batch >= mPrivatePermutations.size())
+			if (mPartyIdx != mControlOwner || batch >= mPrivatePermutations.rows())
 				throw RTE_LOC;
 			return mPrivatePermutations[batch];
 		}
@@ -813,7 +812,7 @@ namespace detail
 			mPrivateSendOts.clear();
 			mPrivateBaseChoices.reset(0);
 			mPrivateControlsBits.reset(0);
-			mPrivatePermutations.clear();
+			mPrivatePermutations.resize(0, 0);
 			mPrivateSessions.clear();
 			mPrivatePrepared = false;
 			mPrivateSampled = false;

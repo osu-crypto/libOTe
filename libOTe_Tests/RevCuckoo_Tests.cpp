@@ -6,14 +6,67 @@ namespace osuCrypto
 	void RevCuckoo_seededSparseSets_Test(const oc::CLP&)
 	{
 		PRNG prng(block(0x7263767365656473ull, 17));
-		for (u64 partitions : { 2ull, 3ull })
-			for (u64 domain : { 7ull, 32ull, 65ull })
+		struct ProjectionCase
+		{
+			u64 inBytes, outBytes, positionBytes, selectorBits, domain;
+		};
+		for (const auto [inBytes, outBytes, positionBytes, selectorBits, domain] : {
+			ProjectionCase{ 2, 1, 1, 7, 1 }, ProjectionCase{ 2, 1, 1, 7, 7 },
+			ProjectionCase{ 3, 8, 1, 61, 64 },
+			ProjectionCase{ 3, 8, 2, 64, 65 }, ProjectionCase{ 3, 8, 4, 63, 257 },
+			ProjectionCase{ 3, 70, 2, 560, 33 } })
+		{
+			GoldreichHash hash;
+			hash.init(0, domain, inBytes, outBytes);
+			auto cache = hash.cache(prng.get());
+			Matrix<u8> input(domain, inBytes), full(domain, outBytes);
+			Matrix<u8> selector(selectorBits, positionBytes);
+			Matrix<u8> anchor(1, outBytes);
+			for (u64 i = 0; i < domain; ++i)
+				copyBytesMin(input[i], i);
+			for (auto& v : selector)
+				v = prng.get<u8>();
+			for (auto& v : anchor)
+				v = prng.get<u8>();
+			hash.hash(input, full, cache);
+			std::vector<u32> buckets(domain);
+			hash.hashToBuckets(domain,
+				span<u32>(buckets.data(), buckets.size()), cache,
+				selector, anchor[0]);
+			for (u64 i = 0; i < domain; ++i)
+			{
+				u32 expected = 0;
+				for (u64 bit = 0; bit < selectorBits; ++bit)
+				{
+					const auto hashBit =
+						((full(i, bit / 8) ^ anchor(0, bit / 8)) >> (bit & 7)) & 1;
+					if (hashBit)
+						for (u64 b = 0; b < positionBytes; ++b)
+							expected ^= u32(selector(bit, b)) << (8 * b);
+				}
+				if (buckets[i] != expected)
+					throw std::runtime_error("Goldreich projected hash mismatch. " LOCATION);
+			}
+		}
+
+		struct TestCase
+		{
+			u64 partitions, domain, pointsPerSet, numSets;
+		};
+		for (const auto [partitions, domain, pointsPerSet, numSets] : {
+			TestCase{ 2, 7, 4, 3 }, TestCase{ 2, 32, 4, 3 },
+			TestCase{ 2, 65, 4, 3 }, TestCase{ 3, 7, 4, 3 },
+			TestCase{ 3, 32, 4, 3 }, TestCase{ 3, 65, 4, 3 },
+			// This profile exercises two-byte bucket indices and offsets.
+			TestCase{ 2, 65537, 257, 1 } })
 			{
 				RevCuckooDmpf<block> dpf;
-				dpf.init(0, 4, 3, domain, partitions, 2, 40, true);
+				dpf.init(0, pointsPerSet, numSets, domain, partitions, 2, 40, true);
 				const auto count = partitions * dpf.mNumSets;
 				const auto width = dpf.hashWidth();
 				const auto columns = partitions * dpf.mPartitionSize;
+				const auto positionBytes = std::max<u64>(
+					1, divCeil(log2ceil(dpf.mPartitionSize), 8));
 				std::vector<GoldreichHash::Cache> caches(count);
 				std::vector<Matrix<u8>> descriptors(dpf.mNumSets);
 				Matrix<u8> dummy(1, dpf.mGoldreichHash[0].mInBytes);
@@ -26,12 +79,15 @@ namespace osuCrypto
 				}
 				for (auto& descriptor : descriptors)
 				{
-					descriptor.resize(partitions * width, 1);
-					for (auto& value : descriptor)
-						value = prng.get<u8>() & (dpf.mPartitionSize - 1);
+					descriptor.resize(partitions * width, positionBytes);
+					for (u64 row = 0; row < descriptor.rows(); ++row)
+					{
+						const auto value = prng.get<u64>() & (dpf.mPartitionSize - 1);
+						copyBytesMin(descriptor[row], value);
+					}
 				}
 				// Exercise a maximally loaded bucket, not a fixed-capacity average.
-				std::fill_n(descriptors[0].begin(), width, 0);
+				std::fill_n(descriptors[0].begin(), width * positionBytes, 0);
 				dpf.buildSparseSets(columns, width, descriptors, caches, anchors);
 				if (dpf.realLeafCount() != count * domain || dpf.mSparseSets[0].size() != domain)
 					throw RTE_LOC;
@@ -41,7 +97,8 @@ namespace osuCrypto
 				{
 					std::vector<std::vector<u32>> expected(dpf.mPartitionSize);
 					const MatrixView<const u8> descriptor(
-						descriptors[k / partitions].data((k % partitions) * width), width, 1);
+						descriptors[k / partitions].data((k % partitions) * width),
+						width, positionBytes);
 					for (u64 x = 0; x < domain; ++x)
 					{
 						copyBytesMin(input[0], x);
@@ -250,7 +307,8 @@ namespace osuCrypto
 		for (u64 p = 0; p < 2; ++p)
 			for (u64 s = 0; s < numSets; ++s)
 			{
-				permutations[p].push_back(dpf[p].mWaksmanPermute.privatePermutation(s));
+				const auto privatePermutation = dpf[p].mWaksmanPermute.privatePermutation(s);
+				permutations[p].emplace_back(privatePermutation.begin(), privatePermutation.end());
 				auto sorted = permutations[p].back();
 				std::sort(sorted.begin(), sorted.end());
 				if (sorted.size() != dpf[p].mNumPartitions * dpf[p].mPartitionSize)
@@ -332,7 +390,9 @@ namespace osuCrypto
 			std::get<1>(r).result();
 			for (u64 p = 0; p < 2; ++p)
 				for (u64 s = 0; s < numSets; ++s)
-					if (permutations[p][s] != dpf[p].mWaksmanPermute.privatePermutation(s))
+					if (const auto privatePermutation = dpf[p].mWaksmanPermute.privatePermutation(s);
+						!std::equal(permutations[p][s].begin(), permutations[p][s].end(),
+							privatePermutation.begin(), privatePermutation.end()))
 						throw std::runtime_error("RevCuckoo permutation changed across expansions. " LOCATION);
 			F zero;
 			ctx.zero(zero);

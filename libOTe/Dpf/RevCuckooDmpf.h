@@ -347,25 +347,16 @@ namespace osuCrypto
 		{
 			mSparseSets.resize(f * mNumSets);
 			setTimePoint("sparseSets Begin");
-			constexpr auto stepSize = 32;
 			auto stride = mGoldreichHash[0].mOutBytes;
-			auto d32 = mDomain / stepSize * stepSize;
 			assert(stride == divCeil(c, 8));
 			auto positionBytes = std::max<u64>(1, divCeil(log2ceil(mPartitionSize), 8));
 
-			// Stream one evaluator at a time, hashing it only once. Retain the
-			// 32-row inner-product kernel and exact CSR allocation, without an
-			// O(numSets * w * N * hashWidth) table of public feature vectors.
-			Matrix<u8> I(mDomain, mGoldreichHash[0].mInBytes);
-			Matrix<u8> H(mDomain, stride);
-			for (u64 i = 0; i < mDomain; ++i)
-				copyBytesMin(I[i], i);
+			// Stream one evaluator at a time. Compose the revealed bucket
+			// selector into its public hash before building exact CSR lists.
 			mSparseSetBuf = std::make_unique<u32[]>(mNumSets * mNumPartitions * mDomain);
 			mRealLeafCounts.resize(mSparseSets.size());
 			std::vector<u64> offsets(mPartitionSize + 1), cursors(mPartitionSize);
-			std::vector<u8> Ssj(stride * 8);
-			std::array<u8, stepSize> h;
-			std::array<u32, stepSize> buckets;
+			std::vector<u32> bucketByPoint(mDomain);
 			for (u64 s = 0; s < mNumSets; ++s)
 			{
 				if (S[s].cols() != positionBytes)
@@ -373,61 +364,26 @@ namespace osuCrypto
 				for (u64 j = 0; j < mNumPartitions; ++j)
 				{
 					const auto instance = s * mNumPartitions + j;
-					mGoldreichHash[instance].hash(I, H, hashCache[instance]);
-					for (u64 i = 0; i < mDomain; ++i)
-						for (u64 k = 0; k < stride; ++k)
-							H(i, k) ^= HDomain(instance, k);
-
-					auto forEachMapping = [&](auto&& fn)
-					{
-						auto Hj = H.data();
-
-						for (u64 i = 0; i < d32; i += stepSize)
-						{
-							buckets.fill(0);
-							for (u64 b = 0; b < positionBytes; ++b)
-							{
-								for (u64 k = 0; k < c; ++k)
-									Ssj[k] = S[s](j * c + k, b);
-								h.fill(0);
-								innerProd(Hj + i * stride, stepSize, Ssj.data(), stride, h.data());
-								for (u64 k = 0; k < stepSize; ++k)
-									buckets[k] |= static_cast<u32>(h[k]) << (8 * b);
-							}
-							for (u64 k = 0; k < stepSize; ++k)
-							{
-								if (buckets[k] >= mPartitionSize)
-									throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
-								fn(buckets[k], i + k);
-							}
-						}
-
-						for (u64 i = d32; i < mDomain; ++i)
-						{
-							u32 bucket = 0;
-							for (u64 b = 0; b < positionBytes; ++b)
-							{
-								for (u64 k = 0; k < c; ++k)
-									Ssj[k] = S[s](j * c + k, b);
-								h[0] = 0;
-								innerProd(Hj + i * stride, 1, Ssj.data(), stride, h.data());
-								bucket |= static_cast<u32>(h[0]) << (8 * b);
-							}
-							if (bucket >= mPartitionSize)
-								throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
-							fn(bucket, i);
-						}
-					};
+					const MatrixView<const u8> selector(
+						S[s].data(j * c), c, positionBytes);
+					mGoldreichHash[instance].hashToBuckets(
+						mDomain, span<u32>(bucketByPoint.data(), bucketByPoint.size()),
+						hashCache[instance], selector,
+						span<const u8>(HDomain.data(instance), stride));
 
 					std::fill(offsets.begin(), offsets.end(), 0);
-					forEachMapping([&](u64 bucket, u64) { ++offsets[bucket + 1]; });
+					for (auto bucket : bucketByPoint)
+					{
+						if (bucket >= mPartitionSize)
+							throw std::runtime_error("RevCuckoo produced an invalid bucket index. " LOCATION);
+						++offsets[bucket + 1];
+					}
 					for (u64 i = 1; i < offsets.size(); ++i)
 						offsets[i] += offsets[i - 1];
 					std::copy_n(offsets.begin(), mPartitionSize, cursors.begin());
 					auto data = mSparseSetBuf.get() + instance * mDomain;
-					forEachMapping([&](u64 bucket, u64 index) {
-						data[cursors[bucket]++] = static_cast<u32>(index);
-					});
+					for (u64 index = 0; index < mDomain; ++index)
+						data[cursors[bucketByPoint[index]]++] = static_cast<u32>(index);
 					for (u64 b = 0; b < mPartitionSize; ++b)
 					{
 						auto column = s * f + j * mPartitionSize + b;

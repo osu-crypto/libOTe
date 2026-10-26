@@ -5,7 +5,12 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
+#include "libOTe/Tools/CompilerHints.h"
 #include "../DpfMult.h"
+#include <array>
+#include <bit>
+#include <stdexcept>
+#include <vector>
 
 namespace osuCrypto
 {
@@ -163,6 +168,117 @@ namespace osuCrypto
 				}
 			}
 
+		}
+
+		// Public evaluation of inputs 0, ..., domain-1 after the bucket selector
+		// has been revealed. Compose the selector into f2's byte tables, and
+		// advance the linear f0/f1 inputs as the counter increments. `anchor` is
+		// H(N); XORing its projection gives the RevCuckoo H(N)=0 convention.
+		OC_NOINLINE void hashToBuckets(
+			u64 domain,
+			span<u32> buckets,
+			Cache& cache,
+			MatrixView<const u8> selector,
+			span<const u8> anchor)
+		{
+			if (domain == 0 || domain != buckets.size() ||
+				selector.rows() > mOutBytes * 8 || selector.cols() == 0 ||
+				selector.cols() > sizeof(u32) || anchor.size() != mOutBytes ||
+				cache.f2.plaintextU8Size() != mInBytes + mNumIntermediateBytes)
+				throw std::invalid_argument("GoldreichHash projected dimensions mismatch. " LOCATION);
+			const auto indexBits = std::bit_width(domain - 1);
+			if (indexBits > mInBytes * 8)
+				throw std::invalid_argument("GoldreichHash domain exceeds input width. " LOCATION);
+
+			const auto inputBytes = cache.f2.plaintextU8Size();
+			const auto tableStride = cache.f2.mPow2CodeSize;
+			// Project each possible hash-output byte through the public selector.
+			// This table is shared by all 256 values of every f2 input byte.
+			std::vector<u32> projection(mOutBytes * 256);
+			for (u64 outByte = 0; outByte < mOutBytes; ++outByte)
+			{
+				std::array<u32, 8> basis{};
+				for (u64 bit = 0; bit < 8; ++bit)
+				{
+					const auto row = outByte * 8 + bit;
+					if (row < selector.rows())
+						for (u64 b = 0; b < selector.cols(); ++b)
+							basis[bit] |= u32(selector(row, b)) << (8 * b);
+				}
+				auto table = projection.data() + outByte * 256;
+				for (u32 value = 1; value < 256; ++value)
+				{
+					const auto bit = std::countr_zero(value);
+					table[value] = table[value & (value - 1)] ^ basis[bit];
+				}
+			}
+
+			// Compose the selector with f2's existing byte encoding table once.
+			std::vector<u32> projectedF2(inputBytes * 256);
+			for (u64 inByte = 0; inByte < inputBytes; ++inByte)
+				for (u64 value = 0; value < 256; ++value)
+				{
+					const auto entry = reinterpret_cast<const u8*>(
+						cache.f2.mG8.data() +
+						(inByte * 256 + value) * tableStride);
+					u32 result = 0;
+					for (u64 outByte = 0; outByte < mOutBytes; ++outByte)
+						result ^= projection[outByte * 256 + entry[outByte]];
+					projectedF2[inByte * 256 + value] = result;
+				}
+
+			u32 anchorBucket = 0;
+			for (u64 outByte = 0; outByte < mOutBytes; ++outByte)
+				anchorBucket ^= projection[outByte * 256 + anchor[outByte]];
+
+			// Since f0, f1, and the projected input contribution of f2 are
+			// linear, going from i-1 to i toggles exactly bits 0..ctz(i).
+			// Precompute each prefix once per independently seeded evaluator.
+			std::vector<u8> deltaA(indexBits * mNumIntermediateBytes);
+			std::vector<u8> deltaB(indexBits * mNumIntermediateBytes);
+			std::vector<u32> deltaX(indexBits);
+			for (u64 bit = 0; bit < indexBits; ++bit)
+			{
+				const auto inByte = bit / 8;
+				const auto value = u64{ 1 } << (bit & 7);
+				const auto tableIndex = inByte * 256 + value;
+				const auto* columnA = reinterpret_cast<const u8*>(
+					cache.f0.mG8.data() + tableIndex * cache.f0.mPow2CodeSize);
+				const auto* columnB = reinterpret_cast<const u8*>(
+					cache.f1.mG8.data() + tableIndex * cache.f1.mPow2CodeSize);
+				for (u64 b = 0; b < mNumIntermediateBytes; ++b)
+				{
+					deltaA[bit * mNumIntermediateBytes + b] = columnA[b] ^
+						(bit ? deltaA[(bit - 1) * mNumIntermediateBytes + b] : 0);
+					deltaB[bit * mNumIntermediateBytes + b] = columnB[b] ^
+						(bit ? deltaB[(bit - 1) * mNumIntermediateBytes + b] : 0);
+				}
+				deltaX[bit] = projectedF2[tableIndex] ^
+					(bit ? deltaX[bit - 1] : 0);
+			}
+
+			std::vector<u8> A(mNumIntermediateBytes), B(mNumIntermediateBytes);
+			// The public hash flips input bit zero before f2 encoding.
+			u32 xBucket = projectedF2[1];
+			for (u64 i = 0; i < domain; ++i)
+			{
+				if (i)
+				{
+					const auto change = std::countr_zero(i);
+					const auto* changeA = deltaA.data() + change * mNumIntermediateBytes;
+					const auto* changeB = deltaB.data() + change * mNumIntermediateBytes;
+					for (u64 b = 0; b < mNumIntermediateBytes; ++b)
+					{
+						A[b] ^= changeA[b];
+						B[b] ^= changeB[b];
+					}
+					xBucket ^= deltaX[change];
+				}
+				u32 bucket = anchorBucket ^ xBucket;
+				for (u64 b = 0; b < mNumIntermediateBytes; ++b)
+					bucket ^= projectedF2[(mInBytes + b) * 256 + (A[b] & B[b])];
+				buckets[i] = bucket;
+			}
 		}
 
 #define CO_TRACE (co_await macoro::get_trace()).str()
