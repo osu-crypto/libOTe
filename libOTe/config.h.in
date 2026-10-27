@@ -71,6 +71,9 @@
 // build the library with LogVole enabled
 #cmakedefine ENABLE_LOGVOLE @ENABLE_LOGVOLE@
 
+// the CUDA GPU backend for LogVole
+#cmakedefine ENABLE_LOGVOLE_CUDA @ENABLE_LOGVOLE_CUDA@
+
 #cmakedefine ENABLE_PPRF @ENABLE_PPRF@
 
 // build the library with silver codes.

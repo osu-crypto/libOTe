@@ -685,7 +685,7 @@ namespace osuCrypto
 			throw RTE_LOC;
 
 		auto sock = coproto::LocalAsyncSocket::makePair();
-		std::vector<F> A0(n), B0(n), C0(n);
+		std::vector<F> A0(n), BZero(n), C0(n);
 		std::vector<F> A1(n), B1(n), C1(n);
 
 		if (verbose)
@@ -693,18 +693,18 @@ namespace osuCrypto
 
 		// Generate triples using the 3-parameter expand function
 		auto r = macoro::sync_wait(macoro::when_all_ready(
-			triples[0].expand(A0, B0, C0, prng0, sock[0]),
+			triples[0].expand(A0, BZero, C0, prng0, sock[0]),
 			triples[1].expand(A1, B1, C1, prng1, sock[1])));
 		std::get<0>(r).result();
 		std::get<1>(r).result();
 
 		// Verify that we got correct triple correlations
-		// Check that (A0 + A1) * (B0 + B1) = C0 + C1
+		// Check that (A0 + A1) * (BZero + B1) = C0 + C1
 		bool allCorrect = true;
 		for (size_t i = 0; i < n && allCorrect; i++)
 		{
 			auto a = A0[i] + A1[i];  // Reconstruct A
-			auto b = B0[i] + B1[i];  // Reconstruct B  
+			auto b = BZero[i] + B1[i];  // Reconstruct B
 			auto c = C0[i] + C1[i];  // Reconstruct C
 			auto expected = a * b;   // Expected product
 
@@ -730,7 +730,7 @@ namespace osuCrypto
 			for (u64 i = 0; i < std::min<u64>(5, n); ++i)
 			{
 				auto a = A0[i] + A1[i];
-				auto b = B0[i] + B1[i];
+				auto b = BZero[i] + B1[i];
 				auto c = C0[i] + C1[i];
 				std::cout << "  Triple " << i << ": " << a << " * " << b << " = " << c << std::endl;
 			}

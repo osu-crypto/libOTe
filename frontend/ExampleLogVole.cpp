@@ -2,6 +2,9 @@
 #include "util.h"
 
 #include "libOTe/config.h"
+#if defined(ENABLE_LOGVOLE_CUDA)
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#endif
 
 #include <iostream>
 #include <vector>
@@ -35,8 +38,45 @@ namespace osuCrypto
         // The example exposes the public LogVole wrapper. It chooses the
         // batching prime by bit count and reports the concrete prime with
         // sender.modulus()/receiver.modulus().
+        LogVole::CivoleSetting logVoleExampleSetting(const CLP& cmd)
+        {
+            if (cmd.getOr("noninteractive", 0) && cmd.hasValue("nogold") && !cmd.get<int>("nogold"))
+                throw std::invalid_argument("non-interactive LogVole requires NoGoldenSeed");
+            return cmd.getOr("noninteractive", 0) || cmd.getOr("nogold", 0)
+                ? LogVole::CivoleSetting::NoGoldenSeed : LogVole::CivoleSetting::GoldenSeed;
+        }
+
+        LogVole::OnlineMode logVoleExampleMode(const CLP& cmd)
+        {
+            return cmd.getOr("noninteractive", 0)
+                ? LogVole::OnlineMode::NonInteractive : LogVole::OnlineMode::Interactive;
+        }
+
+        struct LogVoleExampleBackend
+        {
+#if defined(ENABLE_LOGVOLE_CUDA)
+            bool previous = LogVole::gpu::enabled();
+            explicit LogVoleExampleBackend(const CLP& cmd)
+            {
+                const bool requested = cmd.getOr("gpu", 0) != 0;
+                LogVole::gpu::setEnabled(requested);
+                if (requested && !LogVole::gpu::enabled())
+                    throw std::runtime_error("No CUDA device available for LogVole");
+            }
+            ~LogVoleExampleBackend() { LogVole::gpu::setEnabled(previous); }
+#else
+            explicit LogVoleExampleBackend(const CLP& cmd)
+            {
+                if (cmd.getOr("gpu", 0))
+                    throw std::runtime_error("Build with ENABLE_LOGVOLE_CUDA=ON to use -gpu 1");
+            }
+#endif
+        };
+
         u32 logVoleExamplePlaintextModulusBits(const CLP& cmd)
         {
+            if (const auto bits = LogVole::civoleSettingPlaintextModulusBits(logVoleExampleSetting(cmd)))
+                return bits;
             const auto plaintextModulusBits = cmd.getOr("p", 55);
             if (plaintextModulusBits < 2 || plaintextModulusBits > 61)
                 throw std::runtime_error("LogVole example requires -p in [2, 61]");
@@ -75,6 +115,7 @@ namespace osuCrypto
         void LogVole_local_example(int numVole, int numThreads, std::string tag, const CLP& cmd)
         {
             using namespace LogVole;
+            LogVoleExampleBackend backend(cmd);
 
             if (numVole == 0)
                 numVole = 16;
@@ -86,8 +127,10 @@ namespace osuCrypto
             LogVoleReceiver receiver{};
             const auto plaintextModulusBits = logVoleExamplePlaintextModulusBits(cmd);
             const auto workerThreads = static_cast<u32>(std::max(numThreads, 1));
-            sender.configure(static_cast<u64>(numVole), plaintextModulusBits, workerThreads);
-            receiver.configure(static_cast<u64>(numVole), plaintextModulusBits, workerThreads);
+            sender.configure(static_cast<u64>(numVole), plaintextModulusBits, workerThreads,
+                logVoleExampleSetting(cmd), logVoleExampleMode(cmd));
+            receiver.configure(static_cast<u64>(numVole), plaintextModulusBits, workerThreads,
+                logVoleExampleSetting(cmd), logVoleExampleMode(cmd));
             const u64 modulus = sender.modulus();
             const auto w = static_cast<u64>(numVole);
             const auto delta = static_cast<u64>(cmd.getOr("delta", 7)) % modulus;
@@ -141,6 +184,7 @@ namespace osuCrypto
     {
 #if defined(ENABLE_LOGVOLE) && defined(COPROTO_ENABLE_BOOST)
         using namespace LogVole;
+        LogVoleExampleBackend backend(cmd);
 
         if (numVole == 0)
             numVole = 16;
@@ -155,9 +199,11 @@ namespace osuCrypto
         LogVoleSender sender{};
         LogVoleReceiver receiver{};
         if (role == Role::Sender)
-            sender.configure(w, plaintextModulusBits, workerThreads);
+            sender.configure(w, plaintextModulusBits, workerThreads,
+                logVoleExampleSetting(cmd), logVoleExampleMode(cmd));
         else
-            receiver.configure(w, plaintextModulusBits, workerThreads);
+            receiver.configure(w, plaintextModulusBits, workerThreads,
+                logVoleExampleSetting(cmd), logVoleExampleMode(cmd));
 
         const u64 modulus = role == Role::Sender ? sender.modulus() : receiver.modulus();
         const auto delta = static_cast<u64>(cmd.getOr("delta", 7)) % modulus;

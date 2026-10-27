@@ -1,15 +1,60 @@
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
+#include "libOTe/config.h"
+#if defined(ENABLE_LOGVOLE_CUDA)
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuGaussian.h"
+#endif
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cmath>
+#include <limits>
+#include <span>
+#include <string>
 #include <vector>
 
 using namespace osuCrypto::LogVole;
 
 namespace
 {
+    class ScopedEnvironmentValue
+    {
+    public:
+        ScopedEnvironmentValue(const char* name, const char* value) : mName(name)
+        {
+            if (const char* old = std::getenv(name)) { mHadOld = true; mOld = old; }
+            if (value) ::tests_libOTe::logvole_test::setEnvironment(name, value, 1);
+            else ::tests_libOTe::logvole_test::unsetEnvironment(name);
+        }
+        ~ScopedEnvironmentValue()
+        {
+            if (mHadOld) ::tests_libOTe::logvole_test::setEnvironment(mName.c_str(), mOld.c_str(), 1);
+            else ::tests_libOTe::logvole_test::unsetEnvironment(mName.c_str());
+        }
+        ScopedEnvironmentValue(const ScopedEnvironmentValue&) = delete;
+        ScopedEnvironmentValue& operator=(const ScopedEnvironmentValue&) = delete;
+    private:
+        std::string mName, mOld;
+        bool mHadOld = false;
+    };
+
+#if defined(ENABLE_LOGVOLE_CUDA)
+    class ScopedGpuEnabled
+    {
+    public:
+        explicit ScopedGpuEnabled(bool enabled) : mWasEnabled(gpu::enabled()) { gpu::setEnabled(enabled); }
+        ~ScopedGpuEnabled() { gpu::setEnabled(mWasEnabled); }
+        ScopedGpuEnabled(const ScopedGpuEnabled&) = delete;
+        ScopedGpuEnabled& operator=(const ScopedGpuEnabled&) = delete;
+    private:
+        bool mWasEnabled;
+    };
+#endif
+
     struct LheParams
     {
         RingParams mRing{};
@@ -81,6 +126,36 @@ namespace
         expect_batch_equal(a.mPolys, b.mPolys);
     }
 
+    void expect_deferred_tensor_equal(const std::shared_ptr<const LazyRingTensorHostState>& owner,
+                                      const RingTensor& shape, const RingTensor& expected)
+    {
+        LOGVOLE_REQUIRE_TRUE(owner);
+        LOGVOLE_REQUIRE_TRUE(shape.mPolys.empty());
+        LOGVOLE_REQUIRE_EQ(shape.mRows, expected.mRows);
+        LOGVOLE_REQUIRE_EQ(shape.mCols, expected.mCols);
+        std::vector<std::uint8_t> expectedBytes;
+        expectedBytes.reserve(expected.mPolys.size() * expected.mPolys.front().mCoeffs.size() * sizeof(std::uint64_t));
+        for (const auto& poly : expected.mPolys)
+            for (auto word : poly.mCoeffs)
+                for (unsigned byte = 0; byte < sizeof(word); ++byte)
+                    expectedBytes.push_back(static_cast<std::uint8_t>(word >> (8u * byte)));
+        std::vector<std::uint8_t> actualBytes(expectedBytes.size(), 0xA5u);
+        LOGVOLE_REQUIRE_FALSE(owner->copyCoefficientsTo(std::span(actualBytes).first(actualBytes.size() - 1)));
+        LOGVOLE_REQUIRE_TRUE(std::all_of(actualBytes.begin(), actualBytes.end(),
+            [](std::uint8_t byte) { return byte == 0xA5u; }));
+        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(actualBytes));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(expectedBytes, actualBytes));
+        const auto& host = owner->get();
+        expect_tensor_equal(expected, host);
+        LOGVOLE_REQUIRE_TRUE(&owner->get() == &host);
+        auto mutableCopy = host;
+        mutableCopy.mPolys.front().mCoeffs.front() ^= 1;
+        LOGVOLE_REQUIRE_EQ(owner->get().mPolys.front().mCoeffs.front(),
+            expected.mPolys.front().mCoeffs.front());
+        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(actualBytes));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(expectedBytes, actualBytes));
+    }
+
     bool forward_tensor(RingTensor& tensor, const RingNttContext& ctx)
     {
         for (auto& poly : tensor.mPolys)
@@ -124,6 +199,277 @@ namespace
         }
         return true;
     }
+
+    void check_enc1_serial_reference(const RingParams& ring, std::uint32_t cols, std::uint32_t gadgetBits = 20)
+    {
+        ScopedEnvironmentValue residentDefault("LV_GPU_SETUP_GAUSSIAN_RESIDENT", "0");
+        ScopedEnvironmentValue extraDownload("LV_GPU_SETUP_EXTRA_PIPELINED_DOWNLOAD", "1");
+        ScopedEnvironmentValue reuseDownloadWorkers("LV_GPU_SETUP_DOWNLOAD_REUSE_WORKERS", "1");
+#if defined(ENABLE_LOGVOLE_CUDA)
+        const bool haveGpu = gpu::enabled();
+        const bool haveGaussian = haveGpu && gpu::gaussianTransformHostCompatible();
+#else
+        const bool haveGpu = false;
+        const bool haveGaussian = false;
+#endif
+        RingNttContext ctx{};
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, ctx));
+        constexpr std::uint32_t rows = 5;
+        auto r = sample_batch(ctx, rows, 0x123456u);
+        auto sk = sample_batch(ctx, cols, 0x234567u);
+        std::vector<RnsPoly> publicA;
+        LOGVOLE_REQUIRE_TRUE(buildLhePublicANtt(ctx, rows, publicA));
+        // Exercise the normalization contract for coefficient and NTT inputs.
+        for (auto* batch : { &r, &sk, &publicA })
+            for (auto& poly : *batch)
+                for (std::size_t limb = 0; limb < ringModulusCount(ctx); ++limb)
+                {
+                    const auto offset = limb * ring.mPolyModulusDegree;
+                    poly.mCoeffs[offset] = std::numeric_limits<std::uint64_t>::max();
+                    poly.mCoeffs[offset + ring.mPolyModulusDegree - 1] = ringModulusValue(ctx, limb) + 3;
+                }
+        const auto originalR = r, originalSk = sk, originalA = publicA;
+
+        for (bool inputNtt : { false, true })
+        for (bool truncate : { false, true })
+        for (double sigma : { 0.0, 3.2 })
+        {
+            // The reference retains the original serial transform/noise order.
+            // A short PRNG buffer makes each 64-byte SEAL seed cross a refill.
+            oc::PRNG referencePrng(oc::block(0x345678u, 0), 3);
+            RingTensor expected{};
+            expected.mRows = rows;
+            expected.mCols = cols;
+            expected.mPolys.resize(ringTensorSize(expected));
+            {
+#if defined(ENABLE_LOGVOLE_CUDA)
+                ScopedGpuEnabled cpuReference(false);
+#endif
+                auto rNtt = r, skNtt = sk;
+                for (auto& poly : skNtt) LOGVOLE_REQUIRE_TRUE(forwardNtt(poly, ctx));
+                if (!inputNtt)
+                    for (auto& poly : rNtt) LOGVOLE_REQUIRE_TRUE(forwardNtt(poly, ctx));
+                for (std::uint32_t row = 0; row < rows; ++row)
+                for (std::uint32_t col = 0; col < cols; ++col)
+                {
+                    auto& poly = expected.mPolys[ringTensorIndex(expected, row, col)];
+                    LOGVOLE_REQUIRE_TRUE(multiplyByGPower(ctx, rNtt[row], gadgetBits,
+                        col + static_cast<std::uint32_t>(truncate), poly));
+                    LOGVOLE_REQUIRE_TRUE(dyadicMultiplyAddNttInplace(publicA[row], skNtt[col], poly, ctx));
+                    LOGVOLE_REQUIRE_TRUE(inverseNtt(poly, ctx));
+                    if (sigma > 0)
+                        LOGVOLE_REQUIRE_TRUE(addPolyError(poly, sigma, 19.2, referencePrng, ctx));
+                }
+            }
+            const auto nextReference = referencePrng.get<oc::block>();
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (haveGpu && !inputNtt && !truncate && sigma == 0.0)
+            {
+                auto aliasedR = r;
+                {
+                    ScopedEnvironmentValue forced("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", "1");
+                    const auto* storage = aliasedR.data();
+                    LOGVOLE_REQUIRE_FALSE(gpu::assembleLheCiphertextDevice(ctx,
+                        aliasedR, sk, publicA, gadgetBits, false, 0u, aliasedR));
+                    LOGVOLE_REQUIRE_TRUE(aliasedR.data() == storage);
+                    LOGVOLE_REQUIRE_TRUE(batches_equal(aliasedR, r));
+                }
+                ScopedEnvironmentValue enabled("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", "0");
+                LOGVOLE_REQUIRE_TRUE(gpu::assembleLheCiphertextDevice(ctx,
+                    aliasedR, sk, publicA, gadgetBits, false, 0u, aliasedR));
+                LOGVOLE_REQUIRE_TRUE(batches_equal(aliasedR, expected.mPolys));
+            }
+#endif
+            if (haveGpu)
+            {
+                ScopedEnvironmentValue resident("LV_GPU_SETUP_GAUSSIAN_RESIDENT", "1");
+                // Unknown host arithmetic must exercise exact host replay; strict rejection is checked separately.
+                ScopedEnvironmentValue residentStrict("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", haveGaussian ? "1" : "0");
+                ScopedEnvironmentValue residentDecline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", "0");
+                ScopedEnvironmentValue transform("LV_GPU_SETUP_GAUSSIAN_TRANSFORM", "1");
+                ScopedEnvironmentValue transformStrict("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_STRICT", haveGaussian ? "1" : "0");
+                ScopedEnvironmentValue transformDecline("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_FORCE_DECLINE", "0");
+                ScopedEnvironmentValue device("LV_GPU_SETUP_LHE_DEVICE", "1");
+                ScopedEnvironmentValue deviceStrict("LV_GPU_SETUP_LHE_DEVICE_STRICT", "1");
+                ScopedEnvironmentValue deviceDecline("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", "0");
+                ScopedEnvironmentValue compact("LV_GPU_SETUP_COMPACT_NOISE", "1");
+                ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "1");
+                auto invoke = [&](oc::PRNG& prng, RingTensor& out,
+                                  std::shared_ptr<const LazyRingTensorHostState>* deferred = nullptr) {
+                    return truncate
+                        ? lheEnc1Trunc(ctx, r, sk, gadgetBits, out, sigma, 19.2, &prng, inputNtt, &publicA, 4, deferred)
+                        : lheEnc1(ctx, r, sk, gadgetBits, out, sigma, 19.2, &prng, inputNtt, &publicA, 4, deferred);
+                };
+                for (const char* blocks : {"0", "1"})
+                {
+                    ScopedEnvironmentValue prefix("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_PREFIX_BLOCKS", blocks);
+                    oc::PRNG actualPrng(oc::block(0x345678u, 0), 3);
+                    RingTensor actual;
+                    LOGVOLE_REQUIRE_TRUE(invoke(actualPrng, actual));
+                    expect_tensor_equal(expected, actual);
+                    LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), nextReference);
+                }
+                {
+                    oc::PRNG deferredPrng(oc::block(0x345678u, 0), 3);
+                    RingTensor deferred;
+                    std::shared_ptr<const LazyRingTensorHostState> owner;
+                    LOGVOLE_REQUIRE_TRUE(invoke(deferredPrng, deferred, &owner));
+                    expect_deferred_tensor_equal(owner, deferred, expected);
+                    LOGVOLE_EXPECT_EQ(deferredPrng.get<oc::block>(), nextReference);
+
+                    if (!inputNtt && truncate && sigma > 0 && ring.mPolyModulusDegree == 1024)
+                    {
+                        const auto retained = owner;
+                        RingTensor rejected = expected;
+                        const auto* storage = rejected.mPolys.data();
+                        oc::PRNG rejectedPrng(oc::block(0x345678u, 0), 3);
+                        oc::PRNG untouchedPrng(oc::block(0x345678u, 0), 3);
+                        LOGVOLE_REQUIRE_FALSE(lheEnc1Trunc(ctx, r, sk, gadgetBits, rejected,
+                            -1.0, 19.2, &rejectedPrng, inputNtt, &publicA, 4, &owner));
+                        LOGVOLE_REQUIRE_TRUE(owner == retained);
+                        LOGVOLE_REQUIRE_TRUE(rejected.mPolys.data() == storage);
+                        expect_tensor_equal(expected, rejected);
+                        LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), untouchedPrng.get<oc::block>());
+
+                        // With compact noise disabled, the device result needs
+                        // host noise addition before it is a complete ciphertext.
+                        // The explicit deferred request must therefore publish
+                        // eager data and reset a previous owner.
+                        {
+                            ScopedEnvironmentValue eagerNoise("LV_GPU_SETUP_COMPACT_NOISE", "0");
+                            oc::PRNG eagerPrng(oc::block(0x345678u, 0), 3);
+                            LOGVOLE_REQUIRE_TRUE(invoke(eagerPrng, deferred, &owner));
+                            LOGVOLE_REQUIRE_FALSE(owner);
+                            expect_tensor_equal(expected, deferred);
+                            LOGVOLE_EXPECT_EQ(eagerPrng.get<oc::block>(), nextReference);
+                        }
+                        deferred.mPolys.front().mCoeffs.front() ^= 1;
+                        expect_tensor_equal(expected, retained->get());
+                        {
+                            ScopedEnvironmentValue eagerDevice("LV_GPU_SETUP_LHE_DEVICE", "0");
+                            oc::PRNG eagerPrng(oc::block(0x345678u, 0), 3);
+                            owner = retained;
+                            LOGVOLE_REQUIRE_TRUE(invoke(eagerPrng, deferred, &owner));
+                            LOGVOLE_REQUIRE_FALSE(owner);
+                            expect_tensor_equal(expected, deferred);
+                            LOGVOLE_EXPECT_EQ(eagerPrng.get<oc::block>(), nextReference);
+                        }
+                    }
+                }
+                ScopedEnvironmentValue decline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", "1");
+                {
+                    ScopedEnvironmentValue replay("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", "0");
+                    oc::PRNG replayPrng(oc::block(0x345678u, 0), 3);
+                    RingTensor actual;
+                    LOGVOLE_REQUIRE_TRUE(invoke(replayPrng, actual));
+                    expect_tensor_equal(expected, actual);
+                    LOGVOLE_EXPECT_EQ(replayPrng.get<oc::block>(), nextReference);
+                }
+                if (sigma > 0.0)
+                {
+                    ScopedEnvironmentValue requireResident("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", "1");
+                    oc::PRNG rejectedPrng(oc::block(0x345678u, 0), 3);
+                    RingTensor rejected = expected;
+                    const auto* storage = rejected.mPolys.data();
+                    LOGVOLE_REQUIRE_FALSE(invoke(rejectedPrng, rejected));
+                    LOGVOLE_REQUIRE_TRUE(rejected.mPolys.data() == storage);
+                    expect_tensor_equal(expected, rejected);
+                    LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
+                }
+                LOGVOLE_REQUIRE_TRUE(batches_equal(r, originalR));
+                LOGVOLE_REQUIRE_TRUE(batches_equal(sk, originalSk));
+                LOGVOLE_REQUIRE_TRUE(batches_equal(publicA, originalA));
+            }
+            for (std::uint32_t workers : { 1u, 4u })
+            for (bool deviceAssembly : { false, true })
+            for (bool compactNoise : { false, true })
+            {
+                if (deviceAssembly && !haveGpu) continue;
+                if (compactNoise && !deviceAssembly) continue;
+                ScopedEnvironmentValue parallelOption("LV_GPU_SETUP_LHE", "1");
+                ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_LHE_DEVICE", deviceAssembly ? "1" : "0");
+                ScopedEnvironmentValue strictOption("LV_GPU_SETUP_LHE_DEVICE_STRICT", "1");
+                ScopedEnvironmentValue compactOption("LV_GPU_SETUP_COMPACT_NOISE", compactNoise ? "1" : "0");
+                ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "1");
+                ScopedEnvironmentValue forceOption("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", "0");
+#if defined(ENABLE_LOGVOLE_CUDA)
+                if (deviceAssembly) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+#endif
+                oc::PRNG actualPrng(oc::block(0x345678u, 0), 3);
+                RingTensor actual{};
+                const bool ok = truncate
+                    ? lheEnc1Trunc(ctx, r, sk, gadgetBits, actual, sigma, 19.2,
+                        &actualPrng, inputNtt, &publicA, workers)
+                    : lheEnc1(ctx, r, sk, gadgetBits, actual, sigma, 19.2,
+                        &actualPrng, inputNtt, &publicA, workers);
+                LOGVOLE_REQUIRE_TRUE(ok);
+                expect_tensor_equal(expected, actual);
+                LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), nextReference);
+                LOGVOLE_REQUIRE_TRUE(batches_equal(r, originalR));
+                LOGVOLE_REQUIRE_TRUE(batches_equal(sk, originalSk));
+                LOGVOLE_REQUIRE_TRUE(batches_equal(publicA, originalA));
+            }
+            if (haveGpu)
+            {
+                ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_LHE_DEVICE", "1");
+                ScopedEnvironmentValue compactOption("LV_GPU_SETUP_COMPACT_NOISE", "1");
+                ScopedEnvironmentValue deviceStrict("LV_GPU_SETUP_LHE_DEVICE_STRICT", "0");
+                ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "0");
+                ScopedEnvironmentValue forceOption("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", "1");
+                auto invoke = [&](oc::PRNG& prng, RingTensor& output, double clip) {
+                    return truncate
+                        ? lheEnc1Trunc(ctx, r, sk, gadgetBits, output, sigma, clip,
+                            &prng, inputNtt, &publicA, 4)
+                        : lheEnc1(ctx, r, sk, gadgetBits, output, sigma, clip,
+                            &prng, inputNtt, &publicA, 4);
+                };
+                for (const char* parallel : { "0", "1" })
+                {
+                    ScopedEnvironmentValue parallelOption("LV_GPU_SETUP_LHE", parallel);
+                    oc::PRNG fallbackPrng(oc::block(0x345678u, 0), 3);
+                    RingTensor actual;
+                    LOGVOLE_REQUIRE_TRUE(invoke(fallbackPrng, actual, 19.2));
+                    expect_tensor_equal(expected, actual);
+                    LOGVOLE_EXPECT_EQ(fallbackPrng.get<oc::block>(), nextReference);
+                }
+                {
+                    ScopedEnvironmentValue strictOption("LV_GPU_SETUP_LHE_DEVICE_STRICT", "1");
+                    oc::PRNG failedPrng(oc::block(0x345678u, 0), 3);
+                    RingTensor failed;
+                    failed.mRows = 0xBADu;
+                    LOGVOLE_EXPECT_FALSE(invoke(failedPrng, failed, 19.2));
+                    LOGVOLE_EXPECT_EQ(failed.mRows, 0xBADu);
+                }
+                if (sigma == 0.0)
+                {
+                    ScopedEnvironmentValue allowDevice("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", "0");
+                    const double ineligibleClip = std::nextafter(
+                        static_cast<double>(ringModulusValue(ctx, 0) >> 1u),
+                        std::numeric_limits<double>::infinity());
+                    // Eligibility failure is checked before drawing seeds.
+                    oc::PRNG rejectedPrng(oc::block(0x345678u, 0), 3);
+                    RingTensor rejected;
+                    rejected.mRows = 0xBADu;
+                    {
+                        ScopedEnvironmentValue strictCompact("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "1");
+                        LOGVOLE_EXPECT_FALSE(invoke(rejectedPrng, rejected, ineligibleClip));
+                    }
+                    LOGVOLE_EXPECT_EQ(rejected.mRows, 0xBADu);
+                    LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
+                    // Without strict compact mode, sigma=0 keeps the ordinary
+                    // noiseless result even when compact representation declines.
+                    oc::PRNG fallbackPrng(oc::block(0x345678u, 0), 3);
+                    RingTensor actual;
+                    LOGVOLE_REQUIRE_TRUE(invoke(fallbackPrng, actual, ineligibleClip));
+                    expect_tensor_equal(expected, actual);
+                    LOGVOLE_EXPECT_EQ(fallbackPrng.get<oc::block>(), nextReference);
+                }
+                LOGVOLE_REQUIRE_TRUE(batches_equal(r, originalR));
+                LOGVOLE_REQUIRE_TRUE(batches_equal(sk, originalSk));
+                LOGVOLE_REQUIRE_TRUE(batches_equal(publicA, originalA));
+            }
+        }
+    }
 }
 
 void LogVole_LheOps_PublicADeterministic(const oc::CLP&)
@@ -140,6 +486,13 @@ void LogVole_LheOps_PublicADeterministic(const oc::CLP&)
 
     LOGVOLE_EXPECT_EQ(a1.size(), params.mMu);
     expect_batch_equal(a1, a2);
+
+    const auto shared = sharedLhePublicANtt(ctx, params.mMu);
+    LOGVOLE_REQUIRE_TRUE(shared && shared == sharedLhePublicANtt(ctx, params.mMu));
+    expect_batch_equal(*shared, a2);
+    a1.front().mCoeffs.front() ^= 1;
+    expect_batch_equal(*shared, a2);
+    LOGVOLE_EXPECT_FALSE(sharedLhePublicANtt(ctx, 0));
 }
 
 void LogVole_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP&)
@@ -183,6 +536,22 @@ void LogVole_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP&)
             expect_poly_equal(dec[row], expected);
         }
     }
+
+    // With LV_GPU_SETUP_LHE=1 these also exercise the parallel implementation
+    // in CPU-only builds. GPU test runs exercise the batched device inverse.
+#if defined(ENABLE_LOGVOLE_CUDA)
+    ScopedGpuEnabled useGpu(true);
+    if (const char* strict = std::getenv("LV_GPU_SETUP_LHE_DEVICE_STRICT"))
+        if (strict[0] == '1') LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+#endif
+    check_enc1_serial_reference(params.mRing, params.mTau);
+    RingParams productionRing{};
+    productionRing.mPolyModulusDegree = 8192;
+    assignValues<int>(productionRing.mCoeffModulusBits, { 55, 55, 55, 55 });
+    check_enc1_serial_reference(productionRing, 2, 110);
+    productionRing.mPolyModulusDegree = 16384;
+    assignValues<int>(productionRing.mCoeffModulusBits, { 52, 52, 52, 52, 52, 52, 52, 52 });
+    check_enc1_serial_reference(productionRing, 2, 208);
 }
 
 void LogVole_LheOps_ApplyCt1AndDeriveSkxRelation(const oc::CLP&)

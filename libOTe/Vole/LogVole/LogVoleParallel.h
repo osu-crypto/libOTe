@@ -3,6 +3,7 @@
 #include <cryptoTools/Common/Defines.h>
 
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "macoro/task.h"
 #include "macoro/sync_wait.h"
@@ -19,6 +20,9 @@ namespace osuCrypto::LogVole::detail
 {
     inline std::size_t hardwareWorkerSlots()
     {
+        if (tCpuBenchmarkContext) return tCpuBenchmarkContext->mWorkerLimit
+            ? std::min(tCpuBenchmarkContext->mWorkerLimit, tCpuBenchmarkContext->mCpus.size())
+            : tCpuBenchmarkContext->mCpus.size();
         const auto hw = static_cast<std::size_t>(std::thread::hardware_concurrency());
         return hw == 0 ? 1 : hw;
     }
@@ -31,6 +35,8 @@ namespace osuCrypto::LogVole::detail
     public:
         explicit ParallelWorkerSlotGuard(std::size_t requestedWorkers)
         {
+            mCounter = tCpuBenchmarkContext
+                ? &tCpuBenchmarkContext->mWorkerSlots : &gParallelWorkerSlotsInUse;
             mGrantedWorkers = 1;
             if (requestedWorkers <= 1)
             {
@@ -40,7 +46,7 @@ namespace osuCrypto::LogVole::detail
             const std::size_t maxSlots = hardwareWorkerSlots();
             while (true)
             {
-                std::size_t used = gParallelWorkerSlotsInUse.load(std::memory_order_acquire);
+                std::size_t used = mCounter->load(std::memory_order_acquire);
                 if (used >= maxSlots)
                 {
                     return;
@@ -48,7 +54,7 @@ namespace osuCrypto::LogVole::detail
 
                 const std::size_t available = maxSlots - used;
                 const std::size_t grant = std::min(requestedWorkers, available);
-                if (gParallelWorkerSlotsInUse.compare_exchange_weak(
+                if (mCounter->compare_exchange_weak(
                         used,
                         used + grant,
                         std::memory_order_acq_rel,
@@ -68,7 +74,7 @@ namespace osuCrypto::LogVole::detail
         {
             if (mReservedWorkers != 0)
             {
-                gParallelWorkerSlotsInUse.fetch_sub(mReservedWorkers, std::memory_order_release);
+                mCounter->fetch_sub(mReservedWorkers, std::memory_order_release);
             }
         }
 
@@ -78,6 +84,7 @@ namespace osuCrypto::LogVole::detail
         }
 
     private:
+        std::atomic<std::size_t>* mCounter = nullptr;
         std::size_t mGrantedWorkers = 1;
         std::size_t mReservedWorkers = 0;
     };
@@ -144,15 +151,18 @@ namespace osuCrypto::LogVole::detail
         macoro::thread_pool& pool,
         Worker& worker,
         std::size_t workerIdx,
-        ProtocolCacheScope cacheScope)
+        ProtocolCacheScope cacheScope,
+        CpuBenchmarkContext* benchmarkContext)
     {
         co_await pool.schedule();
         ScopedProtocolCacheScope scopedCache(cacheScope);
+        CpuBenchmarkWorkerScope benchmarkScope(benchmarkContext);
         worker(workerIdx);
     }
 
     template<typename TaskFn>
-    bool runParallelTasks(std::size_t taskCount, u32 requestedWorkers, TaskFn&& taskFn)
+    bool runParallelTasks(std::size_t taskCount, u32 requestedWorkers, TaskFn&& taskFn,
+        bool dynamic = false)
     {
         if (taskCount == 0)
         {
@@ -164,6 +174,7 @@ namespace osuCrypto::LogVole::detail
         const std::size_t workerCount = std::min(requested, slotGuard.grantedWorkers());
         if (workerCount <= 1)
         {
+            CpuBenchmarkTaskScope taskScope;
             for (std::size_t taskIdx = 0; taskIdx < taskCount; ++taskIdx)
             {
                 if (!taskFn(taskIdx))
@@ -176,10 +187,30 @@ namespace osuCrypto::LogVole::detail
 
         ParallelWorkerCapScope capScope(workerCount);
         std::atomic<bool> failed{ false };
+        std::atomic<std::size_t> nextTask{ 0 };
 
         const ProtocolCacheScope cacheScope = currentProtocolCacheScope();
         auto worker = [&](std::size_t workerIdx) {
+            CpuBenchmarkTaskScope taskScope;
             ScopedProtocolCacheScope scopedCache(cacheScope);
+            if (dynamic)
+            {
+                // Opt-in for tasks whose randomness and outputs are indexed by
+                // task, so changing the worker assignment preserves semantics.
+                // Short tasks let a slower NUMA core finish without holding up
+                // the other workers for an entire static partition.
+                while (!failed.load(std::memory_order_acquire))
+                {
+                    const auto taskIdx = nextTask.fetch_add(1, std::memory_order_relaxed);
+                    if (taskIdx >= taskCount) break;
+                    if (!taskFn(taskIdx))
+                    {
+                        failed.store(true, std::memory_order_release);
+                        break;
+                    }
+                }
+                return;
+            }
             const std::size_t taskBegin = workerIdx * taskCount / workerCount;
             const std::size_t taskEnd = (workerIdx + 1) * taskCount / workerCount;
             for (std::size_t taskIdx = taskBegin; taskIdx < taskEnd; ++taskIdx)
@@ -202,7 +233,7 @@ namespace osuCrypto::LogVole::detail
         tasks.reserve(workerCount - 1);
         for (std::size_t i = 1; i < workerCount; ++i)
         {
-            tasks.push_back(runPoolWorker(pool, worker, i, cacheScope) | macoro::make_eager());
+            tasks.push_back(runPoolWorker(pool, worker, i, cacheScope, tCpuBenchmarkContext) | macoro::make_eager());
         }
 
         worker(0);

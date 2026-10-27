@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
+#include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -16,6 +17,18 @@ using namespace osuCrypto::LogVole;
 
 namespace
 {
+    bool finalize_receiver_from_sender_wire(
+        const ShrinkExpandReceiverOfflineInput& input,
+        const ShrinkExpandSenderState& sender,
+        ShrinkExpandReceiverState& receiver)
+    {
+        const auto workers = input.mParams.mNumWorkerThreads;
+        auto bytes = encodeShrinkExpandOfflineState(sender, workers);
+        ShrinkExpandOfflineMessage message;
+        return decode(bytes, message, workers) &&
+            finalizeShrinkExpandReceiverOffline(input, std::move(message), receiver);
+    }
+
     ShrinkExpandParams make_params(bool trunc = false)
     {
         ShrinkExpandParams params{};
@@ -133,9 +146,9 @@ namespace
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (const auto& poly : batch)
         {
-            for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+            for (std::size_t modIdx = 0; modIdx < ringModulusCount(ctx); ++modIdx)
             {
-                const std::uint64_t mod = ctx.mModuli[modIdx].value();
+                const std::uint64_t mod = ringModulusValue(ctx, modIdx);
                 const std::size_t offset = modIdx * n;
                 for (std::size_t i = 0; i < n; ++i)
                 {
@@ -156,7 +169,9 @@ namespace
     {
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         const std::size_t rho = ctx.mParams.mCoeffModulusBits.size();
-        auto contextData = ctx.mContext->key_context_data();
+        const auto hostContext = getRingHostContext(ctx);
+        LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
+        auto contextData = hostContext->key_context_data();
         seal::util::RNSBase fullBase(contextData->parms().coeff_modulus(), seal::MemoryManager::GetPool());
 
         auto composedPoly = seal::util::allocate_poly(n, rho, seal::MemoryManager::GetPool());
@@ -226,7 +241,7 @@ namespace
         receiverInput.mParams = params;
 
         ShrinkExpandReceiverState receiverState{};
-        if (!finalizeShrinkExpandReceiverOffline(receiverInput, senderState, receiverState))
+        if (!finalize_receiver_from_sender_wire(receiverInput, senderState, receiverState))
         {
             return false;
         }
@@ -358,7 +373,7 @@ void LogVole_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
     receiverInput.mParams = params;
 
     ShrinkExpandReceiverState receiverState{};
-    LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(receiverInput, senderState, receiverState));
+    LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(receiverInput, senderState, receiverState));
     LOGVOLE_EXPECT_EQ(receiverState.mCt1.mRows, params.mMu);
     LOGVOLE_EXPECT_EQ(receiverState.mLacct.mCt.mRows, senderState.mLacct.mCt.mRows);
 }
@@ -393,7 +408,7 @@ void LogVole_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
     receiverInput.mParams.mTau += 1;
 
     ShrinkExpandReceiverState receiverState{};
-    LOGVOLE_REQUIRE_FALSE(finalizeShrinkExpandReceiverOffline(receiverInput, senderState, receiverState));
+    LOGVOLE_REQUIRE_FALSE(finalize_receiver_from_sender_wire(receiverInput, senderState, receiverState));
 }
 
 void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
@@ -414,7 +429,9 @@ void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
     std::vector<RnsPoly> tbaPrime;
     tbaPrime.reserve(wPrime * rho);
 
-    auto keyContextData = ctx.mContext->key_context_data();
+    const auto hostContext = getRingHostContext(ctx);
+    LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
+    auto keyContextData = hostContext->key_context_data();
     seal::util::RNSBase fullBase(keyContextData->parms().coeff_modulus(), seal::MemoryManager::GetPool());
     auto pool = seal::MemoryManager::GetPool();
 
@@ -490,7 +507,7 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     ShrinkExpandReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;
     ShrinkExpandReceiverState receiverState{};
-    LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(receiverInput, senderState, receiverState));
+    LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(receiverInput, senderState, receiverState));
 
     auto x = sample_batch(ctx, params.mMu, 0x6001u);
     ShrinkExpandShrinkOutput shrink{};

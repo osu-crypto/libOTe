@@ -1,10 +1,24 @@
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
+#include "libOTe/config.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
+#include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
+
+#if defined(ENABLE_LOGVOLE_CUDA)
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#endif
 
 #include "seal/util/uintarithsmallmod.h"
+#include "seal/util/ntt.h"
+#include "seal/util/polyarithsmallmod.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdlib>
 #include <cstddef>
+#include <exception>
 #include <limits>
 #include <mutex>
 #include <unordered_map>
@@ -13,32 +27,39 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        u64 pow2Mod(u64 exp, u64 mod)
+        bool gpuSetupLencEnabled()
         {
-            const seal::Modulus modulus(mod);
-            u64 result = 1;
-            u64 base = 2 % mod;
-            u64 e = exp;
-            while (e > 0)
-            {
-                if ((e & 1u) != 0)
-                {
-                    result = mulMod(result, base, modulus);
-                }
-                base = mulMod(base, base, modulus);
-                e >>= 1;
-            }
-            return result;
+            const char* value = std::getenv("LV_GPU_SETUP_LENC");
+            if (value) return value[0] != '0';
+#if defined(ENABLE_LOGVOLE_CUDA)
+            return gpu::enabled();
+#else
+            return false;
+#endif
         }
 
-        u32 nextPowerOfTwo(u32 value)
+        bool gpuSetupLencDeviceEnabled()
         {
-            u32 out = 1;
-            while (out < value)
+#if defined(ENABLE_LOGVOLE_CUDA)
+            const char* value = std::getenv("LV_GPU_SETUP_LENC_DEVICE");
+            return (!value || value[0] != '0') && gpu::enabled();
+#else
+            return false;
+#endif
+        }
+
+        bool lencTreeWidth(std::size_t count, u32 requested, u32& width)
+        {
+            // A LENC tree needs an internal node for its digest and its first
+            // randomizer layer. Pad a singleton with one zero leaf.
+            if (count == 0 || count > (u64(1) << 31)) return false;
+            width = requested;
+            if (width == 0)
             {
-                out <<= 1;
+                width = 2;
+                while (width < count) width <<= 1;
             }
-            return out;
+            return width >= 2 && width >= count && (width & (width - 1u)) == 0;
         }
 
         u32 ilog2Exact(u32 powerOfTwo)
@@ -49,12 +70,6 @@ namespace osuCrypto::LogVole
                 ++out;
             }
             return out;
-        }
-
-        bool zeroPoly(const RingNttContext& ctx, RnsPoly& out)
-        {
-            resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-            return true;
         }
 
         bool validateKeyDeriveSenderInput(const KeyDeriveSenderInput& input)
@@ -80,17 +95,31 @@ namespace osuCrypto::LogVole
             return out;
         }
 
-        bool negatePoly(const RingNttContext& ctx, const RnsPoly& poly, RnsPoly& out)
+        bool negatePoly(const RingNttContext& ctx, RnsPoly poly, RnsPoly& out)
         {
-            RnsPoly zero{};
-            return zeroPoly(ctx, zero) && ringSub(zero, poly, ctx, out);
+            if (!validateRingPolyShape(poly, ctx.mParams)) return false;
+            const auto& moduli = getRingHostModuli(ctx);
+            if (moduli.empty()) return false;
+            // The preceding inverse transform produced canonical coefficients.
+            // Consume its buffer instead of allocating and copying a zero
+            // polynomial for 0 - poly at every internal digest-tree node.
+            const std::size_t n = ctx.mParams.mPolyModulusDegree;
+            for (std::size_t j = 0; j < moduli.size(); ++j)
+            {
+                auto* coefficients = poly.mCoeffs.data() + j * n;
+                seal::util::negate_poly_coeffmod(coefficients, n, moduli[j], coefficients);
+            }
+            globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
+            out = std::move(poly);
+            return true;
         }
 
         bool buildPaddedNttBatch(
             const RingNttContext& ctx,
             const std::vector<RnsPoly>& in,
             u32 widthPadded,
-            std::vector<RnsPoly>& out)
+            std::vector<RnsPoly>& out,
+            bool transformToNtt = true)
         {
             if (in.size() > widthPadded)
             {
@@ -106,36 +135,36 @@ namespace osuCrypto::LogVole
             {
                 resizeZero(next[i].mCoeffs, ringPolyCoeffCount(ctx.mParams));
             }
-            for (auto& poly : next)
+            // widthPadded independent transforms, dispatched as a single batch.
+            if (transformToNtt && !forwardNttBatch(next, ctx))
             {
-                if (!forwardNtt(poly, ctx))
-                {
-                    return false;
-                }
+                return false;
             }
 
             out = std::move(next);
             return true;
         }
 
-        std::vector<RnsPoly> buildLencPublicBNttImpl(const RingNttContext& ctx, u32 tau)
+        std::vector<RnsPoly> buildLencPublicBNttImpl(const RingNttContext& ctx, u32 tau,
+            std::shared_ptr<const gpu::RetainedPublicUniform>* captured = nullptr)
         {
-            std::vector<RnsPoly> b(2u * tau);
-            for (u32 i = 0; i < 2u * tau; ++i)
-            {
-                b[i] = deriveUniformPolyFromNonceNtt(ctx, 0xC0DEC0DEull, 0x1EEC0DEu, i);
-            }
-            return b;
+            return deriveUniformPolyBatchFromNonce(
+                ctx, 0xC0DEC0DEull, 0x1EEC0DEu, 2u * tau, true, captured);
         }
 
         struct PublicBCacheKey
         {
             RingParams mRing;
             u32 mTau = 0;
+            u64 mRunId = 0;
+            ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
+            int mDevice = -1;
 
             bool operator==(const PublicBCacheKey& other) const
             {
-                return mRing == other.mRing && mTau == other.mTau;
+                return mRing == other.mRing && mTau == other.mTau &&
+                    mRunId == other.mRunId && mRole == other.mRole &&
+                    mDevice == other.mDevice;
             }
         };
 
@@ -145,6 +174,10 @@ namespace osuCrypto::LogVole
             {
                 std::size_t h = std::hash<u32>{}(key.mRing.mPolyModulusDegree);
                 h ^= std::hash<u32>{}(key.mTau) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+                h ^= std::hash<u64>{}(key.mRunId) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+                h ^= std::hash<u8>{}(static_cast<u8>(key.mRole)) +
+                    0x9e3779b9u + (h << 6u) + (h >> 2u);
+                h ^= std::hash<int>{}(key.mDevice) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
                 for (int bits : key.mRing.mCoeffModulusBits)
                 {
                     const std::size_t b = std::hash<int>{}(bits);
@@ -154,18 +187,49 @@ namespace osuCrypto::LogVole
             }
         };
 
-        std::unordered_map<PublicBCacheKey, std::shared_ptr<const std::vector<RnsPoly>>, PublicBCacheKeyHash>
+        struct PublicBCacheEntry
+        {
+            std::mutex mMutex;
+            std::shared_ptr<const std::vector<RnsPoly>> mHost;
+            std::shared_ptr<const gpu::RetainedPublicUniform> mDevice;
+        };
+
+        std::unordered_map<PublicBCacheKey, std::shared_ptr<PublicBCacheEntry>, PublicBCacheKeyHash>
             publicBCache;
         std::mutex publicBCacheMutex;
 
-        std::shared_ptr<const std::vector<RnsPoly>> getOrCreateCachedPublicBNtt(const RingNttContext& ctx, u32 tau)
+        std::shared_ptr<PublicBCacheEntry> getOrCreateCachedPublicBEntry(
+            const RingNttContext& ctx, u32 tau)
         {
             PublicBCacheKey key{};
             key.mRing = ctx.mParams;
             key.mTau = tau;
+            key.mRole = currentProtocolCacheScope().mRole;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            // Retained device operands belong to one cold protocol run. Keep
+            // the old host-only cache scope when this feature is disabled.
+            if (gpu::publicUniformRetentionEnabled())
+            {
+                key.mRunId = currentProtocolCacheScope().mRunId;
+                key.mDevice = gpu::currentDeviceOrdinal();
+            }
+#endif
 
             {
                 std::lock_guard<std::mutex> lock(publicBCacheMutex);
+                // Run-scoped device retention must not accumulate a new full
+                // host snapshot forever. Keep every entry still owned by a
+                // protocol state, plus the legacy process-wide run-0 cache.
+                if (key.mRunId != 0)
+                {
+                    for (auto entry = publicBCache.begin(); entry != publicBCache.end();)
+                    {
+                        if (entry->first.mRunId != 0 && entry->first.mRunId != key.mRunId &&
+                            entry->second.use_count() == 1)
+                            entry = publicBCache.erase(entry);
+                        else ++entry;
+                    }
+                }
                 auto it = publicBCache.find(key);
                 if (it != publicBCache.end())
                 {
@@ -173,12 +237,52 @@ namespace osuCrypto::LogVole
                 }
             }
 
-            auto candidate = std::make_shared<const std::vector<RnsPoly>>(buildLencPublicBNttImpl(ctx, tau));
+            auto candidate = std::make_shared<PublicBCacheEntry>();
+#if defined(ENABLE_LOGVOLE_CUDA)
+            (void)retainUniformPolyBatchFromNonce(ctx, 0xC0DEC0DEull,
+                0x1EEC0DEu, 2u * tau, true, candidate->mDevice);
+#endif
+            if (!candidate->mDevice)
+            {
+                std::shared_ptr<const gpu::RetainedPublicUniform> captured;
+                candidate->mHost = std::make_shared<const std::vector<RnsPoly>>(
+                    buildLencPublicBNttImpl(ctx, tau, &captured));
+                candidate->mDevice = std::move(captured);
+#if defined(ENABLE_LOGVOLE_CUDA)
+                if (candidate->mDevice)
+                    (void)gpu::registerPublicUniformRetention(ctx, candidate->mHost, candidate->mDevice);
+#endif
+            }
 
             std::lock_guard<std::mutex> lock(publicBCacheMutex);
             auto [it, inserted] = publicBCache.emplace(std::move(key), candidate);
             (void)inserted;
             return it->second;
+        }
+
+        std::shared_ptr<const std::vector<RnsPoly>> getOrCreateCachedPublicBNtt(
+            const RingNttContext& ctx, u32 tau)
+        {
+            auto entry = getOrCreateCachedPublicBEntry(ctx, tau);
+            if (!entry) return {};
+            std::lock_guard<std::mutex> lock(entry->mMutex);
+            if (entry->mHost) return entry->mHost;
+            std::shared_ptr<const std::vector<RnsPoly>> materialized;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (entry->mDevice)
+                (void)gpu::materializeRetainedPublicUniform(ctx, entry->mDevice, materialized);
+#endif
+            if (!materialized)
+                materialized = std::make_shared<const std::vector<RnsPoly>>(
+                    buildLencPublicBNttImpl(ctx, tau));
+            if (!materialized || materialized->size() != 2u * tau ||
+                !validateRingBatchShape(*materialized, ctx.mParams)) return {};
+            entry->mHost = std::move(materialized);
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (entry->mDevice)
+                (void)gpu::registerPublicUniformRetention(ctx, entry->mHost, entry->mDevice);
+#endif
+            return entry->mHost;
         }
 
         bool validatePublicBNtt(const RingNttContext& ctx, const std::vector<RnsPoly>& publicBNtt, u32 tau)
@@ -199,18 +303,10 @@ namespace osuCrypto::LogVole
             }
 
             RnsPoly accNtt{};
-            if (!zeroPoly(ctx, accNtt))
-            {
-                return false;
-            }
+            resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
-            for (std::size_t i = 0; i < size; ++i)
-            {
-                if (!dyadicMultiplyAddNttInplace(*leftPtrs[i], *rightPtrs[i], accNtt, ctx))
-                {
-                    return false;
-                }
-            }
+            if (!dyadicInnerProductNttInplace({leftPtrs, size}, {rightPtrs, size}, accNtt, ctx))
+                return false;
 
             if (!inverseNtt(accNtt, ctx))
             {
@@ -247,14 +343,16 @@ namespace osuCrypto::LogVole
 
         bool buildRecursiveLeafScaling(const RingNttContext& ctx, RecursiveLeafScaling& out)
         {
-            const std::size_t rho = ctx.mModuli.size();
+            const auto& moduli = getRingHostModuli(ctx);
+            const std::size_t rho = moduli.size();
+            if (!rho) return false;
             RecursiveLeafScaling scaling{};
             resizeFill<u64>(scaling.mCrtLiftModQj, rho, 1);
             resizeFill<u64>(scaling.mInvCrtLiftModQj, rho, 1);
 
             for (std::size_t j = 0; j < rho; ++j)
             {
-                const auto& modJ = ctx.mModuli[j];
+                const auto& modJ = moduli[j];
                 u64 crtLiftModQj = 1;
                 for (std::size_t w = 0; w < rho; ++w)
                 {
@@ -262,7 +360,7 @@ namespace osuCrypto::LogVole
                     {
                         continue;
                     }
-                    crtLiftModQj = seal::util::multiply_uint_mod(crtLiftModQj, ctx.mModuli[w].value(), modJ);
+                    crtLiftModQj = seal::util::multiply_uint_mod(crtLiftModQj, moduli[w].value(), modJ);
                 }
                 scaling.mCrtLiftModQj[j] = crtLiftModQj;
 
@@ -280,11 +378,13 @@ namespace osuCrypto::LogVole
 
         RnsPoly selectAndScaleLimbNtt(const RingNttContext& ctx, const RnsPoly& polyNtt, u32 limbIdx, u64 scaleModQj)
         {
+            const auto& moduli = getRingHostModuli(ctx);
+            if (limbIdx >= moduli.size()) return {};
             RnsPoly out{};
             resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
-            const auto& modulus = ctx.mModuli[limbIdx];
+            const auto& modulus = moduli[limbIdx];
             const std::size_t offset = static_cast<std::size_t>(limbIdx) * n;
             for (std::size_t c = 0; c < n; ++c)
             {
@@ -310,23 +410,29 @@ namespace osuCrypto::LogVole
             const std::size_t coeffCount = ringPolyCoeffCount(ctx.mParams);
             if (leftBNtt.mCoeffs.size() != coeffCount || leftDigitNtt.mCoeffs.size() != coeffCount ||
                 rightBNtt.mCoeffs.size() != coeffCount || rightDigitNtt.mCoeffs.size() != coeffCount ||
-                leftLimb >= ctx.mModuli.size() || rightLimb >= ctx.mModuli.size())
+                leftLimb >= ringModulusCount(ctx) || rightLimb >= ringModulusCount(ctx))
             {
                 return false;
             }
 
             RnsPoly accNtt{};
             resizeZero(accNtt.mCoeffs, coeffCount);
+            const auto& moduli = getRingHostModuli(ctx);
+            if (moduli.empty()) return false;
 
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
             auto accumulateLimb = [&](const RnsPoly& bNtt, u32 limb, u64 scaleModQj, const RnsPoly& digitNtt) {
-                const auto& modulus = ctx.mModuli[limb];
+                const auto& modulus = moduli[limb];
                 const std::size_t offset = static_cast<std::size_t>(limb) * n;
+                AlignedUnVec<u64> scaled(n);
+                seal::util::multiply_poly_scalar_coeffmod(
+                    bNtt.mCoeffs.data() + offset, n, scaleModQj, modulus, scaled.data());
+                if (detail::cpuDyadicMultiplyAdd(scaled.data(), digitNtt.mCoeffs.data() + offset,
+                    accNtt.mCoeffs.data() + offset, n, modulus)) return;
                 for (std::size_t c = 0; c < n; ++c)
                 {
                     const std::size_t idx = offset + c;
-                    const u64 scaledB = seal::util::multiply_uint_mod(bNtt.mCoeffs[idx], scaleModQj, modulus);
-                    const u64 prod = seal::util::multiply_uint_mod(scaledB, digitNtt.mCoeffs[idx], modulus);
+                    const u64 prod = seal::util::multiply_uint_mod(scaled[c], digitNtt.mCoeffs[idx], modulus);
                     accNtt.mCoeffs[idx] = seal::util::add_uint_mod(accNtt.mCoeffs[idx], prod, modulus);
                 }
             };
@@ -334,42 +440,48 @@ namespace osuCrypto::LogVole
             accumulateLimb(leftBNtt, leftLimb, leftScaleModQj, leftDigitNtt);
             accumulateLimb(rightBNtt, rightLimb, rightScaleModQj, rightDigitNtt);
 
-            if (!inverseNtt(accNtt, ctx))
-            {
-                return false;
-            }
+            // The CRT-lifted leaves populate only these two limbs. Every other
+            // limb is exactly zero and its inverse transform is also zero.
+            const auto hostContext = getRingHostContext(ctx);
+            if (!hostContext || !hostContext->key_context_data()) return false;
+            const auto* tables = hostContext->key_context_data()->small_ntt_tables();
+            seal::util::inverse_ntt_negacyclic_harvey(
+                accNtt.mCoeffs.data() + leftLimb * n, tables[leftLimb]);
+            if (rightLimb != leftLimb)
+                seal::util::inverse_ntt_negacyclic_harvey(
+                    accNtt.mCoeffs.data() + rightLimb * n, tables[rightLimb]);
+            globalRingOpsStats.mInttCount.fetch_add(1, std::memory_order_relaxed);
 
             out = std::move(accNtt);
             return true;
         }
 
-        std::vector<RnsPoly> makePublicBInternalHi(const std::vector<RnsPoly>& publicBFullNtt, u32 tauHi)
+        std::vector<const RnsPoly*> makePublicBInternalHi(const std::vector<RnsPoly>& publicBFullNtt, u32 tauHi)
         {
             const u32 fullTau = tauHi + 1u;
-            std::vector<RnsPoly> out(2u * tauHi);
+            std::vector<const RnsPoly*> out(2u * tauHi);
             for (u32 i = 0; i < tauHi; ++i)
             {
-                out[i] = publicBFullNtt[1u + i];
+                out[i] = &publicBFullNtt[1u + i];
             }
             for (u32 i = 0; i < tauHi; ++i)
             {
-                out[tauHi + i] = publicBFullNtt[fullTau + 1u + i];
+                out[tauHi + i] = &publicBFullNtt[fullTau + 1u + i];
             }
             return out;
         }
 
-        std::vector<RnsPoly> makePublicBLeaf(
-            const RingNttContext& ctx,
+        std::vector<const RnsPoly*> makePublicBLeaf(
             const std::vector<RnsPoly>& publicBFullNtt,
             u32 tauHi,
             u32 tauLeaf)
         {
             const u32 fullTau = tauHi + 1u;
-            std::vector<RnsPoly> out(2u * tauLeaf, zeroPolyRaw(ctx));
+            std::vector<const RnsPoly*> out(2u * tauLeaf);
             for (u32 i = 0; i < tauLeaf; ++i)
             {
-                out[i] = publicBFullNtt[i];
-                out[tauLeaf + i] = publicBFullNtt[fullTau + i];
+                out[i] = &publicBFullNtt[i];
+                out[tauLeaf + i] = &publicBFullNtt[fullTau + i];
             }
             return out;
         }
@@ -391,7 +503,7 @@ namespace osuCrypto::LogVole
             for (u32 i = 0; i < tauHi; ++i)
             {
                 RnsPoly digitNtt = std::move(hiDec[i]);
-                if (!forwardNtt(digitNtt, ctx))
+                if (!forwardNttCanonical(digitNtt, ctx))
                 {
                     return false;
                 }
@@ -418,7 +530,7 @@ namespace osuCrypto::LogVole
             for (u32 i = 0; i < tauLeaf; ++i)
             {
                 RnsPoly digitNtt = std::move(leafDec[i]);
-                if (!forwardNtt(digitNtt, ctx))
+                if (!forwardNttCanonical(digitNtt, ctx))
                 {
                     return false;
                 }
@@ -439,23 +551,30 @@ namespace osuCrypto::LogVole
             u64 invCrtLiftModQj,
             std::vector<RnsPoly>& out)
         {
+            const auto& moduli = getRingHostModuli(ctx);
+            if (limbIdx >= moduli.size()) return false;
             RnsPoly plainPoly{};
-            resizeZero(plainPoly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+            plainPoly.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
 
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
-            const auto& modulus = ctx.mModuli[limbIdx];
+            const auto& modulus = moduli[limbIdx];
+            seal::util::MultiplyUIntModOperand inverseLift;
+            inverseLift.set(invCrtLiftModQj, modulus);
             const std::size_t offset = static_cast<std::size_t>(limbIdx) * n;
-            for (std::size_t c = 0; c < n; ++c)
+            const bool vectorized = detail::cpuUnliftCenteredRns(
+                liftedPoly.mCoeffs.data() + offset, plainPoly.mCoeffs.data(), n,
+                modulus, invCrtLiftModQj, moduli);
+            for (std::size_t c = 0; !vectorized && c < n; ++c)
             {
                 const u64 reduced =
-                    seal::util::multiply_uint_mod(liftedPoly.mCoeffs[offset + c], invCrtLiftModQj, modulus);
+                    seal::util::multiply_uint_mod(liftedPoly.mCoeffs[offset + c], inverseLift, modulus);
                 const i64 centered = (reduced > (modulus.value() >> 1u))
                                          ? -static_cast<i64>(modulus.value() - reduced)
                                          : static_cast<i64>(reduced);
 
-                for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+                for (std::size_t modIdx = 0; modIdx < moduli.size(); ++modIdx)
                 {
-                    const auto& modK = ctx.mModuli[modIdx];
+                    const auto& modK = moduli[modIdx];
                     const std::size_t modOffset = modIdx * n + c;
                     if (centered < 0)
                     {
@@ -468,7 +587,7 @@ namespace osuCrypto::LogVole
                 }
             }
 
-            if (!forwardNtt(plainPoly, ctx))
+            if (!(vectorized ? forwardNttCanonical(plainPoly, ctx) : forwardNtt(plainPoly, ctx)))
             {
                 return false;
             }
@@ -487,8 +606,14 @@ namespace osuCrypto::LogVole
         {
             RnsPoly noise{};
             resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+            const bool canonicalNoise = noiseMaxDeviation >= 0 &&
+                [&] {
+                    for (std::size_t limb = 0; limb < ringModulusCount(ctx); ++limb)
+                        if (!(noiseMaxDeviation < static_cast<double>(ringModulusValue(ctx, limb)))) return false;
+                    return true;
+                }();
             if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, prng, ctx) ||
-                !forwardNtt(noise, ctx))
+                !(canonicalNoise ? forwardNttCanonical(noise, ctx) : forwardNtt(noise, ctx)))
             {
                 return false;
             }
@@ -522,15 +647,8 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
-            u32 width = requestedWidthPadded;
-            if (width == 0)
-            {
-                width = nextPowerOfTwo(xCount);
-            }
-            if (width < xCount || (width & (width - 1u)) != 0)
-            {
-                return false;
-            }
+            u32 width = 0;
+            if (!lencTreeWidth(xCount, requestedWidthPadded, width)) return false;
 
             std::shared_ptr<const std::vector<RnsPoly>> cachedPublicBNtt;
             if (publicBNtt)
@@ -547,7 +665,7 @@ namespace osuCrypto::LogVole
             }
 
             const auto publicBInternalHi = makePublicBInternalHi(*publicBNtt, tauHi);
-            const auto publicBLeaf = makePublicBLeaf(ctx, *publicBNtt, tauHi, tauLeaf);
+            const auto publicBLeaf = makePublicBLeaf(*publicBNtt, tauHi, tauLeaf);
             RecursiveLeafScaling leafScaling{};
             if (leafInputsAreGadget && !buildRecursiveLeafScaling(ctx, leafScaling))
             {
@@ -568,11 +686,13 @@ namespace osuCrypto::LogVole
                 resizeZero(zeroPadding.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             }
 
+            HostStep leafStep(leafInputsAreGadget
+                ? "cpu shrink detail: recursive leaves" : "cpu shrink detail: initial leaves");
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
                 const u32 node = (width - 1u) + leaf;
                 const RnsPoly& leafPoly = (leaf < xCount) ? leafAt(leaf) : zeroPadding;
-                const u32 limb = leaf % static_cast<u32>(ctx.mModuli.size());
+                const u32 limb = leaf % static_cast<u32>(ringModulusCount(ctx));
                 if (leafInputsAreGadget)
                 {
                     if (!decomposeRecursiveLeafSingleDigitNtt(
@@ -587,6 +707,8 @@ namespace osuCrypto::LogVole
                 }
             }
 
+            leafStep.stop();
+            HostStep internalStep("cpu shrink detail: internal nodes");
             const u32 maxActiveTau = std::max(tauLeaf, tauHi);
             AlignedUnVec<const RnsPoly*> bPtrs(2u * maxActiveTau);
             AlignedUnVec<const RnsPoly*> pairPtrs(2u * maxActiveTau);
@@ -605,7 +727,7 @@ namespace osuCrypto::LogVole
                     }
                     for (std::size_t idx = 0; idx < bLevel.size(); ++idx)
                     {
-                        bPtrs[idx] = &bLevel[idx];
+                        bPtrs[idx] = bLevel[idx];
                     }
                 }
 
@@ -628,8 +750,8 @@ namespace osuCrypto::LogVole
                     {
                         const u32 leftLeaf = left - (width - 1u);
                         const u32 rightLeaf = right - (width - 1u);
-                        const u32 leftLimb = leftLeaf % static_cast<u32>(ctx.mModuli.size());
-                        const u32 rightLimb = rightLeaf % static_cast<u32>(ctx.mModuli.size());
+                        const u32 leftLimb = leftLeaf % static_cast<u32>(ringModulusCount(ctx));
+                        const u32 rightLimb = rightLeaf % static_cast<u32>(ringModulusCount(ctx));
                         if (!recursiveLeafPairInnerProductNttToStd(
                                 ctx, (*publicBNtt)[0], leftLimb, leafScaling.mCrtLiftModQj[leftLimb], *pairPtrs[0],
                                 (*publicBNtt)[fullTau], rightLimb, leafScaling.mCrtLiftModQj[rightLimb], *pairPtrs[1],
@@ -644,7 +766,7 @@ namespace osuCrypto::LogVole
                     }
 
                     RnsPoly nodeValue{};
-                    if (!negatePoly(ctx, dot, nodeValue))
+                    if (!negatePoly(ctx, std::move(dot), nodeValue))
                     {
                         return false;
                     }
@@ -818,6 +940,26 @@ namespace osuCrypto::LogVole
         return true;
     }
 
+    std::shared_ptr<const std::vector<RnsPoly>> sharedLencPublicBNtt(
+        const RingNttContext& ctx, u32 tau)
+    {
+        return getOrCreateCachedPublicBNtt(ctx, tau);
+    }
+
+    std::shared_ptr<const gpu::RetainedPublicUniform> retainedLencPublicBNtt(
+        const RingNttContext& ctx, u32 tau)
+    {
+#if defined(ENABLE_LOGVOLE_CUDA)
+        auto entry = getOrCreateCachedPublicBEntry(ctx, tau);
+        if (entry && entry->mDevice && gpu::retainedPublicUniformMatches(
+                ctx, *entry->mDevice, 2u * tau, true)) return entry->mDevice;
+#else
+        (void)ctx;
+        (void)tau;
+#endif
+        return {};
+    }
+
     std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau)
     {
         auto cached = getOrCreateCachedPublicBNtt(ctx, tau);
@@ -860,15 +1002,8 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        u32 width = requestedWidthPadded;
-        if (width == 0)
-        {
-            width = nextPowerOfTwo(static_cast<u32>(x.size()));
-        }
-        if (width < x.size() || (width & (width - 1u)) != 0)
-        {
-            return false;
-        }
+        u32 width = 0;
+        if (!lencTreeWidth(x.size(), requestedWidthPadded, width)) return false;
 
         std::shared_ptr<const std::vector<RnsPoly>> cachedPublicBNtt;
         if (publicBNtt)
@@ -941,7 +1076,7 @@ namespace osuCrypto::LogVole
                 RnsPoly dot{};
                 RnsPoly nodeValue{};
                 if (!innerProductNttToStdPtrs(ctx, bPtrs.data(), pairPtrs.data(), 2u * tau, dot) ||
-                    !negatePoly(ctx, dot, nodeValue))
+                    !negatePoly(ctx, std::move(dot), nodeValue))
                 {
                     return false;
                 }
@@ -982,23 +1117,19 @@ namespace osuCrypto::LogVole
         u32 requestedWidthPadded,
         bool emitRCoeffDomain,
         const std::vector<RnsPoly>* publicBNtt,
-        u32)
+        u32,
+        bool /*deferCiphertextHost*/)
     {
         if (s.empty() || tau == 0 || noiseStandardDeviation < 0 || !validateRingBatchShape(s, ctx.mParams))
         {
             return false;
         }
 
+        const auto& moduli = getRingHostModuli(ctx);
+        if (moduli.empty()) return false;
+        u32 width = 0;
+        if (!lencTreeWidth(s.size(), requestedWidthPadded, width)) return false;
         const u32 mu = static_cast<u32>(s.size());
-        u32 width = requestedWidthPadded;
-        if (width == 0)
-        {
-            width = nextPowerOfTwo(mu);
-        }
-        if (width < mu || (width & (width - 1u)) != 0)
-        {
-            return false;
-        }
 
         std::shared_ptr<const std::vector<RnsPoly>> cachedPublicBNtt;
         if (publicBNtt)
@@ -1058,20 +1189,23 @@ namespace osuCrypto::LogVole
                     {
                         const u32 t = k - bit * tau;
                         const u64 shift = static_cast<u64>(gadgetLogBase) * t;
-                        for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+                        for (std::size_t modIdx = 0; modIdx < moduli.size(); ++modIdx)
                         {
-                            const u64 mod = ctx.mModuli[modIdx].value();
+                            const u64 mod = moduli[modIdx].value();
                             const std::size_t offset = modIdx * n;
-                            const u64 factor = pow2Mod(shift, mod);
+                            const u64 factor = detail::pow2Mod(shift, mod);
                             for (std::size_t i = 0; i < n; ++i)
                             {
                                 const std::size_t idx = offset + i;
+                                const u64 value = riNtt.mCoeffs[idx];
                                 rowKNtt.mCoeffs[idx] =
                                     mulAddMod(
-                                        riNtt.mCoeffs[idx] % mod,
+                                        (value < mod)
+                                            ? value
+                                            : seal::util::barrett_reduce_64(value, moduli[modIdx]),
                                         factor,
                                         rowKNtt.mCoeffs[idx],
-                                        ctx.mModuli[modIdx]);
+                                        moduli[modIdx]);
                             }
                         }
                     }
@@ -1102,15 +1236,15 @@ namespace osuCrypto::LogVole
 
         if (emitRCoeffDomain)
         {
+            // mu independent inverse transforms; one batch rather than mu calls.
             next.mR.resize(mu);
             for (u32 i = 0; i < mu; ++i)
             {
-                RnsPoly r = next.mRNtt[i];
-                if (!inverseNtt(r, ctx))
-                {
-                    return false;
-                }
-                next.mR[i] = std::move(r);
+                next.mR[i] = next.mRNtt[i];
+            }
+            if (!inverseNttBatch(next.mR, ctx))
+            {
+                return false;
             }
         }
 
@@ -1250,9 +1384,9 @@ namespace osuCrypto::LogVole
             }
 
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
-            for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+            for (std::size_t modIdx = 0; modIdx < ringModulusCount(ctx); ++modIdx)
             {
-                const u64 mod = ctx.mModuli[modIdx].value();
+                const u64 mod = ringModulusValue(ctx, modIdx);
                 const std::size_t offset = modIdx * n;
                 for (std::size_t i = 0; i < n; ++i)
                 {
@@ -1340,12 +1474,46 @@ namespace osuCrypto::LogVole
         bool emitRCoeffDomain,
         bool leafInputsAreGadget,
         const std::vector<RnsPoly>* publicBNtt,
-        u32)
+        u32 requestedWorkers,
+        bool deferCiphertextHost,
+        bool deferRandomizerHost,
+        const gpu::DeviceBatch* seedLabelDevice,
+        const LazySeedLabelHostState* seedLabelHost)
     {
-        if (s.empty() || tauHi == 0 || noiseStandardDeviation < 0 || !validateRingBatchShape(s, ctx.mParams))
+        HostStep setupStep("setup: lenc truncated");
+        const auto sCount = seedLabelHost ? seedLabelHost->count() : s.size();
+        if (!sCount || sCount > std::numeric_limits<u32>::max() ||
+            tauHi == 0 || noiseStandardDeviation < 0 ||
+            (seedLabelDevice
+                ? (!s.empty() || !seedLabelHost ||
+                   !seedLabelHost->matches(ctx.mParams))
+                : !validateRingBatchShape(s, ctx.mParams)))
         {
             return false;
         }
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (seedLabelDevice &&
+            !gpu::setupLencInputBatchMatches(ctx, *seedLabelDevice,
+                sCount, currentProtocolCacheScope().mRunId)) return false;
+#else
+        if (seedLabelDevice) return false;
+#endif
+
+        const std::vector<RnsPoly>* sHost = &s;
+        const auto materializeS = [&] {
+            if (!seedLabelDevice) return true;
+            try
+            {
+                sHost = &seedLabelHost->hostCoefficients();
+            }
+            catch (const std::exception&)
+            {
+                return false;
+            }
+            if (sHost->size() != sCount ||
+                !validateRingBatchShape(*sHost, ctx.mParams)) return false;
+            return true;
+        };
 
         const u32 tauLeaf = computeTruncLeafTau(tauHi, plaintextModulusBits, gadgetLogBase, leafInputsAreGadget);
         const u32 fullTau = tauHi + 1u;
@@ -1354,18 +1522,13 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const u32 mu = static_cast<u32>(s.size());
-        u32 width = requestedWidthPadded;
-        if (width == 0)
-        {
-            width = nextPowerOfTwo(mu);
-        }
-        if (width < mu || (width & (width - 1u)) != 0)
-        {
-            return false;
-        }
+        const u32 mu = static_cast<u32>(sCount);
+        u32 width = 0;
+        if (!lencTreeWidth(sCount, requestedWidthPadded, width)) return false;
 
+        const bool deviceAssemblyRequested = gpuSetupLencDeviceEnabled();
         std::shared_ptr<const std::vector<RnsPoly>> cachedPublicBNtt;
+        std::shared_ptr<const gpu::RetainedPublicUniform> retainedPublicBNtt;
         if (publicBNtt)
         {
             if (!validatePublicBNtt(ctx, *publicBNtt, fullTau))
@@ -1375,14 +1538,25 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau);
-            publicBNtt = cachedPublicBNtt.get();
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (deviceAssemblyRequested)
+                retainedPublicBNtt = retainedLencPublicBNtt(ctx, fullTau);
+#endif
+            if (!retainedPublicBNtt)
+            {
+                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau);
+                publicBNtt = cachedPublicBNtt.get();
+                if (!publicBNtt || !validatePublicBNtt(ctx, *publicBNtt, fullTau)) return false;
+            }
         }
 
-        const auto publicBInternalHi = makePublicBInternalHi(*publicBNtt, tauHi);
-        const auto publicBLeaf = makePublicBLeaf(ctx, *publicBNtt, tauHi, tauLeaf);
+        std::vector<const RnsPoly*> publicBInternalHi, publicBLeaf;
+        bool retainRandomizers = false;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        retainRandomizers = deferRandomizerHost && gpuSetupLencDeviceEnabled() && gpu::lencRandomizerResidencyEnabled();
+#endif
         RecursiveLeafScaling leafScaling{};
-        if (leafInputsAreGadget && !buildRecursiveLeafScaling(ctx, leafScaling))
+        if (leafInputsAreGadget && !retainRandomizers && !buildRecursiveLeafScaling(ctx, leafScaling))
         {
             return false;
         }
@@ -1391,145 +1565,346 @@ namespace osuCrypto::LogVole
         const u32 ctTauMax = std::max(tauHi, tauLeaf);
         std::vector<std::vector<RnsPoly>> rLayersNtt(levels, std::vector<RnsPoly>(width));
 
-        for (u32 level = 0; level < levels; ++level)
+        const char* paddingSetting = std::getenv("LV_GPU_SETUP_LENC_DEVICE_PADDING");
+        const bool devicePadding = deviceAssemblyRequested && (!paddingSetting || paddingSetting[0] != '0');
+        const bool setupBatch = gpuSetupLencEnabled() || deviceAssemblyRequested;
+        const char* compactFlag = std::getenv("LV_GPU_SETUP_COMPACT_NOISE");
+        const char* compactStrictFlag = std::getenv("LV_GPU_SETUP_COMPACT_NOISE_STRICT");
+        // Keep errors compact through GPU expansion. Exact Gaussian sampling
+        // can retain q0 on device; original seeds support every fallback.
+        const bool compactRequested = deviceAssemblyRequested && (!compactFlag || compactFlag[0] != '0');
+        const bool compactStrict = compactRequested && compactStrictFlag && compactStrictFlag[0] != '0';
+        const bool compactNoiseEnabled = compactRequested &&
+            canSamplePolyErrorCompact(ctx, noiseStandardDeviation, noiseMaxDeviation);
+        if (compactStrict && !compactNoiseEnabled) return false;
+        const std::size_t randomizerN = ctx.mParams.mPolyModulusDegree;
+        std::vector<u64> compactRandomizers;
+        std::shared_ptr<gpu::DeviceScalars> residentRandomizers;
+        std::vector<seal::prng_seed_type> randomizerSeeds;
+        if (compactNoiseEnabled)
         {
-            for (u32 leaf = 0; leaf < width; ++leaf)
+            const std::size_t count = static_cast<std::size_t>(levels) * width;
+            if (!randomizerN || count > std::numeric_limits<std::size_t>::max() / randomizerN) return false;
+        }
+        if (setupBatch)
+        {
+            // Draw the identical parent seeds in level/leaf order before any
+            // worker runs. Each local error sampler then owns its PRNG stream.
+            auto& seeds = randomizerSeeds;
+            seeds.resize(static_cast<std::size_t>(levels) * width);
+            for (auto& seed : seeds) prng.get(seed.data(), seed.size());
+            if (compactNoiseEnabled)
             {
-                if (!sampleErrorPolyNtt(ctx, prng, noiseStandardDeviation, noiseMaxDeviation, rLayersNtt[level][leaf]))
-                {
-                    return false;
-                }
+                if (!samplePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
+                    noiseStandardDeviation, noiseMaxDeviation, seeds, ctx, requestedWorkers)) return false;
             }
+            else if (!detail::runParallelTasks(seeds.size(), requestedWorkers, [&](std::size_t idx) {
+                    auto& poly = rLayersNtt[idx / width][idx % width];
+                    resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+                    return addPolyErrorFromSeed(poly, noiseStandardDeviation,
+                        noiseMaxDeviation, seeds[idx], ctx);
+                })) return false;
+            if (!deviceAssemblyRequested)
+                for (auto& layer : rLayersNtt)
+                    if (!forwardNttBatch(layer, ctx)) return false;
         }
-
-        std::vector<RnsPoly> sPadNtt;
-        if (!buildPaddedNttBatch(ctx, s, width, sPadNtt))
+        else
         {
-            return false;
-        }
-
-        RingTensor ct{};
-        ct.mRows = levels * width;
-        ct.mCols = 2u * ctTauMax;
-        ct.mPolys.resize(ringTensorSize(ct));
-
-        const std::size_t n = ctx.mParams.mPolyModulusDegree;
-        for (u32 level = 0; level < levels; ++level)
-        {
-            for (u32 leaf = 0; leaf < width; ++leaf)
+            for (u32 level = 0; level < levels; ++level)
             {
-                const RnsPoly& rNtt = rLayersNtt[level][leaf];
-                const u32 bit = (leaf >> (levels - 1u - level)) & 1u;
-                const RnsPoly& riNtt = (level == levels - 1u) ? sPadNtt[leaf] : rLayersNtt[level + 1u][leaf];
-
-                const bool isLeafLevel = level == levels - 1u;
-                const std::vector<RnsPoly>& bLevel = isLeafLevel ? publicBLeaf : publicBInternalHi;
-                const u32 activeTau = isLeafLevel ? tauLeaf : tauHi;
-                const u32 powerOffset = isLeafLevel ? 0u : 1u;
-                const u32 leafPairBase = leaf & ~1u;
-                const u32 leftLimb = leafPairBase % static_cast<u32>(ctx.mModuli.size());
-                const u32 rightLimb = (leafPairBase + 1u) % static_cast<u32>(ctx.mModuli.size());
-
-                for (u32 side = 0; side < 2u; ++side)
+                for (u32 leaf = 0; leaf < width; ++leaf)
                 {
-                    for (u32 t = 0; t < ctTauMax; ++t)
+                    if (!sampleErrorPolyNtt(ctx, prng, noiseStandardDeviation, noiseMaxDeviation, rLayersNtt[level][leaf]))
                     {
-                        RnsPoly rowKNtt{};
-                        resizeZero(rowKNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-
-                        if (t < activeTau)
-                        {
-                            const auto& bPoly = bLevel[side * activeTau + t];
-                            RnsPoly scaledBPoly{};
-                            const RnsPoly* bPolyPtr = &bPoly;
-                            if (isLeafLevel && leafInputsAreGadget)
-                            {
-                                const u32 limb = (side == 0) ? leftLimb : rightLimb;
-                                const u32 fullTauSideOffset = (side == 0) ? 0u : fullTau;
-                                scaledBPoly = selectAndScaleLimbNtt(
-                                    ctx, (*publicBNtt)[fullTauSideOffset], limb, leafScaling.mCrtLiftModQj[limb]);
-                                bPolyPtr = &scaledBPoly;
-                            }
-
-                            if (!dyadicMultiplyAddNttInplace(rNtt, *bPolyPtr, rowKNtt, ctx))
-                            {
-                                return false;
-                            }
-
-                            if (side == bit)
-                            {
-                                const u64 shift = static_cast<u64>(gadgetLogBase) * static_cast<u64>(t + powerOffset);
-                                RnsPoly scaledRiNtt{};
-                                const RnsPoly* riPolyPtr = &riNtt;
-                                if (isLeafLevel && leafInputsAreGadget)
-                                {
-                                    const u32 limb = (side == 0) ? leftLimb : rightLimb;
-                                    scaledRiNtt =
-                                        selectAndScaleLimbNtt(ctx, riNtt, limb, leafScaling.mCrtLiftModQj[limb]);
-                                    riPolyPtr = &scaledRiNtt;
-                                }
-
-                                for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
-                                {
-                                    const auto& modulus = ctx.mModuli[modIdx];
-                                    const u64 mod = modulus.value();
-                                    const std::size_t offset = modIdx * n;
-                                    const u64 factor = pow2Mod(shift, mod);
-                                    for (std::size_t i = 0; i < n; ++i)
-                                    {
-                                        const std::size_t idx = offset + i;
-                                        const u64 scaled =
-                                            seal::util::multiply_uint_mod(riPolyPtr->mCoeffs[idx], factor, modulus);
-                                        rowKNtt.mCoeffs[idx] =
-                                            seal::util::add_uint_mod(rowKNtt.mCoeffs[idx], scaled, modulus);
-                                    }
-                                }
-                            }
-                        }
-
-                        if (noiseStandardDeviation > 0 && t < activeTau)
-                        {
-                            RnsPoly noise{};
-                            resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-                            if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, prng, ctx) ||
-                                !forwardNtt(noise, ctx) ||
-                                !ringAddInplace(rowKNtt, noise, ctx))
-                            {
-                                return false;
-                            }
-                        }
-
-                        const u32 slot = side * ctTauMax + t;
-                        ct.mPolys[ctRowIndex(level, leaf, width) * ct.mCols + slot] = std::move(rowKNtt);
+                        return false;
                     }
                 }
             }
         }
 
-        LencEncodeOutput next{};
-        next.mRNtt.resize(mu);
-        for (u32 i = 0; i < mu; ++i)
+        std::vector<RnsPoly> sPadNtt;
+        if (!devicePadding &&
+            (!materializeS() || !buildPaddedNttBatch(ctx, *sHost,
+                width, sPadNtt, !deviceAssemblyRequested)))
         {
-            next.mRNtt[i] = std::move(rLayersNtt[0][i]);
+            return false;
         }
 
-        if (emitRCoeffDomain)
+        std::vector<RnsPoly> deviceFirstRNtt;
+        RingTensor ct{};
+        ct.mRows = levels * width;
+        ct.mCols = 2u * ctTauMax;
+        ct.mPolys.resize(ringTensorSize(ct));
+
+        bool deviceAssembled = false;
+        std::shared_ptr<const LazyRingTensorHostState> lazyCiphertext;
+        std::shared_ptr<const LazyLencRandomizerState> lazyRandomizers;
+        if (setupBatch)
+        {
+            // Keep identical parent seed order while optionally sampling only
+            // q0: the device broadcasts these signed values during its NTT.
+            const std::size_t n = ctx.mParams.mPolyModulusDegree;
+            std::vector<u64> compactNoise;
+            std::shared_ptr<gpu::DeviceScalars> residentNoise;
+            if (compactNoiseEnabled)
+            {
+                if (!n || ct.mPolys.size() > std::numeric_limits<std::size_t>::max() / n) return false;
+            }
+            std::vector<std::array<u64, 8>> seeds(ct.mPolys.size());
+            std::vector<u8> activeNoiseRows(seeds.size(), 0u);
+            for (std::size_t idx = 0; idx < seeds.size(); ++idx)
+            {
+                const u32 level = static_cast<u32>(idx / ct.mCols / width);
+                const u32 activeTau = level == levels - 1u ? tauLeaf : tauHi;
+                if (noiseStandardDeviation > 0 && idx % ctTauMax < activeTau)
+                {
+                    prng.get(seeds[idx].data(), seeds[idx].size());
+                    activeNoiseRows[idx] = 1u;
+                }
+            }
+            if (compactNoiseEnabled)
+            {
+                if (!samplePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
+                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows)) return false;
+            }
+            else if (!detail::runParallelTasks(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx) {
+                    const bool activeNoise = activeNoiseRows[idx] != 0;
+                    auto& poly = ct.mPolys[idx];
+                    resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+                    return !activeNoise ||
+                        addPolyErrorFromSeed(poly, noiseStandardDeviation,
+                            noiseMaxDeviation, seeds[idx], ctx);
+                })) return false;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (deviceAssemblyRequested)
+            {
+                deviceAssembled = gpu::assembleLencTruncDevice(
+                    ctx, rLayersNtt, devicePadding
+                        ? std::span<const RnsPoly>{s}
+                        : std::span<const RnsPoly>{sPadNtt},
+                    publicBNtt ? std::span<const RnsPoly>{*publicBNtt} : std::span<const RnsPoly>{},
+                    tauHi, tauLeaf,
+                    gadgetLogBase, leafInputsAreGadget, leafScaling.mCrtLiftModQj,
+                    compactNoiseEnabled ? std::span<const RnsPoly>{} : std::span<const RnsPoly>{ct.mPolys},
+                    ct.mPolys, &deviceFirstRNtt, compactNoise, compactRandomizers, requestedWorkers, devicePadding,
+                    residentNoise.get(), residentRandomizers.get(),
+                    deferCiphertextHost ? &lazyCiphertext : nullptr,
+                    retainRandomizers ? mu : 0u, retainRandomizers ? &lazyRandomizers : nullptr,
+                    retainedPublicBNtt.get(),
+                    devicePadding ? seedLabelDevice : nullptr);
+                const char* strict = std::getenv("LV_GPU_SETUP_LENC_DEVICE_STRICT");
+                if (!deviceAssembled && (compactStrict || (strict && strict[0] != '0'))) return false;
+            }
+#endif
+            if (compactNoiseEnabled && !deviceAssembled &&
+                !materializePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
+                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows)) return false;
+            if (compactNoiseEnabled && !deviceAssembled &&
+                !detail::runParallelTasks(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx) {
+                    return expandPolyErrorCompact(
+                        std::span<const u64>(compactNoise).subspan(idx * n, n), ct.mPolys[idx], ctx);
+                })) return false;
+            // The device path keeps randomizer layers and padded input in
+            // coefficient form on the host and transforms them only on device.
+            // A declined attempt must prepare them before the established path.
+            if (deviceAssemblyRequested && !deviceAssembled)
+            {
+                // Device padding borrows the original input. Materialize the
+                // host coefficient copy only when an exact fallback needs it.
+                if (devicePadding &&
+                    (!materializeS() || !buildPaddedNttBatch(ctx, *sHost,
+                        width, sPadNtt, false))) return false;
+                if (compactNoiseEnabled &&
+                    !materializePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
+                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers)) return false;
+                if (compactNoiseEnabled && !detail::runParallelTasks(
+                    static_cast<std::size_t>(levels) * width, requestedWorkers, [&](std::size_t idx) {
+                        return expandPolyErrorCompact(
+                            std::span<const u64>(compactRandomizers).subspan(idx * n, n),
+                            rLayersNtt[idx / width][idx % width], ctx);
+                    })) return false;
+                for (auto& layer : rLayersNtt)
+                    if (!forwardNttBatch(layer, ctx)) return false;
+                if (!forwardNttBatch(sPadNtt, ctx)) return false;
+            }
+            // Noise also remains in coefficient form on failure; replay uses
+            // the same sampled values without consuming any more PRNG seeds.
+            if (!deviceAssembled && noiseStandardDeviation > 0 &&
+                !forwardNttBatch(ct.mPolys, ctx)) return false;
+        }
+
+        if (!deviceAssembled)
+        {
+            // The ordinary API and a declined GPU attempt need the exact host
+            // operands. Successful retained-only assembly never downloads B.
+            if (!publicBNtt)
+            {
+                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau);
+                publicBNtt = cachedPublicBNtt.get();
+            }
+            if (!publicBNtt || !validatePublicBNtt(ctx, *publicBNtt, fullTau)) return false;
+            publicBInternalHi = makePublicBInternalHi(*publicBNtt, tauHi);
+            publicBLeaf = makePublicBLeaf(*publicBNtt, tauHi, tauLeaf);
+        }
+        if (!deviceAssembled && retainRandomizers && leafInputsAreGadget &&
+            !buildRecursiveLeafScaling(ctx, leafScaling)) return false;
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        auto buildRow = [&](std::size_t row) {
+            const auto& moduli = getRingHostModuli(ctx);
+            if (moduli.empty()) return false;
+            const u32 level = static_cast<u32>(row / width);
+            const u32 leaf = static_cast<u32>(row % width);
+            const RnsPoly& rNtt = rLayersNtt[level][leaf];
+            const u32 bit = (leaf >> (levels - 1u - level)) & 1u;
+            const RnsPoly& riNtt = (level == levels - 1u) ? sPadNtt[leaf] : rLayersNtt[level + 1u][leaf];
+
+            const bool isLeafLevel = level == levels - 1u;
+            const auto& bLevel = isLeafLevel ? publicBLeaf : publicBInternalHi;
+            const u32 activeTau = isLeafLevel ? tauLeaf : tauHi;
+            const u32 powerOffset = isLeafLevel ? 0u : 1u;
+            const u32 leafPairBase = leaf & ~1u;
+            const u32 leftLimb = leafPairBase % static_cast<u32>(moduli.size());
+            const u32 rightLimb = (leafPairBase + 1u) % static_cast<u32>(moduli.size());
+
+            for (u32 side = 0; side < 2u; ++side)
+            {
+                for (u32 t = 0; t < ctTauMax; ++t)
+                {
+                    const u32 slot = side * ctTauMax + t;
+                    const std::size_t outputIdx = ctRowIndex(level, leaf, width) * ct.mCols + slot;
+                    RnsPoly rowKNtt{};
+                    if (setupBatch) rowKNtt = std::move(ct.mPolys[outputIdx]);
+                    else resizeZero(rowKNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+
+                    if (t < activeTau)
+                    {
+                        const auto& bPoly = *bLevel[side * activeTau + t];
+                        RnsPoly scaledBPoly{};
+                        const RnsPoly* bPolyPtr = &bPoly;
+                        if (isLeafLevel && leafInputsAreGadget)
+                        {
+                            const u32 limb = (side == 0) ? leftLimb : rightLimb;
+                            const u32 fullTauSideOffset = (side == 0) ? 0u : fullTau;
+                            scaledBPoly = selectAndScaleLimbNtt(
+                                ctx, (*publicBNtt)[fullTauSideOffset], limb, leafScaling.mCrtLiftModQj[limb]);
+                            bPolyPtr = &scaledBPoly;
+                        }
+
+                        if (!dyadicMultiplyAddNttInplace(rNtt, *bPolyPtr, rowKNtt, ctx))
+                        {
+                            return false;
+                        }
+
+                        if (side == bit)
+                        {
+                            const u64 shift = static_cast<u64>(gadgetLogBase) * static_cast<u64>(t + powerOffset);
+                            RnsPoly scaledRiNtt{};
+                            const RnsPoly* riPolyPtr = &riNtt;
+                            if (isLeafLevel && leafInputsAreGadget)
+                            {
+                                const u32 limb = (side == 0) ? leftLimb : rightLimb;
+                                scaledRiNtt =
+                                    selectAndScaleLimbNtt(ctx, riNtt, limb, leafScaling.mCrtLiftModQj[limb]);
+                                riPolyPtr = &scaledRiNtt;
+                            }
+
+                            for (std::size_t modIdx = 0; modIdx < moduli.size(); ++modIdx)
+                            {
+                                const auto& modulus = moduli[modIdx];
+                                const u64 mod = modulus.value();
+                                const std::size_t offset = modIdx * n;
+                                const u64 factor = detail::pow2Mod(shift, mod);
+                                seal::util::MultiplyUIntModOperand operand;
+                                if (setupBatch) operand.set(factor, modulus);
+                                for (std::size_t i = 0; i < n; ++i)
+                                {
+                                    const std::size_t idx = offset + i;
+                                    const u64 scaled = setupBatch
+                                        ? seal::util::multiply_uint_mod(riPolyPtr->mCoeffs[idx], operand, modulus)
+                                        : seal::util::multiply_uint_mod(riPolyPtr->mCoeffs[idx], factor, modulus);
+                                    rowKNtt.mCoeffs[idx] =
+                                        seal::util::add_uint_mod(rowKNtt.mCoeffs[idx], scaled, modulus);
+                                }
+                            }
+                        }
+                    }
+
+                    if (!setupBatch && noiseStandardDeviation > 0 && t < activeTau)
+                    {
+                        RnsPoly noise{};
+                        resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+                        if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, prng, ctx) ||
+                            !forwardNtt(noise, ctx) ||
+                            !ringAddInplace(rowKNtt, noise, ctx))
+                        {
+                            return false;
+                        }
+                    }
+
+                    ct.mPolys[outputIdx] = std::move(rowKNtt);
+                }
+            }
+            return true;
+        };
+        if (!deviceAssembled &&
+            !detail::runParallelTasks(ct.mRows, setupBatch ? requestedWorkers : 1, buildRow)) return false;
+
+        LencEncodeOutput next{};
+        next.mLazyRandomizers = std::move(lazyRandomizers);
+        if (!next.mLazyRandomizers)
+        {
+            next.mRNtt.resize(mu);
+            for (u32 i = 0; i < mu; ++i)
+                next.mRNtt[i] = deviceAssembled
+                    ? std::move(deviceFirstRNtt[i]) : std::move(rLayersNtt[0][i]);
+        }
+
+        if (emitRCoeffDomain && !next.mLazyRandomizers)
         {
             next.mR.resize(mu);
-            for (u32 i = 0; i < mu; ++i)
+            if (deviceAssembled && compactNoiseEnabled)
             {
-                RnsPoly r = next.mRNtt[i];
-                if (!inverseNtt(r, ctx))
+                // Only the first coefficient layer is part of the public
+                // state. All other RNS expansion took place on the device.
+                bool deviceExpanded = false;
+#if defined(ENABLE_LOGVOLE_CUDA)
+                const char* outputSetting = std::getenv("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT");
+                if (gpu::enabled() && (!outputSetting || outputSetting[0] != '0'))
                 {
-                    return false;
+                    HostStep outputStep("setup: lenc randomizer GPU output");
+                    const char* decline = std::getenv("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_FORCE_DECLINE");
+                    if (!decline || decline[0] != '1')
+                        deviceExpanded = residentRandomizers
+                            ? gpu::expandErrorCompactDevice(ctx, *residentRandomizers, false, next.mR, mu, requestedWorkers)
+                            : gpu::expandErrorCompactDevice(ctx,
+                                std::span<const u64>(compactRandomizers).first(static_cast<std::size_t>(mu) * n),
+                                false, next.mR, requestedWorkers);
+                    const char* strict = std::getenv("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_STRICT");
+                    if (!deviceExpanded && strict && strict[0] != '0') return false;
                 }
-                next.mR[i] = std::move(r);
+#endif
+                if (!deviceExpanded &&
+                    !materializePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
+                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers)) return false;
+                if (!deviceExpanded && !detail::runParallelTasks(mu, requestedWorkers, [&](std::size_t i) {
+                    return expandPolyErrorCompact(
+                        std::span<const u64>(compactRandomizers).subspan(i * n, n), next.mR[i], ctx);
+                })) return false;
+            }
+            else
+                for (u32 i = 0; i < mu; ++i)
+                    next.mR[i] = deviceAssembled
+                        ? std::move(rLayersNtt[0][i]) : next.mRNtt[i];
+            if (!deviceAssembled && !inverseNttBatch(next.mR, ctx))
+            {
+                return false;
             }
         }
 
         next.mLacct.mWidthPadded = width;
         next.mLacct.mLevels = levels;
         next.mLacct.mCt = std::move(ct);
+        next.mLazyCt = std::move(lazyCiphertext);
         out = std::move(next);
         return true;
     }
@@ -1585,7 +1960,7 @@ namespace osuCrypto::LogVole
             leafInputsAreGadget);
     }
 
-    bool lencEvalTrunc(
+    static bool lencEvalTruncImpl(
         const RingNttContext& ctx,
         const LencLacct& lacct,
         const DigestTree& tree,
@@ -1595,8 +1970,9 @@ namespace osuCrypto::LogVole
         u32 plaintextModulusBits,
         std::vector<RnsPoly>& out,
         bool outputNtt,
-        u32,
-        bool leafInputsAreGadget)
+        u32 requestedWorkers,
+        bool leafInputsAreGadget,
+        bool subtractFromOutput)
     {
         if (mu == 0 || tauHi == 0 || lacct.mWidthPadded == 0)
         {
@@ -1641,12 +2017,27 @@ namespace osuCrypto::LogVole
             }
         }
 
+        // One leaf per task. Leaves are independent - each walks its own root path
+        // and writes only out[leaf], with no reduction between them - so the result
+        // is bit-identical. This matters because it is the Root recursion level,
+        // whose host cost is fixed in n, and it was running single threaded while
+        // the other cores sat idle.
+        if (subtractFromOutput && (out.size() != mu || !outputNtt ||
+            !validateRingBatchShape(out, ctx.mParams))) return false;
         out.resize(mu);
-        for (u32 leaf = 0; leaf < mu; ++leaf)
+        const bool leavesOk = detail::runParallelTasks(
+            mu,
+            requestedWorkers,
+            [&](std::size_t leafIdx) -> bool
         {
+            const auto leaf = static_cast<u32>(leafIdx);
             RnsPoly accNtt{};
-            resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+            if (subtractFromOutput) accNtt = std::move(out[leaf]);
+            else resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
+            std::vector<const RnsPoly*> ciphertexts, nodes;
+            ciphertexts.reserve(2u * lacct.mLevels * ctTauMax);
+            nodes.reserve(2u * lacct.mLevels * ctTauMax);
             u32 parent = 0;
             for (u32 level = 0; level < lacct.mLevels; ++level)
             {
@@ -1660,22 +2051,30 @@ namespace osuCrypto::LogVole
                     const auto& ctPolyLNtt =
                         lacct.mCt.mPolys[ringTensorIndex(lacct.mCt, static_cast<u32>(row), c)];
                     const auto& nodePolyLNtt = tree.mNodeDecompNtt[left][c];
-                    if (!dyadicMultiplyAddNttInplace(ctPolyLNtt, nodePolyLNtt, accNtt, ctx))
-                    {
-                        return false;
-                    }
+                    ciphertexts.push_back(&ctPolyLNtt);
+                    nodes.push_back(&nodePolyLNtt);
 
                     const auto& ctPolyRNtt =
                         lacct.mCt.mPolys[ringTensorIndex(lacct.mCt, static_cast<u32>(row), ctTauMax + c)];
                     const auto& nodePolyRNtt = tree.mNodeDecompNtt[right][c];
-                    if (!dyadicMultiplyAddNttInplace(ctPolyRNtt, nodePolyRNtt, accNtt, ctx))
-                    {
-                        return false;
-                    }
+                    ciphertexts.push_back(&ctPolyRNtt);
+                    nodes.push_back(&nodePolyRNtt);
                 }
 
                 const u32 bit = (leaf >> (lacct.mLevels - 1u - level)) & 1u;
                 parent = (bit == 0) ? left : right;
+            }
+
+            if (!dyadicInnerProductNttInplace(ciphertexts, nodes, accNtt, ctx)) return false;
+
+            // Eval is the negative path sum. Subtracting it adds the products
+            // directly to the existing NTT row, avoiding a separate zeroed
+            // batch, negation pass and subsequent ring subtraction.
+            if (subtractFromOutput)
+            {
+                globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
+                out[leaf] = std::move(accNtt);
+                return true;
             }
 
             if (!outputNtt && !inverseNtt(accNtt, ctx))
@@ -1684,9 +2083,9 @@ namespace osuCrypto::LogVole
             }
 
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
-            for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+            for (std::size_t modIdx = 0; modIdx < ringModulusCount(ctx); ++modIdx)
             {
-                const u64 mod = ctx.mModuli[modIdx].value();
+                const u64 mod = ringModulusValue(ctx, modIdx);
                 const std::size_t offset = modIdx * n;
                 for (std::size_t i = 0; i < n; ++i)
                 {
@@ -1699,8 +2098,27 @@ namespace osuCrypto::LogVole
             }
 
             out[leaf] = std::move(accNtt);
-        }
+            return true;
+        });
 
-        return true;
+        return leavesOk;
+    }
+
+    bool lencEvalTrunc(
+        const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
+        u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out, bool outputNtt, u32 requestedWorkers, bool leafInputsAreGadget)
+    {
+        return lencEvalTruncImpl(ctx, lacct, tree, mu, tauHi, gadgetLogBase, plaintextModulusBits,
+            out, outputNtt, requestedWorkers, leafInputsAreGadget, false);
+    }
+
+    bool lencSubtractEvalTruncNttInplace(
+        const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
+        u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out, u32 requestedWorkers, bool leafInputsAreGadget)
+    {
+        return lencEvalTruncImpl(ctx, lacct, tree, mu, tauHi, gadgetLogBase, plaintextModulusBits,
+            out, true, requestedWorkers, leafInputsAreGadget, true);
     }
 }

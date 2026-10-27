@@ -73,14 +73,19 @@ target_include_directories(libOTe_Tests PUBLIC
 
 if(ENABLE_LOGVOLE)
     target_sources(libOTe_Tests PRIVATE
+        LogVole/tests/test_modes.cpp
         LogVole/tests/test_core.cpp
+        LogVole/tests/test_cpu.cpp
+        LogVole/tests/test_zk.cpp
         LogVole/tests/test_civole.cpp
+        LogVole/tests/test_garbled_labels.cpp
         LogVole/tests/test_encoding.cpp
         LogVole/tests/test_keyderive_coproto.cpp
         LogVole/tests/test_keyderive_core.cpp
         LogVole/tests/test_lhe.cpp
         LogVole/tests/test_lenc.cpp
         LogVole/tests/test_ring_ops.cpp
+        LogVole/tests/test_native_seal_bundle.cpp
         LogVole/tests/test_shrinkexpand_coproto.cpp
         LogVole/tests/test_shrinkexpand.cpp
     )
@@ -103,4 +108,15 @@ else()
         target_compile_options(libOTe_Tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-subobject-linkage>)
 
     endif()
+endif()
+
+# GCC 13 can emit 64-byte-aligned block copies/clears into ASan stack slots
+# that are only 32-byte aligned. Cap these generated memory operations in the
+# test target; the library's AVX-512 kernels remain enabled and covered.
+if(ENABLE_ASAN AND ENABLE_AVX512 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+        AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13
+        AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+    target_compile_options(libOTe_Tests PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-mmove-max=256>
+        $<$<COMPILE_LANGUAGE:CXX>:-mstore-max=256>)
 endif()
