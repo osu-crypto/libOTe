@@ -382,6 +382,14 @@ namespace osuCrypto
 	struct CoeffCtxGoldilocks : CoeffCtxInteger
 	{
 		template<typename G>
+		constexpr double regularNoiseFactor() const
+		{
+			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
+			return static_cast<double>(Goldilocks::mModulus) /
+				static_cast<double>(Goldilocks::mModulus - 1);
+		}
+
+		template<typename G>
 		constexpr bool characteristicTwo() const
 		{
 			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
@@ -414,6 +422,20 @@ namespace osuCrypto
 		{
 			static_assert(std::is_same_v<std::remove_cvref_t<G>, Goldilocks>);
 			ret.mVal = fieldSampling::fromBlock(seed, Goldilocks::mModulus);
+		}
+
+		OC_FORCEINLINE Goldilocks sample(PRNG& prng) const
+		{
+			return Goldilocks{ fieldSampling::sample(prng, Goldilocks::mModulus) };
+		}
+
+		OC_FORCEINLINE Goldilocks sampleNonZero(PRNG& prng) const
+		{
+			Goldilocks result;
+			do
+				result = sample(prng);
+			while (result == Goldilocks::zero());
+			return result;
 		}
 	};
 

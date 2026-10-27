@@ -21,6 +21,7 @@
 #include "libOTe_Tests/Dpf_Tests.h"
 #include "libOTe_Tests/Foleage_Tests.h"
 #include "libOTe_Tests/RevCuckoo_Tests.h"
+#include "libOTe_Tests/Waterfall_Tests.h"
 #include "libOTe_Tests/Cmp_Tests.h"
 #include "libOTe_Tests/Equality_Tests.h"
 #include "libOTe_Tests/Permute_Tests.h"
@@ -35,6 +36,7 @@
 #include "libOTe_Tests/Permutation_Tests.h"
 #include "libOTe_Tests/BlkAccCode_Tests.h"
 #include "libOTe_Tests/LogVole_Tests.h"
+#include "libOTe_Tests/AnyField_Tests.h"
 
 
 using namespace osuCrypto;
@@ -44,6 +46,15 @@ namespace tests_libOTe
 
 	TestCollection Tests([](TestCollection& tc)
 		{
+			tc.add("AnyField_F9_Test                       ", AnyField_F9_Test);
+			tc.add("AnyField_F9Transform_Test              ", AnyField_F9Transform_Test);
+			tc.add("AnyField_F4_Test                       ", AnyField_F4_Test);
+			tc.add("AnyField_F4Transform_Test              ", AnyField_F4Transform_Test);
+			tc.add("AnyField_GoldilocksTransform_Test      ", AnyField_GoldilocksTransform_Test);
+			tc.add("AnyField_PositionCircuit_Test          ", AnyField_PositionCircuit_Test);
+			tc.add("AnyField_F3Ole_Test                     ", AnyField_F3Ole_Test);
+			tc.add("AnyField_F2Ole_Test                     ", AnyField_F2Ole_Test);
+			tc.add("AnyField_GoldilocksOle_Test             ", AnyField_GoldilocksOle_Test);
 
 			tc.add("Cmp_greaterThan_test                    ", Cmp_greaterThan_test);
 			tc.add("Tools_Transpose_Test                    ", Tools_Transpose_Test);
@@ -99,6 +110,10 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Mtx_Test                      ", SparseDpf_Mtx_Test);
 			tc.add("SparseDpf_Vec_Test                      ", SparseDpf_Vec_Test);
 			tc.add("SparseDpf_Punct_Test                    ", SparseDpf_Punct_Test);
+			tc.add("SparseDpf_InactiveLevel_Test            ", SparseDpf_InactiveLevel_Test);
+			tc.add("CachedDpf_LeafRekey_Test                ", CachedDpf_LeafRekey_Test);
+			tc.add("DpfTreeHash_Rekey_Test                  ", DpfTreeHash_Rekey_Test);
+			tc.add("SparseDpf_CorrectionEncoding_Test       ", SparseDpf_CorrectionEncoding_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
 			tc.add("Dpf_Audit_Test                          ", Dpf_Audit_Test);
 
@@ -122,8 +137,21 @@ namespace tests_libOTe
 			tc.add("WaksmanPermute_Many_Test                ", WaksmanPermute_Many_Test);
 			
 			tc.add("RevCuckoo_baseOtSlicing_Test             ", RevCuckoo_baseOtSlicing_Test);
+			tc.add("RevCuckoo_seededSparseSets_Test         ", RevCuckoo_seededSparseSets_Test);
 			tc.add("RevCuckoo_iterative_Test                ", RevCuckoo_iterative_Test);
 			tc.add("RevCuckoo_singlePoint_Test              ", RevCuckoo_singlePoint_Test);
+			tc.add("RevCuckoo_robustness_Test               ", RevCuckoo_robustness_Test);
+			tc.add("RevCuckoo_failurePropagation_Test       ", RevCuckoo_failurePropagation_Test);
+			tc.add("Waterfall_config_Test                    ", Waterfall_config_Test);
+			tc.add("Waterfall_validation_Test                ", Waterfall_validation_Test);
+			tc.add("Waterfall_emptySparseColumn_Test           ", Waterfall_emptySparseColumn_Test);
+			tc.add("Waterfall_placement_Test                 ", Waterfall_placement_Test);
+			tc.add("Waterfall_hash_Test                      ", Waterfall_hash_Test);
+			tc.add("Waterfall_candidates_Test                ", Waterfall_candidates_Test);
+			tc.add("Waterfall_basicMpc_Test                  ", Waterfall_basicMpc_Test);
+			tc.add("Waterfall_reachabilityMpc_Test           ", Waterfall_reachabilityMpc_Test);
+			tc.add("Waterfall_scatterMpc_Test                ", Waterfall_scatterMpc_Test);
+			tc.add("Waterfall_dmpfEndToEnd_Test              ", Waterfall_dmpfEndToEnd_Test);
 			
 
 			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);
@@ -189,10 +217,11 @@ namespace tests_libOTe
 			tc.add("BlkAccCode_Audit_Test                   ", BlkAccCode_Audit_Test);
 			
 			tc.add("RegularPprf_expandOne_test               ", RegularPprf_expandOne_test);
-			tc.add("RegularPprf_inter_test                   ", RegularPprf_inter_test);
+			tc.add("RegularPprf_PhysicalIndex_test           ", RegularPprf_PhysicalIndex_test);
 			tc.add("RegularPprf_ByLeafIndex_test             ", RegularPprf_ByLeafIndex_test);
 			tc.add("RegularPprf_ByTreeIndex_test             ", RegularPprf_ByTreeIndex_test);
 			tc.add("RegularPprf_callback_test                ", RegularPprf_callback_test);
+			tc.add("HalfTreePprf_test                         ", HalfTreePprf_test);
 			tc.add("Pprf_Audit_Test                           ", Pprf_Audit_Test);
 			tc.add("StationaryPprf_inter_test                ", StationaryPprf_inter_test);
 
@@ -206,6 +235,10 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Mtx_Test                       ", SparseDpf_Mtx_Test);
 			tc.add("SparseDpf_Vec_Test                       ", SparseDpf_Vec_Test);
 			tc.add("SparseDpf_Punct_Test                     ", SparseDpf_Punct_Test);
+			tc.add("SparseDpf_InactiveLevel_Test             ", SparseDpf_InactiveLevel_Test);
+			tc.add("CachedDpf_LeafRekey_Test                 ", CachedDpf_LeafRekey_Test);
+			tc.add("DpfTreeHash_Rekey_Test                   ", DpfTreeHash_Rekey_Test);
+			tc.add("SparseDpf_CorrectionEncoding_Test        ", SparseDpf_CorrectionEncoding_Test);
 			
 			tc.add("TritDpf_Proto_Test                       ", TritDpf_Proto_Test);
 			tc.add("Dpf_Audit_Test                           ", Dpf_Audit_Test);
@@ -281,6 +314,7 @@ namespace tests_libOTe
 			tc.add("Vole_Silent_mal_test                    ", Vole_Silent_mal_test);
 			tc.add("Vole_Silent_malBase_test                ", Vole_Silent_malBase_test);
 			tc.add("Vole_Silent_Clear_test                  ", Vole_Silent_Clear_test);
+			tc.add("Vole_Silent_NoiseSampling_test          ", Vole_Silent_NoiseSampling_test);
 			tc.add("Vole_Silent_Rounds_test                 ", Vole_Silent_Rounds_test);
 
 			tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);
@@ -294,6 +328,7 @@ namespace tests_libOTe
 
 			tc.add("foleage_tensor_test                     ", foleage_tensor_test);
 			tc.add("foleage_F4ole_test                      ", foleage_F4ole_test);
+			tc.add("foleage_F2ole_test                      ", foleage_F2ole_test);
 			tc.add("foleage_Triple_test                     ", foleage_Triple_test);
 
 			tc.add("foleage_GenBase_test                    ", foleage_GenBase_test);
@@ -311,6 +346,7 @@ namespace tests_libOTe
 			tc.add("RingLpn_GenBase_test                    ", RingLpn_GenBase_test);
 			tc.add("RingLpn_stationary_test                 ", RingLpn_stationary_test);
 			tc.add("RingLpn_Audit_test                      ", RingLpn_Audit_test);
+			tc.add("RingLpn_SupportFilter_test              ", RingLpn_SupportFilter_test);
 			tc.add("Gmw_Audit_Test                           ", Gmw_Audit_Test);
 
 #ifdef ENABLE_LOGVOLE

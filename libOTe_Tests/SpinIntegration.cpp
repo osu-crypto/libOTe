@@ -229,7 +229,8 @@ void tests_libOTe::Spin_Integration_Test() {
     for(u64 requested:{1ull,4096ull,8191ull,8192ull,8193ull,24539ull,65536ull,65537ull,(1ull<<24)+1,1ull<<26,(1ull<<31)-16384}) {
         const auto spec=detail::spinProfile(requested);
         for(auto noise:{SdNoiseDistribution::Regular,SdNoiseDistribution::Stationary}) {
-            auto cfg=syndromeDecodingConfigure(128,requested,MultType::Spin,noise,1);
+            auto cfg=syndromeDecodingConfigure(
+                128,requested,MultType::Spin,noise,SdNoiseSecurityModel::binary());
             const auto n=cfg.mNoiseVectorSize,active=cfg.mNumPartitions*cfg.mSizePer;
             require(n==2*spec.message_size && active<=n && active>0);
             const double effective=(double(n/4)-double(n-active))/double(active);

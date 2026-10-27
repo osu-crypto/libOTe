@@ -1,6 +1,6 @@
 #include "Permute_Tests.h"
 
-#include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
+#include "libOTe/Dpf/Waterfall/SerialWaksmanPermute.h"
 #include "cryptoTools/Common/Matrix.h"
 #include "cryptoTools/Common/CLP.h"
 #include "cryptoTools/Crypto/PRNG.h"
@@ -24,7 +24,6 @@ namespace osuCrypto
 		//PRNG prng(block(243573546521, 4532165));
 
 		//// Create a  instance
-		//WaksmanPermute permuter;
 
 		//for (u64 n : N)
 		//{
@@ -86,7 +85,7 @@ namespace osuCrypto
 					<< " - " << testIdx + 1 << "/" << numTests << std::endl;
 
 				// Create permuter instances
-				std::array<WaksmanPermute, 2> permuters;
+				std::array<SerialWaksmanPermute, 2> permuters;
 				permuters[0].init(0, n);
 				permuters[1].init(1, n);
 
@@ -138,6 +137,8 @@ namespace osuCrypto
 
 				permuters[0].setBaseOts(baseSendOts[0], baseRecvOts[0], baseRecvBits[0]);
 				permuters[1].setBaseOts(baseSendOts[1], baseRecvOts[1], baseRecvBits[1]);
+				permuters[0].sample(prng);
+				permuters[1].sample(prng);
 
 				// Apply the permutation protocol
 				auto r = macoro::sync_wait(macoro::when_all_ready(
@@ -168,6 +169,20 @@ namespace osuCrypto
 						<< " at test " << testIdx << std::endl;
 					std::cout << "Input and output sets differ!" << std::endl;
 					throw RTE_LOC;
+				}
+
+				auto inverseResult = macoro::sync_wait(macoro::when_all_ready(
+					permuters[0].applyInverse<F, CoeffCtx>(inputs[0], sock[0], ctx),
+					permuters[1].applyInverse<F, CoeffCtx>(inputs[1], sock[1], ctx)
+				));
+				std::get<0>(inverseResult).result();
+				std::get<1>(inverseResult).result();
+				for (u64 i = 0; i < n; ++i)
+				{
+					auto actual = ctx.template make<F>();
+					ctx.plus(actual, inputs[0][i], inputs[1][i]);
+					if (!ctx.eq(actual, expectedValues[i]))
+						throw RTE_LOC;
 				}
 			}
 		}
@@ -201,7 +216,7 @@ namespace osuCrypto
 					<< " - " << testIdx + 1 << "/" << numTests << std::endl;
 
 				// Create permuter instances
-				std::array<WaksmanPermute, 2> permuters;
+				std::array<SerialWaksmanPermute, 2> permuters;
 				permuters[0].init(0, n, batches);
 				permuters[1].init(1, n, batches);
 
@@ -259,6 +274,8 @@ namespace osuCrypto
 
 				permuters[0].setBaseOts(baseSendOts[0], baseRecvOts[0], baseRecvBits[0]);
 				permuters[1].setBaseOts(baseSendOts[1], baseRecvOts[1], baseRecvBits[1]);
+				permuters[0].sample(prng);
+				permuters[1].sample(prng);
 
 				// Apply the permutation protocol
 				auto r = macoro::sync_wait(macoro::when_all_ready(
@@ -294,6 +311,31 @@ namespace osuCrypto
 						throw RTE_LOC;
 					}
 				}
+				for (u64 b = 0; b < batches; ++b)
+					for (u64 i = 0; i < n; ++i)
+					{
+						auto plain = ctx.template make<F>();
+						ctx.plus(plain, inputs[0][b][i], inputs[1][b][i]);
+						ctx.fromBlock(inputs[0][b][i], prng.get());
+						ctx.minus(inputs[1][b][i], plain, inputs[0][b][i]);
+					}
+
+				// The same hidden switch configuration must support the inverse
+				// traversal without consuming a second set of base OTs.
+				auto inverseResult = macoro::sync_wait(macoro::when_all_ready(
+					permuters[0].applyManyInverse<F, VecF>(inputs[0], sock[0], ctx),
+					permuters[1].applyManyInverse<F, VecF>(inputs[1], sock[1], ctx)
+				));
+				std::get<0>(inverseResult).result();
+				std::get<1>(inverseResult).result();
+				for (u64 b = 0; b < batches; ++b)
+					for (u64 i = 0; i < n; ++i)
+					{
+						auto actual = ctx.template make<F>();
+						ctx.plus(actual, inputs[0][b][i], inputs[1][b][i]);
+						if (!ctx.eq(actual, expectedValues[b][i]))
+							throw RTE_LOC;
+					}
 			}
 		}
 	}

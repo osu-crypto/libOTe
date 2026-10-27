@@ -15,6 +15,11 @@
 
 namespace osuCrypto
 {
+#ifdef ENABLE_RINGLPN
+	// Protocol correctness tests use tiny rings that cannot target 128-bit security.
+	constexpr u64 ToyRingLpnSecurityParameter = 1;
+#endif
+
 	void RingLpn_Audit_test(const CLP&)
 	{
 #ifdef ENABLE_RINGLPN
@@ -25,7 +30,7 @@ namespace osuCrypto
 			bool rejected = false;
 			try
 			{
-				ring.init(partyIdx, n, mode, dpf, base);
+				ring.init(partyIdx, n, mode, dpf, base, ToyRingLpnSecurityParameter);
 			}
 			catch (const std::invalid_argument&)
 			{
@@ -79,7 +84,8 @@ namespace osuCrypto
 		Ring invalidProtocol;
 		invalidProtocol.mNumPolys = 2;
 		invalidProtocol.mPolyWeight = 8;
-		invalidProtocol.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		invalidProtocol.init(0, 64, Ring::Mode::Ole, sum, precomputed,
+			ToyRingLpnSecurityParameter);
 		auto badProtocol = static_cast<Ring::Protocol>(255);
 		bool countRejected = false;
 		bool readinessRejected = false;
@@ -120,7 +126,8 @@ namespace osuCrypto
 		Ring reinitialized;
 		reinitialized.mNumPolys = 2;
 		reinitialized.mPolyWeight = 8;
-		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed,
+			ToyRingLpnSecurityParameter);
 		reinitialized.mSparseCoefficients.resize(16);
 		reinitialized.mTensoredCoefficients.resize(16 * 16);
 		reinitialized.mTensorRecvOts.resize(1);
@@ -128,7 +135,8 @@ namespace osuCrypto
 		reinitialized.mTensorSendOts.resize(1);
 		reinitialized.mProdPolyTreePosArth.resize(1);
 		reinitialized.mProdPolyTreePosXor.resize(1);
-		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		reinitialized.init(0, 64, Ring::Mode::Ole, sum, precomputed,
+			ToyRingLpnSecurityParameter);
 		if (!reinitialized.mSparseCoefficients.empty() ||
 			!reinitialized.mTensoredCoefficients.empty() ||
 			!reinitialized.mTensorRecvOts.empty() ||
@@ -161,7 +169,8 @@ namespace osuCrypto
 		Ring reusableSum;
 		reusableSum.mNumPolys = 2;
 		reusableSum.mPolyWeight = 8;
-		reusableSum.init(0, 64, Ring::Mode::Ole, sum, precomputed);
+		reusableSum.init(0, 64, Ring::Mode::Ole, sum, precomputed,
+			ToyRingLpnSecurityParameter);
 		reusableSum.mHasDpf = true;
 		auto& sumDpf = std::get<SumDmpf<F12289>>(reusableSum.mDpf);
 		sumDpf.mDpf.mMultiplier.mOtIdx = sumDpf.mDpf.mMultiplier.mTotalMults;
@@ -458,8 +467,8 @@ namespace osuCrypto
 						PRNG prng1(block(6474567454546, 567546754674345444));
 						Timer timer;
 
-						oles[0].init(0, n, mode, dpf, base);
-						oles[1].init(1, n, mode, dpf, base);
+						oles[0].init(0, n, mode, dpf, base, ToyRingLpnSecurityParameter);
+						oles[1].init(1, n, mode, dpf, base, ToyRingLpnSecurityParameter);
 
 
 						ringSetBase(oles);
@@ -564,8 +573,14 @@ namespace osuCrypto
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
 
-		oles[0].init(0, n);
-		oles[1].init(1, n);
+		oles[0].init(0, n, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
+		oles[1].init(1, n, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
 
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		std::vector<F>
@@ -574,6 +589,39 @@ namespace osuCrypto
 
 		if (verbose)
 			oles[0].setTimer(timer);
+
+		// Exercise the built-in base OT bootstrap, including the party-1
+		// SoftSpoken sender whose base choices must remain secret and random.
+		auto base = macoro::sync_wait(macoro::when_all_ready(
+			oles[0].genBaseCors(prng0, sock[0]),
+			oles[1].genBaseCors(prng1, sock[1])));
+		std::get<0>(base).result();
+		std::get<1>(base).result();
+
+#ifdef ENABLE_SOFTSPOKEN_OT
+		if (!oles[1].mOtExtSender ||
+			!oles[1].mOtExtSender->hasBaseOts() ||
+			!oles[0].mOtExtRecver ||
+			!oles[0].mOtExtRecver->hasBaseOts() ||
+			oles[1].mOtExtSender->delta() == ZeroBlock)
+			throw RTE_LOC;
+
+		BitVector probeChoices(128);
+		probeChoices.randomize(prng0);
+		AlignedUnVector<block> probeRecv(probeChoices.size());
+		AlignedUnVector<std::array<block, 2>> probeSend(probeChoices.size());
+		auto probe = macoro::sync_wait(macoro::when_all_ready(
+			oles[0].mOtExtRecver->receive(probeChoices, probeRecv, prng0, sock[0]),
+			oles[1].mOtExtSender->send(probeSend, prng1, sock[1])));
+		std::get<0>(probe).result();
+		std::get<1>(probe).result();
+		for (u64 i = 0; i < probeChoices.size(); ++i)
+		{
+			if (probeSend[i][0] == probeSend[i][1] ||
+				probeRecv[i] != probeSend[i][probeChoices[i]])
+				throw RTE_LOC;
+		}
+#endif
 
 		auto r = macoro::sync_wait(macoro::when_all_ready(
 			oles[0].expand(A, C0, prng0, sock[0]),
@@ -620,8 +668,14 @@ namespace osuCrypto
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
 
-		triples[0].init(0, n);
-		triples[1].init(1, n);
+		triples[0].init(0, n, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
+		triples[1].init(1, n, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
 
 		ringSetBase(triples);
 
@@ -731,8 +785,8 @@ namespace osuCrypto
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
 
-		oles[0].init(0, n, mode, dpf, tensor);
-		oles[1].init(1, n, mode, dpf, tensor);
+		oles[0].init(0, n, mode, dpf, tensor, ToyRingLpnSecurityParameter);
+		oles[1].init(1, n, mode, dpf, tensor, ToyRingLpnSecurityParameter);
 
 		ringSetBase(oles);
 
@@ -743,6 +797,9 @@ namespace osuCrypto
 
 		if (verbose)
 			oles[0].setTimer(timer);
+
+		std::vector<F> previousMasks;
+		std::array<std::vector<u64>, 2> previousPositions;
 
 		for (u64 tt = 0; tt < trials; ++tt)
 		{
@@ -794,6 +851,33 @@ namespace osuCrypto
 				oles[1].expand(B, C1, prng1, sock[1])));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
+
+			const auto& masks = oles[0].mFftA;
+			if (masks.rows() != oles[0].mNumPolys || masks.cols() != n ||
+				oles[1].mFftA.rows() != masks.rows() || oles[1].mFftA.cols() != n)
+				throw UnitTestFail("RingLPN public mask dimensions are incorrect");
+			if (!std::equal(masks.begin(), masks.end(), oles[1].mFftA.begin()))
+				throw UnitTestFail("RingLPN parties used different public masks");
+			if (tt && std::equal(masks.begin(), masks.end(), previousMasks.begin()))
+				throw UnitTestFail("RingLPN reused public masks across expansions");
+			previousMasks.assign(masks.begin(), masks.end());
+			for (u64 i = 0; i < n; ++i)
+			{
+				if (masks(0, i) != F::one())
+					throw UnitTestFail("RingLPN mask zero is not the identity");
+				for (u64 j = 0; j < masks.rows(); ++j)
+					for (u64 k = 0; k < masks.rows(); ++k)
+						for (u64 p = 0; p < 2; ++p)
+							if (oles[p].mFftASquared(j * masks.rows() + k, i) != masks(j, i) * masks(k, i))
+								throw UnitTestFail("RingLPN product masks were not refreshed");
+			}
+			for (u64 p = 0; p < 2; ++p)
+			{
+				const auto& positions = oles[p].mSparsePositions;
+				if (tt && !std::equal(positions.begin(), positions.end(), previousPositions[p].begin()))
+					throw UnitTestFail("RingLPN mask refresh changed the cached support");
+				previousPositions[p].assign(positions.begin(), positions.end());
+			}
 
 			//Now we check that we got the correct OLE correlations and fail
 			//the test otherwise.
@@ -919,8 +1003,14 @@ namespace osuCrypto
 
 		PRNG prng(block(2424523452345, 111124521521455324));
 
-		oles[0].init(0, 1000);
-		oles[1].init(1, 1000);
+		oles[0].init(0, 1000, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
+		oles[1].init(1, 1000, RingLpnTriple<F>::Mode::Triple,
+			RingLpnTriple<F>::DpfType::RevCuckooDmpf,
+			RingLpnTriple<F>::TensorBaseCorType::OtBased,
+			ToyRingLpnSecurityParameter);
 
 		u64 n = oles[0].mNumPolys * oles[0].mPolyWeight;
 		u64 n2 = n * n;
