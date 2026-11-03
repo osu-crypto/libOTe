@@ -1039,8 +1039,7 @@ namespace osuCrypto::LogVole::gpu
             std::vector<u64> recursiveFactors;
             std::vector<RnsPoly> recursiveLeafB;
             std::array<u32, 2> recursiveInputs{};
-            using DeviceAllocation = std::unique_ptr<void, decltype(&gpuFree)>;
-            DeviceAllocation deviceRecursiveInputs(nullptr, gpuFree);
+            OwnedGpuBuffer deviceRecursiveInputs;
             // Metadata uploads and all cache buffers must outlive queued work,
             // including a later allocation or launch failure.
             struct DrainStream
@@ -1079,13 +1078,13 @@ namespace osuCrypto::LogVole::gpu
                 if (!deviceLeafB || deviceLeafB[0] != '0')
                 {
                     recursiveInputs = { 0u, static_cast<u32>(fullTau) };
-                    deviceRecursiveInputs.reset(gpuMalloc(sizeof(recursiveInputs)));
+                    deviceRecursiveInputs = tryAllocateGpuBuffer(stream, sizeof(recursiveInputs));
                     if (!ring->crtLiftFactors() || !deviceRecursiveInputs ||
                         !cache->mRecursiveLeafB.resize(*ring, 2u, stream) ||
-                        !gpuMemcpyH2D(deviceRecursiveInputs.get(), recursiveInputs.data(),
+                        !gpuMemcpyH2D(deviceRecursiveInputs.data(), recursiveInputs.data(),
                             sizeof(recursiveInputs), stream.raw()) ||
                         !launchScaleByPow2(ring->view(), cache->mPublicB.data(stream),
-                            static_cast<const u32*>(deviceRecursiveInputs.get()),
+                            static_cast<const u32*>(deviceRecursiveInputs.data()),
                             cache->mRecursiveLeafB.data(stream), nullptr, 2u,
                             ring->crtLiftFactors(), stream.raw()))
                         return nullptr;
@@ -3126,8 +3125,7 @@ namespace osuCrypto::LogVole::gpu
         struct RestoreStream { void* previous = gpuCurrentStream(); ~RestoreStream() { gpuSetCurrentStream(previous); } } restore;
         gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer samples;
-        using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        Allocation selectors(nullptr, gpuFree), scales(nullptr, gpuFree), denseInput(nullptr, gpuFree);
+        OwnedGpuBuffer selectors, scales, denseInput;
         std::vector<u32> limbs;
         std::vector<u64> ones;
         std::vector<RnsPoly> next;
@@ -3142,10 +3140,10 @@ namespace osuCrypto::LogVole::gpu
             if (!source)
             {
                 const std::size_t bytes = static_cast<std::size_t>(count) * n * sizeof(u64);
-                denseInput.reset(gpuMalloc(bytes));
-                if (!denseInput || !gpuMemcpyH2D(denseInput.get(), compactLimb0.data(), bytes, stream.raw()))
+                denseInput = tryAllocateGpuBuffer(stream, bytes);
+                if (!denseInput || !gpuMemcpyH2D(denseInput.data(), compactLimb0.data(), bytes, stream.raw()))
                     return false;
-                source = static_cast<const u64*>(denseInput.get());
+                source = static_cast<const u64*>(denseInput.data());
             }
             if (!launchExpandCenteredCompact(ring->view(), source, samples.data(stream), count, stream.raw()))
                 return false;
@@ -3154,17 +3152,17 @@ namespace osuCrypto::LogVole::gpu
         {
             limbs.assign(count, 0);
             ones.assign(ring->rho(), 1);
-            selectors.reset(gpuMalloc(limbs.size() * sizeof(u32)));
-            scales.reset(gpuMalloc(ones.size() * sizeof(u64)));
+            selectors = tryAllocateGpuBuffer(stream, limbs.size() * sizeof(u32));
+            scales = tryAllocateGpuBuffer(stream, ones.size() * sizeof(u64));
             if (!selectors || !scales || !(deviceCompact
                 ? copyRowsFromDevice(samples.data(stream), ring->polyWords() * sizeof(u64),
                     deviceCompact->data(), n * sizeof(u64), count, stream)
                 : uploadRowsFromHost(samples.data(stream), ring->polyWords() * sizeof(u64),
                     compactLimb0.data(), n * sizeof(u64), count, stream)) ||
-                !gpuMemcpyH2D(selectors.get(), limbs.data(), limbs.size() * sizeof(u32), stream.raw()) ||
-                !gpuMemcpyH2D(scales.get(), ones.data(), ones.size() * sizeof(u64), stream.raw()) ||
+                !gpuMemcpyH2D(selectors.data(), limbs.data(), limbs.size() * sizeof(u32), stream.raw()) ||
+                !gpuMemcpyH2D(scales.data(), ones.data(), ones.size() * sizeof(u64), stream.raw()) ||
                 !launchLiftCenteredLimb(ring->view(), samples.data(stream), nullptr,
-                    static_cast<const u32*>(selectors.get()), static_cast<const u64*>(scales.get()),
+                    static_cast<const u32*>(selectors.data()), static_cast<const u64*>(scales.data()),
                     samples.data(stream), nullptr, count, stream.raw())) return false;
         }
         if (outputNtt && !launchNttForward(ring->view(), samples.data(stream), count, nullptr, stream.raw()))
@@ -3452,8 +3450,7 @@ namespace osuCrypto::LogVole::gpu
         } restoreStream;
         gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer rBuffer, bBuffer, ctBuffer, scaledBuffer, compactNoiseSource;
-        using DeviceAllocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        DeviceAllocation deviceIndices(nullptr, gpuFree);
+        OwnedGpuBuffer deviceIndices;
         std::vector<RnsPoly> next;
         // Drain before destroying metadata, pageable download destinations, or
         // device allocations on any launch/copy failure.
@@ -3497,11 +3494,11 @@ namespace osuCrypto::LogVole::gpu
                         : uploadRowsFromHost(compactNoiseSource.data(stream), polyBytes, compactNoiseLimb0.data(), n * sizeof(u64), count, stream))) return false;
             }
             else if (!ctBuffer.upload(noiseCoeffs, stream)) return false;
-            deviceIndices.reset(gpuMalloc(indices.size() * sizeof(u32)));
+            deviceIndices = tryAllocateGpuBuffer(stream, indices.size() * sizeof(u32));
             if (!deviceIndices ||
-                !gpuMemcpyH2D(deviceIndices.get(), indices.data(), indices.size() * sizeof(u32), stream.raw())) return false;
+                !gpuMemcpyH2D(deviceIndices.data(), indices.data(), indices.size() * sizeof(u32), stream.raw())) return false;
         }
-        const auto* idx = static_cast<const u32*>(deviceIndices.get());
+        const auto* idx = static_cast<const u32*>(deviceIndices.data());
         {
             HostStep kernelStep("setup: root device launches");
             if (!launchCanonicalize(ring->view(), rBuffer.data(stream), nullptr, 2u * rows, stream.raw()) ||
@@ -3778,8 +3775,7 @@ namespace osuCrypto::LogVole::gpu
         } restoreStream;
         gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer rBuffer, bBuffer, ctBuffer, scaledBuffer, compactNoiseSource, compactRandomizerSource;
-        using DeviceAllocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        DeviceAllocation deviceIndices(nullptr, gpuFree), deviceFactors(nullptr, gpuFree);
+        OwnedGpuBuffer deviceIndices, deviceFactors;
         std::vector<RnsPoly> next, firstRNtt;
         GpuPolyBuffer retainedNtt;
         std::shared_ptr<const LazyLencRandomizerState> randomizerOwner;
@@ -3832,20 +3828,20 @@ namespace osuCrypto::LogVole::gpu
                         : uploadRowsFromHost(compactNoiseSource.data(stream), polyBytes, compactNoiseLimb0.data(), n * sizeof(u64), count, stream))) return false;
             }
             else if (!ctBuffer.upload(noiseCoeffs, stream)) return false;
-            deviceIndices.reset(gpuMalloc(indices.size() * sizeof(u32)));
+            deviceIndices = tryAllocateGpuBuffer(stream, indices.size() * sizeof(u32));
             if (!deviceIndices ||
-                !gpuMemcpyH2D(deviceIndices.get(), indices.data(), indices.size() * sizeof(u32), stream.raw())) return false;
+                !gpuMemcpyH2D(deviceIndices.data(), indices.data(), indices.size() * sizeof(u32), stream.raw())) return false;
             // Internal retained setup uses the ring's GPU-derived lift. Keep
             // custom caller-supplied lift factors for the public eager API.
             if (gadgetLeaves && !retainedRandomizers)
             {
-                deviceFactors.reset(gpuMalloc(crtLiftModQj.size_bytes()));
-                if (!deviceFactors || !gpuMemcpyH2D(deviceFactors.get(), crtLiftModQj.data(),
+                deviceFactors = tryAllocateGpuBuffer(stream, crtLiftModQj.size_bytes());
+                if (!deviceFactors || !gpuMemcpyH2D(deviceFactors.data(), crtLiftModQj.data(),
                         crtLiftModQj.size_bytes(), stream.raw())) return false;
             }
         }
-        const auto* idx = static_cast<const u32*>(deviceIndices.get());
-        const auto* scalar = retainedRandomizers ? ring->crtLiftFactors() : static_cast<const u64*>(deviceFactors.get());
+        const auto* idx = static_cast<const u32*>(deviceIndices.data());
+        const auto* scalar = retainedRandomizers ? ring->crtLiftFactors() : static_cast<const u64*>(deviceFactors.data());
         {
             HostStep kernelStep("setup: lenc device launches");
             if (compactRandomizers)
@@ -4105,8 +4101,7 @@ namespace osuCrypto::LogVole::gpu
         } restoreStream;
         gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer rBuffer, skBuffer, aBuffer, ctBuffer, noiseBuffer;
-        using DeviceAllocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        DeviceAllocation deviceIndices(nullptr, gpuFree);
+        OwnedGpuBuffer deviceIndices;
         std::vector<RnsPoly> next;
         // Declare this after every queued source/destination owner so even a
         // partial upload/download failure drains before any owner is destroyed.
@@ -4136,11 +4131,11 @@ namespace osuCrypto::LogVole::gpu
                     !(compactNoiseDevice
                         ? copyRowsFromDevice(noiseBuffer.data(stream), polyBytes, compactNoiseDevice->data(), noiseDegree * sizeof(u64), count, stream)
                         : uploadRowsFromHost(noiseBuffer.data(stream), polyBytes, compactNoiseLimb0.data(), noiseDegree * sizeof(u64), count, stream)))) return false;
-            deviceIndices.reset(gpuMalloc(indices.size() * sizeof(u32)));
+            deviceIndices = tryAllocateGpuBuffer(stream, indices.size() * sizeof(u32));
             if (!deviceIndices ||
-                !gpuMemcpyH2D(deviceIndices.get(), indices.data(), indices.size() * sizeof(u32), stream.raw())) return false;
+                !gpuMemcpyH2D(deviceIndices.data(), indices.data(), indices.size() * sizeof(u32), stream.raw())) return false;
         }
-        const auto* idx = static_cast<const u32*>(deviceIndices.get());
+        const auto* idx = static_cast<const u32*>(deviceIndices.data());
         const auto* rData = retainedR ? retainedR->data(stream) : rBuffer.data(stream);
         {
             HostStep kernelStep("setup: lhe device launches");
@@ -7572,14 +7567,14 @@ namespace osuCrypto::LogVole::gpu
     {
         bool hashRootWordsDevice(const u64* words, u32 count, block& out, GpuStream& stream)
         {
-            auto* result = static_cast<u64*>(gpuMalloc(sizeof(block)));
+            auto resultStorage = tryAllocateGpuBuffer(stream, sizeof(block));
+            auto* result = static_cast<u64*>(resultStorage.data());
             if (!result) return false;
             u8* pinned = stream.staging(sizeof(block));
             const bool queued = pinned && launchRootDigestHash(words, count, result, stream.raw()) &&
                 gpuMemcpyD2H(pinned, result, sizeof(block), stream.raw());
             const bool complete = stream.sync();
             if (queued && complete) std::memcpy(&out, pinned, sizeof(block));
-            gpuFree(result);
             return queued && complete;
         }
     }
@@ -8509,6 +8504,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         auto& stream = threadStream();
+        StreamDrain drain{stream};
         auto& scratch = sampleScratch(stream);
         const std::size_t streamWords = ring->polyWords() + kSampleSlackWords;
         if (!scratch.ensureSeeds(sealSeeds.size())) return false;
@@ -8524,11 +8520,11 @@ namespace osuCrypto::LogVole::gpu
             !scratch.nextRejectEpoch(seeds.size(), stream.raw(), rejectEpochs, rejectEpoch))
             return false;
 
-        u64* dMax = static_cast<u64*>(gpuMalloc(maxMultiple.size() * sizeof(u64)));
+        auto maxStorage = tryAllocateGpuBuffer(stream, maxMultiple.size() * sizeof(u64));
+        auto* dMax = static_cast<u64*>(maxStorage.data());
         GpuPolyBuffer dst;
         if (!dMax || !dst.resize(*ring, seeds.size(), stream))
         {
-            gpuFree(dMax);
             return false;
         }
 
@@ -8541,7 +8537,6 @@ namespace osuCrypto::LogVole::gpu
                 maxMultipleOverride.empty(), stream.raw());
 
         if (ok) ok = dst.download(out, stream, 0, seeds.size());
-        gpuFree(dMax);
         return ok;
     }
 
@@ -8566,10 +8561,12 @@ namespace osuCrypto::LogVole::gpu
             const seal::Modulus mod(ring->hostModuli()[j]);
             maxMultiple[j] = maxRandom - seal::util::barrett_reduce_64(maxRandom, mod) - 1;
         }
-        u64* dMax = static_cast<u64*>(gpuMalloc(maxMultiple.size() * sizeof(u64)));
+        auto& stream = threadStream();
+        StreamDrain drain{stream};
+        auto maxStorage = tryAllocateGpuBuffer(stream, maxMultiple.size() * sizeof(u64));
+        auto* dMax = static_cast<u64*>(maxStorage.data());
         if (!dMax) return false;
 
-        auto& stream = threadStream();
         OfflineCache cache{};
         cache.mMaxMultiple = dMax;
 
@@ -8579,7 +8576,6 @@ namespace osuCrypto::LogVole::gpu
                       *ring, cache, ctx.mParams, chunkCount, mu, seed, sid, instanceBase,
                       hashSeedDigest(digest), dst, stream);
         if (ok) ok = dst.download(out, stream, 0, static_cast<std::size_t>(chunkCount) * mu);
-        gpuFree(dMax);
         return ok;
     }
 
@@ -8641,11 +8637,13 @@ namespace osuCrypto::LogVole::gpu
                     ring.view(), plain->view(), labels, chunks,
                     zp.mPlaintextModulus, consts.mFastLimbs,
                     plain->inverseSlotMap(), slots, flat, zpLabelCount);
+            OwnedGpuBuffer coefficientStorage;
             u64* coeffs = nullptr;
             if (!fusedScale)
             {
                 const std::size_t coeffWords = static_cast<std::size_t>(chunks) * n;
-                coeffs = static_cast<u64*>(gpuMalloc(coeffWords * sizeof(u64)));
+                coefficientStorage = tryAllocateGpuBuffer(stream, coeffWords * sizeof(u64));
+                coeffs = static_cast<u64*>(coefficientStorage.data());
                 if (!coeffs) return false;
             }
 
@@ -8707,7 +8705,6 @@ namespace osuCrypto::LogVole::gpu
                 // and let whoever eventually reads it order against that.
                 // resize() retained this stream before work was submitted.
             }
-            if (coeffs) gpuFree(coeffs);
             if (ok && deviceOut) *deviceOut = std::move(scalars);
             return ok;
         }
@@ -8790,14 +8787,13 @@ namespace osuCrypto::LogVole::gpu
 
         auto& stream = threadStream();
         GpuPolyBuffer source;
-        using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        Allocation coefficients(nullptr, gpuFree), scalars(nullptr, gpuFree);
+        OwnedGpuBuffer coefficients, scalars;
         // Every queued operation must finish before source and scratch owners
         // release their role-local bytes, including an error after submission.
         StreamDrain drain{stream};
         const std::size_t coeffCount = static_cast<std::size_t>(chunkCount) * ring->n();
-        coefficients.reset(gpuMalloc(coeffCount * sizeof(u64)));
-        scalars.reset(gpuMalloc(static_cast<std::size_t>(zpLabelCount) * sizeof(u64)));
+        coefficients = tryAllocateGpuBuffer(stream, coeffCount * sizeof(u64));
+        scalars = tryAllocateGpuBuffer(stream, static_cast<std::size_t>(zpLabelCount) * sizeof(u64));
         if (!coefficients || !scalars || !source.resize(*ring, chunkCount, stream))
             return false;
         {
@@ -8806,8 +8802,8 @@ namespace osuCrypto::LogVole::gpu
                     std::span<const RnsPoly>(labels.data(),
                         static_cast<std::size_t>(chunkCount)), stream)) return false;
         }
-        auto* coeff = static_cast<u64*>(coefficients.get());
-        auto* flat = static_cast<u64*>(scalars.get());
+        auto* coeff = static_cast<u64*>(coefficients.data());
+        auto* flat = static_cast<u64*>(scalars.data());
         const u32 chunks = static_cast<u32>(chunkCount);
         bool ok = false;
         {
@@ -8950,11 +8946,13 @@ namespace osuCrypto::LogVole::gpu
 
         // The fused path consumes scalars directly and writes the ring batch, so
         // only the exact legacy path needs the N-word-per-chunk plaintext scratch.
+        OwnedGpuBuffer coefficientStorage;
         u64* coeffs = nullptr;
         if (!fusedWrap)
         {
             const std::size_t coeffWords = static_cast<std::size_t>(chunkCount) * n;
-            coeffs = static_cast<u64*>(gpuMalloc(coeffWords * sizeof(u64)));
+            coefficientStorage = tryAllocateGpuBuffer(stream, coeffWords * sizeof(u64));
+            coeffs = static_cast<u64*>(coefficientStorage.data());
             if (!coeffs) return nullptr;
         }
 
@@ -8984,9 +8982,8 @@ namespace osuCrypto::LogVole::gpu
                          ring->view(), coeffs, chunks, lift, out->mImpl->mBuf.data(stream), stream.raw());
             }
             // No drain: the wrapped input is device resident and is consumed on
-            // this stream. Legacy scratch frees below remain stream ordered.
+            // this stream. Owned scratch releases remain stream ordered.
         }
-        if (coeffs) gpuFree(coeffs);
         return ok ? out : nullptr;
     }
     }
@@ -9003,7 +9000,8 @@ namespace osuCrypto::LogVole::gpu
         if (!enabled() || labels.empty()) return nullptr;
 
         auto& stream = threadStream();
-        u64* scalars = static_cast<u64*>(gpuMalloc(labels.size() * sizeof(u64)));
+        auto scalarStorage = tryAllocateGpuBuffer(stream, labels.size_bytes());
+        auto* scalars = static_cast<u64*>(scalarStorage.data());
         if (!scalars) return nullptr;
 
         bool ok = false;
@@ -9017,7 +9015,6 @@ namespace osuCrypto::LogVole::gpu
                   garbledInput, nullptr)
             : nullptr;
         // Stream ordered, like the scratch frees inside the helper.
-        gpuFree(scalars);
         return out;
     }
 
@@ -9096,17 +9093,15 @@ namespace osuCrypto::LogVole::gpu
         if (!ring || ring->n() != slots || ring->rho() != rho) return {};
         auto owner = std::make_shared<DeviceBatch>();
         GpuPolyBuffer output;
-        using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        Allocation lift(nullptr, gpuFree), values(nullptr, gpuFree),
-            coefficients(nullptr, gpuFree);
+        OwnedGpuBuffer lift, values, coefficients;
         std::shared_ptr<GpuPlainNtt> plain;
         // This guard is deliberately constructed after every GPU allocation
         // owner, including slot scratch. An early post-submit decline must
         // finish queued work before any of those owners release their bytes.
         StreamDrain drain{stream};
         if (!output.resize(*ring, 1, stream)) return {};
-        lift.reset(gpuMalloc(rho * sizeof(u64)));
-        if (!lift || !gpuMemcpyH2D(lift.get(),
+        lift = tryAllocateGpuBuffer(stream, rho * sizeof(u64));
+        if (!lift || !gpuMemcpyH2D(lift.data(),
                 ctx.mPlaintextLiftModQj.data(), rho * sizeof(u64), stream.raw())) return {};
         const auto view = ring->view();
         const char* directConstant = std::getenv("LV_GPU_SETUP_DELTA_CONSTANT_DIRECT");
@@ -9114,7 +9109,7 @@ namespace osuCrypto::LogVole::gpu
             (!directConstant || directConstant[0] != '0'))
         {
             if (!launchPrepareConstantDelta(view, delta,
-                    static_cast<const u64*>(lift.get()), output.data(stream),
+                    static_cast<const u64*>(lift.data()), output.data(stream),
                     stream.raw())) return {};
         }
         else
@@ -9122,11 +9117,11 @@ namespace osuCrypto::LogVole::gpu
             plain = gpuPlainTables(ctx);
             if (!plain || plain->n() != slots ||
                 plain->view().mMinModulus != ctx.mPlaintextModulus) return {};
-            values.reset(gpuMalloc(slots * sizeof(u64)));
-            coefficients.reset(gpuMalloc(slots * sizeof(u64)));
+            values = tryAllocateGpuBuffer(stream, slots * sizeof(u64));
+            coefficients = tryAllocateGpuBuffer(stream, slots * sizeof(u64));
             if (!values || !coefficients) return {};
-            auto* slotValues = static_cast<u64*>(values.get());
-            auto* plainCoefficients = static_cast<u64*>(coefficients.get());
+            auto* slotValues = static_cast<u64*>(values.data());
+            auto* plainCoefficients = static_cast<u64*>(coefficients.data());
             if (!deltaSlots.empty())
             {
                 if (!gpuMemcpyH2D(slotValues, deltaSlots.data(),
@@ -9144,7 +9139,7 @@ namespace osuCrypto::LogVole::gpu
                 !launchNttInverse(plain->view(), plainCoefficients,
                     1, nullptr, stream.raw()) ||
                 !launchLiftPlainToRing(view, plainCoefficients, 1,
-                    static_cast<const u64*>(lift.get()), output.data(stream),
+                    static_cast<const u64*>(lift.data()), output.data(stream),
                     stream.raw())) return {};
         }
         if (!stream.sync()) return {};
@@ -9213,20 +9208,19 @@ namespace osuCrypto::LogVole::gpu
             auto ring = GpuRing::get(ctx.mRing);
             if (!ring || ring->n() != slots || ring->rho() != rho) return false;
             const auto view = ring->view();
-            using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
-            Allocation deviceLift(nullptr, gpuFree);
-            Allocation deviceOutput(nullptr, gpuFree), deviceSlots(nullptr, gpuFree), devicePlain(nullptr, gpuFree);
+            OwnedGpuBuffer deviceLift;
+            OwnedGpuBuffer deviceOutput, deviceSlots, devicePlain;
             std::shared_ptr<GpuPlainNtt> plain;
             RnsPoly next;
             StreamDrain drain{stream};
             const std::size_t words = slots * rho;
             const std::size_t bytes = words * sizeof(u64);
-            deviceLift.reset(gpuMalloc(rho * sizeof(u64)));
-            deviceOutput.reset(gpuMalloc(bytes));
+            deviceLift = tryAllocateGpuBuffer(stream, rho * sizeof(u64));
+            deviceOutput = tryAllocateGpuBuffer(stream, bytes);
             if (!deviceLift || !deviceOutput ||
-                !gpuMemcpyH2D(deviceLift.get(), ctx.mPlaintextLiftModQj.data(), rho * sizeof(u64), stream.raw())) return false;
-            auto* destination = static_cast<u64*>(deviceOutput.get());
-            const auto* lift = static_cast<const u64*>(deviceLift.get());
+                !gpuMemcpyH2D(deviceLift.data(), ctx.mPlaintextLiftModQj.data(), rho * sizeof(u64), stream.raw())) return false;
+            auto* destination = static_cast<u64*>(deviceOutput.data());
+            const auto* lift = static_cast<const u64*>(deviceLift.data());
             const char* directConstant = std::getenv("LV_GPU_SETUP_DELTA_CONSTANT_DIRECT");
             if (!garbledDeltas && deltaSlots.empty() && (!directConstant || directConstant[0] != '0'))
             {
@@ -9237,11 +9231,11 @@ namespace osuCrypto::LogVole::gpu
                 plain = gpuPlainTables(ctx);
                 if (!plain || plain->n() != slots || plain->view().mMinModulus != ctx.mPlaintextModulus)
                     return false;
-                deviceSlots.reset(gpuMalloc(slots * sizeof(u64)));
-                devicePlain.reset(gpuMalloc(slots * sizeof(u64)));
+                deviceSlots = tryAllocateGpuBuffer(stream, slots * sizeof(u64));
+                devicePlain = tryAllocateGpuBuffer(stream, slots * sizeof(u64));
                 if (!deviceSlots || !devicePlain) return false;
-                auto* values = static_cast<u64*>(deviceSlots.get());
-                auto* coefficients = static_cast<u64*>(devicePlain.get());
+                auto* values = static_cast<u64*>(deviceSlots.data());
+                auto* coefficients = static_cast<u64*>(devicePlain.data());
                 if (!deltaSlots.empty())
                 {
                     if (!gpuMemcpyH2D(values, deltaSlots.data(), slots * sizeof(u64), stream.raw())) return false;
@@ -9277,7 +9271,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr wrapped;
         std::shared_ptr<GpuRing> constantRing;
         GpuPolyBuffer constantPoly;
-        std::unique_ptr<void, decltype(&gpuFree)> constantLift(nullptr, gpuFree);
+        OwnedGpuBuffer constantLift;
         std::vector<RnsPoly> next;
         StreamDrain drain{stream};
         auto downloadDelta = [&](const GpuPolyBuffer& values) {
@@ -9306,10 +9300,10 @@ namespace osuCrypto::LogVole::gpu
             if (!constantRing || ctx.mPlaintextLiftModQj.size() != constantRing->rho() ||
                 !constantPoly.resize(*constantRing, 1, stream)) return false;
             const auto bytes = ctx.mPlaintextLiftModQj.size() * sizeof(u64);
-            constantLift.reset(gpuMalloc(bytes));
-            if (!constantLift || !gpuMemcpyH2D(constantLift.get(), ctx.mPlaintextLiftModQj.data(), bytes, stream.raw()) ||
+            constantLift = tryAllocateGpuBuffer(stream, bytes);
+            if (!constantLift || !gpuMemcpyH2D(constantLift.data(), ctx.mPlaintextLiftModQj.data(), bytes, stream.raw()) ||
                 !launchPrepareConstantDelta(constantRing->view(), delta,
-                    static_cast<const u64*>(constantLift.get()), constantPoly.data(stream), stream.raw()) ||
+                    static_cast<const u64*>(constantLift.data()), constantPoly.data(stream), stream.raw()) ||
                 !downloadDelta(constantPoly)) return false;
             out = std::move(next[0]);
             return true;
@@ -9370,17 +9364,16 @@ namespace osuCrypto::LogVole::gpu
         auto out = std::make_shared<DeviceScalars>();
         std::array<u64, 2> seedWords{};
         std::memcpy(seedWords.data(), &seed, sizeof(seedWords));
-        using DeviceAllocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        DeviceAllocation deviceSeed(nullptr, gpuFree);
+        OwnedGpuBuffer deviceSeed;
         struct DrainStream
         {
             GpuStream& stream;
             ~DrainStream() { stream.sync(); }
         } drainStream{ stream };
         if (!out->resize(static_cast<std::size_t>(count), stream)) return nullptr;
-        deviceSeed.reset(gpuMalloc(sizeof(seedWords)));
-        if (!deviceSeed || !gpuMemcpyH2D(deviceSeed.get(), seedWords.data(), sizeof(seedWords), stream.raw()) ||
-            !launchAesCtrScalars(static_cast<const u64*>(deviceSeed.get()), out->data(),
+        deviceSeed = tryAllocateGpuBuffer(stream, sizeof(seedWords));
+        if (!deviceSeed || !gpuMemcpyH2D(deviceSeed.data(), seedWords.data(), sizeof(seedWords), stream.raw()) ||
+            !launchAesCtrScalars(static_cast<const u64*>(deviceSeed.data()), out->data(),
                 count, modulus, stream.raw()) || !stream.sync()) return nullptr;
         // Work is complete, so consumers need no dependency on this thread's
         // stream and may keep the result after the producing thread exits.

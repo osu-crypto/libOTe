@@ -2247,6 +2247,29 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(second.mData != nullptr);
         LOGVOLE_REQUIRE_TRUE(first.mData.get() != second.mData.get());
         LOGVOLE_REQUIRE_TRUE(std::equal(saved.begin(), saved.end(), first.mData.get()));
+        // Export pinned output across actual OS-thread exit, then retire that
+        // worker's stream cache before reading and releasing the output.
+        std::weak_ptr<gpu::OwnedGpuStream> producer;
+        std::packaged_task<gpu::GaussianPrngPrefixBuffer()> task([&] {
+            auto workerSeeds = seeds;
+            workerSeeds[0][1] = 0;
+            gpu::GaussianPrngPrefixBuffer exported, grown;
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(workerSeeds, 512, exported));
+            producer = gpu::threadSampleStream().allocationOwner();
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(seeds, 1024, grown));
+            LOGVOLE_REQUIRE_TRUE(exported.mData.get() != grown.mData.get());
+            LOGVOLE_REQUIRE_TRUE(std::equal(saved.begin(), saved.end(), exported.mData.get()));
+            return exported;
+        });
+        auto future = task.get_future();
+        std::thread worker(std::move(task));
+        worker.join();
+        auto exported = future.get();
+        gpu::gpuCollectThreadResources();
+        LOGVOLE_REQUIRE_TRUE(producer.expired());
+        LOGVOLE_REQUIRE_EQ(exported.mWords, saved.size());
+        LOGVOLE_REQUIRE_TRUE(std::equal(saved.begin(), saved.end(), exported.mData.get()));
+        exported = {};
         const auto previous = second.mData;
         const auto previousWords = second.mWords;
         ScopedEnvironmentValue forceDecline("LV_GPU_SETUP_GAUSSIAN_PRG_FORCE_DECLINE", "1");

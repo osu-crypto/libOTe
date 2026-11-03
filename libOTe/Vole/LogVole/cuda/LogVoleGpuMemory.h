@@ -97,6 +97,7 @@ namespace osuCrypto::LogVole::gpu
         void* data() const noexcept { return mData; }
         std::size_t size() const noexcept { return mBytes; }
         const std::shared_ptr<OwnedGpuStream>& stream() const noexcept { return mStream; }
+        explicit operator bool() const noexcept { return mData != nullptr; }
         void reset() noexcept;
 
         // Exclusive stream handoff: orders subsequent use on next after all

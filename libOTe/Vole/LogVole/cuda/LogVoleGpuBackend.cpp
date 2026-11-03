@@ -941,6 +941,7 @@ namespace osuCrypto::LogVole::gpu
         // called first. No scratch destructor can observe a destroyed stream.
         mProtocolScratch.reset();
         mTransferScratch.reset();
+        mGaussianScratch.reset();
         mDeviceScratchStorage.reset();
         mHostScratchStorage.reset();
         mStagingStorage.reset();

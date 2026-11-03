@@ -60,6 +60,11 @@ namespace osuCrypto::LogVole::gpu
     {
         void operator()(GpuTransferScratch* scratch) const noexcept;
     };
+    struct GpuGaussianScratch;
+    struct GpuGaussianScratchDeleter
+    {
+        void operator()(GpuGaussianScratch* scratch) const noexcept;
+    };
 
     // A stream plus its reusable scratch. Scratch is released after draining
     // this stream and before releasing the native stream owner.
@@ -83,6 +88,7 @@ namespace osuCrypto::LogVole::gpu
         const std::shared_ptr<OwnedGpuStream>& allocationOwner();
         GpuProtocolScratch& protocolScratch();
         GpuTransferScratch& transferScratch();
+        GpuGaussianScratch& gaussianScratch();
         bool pipelinedUploadEnabled() const { return mPipelinedUpload; }
 
         // Upload a small u32 index array and return a device pointer valid
@@ -110,6 +116,7 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<OwnedGpuStream> mAllocationOwner;
         std::unique_ptr<GpuProtocolScratch, GpuProtocolScratchDeleter> mProtocolScratch;
         std::unique_ptr<GpuTransferScratch, GpuTransferScratchDeleter> mTransferScratch;
+        std::unique_ptr<GpuGaussianScratch, GpuGaussianScratchDeleter> mGaussianScratch;
         bool mHighestPriority = false;
         bool mPipelinedUpload = false;
         OwnedGpuBuffer mDeviceScratchStorage;
@@ -122,6 +129,14 @@ namespace osuCrypto::LogVole::gpu
         u8* mStaging = nullptr;
         std::size_t mStagingBytes = 0;
     };
+
+    // Preserve the boolean failure convention of the protocol entry points.
+    // The returned allocation retains its explicit stream even on early exit.
+    inline OwnedGpuBuffer tryAllocateGpuBuffer(GpuStream& stream, std::size_t bytes)
+    {
+        try { return OwnedGpuBuffer(stream.allocationOwner(), bytes); }
+        catch (...) { return {}; }
+    }
 
     struct StreamDrain
     {

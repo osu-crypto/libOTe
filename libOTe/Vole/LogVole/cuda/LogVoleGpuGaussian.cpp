@@ -1,4 +1,3 @@
-#include "libOTe/Vole/LogVole/cuda/LogVoleGpuThreadLocal.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuGaussian.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
@@ -42,14 +41,32 @@ namespace osuCrypto::LogVole::gpu
                 }
                 std::size_t capacity = 4096;
                 while (capacity < bytes) capacity *= 2u;
-                auto* allocation = static_cast<u64*>(gpuMallocHost(capacity));
-                if (!allocation) return {};
-                auto next = std::shared_ptr<u64>(allocation, [](u64* value) { gpuFreeHost(value); });
+                std::shared_ptr<PinnedHostBuffer> allocation;
+                try { allocation = std::make_shared<PinnedHostBuffer>(capacity); }
+                catch (...) { return {}; }
+                auto next = std::shared_ptr<u64>(allocation, static_cast<u64*>(allocation->data()));
                 mData = next;
                 mCapacity = capacity;
                 return next;
             }
         };
+    }
+
+    struct GpuGaussianScratch
+    {
+        PinnedPrefixCache prefixes;
+        PinnedPrefixCache output;
+    };
+
+    void GpuGaussianScratchDeleter::operator()(GpuGaussianScratch* scratch) const noexcept
+    {
+        delete scratch;
+    }
+
+    GpuGaussianScratch& GpuStream::gaussianScratch()
+    {
+        if (!mGaussianScratch) mGaussianScratch.reset(new GpuGaussianScratch());
+        return *mGaussianScratch;
     }
 
     bool gaussianTransformHostCompatible()
@@ -226,13 +243,9 @@ namespace osuCrypto::LogVole::gpu
             ~RestoreStream() { gpuSetCurrentStream(previous); }
         } restore;
         gpuSetCurrentStream(stream.raw());
-        using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        Allocation deviceSeeds(nullptr, gpuFree), prefixes(nullptr, gpuFree), candidates(nullptr, gpuFree),
-            counts(nullptr, gpuFree), complete(nullptr, gpuFree), deviceRows(nullptr, gpuFree);
+        OwnedGpuBuffer deviceSeeds, prefixes, candidates, counts, complete, deviceRows;
         auto samples = std::make_shared<DeviceScalars>();
-        thread_local GpuThreadLocal<PinnedPrefixCache[kStreamSlots]> outputCachesOwner;
-        auto& outputCaches = outputCachesOwner.get();
-        auto pinned = hostOut ? outputCaches[threadStreamSlot()].acquire(outputBytes) : std::shared_ptr<u64>{};
+        auto pinned = hostOut ? stream.gaussianScratch().output.acquire(outputBytes) : std::shared_ptr<u64>{};
         if (hostOut && !pinned) return false;
         std::vector<u8> completed(seeds.size(), 1), activeCompleted(activeSeeds.size());
         StreamDrain drain{stream};
@@ -240,30 +253,30 @@ namespace osuCrypto::LogVole::gpu
             !gpuMemsetZero(samples->data(), outputBytes, stream.raw())) return false;
         if (!activeSeeds.empty())
         {
-            deviceSeeds.reset(gpuMalloc(activeSeeds.size_bytes()));
-            prefixes.reset(gpuMalloc(allPrefixBytes));
-            candidates.reset(gpuMalloc(allPrefixBytes));
-            counts.reset(gpuMalloc(activeSeeds.size() * countRowBytes));
-            complete.reset(gpuMalloc(activeSeeds.size()));
-            if (!outputRows.empty()) deviceRows.reset(gpuMalloc(outputRows.size() * sizeof(u32)));
+            deviceSeeds = tryAllocateGpuBuffer(stream, activeSeeds.size_bytes());
+            prefixes = tryAllocateGpuBuffer(stream, allPrefixBytes);
+            candidates = tryAllocateGpuBuffer(stream, allPrefixBytes);
+            counts = tryAllocateGpuBuffer(stream, activeSeeds.size() * countRowBytes);
+            complete = tryAllocateGpuBuffer(stream, activeSeeds.size());
+            if (!outputRows.empty()) deviceRows = tryAllocateGpuBuffer(stream, outputRows.size() * sizeof(u32));
             if (!deviceSeeds || !prefixes || !candidates || !counts || !complete ||
-                (!outputRows.empty() && (!deviceRows || !gpuMemcpyH2D(deviceRows.get(), outputRows.data(),
+                (!outputRows.empty() && (!deviceRows || !gpuMemcpyH2D(deviceRows.data(), outputRows.data(),
                     outputRows.size() * sizeof(u32), stream.raw()))) ||
-                !gpuMemcpyH2D(deviceSeeds.get(), activeSeeds.data(), activeSeeds.size_bytes(), stream.raw())) return false;
+                !gpuMemcpyH2D(deviceSeeds.data(), activeSeeds.data(), activeSeeds.size_bytes(), stream.raw())) return false;
             HostStep step("setup: Gaussian GPU transform PRG");
-            if (!launchBlake2xbStreamForTest(static_cast<const u64*>(deviceSeeds.get()),
-                    static_cast<u64*>(prefixes.get()), wordsPerPrefix, static_cast<u32>(activeSeeds.size()), stream.raw()))
+            if (!launchBlake2xbStreamForTest(static_cast<const u64*>(deviceSeeds.data()),
+                    static_cast<u64*>(prefixes.data()), wordsPerPrefix, static_cast<u32>(activeSeeds.size()), stream.raw()))
                 return false;
         }
         if (!activeSeeds.empty())
         {
             HostStep step("setup: Gaussian GPU transform launch");
-            if (!launchGaussianTransform(static_cast<const u64*>(prefixes.get()), wordsPerPrefix,
+            if (!launchGaussianTransform(static_cast<const u64*>(prefixes.data()), wordsPerPrefix,
                     static_cast<u32>(activeSeeds.size()), coefficients, sigma, clip, modulus,
-                    static_cast<u64*>(candidates.get()), static_cast<u32*>(counts.get()),
-                    samples->data(), static_cast<u8*>(complete.get()), stream.raw(),
-                    static_cast<const u32*>(deviceRows.get())) ||
-                !gpuMemcpyD2H(activeCompleted.data(), complete.get(), activeCompleted.size(), stream.raw())) return false;
+                    static_cast<u64*>(candidates.data()), static_cast<u32*>(counts.data()),
+                    samples->data(), static_cast<u8*>(complete.data()), stream.raw(),
+                    static_cast<const u32*>(deviceRows.data())) ||
+                !gpuMemcpyD2H(activeCompleted.data(), complete.data(), activeCompleted.size(), stream.raw())) return false;
         }
         if ((hostOut && !gpuMemcpyD2H(pinned.get(), samples->data(), outputBytes, stream.raw())) || !stream.sync())
             return false;
@@ -325,22 +338,19 @@ namespace osuCrypto::LogVole::gpu
             ~RestoreStream() { gpuSetCurrentStream(previous); }
         } restore;
         gpuSetCurrentStream(stream.raw());
-        using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        Allocation deviceSeeds(nullptr, gpuFree), devicePrefixes(nullptr, gpuFree);
-        thread_local GpuThreadLocal<PinnedPrefixCache[kStreamSlots]> prefixCachesOwner;
-        auto& prefixCaches = prefixCachesOwner.get();
-        auto pinned = prefixCaches[threadStreamSlot()].acquire(bytes);
+        OwnedGpuBuffer deviceSeeds, devicePrefixes;
+        auto pinned = stream.gaussianScratch().prefixes.acquire(bytes);
         if (!pinned) return false;
         StreamDrain drain{stream};
-        deviceSeeds.reset(gpuMalloc(seeds.size_bytes()));
-        devicePrefixes.reset(gpuMalloc(bytes));
+        deviceSeeds = tryAllocateGpuBuffer(stream, seeds.size_bytes());
+        devicePrefixes = tryAllocateGpuBuffer(stream, bytes);
         if (!deviceSeeds || !devicePrefixes ||
-            !gpuMemcpyH2D(deviceSeeds.get(), seeds.data(), seeds.size_bytes(), stream.raw()) ||
-            !launchBlake2xbStreamForTest(static_cast<const u64*>(deviceSeeds.get()),
-                static_cast<u64*>(devicePrefixes.get()), wordsPerPrefix,
+            !gpuMemcpyH2D(deviceSeeds.data(), seeds.data(), seeds.size_bytes(), stream.raw()) ||
+            !launchBlake2xbStreamForTest(static_cast<const u64*>(deviceSeeds.data()),
+                static_cast<u64*>(devicePrefixes.data()), wordsPerPrefix,
                 static_cast<u32>(seeds.size()), stream.raw())) return false;
 
-        if (!gpuMemcpyD2H(pinned.get(), devicePrefixes.get(), bytes, stream.raw()) || !stream.sync()) return false;
+        if (!gpuMemcpyD2H(pinned.get(), devicePrefixes.data(), bytes, stream.raw()) || !stream.sync()) return false;
         out.mData = std::move(pinned);
         out.mWords = bytes / sizeof(u64);
         return true;
