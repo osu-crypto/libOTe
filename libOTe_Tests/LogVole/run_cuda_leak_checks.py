@@ -6,6 +6,7 @@ or performance test. Nonzero sanitizer results, skips, and timeouts fail the run
 """
 import argparse
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -30,17 +31,23 @@ def main():
     args.log_dir.mkdir(parents=True, exist_ok=True)
     jobs = [
         ("owned-lifetimes", None),
-        ("pool-lifecycle", ["LogVole_RingOps_GpuMemoryPoolLifecycle"]),
+        ("pool-lifecycle", ["LogVole_RingOps_GpuMemoryPoolLifecycle",
+                            "LogVole_RingOps_GpuBufferResizeBounds"]),
         ("wire-and-caches", ["LogVole_Encoding_PinnedWireBufferOwnership",
                              "LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch",
                              "LogVole_RingOps_PartyCachesDoNotAlias"]),
         ("zk-scalar-use", ["LogVole_Zk_FreshMaskGpu"]),
         ("retention-cold", ["LogVole_RingOps_PublicUniformRetentionParity"]),
         ("protocol-modes", ["LogVole_Modes_"]),
+        ("root-prefetch", ["LogVole_Core_RootFinalizePrefetchExactAndCleanup",
+                           "LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact"]),
     ]
     results = []
     started = time.monotonic()
     for name, tests in jobs:
+        environment = os.environ.copy()
+        if name == "root-prefetch":
+            environment["LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH"] = "1"
         command = [sanitizer, "--tool", "memcheck", "--leak-check", "full",
                    "--error-exitcode", "99"]
         command += ([str(lifetime)] if tests is None else
@@ -57,7 +64,7 @@ def main():
             log.flush()
             try:
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
-                                        timeout=min(40, remaining))
+                                        timeout=min(40, remaining), env=environment)
                 code = result.returncode
             except subprocess.TimeoutExpired:
                 code = 124

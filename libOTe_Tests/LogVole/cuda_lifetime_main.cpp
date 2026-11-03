@@ -64,6 +64,38 @@ int main()
             memory->trim();
             verify(buffer, 17 + round);
 
+            // Model the tiled receiver's borrowed secondary-stream use. Keep
+            // the allocation bound to first; join every tile back to first
+            // before release, preserving independent slice overlap.
+            {
+                OwnedGpuBuffer tiles(first, 4099);
+                std::array<unsigned char, 4099> host{};
+                const auto main = static_cast<cudaStream_t>(first->raw());
+                const auto producer = static_cast<cudaStream_t>(second->raw());
+                cudaEvent_t joined = nullptr;
+                check(cudaEventCreateWithFlags(&joined, cudaEventDisableTiming));
+                check(cudaEventRecord(joined, main));
+                check(cudaStreamWaitEvent(producer, joined, 0));
+                for (unsigned tile = 0; tile != 2; ++tile)
+                {
+                    const std::size_t offset = tile ? 2048 : 0;
+                    const std::size_t length = tile ? 2051 : 2048;
+                    auto* slice = static_cast<unsigned char*>(tiles.data()) + offset;
+                    check(cudaMemsetAsync(slice, 31 + tile, length, producer));
+                    check(cudaEventRecord(joined, producer));
+                    check(cudaStreamWaitEvent(main, joined, 0));
+                    check(cudaMemcpyAsync(host.data() + offset, slice, length,
+                        cudaMemcpyDeviceToHost, main));
+                }
+                check(cudaEventDestroy(joined));
+                tiles.reset();
+                tiles = OwnedGpuBuffer(first, 4099);
+                fill(tiles, 255);
+                first->synchronize();
+                for (std::size_t i = 0; i != host.size(); ++i)
+                    require(host[i] == (i < 2048 ? 31 : 32), "borrowed tile lifetime mismatch");
+            }
+
             // Both memory and stream are retained by the exported buffer.
             std::weak_ptr<GpuMemoryPool> weakMemory = memory;
             std::weak_ptr<OwnedGpuStream> weakStream = second;

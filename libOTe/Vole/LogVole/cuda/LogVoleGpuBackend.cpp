@@ -2289,9 +2289,9 @@ namespace osuCrypto::LogVole::gpu
 
     // ---- GpuPolyBuffer ----------------------------------------------------
 
-    GpuPolyBuffer::GpuPolyBuffer(const GpuRing& ring, std::size_t count)
+    GpuPolyBuffer::GpuPolyBuffer(const GpuRing& ring, std::size_t count, GpuStream& stream)
     {
-        resize(ring, count);
+        if (!resize(ring, count, stream)) throw std::runtime_error("CUDA polynomial allocation failed");
     }
 
     GpuPolyBuffer::~GpuPolyBuffer()
@@ -2300,7 +2300,8 @@ namespace osuCrypto::LogVole::gpu
     }
 
     GpuPolyBuffer::GpuPolyBuffer(GpuPolyBuffer&& other) noexcept
-        : mData(other.mData), mCount(other.mCount), mPolyWords(other.mPolyWords), mCapacity(other.mCapacity)
+        : mStorage(std::move(other.mStorage)), mData(other.mData), mCount(other.mCount),
+          mPolyWords(other.mPolyWords), mCapacity(other.mCapacity)
     {
         other.mData = nullptr;
         other.mCount = 0;
@@ -2312,6 +2313,7 @@ namespace osuCrypto::LogVole::gpu
         if (this != &other)
         {
             release();
+            mStorage = std::move(other.mStorage);
             mData = other.mData;
             mCount = other.mCount;
             mPolyWords = other.mPolyWords;
@@ -2325,45 +2327,50 @@ namespace osuCrypto::LogVole::gpu
 
     void GpuPolyBuffer::release()
     {
-        gpuFree(mData);
+        mStorage.reset();
         mData = nullptr;
         mCount = 0;
         mCapacity = 0;
     }
 
-    bool GpuPolyBuffer::resize(const GpuRing& ring, std::size_t count)
+    bool GpuPolyBuffer::resize(const GpuRing& ring, std::size_t count, GpuStream& stream)
     {
-        return resizeWords(ring.polyWords(), count);
+        return resizeWords(ring.polyWords(), count, stream);
     }
 
-    bool GpuPolyBuffer::resizeWords(std::size_t polyWords, std::size_t count)
+    bool GpuPolyBuffer::resizeWords(std::size_t polyWords, std::size_t count, GpuStream& stream)
     {
         if (!polyWords || polyWords > std::numeric_limits<std::size_t>::max() / sizeof(u64) ||
             count > std::numeric_limits<std::size_t>::max() / sizeof(u64) / polyWords) return false;
-        if (polyWords == mPolyWords && count <= mCapacity)
-        {
-            mCount = count;
-            return true;
-        }
         if (!count)
         {
             release();
             mPolyWords = polyWords;
             return true;
         }
-        // Allocate first, preserving the old buffer on allocation failure.
-        auto* next = static_cast<u64*>(gpuMalloc(count * polyWords * sizeof(u64)));
-        if (!next) return false;
-        gpuFree(mData);
-        mData = next;
-        mPolyWords = polyWords;
-        mCount = mCapacity = count;
-        return true;
+        try
+        {
+            if (polyWords == mPolyWords && count <= mCapacity)
+            {
+                (void)data(stream);
+                mCount = count;
+                return true;
+            }
+            // Allocate first, preserving the old buffer on allocation failure.
+            OwnedGpuBuffer next(stream.allocationOwner(), count * polyWords * sizeof(u64));
+            mStorage = std::move(next);
+            mData = static_cast<u64*>(mStorage.data());
+            mPolyWords = polyWords;
+            mCount = mCapacity = count;
+            return true;
+        }
+        catch (...) { return false; }
     }
 
     bool GpuPolyBuffer::upload(std::span<const RnsPoly> polys, GpuStream& stream, std::size_t dstOffset)
     {
         if (polys.empty()) return true;
+        if (dstOffset > mCount || polys.size() > mCount - dstOffset) return false;
         const std::size_t polyBytes = mPolyWords * sizeof(u64);
 
         // Coalesce the per-polynomial copies through pinned staging: one large
@@ -2395,7 +2402,7 @@ namespace osuCrypto::LogVole::gpu
                 if (polys[done + i].mCoeffs.size() != mPolyWords) return false;
                 std::memcpy(stage + i * polyBytes, polys[done + i].mCoeffs.data(), polyBytes);
             }
-            if (!gpuMemcpyH2D(poly(dstOffset + done), stage, run * polyBytes, stream.raw()) ||
+            if (!gpuMemcpyH2D(poly(dstOffset + done, stream), stage, run * polyBytes, stream.raw()) ||
                 !stream.sync())
             {
                 return false;
@@ -2409,12 +2416,13 @@ namespace osuCrypto::LogVole::gpu
     {
         if (dstIdx >= mCount) return false;
         if (p.mCoeffs.size() != mPolyWords) return false;
-        return gpuMemcpyH2D(poly(dstIdx), p.mCoeffs.data(), mPolyWords * sizeof(u64), stream.raw());
+        return gpuMemcpyH2D(poly(dstIdx, stream), p.mCoeffs.data(), mPolyWords * sizeof(u64), stream.raw());
     }
 
     bool GpuPolyBuffer::download(
         std::vector<RnsPoly>& polys, GpuStream& stream, std::size_t srcOffset, std::size_t count) const
     {
+        if (srcOffset > mCount || count > mCount - srcOffset) return false;
         const std::size_t num = count ? count : (mCount - srcOffset);
         polys.resize(num);
         if (num == 0) return true;
@@ -2437,7 +2445,7 @@ namespace osuCrypto::LogVole::gpu
             }
             if (stage)
             {
-                if (!gpuMemcpyD2H(stage, poly(srcOffset + done), run * polyBytes, stream.raw()) ||
+                if (!gpuMemcpyD2H(stage, poly(srcOffset + done, stream), run * polyBytes, stream.raw()) ||
                     !stream.sync())
                 {
                     return false;
@@ -2452,7 +2460,7 @@ namespace osuCrypto::LogVole::gpu
                 for (std::size_t i = 0; i < run; ++i)
                 {
                     if (!gpuMemcpyD2H(
-                            polys[done + i].mCoeffs.data(), poly(srcOffset + done + i), polyBytes,
+                            polys[done + i].mCoeffs.data(), poly(srcOffset + done + i, stream), polyBytes,
                             stream.raw()))
                     {
                         return false;
@@ -2628,7 +2636,7 @@ namespace osuCrypto::LogVole::gpu
             const u32 slot = static_cast<u32>((offset / runPolys) & 1u);
             // Slot i is reused only after its prior CPU copy finished. Queue
             // the next DMA before joining the previous chunk's host workers.
-            if (!gpuMemcpyD2H(pinned + slot * slotBytes, poly(srcOffset + offset),
+            if (!gpuMemcpyD2H(pinned + slot * slotBytes, poly(srcOffset + offset, stream),
                     length * polyBytes, stream.raw()) ||
                 !gpuEventRecord(staging.events[slot], stream.raw())) return false;
             if (previousLength && !materialize(previousOffset, previousLength, previousSlot)) return false;
@@ -2643,16 +2651,17 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPolyBuffer::downloadAsync(RnsPoly& p, std::size_t srcIdx, GpuStream& stream) const
     {
+        if (srcIdx >= mCount) return false;
         if (p.mCoeffs.size() != mPolyWords)
         {
             resizeZero(p.mCoeffs, mPolyWords);
         }
-        return gpuMemcpyD2H(p.mCoeffs.data(), poly(srcIdx), mPolyWords * sizeof(u64), stream.raw());
+        return gpuMemcpyD2H(p.mCoeffs.data(), poly(srcIdx, stream), mPolyWords * sizeof(u64), stream.raw());
     }
 
     bool GpuPolyBuffer::zero(GpuStream& stream)
     {
-        return gpuMemsetZero(mData, bytes(), stream.raw());
+        return gpuMemsetZero(data(stream), bytes(), stream.raw());
     }
 
     // ---- primitive wrappers ----------------------------------------------

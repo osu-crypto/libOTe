@@ -63,9 +63,9 @@ namespace osuCrypto::LogVole::gpu
     public:
         GpuStream();
         // A lean non-blocking stream at the device's greatest supported
-        // priority. It deliberately has no allocation/index scratch: callers
-        // must prepare all storage on an ordinary registered stream before
-        // launching work here. Returns null when the device exposes no useful
+        // priority. It has no default index scratch; callers prepare their
+        // workspace storage explicitly before query submission. Returns null
+        // when the device exposes no useful
         // priority range or stream creation fails.
         static std::unique_ptr<GpuStream> createHighestPriority();
         ~GpuStream();
@@ -74,7 +74,7 @@ namespace osuCrypto::LogVole::gpu
 
         void* raw() const { return mStream; }
         bool sync() const;
-        // Explicit allocation owner retained by exported scalar buffers.
+        // Explicit allocation owner retained by buffers and protocol scratch.
         const std::shared_ptr<OwnedGpuStream>& allocationOwner();
         GpuProtocolScratch& protocolScratch();
 
@@ -342,21 +342,33 @@ namespace osuCrypto::LogVole::gpu
     {
     public:
         GpuPolyBuffer() = default;
-        explicit GpuPolyBuffer(const GpuRing& ring, std::size_t count);
+        explicit GpuPolyBuffer(const GpuRing& ring, std::size_t count, GpuStream& stream);
         ~GpuPolyBuffer();
         GpuPolyBuffer(GpuPolyBuffer&& other) noexcept;
         GpuPolyBuffer& operator=(GpuPolyBuffer&& other) noexcept;
         GpuPolyBuffer(const GpuPolyBuffer&) = delete;
         GpuPolyBuffer& operator=(const GpuPolyBuffer&) = delete;
 
-        bool resize(const GpuRing& ring, std::size_t count);
+        bool resize(const GpuRing& ring, std::size_t count, GpuStream& stream);
         // Layout-only operations do not need NTT/CRT tables. Validate the word
         // count and allocation size without bootstrapping a GpuRing.
-        bool resizeWords(std::size_t polyWords, std::size_t count);
+        bool resizeWords(std::size_t polyWords, std::size_t count, GpuStream& stream);
         void release();
 
-        u64* data() const { return mData; }
-        u64* poly(std::size_t idx) const { return mData + idx * mPolyWords; }
+        // Host access is serialized by the caller. A new stream orders its use
+        // after earlier uses and is retained through release, including reads.
+        // A borrowed pointer may be queued on secondary streams only if those
+        // uses are joined back to this stream before returning or unwinding.
+        u64* data(GpuStream& stream) const
+        {
+            if (mData && mStorage.stream()->raw() != stream.raw())
+                mStorage.handoff(stream.allocationOwner());
+            return mData;
+        }
+        u64* poly(std::size_t idx, GpuStream& stream) const
+        { return data(stream) + idx * mPolyWords; }
+        // Identity/availability inspection only; does not authorize device use.
+        const void* address() const { return mData; }
         std::size_t count() const { return mCount; }
         std::size_t polyWords() const { return mPolyWords; }
         std::size_t bytes() const { return mCount * mPolyWords * sizeof(u64); }
@@ -381,6 +393,7 @@ namespace osuCrypto::LogVole::gpu
         bool zero(GpuStream& stream);
 
     private:
+        mutable OwnedGpuBuffer mStorage;
         u64* mData = nullptr;
         std::size_t mCount = 0;
         std::size_t mPolyWords = 0;

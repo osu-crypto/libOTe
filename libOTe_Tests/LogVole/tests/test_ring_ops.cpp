@@ -327,32 +327,69 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
     auto small = gpu::GpuRing::get(smallContext);
     auto large = gpu::GpuRing::get(largeContext);
     LOGVOLE_REQUIRE_TRUE(small && large);
+    auto& stream = gpu::threadStream();
     gpu::GpuPolyBuffer buffer;
-    LOGVOLE_REQUIRE_TRUE(buffer.resize(*small, 1));
-    const auto oldData = buffer.data();
-    LOGVOLE_REQUIRE_TRUE(buffer.resize(*large, 1));
+    LOGVOLE_REQUIRE_TRUE(buffer.resize(*small, 1, stream));
+    const auto oldData = buffer.data(stream);
+    LOGVOLE_REQUIRE_TRUE(buffer.resize(*large, 1, stream));
     // A geometry change needs a new allocation while the smaller one is live.
-    LOGVOLE_REQUIRE_TRUE(buffer.data() != oldData);
+    LOGVOLE_REQUIRE_TRUE(buffer.data(stream) != oldData);
     std::vector<std::uint64_t> expected(large->polyWords()), fetched(expected.size());
     for (std::size_t i = 0; i < expected.size(); ++i)
         expected[i] = 0xfedcba9876543210ull ^ i;
-    auto& stream = gpu::threadStream();
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(buffer.data(), expected.data(), buffer.bytes(), stream.raw()));
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), buffer.data(), buffer.bytes(), stream.raw()));
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(buffer.data(stream), expected.data(), buffer.bytes(), stream.raw()));
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), buffer.data(stream), buffer.bytes(), stream.raw()));
     LOGVOLE_REQUIRE_TRUE(stream.sync());
     LOGVOLE_REQUIRE_TRUE(fetched == expected);
-    const auto preserved = buffer.data();
+    const auto preserved = buffer.data(stream);
     const auto invalid = std::numeric_limits<std::size_t>::max() / large->polyBytes() + 2;
-    LOGVOLE_REQUIRE_TRUE(!buffer.resize(*large, invalid));
-    LOGVOLE_REQUIRE_TRUE(buffer.data() == preserved);
+    LOGVOLE_REQUIRE_TRUE(!buffer.resize(*large, invalid, stream));
+    LOGVOLE_REQUIRE_TRUE(buffer.data(stream) == preserved);
     LOGVOLE_REQUIRE_EQ(buffer.count(), 1ull);
     LOGVOLE_REQUIRE_EQ(buffer.polyWords(), large->polyWords());
-    LOGVOLE_REQUIRE_TRUE(buffer.resize(*large, 1));
-    LOGVOLE_REQUIRE_TRUE(buffer.data() == preserved);
-    LOGVOLE_REQUIRE_TRUE(buffer.resize(*small, 0));
-    LOGVOLE_REQUIRE_TRUE(buffer.data() == nullptr);
+    LOGVOLE_REQUIRE_TRUE(buffer.resize(*large, 1, stream));
+    LOGVOLE_REQUIRE_TRUE(buffer.data(stream) == preserved);
+    LOGVOLE_REQUIRE_TRUE(buffer.resize(*small, 0, stream));
+    LOGVOLE_REQUIRE_TRUE(buffer.data(stream) == nullptr);
     LOGVOLE_REQUIRE_EQ(buffer.count(), 0ull);
     LOGVOLE_REQUIRE_EQ(buffer.polyWords(), small->polyWords());
+
+    // The exported allocation retains its producer after the wrapper dies.
+    gpu::GpuPolyBuffer exported;
+    std::weak_ptr<gpu::OwnedGpuStream> producerOwner;
+    std::weak_ptr<gpu::GpuMemoryPool> allocationOwner;
+    {
+        gpu::GpuStream producer;
+        producerOwner = producer.allocationOwner();
+        allocationOwner = producer.allocationOwner()->memory();
+        LOGVOLE_REQUIRE_TRUE(exported.resize(*large, 1, producer));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(exported.data(producer),
+            expected.data(), exported.bytes(), producer.raw()));
+    }
+    LOGVOLE_REQUIRE_TRUE(!producerOwner.expired() && !allocationOwner.expired());
+    gpu::GpuStream consumer;
+    gpu::GpuPolyBuffer copied(*large, 1, consumer);
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2D(copied.data(consumer), exported.data(consumer),
+        exported.bytes(), consumer.raw()));
+    // Move preserves the pending read and both owners; replacing that moved
+    // allocation must wait for the read before returning it to its origin pool.
+    gpu::GpuPolyBuffer moved(std::move(exported));
+    LOGVOLE_REQUIRE_TRUE(exported.empty() && !exported.address());
+    LOGVOLE_REQUIRE_TRUE(!moved.resize(*large, invalid, consumer));
+    LOGVOLE_REQUIRE_TRUE(moved.resize(*small, 1, consumer));
+    LOGVOLE_REQUIRE_TRUE(producerOwner.expired() && allocationOwner.expired());
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), copied.data(consumer),
+        copied.bytes(), consumer.raw()));
+    LOGVOLE_REQUIRE_TRUE(consumer.sync());
+    LOGVOLE_REQUIRE_TRUE(fetched == expected);
+    // Reusing capacity on another stream must order the new write after reads
+    // already queued on the previous stream.
+    LOGVOLE_REQUIRE_TRUE(copied.resize(*large, 1, stream));
+    LOGVOLE_REQUIRE_TRUE(copied.zero(stream));
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), copied.data(consumer),
+        copied.bytes(), consumer.raw()));
+    LOGVOLE_REQUIRE_TRUE(consumer.sync());
+    LOGVOLE_REQUIRE_TRUE(std::all_of(fetched.begin(), fetched.end(), [](auto x) { return x == 0; }));
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
@@ -971,14 +1008,14 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     for (std::size_t limb = 0; limb < widths.size(); ++limb)
                         seal::util::ntt_negacyclic_harvey(
                             expectedNtt.mCoeffs.data() + limb * degree, sealTables[limb]);
-                    gpu::GpuPolyBuffer device(*certificate, 1u);
-                    LOGVOLE_REQUIRE_TRUE(device.data() && device.upload(input, 0u, stream));
-                    LOGVOLE_REQUIRE_TRUE(gpu::nttForward(*certificate, device.data(), 1u, stream));
+                    gpu::GpuPolyBuffer device(*certificate, 1u, stream);
+                    LOGVOLE_REQUIRE_TRUE(device.data(stream) && device.upload(input, 0u, stream));
+                    LOGVOLE_REQUIRE_TRUE(gpu::nttForward(*certificate, device.data(stream), 1u, stream));
                     std::vector<RnsPoly> transformed;
                     LOGVOLE_REQUIRE_TRUE(device.download(transformed, stream));
                     LOGVOLE_REQUIRE_EQ(transformed.size(), 1u);
                     expect_poly_equal(transformed[0], expectedNtt);
-                    LOGVOLE_REQUIRE_TRUE(gpu::nttInverse(*certificate, device.data(), 1u, stream));
+                    LOGVOLE_REQUIRE_TRUE(gpu::nttInverse(*certificate, device.data(stream), 1u, stream));
                     std::vector<RnsPoly> roundTrip;
                     LOGVOLE_REQUIRE_TRUE(device.download(roundTrip, stream));
                     LOGVOLE_REQUIRE_EQ(roundTrip.size(), 1u);
@@ -1290,7 +1327,7 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(ring != nullptr);
                 auto& stream = gpu::threadStream();
                 gpu::GpuPolyBuffer device;
-                LOGVOLE_REQUIRE_TRUE(device.resize(*ring, actual.size()));
+                LOGVOLE_REQUIRE_TRUE(device.resize(*ring, actual.size(), stream));
                 LOGVOLE_REQUIRE_TRUE(device.upload(actual, stream));
                 gpu::GpuStream emptyStream;
                 LOGVOLE_REQUIRE_EQ(emptyStream.stagingCapacity(), 0u);
@@ -1317,7 +1354,7 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                                 // H2D. Same-stream ordering must protect its
                                 // bytes until that upload has consumed them.
                                 std::memcpy(existing, actual.back().mCoeffs.data(), ring->polyBytes());
-                                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(device.poly(0), existing,
+                                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(device.poly(0, stream), existing,
                                     ring->polyBytes(), stream.raw()));
                             }
                             std::vector<RnsPoly> downloaded{actual[0]};
@@ -1448,20 +1485,20 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(forwardNtt(expected[i], ctx));
         }
 
-        gpu::GpuPolyBuffer inPlace(*ring, count);
-        gpu::GpuPolyBuffer outOfPlaceInput(*ring, count);
-        gpu::GpuPolyBuffer outOfPlace(*ring, count);
+        gpu::GpuPolyBuffer inPlace(*ring, count, stream);
+        gpu::GpuPolyBuffer outOfPlaceInput(*ring, count, stream);
+        gpu::GpuPolyBuffer outOfPlace(*ring, count, stream);
         LOGVOLE_REQUIRE_TRUE(
-            inPlace.data() && outOfPlaceInput.data() && outOfPlace.data());
+            inPlace.data(stream) && outOfPlaceInput.data(stream) && outOfPlace.data(stream));
         for (unsigned iteration = 0; iteration < 4u; ++iteration)
         {
             LOGVOLE_REQUIRE_TRUE(inPlace.upload(original, stream));
             LOGVOLE_REQUIRE_TRUE(outOfPlaceInput.upload(original, stream));
             LOGVOLE_REQUIRE_TRUE(gpu::nttForward(
-                *ring, inPlace.data(), static_cast<std::uint32_t>(count), stream));
+                *ring, inPlace.data(stream), static_cast<std::uint32_t>(count), stream));
             LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardFrom(
-                ring->view(), outOfPlaceInput.data(), nullptr,
-                outOfPlace.data(), nullptr, static_cast<std::uint32_t>(count),
+                ring->view(), outOfPlaceInput.data(stream), nullptr,
+                outOfPlace.data(stream), nullptr, static_cast<std::uint32_t>(count),
                 stream.raw()));
             std::vector<RnsPoly> actualInPlace, actualOutOfPlace;
             LOGVOLE_REQUIRE_TRUE(inPlace.download(actualInPlace, stream));
