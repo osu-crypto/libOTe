@@ -234,7 +234,7 @@ namespace osuCrypto::LogVole::gpu
     }
 
     OwnedGpuBuffer::OwnedGpuBuffer(std::shared_ptr<OwnedGpuStream> stream, std::size_t bytes)
-        : mStream(std::move(stream)), mBytes(bytes)
+        : mAllocationStream(stream), mStream(std::move(stream)), mBytes(bytes)
     {
         if (!mStream) throw std::invalid_argument("CUDA buffer requires a stream owner");
         mData = mStream->mMemory->mImpl->allocate(bytes, native(mStream->raw()), mStream->mId);
@@ -242,13 +242,15 @@ namespace osuCrypto::LogVole::gpu
 
     OwnedGpuBuffer::~OwnedGpuBuffer() { reset(); }
     OwnedGpuBuffer::OwnedGpuBuffer(OwnedGpuBuffer&& other) noexcept
-        : mStream(std::move(other.mStream)), mData(std::exchange(other.mData, nullptr)),
+        : mAllocationStream(std::move(other.mAllocationStream)),
+          mStream(std::move(other.mStream)), mData(std::exchange(other.mData, nullptr)),
           mBytes(std::exchange(other.mBytes, 0)) {}
 
     OwnedGpuBuffer& OwnedGpuBuffer::operator=(OwnedGpuBuffer&& other) noexcept
     {
         if (this == &other) return *this;
         reset();
+        mAllocationStream = std::move(other.mAllocationStream);
         mStream = std::move(other.mStream);
         mData = std::exchange(other.mData, nullptr);
         mBytes = std::exchange(other.mBytes, 0);
@@ -258,18 +260,26 @@ namespace osuCrypto::LogVole::gpu
     void OwnedGpuBuffer::reset() noexcept
     {
         if (mData)
-            mStream->mMemory->mImpl->release(mData, mBytes, native(mStream->raw()), mStream->mId);
+        {
+            // Return storage to its allocation domain only after the final
+            // consumer. This queues a dependency, not a host/device-wide wait.
+            try { handoff(mAllocationStream); }
+            catch (...) { std::terminate(); }
+            mAllocationStream->mMemory->mImpl->release(mData, mBytes,
+                native(mAllocationStream->raw()), mAllocationStream->mId);
+        }
         mData = nullptr;
         mBytes = 0;
         mStream.reset();
+        mAllocationStream.reset();
     }
 
-    void OwnedGpuBuffer::handoff(std::shared_ptr<OwnedGpuStream> next)
+    void OwnedGpuBuffer::handoff(const std::shared_ptr<OwnedGpuStream>& next)
     {
-        if (!next || !mStream || next->mMemory != mStream->mMemory)
-            throw std::invalid_argument("CUDA handoff requires streams in the same allocation domain");
+        if (!next || !mStream || next->mMemory->device() != mAllocationStream->mMemory->device())
+            throw std::invalid_argument("CUDA handoff requires streams on the same device");
         if (next == mStream) return;
-        auto& pool = *mStream->mMemory->mImpl;
+        auto& pool = *mAllocationStream->mMemory->mImpl;
         {
             std::lock_guard lock(pool.mutex);
             auto event = pool.takeEvent();
@@ -287,6 +297,6 @@ namespace osuCrypto::LogVole::gpu
         }
         // Drop the old owner outside the allocator lock: it may drain/destroy
         // that stream. Never synchronize the device as a whole.
-        mStream = std::move(next);
+        mStream = next;
     }
 }

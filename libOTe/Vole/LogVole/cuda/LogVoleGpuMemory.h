@@ -11,7 +11,8 @@ namespace osuCrypto::LogVole::gpu
 
     // Explicit allocation domain. It owns a private CUDA pool and its host
     // free lists; no process-wide allocator or current-stream state is used.
-    // Streams retain this owner, and buffers retain their last-use stream.
+    // Streams retain this owner; buffers retain both their allocation stream
+    // and their last-use stream, including handoffs to another private pool.
     // Construct and destroy all owners within the application's CUDA lifetime,
     // before main returns. This includes any exported buffers.
     class GpuMemoryPool
@@ -80,9 +81,12 @@ namespace osuCrypto::LogVole::gpu
         // Exclusive stream handoff: orders subsequent use on next after all
         // preceding use on the current stream. Callers must not enqueue further
         // use on the old stream. Raw pointers do not transfer this ownership.
-        void handoff(std::shared_ptr<OwnedGpuStream> next);
+        // Streams may belong to different pools on the same device. Storage
+        // always returns to its original pool, ordered after the final use.
+        void handoff(const std::shared_ptr<OwnedGpuStream>& next);
 
     private:
+        std::shared_ptr<OwnedGpuStream> mAllocationStream;
         std::shared_ptr<OwnedGpuStream> mStream;
         void* mData = nullptr;
         std::size_t mBytes = 0;

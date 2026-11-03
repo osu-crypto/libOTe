@@ -124,10 +124,24 @@ int main()
         auto otherStream = std::make_shared<OwnedGpuStream>(otherMemory);
         OwnedGpuBuffer original(stream, 4099);
         fill(original, 63);
+        original.handoff(otherStream);
+        verify(original, 63);
+        // A foreign stream may still be reading the source when it is released.
+        // Reusing the source's bucket on its allocation stream must wait for
+        // that read, without requiring the caller to synchronize either stream.
+        OwnedGpuBuffer copied(otherStream, 4099);
+        check(cudaMemcpyAsync(copied.data(), original.data(), original.size(),
+            cudaMemcpyDeviceToDevice, static_cast<cudaStream_t>(otherStream->raw())));
+        original.reset();
+        original = OwnedGpuBuffer(stream, 4099);
+        fill(original, 29);
+        verify(copied, 63);
+        original.handoff(otherStream);
+        fill(original, 63);
         bool rejected = false;
-        try { original.handoff(otherStream); }
+        try { original.handoff({}); }
         catch (const std::invalid_argument&) { rejected = true; }
-        require(rejected, "cross-domain handoff accepted");
+        require(rejected, "null stream handoff accepted");
         verify(original, 63);
         OwnedGpuBuffer moved(std::move(original));
         require(!original.data() && original.size() == 0 && !original.stream(), "invalid moved-from buffer");
@@ -145,6 +159,21 @@ int main()
         catch (const Cancelled&) {}
         memory->trim();
         verify(moved, 63);
+        copied.reset();
+        std::weak_ptr<GpuMemoryPool> weakOrigin = memory, weakConsumer = otherMemory;
+        std::weak_ptr<OwnedGpuStream> weakOriginStream = stream, weakConsumerStream = otherStream;
+        stream.reset();
+        otherStream.reset();
+        memory.reset();
+        otherMemory.reset();
+        require(!weakOrigin.expired() && !weakConsumer.expired() &&
+            !weakOriginStream.expired() && !weakConsumerStream.expired(),
+            "cross-domain buffer failed to retain both owners");
+        verify(moved, 63);
+        moved.reset();
+        require(weakOrigin.expired() && weakConsumer.expired() &&
+            weakOriginStream.expired() && weakConsumerStream.expired(),
+            "cross-domain ownership cycle");
         std::cout << "CUDA owned lifetime checks passed\n";
     }
     catch (const std::exception& error)
