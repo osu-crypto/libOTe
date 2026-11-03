@@ -445,6 +445,46 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         gpu::gpuCollectThreadResources();
         LOGVOLE_REQUIRE_TRUE(gpu::gpuLastErrorOk(nullptr));
     }
+    // A worker can export an unfinished wrapped polynomial, then retire its
+    // stream-owned lift cache. The exported allocation keeps the native stream
+    // alive, but must not keep that scratch cache (or its pool) alive forever.
+    ZpCrtContext plainContext;
+    const std::array<std::uint64_t, 5> labels{1, 7, 19, 0, 31};
+    RnsPoly expectedWrap;
+    {
+        ScopedGpuEnabled cpu(false);
+        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(make_small_params(), 20, plainContext));
+        LOGVOLE_REQUIRE_TRUE(wrapZpBatchCrt(plainContext, labels, true, 0, 1, expectedWrap));
+    }
+    for (auto role : {ProtocolCacheRole::Sender, ProtocolCacheRole::Receiver})
+    {
+        std::weak_ptr<gpu::OwnedGpuStream> producer;
+        std::weak_ptr<gpu::GpuMemoryPool> pool;
+        std::packaged_task<gpu::DeviceBatchPtr()> task([&] {
+            ScopedProtocolCacheScope scope(role, allocateProtocolCacheRunId());
+            auto& stream = gpu::threadStream();
+            producer = stream.allocationOwner();
+            pool = stream.allocationOwner()->memory();
+            // Cold allocation and a cache hit both feed the ordinary wrap path.
+            auto first = gpu::wrapLabelsDevice(plainContext, labels, true, 0, 1);
+            LOGVOLE_REQUIRE_TRUE(first);
+            auto second = gpu::wrapLabelsDevice(plainContext, labels, true, 0, 1);
+            LOGVOLE_REQUIRE_TRUE(second);
+            return second;
+        });
+        auto result = task.get_future();
+        std::thread worker(std::move(task));
+        worker.join();
+        auto exported = result.get();
+        gpu::gpuCollectThreadResources();
+        LOGVOLE_REQUIRE_TRUE(!producer.expired() && !pool.expired());
+        std::vector<RnsPoly> fetched;
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*exported, fetched));
+        LOGVOLE_REQUIRE_EQ(fetched.size(), std::size_t(1));
+        expect_poly_equal(expectedWrap, fetched[0]);
+        exported.reset();
+        LOGVOLE_REQUIRE_TRUE(producer.expired() && pool.expired());
+    }
     // Repeated worker exit covers thread-local stream/scratch destruction. Trim
     // while owners are live must preserve them, then release their idle blocks.
     for (unsigned round = 0; round != 3; ++round)

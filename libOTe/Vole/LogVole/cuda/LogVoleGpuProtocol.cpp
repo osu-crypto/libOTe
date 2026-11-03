@@ -817,22 +817,14 @@ namespace osuCrypto::LogVole::gpu
         // with nested host loops and re-uploaded on every call, which is host time
         // and PCIe traffic on the critical path for something that never changes.
         //
-        // They are cached on the device, keyed by the geometry they were built
-        // from, so a repeat call with the same shape is a map lookup. Its
-        // destructor releases the device arrays before the allocator shuts down.
+        // Cache immutable geometry on its consuming stream. Secondary-stream
+        // borrowers must join back to that stream before returning or unwinding.
         struct IdxCache
         {
-            std::mutex mMutex;
-            std::unordered_map<u64, u32*> mMap;
-            IdxCache() { gpuInitializeMemoryPools(); }
-            ~IdxCache() { for (const auto& entry : mMap) gpuFree(entry.second); }
+            std::unordered_map<u64, OwnedGpuBuffer> mMap;
         };
 
-        IdxCache& idxCache()
-        {
-            static IdxCache cache;
-            return cache;
-        }
+        IdxCache& idxCache(GpuStream& stream);
 
         // FNV-1a over the geometry values, with a per-site tag so two sites that
         // happen to share a shape cannot collide.
@@ -854,35 +846,24 @@ namespace osuCrypto::LogVole::gpu
         template<typename BuildFn>
         const u32* cachedIdx(u64 key, std::size_t count, GpuStream& stream, BuildFn&& build)
         {
-            if (count == 0) return nullptr;
-            auto& cache = idxCache();
-            {
-                std::lock_guard<std::mutex> lock(cache.mMutex);
-                auto it = cache.mMap.find(key);
-                if (it != cache.mMap.end()) return it->second;
-            }
+            if (!count || count > std::numeric_limits<std::size_t>::max() / sizeof(u32))
+                return nullptr;
+            auto& cache = idxCache(stream);
+            auto found = cache.mMap.find(key);
+            if (found != cache.mMap.end())
+                return static_cast<const u32*>(found->second.data());
 
             std::vector<u32> host(count);
             build(host);
-
-            auto* dev = static_cast<u32*>(gpuMalloc(count * sizeof(u32)));
-            if (!dev) return nullptr;
-            // Synchronise once here so the array is durable before any other
-            // stream reads it; this is a one-off per geometry.
-            if (!gpuMemcpyH2D(dev, host.data(), count * sizeof(u32), stream.raw()) || !stream.sync())
-            {
-                gpuFree(dev);
-                return nullptr;
-            }
-
-            std::lock_guard<std::mutex> lock(cache.mMutex);
-            try
-            {
-                auto [it, inserted] = cache.mMap.emplace(key, dev);
-                if (!inserted) gpuFree(dev);   // lost a race; keep the winner
-                return it->second;
-            }
-            catch (...) { gpuFree(dev); throw; }
+            auto storage = tryAllocateGpuBuffer(stream, count * sizeof(u32));
+            if (!storage) return nullptr;
+            // The cold upload must finish before its host vector is destroyed.
+            // Cache hits only look up the existing allocation.
+            const bool copied = gpuMemcpyH2D(storage.data(), host.data(), count * sizeof(u32), stream.raw());
+            const bool complete = stream.sync();
+            if (!copied || !complete) return nullptr;
+            auto it = cache.mMap.emplace(key, std::move(storage)).first;
+            return static_cast<const u32*>(it->second.data());
         }
 
         // Device mirror of a party's offline tensors. Uploaded once per state.
@@ -1501,6 +1482,8 @@ namespace osuCrypto::LogVole::gpu
         SampleScratch receiverPrefetch;
         SampleScratch setup;
         ValidateScratch validation;
+        IdxCache indices;
+        std::vector<std::pair<std::vector<u64>, OwnedGpuBuffer>> plaintextLifts;
     };
 
     void GpuProtocolScratchDeleter::operator()(GpuProtocolScratch* scratch) const noexcept
@@ -1516,6 +1499,7 @@ namespace osuCrypto::LogVole::gpu
 
     namespace
     {
+        IdxCache& idxCache(GpuStream& stream) { return stream.protocolScratch().indices; }
         SampleScratch& sampleScratch(GpuStream& stream) { return stream.protocolScratch().sample; }
         SampleScratch& senderPrefetchSampleScratch(GpuStream& stream)
         { return stream.protocolScratch().senderPrefetch; }
@@ -1550,21 +1534,6 @@ namespace osuCrypto::LogVole::gpu
                        scratch.mMarginLo, marginLo.data(), ring.rho() * sizeof(u64), stream.raw()) &&
                    gpuMemcpyH2D(
                        scratch.mMarginHi, marginHi.data(), ring.rho() * sizeof(u64), stream.raw());
-        }
-
-        // Uploads a small constant array that lives for the process lifetime.
-        template<typename T>
-        const void* uploadPersistent(const std::vector<T>& host)
-        {
-            if (host.empty()) return nullptr;
-            void* d = gpuMalloc(host.size() * sizeof(T));
-            if (!d) return nullptr;
-            if (!gpuMemcpyH2D(d, host.data(), host.size() * sizeof(T), nullptr) || !gpuDeviceSync())
-            {
-                gpuFree(d);
-                return nullptr;
-            }
-            return d;
         }
     }
 
@@ -8882,43 +8851,35 @@ namespace osuCrypto::LogVole::gpu
                 false, 0, padChunks, false, nullptr);
         }
 
-        // Delta lift factors per limb, cached with the ring tables.
+        auto& stream = threadStream();
+        // Each stream retains its immutable lift factors until all queued uses
+        // finish. No process-wide owner or default-stream upload is involved.
         const u64* lift = nullptr;
         if (multiplyByDelta)
         {
             if (zp.mPlaintextLiftModQj.size() != rho) return nullptr;
-            static std::mutex liftMutex;
-            using LiftKey = std::pair<std::vector<u64>, ProtocolCacheRole>;
-            struct LiftCache : std::vector<std::pair<LiftKey, const u64*>>
+            auto& liftCache = stream.protocolScratch().plaintextLifts;
+            for (const auto& [key, storage] : liftCache)
             {
-                LiftCache() { gpuInitializeMemoryPools(); }
-                ~LiftCache()
+                if (key.size() == rho && std::equal(key.begin(), key.end(), zp.mPlaintextLiftModQj.begin()))
                 {
-                    for (const auto& entry : *this) gpuFree(const_cast<u64*>(entry.second));
-                }
-            };
-            static LiftCache liftCache;
-            std::vector<u64> host(zp.mPlaintextLiftModQj.begin(), zp.mPlaintextLiftModQj.end());
-            LiftKey key{host, currentProtocolCacheScope().mRole};
-            std::lock_guard<std::mutex> lock(liftMutex);
-            for (const auto& [k, v] : liftCache)
-            {
-                if (k == key)
-                {
-                    lift = v;
+                    lift = static_cast<const u64*>(storage.data());
                     break;
                 }
             }
             if (!lift)
             {
-                lift = static_cast<const u64*>(uploadPersistent(host));
-                if (!lift) return nullptr;
-                try { liftCache.emplace_back(std::move(key), lift); }
-                catch (...) { gpuFree(const_cast<u64*>(lift)); throw; }
+                std::vector<u64> key(zp.mPlaintextLiftModQj.begin(), zp.mPlaintextLiftModQj.end());
+                auto storage = tryAllocateGpuBuffer(stream, key.size() * sizeof(u64));
+                if (!storage) return nullptr;
+                const bool copied = gpuMemcpyH2D(storage.data(), key.data(), key.size() * sizeof(u64), stream.raw());
+                const bool complete = stream.sync();
+                if (!copied || !complete) return nullptr;
+                lift = static_cast<const u64*>(storage.data());
+                liftCache.emplace_back(std::move(key), std::move(storage));
             }
         }
 
-        auto& stream = threadStream();
         auto out = std::make_shared<DeviceBatch>();
         out->mImpl->mRing = ring;
         if (!multiplyByDelta)
