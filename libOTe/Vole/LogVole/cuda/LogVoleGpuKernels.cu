@@ -13,6 +13,9 @@
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuPseudo52.cuh"
 
 #include <cuda_runtime.h>
+#if defined(_MSC_VER)
+#include <malloc.h>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -5759,8 +5762,7 @@ namespace osuCrypto::LogVole::gpu
             u32 FixedPostOp = kElemOpNone,
             bool FusedLastTwoStages = false,
             bool VectorShoupLoads = false>
-        __global__ __maxnreg__(
-            Fixed8192 ? (FusedLastTwoStages ? 40 : 32) : 0) void nttInverseKernel(
+        __device__ __forceinline__ void nttInverseBody(
             DeviceRing rg,
             u64* data,
             const u32* polyIdx,
@@ -6066,6 +6068,47 @@ namespace osuCrypto::LogVole::gpu
                     }
                 }
             }
+        }
+
+        // Keep the generic kernel unconstrained. __maxnreg__(0) is invalid,
+        // and substituting 255 would override a caller's --maxrregcount.
+        // Both entry points inline the same butterfly body with no device call.
+        template<bool HasFusedIp>
+        __global__ void nttInverseKernel(
+            DeviceRing rg,
+            u64* data,
+            const u32* polyIdx,
+            u32 preOp,
+            const u64* preB,
+            u32 postOp,
+            const u64* postB,
+            NttFusedIp ip,
+            u32 logTiles,
+            bool fusedFirstStage = false)
+        {
+            nttInverseBody<HasFusedIp>(rg, data, polyIdx, preOp, preB,
+                postOp, postB, ip, logTiles, fusedFirstStage);
+        }
+
+        template<u32 FixedRho, bool SimpleIndex = false,
+            u32 FixedPostOp = kElemOpNone, bool FusedLastTwoStages = false,
+            bool VectorShoupLoads = false>
+        __global__ __maxnreg__(FusedLastTwoStages ? 40 : 32)
+        void nttInverseFixed8192Kernel(
+            DeviceRing rg,
+            u64* data,
+            const u32* polyIdx,
+            u32 preOp,
+            const u64* preB,
+            u32 postOp,
+            const u64* postB,
+            NttFusedIp ip,
+            u32 logTiles,
+            bool fusedFirstStage = false)
+        {
+            nttInverseBody<false, true, FixedRho, SimpleIndex, FixedPostOp,
+                FusedLastTwoStages, VectorShoupLoads>(rg, data, polyIdx,
+                    preOp, preB, postOp, postB, ip, logTiles, fusedFirstStage);
         }
 
         // The one-tile plaintext inverse used by the common wrap path, with both
@@ -16173,97 +16216,97 @@ namespace osuCrypto::LogVole::gpu
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                        nttInverseFixed8192Kernel<4u>, cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true>,
+                        nttInverseFixed8192Kernel<4u, true>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndex)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, false, 0u>,
+                        nttInverseFixed8192Kernel<4u, false, 0u>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192AddDirect)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, false, 2u>,
+                        nttInverseFixed8192Kernel<4u, false, 2u>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192NegateDirect)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, false, 4u>,
+                        nttInverseFixed8192Kernel<4u, false, 4u>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192ReverseSubDirect)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true, 0u>,
+                        nttInverseFixed8192Kernel<4u, true, 0u>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexAddDirect)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true, 2u>,
+                        nttInverseFixed8192Kernel<4u, true, 2u>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexNegateDirect)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true, 4u>,
+                        nttInverseFixed8192Kernel<4u, true, 4u>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexReverseSubDirect)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true, 0u, true>,
+                        nttInverseFixed8192Kernel<4u, true, 0u, true>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexAddFusedTail)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true, 2u, true>,
+                        nttInverseFixed8192Kernel<4u, true, 2u, true>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexNegateFusedTail)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true, 4u, true>,
+                        nttInverseFixed8192Kernel<4u, true, 4u, true>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexReverseSubFusedTail)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true, 0u, true, true>,
+                        nttInverseFixed8192Kernel<4u, true, 0u, true, true>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexAddFusedTailVectorShoup)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true, 2u, true, true>,
+                        nttInverseFixed8192Kernel<4u, true, 2u, true, true>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexNegateFusedTailVectorShoup)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<false, true, 4u, true, 4u, true, true>,
+                        nttInverseFixed8192Kernel<4u, true, 4u, true, true>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexReverseSubFusedTailVectorShoup)"))
@@ -16291,16 +16334,14 @@ namespace osuCrypto::LogVole::gpu
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<
-                            false, true, 4u, false, kElemOpDirectCopy>,
+                        nttInverseFixed8192Kernel<4u, false, kElemOpDirectCopy>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192CopyDirect)"))
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseKernel<
-                            false, true, 4u, true, kElemOpDirectCopy>,
+                        nttInverseFixed8192Kernel<4u, true, kElemOpDirectCopy>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePlain8192SimpleIndexCopyDirect)"))
@@ -17110,13 +17151,21 @@ namespace osuCrypto::LogVole::gpu
 
                 // C17 aligned_alloc requires size to be an alignment multiple;
                 // roundCapacity establishes that without touching the pages.
+#if defined(_MSC_VER)
+                void* const pointer = _aligned_malloc(capacity, kPageAlignment);
+#else
                 void* const pointer = std::aligned_alloc(kPageAlignment, capacity);
+#endif
                 if (!pointer) return nullptr;
                 Block* block = nullptr;
                 try { block = new Block{pointer, capacity, bytes, PinState::Unregistered}; }
                 catch (...)
                 {
+#if defined(_MSC_VER)
+                    _aligned_free(pointer);
+#else
                     std::free(pointer);
+#endif
                     return nullptr;
                 }
 
@@ -17143,7 +17192,11 @@ namespace osuCrypto::LogVole::gpu
                 if (!recorded)
                 {
                     delete block;
+#if defined(_MSC_VER)
+                    _aligned_free(pointer);
+#else
                     std::free(pointer);
+#endif
                     return nullptr;
                 }
                 return pointer;
@@ -18748,22 +18801,21 @@ namespace osuCrypto::LogVole::gpu
                         }
                         else if (fusedLastTwoStages && vectorShoupLoads)
                         {
-                            nttInverseKernel<
-                                false, true, 4u, true, 0u, true, true><<<
+                            nttInverseFixed8192Kernel<4u, true, 0u, true, true><<<
                                 polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else if (fusedLastTwoStages)
                         {
-                            nttInverseKernel<false, true, 4u, true, 0u, true><<<
+                            nttInverseFixed8192Kernel<4u, true, 0u, true><<<
                                 polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else
                         {
-                            nttInverseKernel<false, true, 4u, true, 0u><<<
+                            nttInverseFixed8192Kernel<4u, true, 0u><<<
                                 polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
@@ -18795,22 +18847,21 @@ namespace osuCrypto::LogVole::gpu
                         }
                         else if (fusedLastTwoStages && vectorShoupLoads)
                         {
-                            nttInverseKernel<
-                                false, true, 4u, true, 2u, true, true><<<
+                            nttInverseFixed8192Kernel<4u, true, 2u, true, true><<<
                                 polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else if (fusedLastTwoStages)
                         {
-                            nttInverseKernel<false, true, 4u, true, 2u, true><<<
+                            nttInverseFixed8192Kernel<4u, true, 2u, true><<<
                                 polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else
                         {
-                            nttInverseKernel<false, true, 4u, true, 2u><<<
+                            nttInverseFixed8192Kernel<4u, true, 2u><<<
                                 polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
@@ -18841,22 +18892,21 @@ namespace osuCrypto::LogVole::gpu
                         }
                         else if (fusedLastTwoStages && vectorShoupLoads)
                         {
-                            nttInverseKernel<
-                                false, true, 4u, true, 4u, true, true><<<
+                            nttInverseFixed8192Kernel<4u, true, 4u, true, true><<<
                                 polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else if (fusedLastTwoStages)
                         {
-                            nttInverseKernel<false, true, 4u, true, 4u, true><<<
+                            nttInverseFixed8192Kernel<4u, true, 4u, true><<<
                                 polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else
                         {
-                            nttInverseKernel<false, true, 4u, true, 4u><<<
+                            nttInverseFixed8192Kernel<4u, true, 4u><<<
                                 polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
@@ -18864,7 +18914,7 @@ namespace osuCrypto::LogVole::gpu
                     }
                     else
                     {
-                        nttInverseKernel<false, true, 4u, true><<<
+                        nttInverseFixed8192Kernel<4u, true><<<
                             polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                             fusedFirstStage);
@@ -18874,28 +18924,28 @@ namespace osuCrypto::LogVole::gpu
                 {
                     if (direct && postOp == static_cast<u32>(ElemOp::Add))
                     {
-                        nttInverseKernel<false, true, 4u, false, 0u><<<
+                        nttInverseFixed8192Kernel<4u, false, 0u><<<
                             polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                             fusedFirstStage);
                     }
                     else if (direct && postOp == static_cast<u32>(ElemOp::Negate))
                     {
-                        nttInverseKernel<false, true, 4u, false, 2u><<<
+                        nttInverseFixed8192Kernel<4u, false, 2u><<<
                             polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                             fusedFirstStage);
                     }
                     else if (direct && postOp == static_cast<u32>(ElemOp::ReverseSub))
                     {
-                        nttInverseKernel<false, true, 4u, false, 4u><<<
+                        nttInverseFixed8192Kernel<4u, false, 4u><<<
                             polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                             fusedFirstStage);
                     }
                     else
                     {
-                        nttInverseKernel<false, true, 4u><<<
+                        nttInverseFixed8192Kernel<4u><<<
                             polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u);
                     }
@@ -18912,16 +18962,14 @@ namespace osuCrypto::LogVole::gpu
                 // kernel's two resident CTAs while retaining fixed indexing.
                 if (nttLog13SimpleIndexEnabled())
                 {
-                    nttInverseKernel<
-                        false, true, 4u, true, kElemOpDirectCopy><<<
+                    nttInverseFixed8192Kernel<4u, true, kElemOpDirectCopy><<<
                         static_cast<u32>(blocks), kNttThreads, shBytes, st>>>(
                         rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                         fusedFirstStage);
                 }
                 else
                 {
-                    nttInverseKernel<
-                        false, true, 4u, false, kElemOpDirectCopy><<<
+                    nttInverseFixed8192Kernel<4u, false, kElemOpDirectCopy><<<
                         static_cast<u32>(blocks), kNttThreads, shBytes, st>>>(
                         rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                         fusedFirstStage);

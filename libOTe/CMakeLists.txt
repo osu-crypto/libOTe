@@ -154,7 +154,7 @@ target_compile_definitions(libOTe PRIVATE
 
 
 if(MSVC)
-    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}> /Zi )
+    target_compile_options(libOTe PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER};/Zi>")
 else()
 
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
