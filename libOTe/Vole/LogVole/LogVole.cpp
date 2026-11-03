@@ -449,7 +449,8 @@ namespace osuCrypto::LogVole
     }
 
     static bool resolveCivoleModulusWithEvidence(
-        const CivoleParams& params, u64& out, bool* nativeBundleCommitted)
+        const CivoleParams& params, u64& out, bool* nativeBundleCommitted,
+        std::shared_ptr<const ZpCrtContext>* factoryOwner = nullptr)
     {
         ZpCrtContext ctx{};
         if (!makeZpCrtContext(
@@ -462,6 +463,8 @@ namespace osuCrypto::LogVole
         out = ctx.mPlaintextModulus;
         if (nativeBundleCommitted)
             *nativeBundleCommitted = ctx.mNativeSealBundleCommitted;
+        if (factoryOwner)
+            *factoryOwner = std::move(ctx.mFactoryOwner);
         return true;
     }
 
@@ -497,6 +500,7 @@ namespace osuCrypto
             mSetting = other.mSetting;
             mConfigureCacheRunId = other.mConfigureCacheRunId;
             mNativeSealBundleAtConfigure = other.mNativeSealBundleAtConfigure;
+            mConfigureFactoryOwner = std::move(other.mConfigureFactoryOwner);
             mKeepOutputOnDevice = other.mKeepOutputOnDevice;
             mOutputDevice = std::move(other.mOutputDevice);
             mOutputDeviceCount = other.mOutputDeviceCount;
@@ -530,6 +534,7 @@ namespace osuCrypto
             mSetting = other.mSetting;
             mConfigureCacheRunId = other.mConfigureCacheRunId;
             mNativeSealBundleAtConfigure = other.mNativeSealBundleAtConfigure;
+            mConfigureFactoryOwner = std::move(other.mConfigureFactoryOwner);
             mKeepOutputOnDevice = other.mKeepOutputOnDevice;
             mOutputDevice = std::move(other.mOutputDevice);
             mOutputDeviceCount = other.mOutputDeviceCount;
@@ -579,6 +584,7 @@ namespace osuCrypto
         CivoleParams params{};
         u64 modulus = 0;
         bool nativeBundleCommitted = false;
+        std::shared_ptr<const ZpCrtContext> factoryOwner;
         if (!makeCivoleParams(setting, params, numThreads))
         {
             throw std::runtime_error("LogVole CI-VOLE sender could not create default parameters");
@@ -586,7 +592,7 @@ namespace osuCrypto
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;
         if (!resolveCivoleModulusWithEvidence(
-                params, modulus, &nativeBundleCommitted))
+                params, modulus, &nativeBundleCommitted, &factoryOwner))
         {
             throw std::runtime_error("LogVole CI-VOLE sender could not resolve plaintext modulus");
         }
@@ -596,6 +602,7 @@ namespace osuCrypto
         mModulus = modulus;
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
+        mConfigureFactoryOwner = std::move(factoryOwner);
         mDelta = 0;
         mNumThreads = numThreads;
         mNextSid = 0;
@@ -711,6 +718,7 @@ namespace osuCrypto
         mOutputDeviceCount = 0;
         mConfigureCacheRunId = 0;
         mNativeSealBundleAtConfigure = false;
+        mConfigureFactoryOwner.reset();
     }
 
     void LogVoleReceiver::configure(
@@ -748,6 +756,7 @@ namespace osuCrypto
         CivoleParams params{};
         u64 modulus = 0;
         bool nativeBundleCommitted = false;
+        std::shared_ptr<const ZpCrtContext> factoryOwner;
         if (!makeCivoleParams(setting, params, numThreads))
         {
             throw std::runtime_error("LogVole CI-VOLE receiver could not create default parameters");
@@ -755,7 +764,7 @@ namespace osuCrypto
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;
         if (!resolveCivoleModulusWithEvidence(
-                params, modulus, &nativeBundleCommitted))
+                params, modulus, &nativeBundleCommitted, &factoryOwner))
         {
             throw std::runtime_error("LogVole CI-VOLE receiver could not resolve plaintext modulus");
         }
@@ -765,6 +774,7 @@ namespace osuCrypto
         mModulus = modulus;
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
+        mConfigureFactoryOwner = std::move(factoryOwner);
         mNumThreads = numThreads;
         mNextSid = 0;
         mLastOnlineComm = {};
@@ -909,6 +919,7 @@ namespace osuCrypto
         mOutputDeviceCount = 0;
         mConfigureCacheRunId = 0;
         mNativeSealBundleAtConfigure = false;
+        mConfigureFactoryOwner.reset();
     }
 }
 
@@ -976,24 +987,13 @@ namespace osuCrypto::LogVole
         };
 
         using ZpCache =
-            std::unordered_map<ZpCacheKey, std::shared_ptr<const ZpCrtContext>, ZpCacheKeyHash>;
+            std::unordered_map<ZpCacheKey, std::weak_ptr<const ZpCrtContext>, ZpCacheKeyHash>;
 
-        // Retain SEAL's pool until every cached context has been released.
+        // A lookup index never extends resource lifetime past its callers.
         ZpCache& zpContextCache()
         {
-            struct Owner
-            {
-                seal::MemoryPoolHandle pool = seal::MemoryPoolHandle::Global();
-                ZpCache cache;
-                Owner()
-                {
-#if defined(ENABLE_LOGVOLE_CUDA)
-                    gpu::gpuInitializeMemoryPools();
-#endif
-                }
-            };
-            static Owner owner;
-            return owner.cache;
+            static ZpCache cache;
+            return cache;
         }
         std::mutex zpContextCacheMutex;
 
@@ -1063,8 +1063,13 @@ namespace osuCrypto::LogVole
             auto it = zpContextCache().find(key);
             if (it != zpContextCache().end())
             {
-                out = *it->second;
-                return true;
+                if (auto record = it->second.lock())
+                {
+                    out = *record;
+                    out.mFactoryOwner = std::move(record);
+                    return true;
+                }
+                zpContextCache().erase(it);
             }
         }
 
@@ -1089,9 +1094,11 @@ namespace osuCrypto::LogVole
         auto shared = std::make_shared<const ZpCrtContext>(std::move(built));
         {
             std::lock_guard<std::mutex> lock(zpContextCacheMutex);
-            auto [it, inserted] = zpContextCache().emplace(std::move(key), shared);
-            (void)inserted;
-            out = *it->second;
+            auto& slot = zpContextCache()[key];
+            if (auto existing = slot.lock()) shared = std::move(existing);
+            else slot = shared;
+            out = *shared;
+            out.mFactoryOwner = std::move(shared);
         }
         return true;
     }
@@ -1213,8 +1220,8 @@ namespace osuCrypto::LogVole
             u32 selectedBits = 0;
             if (!gpu::selectSealPlainModulusDevice(ring.mPolyModulusDegree,
                     plaintextModulusBits, deviceRing->view().mMinModulus,
-                    plaintextPrime, selectedBits) ||
-                !gpu::GpuPlainNtt::getRaw(ring.mPolyModulusDegree, plaintextPrime))
+                    plaintextPrime, selectedBits, deviceRing->setupContext()) ||
+                !gpu::GpuPlainNtt::getRaw(ring.mPolyModulusDegree, plaintextPrime, deviceRing->setupContext()))
                 return false;
 
             ZpCrtContext next{};
@@ -2003,6 +2010,7 @@ namespace osuCrypto::LogVole
 
         CivoleSenderState next{};
         next.mParams = sessionParams;
+        next.mCrtFactoryOwner = ctx.mFactoryOwner;
         next.mModulus = ctx.mPlaintextModulus;
         next.mDelta = input.mDelta;
         next.mW = input.mW;
@@ -2032,10 +2040,18 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole CI-VOLE offline modes do not match");
 
         ZpCrtContext ctx{};
-        if (!makeZpCrtContext(
+        bool haveContext = false;
+        {
+            // A peer coroutine may have suspended with its legacy role scope
+            // active. Select the receiver's factory lane without carrying a
+            // thread-local scope across this coroutine's next suspension.
+            ScopedProtocolCacheScope role(ProtocolCacheRole::Receiver,
+                currentProtocolCacheScope().mRunId);
+            haveContext = makeZpCrtContext(
                 sessionParams.mLogVole.mShrinkExpand.mRing,
-                sessionParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
-                ctx))
+                sessionParams.mLogVole.mShrinkExpand.mPlaintextModulusBits, ctx);
+        }
+        if (!haveContext)
         {
             throw std::runtime_error("LogVole CI-VOLE receiver could not build CRT context");
         }
@@ -2071,6 +2087,7 @@ namespace osuCrypto::LogVole
 
         CivoleReceiverState next{};
         next.mParams = sessionParams;
+        next.mCrtFactoryOwner = ctx.mFactoryOwner;
         next.mModulus = ctx.mPlaintextModulus;
         next.mW = meta.mLabelCount;
         next.mRingWidth = params.mW;

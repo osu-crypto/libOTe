@@ -431,6 +431,7 @@ namespace osuCrypto::LogVole
 
         ShrinkExpandSenderState next{};
         next.mParams = input.mParams;
+        next.mRingFactoryOwner = ctx.mFactoryOwner;
         next.mS = input.mS;
         next.mLazyS = input.mLazyS;
         if (input.mFixedSk1Device)
@@ -704,6 +705,7 @@ namespace osuCrypto::LogVole
 
         ShrinkExpandReceiverState next{};
         next.mParams = input.mParams;
+        next.mRingFactoryOwner = ctx.mFactoryOwner;
         HostStep publicDataStep("setup receiver: public data");
         const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -828,7 +830,7 @@ namespace osuCrypto::LogVole
                 state.mLazyPublicUniformHosts))
         {
             RingNttContext ctx{};
-            if (!makeRingNttContext(state.mParams.mRing, ctx)) return;
+            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner)) return;
             ScopedProtocolCacheScope senderScope(
                 ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
@@ -895,7 +897,7 @@ namespace osuCrypto::LogVole
             ScopedProtocolCacheScope roleScope(
                 ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
-            if (!makeRingNttContext(state.mParams.mRing, ctx) ||
+            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner) ||
                 !receiverPublicHosts(ctx, state, publicA, publicB)) return;
             next.mPublicANtt = std::move(publicA);
             next.mPublicBNtt = std::move(publicB);
@@ -931,7 +933,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(state.mParams.mRing, ctx))
+        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
         {
             return false;
         }
@@ -964,7 +966,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(state.mParams.mRing, ctx))
+        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
         {
             return false;
         }
@@ -1018,7 +1020,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(state.mParams.mRing, ctx))
+        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
         {
             return false;
         }

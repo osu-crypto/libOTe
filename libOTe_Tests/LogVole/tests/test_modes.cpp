@@ -1,6 +1,7 @@
 #include "libOTe/config.h"
 #include "libOTe/Vole/LogVole/LogVole.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe_Tests/LogVole_TestUtil.h"
 #include "cryptoTools/Common/CLP.h"
 #include "coproto/Socket/LocalAsyncSock.h"
@@ -43,16 +44,32 @@ namespace
         LogVoleReceiver originalReceiver;
         originalSender.configure(count, 55, threads, setting, mode);
         originalReceiver.configure(count, 55, threads, setting, mode);
+        auto observeFactory = [](const CivoleParams& params, ProtocolCacheRole role)
+        {
+            ScopedProtocolCacheScope scope(role, 0);
+            ZpCrtContext context;
+            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mLogVole.mShrinkExpand.mRing,
+                params.mLogVole.mShrinkExpand.mPlaintextModulusBits, context));
+            return std::weak_ptr<const ZpCrtContext>(context.mFactoryOwner);
+        };
+        const auto senderFactory = observeFactory(originalSender.mParams, ProtocolCacheRole::Sender);
+        const auto receiverFactory = observeFactory(originalReceiver.mParams, ProtocolCacheRole::Receiver);
+        LOGVOLE_REQUIRE_FALSE(senderFactory.expired());
+        LOGVOLE_REQUIRE_FALSE(receiverFactory.expired());
         originalSender.mKeepOutputOnDevice = device;
         originalReceiver.mKeepOutputOnDevice = device;
         PRNG senderPrng(toBlock(100 ^ seed, 200)), receiverPrng(toBlock(300 ^ seed, 400));
         PRNG inputPrng(toBlock(500 ^ seed, 600));
         auto offline = coproto::LocalAsyncSocket::makePair();
-        auto setup = macoro::sync_wait(macoro::when_all_ready(
-            originalSender.offline(delta, senderPrng, offline[0]),
-            originalReceiver.offline(offline[1])));
-        std::get<0>(setup).result();
-        std::get<1>(setup).result();
+        {
+            auto setup = macoro::sync_wait(macoro::when_all_ready(
+                originalSender.offline(delta, senderPrng, offline[0]),
+                originalReceiver.offline(offline[1])));
+            std::get<0>(setup).result();
+            std::get<1>(setup).result();
+        }
+        LOGVOLE_REQUIRE_TRUE(originalSender.mOfflineState.mCrtFactoryOwner == senderFactory.lock());
+        LOGVOLE_REQUIRE_TRUE(originalReceiver.mOfflineState.mCrtFactoryOwner == receiverFactory.lock());
 
         // Moving an established session must retain the new backend/mode state.
         LogVoleSender sender(std::move(originalSender));
@@ -102,6 +119,8 @@ namespace
         receiver.clear();
         LOGVOLE_REQUIRE_FALSE(sender.outputDevice());
         LOGVOLE_REQUIRE_FALSE(receiver.outputDevice());
+        LOGVOLE_REQUIRE_TRUE(senderFactory.expired());
+        LOGVOLE_REQUIRE_TRUE(receiverFactory.expired());
     }
 }
 

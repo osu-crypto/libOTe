@@ -25,6 +25,22 @@
 
 namespace osuCrypto::LogVole::gpu
 {
+    // Explicit cold-setup execution domain. Copies of ring/CRT resources can
+    // retain this domain; it owns reusable per-worker streams without TLS.
+    // Callers must join all factory users before releasing their last owner.
+    class GpuSetupContext
+    {
+    public:
+        GpuSetupContext();
+        ~GpuSetupContext();
+        GpuSetupContext(const GpuSetupContext&) = delete;
+        GpuSetupContext& operator=(const GpuSetupContext&) = delete;
+        std::shared_ptr<OwnedGpuStream> stream();
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+    };
+
     bool available();
     std::string deviceDescription();
     // Returns -1 if the current CUDA device cannot be queried.
@@ -35,9 +51,9 @@ namespace osuCrypto::LogVole::gpu
     // arithmetic; only the small immutable API metadata is copied to host.
     bool dynamicSealSetupSupported(const RingParams& params);
     bool selectSealCoeffModuliDevice(const RingParams& params,
-        std::vector<u64>& orderedPrimes);
+        std::vector<u64>& orderedPrimes, std::shared_ptr<GpuSetupContext> execution = {});
     bool selectSealPlainModulusDevice(u32 n, u32 requestedBits, u64 minimumQ,
-        u64& selectedPrime, u32& selectedBits);
+        u64& selectedPrime, u32& selectedBits, std::shared_ptr<GpuSetupContext> execution = {});
     class GpuRing;
     class GpuPlainNtt;
     struct NativeSealSetupBundle;
@@ -46,7 +62,7 @@ namespace osuCrypto::LogVole::gpu
     // owners and downloads one q/p/lift/status record. No cache or caller
     // output changes on decline; the caller publishes contexts after success.
     bool buildNativeSealSetupBundleDevice(const RingParams& params,
-        u32 requestedPlaintextBits, NativeSealSetupBundle& out);
+        u32 requestedPlaintextBits, NativeSealSetupBundle& out, std::shared_ptr<GpuSetupContext> execution = {});
     bool preparePlaintextLiftDevice(const GpuRing& ring, u64 plaintextPrime,
         AlignedUnVec<u64>& residues);
 
@@ -210,7 +226,7 @@ namespace osuCrypto::LogVole::gpu
         // construct SEAL-compatible NTT, CRT, and denoise constants.
         // Returns null for unsupported/malformed parameters or CUDA failure.
         static std::shared_ptr<GpuRing> getRaw(
-            const RingParams& params, std::span<const u64> orderedPrimes);
+            const RingParams& params, std::span<const u64> orderedPrimes, std::shared_ptr<GpuSetupContext> execution = {});
         // Publish an already certified native ring into the matching raw
         // role/mode lane. Existing sequential owners stay alive for borrowers.
         static bool publishRaw(const RingParams& params,
@@ -248,15 +264,17 @@ namespace osuCrypto::LogVole::gpu
             return static_cast<bool>(mNativeSealBundleStorage);
         }
         const u64* sampleMaxMultiple() const { return mSampleMaxMultiple; }
+        const std::shared_ptr<GpuSetupContext>& setupContext() const { return mSetup; }
 
     private:
         GpuRing() = default;
         friend bool buildNativeSealSetupBundleDevice(const RingParams&,
-            u32, NativeSealSetupBundle&);
+            u32, NativeSealSetupBundle&, std::shared_ptr<GpuSetupContext>);
         bool init(const RingNttContext& ctx);
         bool initRaw(const RingParams& params, std::span<const u64> orderedPrimes);
         bool initDenoise(const RingNttContext& ctx);
 
+        std::shared_ptr<GpuSetupContext> mSetup;
         RingConstView mView{};
         DenoiseConstView mDenoise{};
         bool mDenoiseReady = false;
@@ -310,7 +328,7 @@ namespace osuCrypto::LogVole::gpu
         static std::shared_ptr<GpuPlainNtt> get(
             const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder);
         // Builds the plaintext NTT and SEAL batching permutation on the device.
-        static std::shared_ptr<GpuPlainNtt> getRaw(u32 degree, u64 plaintextPrime);
+        static std::shared_ptr<GpuPlainNtt> getRaw(u32 degree, u64 plaintextPrime, std::shared_ptr<GpuSetupContext> execution = {});
         // Admit a fully sealed private native-bundle owner into the immutable
         // role-keyed raw table cache. Call only at the host context commit
         // boundary; no table construction or D2H occurs here.
@@ -339,10 +357,11 @@ namespace osuCrypto::LogVole::gpu
     private:
         GpuPlainNtt() = default;
         friend bool buildNativeSealSetupBundleDevice(const RingParams&,
-            u32, NativeSealSetupBundle&);
+            u32, NativeSealSetupBundle&, std::shared_ptr<GpuSetupContext>);
         bool init(const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder);
         bool initRaw(u32 degree, u64 plaintextPrime);
 
+        std::shared_ptr<GpuSetupContext> mSetup;
         RingConstView mView{};
         const u32* mSlotMap = nullptr;
         const u32* mInverseSlotMap = nullptr;

@@ -140,7 +140,7 @@ namespace osuCrypto::LogVole
             u32 tauHi = 0u;
             RingNttContext ctx{};
             if (!detail::computeTauHi(state.mParams, tauHi) ||
-                !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
+                !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
             {
                 return;
             }
@@ -619,7 +619,7 @@ namespace osuCrypto::LogVole
                 if (nonInteractive)
                 {
                     HostStep step("root: derive public response", state.mParams.mW);
-                    if (!deriveNonInteractiveRootResponse(state.mParams, digestState.mDPrime, response))
+                    if (!deriveNonInteractiveRootResponse(state.mParams, digestState.mDPrime, response, state.mShrinkExpandState.mRingFactoryOwner))
                         throw std::runtime_error("LogVole receiver could not derive non-interactive response");
                 }
                 else
@@ -838,7 +838,7 @@ namespace osuCrypto::LogVole
         {
             HostStep step("lvl: denoiseAndAgg", state.mParams.mW);
             RingNttContext gpuCtx{};
-            if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, gpuCtx))
+            if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, gpuCtx, state.mShrinkExpandState.mRingFactoryOwner))
             {
                 throw std::runtime_error("LogVole receiver could not build ring context");
             }

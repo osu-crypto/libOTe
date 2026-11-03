@@ -936,7 +936,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(state.mParams.mRing, ctx))
+        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
         {
             throw std::runtime_error("LogVole sender could not build ring context");
         }

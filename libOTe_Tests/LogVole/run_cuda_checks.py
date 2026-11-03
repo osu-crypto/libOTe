@@ -29,7 +29,7 @@ def main():
         "Cpu_GpuZkMatMulSeededInputsMatchReference",
         "RingOps_PartyCachesDoNotAlias", "RingOps_ScalarUploadLifetimeAndRoleSwitch",
         "RingOps_GpuBufferResizeBounds", "RingOps_GpuMemoryPoolLifecycle", "RingOps_GpuStreamStagingLifetime", "Encoding_PinnedWireBufferOwnership", "Encoding_RootResidentWireExact",
-        "RingOps_GaussianPrefixBatchParity",
+        "RingOps_GaussianPrefixBatchParity", "NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns",
         "Civole_RejectsZeroDelta", "Civole_RejectsPeerOfflineWidth",
         "Civole_StateMachineAutoOfflineSequentialSids",
         "KeyDeriveCoproto_OversizedFramesRejectedBeforeAllocation",
@@ -46,13 +46,14 @@ def main():
                                       "-lvCount", str(count), "-lvRounds", "2",
                                       "-lvRandom", "1"]))
     # One CPU control per setting; GPU cases above exercise all three modes.
-    jobs.append(("cpu-control", ["-u", "LogVole_Modes_InteractiveGolden",
-                                  "LogVole_Modes_NonInteractive", "-gpu", "0",
-                                  "-lvCount", "8193", "-lvRounds", "2", "-lvRandom", "1"]))
+    # CPU controls build real SEAL contexts and need their own cold-start bound.
+    for name, test in (("golden", "InteractiveGolden"), ("noninteractive", "NonInteractive")):
+        jobs.append(("cpu-control-" + name, ["-u", "LogVole_Modes_" + test, "-gpu", "0",
+                                          "-lvCount", "8193", "-lvRounds", "2", "-lvRandom", "1"]))
     started = time.monotonic()
     results = []
     for name, options in jobs:
-        remaining = 45 - (time.monotonic() - started)
+        remaining = 90 - (time.monotonic() - started)
         if remaining <= 0:
             results.append(dict(name=name, exit_code=124, reason="suite time budget exhausted"))
             break
@@ -63,7 +64,8 @@ def main():
             log.flush()
             try:
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
-                                        timeout=min(20, remaining))
+                                        timeout=min(40 if name.startswith("cpu-control-") else 20,
+                                                    remaining))
                 code = result.returncode
             except subprocess.TimeoutExpired:
                 code = 124

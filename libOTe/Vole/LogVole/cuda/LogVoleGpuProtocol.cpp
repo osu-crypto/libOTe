@@ -8553,7 +8553,7 @@ namespace osuCrypto::LogVole::gpu
         {
             if (zp.mGpuLightweight)
                 return GpuPlainNtt::getRaw(
-                    zp.mRing.mParams.mPolyModulusDegree, zp.mPlaintextModulus);
+                    zp.mRing.mParams.mPolyModulusDegree, zp.mPlaintextModulus, zp.mRing.mGpuSetup);
             if (!zp.mBatchingContext || !zp.mBatchEncoder) return nullptr;
             return GpuPlainNtt::get(*zp.mBatchingContext, *zp.mBatchEncoder);
         }

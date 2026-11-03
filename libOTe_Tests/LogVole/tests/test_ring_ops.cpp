@@ -405,6 +405,78 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
     if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     ScopedEnvironmentValue overlap("LV_GPU_SETUP_INIT_OVERLAP", "1");
     ScopedEnvironmentValue deferred("LV_GPU_DEFER_GOLDEN_VALIDATION", "1");
+    {
+        auto execution = std::make_shared<gpu::GpuSetupContext>();
+        std::weak_ptr<gpu::GpuSetupContext> contextOwner = execution;
+        auto first = execution->stream();
+        LOGVOLE_REQUIRE_TRUE(execution->stream() == first);
+        {
+            gpu::GpuSetupContext independent;
+            LOGVOLE_REQUIRE_TRUE(independent.stream()->raw() != first->raw());
+        }
+        gpu::OwnedGpuBuffer exported(first, 31);
+        std::weak_ptr<gpu::OwnedGpuStream> producer = first;
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(exported.data(), exported.size(), first->raw()));
+        first.reset();
+        std::weak_ptr<gpu::OwnedGpuStream> workerStream;
+        std::packaged_task<void()> task([&] {
+            auto worker = execution->stream();
+            workerStream = worker;
+            LOGVOLE_REQUIRE_TRUE(worker != exported.stream());
+            LOGVOLE_REQUIRE_TRUE(worker->memory() == exported.stream()->memory());
+            std::vector<std::uint64_t> primes;
+            LOGVOLE_REQUIRE_TRUE(gpu::selectSealCoeffModuliDevice(make_small_params(), primes, execution));
+            LOGVOLE_REQUIRE_EQ(primes.size(), std::size_t(2));
+        });
+        auto completed = task.get_future();
+        std::thread worker(std::move(task));
+        worker.join();
+        completed.get();
+        // No TLS retirement/collection is involved. The context owns the idle
+        // worker stream, and exported storage independently retains its producer.
+        LOGVOLE_REQUIRE_TRUE(!workerStream.expired());
+        execution.reset();
+        LOGVOLE_REQUIRE_TRUE(contextOwner.expired() && workerStream.expired());
+        LOGVOLE_REQUIRE_TRUE(!producer.expired());
+        std::array<std::uint8_t, 31> fetched{};
+        fetched.fill(0xff);
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), exported.data(), fetched.size(), exported.stream()->raw()));
+        exported.stream()->synchronize();
+        LOGVOLE_REQUIRE_TRUE(std::all_of(fetched.begin(), fetched.end(), [](auto v) { return v == 0; }));
+        exported.reset();
+        LOGVOLE_REQUIRE_TRUE(producer.expired());
+    }
+    // A process-wide lookup index must not keep factory resources alive.
+    // Reuse is preserved while caller contexts retain their immutable record.
+    std::weak_ptr<const RingNttContext> ringRecord;
+    std::weak_ptr<const ZpCrtContext> crtRecord;
+    {
+        ScopedGpuEnabled cpu(false);
+        RingParams unique{};
+        unique.mPolyModulusDegree = 2048;
+        assignValues<int>(unique.mCoeffModulusBits, {26, 27, 28});
+        RingNttContext first, second;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(unique, first));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(unique, second));
+        LOGVOLE_REQUIRE_TRUE(first.mFactoryOwner && first.mFactoryOwner == second.mFactoryOwner);
+        ringRecord = first.mFactoryOwner;
+        second = {};
+        {
+            ScopedProtocolCacheScope otherRole(
+                currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender
+                    ? ProtocolCacheRole::Receiver : ProtocolCacheRole::Sender, 0);
+            // The caller's explicit record takes precedence over an ambient
+            // worker role, even when the output also supplies its sole owner.
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(unique, first, first.mFactoryOwner));
+            LOGVOLE_REQUIRE_TRUE(first.mFactoryOwner == ringRecord.lock());
+        }
+        ZpCrtContext crt, again;
+        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(unique, 19, crt));
+        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(unique, 19, again));
+        LOGVOLE_REQUIRE_TRUE(crt.mFactoryOwner && crt.mFactoryOwner == again.mFactoryOwner);
+        crtRecord = crt.mFactoryOwner;
+    }
+    LOGVOLE_REQUIRE_TRUE(ringRecord.expired() && crtRecord.expired());
     for (unsigned round = 0; round != 2; ++round)
     {
         RingNttContext context;

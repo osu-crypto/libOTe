@@ -801,24 +801,13 @@ namespace osuCrypto::LogVole
         };
 
         using RingContextCache = std::
-            unordered_map<RingContextCacheKey, std::shared_ptr<const RingNttContext>, RingContextCacheKeyHash>;
+            unordered_map<RingContextCacheKey, std::weak_ptr<const RingNttContext>, RingContextCacheKeyHash>;
 
-        // Retain SEAL's pool until every cached context has been released.
+        // A lookup index never extends resource lifetime past its callers.
         RingContextCache& ringContextCache()
         {
-            struct Owner
-            {
-                seal::MemoryPoolHandle pool = seal::MemoryPoolHandle::Global();
-                RingContextCache cache;
-                Owner()
-                {
-#if defined(ENABLE_LOGVOLE_CUDA)
-                    gpu::gpuInitializeMemoryPools();
-#endif
-                }
-            };
-            static Owner owner;
-            return owner.cache;
+            static RingContextCache cache;
+            return cache;
         }
         std::mutex ringContextCacheMutex;
 
@@ -850,8 +839,13 @@ namespace osuCrypto::LogVole
             auto it = ringContextCache().find(key);
             if (it != ringContextCache().end())
             {
-                out = *it->second;
-                return true;
+                if (auto record = it->second.lock())
+                {
+                    out = *record;
+                    out.mFactoryOwner = std::move(record);
+                    return true;
+                }
+                ringContextCache().erase(it);
             }
         }
 
@@ -861,15 +855,19 @@ namespace osuCrypto::LogVole
             HostStep contextStep("setup: lightweight ring context");
             const auto primes = productionRingModuli(params);
             built.mParams = params;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>();
+#endif
             auto metadata = std::make_shared<RingModulusMetadata>();
             if (!primes.empty()) metadata->mValues.assign(primes.begin(), primes.end());
             else
             {
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (!gpu::selectSealCoeffModuliDevice(params, metadata->mValues)) return false;
+                if (!gpu::selectSealCoeffModuliDevice(params, metadata->mValues, built.mGpuSetup)) return false;
                 metadata->mDynamicGpuCertificate =
-                    gpu::GpuRing::getRaw(params, metadata->mValues);
+                    gpu::GpuRing::getRaw(params, metadata->mValues, built.mGpuSetup);
                 if (!metadata->mDynamicGpuCertificate) return false;
+                built.mGpuSetup = metadata->mDynamicGpuCertificate->setupContext();
 #else
                 return false;
 #endif
@@ -891,9 +889,11 @@ namespace osuCrypto::LogVole
         auto shared = std::make_shared<const RingNttContext>(built);
         {
             std::lock_guard<std::mutex> lock(ringContextCacheMutex);
-            auto [it, inserted] = ringContextCache().emplace(std::move(key), shared);
-            (void)inserted;
-            out = *it->second;
+            auto& slot = ringContextCache()[key];
+            if (auto existing = slot.lock()) shared = std::move(existing);
+            else slot = shared;
+            out = *shared;
+            out.mFactoryOwner = std::move(shared);
         }
         return true;
     }
@@ -910,6 +910,23 @@ namespace osuCrypto::LogVole
                 (gpu::dynamicSealSetupSupported(params) && gpu::currentDeviceOrdinal() == 0));
 #endif
         return makeRingNttContextCached(params, out, lightweight);
+    }
+
+    bool makeRingNttContext(const RingParams& params, RingNttContext& out,
+        const std::shared_ptr<const RingNttContext>& retained)
+    {
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (gpu::enabled()) return makeRingNttContext(params, out);
+#endif
+        if (retained && !retained->mGpuLightweight && retained->mParams == params)
+        {
+            // retained may refer to out.mFactoryOwner itself.
+            auto owner = retained;
+            out = *owner;
+            out.mFactoryOwner = std::move(owner);
+            return true;
+        }
+        return makeRingNttContext(params, out);
     }
 
     bool makeGpuRingNttContext(const RingParams& params, RingNttContext& out)
@@ -947,6 +964,7 @@ namespace osuCrypto::LogVole
         metadata->mValues.assign(orderedPrimes.begin(), orderedPrimes.end());
         metadata->mBitCounts.assign(params.mCoeffModulusBits.begin(),
             params.mCoeffModulusBits.end());
+        built.mGpuSetup = certificate->setupContext();
         metadata->mDynamicGpuCertificate = std::move(certificate);
         built.mRawModuli = std::move(metadata);
         built.mGpuLightweight = true;
@@ -967,7 +985,7 @@ namespace osuCrypto::LogVole
 #endif
     }
 
-    bool publishNativeGpuRingNttContext(const RingNttContext& ready)
+    bool publishNativeGpuRingNttContext(RingNttContext& ready)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         HostStep publicationStep("setup: native ring context publication");
@@ -988,7 +1006,10 @@ namespace osuCrypto::LogVole
             key.mGpuLightweight = true;
             key.mExpandModChain = false;
             key.mNativeSealBundleRequested = true;
-            auto shared = std::make_shared<const RingNttContext>(ready);
+            RingNttContext record = ready;
+            record.mFactoryOwner.reset();
+            auto shared = std::make_shared<const RingNttContext>(std::move(record));
+            ready.mFactoryOwner = shared;
             std::lock_guard<std::mutex> lock(ringContextCacheMutex);
             if (auto it = ringContextCache().find(key);
                 it != ringContextCache().end())

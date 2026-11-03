@@ -354,7 +354,8 @@ namespace osuCrypto::LogVole
     bool deriveNonInteractiveRootResponse(
         const Params& params,
         const RnsPoly& dPrime,
-        RootResponseMessage& response);
+        RootResponseMessage& response,
+        const std::shared_ptr<const RingNttContext>& retained = {});
 
     // `preSampledKPrime`, when non-null, is used instead of drawing k'_Rt here.
     // k'_Rt does not depend on the receiver's digest, so the caller can draw it

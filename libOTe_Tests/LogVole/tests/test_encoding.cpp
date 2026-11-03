@@ -301,12 +301,10 @@ namespace
             for (const auto& poly : mHost.mPolys)
                 coefficients.insert(coefficients.end(), poly.mCoeffs.begin(), poly.mCoeffs.end());
             mBytes = coefficients.size() * sizeof(std::uint64_t);
-            void* allocation = gpu::gpuMalloc(mBytes);
-            if (!allocation) throw std::runtime_error("Root wire test device allocation failed");
-            mDevice = std::shared_ptr<void>(allocation, [](void* p) { gpu::gpuFree(p); });
             gpu::GpuStream stream;
+            mDevice = gpu::OwnedGpuBuffer(stream.allocationOwner(), mBytes);
             if (!stream.raw() || !gpu::uploadSetupWire(
-                    mDevice.get(), {reinterpret_cast<const std::uint8_t*>(coefficients.data()), mBytes}, stream) || !stream.sync())
+                    mDevice.data(), {reinterpret_cast<const std::uint8_t*>(coefficients.data()), mBytes}, stream) || !stream.sync())
                 throw std::runtime_error("Root wire test device upload failed");
         }
 
@@ -321,8 +319,10 @@ namespace
             ++mCopyRequests;
             if (!mAllowCopy || destination.size() != mBytes) return false;
             gpu::GpuStream stream;
-            return stream.raw() && gpu::downloadSetupWire(
-                destination, mDevice.get(), stream) && stream.sync();
+            if (!stream.raw()) return false;
+            mDevice.handoff(stream.allocationOwner());
+            return gpu::downloadSetupWire(
+                destination, mDevice.data(), stream) && stream.sync();
         }
 
         std::size_t hostRequests() const { return mHostRequests; }
@@ -330,7 +330,7 @@ namespace
 
     private:
         RingTensor mHost;
-        std::shared_ptr<void> mDevice;
+        mutable gpu::OwnedGpuBuffer mDevice;
         std::size_t mBytes = 0;
         bool mAllowCopy = true;
         mutable std::size_t mHostRequests = 0;
@@ -1285,20 +1285,16 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
 
         gpu::GpuStream transferStream;
         LOGVOLE_REQUIRE_TRUE(transferStream.raw() != nullptr);
-        struct DeviceAllocation
-        {
-            void* mPointer = nullptr;
-            ~DeviceAllocation() { gpu::gpuFree(mPointer); }
-        } device{gpu::gpuMalloc(bytes)};
-        LOGVOLE_REQUIRE_TRUE(device.mPointer != nullptr);
+        gpu::OwnedGpuBuffer device(transferStream.allocationOwner(), bytes);
+        LOGVOLE_REQUIRE_TRUE(device.data() != nullptr);
         LOGVOLE_REQUIRE_TRUE(
-            gpu::gpuMemsetZero(device.mPointer, bytes, transferStream.raw()));
+            gpu::gpuMemsetZero(device.data(), bytes, transferStream.raw()));
         {
             // The opt-out keeps this fresh, active pool-owned destination
             // pageable and exercises the bounded staged D2H fallback.
             ScopedEnvironmentValue stagedDownload("LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD", "0");
             LOGVOLE_REQUIRE_TRUE(
-                gpu::downloadSetupWire(buffer.wireView(), device.mPointer, transferStream));
+                gpu::downloadSetupWire(buffer.wireView(), device.data(), transferStream));
             LOGVOLE_EXPECT_FALSE(memory->isPinned(buffer.data(), buffer.size()));
             LOGVOLE_EXPECT_EQ(buffer.front(), 0);
             LOGVOLE_EXPECT_EQ(buffer.back(), 0);
@@ -1307,7 +1303,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         // can fill the Buffer directly. Later H2D and repeated D2H retain the
         // exact byte and lifetime checks below.
         LOGVOLE_REQUIRE_TRUE(
-            gpu::downloadSetupWire(buffer.wireView(), device.mPointer, transferStream));
+            gpu::downloadSetupWire(buffer.wireView(), device.data(), transferStream));
         LOGVOLE_REQUIRE_TRUE(memory->isPinned(buffer.data(), buffer.size()));
         LOGVOLE_EXPECT_EQ(buffer.front(), 0);
         LOGVOLE_EXPECT_EQ(buffer.back(), 0);
@@ -1315,11 +1311,11 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         std::fill(buffer.begin(), buffer.end(), 0x3c);
         buffer.back() = 0xa7;
         LOGVOLE_REQUIRE_TRUE(
-            gpu::uploadSetupWire(device.mPointer, buffer.wireView(), transferStream));
+            gpu::uploadSetupWire(device.data(), buffer.wireView(), transferStream));
         LOGVOLE_REQUIRE_TRUE(memory->isPinned(buffer.data(), buffer.size()));
         std::fill(buffer.begin(), buffer.end(), 0);
         LOGVOLE_REQUIRE_TRUE(
-            gpu::downloadSetupWire(buffer.wireView(), device.mPointer, transferStream));
+            gpu::downloadSetupWire(buffer.wireView(), device.data(), transferStream));
         LOGVOLE_EXPECT_EQ(buffer.front(), 0x3c);
         LOGVOLE_EXPECT_EQ(buffer.back(), 0xa7);
 

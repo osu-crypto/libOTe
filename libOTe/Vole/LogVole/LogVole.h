@@ -30,6 +30,9 @@ namespace osuCrypto::LogVole
     // the concrete prime used by a session.
     struct ZpCrtContext
     {
+        // Caller values retain the immutable factory record; lookup indices are weak.
+        // The record itself leaves this field empty, preventing a self-cycle.
+        std::shared_ptr<const ZpCrtContext> mFactoryOwner;
         RingNttContext mRing;
         u32 mPlaintextModulusBits = 0;
         u64 mPlaintextModulus = 0;
@@ -112,6 +115,7 @@ namespace osuCrypto::LogVole
     struct CivoleSenderState
     {
         CivoleParams mParams;
+        std::shared_ptr<const ZpCrtContext> mCrtFactoryOwner;
         u64 mModulus = 0;
         u64 mDelta = 0;
         u64 mW = 0;
@@ -129,6 +133,7 @@ namespace osuCrypto::LogVole
     struct CivoleReceiverState
     {
         CivoleParams mParams;
+        std::shared_ptr<const ZpCrtContext> mCrtFactoryOwner;
         u64 mModulus = 0;
         u64 mW = 0;
         u32 mRingWidth = 0;
@@ -305,6 +310,8 @@ namespace osuCrypto
         void clear();
 
     private:
+        // Keep configure-time tables reusable until reconfiguration or clear().
+        std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         u64 mConfigureCacheRunId = 0;
         bool mNativeSealBundleAtConfigure = false;
     };
@@ -397,6 +404,8 @@ namespace osuCrypto
         void clear();
 
     private:
+        // Keep configure-time tables reusable until reconfiguration or clear().
+        std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         u64 mConfigureCacheRunId = 0;
         bool mNativeSealBundleAtConfigure = false;
     };

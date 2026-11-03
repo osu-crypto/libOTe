@@ -15,7 +15,7 @@
 
 namespace osuCrypto::LogVole
 {
-    namespace gpu { class DeviceScalars; class RetainedPublicUniform; class GpuRing; }
+    namespace gpu { class DeviceScalars; class RetainedPublicUniform; class GpuRing; class GpuSetupContext; }
     struct RingOpsStats
     {
         static inline std::atomic<u64> resetEpoch{ 0u };
@@ -111,7 +111,12 @@ namespace osuCrypto::LogVole
 
     struct RingNttContext
     {
+        // Caller values retain the immutable factory record; lookup indices are weak.
+        // The record itself leaves this field empty, preventing a self-cycle.
+        std::shared_ptr<const RingNttContext> mFactoryOwner;
         RingParams mParams;
+        // Resource domain only; it never owns or refers back to ring caches.
+        std::shared_ptr<gpu::GpuSetupContext> mGpuSetup;
         // Legacy host storage. Lightweight contexts keep this empty; explicit
         // host access materializes SEAL objects in the shared fallback owner.
         std::vector<seal::Modulus> mModuli;
@@ -137,6 +142,10 @@ namespace osuCrypto::LogVole
     bool validateRingBatchShape(const std::vector<RnsPoly>& polys, const RingParams& params);
     bool validateRingBatchShape(std::span<const RnsPoly> polys, const RingParams& params);
     bool makeRingNttContext(const RingParams& params, RingNttContext& out);
+    // Reuse an explicitly retained CPU record across coroutine/worker role
+    // changes. A backend change still goes through the normal factory.
+    bool makeRingNttContext(const RingParams& params, RingNttContext& out,
+        const std::shared_ptr<const RingNttContext>& retained);
     // Production tuples use audited metadata without device work. Other raw
     // GPU-supported tuples construct and certify metadata on the device before
     // publication. Unsupported parameters leave out unchanged.
@@ -149,7 +158,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<gpu::GpuRing> certificate, RingNttContext& out);
     // Admit a validated native certificate into the standalone role-local
     // Ring factory after its combined CRT setup has fully committed.
-    bool publishNativeGpuRingNttContext(const RingNttContext& ready);
+    bool publishNativeGpuRingNttContext(RingNttContext& ready);
     // Explicit, cached exact CPU fallback. Never changes a lightweight context
     // into the legacy null-context sampler or publishes through mContext.
     std::shared_ptr<seal::SEALContext> getRingHostContext(const RingNttContext& ctx);

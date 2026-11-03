@@ -706,7 +706,7 @@ namespace osuCrypto::LogVole
         bool sampleRootKPrime(const SenderState& state, PRNG& prng, RnsPoly& out)
         {
             RingNttContext ctx{};
-            if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
+            if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
             {
                 return false;
             }
@@ -2563,7 +2563,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
+        if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
         {
             return false;
         }
@@ -3040,12 +3040,13 @@ namespace osuCrypto::LogVole
     bool deriveNonInteractiveRootResponse(
         const Params& params,
         const RnsPoly& dPrime,
-        RootResponseMessage& response)
+        RootResponseMessage& response,
+        const std::shared_ptr<const RingNttContext>& retained)
     {
         RingNttContext ctx{};
         if (params.mOnlineMode != OnlineMode::NonInteractive ||
             params.mCt2SeedMode != Ct2SeedMode::PublicSeed ||
-            !makeRingNttContext(params.mShrinkExpand.mRing, ctx) ||
+            !makeRingNttContext(params.mShrinkExpand.mRing, ctx, retained) ||
             !validateRingPolyShape(dPrime, ctx.mParams)) return false;
         const u64 degree = ctx.mParams.mPolyModulusDegree;
         for (std::size_t limb = 0; limb < ringModulusCount(ctx); ++limb)
@@ -3123,7 +3124,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
+        if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
         {
             return false;
         }
@@ -3176,7 +3177,7 @@ namespace osuCrypto::LogVole
             if (nonInteractive)
             {
                 RootResponseMessage oracle{};
-                if (!deriveNonInteractiveRootResponse(state.mParams, dPrime, oracle)) return false;
+                if (!deriveNonInteractiveRootResponse(state.mParams, dPrime, oracle, state.mShrinkExpandState.mRingFactoryOwner)) return false;
                 skPrime.mCoeffs = std::move(oracle.mSkPrimeCoeffs);
             }
             else if (preSampledKPrime)
@@ -3366,7 +3367,7 @@ namespace osuCrypto::LogVole
         if (deviceOut && gpu::rootKPrimeSamplingEnabled())
         {
             RingNttContext ctx{};
-            if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx)) return false;
+            if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner)) return false;
             const bool production =
                 (ctx.mParams.mPolyModulusDegree == 16384u && ringModulusCount(ctx) == 8u) ||
                 (ctx.mParams.mPolyModulusDegree == 8192u && ringModulusCount(ctx) == 4u);
@@ -3439,7 +3440,7 @@ namespace osuCrypto::LogVole
         const u32 leftWidth = rootLeftWidth(tauHi, rho);
         RingNttContext ctx{};
         if (rho == 0 ||
-            !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
+            !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
         {
             return false;
         }
@@ -3545,7 +3546,7 @@ namespace osuCrypto::LogVole
                         std::static_pointer_cast<gpu::DeviceBatch>(
                             state.mRootKPrimeRtDevice);
                     bool rootOkDev = rootPublicSeed || deferRootValidation;
-                    if (makeRingNttContext(state.mParams.mShrinkExpand.mRing, rootCtx) &&
+                    if (makeRingNttContext(state.mParams.mShrinkExpand.mRing, rootCtx, state.mShrinkExpandState.mRingFactoryOwner) &&
                         gpu::rootSenderTbkDevice(
                             state.mShrinkExpandState, rootCtx, seed, state.mParams.mSessionId,
                             *state.mRootDPrimeRt, state.mRootDPrimeHash, *state.mRootKPrimeRt,
@@ -3706,7 +3707,7 @@ namespace osuCrypto::LogVole
             {
                 HostStep step("send: level expand (device)", state.mParams.mW);
                 RingNttContext gpuCtx{};
-                if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, gpuCtx))
+                if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, gpuCtx, state.mShrinkExpandState.mRingFactoryOwner))
                 {
                     return false;
                 }
@@ -3969,7 +3970,7 @@ namespace osuCrypto::LogVole
                 gpu::deferredGoldenValidationEnabled())
             {
                 RingNttContext ctx{};
-                if (makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx) &&
+                if (makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner) &&
                     gpu::beginGoldenValidationAttempt(ctx))
                 {
                     RecursiveSeedEvalOutput deferred{};
@@ -4229,6 +4230,7 @@ namespace osuCrypto::LogVole
         void copySetupMetadata(const State& source, State& destination)
         {
             destination.mParams = source.mParams;
+            destination.mRingFactoryOwner = source.mRingFactoryOwner;
             destination.mPublicANtt = source.mPublicANtt;
             destination.mPublicBNtt = source.mPublicBNtt;
             if constexpr (requires { source.mPublicANttDevice; })
@@ -5132,7 +5134,7 @@ namespace osuCrypto::LogVole
             u32 muHiDev = 0;
             RingNttContext devCtx{};
             if (!computeMuHi(state.mParams, muHiDev) ||
-                !makeRingNttContext(state.mParams.mShrinkExpand.mRing, devCtx))
+                !makeRingNttContext(state.mParams.mShrinkExpand.mRing, devCtx, state.mShrinkExpandState.mRingFactoryOwner))
             {
                 return false;
             }
@@ -5302,7 +5304,7 @@ namespace osuCrypto::LogVole
         const bool haveDeviceTree = static_cast<bool>(digestState.mLeftTreeGpu);
         if (rho == 0 ||
             (!haveHostHatD && !haveDeviceTree) ||
-            !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx))
+            !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
         {
             return false;
         }

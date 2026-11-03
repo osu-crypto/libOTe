@@ -13,6 +13,7 @@
 
 namespace osuCrypto::LogVole
 {
+    struct RingNttContext;
     namespace gpu { class DeviceBatch; class RetainedPublicUniform; }
 
     template<typename T>
@@ -247,6 +248,8 @@ namespace osuCrypto::LogVole
     struct ShrinkExpandSenderState
     {
         ShrinkExpandParams mParams;
+        // Retain factory resources across offline/online operations and copies.
+        std::shared_ptr<const RingNttContext> mRingFactoryOwner;
         std::vector<RnsPoly> mS;
         std::shared_ptr<const LazySeedLabelHostState> mLazyS;
         std::vector<RnsPoly> mR;
@@ -298,6 +301,8 @@ namespace osuCrypto::LogVole
     struct ShrinkExpandReceiverState
     {
         ShrinkExpandParams mParams;
+        // Retain factory resources across offline/online operations and copies.
+        std::shared_ptr<const RingNttContext> mRingFactoryOwner;
         std::shared_ptr<const std::vector<RnsPoly>> mPublicANtt;
         std::shared_ptr<const std::vector<RnsPoly>> mPublicBNtt;
         // Internal transport setup can retain deterministic public operands on
