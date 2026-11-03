@@ -1112,6 +1112,8 @@ namespace osuCrypto::LogVole::gpu
     // `maxMultipleIsSealDefault` is provenance, not a value comparison. False
     // keeps custom/forced thresholds on the accepted sampler; true permits the
     // default-off pseudo55 preflight when every other production gate matches.
+    // Non-fused routes borrow roots through stream completion. Fused routes
+    // accept null root/prefix scratch and perform no allocation here.
     bool launchSampleUniformPolyBlake2xb(
         const RingConstView& rc,
         const u64* seeds,
@@ -1124,5 +1126,7 @@ namespace osuCrypto::LogVole::gpu
         u32* rejectEpochs,
         u32 rejectEpoch,
         bool maxMultipleIsSealDefault,
+        u64* roots,
+        std::size_t rootCapacityWords,
         void* stream);
 }

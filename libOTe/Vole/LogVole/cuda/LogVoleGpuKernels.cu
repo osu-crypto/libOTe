@@ -21716,8 +21716,8 @@ namespace osuCrypto::LogVole::gpu
             return !gpuFusedSamplerActive(rc.mN, streamWords, outCount);
         }
 
-        // A pure preflight is the only soft-decline boundary. Once root storage
-        // is acquired, failures are terminal: falling through would enqueue an
+        // A pure preflight is the only soft-decline boundary. Once accepted,
+        // workspace/launch failures are terminal: falling through would enqueue an
         // accepted writer against partially committed candidate work.
         SmallSampleDirectTryResult tryLaunchSmallSampleDirect(
             const RingConstView& rc,
@@ -21731,6 +21731,8 @@ namespace osuCrypto::LogVole::gpu
             u32 rejectEpoch,
             bool maxMultipleIsSealDefault,
             bool allowCustomThresholdForTest,
+            u64* roots,
+            std::size_t rootCapacityWords,
             void* stream)
         {
             if (!smallSampleDirectPreflight(
@@ -21744,9 +21746,8 @@ namespace osuCrypto::LogVole::gpu
             constexpr u32 kThreads = 128u;
             const std::size_t rootWords =
                 static_cast<std::size_t>(outCount) * kRootsPerPoly * 8u;
-            u64* const roots =
-                static_cast<u64*>(gpuMalloc(rootWords * sizeof(u64)));
-            if (!roots) return SmallSampleDirectTryResult::CommittedFailure;
+            if (!roots || rootCapacityWords < rootWords)
+                return SmallSampleDirectTryResult::CommittedFailure;
 
             const cudaStream_t st = asStream(stream);
             prngRootKernel<<<
@@ -21755,7 +21756,6 @@ namespace osuCrypto::LogVole::gpu
                 seeds, roots, outCount, kRootsPerPoly);
             if (!check(cudaGetLastError(), "smallSampleDirectRoot"))
             {
-                gpuFree(roots);
                 return SmallSampleDirectTryResult::CommittedFailure;
             }
 
@@ -21767,8 +21767,6 @@ namespace osuCrypto::LogVole::gpu
                 rejectEpochs, rejectEpoch);
             const bool directOk =
                 check(cudaGetLastError(), "smallSampleDirectReduce");
-            // gpuFree is ordered behind the producer on the owning stream.
-            gpuFree(roots);
             if (!directOk)
                 return SmallSampleDirectTryResult::CommittedFailure;
 
@@ -21794,6 +21792,8 @@ namespace osuCrypto::LogVole::gpu
         u32* rejectEpochs,
         u32 rejectEpoch,
         bool maxMultipleIsSealDefault,
+        u64* roots,
+        std::size_t rootCapacityWords,
         void* stream)
     {
         if (outCount == 0) return true;
@@ -21804,7 +21804,7 @@ namespace osuCrypto::LogVole::gpu
             tryLaunchSmallSampleDirect(
                 rc, seeds, streamWords, maxMultiple, out, outIdx, outCount,
                 rejectEpochs, rejectEpoch, maxMultipleIsSealDefault, false,
-                stream);
+                roots, rootCapacityWords, stream);
         if (smallDirectResult ==
             SmallSampleDirectTryResult::CommittedSuccess)
             return true;
@@ -21969,32 +21969,21 @@ namespace osuCrypto::LogVole::gpu
         if (!scratch) return false;
 
         {
-            const u32 buffersPerStream = (streamWords + kPrngBufferWords - 1u) / kPrngBufferWords;
-
-            // Roots live in a slice at the end of the caller's scratch buffer is
-            // not possible (it is exactly sized), so a small pooled allocation
-            // is used; the caching allocator makes this free after the first
-            // call.
-            const std::size_t rootWords =
-                static_cast<std::size_t>(outCount) * buffersPerStream * 8;
-            u64* roots = static_cast<u64*>(gpuMalloc(rootWords * sizeof(u64)));
-            if (!roots) return false;
+            const u32 buffersPerStream = streamWords / kPrngBufferWords +
+                (streamWords % kPrngBufferWords != 0u);
+            if (!roots || rootCapacityWords < blake2xbRootScratchWords(streamWords, outCount))
+                return false;
 
             prngRootKernel<<<grid2D(buffersPerStream, outCount, 128), 128, 0, st>>>(
                 seeds, roots, outCount, buffersPerStream);
             if (!check(cudaGetLastError(), "prngRoot"))
             {
-                gpuFree(roots);
                 return false;
             }
 
             prngBlockKernel<<<grid2D(buffersPerStream * kPrngBlocksPerBuffer, outCount, 128), 128, 0, st>>>(
                 roots, scratch, outCount, streamWords, buffersPerStream);
             const bool ok = check(cudaGetLastError(), "prngBlock");
-            // Release without draining: gpuFree is stream ordered (cudaFreeAsync),
-            // so the block cannot be reissued until the kernels above have
-            // finished with it. This used to synchronise on every sampling call.
-            gpuFree(roots);
             if (!ok) return false;
         }
 

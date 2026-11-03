@@ -82,6 +82,7 @@
     X(RingOps, PartyCachesDoNotAlias) \
     X(RingOps, ScalarUploadLifetimeAndRoleSwitch) \
     X(RingOps, GpuMemoryPoolLifecycle) \
+    X(RingOps, UniformSamplerScratchOwnership) \
     X(RingOps, GpuStreamStagingLifetime) \
     X(RingOps, GpuBufferResizeBounds) \
     X(RingOps, LightweightProductionContexts) \

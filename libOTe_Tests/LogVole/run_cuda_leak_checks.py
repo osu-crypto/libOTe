@@ -32,6 +32,7 @@ def main():
     jobs = [
         ("owned-lifetimes", None),
         ("pool-lifecycle", ["LogVole_RingOps_GpuMemoryPoolLifecycle",
+                            "LogVole_RingOps_UniformSamplerScratchOwnership",
                             "LogVole_RingOps_GpuStreamStagingLifetime",
                             "LogVole_RingOps_GpuBufferResizeBounds"]),
         ("wire-and-caches", ["LogVole_Cpu_NttMatchesReference",

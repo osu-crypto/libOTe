@@ -16,6 +16,7 @@
 #include "cryptoTools/Common/CLP.h"
 #include "seal/util/ntt.h"
 #include "seal/util/rns.h"
+#include "seal/util/rlwe.h"
 
 #include <algorithm>
 #include <array>
@@ -628,6 +629,88 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    ScopedGpuEnabled enabled(cmd.getOr("gpu", 0) != 0);
+    LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    for (bool production : {false, true})
+    {
+        auto params = make_small_params();
+        if (production)
+        {
+            params.mPolyModulusDegree = 8192;
+            assignValues<int>(params.mCoeffModulusBits, {55, 55, 55, 55});
+        }
+        RingNttContext ctx;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        auto ring = gpu::GpuRing::get(ctx);
+        LOGVOLE_REQUIRE_TRUE(ring != nullptr);
+        const auto words = ring->polyWords();
+        const auto streamWords = static_cast<gpu::u32>(words + gpu::kSampleSlackWords);
+        const auto host = getRingHostContext(ctx);
+        LOGVOLE_REQUIRE_TRUE(host && host->key_context_data());
+        seal::Blake2xbPRNGFactory referenceFactory;
+        for (gpu::u32 count : {4u, 64u})
+        {
+            gpu::GpuExecutionContext execution;
+            auto& stream = execution.mainStream();
+            const bool fused = gpu::gpuFusedSamplerActive(ring->n(), streamWords, count);
+            gpu::OwnedGpuBuffer seedsDevice(stream.allocationOwner(), count * sizeof(seal::prng_seed_type));
+            gpu::OwnedGpuBuffer output(stream.allocationOwner(), count * words * sizeof(gpu::u64));
+            gpu::OwnedGpuBuffer epochs(stream.allocationOwner(), count * sizeof(gpu::u32));
+            gpu::OwnedGpuBuffer prefixes, roots;
+            if (!fused)
+            {
+                prefixes = gpu::OwnedGpuBuffer(stream.allocationOwner(), count * streamWords * sizeof(gpu::u64));
+                roots = gpu::OwnedGpuBuffer(stream.allocationOwner(), sizeof(gpu::u64) *
+                    gpu::blake2xbRootScratchWords(streamWords, count));
+            }
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(epochs.data(), epochs.size(), stream.raw()));
+            std::vector<seal::prng_seed_type> seeds(count);
+            std::vector<std::uint64_t> expected(count * words), actual(expected.size());
+            for (unsigned query = 0; query != 2; ++query)
+            {
+                // Equal canonical thresholds with different provenance exercise
+                // the materialized and optimized small-sample routes. Fused
+                // batches deliberately receive no prefix or root allocation.
+                for (gpu::u32 row = 0; row != count; ++row)
+                {
+                    seeds[row][0] = 0x53435241544348ull + row;
+                    seeds[row][1] = query + 1;
+                    seeds[row][2] = params.mPolyModulusDegree;
+                    seal::util::sample_poly_uniform(referenceFactory.create(seeds[row]),
+                        host->key_context_data()->parms(), expected.data() + row * words);
+                }
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(seedsDevice.data(), seeds.data(), seedsDevice.size(), stream.raw()));
+                auto launch = [&](std::size_t rootCapacity) {
+                    return gpu::launchSampleUniformPolyBlake2xb(ring->view(),
+                        static_cast<const gpu::u64*>(seedsDevice.data()), static_cast<gpu::u64*>(prefixes.data()),
+                        streamWords, ring->sampleMaxMultiple(), static_cast<gpu::u64*>(output.data()), nullptr,
+                        count, static_cast<gpu::u32*>(epochs.data()), query + 1, query != 0,
+                        static_cast<gpu::u64*>(roots.data()), rootCapacity, stream.raw());
+                };
+                const auto capacity = roots.size() / sizeof(gpu::u64);
+                if (!fused)
+                {
+                    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(output.data(), output.size(), stream.raw()));
+                    LOGVOLE_REQUIRE_FALSE(launch(0));
+                    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(actual.data(), output.data(), output.size(), stream.raw()));
+                    LOGVOLE_REQUIRE_TRUE(stream.sync());
+                    LOGVOLE_REQUIRE_TRUE(std::all_of(actual.begin(), actual.end(), [](auto word) { return word == 0; }));
+                }
+                LOGVOLE_REQUIRE_TRUE(launch(capacity));
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(actual.data(), output.data(), output.size(), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(stream.sync());
+                LOGVOLE_REQUIRE_TRUE(actual == expected);
+            }
+        }
+    }
+#else
+    LOGVOLE_SKIP() << "requires CUDA build";
 #endif
 }
 
