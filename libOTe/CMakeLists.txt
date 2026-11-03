@@ -117,6 +117,7 @@ if(ENABLE_LOGVOLE)
             Vole/LogVole/cuda/LogVoleGpuKernels.cu
             Vole/LogVole/cuda/LogVoleGpuZk.cu
             Vole/LogVole/cuda/LogVoleGpuBackend.cpp
+            Vole/LogVole/cuda/LogVoleGpuMemory.cpp
             Vole/LogVole/cuda/LogVoleGpuGaussian.cpp
             Vole/LogVole/cuda/LogVoleGpuGaussianKernels.cu
             Vole/LogVole/cuda/LogVoleGpuProtocol.cpp)

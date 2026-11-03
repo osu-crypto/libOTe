@@ -16,15 +16,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=pathlib.Path)
     parser.add_argument("--sanitizer", default="compute-sanitizer")
+    parser.add_argument("--lifetime-executable", type=pathlib.Path,
+                        help="explicit-owner test binary (defaults to a sibling of executable)")
     parser.add_argument("--log-dir", type=pathlib.Path,
                         default=pathlib.Path("out/logvole-cuda-leaks"))
     args = parser.parse_args()
     executable = args.executable.resolve(strict=True)
+    lifetime = (args.lifetime_executable or executable.with_name(
+        "logvole_cuda_lifetime_tests" + executable.suffix)).resolve(strict=True)
     sanitizer = shutil.which(args.sanitizer)
     if not sanitizer:
         parser.error("Compute Sanitizer not found; use --sanitizer PATH")
     args.log_dir.mkdir(parents=True, exist_ok=True)
     jobs = [
+        ("owned-lifetimes", None),
         ("pool-lifecycle", ["LogVole_RingOps_GpuMemoryPoolLifecycle"]),
         ("wire-and-caches", ["LogVole_Encoding_PinnedWireBufferOwnership",
                              "LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch",
@@ -36,8 +41,10 @@ def main():
     started = time.monotonic()
     for name, tests in jobs:
         command = [sanitizer, "--tool", "memcheck", "--leak-check", "full",
-                   "--error-exitcode", "99", str(executable), "-u", *tests,
-                   "-gpu", "1", "-lvCount", "8193", "-lvRounds", "3", "-lvRandom", "1"]
+                   "--error-exitcode", "99"]
+        command += ([str(lifetime)] if tests is None else
+                    [str(executable), "-u", *tests, "-gpu", "1", "-lvCount", "8193",
+                     "-lvRounds", "3", "-lvRandom", "1"])
         tick = time.monotonic()
         remaining = 90 - (tick - started)
         if remaining <= 0:
@@ -57,6 +64,8 @@ def main():
         clean = ("LEAK SUMMARY: 0 bytes leaked in 0 allocations" in output
                  and "ERROR SUMMARY: 0 errors" in output
                  and "skipped" not in output.lower())
+        if tests is None:
+            clean = clean and "CUDA owned lifetime checks passed" in output
         results.append(dict(name=name, exit_code=code, clean=clean,
                             seconds=round(time.monotonic() - tick, 2)))
         print(json.dumps(results[-1]), flush=True)

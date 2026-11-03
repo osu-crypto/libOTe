@@ -91,9 +91,14 @@ if(ENABLE_LOGVOLE)
     )
     target_sources(libOTe_Tests PRIVATE ${LOGVOLE_TEST_SOURCES})
     if(ENABLE_LOGVOLE_CUDA)
+        add_executable(logvole_cuda_lifetime_tests EXCLUDE_FROM_ALL
+            LogVole/cuda_lifetime_main.cpp)
+        target_link_libraries(logvole_cuda_lifetime_tests PRIVATE libOTe)
+        target_compile_features(logvole_cuda_lifetime_tests PRIVATE cxx_std_20)
         # Focused target avoids compiling unrelated OT/frontend configurations.
         add_executable(logvole_cuda_tests EXCLUDE_FROM_ALL
             LogVole/cuda_test_main.cpp UInt_Tests.cpp ${LOGVOLE_TEST_SOURCES})
+        add_dependencies(logvole_cuda_tests logvole_cuda_lifetime_tests)
         target_link_libraries(logvole_cuda_tests PRIVATE libOTe)
         target_compile_features(logvole_cuda_tests PRIVATE cxx_std_20)
         target_include_directories(logvole_cuda_tests PRIVATE
