@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuThreadLocal.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 
@@ -74,7 +75,14 @@ namespace osuCrypto::LogVole::gpu
             RetainedPublicUniformPtr mDevice;
         };
         std::mutex publicRetentionMutex;
-        std::vector<PublicRetentionEntry> publicRetentionEntries;
+        auto& publicRetentionEntries()
+        {
+            static std::vector<PublicRetentionEntry> entries = [] {
+                gpuInitializeMemoryPools();
+                return std::vector<PublicRetentionEntry>{};
+            }();
+            return entries;
+        }
         std::atomic<u64> publicRetentionCaptures{0}, publicRetentionCopies{0};
         std::atomic<u64> publicRetentionCopiedBytes{0}, publicRetentionMisses{0};
         std::atomic<u64> publicRetentionHostMaterializations{0};
@@ -165,9 +173,9 @@ namespace osuCrypto::LogVole::gpu
         if (bytes > publicRetentionByteLimit) return false;
         std::lock_guard<std::mutex> lock(publicRetentionMutex);
         std::size_t retainedBytes = 0;
-        for (auto it = publicRetentionEntries.begin(); it != publicRetentionEntries.end();)
+        for (auto it = publicRetentionEntries().begin(); it != publicRetentionEntries().end();)
         {
-            if (it->mHost.expired()) it = publicRetentionEntries.erase(it);
+            if (it->mHost.expired()) it = publicRetentionEntries().erase(it);
             else
             {
                 auto previousHost = it->mHost.lock();
@@ -176,12 +184,12 @@ namespace osuCrypto::LogVole::gpu
                 ++it;
             }
         }
-        while (!publicRetentionEntries.empty() && retainedBytes > publicRetentionByteLimit - bytes)
+        while (!publicRetentionEntries().empty() && retainedBytes > publicRetentionByteLimit - bytes)
         {
-            retainedBytes -= publicRetentionEntries.front().mDevice->mImpl->mValues.bytes();
-            publicRetentionEntries.erase(publicRetentionEntries.begin());
+            retainedBytes -= publicRetentionEntries().front().mDevice->mImpl->mValues.bytes();
+            publicRetentionEntries().erase(publicRetentionEntries().begin());
         }
-        publicRetentionEntries.push_back({host, captured});
+        publicRetentionEntries().push_back({host, captured});
         return true;
     }
 
@@ -193,10 +201,10 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<const std::vector<RnsPoly>> owner;
         {
             std::lock_guard<std::mutex> lock(publicRetentionMutex);
-            for (auto it = publicRetentionEntries.begin(); it != publicRetentionEntries.end();)
+            for (auto it = publicRetentionEntries().begin(); it != publicRetentionEntries().end();)
             {
                 auto live = it->mHost.lock();
-                if (!live) { it = publicRetentionEntries.erase(it); continue; }
+                if (!live) { it = publicRetentionEntries().erase(it); continue; }
                 if (live->data() == host.data() && live->size() == host.size())
                 {
                     owner = std::move(live);
@@ -806,20 +814,20 @@ namespace osuCrypto::LogVole::gpu
         // and PCIe traffic on the critical path for something that never changes.
         //
         // They are cached on the device, keyed by the geometry they were built
-        // from, so a repeat call with the same shape is a map lookup. The cache is
-        // deliberately immortal: entries outlive the SEAL memory pool and the
-        // allocator's bookkeeping, and freeing them at exit reintroduces the
-        // destruction-order crash documented in 3.5.
+        // from, so a repeat call with the same shape is a map lookup. Its
+        // destructor releases the device arrays before the allocator shuts down.
         struct IdxCache
         {
             std::mutex mMutex;
             std::unordered_map<u64, u32*> mMap;
+            IdxCache() { gpuInitializeMemoryPools(); }
+            ~IdxCache() { for (const auto& entry : mMap) gpuFree(entry.second); }
         };
 
         IdxCache& idxCache()
         {
-            static IdxCache* cache = new IdxCache();
-            return *cache;
+            static IdxCache cache;
+            return cache;
         }
 
         // FNV-1a over the geometry values, with a per-site tag so two sites that
@@ -859,13 +867,18 @@ namespace osuCrypto::LogVole::gpu
             // stream reads it; this is a one-off per geometry.
             if (!gpuMemcpyH2D(dev, host.data(), count * sizeof(u32), stream.raw()) || !stream.sync())
             {
+                gpuFree(dev);
                 return nullptr;
             }
 
             std::lock_guard<std::mutex> lock(cache.mMutex);
-            auto [it, inserted] = cache.mMap.emplace(key, dev);
-            if (!inserted) gpuFree(dev);   // lost a race; keep the winner
-            return it->second;
+            try
+            {
+                auto [it, inserted] = cache.mMap.emplace(key, dev);
+                if (!inserted) gpuFree(dev);   // lost a race; keep the winner
+                return it->second;
+            }
+            catch (...) { gpuFree(dev); throw; }
         }
 
         // Device mirror of a party's offline tensors. Uploaded once per state.
@@ -1433,7 +1446,8 @@ namespace osuCrypto::LogVole::gpu
         // run on separate streams.
         SampleScratch& sampleScratch()
         {
-            thread_local SampleScratch s[kStreamSlots];
+            thread_local GpuThreadLocal<SampleScratch[kStreamSlots]> sOwner;
+            auto& s = sOwner.get();
             return s[threadStreamSlot()];
         }
 
@@ -1443,7 +1457,8 @@ namespace osuCrypto::LogVole::gpu
         // would turn the prefetch into a write-after-read race.
         SampleScratch& senderPrefetchSampleScratch()
         {
-            thread_local SampleScratch s[kStreamSlots];
+            thread_local GpuThreadLocal<SampleScratch[kStreamSlots]> sOwner;
+            auto& s = sOwner.get();
             return s[threadStreamSlot()];
         }
 
@@ -1453,7 +1468,8 @@ namespace osuCrypto::LogVole::gpu
         // or rejection storage: all are rewritten for the next sampled batch.
         SampleScratch& receiverPrefetchSampleScratch()
         {
-            thread_local SampleScratch s[kStreamSlots];
+            thread_local GpuThreadLocal<SampleScratch[kStreamSlots]> sOwner;
+            auto& s = sOwner.get();
             return s[threadStreamSlot()];
         }
 
@@ -1498,7 +1514,8 @@ namespace osuCrypto::LogVole::gpu
 
         ValidateScratch& validateScratch()
         {
-            thread_local ValidateScratch s[kStreamSlots];
+            thread_local GpuThreadLocal<ValidateScratch[kStreamSlots]> sOwner;
+            auto& s = sOwner.get();
             return s[threadStreamSlot()];
         }
 
@@ -2527,7 +2544,8 @@ namespace osuCrypto::LogVole::gpu
             gpuSetCurrentStream(stream.raw());
             // Setup uses the secondary stream. Its scratch must not alias the
             // online sampler or either prefetch sampler on another stream.
-            thread_local SampleScratch setupScratch[kStreamSlots];
+            thread_local GpuThreadLocal<SampleScratch[kStreamSlots]> setupScratchOwner;
+            auto& setupScratch = setupScratchOwner.get();
             auto& scratch = setupScratch[threadStreamSlot()];
             GpuPolyBuffer sampled;
             struct DrainStream
@@ -8833,7 +8851,15 @@ namespace osuCrypto::LogVole::gpu
             if (zp.mPlaintextLiftModQj.size() != rho) return nullptr;
             static std::mutex liftMutex;
             using LiftKey = std::pair<std::vector<u64>, ProtocolCacheRole>;
-            static std::vector<std::pair<LiftKey, const u64*>> liftCache;
+            struct LiftCache : std::vector<std::pair<LiftKey, const u64*>>
+            {
+                LiftCache() { gpuInitializeMemoryPools(); }
+                ~LiftCache()
+                {
+                    for (const auto& entry : *this) gpuFree(const_cast<u64*>(entry.second));
+                }
+            };
+            static LiftCache liftCache;
             std::vector<u64> host(zp.mPlaintextLiftModQj.begin(), zp.mPlaintextLiftModQj.end());
             LiftKey key{host, currentProtocolCacheScope().mRole};
             std::lock_guard<std::mutex> lock(liftMutex);
@@ -8849,7 +8875,8 @@ namespace osuCrypto::LogVole::gpu
             {
                 lift = static_cast<const u64*>(uploadPersistent(host));
                 if (!lift) return nullptr;
-                liftCache.emplace_back(std::move(key), lift);
+                try { liftCache.emplace_back(std::move(key), lift); }
+                catch (...) { gpuFree(const_cast<u64*>(lift)); throw; }
             }
         }
 

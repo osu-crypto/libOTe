@@ -47,7 +47,7 @@ namespace osuCrypto::LogVole
         // CUDA-owned Root wire pages are local to this sender process. The
         // vector allocator remains responsible for their lifetime; released
         // blocks may be reused but are never freed while coproto or TCP owns
-        // the moved Buffer. The process-local pool is deliberately immortal.
+        // the moved Buffer. Idle blocks are released during pool destruction.
         struct RootCudaWirePool
         {
             struct Block
@@ -62,6 +62,12 @@ namespace osuCrypto::LogVole
             std::unordered_map<void*, std::unique_ptr<Block>> mBlocks;
             std::map<std::uintptr_t, Block*> mActive;
             std::mutex mMutex;
+
+            RootCudaWirePool() { gpu::gpuInitializeMemoryPools(); }
+            ~RootCudaWirePool()
+            {
+                for (const auto& entry : mBlocks) cudaFreeHost(entry.first);
+            }
 
             Block* findActiveLocked(const void* pointer,
                 std::size_t bytes) const noexcept
@@ -221,8 +227,8 @@ namespace osuCrypto::LogVole
 
         RootCudaWirePool& rootCudaWirePool()
         {
-            static RootCudaWirePool* pool = new RootCudaWirePool();
-            return *pool;
+            static RootCudaWirePool pool;
+            return pool;
         }
 #endif
     }

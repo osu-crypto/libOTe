@@ -8,6 +8,7 @@
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
 #endif
 
 #include "seal/util/uintarithsmallmod.h"
@@ -194,8 +195,17 @@ namespace osuCrypto::LogVole
             std::shared_ptr<const gpu::RetainedPublicUniform> mDevice;
         };
 
-        std::unordered_map<PublicBCacheKey, std::shared_ptr<PublicBCacheEntry>, PublicBCacheKeyHash>
-            publicBCache;
+        auto& publicBCache()
+        {
+            using Cache = std::unordered_map<PublicBCacheKey, std::shared_ptr<PublicBCacheEntry>, PublicBCacheKeyHash>;
+            static Cache cache = [] {
+#if defined(ENABLE_LOGVOLE_CUDA)
+                gpu::gpuInitializeMemoryPools();
+#endif
+                return Cache{};
+            }();
+            return cache;
+        }
         std::mutex publicBCacheMutex;
 
         std::shared_ptr<PublicBCacheEntry> getOrCreateCachedPublicBEntry(
@@ -222,16 +232,16 @@ namespace osuCrypto::LogVole
                 // protocol state, plus the legacy process-wide run-0 cache.
                 if (key.mRunId != 0)
                 {
-                    for (auto entry = publicBCache.begin(); entry != publicBCache.end();)
+                    for (auto entry = publicBCache().begin(); entry != publicBCache().end();)
                     {
                         if (entry->first.mRunId != 0 && entry->first.mRunId != key.mRunId &&
                             entry->second.use_count() == 1)
-                            entry = publicBCache.erase(entry);
+                            entry = publicBCache().erase(entry);
                         else ++entry;
                     }
                 }
-                auto it = publicBCache.find(key);
-                if (it != publicBCache.end())
+                auto it = publicBCache().find(key);
+                if (it != publicBCache().end())
                 {
                     return it->second;
                 }
@@ -255,7 +265,7 @@ namespace osuCrypto::LogVole
             }
 
             std::lock_guard<std::mutex> lock(publicBCacheMutex);
-            auto [it, inserted] = publicBCache.emplace(std::move(key), candidate);
+            auto [it, inserted] = publicBCache().emplace(std::move(key), candidate);
             (void)inserted;
             return it->second;
         }

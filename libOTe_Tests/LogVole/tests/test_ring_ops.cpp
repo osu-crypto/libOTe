@@ -26,6 +26,7 @@
 #include <cstring>
 #include <limits>
 #include <future>
+#include <thread>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -207,10 +208,14 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
     if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     const std::vector<std::uint64_t> input{1, 2, 3, 0xffffffffffffffffull};
-    // The future joins its worker before the token is consumed. A completed
-    // upload must remain usable after that thread's CUDA stream is destroyed.
-    auto worker = std::async(std::launch::async, [&] { return gpu::uploadScalars(input); });
-    auto uploaded = worker.get();
+    // Join an actual OS thread, including its TLS destructors, before consuming
+    // the token. MSVC std::async may retain a pool worker after future.get().
+    std::packaged_task<std::shared_ptr<gpu::DeviceScalars>()> task(
+        [&] { return gpu::uploadScalars(input); });
+    auto result = task.get_future();
+    std::thread worker(std::move(task));
+    worker.join();
+    auto uploaded = result.get();
     LOGVOLE_REQUIRE_TRUE(uploaded);
     LOGVOLE_REQUIRE_TRUE(uploaded->producerStream() == nullptr);
     std::vector<std::uint64_t> fetched(input.size());
@@ -296,6 +301,72 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(buffer.data() == nullptr);
     LOGVOLE_REQUIRE_EQ(buffer.count(), 0ull);
     LOGVOLE_REQUIRE_EQ(buffer.polyWords(), small->polyWords());
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool requested = cmd.getOr("gpu", 0) != 0;
+    ScopedGpuEnabled gpuScope(requested);
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    ScopedEnvironmentValue overlap("LV_GPU_SETUP_INIT_OVERLAP", "1");
+    for (unsigned round = 0; round != 2; ++round)
+    {
+        RingNttContext context;
+        auto params = make_small_params();
+        params.mPolyModulusDegree = 2048;
+        assignValues<int>(params.mCoeffModulusBits, {31, 31 + static_cast<int>(round)});
+        {
+            ScopedGpuEnabled cpu(false);
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, context));
+        }
+        {
+            gpu::GpuRingSetupPrefetch prefetch(context, true);
+            if (!round)
+            {
+                LOGVOLE_REQUIRE_TRUE(prefetch.wait());
+                LOGVOLE_REQUIRE_TRUE(prefetch.wait());
+            }
+            // The second cold initialization is joined by the destructor.
+        }
+        LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(context));
+    }
+    // Repeated worker exit covers thread-local stream/scratch destruction. Trim
+    // while owners are live must preserve them, then release their idle blocks.
+    for (unsigned round = 0; round != 3; ++round)
+    {
+        std::packaged_task<void()> task([round] {
+            auto& stream = gpu::threadStream();
+            constexpr std::size_t count = 4099, bytes = count * sizeof(std::uint64_t);
+            using Owner = std::unique_ptr<void, void(*)(void*)>;
+            Owner device(gpu::gpuMalloc(bytes), gpu::gpuFree);
+            Owner host(gpu::gpuMallocHost(bytes), gpu::gpuFreeHost);
+            Owner wire(gpu::gpuTryAllocateSetupWireHost(bytes), [](void* p) { (void)gpu::gpuReleaseSetupWireHost(p); });
+            LOGVOLE_REQUIRE_TRUE(device && host && wire);
+            auto* source = static_cast<std::uint64_t*>(host.get());
+            auto* fetched = static_cast<std::uint64_t*>(wire.get());
+            for (std::size_t i = 0; i < count; ++i) source[i] = 0xfedcba9876543210ull ^ (i + round);
+            bool pinned = false;
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuTryPinSetupWireHostRange(wire.get(), bytes, pinned));
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(device.get(), source, bytes, stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(stream.sync());
+            gpu::gpuTrimMemory();
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(wire.get(), bytes));
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched, device.get(), bytes, stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(stream.sync());
+            LOGVOLE_REQUIRE_TRUE(std::equal(source, source + count, fetched));
+        });
+        auto result = task.get_future();
+        std::thread worker(std::move(task));
+        worker.join();
+        result.get();
+        gpu::gpuTrimMemory();
+    }
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";

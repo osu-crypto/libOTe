@@ -111,7 +111,14 @@ namespace osuCrypto::LogVole::gpu
     // cudaMalloc/cudaFree synchronise and are far too slow to call per query.
     void* gpuMalloc(std::size_t bytes);
     void gpuFree(void* ptr);
-    // Hands every cached block back to the driver.
+    // Static caches call this before construction so their buffers are released
+    // before the allocator bookkeeping. Does not allocate CUDA storage.
+    void gpuInitializeMemoryPools();
+    // Drain owners retired by exited workers, outside TLS/loader callbacks.
+    // No synchronization when there are no retired resources.
+    void gpuCollectThreadResources();
+    // Release idle device and pinned/setup-wire blocks; live buffers stay valid.
+    // Call after joining work that may allocate or release buffers.
     void gpuTrimMemory();
     void* gpuMallocHost(std::size_t bytes);
     void gpuFreeHost(void* ptr);

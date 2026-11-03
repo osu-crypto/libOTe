@@ -20,7 +20,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <future>
+#include <thread>
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuThreadLocal.h"
 #include <limits>
 #include <mutex>
 #include <sstream>
@@ -29,6 +30,104 @@
 
 namespace osuCrypto::LogVole::gpu
 {
+    namespace
+    {
+        struct ThreadResourceGroup
+        {
+            std::atomic<bool> retired{false};
+            thread_storage_detail::ThreadResourceNode* head = nullptr;
+            ThreadResourceGroup* next = nullptr;
+        };
+
+        struct ThreadResourceRegistry
+        {
+            std::mutex mutex;
+            ThreadResourceGroup* head = nullptr;
+
+            void collect(bool all = false)
+            {
+                ThreadResourceGroup* retired = nullptr;
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    auto** link = &head;
+                    while (*link)
+                    {
+                        auto* group = *link;
+                        if (all || group->retired.load(std::memory_order_acquire))
+                        {
+                            *link = group->next;
+                            group->next = retired;
+                            retired = group;
+                        }
+                        else link = &group->next;
+                    }
+                }
+                if (!retired) return;
+                // Workers may have queued asynchronous transfers. Collect only
+                // on thread turnover, explicit trim or process teardown, never
+                // in a steady-state allocation or kernel loop.
+                gpuDeviceSync();
+                const auto previousStream = gpuCurrentStream();
+                while (retired)
+                {
+                    auto* group = retired;
+                    retired = group->next;
+                    // Retire a whole thread at once, then destroy its owners in
+                    // reverse construction order: scratch before its streams.
+                    while (group->head)
+                    {
+                        auto* node = group->head;
+                        group->head = node->next;
+                        node->destroy(node);
+                    }
+                    delete group;
+                }
+                gpuSetCurrentStream(previousStream);
+            }
+            ~ThreadResourceRegistry() { collect(true); }
+        };
+
+        ThreadResourceRegistry& threadResourceRegistry()
+        {
+            gpuInitializeMemoryPools();
+            static ThreadResourceRegistry registry;
+            return registry;
+        }
+
+        ThreadResourceGroup& threadResourceGroup()
+        {
+            // Constructed before the first GpuThreadLocal finishes construction,
+            // so it retires the group after all of that thread's wrappers exit.
+            struct Lease
+            {
+                ThreadResourceGroup* group;
+                Lease()
+                {
+                    auto owner = std::make_unique<ThreadResourceGroup>();
+                    auto& registry = threadResourceRegistry();
+                    std::lock_guard<std::mutex> lock(registry.mutex);
+                    owner->next = registry.head;
+                    registry.head = group = owner.release();
+                }
+                ~Lease() { group->retired.store(true, std::memory_order_release); }
+            };
+            thread_local Lease lease;
+            return *lease.group;
+        }
+    }
+
+    void thread_storage_detail::registerThreadResource(ThreadResourceNode* node)
+    {
+        auto& group = threadResourceGroup();
+        node->next = group.head;
+        group.head = node;
+    }
+
+    void gpuCollectThreadResources()
+    {
+        threadResourceRegistry().collect();
+    }
+
     int currentDeviceOrdinal()
     {
         int device = -1;
@@ -116,17 +215,20 @@ namespace osuCrypto::LogVole::gpu
             {
             case ProtocolCacheRole::Sender:
             {
-                thread_local GpuStream sender;
+                thread_local GpuThreadLocal<GpuStream> senderOwner;
+                auto& sender = senderOwner.get();
                 return sender;
             }
             case ProtocolCacheRole::Receiver:
             {
-                thread_local GpuStream receiver;
+                thread_local GpuThreadLocal<GpuStream> receiverOwner;
+                auto& receiver = receiverOwner.get();
                 return receiver;
             }
             default:
             {
-                thread_local GpuStream unspecified;
+                thread_local GpuThreadLocal<GpuStream> unspecifiedOwner;
+                auto& unspecified = unspecifiedOwner.get();
                 return unspecified;
             }
             }
@@ -164,14 +266,14 @@ namespace osuCrypto::LogVole::gpu
             }
         };
 
-        // Immortal for the same reason as the device allocator: GpuRing's
-        // destructor calls gpuFree, and the two sets of statics live in
-        // different translation units with no destruction-order guarantee.
         using RingCache = std::unordered_map<RingCacheKey, std::shared_ptr<GpuRing>, RingCacheKeyHash>;
         RingCache& ringCache()
         {
-            static auto* c = new RingCache();
-            return *c;
+            static RingCache c = [] {
+                gpuInitializeMemoryPools();
+                return RingCache{};
+            }();
+            return c;
         }
         std::mutex gRingCacheMutex;
 
@@ -205,8 +307,11 @@ namespace osuCrypto::LogVole::gpu
         using RawRingCache = std::unordered_map<RawRingCacheKey, std::shared_ptr<GpuRing>, RawRingCacheKeyHash>;
         RawRingCache& rawRingCache()
         {
-            static auto* cache = new RawRingCache();
-            return *cache;
+            static RawRingCache cache = [] {
+                gpuInitializeMemoryPools();
+                return RawRingCache{};
+            }();
+            return cache;
         }
         std::mutex gRawRingCacheMutex;
 
@@ -255,17 +360,20 @@ namespace osuCrypto::LogVole::gpu
             {
             case ProtocolCacheRole::Sender:
             {
-                thread_local RawSetupStreamOwner sender;
+                thread_local GpuThreadLocal<RawSetupStreamOwner> senderOwner;
+                auto& sender = senderOwner.get();
                 return sender;
             }
             case ProtocolCacheRole::Receiver:
             {
-                thread_local RawSetupStreamOwner receiver;
+                thread_local GpuThreadLocal<RawSetupStreamOwner> receiverOwner;
+                auto& receiver = receiverOwner.get();
                 return receiver;
             }
             default:
             {
-                thread_local RawSetupStreamOwner unspecified;
+                thread_local GpuThreadLocal<RawSetupStreamOwner> unspecifiedOwner;
+                auto& unspecified = unspecifiedOwner.get();
                 return unspecified;
             }
             }
@@ -878,9 +986,12 @@ namespace osuCrypto::LogVole::gpu
         // independent: nsys showed every kernel of a run on a single stream with
         // the device idle 41% of the time. Their device buffers are disjoint, so
         // separate streams are safe once the caching allocator is stream-aware.
-        thread_local GpuStream unspecified;
-        thread_local GpuStream sender;
-        thread_local GpuStream receiver;
+        thread_local GpuThreadLocal<GpuStream> unspecifiedOwner;
+        auto& unspecified = unspecifiedOwner.get();
+        thread_local GpuThreadLocal<GpuStream> senderOwner;
+        auto& sender = senderOwner.get();
+        thread_local GpuThreadLocal<GpuStream> receiverOwner;
+        auto& receiver = receiverOwner.get();
 
         GpuStream* s = &unspecified;
         switch (currentProtocolCacheScope().mRole)
@@ -904,9 +1015,12 @@ namespace osuCrypto::LogVole::gpu
         // A second stream per role, used only for work independent of the main
         // chain, so an instruction-bound kernel can overlap a bandwidth-bound one.
         // Keyed the same way as threadStream so the two parties do not share it.
-        thread_local GpuStream unspecified;
-        thread_local GpuStream sender;
-        thread_local GpuStream receiver;
+        thread_local GpuThreadLocal<GpuStream> unspecifiedOwner;
+        auto& unspecified = unspecifiedOwner.get();
+        thread_local GpuThreadLocal<GpuStream> senderOwner;
+        auto& sender = senderOwner.get();
+        thread_local GpuThreadLocal<GpuStream> receiverOwner;
+        auto& receiver = receiverOwner.get();
 
         switch (currentProtocolCacheScope().mRole)
         {
@@ -944,7 +1058,7 @@ namespace osuCrypto::LogVole::gpu
         // would otherwise be reallocated back and forth between the two sizes.
         constexpr std::size_t kChunk = std::size_t(16) << 20;
 
-        thread_local struct DownloadStaging
+        struct DownloadStaging
         {
             u8* mPinned = nullptr;
             void* mEvent[2]{ nullptr, nullptr };
@@ -962,7 +1076,9 @@ namespace osuCrypto::LogVole::gpu
                 gpuEventDestroy(mEvent[1]);
             }
             bool ready() const { return mPinned && mEvent[0] && mEvent[1]; }
-        } staging;
+        };
+        thread_local GpuThreadLocal<DownloadStaging> owner;
+        auto& staging = owner.get();
 
         if (!staging.ready())
         {
@@ -1034,7 +1150,7 @@ namespace osuCrypto::LogVole::gpu
             return gpuMemcpyH2D(deviceDst, src, bytes, stream.raw());
         }
 
-        thread_local struct UploadStaging
+        struct UploadStaging
         {
             u8* mPinned = nullptr;
             void* mEvent[2]{ nullptr, nullptr };
@@ -1055,7 +1171,9 @@ namespace osuCrypto::LogVole::gpu
                 gpuEventDestroy(mEvent[1]);
             }
             bool ready() const { return mPinned && mEvent[0] && mEvent[1]; }
-        } staging;
+        };
+        thread_local GpuThreadLocal<UploadStaging> owner;
+        auto& staging = owner.get();
 
         if (!staging.ready())
         {
@@ -1639,8 +1757,11 @@ namespace osuCrypto::LogVole::gpu
 
     struct GpuRingSetupPrefetch::Impl
     {
-        std::future<bool> mFuture;
+        // Own the OS thread: MSVC std::async uses persistent pool threads,
+        // whose thread-local CUDA scratch need not be destroyed on future.get().
+        std::thread mWorker;
         bool mSuccess = false;
+        ~Impl() { if (mWorker.joinable()) mWorker.join(); }
     };
 
     GpuRingSetupPrefetch::GpuRingSetupPrefetch(const RingNttContext& ctx, bool gpuEnabled)
@@ -1684,8 +1805,8 @@ namespace osuCrypto::LogVole::gpu
             const auto protocolScope = currentProtocolCacheScope();
             auto* benchmarkContext = tCpuBenchmarkContext;
             auto next = std::make_unique<Impl>();
-            next->mFuture = std::async(std::launch::async,
-                [ownedContext = ctx, protocolScope, benchmarkContext, device]() {
+            next->mWorker = std::thread(
+                [ownedContext = ctx, protocolScope, benchmarkContext, device, state = next.get()]() {
                     try
                     {
                         ScopedProtocolCacheScope scope(protocolScope);
@@ -1700,7 +1821,8 @@ namespace osuCrypto::LogVole::gpu
                         // initialization creates its own stream. Neither
                         // shares mutable query scratch.
                         gpuSetCurrentStream(nullptr);
-                        return static_cast<bool>(GpuRing::get(ownedContext));
+                        state->mSuccess = static_cast<bool>(GpuRing::get(ownedContext));
+                        return state->mSuccess;
                     }
                     catch (...)
                     {
@@ -1726,10 +1848,10 @@ namespace osuCrypto::LogVole::gpu
     bool GpuRingSetupPrefetch::wait() noexcept
     {
         if (!mImpl) return true;
-        if (mImpl->mFuture.valid())
+        if (mImpl->mWorker.joinable())
         {
-            try { mImpl->mSuccess = mImpl->mFuture.get(); }
-            catch (...) { mImpl->mSuccess = false; }
+            mImpl->mWorker.join();
+            gpuCollectThreadResources();
         }
         return mImpl->mSuccess;
     }
@@ -1938,17 +2060,20 @@ namespace osuCrypto::LogVole::gpu
         using PlainKey = std::tuple<u64, u64, ProtocolCacheRole>;
         using PlainCache = std::vector<std::pair<PlainKey, std::shared_ptr<GpuPlainNtt>>>;
         static std::mutex mutex;
-        static auto* cache = new PlainCache();   // immortal, see ringCache()
+        static PlainCache cache = [] {
+            gpuInitializeMemoryPools();
+            return PlainCache{};
+        }();
 
         std::lock_guard<std::mutex> lock(mutex);
-        for (const auto& [k, v] : *cache)
+        for (const auto& [k, v] : cache)
         {
             if (k == key) return v;
         }
 
         std::shared_ptr<GpuPlainNtt> tables(new GpuPlainNtt());
         if (!tables->init(batchingContext, encoder)) return nullptr;
-        cache->emplace_back(key, tables);
+        cache.emplace_back(key, tables);
         return tables;
     }
 
@@ -1959,13 +2084,16 @@ namespace osuCrypto::LogVole::gpu
             std::vector<std::pair<RawPlainKey, std::shared_ptr<GpuPlainNtt>>>;
         RawPlainCache& rawPlainCache()
         {
-            static auto* cache = new RawPlainCache();
-            return *cache;
+            static RawPlainCache cache = [] {
+                gpuInitializeMemoryPools();
+                return RawPlainCache{};
+            }();
+            return cache;
         }
         std::mutex& rawPlainCacheMutex()
         {
-            static auto* mutex = new std::mutex();
-            return *mutex;
+            static std::mutex mutex;
+            return mutex;
         }
     }
 
@@ -2375,7 +2503,8 @@ namespace osuCrypto::LogVole::gpu
         };
         // One allocation per host thread, reused safely across roles because
         // this synchronous API drains every transfer before returning.
-        thread_local PinnedDownload staging;
+        thread_local GpuThreadLocal<PinnedDownload> owner;
+        auto& staging = owner.get();
         StreamDrain drain{stream};
         u8* selected = nullptr;
         {

@@ -1,8 +1,10 @@
 """Run bounded CUDA regressions serially on Windows or Linux.
 
-Usage: python run_cuda_checks.py /path/to/frontend_libOTe [--log-dir DIR]
-The executable must register the LogVole and UInt tests and enable CUDA.
-Large allocation tests and sanitizer runs are intentionally not selected.
+Build with: cmake --build BUILD --target logvole_cuda_tests --parallel 4
+Usage: python run_cuda_checks.py BUILD/libOTe_Tests/logvole_cuda_tests [--log-dir DIR]
+On Windows, append .exe. A CUDA-enabled frontend_libOTe also works.
+Run run_cuda_leak_checks.py separately for bounded full leak detection.
+Large allocation tests are intentionally not selected.
 """
 import argparse
 import json
@@ -26,7 +28,7 @@ def main():
         "Cpu_ResamplingOverwritesPreviousQuery", "Cpu_ZkArithmeticMatchesReference",
         "Cpu_GpuZkMatMulSeededInputsMatchReference",
         "RingOps_PartyCachesDoNotAlias", "RingOps_ScalarUploadLifetimeAndRoleSwitch",
-        "RingOps_GpuBufferResizeBounds", "Encoding_PinnedWireBufferOwnership",
+        "RingOps_GpuBufferResizeBounds", "RingOps_GpuMemoryPoolLifecycle", "Encoding_PinnedWireBufferOwnership",
         "RingOps_GaussianPrefixBatchParity",
         "Civole_RejectsZeroDelta", "Civole_RejectsPeerOfflineWidth",
         "Civole_StateMachineAutoOfflineSequentialSids",

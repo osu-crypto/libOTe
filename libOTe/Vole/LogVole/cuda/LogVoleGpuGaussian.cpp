@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuThreadLocal.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuGaussian.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
@@ -229,7 +230,8 @@ namespace osuCrypto::LogVole::gpu
         Allocation deviceSeeds(nullptr, gpuFree), prefixes(nullptr, gpuFree), candidates(nullptr, gpuFree),
             counts(nullptr, gpuFree), complete(nullptr, gpuFree), deviceRows(nullptr, gpuFree);
         auto samples = std::make_shared<DeviceScalars>();
-        thread_local PinnedPrefixCache outputCaches[kStreamSlots];
+        thread_local GpuThreadLocal<PinnedPrefixCache[kStreamSlots]> outputCachesOwner;
+        auto& outputCaches = outputCachesOwner.get();
         auto pinned = hostOut ? outputCaches[threadStreamSlot()].acquire(outputBytes) : std::shared_ptr<u64>{};
         if (hostOut && !pinned) return false;
         std::vector<u8> completed(seeds.size(), 1), activeCompleted(activeSeeds.size());
@@ -324,7 +326,8 @@ namespace osuCrypto::LogVole::gpu
         gpuSetCurrentStream(stream.raw());
         using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
         Allocation deviceSeeds(nullptr, gpuFree), devicePrefixes(nullptr, gpuFree);
-        thread_local PinnedPrefixCache prefixCaches[kStreamSlots];
+        thread_local GpuThreadLocal<PinnedPrefixCache[kStreamSlots]> prefixCachesOwner;
+        auto& prefixCaches = prefixCachesOwner.get();
         auto pinned = prefixCaches[threadStreamSlot()].acquire(bytes);
         if (!pinned) return false;
         StreamDrain drain{stream};

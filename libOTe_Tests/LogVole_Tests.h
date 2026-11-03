@@ -80,6 +80,7 @@
     X(RingOps, NttRoundTrip) \
     X(RingOps, PartyCachesDoNotAlias) \
     X(RingOps, ScalarUploadLifetimeAndRoleSwitch) \
+    X(RingOps, GpuMemoryPoolLifecycle) \
     X(RingOps, GpuBufferResizeBounds) \
     X(RingOps, LightweightProductionContexts) \
     X(NativeSealBundle, ExactParityAndRollback) \

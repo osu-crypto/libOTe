@@ -8,6 +8,7 @@
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
 #endif
 
 #include <algorithm>
@@ -87,8 +88,17 @@ namespace osuCrypto::LogVole
             std::shared_ptr<const gpu::RetainedPublicUniform> mDevice;
         };
 
-        std::unordered_map<PublicACacheKey, std::shared_ptr<PublicACacheEntry>, PublicACacheKeyHash>
-            publicACache;
+        auto& publicACache()
+        {
+            using Cache = std::unordered_map<PublicACacheKey, std::shared_ptr<PublicACacheEntry>, PublicACacheKeyHash>;
+            static Cache cache = [] {
+#if defined(ENABLE_LOGVOLE_CUDA)
+                gpu::gpuInitializeMemoryPools();
+#endif
+                return Cache{};
+            }();
+            return cache;
+        }
         std::mutex publicACacheMutex;
 
         std::vector<RnsPoly> buildLhePublicANttImpl(const RingNttContext& ctx, u32 mu,
@@ -119,17 +129,17 @@ namespace osuCrypto::LogVole
                 {
                     // A completed run's otherwise unowned host snapshot can
                     // retire; the retention registry holds only a weak owner.
-                    for (auto entry = publicACache.begin(); entry != publicACache.end();)
+                    for (auto entry = publicACache().begin(); entry != publicACache().end();)
                     {
                         if (entry->first.mRunId != 0 && entry->first.mRunId != key.mRunId &&
                             entry->second.use_count() == 1)
-                            entry = publicACache.erase(entry);
+                            entry = publicACache().erase(entry);
                         else ++entry;
                     }
                 }
 #endif
-                auto it = publicACache.find(key);
-                if (it != publicACache.end())
+                auto it = publicACache().find(key);
+                if (it != publicACache().end())
                 {
                     return it->second;
                 }
@@ -153,7 +163,7 @@ namespace osuCrypto::LogVole
             }
 
             std::lock_guard<std::mutex> lock(publicACacheMutex);
-            auto [it, inserted] = publicACache.emplace(std::move(key), candidate);
+            auto [it, inserted] = publicACache().emplace(std::move(key), candidate);
             (void)inserted;
             return it->second;
         }

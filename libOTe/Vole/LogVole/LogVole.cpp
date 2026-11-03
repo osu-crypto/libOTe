@@ -9,6 +9,7 @@
 
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
 #endif
 
@@ -977,17 +978,22 @@ namespace osuCrypto::LogVole
         using ZpCache =
             std::unordered_map<ZpCacheKey, std::shared_ptr<const ZpCrtContext>, ZpCacheKeyHash>;
 
-        // Deliberately never destroyed. The cached ZpCrtContext keeps
-        // seal::SEALContext and seal::BatchEncoder alive, and those hold
-        // allocations from SEAL's global MemoryPoolMT. At process exit there is
-        // no ordering guarantee between this cache and that pool, and tearing
-        // the pool down first makes the shared_ptr release corrupt the heap
-        // (aborts in MemoryPoolHeadMT::~MemoryPoolHeadMT). A process-lifetime
-        // cache has nothing to gain from being freed at exit.
+        // Retain SEAL's pool until every cached context has been released.
         ZpCache& zpContextCache()
         {
-            static ZpCache* cache = new ZpCache();
-            return *cache;
+            struct Owner
+            {
+                seal::MemoryPoolHandle pool = seal::MemoryPoolHandle::Global();
+                ZpCache cache;
+                Owner()
+                {
+#if defined(ENABLE_LOGVOLE_CUDA)
+                    gpu::gpuInitializeMemoryPools();
+#endif
+                }
+            };
+            static Owner owner;
+            return owner.cache;
         }
         std::mutex zpContextCacheMutex;
 

@@ -16675,7 +16675,9 @@ namespace osuCrypto::LogVole::gpu
 
             void giveEventLocked(cudaEvent_t e)
             {
-                if (e) mEventPool.push_back(e);
+                if (!e) return;
+                try { mEventPool.push_back(e); }
+                catch (...) { cudaEventDestroy(e); }
             }
 
             void* alloc(std::size_t bytes, void* stream)
@@ -16739,7 +16741,13 @@ namespace osuCrypto::LogVole::gpu
                                         idle ? nullptr : foreign.mPtr,
                                         nullptr, foreign.mEvent});
                                 }
-                                catch (...) { /* Leak the block/event if bookkeeping fails. */ }
+                                catch (...)
+                                {
+                                    // Host bookkeeping can also fail after a
+                                    // driver error. Still attempt driver cleanup.
+                                    if (!idle) (void)check(cudaFree(foreign.mPtr), "free failed dependency");
+                                    (void)check(cudaEventDestroy(foreign.mEvent), "destroy failed dependency");
+                                }
                                 if (!idle) return nullptr;
                                 // The device is idle, but the failed event must
                                 // not be handed to another allocation.
@@ -16762,7 +16770,10 @@ namespace osuCrypto::LogVole::gpu
                                 cudaGetLastError();
                                 std::lock_guard<std::mutex> lock(mMutex);
                                 try { mQuarantined.push_back(foreign); }
-                                catch (...) { /* Leak the block if bookkeeping fails. */ }
+                                catch (...)
+                                {
+                                    (void)check(cudaFree(foreign.mPtr), "free failed stream allocation");
+                                }
                                 return nullptr;
                             }
                         }
@@ -16796,7 +16807,8 @@ namespace osuCrypto::LogVole::gpu
                     {
                         // The stream is gone, which means it was synchronised on the
                         // way out, which means this block is idle. Record nothing.
-                        mFree[b].push_back(Block{ ptr, nullptr, nullptr });
+                        try { mFree[b].push_back(Block{ ptr, nullptr, nullptr }); }
+                        catch (...) { (void)check(cudaFreeAsync(ptr, nullptr), "free uncached allocation"); }
                         return;
                     }
                     e = takeEventLocked();
@@ -16810,7 +16822,14 @@ namespace osuCrypto::LogVole::gpu
                     e = nullptr;
                 }
                 std::lock_guard<std::mutex> lock(mMutex);
-                mFree[b].push_back(Block{ ptr, stream, e });
+                try { mFree[b].push_back(Block{ ptr, stream, e }); }
+                catch (...)
+                {
+                    // Free behind the last use on this stream if the cache's
+                    // bookkeeping allocation fails. Never lose the allocation.
+                    (void)check(cudaFreeAsync(ptr, asStream(stream)), "free uncached allocation");
+                    if (e) cudaEventDestroy(e);
+                }
             }
 
             void addStream(void* stream)
@@ -16827,45 +16846,57 @@ namespace osuCrypto::LogVole::gpu
                 mLive.erase(stream);
             }
 
+            ~DeviceAllocator() { releaseAll(); }
+
             void releaseAll()
             {
-                cudaDeviceSynchronize();
+                // Only teardown/explicit trim synchronizes. Allocation and reuse
+                // retain their existing stream-ordered fast path.
                 std::lock_guard<std::mutex> lock(mMutex);
+                bool empty = mQuarantined.empty() && mEventPool.empty();
+                for (const auto& list : mFree) empty = empty && list.empty();
+                if (empty) return;
+                cudaDeviceSynchronize();
                 for (u32 b = 0; b < kBuckets; ++b)
                 {
                     for (auto& e : mFree[b])
                     {
                         cudaFreeAsync(e.mPtr, nullptr);
-                        giveEventLocked(e.mEvent);
+                        if (e.mEvent) cudaEventDestroy(e.mEvent);
                     }
                     mFree[b].clear();
                 }
+                for (const auto& block : mQuarantined)
+                {
+                    if (block.mPtr) cudaFreeAsync(block.mPtr, nullptr);
+                    if (block.mEvent) cudaEventDestroy(block.mEvent);
+                }
+                mQuarantined.clear();
+                for (auto event : mEventPool) cudaEventDestroy(event);
+                mEventPool.clear();
                 cudaStreamSynchronize(nullptr);
                 if (auto pool = deviceMemPool()) cudaMemPoolTrimTo(pool, 0);
             }
         };
 
-        // Never destroyed: device buffers are owned by objects with process
-        // lifetime (GpuRing, GpuPlainNtt, thread_local scratch) whose destructors
-        // call gpuFree, and there is no destruction-order guarantee between those
-        // and these statics. Freeing after the bookkeeping was destroyed corrupted
-        // the host heap and aborted in an unrelated free at exit.
+        // Owners initialize these pools before registering their own static
+        // destructors. Thread-local scratch is destroyed before static storage.
         DeviceAllocator& allocator()
         {
-            static DeviceAllocator* a = new DeviceAllocator();
-            return *a;
+            static DeviceAllocator a;
+            return a;
         }
 
         std::unordered_map<void*, std::size_t>& allocSizes()
         {
-            static auto* m = new std::unordered_map<void*, std::size_t>();
-            return *m;
+            static std::unordered_map<void*, std::size_t> sizes;
+            return sizes;
         }
 
         std::mutex& allocSizesMutex()
         {
-            static auto* m = new std::mutex();
-            return *m;
+            static std::mutex mutex;
+            return mutex;
         }
     }
 
@@ -16925,9 +16956,17 @@ namespace osuCrypto::LogVole::gpu
     {
         void* p = allocator().alloc(bytes, gCurrentStream);
         if (!p) return nullptr;
-        std::lock_guard<std::mutex> lock(allocSizesMutex());
-        allocSizes()[p] = bytes;
-        return p;
+        try
+        {
+            std::lock_guard<std::mutex> lock(allocSizesMutex());
+            allocSizes().emplace(p, bytes);
+            return p;
+        }
+        catch (...)
+        {
+            allocator().release(p, bytes, gCurrentStream);
+            return nullptr;
+        }
     }
 
     void gpuFree(void* ptr)
@@ -16949,11 +16988,6 @@ namespace osuCrypto::LogVole::gpu
         allocator().release(ptr, bytes, gCurrentStream);
     }
 
-    void gpuTrimMemory()
-    {
-        allocator().releaseAll();
-    }
-
     // Pinned host memory, recycled process-wide rather than returned to the driver.
     //
     // Every buffer that goes through here is per-thread scratch: GpuStream's index
@@ -16965,9 +16999,8 @@ namespace osuCrypto::LogVole::gpu
     // online window, plus 8.1 ms of cudaFreeHost at teardown.
     //
     // Sizes are rounded up to a power of two so that the same block satisfies a
-    // later request of any size in the bucket, and nothing is ever unpinned - the
-    // steady-state footprint is bounded by the peak concurrent demand, which is a
-    // handful of buffers per worker thread.
+    // later request of any size in the bucket. Explicit trimming releases idle
+    // blocks, and destruction releases the remaining cached storage.
     namespace
     {
         struct PinnedPool
@@ -16977,6 +17010,26 @@ namespace osuCrypto::LogVole::gpu
             std::unordered_map<void*, u32> mBucket;
             std::map<std::uintptr_t, std::size_t> mActive;
             std::mutex mMutex;
+
+            ~PinnedPool()
+            {
+                for (const auto& entry : mBucket) cudaFreeHost(entry.first);
+            }
+
+            void trim()
+            {
+                std::lock_guard<std::mutex> lock(mMutex);
+                for (auto it = mBucket.begin(); it != mBucket.end();)
+                {
+                    if (!mActive.count(reinterpret_cast<std::uintptr_t>(it->first)))
+                    {
+                        cudaFreeHost(it->first);
+                        it = mBucket.erase(it);
+                    }
+                    else ++it;
+                }
+                for (auto& list : mFree) list.clear();
+            }
 
             static u32 bucketOf(std::size_t bytes)
             {
@@ -17057,13 +17110,10 @@ namespace osuCrypto::LogVole::gpu
             }
         };
 
-        // Never destroyed, for the same reason as the device allocator: the
-        // thread_local owners of these buffers have no destruction-order guarantee
-        // against a function-local static.
         PinnedPool& pinnedPool()
         {
-            static PinnedPool* p = new PinnedPool();
-            return *p;
+            static PinnedPool pool;
+            return pool;
         }
 
         // Large protocol messages have a different lifetime and cold-start
@@ -17095,6 +17145,38 @@ namespace osuCrypto::LogVole::gpu
             std::unordered_map<void*, Block*> mBlocks;
             std::map<std::uintptr_t, Block*> mActive;
             std::mutex mMutex;
+
+            static void destroy(Block* block)
+            {
+                if (block->mPinState == PinState::Registered)
+                    cudaHostUnregister(block->mPointer);
+#if defined(_MSC_VER)
+                _aligned_free(block->mPointer);
+#else
+                std::free(block->mPointer);
+#endif
+                delete block;
+            }
+
+            ~SetupWirePool()
+            {
+                for (const auto& entry : mBlocks) destroy(entry.second);
+            }
+
+            void trim()
+            {
+                std::lock_guard<std::mutex> lock(mMutex);
+                for (auto it = mBlocks.begin(); it != mBlocks.end();)
+                {
+                    if (!it->second->mActiveBytes)
+                    {
+                        destroy(it->second);
+                        it = mBlocks.erase(it);
+                    }
+                    else ++it;
+                }
+                mFree.clear();
+            }
 
             static bool roundCapacity(std::size_t bytes, std::size_t& capacity)
             {
@@ -17255,8 +17337,8 @@ namespace osuCrypto::LogVole::gpu
                 std::lock_guard<std::mutex> lock(mMutex);
                 auto known = mBlocks.find(pointer);
                 if (known == mBlocks.end()) return false;
-                // Keep successful registration and ordinary storage for process
-                // lifetime. Borrowed transport keeps the Buffer active until its
+                // Keep successful registration and storage until trim or teardown.
+                // Borrowed transport keeps the Buffer active until its
                 // actual socket operation completes, so only then can it reenter
                 // this best-fit list.
                 if (mActive.erase(reinterpret_cast<std::uintptr_t>(pointer)))
@@ -17269,14 +17351,28 @@ namespace osuCrypto::LogVole::gpu
             }
         };
 
-        // Deliberately immortal: registered blocks must outlive arbitrary wire
-        // Buffer/thread-local destruction order, and the OS reclaims them when
-        // this separate party process exits.
         SetupWirePool& setupWirePool()
         {
-            static SetupWirePool* p = new SetupWirePool();
-            return *p;
+            static SetupWirePool pool;
+            return pool;
         }
+    }
+
+    void gpuInitializeMemoryPools()
+    {
+        (void)allocator();
+        (void)allocSizes();
+        (void)allocSizesMutex();
+        (void)pinnedPool();
+        (void)setupWirePool();
+    }
+
+    void gpuTrimMemory()
+    {
+        gpuCollectThreadResources();
+        allocator().releaseAll();
+        pinnedPool().trim();
+        setupWirePool().trim();
     }
 
     void* gpuMallocHost(std::size_t bytes)

@@ -803,15 +803,22 @@ namespace osuCrypto::LogVole
         using RingContextCache = std::
             unordered_map<RingContextCacheKey, std::shared_ptr<const RingNttContext>, RingContextCacheKeyHash>;
 
-        // Never destroyed, on purpose: the cached RingNttContext owns a
-        // seal::SEALContext whose allocations come from SEAL's global memory
-        // pool, and there is no static-destruction ordering guarantee between
-        // the two. Releasing after the pool is gone aborts inside
-        // MemoryPoolHeadMT::~MemoryPoolHeadMT.
+        // Retain SEAL's pool until every cached context has been released.
         RingContextCache& ringContextCache()
         {
-            static RingContextCache* cache = new RingContextCache();
-            return *cache;
+            struct Owner
+            {
+                seal::MemoryPoolHandle pool = seal::MemoryPoolHandle::Global();
+                RingContextCache cache;
+                Owner()
+                {
+#if defined(ENABLE_LOGVOLE_CUDA)
+                    gpu::gpuInitializeMemoryPools();
+#endif
+                }
+            };
+            static Owner owner;
+            return owner.cache;
         }
         std::mutex ringContextCacheMutex;
 
