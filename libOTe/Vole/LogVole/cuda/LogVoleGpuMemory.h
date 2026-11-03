@@ -9,6 +9,27 @@ namespace osuCrypto::LogVole::gpu
     class OwnedGpuStream;
     class OwnedGpuBuffer;
 
+    // Pinned host storage with no global pool or registry. The enclosing stream
+    // owner must finish DMA before replacement/destruction. Exported host views
+    // may retain this object after their completed download.
+    class PinnedHostBuffer
+    {
+    public:
+        PinnedHostBuffer() = default;
+        explicit PinnedHostBuffer(std::size_t bytes);
+        ~PinnedHostBuffer();
+        PinnedHostBuffer(PinnedHostBuffer&& other) noexcept;
+        PinnedHostBuffer& operator=(PinnedHostBuffer&& other) noexcept;
+        PinnedHostBuffer(const PinnedHostBuffer&) = delete;
+        PinnedHostBuffer& operator=(const PinnedHostBuffer&) = delete;
+        void* data() const noexcept { return mData; }
+        std::size_t size() const noexcept { return mBytes; }
+        void reset() noexcept;
+    private:
+        void* mData = nullptr;
+        std::size_t mBytes = 0;
+    };
+
     // Explicit allocation domain. It owns a private CUDA pool and its host
     // free lists; no process-wide allocator or current-stream state is used.
     // Streams retain this owner; buffers retain both their allocation stream

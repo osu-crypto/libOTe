@@ -482,6 +482,86 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
 #endif
 }
 
+void LogVole_RingOps_GpuStreamStagingLifetime(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool requested = cmd.getOr("gpu", 0) != 0;
+    ScopedGpuEnabled gpuScope(requested);
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    ScopedEnvironmentValue ringSize("LV_GPU_INDEX_SCRATCH_KIB", "256");
+    for (const char* lazy : {"0", "1"})
+    {
+        ScopedEnvironmentValue lazySetting("LV_GPU_LAZY_INDEX_SCRATCH", lazy);
+        gpu::GpuStream stream;
+        std::vector<std::uint32_t> indices(65533), fetched(indices.size());
+        for (std::size_t i = 0; i != indices.size(); ++i) indices[i] = static_cast<std::uint32_t>(i ^ 0xa5a5u);
+        auto* first = stream.uploadIdx(indices);
+        LOGVOLE_REQUIRE_TRUE(first);
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), first, indices.size() * 4, stream.raw()));
+        const std::array<std::uint32_t, 9> tail{9, 8, 7, 6, 5, 4, 3, 2, 1};
+        std::array<std::uint32_t, 9> fetchedTail{};
+        auto* second = stream.uploadIdx(tail); // wraps while the first read is queued
+        LOGVOLE_REQUIRE_TRUE(second == first);
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetchedTail.data(), second, sizeof(tail), stream.raw()));
+        LOGVOLE_REQUIRE_TRUE(stream.sync());
+        LOGVOLE_REQUIRE_TRUE(fetched == indices && fetchedTail == tail);
+    }
+
+    ScopedEnvironmentValue pipeline("LV_GPU_PIPELINED_UPLOAD", "1");
+    constexpr std::size_t bytes = (std::size_t(16) << 20) + 3;
+    std::vector<std::uint8_t> source(bytes, 37), fetched(bytes);
+    gpu::OwnedGpuBuffer pending;
+    {
+        gpu::GpuStream stream;
+        LOGVOLE_REQUIRE_TRUE(stream.pipelinedUploadEnabled());
+        pending = gpu::OwnedGpuBuffer(stream.allocationOwner(), bytes);
+        for (unsigned round = 0; round != 2; ++round)
+        {
+            std::fill(source.begin(), source.end(), static_cast<std::uint8_t>(37 + round));
+            LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(pending.data(), source.data(), bytes, stream));
+            LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(fetched.data(), pending.data(), bytes, stream));
+            LOGVOLE_REQUIRE_TRUE(fetched == source);
+        }
+
+        auto* stage = stream.staging(4099);
+        LOGVOLE_REQUIRE_TRUE(stage);
+        std::fill_n(stage, 4099, std::uint8_t{71});
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(pending.data(), stage, 4099, stream.raw()));
+        LOGVOLE_REQUIRE_TRUE(stream.staging((std::size_t(8) << 20) + 1)); // drains the borrowed old source
+        LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(fetched.data(), pending.data(), 4099, stream));
+        LOGVOLE_REQUIRE_TRUE(std::all_of(fetched.begin(), fetched.begin() + 4099, [](auto x) { return x == 71; }));
+        const auto preserved = stream.existingStaging(1);
+        LOGVOLE_REQUIRE_TRUE(!stream.staging(std::numeric_limits<std::size_t>::max()));
+        LOGVOLE_REQUIRE_TRUE(stream.existingStaging(1) == preserved);
+
+        // Three polynomial DMA chunks exercise both transfer slots, including
+        // private pinned storage and the stream's borrowed shared staging.
+        ScopedEnvironmentValue slotSize("LV_GPU_SETUP_DOWNLOAD_SLOT_MIB", "1");
+        gpu::GpuPolyBuffer polynomials;
+        LOGVOLE_REQUIRE_TRUE(polynomials.resizeWords(4096, 65, stream));
+        LOGVOLE_REQUIRE_TRUE(polynomials.zero(stream));
+        for (const char* reuse : {"0", "1"})
+        {
+            ScopedEnvironmentValue reuseSetting("LV_GPU_SETUP_REUSE_DOWNLOAD_STAGING", reuse);
+            std::vector<RnsPoly> host;
+            LOGVOLE_REQUIRE_TRUE(polynomials.downloadPipelined(host, stream, 2));
+            LOGVOLE_REQUIRE_EQ(host.size(), 65u);
+            for (const auto& poly : host)
+                LOGVOLE_REQUIRE_TRUE(std::all_of(poly.mCoeffs.begin(), poly.mCoeffs.end(), [](auto x) { return x == 0; }));
+        }
+        // Destroy the stream wrapper with a pinned H2D source still in use.
+        LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(pending.data(), source.data(), bytes, stream));
+    }
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), pending.data(), bytes, pending.stream()->raw()));
+    pending.stream()->synchronize();
+    LOGVOLE_REQUIRE_TRUE(fetched == source);
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
 void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP&)
 {
     RingNttContext senderCtx{}, receiverCtx{};

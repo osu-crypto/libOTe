@@ -44,6 +44,31 @@ namespace osuCrypto::LogVole::gpu
         cudaStream_t native(void* stream) noexcept { return static_cast<cudaStream_t>(stream); }
     }
 
+    PinnedHostBuffer::PinnedHostBuffer(std::size_t bytes) : mBytes(bytes)
+    {
+        if (bytes) requireCuda(cudaMallocHost(&mData, bytes), "cudaMallocHost");
+    }
+
+    PinnedHostBuffer::~PinnedHostBuffer() { reset(); }
+    PinnedHostBuffer::PinnedHostBuffer(PinnedHostBuffer&& other) noexcept
+        : mData(std::exchange(other.mData, nullptr)), mBytes(std::exchange(other.mBytes, 0)) {}
+
+    PinnedHostBuffer& PinnedHostBuffer::operator=(PinnedHostBuffer&& other) noexcept
+    {
+        if (this == &other) return *this;
+        reset();
+        mData = std::exchange(other.mData, nullptr);
+        mBytes = std::exchange(other.mBytes, 0);
+        return *this;
+    }
+
+    void PinnedHostBuffer::reset() noexcept
+    {
+        if (mData) cleanupCuda(cudaFreeHost(mData));
+        mData = nullptr;
+        mBytes = 0;
+    }
+
     struct GpuMemoryPool::Impl
     {
         static constexpr unsigned kBuckets = std::numeric_limits<std::size_t>::digits;

@@ -173,36 +173,16 @@ namespace osuCrypto::LogVole::gpu
 
         bool lazyIndexScratchEnabled()
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_LAZY_INDEX_SCRATCH");
-                return v ? std::strcmp(v, "1") == 0 : h200LazyResourcesDefault();
-            }();
-            return on;
+            const char* v = std::getenv("LV_GPU_LAZY_INDEX_SCRATCH");
+            return v ? std::strcmp(v, "1") == 0 : h200LazyResourcesDefault();
         }
 
         std::size_t indexScratchWords()
         {
-            static const std::size_t words = [] {
-                const char* v = std::getenv("LV_GPU_INDEX_SCRATCH_KIB");
-                const unsigned long kib = v ? std::strtoul(v, nullptr, 10) : 4096u;
-                return std::size_t(kib >= 256u && kib <= 4096u && (kib & (kib - 1u)) == 0u
-                    ? kib : 4096u) * 256u;
-            }();
-            return words;
-        }
-
-        void* allocateIndexScratch(std::size_t bytes, void* stream)
-        {
-            struct RestoreStream
-            {
-                void* previous = gpuCurrentStream();
-                ~RestoreStream() { gpuSetCurrentStream(previous); }
-            } restore;
-            // Direct GpuStream users need not have selected this stream in
-            // threadStream(). Queue allocator reuse dependencies on the actual
-            // H2D destination stream, without changing the caller's context.
-            gpuSetCurrentStream(stream);
-            return gpuMalloc(bytes);
+            const char* v = std::getenv("LV_GPU_INDEX_SCRATCH_KIB");
+            const unsigned long kib = v ? std::strtoul(v, nullptr, 10) : 4096u;
+            return std::size_t(kib >= 256u && kib <= 4096u && (kib & (kib - 1u)) == 0u
+                ? kib : 4096u) * 256u;
         }
 
         // Keep main and sampler stream families independent. A role-specific
@@ -841,6 +821,80 @@ namespace osuCrypto::LogVole::gpu
         return gpuDeviceName();
     }
 
+    namespace
+    {
+        struct TransferStaging
+        {
+            PinnedHostBuffer mStorage;
+            u8* mPinned = nullptr;
+            void* mEvent[2]{nullptr, nullptr};
+            bool mPending[2]{false, false};
+
+            ~TransferStaging()
+            {
+                // GpuStream drains before destroying any transfer scratch.
+                gpuEventDestroy(mEvent[0]);
+                gpuEventDestroy(mEvent[1]);
+            }
+            bool prepareEvents()
+            {
+                for (auto& event : mEvent) if (!event) event = gpuEventCreate();
+                return mEvent[0] && mEvent[1];
+            }
+            bool reserve(GpuStream& stream, std::size_t bytes, std::size_t minimum = 4096)
+            {
+                if (!stream.raw()) return false;
+                if (bytes > mStorage.size())
+                {
+                    std::size_t wanted = std::max(minimum, mStorage.size());
+                    while (wanted < bytes)
+                    {
+                        if (wanted > std::numeric_limits<std::size_t>::max() / 2) return false;
+                        wanted *= 2;
+                    }
+                    try
+                    {
+                        PinnedHostBuffer next(wanted);
+                        if (mStorage.data() && !stream.sync()) return false;
+                        mStorage = std::move(next);
+                        mPinned = static_cast<u8*>(mStorage.data());
+                        mPending[0] = mPending[1] = false;
+                    }
+                    catch (...) { return false; }
+                }
+                return mPinned && prepareEvents();
+            }
+        };
+
+        struct DrainTransferOnFailure
+        {
+            GpuStream& stream;
+            bool completed = false;
+            ~DrainTransferOnFailure()
+            {
+                if (!completed && !stream.sync()) std::terminate();
+            }
+        };
+    }
+
+    struct GpuTransferScratch
+    {
+        TransferStaging download;
+        TransferStaging upload;
+        TransferStaging polynomials;
+    };
+
+    void GpuTransferScratchDeleter::operator()(GpuTransferScratch* scratch) const noexcept
+    {
+        delete scratch;
+    }
+
+    GpuTransferScratch& GpuStream::transferScratch()
+    {
+        if (!mTransferScratch) mTransferScratch.reset(new GpuTransferScratch());
+        return *mTransferScratch;
+    }
+
     // ---- GpuStream --------------------------------------------------------
 
     GpuStream::GpuStream() : GpuStream(false, true) {}
@@ -865,11 +919,11 @@ namespace osuCrypto::LogVole::gpu
         {
             mStream = gpuStreamCreate();
         }
+        const char* upload = std::getenv("LV_GPU_PIPELINED_UPLOAD");
+        mPipelinedUpload = upload && upload[0] == '1';
         if (!mStream || !allocateScratch) return;
         mScratchWords = indexScratchWords(); // default 4 MiB
-        if (lazyIndexScratchEnabled()) return;
-        mDeviceScratch = static_cast<u32*>(allocateIndexScratch(mScratchWords * sizeof(u32), mStream));
-        mHostScratch = static_cast<u32*>(gpuMallocHost(mScratchWords * sizeof(u32)));
+        if (!lazyIndexScratchEnabled()) (void)ensureIndexScratch();
     }
 
     std::unique_ptr<GpuStream> GpuStream::createHighestPriority()
@@ -886,29 +940,15 @@ namespace osuCrypto::LogVole::gpu
         // Explicit dependency order, independent of which scratch accessor was
         // called first. No scratch destructor can observe a destroyed stream.
         mProtocolScratch.reset();
-        if (mHighestPriority)
-        {
-            // This lean stream never owns allocator-managed storage and is not
-            // registered with the allocator. Destroy it without publishing it
-            // as the allocation stream, even transiently.
-            if (!mAllocationOwner) gpuStreamDestroy(mStream);
-            return;
-        }
-        // Release this stream's own buffers *as* this stream. gpuFree tags a block
-        // with gCurrentStream, and at thread exit that can name a sibling
-        // thread_local GpuStream that was already destroyed. The allocator refuses
-        // to touch a stream it has not been told about, but pointing it at the live
-        // handle here keeps the tagging honest as well as safe.
-        gpuSetCurrentStream(mStream);
-        gpuFree(mDeviceScratch);
-        gpuFreeHost(mHostScratch);
-        gpuFreeHost(mStaging);
-        gpuSetCurrentStream(nullptr);
-        // Detach from the legacy allocator now. Exported scalar buffers may
-        // retain the native stream independently after this wrapper dies; its
-        // eventual destruction must not consult that allocator's bookkeeping.
-        // Clearing the tags also prevents confusion when CUDA reuses handles.
-        gpuForgetStream(mStream);
+        mTransferScratch.reset();
+        mDeviceScratchStorage.reset();
+        mHostScratchStorage.reset();
+        mStagingStorage.reset();
+        if (gpuCurrentStream() == mStream) gpuSetCurrentStream(nullptr);
+        // Other buffers still use the legacy allocator during migration.
+        // Detach its tags while the native stream is still alive. Exported
+        // explicit owners may retain the native stream after this wrapper.
+        if (!mHighestPriority) gpuForgetStream(mStream);
         if (!mAllocationOwner) gpuStreamDestroy(mStream);
     }
 
@@ -925,17 +965,45 @@ namespace osuCrypto::LogVole::gpu
         return mAllocationOwner;
     }
 
+    bool GpuStream::ensureIndexScratch()
+    {
+        if (mDeviceScratch && mHostScratch) return true;
+        if (!mScratchWords) return false;
+        try
+        {
+            const auto bytes = mScratchWords * sizeof(u32);
+            PinnedHostBuffer host(bytes);
+            OwnedGpuBuffer device(allocationOwner(), bytes);
+            mHostScratchStorage = std::move(host);
+            mDeviceScratchStorage = std::move(device);
+            mHostScratch = static_cast<u32*>(mHostScratchStorage.data());
+            mDeviceScratch = static_cast<u32*>(mDeviceScratchStorage.data());
+            return true;
+        }
+        catch (...) { return false; }
+    }
+
     u8* GpuStream::staging(std::size_t bytes)
     {
+        if (!mStream) return nullptr;
         if (bytes <= mStagingBytes) return mStaging;
-        // Pinning is expensive, so grow in large steps and never shrink.
+        // Preserve geometric reuse without routing through a process-wide pool.
         std::size_t want = mStagingBytes ? mStagingBytes : (std::size_t(8) << 20);
-        while (want < bytes) want *= 2;
-        gpuStreamSync(mStream);
-        gpuFreeHost(mStaging);
-        mStaging = static_cast<u8*>(gpuMallocHost(want));
-        mStagingBytes = mStaging ? want : 0;
-        return mStaging;
+        while (want < bytes)
+        {
+            if (want > std::numeric_limits<std::size_t>::max() / 2) return nullptr;
+            want *= 2;
+        }
+        try
+        {
+            PinnedHostBuffer next(want);
+            if (mStaging && !sync()) return nullptr;
+            mStagingStorage = std::move(next);
+            mStaging = static_cast<u8*>(mStagingStorage.data());
+            mStagingBytes = want;
+            return mStaging;
+        }
+        catch (...) { return nullptr; }
     }
 
     bool GpuStream::sync() const
@@ -962,21 +1030,12 @@ namespace osuCrypto::LogVole::gpu
         // Most sampler/worker streams never upload an index array. Avoid
         // allocating and pinning their ring until it is actually needed.
         // Highest-priority lean streams have mScratchWords==0 and stay lean.
-        if (lazyIndexScratchEnabled() && mScratchWords != 0u)
+        if (idx.size() > mScratchWords || !ensureIndexScratch()) return nullptr;
+        if (idx.size() > mScratchWords - mScratchUsed)
         {
-            if (!mDeviceScratch)
-                mDeviceScratch = static_cast<u32*>(allocateIndexScratch(mScratchWords * sizeof(u32), mStream));
-            if (!mHostScratch)
-                mHostScratch = static_cast<u32*>(gpuMallocHost(mScratchWords * sizeof(u32)));
-        }
-        if (!mDeviceScratch || !mHostScratch) return nullptr;
-        if (mScratchUsed + idx.size() > mScratchWords)
-        {
-            // Wrapping would corrupt in-flight work, so make sure the stream is
-            // drained first. Index arrays are tiny; this path is rare.
-            gpuStreamSync(mStream);
+            // Wrapping must finish reads of both the host and device ring.
+            if (!sync()) return nullptr;
             mScratchUsed = 0;
-            if (idx.size() > mScratchWords) return nullptr;
         }
         const std::size_t off = mScratchUsed;
         std::copy(idx.begin(), idx.end(), mHostScratch + off);
@@ -1065,7 +1124,7 @@ namespace osuCrypto::LogVole::gpu
     bool downloadToHost(void* dst, const void* deviceSrc, std::size_t bytes, GpuStream& stream)
     {
         if (bytes == 0) return true;
-        if (!dst || !deviceSrc) return false;
+        if (!dst || !deviceSrc || !stream.raw()) return false;
 
         // 16 MiB per buffer keeps the pinned footprint at 32 MiB while still
         // being large enough that each transfer reaches peak PCIe bandwidth.
@@ -1074,33 +1133,14 @@ namespace osuCrypto::LogVole::gpu
         // would otherwise be reallocated back and forth between the two sizes.
         constexpr std::size_t kChunk = std::size_t(16) << 20;
 
-        struct DownloadStaging
-        {
-            u8* mPinned = nullptr;
-            void* mEvent[2]{ nullptr, nullptr };
+        auto& staging = stream.transferScratch().download;
 
-            DownloadStaging()
-            {
-                mPinned = static_cast<u8*>(gpuMallocHost(2 * kChunk));
-                mEvent[0] = gpuEventCreate();
-                mEvent[1] = gpuEventCreate();
-            }
-            ~DownloadStaging()
-            {
-                gpuFreeHost(mPinned);
-                gpuEventDestroy(mEvent[0]);
-                gpuEventDestroy(mEvent[1]);
-            }
-            bool ready() const { return mPinned && mEvent[0] && mEvent[1]; }
-        };
-        thread_local GpuThreadLocal<DownloadStaging> owner;
-        auto& staging = owner.get();
-
-        if (!staging.ready())
+        if (!staging.reserve(stream, bytes <= kChunk ? bytes : 2 * kChunk))
         {
             // No pinned memory available; the slow path is still correct.
             return gpuMemcpyD2H(dst, deviceSrc, bytes, stream.raw()) && stream.sync();
         }
+        DrainTransferOnFailure drain{stream};
         u8* pinned = staging.mPinned;
         auto& events = staging;
 
@@ -1108,6 +1148,7 @@ namespace osuCrypto::LogVole::gpu
         {
             if (!gpuMemcpyD2H(pinned, deviceSrc, bytes, stream.raw()) || !stream.sync()) return false;
             std::memcpy(dst, pinned, bytes);
+            drain.completed = true;
             return true;
         }
 
@@ -1145,57 +1186,32 @@ namespace osuCrypto::LogVole::gpu
             if (!gpuEventSync(events.mEvent[queuedSlot])) return false;
             std::memcpy(out + queuedOff, pinned + queuedSlot * kChunk, queuedLen);
         }
+        drain.completed = true;
         return true;
     }
 
     bool uploadFromHost(void* deviceDst, const void* src, std::size_t bytes, GpuStream& stream)
     {
         if (bytes == 0) return true;
-        if (!deviceDst || !src) return false;
+        if (!deviceDst || !src || !stream.raw()) return false;
 
         // Explicit opt-in: on H200 the CUDA driver's pageable-copy staging is
         // faster than an extra host memcpy through our pinned buffers. Keep the
         // pipeline available for platforms where that trade-off is reversed.
-        static const bool enabled = [] {
-            const char* v = std::getenv("LV_GPU_PIPELINED_UPLOAD");
-            return v && v[0] == '1';
-        }();
         constexpr std::size_t kChunk = std::size_t(16) << 20;
-        if (!enabled || bytes <= kChunk)
+        if (!stream.pipelinedUploadEnabled() || bytes <= kChunk)
         {
             return gpuMemcpyH2D(deviceDst, src, bytes, stream.raw());
         }
 
-        struct UploadStaging
-        {
-            u8* mPinned = nullptr;
-            void* mEvent[2]{ nullptr, nullptr };
-            bool mPending[2]{ false, false };
+        auto& staging = stream.transferScratch().upload;
 
-            UploadStaging()
-            {
-                mPinned = static_cast<u8*>(gpuMallocHost(2 * kChunk));
-                mEvent[0] = gpuEventCreate();
-                mEvent[1] = gpuEventCreate();
-            }
-            ~UploadStaging()
-            {
-                for (u32 i = 0; i < 2; ++i)
-                    if (mPending[i] && mEvent[i]) gpuEventSync(mEvent[i]);
-                gpuFreeHost(mPinned);
-                gpuEventDestroy(mEvent[0]);
-                gpuEventDestroy(mEvent[1]);
-            }
-            bool ready() const { return mPinned && mEvent[0] && mEvent[1]; }
-        };
-        thread_local GpuThreadLocal<UploadStaging> owner;
-        auto& staging = owner.get();
-
-        if (!staging.ready())
+        if (!staging.reserve(stream, 2 * kChunk))
         {
             return gpuMemcpyH2D(deviceDst, src, bytes, stream.raw());
         }
 
+        DrainTransferOnFailure drain{stream};
         const auto* in = static_cast<const u8*>(src);
         auto* dst = static_cast<u8*>(deviceDst);
         for (std::size_t off = 0; off < bytes; off += kChunk)
@@ -1215,6 +1231,7 @@ namespace osuCrypto::LogVole::gpu
             }
             staging.mPending[slot] = true;
         }
+        drain.completed = true;
         return true;
     }
 
@@ -2494,41 +2511,7 @@ namespace osuCrypto::LogVole::gpu
         const std::size_t targetSlotBytes = boundedStageBytes("LV_GPU_SETUP_DOWNLOAD_SLOT_MIB", 8, 32);
         const std::size_t runPolys = std::min(num, std::max<std::size_t>(1, targetSlotBytes / polyBytes));
         const std::size_t slotBytes = runPolys * polyBytes;
-        struct PinnedDownload
-        {
-            u8* data = nullptr;
-            std::size_t capacity = 0;
-            void* events[2] = {nullptr, nullptr};
-            ~PinnedDownload()
-            {
-                gpuFreeHost(data);
-                gpuEventDestroy(events[0]);
-                gpuEventDestroy(events[1]);
-            }
-            bool prepareEvents()
-            {
-                for (auto& event : events) if (!event) event = gpuEventCreate();
-                return events[0] && events[1];
-            }
-            bool reserve(std::size_t bytes)
-            {
-                if (capacity < bytes)
-                {
-                    std::size_t wanted = std::size_t(1) << 20;
-                    while (wanted < bytes) wanted *= 2u;
-                    // Every preceding invocation drained its stream before
-                    // returning, so this thread's old slots have no readers.
-                    gpuFreeHost(data);
-                    data = static_cast<u8*>(gpuMallocHost(wanted));
-                    capacity = data ? wanted : 0;
-                }
-                return data && prepareEvents();
-            }
-        };
-        // One allocation per host thread, reused safely across roles because
-        // this synchronous API drains every transfer before returning.
-        thread_local GpuThreadLocal<PinnedDownload> owner;
-        auto& staging = owner.get();
+        auto& staging = stream.transferScratch().polynomials;
         StreamDrain drain{stream};
         u8* selected = nullptr;
         {
@@ -2540,17 +2523,16 @@ namespace osuCrypto::LogVole::gpu
                 // Prior H2D reads and these D2H writes use the same stream.
                 // Every CPU reader waits for its chunk event; joined workers
                 // finish before either slot is reused. Never own/grow/free the
-                // stream's borrowed buffer through this private TLS cache.
+                // stream's borrowed buffer through the separate transfer scratch.
                 if (!staging.prepareEvents()) return false;
             }
             else
             {
-                if (!staging.reserve(2u * slotBytes)) return false;
-                selected = staging.data;
+                if (!staging.reserve(stream, 2u * slotBytes, std::size_t(1) << 20)) return false;
+                selected = staging.mPinned;
             }
         }
-        // Capture the caller's storage as an ordinary pointer. Referring to a
-        // thread_local object inside a pool worker would select its own cache.
+        // Workers borrow this stream's selected storage until their join.
         u8* const pinned = selected;
         struct CopyPool
         {
@@ -2586,7 +2568,7 @@ namespace osuCrypto::LogVole::gpu
         auto materialize = [&](std::size_t offset, std::size_t length, u32 slot) {
             {
                 HostStep waitStep("setup: pipelined download DMA wait");
-                if (!gpuEventSync(staging.events[slot])) return false;
+                if (!gpuEventSync(staging.mEvent[slot])) return false;
             }
             HostStep copyStep("setup: pipelined download host copy");
             auto copyOne = [&](std::size_t i) {
@@ -2638,7 +2620,7 @@ namespace osuCrypto::LogVole::gpu
             // the next DMA before joining the previous chunk's host workers.
             if (!gpuMemcpyD2H(pinned + slot * slotBytes, poly(srcOffset + offset, stream),
                     length * polyBytes, stream.raw()) ||
-                !gpuEventRecord(staging.events[slot], stream.raw())) return false;
+                !gpuEventRecord(staging.mEvent[slot], stream.raw())) return false;
             if (previousLength && !materialize(previousOffset, previousLength, previousSlot)) return false;
             previousOffset = offset;
             previousLength = length;

@@ -55,6 +55,11 @@ namespace osuCrypto::LogVole::gpu
     {
         void operator()(GpuProtocolScratch* scratch) const noexcept;
     };
+    struct GpuTransferScratch;
+    struct GpuTransferScratchDeleter
+    {
+        void operator()(GpuTransferScratch* scratch) const noexcept;
+    };
 
     // A stream plus its reusable scratch. Scratch is released after draining
     // this stream and before releasing the native stream owner.
@@ -77,10 +82,12 @@ namespace osuCrypto::LogVole::gpu
         // Explicit allocation owner retained by buffers and protocol scratch.
         const std::shared_ptr<OwnedGpuStream>& allocationOwner();
         GpuProtocolScratch& protocolScratch();
+        GpuTransferScratch& transferScratch();
+        bool pipelinedUploadEnabled() const { return mPipelinedUpload; }
 
         // Upload a small u32 index array and return a device pointer valid
-        // until the next reset(). Uses a bump allocator on pinned + device
-        // memory so index uploads do not allocate.
+        // until the ring wraps. Wrap drains prior work on this stream before
+        // reusing storage; ordinary index uploads do not allocate or wait.
         const u32* uploadIdx(std::span<const u32> idx);
         void reset();
 
@@ -97,11 +104,17 @@ namespace osuCrypto::LogVole::gpu
 
     private:
         GpuStream(bool highestPriority, bool allocateScratch);
+        bool ensureIndexScratch();
 
         void* mStream = nullptr;
         std::shared_ptr<OwnedGpuStream> mAllocationOwner;
         std::unique_ptr<GpuProtocolScratch, GpuProtocolScratchDeleter> mProtocolScratch;
+        std::unique_ptr<GpuTransferScratch, GpuTransferScratchDeleter> mTransferScratch;
         bool mHighestPriority = false;
+        bool mPipelinedUpload = false;
+        OwnedGpuBuffer mDeviceScratchStorage;
+        PinnedHostBuffer mHostScratchStorage;
+        PinnedHostBuffer mStagingStorage;
         u32* mDeviceScratch = nullptr;
         u32* mHostScratch = nullptr;
         std::size_t mScratchWords = 0;
