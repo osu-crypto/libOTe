@@ -81,7 +81,7 @@ namespace osuCrypto::LogVole::detail
         {
             const auto lanes = _mm512_setr_epi64(0, 1, 2, 3, 4, 5, 6, 7);
             const auto offsets = _mm512_slli_epi64(lanes, 3);
-            static const bool transposeOutput = [] {
+            const bool transposeOutput = [] {
                 const char* value = std::getenv("LV_CPU_BLAKE_TRANSPOSE");
                 return !value || value[0] != '0';
             }();
@@ -199,7 +199,7 @@ namespace osuCrypto::LogVole::detail
 
     std::shared_ptr<seal::UniformRandomGeneratorFactory> cpuBlake2xbFactory()
     {
-        static const std::shared_ptr<seal::UniformRandomGeneratorFactory> factory = [] {
+        const std::shared_ptr<seal::UniformRandomGeneratorFactory> factory = [] {
 #if defined(LV_CPU_BLAKE_AVX512)
             const char* enabled = std::getenv("LV_CPU_VECTOR_BLAKE2");
             if (cpuBlake2xbVectorAvailable() && (!enabled || enabled[0] != '0'))
@@ -214,7 +214,7 @@ namespace osuCrypto::LogVole::detail
 
     std::shared_ptr<seal::UniformRandomGeneratorFactory> cpuDefaultPrngFactory()
     {
-        static const auto factory = [] {
+        const auto factory = [] {
             auto original = seal::UniformRandomGeneratorFactory::DefaultFactory();
             return original->create(seal::prng_seed_type{})->info().type_ == seal::prng_type::blake2xb
                 ? cpuBlake2xbFactory() : original;

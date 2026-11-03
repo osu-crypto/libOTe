@@ -211,6 +211,26 @@ namespace osuCrypto::LogVole
         bool mGarbledInput = false;
     };
 
+    inline ExecutionContext& executionContext(const ZpCrtContext& value)
+    {
+        return executionContext(value.mRing);
+    }
+
+    inline ExecutionContext& executionContext(const CivoleParams& value)
+    {
+        return executionContext(value.mLogVole);
+    }
+
+    inline ExecutionContext& executionContext(const CivoleSenderState& value)
+    {
+        return executionContext(value.mParams);
+    }
+
+    inline ExecutionContext& executionContext(const CivoleReceiverState& value)
+    {
+        return executionContext(value.mParams);
+    }
+
 }
 
 namespace osuCrypto
@@ -253,6 +273,9 @@ namespace osuCrypto
         // Leave the keys in GPU memory instead of writing them to `b`, for
         // callers whose next step also runs on the GPU. After send(),
         // outputDevice() holds them. Ignored without the CUDA backend.
+        // Select CUDA for this session before configure(). The choice is copied
+        // into the parameters and cannot be changed by another session.
+        bool mUseGpu = false;
         bool mKeepOutputOnDevice = false;
         std::shared_ptr<void> mOutputDevice;
         u64 mOutputDeviceCount = 0;
@@ -276,6 +299,7 @@ namespace osuCrypto
         bool isConfigured() const { return mState != State::Default; }
         bool hasOffline() const { return mState == State::Offline; }
         u64 modulus() const { return mModulus; }
+        LogVole::ExecutionContext& execution() const { return LogVole::executionContext(mParams); }
         // Diagnostic evidence for the SEAL context selected by configure().
         u64 configureCacheRunId() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }
@@ -359,6 +383,9 @@ namespace osuCrypto
         // Leave the MACs in GPU memory instead of writing them to `a`, for
         // callers whose next step also runs on the GPU. After receive(),
         // outputDevice() holds them. Ignored when the CUDA backend is not in use.
+        // Select CUDA for this session before configure(). The choice is copied
+        // into the parameters and cannot be changed by another session.
+        bool mUseGpu = false;
         bool mKeepOutputOnDevice = false;
 
         // Take x from GPU memory instead of from the `x` span, for callers whose
@@ -372,6 +399,7 @@ namespace osuCrypto
         bool isConfigured() const { return mState != State::Default; }
         bool hasOffline() const { return mState == State::Offline; }
         u64 modulus() const { return mModulus; }
+        LogVole::ExecutionContext& execution() const { return LogVole::executionContext(mParams); }
         // Diagnostic evidence for the SEAL context selected by configure().
         u64 configureCacheRunId() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }

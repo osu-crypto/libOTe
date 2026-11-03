@@ -11,7 +11,6 @@
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
-#include <cuda_runtime_api.h>
 #endif
 
 #include <cstddef>
@@ -29,13 +28,16 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        std::mutex rootWirePinEvidenceMutex;
-        RootWirePinOverlapEvidence lastRootWirePinEvidence{};
-
-        void publishRootWirePinEvidence(const RootWirePinOverlapEvidence& evidence)
+        struct WirePinEvidenceResources
         {
-            std::lock_guard lock(rootWirePinEvidenceMutex);
-            lastRootWirePinEvidence = evidence;
+            std::mutex mMutex;
+            RootWirePinOverlapEvidence mLast;
+        };
+
+        void publishRootWirePinEvidence(ExecutionContext& execution, const RootWirePinOverlapEvidence& evidence)
+        {
+            std::lock_guard lock(execution.wireResources<WirePinEvidenceResources>().mMutex);
+            execution.wireResources<WirePinEvidenceResources>().mLast = evidence;
         }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -60,22 +62,22 @@ namespace osuCrypto::LogVole
             {
                 const void* const pointer = wire.data();
                 const std::size_t bytes = wire.size();
+                auto execution = wire.executionOwner();
                 try
                 {
-                    mThread = std::thread([this, pointer, bytes, runId, device,
+                    mThread = std::thread([this, execution, pointer, bytes, runId, device,
                         benchmarkContext] {
                         try
                         {
                             CpuBenchmarkWorkerScope benchmarkWorker(benchmarkContext);
                             CpuBenchmarkTaskScope benchmarkTask;
-                            ScopedProtocolCacheScope senderScope(
-                                ProtocolCacheRole::Sender, runId);
-                            HostStep phase("setup: root wire preregistration");
+
+                            HostStep phase(*execution, "setup: root wire preregistration");
                             mBeginNs = steadyClockNs();
                             const u64 cpuBegin = cpuBenchmarkThreadNs();
                             bool pinned = false;
-                            mPinned = cudaSetDevice(device) == cudaSuccess &&
-                                gpu::gpuTryPinSetupWireHostRange(pointer, bytes, pinned) &&
+                            mPinned = gpu::gpuSelectDevice(device) &&
+                                gpu::gpuTryPinSetupWireHostRange((*execution).wireResources<gpu::SetupWireMemory>(), pointer, bytes, pinned) &&
                                 pinned;
                             mCpuNs = cpuBenchmarkThreadNs() - cpuBegin;
                             mEndNs = steadyClockNs();
@@ -108,25 +110,24 @@ namespace osuCrypto::LogVole
             Buffer mReserved;
             bool mCudaOwned = false;
 
-            bool start(std::size_t forecastBytes, u64 runId, int device,
+            bool start(ExecutionContextPtr execution, std::size_t forecastBytes, u64 runId, int device,
                 CpuBenchmarkContext* benchmarkContext)
             {
                 try
                 {
-                    mThread = std::thread([this, forecastBytes, runId, device,
+                    mThread = std::thread([this, execution, forecastBytes, runId, device,
                         benchmarkContext] {
                         try
                         {
                             CpuBenchmarkWorkerScope benchmarkWorker(
                                 benchmarkContext);
                             CpuBenchmarkTaskScope benchmarkTask;
-                            ScopedProtocolCacheScope senderScope(
-                                ProtocolCacheRole::Sender, runId);
-                            HostStep phase(
+
+                            HostStep phase(*execution,
                                 "setup: early CUDA-owned Root wire reservation");
-                            if (cudaSetDevice(device) != cudaSuccess ||
-                                !gpu::enabled()) return;
-                            mReserved = reserveRootCudaWireBuffer(
+                            if (!gpu::gpuSelectDevice(device) ||
+                                !gpu::enabled(*execution)) return;
+                            mReserved = reserveRootCudaWireBuffer(*execution,
                                 forecastBytes, runId, mCudaOwned, false);
                         }
                         catch (...) { mCudaOwned = false; }
@@ -147,7 +148,7 @@ namespace osuCrypto::LogVole
 
         bool setupOwnedSendEnabled()
         {
-            static const bool ownPayload = [] {
+            const bool ownPayload = [] {
                 const char* value = std::getenv("LV_SETUP_OWNED_SEND");
                 return !(value && value[0] == '0');
             }();
@@ -156,7 +157,7 @@ namespace osuCrypto::LogVole
 
         task<> sendOfflineFrame(Socket& sock, Buffer payload)
         {
-            HostStep phase("setup transport: send offline frame");
+            HostStep phase(executionContext(payload), "setup transport: send offline frame");
             // Encoding creates a fresh, single-use buffer. Keep ownership in
             // the coroutine and hand it to coproto, avoiding a second complete
             // copy of the (potentially hundreds of MB) offline message.
@@ -172,7 +173,7 @@ namespace osuCrypto::LogVole
 
         bool ownedRootMessageFastPathEnabled()
         {
-            static const bool on = [] {
+            const bool on = [] {
                 const char* value = std::getenv("LV_ROOT_OWNED_MESSAGE_FASTPATH");
                 // Set to zero to restore the const-message path and its defensive
                 // frame/message copies exactly.
@@ -206,6 +207,7 @@ namespace osuCrypto::LogVole
         // later reuses shrink state and sends no local shrink frame.
         struct RootWirePinPlan
         {
+            ExecutionContextPtr mExecutionContext;
             RootWirePinOverlapEvidence mEvidence{};
             RootOfflineMessage* mRoot = nullptr;
             Buffer mReserved;
@@ -220,7 +222,9 @@ namespace osuCrypto::LogVole
             RootWirePinPlan(u64 senderRunId, bool requested,
                 bool cudaRequested,
                 RootOfflineMessage* root)
-                : mRoot(root), mCudaRequested(cudaRequested)
+                : mExecutionContext(root ? root->mRing.mExecutionContext
+                    : std::make_shared<ExecutionContext>()),
+                  mRoot(root), mCudaRequested(cudaRequested)
             {
                 mEvidence.mSenderRunId = senderRunId;
                 mEvidence.mRequested = requested;
@@ -231,7 +235,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (!mCudaRequested || !mRoot) return false;
                 mEvidence.mWireBytes = rootOfflineWireSize(*mRoot);
-                noteRootWireCudaExpectedDownloads(
+                noteRootWireCudaExpectedDownloads(*mExecutionContext,
                     mEvidence.mSenderRunId, *mRoot);
                 const bool deviceExport = mRoot->mLazyCtR ||
                     mRoot->mLazyLacctLeft || mRoot->mLazyTopCt;
@@ -241,11 +245,11 @@ namespace osuCrypto::LogVole
                 const bool eligible = mEvidence.mSenderRunId != 0 &&
                     deviceExport && mEvidence.mWireBytes >=
                         (std::size_t{1} << 20) &&
-                    gpu::enabled() && gpu::currentDeviceOrdinal() >= 0 &&
+                    gpu::enabled(*mExecutionContext) && gpu::currentDeviceOrdinal() >= 0 &&
                     setupOwnedSendEnabled() &&
                     (!pinnedWire || pinnedWire[0] != '0') &&
                     (!directWire || directWire[0] != '0');
-                noteRootWireCudaAllocEligibility(mEvidence.mSenderRunId,
+                noteRootWireCudaAllocEligibility(*mExecutionContext, mEvidence.mSenderRunId,
                     static_cast<std::size_t>(mEvidence.mWireBytes), eligible);
                 return eligible;
 #else
@@ -258,7 +262,7 @@ namespace osuCrypto::LogVole
                 std::size_t forecastBytes)
             {
                 if (!early.mThread.joinable()) return;
-                HostStep waitStep("setup: early Root wire reservation join");
+                HostStep waitStep(*mExecutionContext, "setup: early Root wire reservation join");
                 const u64 waitBegin = steadyClockNs();
                 early.join();
                 const u64 joinWaitNs = steadyClockNs() - waitBegin;
@@ -281,7 +285,7 @@ namespace osuCrypto::LogVole
                     // existing exact-size late reservation fallback.
                     early.mReserved = Buffer{};
                 }
-                noteRootWireCudaEarlyJoin(mEvidence.mSenderRunId,
+                noteRootWireCudaEarlyJoin(*mExecutionContext, mEvidence.mSenderRunId,
                     joinWaitNs, adopted);
             }
 #endif
@@ -292,9 +296,8 @@ namespace osuCrypto::LogVole
                 if (!mCudaRequested || mCudaAttempted || !mRoot) return;
                 mCudaAttempted = true;
                 if (!prepareCudaWireEligibility()) return;
-                ScopedProtocolCacheScope senderScope(
-                    ProtocolCacheRole::Sender, mEvidence.mSenderRunId);
-                mReserved = reserveRootCudaWireBuffer(
+
+                mReserved = reserveRootCudaWireBuffer(*mExecutionContext,
                     static_cast<std::size_t>(mEvidence.mWireBytes),
                     mEvidence.mSenderRunId, mCudaSelected);
 #endif
@@ -316,7 +319,7 @@ namespace osuCrypto::LogVole
                     "LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD");
                 const int device = gpu::currentDeviceOrdinal();
                 if (!deviceExport || mEvidence.mWireBytes <
-                        (std::size_t{1} << 20) || !gpu::enabled() || device < 0 ||
+                        (std::size_t{1} << 20) || !gpu::enabled(*mExecutionContext) || device < 0 ||
                     (pinnedWire && pinnedWire[0] == '0') ||
                     (directWire && directWire[0] == '0'))
                     return;
@@ -324,15 +327,15 @@ namespace osuCrypto::LogVole
                 if (mReserved.empty())
                     mReserved.resize(static_cast<std::size_t>(
                         mEvidence.mWireBytes));
-                mEvidence.mEligible = gpu::gpuIsSetupWireHostRange(
+                mEvidence.mEligible = gpu::gpuIsSetupWireHostRange((*mExecutionContext).wireResources<gpu::SetupWireMemory>(),
                     mReserved.data(), mReserved.size());
                 if (!mEvidence.mEligible) return;
-                mEvidence.mAlreadyPinned = gpu::gpuIsSetupWirePinnedHostRange(
+                mEvidence.mAlreadyPinned = gpu::gpuIsSetupWirePinnedHostRange((*mExecutionContext).wireResources<gpu::SetupWireMemory>(),
                     mReserved.data(), mReserved.size());
                 mEvidence.mPinSucceeded = mEvidence.mAlreadyPinned;
                 if (!mEvidence.mAlreadyPinned)
                     mEvidence.mLaunched = mWorker.start(mReserved,
-                        mEvidence.mSenderRunId, device, tCpuBenchmarkContext);
+                        mEvidence.mSenderRunId, device, mExecutionContext->mCpuBenchmark);
 #endif
             }
 
@@ -340,7 +343,7 @@ namespace osuCrypto::LogVole
             {
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (!mEvidence.mLaunched) return;
-                HostStep waitStep("setup: root wire preregistration join");
+                HostStep waitStep(*mExecutionContext, "setup: root wire preregistration join");
                 const u64 waitBegin = steadyClockNs();
                 mWorker.join();
                 mEvidence.mJoinWaitNs = steadyClockNs() - waitBegin;
@@ -410,8 +413,7 @@ namespace osuCrypto::LogVole
                 auto shrinkExpandSock = sock.fork();
                 Buffer payload;
                 {
-                    ScopedProtocolCacheScope senderScope(
-                        ProtocolCacheRole::Sender, senderRunId);
+
                     payload = message.mEncodedShrinkExpandMessage.empty()
                         ? encode(message.mShrinkExpandMessage,
                             params.mShrinkExpand.mNumWorkerThreads)
@@ -438,8 +440,7 @@ namespace osuCrypto::LogVole
                 auto rootSock = sock.fork();
                 Buffer payload;
                 {
-                    ScopedProtocolCacheScope senderScope(
-                        ProtocolCacheRole::Sender, senderRunId);
+
                     payload = rootPin.mReserved.empty()
                         ? encode(message.mRootMessage,
                             params.mShrinkExpand.mNumWorkerThreads)
@@ -449,7 +450,7 @@ namespace osuCrypto::LogVole
                 }
                 rootPin.mEvidence.mSelected = rootPin.mEvidence.mEligible &&
                     rootPin.mEvidence.mPinSucceeded;
-                publishRootWirePinEvidence(rootPin.mEvidence);
+                publishRootWirePinEvidence(*rootPin.mExecutionContext, rootPin.mEvidence);
                 co_await sendOfflineFrame(rootSock, std::move(payload));
                 co_return;
             }
@@ -503,7 +504,7 @@ namespace osuCrypto::LogVole
                     {
                         // Install the captured sender/SID scope only around
                         // synchronous work, never across a socket suspension.
-                        ScopedProtocolCacheScope activeSender(senderScope);
+
                         havePreK = !nonInteractive && sampleRootResponseKPrime(
                             state, prng, preKPrime, &preKPrimeDevice);
                         if (havePreK || nonInteractive)
@@ -519,28 +520,28 @@ namespace osuCrypto::LogVole
                         }
                     }
                     {
-                        HostStep step("send: recv root digest");
+                        HostStep step(executionContext(state), "send: recv root digest");
                         u64 maxPayload = 0;
                         const bool validPayloadSize = rootDigestPayloadSize(state.mParams.mShrinkExpand.mRing, maxPayload);
-                        digestPayload = co_await detail::recvFrame<ProtocolCacheRole::Sender>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload));
+                        digestPayload = co_await detail::recvFrame<ProtocolCacheRole::Sender>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload), &(executionContext(state)));
                     }
 
                     RootDigestMessage digest{};
                     RootResponseMessage response{};
                     {
-                        ScopedProtocolCacheScope activeSender(senderScope);
+
                         // recvFrame may resume on a receiver worker. Restore
                         // the exact captured scope before validating secrets.
                         {
-                            AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
+                            AutoTimer serTimer(executionContext(state).mTiming.mRootSerializeUs);
                             if (!decode(digestPayload, digest))
                             {
                                 throw std::runtime_error("LogVole sender could not decode root digest");
                             }
                         }
                         {
-                            HostStep step("send: root response");
-                            AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
+                            HostStep step(executionContext(state), "send: root response");
+                            AutoTimer rootTimer(executionContext(state).mTiming.mRootSenderHostUs);
                             const bool prepared = ownedFastPath
                                 ? prepareRootResponseSender(
                                       state, std::move(digest), prng, response,
@@ -562,14 +563,14 @@ namespace osuCrypto::LogVole
 
                         if (!nonInteractive)
                         {
-                            AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
+                            AutoTimer serTimer(executionContext(state).mTiming.mRootSerializeUs);
                             responsePayload = encode(response);
                         }
                     }
                     if (!nonInteractive)
                     {
                         responseFrameSize = detail::frameBytes(responsePayload);
-                        HostStep step("send: send root response");
+                        HostStep step(executionContext(state), "send: send root response");
                         if (ownedFastPath)
                         {
                             co_await detail::sendOwnedFrame(rootSock, std::move(responsePayload));
@@ -584,9 +585,9 @@ namespace osuCrypto::LogVole
                     // on the wire, so the receiver runs its finalize while this
                     // runs instead of waiting for it.
                     {
-                        ScopedProtocolCacheScope activeSender(senderScope);
-                        HostStep step("cpu sender: post-response precompute");
-                        AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
+
+                        HostStep step(executionContext(state), "cpu sender: post-response precompute");
+                        AutoTimer rootTimer(executionContext(state).mTiming.mRootSenderHostUs);
                         if (!finishRootSenderPrecompute(state, prng, &precomputeRoot))
                         {
                             throw std::runtime_error("LogVole sender could not prepare root response");
@@ -613,10 +614,10 @@ namespace osuCrypto::LogVole
         }
     }
 
-    RootWirePinOverlapEvidence rootWirePinOverlapEvidenceSnapshot()
+    RootWirePinOverlapEvidence rootWirePinOverlapEvidenceSnapshot(ExecutionContext& execution)
     {
-        std::lock_guard lock(rootWirePinEvidenceMutex);
-        return lastRootWirePinEvidence;
+        std::lock_guard lock(execution.wireResources<WirePinEvidenceResources>().mMutex);
+        return execution.wireResources<WirePinEvidenceResources>().mLast;
     }
 
     std::size_t forecastRootOfflineWireSize(const Params& params,
@@ -724,8 +725,7 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         Socket& sock)
     {
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+
         ShrinkExpandOfflineMessage message{};
         if (!prepareShrinkExpandSenderOffline(input, prng, message, state))
         {
@@ -742,10 +742,10 @@ namespace osuCrypto::LogVole
         Socket& sock)
     {
         const u64 senderRunId = input.mSenderOwnerRunId
-            ? input.mSenderOwnerRunId : currentProtocolCacheScope().mRunId;
+            ? input.mSenderOwnerRunId : executionContext(input.mParams).mScope.mRunId;
         RootWirePinOverlapEvidence initialPinEvidence{};
         initialPinEvidence.mSenderRunId = senderRunId;
-        publishRootWirePinEvidence(initialPinEvidence);
+        publishRootWirePinEvidence(executionContext(input.mParams), initialPinEvidence);
         const char* rootPinOption = std::getenv("LV_GPU_ROOT_WIRE_PIN_OVERLAP");
         const bool rootPinRequested = rootPinOption && rootPinOption[0] == '1';
         const char* rootCudaOption = std::getenv("LV_GPU_ROOT_WIRE_CUDA_ALLOC");
@@ -755,14 +755,13 @@ namespace osuCrypto::LogVole
             "LV_GPU_ROOT_WIRE_CUDA_ALLOC_EARLY");
         const bool earlyRequested = rootCudaRequested && rootEarlyOption &&
             rootEarlyOption[0] == '1';
-        resetRootWireCudaAllocEvidence(senderRunId, rootCudaRequested);
+        resetRootWireCudaAllocEvidence(executionContext(input.mParams), senderRunId, rootCudaRequested);
         std::size_t forecastBytes = 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
         RootWireEarlyCudaWorker earlyWorker;
         if (earlyRequested)
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Sender, senderRunId);
+
             forecastBytes = forecastRootOfflineWireSize(
                 input.mParams, input.mLeafInputsAreGadget);
             const char* pinnedWire = std::getenv("LV_GPU_SETUP_PINNED_WIRE");
@@ -775,25 +774,24 @@ namespace osuCrypto::LogVole
             const bool eligible = senderRunId != 0 &&
                 input.mUseGpuResidentInternalState &&
                 forecastBytes >= (std::size_t{1} << 20) &&
-                gpu::enabled() && device >= 0 &&
+                gpu::enabled(executionContext(input.mParams)) && device >= 0 &&
                 setupOwnedSendEnabled() &&
                 (!pinnedWire || pinnedWire[0] != '0') &&
                 (!directWire || directWire[0] != '0') &&
                 (!lazyWire || lazyWire[0] != '0') &&
                 (!directEncoding || directEncoding[0] != '0');
-            const bool launched = eligible && earlyWorker.start(forecastBytes,
-                senderRunId, device, tCpuBenchmarkContext);
-            noteRootWireCudaEarlyPlan(senderRunId, earlyRequested,
+            const bool launched = eligible && earlyWorker.start(input.mParams.mShrinkExpand.mRing.mExecutionContext, forecastBytes,
+                senderRunId, device, executionContext(input.mParams).mCpuBenchmark);
+            noteRootWireCudaEarlyPlan(executionContext(input.mParams), senderRunId, earlyRequested,
                 eligible, forecastBytes, launched);
         }
 #else
-        noteRootWireCudaEarlyPlan(senderRunId, earlyRequested,
+        noteRootWireCudaEarlyPlan(executionContext(input.mParams), senderRunId, earlyRequested,
             false, 0, false);
 #endif
         SenderOfflineOutput output{};
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Sender, senderRunId);
+
             if (!detail::prepareSenderOfflineForTransport(input, prng, output))
             {
                 throw std::runtime_error(
@@ -819,8 +817,7 @@ namespace osuCrypto::LogVole
         KeyDeriveSenderOutput& output,
         Socket& sock)
     {
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+
 		u64 maxPayload = 0;
 		if (input.mSk1.size() > std::numeric_limits<u32>::max())
 			throw std::length_error("LogVole key-derive dimension is too large");
@@ -861,16 +858,16 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         Socket& sock)
     {
-        ProtocolCacheScope cacheScope = currentProtocolCacheScope();
+        ProtocolCacheScope cacheScope = executionContext(state).mScope;
         if (cacheScope.mRunId == 0)
         {
-            cacheScope.mRunId = allocateProtocolCacheRunId();
+            cacheScope.mRunId = executionContext(state).ownerId();
         }
         cacheScope.mRole = ProtocolCacheRole::Sender;
-        ScopedProtocolCacheScope scopedCache(cacheScope);
-        HostStep onlineTotal("send: online TOTAL");
+
+        HostStep onlineTotal(executionContext(state), "send: online TOTAL");
         {
-            HostStep step("send: clear cache + sid");
+            HostStep step(executionContext(state), "send: clear cache + sid");
             if (!(options.mUsePrecomputed && senderHasPrecompute(state)))
             {
                 clearSenderOnlineCache(state);
@@ -899,7 +896,7 @@ namespace osuCrypto::LogVole
         }
 
         SenderOnlineOutput next{};
-        HostStep tailStep("send: online tail (tbk copy)");
+        HostStep tailStep(executionContext(state), "send: online tail (tbk copy)");
         next.mSeed = state.mGoldenSeed;
         if (!options.mSkipTbkOutput)
         {
@@ -917,12 +914,11 @@ namespace osuCrypto::LogVole
         ShrinkExpandSenderExpandOutput& output,
         Socket& sock)
     {
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+
 		u64 maxPayload = 0;
 		const bool validPayloadSize = polyPayloadSize(state.mParams.mRing, maxPayload);
 		const auto digestPayload =
-			co_await detail::recvFrame<ProtocolCacheRole::Sender>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload));
+			co_await detail::recvFrame<ProtocolCacheRole::Sender>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), &(executionContext(state)));
 
         PolyMessage digestMessage{};
         if (!decode(digestPayload, digestMessage))

@@ -95,6 +95,8 @@
 
 #define LIBOTE_LOGVOLE_EXTENDED_TESTS(X) \
     X(Core, ModeSelection) \
+    X(Core, IndependentExecutionContexts) \
+    X(Core, SeededSessionIsolation) \
     X(Core, RuntimeCacheScopePropagatesToParallelWorkers) \
     X(Core, SeedLabelAggSumsTauBlocks) \
     X(Core, GdecompHiUnbundleLiftsOneLimbPerOutput) \

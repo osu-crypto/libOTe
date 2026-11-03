@@ -2,6 +2,7 @@
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/Aligned.h>
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include <algorithm>
 #include <initializer_list>
@@ -62,6 +63,7 @@ namespace osuCrypto::LogVole
     {
         u32 mPolyModulusDegree = 0;
         AlignedUnVec<int> mCoeffModulusBits;
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
 
         bool operator==(const RingParams& other) const
         {
@@ -78,6 +80,22 @@ namespace osuCrypto::LogVole
             return !(*this == other);
         }
     };
+
+    inline ExecutionContext& executionContext(const RingParams& params)
+    {
+        return *params.mExecutionContext;
+    }
+
+    inline void bindExecutionRole(RingParams& params, ProtocolCacheRole role)
+    {
+        if (executionContext(params).mScope.mRole == role &&
+            executionContext(params).mScope.mRunId != 0) return;
+        auto owner = std::make_shared<ExecutionContext>();
+        owner->mUseGpu = executionContext(params).mUseGpu;
+        owner->mCpuBenchmark = executionContext(params).mCpuBenchmark;
+        owner->mScope = {owner->ownerId(), role};
+        params.mExecutionContext = std::move(owner);
+    }
 
     struct RnsPoly
     {
@@ -448,4 +466,34 @@ namespace osuCrypto::LogVole
         mutable std::shared_ptr<void> mRootGpuCache;
         std::unique_ptr<ReceiverState> mNextLevelState;
     };
+    inline ExecutionContext& executionContext(const ShrinkExpandParams& value)
+    {
+        return executionContext(value.mRing);
+    }
+
+    inline ExecutionContext& executionContext(const Params& value)
+    {
+        return executionContext(value.mShrinkExpand);
+    }
+
+    inline ExecutionContext& executionContext(const ShrinkExpandSenderState& value)
+    {
+        return executionContext(value.mParams);
+    }
+
+    inline ExecutionContext& executionContext(const ShrinkExpandReceiverState& value)
+    {
+        return executionContext(value.mParams);
+    }
+
+    inline ExecutionContext& executionContext(const SenderState& value)
+    {
+        return executionContext(value.mParams);
+    }
+
+    inline ExecutionContext& executionContext(const ReceiverState& value)
+    {
+        return executionContext(value.mParams);
+    }
+
 }

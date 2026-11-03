@@ -5,7 +5,6 @@
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
-#include <cuda_runtime_api.h>
 #endif
 
 #include <algorithm>
@@ -31,8 +30,11 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        std::mutex rootCudaWireEvidenceMutex;
-        RootWireCudaAllocEvidence lastRootCudaWireEvidence{};
+        struct WireEvidenceResources
+        {
+            std::mutex mMutex;
+            RootWireCudaAllocEvidence mLast{};
+        };
 
         u64 rootCudaWireSteadyNs()
         {
@@ -41,13 +43,11 @@ namespace osuCrypto::LogVole
         }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-        thread_local bool requestRootCudaWireAllocation = false;
-        thread_local u64 rootCudaWireAllocationRunId = 0;
 
         // CUDA-owned Root wire pages are local to this sender process. The
         // vector allocator remains responsible for their lifetime; released
         // blocks may be reused but are never freed while coproto or TCP owns
-        // the moved Buffer. The process-local pool is deliberately immortal.
+        // the moved Buffer. The execution owner releases the pool after its final Buffer is released.
         struct RootCudaWirePool
         {
             struct Block
@@ -62,6 +62,11 @@ namespace osuCrypto::LogVole
             std::unordered_map<void*, std::unique_ptr<Block>> mBlocks;
             std::map<std::uintptr_t, Block*> mActive;
             std::mutex mMutex;
+
+            ~RootCudaWirePool()
+            {
+                for (auto& [pointer, block] : mBlocks) gpu::gpuFreeHost(pointer);
+            }
 
             Block* findActiveLocked(const void* pointer,
                 std::size_t bytes) const noexcept
@@ -107,18 +112,11 @@ namespace osuCrypto::LogVole
                 }
                 catch (...) { return nullptr; }
 
-                void* pointer = nullptr;
-                const auto error = cudaHostAlloc(&pointer, bytes,
-                    cudaHostAllocPortable);
-                if (error != cudaSuccess)
-                {
-                    const auto pending = cudaPeekAtLastError();
-                    if (pending == error) (void)cudaGetLastError();
-                    return nullptr;
-                }
+                void* pointer = gpu::gpuMallocHost(bytes);
+                if (!pointer) return nullptr;
                 if (reinterpret_cast<std::uintptr_t>(pointer) % alignment)
                 {
-                    (void)cudaFreeHost(pointer);
+                    gpu::gpuFreeHost(pointer);
                     return nullptr;
                 }
                 try
@@ -130,7 +128,7 @@ namespace osuCrypto::LogVole
                         std::move(block));
                     if (!inserted)
                     {
-                        (void)cudaFreeHost(pointer);
+                        gpu::gpuFreeHost(pointer);
                         return nullptr;
                     }
                     try
@@ -151,7 +149,7 @@ namespace osuCrypto::LogVole
                 }
                 catch (...)
                 {
-                    (void)cudaFreeHost(pointer);
+                    gpu::gpuFreeHost(pointer);
                     return nullptr;
                 }
             }
@@ -219,17 +217,17 @@ namespace osuCrypto::LogVole
             }
         };
 
-        RootCudaWirePool& rootCudaWirePool()
+        RootCudaWirePool& rootCudaWirePool(ExecutionContext& execution)
         {
-            static RootCudaWirePool* pool = new RootCudaWirePool();
-            return *pool;
+            return execution.wireResources<RootCudaWirePool>();
         }
 #endif
     }
 
     namespace detail
     {
-        void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment)
+        void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
+            ExecutionContext& execution, bool rootCudaAllocation, u64 runId)
         {
             if (!bytes) return nullptr;
             if (alignment < alignof(void*) || (alignment & (alignment - 1u)) ||
@@ -240,22 +238,22 @@ namespace osuCrypto::LogVole
             if (bytes > std::numeric_limits<std::size_t>::max() - overhead)
                 throw std::bad_array_new_length();
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (requestRootCudaWireAllocation && gpu::enabled())
+            if (rootCudaAllocation && gpu::enabled(execution))
             {
-                HostStep cudaAllocationStep("setup: CUDA-owned Root wire allocation");
-                if (void* pointer = rootCudaWirePool().allocate(bytes,
-                        alignment, rootCudaWireAllocationRunId))
+                HostStep cudaAllocationStep(execution, "setup: CUDA-owned Root wire allocation");
+                if (void* pointer = rootCudaWirePool(execution).allocate(bytes,
+                        alignment, runId))
                     return pointer;
             }
             const char* pinned = std::getenv("LV_GPU_SETUP_PINNED_WIRE");
             if (bytes >= (std::size_t{1} << 20) && alignment <= 4096 &&
-                (!pinned || pinned[0] != '0') && gpu::enabled())
+                (!pinned || pinned[0] != '0') && gpu::enabled(execution))
             {
-                HostStep allocationStep("setup: reusable wire allocation");
-                if (void* pointer = gpu::gpuTryAllocateSetupWireHost(bytes))
+                HostStep allocationStep(execution, "setup: reusable wire allocation");
+                if (void* pointer = gpu::gpuTryAllocateSetupWireHost(execution.wireResources<gpu::SetupWireMemory>(), bytes))
                 {
                     if (reinterpret_cast<std::uintptr_t>(pointer) % alignment == 0) return pointer;
-                    (void)gpu::gpuReleaseSetupWireHost(pointer);
+                    (void)rootCudaWirePool(execution).releaseKnown(pointer);
                 }
             }
 #endif
@@ -264,94 +262,94 @@ namespace osuCrypto::LogVole
             return pointer;
         }
 
-        void deallocateSetupWireBytes(void* pointer) noexcept
+        void deallocateSetupWireBytes(void* pointer, ExecutionContext& execution) noexcept
         {
             if (!pointer) return;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (rootCudaWirePool().releaseKnown(pointer)) return;
+            if (rootCudaWirePool(execution).releaseKnown(pointer)) return;
             // Allocation provenance, not the current runtime flag, determines
             // the matching release. Rollback may change while buffers survive.
-            if (gpu::gpuReleaseSetupWireHost(pointer)) return;
+            if (gpu::gpuReleaseSetupWireHost(execution.wireResources<gpu::SetupWireMemory>(), pointer)) return;
 #endif
             AlignedAllocator<u8>::aligned_free(pointer);
         }
     }
 
-    void resetRootWireCudaAllocEvidence(u64 senderRunId,
+    void resetRootWireCudaAllocEvidence(ExecutionContext& execution, u64 senderRunId,
         bool requested) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            lastRootCudaWireEvidence = {};
-            lastRootCudaWireEvidence.mSenderRunId = senderRunId;
-            lastRootCudaWireEvidence.mRequested = requested;
+            std::lock_guard lock(execution.wireResources<WireEvidenceResources>().mMutex);
+            execution.wireResources<WireEvidenceResources>().mLast = {};
+            execution.wireResources<WireEvidenceResources>().mLast.mSenderRunId = senderRunId;
+            execution.wireResources<WireEvidenceResources>().mLast.mRequested = requested;
         }
         catch (...) {}
     }
 
-    void noteRootWireCudaAllocEligibility(u64 senderRunId,
+    void noteRootWireCudaAllocEligibility(ExecutionContext& execution, u64 senderRunId,
         std::size_t wireBytes, bool eligible) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId != senderRunId) return;
-            lastRootCudaWireEvidence.mWireBytes = static_cast<u64>(wireBytes);
-            lastRootCudaWireEvidence.mEligible = eligible;
+            std::lock_guard lock(execution.wireResources<WireEvidenceResources>().mMutex);
+            if (execution.wireResources<WireEvidenceResources>().mLast.mSenderRunId != senderRunId) return;
+            execution.wireResources<WireEvidenceResources>().mLast.mWireBytes = static_cast<u64>(wireBytes);
+            execution.wireResources<WireEvidenceResources>().mLast.mEligible = eligible;
         }
         catch (...) {}
     }
 
-    void noteRootWireCudaEarlyPlan(u64 senderRunId, bool requested,
+    void noteRootWireCudaEarlyPlan(ExecutionContext& execution, u64 senderRunId, bool requested,
         bool eligible, std::size_t forecastBytes, bool launched) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId != senderRunId) return;
-            lastRootCudaWireEvidence.mEarlyRequested = requested;
-            lastRootCudaWireEvidence.mEarlyEligible = eligible;
-            lastRootCudaWireEvidence.mEarlyForecastBytes =
+            std::lock_guard lock(execution.wireResources<WireEvidenceResources>().mMutex);
+            if (execution.wireResources<WireEvidenceResources>().mLast.mSenderRunId != senderRunId) return;
+            execution.wireResources<WireEvidenceResources>().mLast.mEarlyRequested = requested;
+            execution.wireResources<WireEvidenceResources>().mLast.mEarlyEligible = eligible;
+            execution.wireResources<WireEvidenceResources>().mLast.mEarlyForecastBytes =
                 static_cast<u64>(forecastBytes);
-            lastRootCudaWireEvidence.mEarlyLaunched = launched;
+            execution.wireResources<WireEvidenceResources>().mLast.mEarlyLaunched = launched;
         }
         catch (...) {}
     }
 
-    void noteRootWireCudaEarlyJoin(u64 senderRunId, u64 joinWaitNs,
+    void noteRootWireCudaEarlyJoin(ExecutionContext& execution, u64 senderRunId, u64 joinWaitNs,
         bool adopted) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId != senderRunId) return;
-            lastRootCudaWireEvidence.mEarlyJoinWaitNs = joinWaitNs;
-            lastRootCudaWireEvidence.mEarlyAdopted = adopted;
+            std::lock_guard lock(execution.wireResources<WireEvidenceResources>().mMutex);
+            if (execution.wireResources<WireEvidenceResources>().mLast.mSenderRunId != senderRunId) return;
+            execution.wireResources<WireEvidenceResources>().mLast.mEarlyJoinWaitNs = joinWaitNs;
+            execution.wireResources<WireEvidenceResources>().mLast.mEarlyAdopted = adopted;
             if (adopted)
             {
-                lastRootCudaWireEvidence.mSelected = true;
-                lastRootCudaWireEvidence.mDeclined = false;
+                execution.wireResources<WireEvidenceResources>().mLast.mSelected = true;
+                execution.wireResources<WireEvidenceResources>().mLast.mDeclined = false;
             }
         }
         catch (...) {}
     }
 
-    RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot() noexcept
+    RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot(ExecutionContext& execution) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            return lastRootCudaWireEvidence;
+            std::lock_guard lock(execution.wireResources<WireEvidenceResources>().mMutex);
+            return execution.wireResources<WireEvidenceResources>().mLast;
         }
         catch (...) { return {}; }
     }
 
-    bool isRootCudaWireHostRange(const void* pointer,
+    bool isRootCudaWireHostRange(ExecutionContext& execution, const void* pointer,
         std::size_t bytes) noexcept
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
-        return rootCudaWirePool().contains(pointer, bytes);
+        return rootCudaWirePool(execution).contains(pointer, bytes);
 #else
         (void)pointer;
         (void)bytes;
@@ -359,23 +357,23 @@ namespace osuCrypto::LogVole
 #endif
     }
 
-    void recordRootCudaWireDirectDownload(const void* pointer,
+    void recordRootCudaWireDirectDownload(ExecutionContext& execution, const void* pointer,
         std::size_t bytes, bool completed) noexcept
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!completed || !bytes) return;
-        const u64 ownerRunId = rootCudaWirePool().ownerRunId(pointer, bytes);
+        const u64 ownerRunId = rootCudaWirePool(execution).ownerRunId(pointer, bytes);
         if (!ownerRunId) return;
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId != ownerRunId ||
-                lastRootCudaWireEvidence.mDirectDownloadBytes >
+            std::lock_guard lock(execution.wireResources<WireEvidenceResources>().mMutex);
+            if (execution.wireResources<WireEvidenceResources>().mLast.mSenderRunId != ownerRunId ||
+                execution.wireResources<WireEvidenceResources>().mLast.mDirectDownloadBytes >
                     std::numeric_limits<u64>::max() - bytes)
                 return;
-            lastRootCudaWireEvidence.mDirectDownloadBytes +=
+            execution.wireResources<WireEvidenceResources>().mLast.mDirectDownloadBytes +=
                 static_cast<u64>(bytes);
-            ++lastRootCudaWireEvidence.mDirectDownloadCalls;
+            ++execution.wireResources<WireEvidenceResources>().mLast.mDirectDownloadCalls;
         }
         catch (...) {}
 #else
@@ -385,48 +383,30 @@ namespace osuCrypto::LogVole
 #endif
     }
 
-    Buffer reserveRootCudaWireBuffer(std::size_t bytes, u64 senderRunId,
+    Buffer reserveRootCudaWireBuffer(ExecutionContext& execution, std::size_t bytes, u64 senderRunId,
         bool& cudaOwned, bool recordSelection)
     {
         cudaOwned = false;
         const u64 wallBegin = rootCudaWireSteadyNs();
         const u64 cpuBegin = cpuBenchmarkThreadNs();
-        Buffer reserved;
-#if defined(ENABLE_LOGVOLE_CUDA)
-        struct RequestScope
-        {
-            bool mPreviousRequest = requestRootCudaWireAllocation;
-            u64 mPreviousRunId = rootCudaWireAllocationRunId;
-            explicit RequestScope(u64 runId)
-            {
-                requestRootCudaWireAllocation = true;
-                rootCudaWireAllocationRunId = runId;
-            }
-            ~RequestScope()
-            {
-                requestRootCudaWireAllocation = mPreviousRequest;
-                rootCudaWireAllocationRunId = mPreviousRunId;
-            }
-        } request(senderRunId);
-#else
-        (void)senderRunId;
-#endif
-        reserved.resize(bytes);
-        cudaOwned = isRootCudaWireHostRange(reserved.data(), reserved.size());
+        auto owner = execution.weak_from_this().lock();
+        if (!owner) owner = execution.resourceOwner();
+        Buffer reserved(bytes, std::move(owner), true, senderRunId);
+        cudaOwned = isRootCudaWireHostRange(execution, reserved.data(), reserved.size());
         const u64 cpuElapsed = cpuBenchmarkThreadNs() - cpuBegin;
         const u64 wallEnd = rootCudaWireSteadyNs();
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId == senderRunId)
+            std::lock_guard lock(execution.wireResources<WireEvidenceResources>().mMutex);
+            if (execution.wireResources<WireEvidenceResources>().mLast.mSenderRunId == senderRunId)
             {
-                lastRootCudaWireEvidence.mAllocationBeginNs = wallBegin;
-                lastRootCudaWireEvidence.mAllocationEndNs = wallEnd;
-                lastRootCudaWireEvidence.mAllocationCpuNs = cpuElapsed;
+                execution.wireResources<WireEvidenceResources>().mLast.mAllocationBeginNs = wallBegin;
+                execution.wireResources<WireEvidenceResources>().mLast.mAllocationEndNs = wallEnd;
+                execution.wireResources<WireEvidenceResources>().mLast.mAllocationCpuNs = cpuElapsed;
                 if (recordSelection)
                 {
-                    lastRootCudaWireEvidence.mSelected = cudaOwned;
-                    lastRootCudaWireEvidence.mDeclined =
-                        lastRootCudaWireEvidence.mEligible && !cudaOwned;
+                    execution.wireResources<WireEvidenceResources>().mLast.mSelected = cudaOwned;
+                    execution.wireResources<WireEvidenceResources>().mLast.mDeclined =
+                        execution.wireResources<WireEvidenceResources>().mLast.mEligible && !cudaOwned;
                 }
             }
         }
@@ -436,17 +416,18 @@ namespace osuCrypto::LogVole
     bool shrinkRootCudaWireBuffer(Buffer& reserved,
         std::size_t exactBytes) noexcept
     {
+        auto& execution = executionContext(reserved);
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!exactBytes || exactBytes > reserved.size() ||
-            !isRootCudaWireHostRange(reserved.data(), reserved.size()))
+            !isRootCudaWireHostRange(execution, reserved.data(), reserved.size()))
             return false;
         const std::size_t oldBytes = reserved.size();
-        if (!rootCudaWirePool().contractActive(reserved.data(),
+        if (!rootCudaWirePool(execution).contractActive(reserved.data(),
                 oldBytes, exactBytes)) return false;
         try { reserved.resize(exactBytes); }
         catch (...) { return false; }
         return reserved.size() == exactBytes &&
-            isRootCudaWireHostRange(reserved.data(), exactBytes);
+            isRootCudaWireHostRange(execution, reserved.data(), exactBytes);
 #else
         (void)reserved;
         (void)exactBytes;
@@ -456,12 +437,13 @@ namespace osuCrypto::LogVole
 
     void adviseGpuSetupWireBuffer(Buffer& buffer)
     {
+        auto& execution = executionContext(buffer);
 #if defined(__linux__) && defined(ENABLE_LOGVOLE_CUDA) && defined(MADV_HUGEPAGE)
         const char* flag = std::getenv("LV_GPU_SETUP_WIRE_HUGE_PAGES");
-        if ((flag && flag[0] == '0') || !gpu::enabled() || buffer.size() < (std::size_t{8} << 20))
+        if ((flag && flag[0] == '0') || !gpu::enabled(execution) || buffer.size() < (std::size_t{8} << 20))
             return;
-        if (gpu::gpuIsSetupWireHostRange(buffer.data(), buffer.size()) ||
-            isRootCudaWireHostRange(buffer.data(), buffer.size())) return;
+        if (gpu::gpuIsSetupWireHostRange((executionContext(buffer)).wireResources<gpu::SetupWireMemory>(), buffer.data(), buffer.size()) ||
+            isRootCudaWireHostRange(execution, buffer.data(), buffer.size())) return;
         constexpr std::uintptr_t alignment = std::uintptr_t{2} << 20;
         const auto first = reinterpret_cast<std::uintptr_t>(buffer.data());
         if (first > std::numeric_limits<std::uintptr_t>::max() - buffer.size()) return;
@@ -490,7 +472,7 @@ namespace osuCrypto::LogVole
         // the established byte-at-a-time path.
         bool rootU64MemcpyCodecEnabled()
         {
-            static const bool on = [] {
+            const bool on = [] {
                 const char* value = std::getenv("LV_ROOT_U64_MEMCPY_CODEC");
                 return !(value && value[0] == '0');
             }();
@@ -503,18 +485,18 @@ namespace osuCrypto::LogVole
             {
                 return false;
             }
-            static const bool on = [] {
+            const bool on = [] {
                 const char* value = std::getenv("LV_SETUP_MEMCPY_CODEC");
                 return !(value && value[0] == '0');
             }();
             return on;
         }
 
-        u32 setupCodecWorkers(u32 requested)
+        u32 setupCodecWorkers(u32 requested, ExecutionContext* execution = nullptr)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             const char* value = std::getenv("LV_GPU_SETUP_PARALLEL_CODEC");
-            if (gpu::enabled() && (!value || value[0] != '0'))
+            if (execution && gpu::enabled(*execution) && (!value || value[0] != '0'))
                 return std::max<u32>(1u, requested);
 #endif
             return 1;
@@ -644,14 +626,16 @@ namespace osuCrypto::LogVole
             std::size_t mOffset = 0;
             u32 mWorkers = 1;
 
-            explicit BufferWriter(std::size_t size, u32 workers = 1)
-                : mBuffer(size), mWorkers(setupCodecWorkers(workers))
+            explicit BufferWriter(std::size_t size, u32 workers = 1,
+                ExecutionContextPtr execution = std::make_shared<ExecutionContext>())
+                : mBuffer(size, std::move(execution)),
+                  mWorkers(setupCodecWorkers(workers, &executionContext(mBuffer)))
             {
                 adviseGpuSetupWireBuffer(mBuffer);
             }
 
             explicit BufferWriter(Buffer&& reserved, u32 workers = 1)
-                : mBuffer(std::move(reserved)), mWorkers(setupCodecWorkers(workers))
+                : mBuffer(std::move(reserved)), mWorkers(setupCodecWorkers(workers, &executionContext(mBuffer)))
             {
                 adviseGpuSetupWireBuffer(mBuffer);
             }
@@ -901,15 +885,15 @@ namespace osuCrypto::LogVole
 
             polys.resize(polyCount);
             const auto bytes = static_cast<std::size_t>(perPoly) * sizeof(u64);
-            if (setupCodecWorkers(workers) > 1 && polyCount > 1 &&
+            if (setupCodecWorkers(workers, &executionContext(ring)) > 1 && polyCount > 1 &&
                 static_cast<std::size_t>(coeffCount) * sizeof(u64) >= (std::size_t(1) << 20))
             {
-                if (!detail::runParallelTasks(polyCount, setupCodecWorkers(workers), [&](std::size_t i) {
+                if (!detail::runParallelTasks(polyCount, setupCodecWorkers(workers, &executionContext(ring)), [&](std::size_t i) {
                     auto& poly = polys[i];
                     poly.mCoeffs.resize(static_cast<std::size_t>(perPoly));
                     std::memcpy(poly.mCoeffs.data(), payload.data() + offset + i * bytes, bytes);
                     return true;
-                })) return false;
+                }, false, &(executionContext(ring)))) return false;
                 offset += static_cast<u64>(coeffCount) * sizeof(u64);
                 return true;
             }
@@ -1250,13 +1234,13 @@ namespace osuCrypto::LogVole
         const ShrinkExpandLacct& lacct,
         u32 workers)
     {
-        HostStep phase("setup codec: encode shrink expand");
+        HostStep phase(executionContext(params), "setup codec: encode shrink expand");
         BufferWriter writer(
             paramsByteSize(params) +
             2u * sizeof(u32) +
             ringBatchByteSize(ct1.mPolys) +
             4u * sizeof(u32) +
-            ringBatchByteSize(lacct.mCt.mPolys), workers);
+            ringBatchByteSize(lacct.mCt.mPolys), workers, params.mRing.mExecutionContext);
         writer.writeParams(params);
         writer.writeU32(ct1.mRows);
         writer.writeU32(ct1.mCols);
@@ -1284,7 +1268,7 @@ namespace osuCrypto::LogVole
             std::endian::native != std::endian::little)
             return encodeShrinkExpandOfflineTensors(state.mParams, state.hostCt1(), state.hostLacct(), workers);
 
-        HostStep phase("setup codec: encode resident shrink expand");
+        HostStep phase(executionContext(state), "setup codec: encode resident shrink expand");
         const u64 wordsPerPoly = ringPolyCoeffCount(state.mParams.mRing);
         const auto tensorWords = [&](const RingTensor& tensor) -> u32 {
             if (!wordsPerPoly || ringTensorSize(tensor) >
@@ -1417,7 +1401,7 @@ namespace osuCrypto::LogVole
         return rootWireLayout(message).mBytes;
     }
 
-    void noteRootWireCudaExpectedDownloads(u64 senderRunId,
+    void noteRootWireCudaExpectedDownloads(ExecutionContext& execution, u64 senderRunId,
         const RootOfflineMessage& message)
     {
         const auto layout = rootWireLayout(message);
@@ -1437,22 +1421,22 @@ namespace osuCrypto::LogVole
         addTensor(message.mCtR, message.mLazyCtR);
         addTensor(message.mLacctLeft.mCt, message.mLazyLacctLeft);
         addTensor(message.mTopCt, message.mLazyTopCt);
-        std::lock_guard lock(rootCudaWireEvidenceMutex);
-        if (lastRootCudaWireEvidence.mSenderRunId != senderRunId) return;
-        lastRootCudaWireEvidence.mExpectedDirectDownloadBytes = expectedBytes;
-        lastRootCudaWireEvidence.mExpectedDirectDownloadCalls = expectedCalls;
+        std::lock_guard lock(execution.wireResources<WireEvidenceResources>().mMutex);
+        if (execution.wireResources<WireEvidenceResources>().mLast.mSenderRunId != senderRunId) return;
+        execution.wireResources<WireEvidenceResources>().mLast.mExpectedDirectDownloadBytes = expectedBytes;
+        execution.wireResources<WireEvidenceResources>().mLast.mExpectedDirectDownloadCalls = expectedCalls;
     }
 
     Buffer encode(const RootOfflineMessage& message, u32 workers)
     {
         return encodeRootOfflineIntoBuffer(message,
-            Buffer(rootOfflineWireSize(message)), workers);
+            Buffer(rootOfflineWireSize(message), message.mRing.mExecutionContext), workers);
     }
 
     Buffer encodeRootOfflineIntoBuffer(const RootOfflineMessage& message,
         Buffer&& reserved, u32 workers)
     {
-        HostStep phase("setup codec: encode root");
+        HostStep phase(executionContext(reserved), "setup codec: encode root");
         const auto layout = rootWireLayout(message);
         if (reserved.size() != layout.mBytes)
             throw std::invalid_argument("LogVole reserved Root wire size does not match message");
@@ -1592,7 +1576,7 @@ namespace osuCrypto::LogVole
 
     bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, u32 workers)
     {
-        HostStep phase("setup codec: decode shrink expand");
+        HostStep phase(executionContext(message.mParams), "setup codec: decode shrink expand");
         message.mLazyCt1.reset();
         message.mLazyLacct.reset();
         u64 offset = 0;
@@ -1633,7 +1617,7 @@ namespace osuCrypto::LogVole
             const RingTensor& get() const override
             {
                 std::call_once(mOnce, [&] {
-                    HostStep phase("setup codec: deferred tensor materialization");
+                    HostStep phase(executionContext(*mPayload), "setup codec: deferred tensor materialization");
                     std::vector<RnsPoly> polys(static_cast<std::size_t>(mHost.mRows) * mHost.mCols);
                     const auto bytes = mPolyWords * sizeof(u64);
                     for (std::size_t i = 0; i < polys.size(); ++i)
@@ -1656,17 +1640,18 @@ namespace osuCrypto::LogVole
     bool decodeShrinkExpandOfflineForTransport(Buffer&& payload,
         ShrinkExpandOfflineMessage& message, u32 workers)
     {
+        auto& execution = executionContext(payload);
+        message.mParams.mRing.mExecutionContext = payload.executionOwner();
         bool enabled = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+
         const char* flag = std::getenv("LV_GPU_SETUP_ENCODED_RECEIVE");
-        enabled = gpu::enabled() && (!flag || flag[0] != '0');
+        enabled = gpu::enabled(execution) && (!flag || flag[0] != '0');
 #endif
         if (!enabled || std::endian::native != std::endian::little)
             return decode(payload, message, workers);
 
-        HostStep phase("setup codec: retain encoded shrink expand");
+        HostStep phase(execution, "setup codec: retain encoded shrink expand");
         ShrinkExpandOfflineMessage next{};
         u64 offset = 0;
         if (!readParams(payload, offset, next.mParams) || !validateShrinkExpandParams(next.mParams))
@@ -1736,7 +1721,7 @@ namespace osuCrypto::LogVole
 
     bool decode(std::span<const u8> payload, RootOfflineMessage& message, u32 workers)
     {
-        HostStep phase("setup codec: decode root");
+        HostStep phase(executionContext(message.mRing), "setup codec: decode root");
         u64 offset = 0;
         u32 publicBStarCount = 0;
 
@@ -1774,15 +1759,16 @@ namespace osuCrypto::LogVole
     bool decodeRootOfflineForTransport(Buffer&& payload,
         RootOfflineMessage& message, u32 workers)
     {
+        auto& execution = executionContext(payload);
+        message.mRing.mExecutionContext = payload.executionOwner();
         bool enabled = false;
         bool retainCtR = false;
         bool retainLacct = false;
         bool retainPublicBStar = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+
         const char* flag = std::getenv("LV_GPU_SETUP_ROOT_ENCODED_RECEIVE");
-        enabled = gpu::enabled() && (!flag || flag[0] != '0');
+        enabled = gpu::enabled(execution) && (!flag || flag[0] != '0');
         const char* ctRFlag = std::getenv("LV_GPU_SETUP_ROOT_CTR_ENCODED_RECEIVE");
         retainCtR = !ctRFlag || ctRFlag[0] != '0';
         const char* lacctFlag = std::getenv("LV_GPU_SETUP_ROOT_LACCT_ENCODED_RECEIVE");
@@ -1793,8 +1779,9 @@ namespace osuCrypto::LogVole
         if (!enabled || std::endian::native != std::endian::little)
             return decode(payload, message, workers);
 
-        HostStep phase("setup codec: retain encoded root tensors");
+        HostStep phase(execution, "setup codec: retain encoded root tensors");
         RootOfflineMessage next{};
+        next.mRing.mExecutionContext = payload.executionOwner();
         u64 offset = 0;
         u32 publicBStarCount = 0;
         struct Segment { std::size_t offset = 0, bytes = 0; } ctR, lacct, topCt, publicBStar;

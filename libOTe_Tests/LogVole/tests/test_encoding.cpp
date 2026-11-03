@@ -398,17 +398,20 @@ namespace
 
     void expect_parallel_offline_codec(const oc::CLP& cmd)
     {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
         bool haveGpu = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool previousGpu = gpu::enabled();
-        struct RestoreGpu { bool mPrevious; ~RestoreGpu() { gpu::setEnabled(mPrevious); } } restoreGpu{ previousGpu };
-        gpu::setEnabled(cmd.getOr("gpu", 0) != 0);
-        haveGpu = gpu::enabled();
+        const bool previousGpu = gpu::enabled(*testExecution);
+        ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
+        testExecution->mUseGpu = (cmd.getOr("gpu", 0) != 0);
+        haveGpu = gpu::enabled(*testExecution);
 #else
         (void)cmd;
 #endif
         ScopedEnvironmentValue parallelCodec("LV_GPU_SETUP_PARALLEL_CODEC", "1");
-        ScopedProtocolCacheScope roleScope(ProtocolCacheRole::Unspecified, currentProtocolCacheScope().mRunId);
+        ::tests_libOTe::logvole_test::ScopedProtocolCacheScope roleScope(testExecution, ProtocolCacheRole::Unspecified, testExecution->mScope.mRunId);
         CpuBenchmarkContext telemetry;
         telemetry.mWorkerLimit = 8;
 #if defined(__linux__)
@@ -418,17 +421,14 @@ namespace
         for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu)
             if (CPU_ISSET(cpu, &cpus)) telemetry.mCpus.push_back(cpu);
 #endif
-        struct RestoreTelemetry
-        {
-            CpuBenchmarkContext* mPrevious;
-            ~RestoreTelemetry() { tCpuBenchmarkContext = mPrevious; }
-        } restoreTelemetry{ tCpuBenchmarkContext };
-        tCpuBenchmarkContext = &telemetry;
+        ::tests_libOTe::logvole_test::ScopedCpuBenchmark restoreTelemetry(testExecution, testExecution->mCpuBenchmark);
+        testExecution->mCpuBenchmark = &telemetry;
         const char* nativeCodec = std::getenv("LV_SETUP_MEMCPY_CODEC");
         const bool expectParallel = haveGpu && std::endian::native == std::endian::little &&
             (!nativeCodec || nativeCodec[0] != '0') && telemetry.mCpus.size() > 1u;
 
         RingParams ring{};
+        ::tests_libOTe::logvole_test::bindExecution(ring, testExecution);
         ring.mPolyModulusDegree = 8192;
         assignValues<int>(ring.mCoeffModulusBits, { 55, 54, 53, 52 });
         ShrinkExpandOfflineMessage shrink{};
@@ -453,6 +453,7 @@ namespace
         expect_large_parallel_wire(shrink, ringHeader + 20u + 3u + 8u, telemetry, expectParallel);
 
         RootOfflineMessage root{};
+        ::tests_libOTe::logvole_test::bindExecution(root, testExecution);
         root.mRing = ring;
         root.mTauHi = 2;
         root.mGadgetLogBase = 107;
@@ -470,7 +471,10 @@ namespace
 
 void LogVole_Encoding_SingletonOfflinePayloadBound(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     ShrinkExpandSenderOfflineInput input;
+    ::tests_libOTe::logvole_test::bindExecution(input, testExecution);
     input.mParams.mRing.mPolyModulusDegree = 1024;
     assignValues<int>(input.mParams.mRing.mCoeffModulusBits, {30, 30});
     input.mParams.mPlaintextModulusBits = 20;
@@ -478,7 +482,8 @@ void LogVole_Encoding_SingletonOfflinePayloadBound(const oc::CLP&)
     input.mParams.mTau = 2;
     input.mParams.mGadgetLogBase = 20;
     RingNttContext ctx;
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(input.mParams.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, input.mParams.mRing, ctx));
     input.mS = {deriveUniformPolyFromNonce(ctx, 0x53494e474c4553ull, 0x57495245u, 0)};
     for (bool truncated : {false, true})
     {
@@ -496,6 +501,7 @@ void LogVole_Encoding_SingletonOfflinePayloadBound(const oc::CLP&)
         ShrinkExpandOfflineMessage decoded;
         LOGVOLE_REQUIRE_TRUE(decode(bytes, decoded));
         ShrinkExpandReceiverOfflineInput receiverInput;
+        ::tests_libOTe::logvole_test::bindExecution(receiverInput, testExecution);
         receiverInput.mParams = input.mParams;
         ShrinkExpandReceiverState receiver;
         LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(
@@ -505,6 +511,8 @@ void LogVole_Encoding_SingletonOfflinePayloadBound(const oc::CLP&)
 
 void LogVole_Encoding_KeyDeriveRequestRoundTrip(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     const auto message = make_keyderive_request();
     const auto encoded = encode(message);
 
@@ -518,6 +526,8 @@ void LogVole_Encoding_KeyDeriveRequestRoundTrip(const oc::CLP&)
 
 void LogVole_Encoding_KeyDeriveResponseRoundTrip(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     const auto message = make_keyderive_response();
     const auto encoded = encode(message);
 
@@ -531,6 +541,8 @@ void LogVole_Encoding_KeyDeriveResponseRoundTrip(const oc::CLP&)
 
 void LogVole_Encoding_SeedMessageRoundTrip(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     SeedMessage message{};
     assignValues<std::uint8_t>(message.mSeed, { 1, 3, 5, 7, 9, 11 });
 
@@ -545,9 +557,12 @@ void LogVole_Encoding_SeedMessageRoundTrip(const oc::CLP&)
 
 void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
 {
-    const RingParams ring = make_ring();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const RingParams ring = ::tests_libOTe::logvole_test::withExecution(make_ring(), testExecution);
 
     RootOfflineMessage message{};
+
     message.mRing = ring;
     message.mTauHi = 2;
     message.mGadgetLogBase = 7;
@@ -576,15 +591,15 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(reservedEncoded.data() == reservedPointer);
     expect_bytes_equal(reservedEncoded, encoded);
     bool cudaOwned = false;
-    Buffer requestedRootWire = reserveRootCudaWireBuffer(
+    Buffer requestedRootWire = reserveRootCudaWireBuffer(*testExecution,
         encoded.size(), 987u, cudaOwned);
     const auto* const requestedPointer = requestedRootWire.data();
-    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(requestedPointer,
+    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(*testExecution, requestedPointer,
         requestedRootWire.size()), cudaOwned);
     const auto requestedEncoded = encodeRootOfflineIntoBuffer(
         message, std::move(requestedRootWire), 1u);
     LOGVOLE_REQUIRE_TRUE(requestedEncoded.data() == requestedPointer);
-    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(requestedEncoded.data(),
+    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(*testExecution, requestedEncoded.data(),
         requestedEncoded.size()), cudaOwned);
     expect_bytes_equal(requestedEncoded, encoded);
     bool rejectedWrongSize = false;
@@ -596,6 +611,7 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
     catch (const std::invalid_argument&) { rejectedWrongSize = true; }
     LOGVOLE_REQUIRE_TRUE(rejectedWrongSize);
     RootOfflineMessage decoded{};
+    ::tests_libOTe::logvole_test::bindExecution(decoded, testExecution);
     LOGVOLE_REQUIRE_TRUE(decode(encoded, decoded));
 
     LOGVOLE_EXPECT_TRUE(decoded.mRing == message.mRing);
@@ -633,6 +649,7 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
     expect_offline_decode_boundaries<RootOfflineMessage>(encoded, firstTensorOffset);
 
     RootOfflineMessage empty{};
+    ::tests_libOTe::logvole_test::bindExecution(empty, testExecution);
     empty.mRing = ring;
     LOGVOLE_REQUIRE_TRUE(decode(encode(empty), decoded));
     LOGVOLE_EXPECT_TRUE(decoded.mCtR.mPolys.empty());
@@ -643,18 +660,18 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
 
 void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0) == 0 || std::endian::native != std::endian::little) return;
-    const bool previousGpu = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool previous;
-        ~RestoreGpu() { gpu::setEnabled(previous); }
-    } restore{previousGpu};
-    gpu::setEnabled(true);
+    const bool previousGpu = gpu::enabled(*testExecution);
+    ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
+    testExecution->mUseGpu = (true);
 
-    const RingParams ring = make_ring();
+    const RingParams ring = ::tests_libOTe::logvole_test::withExecution(make_ring(), testExecution);
     RootOfflineMessage eager{};
+    ::tests_libOTe::logvole_test::bindExecution(eager, testExecution);
     eager.mRing = ring;
     eager.mTauHi = 2;
     eager.mGadgetLogBase = 7;
@@ -673,6 +690,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     expect_bytes_equal(encode(eager, 1), as_span(exact));
 
     RootOfflineMessage resident = eager;
+    ::tests_libOTe::logvole_test::bindExecution(resident, testExecution);
     auto ctR = std::make_shared<TestRootDeviceTensor>(resident.mCtR);
     auto lacct = std::make_shared<TestRootDeviceTensor>(resident.mLacctLeft.mCt);
     auto topCt = std::make_shared<TestRootDeviceTensor>(resident.mTopCt);
@@ -687,39 +705,40 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
         const auto wire = encode(resident, workers);
         expect_bytes_equal(wire, as_span(exact));
         RootOfflineMessage decoded{};
+        ::tests_libOTe::logvole_test::bindExecution(decoded, testExecution);
         LOGVOLE_REQUIRE_TRUE(decode(wire, decoded, workers));
         expect_tensor_equal(decoded.mCtR, eager.mCtR);
         expect_tensor_equal(decoded.mLacctLeft.mCt, eager.mLacctLeft.mCt);
         expect_tensor_equal(decoded.mTopCt, eager.mTopCt);
     }
     constexpr oc::u64 cudaWireTestRunId = 987u;
-    resetRootWireCudaAllocEvidence(cudaWireTestRunId, true);
-    noteRootWireCudaAllocEligibility(cudaWireTestRunId,
+    resetRootWireCudaAllocEvidence(*testExecution, cudaWireTestRunId, true);
+    noteRootWireCudaAllocEligibility(*testExecution, cudaWireTestRunId,
         rootOfflineWireSize(resident), true);
-    noteRootWireCudaExpectedDownloads(cudaWireTestRunId, resident);
+    noteRootWireCudaExpectedDownloads(*testExecution, cudaWireTestRunId, resident);
     bool cudaOwned = false;
     const std::size_t exactRootBytes = rootOfflineWireSize(resident);
     const std::size_t forecastRootBytes = exactRootBytes + 4096u;
-    Buffer reserved = reserveRootCudaWireBuffer(
+    Buffer reserved = reserveRootCudaWireBuffer(*testExecution,
         forecastRootBytes, cudaWireTestRunId, cudaOwned);
     LOGVOLE_REQUIRE_TRUE(cudaOwned);
     const auto* const reservedPointer = reserved.data();
-    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange(reservedPointer,
+    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange(*testExecution, reservedPointer,
         forecastRootBytes));
     LOGVOLE_REQUIRE_TRUE(shrinkRootCudaWireBuffer(reserved,
         exactRootBytes));
     LOGVOLE_REQUIRE_TRUE(reserved.data() == reservedPointer);
     LOGVOLE_REQUIRE_EQ(reserved.size(), exactRootBytes);
     LOGVOLE_REQUIRE_TRUE(reserved.capacity() >= forecastRootBytes);
-    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange(reservedPointer,
+    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange(*testExecution, reservedPointer,
         forecastRootBytes));
-    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange(reservedPointer,
+    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange(*testExecution, reservedPointer,
         exactRootBytes));
     Buffer cudaWire = encodeRootOfflineIntoBuffer(resident,
         std::move(reserved), 4u);
     LOGVOLE_REQUIRE_TRUE(cudaWire.data() == reservedPointer);
     expect_bytes_equal(cudaWire, as_span(exact));
-    const auto cudaEvidence = rootWireCudaAllocEvidenceSnapshot();
+    const auto cudaEvidence = rootWireCudaAllocEvidenceSnapshot(*testExecution);
     LOGVOLE_REQUIRE_TRUE(cudaEvidence.mSelected);
     LOGVOLE_REQUIRE_EQ(cudaEvidence.mDirectDownloadCalls,
         cudaEvidence.mExpectedDirectDownloadCalls);
@@ -729,10 +748,10 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     coproto::BufferingSocket socket;
     macoro::sync_wait(socket.send(std::move(cudaWire)));
     macoro::sync_wait(socket.flush());
-    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange(reservedPointer,
+    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange(*testExecution, reservedPointer,
         exactRootBytes));
     bool reusedCudaOwned = false;
-    Buffer reused = reserveRootCudaWireBuffer(forecastRootBytes,
+    Buffer reused = reserveRootCudaWireBuffer(*testExecution, forecastRootBytes,
         cudaWireTestRunId, reusedCudaOwned);
     LOGVOLE_REQUIRE_TRUE(reusedCudaOwned);
     LOGVOLE_REQUIRE_TRUE(reused.data() == reservedPointer);
@@ -752,6 +771,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     ScopedEnvironmentValue encodedLacct("LV_GPU_SETUP_ROOT_LACCT_ENCODED_RECEIVE", "1");
     ScopedEnvironmentValue encodedBStar("LV_GPU_SETUP_ROOT_BSTAR_ENCODED_RECEIVE", "1");
     RootOfflineMessage retained{};
+    ::tests_libOTe::logvole_test::bindExecution(retained, testExecution);
     auto received = encode(eager, 1);
     LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(received), retained, 4));
     LOGVOLE_REQUIRE_TRUE(retained.mOwnedCtRWire && retained.mLazyCtR);
@@ -785,8 +805,10 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     for (std::size_t i = 0; i < retainedBStar.size(); ++i)
         expect_poly_equal(retainedBStar[i], eager.mPublicBStarNtt[i]);
     RootOfflineMessage otherParty = eager;
+    ::tests_libOTe::logvole_test::bindExecution(otherParty, testExecution);
     ++otherParty.mPublicBStarNtt.front().mCoeffs.front();
     RootOfflineMessage otherRetained{};
+    ::tests_libOTe::logvole_test::bindExecution(otherRetained, testExecution);
     auto otherWire = encode(otherParty, 1);
     LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
         std::move(otherWire), otherRetained, 4));
@@ -815,6 +837,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
         topCtOffset, eager.mTopCt);
     const auto expectRejected = [&](Buffer&& malformed) {
         RootOfflineMessage eagerRejected{};
+        ::tests_libOTe::logvole_test::bindExecution(eagerRejected, testExecution);
         LOGVOLE_EXPECT_FALSE(decode(malformed, eagerRejected, 4));
         const auto ctROwner = retained.mOwnedCtRWire;
         const auto lacctOwner = retained.mOwnedLacctLeftWire;
@@ -864,12 +887,14 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     // A direct/public decode remains eager even when its input was produced
     // by the same resident sender message.
     RootOfflineMessage direct{};
+    ::tests_libOTe::logvole_test::bindExecution(direct, testExecution);
     LOGVOLE_REQUIRE_TRUE(decode(encode(eager, 1), direct, 4));
     LOGVOLE_EXPECT_TRUE(!direct.mCtR.mPolys.empty() && !direct.mOwnedCtRWire);
     LOGVOLE_EXPECT_TRUE(!direct.mLacctLeft.mCt.mPolys.empty() && !direct.mOwnedLacctLeftWire);
     LOGVOLE_EXPECT_TRUE(!direct.mTopCt.mPolys.empty() && !direct.mOwnedTopCtWire);
     LOGVOLE_EXPECT_TRUE(!direct.mPublicBStarNtt.empty() && !direct.mOwnedPublicBStarWire);
     RootOfflineMessage refreshed = retained;
+    ::tests_libOTe::logvole_test::bindExecution(refreshed, testExecution);
     LOGVOLE_REQUIRE_TRUE(decode(encode(eager, 1), refreshed, 4));
     LOGVOLE_EXPECT_TRUE(!refreshed.mOwnedPublicBStarWire && !refreshed.mLazyPublicBStar);
     LOGVOLE_EXPECT_EQ(refreshed.mPublicBStarNtt.size(), eager.mPublicBStarNtt.size());
@@ -877,6 +902,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     {
         ScopedEnvironmentValue ctROptOut("LV_GPU_SETUP_ROOT_CTR_ENCODED_RECEIVE", "0");
         RootOfflineMessage stagedCtR{};
+        ::tests_libOTe::logvole_test::bindExecution(stagedCtR, testExecution);
         auto stagedWire = encode(eager, 1);
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedCtR, 4));
         LOGVOLE_EXPECT_TRUE(!stagedCtR.mCtR.mPolys.empty() && !stagedCtR.mOwnedCtRWire);
@@ -887,6 +913,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     {
         ScopedEnvironmentValue lacctOptOut("LV_GPU_SETUP_ROOT_LACCT_ENCODED_RECEIVE", "0");
         RootOfflineMessage stagedLacct{};
+        ::tests_libOTe::logvole_test::bindExecution(stagedLacct, testExecution);
         auto stagedWire = encode(eager, 1);
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedLacct, 4));
         LOGVOLE_EXPECT_TRUE(!stagedLacct.mLacctLeft.mCt.mPolys.empty() &&
@@ -898,6 +925,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     {
         ScopedEnvironmentValue bStarOptOut("LV_GPU_SETUP_ROOT_BSTAR_ENCODED_RECEIVE", "0");
         RootOfflineMessage stagedBStar{};
+        ::tests_libOTe::logvole_test::bindExecution(stagedBStar, testExecution);
         auto stagedWire = encode(eager, 1);
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedBStar, 4));
         LOGVOLE_EXPECT_TRUE(!stagedBStar.mPublicBStarNtt.empty() &&
@@ -911,6 +939,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     {
         ScopedEnvironmentValue optOut("LV_GPU_SETUP_ROOT_ENCODED_RECEIVE", "0");
         RootOfflineMessage staged{};
+        ::tests_libOTe::logvole_test::bindExecution(staged, testExecution);
         auto stagedWire = encode(eager, 1);
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), staged, 4));
         LOGVOLE_EXPECT_TRUE(!staged.mCtR.mPolys.empty() && !staged.mOwnedCtRWire);
@@ -932,7 +961,9 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
 
 void LogVole_Encoding_ShrinkExpandOfflineMessageDoesNotLeakNoiseRoot(const oc::CLP&)
 {
-    const RingParams ring = make_ring();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const RingParams ring = ::tests_libOTe::logvole_test::withExecution(make_ring(), testExecution);
 
     ShrinkExpandOfflineMessage message{};
     message.mParams.mRing = ring;
@@ -988,7 +1019,9 @@ void LogVole_Encoding_ShrinkExpandOfflineMessageDoesNotLeakNoiseRoot(const oc::C
 
 void LogVole_Encoding_ShrinkExpandOfflineMessageRejectsInvalidMode(const oc::CLP&)
 {
-    const RingParams ring = make_ring();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const RingParams ring = ::tests_libOTe::logvole_test::withExecution(make_ring(), testExecution);
 
     ShrinkExpandOfflineMessage message{};
     message.mParams.mRing = ring;
@@ -1024,7 +1057,9 @@ void LogVole_Encoding_ShrinkExpandOfflineMessageRejectsInvalidMode(const oc::CLP
 
 void LogVole_Encoding_ShrinkExpandOfflineMessageRejectsNoncanonicalBooleans(const oc::CLP&)
 {
-    const RingParams ring = make_ring();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const RingParams ring = ::tests_libOTe::logvole_test::withExecution(make_ring(), testExecution);
 
     ShrinkExpandOfflineMessage message{};
     message.mParams.mRing = ring;
@@ -1062,6 +1097,8 @@ void LogVole_Encoding_ShrinkExpandOfflineMessageRejectsNoncanonicalBooleans(cons
 
 void LogVole_Encoding_RootDigestAndResponseRoundTrip(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     // This literal is an external wire oracle, rather than an encode/decode
     // round trip where matching bugs could agree. It covers low bytes, carries,
     // a mixed-byte value, the high bit, and the full-width maximum.
@@ -1245,6 +1282,9 @@ void LogVole_Encoding_RootDigestAndResponseRoundTrip(const oc::CLP&)
 
 void LogVole_Encoding_AllMessageRoundTrips(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
     LogVole_Encoding_KeyDeriveRequestRoundTrip(cmd);
     LogVole_Encoding_KeyDeriveResponseRoundTrip(cmd);
     LogVole_Encoding_SeedMessageRoundTrip(cmd);
@@ -1259,15 +1299,14 @@ void LogVole_Encoding_AllMessageRoundTrips(const oc::CLP& cmd)
 
 void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
-    const bool previousGpu = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool mPrevious;
-        ~RestoreGpu() { gpu::setEnabled(mPrevious); }
-    } restoreGpu{previousGpu};
-    gpu::setEnabled(cmd.getOr("gpu", 0) != 0);
-    if (!gpu::enabled()) return;
+    const bool previousGpu = gpu::enabled(*testExecution);
+    ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
+    testExecution->mUseGpu = (cmd.getOr("gpu", 0) != 0);
+    if (!gpu::enabled(*testExecution)) return;
 
     constexpr std::size_t bytes = std::size_t{1} << 20;
     ScopedEnvironmentValue pinned("LV_GPU_SETUP_PINNED_WIRE", "1");
@@ -1279,10 +1318,10 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(firstAllocation != nullptr);
         LOGVOLE_REQUIRE_EQ(reinterpret_cast<std::uintptr_t>(buffer.data()) % oc::gDefaultAlignment,
             std::uintptr_t{0});
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(buffer.data(), buffer.size()));
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(buffer.data() + 31, buffer.size() - 31));
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(buffer.data() + buffer.size() - 1, 2));
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data(), buffer.size()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data() + 31, buffer.size() - 31));
+        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data() + buffer.size() - 1, 2));
+        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data(), buffer.size()));
 
         gpu::GpuStream transferStream;
         LOGVOLE_REQUIRE_TRUE(transferStream.raw() != nullptr);
@@ -1300,7 +1339,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
             ScopedEnvironmentValue stagedDownload("LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD", "0");
             LOGVOLE_REQUIRE_TRUE(
                 gpu::downloadSetupWire(buffer.data(), device.mPointer, bytes, transferStream));
-            LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+            LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data(), buffer.size()));
             LOGVOLE_EXPECT_EQ(buffer.front(), 0);
             LOGVOLE_EXPECT_EQ(buffer.back(), 0);
         }
@@ -1309,7 +1348,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         // exact byte and lifetime checks below.
         LOGVOLE_REQUIRE_TRUE(
             gpu::downloadSetupWire(buffer.data(), device.mPointer, bytes, transferStream));
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data(), buffer.size()));
         LOGVOLE_EXPECT_EQ(buffer.front(), 0);
         LOGVOLE_EXPECT_EQ(buffer.back(), 0);
 
@@ -1317,7 +1356,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         buffer.back() = 0xa7;
         LOGVOLE_REQUIRE_TRUE(
             gpu::uploadSetupWire(device.mPointer, buffer.data(), bytes, transferStream));
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data(), buffer.size()));
         std::fill(buffer.begin(), buffer.end(), 0);
         LOGVOLE_REQUIRE_TRUE(
             gpu::downloadSetupWire(buffer.data(), device.mPointer, bytes, transferStream));
@@ -1325,27 +1364,27 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         LOGVOLE_EXPECT_EQ(buffer.back(), 0xa7);
 
         bool pinnedRange = false;
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuTryPinSetupWireHostRange(
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuTryPinSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(),
             buffer.data() + 31, buffer.size() - 31, pinnedRange));
         LOGVOLE_REQUIRE_TRUE(pinnedRange);
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data(), buffer.size()));
         LOGVOLE_REQUIRE_TRUE(
-            gpu::gpuIsSetupWirePinnedHostRange(buffer.data() + 31, buffer.size() - 31));
+            gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data() + 31, buffer.size() - 31));
         pinnedRange = true;
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuTryPinSetupWireHostRange(
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuTryPinSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(),
             buffer.data() + buffer.size() - 1, 2, pinnedRange));
         LOGVOLE_EXPECT_FALSE(pinnedRange);
 
         Buffer copied = buffer;
         LOGVOLE_REQUIRE_TRUE(copied.data() != buffer.data());
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(copied.data(), copied.size()));
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(copied.data(), copied.size()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), copied.data(), copied.size()));
+        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), copied.data(), copied.size()));
         LOGVOLE_REQUIRE_TRUE(std::equal(copied.begin(), copied.end(), buffer.begin()));
         LOGVOLE_EXPECT_EQ(copied.front(), 0x3c);
         LOGVOLE_EXPECT_EQ(copied.back(), 0xa7);
         pinnedRange = false;
         LOGVOLE_REQUIRE_TRUE(
-            gpu::gpuTryPinSetupWireHostRange(copied.data(), copied.size(), pinnedRange));
+            gpu::gpuTryPinSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), copied.data(), copied.size(), pinnedRange));
         LOGVOLE_REQUIRE_TRUE(pinnedRange);
 
         Buffer moved = std::move(buffer);
@@ -1358,37 +1397,37 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
             ScopedEnvironmentValue disabled("LV_GPU_SETUP_PINNED_WIRE", "0");
             moved.clear();
         }
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(firstAllocation, bytes));
+        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), firstAllocation, bytes));
     }
 
     Buffer reused(bytes);
     LOGVOLE_REQUIRE_TRUE(reused.data() == firstAllocation);
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(reused.data(), reused.size()));
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), reused.data(), reused.size()));
     // Registration belongs to the allocation and persists while it is free.
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(reused.data(), reused.size()));
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), reused.data(), reused.size()));
     std::fill(reused.begin(), reused.end(), 0x5a);
     reused.resize(bytes + 257u, oc::AllocType::Zeroed);
     LOGVOLE_REQUIRE_TRUE(std::all_of(reused.begin(), reused.begin() + bytes,
         [](std::uint8_t value) { return value == 0x5a; }));
     LOGVOLE_REQUIRE_TRUE(std::all_of(reused.begin() + bytes, reused.end(),
         [](std::uint8_t value) { return value == 0; }));
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(reused.data(), reused.size()));
-    LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(reused.data(), reused.size()));
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), reused.data(), reused.size()));
+    LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), reused.data(), reused.size()));
     bool resizedPinned = false;
     LOGVOLE_REQUIRE_TRUE(
-        gpu::gpuTryPinSetupWireHostRange(reused.data(), reused.size(), resizedPinned));
+        gpu::gpuTryPinSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), reused.data(), reused.size(), resizedPinned));
     LOGVOLE_REQUIRE_TRUE(resizedPinned);
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(reused.data(), reused.size()));
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), reused.data(), reused.size()));
     reused.clear();
     {
         ScopedEnvironmentValue disabled("LV_GPU_SETUP_PINNED_WIRE", "0");
         Buffer ordinary(bytes);
         LOGVOLE_REQUIRE_TRUE(ordinary.data() != nullptr);
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(ordinary.data(), ordinary.size()));
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(ordinary.data(), ordinary.size()));
+        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), ordinary.data(), ordinary.size()));
+        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), ordinary.data(), ordinary.size()));
         bool ordinaryPinned = true;
         LOGVOLE_REQUIRE_TRUE(
-            gpu::gpuTryPinSetupWireHostRange(ordinary.data(), ordinary.size(), ordinaryPinned));
+            gpu::gpuTryPinSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), ordinary.data(), ordinary.size(), ordinaryPinned));
         LOGVOLE_EXPECT_FALSE(ordinaryPinned);
     }
 #else

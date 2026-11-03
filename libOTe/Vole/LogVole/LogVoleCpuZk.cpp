@@ -227,7 +227,7 @@ namespace osuCrypto::LogVole::detail
 
         int vectorBits(const seal::Modulus& modulus, std::size_t count)
         {
-            static const bool enabled = [] {
+            const bool enabled = [] {
                 const char* value = std::getenv("LV_CPU_VECTOR_ZK");
                 const char* pseudo = std::getenv("LV_CPU_ZK_PSEUDO_REDUCE");
                 return (!value || value[0] != '0') && (!pseudo || pseudo[0] != '0') &&
@@ -352,7 +352,7 @@ namespace osuCrypto::LogVole::detail
 
         int matrixVectorBits(const seal::Modulus& modulus)
         {
-            static const bool enabled = [] {
+            const bool enabled = [] {
                 const char* value = std::getenv("LV_CPU_VECTOR_MATMUL");
                 return (!value || value[0] != '0') &&
                     __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512dq") &&
@@ -444,7 +444,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, const seal::Modulus& modulus)
     {
 #if defined(LV_ZK_VECTOR)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_VECTOR_WITNESS");
             return !value || value[0] != '0';
         }();

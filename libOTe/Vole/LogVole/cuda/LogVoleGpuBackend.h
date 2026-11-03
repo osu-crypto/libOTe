@@ -35,7 +35,7 @@ namespace osuCrypto::LogVole::gpu
     bool dynamicSealSetupSupported(const RingParams& params);
     bool selectSealCoeffModuliDevice(const RingParams& params,
         std::vector<u64>& orderedPrimes);
-    bool selectSealPlainModulusDevice(u32 n, u32 requestedBits, u64 minimumQ,
+    bool selectSealPlainModulusDevice(ExecutionContext& execution, u32 n, u32 requestedBits, u64 minimumQ,
         u64& selectedPrime, u32& selectedBits);
     class GpuRing;
     class GpuPlainNtt;
@@ -54,6 +54,8 @@ namespace osuCrypto::LogVole::gpu
     {
     public:
         GpuStream();
+        explicit GpuStream(ExecutionContext& execution);
+        ExecutionContext& execution() const { return *mExecution; }
         // A lean non-blocking stream at the device's greatest supported
         // priority. It deliberately has no allocation/index scratch: callers
         // must prepare all storage on an ordinary registered stream before
@@ -85,7 +87,9 @@ namespace osuCrypto::LogVole::gpu
         }
 
     private:
-        GpuStream(bool highestPriority, bool allocateScratch);
+        GpuStream(bool highestPriority, bool allocateScratch, ExecutionContext* execution = nullptr);
+        ExecutionContextPtr mOwnedExecution;
+        ExecutionContext* mExecution = nullptr;
 
         void* mStream = nullptr;
         bool mHighestPriority = false;
@@ -103,18 +107,11 @@ namespace osuCrypto::LogVole::gpu
         ~StreamDrain() { mStream.sync(); }
     };
 
-    // Stream for the calling thread *and protocol role*, so the sender and the
-    // receiver do not serialise on one stream when they are interleaved
-    // coroutines on the same host thread. Also publishes the stream to the
-    // caching allocator via gpuSetCurrentStream.
-    GpuStream& threadStream();
-    // Second stream for the calling role, for work independent of the main chain.
-    GpuStream& threadSampleStream();
-
-    // 0 = unspecified, 1 = sender, 2 = receiver. Any per-thread scratch that is
-    // touched by device work must be indexed by this too, otherwise two streams
-    // would share one buffer.
-    u32 threadStreamSlot();
+    // Streams and scratch belong to the explicit execution owner, with a
+    // separate lane for each worker. Producer handles order cross-thread uses.
+    GpuStream& executionStream(ExecutionContext& execution);
+    GpuStream& sampleStream(ExecutionContext& execution);
+    u32 executionStreamSlot(const ExecutionContext& execution);
     constexpr u32 kStreamSlots = 3;
 
     // Copies `bytes` from a device pointer into ordinary (pageable) host memory
@@ -147,7 +144,7 @@ namespace osuCrypto::LogVole::gpu
 
     // Explicit native setup selects a role-local cache lane on device 0.
     // Factory construction still requires a nonzero owned protocol run.
-    bool nativeSealBundleCacheRequested();
+    bool nativeSealBundleCacheRequested(const ExecutionContext& execution);
 
     // Upload a compact host matrix into pitched device rows. The caller keeps
     // src alive until stream completion; untouched device columns stay unused.
@@ -180,6 +177,7 @@ namespace osuCrypto::LogVole::gpu
         GpuRing(const GpuRing&) = delete;
         GpuRing& operator=(const GpuRing&) = delete;
 
+        ExecutionContext& execution() const { return executionContext(mParams); }
         u32 n() const { return mView.mN; }
         u32 rho() const { return mView.mRho; }
         std::size_t polyWords() const { return static_cast<std::size_t>(mView.mN) * mView.mRho; }
@@ -267,15 +265,17 @@ namespace osuCrypto::LogVole::gpu
     public:
         // Cached per (N, plaintext modulus). Returns null on failure.
         static std::shared_ptr<GpuPlainNtt> get(
-            const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder);
+            const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder, ExecutionContext& execution);
         // Builds the plaintext NTT and SEAL batching permutation on the device.
-        static std::shared_ptr<GpuPlainNtt> getRaw(u32 degree, u64 plaintextPrime);
+        static std::shared_ptr<GpuPlainNtt> getRaw(u32 degree, u64 plaintextPrime, ExecutionContext& execution);
         // Admit a fully sealed private native-bundle owner into the immutable
         // role-keyed raw table cache. Call only at the host context commit
         // boundary; no table construction or D2H occurs here.
-        static bool publishRaw(u32 degree, u64 plaintextPrime,
+        static bool publishRaw(u32 degree, u64 plaintextPrime, ExecutionContext& execution,
             const std::shared_ptr<GpuPlainNtt>& ready);
 
+        ExecutionContextPtr mExecutionContext;
+        ExecutionContext& execution() const { return *mExecutionContext; }
         ~GpuPlainNtt();
         GpuPlainNtt(const GpuPlainNtt&) = delete;
         GpuPlainNtt& operator=(const GpuPlainNtt&) = delete;
@@ -299,7 +299,7 @@ namespace osuCrypto::LogVole::gpu
         GpuPlainNtt() = default;
         friend bool buildNativeSealSetupBundleDevice(const RingParams&,
             u32, NativeSealSetupBundle&);
-        bool init(const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder);
+        bool init(const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder, ExecutionContext& execution);
         bool initRaw(u32 degree, u64 plaintextPrime);
 
         RingConstView mView{};

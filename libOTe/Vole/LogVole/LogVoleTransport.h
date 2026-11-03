@@ -60,13 +60,13 @@ namespace osuCrypto::LogVole::detail
     }
 
     template<ProtocolCacheRole Role>
-    inline task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize)
+    inline task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize, ExecutionContext* execution = nullptr)
     {
         std::array<u8, kFrameHeaderSize> header{};
         const auto waitStart = std::chrono::steady_clock::now();
         co_await sock.recv(header);
-        (Role == ProtocolCacheRole::Sender ? globalTimingStats.mSenderWaitUs
-            : globalTimingStats.mReceiverWaitUs).fetch_add(
+        if (execution) (Role == ProtocolCacheRole::Sender ? execution->mTiming.mSenderWaitUs
+            : execution->mTiming.mReceiverWaitUs).fetch_add(
             static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
                                  std::chrono::steady_clock::now() - waitStart)
                                  .count()),
@@ -79,13 +79,15 @@ namespace osuCrypto::LogVole::detail
             throw std::length_error("LogVole frame is too large");
         }
 
-        Buffer payload(static_cast<std::size_t>(size));
+        auto owner = execution ? execution->weak_from_this().lock() : ExecutionContextPtr{};
+        if (!owner) owner = execution ? execution->resourceOwner() : std::make_shared<ExecutionContext>();
+        Buffer payload(static_cast<std::size_t>(size), std::move(owner));
         adviseGpuSetupWireBuffer(payload);
         if (!payload.empty())
         {
             if constexpr (Role == ProtocolCacheRole::Receiver)
             {
-                HostStep phase("transport receiver: receive frame payload");
+                HostStep phase(execution, "transport receiver: receive frame payload");
                 co_await sock.recv(payload);
             }
             else

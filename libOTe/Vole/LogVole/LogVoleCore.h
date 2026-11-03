@@ -31,6 +31,7 @@ namespace osuCrypto::LogVole
 
     struct RootDigestState
     {
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
         RnsPoly mDRt;
         RnsPoly mYLeft;
         RnsPoly mDPrime;

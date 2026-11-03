@@ -19,15 +19,14 @@ namespace
 {
     void checkMode(const CLP& cmd, CivoleSetting setting, OnlineMode mode)
     {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
         const bool device = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        struct RestoreBackend
-        {
-            bool previous = gpu::enabled();
-            ~RestoreBackend() { gpu::setEnabled(previous); }
-        } restore;
-        gpu::setEnabled(device);
-        if (device) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+        ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
+        testExecution->mUseGpu = (device);
+        if (device) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #else
         LOGVOLE_REQUIRE_FALSE(device);
 #endif
@@ -35,7 +34,9 @@ namespace
         constexpr u64 count = (u64{1} << 18) + 3;
         constexpr u64 delta = 19;
         LogVoleSender originalSender;
+        ::tests_libOTe::logvole_test::bindExecution(originalSender, testExecution);
         LogVoleReceiver originalReceiver;
+        ::tests_libOTe::logvole_test::bindExecution(originalReceiver, testExecution);
         originalSender.configure(count, 55, 2, setting, mode);
         originalReceiver.configure(count, 55, 2, setting, mode);
         originalSender.mKeepOutputOnDevice = device;
@@ -51,6 +52,7 @@ namespace
         // Moving an established session must retain the new backend/mode state.
         LogVoleSender sender(std::move(originalSender));
         LogVoleReceiver receiver;
+        ::tests_libOTe::logvole_test::bindExecution(receiver, testExecution);
         receiver = std::move(originalReceiver);
         LOGVOLE_REQUIRE_FALSE(originalSender.isConfigured());
         LOGVOLE_REQUIRE_FALSE(originalReceiver.isConfigured());
@@ -100,10 +102,16 @@ namespace
 
 void LogVole_Modes_InteractiveGolden(const CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
     checkMode(cmd, CivoleSetting::GoldenSeed, OnlineMode::Interactive);
 }
 
 void LogVole_Modes_NonInteractive(const CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
     checkMode(cmd, CivoleSetting::NoGoldenSeed, OnlineMode::NonInteractive);
 }

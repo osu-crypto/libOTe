@@ -80,21 +80,21 @@ namespace osuCrypto::LogVole
         constexpr double kNoiseStdS = 3.19;
         constexpr double kNoiseLambda = 128.0;
 
-        bool setupBatchNttEnabled()
+        bool setupBatchNttEnabled(ExecutionContext& execution)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             const char* value = std::getenv("LV_GPU_SETUP_BATCH_NTT");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return (!value || value[0] != '0') && gpu::enabled(execution);
 #else
             return false;
 #endif
         }
 
-        bool setupParallelMessageCopyEnabled()
+        bool setupParallelMessageCopyEnabled(ExecutionContext& execution)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             const char* value = std::getenv("LV_GPU_SETUP_PARALLEL_MESSAGE_COPY");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return (!value || value[0] != '0') && gpu::enabled(execution);
 #else
             return false;
 #endif
@@ -196,7 +196,7 @@ namespace osuCrypto::LogVole
                 std::lock_guard<std::mutex> lock(mMutex);
                 if (!mPublicA || !mPublicB)
                 {
-                    ScopedProtocolCacheScope roleScope(mScope);
+
                     std::shared_ptr<const std::vector<RnsPoly>> nextA, nextB;
                     if (!gpu::materializeRetainedPublicUniform(
                             mCtx, mPublicADevice, nextA) ||
@@ -381,31 +381,33 @@ namespace osuCrypto::LogVole
         ShrinkExpandOfflineMessage* message,
         ShrinkExpandSenderState& senderState)
     {
-        HostStep setupStep("setup sender: shrink expand total");
+            auto sessionParams = input.mParams;
+            bindExecutionRole(sessionParams.mRing, ProtocolCacheRole::Sender);
+
+        HostStep setupStep(executionContext(sessionParams), "setup sender: shrink expand total");
         // A direct caller must not promote a receiver scope into a sender
         // capability merely by invoking the sender API with a private token.
         if (input.mFixedSk1Device &&
-            (currentProtocolCacheScope().mRole != ProtocolCacheRole::Sender ||
-             currentProtocolCacheScope().mRunId != input.mFixedSk1OwnerRunId))
+            (executionContext(sessionParams).mScope.mRole != ProtocolCacheRole::Sender ||
+             executionContext(sessionParams).mScope.mRunId != input.mFixedSk1OwnerRunId))
             return false;
-        ScopedProtocolCacheScope senderScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+
         if (!validateShrinkExpandSenderOfflineInput(input))
         {
             return false;
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(input.mParams.mRing, ctx))
+        if (!makeRingNttContext(sessionParams.mRing, ctx))
         {
             return false;
         }
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (input.mFixedSk1Device &&
             (!gpu::topSecretUniformBatchMatches(ctx,
-                *input.mFixedSk1Device, input.mParams.mTau,
+                *input.mFixedSk1Device, sessionParams.mTau,
                 input.mFixedSk1OwnerRunId) ||
-             currentProtocolCacheScope().mRunId != input.mFixedSk1OwnerRunId))
+             executionContext(sessionParams).mScope.mRunId != input.mFixedSk1OwnerRunId))
             return false;
 #else
         if (input.mFixedSk1Device) return false;
@@ -414,10 +416,10 @@ namespace osuCrypto::LogVole
         if (input.mSDevice)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (message || !gpu::enabled() ||
+            if (message || !gpu::enabled(executionContext(sessionParams)) ||
                 !gpu::setupSeedLabelRepBatchMatches(ctx,
-                    *input.mSDevice, input.mParams.mMu,
-                    currentProtocolCacheScope().mRunId)) return false;
+                    *input.mSDevice, sessionParams.mMu,
+                    executionContext(sessionParams).mScope.mRunId)) return false;
 #else
             return false;
 #endif
@@ -426,11 +428,11 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         // Join before leaving this timed setup scope. Independent CPU sampling
         // can overlap first-use GPU initialization without excluding its cost.
-        gpu::GpuRingSetupPrefetch ringPrefetch(ctx, gpu::enabled());
+        gpu::GpuRingSetupPrefetch ringPrefetch(ctx, gpu::enabled(executionContext(sessionParams)));
 #endif
 
         ShrinkExpandSenderState next{};
-        next.mParams = input.mParams;
+        next.mParams = sessionParams;
         next.mS = input.mS;
         next.mLazyS = input.mLazyS;
         if (input.mFixedSk1Device)
@@ -445,29 +447,29 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            HostStep sk1Step("setup sender: top sk1 uniform sampling");
+            HostStep sk1Step(executionContext(sessionParams), "setup sender: top sk1 uniform sampling");
             if (input.mDeferTopSk1Host && !message &&
-                input.mParams.mTruncateOneGadgetDigit)
+                sessionParams.mTruncateOneGadgetDigit)
             {
                 std::shared_ptr<gpu::DeviceBatch> resident;
                 std::shared_ptr<const LazyRootSecretHostState> lazy;
-                if (!sampleTopSecretUniformBatch(ctx, input.mParams.mTau,
+                if (!sampleTopSecretUniformBatch(ctx, sessionParams.mTau,
                         prng, next.mSk1, resident, lazy)) return false;
                 next.mTopSk1Device = std::move(resident);
                 next.mLazyTopSk1 = std::move(lazy);
                 if (next.mTopSk1Device)
-                    next.mTopSk1OwnerRunId = currentProtocolCacheScope().mRunId;
+                    next.mTopSk1OwnerRunId = executionContext(sessionParams).mScope.mRunId;
             }
-            else next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, prng);
+            else next.mSk1 = sampleUniformBatch(ctx, sessionParams.mTau, prng);
         }
 
-        HostStep publicDataStep("setup sender: public data");
-        const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
+        HostStep publicDataStep(executionContext(sessionParams), "setup sender: public data");
+        const u32 publicBTau = sessionParams.mTruncateOneGadgetDigit ? (sessionParams.mTau + 1u) : sessionParams.mTau;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (input.mDeferHostCiphertexts && !message && gpu::enabled() &&
-            gpu::publicUniformRetentionEnabled())
+        if (input.mDeferHostCiphertexts && !message && gpu::enabled(executionContext(sessionParams)) &&
+            gpu::publicUniformRetentionEnabled(executionContext(sessionParams)))
         {
-            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu);
+            next.mPublicANttDevice = retainedLhePublicANtt(ctx, sessionParams.mMu);
             next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau);
             if (!next.mPublicANttDevice || !next.mPublicBNttDevice)
             {
@@ -476,46 +478,46 @@ namespace osuCrypto::LogVole
             }
             else
             {
-                next.mPublicUniformRunId = currentProtocolCacheScope().mRunId;
+                next.mPublicUniformRunId = executionContext(sessionParams).mScope.mRunId;
                 next.mLazyPublicUniformHosts =
                     std::make_shared<const LazyPublicUniformHosts>(
                         ctx, next.mPublicANttDevice, next.mPublicBNttDevice,
-                        currentProtocolCacheScope());
+                        executionContext(sessionParams).mScope);
             }
         }
 #endif
         if (!next.mPublicANttDevice)
         {
-            next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu);
+            next.mPublicANtt = sharedLhePublicANtt(ctx, sessionParams.mMu);
             next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau);
         }
         if ((!next.mPublicANtt && !next.mPublicANttDevice) ||
             (!next.mPublicBNtt && !next.mPublicBNttDevice)) return false;
         publicDataStep.stop();
 
-        const bool fullNoise = usesFullNoise(input.mParams);
-        const double lencSigma = fullNoise ? computeSigma(std::sqrt(static_cast<double>(input.mParams.mTau))) : 0.0;
+        const bool fullNoise = usesFullNoise(sessionParams);
+        const double lencSigma = fullNoise ? computeSigma(std::sqrt(static_cast<double>(sessionParams.mTau))) : 0.0;
         const double lencMaxDev = fullNoise ? std::sqrt(kNoiseLambda) * lencSigma : 0.0;
 
         LencEncodeOutput lenc{};
         bool lencOk = false;
-        if (input.mParams.mTruncateOneGadgetDigit)
+        if (sessionParams.mTruncateOneGadgetDigit)
         {
             lencOk = lencEncTrunc(
                 ctx,
                 input.mS,
-                input.mParams.mTau,
-                input.mParams.mGadgetLogBase,
-                input.mParams.mPlaintextModulusBits,
+                sessionParams.mTau,
+                sessionParams.mGadgetLogBase,
+                sessionParams.mPlaintextModulusBits,
                 prng,
                 lenc,
                 lencSigma,
                 lencMaxDev,
                 0,
                 true,
-                input.mParams.mLeafInputsAreGadget,
+                sessionParams.mLeafInputsAreGadget,
                 next.mPublicBNtt.get(),
-                input.mParams.mNumWorkerThreads,
+                sessionParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message,
                 input.mDeferHostCiphertexts && !message,
                 input.mSDevice.get(), input.mLazyS.get());
@@ -525,8 +527,8 @@ namespace osuCrypto::LogVole
             lencOk = lencEnc(
                 ctx,
                 input.mS,
-                input.mParams.mTau,
-                input.mParams.mGadgetLogBase,
+                sessionParams.mTau,
+                sessionParams.mGadgetLogBase,
                 prng,
                 lenc,
                 lencSigma,
@@ -534,7 +536,7 @@ namespace osuCrypto::LogVole
                 0,
                 true,
                 next.mPublicBNtt.get(),
-                input.mParams.mNumWorkerThreads,
+                sessionParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message);
         }
         if (!lencOk)
@@ -553,20 +555,20 @@ namespace osuCrypto::LogVole
         const double lheMaxDev = fullNoise ? std::sqrt(kNoiseLambda) * lheSigma : 0.0;
 
         bool ct1Ok = false;
-        if (input.mParams.mTruncateOneGadgetDigit)
+        if (sessionParams.mTruncateOneGadgetDigit)
         {
             ct1Ok = lheEnc1Trunc(
                 ctx,
                 lenc.mRNtt,
                 next.mSk1,
-                input.mParams.mGadgetLogBase,
+                sessionParams.mGadgetLogBase,
                 next.mCt1,
                 lheSigma,
                 lheMaxDev,
                 &prng,
                 true,
                 next.mPublicANtt.get(),
-                input.mParams.mNumWorkerThreads,
+                sessionParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
                 lenc.mLazyRandomizers, nullptr, nullptr,
                 next.mTopSk1Device.get(), next.mLazyTopSk1.get(),
@@ -578,14 +580,14 @@ namespace osuCrypto::LogVole
                 ctx,
                 lenc.mRNtt,
                 next.mSk1,
-                input.mParams.mGadgetLogBase,
+                sessionParams.mGadgetLogBase,
                 next.mCt1,
                 lheSigma,
                 lheMaxDev,
                 &prng,
                 true,
                 next.mPublicANtt.get(),
-                input.mParams.mNumWorkerThreads,
+                sessionParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
                 lenc.mLazyRandomizers);
         }
@@ -605,8 +607,8 @@ namespace osuCrypto::LogVole
 
         ShrinkExpandOfflineMessage nextMessage{};
         nextMessage.mParams = next.mParams;
-        HostStep messageCopyStep("setup sender: offline message copy");
-        if (setupParallelMessageCopyEnabled())
+        HostStep messageCopyStep(executionContext(sessionParams), "setup sender: offline message copy");
+        if (setupParallelMessageCopyEnabled(executionContext(sessionParams)))
         {
             nextMessage.mCt1.mRows = next.mCt1.mRows;
             nextMessage.mCt1.mCols = next.mCt1.mCols;
@@ -621,14 +623,14 @@ namespace osuCrypto::LogVole
             // Each worker allocates and copies its own polynomial. Message and
             // state remain independently mutable, exactly as with assignment.
             if (!detail::runParallelTasks(ct1Count + lacctCount,
-                    input.mParams.mNumWorkerThreads, [&](std::size_t index) {
+                    sessionParams.mNumWorkerThreads, [&](std::size_t index) {
                         if (index < ct1Count)
                             nextMessage.mCt1.mPolys[index] = next.mCt1.mPolys[index];
                         else
                             nextMessage.mLacct.mCt.mPolys[index - ct1Count] =
                                 next.mLacct.mCt.mPolys[index - ct1Count];
                         return true;
-                    })) return false;
+                    }, false, &(executionContext(senderState)))) return false;
         }
         else
         {
@@ -665,9 +667,12 @@ namespace osuCrypto::LogVole
         Message&& message,
         ShrinkExpandReceiverState& receiverState)
     {
-        HostStep setupStep("setup receiver: shrink expand total");
+            auto sessionParams = input.mParams;
+            bindExecutionRole(sessionParams.mRing, ProtocolCacheRole::Receiver);
+
+        HostStep setupStep(executionContext(sessionParams), "setup receiver: shrink expand total");
         if (!validateShrinkExpandReceiverOfflineInput(input) ||
-            !validateStateParamsMatch(input.mParams, message.mParams))
+            !validateStateParamsMatch(sessionParams, message.mParams))
         {
             return false;
         }
@@ -677,16 +682,16 @@ namespace osuCrypto::LogVole
         const auto validTensor = [&](const RingTensor& tensor, const auto& lazy) {
             if (!lazy)
                 return ringTensorSize(tensor) == tensor.mPolys.size() &&
-                    validateRingBatchShape(tensor.mPolys, input.mParams.mRing);
-            const u64 words = ringPolyCoeffCount(input.mParams.mRing);
+                    validateRingBatchShape(tensor.mPolys, sessionParams.mRing);
+            const u64 words = ringPolyCoeffCount(sessionParams.mRing);
             const auto bytes = lazy->encodedCoefficients();
             return tensor.mPolys.empty() && words && bytes.size() % sizeof(u64) == 0 &&
                 ringTensorSize(tensor) <= (bytes.size() / sizeof(u64)) / words &&
                 ringTensorSize(tensor) * words == bytes.size() / sizeof(u64);
         };
         // Validate the complete message before consuming any owned storage.
-        if (message.mCt1.mRows != input.mParams.mMu ||
-            message.mCt1.mCols != input.mParams.mTau ||
+        if (message.mCt1.mRows != sessionParams.mMu ||
+            message.mCt1.mCols != sessionParams.mTau ||
             !validTensor(message.mCt1, message.mLazyCt1) ||
             message.mLacct.mWidthPadded == 0 ||
             message.mLacct.mLevels == 0 ||
@@ -697,21 +702,20 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(input.mParams.mRing, ctx))
+        if (!makeRingNttContext(sessionParams.mRing, ctx))
         {
             return false;
         }
 
         ShrinkExpandReceiverState next{};
-        next.mParams = input.mParams;
-        HostStep publicDataStep("setup receiver: public data");
-        const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
+        next.mParams = sessionParams;
+        HostStep publicDataStep(executionContext(sessionParams), "setup receiver: public data");
+        const u32 publicBTau = sessionParams.mTruncateOneGadgetDigit ? (sessionParams.mTau + 1u) : sessionParams.mTau;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (input.mDeferHostSnapshot)
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu);
+
+            next.mPublicANttDevice = retainedLhePublicANtt(ctx, sessionParams.mMu);
             next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau);
             // Publish retained-only state only as a complete A/B pair. A
             // partial device attempt falls back to two exact eager owners.
@@ -725,13 +729,13 @@ namespace osuCrypto::LogVole
                 next.mLazyPublicUniformHosts =
                     std::make_shared<const LazyPublicUniformHosts>(
                         ctx, next.mPublicANttDevice, next.mPublicBNttDevice,
-                        currentProtocolCacheScope());
+                        executionContext(sessionParams).mScope);
             }
         }
 #endif
         if (!next.mPublicANttDevice)
         {
-            next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu);
+            next.mPublicANtt = sharedLhePublicANtt(ctx, sessionParams.mMu);
             next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau);
         }
         if ((!next.mPublicANtt && !next.mPublicANttDevice) ||
@@ -745,9 +749,8 @@ namespace osuCrypto::LogVole
         const char* residentNtt = std::getenv("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT");
         if (!residentNtt || residentNtt[0] != '0')
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-            if (gpu::enabled())
+
+            if (gpu::enabled(executionContext(sessionParams)))
             {
                 if (gpu::finalizeReceiverSetupDevice(ctx, next, input.mDeferHostSnapshot,
                         message.mLazyCt1, message.mLazyLacct))
@@ -763,8 +766,7 @@ namespace osuCrypto::LogVole
 
         if (!next.mPublicANtt || !next.mPublicBNtt)
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
             if (!receiverPublicHosts(ctx, next, publicA, publicB)) return false;
             // Materialize both local owners completely before publishing either
@@ -781,7 +783,7 @@ namespace osuCrypto::LogVole
 
         // These ciphertext transforms are independent. Batching lets setup use
         // the existing device NTT instead of serial host transforms per cell.
-        if (setupBatchNttEnabled())
+        if (setupBatchNttEnabled(executionContext(sessionParams)))
         {
             if (!forwardNttBatch(next.mCt1.mPolys, ctx)) return false;
         }
@@ -829,8 +831,7 @@ namespace osuCrypto::LogVole
         {
             RingNttContext ctx{};
             if (!makeRingNttContext(state.mParams.mRing, ctx)) return;
-            ScopedProtocolCacheScope senderScope(
-                ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
             if (state.mLazyPublicUniformHosts)
             {
@@ -892,8 +893,7 @@ namespace osuCrypto::LogVole
         if (!next.mPublicANtt || !next.mPublicBNtt)
         {
             RingNttContext ctx{};
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
             if (!makeRingNttContext(state.mParams.mRing, ctx) ||
                 !receiverPublicHosts(ctx, state, publicA, publicB)) return;
@@ -970,8 +970,7 @@ namespace osuCrypto::LogVole
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        // Reuse storage only; query-bound coefficients are always rebuilt.
-        thread_local std::vector<RnsPoly> senderCt2;
+        std::vector<RnsPoly> senderCt2;
         if (!buildHashedCt2(
                 ctx,
                 state.mParams.mMu,
@@ -1033,10 +1032,9 @@ namespace osuCrypto::LogVole
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        // Keep a separate reusable allocation for the receiver's coefficients.
-        thread_local std::vector<RnsPoly> receiverCt2;
-        const bool senderRole = currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender;
-        HostStep sampleStep(senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling");
+        std::vector<RnsPoly> receiverCt2;
+        const bool senderRole = executionContext(state).mScope.mRole == ProtocolCacheRole::Sender;
+        HostStep sampleStep(executionContext(state), senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling");
         if (!buildHashedCt2(
                 ctx,
                 state.mParams.mMu,
@@ -1050,7 +1048,7 @@ namespace osuCrypto::LogVole
         }
 
         sampleStep.stop();
-        HostStep applyStep(senderRole ? "cpu sender expand detail: apply" : "cpu receiver expand detail: apply");
+        HostStep applyStep(executionContext(state), senderRole ? "cpu sender expand detail: apply" : "cpu receiver expand detail: apply");
         std::vector<RnsPoly> ct1AppliedNtt;
         bool applyOk = false;
         if (state.mParams.mTruncateOneGadgetDigit)
@@ -1083,7 +1081,7 @@ namespace osuCrypto::LogVole
         }
 
         applyStep.stop();
-        HostStep decryptStep(senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt");
+        HostStep decryptStep(executionContext(state), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt");
         std::vector<RnsPoly> decPartialNtt;
         if (!lheDec(
                 ctx,
@@ -1099,10 +1097,10 @@ namespace osuCrypto::LogVole
         }
 
         decryptStep.stop();
-        HostStep evalStep(senderRole ? "cpu sender expand detail: tree eval" : "cpu receiver expand detail: tree eval");
+        HostStep evalStep(executionContext(state), senderRole ? "cpu sender expand detail: tree eval" : "cpu receiver expand detail: tree eval");
         std::vector<RnsPoly> evalNtt;
         bool evalOk = false;
-        static const bool fusedEvalEnabled = [] {
+        const bool fusedEvalEnabled = [] {
             const char* value = std::getenv("LV_CPU_FUSED_EXPAND_EVAL");
             return !value || value[0] != '0';
         }();
@@ -1151,7 +1149,7 @@ namespace osuCrypto::LogVole
         }
 
         evalStep.stop();
-        HostStep finishStep(senderRole ? "cpu sender expand detail: finish" : "cpu receiver expand detail: finish");
+        HostStep finishStep(executionContext(state), senderRole ? "cpu sender expand detail: finish" : "cpu receiver expand detail: finish");
         ShrinkExpandReceiverExpandOutput next{};
         next.mTbm.resize(state.mParams.mMu);
         for (u32 row = 0; row < state.mParams.mMu; ++row)
@@ -1380,7 +1378,7 @@ namespace osuCrypto::LogVole
 
             result[i] = std::move(polyOut);
             return true;
-        })) return false;
+        }, false, &(executionContext(ctx)))) return false;
 
         out = std::move(result);
         return true;

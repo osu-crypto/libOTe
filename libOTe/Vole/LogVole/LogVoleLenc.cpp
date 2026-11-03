@@ -27,22 +27,22 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        bool gpuSetupLencEnabled()
+        bool gpuSetupLencEnabled(ExecutionContext& execution)
         {
             const char* value = std::getenv("LV_GPU_SETUP_LENC");
             if (value) return value[0] != '0';
 #if defined(ENABLE_LOGVOLE_CUDA)
-            return gpu::enabled();
+            return gpu::enabled(execution);
 #else
             return false;
 #endif
         }
 
-        bool gpuSetupLencDeviceEnabled()
+        bool gpuSetupLencDeviceEnabled(ExecutionContext& execution)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             const char* value = std::getenv("LV_GPU_SETUP_LENC_DEVICE");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return (!value || value[0] != '0') && gpu::enabled(execution);
 #else
             return false;
 #endif
@@ -109,7 +109,7 @@ namespace osuCrypto::LogVole
                 auto* coefficients = poly.mCoeffs.data() + j * n;
                 seal::util::negate_poly_coeffmod(coefficients, n, moduli[j], coefficients);
             }
-            globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
+            executionContext(ctx).mRingOps.mSubCount.fetch_add(1, std::memory_order_relaxed);
             out = std::move(poly);
             return true;
         }
@@ -194,44 +194,49 @@ namespace osuCrypto::LogVole
             std::shared_ptr<const gpu::RetainedPublicUniform> mDevice;
         };
 
-        std::unordered_map<PublicBCacheKey, std::shared_ptr<PublicBCacheEntry>, PublicBCacheKeyHash>
-            publicBCache;
-        std::mutex publicBCacheMutex;
+        struct PublicBCache
+        {
+            std::unordered_map<PublicBCacheKey, std::shared_ptr<PublicBCacheEntry>, PublicBCacheKeyHash>
+                mEntries;
+            std::mutex mMutex;
+        };
 
         std::shared_ptr<PublicBCacheEntry> getOrCreateCachedPublicBEntry(
             const RingNttContext& ctx, u32 tau)
         {
+            auto& cache = executionContext(ctx).resources<PublicBCache>();
             PublicBCacheKey key{};
             key.mRing = ctx.mParams;
+            key.mRing.mExecutionContext.reset();
             key.mTau = tau;
-            key.mRole = currentProtocolCacheScope().mRole;
+            key.mRole = executionContext(ctx).mScope.mRole;
 #if defined(ENABLE_LOGVOLE_CUDA)
             // Retained device operands belong to one cold protocol run. Keep
             // the old host-only cache scope when this feature is disabled.
-            if (gpu::publicUniformRetentionEnabled())
+            if (gpu::publicUniformRetentionEnabled(executionContext(ctx)))
             {
-                key.mRunId = currentProtocolCacheScope().mRunId;
+                key.mRunId = executionContext(ctx).mScope.mRunId;
                 key.mDevice = gpu::currentDeviceOrdinal();
             }
 #endif
 
             {
-                std::lock_guard<std::mutex> lock(publicBCacheMutex);
+                std::lock_guard<std::mutex> lock(cache.mMutex);
                 // Run-scoped device retention must not accumulate a new full
                 // host snapshot forever. Keep every entry still owned by a
-                // protocol state, plus the legacy process-wide run-0 cache.
+                // protocol state and its explicit execution owner.
                 if (key.mRunId != 0)
                 {
-                    for (auto entry = publicBCache.begin(); entry != publicBCache.end();)
+                    for (auto entry = cache.mEntries.begin(); entry != cache.mEntries.end();)
                     {
                         if (entry->first.mRunId != 0 && entry->first.mRunId != key.mRunId &&
                             entry->second.use_count() == 1)
-                            entry = publicBCache.erase(entry);
+                            entry = cache.mEntries.erase(entry);
                         else ++entry;
                     }
                 }
-                auto it = publicBCache.find(key);
-                if (it != publicBCache.end())
+                auto it = cache.mEntries.find(key);
+                if (it != cache.mEntries.end())
                 {
                     return it->second;
                 }
@@ -254,8 +259,8 @@ namespace osuCrypto::LogVole
 #endif
             }
 
-            std::lock_guard<std::mutex> lock(publicBCacheMutex);
-            auto [it, inserted] = publicBCache.emplace(std::move(key), candidate);
+            std::lock_guard<std::mutex> lock(cache.mMutex);
+            auto [it, inserted] = cache.mEntries.emplace(std::move(key), candidate);
             (void)inserted;
             return it->second;
         }
@@ -450,7 +455,7 @@ namespace osuCrypto::LogVole
             if (rightLimb != leftLimb)
                 seal::util::inverse_ntt_negacyclic_harvey(
                     accNtt.mCoeffs.data() + rightLimb * n, tables[rightLimb]);
-            globalRingOpsStats.mInttCount.fetch_add(1, std::memory_order_relaxed);
+            executionContext(ctx).mRingOps.mInttCount.fetch_add(1, std::memory_order_relaxed);
 
             out = std::move(accNtt);
             return true;
@@ -686,7 +691,7 @@ namespace osuCrypto::LogVole
                 resizeZero(zeroPadding.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             }
 
-            HostStep leafStep(leafInputsAreGadget
+            HostStep leafStep(executionContext(ctx), leafInputsAreGadget
                 ? "cpu shrink detail: recursive leaves" : "cpu shrink detail: initial leaves");
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
@@ -708,7 +713,7 @@ namespace osuCrypto::LogVole
             }
 
             leafStep.stop();
-            HostStep internalStep("cpu shrink detail: internal nodes");
+            HostStep internalStep(executionContext(ctx), "cpu shrink detail: internal nodes");
             const u32 maxActiveTau = std::max(tauLeaf, tauHi);
             AlignedUnVec<const RnsPoly*> bPtrs(2u * maxActiveTau);
             AlignedUnVec<const RnsPoly*> pairPtrs(2u * maxActiveTau);
@@ -1480,7 +1485,7 @@ namespace osuCrypto::LogVole
         const gpu::DeviceBatch* seedLabelDevice,
         const LazySeedLabelHostState* seedLabelHost)
     {
-        HostStep setupStep("setup: lenc truncated");
+        HostStep setupStep(executionContext(ctx), "setup: lenc truncated");
         const auto sCount = seedLabelHost ? seedLabelHost->count() : s.size();
         if (!sCount || sCount > std::numeric_limits<u32>::max() ||
             tauHi == 0 || noiseStandardDeviation < 0 ||
@@ -1494,7 +1499,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (seedLabelDevice &&
             !gpu::setupLencInputBatchMatches(ctx, *seedLabelDevice,
-                sCount, currentProtocolCacheScope().mRunId)) return false;
+                sCount, executionContext(ctx).mScope.mRunId)) return false;
 #else
         if (seedLabelDevice) return false;
 #endif
@@ -1526,7 +1531,7 @@ namespace osuCrypto::LogVole
         u32 width = 0;
         if (!lencTreeWidth(sCount, requestedWidthPadded, width)) return false;
 
-        const bool deviceAssemblyRequested = gpuSetupLencDeviceEnabled();
+        const bool deviceAssemblyRequested = gpuSetupLencDeviceEnabled(executionContext(ctx));
         std::shared_ptr<const std::vector<RnsPoly>> cachedPublicBNtt;
         std::shared_ptr<const gpu::RetainedPublicUniform> retainedPublicBNtt;
         if (publicBNtt)
@@ -1553,7 +1558,7 @@ namespace osuCrypto::LogVole
         std::vector<const RnsPoly*> publicBInternalHi, publicBLeaf;
         bool retainRandomizers = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        retainRandomizers = deferRandomizerHost && gpuSetupLencDeviceEnabled() && gpu::lencRandomizerResidencyEnabled();
+        retainRandomizers = deferRandomizerHost && gpuSetupLencDeviceEnabled(executionContext(ctx)) && gpu::lencRandomizerResidencyEnabled(executionContext(ctx));
 #endif
         RecursiveLeafScaling leafScaling{};
         if (leafInputsAreGadget && !retainRandomizers && !buildRecursiveLeafScaling(ctx, leafScaling))
@@ -1567,7 +1572,7 @@ namespace osuCrypto::LogVole
 
         const char* paddingSetting = std::getenv("LV_GPU_SETUP_LENC_DEVICE_PADDING");
         const bool devicePadding = deviceAssemblyRequested && (!paddingSetting || paddingSetting[0] != '0');
-        const bool setupBatch = gpuSetupLencEnabled() || deviceAssemblyRequested;
+        const bool setupBatch = gpuSetupLencEnabled(executionContext(ctx)) || deviceAssemblyRequested;
         const char* compactFlag = std::getenv("LV_GPU_SETUP_COMPACT_NOISE");
         const char* compactStrictFlag = std::getenv("LV_GPU_SETUP_COMPACT_NOISE_STRICT");
         // Keep errors compact through GPU expansion. Exact Gaussian sampling
@@ -1603,7 +1608,7 @@ namespace osuCrypto::LogVole
                     resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                     return addPolyErrorFromSeed(poly, noiseStandardDeviation,
                         noiseMaxDeviation, seeds[idx], ctx);
-                })) return false;
+                }, false, &(executionContext(ctx)))) return false;
             if (!deviceAssemblyRequested)
                 for (auto& layer : rLayersNtt)
                     if (!forwardNttBatch(layer, ctx)) return false;
@@ -1674,7 +1679,7 @@ namespace osuCrypto::LogVole
                     return !activeNoise ||
                         addPolyErrorFromSeed(poly, noiseStandardDeviation,
                             noiseMaxDeviation, seeds[idx], ctx);
-                })) return false;
+                }, false, &(executionContext(ctx)))) return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (deviceAssemblyRequested)
             {
@@ -1703,7 +1708,7 @@ namespace osuCrypto::LogVole
                 !detail::runParallelTasks(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx) {
                     return expandPolyErrorCompact(
                         std::span<const u64>(compactNoise).subspan(idx * n, n), ct.mPolys[idx], ctx);
-                })) return false;
+                }, false, &(executionContext(ctx)))) return false;
             // The device path keeps randomizer layers and padded input in
             // coefficient form on the host and transforms them only on device.
             // A declined attempt must prepare them before the established path.
@@ -1722,7 +1727,7 @@ namespace osuCrypto::LogVole
                         return expandPolyErrorCompact(
                             std::span<const u64>(compactRandomizers).subspan(idx * n, n),
                             rLayersNtt[idx / width][idx % width], ctx);
-                    })) return false;
+                    }, false, &(executionContext(ctx)))) return false;
                 for (auto& layer : rLayersNtt)
                     if (!forwardNttBatch(layer, ctx)) return false;
                 if (!forwardNttBatch(sPadNtt, ctx)) return false;
@@ -1847,7 +1852,7 @@ namespace osuCrypto::LogVole
             return true;
         };
         if (!deviceAssembled &&
-            !detail::runParallelTasks(ct.mRows, setupBatch ? requestedWorkers : 1, buildRow)) return false;
+            !detail::runParallelTasks(ct.mRows, setupBatch ? requestedWorkers : 1, buildRow, false, &(executionContext(ctx)))) return false;
 
         LencEncodeOutput next{};
         next.mLazyRandomizers = std::move(lazyRandomizers);
@@ -1869,9 +1874,9 @@ namespace osuCrypto::LogVole
                 bool deviceExpanded = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
                 const char* outputSetting = std::getenv("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT");
-                if (gpu::enabled() && (!outputSetting || outputSetting[0] != '0'))
+                if (gpu::enabled(executionContext(ctx)) && (!outputSetting || outputSetting[0] != '0'))
                 {
-                    HostStep outputStep("setup: lenc randomizer GPU output");
+                    HostStep outputStep(executionContext(ctx), "setup: lenc randomizer GPU output");
                     const char* decline = std::getenv("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_FORCE_DECLINE");
                     if (!decline || decline[0] != '1')
                         deviceExpanded = residentRandomizers
@@ -1889,7 +1894,7 @@ namespace osuCrypto::LogVole
                 if (!deviceExpanded && !detail::runParallelTasks(mu, requestedWorkers, [&](std::size_t i) {
                     return expandPolyErrorCompact(
                         std::span<const u64>(compactRandomizers).subspan(i * n, n), next.mR[i], ctx);
-                })) return false;
+                }, false, &(executionContext(ctx)))) return false;
             }
             else
                 for (u32 i = 0; i < mu; ++i)
@@ -2072,7 +2077,7 @@ namespace osuCrypto::LogVole
             // batch, negation pass and subsequent ring subtraction.
             if (subtractFromOutput)
             {
-                globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
+                executionContext(ctx).mRingOps.mSubCount.fetch_add(1, std::memory_order_relaxed);
                 out[leaf] = std::move(accNtt);
                 return true;
             }
@@ -2099,7 +2104,7 @@ namespace osuCrypto::LogVole
 
             out[leaf] = std::move(accNtt);
             return true;
-        });
+        }, false, &(executionContext(ctx)));
 
         return leavesOk;
     }

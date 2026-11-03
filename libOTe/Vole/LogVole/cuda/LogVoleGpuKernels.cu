@@ -534,7 +534,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 deviceSmCount()
         {
-            static const u32 count = [] {
+            const u32 count = [] {
                 int device = 0;
                 cudaDeviceProp prop{};
                 if (cudaGetDevice(&device) == cudaSuccess &&
@@ -557,7 +557,7 @@ namespace osuCrypto::LogVole::gpu
         // same-binary rollback.
         bool nttLog14H200Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200");
             return on;
         }
 
@@ -567,7 +567,7 @@ namespace osuCrypto::LogVole::gpu
         // Explicit zero retains the generic same-binary rollback.
         bool nttLog14H200FixedTransformsEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FIXED_TRANSFORMS");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FIXED_TRANSFORMS");
             return on;
         }
 
@@ -577,13 +577,13 @@ namespace osuCrypto::LogVole::gpu
         // Explicit zero retains the original three-pass implementation.
         bool noGoldH200CombinedAccumulatorEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_COMBINED_ACCUMULATOR");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_COMBINED_ACCUMULATOR");
             return on;
         }
 
         bool noGoldH200AccumulatorPseudo52Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_ACCUM_PSEUDO52");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_ACCUM_PSEUDO52");
             return on;
         }
 
@@ -594,7 +594,7 @@ namespace osuCrypto::LogVole::gpu
         // bounds below. Explicit zero restores the accepted integer inverse.
         u32 noGoldH200InverseFp52Threads()
         {
-            static const u32 threads = [] {
+            const u32 threads = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52");
                 if (!v || !v[0]) return 1024u;
                 if (v[0] == '0') return 0u;
@@ -605,7 +605,7 @@ namespace osuCrypto::LogVole::gpu
 
         bool noGoldH200InverseFp52CacheRoots()
         {
-            static const bool on = [] {
+            const bool on = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_CACHE_ROOTS");
                 return !v || v[0] == '1';
             }();
@@ -614,13 +614,13 @@ namespace osuCrypto::LogVole::gpu
 
         bool noGoldH200InverseCachedSuffix()
         {
-            static const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG14_H200_INVERSE_CACHED_SUFFIX");
+            const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG14_H200_INVERSE_CACHED_SUFFIX");
             return on;
         }
 
         u32 noGoldH200InverseFp52Schedule()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_SCHEDULE");
                 const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 4u;
                 return n <= 5u ? static_cast<u32>(n) : 0u;
@@ -630,7 +630,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200InverseFp52TwoTile()
         {
-            static const u32 unroll = [] {
+            const u32 unroll = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_TWOTILE");
                 const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 4u;
                 return n == 1u || n == 2u || n == 4u || n == 8u ? static_cast<u32>(n) : 0u;
@@ -640,7 +640,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200InverseFp52TileCacheStage()
         {
-            static const u32 stage = [] {
+            const u32 stage = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_TILE_CACHE_STAGE");
                 const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 2u;
                 return n >= 1u && n <= 6u ? static_cast<u32>(n) : 2u;
@@ -650,7 +650,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200InverseFp52Tile1024Mode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_TILE_THREADS");
                 // Wide batches retain the faster 512-thread kernel. Only the
                 // measured narrow H200/rho8x52 batches use 1024/cache-stage 1.
@@ -665,7 +665,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200InverseFp52TileMinBlocks()
         {
-            static const u32 blocks = [] {
+            const u32 blocks = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_TILE_MIN_BLOCKS");
                 if (v && std::strcmp(v, "64") == 0) return 64u;
                 if (v && std::strcmp(v, "128") == 0) return 128u;
@@ -678,7 +678,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200InverseFp52PrefixSchedule()
         {
-            static const u32 schedule = [] {
+            const u32 schedule = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_PREFIX");
                 // Stage 188: two independent pairs plus next-group root/data
                 // prefetch. Seven-trial ablations confirm the combined gain.
@@ -694,7 +694,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200InverseFp52StaticOps()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_STATIC_OPS");
                 return v && v[0] >= '1' && v[0] <= '3' && v[1] == '\0'
                     ? static_cast<u32>(v[0] - '0') : 0u;
@@ -705,7 +705,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200ForwardFp52Mode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_FORWARD_FP52");
                 const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 1u;
                 return n <= 5u ? static_cast<u32>(n) : 0u;
@@ -715,7 +715,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200ForwardFp52Extra()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_FORWARD_FP52_EXTRA");
                 const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 3u;
                 return n <= 3u ? static_cast<u32>(n) : 0u;
@@ -725,7 +725,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200ForwardFp52Tail()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_FORWARD_FP52_TAIL");
                 // Stage-188 repeat: four groups in the register-parked first
                 // half, two in the second. Zero keeps the preceding tail.
@@ -738,7 +738,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200AccumulatorSchedule()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_SCHEDULE");
                 if (!v) return 0u;
                 const unsigned long n = std::strtoul(v, nullptr, 10);
@@ -749,7 +749,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200AccumulatorTileBlocks()
         {
-            static const u32 blocks = [] {
+            const u32 blocks = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_TILE_BLOCKS");
                 if (!v) return 0u;
                 const unsigned long n = std::strtoul(v, nullptr, 10);
@@ -760,7 +760,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200AccumulatorPackedMode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_PACKED");
                 return v && v[0] >= '1' && v[0] <= '7' && v[1] == '\0'
                     ? static_cast<u32>(v[0] - '0') : 0u;
@@ -770,7 +770,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200AccumulatorOrder()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_ORDER");
                 return v && v[0] >= '1' && v[0] <= '4' && v[1] == '\0'
                     ? static_cast<u32>(v[0] - '0') : 0u;
@@ -780,7 +780,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200AccumulatorCarryMode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_CARRY");
                 return v && v[0] >= '1' && v[0] <= '4' && v[1] == '\0'
                     ? static_cast<u32>(v[0] - '0') : 0u;
@@ -790,7 +790,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200AccumulatorLoadMode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_LOAD");
                 // Packed pointer pairs, explicit carry/borrow, L1+L2 loads.
                 // Other explicit packed/order/carry schedules take precedence.
@@ -804,7 +804,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200PointwiseMode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_POINTWISE");
                 // Stage 199: checked exact-FP64 single products, full-u128
                 // pseudo52 carry reduction for the two/six-term paths.
@@ -817,7 +817,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200PointwiseThreads()
         {
-            static const u32 threads = [] {
+            const u32 threads = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_POINTWISE_THREADS");
                 if (v && std::strcmp(v, "128") == 0) return 128u;
                 if (v && std::strcmp(v, "512") == 0) return 512u;
@@ -829,7 +829,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200OuterReuseMode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_OUTER_REUSE");
                 if (!v) return 0u;
                 char* end = nullptr;
@@ -841,7 +841,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200GadgetGarnerMode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_GADGET_GARNER");
                 // Stage 199: retain exact prior Garner digits as doubles,
                 // using GPU-prepared constants and checked canonical inputs.
@@ -856,7 +856,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200GadgetFoldMode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_GADGET_FOLD");
                 // Explicit carry in both pseudo52 folding and compact Horner.
                 if (!v) return 3u;
@@ -868,7 +868,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200GadgetSchedule()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_GADGET_SCHEDULE");
                 return v && v[0] >= '1' && v[0] <= '4' && v[1] == '\0'
                     ? static_cast<u32>(v[0] - '0') : 0u;
@@ -880,7 +880,7 @@ namespace osuCrypto::LogVole::gpu
         // of one 107-register CTA serializing all 256 roots and 64 passes.
         bool noGoldH200SplitSamplerEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_SPLIT_SAMPLE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_SPLIT_SAMPLE");
             return on;
         }
 
@@ -889,7 +889,7 @@ namespace osuCrypto::LogVole::gpu
         // PARTS=4 and SHARED_PREFIX=0 retain the established four-part symbol.
         u32 noGoldH200SampleParts()
         {
-            static const u32 parts = [] {
+            const u32 parts = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_SAMPLE_PARTS");
                 if (!v || !v[0]) return 2u;
                 if (std::strcmp(v, "2") == 0) return 2u;
@@ -903,7 +903,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200SampleReduction()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_SAMPLE_REDUCE");
                 // Exact full-u64 single fold; retain the original threshold
                 // comparison and cold ordered-replay contract (Stage 201).
@@ -916,25 +916,25 @@ namespace osuCrypto::LogVole::gpu
 
         bool noGoldH200SampleSharedPrefixEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_SAMPLE_SHARED_PREFIX");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_SAMPLE_SHARED_PREFIX");
             return on;
         }
 
         bool noGoldH200Gadget208Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_GADGET208");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_GADGET208");
             return on;
         }
 
         bool noGoldH200Gadget208Pseudo52Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_GADGET208_PSEUDO52");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_GADGET208_PSEUDO52");
             return on;
         }
 
         bool nttLog14H200InverseWarp05Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_WARP05");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_WARP05");
             return on;
         }
 
@@ -942,7 +942,7 @@ namespace osuCrypto::LogVole::gpu
         // Zero retains the synchronization-safe Stage-126 shared-input path.
         bool nttLog14H200InverseDirectLoadEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_DIRECT_LOAD");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_DIRECT_LOAD");
             return on;
         }
 
@@ -950,13 +950,13 @@ namespace osuCrypto::LogVole::gpu
         // It requires direct loads; zero isolates the Stage-127 input change.
         bool nttLog14H200InversePairedSuffixEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_PAIRED_SUFFIX");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_PAIRED_SUFFIX");
             return on;
         }
 
         bool nttLog14H200ForwardWarp712Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FORWARD_WARP712");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FORWARD_WARP712");
             return on;
         }
 
@@ -964,19 +964,19 @@ namespace osuCrypto::LogVole::gpu
         // CTAs per SM. Zero keeps the preceding 1024-thread single-stage prefix.
         bool nttLog14H200ForwardPairedPrefixEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FORWARD_PAIRED_PREFIX");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FORWARD_PAIRED_PREFIX");
             return on;
         }
 
         bool nttLog14H200CenteredEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_CENTERED");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_CENTERED");
             return on;
         }
 
         bool deviceSupportsLog14H200Shared()
         {
-            static const bool supported = [] {
+            const bool supported = [] {
                 int device = 0;
                 cudaDeviceProp prop{};
                 return cudaGetDevice(&device) == cudaSuccess &&
@@ -1011,7 +1011,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 nttForwardThreads()
         {
-            static const u32 value = [] {
+            const u32 value = [] {
                 const u32 common = parseNttThreads("LV_NTT_THREADS", kNttThreads);
                 return parseNttThreads("LV_NTT_FORWARD_THREADS", common);
             }();
@@ -1020,7 +1020,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 nttInverseThreads()
         {
-            static const u32 value = [] {
+            const u32 value = [] {
                 const u32 common = parseNttThreads("LV_NTT_THREADS", kNttThreads);
                 return parseNttThreads("LV_NTT_INVERSE_THREADS", common);
             }();
@@ -1032,7 +1032,7 @@ namespace osuCrypto::LogVole::gpu
         // shape is not instantiated because its parked values spill to stack.
         u32 nttLog14H200InverseThreads()
         {
-            static const u32 value = [] {
+            const u32 value = [] {
                 const char* v = std::getenv(
                     "LV_GPU_NTT_LOG14_H200_INVERSE_THREADS");
                 return v && std::strcmp(v, "1024") == 0
@@ -1044,7 +1044,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 nttFusedIpThreads()
         {
-            static const u32 value = [] {
+            const u32 value = [] {
                 return parseNttThreads("LV_NTT_FUSED_IP_THREADS", nttInverseThreads());
             }();
             return value;
@@ -1052,7 +1052,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 ct2PolySeedThreads()
         {
-            static const u32 value = [] {
+            const u32 value = [] {
                 const char* v = std::getenv("LV_CT2_SEED_THREADS");
                 if (!v || !v[0]) return 32u;
                 const unsigned long parsed = std::strtoul(v, nullptr, 10);
@@ -1065,7 +1065,7 @@ namespace osuCrypto::LogVole::gpu
 
         bool ct2SplitAesEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_CT2_SPLIT_AES");
+            const bool on = environmentFlagDefaultOn("LV_CT2_SPLIT_AES");
             return on;
         }
 
@@ -1076,10 +1076,9 @@ namespace osuCrypto::LogVole::gpu
         // setting the switch to zero restores it for full CTAs as well.
         bool ct2AesSharedSboxEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_CT2_AES_SHARED_SBOX");
+            const bool on = environmentFlagDefaultOn("LV_GPU_CT2_AES_SHARED_SBOX");
             return on;
         }
-
 
 
         // Scale-and-round's numerator has the special form x*p with x,p<q.
@@ -1088,7 +1087,7 @@ namespace osuCrypto::LogVole::gpu
         // Keep the reciprocal implementation available for exact A/B and rollback.
         bool scaleAndRoundShoupEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_SHOUP");
+            const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_SHOUP");
             return on;
         }
 
@@ -1097,7 +1096,7 @@ namespace osuCrypto::LogVole::gpu
         // correction. Keep both changes under one independent arithmetic rollback.
         bool scaleAndRoundFastArithmeticEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_FAST_ARITH");
+            const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_FAST_ARITH");
             return on;
         }
 
@@ -1106,7 +1105,7 @@ namespace osuCrypto::LogVole::gpu
         // kernel. The accepted Shoup kernel remains the same-binary rollback.
         bool scaleAndRoundHotRho4Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_HOT_RHO4");
+            const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_HOT_RHO4");
             return on;
         }
 
@@ -1116,7 +1115,7 @@ namespace osuCrypto::LogVole::gpu
         // accepted full-width carry path for exact A/B.
         bool scaleAndRoundHotHiCarryEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_HOT_HI_CARRY");
+            const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_HOT_HI_CARRY");
             return on;
         }
 
@@ -1126,7 +1125,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback to the established split chain.
         bool scaleNttForwardGatherHiCarryEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SCALE_UNWRAP_HI_CARRY");
+            const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SCALE_UNWRAP_HI_CARRY");
             return on;
         }
 
@@ -1138,7 +1137,7 @@ namespace osuCrypto::LogVole::gpu
         // zero selects the separate, codegen-stable coefficient-owned rollback.
         bool scaleNttForwardGatherSlotOwnedEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SCALE_UNWRAP_SLOT_OWNED");
+            const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SCALE_UNWRAP_SLOT_OWNED");
             return on;
         }
 
@@ -1149,7 +1148,7 @@ namespace osuCrypto::LogVole::gpu
         // complete rollback and handles every other degree/tile count.
         bool nttLog13SpecializedEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_SPECIALIZED");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_SPECIALIZED");
             return on;
         }
 
@@ -1158,7 +1157,7 @@ namespace osuCrypto::LogVole::gpu
         // expression can be isolated from the rest of the LogN=13 specialization.
         bool nttLog13SimpleIndexEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_SIMPLE_INDEX");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_SIMPLE_INDEX");
             return on;
         }
 
@@ -1170,7 +1169,7 @@ namespace osuCrypto::LogVole::gpu
         // kernel symbols retain the scalar-load path as an exact =0 rollback.
         bool nttLog13VectorShoupLoadsEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_VECTOR_SHOUP_LOADS");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_VECTOR_SHOUP_LOADS");
             return on;
         }
 
@@ -1181,7 +1180,7 @@ namespace osuCrypto::LogVole::gpu
         // geometry and critical-path placement differ on H200.
         bool nttLog13ForwardFusedFirstStageEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_FUSED_FIRST_STAGE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_FUSED_FIRST_STAGE");
             return on;
         }
 
@@ -1195,7 +1194,7 @@ namespace osuCrypto::LogVole::gpu
         // accepted path.
         bool nttLog13ForwardFusedLastTwoStagesEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_FUSED_LAST_TWO_STAGES");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_FUSED_LAST_TWO_STAGES");
             return on;
         }
 
@@ -1206,7 +1205,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback path.
         bool nttLog13ForwardWarpStages712Enabled()
         {
-            static const bool on = [] {
+            const bool on = [] {
                 const char* v = std::getenv(
                     "LV_GPU_NTT_LOG13_FORWARD_WARP_STAGES_7_12");
                 return !(v && std::strcmp(v, "0") == 0);
@@ -1220,19 +1219,19 @@ namespace osuCrypto::LogVole::gpu
         // so either accepted default can be rolled back independently.
         bool nttLog13ForwardCenteredFromFusedLastTwoStagesEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_CENTERED_FROM_FUSED_LAST_TWO_STAGES");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_CENTERED_FROM_FUSED_LAST_TWO_STAGES");
             return on;
         }
 
         bool nttLog13ForwardPlainBroadcastFusedLastTwoStagesEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_PLAIN_BROADCAST_FUSED_LAST_TWO_STAGES");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_PLAIN_BROADCAST_FUSED_LAST_TWO_STAGES");
             return on;
         }
 
         bool nttLog13InverseFusedFirstStageEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_FIRST_STAGE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_FIRST_STAGE");
             return on;
         }
 
@@ -1245,7 +1244,7 @@ namespace osuCrypto::LogVole::gpu
         // is accepted by default; set the switch to 0 for the preceding tail.
         bool nttLog13InverseFusedLastTwoStagesEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_TWO_STAGES");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_TWO_STAGES");
             return on;
         }
 
@@ -1259,7 +1258,7 @@ namespace osuCrypto::LogVole::gpu
         // continues to use that fallback.
         bool nttLog13InverseFusedLastThreeStagesEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_STAGES");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_STAGES");
             return on;
         }
 
@@ -1268,7 +1267,7 @@ namespace osuCrypto::LogVole::gpu
         // restores their exact staged fallbacks without disabling ReverseSub.
         bool nttLog13InverseFusedLastThreeAddNegateEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_ADD_NEGATE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_ADD_NEGATE");
             return on;
         }
 
@@ -1282,7 +1281,7 @@ namespace osuCrypto::LogVole::gpu
         // the protocol caller.
         bool nttLog13InversePostWarpStages05Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_POST_WARP_STAGES_0_5");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_POST_WARP_STAGES_0_5");
             return on;
         }
 
@@ -1292,7 +1291,7 @@ namespace osuCrypto::LogVole::gpu
         // CTA barrier. The legacy materialized path remains an exact rollback.
         bool nttLog13InverseTreeFusedFirstStageEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_TREE_FUSED_FIRST_STAGE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_TREE_FUSED_FIRST_STAGE");
             return on;
         }
 
@@ -1302,7 +1301,7 @@ namespace osuCrypto::LogVole::gpu
         // preceding pseudo-55 kernel remains the exact `=0` rollback.
         bool nttLog13InverseTreeWarpStagesEnabled()
         {
-            static const bool on = [] {
+            const bool on = [] {
                 const char* v = std::getenv(
                     "LV_GPU_NTT_LOG13_INVERSE_TREE_WARP_STAGES_1_5");
                 return !(v && std::strcmp(v, "0") == 0);
@@ -1318,7 +1317,7 @@ namespace osuCrypto::LogVole::gpu
         // the protocol caller.
         bool nttLog13InverseTreeProductWarpStages05Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_STAGES_0_5");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_STAGES_0_5");
             return on;
         }
 
@@ -1328,7 +1327,7 @@ namespace osuCrypto::LogVole::gpu
         // 40-register ceiling; `=0` selects the scalar Stage-112a intermediate.
         bool nttLog13InverseTreeProductWarpVectorPairsEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_VECTOR_PAIRS");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_VECTOR_PAIRS");
             return on;
         }
 
@@ -1339,7 +1338,7 @@ namespace osuCrypto::LogVole::gpu
         // retain the shared tail and this independent switch is the exact rollback.
         bool nttLog13DirectStoreEnabled()
         {
-            static const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG13_DIRECT_STORE");
+            const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG13_DIRECT_STORE");
             return on;
         }
 
@@ -1349,7 +1348,7 @@ namespace osuCrypto::LogVole::gpu
         // were mixed at the noise floor, so retain this as an opt-in experiment.
         bool nttCenteredDiagonalIdentityEnabled()
         {
-            static const bool on = environmentFlagOptIn("LV_GPU_NTT_CENTERED_DIAG_IDENTITY");
+            const bool on = environmentFlagOptIn("LV_GPU_NTT_CENTERED_DIAG_IDENTITY");
             return on;
         }
 
@@ -1360,7 +1359,7 @@ namespace osuCrypto::LogVole::gpu
         // measured without changing inverse geometry.
         bool nttLog13InverseSpecializedEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_SPECIALIZED");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_SPECIALIZED");
             return on;
         }
 
@@ -1372,7 +1371,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback and for every other pre/post tuple.
         bool nttLog13InverseDirectStoreEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_DIRECT_STORE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_DIRECT_STORE");
             return on;
         }
 
@@ -1383,7 +1382,7 @@ namespace osuCrypto::LogVole::gpu
         // opt-in until its positive primitive result clears the full protocol.
         bool nttLog13InverseSmallDirectEnabled()
         {
-            static const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG13_INVERSE_SMALL_DIRECT");
+            const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG13_INVERSE_SMALL_DIRECT");
             return on;
         }
 
@@ -1394,7 +1393,7 @@ namespace osuCrypto::LogVole::gpu
         // pass. Keep the runtime-geometry kernel as the exact toggle-off rollback.
         bool nttLog13InverseScatterFixedEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_SCATTER_FIXED");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_SCATTER_FIXED");
             return on;
         }
 
@@ -1405,7 +1404,7 @@ namespace osuCrypto::LogVole::gpu
         // older LOGVOLE_GPU_FUSED_IP experiment for isolated rollback.
         bool nttLog13InverseFixedIpEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FIXED_IP");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FIXED_IP");
             return on;
         }
 
@@ -1419,7 +1418,7 @@ namespace osuCrypto::LogVole::gpu
         // LV_GPU_FIXED_IP_MU_ROW_REUSE=0 to disable it.
         bool fixedIpMuRowReuseEnabled()
         {
-            static const bool on = [] {
+            const bool on = [] {
                 const char* v = std::getenv("LV_GPU_FIXED_IP_MU_ROW_REUSE");
                 // Retain the original experiment spelling for reproducibility.
                 if (!v) v = std::getenv("LV_GPU_FIXED_IP_MU16_ROW_REUSE");
@@ -1434,7 +1433,7 @@ namespace osuCrypto::LogVole::gpu
         // row-reuse symbols remain untouched.
         bool fixedIpWideMuRowReuseEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FIXED_IP_WIDE_MU_ROW_REUSE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_FIXED_IP_WIDE_MU_ROW_REUSE");
             return on;
         }
 
@@ -1446,14 +1445,14 @@ namespace osuCrypto::LogVole::gpu
         // to retain the exact same-binary rollback to the generic reducers.
         bool pointwisePseudo55ReduceEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_POINTWISE_PSEUDO55_REDUCE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_POINTWISE_PSEUDO55_REDUCE");
             return on;
         }
 
 
         u32 rootZetaSampleThreads()
         {
-            static const u32 value = [] {
+            const u32 value = [] {
                 const char* v = std::getenv("LV_GPU_ROOT_ZETA_THREADS");
                 if (!v || !v[0]) return 256u;
                 const unsigned long parsed = std::strtoul(v, nullptr, 10);
@@ -1464,14 +1463,14 @@ namespace osuCrypto::LogVole::gpu
 
         u32 nttLog13InverseThreads()
         {
-            static const u32 value =
+            const u32 value =
                 parseNttThreads("LV_NTT_LOG13_INVERSE_THREADS", 512u);
             return value;
         }
 
         u32 nttLog13InverseMinBlocks()
         {
-            static const u32 value = [] {
+            const u32 value = [] {
                 const char* v = std::getenv("LV_NTT_LOG13_INVERSE_MIN_BLOCKS");
                 if (!v || !v[0]) return 256u;
                 const unsigned long parsed = std::strtoul(v, nullptr, 10);
@@ -1486,7 +1485,7 @@ namespace osuCrypto::LogVole::gpu
         // kernel as the complete rollback and for every other parameter set.
         bool expandAccumulatorSpecializedEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_SPECIALIZED");
+            const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_SPECIALIZED");
             return on;
         }
 
@@ -1496,7 +1495,7 @@ namespace osuCrypto::LogVole::gpu
         // its arithmetic contribution can be measured without changing tiling.
         bool expandAccumulatorQ64ComplementEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_Q64_COMPLEMENT");
+            const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_Q64_COMPLEMENT");
             return on;
         }
 
@@ -1509,7 +1508,7 @@ namespace osuCrypto::LogVole::gpu
         // codegen-stable exact fallback.
         bool expandAccumulatorPseudo55Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55");
+            const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55");
             return on;
         }
 
@@ -1521,7 +1520,7 @@ namespace osuCrypto::LogVole::gpu
         // an explicit `=0` retains the accepted symbol byte-for-byte.
         bool expandAccumulatorGoldenPseudo55DualEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_GOLDEN_DUAL");
+            const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_GOLDEN_DUAL");
             return on;
         }
 
@@ -1532,7 +1531,7 @@ namespace osuCrypto::LogVole::gpu
         // dispatch remains unchanged.
         bool expandAccumulatorPseudo55WideEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_WIDE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_WIDE");
             return on;
         }
 
@@ -1542,7 +1541,7 @@ namespace osuCrypto::LogVole::gpu
         // an in-binary rollback.
         bool expandAccumulatorPseudo55DualEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL");
+            const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL");
             return on;
         }
 
@@ -1553,7 +1552,7 @@ namespace osuCrypto::LogVole::gpu
         // Stage-101 and Stage-99 bodies as independent same-binary rollbacks.
         bool expandAccumulatorPseudo55DualPackedPairsEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL_PACKED_PAIRS");
+            const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL_PACKED_PAIRS");
             return on;
         }
 
@@ -1564,7 +1563,7 @@ namespace osuCrypto::LogVole::gpu
         // exact same-binary rollback.
         bool expandAccumulatorTiledEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_TILED");
+            const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_TILED");
             return on;
         }
 
@@ -1575,7 +1574,7 @@ namespace osuCrypto::LogVole::gpu
         // exact same-binary rollback and forced-rejection validation.
         bool rejectFastpathEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_REJECT_FASTPATH");
+            const bool on = environmentFlagDefaultOn("LV_GPU_REJECT_FASTPATH");
             return on;
         }
 
@@ -1585,7 +1584,7 @@ namespace osuCrypto::LogVole::gpu
         // The old fixup-then-reduce sequence remains an exact runtime rollback.
         bool rejectReduceFusionEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_REJECT_REDUCE_FUSION");
+            const bool on = environmentFlagDefaultOn("LV_GPU_REJECT_REDUCE_FUSION");
             return on;
         }
 
@@ -1595,7 +1594,7 @@ namespace osuCrypto::LogVole::gpu
         // A/B and as a conservative fallback.
         bool denoiseSpecializedEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_SPECIALIZED");
+            const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_SPECIALIZED");
             return on;
         }
 
@@ -1604,7 +1603,7 @@ namespace osuCrypto::LogVole::gpu
         // reductions; the original specialized kernel remains the exact rollback.
         bool denoiseShoupEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_SHOUP");
+            const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_SHOUP");
             return on;
         }
 
@@ -1613,7 +1612,7 @@ namespace osuCrypto::LogVole::gpu
         // Keep this toggle independent of the Shoup arithmetic for isolated A/B.
         bool denoiseHotGeometryEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_HOT_GEOMETRY");
+            const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_HOT_GEOMETRY");
             return on;
         }
 
@@ -1623,7 +1622,7 @@ namespace osuCrypto::LogVole::gpu
         // existing specialized and runtime kernels remain exact rollbacks.
         bool goldenValidateShoupEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GOLDEN_VALIDATE_SHOUP");
+            const bool on = environmentFlagDefaultOn("LV_GPU_GOLDEN_VALIDATE_SHOUP");
             return on;
         }
 
@@ -1632,7 +1631,7 @@ namespace osuCrypto::LogVole::gpu
         // it available for other GPUs without paying that occupancy cost by default.
         bool denoiseSpecializedRho8Enabled()
         {
-            static const bool on = environmentFlagOptIn("LV_GPU_DENOISE_SPECIALIZED_RHO8");
+            const bool on = environmentFlagOptIn("LV_GPU_DENOISE_SPECIALIZED_RHO8");
             return on;
         }
 
@@ -1641,19 +1640,19 @@ namespace osuCrypto::LogVole::gpu
         // explicit zero preserves the general/legacy denoising dispatch.
         bool noGoldDenoiseShoupEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_DENOISE_SHOUP");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_DENOISE_SHOUP");
             return on;
         }
 
         bool noGoldDenoiseUnrollEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_DENOISE_UNROLL");
+            const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_DENOISE_UNROLL");
             return on;
         }
 
         u32 noGoldDenoiseThreads()
         {
-            static const u32 count = [] {
+            const u32 count = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_DENOISE_THREADS");
                 if (v && std::strcmp(v, "256") == 0) return 256u;
                 if (v && std::strcmp(v, "512") == 0) return 512u;
@@ -1668,7 +1667,7 @@ namespace osuCrypto::LogVole::gpu
         // arrays. The general kernel remains the exact same-binary rollback.
         bool gadgetHi110SpecializedEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110");
+            const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110");
             return on;
         }
 
@@ -1680,7 +1679,7 @@ namespace osuCrypto::LogVole::gpu
         // Hi110 symbol as an exact, codegen-stable =0 fallback.
         bool gadgetHi110CompactCrtEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_COMPACT_CRT");
+            const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_COMPACT_CRT");
             return on;
         }
 
@@ -1690,7 +1689,7 @@ namespace osuCrypto::LogVole::gpu
         // n=24 and n=25; zero retains the accepted compact-Barrett rollback.
         bool gadgetHi110Radix55ReduceEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_RADIX55_REDUCE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_RADIX55_REDUCE");
             return on;
         }
 
@@ -1700,7 +1699,7 @@ namespace osuCrypto::LogVole::gpu
         // gates; zero selects the accepted Shoup-fold rollback symbols.
         bool gadgetHi110Pseudo55SecondFoldEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_PSEUDO55_SECOND_FOLD");
+            const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_PSEUDO55_SECOND_FOLD");
             return on;
         }
 
@@ -1710,7 +1709,7 @@ namespace osuCrypto::LogVole::gpu
         // the accepted four-term gadget as the complete same-binary fallback.
         bool gadgetHi110SparsePairEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_SPARSE_PAIR");
+            const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_SPARSE_PAIR");
             return on;
         }
 
@@ -1719,22 +1718,18 @@ namespace osuCrypto::LogVole::gpu
         // text unchanged also keeps its rollback audit simple.
         bool gadgetHi110SparsePairGarnerEnabled()
         {
-            static const bool on = [] {
+            const bool on = [] {
                 const char* v = std::getenv("LV_GADGET_GARNER");
                 return v && v[0] != '\0' && v[0] != '0';
             }();
             return on;
         }
 
-        cudaError_t gLastError = cudaSuccess;
-        const char* gLastWhere = "";
 
         inline bool check(cudaError_t e, const char* where)
         {
             if (e != cudaSuccess)
             {
-                gLastError = e;
-                gLastWhere = where;
                 return false;
             }
             return true;
@@ -1747,7 +1742,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 noGoldH200RootL2Mode()
         {
-            static const u32 mode = [] {
+            const u32 mode = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_ROOT_L2");
                 // Stage 199: both root windows, with setup scoped to the ring.
                 // Explicit zero leaves the application's cache policy alone.
@@ -1772,7 +1767,7 @@ namespace osuCrypto::LogVole::gpu
             cudaStreamAttrValue value{};
             value.accessPolicyWindow.base_ptr = const_cast<void*>(roots);
             value.accessPolicyWindow.num_bytes = bytes;
-            static const float hitRatio = [] {
+            const float hitRatio = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_ROOT_L2_HIT_PERCENT");
                 if (v && std::strcmp(v, "25") == 0) return 0.25f;
                 if (v && std::strcmp(v, "50") == 0) return 0.5f;
@@ -4605,8 +4600,6 @@ namespace osuCrypto::LogVole::gpu
             if (residue >= q) residue -= q;
             return residue;
         }
-
-
 
 
         // Hot tau=1 shrink tree. The public columns are [0,2] at the leaf and
@@ -13217,7 +13210,6 @@ namespace osuCrypto::LogVole::gpu
         }
 
 
-
         __device__ inline void aes128Encrypt(const unsigned char* rk, unsigned char* s)
         {
 #pragma unroll
@@ -13740,11 +13732,6 @@ namespace osuCrypto::LogVole::gpu
 
             aes128ExpandToGlobal(h[0], h[1], roundKeys + static_cast<size_t>(gid) * 176);
         }
-
-
-
-
-
 
 
         __global__ __launch_bounds__(128) void ct2PolySeedEncryptKernel(
@@ -14453,7 +14440,7 @@ namespace osuCrypto::LogVole::gpu
         // two can be measured against each other on the same build.
         bool fusedSamplerEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LOGVOLE_GPU_FUSED_SAMPLE");
+            const bool on = environmentFlagDefaultOn("LOGVOLE_GPU_FUSED_SAMPLE");
             return on;
         }
 
@@ -14465,7 +14452,7 @@ namespace osuCrypto::LogVole::gpu
         // rollback to the materialized sampler.
         bool speculativeFusedSamplerEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_SPECULATIVE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_SPECULATIVE");
             return on;
         }
 
@@ -14476,7 +14463,7 @@ namespace osuCrypto::LogVole::gpu
         // the wider speculative or materialised rollback controls.
         bool hotSpeculativeFusedSamplerEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_HOT");
+            const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_HOT");
             return on;
         }
 
@@ -14487,7 +14474,7 @@ namespace osuCrypto::LogVole::gpu
         // transpose independently of all other sampler switches.
         bool hotSamplerWarpTransposeEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_WARP_TRANSPOSE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_WARP_TRANSPOSE");
             return on;
         }
 
@@ -14498,7 +14485,7 @@ namespace osuCrypto::LogVole::gpu
         // REG80 sampler, while the scalar shared-message experiment is separate.
         bool hotSamplerRoundVectorMessageEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_ROUND_VECTOR_MESSAGE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_ROUND_VECTOR_MESSAGE");
             return on;
         }
 
@@ -14509,7 +14496,7 @@ namespace osuCrypto::LogVole::gpu
         // kernel as an exact same-binary rollback and SASS reference.
         bool hotSamplerSharedRootPrefixEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_SHARED_ROOT_PREFIX");
+            const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_SHARED_ROOT_PREFIX");
             return on;
         }
 
@@ -14523,7 +14510,7 @@ namespace osuCrypto::LogVole::gpu
         // zero restores the accepted materialized root/block/reduce chain.
         bool smallSampleDirectReduceEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_SMALL_SAMPLE_DIRECT_REDUCE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_SMALL_SAMPLE_DIRECT_REDUCE");
             return on;
         }
 
@@ -14533,7 +14520,7 @@ namespace osuCrypto::LogVole::gpu
         // accepted launch as a same-binary rollback.
         bool hotSamplerSplit64Enabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_SPLIT64");
+            const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SAMPLE_SPLIT64");
             return on;
         }
 
@@ -14542,7 +14529,7 @@ namespace osuCrypto::LogVole::gpu
         // exact same-binary A/B. The shared transpose is otherwise the default.
         bool coalescedSamplerStoreEnabled()
         {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_COALESCED_SAMPLE");
+            const bool on = environmentFlagDefaultOn("LV_GPU_COALESCED_SAMPLE");
             return on;
         }
 
@@ -14552,7 +14539,7 @@ namespace osuCrypto::LogVole::gpu
         // can be swept per GPU without changing the byte stream.
         u32 fusedSamplerMinPolys()
         {
-            static const u32 value = [] {
+            const u32 value = [] {
                 const char* v = std::getenv("LV_FUSED_SAMPLE_MIN_POLYS");
                 if (!v || !v[0]) return 64u;
                 const unsigned long parsed = std::strtoul(v, nullptr, 10);
@@ -14634,7 +14621,6 @@ namespace osuCrypto::LogVole::gpu
         static_assert(
             kNoGoldSampleRoots == 256u && kNoGoldSamplePasses == 64u &&
             kNoGoldPartRoots == 64u && kNoGoldPartPasses == 16u);
-
 
 
         // Random access to one word of the unbounded logical SEAL Blake2xb
@@ -14808,7 +14794,7 @@ namespace osuCrypto::LogVole::gpu
             const u32* rejectEpochs, u32 rejectEpoch, u64* out,
             const u32* outIdx, u32 outCount, cudaStream_t stream)
         {
-            static const bool parallel = [] {
+            const bool parallel = [] {
                 const char* v = std::getenv("LV_GPU_PARALLEL_SAMPLE_REPAIR");
                 return !(v && v[0] == '0');
             }();
@@ -15084,8 +15070,6 @@ namespace osuCrypto::LogVole::gpu
             u64 mResidue;
             u32 mRejected;
         };
-
-
 
 
         // Exact hot geometry: N=8192, rho=4, 64 roots and 16 full passes. Static
@@ -16071,9 +16055,6 @@ namespace osuCrypto::LogVole::gpu
             return dim3(x, y == 0 ? 1u : y, 1);
         }
 
-
-        bool gSharedConfigured = false;
-
         // Request the tile size rather than the ring degree. Two reasons: a degree
         // above kNttMaxTileLen would ask for more than the 100 KiB a block can
         // opt into on sm_89 (N = 16384 wants 128 KiB), and the request is a cap, so
@@ -16081,7 +16062,7 @@ namespace osuCrypto::LogVole::gpu
         // a process fixed the limit for every later, possibly larger, n.
         bool configureShared(u32)
         {
-            if (gSharedConfigured) return true;
+
             const size_t bytes = static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
                     cudaFuncSetAttribute(
@@ -16353,23 +16334,17 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseFusedIp)"))
                 return false;
-            gSharedConfigured = true;
+
             return true;
         }
 
-        bool gPointwisePseudo55TreeSharedConfigured = false;
-        bool gPointwisePseudo55TreeWarpSharedConfigured = false;
-        bool gPointwisePseudo55TreeProductWarpSharedConfigured = false;
-        bool gPointwisePseudo55TreeProductWarpVectorSharedConfigured = false;
-        bool gPointwisePseudo55SparseSharedConfigured = false;
-        bool gNttInversePostWarpStages05SharedConfigured = false;
 
         // Keep Stage-110's opt-in attributes out of the common configureShared
         // path. Only an explicit alpha=2 production dispatch (or its focused
         // test hook) touches these separate candidate symbols.
         bool configureNttInversePostWarpStages05Shared()
         {
-            if (gNttInversePostWarpStages05SharedConfigured) return true;
+
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -16393,7 +16368,7 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePostWarpStages05ReverseSub)"))
                 return false;
-            gNttInversePostWarpStages05SharedConfigured = true;
+
             return true;
         }
 
@@ -16402,7 +16377,7 @@ namespace osuCrypto::LogVole::gpu
         // other pointwise family.
         bool configurePointwisePseudo55TreeShared()
         {
-            if (gPointwisePseudo55TreeSharedConfigured) return true;
+
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -16412,13 +16387,13 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseTreePairPseudo55)"))
                 return false;
-            gPointwisePseudo55TreeSharedConfigured = true;
+
             return true;
         }
 
         bool configurePointwisePseudo55TreeWarpShared()
         {
-            if (gPointwisePseudo55TreeWarpSharedConfigured) return true;
+
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -16428,13 +16403,13 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseTreePairWarpStagesPseudo55)"))
                 return false;
-            gPointwisePseudo55TreeWarpSharedConfigured = true;
+
             return true;
         }
 
         bool configurePointwisePseudo55TreeProductWarpShared()
         {
-            if (gPointwisePseudo55TreeProductWarpSharedConfigured) return true;
+
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -16444,14 +16419,12 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseTreePairProductWarpStages05Pseudo55)"))
                 return false;
-            gPointwisePseudo55TreeProductWarpSharedConfigured = true;
+
             return true;
         }
 
         bool configurePointwisePseudo55TreeProductWarpVectorShared()
         {
-            if (gPointwisePseudo55TreeProductWarpVectorSharedConfigured)
-                return true;
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -16461,13 +16434,13 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseTreePairProductWarpStages05VectorPairsPseudo55)"))
                 return false;
-            gPointwisePseudo55TreeProductWarpVectorSharedConfigured = true;
+
             return true;
         }
 
         bool configurePointwisePseudo55SparseShared()
         {
-            if (gPointwisePseudo55SparseSharedConfigured) return true;
+
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -16477,7 +16450,7 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseRecursiveLeafSparsePseudo55)"))
                 return false;
-            gPointwisePseudo55SparseSharedConfigured = true;
+
             return true;
         }
 
@@ -16504,373 +16477,61 @@ namespace osuCrypto::LogVole::gpu
         return count > 0;
     }
 
-    const char* gpuDeviceName()
+    int gpuDeviceOrdinal()
     {
-        static char name[256] = { 0 };
+        int device = -1;
+        return cudaGetDevice(&device) == cudaSuccess ? device : -1;
+    }
+
+    bool gpuSelectDevice(int device)
+    {
+        return cudaSetDevice(device) == cudaSuccess;
+    }
+
+    bool gpuDeviceIsH200()
+    {
+        cudaDeviceProp properties{};
+        const int device = gpuDeviceOrdinal();
+        return device >= 0 && cudaGetDeviceProperties(&properties, device) == cudaSuccess &&
+            properties.major == 9 && std::strstr(properties.name, "H200");
+    }
+
+    void* gpuStreamCreateHighestPriority()
+    {
+        int least = 0, greatest = 0;
+        cudaStream_t stream = nullptr;
+        if (cudaDeviceGetStreamPriorityRange(&least, &greatest) != cudaSuccess ||
+            greatest >= least || cudaStreamCreateWithPriority(&stream,
+                cudaStreamNonBlocking, greatest) != cudaSuccess) return nullptr;
+        return stream;
+    }
+
+    bool gpuMemcpyRows(void* destination, std::size_t destinationPitch,
+        const void* source, std::size_t sourcePitch, std::size_t rowBytes,
+        std::size_t rows, bool hostSource, void* stream)
+    {
+        return cudaMemcpy2DAsync(destination, destinationPitch, source, sourcePitch,
+            rowBytes, rows, hostSource ? cudaMemcpyHostToDevice : cudaMemcpyDeviceToDevice,
+            asStream(stream)) == cudaSuccess;
+    }
+
+    std::string gpuDeviceName()
+    {
         cudaDeviceProp prop{};
-        if (cudaGetDeviceProperties(&prop, 0) != cudaSuccess) return "unknown";
-        std::snprintf(name, sizeof(name), "%s (sm_%d%d, %d SMs)", prop.name, prop.major, prop.minor,
-                      prop.multiProcessorCount);
+        int device = 0;
+        if (cudaGetDevice(&device) != cudaSuccess ||
+            cudaGetDeviceProperties(&prop, device) != cudaSuccess) return "unknown";
+        char name[256]{};
+        std::snprintf(name, sizeof(name), "%s (sm_%d%d, %d SMs)", prop.name,
+            prop.major, prop.minor, prop.multiProcessorCount);
         return name;
     }
 
     bool gpuLastErrorOk(const char** msg)
     {
-        const cudaError_t e = cudaGetLastError();
-        if (e != cudaSuccess)
-        {
-            gLastError = e;
-            gLastWhere = "async";
-        }
-        if (gLastError == cudaSuccess) return true;
-        static char buf[512];
-        std::snprintf(buf, sizeof(buf), "%s: %s", gLastWhere, cudaGetErrorString(gLastError));
-        if (msg) *msg = buf;
-        return false;
-    }
-
-    namespace
-    {
-
-        // Device allocation is a size-bucketed cache in front of CUDA's
-        // stream-ordered pool. Both halves were measured separately and both are
-        // needed:
-        //
-        //  * cache + cudaMalloc:      185 driver calls, 108 ms
-        //  * pool only, no cache:     447 driver calls, 124 ms
-        //  * cache + cudaMallocAsync: what this is
-        //
-        // The cache absorbs the great majority of requests, which is why removing
-        // it made things worse; the pool makes the remaining misses much cheaper
-        // than cudaMalloc, which synchronises.
-        //
-        // Blocks carry the stream they were released on. A block returned to the
-        // requesting stream needs no synchronisation; one crossing streams is only
-        // handed over after the previous stream is idle. That is what makes
-        // running the two parties on separate streams safe.
-        cudaMemPool_t deviceMemPool()
-        {
-            static cudaMemPool_t pool = [] {
-                cudaMemPool_t p = nullptr;
-                if (cudaDeviceGetDefaultMemPool(&p, 0) != cudaSuccess) return cudaMemPool_t(nullptr);
-                std::uint64_t threshold = ~std::uint64_t(0);
-                cudaMemPoolSetAttribute(p, cudaMemPoolAttrReleaseThreshold, &threshold);
-                return p;
-            }();
-            return pool;
-        }
-
-        struct DeviceAllocator
-        {
-            static constexpr u32 kBuckets = 40;   // up to 2^39 bytes
-
-            // A cached block, plus what has to finish before it can be handed to a
-            // different stream. The event is recorded at release time; reuse makes
-            // the *new* stream wait on it, which is a device-side dependency and
-            // costs the host nothing.
-            //
-            // This used to be a bare stream handle that reuse synchronised on the
-            // host - cudaStreamSynchronize for a live stream, cudaDeviceSynchronize
-            // when the stream had already been destroyed. Both drain the pipeline
-            // and both showed up in the profile: 199 cudaStreamSynchronize calls
-            // and 13.1 ms of cudaDeviceSynchronize inside one online window.
-            struct Block
-            {
-                void* mPtr;
-                void* mStream;      // null once the stream is gone; forces the event path
-                cudaEvent_t mEvent; // may be null if event creation failed
-            };
-
-            std::vector<Block> mFree[kBuckets];
-            std::vector<cudaEvent_t> mEventPool;
-            // Keep a failed dependency's allocation and event alive rather than
-            // letting either be recycled while its old stream may still use it.
-            std::vector<Block> mQuarantined;
-            // Every stream handed out by gpuStreamCreate and not yet destroyed.
-            //
-            // Needed because thread_local objects that own device memory
-            // (GpuStream itself, SampleScratch, ValidateScratch) are destroyed in
-            // an unspecified order at thread exit, so a gpuFree can run while
-            // gCurrentStream still names a stream that has already been destroyed.
-            // Touching that handle - cudaEventRecord, cudaMallocAsync,
-            // cudaStreamSynchronize, anything - segfaults inside the driver.
-            //
-            // A destroyed stream is always synchronised first (see
-            // GpuStream::~GpuStream), so a block last used on one is idle and can be
-            // reused with no dependency at all.
-            std::unordered_set<void*> mLive;
-            std::mutex mMutex;
-
-            // Requires mMutex. nullptr is the default stream and always usable.
-            bool liveLocked(void* stream) const
-            {
-                return stream == nullptr || mLive.count(stream) != 0;
-            }
-
-            static u32 bucketOf(std::size_t bytes)
-            {
-                u32 b = 12;   // 4 KiB floor
-                while (b < kBuckets - 1 && (std::size_t(1) << b) < bytes) ++b;
-                return b;
-            }
-
-            // Both helpers require mMutex.
-            cudaEvent_t takeEventLocked()
-            {
-                if (!mEventPool.empty())
-                {
-                    cudaEvent_t e = mEventPool.back();
-                    mEventPool.pop_back();
-                    return e;
-                }
-                cudaEvent_t e = nullptr;
-                if (cudaEventCreateWithFlags(&e, cudaEventDisableTiming) != cudaSuccess)
-                {
-                    cudaGetLastError();
-                    return nullptr;
-                }
-                return e;
-            }
-
-            void giveEventLocked(cudaEvent_t e)
-            {
-                if (e) mEventPool.push_back(e);
-            }
-
-            void* alloc(std::size_t bytes, void* stream)
-            {
-                if (bytes == 0) return nullptr;
-                const u32 b = bucketOf(bytes);
-                Block foreign{ nullptr, nullptr, nullptr };
-                {
-                    std::lock_guard<std::mutex> lock(mMutex);
-                    if (!liveLocked(stream)) stream = nullptr;
-                    auto& list = mFree[b];
-                    for (std::size_t i = list.size(); i-- > 0;)
-                    {
-                        if (list[i].mStream == stream && stream != nullptr)
-                        {
-                            // Same stream: in-order execution already separates the
-                            // old use from anything queued next, so no dependency
-                            // needs expressing.
-                            void* p = list[i].mPtr;
-                            giveEventLocked(list[i].mEvent);
-                            list.erase(list.begin() + static_cast<std::ptrdiff_t>(i));
-                            return p;
-                        }
-                    }
-                    // A block another stream last used is reusable behind a
-                    // device-side dependency on that stream. Preferring a fresh pool
-                    // allocation instead was measured (it is what a cross-stream
-                    // sampler would want): neutral at 2^22, so the simpler policy
-                    // stays.
-                    if (!list.empty())
-                    {
-                        foreign = list.back();
-                        list.pop_back();
-                    }
-                }
-
-                if (foreign.mPtr)
-                {
-                    if (foreign.mEvent)
-                    {
-                        // cudaStreamWaitEvent captures the event's state at the
-                        // call, so the event can go straight back into the pool.
-                        const cudaError_t waited = cudaStreamWaitEvent(
-                            asStream(stream), foreign.mEvent, 0);
-                        if (waited != cudaSuccess)
-                        {
-                            // Returning this block without a dependency can let
-                            // a new kernel overwrite an old stream's input.
-                            // Make the rare failure path conservative while the
-                            // successful path remains entirely device ordered.
-                            cudaGetLastError();
-                            if (cudaEventSynchronize(foreign.mEvent) != cudaSuccess)
-                            {
-                                cudaGetLastError();
-                                const bool idle = cudaDeviceSynchronize() == cudaSuccess;
-                                if (!idle) cudaGetLastError();
-                                std::lock_guard<std::mutex> lock(mMutex);
-                                try
-                                {
-                                    mQuarantined.push_back(Block{
-                                        idle ? nullptr : foreign.mPtr,
-                                        nullptr, foreign.mEvent});
-                                }
-                                catch (...) { /* Leak the block/event if bookkeeping fails. */ }
-                                if (!idle) return nullptr;
-                                // The device is idle, but the failed event must
-                                // not be handed to another allocation.
-                                return foreign.mPtr;
-                            }
-                        }
-                        std::lock_guard<std::mutex> lock(mMutex);
-                        giveEventLocked(foreign.mEvent);
-                    }
-                    else if (foreign.mStream)
-                    {
-                        // Event creation failed for this block; fall back to the
-                        // handle, which is still live or it would have been cleared.
-                        if (cudaStreamSynchronize(
-                                static_cast<cudaStream_t>(foreign.mStream)) != cudaSuccess)
-                        {
-                            cudaGetLastError();
-                            if (cudaDeviceSynchronize() != cudaSuccess)
-                            {
-                                cudaGetLastError();
-                                std::lock_guard<std::mutex> lock(mMutex);
-                                try { mQuarantined.push_back(foreign); }
-                                catch (...) { /* Leak the block if bookkeeping fails. */ }
-                                return nullptr;
-                            }
-                        }
-                    }
-                    // No event and no stream means the block was released after its
-                    // stream had already been synchronised, so nothing to wait for.
-                    return foreign.mPtr;
-                }
-
-                (void)deviceMemPool();
-                void* p = nullptr;
-                cudaStream_t st = asStream(stream);
-                const std::size_t bucketBytes = std::size_t(1) << b;
-                if (cudaMallocAsync(&p, bucketBytes, st) != cudaSuccess)
-                {
-                    cudaGetLastError();
-                    releaseAll();
-                    if (!check(cudaMallocAsync(&p, bucketBytes, st), "cudaMallocAsync")) return nullptr;
-                }
-                return p;
-            }
-
-            void release(void* ptr, std::size_t bytes, void* stream)
-            {
-                if (!ptr) return;
-                const u32 b = bucketOf(bytes);
-                cudaEvent_t e = nullptr;
-                {
-                    std::lock_guard<std::mutex> lock(mMutex);
-                    if (!liveLocked(stream))
-                    {
-                        // The stream is gone, which means it was synchronised on the
-                        // way out, which means this block is idle. Record nothing.
-                        mFree[b].push_back(Block{ ptr, nullptr, nullptr });
-                        return;
-                    }
-                    e = takeEventLocked();
-                }
-                if (e && cudaEventRecord(e, asStream(stream)) != cudaSuccess)
-                {
-                    cudaGetLastError();
-                    // Fall back to the stream handle for this block.
-                    std::lock_guard<std::mutex> lock(mMutex);
-                    giveEventLocked(e);
-                    e = nullptr;
-                }
-                std::lock_guard<std::mutex> lock(mMutex);
-                mFree[b].push_back(Block{ ptr, stream, e });
-            }
-
-            void addStream(void* stream)
-            {
-                if (!stream) return;
-                std::lock_guard<std::mutex> lock(mMutex);
-                mLive.insert(stream);
-            }
-
-            void dropStream(void* stream)
-            {
-                if (!stream) return;
-                std::lock_guard<std::mutex> lock(mMutex);
-                mLive.erase(stream);
-            }
-
-            void releaseAll()
-            {
-                cudaDeviceSynchronize();
-                std::lock_guard<std::mutex> lock(mMutex);
-                for (u32 b = 0; b < kBuckets; ++b)
-                {
-                    for (auto& e : mFree[b])
-                    {
-                        cudaFreeAsync(e.mPtr, nullptr);
-                        giveEventLocked(e.mEvent);
-                    }
-                    mFree[b].clear();
-                }
-                cudaStreamSynchronize(nullptr);
-                if (auto pool = deviceMemPool()) cudaMemPoolTrimTo(pool, 0);
-            }
-        };
-
-        // Never destroyed: device buffers are owned by objects with process
-        // lifetime (GpuRing, GpuPlainNtt, thread_local scratch) whose destructors
-        // call gpuFree, and there is no destruction-order guarantee between those
-        // and these statics. Freeing after the bookkeeping was destroyed corrupted
-        // the host heap and aborted in an unrelated free at exit.
-        DeviceAllocator& allocator()
-        {
-            static DeviceAllocator* a = new DeviceAllocator();
-            return *a;
-        }
-
-        std::unordered_map<void*, std::size_t>& allocSizes()
-        {
-            static auto* m = new std::unordered_map<void*, std::size_t>();
-            return *m;
-        }
-
-        std::mutex& allocSizesMutex()
-        {
-            static auto* m = new std::mutex();
-            return *m;
-        }
-    }
-
-    namespace
-    {
-        thread_local void* gCurrentStream = nullptr;
-    }
-
-    // The stream that subsequent allocations belong to. Set by threadStream()
-    // before any GPU work in that scope, so a block is tagged with the stream
-    // that actually used it.
-    void gpuSetCurrentStream(void* stream)
-    {
-        gCurrentStream = stream;
-    }
-
-    void* gpuCurrentStream()
-    {
-        return gCurrentStream;
-    }
-
-    // Drop every reference the allocator holds to `stream`.
-    //
-    // A thread_local GpuStream is destroyed when its owning thread exits, and its
-    // scratch buffers are freed into the cache tagged with it on the way out. Two
-    // things go wrong if the tag is left behind. Historically the tag was what
-    // reuse synchronised on, so a destroyed handle faulted inside the driver -
-    // that is now handled by the recorded event instead. What remains is subtler:
-    // the driver reuses cudaStream_t values, so a later stream can be handed the
-    // dead stream's handle and alloc() would then mistake a foreign block for one
-    // of its own and skip the dependency entirely.
-    //
-    // Clearing the tag costs nothing: the block still carries its event, so reuse
-    // takes the event path and stays correct without any host synchronise.
-    void gpuForgetStream(void* stream)
-    {
-        if (!stream) return;
-        auto& a = allocator();
-        std::lock_guard<std::mutex> lock(a.mMutex);
-        for (auto& list : a.mFree)
-        {
-            for (auto& entry : list)
-            {
-                if (entry.mStream == stream) entry.mStream = nullptr;
-            }
-        }
+        const auto error = cudaGetLastError();
+        if (msg) *msg = cudaGetErrorString(error);
+        return error == cudaSuccess;
     }
 
     bool gpuStreamWaitEvent(void* stream, void* event)
@@ -16882,156 +16543,19 @@ namespace osuCrypto::LogVole::gpu
 
     void* gpuMalloc(std::size_t bytes)
     {
-        void* p = allocator().alloc(bytes, gCurrentStream);
-        if (!p) return nullptr;
-        std::lock_guard<std::mutex> lock(allocSizesMutex());
-        allocSizes()[p] = bytes;
-        return p;
+        if (!bytes) return nullptr;
+        void* pointer = nullptr;
+        return check(cudaMalloc(&pointer, bytes), "malloc") ? pointer : nullptr;
     }
 
-    void gpuFree(void* ptr)
+    void gpuFree(void* pointer)
     {
-        if (!ptr) return;
-        std::size_t bytes = 0;
-        {
-            std::lock_guard<std::mutex> lock(allocSizesMutex());
-            auto& sizes = allocSizes();
-            auto it = sizes.find(ptr);
-            if (it == sizes.end())
-            {
-                cudaFreeAsync(ptr, asStream(gCurrentStream));
-                return;
-            }
-            bytes = it->second;
-            sizes.erase(it);
-        }
-        allocator().release(ptr, bytes, gCurrentStream);
+        if (pointer) (void)cudaFree(pointer);
     }
 
-    void gpuTrimMemory()
-    {
-        allocator().releaseAll();
-    }
+    void gpuTrimMemory() {}
 
-    // Pinned host memory, recycled process-wide rather than returned to the driver.
-    //
-    // Every buffer that goes through here is per-thread scratch: GpuStream's index
-    // staging and polynomial staging, and downloadToHost's 32 MiB download pair.
-    // They are all thread_local, so each transient worker thread used to pay a
-    // cudaHostAlloc on the way in and a cudaFreeHost on the way out. Pinning is a
-    // kernel-level page-table operation and it is slow in proportion to the size:
-    // measured at 4.0 ms for one 32 MiB allocation, landing squarely inside the
-    // online window, plus 8.1 ms of cudaFreeHost at teardown.
-    //
-    // Sizes are rounded up to a power of two so that the same block satisfies a
-    // later request of any size in the bucket, and nothing is ever unpinned - the
-    // steady-state footprint is bounded by the peak concurrent demand, which is a
-    // handful of buffers per worker thread.
-    namespace
-    {
-        struct PinnedPool
-        {
-            static constexpr u32 kBuckets = 40;
-            std::vector<void*> mFree[kBuckets];
-            std::unordered_map<void*, u32> mBucket;
-            std::map<std::uintptr_t, std::size_t> mActive;
-            std::mutex mMutex;
-
-            static u32 bucketOf(std::size_t bytes)
-            {
-                u32 b = 12;   // 4 KiB floor
-                while (b < kBuckets - 1 && (std::size_t(1) << b) < bytes) ++b;
-                return b;
-            }
-
-            void* alloc(std::size_t bytes, bool optional = false)
-            {
-                if (bytes == 0 || bytes > (std::size_t(1) << (kBuckets - 1))) return nullptr;
-                const u32 b = bucketOf(bytes);
-                const std::size_t capacity = std::size_t(1) << b;
-                {
-                    std::lock_guard<std::mutex> lock(mMutex);
-                    auto& list = mFree[b];
-                    if (!list.empty())
-                    {
-                        void* p = list.back();
-                        try { mActive.emplace(reinterpret_cast<std::uintptr_t>(p), capacity); }
-                        catch (...) { return nullptr; }
-                        list.pop_back();
-                        return p;
-                    }
-                }
-                void* p = nullptr;
-                const auto error = cudaHostAlloc(&p, capacity, cudaHostAllocPortable);
-                if (error != cudaSuccess)
-                {
-                    if (optional && (error == cudaErrorMemoryAllocation || error == cudaErrorInvalidValue ||
-                        error == cudaErrorNotSupported || error == cudaErrorInsufficientDriver || error == cudaErrorNoDevice))
-                    {
-                        const auto pending = cudaPeekAtLastError();
-                        if (pending == error) (void)cudaGetLastError();
-                        else if (pending != cudaSuccess) (void)check(pending, "optional host allocation async");
-                        return nullptr;
-                    }
-                    (void)check(error, "cudaHostAlloc");
-                    return nullptr;
-                }
-                std::lock_guard<std::mutex> lock(mMutex);
-                try
-                {
-                    mBucket.emplace(p, b);
-                    mActive.emplace(reinterpret_cast<std::uintptr_t>(p), capacity);
-                }
-                catch (...)
-                {
-                    mBucket.erase(p);
-                    mActive.erase(reinterpret_cast<std::uintptr_t>(p));
-                    (void)cudaFreeHost(p);
-                    return nullptr;
-                }
-                return p;
-            }
-
-            bool releaseKnown(void* ptr)
-            {
-                if (!ptr) return false;
-                std::lock_guard<std::mutex> lock(mMutex);
-                auto it = mBucket.find(ptr);
-                if (it == mBucket.end()) return false;
-                // Never enqueue the same allocation twice, including an
-                // accidental repeated release of a recognized base pointer.
-                if (mActive.erase(reinterpret_cast<std::uintptr_t>(ptr)))
-                {
-                    try { mFree[it->second].push_back(ptr); }
-                    catch (...) { /* Keep it pinned but unavailable on host OOM. */ }
-                }
-                return true;
-            }
-
-            void release(void* ptr)
-            {
-                if (!ptr) return;
-                // Not ours; retain the existing direct driver release.
-                if (!releaseKnown(ptr)) cudaFreeHost(ptr);
-            }
-        };
-
-        // Never destroyed, for the same reason as the device allocator: the
-        // thread_local owners of these buffers have no destruction-order guarantee
-        // against a function-local static.
-        PinnedPool& pinnedPool()
-        {
-            static PinnedPool* p = new PinnedPool();
-            return *p;
-        }
-
-        // Large protocol messages have a different lifetime and cold-start
-        // tradeoff from CUDA scratch. Eager cudaHostAlloc both backs and pins
-        // every page before the codec or TCP receive writes it; at n=2^25 this
-        // dominated setup. Keep ordinary page-aligned storage in a separate
-        // process-local pool, then register it once at the first GPU transfer,
-        // after the producer has normally faulted the payload into memory.
-        struct SetupWirePool
+    struct SetupWireMemory::Impl
         {
             static constexpr std::size_t kPageAlignment = std::size_t{1} << 12;
 
@@ -17054,6 +16578,17 @@ namespace osuCrypto::LogVole::gpu
             std::unordered_map<void*, Block*> mBlocks;
             std::map<std::uintptr_t, Block*> mActive;
             std::mutex mMutex;
+
+            ~Impl()
+            {
+                for (auto& [pointer, block] : mBlocks)
+                {
+                    if (block->mPinState == PinState::Registered)
+                        (void)cudaHostUnregister(pointer);
+                    std::free(pointer);
+                    delete block;
+                }
+            }
 
             static bool roundCapacity(std::size_t bytes, std::size_t& capacity)
             {
@@ -17202,8 +16737,8 @@ namespace osuCrypto::LogVole::gpu
                 std::lock_guard<std::mutex> lock(mMutex);
                 auto known = mBlocks.find(pointer);
                 if (known == mBlocks.end()) return false;
-                // Keep successful registration and ordinary storage for process
-                // lifetime. Borrowed transport keeps the Buffer active until its
+                // Keep successful registration and storage for this execution
+                // owner. Borrowed transport keeps the Buffer active until its
                 // actual socket operation completes, so only then can it reenter
                 // this best-fit list.
                 if (mActive.erase(reinterpret_cast<std::uintptr_t>(pointer)))
@@ -17216,52 +16751,53 @@ namespace osuCrypto::LogVole::gpu
             }
         };
 
-        // Deliberately immortal: registered blocks must outlive arbitrary wire
-        // Buffer/thread-local destruction order, and the OS reclaims them when
-        // this separate party process exits.
-        SetupWirePool& setupWirePool()
-        {
-            static SetupWirePool* p = new SetupWirePool();
-            return *p;
-        }
-    }
+    SetupWireMemory::SetupWireMemory() : mImpl(std::make_unique<Impl>()) {}
+    SetupWireMemory::~SetupWireMemory() = default;
 
     void* gpuMallocHost(std::size_t bytes)
     {
-        return pinnedPool().alloc(bytes);
+        void* pointer = nullptr;
+        if (!bytes) return nullptr;
+        const auto error = cudaHostAlloc(&pointer, bytes, cudaHostAllocPortable);
+        if (error == cudaSuccess) return pointer;
+        // Pinned allocation is optional. Do not leave its declined allocation
+        // as the next caller's CUDA last error.
+        if (error == cudaErrorMemoryAllocation && cudaPeekAtLastError() == error)
+            (void)cudaGetLastError();
+        return nullptr;
     }
 
     void gpuFreeHost(void* ptr)
     {
-        pinnedPool().release(ptr);
+        if (ptr) (void)cudaFreeHost(ptr);
     }
 
-    void* gpuTryAllocateSetupWireHost(std::size_t bytes)
+    void* gpuTryAllocateSetupWireHost(SetupWireMemory& memory, std::size_t bytes)
     {
-        try { return setupWirePool().alloc(bytes); }
+        try { return memory.mImpl->alloc(bytes); }
         catch (...) { return nullptr; }
     }
 
-    bool gpuIsSetupWireHostRange(const void* ptr, std::size_t bytes)
+    bool gpuIsSetupWireHostRange(SetupWireMemory& memory, const void* ptr, std::size_t bytes)
     {
-        return setupWirePool().contains(ptr, bytes, false);
+        return memory.mImpl->contains(ptr, bytes, false);
     }
 
-    bool gpuIsSetupWirePinnedHostRange(const void* ptr, std::size_t bytes)
+    bool gpuIsSetupWirePinnedHostRange(SetupWireMemory& memory, const void* ptr, std::size_t bytes)
     {
-        return setupWirePool().contains(ptr, bytes, true);
+        return memory.mImpl->contains(ptr, bytes, true);
     }
 
-    bool gpuTryPinSetupWireHostRange(const void* ptr, std::size_t bytes, bool& pinned)
+    bool gpuTryPinSetupWireHostRange(SetupWireMemory& memory, const void* ptr, std::size_t bytes, bool& pinned)
     {
-        try { return setupWirePool().pin(ptr, bytes, pinned); }
+        try { return memory.mImpl->pin(ptr, bytes, pinned); }
         catch (...) { pinned = false; return false; }
     }
 
-    bool gpuReleaseSetupWireHost(void* ptr) noexcept
+    bool gpuReleaseSetupWireHost(SetupWireMemory& memory, void* ptr) noexcept
     {
         // Provenance, not current GPU/runtime state, selects this release.
-        try { return setupWirePool().releaseKnown(ptr); }
+        try { return memory.mImpl->releaseKnown(ptr); }
         catch (...) { return true; }
     }
 
@@ -17320,16 +16856,12 @@ namespace osuCrypto::LogVole::gpu
     {
         cudaStream_t s = nullptr;
         if (!check(cudaStreamCreate(&s), "streamCreate")) return nullptr;
-        allocator().addStream(s);
         return s;
     }
 
     void gpuStreamDestroy(void* stream)
     {
         if (!stream) return;
-        // Off the live list before the handle stops being usable, so a later free
-        // from an unrelated thread_local destructor cannot record an event on it.
-        allocator().dropStream(stream);
         cudaStreamDestroy(asStream(stream));
     }
 
@@ -17373,7 +16905,7 @@ namespace osuCrypto::LogVole::gpu
     // for direct A/B measurements.
         bool gpuFusedIpActive()
         {
-            static const bool on = environmentFlagOptIn("LOGVOLE_GPU_FUSED_IP");
+            const bool on = environmentFlagOptIn("LOGVOLE_GPU_FUSED_IP");
             return on;
         }
 
@@ -18187,10 +17719,6 @@ namespace osuCrypto::LogVole::gpu
     }
 
 
-
-
-
-
     bool launchNttInverse(
         const RingConstView& rc, u64* data, u32 polyCount, const u32* polyIdx, void* stream)
     {
@@ -18450,7 +17978,7 @@ namespace osuCrypto::LogVole::gpu
                         {
                             constexpr int bytes = 12288u * sizeof(double);
                             const u32 prefixSchedule = noGoldH200InverseFp52PrefixSchedule();
-                            static const bool traceOps = [] {
+                            const bool traceOps = [] {
                                 const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_OP_TRACE");
                                 return v && std::strcmp(v, "1") == 0;
                             }();
@@ -19784,9 +19312,6 @@ namespace osuCrypto::LogVole::gpu
     }
 
 
-
-
-
     bool tryLaunchExpandAccumulatorTau1Pseudo55WideForTest(
         const RingConstView& rc,
         const u64* ct1,
@@ -19838,10 +19363,6 @@ namespace osuCrypto::LogVole::gpu
             rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
             lacctAIdx, lacctBIdx, out, outCount, stream);
     }
-
-
-
-
 
 
     bool launchInnerProduct(
@@ -20297,8 +19818,6 @@ namespace osuCrypto::LogVole::gpu
     }
 
 
-
-
     bool prepareH200RootPersistence(RingConstView& rc)
     {
         rc.mH200RootL2MaxWindow = 0u;
@@ -20377,7 +19896,7 @@ namespace osuCrypto::LogVole::gpu
         // LV_GADGET_GARNER=1 composes the coefficient by mixed radix instead of the
         // punctured-product CRT sum. Both produce the same integer; this exists to
         // measure the two against each other on one build.
-        static const bool garner = [] {
+        const bool garner = [] {
             const char* v = std::getenv("LV_GADGET_GARNER");
             return v && v[0] != '\0' && v[0] != '0';
         }();
@@ -21604,7 +21123,7 @@ namespace osuCrypto::LogVole::gpu
         const u64* words, u32 count, u64* out, void* stream)
     {
         if ((!words && count != 0u) || !out) return false;
-        static const bool warp = [] {
+        const bool warp = [] {
             const char* v = std::getenv("LV_GPU_ROOT_DIGEST_HASH_WARP");
             // GPU hashing itself remains opt-in. Prefer the exact four-lane
             // implementation on the measured H200; WARP=0 restores scalar GPU

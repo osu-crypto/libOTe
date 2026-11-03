@@ -17,27 +17,52 @@ namespace osuCrypto::LogVole
     struct Params;
     namespace detail
     {
-        void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment);
-        void deallocateSetupWireBytes(void* pointer) noexcept;
+        void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
+            ExecutionContext& execution, bool rootCudaAllocation = false, u64 runId = 0);
+        void deallocateSetupWireBytes(void* pointer, ExecutionContext& execution) noexcept;
 
         template<typename T> struct SetupWireAllocator
         {
             using value_type = T;
             using propagate_on_container_move_assignment = std::true_type;
-            using is_always_equal = std::true_type;
+            using propagate_on_container_swap = std::true_type;
+            using is_always_equal = std::false_type;
+
+            ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
+            bool mRootCudaAllocation = false;
+            u64 mRunId = 0;
             template<typename U> struct rebind { using other = SetupWireAllocator<U>; };
 
             SetupWireAllocator() = default;
-            template<typename U> SetupWireAllocator(const SetupWireAllocator<U>&) noexcept {}
+            SetupWireAllocator(const SetupWireAllocator&) = default;
+            SetupWireAllocator& operator=(const SetupWireAllocator&) = default;
+            SetupWireAllocator(SetupWireAllocator&& other) noexcept
+                : mExecutionContext(other.mExecutionContext),
+                  mRootCudaAllocation(other.mRootCudaAllocation), mRunId(other.mRunId) {}
+            SetupWireAllocator& operator=(SetupWireAllocator&& other) noexcept
+            {
+                mExecutionContext = other.mExecutionContext;
+                mRootCudaAllocation = other.mRootCudaAllocation;
+                mRunId = other.mRunId;
+                return *this;
+            }
+            explicit SetupWireAllocator(ExecutionContextPtr execution,
+                bool rootCudaAllocation = false, u64 runId = 0)
+                : mExecutionContext(std::move(execution)),
+                  mRootCudaAllocation(rootCudaAllocation), mRunId(runId) {}
+            template<typename U> SetupWireAllocator(const SetupWireAllocator<U>& other) noexcept
+                : mExecutionContext(other.mExecutionContext),
+                  mRootCudaAllocation(other.mRootCudaAllocation), mRunId(other.mRunId) {}
 
             T* allocate(std::size_t count)
             {
                 if (count > std::numeric_limits<std::size_t>::max() / sizeof(T))
                     throw std::bad_array_new_length();
                 return static_cast<T*>(allocateSetupWireBytes(count * sizeof(T),
-                    std::max<std::size_t>(gDefaultAlignment, alignof(T))));
+                    std::max<std::size_t>(gDefaultAlignment, alignof(T)),
+                    *mExecutionContext, mRootCudaAllocation, mRunId));
             }
-            void deallocate(T* pointer, std::size_t) noexcept { deallocateSetupWireBytes(pointer); }
+            void deallocate(T* pointer, std::size_t) noexcept { deallocateSetupWireBytes(pointer, *mExecutionContext); }
 
             // Buffer's resize has always left new bytes uninitialized. Preserve
             // that behavior instead of std::vector's default value-initializing
@@ -48,9 +73,10 @@ namespace osuCrypto::LogVole
             template<typename U> void destroy(U* pointer) { pointer->~U(); }
         };
         template<typename T, typename U>
-        bool operator==(const SetupWireAllocator<T>&, const SetupWireAllocator<U>&) noexcept { return true; }
+        bool operator==(const SetupWireAllocator<T>& a, const SetupWireAllocator<U>& b) noexcept
+        { return a.mExecutionContext == b.mExecutionContext; }
         template<typename T, typename U>
-        bool operator!=(const SetupWireAllocator<T>&, const SetupWireAllocator<U>&) noexcept { return false; }
+        bool operator!=(const SetupWireAllocator<T>& a, const SetupWireAllocator<U>& b) noexcept { return !(a == b); }
     }
 
     // A contiguous owning wire buffer. Large GPU buffers reuse page-aligned
@@ -64,6 +90,11 @@ namespace osuCrypto::LogVole
         using Base::Base;
         using element_type = u8;
         Buffer() = default;
+        explicit Buffer(std::size_t size, ExecutionContextPtr execution,
+            bool rootCudaAllocation = false, u64 runId = 0)
+            : Base(size, detail::SetupWireAllocator<u8>(std::move(execution),
+                rootCudaAllocation, runId)) {}
+        ExecutionContextPtr executionOwner() const { return Base::get_allocator().mExecutionContext; }
         Buffer(const Buffer&) = default;
         Buffer(Buffer&&) noexcept = default;
         Buffer& operator=(const Buffer&) = default;
@@ -77,7 +108,7 @@ namespace osuCrypto::LogVole
                 std::memset(Base::data() + oldSize, 0, size - oldSize);
         }
         // AlignedUnVector::clear releases capacity as well as its logical size.
-        void clear() noexcept { Base empty; Base::swap(empty); }
+        void clear() noexcept { Base empty(Base::get_allocator()); Base::swap(empty); }
         span<u8> subspan(u64 offset) { return span<u8>(Base::data(), Base::size()).subspan(offset); }
         span<const u8> subspan(u64 offset) const
         { return span<const u8>(Base::data(), Base::size()).subspan(offset); }
@@ -86,6 +117,11 @@ namespace osuCrypto::LogVole
         span<const u8> subspan(u64 offset, std::size_t size) const
         { return span<const u8>(Base::data(), Base::size()).subspan(offset, size); }
     };
+
+    inline ExecutionContext& executionContext(const Buffer& buffer)
+    {
+        return *buffer.executionOwner();
+    }
 
     // Optional Linux allocation hint for large GPU protocol wire buffers.
     // Does not initialize, read, or change any payload bytes.
@@ -171,15 +207,15 @@ namespace osuCrypto::LogVole
     // Opt-in final Root wire storage is still an ordinary owning Buffer and
     // can be moved into coproto. Only this one reservation asks the allocator
     // for CUDA page-locked pages; a decline returns the usual Buffer storage.
-    Buffer reserveRootCudaWireBuffer(std::size_t bytes, u64 senderRunId,
+    Buffer reserveRootCudaWireBuffer(ExecutionContext& execution, std::size_t bytes, u64 senderRunId,
         bool& cudaOwned, bool recordSelection = true);
     // Shrink the logical wire without reallocating or copying its CUDA-owned
     // pages. The owning pool also contracts the active provenance range.
     bool shrinkRootCudaWireBuffer(Buffer& reserved,
         std::size_t exactBytes) noexcept;
-    bool isRootCudaWireHostRange(const void* pointer,
+    bool isRootCudaWireHostRange(ExecutionContext& execution, const void* pointer,
         std::size_t bytes) noexcept;
-    void recordRootCudaWireDirectDownload(const void* pointer,
+    void recordRootCudaWireDirectDownload(ExecutionContext& execution, const void* pointer,
         std::size_t bytes, bool completed) noexcept;
 
     struct RootWireCudaAllocEvidence
@@ -204,17 +240,17 @@ namespace osuCrypto::LogVole
         bool mEarlyLaunched = false;
         bool mEarlyAdopted = false;
     };
-    void resetRootWireCudaAllocEvidence(u64 senderRunId,
+    void resetRootWireCudaAllocEvidence(ExecutionContext& execution, u64 senderRunId,
         bool requested) noexcept;
-    void noteRootWireCudaAllocEligibility(u64 senderRunId,
+    void noteRootWireCudaAllocEligibility(ExecutionContext& execution, u64 senderRunId,
         std::size_t wireBytes, bool eligible) noexcept;
-    void noteRootWireCudaEarlyPlan(u64 senderRunId, bool requested,
+    void noteRootWireCudaEarlyPlan(ExecutionContext& execution, u64 senderRunId, bool requested,
         bool eligible, std::size_t forecastBytes, bool launched) noexcept;
-    void noteRootWireCudaEarlyJoin(u64 senderRunId, u64 joinWaitNs,
+    void noteRootWireCudaEarlyJoin(ExecutionContext& execution, u64 senderRunId, u64 joinWaitNs,
         bool adopted) noexcept;
-    void noteRootWireCudaExpectedDownloads(u64 senderRunId,
+    void noteRootWireCudaExpectedDownloads(ExecutionContext& execution, u64 senderRunId,
         const RootOfflineMessage& message);
-    RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot() noexcept;
+    RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot(ExecutionContext& execution) noexcept;
 
     struct RootWirePinOverlapEvidence
     {
@@ -234,7 +270,7 @@ namespace osuCrypto::LogVole
     // Snapshot is stable after LogVoleRingSender::offline completes. The run ID
     // prevents a caller from attributing a previous process-local setup to a
     // different offline run.
-    RootWirePinOverlapEvidence rootWirePinOverlapEvidenceSnapshot();
+    RootWirePinOverlapEvidence rootWirePinOverlapEvidenceSnapshot(ExecutionContext& execution);
     Buffer encode(const RootDigestMessage& message);
     Buffer encode(const RootResponseMessage& message);
 

@@ -273,9 +273,12 @@ namespace
 
 void LogVole_ShrinkExpandCoproto_OfflineAndExpandDeterministicRelation(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     const auto s = sample_batch(ctx, params.mMu, 0x2001u);
 
@@ -297,9 +300,12 @@ void LogVole_ShrinkExpandCoproto_OfflineAndExpandDeterministicRelation(const oc:
 
 void LogVole_ShrinkExpandCoproto_TruncOfflineAndExpandBoundedRelation(const oc::CLP&)
 {
-    const auto params = make_params(true);
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(true), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     const auto s = sample_batch(ctx, params.mMu, 0x2101u);
 
@@ -321,9 +327,12 @@ void LogVole_ShrinkExpandCoproto_TruncOfflineAndExpandBoundedRelation(const oc::
 
 void LogVole_ShrinkExpandCoproto_FullNoiseTolerance(const oc::CLP&)
 {
-    const auto params = make_full_noise_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_full_noise_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     const auto s = sample_batch(ctx, params.mMu, 0x5001u);
 
@@ -345,9 +354,12 @@ void LogVole_ShrinkExpandCoproto_FullNoiseTolerance(const oc::CLP&)
 
 void LogVole_ShrinkExpandCoproto_OfflineStateReuseAcrossQueries(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     const auto s = sample_batch(ctx, params.mMu, 0xA001u);
 

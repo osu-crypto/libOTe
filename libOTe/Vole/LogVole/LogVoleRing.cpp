@@ -220,7 +220,7 @@ namespace osuCrypto::LogVole
                         });
                 });
             };
-            static const bool buffered = [] {
+            const bool buffered = [] {
                 const char* value = std::getenv("LV_CPU_BUFFERED_ERROR");
                 return !value || value[0] != '0';
             }();
@@ -243,9 +243,9 @@ namespace osuCrypto::LogVole
         std::shared_ptr<seal::UniformRandomGeneratorFactory> polySamplingPrngFactory()
         {
 #ifdef SEAL_USE_AES_CTR_DRBG
-            static const auto factory = std::make_shared<seal::AesCtrDrbgPRNGFactory>();
+            const auto factory = std::make_shared<seal::AesCtrDrbgPRNGFactory>();
 #else
-            static const auto factory = detail::cpuDefaultPrngFactory();
+            const auto factory = detail::cpuDefaultPrngFactory();
 #endif
             return factory;
         }
@@ -316,60 +316,11 @@ namespace osuCrypto::LogVole
         };
         static_assert(ringOpCounters.size() == static_cast<std::size_t>(RingOp::Count));
 
-        struct PendingRingOpsStats
+        void bumpRingStat(RingOp operation, const RingNttContext& ctx)
         {
-            u64 mEpoch = 0;
-            bool mEpochInitialized = false;
-            std::array<u64, ringOpCounters.size()> mCounts{};
-
-            void syncEpoch()
-            {
-                const u64 globalEpoch = RingOpsStats::resetEpoch.load(std::memory_order_relaxed);
-                if (!mEpochInitialized)
-                {
-                    mEpoch = globalEpoch;
-                    mEpochInitialized = true;
-                    return;
-                }
-
-                if (mEpoch != globalEpoch)
-                {
-                    mCounts.fill(0);
-                    mEpoch = globalEpoch;
-                }
-            }
-
-            void flush()
-            {
-                for (std::size_t i = 0; i < mCounts.size(); ++i)
-                {
-                    auto& count = mCounts[i];
-                    if (!count) continue;
-                    (globalRingOpsStats.*ringOpCounters[i]).fetch_add(count, std::memory_order_relaxed);
-                    count = 0;
-                }
-            }
-
-            ~PendingRingOpsStats()
-            {
-                flush();
-            }
-        };
-
-        thread_local PendingRingOpsStats tlsRingOpsStats{};
-
-        void bumpRingStat(RingOp operation)
-        {
-            constexpr u64 flushThreshold = 256;
-            tlsRingOpsStats.syncEpoch();
             const auto index = static_cast<std::size_t>(operation);
-            auto& local = tlsRingOpsStats.mCounts[index];
-            ++local;
-            if (local >= flushThreshold)
-            {
-                (globalRingOpsStats.*ringOpCounters[index]).fetch_add(local, std::memory_order_relaxed);
-                local = 0;
-            }
+            (executionContext(ctx).mRingOps.*ringOpCounters[index]).fetch_add(
+                1, std::memory_order_relaxed);
         }
 
         bool centeredDecomposeSlow(
@@ -483,11 +434,7 @@ namespace osuCrypto::LogVole
         resetEpoch.fetch_add(1, std::memory_order_relaxed);
     }
 
-    void flushRingOpsThreadLocalStats()
-    {
-        tlsRingOpsStats.syncEpoch();
-        tlsRingOpsStats.flush();
-    }
+
 
     void TimingStats::reset()
     {
@@ -803,17 +750,11 @@ namespace osuCrypto::LogVole
         using RingContextCache = std::
             unordered_map<RingContextCacheKey, std::shared_ptr<const RingNttContext>, RingContextCacheKeyHash>;
 
-        // Never destroyed, on purpose: the cached RingNttContext owns a
-        // seal::SEALContext whose allocations come from SEAL's global memory
-        // pool, and there is no static-destruction ordering guarantee between
-        // the two. Releasing after the pool is gone aborts inside
-        // MemoryPoolHeadMT::~MemoryPoolHeadMT.
-        RingContextCache& ringContextCache()
+        struct RingContextResources
         {
-            static RingContextCache* cache = new RingContextCache();
-            return *cache;
-        }
-        std::mutex ringContextCacheMutex;
+            std::mutex mMutex;
+            RingContextCache mContexts;
+        };
 
         bool makeRingNttContextUncached(const RingParams& params, bool expandModChain, RingNttContext& out);
     }
@@ -825,25 +766,27 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        auto& resources = executionContext(params).resources<RingContextResources>();
         RingContextCacheKey key{};
         key.mDegree = params.mPolyModulusDegree;
         key.mBits.assign(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end());
-        key.mRole = currentProtocolCacheScope().mRole;
+        key.mRole = executionContext(params).mScope.mRole;
         key.mGpuLightweight = lightweight;
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* fullChain = std::getenv("LV_GPU_SETUP_FULL_MOD_CHAIN");
-        key.mExpandModChain = !gpu::enabled() || (fullChain && fullChain[0] == '1');
+        key.mExpandModChain = !gpu::enabled(executionContext(params)) || (fullChain && fullChain[0] == '1');
         key.mNativeSealBundleRequested = lightweight && !key.mExpandModChain &&
             gpu::dynamicSealSetupSupported(params) &&
-            gpu::nativeSealBundleCacheRequested();
+            gpu::nativeSealBundleCacheRequested(executionContext(params));
 #endif
 
         {
-            std::lock_guard<std::mutex> lock(ringContextCacheMutex);
-            auto it = ringContextCache().find(key);
-            if (it != ringContextCache().end())
+            std::lock_guard<std::mutex> lock(resources.mMutex);
+            auto it = resources.mContexts.find(key);
+            if (it != resources.mContexts.end())
             {
                 out = *it->second;
+                out.mParams.mExecutionContext = params.mExecutionContext;
                 return true;
             }
         }
@@ -851,7 +794,7 @@ namespace osuCrypto::LogVole
         RingNttContext built{};
         if (lightweight)
         {
-            HostStep contextStep("setup: lightweight ring context");
+            HostStep contextStep(executionContext(params), "setup: lightweight ring context");
             const auto primes = productionRingModuli(params);
             built.mParams = params;
             auto metadata = std::make_shared<RingModulusMetadata>();
@@ -872,6 +815,8 @@ namespace osuCrypto::LogVole
             built.mGpuLightweight = true;
             built.mHostContextCache = std::make_shared<RingHostContextCache>();
             built.mHostContextCache->mParams = params;
+            built.mHostContextCache->mParams.mExecutionContext = executionContext(params).resourceOwner(false);
+            executionContext(built.mHostContextCache->mParams).mUseGpu = false;
             built.mHostContextCache->mRawModuli = built.mRawModuli;
             built.mHostContextCache->mRole = key.mRole;
             built.mHostContextCache->mExpandModChain = key.mExpandModChain;
@@ -881,12 +826,15 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        auto shared = std::make_shared<const RingNttContext>(built);
+        auto cached = built;
+        cached.mParams.mExecutionContext.reset();
+        auto shared = std::make_shared<const RingNttContext>(std::move(cached));
         {
-            std::lock_guard<std::mutex> lock(ringContextCacheMutex);
-            auto [it, inserted] = ringContextCache().emplace(std::move(key), shared);
+            std::lock_guard<std::mutex> lock(resources.mMutex);
+            auto [it, inserted] = resources.mContexts.emplace(std::move(key), shared);
             (void)inserted;
             out = *it->second;
+                out.mParams.mExecutionContext = params.mExecutionContext;
         }
         return true;
     }
@@ -897,7 +845,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* setting = std::getenv("LV_GPU_SETUP_LIGHTWEIGHT_RING");
         const char* fullChain = std::getenv("LV_GPU_SETUP_FULL_MOD_CHAIN");
-        lightweight = gpu::enabled() && (!setting || setting[0] != '0') &&
+        lightweight = gpu::enabled(executionContext(params)) && (!setting || setting[0] != '0') &&
             (!fullChain || fullChain[0] != '1') &&
             (!productionRingModuli(params).empty() ||
                 (gpu::dynamicSealSetupSupported(params) && gpu::currentDeviceOrdinal() == 0));
@@ -910,7 +858,7 @@ namespace osuCrypto::LogVole
         if (productionRingModuli(params).empty())
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (!gpu::enabled() || gpu::currentDeviceOrdinal() != 0 ||
+            if (!gpu::enabled(executionContext(params)) || gpu::currentDeviceOrdinal() != 0 ||
                 !gpu::dynamicSealSetupSupported(params)) return false;
 #else
             return false;
@@ -927,7 +875,7 @@ namespace osuCrypto::LogVole
         if (!validateRingParams(params) ||
             !gpu::dynamicSealSetupSupported(params) ||
             !certificate ||
-            certificate->rawOwnerRole() != currentProtocolCacheScope().mRole ||
+            certificate->rawOwnerRole() != executionContext(params).mScope.mRole ||
             certificate->n() != params.mPolyModulusDegree ||
             certificate->rho() != orderedPrimes.size() ||
             certificate->hostModuli().size() != orderedPrimes.size() ||
@@ -945,8 +893,10 @@ namespace osuCrypto::LogVole
         built.mGpuLightweight = true;
         built.mHostContextCache = std::make_shared<RingHostContextCache>();
         built.mHostContextCache->mParams = params;
+            built.mHostContextCache->mParams.mExecutionContext = executionContext(params).resourceOwner(false);
+            executionContext(built.mHostContextCache->mParams).mUseGpu = false;
         built.mHostContextCache->mRawModuli = built.mRawModuli;
-        built.mHostContextCache->mRole = currentProtocolCacheScope().mRole;
+        built.mHostContextCache->mRole = executionContext(params).mScope.mRole;
         built.mHostContextCache->mExpandModChain = false;
         if (!validateRingContextMetadata(built)) return false;
         out = std::move(built);
@@ -963,9 +913,10 @@ namespace osuCrypto::LogVole
     bool publishNativeGpuRingNttContext(const RingNttContext& ready)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
-        HostStep publicationStep("setup: native ring context publication");
-        const auto owner = currentProtocolCacheScope();
-        if (!gpu::nativeSealBundleCacheRequested() ||
+        auto& resources = executionContext(ready).resources<RingContextResources>();
+        HostStep publicationStep(executionContext(ready), "setup: native ring context publication");
+        const auto owner = executionContext(ready).mScope;
+        if (!gpu::nativeSealBundleCacheRequested(executionContext(ready)) ||
             !ready.mGpuLightweight || !ready.mRawModuli ||
             !ready.mRawModuli->mDynamicGpuCertificate ||
             !ready.mRawModuli->mDynamicGpuCertificate->nativeSealBundleOwner() ||
@@ -981,10 +932,12 @@ namespace osuCrypto::LogVole
             key.mGpuLightweight = true;
             key.mExpandModChain = false;
             key.mNativeSealBundleRequested = true;
-            auto shared = std::make_shared<const RingNttContext>(ready);
-            std::lock_guard<std::mutex> lock(ringContextCacheMutex);
-            if (auto it = ringContextCache().find(key);
-                it != ringContextCache().end())
+            auto cached = ready;
+            cached.mParams.mExecutionContext.reset();
+            auto shared = std::make_shared<const RingNttContext>(std::move(cached));
+            std::lock_guard<std::mutex> lock(resources.mMutex);
+            if (auto it = resources.mContexts.find(key);
+                it != resources.mContexts.end())
             {
                 // The static lightweight context can have been cached by a
                 // standalone budget check before the combined GPU factory.
@@ -992,7 +945,7 @@ namespace osuCrypto::LogVole
                 it->second = std::move(shared);
                 return true;
             }
-            ringContextCache().emplace(std::move(key), std::move(shared));
+            resources.mContexts.emplace(std::move(key), std::move(shared));
             return true;
         }
         catch (...) { return false; }
@@ -1041,7 +994,7 @@ namespace osuCrypto::LogVole
         try
         {
             std::call_once(ctx.mHostContextCache->mOnce, [&] {
-                HostStep fallbackStep("setup: ring host fallback materialization");
+                HostStep fallbackStep(executionContext(ctx), "setup: ring host fallback materialization");
                 std::vector<seal::Modulus> moduli;
                 moduli.reserve(cache.mRawModuli->mValues.size());
                 for (u64 prime : cache.mRawModuli->mValues) moduli.emplace_back(prime);
@@ -1069,15 +1022,14 @@ namespace osuCrypto::LogVole
         if (!ctx.mGpuLightweight) return ctx.mModuli;
         const auto host = getRingHostContext(ctx);
         if (host && host->key_context_data()) return host->key_context_data()->parms().coeff_modulus();
-        static const std::vector<seal::Modulus> empty;
-        return empty;
+        return ctx.mModuli;
     }
 
     namespace
     {
     bool makeRingNttContextUncached(const RingParams& params, bool expandModChain, RingNttContext& out)
     {
-        HostStep contextStep("setup: ring context build");
+        HostStep contextStep(executionContext(params), "setup: ring context build");
         if (!validateRingParams(params))
         {
             return false;
@@ -1086,7 +1038,7 @@ namespace osuCrypto::LogVole
         std::vector<seal::Modulus> moduli;
         try
         {
-            HostStep primesStep("setup: ring modulus generation");
+            HostStep primesStep(executionContext(params), "setup: ring modulus generation");
             std::vector<int> coeffModulusBits(
                 params.mCoeffModulusBits.begin(),
                 params.mCoeffModulusBits.end());
@@ -1111,7 +1063,7 @@ namespace osuCrypto::LogVole
         next.mParams = params;
         next.mModuli = std::move(moduli);
         {
-            HostStep sealStep("setup: ring SEAL context");
+            HostStep sealStep(executionContext(params), "setup: ring SEAL context");
             // LogVole consumes the key-level NTT/RNS tables and never modulus
             // switches. SEAL still constructs its original key and first data
             // contexts when expansion is disabled; only unused lower levels
@@ -1175,7 +1127,7 @@ namespace osuCrypto::LogVole
             seal::util::ntt_negacyclic_harvey(poly.mCoeffs.data() + (modIdx * n), tables[modIdx]);
         }
 
-        bumpRingStat(RingOp::Ntt);
+        bumpRingStat(RingOp::Ntt, ctx);
         return true;
     }
 
@@ -1186,7 +1138,7 @@ namespace osuCrypto::LogVole
 
     bool forwardNttCanonical(RnsPoly& poly, const RingNttContext& ctx)
     {
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_SKIP_REDUNDANT_REDUCE");
             return !value || value[0] != '0';
         }();
@@ -1209,7 +1161,7 @@ namespace osuCrypto::LogVole
             seal::util::inverse_ntt_negacyclic_harvey(poly.mCoeffs.data() + (modIdx * n), tables[modIdx]);
         }
 
-        bumpRingStat(RingOp::Intt);
+        bumpRingStat(RingOp::Intt, ctx);
         // SEAL's non-lazy inverse already returns coefficients in [0, q).
         return true;
     }
@@ -1241,14 +1193,14 @@ namespace osuCrypto::LogVole
             if (!validateShapeAgainstContext(poly, ctx)) return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* canonicalizeSetting = std::getenv("LV_GPU_SETUP_NTT_CANONICALIZE");
-        const bool deviceCanonicalize = (ctx.mGpuLightweight || polys.size() >= kNttBatchGpuThreshold) && gpu::enabled() &&
+        const bool deviceCanonicalize = (ctx.mGpuLightweight || polys.size() >= kNttBatchGpuThreshold) && gpu::enabled(executionContext(ctx)) &&
             (!canonicalizeSetting || canonicalizeSetting[0] != '0');
         if (deviceCanonicalize)
         {
             if (gpu::nttHostBatch(ctx, polys, false, true))
             {
                 for (std::size_t i = 0; i < polys.size(); ++i)
-                    bumpRingStat(RingOp::Ntt);
+                    bumpRingStat(RingOp::Ntt, ctx);
                 return true;
             }
             const char* strict = std::getenv("LV_GPU_SETUP_NTT_CANONICALIZE_STRICT");
@@ -1267,7 +1219,7 @@ namespace osuCrypto::LogVole
         {
             for (std::size_t i = 0; i < polys.size(); ++i)
             {
-                bumpRingStat(RingOp::Ntt);
+                bumpRingStat(RingOp::Ntt, ctx);
             }
             return true;
         }
@@ -1290,13 +1242,13 @@ namespace osuCrypto::LogVole
         if (ctx.mGpuLightweight || polys.size() >= kNttBatchGpuThreshold)
         {
             const char* canonicalizeSetting = std::getenv("LV_GPU_SETUP_NTT_CANONICALIZE");
-            const bool deviceCanonicalize = gpu::enabled() &&
+            const bool deviceCanonicalize = gpu::enabled(executionContext(ctx)) &&
                 (!canonicalizeSetting || canonicalizeSetting[0] != '0');
             if (gpu::nttHostBatch(ctx, polys, true, deviceCanonicalize))
             {
                 for (auto& poly : polys)
                 {
-                    bumpRingStat(RingOp::Intt);
+                    bumpRingStat(RingOp::Intt, ctx);
                     if (!deviceCanonicalize && !canonicalizePoly(poly, ctx)) return false;
                 }
                 return true;
@@ -1359,7 +1311,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(RingOp::DyadicMulAdd);
+        bumpRingStat(RingOp::DyadicMulAdd, ctx);
         return true;
     }
 
@@ -1397,7 +1349,7 @@ namespace osuCrypto::LogVole
                             reduceU64(c[i], modulus), modulus);
         }
         for (std::size_t t = 0; t < left.size(); ++t)
-            bumpRingStat(RingOp::DyadicMulAdd);
+            bumpRingStat(RingOp::DyadicMulAdd, ctx);
         return true;
     }
 
@@ -1415,7 +1367,7 @@ namespace osuCrypto::LogVole
         seal::util::PolyIter aIter(a.mCoeffs.data(), n, moduli.size());
         seal::util::ConstPolyIter bIter(b.mCoeffs.data(), n, moduli.size());
         seal::util::add_poly_coeffmod(aIter[0], bIter[0], moduli.size(), moduli, aIter[0]);
-        bumpRingStat(RingOp::Add);
+        bumpRingStat(RingOp::Add, ctx);
         return true;
     }
 
@@ -1439,7 +1391,7 @@ namespace osuCrypto::LogVole
         seal::util::PolyIter aIter(a.mCoeffs.data(), n, moduli.size());
         seal::util::ConstPolyIter bIter(b.mCoeffs.data(), n, moduli.size());
         seal::util::sub_poly_coeffmod(aIter[0], bIter[0], moduli.size(), moduli, aIter[0]);
-        bumpRingStat(RingOp::Sub);
+        bumpRingStat(RingOp::Sub, ctx);
         return true;
     }
 
@@ -1467,7 +1419,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        bumpRingStat(RingOp::Mul);
+        bumpRingStat(RingOp::Mul, ctx);
         return true;
     }
 
@@ -1501,7 +1453,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(RingOp::MulScalar);
+        bumpRingStat(RingOp::MulScalar, ctx);
         return true;
     }
 
@@ -1547,7 +1499,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(RingOp::GadgetDecompose);
+        bumpRingStat(RingOp::GadgetDecompose, ctx);
         return true;
     }
 
@@ -1598,7 +1550,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(RingOp::GadgetRecompose);
+        bumpRingStat(RingOp::GadgetRecompose, ctx);
         return true;
     }
 
@@ -1653,7 +1605,7 @@ namespace osuCrypto::LogVole
         if (startLevel == 0 && levels == 1 && detail::cpuLowDigitRns(
             canonical.mCoeffs.data(), out[0].mCoeffs.data(), n, digitBits, baseQ))
         {
-            bumpRingStat(RingOp::GadgetDecompose);
+            bumpRingStat(RingOp::GadgetDecompose, ctx);
             return true;
         }
         auto pool = seal::MemoryPoolHandle::ThreadLocal();
@@ -1709,7 +1661,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(RingOp::GadgetDecompose);
+        bumpRingStat(RingOp::GadgetDecompose, ctx);
         return true;
     }
 
@@ -1751,14 +1703,14 @@ namespace osuCrypto::LogVole
         // compose per coefficient, so the work per byte moved is high.
         if (gpu::gadgetDecomposeHost(ctx, canonical, digitBits, startLevel, levels, true, out))
         {
-            bumpRingStat(RingOp::GadgetDecompose);
+            bumpRingStat(RingOp::GadgetDecompose, ctx);
             return true;
         }
 #endif
         const bool ok = centeredDecomposeSlow(canonical, digitBits, startLevel, levels, ctx, out);
         if (ok)
         {
-            bumpRingStat(RingOp::GadgetDecompose);
+            bumpRingStat(RingOp::GadgetDecompose, ctx);
         }
         return ok;
     }
@@ -1815,7 +1767,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        bumpRingStat(RingOp::GadgetRecompose);
+        bumpRingStat(RingOp::GadgetRecompose, ctx);
         return true;
     }
 
@@ -1922,8 +1874,8 @@ namespace osuCrypto::LogVole
     static void deriveUniformPolyFromSeedInplace(
         const RingNttContext& ctx, block seed, u64 domainTag, u32 index, RnsPoly& out)
     {
-        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
-        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+        AutoTimer totalSamplingTimer(executionContext(ctx).mTiming.mSeedSamplingTimeUs);
+        AutoTimer polySamplingTimer(executionContext(ctx).mTiming.mPolySamplingTimeUs);
 
         // Every coefficient is overwritten by the sampler. Retain the backing
         // allocation when resampling an existing polynomial.
@@ -1936,7 +1888,7 @@ namespace osuCrypto::LogVole
         {
             auto prng = polySamplingPrngFactory()->create(sealSeedFromBlock(polySeed));
             detail::cpuSamplePolyUniform(prng, contextData->parms(), out.mCoeffs.data());
-            bumpRingStat(RingOp::PrngPoly);
+            bumpRingStat(RingOp::PrngPoly, ctx);
             return;
         }
 
@@ -1955,7 +1907,7 @@ namespace osuCrypto::LogVole
                 out.mCoeffs[offset + i] = rng.get<u64>() % mod;
             }
         }
-        bumpRingStat(RingOp::PrngPoly);
+        bumpRingStat(RingOp::PrngPoly, ctx);
     }
 
     RnsPoly deriveUniformPolyFromSeed(const RingNttContext& ctx, block seed, u64 domainTag, u32 index)
@@ -1984,15 +1936,15 @@ namespace osuCrypto::LogVole
         resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
         auto source = polySamplingPrngFactory()->create(seed);
         detail::cpuSamplePolyUniform(source, data->parms(), out.mCoeffs.data());
-        bumpRingStat(RingOp::PrngPoly);
+        bumpRingStat(RingOp::PrngPoly, ctx);
         return out;
     }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
     static bool useDeviceUniformSetup(const RingNttContext& ctx)
     {
-        if (!gpu::enabled()) return false;
-        const bool available = gpu::setupUniformSamplingEnabled() &&
+        if (!gpu::enabled(executionContext(ctx))) return false;
+        const bool available = gpu::setupUniformSamplingEnabled(executionContext(ctx)) &&
             (ctx.mGpuLightweight ? validateLightweightRingContext(ctx) :
                 (ctx.mContext && ctx.mContext->key_context_data()));
         const char* requested = std::getenv("LV_GPU_SETUP_UNIFORM_DEVICE");
@@ -2016,7 +1968,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& hostCoefficients() const override
         {
             std::call_once(mOnce, [&] {
-                HostStep step("setup sender: top sk1 exact seed replay");
+                HostStep step(executionContext(mCtx), "setup sender: top sk1 exact seed replay");
                 std::vector<RnsPoly> next(mSeeds.size());
                 for (std::size_t row = 0; row < mSeeds.size(); ++row)
                     next[row] = sampleUniformPolyFromSeed(mCtx, mSeeds[row]);
@@ -2043,9 +1995,9 @@ namespace osuCrypto::LogVole
         {
             for (std::size_t i = 0; i < seeds.size(); ++i)
             {
-                bumpRingStat(RingOp::PrngPoly);
+                bumpRingStat(RingOp::PrngPoly, ctx);
                 if (actualNtt)
-                    bumpRingStat(RingOp::Ntt);
+                    bumpRingStat(RingOp::Ntt, ctx);
             }
             return out;
         }
@@ -2089,7 +2041,7 @@ namespace osuCrypto::LogVole
                 out.mCoeffs[offset + i] = prng.get<u64>() % mod;
             }
         }
-        bumpRingStat(RingOp::PrngPoly);
+        bumpRingStat(RingOp::PrngPoly, ctx);
         return out;
     }
 
@@ -2127,9 +2079,9 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* option = std::getenv("LV_GPU_SETUP_TOP_SK1_DEVICE");
         const char* strictOption = std::getenv("LV_GPU_SETUP_TOP_SK1_DEVICE_STRICT");
-        const bool requested = gpu::enabled() &&
-            currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender &&
-            currentProtocolCacheScope().mRunId &&
+        const bool requested = gpu::enabled(executionContext(ctx)) &&
+            executionContext(ctx).mScope.mRole == ProtocolCacheRole::Sender &&
+            executionContext(ctx).mScope.mRunId &&
             (!option || option[0] != '0');
         const bool strict = requested && strictOption && strictOption[0] != '0';
         if (requested && useDeviceUniformSetup(ctx))
@@ -2141,10 +2093,10 @@ namespace osuCrypto::LogVole
             auto next = gpu::sampleTopSecretUniformToDevice(ctx, seeds);
             auto host = std::make_shared<SeededTopSecretHostState>(ctx, std::move(seeds));
             if (next && gpu::topSecretUniformBatchMatches(ctx, *next, count,
-                    currentProtocolCacheScope().mRunId))
+                    executionContext(ctx).mScope.mRunId))
             {
                 for (u32 row = 0; row < count; ++row)
-                    bumpRingStat(RingOp::PrngPoly);
+                    bumpRingStat(RingOp::PrngPoly, ctx);
                 resident = std::move(next);
                 lazy = std::move(host);
                 eager.clear();
@@ -2192,8 +2144,8 @@ namespace osuCrypto::LogVole
         u32 count,
         std::vector<RnsPoly>& out)
     {
-        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
-        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+        AutoTimer totalSamplingTimer(executionContext(ctx).mTiming.mSeedSamplingTimeUs);
+        AutoTimer polySamplingTimer(executionContext(ctx).mTiming.mPolySamplingTimeUs);
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         // This is a batch, so the round trip amortises: the host alternative is
@@ -2208,7 +2160,7 @@ namespace osuCrypto::LogVole
             {
                 for (u32 i = 0; i < count; ++i)
                 {
-                    bumpRingStat(RingOp::PrngPoly);
+                    bumpRingStat(RingOp::PrngPoly, ctx);
                 }
                 out = std::move(gpuOut);
                 return;
@@ -2245,8 +2197,8 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count, bool actualNtt,
         std::shared_ptr<const gpu::RetainedPublicUniform>* captured)
     {
-        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
-        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+        AutoTimer totalSamplingTimer(executionContext(ctx).mTiming.mSeedSamplingTimeUs);
+        AutoTimer polySamplingTimer(executionContext(ctx).mTiming.mPolySamplingTimeUs);
         if (count == 0)
         {
             if (captured) captured->reset();
@@ -2282,8 +2234,8 @@ namespace osuCrypto::LogVole
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!count || !useDeviceUniformSetup(ctx)) return false;
-        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
-        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+        AutoTimer totalSamplingTimer(executionContext(ctx).mTiming.mSeedSamplingTimeUs);
+        AutoTimer polySamplingTimer(executionContext(ctx).mTiming.mPolySamplingTimeUs);
         std::vector<std::array<u64, 8>> seeds(count);
         for (u32 i = 0; i < count; ++i)
         {
@@ -2297,9 +2249,9 @@ namespace osuCrypto::LogVole
             !next || next->count() != count) return false;
         for (u32 i = 0; i < count; ++i)
         {
-            bumpRingStat(RingOp::PrngPoly);
+            bumpRingStat(RingOp::PrngPoly, ctx);
             if (actualNtt)
-                bumpRingStat(RingOp::Ntt);
+                bumpRingStat(RingOp::Ntt, ctx);
         }
         out = std::move(next);
         return true;
@@ -2411,7 +2363,7 @@ namespace osuCrypto::LogVole
 
     static std::shared_ptr<seal::UniformRandomGeneratorFactory> errorSamplingPrngFactory()
     {
-        static const bool vectorError = [] {
+        const bool vectorError = [] {
             const char* value = std::getenv("LV_CPU_VECTOR_ERROR");
             return !value || value[0] != '0';
         }();
@@ -2463,7 +2415,7 @@ namespace osuCrypto::LogVole
         auto sealPrng = errorSamplingPrngFactory()->create(seed);
         samplePolyNormal(sealPrng, hostContext->key_context_data()->parms(),
             limb0.data(), noiseStandardDeviation, noiseMaxDeviation, true);
-        bumpRingStat(RingOp::ErrorAdd);
+        bumpRingStat(RingOp::ErrorAdd, ctx);
         return true;
     }
 
@@ -2528,10 +2480,10 @@ namespace osuCrypto::LogVole
         std::size_t wordsPerPrefix = 0;
         bool devicePrefixes = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        static const bool compatibleFactory = errorSamplingPrngFactory()->create(
+        const bool compatibleFactory = errorSamplingPrngFactory()->create(
             seal::prng_seed_type{})->info().type() == seal::prng_type::blake2xb;
         const char* transformSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM");
-        if (gpu::enabled() && (!transformSetting || transformSetting[0] != '0'))
+        if (gpu::enabled(executionContext(ctx)) && (!transformSetting || transformSetting[0] != '0'))
         {
             const char* strictSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_STRICT");
             const bool strict = strictSetting && strictSetting[0] != '0';
@@ -2551,7 +2503,7 @@ namespace osuCrypto::LogVole
                 std::vector<seal::prng_seed_type> activeSeeds(activeRows.size());
                 for (std::size_t i = 0; i < activeRows.size(); ++i)
                     activeSeeds[i] = seeds[activeRows[i]];
-                transformed = gpu::sampleGaussianCompactDevice(activeSeeds, static_cast<u32>(n),
+                transformed = gpu::sampleGaussianCompactDevice(executionContext(ctx), activeSeeds, static_cast<u32>(n),
                     noiseStandardDeviation, noiseMaxDeviation, ringModulusValue(ctx, 0), sampled,
                     static_cast<u32>(blocks * 512u));
             }
@@ -2565,18 +2517,18 @@ namespace osuCrypto::LogVole
                     auto destination = limb0.subspan(row * n, n);
                     if (!sampled.mComplete[task])
                     {
-                        HostStep replayStep("setup: Gaussian CPU replay");
+                        HostStep replayStep(executionContext(ctx), "setup: Gaussian CPU replay");
                         return samplePolyErrorCompactFromSeed(destination, noiseStandardDeviation,
                             noiseMaxDeviation, seeds[row], ctx);
                     }
                     std::memcpy(destination.data(), sampled.mValues.mData.get() + task * n,
                         destination.size_bytes());
-                    bumpRingStat(RingOp::ErrorAdd);
+                    bumpRingStat(RingOp::ErrorAdd, ctx);
                     return true;
-                });
+                }, false, &(executionContext(ctx)));
         }
         const char* setting = std::getenv("LV_GPU_SETUP_GAUSSIAN_PRG");
-        const bool requested = gpu::enabled() && (!setting || setting[0] != '0');
+        const bool requested = gpu::enabled(executionContext(ctx)) && (!setting || setting[0] != '0');
         if (requested)
         {
             const char* strictSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_PRG_STRICT");
@@ -2598,7 +2550,7 @@ namespace osuCrypto::LogVole
                 std::vector<seal::prng_seed_type> activeSeeds(activeRows.size());
                 for (std::size_t i = 0; i < activeRows.size(); ++i) activeSeeds[i] = seeds[activeRows[i]];
                 gpu::GaussianPrngPrefixBuffer downloaded;
-                devicePrefixes = gpu::sampleGaussianPrngPrefixesDevice(
+                devicePrefixes = gpu::sampleGaussianPrngPrefixesDevice(executionContext(ctx),
                     activeSeeds, static_cast<u32>(wordsPerPrefix), downloaded);
                 if (devicePrefixes)
                 {
@@ -2621,9 +2573,9 @@ namespace osuCrypto::LogVole
             if (!hostContext || !hostContext->key_context_data()) return false;
             samplePolyNormal(source, hostContext->key_context_data()->parms(),
                 destination.data(), noiseStandardDeviation, noiseMaxDeviation, true);
-            bumpRingStat(RingOp::ErrorAdd);
+            bumpRingStat(RingOp::ErrorAdd, ctx);
             return true;
-        });
+        }, false, &(executionContext(ctx)));
     }
 
     bool samplePolyErrorCompactBatchForSetup(
@@ -2638,12 +2590,12 @@ namespace osuCrypto::LogVole
         if (seeds.empty()) { host.clear(); device.reset(); return true; }
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* resident = std::getenv("LV_GPU_SETUP_GAUSSIAN_RESIDENT");
-        if (gpu::enabled() && (!resident || resident[0] != '0'))
+        if (gpu::enabled(executionContext(ctx)) && (!resident || resident[0] != '0'))
         {
             const char* strictSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT");
             const bool strict = strictSetting && strictSetting[0] != '0';
             const char* transform = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM");
-            static const bool compatibleFactory = errorSamplingPrngFactory()->create(
+            const bool compatibleFactory = errorSamplingPrngFactory()->create(
                 seal::prng_seed_type{})->info().type() == seal::prng_type::blake2xb;
             u64 blocks = 0;
             bool validPrefix = true;
@@ -2656,7 +2608,7 @@ namespace osuCrypto::LogVole
             gpu::GaussianDeviceSampleBuffer sampled;
             bool ready = (!transform || transform[0] != '0') && compatibleFactory && validPrefix &&
                 n <= std::numeric_limits<u32>::max() &&
-                gpu::sampleGaussianCompactResidentDevice(seeds, static_cast<u32>(n), sigma, clip,
+                gpu::sampleGaussianCompactResidentDevice(executionContext(ctx), seeds, static_cast<u32>(n), sigma, clip,
                     ringModulusValue(ctx, 0), sampled, static_cast<u32>(blocks * 512u), active);
             if (ready)
             {
@@ -2674,16 +2626,16 @@ namespace osuCrypto::LogVole
                         attempt < 8u && retryWords <= std::numeric_limits<u32>::max();
                         ++attempt)
                 {
-                    HostStep retryStep("setup: Gaussian resident GPU repair retry");
+                    HostStep retryStep(executionContext(ctx), "setup: Gaussian resident GPU repair retry");
                     std::vector<seal::prng_seed_type> retrySeeds;
                     retrySeeds.reserve(incomplete.size());
                     for (const auto row : incomplete) retrySeeds.push_back(seeds[row]);
                     gpu::GaussianDeviceSampleBuffer retried;
-                    if (!gpu::sampleGaussianCompactResidentDevice(
+                    if (!gpu::sampleGaussianCompactResidentDevice(executionContext(ctx),
                             retrySeeds, static_cast<u32>(n), sigma, clip,
                             ringModulusValue(ctx, 0), retried,
                             static_cast<u32>(retryWords))) break;
-                    auto& stream = gpu::threadSampleStream();
+                    auto& stream = gpu::sampleStream(executionContext(ctx));
                     gpu::StreamDrain drain{stream};
                     std::vector<std::size_t> remaining;
                     for (std::size_t i = 0; i < incomplete.size(); ++i)
@@ -2712,13 +2664,13 @@ namespace osuCrypto::LogVole
                 }
                 std::vector<std::vector<u64>> repaired(incomplete.size());
                 ready = ready && detail::runParallelTasks(incomplete.size(), requestedWorkers, [&](std::size_t i) {
-                    HostStep repairStep("setup: Gaussian resident CPU repair");
+                    HostStep repairStep(executionContext(ctx), "setup: Gaussian resident CPU repair");
                     repaired[i].resize(n);
                     return samplePolyErrorCompactFromSeed(repaired[i], sigma, clip, seeds[incomplete[i]], ctx);
-                });
+                }, false, &(executionContext(ctx)));
                 if (ready && !incomplete.empty())
                 {
-                    auto& stream = gpu::threadSampleStream();
+                    auto& stream = gpu::sampleStream(executionContext(ctx));
                     gpu::StreamDrain drain{stream};
                     for (std::size_t i = 0; ready && i < incomplete.size(); ++i)
                         ready = gpu::gpuMemcpyH2D(sampled.mValues->data() + incomplete[i] * n,
@@ -2729,7 +2681,7 @@ namespace osuCrypto::LogVole
                 {
                     for (std::size_t row = 0; row < seeds.size(); ++row)
                         if ((active.empty() || active[row]) && sampled.mComplete[row])
-                            bumpRingStat(RingOp::ErrorAdd);
+                            bumpRingStat(RingOp::ErrorAdd, ctx);
                     host.clear();
                     device = std::move(sampled.mValues);
                     return true;
@@ -2761,10 +2713,10 @@ namespace osuCrypto::LogVole
         if (device)
         {
             if (device->count() != words) return false;
-            if (gpu::enabled() && gpu::fetchScalars(*device, next)) { host = std::move(next); return true; }
+            if (gpu::enabled(executionContext(ctx)) && gpu::fetchScalars(*device, next)) { host = std::move(next); return true; }
             // A declined asynchronous fetch must drain before CPU replay can
             // reuse its destination, including copy/sync error exits.
-            if (gpu::enabled()) gpu::threadStream().sync();
+            if (gpu::enabled(executionContext(ctx))) gpu::executionStream(executionContext(ctx)).sync();
             std::fill(next.begin(), next.end(), 0);
         }
 #else
@@ -2773,7 +2725,7 @@ namespace osuCrypto::LogVole
         if (!detail::runParallelTasks(seeds.size(), requestedWorkers, [&](std::size_t row) {
                 return (!active.empty() && !active[row]) ||
                     samplePolyErrorCompactFromSeed(std::span<u64>(next).subspan(row * n, n), sigma, clip, seeds[row], ctx);
-            })) return false;
+            }, false, &(executionContext(ctx)))) return false;
         host = std::move(next);
         return true;
     }
@@ -2834,7 +2786,7 @@ namespace osuCrypto::LogVole
         seal::util::PolyIter destinationIter(poly.mCoeffs.data(), coeffCount, coeffModulusSize);
         seal::util::add_poly_coeffmod(destinationIter[0], tempIter, coeffModulusSize, coeffModulus, destinationIter[0]);
 
-        bumpRingStat(RingOp::ErrorAdd);
+        bumpRingStat(RingOp::ErrorAdd, ctx);
         return true;
     }
 

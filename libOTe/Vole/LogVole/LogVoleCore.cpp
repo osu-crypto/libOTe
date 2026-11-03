@@ -33,7 +33,7 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        // Temporary: per-step timing for the Root recursion level, dumped at exit
+        // Per-step timing for the Root recursion level, owned by its execution context
         // when LV_ROOT_PROFILE is set. The Root is a chain of small dependent
         // operations and the existing mRootReceiverHostUs timer brackets the whole
         // thing, so it cannot say which step to attack.
@@ -53,6 +53,7 @@ namespace osuCrypto::LogVole
             static constexpr u32 kMax = 32;
             Entry mEntries[kMax]{};
             std::atomic<u32> mUsed{ 0 };
+            std::mutex mMutex;
 
             ~RootStepProfiler()
             {
@@ -81,6 +82,7 @@ namespace osuCrypto::LogVole
 
             Entry& slot(const char* name)
             {
+                std::lock_guard lock(mMutex);
                 const u32 n = mUsed.load(std::memory_order_acquire);
                 for (u32 i = 0; i < n; ++i)
                 {
@@ -93,22 +95,16 @@ namespace osuCrypto::LogVole
             }
         };
 
-        RootStepProfiler& rootProfiler()
-        {
-            static RootStepProfiler p;
-            return p;
-        }
-
         struct RootStep
         {
             RootStepProfiler::Entry* mEntry = nullptr;
             std::chrono::steady_clock::time_point mStart;
 
-            explicit RootStep(const char* name)
+            RootStep(ExecutionContext& execution, const char* name)
             {
-                static const bool on = std::getenv("LV_ROOT_PROFILE") != nullptr;
+                const bool on = std::getenv("LV_ROOT_PROFILE") != nullptr;
                 if (!on) return;
-                mEntry = &rootProfiler().slot(name);
+                mEntry = &execution.resources<RootStepProfiler>().slot(name);
                 mStart = std::chrono::steady_clock::now();
             }
             ~RootStep()
@@ -128,11 +124,11 @@ namespace osuCrypto::LogVole
             }
         };
 
-        bool setupBatchNttEnabled()
+        bool setupBatchNttEnabled(ExecutionContext& execution)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             const char* value = std::getenv("LV_GPU_SETUP_BATCH_NTT");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return (!value || value[0] != '0') && gpu::enabled(execution);
 #else
             return false;
 #endif
@@ -140,7 +136,7 @@ namespace osuCrypto::LogVole
 
         bool setupForwardNtt(std::span<RnsPoly> polys, const RingNttContext& ctx)
         {
-            if (setupBatchNttEnabled()) return forwardNttBatch(polys, ctx);
+            if (setupBatchNttEnabled(executionContext(ctx))) return forwardNttBatch(polys, ctx);
             for (auto& poly : polys)
             {
                 if (!forwardNtt(poly, ctx)) return false;
@@ -168,7 +164,7 @@ namespace osuCrypto::LogVole
             const RingTensor& get() const override
             {
                 std::call_once(mOnce, [&] {
-                    HostStep phase("setup root: CtR host forward NTT fallback");
+                    HostStep phase(executionContext(mCtx), "setup root: CtR host forward NTT fallback");
                     mHost = mWire->get();
                     for (auto& poly : mHost.mPolys)
                     {
@@ -682,7 +678,7 @@ namespace osuCrypto::LogVole
             out.mLevels = lacct.mLevels;
             if (state.mRootLacctLeftWire)
             {
-                HostStep phase("setup root: Lacct host fallback");
+                HostStep phase(executionContext(state), "setup root: Lacct host fallback");
                 out.mCt = state.mRootLacctLeftWire->get();
             }
             else out.mCt = lacct.mCt;
@@ -725,7 +721,7 @@ namespace osuCrypto::LogVole
             // Same economics as the gadget decomposition: denoiseComb is 128-bit
             // fixed-point CRT per coefficient, so it is instruction bound and the
             // arithmetic covers the round trip even at the Root's 4 polynomials.
-            if (gpu::enabled() && !input.empty())
+            if (gpu::enabled(executionContext(ctx)) && !input.empty())
             {
                 if (auto dev = gpu::upload(ctx, std::span<const RnsPoly>(input.data(), input.size())))
                 {
@@ -817,7 +813,7 @@ namespace osuCrypto::LogVole
             {
                 return 0u;
             }
-            static const bool h200 = gpu::deviceDescription().find("H200") != std::string::npos;
+            const bool h200 = gpu::deviceDescription().find("H200") != std::string::npos;
             return h200 ? 2u : 0u;
         }
 
@@ -1017,7 +1013,7 @@ namespace osuCrypto::LogVole
             const RingTensor* topCtView = &state.mRootTopCt;
             if (state.mRootTopCtWire)
             {
-                HostStep phase("setup root: TopCt host fallback");
+                HostStep phase(executionContext(ctx), "setup root: TopCt host fallback");
                 topCtView = &state.mRootTopCtWire->get();
             }
             const RingTensor& topCt = *topCtView;
@@ -1212,12 +1208,12 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> next(count);
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* compactSetting = std::getenv("LV_GPU_SETUP_ROOT_COMPACT_NOISE");
-        const bool compactRequested = gpu::enabled() && (!compactSetting || compactSetting[0] != '0');
+        const bool compactRequested = gpu::enabled(executionContext(ctx)) && (!compactSetting || compactSetting[0] != '0');
         const char* strictSetting = std::getenv("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT");
         const bool compactStrict = compactRequested && strictSetting && strictSetting[0] != '0';
-        if (gpu::enabled() && (sigma > 0.0 || compactRequested) && canSamplePolyErrorCompact(ctx, sigma, maxDeviation))
+        if (gpu::enabled(executionContext(ctx)) && (sigma > 0.0 || compactRequested) && canSamplePolyErrorCompact(ctx, sigma, maxDeviation))
         {
-            HostStep step("setup: root compact error sampling");
+            HostStep step(executionContext(ctx), "setup: root compact error sampling");
             std::vector<seal::prng_seed_type> seeds(count);
             if (sigma > 0.0)
                 for (auto& seed : seeds) prng.get(seed.data(), seed.size());
@@ -1247,7 +1243,7 @@ namespace osuCrypto::LogVole
                     sigma, maxDeviation, seeds, ctx, requestedWorkers)) return false;
             if (!detail::runParallelTasks(count, requestedWorkers, [&](std::size_t i) {
                     return expandPolyErrorCompact(std::span<const u64>(compact).subspan(i * n, n), next[i], ctx);
-                }) || (outputNtt && !forwardNttBatch(next, ctx))) return false;
+                }, false, &(executionContext(ctx))) || (outputNtt && !forwardNttBatch(next, ctx))) return false;
             out = std::move(next);
             return true;
         }
@@ -1306,7 +1302,7 @@ namespace osuCrypto::LogVole
             const std::vector<RnsPoly>& hostCoefficients() const override
             {
                 std::call_once(mOnce, [&] {
-                    HostStep hostStep("setup: root r1 explicit host fallback");
+                    HostStep hostStep(executionContext(mCtx), "setup: root r1 explicit host fallback");
                     const std::size_t n = mCtx.mParams.mPolyModulusDegree;
                     if (!n || mCount > std::numeric_limits<std::size_t>::max() / n)
                         throw std::runtime_error("invalid Root r1 shape");
@@ -1321,7 +1317,7 @@ namespace osuCrypto::LogVole
                             return expandPolyErrorCompact(
                                 std::span<const u64>(mCompact).subspan(row * n, n),
                                 next[row], mCtx);
-                        })) throw std::runtime_error("Root r1 host expansion failed");
+                        }, false, &(executionContext(mCtx)))) throw std::runtime_error("Root r1 host expansion failed");
                     mHost = std::move(next);
                 });
                 return mHost;
@@ -1355,7 +1351,7 @@ namespace osuCrypto::LogVole
             const std::vector<RnsPoly>& hostCoefficients() const override
             {
                 std::call_once(mOnce, [&] {
-                    HostStep step("setup: root skRRt explicit host fallback");
+                    HostStep step(executionContext(mCtx), "setup: root skRRt explicit host fallback");
                     std::vector<RnsPoly> next(mRowSeeds.size());
                     for (std::size_t row = 0; row < mRowSeeds.size(); ++row)
                         next[row] = sampleUniformPolyFromSeed(mCtx, mRowSeeds[row]);
@@ -1383,7 +1379,7 @@ namespace osuCrypto::LogVole
                 !ctx.mParams.mPolyModulusDegree ||
                 count > std::numeric_limits<std::size_t>::max() /
                     ctx.mParams.mPolyModulusDegree) return false;
-            HostStep step("setup: root compact error sampling");
+            HostStep step(executionContext(ctx), "setup: root compact error sampling");
             std::vector<seal::prng_seed_type> seeds(count);
             if (sigma > 0.0)
                 for (auto& seed : seeds) prng.get(seed.data(), seed.size());
@@ -1507,12 +1503,12 @@ namespace osuCrypto::LogVole
         const LazyRootErrorHostState* rootR1Host,
         const gpu::RetainedPublicUniform* retainedBStarNtt)
     {
-        HostStep setupStep("setup: root ciphertext");
+        HostStep setupStep(executionContext(ctx), "setup: root ciphertext");
         const auto r1Count = rootR1Host ? rootR1Host->count() : r1.size();
         if (r1Count > std::numeric_limits<u32>::max()) return false;
         const u32 leftWidth = static_cast<u32>(r1Count);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool rootBatchValid = !rootR1Device || !gpu::enabled() ||
+        const bool rootBatchValid = !rootR1Device || !gpu::enabled(executionContext(ctx)) ||
             (rootR1Host && gpu::rootErrorBatchMatches(ctx, *rootR1Device, leftWidth));
 #else
         const bool rootBatchValid = !rootR1Device;
@@ -1569,7 +1565,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* deviceSetting = std::getenv("LV_GPU_SETUP_ROOT_DEVICE");
-        const bool deviceRequested = (!deviceSetting || deviceSetting[0] != '0') && gpu::enabled();
+        const bool deviceRequested = (!deviceSetting || deviceSetting[0] != '0') && gpu::enabled(executionContext(ctx));
         const char* compactSetting = std::getenv("LV_GPU_SETUP_ROOT_COMPACT_NOISE");
         const bool compactRequested = deviceRequested && (!compactSetting || compactSetting[0] != '0');
         const char* compactStrictSetting = std::getenv("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT");
@@ -1593,7 +1589,7 @@ namespace osuCrypto::LogVole
         };
         const auto ensurePublicBStarHost = [&] {
             if (!retainedBStarNtt || !publicBStarFallback.empty()) return true;
-            HostStep fallbackStep("setup root: BStar exact host fallback");
+            HostStep fallbackStep(executionContext(ctx), "setup root: BStar exact host fallback");
             publicBStarFallback = deriveUniformPolyBatchFromNonce(
                 ctx, kRootBStarPublicNonce, kRootBStarPublicDomain,
                 randomizer, true);
@@ -1619,7 +1615,7 @@ namespace osuCrypto::LogVole
         // independently, then transform them in one device batch. This preserves
         // every error and the caller's PRNG position. Reuse the output slots as
         // temporary error storage.
-        const bool batchSetup = setupBatchNttEnabled() || deviceRequested;
+        const bool batchSetup = setupBatchNttEnabled(executionContext(ctx)) || deviceRequested;
         const bool batchNoise = noiseStandardDeviation > 0.0 && batchSetup;
         std::vector<u64> compact;
         std::shared_ptr<gpu::DeviceScalars> residentNoise;
@@ -1649,7 +1645,7 @@ namespace osuCrypto::LogVole
                         resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                         return addPolyErrorFromSeed(noise, noiseStandardDeviation,
                             noiseMaxDeviation, noiseSeeds[idx], ctx);
-                    })) return false;
+                    }, false, &(executionContext(ctx)))) return false;
             if (!deviceRequested && !forwardNttBatch(next.mPolys, ctx)) return false;
         }
 
@@ -1662,7 +1658,7 @@ namespace osuCrypto::LogVole
                     [&](std::size_t idx) {
                         resizeZero(next.mPolys[idx].mCoeffs, ringPolyCoeffCount(ctx.mParams));
                         return true;
-                    })) return false;
+                    }, false, &(executionContext(ctx)))) return false;
             if (gpu::assembleRootTopCtDevice(ctx, *r1Host, r2NttInput, publicBRootNtt,
                     publicBStarNtt, gadgetLogBase, gadgetPowerOffset, next.mPolys, next.mPolys,
                     compact, residentNoise.get(), requestedWorkers, randomizers.get(),
@@ -1682,7 +1678,7 @@ namespace osuCrypto::LogVole
                 !detail::runParallelTasks(next.mPolys.size(), requestedWorkers, [&](std::size_t i) {
                     const std::size_t n = ctx.mParams.mPolyModulusDegree;
                     return expandPolyErrorCompact(std::span<const u64>(compact).subspan(i * n, n), next.mPolys[i], ctx);
-                })) return false;
+                }, false, &(executionContext(ctx)))) return false;
             if (batchNoise && !forwardNttBatch(next.mPolys, ctx)) return false;
             if (rootR1Host) r1Host = &rootR1Host->hostCoefficients();
             r1Ntt = *r1Host;
@@ -1735,7 +1731,7 @@ namespace osuCrypto::LogVole
 
                 next.mPolys[idx] = std::move(cellNtt);
                 return true;
-            })) return false;
+            }, false, &(executionContext(ctx)))) return false;
 
         out = std::move(next);
         return true;
@@ -1873,7 +1869,7 @@ namespace osuCrypto::LogVole
                         local, polyIdx, begin, end,
                         forceFirstReject && taskIdx == 0u);
                     return true;
-                });
+                }, false, &(executionContext(ctx)));
             if (!ran)
             {
                 return false;
@@ -1991,14 +1987,13 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& hostCoefficients() const override
         {
             std::call_once(mOnce, [&] {
-                if (currentProtocolCacheScope().mRole == ProtocolCacheRole::Receiver)
+                if (executionContext(mCtx).mScope.mRole == ProtocolCacheRole::Receiver)
                     throw std::runtime_error("receiver cannot inspect sender top key");
-                HostStep step(mRootHi ? "setup sender: Root high-key explicit host view"
+                HostStep step(executionContext(mCtx), mRootHi ? "setup sender: Root high-key explicit host view"
                                       : "setup sender: top seed-label explicit host view");
-                if (mDevice && gpu::enabled())
+                if (mDevice && gpu::enabled(executionContext(mCtx)))
                 {
-                    ScopedProtocolCacheScope ownerScope(
-                        ProtocolCacheRole::Sender, mOwnerRunId);
+
                     std::vector<RnsPoly> exact;
                     const bool matches = mRootHi
                         ? gpu::rootHiRepBatchMatches(mCtx, *mDevice,
@@ -2044,7 +2039,7 @@ namespace osuCrypto::LogVole
         RootOfflineMessage& message,
         bool deferRandomizerHost)
     {
-        HostStep setupStep("setup sender: root total");
+        HostStep setupStep(executionContext(state), "setup sender: root total");
         u32 tauHi = 0;
         if (!computeTauHi(state.mParams, tauHi))
         {
@@ -2161,27 +2156,27 @@ namespace osuCrypto::LogVole
 
         std::vector<RnsPoly> publicBStarNtt;
         std::shared_ptr<const gpu::RetainedPublicUniform> retainedBStarNtt;
-        const bool batchPublicB = setupBatchNttEnabled();
+        const bool batchPublicB = setupBatchNttEnabled(executionContext(state));
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* bStarOption = std::getenv("LV_GPU_SETUP_ROOT_BSTAR_DEVICE");
         const char* bStarStrictOption =
             std::getenv("LV_GPU_SETUP_ROOT_BSTAR_DEVICE_STRICT");
         const bool bStarRequested = deferRandomizerHost && batchPublicB &&
-            gpu::enabled() &&
-            currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender &&
+            gpu::enabled(executionContext(state)) &&
+            executionContext(state).mScope.mRole == ProtocolCacheRole::Sender &&
             (!bStarOption || bStarOption[0] != '0');
         const bool bStarStrict = bStarRequested && bStarStrictOption &&
             bStarStrictOption[0] != '0';
 #endif
         {
-        HostStep bStarStep("setup sender: root BStar public uniform sampling");
+        HostStep bStarStep(executionContext(state), "setup sender: root BStar public uniform sampling");
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (bStarRequested)
         {
             retainedBStarNtt = gpu::retainRootBStarNttDevice(ctx, randomizer);
             if (bStarStrict && !retainedBStarNtt) return false;
         }
-        if (!retainedBStarNtt && batchPublicB && gpu::setupUniformSamplingEnabled())
+        if (!retainedBStarNtt && batchPublicB && gpu::setupUniformSamplingEnabled(executionContext(state)))
         {
             publicBStarNtt = deriveUniformPolyBatchFromNonce(
                 ctx, kRootBStarPublicNonce, kRootBStarPublicDomain,
@@ -2210,7 +2205,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* r1Option = std::getenv("LV_GPU_SETUP_ROOT_R1_DEVICE");
         const char* r1StrictOption = std::getenv("LV_GPU_SETUP_ROOT_R1_DEVICE_STRICT");
-        const bool r1Requested = deferRandomizerHost && gpu::enabled() &&
+        const bool r1Requested = deferRandomizerHost && gpu::enabled(executionContext(state)) &&
             (!r1Option || r1Option[0] != '0');
         const bool r1Strict = r1Requested && r1StrictOption && r1StrictOption[0] != '0';
         const bool r1Eligible = r1Requested &&
@@ -2230,18 +2225,18 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> skRRt;
         std::shared_ptr<const LazyRootSecretHostState> lazySkRRt;
         std::shared_ptr<gpu::DeviceBatch> residentSkRRt;
-        const u64 skRRtOwnerRunId = currentProtocolCacheScope().mRunId;
+        const u64 skRRtOwnerRunId = executionContext(state).mScope.mRunId;
         {
-            HostStep step("setup sender: root skRRt sampling");
+            HostStep step(executionContext(state), "setup sender: root skRRt sampling");
 #if defined(ENABLE_LOGVOLE_CUDA)
             const char* skOption = std::getenv("LV_GPU_SETUP_ROOT_SKRR_DEVICE");
             const char* skStrictOption =
                 std::getenv("LV_GPU_SETUP_ROOT_SKRR_DEVICE_STRICT");
-            const bool skRequested = deferRandomizerHost && gpu::enabled() &&
+            const bool skRequested = deferRandomizerHost && gpu::enabled(executionContext(state)) &&
                 (!skOption || skOption[0] != '0');
             const bool skStrict = skRequested && skStrictOption &&
                 skStrictOption[0] != '0';
-            if (skRequested && gpu::setupUniformSamplingEnabled())
+            if (skRequested && gpu::setupUniformSamplingEnabled(executionContext(state)))
             {
                 std::vector<seal::prng_seed_type> rowSeeds(tauHi);
                 // One SEAL seed per row, in exactly the old sampler order.
@@ -2325,7 +2320,7 @@ namespace osuCrypto::LogVole
             // The copied TCP wire still needs these exact public coefficients.
             // Publish them only after TopCt has consumed the sender-owned NTT
             // batch on the GPU; no host-to-device return trip remains.
-            HostStep wireStep("setup sender: root BStar wire materialization");
+            HostStep wireStep(executionContext(state), "setup sender: root BStar wire materialization");
             if (!gpu::retainedRootBStarNttMatches(ctx, *retainedBStarNtt,
                     randomizer) ||
                 !gpu::fetchRetainedPublicUniform(*retainedBStarNtt,
@@ -2380,7 +2375,7 @@ namespace osuCrypto::LogVole
         ReceiverState& state,
         Message&& message)
     {
-        HostStep setupStep("setup receiver: root total");
+        HostStep setupStep(executionContext(state), "setup receiver: root total");
         u32 tauHi = 0;
         if (!computeTauHi(state.mParams, tauHi) ||
             !rootMetadataMatches(state, message))
@@ -2575,7 +2570,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> xRoot;
         const auto buildXRoot = [&]() {
             if (!xRoot.empty()) return;
-            RootStep step("prep: xRoot pad");
+            RootStep step(executionContext(state), "prep: xRoot pad");
             xRoot.resize(muHi);
             for (std::size_t idx = 0; idx < x.size(); ++idx)
             {
@@ -2599,18 +2594,18 @@ namespace osuCrypto::LogVole
         std::shared_ptr<DigestTree> rootTree;
         std::shared_ptr<void> gpuSessionOut;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled() && std::getenv("LV_ROOT_PROFILE"))
+        if (gpu::enabled(executionContext(state)) && std::getenv("LV_ROOT_PROFILE"))
         {
             // Diagnostic only: drain whatever the outer levels still have queued
             // before the Root's own timers start, so that the Root's first
             // synchronise is not credited with their work.
-            RootStep step("prep: pre-shrink drain (diagnostic)");
-            gpu::syncStream();
+            RootStep step(executionContext(state), "prep: pre-shrink drain (diagnostic)");
+            gpu::syncStream(executionContext(state));
         }
         gpu::DeviceBatchPtr hatDDev;
-        if (gpu::enabled())
+        if (gpu::enabled(executionContext(state)))
         {
-            RootStep step("prep: shrink");
+            RootStep step(executionContext(state), "prep: shrink");
             auto session = std::make_shared<gpu::LevelSession>();
             gpu::DeviceBatchPtr dHatDev;
             // Prefer the caller's device batch: the Root's input is already there,
@@ -2680,9 +2675,9 @@ namespace osuCrypto::LogVole
         std::shared_ptr<void> leftTreeSession;
         bool leftTreeDone = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled())
+        if (gpu::enabled(executionContext(state)))
         {
-            RootStep step("prep: buildDigestTree(left, device)");
+            RootStep step(executionContext(state), "prep: buildDigestTree(left, device)");
             u32 maxTau = 0;
             RnsPoly deviceDigest{};
             std::vector<RnsPoly> nodesFlat;
@@ -2746,7 +2741,7 @@ namespace osuCrypto::LogVole
 #endif
         if (!leftTreeDone)
         {
-            RootStep step("prep: buildDigestTreeTrunc(left, host)");
+            RootStep step(executionContext(state), "prep: buildDigestTreeTrunc(left, host)");
             if (!buildDigestTreeTrunc(
                     ctx,
                     hatD,
@@ -2784,7 +2779,7 @@ namespace osuCrypto::LogVole
             return v && v[0] == '1';
         }();
         {
-            RootStep step("prep: sampleRootZeta");
+            RootStep step(executionContext(state), "prep: sampleRootZeta");
             if (seededZeta)
             {
                 // This is exactly sampleRootZeta's historical parent-stream
@@ -2823,9 +2818,9 @@ namespace osuCrypto::LogVole
         // the tree's own digest and is already on the device, so the only things
         // that cross are zeta in (it comes from the host PRNG) and d' out (it goes
         // on the wire).
-        if (gpu::enabled() && leftTreeSession)
+        if (gpu::enabled(executionContext(state)) && leftTreeSession)
         {
-            RootStep step("prep: device chain");
+            RootStep step(executionContext(state), "prep: device chain");
             gpu::DeviceBatchPtr topDev;
             gpu::DeviceBatchPtr retainedDPrime;
             bool deviceOk = false;
@@ -2850,7 +2845,7 @@ namespace osuCrypto::LogVole
         // zeta from the already-consumed task keys before taking either fallback.
         if (!digestDone && zeta.empty() && seededZeta)
         {
-            RootStep step("prep: sampleRootZeta seeded fallback");
+            RootStep step(executionContext(state), "prep: sampleRootZeta seeded fallback");
             if (!sampleRootZetaFromTaskSeeds(
                     ctx,
                     state.mRootRandomizerWidth,
@@ -2868,9 +2863,9 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         // Roll back only the sampling experiment while retaining the established
         // device digest chain. This is also the LV_GPU_ROOT_ZETA=0 path.
-        if (!digestDone && gpu::enabled() && leftTreeSession)
+        if (!digestDone && gpu::enabled(executionContext(state)) && leftTreeSession)
         {
-            RootStep step("prep: device chain (host zeta)");
+            RootStep step(executionContext(state), "prep: device chain (host zeta)");
             gpu::DeviceBatchPtr topDev;
             gpu::DeviceBatchPtr retainedDPrime;
             if (gpu::rootDigestReceiverDevice(
@@ -2898,7 +2893,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> publicBRootNtt;
         if (!digestDone)
         {
-            RootStep step("prep: gadget(yLeft)");
+            RootStep step(executionContext(state), "prep: gadget(yLeft)");
             if (!gadgetDecomposeBitsRangeCentered(
                     yLeft,
                     state.mParams.mShrinkExpand.mGadgetLogBase,
@@ -2925,7 +2920,7 @@ namespace osuCrypto::LogVole
 
         if (!digestDone)
         {
-            RootStep step("prep: forwardNttBatch(yDecomp++zeta)");
+            RootStep step(executionContext(state), "prep: forwardNttBatch(yDecomp++zeta)");
             topInputsNtt.resize(yDecomp.size() + zeta.size());
             for (std::size_t idx = 0; idx < yDecomp.size(); ++idx)
                 topInputsNtt[idx] = yDecomp[idx];
@@ -2940,7 +2935,7 @@ namespace osuCrypto::LogVole
         RnsPoly dPrime{};
         if (!digestDone)
         {
-            RootStep step("prep: two inner products + INTT + negate");
+            RootStep step(executionContext(state), "prep: two inner products + INTT + negate");
             const auto& publicBStarNtt = state.mRootPublicBStarWire
                 ? state.mRootPublicBStarWire->get().mPolys
                 : state.mRootPublicBStarNtt;
@@ -2979,6 +2974,7 @@ namespace osuCrypto::LogVole
         }
 
         RootDigestState nextState{};
+        nextState.mExecutionContext = state.mParams.mShrinkExpand.mRing.mExecutionContext;
         nextState.mDRt = std::move(rootDigest);
         nextState.mRootTree = std::move(rootTree);
         nextState.mGpuSession = std::move(gpuSessionOut);
@@ -2993,7 +2989,7 @@ namespace osuCrypto::LogVole
         nextState.mDPrimeGpu = std::move(dPrimeDev);
         if (!deferDPrimeHash)
         {
-            RootStep step("prep: hash dPrime");
+            RootStep step(executionContext(state), "prep: hash dPrime");
             if (!finishRootDigestHash(nextState)) return false;
         }
         nextState.mLeftTree = std::move(leftTree);
@@ -3020,9 +3016,9 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        RootStep step("wire: hash dPrime after send");
+        RootStep step(*digestState.mExecutionContext, "wire: hash dPrime after send");
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::rootDigestHashEnabled() && digestState.mDPrimeGpu)
+        if (gpu::rootDigestHashEnabled(*digestState.mExecutionContext) && digestState.mDPrimeGpu)
         {
             const auto device = std::static_pointer_cast<gpu::DeviceBatch>(digestState.mDPrimeGpu);
             if (gpu::hashRootDigestDevice(*device, digestState.mDPrimeHash))
@@ -3131,7 +3127,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto residentSkCoeffs =
             std::static_pointer_cast<gpu::DeviceBatch>(state.mRootSkRRtDevice);
-        if (secretLazyValid && gpu::enabled() &&
+        if (secretLazyValid && gpu::enabled(executionContext(state)) &&
             !gpu::rootSecretUniformBatchMatches(ctx, *residentSkCoeffs,
                 tauHi, state.mRootSkRRtOwnerRunId)) return false;
 #endif
@@ -3152,7 +3148,7 @@ namespace osuCrypto::LogVole
             : gpu::DeviceBatchPtr{};
 #endif
         {
-            HostStep step("send: root unpack d'");
+            HostStep step(executionContext(state), "send: root unpack d'");
             if (ownedRequest)
             {
                 if (ownedRequest->mDPrimeCoeffs.size() !=
@@ -3172,7 +3168,7 @@ namespace osuCrypto::LogVole
             }
         }
         {
-            HostStep step("send: root sample k'");
+            HostStep step(executionContext(state), "send: root sample k'");
             if (nonInteractive)
             {
                 RootResponseMessage oracle{};
@@ -3189,14 +3185,14 @@ namespace osuCrypto::LogVole
             }
         }
         {
-            HostStep step("send: root deriveSkx");
+            HostStep step(executionContext(state), "send: root deriveSkx");
             bool skxDone = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
             // On the critical path of both parties and independent of the label
             // count: a gadget decomposition and a ring multiplication over full
             // ring elements, which is 8 ms of host time at the no-golden-seed
             // parameters against a fraction of that on the device.
-            if (gpu::enabled())
+            if (gpu::enabled(executionContext(state)))
             {
                 skxDone = gpu::rootSkxSenderDevice(
                     ctx,
@@ -3209,11 +3205,11 @@ namespace osuCrypto::LogVole
                     &residentKPrime,
                     preparedSkNtt,
                     preparedKPrimeDev,
-                    gpu::rootDigestHashEnabled() ? &deviceDigestHash : nullptr,
+                    gpu::rootDigestHashEnabled(executionContext(state)) ? &deviceDigestHash : nullptr,
                     nonInteractive,
                     residentSkCoeffs,
                     state.mRootSkRRtOwnerRunId);
-                haveDeviceDigestHash = skxDone && gpu::rootDigestHashEnabled();
+                haveDeviceDigestHash = skxDone && gpu::rootDigestHashEnabled(executionContext(state));
             }
 #endif
             // A successful device pre-sample deliberately has no host mirror.
@@ -3297,7 +3293,7 @@ namespace osuCrypto::LogVole
             assignRange(next.mSeed, state.mGoldenSeed.begin(), state.mGoldenSeed.end());
         }
         {
-            HostStep step("send: root pack skPrime");
+            HostStep step(executionContext(state), "send: root pack skPrime");
             if (ownedRequest)
             {
                 next.mSkPrimeCoeffs = std::move(skPrime.mCoeffs);
@@ -3363,7 +3359,7 @@ namespace osuCrypto::LogVole
     {
         if (deviceOut) deviceOut->reset();
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (deviceOut && gpu::rootKPrimeSamplingEnabled())
+        if (deviceOut && gpu::rootKPrimeSamplingEnabled(executionContext(state)))
         {
             RingNttContext ctx{};
             if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx)) return false;
@@ -3418,7 +3414,7 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         const SenderState* precomputeRoot)
     {
-        HostStep step("send: ensurePrecompute");
+        HostStep step(executionContext(state), "send: ensurePrecompute");
         const SenderState& precomputeState = precomputeRoot ? *precomputeRoot : state;
         return ensureSenderPrecomputeImpl(precomputeState, prng) && !state.mGoldenSeed.empty();
     }
@@ -3536,9 +3532,9 @@ namespace osuCrypto::LogVole
                 // none of it depends on the label count, so it capped every size:
                 // two megabyte Blake2xb expansions plus 24 SEAL transforms, and
                 // then the level above uploaded the 16 MiB result it produced.
-                if (gpu::enabled())
+                if (gpu::enabled(executionContext(state)))
                 {
-                    HostStep step("send: root (device)");
+                    HostStep step(executionContext(state), "send: root (device)");
                     RingNttContext rootCtx{};
                     gpu::DeviceBatchPtr rootTbkDev;
                     const auto rootKPrimeDev =
@@ -3581,7 +3577,7 @@ namespace osuCrypto::LogVole
 
                 RnsPoly rootKey{};
                 {
-                    HostStep step("send: root key (host)");
+                    HostStep step(executionContext(state), "send: root key (host)");
                     if (!computeRootSenderKey(state, seed, rootKey))
                     {
                         return false;
@@ -3600,7 +3596,7 @@ namespace osuCrypto::LogVole
                 const bool publicSeed = rootPublicSeed;
                 bool candidateOk = publicSeed;
                 {
-                    HostStep step("send: root expand (host)");
+                    HostStep step(executionContext(state), "send: root expand (host)");
                     if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput))
                     {
                         return false;
@@ -3646,7 +3642,7 @@ namespace osuCrypto::LogVole
             gpu::PreparedSenderCt2Ptr senderCt2Prefetch;
             if (ct2PrefetchLevelsRemaining != 0u &&
                 (deferGoldenValidation || state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed) &&
-                gpu::enabled() &&
+                gpu::enabled(executionContext(state)) &&
                 gpu::topSenderCt2PrefetchEnabled())
             {
                 const u32 prefetchChunkCount = computeWDoublePrime(state.mParams, muHi);
@@ -3668,7 +3664,7 @@ namespace osuCrypto::LogVole
 
             RecursiveSeedEvalOutput childEval{};
             {
-                HostStep step("send: child eval", state.mParams.mW);
+                HostStep step(executionContext(state), "send: child eval", state.mParams.mW);
                 if (!evaluateSenderSeedCandidateImpl(
                         *state.mNextLevelState, seed, childEval, false, deferGoldenValidation,
                         ct2PrefetchLevelsRemaining == 0u
@@ -3702,9 +3698,9 @@ namespace osuCrypto::LogVole
             // expand, and validate the candidate without ever moving a
             // polynomial to the host. Only an accepted top-level result is
             // downloaded, by the caller.
-            if (gpu::enabled())
+            if (gpu::enabled(executionContext(state)))
             {
-                HostStep step("send: level expand (device)", state.mParams.mW);
+                HostStep step(executionContext(state), "send: level expand (device)", state.mParams.mW);
                 RingNttContext gpuCtx{};
                 if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, gpuCtx))
                 {
@@ -3718,7 +3714,7 @@ namespace osuCrypto::LogVole
                 }
                 if (!childDev)
                 {
-                    HostStep up("send: upload child tbk (host->dev)", state.mParams.mW);
+                    HostStep up(executionContext(state), "send: upload child tbk (host->dev)", state.mParams.mW);
                     childDev = gpu::upload(
                         gpuCtx, std::span<const RnsPoly>(childEval.mTbk.data(), childEval.mTbk.size()));
                 }
@@ -3850,7 +3846,7 @@ namespace osuCrypto::LogVole
 
                         if (earlyCheck)
                         {
-                            HostStep step("cpu sender detail: golden validation");
+                            HostStep step(executionContext(state), "cpu sender detail: golden validation");
                             // Keep this level's margins and global polynomial
                             // indices. The leaf excludes the unused padded tail.
                             for (std::size_t idx = 0; idx < end - start; ++idx)
@@ -3872,7 +3868,7 @@ namespace osuCrypto::LogVole
                             finalTbk[start + idx] = std::move(expandOutput.mTbk[idx]);
                         }
                         return true;
-                    }))
+                    }, false, &(executionContext(state))))
             {
                 return false;
             }
@@ -3948,7 +3944,7 @@ namespace osuCrypto::LogVole
             // public seed are authoritative its ancestor samplers are just as
             // independent of the child key as in GoldenSeed. Default only the
             // measured H200 geometry to two levels; 0 explicitly rolls it back.
-            static const int publicPrefetchOverride = [] {
+            const int publicPrefetchOverride = [] {
                 const char* v = std::getenv("LV_GPU_NOGOLD_SENDER_CT2_PREFETCH");
                 if (!v) return -1;
                 return v && v[0] >= '1' && v[0] <= '3' && v[1] == '\0'
@@ -3956,17 +3952,17 @@ namespace osuCrypto::LogVole
             }();
             const u32 publicPrefetchLevels = publicPrefetchOverride >= 0
                 ? static_cast<u32>(publicPrefetchOverride)
-                : gpu::enabled() ? defaultPublicSenderCt2PrefetchLevels(state) : 0u;
-            if (publicPrefetchLevels && gpu::enabled() && seed.size() == 16u &&
+                : gpu::enabled(executionContext(state)) ? defaultPublicSenderCt2PrefetchLevels(state) : 0u;
+            if (publicPrefetchLevels && gpu::enabled(executionContext(state)) && seed.size() == 16u &&
                 state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed &&
                 gpu::topSenderCt2PrefetchEnabled())
             {
                 return evaluateSenderSeedCandidateImpl(
                     state, seed, out, true, false, publicPrefetchLevels);
             }
-            if (gpu::enabled() &&
+            if (gpu::enabled(executionContext(state)) &&
                 state.mParams.mCt2SeedMode == Ct2SeedMode::GoldenSeed &&
-                gpu::deferredGoldenValidationEnabled())
+                gpu::deferredGoldenValidationEnabled(executionContext(state)))
             {
                 RingNttContext ctx{};
                 if (makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx) &&
@@ -3982,7 +3978,7 @@ namespace osuCrypto::LogVole
                     {
                         // No deferred state was published. Drain scratch and rerun
                         // the exact same supplied seed through the legacy path.
-                        if (!gpu::abortGoldenValidationAttempt()) return false;
+                        if (!gpu::abortGoldenValidationAttempt(executionContext(state))) return false;
                         return evaluateSenderSeedCandidateImpl(
                             state, seed, out, true, false);
                     }
@@ -3992,13 +3988,13 @@ namespace osuCrypto::LogVole
                     if (!gpu::queueLeafGoldenSeedValidation(
                             topSeedParams, *deferred.mTbkDevice))
                     {
-                        if (!gpu::abortGoldenValidationAttempt()) return false;
+                        if (!gpu::abortGoldenValidationAttempt(executionContext(state))) return false;
                         return evaluateSenderSeedCandidateImpl(
                             state, seed, out, true, false);
                     }
 
                     bool accepted = false;
-                    if (!gpu::finishGoldenValidationAttempt(accepted)) return false;
+                    if (!gpu::finishGoldenValidationAttempt(executionContext(state), accepted)) return false;
                     if (!accepted)
                     {
                         out = RecursiveSeedEvalOutput{};
@@ -4021,14 +4017,14 @@ namespace osuCrypto::LogVole
             RecursiveSeedEvalOutput& out)
         {
             constexpr int maxSeedAttempts = 100;
-            AutoTimer searchTimer(globalTimingStats.mSeedAttemptTimeUs);
-            HostStep searchPhase("cpu sender: seed search and expansion");
+            AutoTimer searchTimer(executionContext(state).mTiming.mSeedAttemptTimeUs);
+            HostStep searchPhase(executionContext(state), "cpu sender: seed search and expansion");
             for (int attempt = 0; attempt < maxSeedAttempts; ++attempt)
             {
                 AlignedUnVec<u8> seed(16);
                 prng.get(seed.data(), seed.size());
 
-                globalTimingStats.mSeedAttemptCount.fetch_add(1, std::memory_order_relaxed);
+                executionContext(state).mTiming.mSeedAttemptCount.fetch_add(1, std::memory_order_relaxed);
 
                 RecursiveSeedEvalOutput eval{};
                 if (!evaluateSenderSeedCandidate(state, seed, eval))
@@ -4079,8 +4075,8 @@ namespace osuCrypto::LogVole
                     // timer is still used, because what it measures - the one
                     // recursive sender expansion - is work both modes have to do;
                     // GoldenSeed just repeats it until a seed is accepted.
-                    AutoTimer expandTimer(globalTimingStats.mSeedAttemptTimeUs);
-                    HostStep expandPhase("cpu sender: public-seed expansion");
+                    AutoTimer expandTimer(executionContext(state).mTiming.mSeedAttemptTimeUs);
+                    HostStep expandPhase(executionContext(state), "cpu sender: public-seed expansion");
                     ok = evaluateSenderSeedCandidate(state, seed, eval);
                     if (ok && eval.mValid)
                     {
@@ -4108,7 +4104,7 @@ namespace osuCrypto::LogVole
             // wait, and threadStream() is keyed on the thread, so stream ordering
             // alone does not guarantee the expansion has landed.
             if (state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed &&
-                gpu::enabled() && eval.mTbkDevice && !gpu::syncStream())
+                gpu::enabled(executionContext(state)) && eval.mTbkDevice && !gpu::syncStream(executionContext(state)))
             {
                 return false;
             }
@@ -4176,21 +4172,21 @@ namespace osuCrypto::LogVole
             return true;
         }
 
-        bool setupParallelCopyEnabled()
+        bool setupParallelCopyEnabled(ExecutionContext& execution)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             const char* value = std::getenv("LV_GPU_SETUP_PARALLEL_COPY");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return (!value || value[0] != '0') && gpu::enabled(execution);
 #else
             return false;
 #endif
         }
 
-        bool sharedSetupStateEnabled(bool requested)
+        bool sharedSetupStateEnabled(ExecutionContext& execution, bool requested)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             const char* value = std::getenv("LV_GPU_SETUP_SHARED_STATE");
-            return requested && (!value || value[0] != '0') && gpu::enabled();
+            return requested && (!value || value[0] != '0') && gpu::enabled(execution);
 #else
             (void)requested;
             return false;
@@ -4270,7 +4266,7 @@ namespace osuCrypto::LogVole
             const ShrinkExpandSenderState& source,
             ShrinkExpandSenderState& destination)
         {
-            HostStep setupStep("setup sender: reusable state copy");
+            HostStep setupStep(executionContext(source), "setup sender: reusable state copy");
             if (source.mSharedHostState)
             {
                 ShrinkExpandSenderState next{};
@@ -4280,7 +4276,7 @@ namespace osuCrypto::LogVole
                 destination = std::move(next);
                 return true;
             }
-            if (!setupParallelCopyEnabled())
+            if (!setupParallelCopyEnabled(executionContext(source)))
             {
                 destination = source;
                 return true;
@@ -4302,7 +4298,7 @@ namespace osuCrypto::LogVole
             const ShrinkExpandReceiverState& source,
             ShrinkExpandReceiverState& destination)
         {
-            HostStep setupStep("setup receiver: reusable state copy");
+            HostStep setupStep(executionContext(source), "setup receiver: reusable state copy");
             if (source.mSharedHostState)
             {
                 ShrinkExpandReceiverState next{};
@@ -4311,7 +4307,7 @@ namespace osuCrypto::LogVole
                 destination = std::move(next);
                 return true;
             }
-            if (!setupParallelCopyEnabled())
+            if (!setupParallelCopyEnabled(executionContext(source)))
             {
                 destination = source;
                 return true;
@@ -4370,15 +4366,14 @@ namespace osuCrypto::LogVole
             const std::vector<RnsPoly>& hostCoefficients() const override
             {
                 std::call_once(mOnce, [&] {
-                    if (currentProtocolCacheScope().mRole ==
+                    if (executionContext(mCtx).mScope.mRole ==
                             ProtocolCacheRole::Receiver)
                         throw std::runtime_error(
                             "receiver cannot materialize sender seed-label state");
-                    HostStep step("setup sender: seed-label explicit host view");
-                    if (mDevice && gpu::enabled())
+                    HostStep step(executionContext(mCtx), "setup sender: seed-label explicit host view");
+                    if (mDevice && gpu::enabled(executionContext(mCtx)))
                     {
-                        ScopedProtocolCacheScope ownerScope(
-                            ProtocolCacheRole::Sender, mOwnerRunId);
+
                         std::vector<RnsPoly> exact;
                         if (gpu::setupSeedLabelRepBatchMatches(mCtx,
                                 *mDevice, count(), mOwnerRunId) &&
@@ -4429,7 +4424,7 @@ namespace osuCrypto::LogVole
             if (!makeRingNttContext(top.mParams.mRing, ctx) ||
                 !gpu::topSecretUniformBatchMatches(ctx, *top.mTopSk1Device,
                     top.mParams.mTau, top.mTopSk1OwnerRunId)) return false;
-            HostStep step("setup sender: top sk1 final public host view");
+            HostStep step(executionContext(state), "setup sender: top sk1 final public host view");
             if (!gpu::download(*top.mTopSk1Device, exact, top.mParams.mTau) ||
                 !validateRingBatchShape(exact, ctx.mParams))
             {
@@ -4472,24 +4467,27 @@ namespace osuCrypto::LogVole
             const ShrinkExpandSenderState* reusableInternalState,
             bool encodeTransportMessages)
         {
+            auto sessionParams = input.mParams;
+            bindExecutionRole(sessionParams.mShrinkExpand.mRing, ProtocolCacheRole::Sender);
+
             u32 tauHi = 0;
             u32 muHi = 0;
-            const u32 rho = static_cast<u32>(input.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            const u32 rho = static_cast<u32>(sessionParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
             const bool internalWrappedDelta = input.mSk1.empty() &&
                 input.mWrappedDeltaDevice && input.mWrappedDeltaHostFallback &&
                 input.mUseGpuResidentInternalState && isTopLevel &&
-                encodeTransportMessages && input.mParams.mGamma == 1u;
+                encodeTransportMessages && sessionParams.mGamma == 1u;
             const bool internalTopSecret = input.mSk1.empty() &&
                 input.mTopSk1Device && input.mLazyTopSk1 &&
                 input.mUseGpuResidentInternalState && !isTopLevel &&
                 encodeTransportMessages &&
-                input.mParams.mShrinkExpand.mTau >= 2u &&
-                input.mParams.mGamma == input.mParams.mShrinkExpand.mTau - 1u;
-            if (!computeTauHi(input.mParams, tauHi) ||
-                !computeMuHi(input.mParams, muHi) ||
+                sessionParams.mShrinkExpand.mTau >= 2u &&
+                sessionParams.mGamma == sessionParams.mShrinkExpand.mTau - 1u;
+            if (!computeTauHi(sessionParams, tauHi) ||
+                !computeMuHi(sessionParams, muHi) ||
                 (!internalWrappedDelta && !internalTopSecret && input.mSk1.empty()) ||
                 (!input.mSk1.empty() && !validateRingBatchShape(input.mSk1,
-                    input.mParams.mShrinkExpand.mRing)) ||
+                    sessionParams.mShrinkExpand.mRing)) ||
                 (input.mWrappedDeltaDevice && !internalWrappedDelta) ||
                 (input.mTopSk1Device && !internalTopSecret) ||
                 (input.mLazyTopSk1 && !internalTopSecret))
@@ -4500,19 +4498,19 @@ namespace osuCrypto::LogVole
             std::vector<RnsPoly> eagerSk1 = input.mSk1;
             std::shared_ptr<gpu::DeviceBatch> residentS;
             std::shared_ptr<const LazySeedLabelHostState> lazyS;
-            const u64 deltaOwnerRunId = currentProtocolCacheScope().mRunId;
+            const u64 deltaOwnerRunId = executionContext(sessionParams).mScope.mRunId;
 #if defined(ENABLE_LOGVOLE_CUDA)
             RingNttContext deltaCtx{};
             const char* chainOption = std::getenv("LV_GPU_SETUP_DELTA_CHAIN_DEVICE");
             const char* chainDecline = std::getenv("LV_GPU_SETUP_DELTA_CHAIN_FORCE_DECLINE");
             const char* chainStrictOption = std::getenv("LV_GPU_SETUP_DELTA_CHAIN_STRICT");
-            const bool chainRequested = internalWrappedDelta && gpu::enabled() &&
+            const bool chainRequested = internalWrappedDelta && gpu::enabled(executionContext(sessionParams)) &&
                 (!chainOption || chainOption[0] != '0');
             const bool chainStrict = chainRequested && chainStrictOption &&
                 chainStrictOption[0] == '1';
             if (internalWrappedDelta)
             {
-                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing,
+                if (!makeRingNttContext(sessionParams.mShrinkExpand.mRing,
                         deltaCtx) ||
                     !gpu::setupDeltaBatchMatches(deltaCtx,
                         *input.mWrappedDeltaDevice, 1u, deltaOwnerRunId))
@@ -4520,7 +4518,7 @@ namespace osuCrypto::LogVole
             }
             if (internalTopSecret)
             {
-                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing,
+                if (!makeRingNttContext(sessionParams.mShrinkExpand.mRing,
                         deltaCtx) ||
                     input.mSenderOwnerRunId != deltaOwnerRunId ||
                     input.mLazyTopSk1->count() != tauHi ||
@@ -4531,14 +4529,14 @@ namespace osuCrypto::LogVole
                 const char* topRepOption = std::getenv("LV_GPU_SETUP_TOP_SK1_REP_DEVICE");
                 const char* topRepDecline = std::getenv("LV_GPU_SETUP_TOP_SK1_REP_FORCE_DECLINE");
                 const char* topStrict = std::getenv("LV_GPU_SETUP_TOP_SK1_CONSUMER_STRICT");
-                const bool topRepRequested = gpu::enabled() &&
+                const bool topRepRequested = gpu::enabled(executionContext(sessionParams)) &&
                     (!topRepOption || topRepOption[0] != '0');
                 if (topRepRequested && (!topRepDecline || topRepDecline[0] != '1'))
                     residentS = gpu::topSecretSeedLabelRepResident(deltaCtx,
                         *input.mTopSk1Device,
-                        input.mParams.mShrinkExpand.mAlpha, tauHi);
+                        sessionParams.mShrinkExpand.mAlpha, tauHi);
                 const std::size_t expected = static_cast<std::size_t>(
-                    input.mParams.mShrinkExpand.mAlpha) * tauHi * rho;
+                    sessionParams.mShrinkExpand.mAlpha) * tauHi * rho;
                 if (residentS && !gpu::setupSeedLabelRepBatchMatches(deltaCtx,
                         *residentS, expected, deltaOwnerRunId)) return false;
                 if (!residentS && topRepRequested && topStrict && topStrict[0] != '0')
@@ -4546,17 +4544,17 @@ namespace osuCrypto::LogVole
                 if (residentS)
                     lazyS = std::make_shared<ReplicatedTopSecretHostState>(
                         deltaCtx, residentS, input.mLazyTopSk1,
-                        input.mParams.mShrinkExpand.mAlpha, tauHi,
+                        sessionParams.mShrinkExpand.mAlpha, tauHi,
                         deltaOwnerRunId, false);
             }
             if (chainRequested && (!chainDecline || chainDecline[0] != '1'))
             {
                 residentS = gpu::seedLabelRepResident(deltaCtx,
-                    *input.mWrappedDeltaDevice, input.mParams.mGamma,
-                    input.mParams.mShrinkExpand.mAlpha,
+                    *input.mWrappedDeltaDevice, sessionParams.mGamma,
+                    sessionParams.mShrinkExpand.mAlpha,
                     tauHi);
                 const std::size_t expected = static_cast<std::size_t>(
-                    input.mParams.mShrinkExpand.mAlpha) *
+                    sessionParams.mShrinkExpand.mAlpha) *
                     tauHi * rho;
                 if (residentS && !gpu::setupSeedLabelRepBatchMatches(
                         deltaCtx, *residentS, expected, deltaOwnerRunId))
@@ -4564,8 +4562,8 @@ namespace osuCrypto::LogVole
                 if (chainStrict && !residentS) return false;
                 if (residentS)
                     lazyS = std::make_shared<ResidentSeedLabelHostState>(
-                        deltaCtx, residentS, input.mParams.mGamma,
-                        input.mParams.mShrinkExpand.mAlpha,
+                        deltaCtx, residentS, sessionParams.mGamma,
+                        sessionParams.mShrinkExpand.mAlpha,
                         tauHi, deltaOwnerRunId,
                         input.mWrappedDeltaHostFallback);
             }
@@ -4574,10 +4572,10 @@ namespace osuCrypto::LogVole
 #endif
 
             const RecursiveMode mode =
-                evalRecursiveMode(input.mParams.mW, input.mParams.mShrinkExpand.mAlpha, tauHi, rho);
+                evalRecursiveMode(sessionParams.mW, sessionParams.mShrinkExpand.mAlpha, tauHi, rho);
 
             ShrinkExpandParams seParams{};
-            if (!makeTruncShrinkExpandParams(input.mParams, input.mLeafInputsAreGadget, seParams))
+            if (!makeTruncShrinkExpandParams(sessionParams, input.mLeafInputsAreGadget, seParams))
             {
                 return false;
             }
@@ -4612,13 +4610,13 @@ namespace osuCrypto::LogVole
                         if (!input.mWrappedDeltaHostFallback ||
                             !input.mWrappedDeltaHostFallback(replay) ||
                             !validateRingPolyShape(replay,
-                                input.mParams.mShrinkExpand.mRing)) return false;
+                                sessionParams.mShrinkExpand.mRing)) return false;
                         eagerSk1.push_back(std::move(replay));
                     }
                     if (!seedLabelRepOfflineSenderInput(
-                            eagerSk1, input.mParams.mGamma,
-                            input.mParams.mShrinkExpand.mAlpha, tauHi,
-                            input.mParams.mShrinkExpand.mRing, sRep)) return false;
+                            eagerSk1, sessionParams.mGamma,
+                            sessionParams.mShrinkExpand.mAlpha, tauHi,
+                            sessionParams.mShrinkExpand.mRing, sRep)) return false;
                 }
 
                 ShrinkExpandSenderOfflineInput seInput{};
@@ -4662,7 +4660,7 @@ namespace osuCrypto::LogVole
                 // mSk1 is an eager mutable field of the public CI-VOLE state.
                 // Publish its one exact host polynomial only after the sender
                 // device has completed seed-label repetition and LENC.
-                HostStep hostStep("setup sender: wrapped delta public host view");
+                HostStep hostStep(executionContext(sessionParams), "setup sender: wrapped delta public host view");
                 std::vector<RnsPoly> exact;
                 if (gpu::setupDeltaBatchMatches(deltaCtx,
                         *input.mWrappedDeltaDevice, 1u, deltaOwnerRunId) &&
@@ -4683,7 +4681,7 @@ namespace osuCrypto::LogVole
             }
 #endif
             SenderState nextState{};
-            nextState.mParams = input.mParams;
+            nextState.mParams = sessionParams;
             nextState.mSk1 = std::move(eagerSk1);
             nextState.mShrinkExpandState = std::move(seState);
             if (reusableInternalState == nullptr && !isTopLevel)
@@ -4692,7 +4690,7 @@ namespace osuCrypto::LogVole
                 if (mode != RecursiveMode::Root)
                     (void)gpu::prepareReusableSenderCache(nextState.mShrinkExpandState);
 #endif
-                if (sharedSetupStateEnabled(input.mUseGpuResidentInternalState) &&
+                if (sharedSetupStateEnabled(executionContext(sessionParams), input.mUseGpuResidentInternalState) &&
                     nextState.mShrinkExpandState.mGpuCache)
                     shareCompletedSetupState(nextState.mShrinkExpandState);
                 childReusableState = &nextState.mShrinkExpandState;
@@ -4700,7 +4698,7 @@ namespace osuCrypto::LogVole
 
             if (mode == RecursiveMode::Root)
             {
-                if (!validRootWidth(input.mParams.mW, muHi) ||
+                if (!validRootWidth(sessionParams.mW, muHi) ||
                     !prepareRootOfflineSender(nextState, prng, nextMessage.mRootMessage, encodeTransportMessages))
                 {
                     return false;
@@ -4709,7 +4707,7 @@ namespace osuCrypto::LogVole
             else
             {
                 Params childParams{};
-                if (!makeChildParams(input.mParams, childParams))
+                if (!makeChildParams(sessionParams, childParams))
                 {
                     return false;
                 }
@@ -4754,20 +4752,23 @@ namespace osuCrypto::LogVole
             bool isTopLevel,
             const ShrinkExpandReceiverState* reusableInternalState)
         {
+            auto sessionParams = input.mParams;
+            bindExecutionRole(sessionParams.mShrinkExpand.mRing, ProtocolCacheRole::Receiver);
+
             u32 tauHi = 0;
             u32 muHi = 0;
-            const u32 rho = static_cast<u32>(input.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
-            if (!computeTauHi(input.mParams, tauHi) ||
-                !computeMuHi(input.mParams, muHi))
+            const u32 rho = static_cast<u32>(sessionParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            if (!computeTauHi(sessionParams, tauHi) ||
+                !computeMuHi(sessionParams, muHi))
             {
                 return false;
             }
 
             const RecursiveMode mode =
-                evalRecursiveMode(input.mParams.mW, input.mParams.mShrinkExpand.mAlpha, tauHi, rho);
+                evalRecursiveMode(sessionParams.mW, sessionParams.mShrinkExpand.mAlpha, tauHi, rho);
 
             ShrinkExpandParams seParams{};
-            if (!makeTruncShrinkExpandParams(input.mParams, input.mLeafInputsAreGadget, seParams))
+            if (!makeTruncShrinkExpandParams(sessionParams, input.mLeafInputsAreGadget, seParams))
             {
                 return false;
             }
@@ -4801,7 +4802,7 @@ namespace osuCrypto::LogVole
             }
 
             ReceiverState nextState{};
-            nextState.mParams = input.mParams;
+            nextState.mParams = sessionParams;
             nextState.mShrinkExpandState = std::move(seState);
             if (reusableInternalState == nullptr && !isTopLevel)
             {
@@ -4813,7 +4814,7 @@ namespace osuCrypto::LogVole
                 if (mode != RecursiveMode::Root)
                     (void)gpu::prepareReusableReceiverCache(nextState.mShrinkExpandState);
 #endif
-                if (sharedSetupStateEnabled(input.mUseGpuResidentInternalState) &&
+                if (sharedSetupStateEnabled(executionContext(sessionParams), input.mUseGpuResidentInternalState) &&
                     nextState.mShrinkExpandState.mGpuCache)
                     shareCompletedSetupState(nextState.mShrinkExpandState);
                 childReusableState = &nextState.mShrinkExpandState;
@@ -4821,7 +4822,7 @@ namespace osuCrypto::LogVole
 
             if (mode == RecursiveMode::Root)
             {
-                if (!validRootWidth(input.mParams.mW, muHi) ||
+                if (!validRootWidth(sessionParams.mW, muHi) ||
                     !finalizeRootOfflineReceiver(nextState, std::forward<Message>(message).mRootMessage))
                 {
                     return false;
@@ -4830,7 +4831,7 @@ namespace osuCrypto::LogVole
             else
             {
                 Params childParams{};
-                if (!message.mNextLevel || !makeChildParams(input.mParams, childParams))
+                if (!message.mNextLevel || !makeChildParams(sessionParams, childParams))
                 {
                     return false;
                 }
@@ -4875,12 +4876,12 @@ namespace osuCrypto::LogVole
 
     bool materializeSenderTopSk1HostViews(SenderState& state)
     {
-        if (currentProtocolCacheScope().mRole == ProtocolCacheRole::Receiver)
+        if (executionContext(state).mScope.mRole == ProtocolCacheRole::Receiver)
             return false;
         if (!state.mShrinkExpandState.mTopSk1Device) return true;
         const u64 runId = state.mShrinkExpandState.mTopSk1OwnerRunId;
         if (!runId) return false;
-        ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, runId);
+
         return materializeTopSk1HostViewsImpl(state);
     }
 
@@ -4892,10 +4893,9 @@ namespace osuCrypto::LogVole
         bool directEncoding = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         {
-            ScopedProtocolCacheScope senderScope(
-                ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+
             const char* setting = std::getenv("LV_GPU_SETUP_DIRECT_WIRE");
-            directEncoding = input.mUseGpuResidentInternalState && gpu::enabled() &&
+            directEncoding = input.mUseGpuResidentInternalState && gpu::enabled(executionContext(input.mParams)) &&
                 (!setting || setting[0] != '0');
         }
 #endif
@@ -5093,7 +5093,7 @@ namespace osuCrypto::LogVole
         // Ask for the key on the device only when the expand below can take it there,
         // which is exactly when the shrink left its digest tree on the device.
         std::shared_ptr<void>* keyDevSlot =
-            (gpu::enabled() && digestState.mGpuSession) ? &receiverKeyDevice : nullptr;
+            (gpu::enabled(executionContext(state)) && digestState.mGpuSession) ? &receiverKeyDevice : nullptr;
 #else
         std::shared_ptr<void>* keyDevSlot = nullptr;
 #endif
@@ -5163,7 +5163,7 @@ namespace osuCrypto::LogVole
             // coroutine suspends on the socket between the digest and the response,
             // and threadStream() is keyed on the thread, so stream ordering alone
             // does not guarantee the expand has landed. One drain per query.
-            if (!gpu::syncStream())
+            if (!gpu::syncStream(executionContext(state)))
             {
                 return false;
             }
@@ -5335,11 +5335,11 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         // The whole chain below as one kernel sequence. Only worth taking when the
         // caller can consume the key on the device, which the device expand can.
-        if (rootKeyDevice && gpu::enabled() && digestState.mLeftTreeGpu &&
+        if (rootKeyDevice && gpu::enabled(executionContext(state)) && digestState.mLeftTreeGpu &&
             (!digestState.mTopInputsNtt.empty() || digestState.mTopInputsNttGpu) &&
             prepareSkPrime())
         {
-            RootStep step("final: device chain");
+            RootStep step(executionContext(state), "final: device chain");
             gpu::DeviceBatchPtr keyDev;
             const auto topDev =
                 std::static_pointer_cast<gpu::DeviceBatch>(digestState.mTopInputsNttGpu);
@@ -5402,7 +5402,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>* hostZeta = &digestState.mZeta;
         if (hostZeta->empty() && !digestState.mZetaTaskSeeds.empty())
         {
-            RootStep step("final: replay root zeta fallback");
+            RootStep step(executionContext(state), "final: replay root zeta fallback");
             if (!sampleRootZetaFromTaskSeeds(
                     ctx,
                     state.mRootRandomizerWidth,
@@ -5439,11 +5439,11 @@ namespace osuCrypto::LogVole
             return false;
         }
         {
-            RootStep step("final: lheApplyCt1Trunc");
+            RootStep step(executionContext(state), "final: lheApplyCt1Trunc");
             const RingTensor* ctRView = &state.mRootCtRRt;
             if (state.mRootCtRWire)
             {
-                HostStep phase("setup root: CtR host fallback");
+                HostStep phase(executionContext(state), "setup root: CtR host fallback");
                 ctRView = &state.mRootCtRWire->get();
             }
             if (!lheApplyCt1Trunc(
@@ -5460,7 +5460,7 @@ namespace osuCrypto::LogVole
             }
         }
         {
-            RootStep step("final: lheDec");
+            RootStep step(executionContext(state), "final: lheDec");
             if (!lheDec(
                     ctx,
                     ctRApplied,
@@ -5475,7 +5475,7 @@ namespace osuCrypto::LogVole
             }
         }
         {
-            RootStep step("final: evalRootTopCtNtt");
+            RootStep step(executionContext(state), "final: evalRootTopCtNtt");
             if (!evalRootTopCtNtt(
                     state, ctx, digestState.mYLeft, *hostZeta, *hostTopInputs,
                     topEvalNtt))
@@ -5484,7 +5484,7 @@ namespace osuCrypto::LogVole
             }
         }
         {
-            RootStep step("final: lencEvalTrunc");
+            RootStep step(executionContext(state), "final: lencEvalTrunc");
             // Reuse the tree the digest step built over the same hatD, when it kept
             // it. The overload without a tree rebuilds it, which is the single
             // largest host cost in the Root and is pure duplicate work.
@@ -5519,7 +5519,7 @@ namespace osuCrypto::LogVole
             }
         }
         {
-            RootStep step("final: buildHashedCt2");
+            RootStep step(executionContext(state), "final: buildHashedCt2");
             if (!buildHashedCt2(
                     ctx,
                     leftWidth,
@@ -5549,7 +5549,7 @@ namespace osuCrypto::LogVole
         // is the same one, only the dispatch granularity changes.
         std::vector<RnsPoly> tbmVec(leftWidth);
         {
-            RootStep step("final: row combine");
+            RootStep step(executionContext(state), "final: row combine");
             for (u32 row = 0; row < leftWidth; ++row)
             {
                 RnsPoly phiNtt = std::move(topEvalNtt[row]);
@@ -5564,7 +5564,7 @@ namespace osuCrypto::LogVole
         }
 
         {
-            RootStep step("final: inverseNttBatch");
+            RootStep step(executionContext(state), "final: inverseNttBatch");
             if (!inverseNttBatch(tbmVec, ctx))
             {
                 return false;
@@ -5572,7 +5572,7 @@ namespace osuCrypto::LogVole
         }
 
         {
-            RootStep step("final: add ctK");
+            RootStep step(executionContext(state), "final: add ctK");
             for (u32 row = 0; row < leftWidth; ++row)
             {
                 if (!ringAddInplace(tbmVec[row], ctK[row], ctx))
@@ -5583,7 +5583,7 @@ namespace osuCrypto::LogVole
         }
 
         state.mGoldenSeed = std::move(ct2Seed);
-        RootStep step("final: denoiseAndAgg");
+        RootStep step(executionContext(state), "final: denoiseAndAgg");
         return denoiseAndAggRootKey(ctx, tbmVec, tauHi, rootKey);
     }
 
@@ -5771,7 +5771,7 @@ namespace osuCrypto::LogVole
         }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled() && gpu::denoiseCombBatch(ctx, tbmPrime, out))
+        if (gpu::enabled(executionContext(ring)) && gpu::denoiseCombBatch(ctx, tbmPrime, out))
         {
             return true;
         }
@@ -5799,7 +5799,7 @@ namespace osuCrypto::LogVole
         const u32 mu = static_cast<u32>(alphaTau * rho);
 #if defined(ENABLE_LOGVOLE_CUDA)
         const char* device = std::getenv("LV_GPU_SETUP_SEED_LABEL_REP");
-        if ((!device || device[0] != '0') && gpu::enabled())
+        if ((!device || device[0] != '0') && gpu::enabled(executionContext(ring)))
         {
             RingNttContext ctx{};
             if (makeRingNttContext(ring, ctx) &&
@@ -5968,7 +5968,7 @@ namespace osuCrypto::LogVole
     bool validateLeafGoldenSeedCandidate(
         const Params& params, const std::vector<RnsPoly>& tbk, bool& out)
     {
-        HostStep validationStep("cpu sender detail: golden validation");
+        HostStep validationStep(executionContext(params), "cpu sender detail: golden validation");
         if (!params.mW || tbk.size() != params.mW ||
             !validateRingBatchShape(tbk, params.mShrinkExpand.mRing)) return false;
         RingNttContext ctx{};
@@ -5983,7 +5983,7 @@ namespace osuCrypto::LogVole
                     if (!checkRoundingPolynomial(ctx, constants, tbk[i], ok)) return false;
                     if (!ok) accepted.store(false, std::memory_order_relaxed);
                     return true;
-                })) return false;
+                }, false, &(executionContext(params)))) return false;
         out = accepted.load(std::memory_order_relaxed);
         return true;
     }
@@ -6041,7 +6041,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& tbkPerSampledPoly,
         bool& out)
     {
-        HostStep validationStep("cpu sender detail: golden validation");
+        HostStep validationStep(executionContext(params), "cpu sender detail: golden validation");
         if (!validateRingBatchShape(tbkPerSampledPoly, params.mShrinkExpand.mRing))
         {
             return false;
@@ -6088,7 +6088,7 @@ namespace osuCrypto::LogVole
                 }
                 if (!accepted) ok.store(false, std::memory_order_relaxed);
                 return true;
-            });
+            }, false, &(executionContext(params)));
 
         if (!ran || shapeError.load())
         {

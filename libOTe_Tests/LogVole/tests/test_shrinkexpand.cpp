@@ -213,9 +213,12 @@ namespace
 
     bool run_relation(bool trunc)
     {
-        const auto params = make_params(trunc);
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+        const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(trunc), testExecution);
         RingNttContext ctx{};
-        if (!makeRingNttContext(params.mRing, ctx))
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        if (!::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx))
         {
             return false;
         }
@@ -226,6 +229,7 @@ namespace
         const auto tbkPrime = sample_scalar(ctx, trunc ? 0x4401u : 0x4400u);
 
         ShrinkExpandSenderOfflineInput senderInput{};
+        ::tests_libOTe::logvole_test::bindExecution(senderInput, testExecution);
         senderInput.mParams = params;
         senderInput.mS = s;
         senderInput.mFixedSk1 = sk1;
@@ -238,6 +242,7 @@ namespace
         }
 
         ShrinkExpandReceiverOfflineInput receiverInput{};
+        ::tests_libOTe::logvole_test::bindExecution(receiverInput, testExecution);
         receiverInput.mParams = params;
 
         ShrinkExpandReceiverState receiverState{};
@@ -340,7 +345,9 @@ namespace
 
 void LogVole_ShrinkExpandCore_ParamsValidation(const oc::CLP&)
 {
-    auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     LOGVOLE_REQUIRE_TRUE(validateShrinkExpandParams(params));
 
     params.mPlaintextModulusBits = 0;
@@ -349,11 +356,15 @@ void LogVole_ShrinkExpandCore_ParamsValidation(const oc::CLP&)
 
 void LogVole_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     ShrinkExpandSenderOfflineInput senderInput{};
+    ::tests_libOTe::logvole_test::bindExecution(senderInput, testExecution);
     senderInput.mParams = params;
     senderInput.mS = sample_batch(ctx, params.mMu, 0x6600u);
     senderInput.mFixedSk1 = sample_batch(ctx, params.mTau, 0x7700u);
@@ -370,6 +381,7 @@ void LogVole_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(senderState.mLacct.mWidthPadded, 4u);
 
     ShrinkExpandReceiverOfflineInput receiverInput{};
+    ::tests_libOTe::logvole_test::bindExecution(receiverInput, testExecution);
     receiverInput.mParams = params;
 
     ShrinkExpandReceiverState receiverState{};
@@ -380,21 +392,29 @@ void LogVole_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
 
 void LogVole_ShrinkExpandCore_DeterministicRelationExact(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     LOGVOLE_REQUIRE_TRUE(run_relation(false));
 }
 
 void LogVole_ShrinkExpandCore_TruncDeterministicRelationBounded(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     LOGVOLE_REQUIRE_TRUE(run_relation(true));
 }
 
 void LogVole_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
 {
-    auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     ShrinkExpandSenderOfflineInput senderInput{};
+    ::tests_libOTe::logvole_test::bindExecution(senderInput, testExecution);
     senderInput.mParams = params;
     senderInput.mS = sample_batch(ctx, params.mMu, 0x8800u);
     senderInput.mFixedSk1 = sample_batch(ctx, params.mTau, 0x9900u);
@@ -404,6 +424,7 @@ void LogVole_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, prng, senderState));
 
     ShrinkExpandReceiverOfflineInput receiverInput{};
+    ::tests_libOTe::logvole_test::bindExecution(receiverInput, testExecution);
     receiverInput.mParams = params;
     receiverInput.mParams.mTau += 1;
 
@@ -413,12 +434,15 @@ void LogVole_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
 
 void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     constexpr std::uint64_t seedX = 0x8888;
     constexpr std::uint64_t seedNoise = 0x9999;
 
-    const auto params = make_full_noise_params();
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_full_noise_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     const std::size_t n = params.mRing.mPolyModulusDegree;
     const std::size_t rho = params.mRing.mCoeffModulusBits.size();
@@ -492,11 +516,15 @@ void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
 
 void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
 {
-    auto params = make_full_noise_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    auto params = ::tests_libOTe::logvole_test::withExecution(make_full_noise_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     ShrinkExpandSenderOfflineInput senderInput{};
+    ::tests_libOTe::logvole_test::bindExecution(senderInput, testExecution);
     senderInput.mParams = params;
     senderInput.mS = sample_batch(ctx, params.mMu, 0x5001u);
 
@@ -505,6 +533,7 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, offlinePrng, senderState));
 
     ShrinkExpandReceiverOfflineInput receiverInput{};
+    ::tests_libOTe::logvole_test::bindExecution(receiverInput, testExecution);
     receiverInput.mParams = params;
     ShrinkExpandReceiverState receiverState{};
     LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(receiverInput, senderState, receiverState));

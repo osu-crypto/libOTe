@@ -1,13 +1,16 @@
 #pragma once
 
 // Optional diagnostics used by the CPU benchmark. Normal library callers leave
-// the thread-local context null, so their scheduling policy is unchanged.
+// an explicit context null. Diagnostics never install thread state.
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
 
 #if defined(__linux__)
 #include <sched.h>
@@ -27,6 +30,29 @@ namespace osuCrypto::LogVole
         std::atomic<std::size_t> mActiveTaskThreads{0};
         std::atomic<std::size_t> mPeakTaskThreads{0};
         std::array<std::atomic<std::uint64_t>, 16> mObservedCpus{};
+
+        std::mutex mTaskMutex;
+        std::unordered_map<std::thread::id, std::size_t> mTaskDepths;
+
+        void enterTask()
+        {
+            std::lock_guard lock(mTaskMutex);
+            if (mTaskDepths[std::this_thread::get_id()]++ != 0) return;
+            const auto active = mActiveTaskThreads.fetch_add(1) + 1;
+            auto peak = mPeakTaskThreads.load();
+            while (active > peak && !mPeakTaskThreads.compare_exchange_weak(peak, active)) {}
+        }
+
+        void leaveTask()
+        {
+            std::lock_guard lock(mTaskMutex);
+            auto it = mTaskDepths.find(std::this_thread::get_id());
+            if (it != mTaskDepths.end() && --it->second == 0)
+            {
+                mTaskDepths.erase(it);
+                mActiveTaskThreads.fetch_sub(1);
+            }
+        }
 
         void reset()
         {
@@ -55,26 +81,17 @@ namespace osuCrypto::LogVole
         }
     };
 
-    inline thread_local CpuBenchmarkContext* tCpuBenchmarkContext = nullptr;
-    inline thread_local bool tCpuBenchmarkIsWorker = false;
-    inline thread_local std::size_t tCpuBenchmarkTaskDepth = 0;
-
-    // Counts distinct threads inside task bodies, without counting nested
-    // serial regions twice. CPU clocks separately establish actual CPU use.
     class CpuBenchmarkTaskScope
     {
     public:
-        CpuBenchmarkTaskScope() : mContext(tCpuBenchmarkContext)
+        explicit CpuBenchmarkTaskScope(CpuBenchmarkContext* context = nullptr) : mContext(context)
         {
-            if (!mContext || tCpuBenchmarkTaskDepth++ != 0) return;
-            const auto active = mContext->mActiveTaskThreads.fetch_add(1) + 1;
-            auto peak = mContext->mPeakTaskThreads.load();
-            while (active > peak && !mContext->mPeakTaskThreads.compare_exchange_weak(peak, active)) {}
+            if (!mContext) return;
+            mContext->enterTask();
         }
         ~CpuBenchmarkTaskScope()
         {
-            if (mContext && --tCpuBenchmarkTaskDepth == 0)
-                mContext->mActiveTaskThreads.fetch_sub(1);
+            if (mContext) mContext->leaveTask();
         }
     private:
         CpuBenchmarkContext* mContext;
@@ -96,10 +113,8 @@ namespace osuCrypto::LogVole
     {
     public:
         explicit CpuBenchmarkWorkerScope(CpuBenchmarkContext* context)
-            : mPrevious(tCpuBenchmarkContext), mContext(context), mPreviousIsWorker(tCpuBenchmarkIsWorker)
+            : mContext(context)
         {
-            tCpuBenchmarkContext = context;
-            tCpuBenchmarkIsWorker = true;
             if (mContext)
             {
                 mContext->checkThread();
@@ -113,13 +128,9 @@ namespace osuCrypto::LogVole
                 mContext->mWorkerCpuNs.fetch_add(cpuBenchmarkThreadNs() - mStart);
                 mContext->checkThread();
             }
-            tCpuBenchmarkContext = mPrevious;
-            tCpuBenchmarkIsWorker = mPreviousIsWorker;
         }
     private:
-        CpuBenchmarkContext* mPrevious;
         CpuBenchmarkContext* mContext;
-        bool mPreviousIsWorker;
         std::uint64_t mStart = 0;
     };
 }

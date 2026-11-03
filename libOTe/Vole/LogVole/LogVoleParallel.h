@@ -18,32 +18,44 @@
 
 namespace osuCrypto::LogVole::detail
 {
-    inline std::size_t hardwareWorkerSlots()
+    inline std::size_t hardwareWorkerSlots(CpuBenchmarkContext* benchmarkContext = nullptr)
     {
-        if (tCpuBenchmarkContext) return tCpuBenchmarkContext->mWorkerLimit
-            ? std::min(tCpuBenchmarkContext->mWorkerLimit, tCpuBenchmarkContext->mCpus.size())
-            : tCpuBenchmarkContext->mCpus.size();
+        if (benchmarkContext) return benchmarkContext->mWorkerLimit
+            ? std::min(benchmarkContext->mWorkerLimit, benchmarkContext->mCpus.size())
+            : benchmarkContext->mCpus.size();
         const auto hw = static_cast<std::size_t>(std::thread::hardware_concurrency());
         return hw == 0 ? 1 : hw;
     }
 
-    inline std::atomic<std::size_t> gParallelWorkerSlotsInUse{ 0 };
-    inline thread_local std::size_t tParallelWorkerCap = 0;
+    struct ParallelWorkerBudget
+    {
+        std::atomic<std::size_t> mSlotsInUse{0};
+    };
 
     class ParallelWorkerSlotGuard
     {
     public:
-        explicit ParallelWorkerSlotGuard(std::size_t requestedWorkers)
+        explicit ParallelWorkerSlotGuard(std::size_t requestedWorkers, CpuBenchmarkContext* benchmarkContext = nullptr,
+            ExecutionContext* execution = nullptr)
         {
-            mCounter = tCpuBenchmarkContext
-                ? &tCpuBenchmarkContext->mWorkerSlots : &gParallelWorkerSlotsInUse;
+            // Ordinary calls own their worker budget. Contention with an
+            // unrelated session must not change the number of workers granted.
+            // Benchmark callers can explicitly share their own accounting.
+            if (!benchmarkContext && !execution)
+            {
+                mGrantedWorkers = std::max<std::size_t>(1,
+                    std::min(requestedWorkers, hardwareWorkerSlots(benchmarkContext)));
+                return;
+            }
+            mCounter = benchmarkContext ? &benchmarkContext->mWorkerSlots
+                : &execution->resources<ParallelWorkerBudget>().mSlotsInUse;
             mGrantedWorkers = 1;
             if (requestedWorkers <= 1)
             {
                 return;
             }
 
-            const std::size_t maxSlots = hardwareWorkerSlots();
+            const std::size_t maxSlots = hardwareWorkerSlots(benchmarkContext);
             while (true)
             {
                 std::size_t used = mCounter->load(std::memory_order_acquire);
@@ -89,39 +101,6 @@ namespace osuCrypto::LogVole::detail
         std::size_t mReservedWorkers = 0;
     };
 
-    class ParallelWorkerCapScope
-    {
-    public:
-        explicit ParallelWorkerCapScope(std::size_t workerCap)
-            : mPreviousCap(tParallelWorkerCap)
-        {
-            if (workerCap == 0)
-            {
-                return;
-            }
-
-            if (mPreviousCap == 0)
-            {
-                tParallelWorkerCap = workerCap;
-            }
-            else
-            {
-                tParallelWorkerCap = std::min(mPreviousCap, workerCap);
-            }
-        }
-
-        ParallelWorkerCapScope(const ParallelWorkerCapScope&) = delete;
-        ParallelWorkerCapScope& operator=(const ParallelWorkerCapScope&) = delete;
-
-        ~ParallelWorkerCapScope()
-        {
-            tParallelWorkerCap = mPreviousCap;
-        }
-
-    private:
-        std::size_t mPreviousCap = 0;
-    };
-
     inline std::size_t resolveWorkerCount(u32 requestedWorkers, std::size_t taskCount)
     {
         if (taskCount <= 1)
@@ -138,11 +117,6 @@ namespace osuCrypto::LogVole::detail
         {
             workers = 1;
         }
-        if (tParallelWorkerCap != 0)
-        {
-            workers = std::min(workers, tParallelWorkerCap);
-        }
-
         return std::min(workers, taskCount);
     }
 
@@ -151,30 +125,30 @@ namespace osuCrypto::LogVole::detail
         macoro::thread_pool& pool,
         Worker& worker,
         std::size_t workerIdx,
-        ProtocolCacheScope cacheScope,
         CpuBenchmarkContext* benchmarkContext)
     {
         co_await pool.schedule();
-        ScopedProtocolCacheScope scopedCache(cacheScope);
+
         CpuBenchmarkWorkerScope benchmarkScope(benchmarkContext);
         worker(workerIdx);
     }
 
     template<typename TaskFn>
     bool runParallelTasks(std::size_t taskCount, u32 requestedWorkers, TaskFn&& taskFn,
-        bool dynamic = false)
+        bool dynamic = false, ExecutionContext* execution = nullptr)
     {
         if (taskCount == 0)
         {
             return true;
         }
 
+        auto* benchmarkContext = execution ? execution->mCpuBenchmark : nullptr;
         const std::size_t requested = resolveWorkerCount(requestedWorkers, taskCount);
-        ParallelWorkerSlotGuard slotGuard(requested);
+        ParallelWorkerSlotGuard slotGuard(requested, benchmarkContext, execution);
         const std::size_t workerCount = std::min(requested, slotGuard.grantedWorkers());
         if (workerCount <= 1)
         {
-            CpuBenchmarkTaskScope taskScope;
+            CpuBenchmarkTaskScope taskScope(benchmarkContext);
             for (std::size_t taskIdx = 0; taskIdx < taskCount; ++taskIdx)
             {
                 if (!taskFn(taskIdx))
@@ -185,14 +159,13 @@ namespace osuCrypto::LogVole::detail
             return true;
         }
 
-        ParallelWorkerCapScope capScope(workerCount);
         std::atomic<bool> failed{ false };
         std::atomic<std::size_t> nextTask{ 0 };
 
-        const ProtocolCacheScope cacheScope = currentProtocolCacheScope();
+
         auto worker = [&](std::size_t workerIdx) {
-            CpuBenchmarkTaskScope taskScope;
-            ScopedProtocolCacheScope scopedCache(cacheScope);
+            CpuBenchmarkTaskScope taskScope(benchmarkContext);
+
             if (dynamic)
             {
                 // Opt-in for tasks whose randomness and outputs are indexed by
@@ -233,7 +206,7 @@ namespace osuCrypto::LogVole::detail
         tasks.reserve(workerCount - 1);
         for (std::size_t i = 1; i < workerCount; ++i)
         {
-            tasks.push_back(runPoolWorker(pool, worker, i, cacheScope, tCpuBenchmarkContext) | macoro::make_eager());
+            tasks.push_back(runPoolWorker(pool, worker, i, benchmarkContext) | macoro::make_eager());
         }
 
         worker(0);

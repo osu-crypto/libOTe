@@ -49,7 +49,7 @@ namespace osuCrypto::LogVole::detail
     auto withCpuZkArithmetic(const seal::Modulus& mod, Fn&& fn)
     {
 #if defined(__SIZEOF_INT128__)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_ZK_PSEUDO_REDUCE");
             return !value || value[0] != '0';
         }();

@@ -49,9 +49,9 @@ namespace osuCrypto::LogVole::gpu
         const ReceiverFirstQueryAllocationsPtr& plan,
         bool& ready, bool& wrapSelected, bool& nodesSelected);
 
-    // Runtime switch. enabled() is false when no CUDA device is present.
-    void setEnabled(bool on);
-    bool enabled();
+    // Per-session selection. False when this owner has not requested CUDA or
+    // no CUDA device is available.
+    bool enabled(const ExecutionContext& execution);
     std::string deviceDescription();
 
     // Prepare the immutable receiver offline mirror before making exact state
@@ -74,12 +74,14 @@ namespace osuCrypto::LogVole::gpu
     // Sender counterpart: share only within one sender's exact setup copies,
     // before concurrent online use.
     bool prepareReusableSenderCache(ShrinkExpandSenderState& state);
-    bool lencRandomizerResidencyEnabled();
+    bool lencRandomizerResidencyEnabled(ExecutionContext& execution);
 
     // Device state that has to survive from a level's shrink to its expand.
     class LevelSession
     {
     public:
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
+        ExecutionContext& execution() const;
         LevelSession();
         ~LevelSession();
         LevelSession(const LevelSession&) = delete;
@@ -98,6 +100,8 @@ namespace osuCrypto::LogVole::gpu
     class DeviceBatch
     {
     public:
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
+        ExecutionContext& execution() const;
         DeviceBatch();
         ~DeviceBatch();
         DeviceBatch(const DeviceBatch&) = delete;
@@ -117,6 +121,8 @@ namespace osuCrypto::LogVole::gpu
     class RetainedPublicUniform
     {
     public:
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
+        ExecutionContext& execution() const;
         RetainedPublicUniform();
         ~RetainedPublicUniform();
         RetainedPublicUniform(const RetainedPublicUniform&) = delete;
@@ -127,7 +133,7 @@ namespace osuCrypto::LogVole::gpu
     };
     using RetainedPublicUniformPtr = std::shared_ptr<const RetainedPublicUniform>;
 
-    bool publicUniformRetentionEnabled();
+    bool publicUniformRetentionEnabled(ExecutionContext& execution);
     // Register only the original captured host allocations moved directly into
     // a const owner. They must not have been modified after sampling. A copied
     // vector cannot register; lookup requires its live immutable owner, exact
@@ -170,7 +176,7 @@ namespace osuCrypto::LogVole::gpu
         u64 mHostMaterializations = 0;
         u64 mHostMaterializedBytes = 0;
     };
-    PublicUniformRetentionStats publicUniformRetentionStats();
+    PublicUniformRetentionStats publicUniformRetentionStats(ExecutionContext& execution);
 
     // Repetition and RNS projection for sender setup. Publishes a complete
     // independent host snapshot only after the device work succeeds; input
@@ -188,13 +194,13 @@ namespace osuCrypto::LogVole::gpu
     bool setupSeedLabelRepBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount, u64 ownerRunId);
 
-    bool rootKPrimeSamplingEnabled();
+    bool rootKPrimeSamplingEnabled(ExecutionContext& execution);
     // Direct SEAL-seed replay. Publishes a coefficient-domain, synchronized
     // device polynomial; never consumes protocol PRNG state itself.
     bool sampleRootKPrimeDevice(const RingNttContext& ctx,
         const std::array<u64, 8>& seed, DeviceBatchPtr& out);
 
-    bool rootDigestHashEnabled();
+    bool rootDigestHashEnabled(ExecutionContext& execution);
     bool hashRootDigestDevice(const DeviceBatch& digest, block& out);
 
     // A coefficient-domain ct2 batch sampled ahead of the sender's top
@@ -204,6 +210,8 @@ namespace osuCrypto::LogVole::gpu
     class PreparedSenderCt2
     {
     public:
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
+        ExecutionContext& execution() const;
         PreparedSenderCt2();
         ~PreparedSenderCt2();
         PreparedSenderCt2(const PreparedSenderCt2&) = delete;
@@ -222,6 +230,8 @@ namespace osuCrypto::LogVole::gpu
     class PreparedReceiverCt2
     {
     public:
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
+        ExecutionContext& execution() const;
         PreparedReceiverCt2();
         ~PreparedReceiverCt2();
         PreparedReceiverCt2(const PreparedReceiverCt2&) = delete;
@@ -240,6 +250,8 @@ namespace osuCrypto::LogVole::gpu
     class PreparedRootFinalize
     {
     public:
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
+        ExecutionContext& execution() const;
         PreparedRootFinalize();
         ~PreparedRootFinalize();
         PreparedRootFinalize(const PreparedRootFinalize&) = delete;
@@ -256,7 +268,9 @@ namespace osuCrypto::LogVole::gpu
     class DeviceScalars
     {
     public:
-        DeviceScalars() = default;
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
+        DeviceScalars() { mExecutionContext->mUseGpu = true; }
+        ExecutionContext& execution() const { return *mExecutionContext; }
         ~DeviceScalars();
         DeviceScalars(const DeviceScalars&) = delete;
         DeviceScalars& operator=(const DeviceScalars&) = delete;
@@ -270,7 +284,11 @@ namespace osuCrypto::LogVole::gpu
         // thread must order against this rather than assume stream ordering, since
         // threadStream() is thread-keyed. Lets the producer skip an eager drain.
         void* producerStream() const { return mProducerStream; }
-        void setProducerStream(void* s) { mProducerStream = s; }
+        void setProducerStream(void* s, ExecutionContextPtr execution = {})
+        {
+            if (execution) mExecutionContext = std::move(execution);
+            mProducerStream = s;
+        }
 
     private:
         u64* mData = nullptr;
@@ -297,11 +315,8 @@ namespace osuCrypto::LogVole::gpu
     // polynomial is 256 KiB, so upload + kernel + download is roughly 55 us
     // against about 1.1 ms for the four ntt_negacyclic_harvey calls. Returns
     // false if the GPU is unavailable, in which case the caller runs on the CPU.
-    // Drain the calling thread's stream. Needed when a device-resident result is
-    // handed to a consumer that may not run on the same thread - after a coroutine
-    // suspends on the socket it can resume elsewhere, and threadStream() is keyed on
-    // the thread, so stream ordering alone no longer guarantees the data is ready.
-    bool syncStream();
+    // Drain this execution owner's stream across coroutine/thread boundaries.
+    bool syncStream(ExecutionContext& execution);
 
     bool nttHostBatch(const RingNttContext& ctx, std::span<RnsPoly> polys, bool inverse);
     // Optional full-u64 reduction before forward NTT, or canonical reduction
@@ -505,7 +520,7 @@ namespace osuCrypto::LogVole::gpu
     // Exact setup sampling from already-consumed SEAL seeds. The opt-in gate
     // also checks that the configured SEAL factory uses Blake2xb. On failure,
     // out is unchanged and callers can replay the same seeds on the CPU.
-    bool setupUniformSamplingEnabled();
+    bool setupUniformSamplingEnabled(ExecutionContext& execution);
     bool sampleUniformBatchFromSeedsDevice(
         const RingNttContext& ctx,
         std::span<const std::array<u64, 8>> seeds,
@@ -875,7 +890,7 @@ namespace osuCrypto::LogVole::gpu
     // batch is checked by the downstream denoise kernel, all levels OR into one
     // device flag, and the sender reads that flag once after queuing the top
     // check. LV_GPU_DEFER_GOLDEN_VALIDATION=0 restores the per-level checks.
-    bool deferredGoldenValidationEnabled();
+    bool deferredGoldenValidationEnabled(ExecutionContext& execution);
     bool beginGoldenValidationAttempt(const RingNttContext& ctx);
     bool denoiseAndAggValidateDevice(
         const RingNttContext& ctx,
@@ -884,8 +899,8 @@ namespace osuCrypto::LogVole::gpu
         const Params& validatedLevelParams,
         DeviceBatchPtr& out,
         u64 logicalInputCount = 0);
-    bool finishGoldenValidationAttempt(bool& ok);
-    bool abortGoldenValidationAttempt();
+    bool finishGoldenValidationAttempt(ExecutionContext& execution, bool& ok);
+    bool abortGoldenValidationAttempt(ExecutionContext& execution);
 
     // validateGoldenSeedCandidate against a device-resident tbk.
     bool validateGoldenSeedDevice(
@@ -1027,10 +1042,10 @@ namespace osuCrypto::LogVole::gpu
 
     // Copies a host scalar array to the device. Exists so a caller can place its
     // input where wrapDeviceLabels wants it; the protocol itself never calls it.
-    DeviceScalarsPtr uploadScalars(std::span<const u64> src);
+    DeviceScalarsPtr uploadScalars(ExecutionContext& execution, std::span<const u64> src);
 
     // Exact cryptoTools AES-CTR u64 stream from a fresh PRNG(seed), reduced
     // modulo modulus on device. Synchronized before publication; no host array
     // is materialized. Null means unsupported input or a device failure.
-    DeviceScalarsPtr sampleScalarsFromSeed(block seed, u64 count, u64 modulus);
+    DeviceScalarsPtr sampleScalarsFromSeed(ExecutionContext& execution, block seed, u64 count, u64 modulus);
 }

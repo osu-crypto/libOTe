@@ -20,7 +20,7 @@ namespace osuCrypto::LogVole::gpu
 
     // Exact BLAKE2xb byte prefixes for independent SEAL seeds. A prefix is a
     // whole number of SEAL's 4096-byte refills. Output is unchanged on failure.
-    bool sampleGaussianPrngPrefixesDevice(
+    bool sampleGaussianPrngPrefixesDevice(ExecutionContext& execution,
         std::span<const std::array<u64, 8>> seeds,
         u32 wordsPerPrefix,
         GaussianPrngPrefixBuffer& out);
@@ -48,12 +48,12 @@ namespace osuCrypto::LogVole::gpu
     // approximation or bound-based acceptance changes the transcript.
     // wordsPerPrefix=0 chooses a conservative finite prefix. On false, out is
     // unchanged. Success may identify rows requiring exact CPU replay.
-    bool sampleGaussianCompactDevice(
+    bool sampleGaussianCompactDevice(ExecutionContext& execution,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianSampleBuffer& out,
         u32 wordsPerPrefix = 0);
 
-    bool sampleGaussianCompactResidentDevice(
+    bool sampleGaussianCompactResidentDevice(ExecutionContext& execution,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianDeviceSampleBuffer& out,
         u32 wordsPerPrefix = 0, std::span<const u8> active = {});

@@ -58,16 +58,7 @@ namespace
     };
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    class ScopedGpuEnabled
-    {
-    public:
-        explicit ScopedGpuEnabled(bool enabled) : mWasEnabled(gpu::enabled()) { gpu::setEnabled(enabled); }
-        ~ScopedGpuEnabled() { gpu::setEnabled(mWasEnabled); }
-        ScopedGpuEnabled(const ScopedGpuEnabled&) = delete;
-        ScopedGpuEnabled& operator=(const ScopedGpuEnabled&) = delete;
-    private:
-        bool mWasEnabled;
-    };
+    using ScopedGpuEnabled = ::tests_libOTe::logvole_test::ScopedGpuEnabled;
 #endif
 
     void swap_moduli_for_test(RingNttContext& ctx, std::size_t first, std::size_t second)
@@ -119,6 +110,8 @@ namespace
 #if defined(ENABLE_LOGVOLE_CUDA)
     void expect_single_limb_batching_parity(const RingParams& ring, std::uint32_t plaintextBits)
     {
+    auto testExecution = osuCrypto::LogVole::executionContext(ring).shared_from_this();
+
         ScopedEnvironmentValue minimalChain("LV_GPU_SETUP_FULL_MOD_CHAIN", "0");
         // This fixture deliberately compares two eager SEAL representations.
         ScopedEnvironmentValue eagerRing("LV_GPU_SETUP_LIGHTWEIGHT_RING", "0");
@@ -126,13 +119,14 @@ namespace
         ZpCrtContext reference, candidate;
         {
             ScopedEnvironmentValue originalBatching("LV_GPU_SETUP_BATCHING_SINGLE_LIMB", "0");
-            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, reference));
+            LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, ring, plaintextBits, reference));
         }
         {
             ScopedEnvironmentValue compactBatching("LV_GPU_SETUP_BATCHING_SINGLE_LIMB", "1");
-            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, candidate));
+            LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, ring, plaintextBits, candidate));
             ZpCrtContext again;
-            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, again));
+            ::tests_libOTe::logvole_test::bindExecution(again, testExecution);
+            LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, ring, plaintextBits, again));
             LOGVOLE_EXPECT_TRUE(again.mBatchingContext == candidate.mBatchingContext);
         }
         // Only the encoding helper changes. The cryptographic ring and full-Q
@@ -185,7 +179,7 @@ namespace
             AlignedUnVec<std::uint64_t> fullUnwrapped, singleUnwrapped;
             // Force the CPU CRT/decode path here. GPU plaintext tables have
             // already been checked word for word, without its shared cache.
-            ScopedGpuEnabled cpuDecode(false);
+            ScopedGpuEnabled cpuDecode(testExecution, false);
             LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(reference, {fullEncoded}, labels.size(), scaleAndRound, 1u, fullUnwrapped));
             LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(candidate, {singleEncoded}, labels.size(), scaleAndRound, 1u, singleUnwrapped));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(fullUnwrapped, singleUnwrapped));
@@ -201,15 +195,18 @@ namespace
 
 void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled gpuScope(requested);
-    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    ScopedGpuEnabled gpuScope(testExecution, requested);
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     const std::vector<std::uint64_t> input{1, 2, 3, 0xffffffffffffffffull};
     // The future joins its worker before the token is consumed. A completed
     // upload must remain usable after that thread's CUDA stream is destroyed.
-    auto worker = std::async(std::launch::async, [&] { return gpu::uploadScalars(input); });
+    auto worker = std::async(std::launch::async, [&] { return gpu::uploadScalars(*testExecution, input); });
     auto uploaded = worker.get();
     LOGVOLE_REQUIRE_TRUE(uploaded);
     LOGVOLE_REQUIRE_TRUE(uploaded->producerStream() == nullptr);
@@ -217,21 +214,21 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*uploaded, fetched));
     LOGVOLE_REQUIRE_TRUE(fetched == input);
 
-    const auto runId = allocateProtocolCacheRunId();
+    const auto runId = ::tests_libOTe::logvole_test::allocateRunId(testExecution);
     // Warm both role streams, then hand cached storage from one role to the
     // next while its last device write may still be pending.
     for (auto role : {ProtocolCacheRole::Sender, ProtocolCacheRole::Receiver})
     {
-        ScopedProtocolCacheScope scope(role, runId);
-        (void)gpu::threadStream();
+        ::tests_libOTe::logvole_test::ScopedProtocolCacheScope scope(testExecution, role, runId);
+        (void)gpu::executionStream(*testExecution);
     }
     std::vector<std::uint64_t> expected(1u << 18, 0x9e3779b97f4a7c15ull);
     for (unsigned iteration = 0; iteration < 8; ++iteration)
     {
         void* previous = nullptr;
         {
-            ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, runId);
-            auto& stream = gpu::threadStream();
+            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope scope(testExecution, ProtocolCacheRole::Sender, runId);
+            auto& stream = gpu::executionStream(*testExecution);
             previous = stream.raw();
             gpu::DeviceScalars retired;
             LOGVOLE_REQUIRE_TRUE(retired.resize(expected.size()));
@@ -239,10 +236,10 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
                 expected.size() * sizeof(std::uint64_t), stream.raw()));
         }
         {
-            ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, runId);
-            uploaded = gpu::uploadScalars(expected);
+            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope scope(testExecution, ProtocolCacheRole::Receiver, runId);
+            uploaded = gpu::uploadScalars(*testExecution, expected);
             LOGVOLE_REQUIRE_TRUE(uploaded);
-            LOGVOLE_REQUIRE_TRUE(gpu::gpuCurrentStream() == gpu::threadStream().raw());
+            LOGVOLE_REQUIRE_TRUE(uploaded->producerStream() == nullptr);
             LOGVOLE_REQUIRE_TRUE(gpu::gpuStreamSync(previous));
             fetched.resize(expected.size());
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*uploaded, fetched));
@@ -257,16 +254,19 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
 
 void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled gpuScope(requested);
-    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    ScopedGpuEnabled gpuScope(testExecution, requested);
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     RingNttContext smallContext{}, largeContext{};
-    auto largeParams = make_four_limb_params();
+    auto largeParams = ::tests_libOTe::logvole_test::withExecution(make_four_limb_params(), testExecution);
     largeParams.mPolyModulusDegree = 4096;
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), smallContext));
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(largeParams, largeContext));
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution), smallContext));
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, largeParams, largeContext));
     auto small = gpu::GpuRing::get(smallContext);
     auto large = gpu::GpuRing::get(largeContext);
     LOGVOLE_REQUIRE_TRUE(small && large);
@@ -279,7 +279,7 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
     std::vector<std::uint64_t> expected(large->polyWords()), fetched(expected.size());
     for (std::size_t i = 0; i < expected.size(); ++i)
         expected[i] = 0xfedcba9876543210ull ^ i;
-    auto& stream = gpu::threadStream();
+    auto& stream = gpu::executionStream(*testExecution);
     LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(buffer.data(), expected.data(), buffer.bytes(), stream.raw()));
     LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), buffer.data(), buffer.bytes(), stream.raw()));
     LOGVOLE_REQUIRE_TRUE(stream.sync());
@@ -304,9 +304,11 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
 
 void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     RingNttContext senderCtx{}, receiverCtx{};
     constexpr std::uint32_t count = 4;
-    const std::uint64_t runId = allocateProtocolCacheRunId();
+    const std::uint64_t runId = ::tests_libOTe::logvole_test::allocateRunId(testExecution);
 
     std::shared_ptr<const std::vector<RnsPoly>> senderA, senderB;
     std::shared_ptr<const std::vector<RnsPoly>> receiverA, receiverB;
@@ -314,21 +316,21 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP&)
     std::shared_ptr<gpu::GpuRing> senderRing, receiverRing;
 #endif
     {
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, runId);
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), senderCtx));
+        ::tests_libOTe::logvole_test::ScopedProtocolCacheScope scope(testExecution, ProtocolCacheRole::Sender, runId);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution), senderCtx));
         senderA = sharedLhePublicANtt(senderCtx, count);
         senderB = sharedLencPublicBNtt(senderCtx, count / 2);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled()) senderRing = gpu::GpuRing::get(senderCtx);
+        if (gpu::enabled(*testExecution)) senderRing = gpu::GpuRing::get(senderCtx);
 #endif
     }
     {
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, runId);
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), receiverCtx));
+        ::tests_libOTe::logvole_test::ScopedProtocolCacheScope scope(testExecution, ProtocolCacheRole::Receiver, runId);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution), receiverCtx));
         receiverA = sharedLhePublicANtt(receiverCtx, count);
         receiverB = sharedLencPublicBNtt(receiverCtx, count / 2);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled()) receiverRing = gpu::GpuRing::get(receiverCtx);
+        if (gpu::enabled(*testExecution)) receiverRing = gpu::GpuRing::get(receiverCtx);
 #endif
     }
 
@@ -339,7 +341,7 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP&)
     expect_batch_equal(*senderA, *receiverA);
     expect_batch_equal(*senderB, *receiverB);
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::enabled())
+    if (gpu::enabled(*testExecution))
     {
         LOGVOLE_REQUIRE_TRUE(senderRing && receiverRing);
         LOGVOLE_EXPECT_TRUE(senderRing != receiverRing);
@@ -349,10 +351,13 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP&)
 
 void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
     const bool requestGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled gpuScope(requestGpu);
-    if (requestGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    ScopedGpuEnabled gpuScope(testExecution, requestGpu);
+    if (requestGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #else
     (void)requestGpu;
 #endif
@@ -384,10 +389,11 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
     for (const auto& preset : presets)
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = preset.degree;
         params.mCoeffModulusBits.resize(preset.primes.size());
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), preset.bits);
-        const auto run = allocateProtocolCacheRunId();
+        const auto run = ::tests_libOTe::logvole_test::allocateRunId(testExecution);
         std::array<RingNttContext, 2> lightweight;
         std::array<ZpCrtContext, 2> crt;
         std::array<bool, 2> roleGpu{};
@@ -396,18 +402,19 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 #endif
         for (std::size_t party = 0; party < 2; ++party)
         {
-            ScopedProtocolCacheScope roleScope(
+            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope roleScope(testExecution,
                 party ? ProtocolCacheRole::Receiver : ProtocolCacheRole::Sender, run);
 #if defined(ENABLE_LOGVOLE_CUDA)
-            roleGpu[party] = gpu::enabled();
+            roleGpu[party] = gpu::enabled(*testExecution);
 #endif
             auto& context = lightweight[party];
-            LOGVOLE_REQUIRE_TRUE(makeGpuRingNttContext(params, context));
+            LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeGpuRingNttContext(testExecution, params, context));
             LOGVOLE_REQUIRE_TRUE(context.mGpuLightweight && context.mHostContextCache && !context.mContext);
             LOGVOLE_REQUIRE_TRUE(context.mModuli.empty() && context.mRawModuli);
             LOGVOLE_REQUIRE_TRUE(validateRingContextMetadata(context));
             RingNttContext again;
-            LOGVOLE_REQUIRE_TRUE(makeGpuRingNttContext(params, again));
+            ::tests_libOTe::logvole_test::bindExecution(again, testExecution);
+            LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeGpuRingNttContext(testExecution, params, again));
             LOGVOLE_EXPECT_TRUE(again.mHostContextCache == context.mHostContextCache);
             LOGVOLE_EXPECT_TRUE(again.mRawModuli == context.mRawModuli);
             LOGVOLE_REQUIRE_EQ(ringModulusCount(context), preset.primes.size());
@@ -418,9 +425,10 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
             }
 
             RingNttContext selected;
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, selected));
+            ::tests_libOTe::logvole_test::bindExecution(selected, testExecution);
+            LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, selected));
             LOGVOLE_EXPECT_EQ(selected.mGpuLightweight, roleGpu[party]);
-            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, crt[party]));
+            LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params, preset.bits, crt[party]));
             LOGVOLE_EXPECT_EQ(crt[party].mGpuLightweight, roleGpu[party]);
             LOGVOLE_EXPECT_EQ(crt[party].mPlaintextModulus, preset.plaintext);
             LOGVOLE_EXPECT_EQ(crt[party].mPlaintextModulusBits, preset.bits - 1u);
@@ -440,19 +448,22 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 {
                     ScopedEnvironmentValue optOut(option, "0");
                     ZpCrtContext eager;
-                    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, eager));
+                    ::tests_libOTe::logvole_test::bindExecution(eager, testExecution);
+                    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params, preset.bits, eager));
                     LOGVOLE_REQUIRE_TRUE(!eager.mGpuLightweight && eager.mBatchingContext && eager.mBatchEncoder);
                     LOGVOLE_EXPECT_EQ(eager.mPlaintextModulus, preset.plaintext);
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(eager.mPlaintextLiftModQj, preset.lift));
                     if (std::strcmp(option, "LV_GPU_SETUP_LIGHTWEIGHT_RING") == 0)
                     {
                         RingNttContext eagerRing;
-                        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, eagerRing));
+                        ::tests_libOTe::logvole_test::bindExecution(eagerRing, testExecution);
+                        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, eagerRing));
                         LOGVOLE_REQUIRE_TRUE(!eagerRing.mGpuLightweight && eagerRing.mContext);
                     }
                 }
                 ZpCrtContext restored;
-                LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, restored));
+                ::tests_libOTe::logvole_test::bindExecution(restored, testExecution);
+                LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params, preset.bits, restored));
                 LOGVOLE_REQUIRE_TRUE(restored.mGpuLightweight);
                 LOGVOLE_EXPECT_TRUE(restored.mHostContextCache == crt[party].mHostContextCache);
             }
@@ -472,7 +483,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
         auto unsupported = params;
         unsupported.mPolyModulusDegree = 262144u;
         auto unchanged = lightweight[0];
-        LOGVOLE_REQUIRE_FALSE(makeGpuRingNttContext(unsupported, unchanged));
+        LOGVOLE_REQUIRE_FALSE(::tests_libOTe::logvole_test::makeGpuRingNttContext(testExecution, unsupported, unchanged));
         LOGVOLE_EXPECT_TRUE(unchanged.mHostContextCache == lightweight[0].mHostContextCache);
         LOGVOLE_EXPECT_TRUE(unchanged.mParams == params && unchanged.mGpuLightweight && !unchanged.mContext);
         for (std::size_t limb = 0; limb < preset.primes.size(); ++limb)
@@ -480,13 +491,15 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 
         // Explicit CPU oracles stay on the host even in the GPU test invocation.
 #if defined(ENABLE_LOGVOLE_CUDA)
-        ScopedGpuEnabled cpuOracle(false);
+        ScopedGpuEnabled cpuOracle(testExecution, false);
 #endif
         RingNttContext eager;
+        ::tests_libOTe::logvole_test::bindExecution(eager, testExecution);
         ZpCrtContext eagerCrt;
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, eager));
+        ::tests_libOTe::logvole_test::bindExecution(eagerCrt, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, eager));
         LOGVOLE_REQUIRE_TRUE(!eager.mGpuLightweight && eager.mContext);
-        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, eagerCrt));
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params, preset.bits, eagerCrt));
         LOGVOLE_EXPECT_EQ(eagerCrt.mPlaintextModulus, preset.plaintext);
         LOGVOLE_REQUIRE_TRUE(rangesEqual(eagerCrt.mPlaintextLiftModQj, preset.lift));
         // Concurrent copies resolve to a single immutable host fallback owner.
@@ -515,6 +528,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
         if (preset.degree == 8192u)
         {
             CivoleParams production;
+            ::tests_libOTe::logvole_test::bindExecution(production, testExecution);
             LOGVOLE_REQUIRE_TRUE(makeCivoleParams(CivoleSetting::GoldenSeed, production, 4u));
             LOGVOLE_REQUIRE_TRUE(production.mLogVole.mShrinkExpand.mRing == params);
             production.mLogVole.mW = (std::uint64_t{1} << 25) / params.mPolyModulusDegree;
@@ -574,6 +588,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
         if (preset.degree == 8192u)
         {
             CivoleParams production;
+            ::tests_libOTe::logvole_test::bindExecution(production, testExecution);
             LOGVOLE_REQUIRE_TRUE(makeCivoleParams(CivoleSetting::GoldenSeed, production, 4u));
             production.mLogVole.mW = (std::uint64_t{1} << 25) / params.mPolyModulusDegree;
             production.mLogVole.mTotalLabelCount = std::uint64_t{1} << 25;
@@ -595,7 +610,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
             AlignedUnVec<std::uint64_t> expectedDecoded;
 #if defined(ENABLE_LOGVOLE_CUDA)
             {
-                ScopedGpuEnabled cpuOracle(false);
+                ScopedGpuEnabled cpuOracle(testExecution, false);
                 LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(
                     eagerCrt, {reference}, labels.size(), scaled, 1u,
                     expectedDecoded));
@@ -675,7 +690,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
     }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::enabled())
+    if (gpu::enabled(*testExecution))
     {
         // The production constants above remain the fast path. These tuples
         // force exact dynamic prime selection, mixed-width ordering, device
@@ -687,19 +702,20 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
         for (const auto& [degree, widths] : dynamicCases)
         {
             RingParams params{};
+            ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
             params.mPolyModulusDegree = degree;
             params.mCoeffModulusBits.resize(widths.size());
             std::copy(widths.begin(), widths.end(), params.mCoeffModulusBits.begin());
             const auto expectedPrimes = seal::CoeffModulus::Create(degree, widths);
-            const auto run = allocateProtocolCacheRunId();
+            const auto run = ::tests_libOTe::logvole_test::allocateRunId(testExecution);
             std::array<RingNttContext, 2> dynamicRing;
             std::array<ZpCrtContext, 2> dynamicCrt;
             std::array<std::shared_ptr<gpu::GpuPlainNtt>, 2> plainOwners;
             for (std::size_t party = 0; party < 2; ++party)
             {
-                ScopedProtocolCacheScope roleScope(
+                ::tests_libOTe::logvole_test::ScopedProtocolCacheScope roleScope(testExecution,
                     party ? ProtocolCacheRole::Receiver : ProtocolCacheRole::Sender, run);
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, dynamicRing[party]));
+                LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, dynamicRing[party]));
                 const auto& selected = dynamicRing[party];
                 LOGVOLE_REQUIRE_TRUE(selected.mGpuLightweight && selected.mRawModuli &&
                     selected.mRawModuli->mDynamicGpuCertificate && !selected.mContext);
@@ -707,24 +723,25 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_EQ(ringModulusCount(selected), widths.size());
                 for (std::size_t limb = 0; limb < widths.size(); ++limb)
                     LOGVOLE_EXPECT_EQ(ringModulusValue(selected, limb), expectedPrimes[limb].value());
-                LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 30u, dynamicCrt[party]));
+                LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params, 30u, dynamicCrt[party]));
                 LOGVOLE_REQUIRE_TRUE(dynamicCrt[party].mGpuLightweight &&
                     !dynamicCrt[party].mBatchingContext && !dynamicCrt[party].mBatchEncoder);
                 const auto certificate = selected.mRawModuli->mDynamicGpuCertificate;
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(selected) == certificate);
 
                 ZpCrtContext eager;
+                ::tests_libOTe::logvole_test::bindExecution(eager, testExecution);
                 {
                     ScopedEnvironmentValue eagerRing("LV_GPU_SETUP_LIGHTWEIGHT_RING", "0");
                     ScopedEnvironmentValue eagerCrt("LV_GPU_SETUP_LIGHTWEIGHT_CRT", "0");
-                    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 30u, eager));
+                    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params, 30u, eager));
                 }
                 LOGVOLE_REQUIRE_TRUE(!eager.mGpuLightweight && eager.mBatchEncoder);
                 LOGVOLE_EXPECT_EQ(dynamicCrt[party].mPlaintextModulus, eager.mPlaintextModulus);
                 LOGVOLE_EXPECT_EQ(dynamicCrt[party].mPlaintextModulusBits, eager.mPlaintextModulusBits);
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(
                     dynamicCrt[party].mPlaintextLiftModQj, eager.mPlaintextLiftModQj));
-                plainOwners[party] = gpu::GpuPlainNtt::getRaw(degree, eager.mPlaintextModulus);
+                plainOwners[party] = gpu::GpuPlainNtt::getRaw(degree, eager.mPlaintextModulus, *testExecution);
                 LOGVOLE_REQUIRE_TRUE(plainOwners[party] && plainOwners[party]->slotCount() == degree);
                 const auto lazyHost = getRingHostContext(selected);
                 LOGVOLE_REQUIRE_TRUE(lazyHost &&
@@ -733,7 +750,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 const auto* sealTables = lazyHost->key_context_data()->small_ntt_tables();
                 std::vector<gpu::HostShoupOperand> roots(static_cast<std::size_t>(degree) * widths.size());
                 std::vector<gpu::HostShoupOperand> inverse(roots.size());
-                auto& stream = gpu::threadStream();
+                auto& stream = gpu::executionStream(*testExecution);
                 LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(roots.data(), certificate->view().mRoots,
                     roots.size() * sizeof(roots[0]), stream));
                 LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(inverse.data(), certificate->view().mInvRoots,
@@ -952,7 +969,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                         std::vector<std::uint64_t>{0xdecafbadULL}));
                     std::uint64_t unchangedPlain = 0xdecafbadULL;
                     std::uint32_t unchangedBits = 31u;
-                    LOGVOLE_REQUIRE_FALSE(gpu::selectSealPlainModulusDevice(
+                    LOGVOLE_REQUIRE_FALSE(gpu::selectSealPlainModulusDevice(*testExecution,
                         degree, 2u, certificate->view().mMinModulus,
                         unchangedPlain, unchangedBits));
                     LOGVOLE_EXPECT_EQ(unchangedPlain, 0xdecafbadULL);
@@ -970,6 +987,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     int compositeBits = 0;
                     for (auto q = composite; q; q >>= 1) ++compositeBits;
                     RingParams compositeParams{};
+                    ::tests_libOTe::logvole_test::bindExecution(compositeParams, testExecution);
                     compositeParams.mPolyModulusDegree = degree;
                     compositeParams.mCoeffModulusBits.resize(1u);
                     compositeParams.mCoeffModulusBits[0] = compositeBits;
@@ -990,9 +1008,13 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 
 void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
 {
-    const auto params = make_small_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
 
     RnsPoly poly = deriveUniformPolyFromNonce(ctx, 0x1234u, 0x5678u, 0);
     RnsPoly expected = poly;
@@ -1004,20 +1026,17 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
     expect_poly_equal(poly, expected);
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    const bool gpuWasEnabled = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool mEnabled;
-        ~RestoreGpu() { gpu::setEnabled(mEnabled); }
-    } restoreGpu{ gpuWasEnabled };
-    gpu::setEnabled(cmd.getOr("gpu", 0) != 0);
-    if (!gpu::enabled()) return;
+    const bool gpuWasEnabled = gpu::enabled(*testExecution);
+    ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
+    testExecution->mUseGpu = (cmd.getOr("gpu", 0) != 0);
+    if (!gpu::enabled(*testExecution)) return;
     // Keep the existing full/minimal-chain comparison independent of the
     // separate opt-in batching-context representation below.
     ScopedEnvironmentValue originalBatching("LV_GPU_SETUP_BATCHING_SINGLE_LIMB", "0");
     for (std::uint32_t limbs : {1u, 2u, 4u})
     {
-        RingParams varied = make_small_params();
+        RingParams varied = ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution);
+        ::tests_libOTe::logvole_test::bindExecution(varied, testExecution);
         varied.mCoeffModulusBits.resize(limbs);
         std::fill(varied.mCoeffModulusBits.begin(), varied.mCoeffModulusBits.end(), 30);
         for (std::uint32_t plaintextBits : {14u, 20u, 30u})
@@ -1029,12 +1048,14 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
     for (bool eightLimbs : { false, true })
     {
         RingParams batchParams{};
+        ::tests_libOTe::logvole_test::bindExecution(batchParams, testExecution);
         batchParams.mPolyModulusDegree = eightLimbs ? 16384 : 8192;
         batchParams.mCoeffModulusBits.resize(eightLimbs ? 8 : 4);
         std::fill(batchParams.mCoeffModulusBits.begin(), batchParams.mCoeffModulusBits.end(),
             eightLimbs ? 52 : 55);
         RingNttContext batchCtx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, batchCtx));
+        ::tests_libOTe::logvole_test::bindExecution(batchCtx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, batchParams, batchCtx));
         expect_single_limb_batching_parity(batchParams, eightLimbs ? 52u : 55u);
         {
             ScopedEnvironmentValue eagerRing("LV_GPU_SETUP_LIGHTWEIGHT_RING", "0");
@@ -1044,15 +1065,16 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
             const auto plaintextBits = eightLimbs ? 52u : 55u;
             {
                 ScopedEnvironmentValue fullChain("LV_GPU_SETUP_FULL_MOD_CHAIN", "1");
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, fullRing));
-                LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(batchParams, plaintextBits, fullCrt));
+                LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, batchParams, fullRing));
+                LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, batchParams, plaintextBits, fullCrt));
             }
             {
                 ScopedEnvironmentValue minimalChain("LV_GPU_SETUP_FULL_MOD_CHAIN", "0");
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, minimalRing));
-                LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(batchParams, plaintextBits, minimalCrt));
+                LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, batchParams, minimalRing));
+                LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, batchParams, plaintextBits, minimalCrt));
                 RingNttContext again;
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, again));
+                ::tests_libOTe::logvole_test::bindExecution(again, testExecution);
+                LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, batchParams, again));
                 LOGVOLE_EXPECT_TRUE(again.mContext == minimalRing.mContext);
             }
             auto expectSameUsableContexts = [](const auto& full, const auto& minimal) {
@@ -1145,7 +1167,7 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
             {
                 auto ring = gpu::GpuRing::get(batchCtx);
                 LOGVOLE_REQUIRE_TRUE(ring != nullptr);
-                auto& stream = gpu::threadStream();
+                auto& stream = gpu::executionStream(*testExecution);
                 gpu::GpuPolyBuffer device;
                 LOGVOLE_REQUIRE_TRUE(device.resize(*ring, actual.size()));
                 LOGVOLE_REQUIRE_TRUE(device.upload(actual, stream));
@@ -1228,14 +1250,10 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                         context.mCpus.resize(workers);
 #endif
                         context.mWorkerLimit = workers;
-                        struct RestoreContext
-                        {
-                            CpuBenchmarkContext* previous = tCpuBenchmarkContext;
-                            ~RestoreContext() { tCpuBenchmarkContext = previous; }
-                        } restoreContext;
-                        tCpuBenchmarkContext = &context;
-                        const auto originalScope = currentProtocolCacheScope();
-                        const auto originalSlots = detail::gParallelWorkerSlotsInUse.load();
+                        ::tests_libOTe::logvole_test::ScopedCpuBenchmark restoreTelemetry(testExecution, testExecution->mCpuBenchmark);
+                        testExecution->mCpuBenchmark = &context;
+                        const auto originalScope = testExecution->mScope;
+                        const auto originalSlots = context.mWorkerSlots.load();
                         std::vector<RnsPoly> downloaded;
                         LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(downloaded, stream, workers, 1u, count));
                         LOGVOLE_REQUIRE_EQ(downloaded.size(), count);
@@ -1250,9 +1268,9 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                         if (workers > 1u && context.mCpus.size() > 1u)
                             LOGVOLE_REQUIRE_TRUE(context.mWorkersChecked.load() > 0u);
 #endif
-                        LOGVOLE_REQUIRE_EQ(detail::gParallelWorkerSlotsInUse.load(), originalSlots);
-                        LOGVOLE_REQUIRE_EQ(currentProtocolCacheScope().mRunId, originalScope.mRunId);
-                        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == originalScope.mRole);
+                        LOGVOLE_REQUIRE_EQ(context.mWorkerSlots.load(), originalSlots);
+                        LOGVOLE_REQUIRE_EQ(testExecution->mScope.mRunId, originalScope.mRunId);
+                        LOGVOLE_REQUIRE_TRUE(testExecution->mScope.mRole == originalScope.mRole);
                     }
                 }
             }
@@ -1274,26 +1292,27 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
 
 void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
-    const bool gpuWasEnabled = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool mEnabled;
-        ~RestoreGpu() { gpu::setEnabled(mEnabled); }
-    } restoreGpu{gpuWasEnabled};
-    gpu::setEnabled(cmd.getOr("gpu", 0) != 0);
-    if (!gpu::enabled()) return;
+    const bool gpuWasEnabled = gpu::enabled(*testExecution);
+    ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
+    testExecution->mUseGpu = (cmd.getOr("gpu", 0) != 0);
+    if (!gpu::enabled(*testExecution)) return;
 
     RingParams params{};
+    ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
     params.mPolyModulusDegree = 16384u;
     params.mCoeffModulusBits.resize(8u);
     std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), 52);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
     auto ring = gpu::GpuRing::get(ctx);
     LOGVOLE_REQUIRE_TRUE(ring && ring->n() == params.mPolyModulusDegree &&
         ring->rho() == params.mCoeffModulusBits.size());
-    auto& stream = gpu::threadStream();
+    auto& stream = gpu::executionStream(*testExecution);
     for (std::size_t count : {std::size_t{1}, std::size_t{8}, std::size_t{16}})
     {
         std::vector<RnsPoly> original(count), expected(count);
@@ -1335,10 +1354,13 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
 
 void LogVole_RingOps_NttBatchDeviceCanonicalization(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requestGpu = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled gpuScope(requestGpu);
-    if (requestGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    ScopedGpuEnabled gpuScope(testExecution, requestGpu);
+    if (requestGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #else
     (void)cmd;
 #endif
@@ -1348,12 +1370,14 @@ void LogVole_RingOps_NttBatchDeviceCanonicalization(const oc::CLP& cmd)
     for (std::uint32_t degree : {1024u, 8192u, 16384u})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = degree;
         params.mCoeffModulusBits.resize(degree == 16384u ? 8u : degree == 8192u ? 4u : 2u);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(),
             degree == 16384u ? 52 : degree == 8192u ? 55 : 30);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const auto hostContext = getRingHostContext(ctx);
         LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
         const auto* tables = hostContext->key_context_data()->small_ntt_tables();
@@ -1425,7 +1449,7 @@ void LogVole_RingOps_NttBatchDeviceCanonicalization(const oc::CLP& cmd)
 
             ScopedEnvironmentValue reduction("LV_GPU_SETUP_NTT_CANONICALIZE", "1");
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (gpu::enabled() && count == 4u)
+            if (gpu::enabled(*testExecution) && count == 4u)
             {
                 for (const char* declineAt : {"1", "2"})
                 {
@@ -1500,9 +1524,12 @@ void LogVole_RingOps_NttBatchDeviceCanonicalization(const oc::CLP& cmd)
 
 void LogVole_RingOps_GadgetDecomposeRecompose(const oc::CLP&)
 {
-    const auto params = make_small_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
 
     RnsPoly poly = deriveUniformPolyFromNonce(ctx, 0x55AAu, 0xCCDDu, 0);
 
@@ -1520,9 +1547,12 @@ void LogVole_RingOps_GadgetDecomposeRecompose(const oc::CLP&)
 
 void LogVole_RingOps_GadgetDecomposeRecomposeBits(const oc::CLP&)
 {
-    const auto params = make_small_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
 
     RnsPoly poly = deriveUniformPolyFromNonce(ctx, 0xAA55u, 0x11EEu, 0);
 
@@ -1540,9 +1570,12 @@ void LogVole_RingOps_GadgetDecomposeRecomposeBits(const oc::CLP&)
 
 void LogVole_RingOps_GadgetDecomposeBitsRangeMatchesSlice(const oc::CLP&)
 {
-    const auto params = make_small_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
 
     RnsPoly poly = deriveUniformPolyFromNonce(ctx, 0xBEEFu, 0xCAFEu, 1);
 
@@ -1560,9 +1593,12 @@ void LogVole_RingOps_GadgetDecomposeBitsRangeMatchesSlice(const oc::CLP&)
 
 void LogVole_RingOps_CenteredGadgetDecomposeRecomposeBits(const oc::CLP&)
 {
-    const auto params = make_four_limb_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_four_limb_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
 
     RnsPoly poly = deriveUniformPolyFromNonce(ctx, 0xA11CEu, 0xB0Bu, 2);
 
@@ -1580,9 +1616,12 @@ void LogVole_RingOps_CenteredGadgetDecomposeRecomposeBits(const oc::CLP&)
 
 void LogVole_RingOps_TensorPackUnpack(const oc::CLP&)
 {
-    const auto params = make_small_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
 
     RingTensor tensor{};
     tensor.mRows = 2;
@@ -1613,10 +1652,13 @@ void LogVole_RingOps_TensorPackUnpack(const oc::CLP&)
 
 void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     ScopedEnvironmentValue originalCpuOption("LV_GPU_SETUP_UNIFORM_DEVICE", "0");
-    const auto params = make_small_params();
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
 
     const std::vector<std::uint64_t> nonces{ 1, 2, 3, 4 };
     auto a = deriveUniformPolyBatchFromNonceList(ctx, nonces, 0xF00Du, 3u, 1u);
@@ -1628,8 +1670,8 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
     expect_batch_equal(a, c);
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled useGpu(true);
-    const bool haveGpu = gpu::enabled();
+    ScopedGpuEnabled useGpu(testExecution, true);
+    const bool haveGpu = gpu::enabled(*testExecution);
     if (const char* strict = std::getenv("LV_GPU_SETUP_UNIFORM_DEVICE_STRICT"))
         if (strict[0] == '1') LOGVOLE_REQUIRE_TRUE(haveGpu);
 #else
@@ -1643,7 +1685,8 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
     };
     auto checkSetupSampling = [&](const RingParams& ring) {
         RingNttContext sampleContext{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, sampleContext));
+        ::tests_libOTe::logvole_test::bindExecution(sampleContext, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, ring, sampleContext));
         constexpr std::uint64_t nonce = 0x534554555053414Dull, domain = 0x554E49464F524Dull;
         for (std::uint32_t count : { 1u, 4u, 32u })
         {
@@ -1652,7 +1695,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
             {
                 ScopedEnvironmentValue cpuOption("LV_GPU_SETUP_UNIFORM_DEVICE", "0");
 #if defined(ENABLE_LOGVOLE_CUDA)
-                ScopedGpuEnabled cpuReference(false);
+                ScopedGpuEnabled cpuReference(testExecution, false);
 #endif
                 for (std::uint32_t i = 0; i < count; ++i)
                 {
@@ -1673,7 +1716,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
                 ScopedEnvironmentValue strictOption("LV_GPU_SETUP_UNIFORM_DEVICE_STRICT", "1");
                 ScopedEnvironmentValue declineOption("LV_GPU_SETUP_UNIFORM_FORCE_DECLINE", "0");
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (device) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+                if (device) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #endif
                 compareExact(expectedNonce, deriveUniformPolyBatchFromNonce(sampleContext, nonce, domain, count));
                 // This established API's name is historical: its values are
@@ -1711,6 +1754,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
     };
     checkSetupSampling(params);
     RingParams production{};
+    ::tests_libOTe::logvole_test::bindExecution(production, testExecution);
     production.mPolyModulusDegree = 8192;
     assignValues<int>(production.mCoeffModulusBits, { 55, 55, 55, 55 });
     checkSetupSampling(production);
@@ -1721,11 +1765,14 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
 
 void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled gpuScope(requested);
-    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    ScopedGpuEnabled gpuScope(testExecution, requested);
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     ScopedEnvironmentValue retain("LV_GPU_SETUP_PUBLIC_RETAIN", "1");
     ScopedEnvironmentValue retainDecline("LV_GPU_SETUP_PUBLIC_RETAIN_FORCE_DECLINE", "0");
     ScopedEnvironmentValue uniform("LV_GPU_SETUP_UNIFORM_DEVICE", "1");
@@ -1735,7 +1782,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
     ScopedEnvironmentValue lheStrict("LV_GPU_SETUP_LHE_DEVICE_STRICT", "1");
     ScopedEnvironmentValue lheDecline("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", "0");
     ScopedEnvironmentValue compact("LV_GPU_SETUP_COMPACT_NOISE", "0");
-    LOGVOLE_REQUIRE_TRUE(gpu::publicUniformRetentionEnabled());
+    LOGVOLE_REQUIRE_TRUE(gpu::publicUniformRetentionEnabled(*testExecution));
     auto exact = [](const auto& a, const auto& b) {
         LOGVOLE_REQUIRE_EQ(a.size(), b.size());
         for (std::size_t i = 0; i < a.size(); ++i)
@@ -1745,14 +1792,16 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
     for (const auto& shape : { std::pair{1024u, 2u}, {8192u, 4u}, {16384u, 8u} })
     {
         RingParams params;
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = shape.first;
         params.mCoeffModulusBits.resize(shape.second);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(),
             shape.first == 1024u ? 30 : shape.first == 8192u ? 55 : 52);
         RingNttContext ctx;
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
-        const auto run = allocateProtocolCacheRunId();
-        ScopedProtocolCacheScope cacheScope(ProtocolCacheRole::Sender, run);
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
+        const auto run = ::tests_libOTe::logvole_test::allocateRunId(testExecution);
+        ::tests_libOTe::logvole_test::ScopedProtocolCacheScope cacheScope(testExecution, ProtocolCacheRole::Sender, run);
         constexpr std::uint32_t count = 4;
         constexpr std::uint64_t nonce = 0x52455441494e4544ULL, domain = 0x5055424c4943ULL;
 
@@ -1760,15 +1809,15 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         {
             std::vector<RnsPoly> expected;
             {
-                ScopedGpuEnabled cpuReference(false);
+                ScopedGpuEnabled cpuReference(testExecution, false);
                 expected = deriveUniformPolyBatchFromNonce(ctx, nonce, domain, count, actualNtt);
             }
-            const auto before = gpu::publicUniformRetentionStats();
+            const auto before = gpu::publicUniformRetentionStats(*testExecution);
             gpu::RetainedPublicUniformPtr token;
             auto sampled = deriveUniformPolyBatchFromNonce(ctx, nonce, domain, count, actualNtt, &token);
             exact(expected, sampled);
             LOGVOLE_REQUIRE_TRUE(token && token->count() == count);
-            LOGVOLE_REQUIRE_TRUE(gpu::publicUniformRetentionStats().mCaptures > before.mCaptures);
+            LOGVOLE_REQUIRE_TRUE(gpu::publicUniformRetentionStats(*testExecution).mCaptures > before.mCaptures);
             auto owner = std::make_shared<const std::vector<RnsPoly>>(std::move(sampled));
             const std::span<const RnsPoly> span(*owner);
             LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(ctx, owner, token));
@@ -1787,6 +1836,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span.subspan(1)) == nullptr);
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, {}) == nullptr);
             RingNttContext changed = ctx;
+            ::tests_libOTe::logvole_test::bindExecution(changed, testExecution);
             swap_moduli_for_test(changed, 0, 1);
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(changed, span) == nullptr);
             LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(changed, owner, token));
@@ -1794,19 +1844,19 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             changed.mParams.mPolyModulusDegree *= 2;
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(changed, span) == nullptr);
             {
-                ScopedProtocolCacheScope peer(ProtocolCacheRole::Receiver, run);
+                ::tests_libOTe::logvole_test::ScopedProtocolCacheScope peer(testExecution, ProtocolCacheRole::Receiver, run);
                 // Party-local GPU caches and retained allocations must not be
                 // visible through a peer role, even in this single-process test.
                 LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == nullptr);
                 LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, owner, token));
             }
             {
-                ScopedProtocolCacheScope anotherRun(ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+                ::tests_libOTe::logvole_test::ScopedProtocolCacheScope anotherRun(testExecution, ProtocolCacheRole::Sender, ::tests_libOTe::logvole_test::allocateRunId(testExecution));
                 LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == nullptr);
                 LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, owner, token));
             }
             {
-                ScopedGpuEnabled cpuOnly(false);
+                ScopedGpuEnabled cpuOnly(testExecution, false);
                 LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == nullptr);
                 auto capture = token;
                 exact(expected, deriveUniformPolyBatchFromNonce(ctx, nonce, domain, count, actualNtt, &capture));
@@ -1849,14 +1899,14 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         // public B is actually transformed. Check both independent oracles.
         std::vector<RnsPoly> expectedA, expectedB;
         {
-            ScopedGpuEnabled cpuReference(false);
+            ScopedGpuEnabled cpuReference(testExecution, false);
             expectedA = deriveUniformPolyBatchFromNonce(ctx, 0xA11ACE5Eull, 0xA110CA7Aull, count);
             expectedB = deriveUniformPolyBatchFromNonce(ctx, 0xC0DEC0DEull, 0x1EEC0DEu, count, true);
         }
-        const auto beforeRetainOnly = gpu::publicUniformRetentionStats();
+        const auto beforeRetainOnly = gpu::publicUniformRetentionStats(*testExecution);
         const auto deviceA = retainedLhePublicANtt(ctx, count);
         const auto deviceB = retainedLencPublicBNtt(ctx, count / 2);
-        const auto afterRetainOnly = gpu::publicUniformRetentionStats();
+        const auto afterRetainOnly = gpu::publicUniformRetentionStats(*testExecution);
         LOGVOLE_REQUIRE_TRUE(deviceA && deviceB && deviceA != deviceB);
         LOGVOLE_REQUIRE_TRUE(gpu::retainedPublicUniformMatches(ctx, *deviceA, count, false));
         LOGVOLE_REQUIRE_TRUE(gpu::retainedPublicUniformMatches(ctx, *deviceB, count, true));
@@ -1867,16 +1917,16 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceB, materializedB));
         exact(expectedA, *materializedA);
         exact(expectedB, *materializedB);
-        const auto afterMaterialize = gpu::publicUniformRetentionStats();
+        const auto afterMaterialize = gpu::publicUniformRetentionStats(*testExecution);
         LOGVOLE_REQUIRE_EQ(afterMaterialize.mHostMaterializations,
             afterRetainOnly.mHostMaterializations + 2u);
         auto sameA = materializedB;
         LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceA, sameA));
         LOGVOLE_REQUIRE_TRUE(sameA == materializedA);
-        LOGVOLE_REQUIRE_EQ(gpu::publicUniformRetentionStats().mHostMaterializations,
+        LOGVOLE_REQUIRE_EQ(gpu::publicUniformRetentionStats(*testExecution).mHostMaterializations,
             afterMaterialize.mHostMaterializations);
         {
-            ScopedProtocolCacheScope peer(ProtocolCacheRole::Receiver, run);
+            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope peer(testExecution, ProtocolCacheRole::Receiver, run);
             auto unchanged = materializedB;
             LOGVOLE_REQUIRE_FALSE(gpu::materializeRetainedPublicUniform(ctx, deviceA, unchanged));
             LOGVOLE_REQUIRE_TRUE(unchanged == materializedB);
@@ -1908,14 +1958,14 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             oc::PRNG referencePrng(seed, 3), actualPrng(seed, 3);
             RingTensor expected, actual;
             {
-                ScopedGpuEnabled cpuReference(false);
+                ScopedGpuEnabled cpuReference(testExecution, false);
                 LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk, 8, expected, 3.2, 19.2,
                     &referencePrng, false, a, 4));
             }
-            const auto before = gpu::publicUniformRetentionStats();
+            const auto before = gpu::publicUniformRetentionStats(*testExecution);
             LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk, 8, actual, 3.2, 19.2,
                 &actualPrng, false, a, 4));
-            const auto after = gpu::publicUniformRetentionStats();
+            const auto after = gpu::publicUniformRetentionStats(*testExecution);
             LOGVOLE_REQUIRE_EQ(expected.mRows, actual.mRows);
             LOGVOLE_REQUIRE_EQ(expected.mCols, actual.mCols);
             exact(expected.mPolys, actual.mPolys);
@@ -1935,7 +1985,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         {
             std::weak_ptr<const std::vector<RnsPoly>> oldA, oldB;
             {
-                ScopedProtocolCacheScope secondRun(ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+                ::tests_libOTe::logvole_test::ScopedProtocolCacheScope secondRun(testExecution, ProtocolCacheRole::Sender, ::tests_libOTe::logvole_test::allocateRunId(testExecution));
                 const auto temporaryA = sharedLhePublicANtt(ctx, count);
                 const auto temporaryB = sharedLencPublicBNtt(ctx, count / 2);
                 oldA = temporaryA;
@@ -1947,7 +1997,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicA) == retainedA);
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicB) == retainedB);
             {
-                ScopedProtocolCacheScope thirdRun(ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+                ::tests_libOTe::logvole_test::ScopedProtocolCacheScope thirdRun(testExecution, ProtocolCacheRole::Sender, ::tests_libOTe::logvole_test::allocateRunId(testExecution));
                 LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(ctx, count) != nullptr);
                 LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(ctx, count / 2) != nullptr);
             }
@@ -1964,10 +2014,12 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
 
 void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     ScopedEnvironmentValue originalTransform("LV_GPU_SETUP_GAUSSIAN_TRANSFORM", "0");
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled useGpu(true);
-    const bool haveGpu = gpu::enabled();
+    ScopedGpuEnabled useGpu(testExecution, true);
+    const bool haveGpu = gpu::enabled(*testExecution);
     if (const char* strict = std::getenv("LV_GPU_SETUP_GAUSSIAN_PRG_STRICT"))
         if (strict[0] == '1') LOGVOLE_REQUIRE_TRUE(haveGpu);
     if (haveGpu)
@@ -1976,19 +2028,19 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP&)
         std::array<seal::prng_seed_type, 1> seeds{};
         seeds[0][0] = 0x50494E4E45445052ull;
         gpu::GaussianPrngPrefixBuffer first, second;
-        LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(seeds, 512, first));
+        LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(*testExecution, seeds, 512, first));
         LOGVOLE_REQUIRE_TRUE(first.mData != nullptr);
         LOGVOLE_REQUIRE_EQ(first.mWords, std::size_t(512));
         const std::vector<std::uint64_t> saved(first.mData.get(), first.mData.get() + first.mWords);
         seeds[0][1] = 0x5345434F4E44ull;
-        LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(seeds, 512, second));
+        LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(*testExecution, seeds, 512, second));
         LOGVOLE_REQUIRE_TRUE(second.mData != nullptr);
         LOGVOLE_REQUIRE_TRUE(first.mData.get() != second.mData.get());
         LOGVOLE_REQUIRE_TRUE(std::equal(saved.begin(), saved.end(), first.mData.get()));
         const auto previous = second.mData;
         const auto previousWords = second.mWords;
         ScopedEnvironmentValue forceDecline("LV_GPU_SETUP_GAUSSIAN_PRG_FORCE_DECLINE", "1");
-        LOGVOLE_REQUIRE_TRUE(!gpu::sampleGaussianPrngPrefixesDevice(seeds, 512, second));
+        LOGVOLE_REQUIRE_TRUE(!gpu::sampleGaussianPrngPrefixesDevice(*testExecution, seeds, 512, second));
         LOGVOLE_REQUIRE_TRUE(second.mData == previous);
         LOGVOLE_REQUIRE_EQ(second.mWords, previousWords);
         LOGVOLE_REQUIRE_TRUE(std::equal(saved.begin(), saved.end(), first.mData.get()));
@@ -2066,12 +2118,14 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP&)
     for (std::uint32_t n : { 1024u, 8192u, 16384u })
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = n;
         params.mCoeffModulusBits.resize(n == 1024 ? 2 : n == 8192 ? 4 : 8);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(),
             n == 1024 ? 30 : n == 8192 ? 55 : 52);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         for (std::uint32_t count : { 1u, 4u, 32u }) checkCase(ctx, count, 3.2, 19.2, {});
         checkCase(ctx, 4, 0.0, 19.2, {});
         checkCase(ctx, 4, 3.2, 19.2, { 1, 0, 2, 0 });
@@ -2081,7 +2135,7 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP&)
             // than the prefix heuristic; the scalar stream must still match.
             checkCase(ctx, 1, 3.2, 0.125, {});
 #if defined(ENABLE_LOGVOLE_CUDA)
-            ScopedGpuEnabled cpuOnly(false);
+            ScopedGpuEnabled cpuOnly(testExecution, false);
 #endif
             ScopedEnvironmentValue enabled("LV_GPU_SETUP_GAUSSIAN_PRG", "1");
             ScopedEnvironmentValue strict("LV_GPU_SETUP_GAUSSIAN_PRG_STRICT", "1");
@@ -2114,11 +2168,14 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP&)
 
 void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled gpuScope(requested);
-    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    ScopedGpuEnabled gpuScope(testExecution, requested);
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     if (!gpu::gaussianTransformHostCompatible())
     {
         if (const char* strict = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_STRICT"))
@@ -2136,7 +2193,8 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
 
     for (const auto shape : {0, 1, 2})
     {
-        RingParams params = make_small_params();
+        RingParams params = ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution);
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         if (shape == 1)
         {
             params.mPolyModulusDegree = 8192;
@@ -2148,7 +2206,8 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
             assignValues<int>(params.mCoeffModulusBits, {52, 52, 52, 52, 52, 52, 52, 52});
         }
         RingNttContext ctx;
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const std::size_t n = params.mPolyModulusDegree;
         for (std::uint32_t count : {1, 4, 32})
         for (double sigma : {0.0, 3.2})
@@ -2183,7 +2242,7 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(seeds == referenceSeeds);
 
             gpu::GaussianSampleBuffer direct;
-            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactDevice(
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactDevice(*testExecution,
                 seeds, static_cast<std::uint32_t>(n), sigma, 19.2, ringModulusValue(ctx, 0), direct));
             LOGVOLE_REQUIRE_EQ(direct.mValues.mWords, count * n);
             for (std::size_t row = 0; row < count; ++row)
@@ -2199,14 +2258,14 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
                 const std::vector<std::uint64_t> snapshot(retained.get(), retained.get() + count * n);
                 const auto flags = direct.mComplete;
                 gpu::GaussianSampleBuffer incomplete;
-                LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactDevice(seeds, static_cast<std::uint32_t>(n),
+                LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactDevice(*testExecution, seeds, static_cast<std::uint32_t>(n),
                     sigma, 19.2, ringModulusValue(ctx, 0), incomplete, 512));
                 LOGVOLE_REQUIRE_TRUE(incomplete.mValues.mData != retained);
                 LOGVOLE_REQUIRE_TRUE(std::all_of(incomplete.mComplete.begin(), incomplete.mComplete.end(),
                     [](auto complete) { return complete == 0; }));
                 LOGVOLE_REQUIRE_TRUE(std::equal(snapshot.begin(), snapshot.end(), retained.get()));
                 ScopedEnvironmentValue forced("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_FORCE_DECLINE", "1");
-                LOGVOLE_REQUIRE_TRUE(!gpu::sampleGaussianCompactDevice(seeds, static_cast<std::uint32_t>(n),
+                LOGVOLE_REQUIRE_TRUE(!gpu::sampleGaussianCompactDevice(*testExecution, seeds, static_cast<std::uint32_t>(n),
                     sigma, 19.2, ringModulusValue(ctx, 0), direct));
                 LOGVOLE_REQUIRE_TRUE(direct.mValues.mData == retained && direct.mComplete == flags);
                 std::vector<std::uint64_t> fallback(expected.size(), marker);
@@ -2232,11 +2291,14 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
 
 void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled gpuScope(requested);
-    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    ScopedGpuEnabled gpuScope(testExecution, requested);
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     if (!gpu::gaussianTransformHostCompatible())
     {
         if (const char* strict = std::getenv("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT"))
@@ -2255,13 +2317,15 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
 
     for (std::uint32_t degree : {1024u, 8192u, 16384u})
     {
-        RingParams params = make_small_params();
+        RingParams params = ::tests_libOTe::logvole_test::withExecution(make_small_params(), testExecution);
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = degree;
         params.mCoeffModulusBits.resize(degree == 16384u ? 8u : degree == 8192u ? 4u : 2u);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(),
             degree == 16384u ? 52 : degree == 8192u ? 55 : 30);
         RingNttContext ctx;
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         if (degree != 8192u)
         {
             // Check the expansion independently of the Gaussian generator,
@@ -2275,7 +2339,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
             for (std::size_t i = 0; i < compactValues.size(); ++i)
                 compactValues[i] = values[(i + i / degree) % values.size()];
             const auto originalCompact = compactValues;
-            auto device = gpu::uploadScalars(compactValues);
+            auto device = gpu::uploadScalars(*testExecution, compactValues);
             LOGVOLE_REQUIRE_TRUE(device != nullptr && gpu::waitScalars(*device));
             std::vector<RnsPoly> coefficients(count);
             for (std::size_t row = 0; row < count; ++row)
@@ -2294,7 +2358,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 auto expected = coefficients;
                 if (outputNtt)
                 {
-                    ScopedGpuEnabled cpuReference(false);
+                    ScopedGpuEnabled cpuReference(testExecution, false);
                     for (auto& poly : expected) LOGVOLE_REQUIRE_TRUE(forwardNttCanonical(poly, ctx));
                 }
                 const auto checkExpansion = [&](std::uint32_t workers) {
@@ -2363,7 +2427,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
             const auto unchangedSeeds = seeds;
             LOGVOLE_REQUIRE_TRUE(seeds == expectedSeeds);
             gpu::GaussianDeviceSampleBuffer direct;
-            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactResidentDevice(
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactResidentDevice(*testExecution,
                 seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active));
             LOGVOLE_REQUIRE_TRUE(direct.mValues != nullptr);
             LOGVOLE_REQUIRE_EQ(direct.mValues->count(), words);
@@ -2403,7 +2467,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
 
             if (count != 4u || sigma == 0.0) continue;
             gpu::GaussianDeviceSampleBuffer incomplete;
-            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactResidentDevice(
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactResidentDevice(*testExecution,
                 seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), incomplete, 512, active));
             LOGVOLE_REQUIRE_TRUE(incomplete.mValues != retained);
             LOGVOLE_REQUIRE_EQ(incomplete.mComplete.size(), active.size());
@@ -2414,7 +2478,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
             gpu::DeviceScalarsPtr device = retained;
             {
                 ScopedEnvironmentValue decline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", "1");
-                LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
+                LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(*testExecution,
                     seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active));
                 LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
                 LOGVOLE_REQUIRE_FALSE(samplePolyErrorCompactBatchForSetup(
@@ -2436,7 +2500,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(host == expected && device == nullptr);
             }
             {
-                ScopedGpuEnabled cpuOnly(false);
+                ScopedGpuEnabled cpuOnly(testExecution, false);
                 host.assign(1, marker);
                 device = retained;
                 LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(
@@ -2473,21 +2537,21 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 // A completed device owner remains valid across a CPU-only
                 // consumer; materialization replays its original seeds without
                 // fetching, replacing, or releasing that retained owner.
-                ScopedGpuEnabled cpuOnly(false);
+                ScopedGpuEnabled cpuOnly(testExecution, false);
                 const auto retainedOwner = device;
                 std::vector<std::uint64_t> replayHost{marker};
                 LOGVOLE_REQUIRE_TRUE(materializePolyErrorCompactBatchForSetup(
                     replayHost, device, sigma, 19.2, seeds, ctx, 4, active));
                 LOGVOLE_REQUIRE_TRUE(replayHost == expected && device == retainedOwner);
             }
-            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
+            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(*testExecution,
                 seeds, 0u, sigma, 19.2, ringModulusValue(ctx, 0), direct));
             LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
-            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
+            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(*testExecution,
                 seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0,
                 std::span<const std::uint8_t>(active).first(3)));
             LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
-            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
+            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(*testExecution,
                 {}, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct));
             LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
             {
@@ -2497,7 +2561,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                     ~RestoreRounding() { std::fesetround(mode); }
                 } rounding;
                 LOGVOLE_REQUIRE_EQ(std::fesetround(FE_UPWARD), 0);
-                LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
+                LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(*testExecution,
                     seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active));
                 LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
                 LOGVOLE_REQUIRE_FALSE(samplePolyErrorCompactBatchForSetup(

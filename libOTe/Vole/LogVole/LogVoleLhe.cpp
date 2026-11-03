@@ -22,24 +22,24 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        bool parallelLheSetupEnabled()
+        bool parallelLheSetupEnabled(ExecutionContext& execution)
         {
             // Explicit 1 also permits CPU-only equivalence tests. The default
             // applies only to GPU protocols; 0 restores the serial setup.
             const char* value = std::getenv("LV_GPU_SETUP_LHE");
             if (value) return value[0] != '0';
 #if defined(ENABLE_LOGVOLE_CUDA)
-            return gpu::enabled();
+            return gpu::enabled(execution);
 #else
             return false;
 #endif
         }
 
-        bool deviceLheSetupEnabled()
+        bool deviceLheSetupEnabled(ExecutionContext& execution)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             const char* value = std::getenv("LV_GPU_SETUP_LHE_DEVICE");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return (!value || value[0] != '0') && gpu::enabled(execution);
 #else
             return false;
 #endif
@@ -87,9 +87,12 @@ namespace osuCrypto::LogVole
             std::shared_ptr<const gpu::RetainedPublicUniform> mDevice;
         };
 
-        std::unordered_map<PublicACacheKey, std::shared_ptr<PublicACacheEntry>, PublicACacheKeyHash>
-            publicACache;
-        std::mutex publicACacheMutex;
+        struct PublicACache
+        {
+            std::unordered_map<PublicACacheKey, std::shared_ptr<PublicACacheEntry>, PublicACacheKeyHash>
+                mEntries;
+            std::mutex mMutex;
+        };
 
         std::vector<RnsPoly> buildLhePublicANttImpl(const RingNttContext& ctx, u32 mu,
             std::shared_ptr<const gpu::RetainedPublicUniform>* captured = nullptr)
@@ -102,34 +105,36 @@ namespace osuCrypto::LogVole
         std::shared_ptr<PublicACacheEntry> getOrCreateCachedPublicAEntry(
             const RingNttContext& ctx, u32 mu)
         {
+            auto& cache = executionContext(ctx).resources<PublicACache>();
             PublicACacheKey key{};
             key.mRing = ctx.mParams;
+            key.mRing.mExecutionContext.reset();
             key.mCount = mu;
-            const auto scope = currentProtocolCacheScope();
+            const auto scope = executionContext(ctx).mScope;
             key.mRunId = scope.mRunId;
             key.mRole = scope.mRole;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (gpu::publicUniformRetentionEnabled()) key.mDevice = gpu::currentDeviceOrdinal();
+            if (gpu::publicUniformRetentionEnabled(executionContext(ctx))) key.mDevice = gpu::currentDeviceOrdinal();
 #endif
 
             {
-                std::lock_guard<std::mutex> lock(publicACacheMutex);
+                std::lock_guard<std::mutex> lock(cache.mMutex);
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (gpu::publicUniformRetentionEnabled() && key.mRunId != 0)
+                if (gpu::publicUniformRetentionEnabled(executionContext(ctx)) && key.mRunId != 0)
                 {
                     // A completed run's otherwise unowned host snapshot can
                     // retire; the retention registry holds only a weak owner.
-                    for (auto entry = publicACache.begin(); entry != publicACache.end();)
+                    for (auto entry = cache.mEntries.begin(); entry != cache.mEntries.end();)
                     {
                         if (entry->first.mRunId != 0 && entry->first.mRunId != key.mRunId &&
                             entry->second.use_count() == 1)
-                            entry = publicACache.erase(entry);
+                            entry = cache.mEntries.erase(entry);
                         else ++entry;
                     }
                 }
 #endif
-                auto it = publicACache.find(key);
-                if (it != publicACache.end())
+                auto it = cache.mEntries.find(key);
+                if (it != cache.mEntries.end())
                 {
                     return it->second;
                 }
@@ -152,8 +157,8 @@ namespace osuCrypto::LogVole
 #endif
             }
 
-            std::lock_guard<std::mutex> lock(publicACacheMutex);
-            auto [it, inserted] = publicACache.emplace(std::move(key), candidate);
+            std::lock_guard<std::mutex> lock(cache.mMutex);
+            auto [it, inserted] = cache.mEntries.emplace(std::move(key), candidate);
             (void)inserted;
             return it->second;
         }
@@ -300,14 +305,14 @@ namespace osuCrypto::LogVole
         u64 rootSecretOwnerRunId,
         bool topSecretDomain)
     {
-        HostStep setupStep("setup: lhe ciphertext");
+        HostStep setupStep(executionContext(ctx), "setup: lhe ciphertext");
         const auto rCount = randomizers ? randomizers->count()
             : rootR1Host ? rootR1Host->count() : rInput.size();
         const auto skCount = rootSecretHost ? rootSecretHost->count() : sk1.size();
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool rootBatchValid = !rootR1Device || !gpu::enabled() ||
+        const bool rootBatchValid = !rootR1Device || !gpu::enabled(executionContext(ctx)) ||
             (rootR1Host && gpu::rootErrorBatchMatches(ctx, *rootR1Device, rCount));
-        const bool rootSecretValid = !rootSecretDevice || !gpu::enabled() ||
+        const bool rootSecretValid = !rootSecretDevice || !gpu::enabled(executionContext(ctx)) ||
             (rootSecretHost && (topSecretDomain
                 ? gpu::topSecretUniformBatchMatches(ctx, *rootSecretDevice,
                     skCount, rootSecretOwnerRunId)
@@ -348,7 +353,7 @@ namespace osuCrypto::LogVole
         else
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (deviceLheSetupEnabled())
+            if (deviceLheSetupEnabled(executionContext(ctx)))
                 retainedPublicANtt = retainedLhePublicANtt(ctx, publicCount);
 #endif
             if (!retainedPublicANtt)
@@ -375,7 +380,7 @@ namespace osuCrypto::LogVole
                 ringAddInplace(poly, error, ctx);
         };
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (deviceLheSetupEnabled())
+        if (deviceLheSetupEnabled(executionContext(ctx)))
         {
             // An initial r1 residency decline still keeps the already-drawn
             // row seeds. Only that decline materializes host rows for the
@@ -428,7 +433,7 @@ namespace osuCrypto::LogVole
                         [&](std::size_t idx) {
                             return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
                                 noiseMaxDeviation, noiseSeeds[idx], ctx);
-                        })) return false;
+                        }, false, &(executionContext(ctx)))) return false;
                 }
                 out = std::move(ct1);
                 if (deferredCiphertext) *deferredCiphertext = std::move(lazyCiphertext);
@@ -464,10 +469,10 @@ namespace osuCrypto::LogVole
         if (rPowerOffset)
         {
             shiftedR.resize(r.size());
-            const u32 shiftWorkers = parallelLheSetupEnabled() ? requestedWorkers : 1;
+            const u32 shiftWorkers = parallelLheSetupEnabled(executionContext(ctx)) ? requestedWorkers : 1;
             if (!detail::runParallelTasks(r.size(), shiftWorkers, [&](std::size_t i) {
                     return multiplyByGPower(ctx, r[i], gadgetLogBase, rPowerOffset, shiftedR[i]);
-                })) return false;
+                }, false, &(executionContext(ctx)))) return false;
             rSource = &shiftedR;
         }
 
@@ -485,13 +490,13 @@ namespace osuCrypto::LogVole
         }
 
 
-        if (parallelLheSetupEnabled())
+        if (parallelLheSetupEnabled(executionContext(ctx)))
         {
             // Canonicalize each source once. Column zero then needs only a
             // copy; the remaining columns use SEAL's precomputed scalar
             // multiplier instead of a full modular multiply per coefficient.
             if (!detail::runParallelTasks(rNtt.size(), requestedWorkers,
-                    [&](std::size_t row) { return canonicalizePoly(rNtt[row], ctx); }))
+                    [&](std::size_t row) { return canonicalizePoly(rNtt[row], ctx); }, false, &(executionContext(ctx))))
             {
                 return false;
             }
@@ -522,7 +527,7 @@ namespace osuCrypto::LogVole
                         }
                     }
                     return dyadicMultiplyAddNttInplace((*publicANtt)[row], sk1Ntt[col], cNtt, ctx);
-                }))
+                }, false, &(executionContext(ctx))))
             {
                 return false;
             }
@@ -547,7 +552,7 @@ namespace osuCrypto::LogVole
                         if (!compactNoise.empty()) return addCompactNoise(idx, ct1.mPolys[idx]);
                         return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
                             noiseMaxDeviation, noiseSeeds[idx], ctx);
-                    }))
+                    }, false, &(executionContext(ctx))))
                 {
                     return false;
                 }
@@ -828,7 +833,7 @@ namespace osuCrypto::LogVole
                             product.mCoeffs[i], moduli[j]);
                     }
                     return true;
-                })) return false;
+                }, false, &(executionContext(ctx)))) return false;
             out = std::move(result);
             return true;
         }
@@ -837,7 +842,7 @@ namespace osuCrypto::LogVole
         // and batched. This is the Root recursion level's hot path, and it used to
         // pay one transform per row per direction; batching lets the CUDA backend
         // amortise a single device round trip over all of them.
-        static const bool inplace = [] {
+        const bool inplace = [] {
             const char* value = std::getenv("LV_CPU_INPLACE_LHE");
             return !value || value[0] != '0';
         }();
@@ -869,15 +874,15 @@ namespace osuCrypto::LogVole
                             c[i] = seal::util::sub_uint_mod(seal::util::barrett_reduce_64(c[i], modulus),
                                 mulMod(seal::util::barrett_reduce_64(a[i], modulus), b[i], modulus), modulus);
                 }
-                globalRingOpsStats.mDyadicMulAddCount.fetch_add(1, std::memory_order_relaxed);
-                globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
+                executionContext(ctx).mRingOps.mDyadicMulAddCount.fetch_add(1, std::memory_order_relaxed);
+                executionContext(ctx).mRingOps.mSubCount.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             RnsPoly askNtt{};
             resizeZero(askNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             return dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, askNtt, ctx) &&
                    ringSubInplace(result[row], askNtt, ctx);
-        });
+        }, false, &(executionContext(ctx)));
         if (!rowsOk)
         {
             return false;

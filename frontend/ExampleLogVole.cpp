@@ -54,23 +54,20 @@ namespace osuCrypto
 
         struct LogVoleExampleBackend
         {
+            bool mUseGpu = false;
+            explicit LogVoleExampleBackend(const CLP& cmd)
+                : mUseGpu(cmd.getOr("gpu", 0) != 0)
+            {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            bool previous = LogVole::gpu::enabled();
-            explicit LogVoleExampleBackend(const CLP& cmd)
-            {
-                const bool requested = cmd.getOr("gpu", 0) != 0;
-                LogVole::gpu::setEnabled(requested);
-                if (requested && !LogVole::gpu::enabled())
+                LogVole::ExecutionContext execution;
+                execution.mUseGpu = mUseGpu;
+                if (mUseGpu && !LogVole::gpu::enabled(execution))
                     throw std::runtime_error("No CUDA device available for LogVole");
-            }
-            ~LogVoleExampleBackend() { LogVole::gpu::setEnabled(previous); }
 #else
-            explicit LogVoleExampleBackend(const CLP& cmd)
-            {
-                if (cmd.getOr("gpu", 0))
+                if (mUseGpu)
                     throw std::runtime_error("Build with ENABLE_LOGVOLE_CUDA=ON to use -gpu 1");
-            }
 #endif
+            }
         };
 
         u32 logVoleExamplePlaintextModulusBits(const CLP& cmd)
@@ -124,7 +121,9 @@ namespace osuCrypto
                 throw std::runtime_error("LogVole example requires non-negative -n");
 
             LogVoleSender sender{};
+            sender.mUseGpu = backend.mUseGpu;
             LogVoleReceiver receiver{};
+            receiver.mUseGpu = backend.mUseGpu;
             const auto plaintextModulusBits = logVoleExamplePlaintextModulusBits(cmd);
             const auto workerThreads = static_cast<u32>(std::max(numThreads, 1));
             sender.configure(static_cast<u64>(numVole), plaintextModulusBits, workerThreads,
@@ -197,7 +196,9 @@ namespace osuCrypto
         const auto workerThreads = static_cast<u32>(std::max(numThreads, 1));
 
         LogVoleSender sender{};
+        sender.mUseGpu = backend.mUseGpu;
         LogVoleReceiver receiver{};
+        receiver.mUseGpu = backend.mUseGpu;
         if (role == Role::Sender)
             sender.configure(w, plaintextModulusBits, workerThreads,
                 logVoleExampleSetting(cmd), logVoleExampleMode(cmd));

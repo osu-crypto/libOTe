@@ -70,7 +70,7 @@ namespace osuCrypto::LogVole::gpu
 
         u32 zkPseudoBits(u64 modulus)
         {
-            static const bool on = [] {
+            const bool on = [] {
                 const char* v = std::getenv("LV_GPU_ZK_PSEUDO_REDUCE");
                 return !(v && v[0] == '0');
             }();
@@ -98,7 +98,7 @@ namespace osuCrypto::LogVole::gpu
 
         bool zkDebug()
         {
-            static const bool on = [] {
+            const bool on = [] {
                 const char* v = std::getenv("LOGVOLE_GPU_DEBUG");
                 return v && v[0] != '\0' && v[0] != '0';
             }();

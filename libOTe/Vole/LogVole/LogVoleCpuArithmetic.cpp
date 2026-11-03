@@ -357,7 +357,7 @@ namespace osuCrypto::LogVole::detail
             const auto zero = _mm512_setzero_si512();
             const auto mask = _mm512_set1_epi64(maskValue);
             const auto one = _mm512_set1_epi64(1);
-            static const bool quotientEnabled = [] {
+            const bool quotientEnabled = [] {
                 const char* value = std::getenv("LV_CPU_CRT_QUOTIENT");
                 return !value || value[0] != '0';
             }();
@@ -712,7 +712,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, const seal::Modulus& modulus, const u64* rejectionLimit)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_VECTOR_REDUCE");
             return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
                 __builtin_cpu_supports("avx512dq");
@@ -734,7 +734,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, const seal::util::RNSBase& base, u64 plaintextModulus)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_VECTOR_ROUND");
             return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
                 __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
@@ -764,7 +764,7 @@ namespace osuCrypto::LogVole::detail
     bool cpuDenoiseRns(const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base, std::size_t target)
     {
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_VECTOR_DENOISE");
             return !value || value[0] != '0';
         }();
@@ -778,7 +778,7 @@ namespace osuCrypto::LogVole::detail
         std::span<const wideU64> reciprocal, wideU64 margin, bool& accepted)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_VECTOR_GOLDEN_CHECK");
             return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
                 __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
@@ -808,7 +808,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, const seal::util::RNSBase& base)
     {
 #if defined(__SIZEOF_INT128__)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_FAST_CRT");
             return !value || value[0] != '0';
         }();
@@ -816,7 +816,7 @@ namespace osuCrypto::LogVole::detail
         for (std::size_t i = 0; i < base.size(); ++i)
             if (base.base()[i].bit_count() > 61) return false;
 #if defined(LV_CPU_IFMA)
-        static const bool vectorEnabled = [] {
+        const bool vectorEnabled = [] {
             const char* value = std::getenv("LV_CPU_VECTOR_CRT");
             return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
                 __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
@@ -851,7 +851,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_FUSED_GADGET");
             const char* vector = std::getenv("LV_CPU_VECTOR_CRT");
             const char* fast = std::getenv("LV_CPU_FAST_CRT");
@@ -877,7 +877,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_FUSED_LOW_DIGIT");
             const char* vector = std::getenv("LV_CPU_VECTOR_CRT");
             const char* fast = std::getenv("LV_CPU_FAST_CRT");
@@ -904,7 +904,7 @@ namespace osuCrypto::LogVole::detail
         std::span<const seal::Modulus> destinationModuli)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_VECTOR_RECURSIVE_LEAF");
             return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
                 __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
@@ -932,7 +932,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t terms, u64* c, std::size_t count, const seal::Modulus& modulus)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_FUSED_DOT");
             const char* vector = std::getenv("LV_CPU_VECTOR_DYADIC");
             return (!value || value[0] != '0') && (!vector || vector[0] != '0') &&
@@ -957,7 +957,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, const seal::Modulus& modulus)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
+        const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_VECTOR_DYADIC");
             return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
                 __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");

@@ -55,6 +55,7 @@ namespace osuCrypto
         LogVoleGarbledSender() = default;
         LogVoleGarbledSender(const LogVoleGarbledSender&) = delete;
         LogVoleGarbledSender& operator=(const LogVoleGarbledSender&) = delete;
+        bool mUseGpu = false;
         bool mKeepOutputOnDevice = false;
 
         void configure(u64 labelCount, u32 numThreads = 1,
@@ -65,6 +66,7 @@ namespace osuCrypto
         task<> send(LogVole::GarbledLabelBatch& zeroLabels, PRNG& prng, Socket& sock);
 
         u64 modulus() const { return mModulus; }
+        LogVole::ExecutionContext& execution() const { return LogVole::executionContext(mParams); }
         u64 configureCacheRunId() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }
         const LogVole::GarbledLabel& deltas() const;
@@ -92,6 +94,7 @@ namespace osuCrypto
         LogVoleGarbledReceiver() = default;
         LogVoleGarbledReceiver(const LogVoleGarbledReceiver&) = delete;
         LogVoleGarbledReceiver& operator=(const LogVoleGarbledReceiver&) = delete;
+        bool mUseGpu = false;
         bool mKeepOutputOnDevice = false;
         // Optional gpu::DeviceScalars containing exactly labelCount field
         // values. The caller guarantees each is < modulus(); pass an empty x
@@ -107,6 +110,7 @@ namespace osuCrypto
         task<> receive(span<const u64> x, LogVole::GarbledLabelBatch& labels,
             PRNG& prng, Socket& sock);
         u64 modulus() const { return mModulus; }
+        LogVole::ExecutionContext& execution() const { return LogVole::executionContext(mParams); }
         u64 configureCacheRunId() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }
         const LogVole::GarbledLabelLayout& layout() const { return mLayout; }

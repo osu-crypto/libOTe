@@ -61,7 +61,7 @@ namespace osuCrypto::LogVole::gpu
     defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE == 14 && \
     defined(__AVX512F__) && defined(__OPTIMIZE__) && !defined(__FAST_MATH__)
         if (std::fegetround() != FE_TONEAREST || (_mm_getcsr() & 0xe040u)) return false;
-        static const bool recognized = [] {
+        const bool recognized = [] {
             Dl_info info{};
             // Taking &std::log can yield the executable's PLT stub in a non-PIE
             // build. Resolve the actual symbol selected by the dynamic linker.
@@ -102,7 +102,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
         }();
         if (!recognized) return false;
-        static const bool arithmeticCompatible = [] {
+        const bool arithmeticCompatible = [] {
             // Canary for the actual compiler's libstdc++ distribution, not
             // just its version macros. In each case replacing radius's FMA
             // with separate multiply/add changes at least one output bit.
@@ -173,13 +173,13 @@ namespace osuCrypto::LogVole::gpu
 #endif
     }
 
-    static bool sampleGaussianCompactImpl(
+    static bool sampleGaussianCompactImpl(ExecutionContext& execution,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianSampleBuffer* hostOut,
         GaussianDeviceSampleBuffer* deviceOut, u32 wordsPerPrefix, std::span<const u8> active)
     {
-        HostStep totalStep("setup: Gaussian GPU transform");
-        if (!enabled() || !gaussianTransformHostCompatible() || seeds.empty() || seeds.size() > 65535u ||
+        HostStep totalStep(execution, "setup: Gaussian GPU transform");
+        if (!enabled(execution) || !gaussianTransformHostCompatible() || seeds.empty() || seeds.size() > 65535u ||
             !coefficients || modulus < 2 || !std::isfinite(sigma) || sigma < 0 ||
             !std::isfinite(clip) || clip < 0 ||
             static_cast<long double>(clip) >= static_cast<long double>(modulus >> 1u) ||
@@ -218,19 +218,14 @@ namespace osuCrypto::LogVole::gpu
         if (prefixBytes > maxBytes / 2 || outputRowBytes > maxBytes || rowBytes > maxBytes ||
             outputBytes > maxBytes || activeSeeds.size() > (maxBytes - outputBytes) / rowBytes) return false;
         const std::size_t allPrefixBytes = activeSeeds.size() * prefixBytes;
-        auto& stream = threadSampleStream();
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restore;
-        gpuSetCurrentStream(stream.raw());
+        auto& stream = sampleStream(execution);
+
         using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
         Allocation deviceSeeds(nullptr, gpuFree), prefixes(nullptr, gpuFree), candidates(nullptr, gpuFree),
             counts(nullptr, gpuFree), complete(nullptr, gpuFree), deviceRows(nullptr, gpuFree);
         auto samples = std::make_shared<DeviceScalars>();
-        thread_local PinnedPrefixCache outputCaches[kStreamSlots];
-        auto pinned = hostOut ? outputCaches[threadStreamSlot()].acquire(outputBytes) : std::shared_ptr<u64>{};
+        struct GaussianOutputCache : PinnedPrefixCache {};
+        auto pinned = hostOut ? execution.deviceResources<GaussianOutputCache>().acquire(outputBytes) : std::shared_ptr<u64>{};
         if (hostOut && !pinned) return false;
         std::vector<u8> completed(seeds.size(), 1), activeCompleted(activeSeeds.size());
         StreamDrain drain{stream};
@@ -248,14 +243,14 @@ namespace osuCrypto::LogVole::gpu
                 (!outputRows.empty() && (!deviceRows || !gpuMemcpyH2D(deviceRows.get(), outputRows.data(),
                     outputRows.size() * sizeof(u32), stream.raw()))) ||
                 !gpuMemcpyH2D(deviceSeeds.get(), activeSeeds.data(), activeSeeds.size_bytes(), stream.raw())) return false;
-            HostStep step("setup: Gaussian GPU transform PRG");
+            HostStep step(execution, "setup: Gaussian GPU transform PRG");
             if (!launchBlake2xbStreamForTest(static_cast<const u64*>(deviceSeeds.get()),
                     static_cast<u64*>(prefixes.get()), wordsPerPrefix, static_cast<u32>(activeSeeds.size()), stream.raw()))
                 return false;
         }
         if (!activeSeeds.empty())
         {
-            HostStep step("setup: Gaussian GPU transform launch");
+            HostStep step(execution, "setup: Gaussian GPU transform launch");
             if (!launchGaussianTransform(static_cast<const u64*>(prefixes.get()), wordsPerPrefix,
                     static_cast<u32>(activeSeeds.size()), coefficients, sigma, clip, modulus,
                     static_cast<u64*>(candidates.get()), static_cast<u32*>(counts.get()),
@@ -285,28 +280,28 @@ namespace osuCrypto::LogVole::gpu
         return true;
     }
 
-    bool sampleGaussianCompactDevice(
+    bool sampleGaussianCompactDevice(ExecutionContext& execution,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianSampleBuffer& out, u32 wordsPerPrefix)
     {
-        return sampleGaussianCompactImpl(seeds, coefficients, sigma, clip, modulus, &out, nullptr, wordsPerPrefix, {});
+        return sampleGaussianCompactImpl(execution, seeds, coefficients, sigma, clip, modulus, &out, nullptr, wordsPerPrefix, {});
     }
 
-    bool sampleGaussianCompactResidentDevice(
+    bool sampleGaussianCompactResidentDevice(ExecutionContext& execution,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianDeviceSampleBuffer& out,
         u32 wordsPerPrefix, std::span<const u8> active)
     {
-        return sampleGaussianCompactImpl(seeds, coefficients, sigma, clip, modulus, nullptr, &out, wordsPerPrefix, active);
+        return sampleGaussianCompactImpl(execution, seeds, coefficients, sigma, clip, modulus, nullptr, &out, wordsPerPrefix, active);
     }
 
-    bool sampleGaussianPrngPrefixesDevice(
+    bool sampleGaussianPrngPrefixesDevice(ExecutionContext& execution,
         std::span<const std::array<u64, 8>> seeds,
         u32 wordsPerPrefix,
         GaussianPrngPrefixBuffer& out)
     {
-        HostStep totalStep("setup: Gaussian GPU PRG prefixes");
-        if (!enabled() || seeds.empty() || !wordsPerPrefix || wordsPerPrefix % 512u ||
+        HostStep totalStep(execution, "setup: Gaussian GPU PRG prefixes");
+        if (!enabled(execution) || seeds.empty() || !wordsPerPrefix || wordsPerPrefix % 512u ||
             seeds.size() > std::numeric_limits<u32>::max()) return false;
         const char* decline = std::getenv("LV_GPU_SETUP_GAUSSIAN_PRG_FORCE_DECLINE");
         if (decline && decline[0] == '1') return false;
@@ -315,17 +310,12 @@ namespace osuCrypto::LogVole::gpu
         if (prefixBytes > maxPrefixBytes || seeds.size() > maxPrefixBytes / prefixBytes) return false;
         const std::size_t bytes = seeds.size() * prefixBytes;
 
-        auto& stream = threadSampleStream();
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restore;
-        gpuSetCurrentStream(stream.raw());
+        auto& stream = sampleStream(execution);
+
         using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
         Allocation deviceSeeds(nullptr, gpuFree), devicePrefixes(nullptr, gpuFree);
-        thread_local PinnedPrefixCache prefixCaches[kStreamSlots];
-        auto pinned = prefixCaches[threadStreamSlot()].acquire(bytes);
+        struct GaussianPrefixCache : PinnedPrefixCache {};
+        auto pinned = execution.deviceResources<GaussianPrefixCache>().acquire(bytes);
         if (!pinned) return false;
         StreamDrain drain{stream};
         deviceSeeds.reset(gpuMalloc(seeds.size_bytes()));

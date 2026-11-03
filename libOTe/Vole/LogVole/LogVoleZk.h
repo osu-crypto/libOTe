@@ -111,6 +111,7 @@ namespace osuCrypto::LogVole
         // immutable allocation. Separate parties must construct separate
         // handles, even when their public wiring bytes are identical.
         std::shared_ptr<void> mOperandsDevice;
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
 
         u64 gateCount() const { return mWidth * mDepth; }
         u64 wireCount() const { return mWidth * (mDepth + 1); }
@@ -207,6 +208,7 @@ namespace osuCrypto::LogVole
     {
         u64 mDim = 0;
         u32 mReps = 1;
+        ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
 
         u32 repetitions() const { return mReps ? mReps : 1u; }
         u64 entries() const { return mDim * mDim; }
@@ -299,6 +301,15 @@ namespace osuCrypto::LogVole
 
     // The verifier's final test, shared by both statements.
     bool zkAccept(const ZkProof& proof, u64 verifierValue, u64 delta, u64 modulus);
+    inline ExecutionContext& executionContext(const ZkMulCircuit& circuit)
+    {
+        return *circuit.mExecutionContext;
+    }
+    inline ExecutionContext& executionContext(const ZkMatMulStatement& statement)
+    {
+        return *statement.mExecutionContext;
+    }
+
 }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -311,10 +322,10 @@ namespace osuCrypto::LogVole::gpu
 
     // Synchronous exact descriptor generation, cached by device, party role,
     // and actual modulus. The output is unchanged on failure.
-    bool prepareZkModulusDevice(u64 modulus, HostModulus& out);
+    bool prepareZkModulusDevice(ExecutionContext& execution, u64 modulus, HostModulus& out);
     // Performs the final acceptance equation on the GPU. A successful call
     // may report accepted=false; execution failure leaves accepted unchanged.
-    bool zkAcceptDevice(const ZkProof& proof, u64 verifierValue, u64 delta,
+    bool zkAcceptDevice(ExecutionContext& execution, const ZkProof& proof, u64 verifierValue, u64 delta,
         u64 modulus, bool& accepted);
     struct ZkMulDeviceState;
     std::shared_ptr<ZkMulDeviceState> makeZkMulDeviceState(const ZkMulCircuit& circuit);
@@ -326,7 +337,7 @@ namespace osuCrypto::LogVole::gpu
         ZkMulDeviceState& state, u64& out);
 
     // Exact fresh PRNG(seed) A/B inputs and masks, with zero request padding.
-    DeviceScalarsPtr zkMatMulWitnessInputsDevice(
+    DeviceScalarsPtr zkMatMulWitnessInputsDevice(ExecutionContext& execution,
         const ZkMatMulStatement& st, u64 modulus, block seed, u64 voleSize = 0);
 
     // Construct the public product in a separate device allocation.
@@ -343,12 +354,12 @@ namespace osuCrypto::LogVole::gpu
     // Replace a device handle with an independent device allocation containing
     // identical public wiring. Host bytes and the input remain unchanged on
     // failure. This is local ownership detachment, not a transport operation.
-    bool zkMulDetachOperands(ZkMulCircuit& circuit);
+    bool zkMulDetachOperands(ExecutionContext& execution, ZkMulCircuit& circuit);
 
     // Exact seeded wiring generated on the GPU. The public host vector remains
     // empty until explicitly materialized; copies within that party may share
     // immutable device wiring.
-    bool makeZkMulCircuitForBudgetDevice(
+    bool makeZkMulCircuitForBudgetDevice(ExecutionContext& execution,
         u64 voleBudget, u64 depth, block seed, ZkMulCircuit& out);
     bool zkMulMaterializeOperands(ZkMulCircuit& circuit);
 

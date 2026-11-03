@@ -3,7 +3,15 @@
 #include <cryptoTools/Common/Defines.h>
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
+#include "libOTe/Vole/LogVole/LogVoleDiagnostics.h"
+
 #include <atomic>
+#include <memory>
+#include <cstdint>
+#include <utility>
+#include <typeindex>
+#include <unordered_map>
+#include <thread>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -27,57 +35,11 @@ namespace osuCrypto::LogVole
         ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
     };
 
-    inline std::atomic<u64> gProtocolCacheRunCounter{ 1 };
-    inline thread_local ProtocolCacheScope tProtocolCacheScope{};
-
-    inline u64 allocateProtocolCacheRunId()
-    {
-        return gProtocolCacheRunCounter.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    inline ProtocolCacheScope currentProtocolCacheScope()
-    {
-        return tProtocolCacheScope;
-    }
-
-    inline void setProtocolCacheScope(ProtocolCacheRole role, u64 runId)
-    {
-        tProtocolCacheScope.mRole = role;
-        tProtocolCacheScope.mRunId = runId;
-    }
-
-    class ScopedProtocolCacheScope
-    {
-    public:
-        ScopedProtocolCacheScope(ProtocolCacheRole role, u64 runId)
-            : mPrevious(tProtocolCacheScope)
-        {
-            setProtocolCacheScope(role, runId);
-        }
-
-        ScopedProtocolCacheScope(ProtocolCacheScope scope)
-            : mPrevious(tProtocolCacheScope)
-        {
-            tProtocolCacheScope = scope;
-        }
-
-        ScopedProtocolCacheScope(const ScopedProtocolCacheScope&) = delete;
-        ScopedProtocolCacheScope& operator=(const ScopedProtocolCacheScope&) = delete;
-
-        ~ScopedProtocolCacheScope()
-        {
-            tProtocolCacheScope = mPrevious;
-        }
-
-    private:
-        ProtocolCacheScope mPrevious{};
-    };
-
     // ---- host step timing -------------------------------------------------
     //
     // Wall-clock and current-thread CPU accounting for named regions, enabled with
-    // LV_STEP_PROFILE=1 and dumped at exit. Header only so every translation
-    // unit can use the same table.
+    // LV_STEP_PROFILE=1 and reported when its execution owner is released.
+    // Every translation unit receives that same explicit owner.
     //
     // The first call is reported apart from the rest because a one-time device
     // cache upload or NTT-table build inside a step is otherwise
@@ -99,7 +61,7 @@ namespace osuCrypto::LogVole
             std::atomic<u64> mMaxNs{ 0 };
         };
         static constexpr u32 kMax = 256;
-        Entry mEntries[kMax]{};
+        std::unique_ptr<Entry[]> mEntries;
         std::atomic<u32> mUsed{ 0 };
         std::mutex mMutex;
 
@@ -164,6 +126,7 @@ namespace osuCrypto::LogVole
         Entry& slot(const char* name)
         {
             std::lock_guard<std::mutex> lock(mMutex);
+            if (!mEntries) mEntries = std::make_unique<Entry[]>(kMax);
             const u32 n = mUsed.load(std::memory_order_relaxed);
             for (u32 i = 0; i < n; ++i)
             {
@@ -176,102 +139,158 @@ namespace osuCrypto::LogVole
         }
     };
 
-    inline HostStepProfiler& hostStepProfiler()
+    // Explicit owner of execution settings, diagnostics, and reusable resources.
+    // Copies of protocol parameters share this owner; independent sessions get
+    // distinct owners. No state is installed on the executing thread.
+    class ExecutionContext : public std::enable_shared_from_this<ExecutionContext>
     {
-        static HostStepProfiler p;
-        return p;
-    }
+        struct Diagnostics
+        {
+            RingOpsStats mRingOps;
+            TimingStats mTiming;
+            HostStepProfiler mHostSteps;
+        };
+        std::shared_ptr<Diagnostics> mDiagnostics;
 
-    inline bool hostStepEnabled()
-    {
-        static const bool on = [] {
-            const char* v = std::getenv("LV_STEP_PROFILE");
-            return v && v[0] != '\0' && v[0] != '0';
-        }();
-        return on;
-    }
+    public:
+        ExecutionContext() : ExecutionContext(std::make_shared<Diagnostics>()) {}
+        explicit ExecutionContext(std::shared_ptr<Diagnostics> diagnostics)
+            : mDiagnostics(std::move(diagnostics)), mRingOps(mDiagnostics->mRingOps),
+              mTiming(mDiagnostics->mTiming), mHostSteps(mDiagnostics->mHostSteps) {}
+
+        bool mUseGpu = false;
+        ProtocolCacheScope mScope{};
+        CpuBenchmarkContext* mCpuBenchmark = nullptr;
+        RingOpsStats& mRingOps;
+        TimingStats& mTiming;
+        HostStepProfiler& mHostSteps;
+
+        u64 ownerId() const
+        {
+            return static_cast<u64>(reinterpret_cast<std::uintptr_t>(mIdentity.get()));
+        }
+
+        // Tables retain metadata and GPU resources without retaining the cache
+        // that refers to those tables. Streams and scratch never own tables.
+        std::shared_ptr<ExecutionContext> resourceOwner(bool shareDeviceResources = true) const
+        {
+            auto owner = std::make_shared<ExecutionContext>(mDiagnostics);
+            owner->mUseGpu = mUseGpu;
+            owner->mScope = mScope;
+            owner->mCpuBenchmark = mCpuBenchmark;
+            owner->mIdentity = mIdentity;
+            owner->mWireResources = mWireResources;
+            if (shareDeviceResources) owner->mDeviceResources = mDeviceResources;
+            return owner;
+        }
+
+        template<class T, class... Args>
+        T& resources(Args&&... args) const
+        {
+            return mResources.get<T>(std::forward<Args>(args)...);
+        }
+
+        template<class T, class... Args>
+        T& deviceResources(Args&&... args) const
+        {
+            std::shared_ptr<ResourceStorage> resources;
+            {
+                std::lock_guard lock(mDeviceResources->mMutex);
+                auto& worker = mDeviceResources->mWorkers[std::this_thread::get_id()];
+                if (!worker) worker = std::make_shared<ResourceStorage>();
+                resources = worker;
+            }
+            return resources->get<T>(std::forward<Args>(args)...);
+        }
+
+        template<class T, class... Args>
+        T& wireResources(Args&&... args) const
+        {
+            return mWireResources->get<T>(std::forward<Args>(args)...);
+        }
+
+    private:
+        struct ResourceStorage
+        {
+            template<class T, class... Args>
+            T& get(Args&&... args)
+            {
+                std::lock_guard lock(mMutex);
+                auto& entry = mEntries[std::type_index(typeid(T))];
+                if (!entry) entry = std::make_shared<T>(std::forward<Args>(args)...);
+                return *static_cast<T*>(entry.get());
+            }
+            std::mutex mMutex;
+            std::unordered_map<std::type_index, std::shared_ptr<void>> mEntries;
+        };
+        struct DeviceResourceStorage
+        {
+            std::mutex mMutex;
+            std::unordered_map<std::thread::id, std::shared_ptr<ResourceStorage>> mWorkers;
+        };
+        std::shared_ptr<u8> mIdentity = std::make_shared<u8>(0);
+        mutable ResourceStorage mResources;
+        std::shared_ptr<ResourceStorage> mWireResources = std::make_shared<ResourceStorage>();
+        std::shared_ptr<DeviceResourceStorage> mDeviceResources = std::make_shared<DeviceResourceStorage>();
+
+    };
+
+    using ExecutionContextPtr = std::shared_ptr<ExecutionContext>;
 
     class HostStep
     {
     public:
-        explicit HostStep(const char* name)
+        HostStep(ExecutionContext& execution, const char* name)
         {
-            if (!hostStepEnabled()) return;
-            mEntry = &hostStepProfiler().slot(name);
-            startCpu();
+            const char* value = std::getenv("LV_STEP_PROFILE");
+            if (!value || !value[0] || value[0] == '0') return;
+            mEntry = &execution.mHostSteps.slot(name);
             mStart = std::chrono::steady_clock::now();
+            mCpuStart = cpuBenchmarkThreadNs();
         }
 
-        // `tag` is appended to the name, so a recursive caller can keep its
-        // levels apart (pass the level's width, for instance).
-        HostStep(const char* name, u64 tag)
+        HostStep(ExecutionContext& execution, const char* name, u64 tag)
         {
-            if (!hostStepEnabled()) return;
-            char buf[56];
-            std::snprintf(buf, sizeof(buf), "%s w=%llu", name, static_cast<unsigned long long>(tag));
-            mEntry = &hostStepProfiler().slot(buf);
-            startCpu();
+            const char* value = std::getenv("LV_STEP_PROFILE");
+            if (!value || !value[0] || value[0] == '0') return;
+            char buffer[56];
+            std::snprintf(buffer, sizeof(buffer), "%s w=%llu", name,
+                static_cast<unsigned long long>(tag));
+            mEntry = &execution.mHostSteps.slot(buffer);
             mStart = std::chrono::steady_clock::now();
+            mCpuStart = cpuBenchmarkThreadNs();
+        }
+
+        HostStep(ExecutionContext* execution, const char* name)
+        {
+            if (!execution) return;
+            const char* value = std::getenv("LV_STEP_PROFILE");
+            if (!value || !value[0] || value[0] == '0') return;
+            mEntry = &execution->mHostSteps.slot(name);
+            mStart = std::chrono::steady_clock::now();
+            mCpuStart = cpuBenchmarkThreadNs();
         }
 
         HostStep(const HostStep&) = delete;
         HostStep& operator=(const HostStep&) = delete;
-
-        ~HostStep()
-        {
-            if (!mEntry) return;
-            stop();
-        }
+        ~HostStep() { stop(); }
 
         void stop()
         {
             if (!mEntry) return;
             const auto ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                                 std::chrono::steady_clock::now() - mStart)
-                                                 .count());
+                std::chrono::steady_clock::now() - mStart).count());
             mEntry->mNs.fetch_add(ns);
-            if (mCpuContext && mCpuContext == tCpuBenchmarkContext)
-            {
-                // Coordinator regions must join their workers before stopping.
-                // Worker regions measure only their own thread; summing the
-                // shared counter there would count unrelated sibling work.
-                const auto workerNs = mIncludeWorkers ? mCpuContext->mWorkerCpuNs.load() - mWorkerStart : 0;
-                mEntry->mCpuNs.fetch_add(cpuBenchmarkThreadNs() - mCpuStart + workerNs);
-                mEntry->mCpuCount.fetch_add(1);
-            }
-            else if (!mCpuContext)
-            {
-                // GPU benchmark workers have no CPU benchmark context. Measure
-                // the executing thread so blocking socket wall time can be
-                // separated from the worker's actual CPU service.
-                mEntry->mCpuNs.fetch_add(cpuBenchmarkThreadNs() - mCpuStart);
-                mEntry->mCpuCount.fetch_add(1);
-            }
+            mEntry->mCpuNs.fetch_add(cpuBenchmarkThreadNs() - mCpuStart);
+            mEntry->mCpuCount.fetch_add(1);
             if (mEntry->mCount.fetch_add(1) == 0) mEntry->mFirstNs.store(ns);
             u64 seen = mEntry->mMaxNs.load();
-            while (ns > seen && !mEntry->mMaxNs.compare_exchange_weak(seen, ns))
-            {
-            }
+            while (ns > seen && !mEntry->mMaxNs.compare_exchange_weak(seen, ns)) {}
             mEntry = nullptr;
         }
 
     private:
-        void startCpu()
-        {
-            mCpuContext = tCpuBenchmarkContext;
-            mCpuStart = cpuBenchmarkThreadNs();
-            if (!mCpuContext) return;
-            // The coordinating thread also executes task zero. Inside that
-            // task, completed siblings belong to the enclosing parallel region,
-            // not to this task's local timer.
-            mIncludeWorkers = !tCpuBenchmarkIsWorker && tCpuBenchmarkTaskDepth == 0;
-            mWorkerStart = mCpuContext->mWorkerCpuNs.load();
-        }
-
-        CpuBenchmarkContext* mCpuContext = nullptr;
-        bool mIncludeWorkers = false;
         u64 mCpuStart = 0;
-        u64 mWorkerStart = 0;
         HostStepProfiler::Entry* mEntry = nullptr;
         std::chrono::steady_clock::time_point mStart{};
     };

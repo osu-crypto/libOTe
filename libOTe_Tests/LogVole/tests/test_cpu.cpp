@@ -36,6 +36,8 @@ using namespace osuCrypto::LogVole;
 
 void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x4556414c, 0x46555345));
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
@@ -43,11 +45,13 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
     for (bool gadget : {false, true})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         params.mCoeffModulusBits.resize(limbs);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), bits);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const unsigned digitBits = limbs*bits/2, plaintextBits = bits-1;
         std::vector<RnsPoly> keys(mu), inputs(mu), initial(mu);
         for (unsigned row = 0; row < mu; ++row)
@@ -94,6 +98,8 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
 
 void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
 #if !defined(__SIZEOF_INT128__)
     LOGVOLE_SKIP() << "Independent margin oracle requires unsigned __int128";
 #else
@@ -171,6 +177,8 @@ void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
 
 void LogVole_Cpu_ReduceMatchesReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x52454455, 0x4345));
     for (int bits : {30, 52, 55, 60})
     for (u64 gap : {1ULL, 32767ULL, 16777215ULL, 16777216ULL})
@@ -216,6 +224,8 @@ void LogVole_Cpu_ReduceMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_ScaleAndRoundMatchesReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
 #if !defined(__SIZEOF_INT128__)
     LOGVOLE_SKIP() << "Independent wide-division oracle requires unsigned __int128";
 #else
@@ -287,16 +297,20 @@ void LogVole_Cpu_ScaleAndRoundMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_FusedGadgetMatchesBalancedReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x47414447, 0x4554));
     for (unsigned limbs : {4, 8})
     {
         const unsigned bits = limbs == 4 ? 55 : 52, digitBits = limbs * bits / 2;
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         params.mCoeffModulusBits.resize(limbs);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), bits);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const auto hostContext = getRingHostContext(ctx);
         LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
         const auto& base = *hostContext->key_context_data()->rns_tool()->base_q();
@@ -357,17 +371,21 @@ void LogVole_Cpu_FusedGadgetMatchesBalancedReference(const oc::CLP&)
 
 void LogVole_Cpu_LowDigitMatchesIntegerReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x4c4f5744, 0x49474954));
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
     for (unsigned digitBits : {63, 110, 208, 256})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         params.mCoeffModulusBits.resize(limbs);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), bits);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         auto poly = sampleUniformPoly(ctx, random);
         // CRT integers 0, 1, 2, Q-1 and Q-2 exercise a quotient estimate
         // immediately below an integer, including its final correction.
@@ -426,16 +444,20 @@ void LogVole_Cpu_LowDigitMatchesIntegerReference(const oc::CLP&)
 
 void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x4c4845, 0x444543));
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         params.mCoeffModulusBits.resize(limbs);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), bits);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const auto& hostModuli = getRingHostModuli(ctx);
         LOGVOLE_REQUIRE_EQ(hostModuli.size(), static_cast<std::size_t>(limbs));
         constexpr unsigned rows = 9;
@@ -507,16 +529,20 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
 
 void LogVole_Cpu_DenoiseMatchesIntegerRounding(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x44454e4f, 0x495345));
     for (unsigned limbs : {1, 2, 4, 8})
     for (int bits : {30, 52, 55, 60})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         params.mCoeffModulusBits.resize(limbs);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), bits);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const auto hostContext = getRingHostContext(ctx);
         LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
         const auto& hostModuli = getRingHostModuli(ctx);
@@ -579,6 +605,8 @@ void LogVole_Cpu_DenoiseMatchesIntegerRounding(const oc::CLP&)
 
 void LogVole_Cpu_NttMatchesReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x4845584c, 0x4e5454));
     struct Case { std::size_t degree; int bits; unsigned limbs; };
     const std::array<Case, 9> cases = {{{1024, 30, 2}, {1024, 49, 2},
@@ -587,11 +615,13 @@ void LogVole_Cpu_NttMatchesReference(const oc::CLP&)
     for (const auto& test : cases)
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = test.degree;
         params.mCoeffModulusBits.resize(test.limbs);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), test.bits);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const auto hostContext = getRingHostContext(ctx);
         LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
         const auto* tables = hostContext->key_context_data()->small_ntt_tables();
@@ -650,16 +680,20 @@ void LogVole_Cpu_NttMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_CrtMatchesSeal(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0xA18, 0x671));
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         params.mCoeffModulusBits.resize(limbs);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), bits);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const auto hostContext = getRingHostContext(ctx);
         LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
         const auto& base = *hostContext->key_context_data()->rns_tool()->base_q();
@@ -685,17 +719,21 @@ void LogVole_Cpu_CrtMatchesSeal(const oc::CLP&)
 
 void LogVole_Cpu_CrtMixedWidthsMatchSeal(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x435254, 0x20260910));
     for (unsigned limbs : {4, 8})
     for (int topBits : {52, 55})
     {
         const std::size_t count = 1024;
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = count;
         params.mCoeffModulusBits.resize(limbs);
         for (unsigned j = 0; j < limbs; ++j) params.mCoeffModulusBits[j] = j%2 ? topBits : 30+j;
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const auto hostContext = getRingHostContext(ctx);
         LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
         const auto& base = *hostContext->key_context_data()->rns_tool()->base_q();
@@ -716,6 +754,8 @@ void LogVole_Cpu_CrtMixedWidthsMatchSeal(const oc::CLP&)
 
 void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
 #if defined(__SIZEOF_INT128__)
     for (u64 width : {1, 7, 8, 9, 1031})
     for (u64 depth : {1, 3})
@@ -758,6 +798,9 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
 
 void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     struct FlagScope
     {
@@ -775,33 +818,29 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             else ::tests_libOTe::logvole_test::unsetEnvironment(name);
         }
     };
-    struct GpuScope
-    {
-        bool previous = gpu::enabled();
-        ~GpuScope() { gpu::setEnabled(previous); }
-    } gpuScope;
+    ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
     const bool wantGpu = cmd.getOr("gpu", 0) != 0;
-    gpu::setEnabled(wantGpu);
-    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    testExecution->mUseGpu = (wantGpu);
+    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     PRNG pairedProofRoots(sysRandomSeed());
     // Exact raw Barrett generation, including non-primes and both endpoints
     // of the supported interval. CPU SEAL is the independent oracle here.
     for (auto role : {ProtocolCacheRole::Sender, ProtocolCacheRole::Receiver})
     {
-        ScopedProtocolCacheScope scope(role, allocateProtocolCacheRunId());
-        if (!gpu::enabled()) continue; // explicit per-role GPU ablation
+        ::tests_libOTe::logvole_test::ScopedProtocolCacheScope scope(testExecution, role, ::tests_libOTe::logvole_test::allocateRunId(testExecution));
+        if (!gpu::enabled(*testExecution)) continue; // explicit per-role GPU ablation
         for (u64 modulus : {2ULL, 4ULL, 257ULL, 1000ULL, 2251799813554177ULL,
                 18014398508400641ULL, (1ULL << 61u) - 1u})
         {
             const seal::Modulus reference(modulus);
             gpu::HostModulus actual;
-            LOGVOLE_REQUIRE_TRUE(gpu::prepareZkModulusDevice(modulus, actual));
+            LOGVOLE_REQUIRE_TRUE(gpu::prepareZkModulusDevice(*testExecution, modulus, actual));
             LOGVOLE_REQUIRE_EQ(actual.mValue, modulus);
             LOGVOLE_REQUIRE_EQ(actual.mRatio0, reference.const_ratio()[0]);
             LOGVOLE_REQUIRE_EQ(actual.mRatio1, reference.const_ratio()[1]);
             gpu::HostModulus cached;
-            LOGVOLE_REQUIRE_TRUE(gpu::prepareZkModulusDevice(modulus, cached));
+            LOGVOLE_REQUIRE_TRUE(gpu::prepareZkModulusDevice(*testExecution, modulus, cached));
             LOGVOLE_REQUIRE_EQ(cached.mRatio0, actual.mRatio0);
             LOGVOLE_REQUIRE_EQ(cached.mRatio1, actual.mRatio1);
             for (u64 delta : std::array<u64, 4>{0, 1, modulus - 1u, ~u64(0)})
@@ -811,9 +850,9 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 const u64 expected = static_cast<u64>((static_cast<unsigned __int128>(proof.mV) * delta +
                     proof.mU % modulus) % modulus);
                 bool accepted = false;
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, expected, delta, modulus, accepted));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(*testExecution, proof, expected, delta, modulus, accepted));
                 LOGVOLE_REQUIRE_TRUE(accepted && zkAccept(proof, expected, delta, modulus));
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, modulus, delta, modulus, accepted));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(*testExecution, proof, modulus, delta, modulus, accepted));
                 LOGVOLE_REQUIRE_TRUE(!accepted && !zkAccept(proof, modulus, delta, modulus));
             }
         }
@@ -822,9 +861,9 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
     {
         gpu::HostModulus retained{17, 23, 31};
         bool accepted = true;
-        LOGVOLE_REQUIRE_TRUE(!gpu::prepareZkModulusDevice(invalid, retained));
+        LOGVOLE_REQUIRE_TRUE(!gpu::prepareZkModulusDevice(*testExecution, invalid, retained));
         LOGVOLE_REQUIRE_TRUE(retained.mValue == 17 && retained.mRatio0 == 23 && retained.mRatio1 == 31);
-        LOGVOLE_REQUIRE_TRUE(!gpu::zkAcceptDevice(ZkProof{}, 0, 0, invalid, accepted));
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkAcceptDevice(*testExecution, ZkProof{}, 0, 0, invalid, accepted));
         LOGVOLE_REQUIRE_TRUE(accepted);
     }
     for (u64 width : {1, 7, 8, 1031})
@@ -834,7 +873,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
         const block circuitSeed = toBlock(0x5647, width + depth);
         ZkMulCircuit reference, actual;
         LOGVOLE_REQUIRE_TRUE(makeZkMulCircuitForBudget(budget, depth, circuitSeed, reference));
-        LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(budget, depth, circuitSeed, actual));
+        LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(*testExecution, budget, depth, circuitSeed, actual));
         LOGVOLE_REQUIRE_EQ(actual.mWidth, reference.mWidth);
         LOGVOLE_REQUIRE_EQ(actual.mDepth, reference.mDepth);
         LOGVOLE_REQUIRE_TRUE(actual.mOperands.empty());
@@ -843,28 +882,28 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(copied.mOperands.empty());
         LOGVOLE_REQUIRE_TRUE(copied.mOperandsDevice == actual.mOperandsDevice);
         LOGVOLE_REQUIRE_TRUE(gpu::zkMulUploadOperands(actual));
-        LOGVOLE_REQUIRE_TRUE(!gpu::makeZkMulCircuitForBudgetDevice(1, depth, circuitSeed, actual));
+        LOGVOLE_REQUIRE_TRUE(!gpu::makeZkMulCircuitForBudgetDevice(*testExecution, 1, depth, circuitSeed, actual));
         LOGVOLE_REQUIRE_TRUE(actual.mOperandsDevice == copied.mOperandsDevice);
 
         ZkMulCircuit detached = copied;
-        LOGVOLE_REQUIRE_TRUE(gpu::zkMulDetachOperands(detached));
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulDetachOperands(*testExecution, detached));
         LOGVOLE_REQUIRE_TRUE(detached.mOperands.empty());
         LOGVOLE_REQUIRE_TRUE(detached.mOperandsDevice != copied.mOperandsDevice);
         LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(detached));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(detached.mOperands, reference.mOperands));
         const auto detachedOwner = detached.mOperandsDevice;
         detached.mDepth = std::numeric_limits<u64>::max();
-        LOGVOLE_REQUIRE_TRUE(!gpu::zkMulDetachOperands(detached));
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkMulDetachOperands(*testExecution, detached));
         LOGVOLE_REQUIRE_TRUE(detached.mOperandsDevice == detachedOwner);
         LOGVOLE_REQUIRE_TRUE(rangesEqual(detached.mOperands, reference.mOperands));
         detached.mDepth = depth;
 
         if (width == 7 && depth == 3)
         {
-            ScopedProtocolCacheScope senderScope(
-                ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope senderScope(testExecution,
+                ProtocolCacheRole::Sender, ::tests_libOTe::logvole_test::allocateRunId(testExecution));
             // Role ablations may intentionally disable the verifier's GPU.
-            if (gpu::enabled())
+            if (gpu::enabled(*testExecution))
             for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
             {
                 const u32 bits = setting == CivoleSetting::GoldenSeed ? 55 : 52;
@@ -924,7 +963,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 // A circuit independently generated by this role transfers its
                 // unique allocation without a D2D clone or host round trip.
                 ZkMulCircuit unique;
-                LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(
+                LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(*testExecution,
                     budget, depth, circuitSeed, unique));
                 LOGVOLE_REQUIRE_EQ(unique.mOperandsDevice.use_count(), 1);
                 const void* uniqueOwner = unique.mOperandsDevice.get();
@@ -938,7 +977,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(verifier.mCircuit.mOperands, reference.mOperands));
 
                 ZkMulCircuit invalidUnique;
-                LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(
+                LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(*testExecution,
                     budget, depth, circuitSeed, invalidUnique));
                 LOGVOLE_REQUIRE_EQ(invalidUnique.mOperandsDevice.use_count(), 1);
                 invalidUnique.mDepth += 1;
@@ -963,8 +1002,8 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     fallbackProver.configure(copied, bits, 1, setting, budget);
                     LOGVOLE_REQUIRE_TRUE(fallbackProver.mCircuit.mOperands.empty());
                     const auto fallbackProverOwner = fallbackProver.mCircuit.mOperandsDevice;
-                    GpuScope hostOnly;
-                    gpu::setEnabled(false);
+                    ::tests_libOTe::logvole_test::ScopedGpuEnabled hostOnly(testExecution, false);
+                    testExecution->mUseGpu = (false);
                     fallbackVerifier.mUseDevice = false;
                     fallbackProver.mUseDevice = false;
                     PRNG witnessPrng(toBlock(0x46414c4c, 1));
@@ -1011,9 +1050,9 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 
                 bool receiverGpu = false;
                 {
-                    ScopedProtocolCacheScope receiverScope(
-                        ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-                    receiverGpu = gpu::enabled();
+                    ::tests_libOTe::logvole_test::ScopedProtocolCacheScope receiverScope(testExecution,
+                        ProtocolCacheRole::Receiver, testExecution->mScope.mRunId);
+                    receiverGpu = gpu::enabled(*testExecution);
                 }
                 if (setting == CivoleSetting::GoldenSeed && receiverGpu)
                 {
@@ -1161,8 +1200,8 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 
             // Exercise the production GPU proof helpers in both constant/power
             // modes, rather than testing only the witness kernel.
-            auto deviceMacs = gpu::uploadScalars(macs);
-            auto deviceKeys = gpu::uploadScalars(keys);
+            auto deviceMacs = gpu::uploadScalars(*testExecution, macs);
+            auto deviceKeys = gpu::uploadScalars(*testExecution, keys);
             auto proverState = gpu::makeZkMulDeviceState(copied);
             auto verifierState = gpu::makeZkMulDeviceState(copied);
             LOGVOLE_REQUIRE_TRUE(deviceMacs && deviceKeys && proverState && verifierState);
@@ -1179,10 +1218,10 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_EQ(proof.mV, referenceProof.mV);
                 LOGVOLE_REQUIRE_EQ(value, referenceValue);
                 bool accepted = false;
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(*testExecution, proof, value, 19, modulus, accepted));
                 LOGVOLE_REQUIRE_TRUE(accepted);
                 proof.mU = (proof.mU + 1) % modulus;
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(*testExecution, proof, value, 19, modulus, accepted));
                 LOGVOLE_REQUIRE_TRUE(!accepted);
             }
         }
@@ -1198,16 +1237,15 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 
 void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
-    struct GpuScope
-    {
-        bool previous = gpu::enabled();
-        ~GpuScope() { gpu::setEnabled(previous); }
-    } gpuScope;
+    ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
     const bool wantGpu = cmd.getOr("gpu", 0) != 0;
-    gpu::setEnabled(wantGpu);
-    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    testExecution->mUseGpu = (wantGpu);
+    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     const u64 largePrime = seal::PlainModulus::Batching(1024, 52).value();
     for (u64 dim : { 1u, 3u, 7u, 16u, 33u, 128u })
     for (u64 modulus : { u64{2}, u64{65537}, largePrime })
@@ -1239,7 +1277,7 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
             for (unsigned i = 0; i < 4; ++i)
                 LOGVOLE_REQUIRE_EQ(cpuPrng.get<u64>(), stream.get<u64>());
 
-            auto device = gpu::zkMatMulWitnessInputsDevice(statement, modulus, seed, requested);
+            auto device = gpu::zkMatMulWitnessInputsDevice(*testExecution, statement, modulus, seed, requested);
             LOGVOLE_REQUIRE_TRUE(device != nullptr);
             LOGVOLE_REQUIRE_EQ(device->count(), count);
             AlignedUnVec<u64> fetched;
@@ -1249,12 +1287,12 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
 
             // Keep two independently owned device results alive at once. A
             // repeated seeded call must neither reuse nor overwrite the first.
-            auto replay = gpu::zkMatMulWitnessInputsDevice(statement, modulus, seed, requested);
+            auto replay = gpu::zkMatMulWitnessInputsDevice(*testExecution, statement, modulus, seed, requested);
             LOGVOLE_REQUIRE_TRUE(replay != nullptr);
             LOGVOLE_REQUIRE_TRUE(replay->data() != device->data());
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*replay, fetched));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(fetched, oracle));
-            auto another = gpu::zkMatMulWitnessInputsDevice(statement, modulus, toBlock(1, dim), requested);
+            auto another = gpu::zkMatMulWitnessInputsDevice(*testExecution, statement, modulus, toBlock(1, dim), requested);
             LOGVOLE_REQUIRE_TRUE(another != nullptr);
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(fetched, oracle));
@@ -1285,22 +1323,22 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
     ZkMatMulStatement valid{};
     valid.mDim = 7;
     const block seed = toBlock(0x494e56414c4944, 7);
-    auto retained = gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed);
+    auto retained = gpu::zkMatMulWitnessInputsDevice(*testExecution, valid, largePrime, seed);
     LOGVOLE_REQUIRE_TRUE(retained != nullptr);
     AlignedUnVec<u64> before, after;
     before.resize(retained->count());
     after.resize(retained->count());
     LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, before));
-    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, 0, seed) == nullptr);
-    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, 1, seed) == nullptr);
-    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed, valid.voleCount() - 1) == nullptr);
-    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed, std::numeric_limits<u64>::max()) == nullptr);
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(*testExecution, valid, 0, seed) == nullptr);
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(*testExecution, valid, 1, seed) == nullptr);
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(*testExecution, valid, largePrime, seed, valid.voleCount() - 1) == nullptr);
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(*testExecution, valid, largePrime, seed, std::numeric_limits<u64>::max()) == nullptr);
     for (u64 dim : { u64{0}, std::numeric_limits<u64>::max(),
             static_cast<u64>(std::numeric_limits<u32>::max()), u64{1} << 32 })
     {
         auto invalid = valid;
         invalid.mDim = dim;
-        LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(invalid, largePrime, seed) == nullptr);
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(*testExecution, invalid, largePrime, seed) == nullptr);
     }
     LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, after));
     LOGVOLE_REQUIRE_TRUE(rangesEqual(before, after));
@@ -1312,6 +1350,8 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
 
 void LogVole_Cpu_DyadicMatchesReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x398, 0x8941));
     for (unsigned bits : {52, 55})
     for (u64 gap : {1, 81919, 16777215, 16777217})
@@ -1364,6 +1404,8 @@ void LogVole_Cpu_DyadicMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_FusedDotMatchesReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
 #if !defined(__SIZEOF_INT128__)
     LOGVOLE_SKIP() << "Independent wide-product oracle requires unsigned __int128";
 #else
@@ -1414,10 +1456,12 @@ void LogVole_Cpu_FusedDotMatchesReference(const oc::CLP&)
     for (int bits : {30, 52, 55, 60})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         assignValues<int>(params.mCoeffModulusBits, {bits, bits});
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         // More than one block of 32, with generic-modulus fallback coverage.
         std::vector<RnsPoly> a(65), b(65);
         std::vector<const RnsPoly*> ap, bp;
@@ -1440,6 +1484,8 @@ void LogVole_Cpu_FusedDotMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
 #if defined(__SIZEOF_INT128__)
     PRNG random(toBlock(0x1eaf, 0x20260910));
     for (int bits : {52, 55})
@@ -1481,11 +1527,13 @@ void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(std::all_of(output.begin(), output.end(), [](u64 x) { return x == 0x12345678; }));
 
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         params.mCoeffModulusBits.resize(8);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), bits);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         std::vector<RnsPoly> raw(2), canonical(2);
         for (unsigned leaf = 0; leaf < 2; ++leaf)
         {
@@ -1505,15 +1553,19 @@ void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
 
 void LogVole_Cpu_ErrorSamplingMatchesSeal(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     for (unsigned limbs : {2, 4, 8})
     for (double deviation : {0.0, 3.2, 64.0})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         params.mCoeffModulusBits.resize(limbs);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), limbs == 4 ? 55 : 52);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         PRNG random(toBlock(0x6677, limbs));
         RnsPoly actual{};
         actual.mCoeffs.resize(1024*limbs);
@@ -1547,10 +1599,12 @@ void LogVole_Cpu_ErrorSamplingMatchesSeal(const oc::CLP&)
     for (bool wideNoise : {false, true})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         assignValues<int>(params.mCoeffModulusBits, {30, 30});
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         PRNG inputPrng(toBlock(0x57494445, 0x4e4f4953));
         std::vector<RnsPoly> inputs{sampleUniformPoly(ctx, inputPrng), sampleUniformPoly(ctx, inputPrng)};
         const double deviation = wideNoise ? double(ringModulusValue(ctx, 0))*0.75 : 3.2;
@@ -1577,17 +1631,21 @@ void LogVole_Cpu_ErrorSamplingMatchesSeal(const oc::CLP&)
 
 void LogVole_Cpu_ResamplingOverwritesPreviousQuery(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x52455341, 0x4d504c45));
     std::vector<RnsPoly> actual;
     for (unsigned limbs : {2, 4, 8, 2})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         params.mCoeffModulusBits.resize(limbs);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(),
             limbs == 4 ? 55 : 52);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         auto digest = sampleUniformPoly(ctx, random);
         std::array<u8, 16> seed{};
         random.get(seed.data(), seed.size());
@@ -1639,6 +1697,8 @@ void LogVole_Cpu_ResamplingOverwritesPreviousQuery(const oc::CLP&)
 
 void LogVole_Cpu_SamplerMatchesSeal(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x739182, 0x193));
     auto fast = LogVole::detail::cpuBlake2xbFactory();
     seal::Blake2xbPRNGFactory reference;
@@ -1668,10 +1728,12 @@ void LogVole_Cpu_SamplerMatchesSeal(const oc::CLP&)
         for (int bits : {30, 52, 55, 60})
         {
             RingParams params{};
+            ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
             params.mPolyModulusDegree = 1024;
             assignValues<int>(params.mCoeffModulusBits, {bits, bits});
             RingNttContext ctx{};
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+            ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+            LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
             std::vector<u64> ap(2048), bp(2048);
             const auto hostContext = getRingHostContext(ctx);
             LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
@@ -1736,6 +1798,8 @@ void LogVole_Cpu_SamplerMatchesSeal(const oc::CLP&)
 
 void LogVole_Cpu_ZkArithmeticMatchesReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x738, 0x514));
     const std::array<u64, 9> moduli = {257, (u64{1} << 50) + 27,
         (u64{1} << 51) - 1, (u64{1} << 51) - 16777215,
@@ -1762,6 +1826,8 @@ void LogVole_Cpu_ZkArithmeticMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_ZkVectorMatchesReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
 #if !defined(__SIZEOF_INT128__)
     LOGVOLE_SKIP() << "Independent wide-division oracle requires unsigned __int128";
 #else
@@ -1830,6 +1896,8 @@ void LogVole_Cpu_ZkVectorMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_ZkProofMatchesReference(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     PRNG random(toBlock(0x819, 0x514));
     for (u64 q : {257ULL, 2251799813554177ULL, 18014398508400641ULL})
     for (u64 budget : {3ULL, 83ULL, 4096ULL})
@@ -1885,13 +1953,17 @@ void LogVole_Cpu_ZkProofMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_GadgetDigitWidths(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     for (int bits : {52, 55})
     {
         RingParams params{};
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         params.mPolyModulusDegree = 1024;
         assignValues<int>(params.mCoeffModulusBits, {bits, bits, bits, bits, bits, bits, bits, bits});
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
         const RnsPoly poly = deriveUniformPolyFromNonce(ctx, 0x325, 0x786, 1);
         for (u32 digitBits : {31, 63, 64, 65, 110, 128, 208, 256, 416})
         for (bool centered : {false, true})

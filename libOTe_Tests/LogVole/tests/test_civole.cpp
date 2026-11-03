@@ -53,12 +53,7 @@ namespace
         bool mHadOld = false;
     };
 #if defined(ENABLE_LOGVOLE_CUDA)
-    struct ScopedGpuEnabled
-    {
-        bool mPrevious = gpu::enabled();
-        explicit ScopedGpuEnabled(bool enabled) { gpu::setEnabled(enabled); }
-        ~ScopedGpuEnabled() { gpu::setEnabled(mPrevious); }
-    };
+    using ScopedGpuEnabled = ::tests_libOTe::logvole_test::ScopedGpuEnabled;
 #endif
 
     CivoleParams make_params()
@@ -163,11 +158,14 @@ static_assert(std::is_move_constructible_v<LogVoleReceiver>);
 static_assert(std::is_move_assignable_v<LogVoleReceiver>);
 void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled enabled(requested);
-    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    ScopedGpuEnabled enabled(testExecution, requested);
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     ScopedEnvironmentValue option("LV_GPU_SETUP_DELTA_DEVICE", "1");
     ScopedEnvironmentValue strict("LV_GPU_SETUP_DELTA_DEVICE_STRICT", "1");
     ScopedEnvironmentValue decline("LV_GPU_SETUP_DELTA_DEVICE_FORCE_DECLINE", "0");
@@ -181,7 +179,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
         {
             RnsPoly expected;
             {
-                ScopedGpuEnabled cpuReference(false);
+                ScopedGpuEnabled cpuReference(testExecution, false);
                 LOGVOLE_REQUIRE_TRUE(wrapZpConstantCrt(ctx, scalar, true, 1u, expected));
             }
             for (const char* lightweight : {"1", "0"})
@@ -203,7 +201,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             if (mode == 2u) { slots[0] = 0; slots.back() = p - 2u; }
             RnsPoly expected, actual;
             {
-                ScopedGpuEnabled cpuReference(false);
+                ScopedGpuEnabled cpuReference(testExecution, false);
                 LOGVOLE_REQUIRE_TRUE(mode == 0u
                     ? wrapZpConstantCrt(ctx, p - 1u, true, 1u, expected)
                     : wrapZpBatchCrt(ctx, slots, true, 0u, 1u, expected));
@@ -250,17 +248,21 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_EQ(rejected.mCoeffs[0], 0xBADu);
     };
     RingParams small;
+    ::tests_libOTe::logvole_test::bindExecution(small, testExecution);
     small.mPolyModulusDegree = 1024;
     assignValues<int>(small.mCoeffModulusBits, {30, 30});
     ZpCrtContext smallContext;
-    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(small, 20u, smallContext));
+    ::tests_libOTe::logvole_test::bindExecution(smallContext, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, small, 20u, smallContext));
     checkRing(smallContext);
     for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
     {
         CivoleParams params;
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         LOGVOLE_REQUIRE_TRUE(makeCivoleParams(setting, params, 4u));
         ZpCrtContext ctx;
-        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mLogVole.mShrinkExpand.mRing,
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params.mLogVole.mShrinkExpand.mRing,
             params.mLogVole.mShrinkExpand.mPlaintextModulusBits, ctx));
         checkRing(ctx);
         const std::array<u64, 3> pattern{1u, ctx.mPlaintextModulus - 1u, 13u};
@@ -269,6 +271,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
         for (bool patterned : {false, true})
         {
             CivoleSenderOfflineInput referenceInput;
+            ::tests_libOTe::logvole_test::bindExecution(referenceInput, testExecution);
             referenceInput.mParams = params;
             referenceInput.mW = (u64{1} << 18) + 3u;
             referenceInput.mDelta = patterned ? 0u : 13u;
@@ -282,9 +285,10 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             const oc::block seed(0x44454c5441574952ULL, patterned);
             oc::PRNG referencePrng(seed, 3);
             CivoleSenderState expected;
+            ::tests_libOTe::logvole_test::bindExecution(expected, testExecution);
             coproto::BufferingSocket referenceSocket;
             {
-                ScopedGpuEnabled cpuReference(false);
+                ScopedGpuEnabled cpuReference(testExecution, false);
                 macoro::sync_wait(civoleSenderOffline(referenceInput, expected, referencePrng, referenceSocket));
                 macoro::sync_wait(referenceSocket.flush());
             }
@@ -297,6 +301,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
                 ScopedEnvironmentValue requireGpu("LV_GPU_SETUP_DELTA_DEVICE_STRICT", forcedFallback ? "0" : "1");
                 oc::PRNG actualPrng(seed, 3);
                 CivoleSenderState actual;
+                ::tests_libOTe::logvole_test::bindExecution(actual, testExecution);
                 coproto::BufferingSocket actualSocket;
                 macoro::sync_wait(civoleSenderOffline(actualInput, actual, actualPrng, actualSocket));
                 macoro::sync_wait(actualSocket.flush());
@@ -310,9 +315,11 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(actual.mLogVoleState.mSk1[i].mCoeffs,
                         expected.mLogVoleState.mSk1[i].mCoeffs));
                 CivoleReceiverOfflineInput receiverInput;
+                ::tests_libOTe::logvole_test::bindExecution(receiverInput, testExecution);
                 receiverInput.mParams = params;
                 receiverInput.mW = referenceInput.mW;
                 CivoleReceiverState receiver;
+                ::tests_libOTe::logvole_test::bindExecution(receiver, testExecution);
                 coproto::BufferingSocket import;
                 import.processInbound(*actualWire);
                 macoro::sync_wait(civoleReceiverOffline(receiverInput, receiver, import));
@@ -327,6 +334,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             }
         }
         CivoleSenderOfflineInput invalid;
+        ::tests_libOTe::logvole_test::bindExecution(invalid, testExecution);
         invalid.mParams = params;
         invalid.mW = 8u;
         invalid.mGarbledDeltaPattern = pattern;
@@ -340,6 +348,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             if (failure == 3u) (*candidate.mGarbledDeltaPattern)[1] = ctx.mPlaintextModulus;
             oc::PRNG prng(oc::block(3, 4), 3), expectedPrng(oc::block(3, 4), 3);
             CivoleSenderState unchanged;
+            ::tests_libOTe::logvole_test::bindExecution(unchanged, testExecution);
             unchanged.mW = 777u;
             coproto::BufferingSocket socket;
             bool threw = false;
@@ -359,14 +368,18 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
 
 void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
 
     CivoleSenderOfflineInput senderInput{};
+    ::tests_libOTe::logvole_test::bindExecution(senderInput, testExecution);
     senderInput.mParams = params;
     senderInput.mDelta = 0;
     senderInput.mW = 8;
 
     CivoleSenderState senderState{};
+    ::tests_libOTe::logvole_test::bindExecution(senderState, testExecution);
     auto sockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG prng(oc::block(55, 66));
     bool threw = false;
@@ -383,11 +396,15 @@ void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
 
 void LogVole_Civole_RejectsPeerOfflineWidth(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     CivoleReceiverOfflineInput input{};
-    input.mParams = make_params();
+    ::tests_libOTe::logvole_test::bindExecution(input, testExecution);
+    input.mParams = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     input.mW = 8;
 
     CivoleReceiverState state{};
+    ::tests_libOTe::logvole_test::bindExecution(state, testExecution);
     auto sockets = coproto::LocalAsyncSocket::makePair();
     auto result = macoro::sync_wait(macoro::when_all_ready(
         civoleReceiverOffline(input, state, sockets[0]),
@@ -410,13 +427,17 @@ void LogVole_Civole_RejectsPeerOfflineWidth(const oc::CLP&)
 
 void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     const u64 modulus = resolve_modulus(params);
     const u64 delta = 13 % modulus;
     constexpr CivoleSid sid = 901;
 
     CivoleSenderState senderState{};
+    ::tests_libOTe::logvole_test::bindExecution(senderState, testExecution);
     CivoleReceiverState receiverState{};
+    ::tests_libOTe::logvole_test::bindExecution(receiverState, testExecution);
     run_offline_pair(params, delta, 8, senderState, receiverState);
     LOGVOLE_EXPECT_EQ(senderState.mW, 8ull);
     LOGVOLE_EXPECT_EQ(receiverState.mW, 8ull);
@@ -480,10 +501,14 @@ void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
 
 void LogVole_Civole_RejectedHostInputPreservesSid(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     for (const auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
     {
         LogVoleSender sender;
+        ::tests_libOTe::logvole_test::bindExecution(sender, testExecution);
         LogVoleReceiver receiver;
+        ::tests_libOTe::logvole_test::bindExecution(receiver, testExecution);
         constexpr u64 count = 1, delta = 19;
         sender.configure(count, 55, 1, setting);
         receiver.configure(count, 55, 1, setting);
@@ -547,8 +572,12 @@ void LogVole_Civole_RejectedHostInputPreservesSid(const oc::CLP&)
 
 void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     LogVoleSender sender{};
+    ::tests_libOTe::logvole_test::bindExecution(sender, testExecution);
     LogVoleReceiver receiver{};
+    ::tests_libOTe::logvole_test::bindExecution(receiver, testExecution);
 
     const std::vector<u64> x1{ 1, 2, 3, 4, 5, 6, 7, 8 };
     std::vector<u64> b1(x1.size());
@@ -590,6 +619,7 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
     receiver.setTimer(receiverTimer);
 
     LogVoleSender movedSender{};
+
     movedSender = std::move(sender);
     LogVoleReceiver movedReceiver(std::move(receiver));
 
@@ -631,13 +661,17 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
 
 void LogVole_Civole_NonInteractiveOracleAndMask(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     CivoleParams civole{};
+    ::tests_libOTe::logvole_test::bindExecution(civole, testExecution);
     LOGVOLE_REQUIRE_TRUE(makeNoGoldenSeedCivoleParams(civole));
     auto params = civole.mLogVole;
     params.mOnlineMode = OnlineMode::NonInteractive;
     params.mSessionId = 101;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mShrinkExpand.mRing, ctx));
     oc::PRNG prng(oc::block(918, 231));
     const auto digest = sampleUniformPoly(ctx, prng);
     RootResponseMessage expected{}, repeated{}, changed{};
@@ -665,8 +699,10 @@ void LogVole_Civole_NonInteractiveOracleAndMask(const oc::CLP&)
     LOGVOLE_EXPECT_FALSE(interactiveSeed == nonInteractiveSeed);
 
     SenderState sender{};
+    ::tests_libOTe::logvole_test::bindExecution(sender, testExecution);
     sender.mParams = params;
     ShrinkExpandParams trunc{};
+    ::tests_libOTe::logvole_test::bindExecution(trunc, testExecution);
     LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, false, trunc));
     const oc::u32 tauHi = trunc.mTau;
     for (oc::u32 i = 0; i < tauHi; ++i)
@@ -675,12 +711,8 @@ void LogVole_Civole_NonInteractiveOracleAndMask(const oc::CLP&)
     request.mDPrimeCoeffs = digest.mCoeffs;
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    struct RestoreGpu
-    {
-        bool mEnabled = gpu::enabled();
-        ~RestoreGpu() { gpu::setEnabled(mEnabled); }
-    } restoreGpu;
-    gpu::setEnabled(false);
+    ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
+    testExecution->mUseGpu = (false);
 #endif
     RootResponseMessage cpuResponse{};
     LOGVOLE_REQUIRE_TRUE(prepareRootResponseSender(sender, request, prng, cpuResponse,
@@ -693,8 +725,8 @@ void LogVole_Civole_NonInteractiveOracleAndMask(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(rangesEqual(recovered.mCoeffs, expected.mSkPrimeCoeffs));
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    gpu::setEnabled(true);
-    if (gpu::enabled())
+    testExecution->mUseGpu = (true);
+    if (gpu::enabled(*testExecution))
     {
         RootResponseMessage gpuResponse{};
         // A different sender PRNG state must still produce the same mask.
@@ -717,6 +749,7 @@ void LogVole_Civole_NonInteractiveOracleAndMask(const oc::CLP&)
     try
     {
         LogVoleReceiver receiver;
+        ::tests_libOTe::logvole_test::bindExecution(receiver, testExecution);
         receiver.configure(8, 55, 1, CivoleSetting::GoldenSeed, OnlineMode::NonInteractive);
     }
     catch (const std::runtime_error&) { rejected = true; }
@@ -725,19 +758,19 @@ void LogVole_Civole_NonInteractiveOracleAndMask(const oc::CLP&)
 
 void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
-    struct RestoreGpu
-    {
-        bool mEnabled = gpu::enabled();
-        ~RestoreGpu() { gpu::setEnabled(mEnabled); }
-    } restoreGpu;
+    ::tests_libOTe::logvole_test::ScopedGpuEnabled restoreGpu(testExecution, testExecution->mUseGpu);
     const bool wantGpu = cmd.getOr("gpu", 0) != 0;
-    gpu::setEnabled(wantGpu);
-    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    testExecution->mUseGpu = (wantGpu);
+    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #endif
     // Cross a full root block and leave a partial CRT batch at the end.
     constexpr u64 n = (1ull << 18) + 3, delta = 13;
     LogVoleSender sender;
+    ::tests_libOTe::logvole_test::bindExecution(sender, testExecution);
     sender.configure(n, 52, 4, CivoleSetting::NoGoldenSeed, OnlineMode::NonInteractive);
     oc::PRNG senderPrng(oc::block(411, 522));
     coproto::BufferingSocket publish;
@@ -754,6 +787,7 @@ void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& c
     for (u64 client = 0; client < 2; ++client)
     {
         LogVoleReceiver receiver;
+        ::tests_libOTe::logvole_test::bindExecution(receiver, testExecution);
         receiver.configure(n, 52, 4, CivoleSetting::NoGoldenSeed, OnlineMode::NonInteractive);
         coproto::BufferingSocket import;
         import.processInbound(*publicKey);
@@ -802,6 +836,7 @@ void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& c
     try
     {
         LogVoleReceiver mismatch;
+
         mismatch.configure(n, 52, 4, CivoleSetting::NoGoldenSeed);
         coproto::BufferingSocket import;
         import.processInbound(*publicKey);
@@ -813,9 +848,12 @@ void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& c
 
 void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled gpuEnabled(cmd.getOr("gpu", 0) != 0);
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    ScopedGpuEnabled gpuEnabled(testExecution, cmd.getOr("gpu", 0) != 0);
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     constexpr u64 n = u64{1} << 25;
     constexpr u64 delta = 19;
     // The first device-only query uses no host input or output allocation;
@@ -835,12 +873,14 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
         ScopedEnvironmentValue declined(
             "LV_GPU_RECEIVER_FIRST_QUERY_ALLOC_FORCE_DECLINE", forceDecline);
         LogVoleSender sender;
+        ::tests_libOTe::logvole_test::bindExecution(sender, testExecution);
         LogVoleReceiver receiver;
+        ::tests_libOTe::logvole_test::bindExecution(receiver, testExecution);
         sender.configure(n, 52u, 4u, CivoleSetting::NoGoldenSeed);
         receiver.configure(n, 52u, 4u, CivoleSetting::NoGoldenSeed);
         sender.mKeepOutputOnDevice = true;
         receiver.mKeepOutputOnDevice = true;
-        receiver.mInputDevice = gpu::sampleScalarsFromSeed(
+        receiver.mInputDevice = gpu::sampleScalarsFromSeed(*testExecution,
             oc::block(0x1939u, 0x2748u), n, receiver.modulus());
         LOGVOLE_REQUIRE_TRUE(receiver.mInputDevice);
         auto inputDevice = std::static_pointer_cast<gpu::DeviceScalars>(
@@ -867,12 +907,12 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
             LOGVOLE_EXPECT_FALSE(wrapSelected);
             LOGVOLE_EXPECT_FALSE(nodesSelected);
             {
-                ScopedProtocolCacheScope receiverRole(ProtocolCacheRole::Receiver, 0u);
+                ::tests_libOTe::logvole_test::ScopedProtocolCacheScope receiverRole(testExecution, ProtocolCacheRole::Receiver, 0u);
                 LOGVOLE_EXPECT_FALSE(gpu::bindReceiverFirstQueryAllocations(
                     plan, &sender.mOfflineState, 0u));
             }
             {
-                ScopedProtocolCacheScope wrongRole(ProtocolCacheRole::Sender, 0u);
+                ::tests_libOTe::logvole_test::ScopedProtocolCacheScope wrongRole(testExecution, ProtocolCacheRole::Sender, 0u);
                 LOGVOLE_EXPECT_FALSE(gpu::bindReceiverFirstQueryAllocations(
                     plan, &sender.mOfflineState, 0u));
             }
@@ -930,7 +970,7 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
                 LOGVOLE_REQUIRE_TRUE(gpu::receiverFirstQueryAllocationStatus(
                     plan, ready, wrapSelected, nodesSelected));
                 LOGVOLE_REQUIRE_TRUE(ready && wrapSelected && nodesSelected);
-                ScopedProtocolCacheScope receiverRole(ProtocolCacheRole::Receiver, query);
+                ::tests_libOTe::logvole_test::ScopedProtocolCacheScope receiverRole(testExecution, ProtocolCacheRole::Receiver, query);
                 LOGVOLE_EXPECT_FALSE(gpu::bindReceiverFirstQueryAllocations(
                     plan, &sender.mOfflineState, query));
             }

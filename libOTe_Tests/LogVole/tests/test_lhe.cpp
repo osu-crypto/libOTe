@@ -1,3 +1,4 @@
+#include "cryptoTools/Common/CLP.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
 #include "libOTe/config.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -43,16 +44,7 @@ namespace
     };
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    class ScopedGpuEnabled
-    {
-    public:
-        explicit ScopedGpuEnabled(bool enabled) : mWasEnabled(gpu::enabled()) { gpu::setEnabled(enabled); }
-        ~ScopedGpuEnabled() { gpu::setEnabled(mWasEnabled); }
-        ScopedGpuEnabled(const ScopedGpuEnabled&) = delete;
-        ScopedGpuEnabled& operator=(const ScopedGpuEnabled&) = delete;
-    private:
-        bool mWasEnabled;
-    };
+    using ScopedGpuEnabled = ::tests_libOTe::logvole_test::ScopedGpuEnabled;
 #endif
 
     struct LheParams
@@ -202,18 +194,21 @@ namespace
 
     void check_enc1_serial_reference(const RingParams& ring, std::uint32_t cols, std::uint32_t gadgetBits = 20)
     {
+    auto testExecution = osuCrypto::LogVole::executionContext(ring).shared_from_this();
+
         ScopedEnvironmentValue residentDefault("LV_GPU_SETUP_GAUSSIAN_RESIDENT", "0");
         ScopedEnvironmentValue extraDownload("LV_GPU_SETUP_EXTRA_PIPELINED_DOWNLOAD", "1");
         ScopedEnvironmentValue reuseDownloadWorkers("LV_GPU_SETUP_DOWNLOAD_REUSE_WORKERS", "1");
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool haveGpu = gpu::enabled();
+        const bool haveGpu = gpu::enabled(*testExecution);
         const bool haveGaussian = haveGpu && gpu::gaussianTransformHostCompatible();
 #else
         const bool haveGpu = false;
         const bool haveGaussian = false;
 #endif
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, ring, ctx));
         constexpr std::uint32_t rows = 5;
         auto r = sample_batch(ctx, rows, 0x123456u);
         auto sk = sample_batch(ctx, cols, 0x234567u);
@@ -243,7 +238,7 @@ namespace
             expected.mPolys.resize(ringTensorSize(expected));
             {
 #if defined(ENABLE_LOGVOLE_CUDA)
-                ScopedGpuEnabled cpuReference(false);
+                ScopedGpuEnabled cpuReference(testExecution, false);
 #endif
                 auto rNtt = r, skNtt = sk;
                 for (auto& poly : skNtt) LOGVOLE_REQUIRE_TRUE(forwardNtt(poly, ctx));
@@ -393,7 +388,7 @@ namespace
                 ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "1");
                 ScopedEnvironmentValue forceOption("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", "0");
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (deviceAssembly) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+                if (deviceAssembly) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #endif
                 oc::PRNG actualPrng(oc::block(0x345678u, 0), 3);
                 RingTensor actual{};
@@ -474,9 +469,12 @@ namespace
 
 void LogVole_LheOps_PublicADeterministic(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     std::vector<RnsPoly> a1;
     LOGVOLE_REQUIRE_TRUE(buildLhePublicANtt(ctx, params.mMu, a1));
@@ -497,9 +495,12 @@ void LogVole_LheOps_PublicADeterministic(const oc::CLP&)
 
 void LogVole_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto r = sample_batch(ctx, params.mMu, 0x1010u);
     auto sk1 = sample_batch(ctx, params.mTau, 0x2020u);
@@ -540,12 +541,13 @@ void LogVole_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP&)
     // With LV_GPU_SETUP_LHE=1 these also exercise the parallel implementation
     // in CPU-only builds. GPU test runs exercise the batched device inverse.
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled useGpu(true);
+    ScopedGpuEnabled useGpu(testExecution, true);
     if (const char* strict = std::getenv("LV_GPU_SETUP_LHE_DEVICE_STRICT"))
-        if (strict[0] == '1') LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+        if (strict[0] == '1') LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #endif
     check_enc1_serial_reference(params.mRing, params.mTau);
     RingParams productionRing{};
+    ::tests_libOTe::logvole_test::bindExecution(productionRing, testExecution);
     productionRing.mPolyModulusDegree = 8192;
     assignValues<int>(productionRing.mCoeffModulusBits, { 55, 55, 55, 55 });
     check_enc1_serial_reference(productionRing, 2, 110);
@@ -556,9 +558,12 @@ void LogVole_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP&)
 
 void LogVole_LheOps_ApplyCt1AndDeriveSkxRelation(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto r = sample_batch(ctx, params.mMu, 0x4040u);
     auto sk1 = sample_batch(ctx, params.mTau, 0x5050u);
@@ -593,9 +598,12 @@ void LogVole_LheOps_ApplyCt1AndDeriveSkxRelation(const oc::CLP&)
 
 void LogVole_LheOps_TruncApplyCt1AndDeriveSkxRelation(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto r = sample_batch(ctx, params.mMu, 0x8080u);
     auto sk1 = sample_batch(ctx, params.mTauHi, 0x9090u);
@@ -633,15 +641,21 @@ void LogVole_LheOps_TruncApplyCt1AndDeriveSkxRelation(const oc::CLP&)
 
 void LogVole_LheOps_ApplyCt1AndDeriveSkxRelations(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
     LogVole_LheOps_ApplyCt1AndDeriveSkxRelation(cmd);
     LogVole_LheOps_TruncApplyCt1AndDeriveSkxRelation(cmd);
 }
 
 void LogVole_LheOps_HashedCt2Deterministic(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     AlignedUnVec<std::uint8_t> seed(16);
     for (std::size_t idx = 0; idx < seed.size(); ++idx)

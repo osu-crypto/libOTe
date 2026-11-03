@@ -23,6 +23,8 @@ using namespace osuCrypto::LogVole;
 
 void LogVole_Zk_RequestSizeBounds(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     constexpr u64 largest = u64{1} << 63;
     LOGVOLE_REQUIRE_EQ(zkVoleRequestSize(0), 1ull);
     LOGVOLE_REQUIRE_EQ(zkVoleRequestSize(1), 1ull);
@@ -174,6 +176,8 @@ namespace
     template<typename Prover, typename Verifier, typename Statement>
     void checkFreshMasks(const Statement& statement, CivoleSetting setting, bool device)
     {
+        auto testExecution = statement.mExecutionContext;
+        testExecution->mUseGpu = device;
         constexpr bool multiplication = std::is_same_v<Prover, ZkMulProver>;
         Prover prover;
         Verifier verifier;
@@ -198,8 +202,8 @@ namespace
             auto storage = std::make_shared<gpu::DeviceScalars>();
             LOGVOLE_REQUIRE_TRUE(storage->resize(request));
             LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(storage->data(), wires.data(),
-                wires.size() * sizeof(u64), gpu::threadStream().raw()));
-            LOGVOLE_REQUIRE_TRUE(gpu::threadStream().sync());
+                wires.size() * sizeof(u64), gpu::executionStream(*testExecution).raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::executionStream(*testExecution).sync());
             prover.mWiresDevice = storage;
         }
 #endif
@@ -319,19 +323,17 @@ namespace
     }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    struct GpuScope
-    {
-        bool previous = gpu::enabled();
-        ~GpuScope() { gpu::setEnabled(previous); }
-    };
+    using GpuScope = ::tests_libOTe::logvole_test::ScopedGpuEnabled;
 #endif
 }
 
 void LogVole_Zk_FreshMaskCpu(const CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
 #if defined(ENABLE_LOGVOLE_CUDA)
-    GpuScope scope;
-    gpu::setEnabled(false);
+    GpuScope scope(testExecution, testExecution->mUseGpu);
+    testExecution->mUseGpu = (false);
 #endif
     checkBothStatements(CivoleSetting::GoldenSeed, false);
     checkBothStatements(CivoleSetting::NoGoldenSeed, false);
@@ -339,12 +341,15 @@ void LogVole_Zk_FreshMaskCpu(const CLP&)
 
 void LogVole_Zk_FreshMaskGpu(const CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
-    GpuScope scope;
+    GpuScope scope(testExecution, testExecution->mUseGpu);
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    gpu::setEnabled(requested);
+    testExecution->mUseGpu = (requested);
     if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
-    LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
     checkBothStatements(CivoleSetting::GoldenSeed, true);
     // Resident NoGoldenSeed witness packing currently targets H200.
     if (gpu::deviceDescription().find("H200") != std::string::npos)
@@ -357,6 +362,8 @@ void LogVole_Zk_FreshMaskGpu(const CLP& cmd)
 
 void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     checkMatMulCpuTerms();
     constexpr u64 p = 17, delta = 3;
     const seal::Modulus modulus(p);
@@ -607,12 +614,15 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
 
 void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
     bool device = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    GpuScope scope;
+    GpuScope scope(testExecution, testExecution->mUseGpu);
     device = cmd.getOr("gpu", 0) != 0;
-    gpu::setEnabled(device);
-    if (device) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    testExecution->mUseGpu = (device);
+    if (device) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #else
     (void)cmd;
 #endif
@@ -643,7 +653,7 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (device)
         {
-            prover.mWiresDevice = gpu::uploadScalars(wires);
+            prover.mWiresDevice = gpu::uploadScalars(*testExecution, wires);
             LOGVOLE_REQUIRE_TRUE(prover.mWiresDevice != nullptr);
         }
 #endif

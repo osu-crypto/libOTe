@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cryptoTools/Common/TestCollection.h>
+#include "libOTe/Vole/LogVole/LogVole.h"
 
 #include <cstdlib>
 #include <sstream>
@@ -11,6 +12,83 @@
 
 namespace tests_libOTe::logvole_test
 {
+    using ExecutionPtr = osuCrypto::LogVole::ExecutionContextPtr;
+
+    template<class T>
+    void bindExecution(T& value, const ExecutionPtr& execution)
+    {
+        if constexpr (requires { value.mUseGpu = true; }) value.mUseGpu = execution->mUseGpu;
+        if constexpr (requires { value.mExecutionContext = execution; }) value.mExecutionContext = execution;
+        else if constexpr (requires { value.mParams; }) bindExecution(value.mParams, execution);
+        else if constexpr (requires { value.mLogVole; }) bindExecution(value.mLogVole, execution);
+        else if constexpr (requires { value.mShrinkExpand; }) bindExecution(value.mShrinkExpand, execution);
+        else if constexpr (requires { value.mRing; }) bindExecution(value.mRing, execution);
+    }
+
+    template<class T>
+    T withExecution(T value, const ExecutionPtr& execution)
+    {
+        bindExecution(value, execution);
+        return value;
+    }
+
+    struct ScopedGpuEnabled
+    {
+        ExecutionPtr mExecution;
+        bool mPrevious;
+        ScopedGpuEnabled(ExecutionPtr execution, bool enabled)
+            : mExecution(std::move(execution)), mPrevious(mExecution->mUseGpu)
+        { mExecution->mUseGpu = enabled; }
+        ~ScopedGpuEnabled() { mExecution->mUseGpu = mPrevious; }
+    };
+
+    struct ScopedCpuBenchmark
+    {
+        ExecutionPtr mExecution;
+        osuCrypto::LogVole::CpuBenchmarkContext* mPrevious;
+        ScopedCpuBenchmark(ExecutionPtr execution, osuCrypto::LogVole::CpuBenchmarkContext* context)
+            : mExecution(std::move(execution)), mPrevious(mExecution->mCpuBenchmark)
+        { mExecution->mCpuBenchmark = context; }
+        ~ScopedCpuBenchmark() { mExecution->mCpuBenchmark = mPrevious; }
+    };
+
+    struct ScopedProtocolCacheScope
+    {
+        ExecutionPtr mExecution;
+        osuCrypto::LogVole::ProtocolCacheScope mPrevious;
+        ScopedProtocolCacheScope(ExecutionPtr execution, osuCrypto::LogVole::ProtocolCacheRole role,
+            osuCrypto::u64 runId)
+            : mExecution(std::move(execution)), mPrevious(mExecution->mScope)
+        { mExecution->mScope = {runId, role}; }
+        ~ScopedProtocolCacheScope() { mExecution->mScope = mPrevious; }
+    };
+
+    inline osuCrypto::u64 allocateRunId(const ExecutionPtr& execution)
+    {
+        struct Counter { std::atomic<osuCrypto::u64> mNext{1}; };
+        return execution->resources<Counter>().mNext.fetch_add(1);
+    }
+
+    inline bool makeRingNttContext(const ExecutionPtr& execution,
+        osuCrypto::LogVole::RingParams params, osuCrypto::LogVole::RingNttContext& out)
+    {
+        params.mExecutionContext = execution;
+        return osuCrypto::LogVole::makeRingNttContext(params, out);
+    }
+    inline bool makeGpuRingNttContext(const ExecutionPtr& execution,
+        osuCrypto::LogVole::RingParams params, osuCrypto::LogVole::RingNttContext& out)
+    {
+        params.mExecutionContext = execution;
+        return osuCrypto::LogVole::makeGpuRingNttContext(params, out);
+    }
+    inline bool makeZpCrtContext(const ExecutionPtr& execution,
+        osuCrypto::LogVole::RingParams params, osuCrypto::u32 bits,
+        osuCrypto::LogVole::ZpCrtContext& out)
+    {
+        params.mExecutionContext = execution;
+        return osuCrypto::LogVole::makeZpCrtContext(params, bits, out);
+    }
+
     inline int setEnvironment(const char* name, const char* value, int overwrite)
     {
 #if defined(_WIN32)

@@ -51,20 +51,7 @@ namespace
     };
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    class ScopedGpuEnabled
-    {
-    public:
-        explicit ScopedGpuEnabled(bool enabled)
-            : mWasEnabled(gpu::enabled())
-        {
-            gpu::setEnabled(enabled);
-        }
-        ~ScopedGpuEnabled() { gpu::setEnabled(mWasEnabled); }
-        ScopedGpuEnabled(const ScopedGpuEnabled&) = delete;
-        ScopedGpuEnabled& operator=(const ScopedGpuEnabled&) = delete;
-    private:
-        bool mWasEnabled;
-    };
+    using ScopedGpuEnabled = ::tests_libOTe::logvole_test::ScopedGpuEnabled;
 #endif
 
     struct LencParams
@@ -231,16 +218,19 @@ namespace
 
     void check_trunc_setup_parity(const LencParams& params, std::uint32_t width = 0)
     {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
         ScopedEnvironmentValue residentDefault("LV_GPU_SETUP_GAUSSIAN_RESIDENT", "0");
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool haveGpu = gpu::enabled();
+        const bool haveGpu = gpu::enabled(*testExecution);
         const bool haveGaussian = haveGpu && gpu::gaussianTransformHostCompatible();
 #else
         const bool haveGpu = false;
         const bool haveGaussian = false;
 #endif
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
         check_compact_noise_parity(ctx);
         auto s = sample_batch(ctx, params.mMu, 0x1E2CB47Cu);
         const auto publicB = buildLencPublicBNtt(ctx, params.mTauHi + 1);
@@ -262,7 +252,7 @@ namespace
 #if defined(ENABLE_LOGVOLE_CUDA)
                 // The reference uses host transforms throughout, including
                 // generic batch helpers reached by the serial implementation.
-                ScopedGpuEnabled cpuReference(false);
+                ScopedGpuEnabled cpuReference(testExecution, false);
 #endif
                 LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, referencePrng,
@@ -326,7 +316,7 @@ namespace
                     oc::PRNG lheReferencePrng(oc::block(0xC7, 1), 3), rootReferencePrng(oc::block(0xC7, 2), 3);
                     {
 #if defined(ENABLE_LOGVOLE_CUDA)
-                        ScopedGpuEnabled cpuReference(false);
+                        ScopedGpuEnabled cpuReference(testExecution, false);
 #endif
                         LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, expected.mRNtt, sk,
                             params.mGadgetLogBase, referenceLhe, sigma, 6 * sigma, &lheReferencePrng,
@@ -496,7 +486,7 @@ namespace
                 ScopedEnvironmentValue rootDecline("LV_GPU_SETUP_ROOT_COMPACT_NOISE_FORCE_DECLINE", "1");
                 ScopedEnvironmentValue paddingOption("LV_GPU_SETUP_LENC_DEVICE_PADDING", devicePadding ? "1" : "0");
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (deviceAssembly) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+                if (deviceAssembly) LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #endif
                 oc::PRNG actualPrng(oc::block(0x1E2C5EEDu, 0), 3);
                 LencEncodeOutput actual{};
@@ -593,7 +583,7 @@ namespace
             LencEncodeOutput expected;
             {
 #if defined(ENABLE_LOGVOLE_CUDA)
-                ScopedGpuEnabled cpuReference(false);
+                ScopedGpuEnabled cpuReference(testExecution, false);
 #endif
                 LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, exactWidthInput, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, referencePrng,
@@ -625,9 +615,12 @@ namespace
 
 void LogVole_LencOps_SingletonPaddingAndRelation(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
     auto s = sample_batch(ctx, 1, 0x53494e474c4553ull);
     std::vector<RnsPoly> x(1);
     resizeZero(x[0].mCoeffs, ringPolyCoeffCount(ctx.mParams));
@@ -683,9 +676,12 @@ void LogVole_LencOps_SingletonPaddingAndRelation(const oc::CLP&)
 
 void LogVole_LencOps_EncShapeAndDeterminism(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x1111u);
     LencEncodeOutput enc1{};
@@ -710,9 +706,12 @@ void LogVole_LencOps_EncShapeAndDeterminism(const oc::CLP&)
 
 void LogVole_LencOps_DigestTreeDeterministic(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto x = sample_batch(ctx, params.mMu, 0x2222u);
 
@@ -738,9 +737,12 @@ void LogVole_LencOps_DigestTreeDeterministic(const oc::CLP&)
 
 void LogVole_LencOps_EvalMatchesRmulDigestMinusSmulX(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x3333u);
     auto x = sample_batch(ctx, params.mMu, 0x4444u);
@@ -773,9 +775,12 @@ void LogVole_LencOps_EvalMatchesRmulDigestMinusSmulX(const oc::CLP&)
 
 void LogVole_LencOps_EvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x6666u);
     auto x = sample_batch(ctx, params.mMu, 0x7777u);
@@ -798,9 +803,12 @@ void LogVole_LencOps_EvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
 
 void LogVole_LencOps_EvalRejectsMuMismatch(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x9999u);
     auto x = sample_batch(ctx, params.mMu, 0xAAAAu);
@@ -822,9 +830,12 @@ void LogVole_LencOps_EvalRejectsMuMismatch(const oc::CLP&)
 
 void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x110011u);
     LencEncodeOutput enc1{};
@@ -861,11 +872,11 @@ void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP&)
     expect_tensor_equal(enc1.mLacct.mCt, enc2.mLacct.mCt);
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled useGpu(true);
+    ScopedGpuEnabled useGpu(testExecution, true);
     // Test runners can demand device coverage explicitly. Otherwise the same
     // fixture remains usable in CPU-only environments, as before.
     if (const char* strict = std::getenv("LV_GPU_SETUP_LENC_DEVICE_STRICT"))
-        if (strict[0] == '1') LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+        if (strict[0] == '1') LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
 #endif
     // Cover leaf activeTau smaller than, larger than, and equal to the
     // internal activeTau, including explicit padding beyond the input width.
@@ -892,9 +903,12 @@ void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP&)
 
 void LogVole_LencOps_TruncDigestTreeDeterministic(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto x = sample_batch(ctx, params.mMu, 0x330033u);
 
@@ -938,9 +952,12 @@ void LogVole_LencOps_TruncDigestTreeDeterministic(const oc::CLP&)
 
 void LogVole_LencOps_TruncEvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x440044u);
     auto x = sample_batch(ctx, params.mMu, 0x550055u);
@@ -993,9 +1010,12 @@ void LogVole_LencOps_TruncEvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
 
 void LogVole_LencOps_TruncEvalRejectsMuMismatch(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x770077u);
     auto x = sample_batch(ctx, params.mMu, 0x880088u);
@@ -1025,10 +1045,13 @@ void LogVole_LencOps_TruncEvalRejectsMuMismatch(const oc::CLP&)
 
 void LogVole_LencOps_TruncLeafInputsAreGadgetPath(const oc::CLP&)
 {
-    auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     params.mMu = 4;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0xAA00AAu);
     auto x = sample_batch(ctx, params.mMu, 0xBB00BBu);

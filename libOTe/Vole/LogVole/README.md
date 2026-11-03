@@ -71,13 +71,23 @@ Use distinct session IDs across clients sharing a public key. The regression
 test `LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries` demonstrates
 this deferred lifecycle and rejects replay.
 
-CUDA applications include `cuda/LogVoleGpuProtocol.h` and call
-`LogVole::gpu::setEnabled(true)` before configuration. Check `gpu::enabled()`
-when GPU execution is required. CPU remains available in a CUDA build via
-`setEnabled(false)`. Set `mKeepOutputOnDevice` to keep outputs in device memory;
+CUDA applications include `cuda/LogVoleGpuProtocol.h` and set
+`sender.mUseGpu = receiver.mUseGpu = true` before configuring those instances.
+Check `gpu::enabled(sender.execution())` when GPU execution is required.
+Each sender and receiver owns its execution settings, caches, streams, scratch
+storage, counters, and profiling data. CPU and CUDA sessions can coexist; no
+process or thread defaults select their backend. `clear()` restores CPU defaults.
+Low-level callers set `ring.mExecutionContext->mUseGpu` before creating their
+contexts; parameter copies within one party retain that explicit owner. Separate
+setup roles acquire separate owners. `execution().mTiming` and
+`execution().mRingOps` expose diagnostics for one session.
+
+Set `mKeepOutputOnDevice` to keep outputs in device memory;
 `outputDevice()` and `outputDeviceCount()` expose the resulting device token.
 The receiver can also supply its own input token through `mInputDevice`.
-The two parties retain separate protocol state and communicate through coproto
+Explicit GPU preparation helpers accept an `ExecutionContext&`, for example
+`gpu::uploadScalars(receiver.execution(), values)`. Returned device tokens retain
+the resources needed for their lifetime. The parties communicate through coproto
 socket messages.
 
 `LogVoleGarbled.h` provides three-component additive 128-bit garbled labels.

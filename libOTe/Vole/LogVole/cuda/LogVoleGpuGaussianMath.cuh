@@ -48,7 +48,7 @@ static constexpr double near_host[] = {
 -0x1.5521375d145cdp-4,
 };
 #if defined(__CUDACC__)
-static __device__ __constant__ double near_device[] = {
+static __device__ __constant__ const double near_device[] = {
 -0x1p-1,
 0x1.5555555555577p-2,
 -0x1.ffffffffffdcbp-3,
@@ -70,7 +70,7 @@ static constexpr double poly_host[] = {
 -0x1.55575e506c89fp-3,
 };
 #if defined(__CUDACC__)
-static __device__ __constant__ double poly_device[] = {
+static __device__ __constant__ const double poly_device[] = {
 -0x1.0000000000001p-1,
 0x1.555555551305bp-2,
 -0x1.fffffffeb459p-3,
@@ -209,7 +209,7 @@ static constexpr double table_host[][2] = {
 {0x1.756cadbd6130cp-1, 0x1.432eee32fe000p-2},
 };
 #if defined(__CUDACC__)
-static __device__ __constant__ double table_device[][2] = {
+static __device__ __constant__ const double table_device[][2] = {
 {0x1.734f0c3e0de9fp+0, -0x1.7cc7f79e69000p-2},
 {0x1.713786a2ce91fp+0, -0x1.76feec20d0000p-2},
 {0x1.6f26008fab5a0p+0, -0x1.713e31351e000p-2},

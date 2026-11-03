@@ -54,20 +54,17 @@ namespace
 #if defined(ENABLE_LOGVOLE_CUDA)
     struct GpuScope
     {
-        bool mOld = gpu::enabled();
-        explicit GpuScope(const oc::CLP& cmd)
-        {
-            const bool want = cmd.getOr("gpu", 0) != 0;
-            gpu::setEnabled(want);
-            if (want) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-        }
-        ~GpuScope() { gpu::setEnabled(mOld); }
+        ::tests_libOTe::logvole_test::ScopedGpuEnabled mScope;
+        GpuScope(const ::tests_libOTe::logvole_test::ExecutionPtr& execution, const oc::CLP& cmd)
+            : mScope(execution, cmd.getOr("gpu", 0) != 0) {}
     };
 #endif
 }
 
 void LogVole_Garbled_LayoutAndValidation(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     for (u32 slots : {8192u, 16384u})
     {
         const u64 perRing = slots / 3;
@@ -101,11 +98,14 @@ void LogVole_Garbled_LayoutAndValidation(const oc::CLP&)
 
 void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
     ScopedEnvironmentValue deltaDevice("LV_GPU_SETUP_DELTA_DEVICE", "1");
     ScopedEnvironmentValue deltaStrict("LV_GPU_SETUP_DELTA_DEVICE_STRICT", "1");
     ScopedEnvironmentValue deltaDecline("LV_GPU_SETUP_DELTA_DEVICE_FORCE_DECLINE", "0");
 #if defined(ENABLE_LOGVOLE_CUDA)
-    GpuScope gpuScope(cmd);
+    GpuScope gpuScope(testExecution, cmd);
 #endif
     for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
     {
@@ -141,14 +141,14 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
             }
             span<const u64> input(x.data(), x.size());
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (gpu::enabled() && round == 1)
+            if (gpu::enabled(*testExecution) && round == 1)
             {
                 sender.mKeepOutputOnDevice = receiver.mKeepOutputOnDevice = true;
-                auto invalid = gpu::uploadScalars({x.data(), x.size() - 1});
+                auto invalid = gpu::uploadScalars(*testExecution, {x.data(), x.size() - 1});
                 receiver.mInputDevice = invalid;
                 auto invalidQuery = coproto::LocalAsyncSocket::makePair();
                 rejects([&] { macoro::sync_wait(receiver.receive({}, a, rp, invalidQuery[1])); });
-                receiver.mInputDevice = gpu::uploadScalars(input);
+                receiver.mInputDevice = gpu::uploadScalars(*testExecution, input);
                 LOGVOLE_REQUIRE_TRUE(receiver.mInputDevice);
                 input = {};
             }
@@ -195,15 +195,20 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 
 void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+    testExecution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+
 #if defined(ENABLE_LOGVOLE_CUDA)
-    GpuScope gpuScope(cmd);
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    GpuScope gpuScope(testExecution, cmd);
+    if (!gpu::enabled(*testExecution)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
     {
         CivoleParams params;
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         LOGVOLE_REQUIRE_TRUE(makeCivoleParams(setting, params));
         ZpCrtContext ctx;
-        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mLogVole.mShrinkExpand.mRing,
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params.mLogVole.mShrinkExpand.mRing,
             params.mLogVole.mShrinkExpand.mPlaintextModulusBits, ctx));
         const u32 slots = zpSlotCount(ctx);
         for (u64 count : {u64{1}, u64(slots / 3), u64(slots / 3 + 1), u64(2 * (slots / 3) + 7)})
@@ -217,7 +222,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
             }
             std::vector<RnsPoly> expected;
             LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(ctx, repeated, false, 0, 1, expected));
-            auto input = gpu::uploadScalars(x);
+            auto input = gpu::uploadScalars(*testExecution, x);
             for (bool deviceInput : {false, true})
             {
                 auto wrapped = deviceInput
@@ -239,7 +244,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
             std::vector<u64> expectedBits(count), actualBits(count);
             bitPrng.get(expectedBits.data(), expectedBits.size());
             for (auto& bit : expectedBits) bit &= 1u;
-            auto generatedBits = gpu::sampleScalarsFromSeed(bitSeed, count, 2);
+            auto generatedBits = gpu::sampleScalarsFromSeed(*testExecution, bitSeed, count, 2);
             LOGVOLE_REQUIRE_TRUE(generatedBits);
             LOGVOLE_REQUIRE_EQ(generatedBits->count(), count);
             LOGVOLE_REQUIRE_TRUE(generatedBits->producerStream() == nullptr);

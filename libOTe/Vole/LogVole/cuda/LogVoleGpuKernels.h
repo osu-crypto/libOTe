@@ -7,6 +7,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <string>
 
 namespace osuCrypto::LogVole::gpu
 {
@@ -103,33 +105,51 @@ namespace osuCrypto::LogVole::gpu
     };
 
     bool gpuDeviceAvailable();
-    const char* gpuDeviceName();
+    int gpuDeviceOrdinal();
+    bool gpuSelectDevice(int device);
+    bool gpuDeviceIsH200();
+    void* gpuStreamCreateHighestPriority();
+    bool gpuMemcpyRows(void* destination, std::size_t destinationPitch,
+        const void* source, std::size_t sourcePitch, std::size_t rowBytes,
+        std::size_t rows, bool hostSource, void* stream);
+    std::string gpuDeviceName();
     bool gpuLastErrorOk(const char** msg);
 
     // ---- memory -----------------------------------------------------------
-    // Device allocations are recycled through a size-bucketed free list because
-    // cudaMalloc/cudaFree synchronise and are far too slow to call per query.
+    // Device storage has explicit lifetimes; scratch is retained by streams
+    // and execution contexts. Free drains pending uses of the allocation.
     void* gpuMalloc(std::size_t bytes);
     void gpuFree(void* ptr);
-    // Hands every cached block back to the driver.
+    // Compatibility hook; execution-owned storage is released with its owner.
     void gpuTrimMemory();
     void* gpuMallocHost(std::size_t bytes);
     void gpuFreeHost(void* ptr);
     // Setup-wire storage is ordinary page-aligned host memory so allocation
-    // does not eagerly fault and pin a large payload. The process-local pool
+    // does not eagerly fault and pin a large payload. The explicitly supplied pool
     // registers a complete owned block lazily on its first GPU transfer and
     // retains successful registration across reuse. Allocation/registration
     // declines preserve the ordinary/staged fallback.
-    void* gpuTryAllocateSetupWireHost(std::size_t bytes);
+    class SetupWireMemory
+    {
+    public:
+        SetupWireMemory();
+        ~SetupWireMemory();
+        SetupWireMemory(const SetupWireMemory&) = delete;
+        SetupWireMemory& operator=(const SetupWireMemory&) = delete;
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+    };
+
+    void* gpuTryAllocateSetupWireHost(SetupWireMemory& memory, std::size_t bytes);
     // True only while the complete range belongs to a live setup-wire block.
-    bool gpuIsSetupWireHostRange(const void* ptr, std::size_t bytes);
+    bool gpuIsSetupWireHostRange(SetupWireMemory& memory, const void* ptr, std::size_t bytes);
     // True only when the live range also has persistent CUDA registration.
-    bool gpuIsSetupWirePinnedHostRange(const void* ptr, std::size_t bytes);
+    bool gpuIsSetupWirePinnedHostRange(SetupWireMemory& memory, const void* ptr, std::size_t bytes);
     // Try to register the complete page-aligned block containing this range.
     // pinned=false is a benign decline; fatal CUDA errors return false.
-    bool gpuTryPinSetupWireHostRange(const void* ptr, std::size_t bytes, bool& pinned);
+    bool gpuTryPinSetupWireHostRange(SetupWireMemory& memory, const void* ptr, std::size_t bytes, bool& pinned);
     // Release an exact setup-wire base pointer; false means it is not ours.
-    bool gpuReleaseSetupWireHost(void* ptr) noexcept;
+    bool gpuReleaseSetupWireHost(SetupWireMemory& memory, void* ptr) noexcept;
     // Optional registration of an exact caller-owned host span. A supported
     // decline returns true with registered=false; fatal CUDA errors return false.
     // Only a successful registration may be passed to gpuUnregisterHost.
@@ -140,23 +160,10 @@ namespace osuCrypto::LogVole::gpu
     bool gpuMemcpyD2D(void* dst, const void* src, std::size_t bytes, void* stream);
     bool gpuMemsetZero(void* dst, std::size_t bytes, void* stream);
 
-    // Drop the caching allocator's references to `stream`, so cached blocks are not
-    // left tagged with a stream that is about to be destroyed. Must be called after
-    // the stream is synchronised and its buffers freed, and before it is destroyed.
-    void gpuForgetStream(void* stream);
-
     // ---- events ------------------------------------------------------------
     // Just enough to overlap two independent kernel chains on separate streams
     // and join them without a host round trip.
     bool gpuStreamWaitEvent(void* stream, void* event);
-    // Declares which stream the calling scope is about to use. gpuMalloc tags
-    // blocks with it and gpuFree records it, so the caching allocator can hand a
-    // recycled block straight back to the same stream and synchronise only when a
-    // block crosses streams. Without this, running two parties on two streams
-    // would let one stream reuse a block the other is still writing.
-    void gpuSetCurrentStream(void* stream);
-    void* gpuCurrentStream();
-
     void* gpuStreamCreate();
     void gpuStreamDestroy(void* stream);
     bool gpuStreamSync(void* stream);

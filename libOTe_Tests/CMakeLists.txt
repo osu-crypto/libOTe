@@ -75,6 +75,7 @@ if(ENABLE_LOGVOLE)
     target_sources(libOTe_Tests PRIVATE
         LogVole/tests/test_modes.cpp
         LogVole/tests/test_core.cpp
+        LogVole/tests/test_execution_context.cpp
         LogVole/tests/test_cpu.cpp
         LogVole/tests/test_zk.cpp
         LogVole/tests/test_civole.cpp
