@@ -229,7 +229,7 @@ namespace osuCrypto::LogVole::gpu
 
     // Explicit native setup selects a role-local cache lane on device 0.
     // Factory construction still requires a nonzero owned protocol run.
-    bool nativeSealBundleCacheRequested();
+    bool nativeSealBundleCacheRequested(ProtocolCacheRole role);
 
     // Upload a compact host matrix into pitched device rows. The caller keeps
     // src alive until stream completion; untouched device columns stay unused.
@@ -251,7 +251,8 @@ namespace osuCrypto::LogVole::gpu
         // construct SEAL-compatible NTT, CRT, and denoise constants.
         // Returns null for unsupported/malformed parameters or CUDA failure.
         static std::shared_ptr<GpuRing> getRaw(
-            const RingParams& params, std::span<const u64> orderedPrimes, std::shared_ptr<GpuSetupContext> execution = {});
+            const RingParams& params, std::span<const u64> orderedPrimes,
+            RingResourceScope owner, std::shared_ptr<GpuSetupContext> execution = {});
         // Publish an already certified native ring into the matching raw
         // role/mode lane. Existing sequential owners stay alive for borrowers.
         static bool publishRaw(const RingParams& params,
@@ -351,9 +352,11 @@ namespace osuCrypto::LogVole::gpu
     public:
         // Cached per (N, plaintext modulus). Returns null on failure.
         static std::shared_ptr<GpuPlainNtt> get(
-            const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder);
+            const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder,
+            RingResourceScope owner);
         // Builds the plaintext NTT and SEAL batching permutation on the device.
-        static std::shared_ptr<GpuPlainNtt> getRaw(u32 degree, u64 plaintextPrime, std::shared_ptr<GpuSetupContext> execution = {});
+        static std::shared_ptr<GpuPlainNtt> getRaw(u32 degree, u64 plaintextPrime,
+            RingResourceScope owner, std::shared_ptr<GpuSetupContext> execution = {});
         // Admit a fully sealed private native-bundle owner into the immutable
         // role-keyed raw table cache. Call only at the host context commit
         // boundary; no table construction or D2H occurs here.

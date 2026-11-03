@@ -71,6 +71,17 @@ namespace
         LOGVOLE_REQUIRE_TRUE(originalSender.mOfflineState.mCrtFactoryOwner == senderFactory.lock());
         LOGVOLE_REQUIRE_TRUE(originalReceiver.mOfflineState.mCrtFactoryOwner == receiverFactory.lock());
 
+        if (mode == OnlineMode::Interactive)
+        {
+            auto saved = std::move(originalSender.mOfflineState.mCrtFactoryOwner);
+            CivoleReleaseKOutput rejected;
+            LOGVOLE_REQUIRE_FALSE(civoleSenderReleaseK(originalSender.mOfflineState, 0, rejected));
+            originalSender.mOfflineState.mCrtFactoryOwner = originalReceiver.mOfflineState.mCrtFactoryOwner;
+            LOGVOLE_REQUIRE_FALSE(civoleSenderReleaseK(originalSender.mOfflineState, 0, rejected));
+            originalSender.mOfflineState.mCrtFactoryOwner = std::move(saved);
+            LOGVOLE_REQUIRE_FALSE(originalSender.mOfflineState.mHasActiveSid);
+        }
+
         // Moving an established session must retain the new backend/mode state.
         LogVoleSender sender(std::move(originalSender));
         LogVoleReceiver receiver;

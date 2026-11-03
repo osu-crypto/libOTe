@@ -30,6 +30,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <unordered_map>
 #include <vector>
@@ -103,6 +104,18 @@ namespace osuCrypto::LogVole
             return !ctx.mRing.mGpuLightweight && ctx.mBatchingContext &&
                 ctx.mBatchingContext->first_context_data() && ctx.mBatchEncoder &&
                 !ctx.mNativePlainNtt && !ctx.mNativeSealBundleCommitted;
+        }
+
+        template<typename State>
+        std::shared_ptr<const ZpCrtContext> stateCrtContext(const State& state)
+        {
+            constexpr auto role = std::is_same_v<State, CivoleSenderState>
+                ? ProtocolCacheRole::Sender : ProtocolCacheRole::Receiver;
+            auto owner = state.mCrtFactoryOwner;
+            if (!owner || owner->mPlaintextModulus != state.mModulus ||
+                owner->mRing.mResourceScope.mRole != role ||
+                owner->mRing.mParams != state.mParams.mLogVole.mShrinkExpand.mRing) return {};
+            return owner;
         }
 
         bool encodeSlotsToRingCrt(
@@ -1221,7 +1234,8 @@ namespace osuCrypto::LogVole
             if (!gpu::selectSealPlainModulusDevice(ring.mPolyModulusDegree,
                     plaintextModulusBits, deviceRing->view().mMinModulus,
                     plaintextPrime, selectedBits, deviceRing->setupContext()) ||
-                !gpu::GpuPlainNtt::getRaw(ring.mPolyModulusDegree, plaintextPrime, deviceRing->setupContext()))
+                !gpu::GpuPlainNtt::getRaw(ring.mPolyModulusDegree, plaintextPrime,
+                    ringCtx.mResourceScope, deviceRing->setupContext()))
                 return false;
 
             ZpCrtContext next{};
@@ -2103,6 +2117,8 @@ namespace osuCrypto::LogVole
     {
         // NI fixes k only after d' arrives; it cannot offer staged key release.
         if (state.mParams.mLogVole.mOnlineMode == OnlineMode::NonInteractive) return false;
+        const auto ctxOwner = stateCrtContext(state);
+        if (!ctxOwner) return false;
         ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Sender, sid);
 
         if (!prepareSenderSidForReleaseK(state, sid) ||
@@ -2112,15 +2128,8 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        ZpCrtContext ctx{};
+        const auto& ctx = *ctxOwner;
         AlignedUnVec<u64> keys;
-        if (!makeZpCrtContext(
-                state.mParams.mLogVole.mShrinkExpand.mRing,
-                state.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
-                ctx))
-        {
-            return false;
-        }
 
         bool haveKeys = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2169,6 +2178,9 @@ namespace osuCrypto::LogVole
         Socket& sock,
         CivoleSenderReleaseOptions options)
     {
+        const auto ctxOwner = stateCrtContext(state);
+        if (!ctxOwner)
+            throw std::runtime_error("LogVole CI-VOLE sender has no matching offline CRT owner");
         if (!prepareSenderSidForReleaseK(state, sid) ||
             state.mReleaseIntUsed)
         {
@@ -2191,15 +2203,8 @@ namespace osuCrypto::LogVole
             co_await sender.online(state.mLogVoleState, onlineOptions, online, prng, sock);
         }
 
-        ZpCrtContext ctx{};
+        const auto& ctx = *ctxOwner;
         AlignedUnVec<u64> keys;
-        if (!makeZpCrtContext(
-                state.mParams.mLogVole.mShrinkExpand.mRing,
-                state.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
-                ctx))
-        {
-            throw std::runtime_error("LogVole CI-VOLE sender could not unwrap keys");
-        }
 
         state.mKeyReleased = true;
         const auto usedSidCount = state.mUsedSids.size();
@@ -2296,14 +2301,13 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole CI-VOLE setx size does not match offline width");
         }
 
-        ZpCrtContext ctx{};
+        const auto ctxOwner = stateCrtContext(state);
+        if (!ctxOwner)
+            throw std::runtime_error("LogVole CI-VOLE receiver has no matching offline CRT owner");
+        const auto& ctx = *ctxOwner;
         {
             HostStep step("recv: crt ctx + validate + sid");
-            if (!makeZpCrtContext(
-                    state.mParams.mLogVole.mShrinkExpand.mRing,
-                    state.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
-                    ctx) ||
-                (!xOnDevice && !validateZpValues(ctx, x)) ||
+            if ((!xOnDevice && !validateZpValues(ctx, x)) ||
                 !prepareReceiverSidForSetX(state, sid))
             {
                 throw std::runtime_error("LogVole CI-VOLE receiver setx input is invalid");

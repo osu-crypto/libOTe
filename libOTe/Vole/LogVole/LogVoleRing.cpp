@@ -721,7 +721,8 @@ namespace osuCrypto::LogVole
             if (!ctx.mGpuLightweight || ctx.mContext || !ctx.mHostContextCache ||
                 !ctx.mModuli.empty() || !ctx.mRawModuli ||
                 ctx.mHostContextCache->mRawModuli != ctx.mRawModuli ||
-                ctx.mHostContextCache->mParams != ctx.mParams) return false;
+                ctx.mHostContextCache->mParams != ctx.mParams ||
+                ctx.mHostContextCache->mRole != ctx.mResourceScope.mRole) return false;
             if (ctx.mRawModuli->mValues.size() != ctx.mParams.mCoeffModulusBits.size() ||
                 ctx.mRawModuli->mBitCounts.size() != ctx.mParams.mCoeffModulusBits.size()) return false;
             const auto primes = productionRingModuli(ctx.mParams);
@@ -747,6 +748,7 @@ namespace osuCrypto::LogVole
             {
                 if (!gpu::dynamicSealSetupSupported(ctx.mParams) ||
                     certificate->rawOwnerRole() != ctx.mHostContextCache->mRole ||
+                    (certificate->nativeSealBundleOwner() && !ctx.mResourceScope.mNativeGpuTables) ||
                     certificate->n() != ctx.mParams.mPolyModulusDegree ||
                     certificate->rho() != ctx.mRawModuli->mValues.size() ||
                     certificate->hostModuli() != ctx.mRawModuli->mValues)
@@ -831,7 +833,7 @@ namespace osuCrypto::LogVole
         key.mExpandModChain = !gpu::enabled() || (fullChain && fullChain[0] == '1');
         key.mNativeSealBundleRequested = lightweight && !key.mExpandModChain &&
             gpu::dynamicSealSetupSupported(params) &&
-            gpu::nativeSealBundleCacheRequested();
+            gpu::nativeSealBundleCacheRequested(key.mRole);
 #endif
 
         {
@@ -865,7 +867,8 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (!gpu::selectSealCoeffModuliDevice(params, metadata->mValues, built.mGpuSetup)) return false;
                 metadata->mDynamicGpuCertificate =
-                    gpu::GpuRing::getRaw(params, metadata->mValues, built.mGpuSetup);
+                    gpu::GpuRing::getRaw(params, metadata->mValues,
+                        {key.mRole, key.mNativeSealBundleRequested}, built.mGpuSetup);
                 if (!metadata->mDynamicGpuCertificate) return false;
                 built.mGpuSetup = metadata->mDynamicGpuCertificate->setupContext();
 #else
@@ -886,6 +889,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        built.mResourceScope = {key.mRole, key.mNativeSealBundleRequested};
 #if defined(ENABLE_LOGVOLE_CUDA)
         built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
 #endif
@@ -918,15 +922,25 @@ namespace osuCrypto::LogVole
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
         const std::shared_ptr<const RingNttContext>& retained)
     {
-#if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled()) return makeRingNttContext(params, out);
-#endif
-        if (retained && !retained->mGpuLightweight && retained->mParams == params)
+        if (retained && retained->mParams == params)
         {
             // retained may refer to out.mFactoryOwner itself.
             auto owner = retained;
-            out = *owner;
-            out.mFactoryOwner = std::move(owner);
+            RingNttContext selected = *owner;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (!gpu::enabled() && selected.mGpuLightweight)
+#else
+            if (selected.mGpuLightweight)
+#endif
+            {
+                selected.mContext = getRingHostContext(selected);
+                if (!selected.mContext || !selected.mContext->key_context_data()) return false;
+                selected.mModuli = selected.mContext->key_context_data()->parms().coeff_modulus();
+                selected.mGpuLightweight = false;
+                selected.mRawModuli.reset();
+            }
+            selected.mFactoryOwner = std::move(owner);
+            out = std::move(selected);
             return true;
         }
         return makeRingNttContext(params, out);
@@ -969,13 +983,14 @@ namespace osuCrypto::LogVole
             params.mCoeffModulusBits.end());
         built.mGpuSetup = certificate->setupContext();
         built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
+        built.mResourceScope = {certificate->rawOwnerRole(), certificate->nativeSealBundleOwner()};
         metadata->mDynamicGpuCertificate = std::move(certificate);
         built.mRawModuli = std::move(metadata);
         built.mGpuLightweight = true;
         built.mHostContextCache = std::make_shared<RingHostContextCache>();
         built.mHostContextCache->mParams = params;
         built.mHostContextCache->mRawModuli = built.mRawModuli;
-        built.mHostContextCache->mRole = currentProtocolCacheScope().mRole;
+        built.mHostContextCache->mRole = built.mResourceScope.mRole;
         built.mHostContextCache->mExpandModChain = false;
         if (!validateRingContextMetadata(built)) return false;
         out = std::move(built);
@@ -993,8 +1008,8 @@ namespace osuCrypto::LogVole
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         HostStep publicationStep("setup: native ring context publication");
-        const auto owner = currentProtocolCacheScope();
-        if (!gpu::nativeSealBundleCacheRequested() ||
+        const auto owner = ready.mResourceScope;
+        if (!gpu::nativeSealBundleCacheRequested(owner.mRole) ||
             !ready.mGpuLightweight || !ready.mRawModuli ||
             !ready.mRawModuli->mDynamicGpuCertificate ||
             !ready.mRawModuli->mDynamicGpuCertificate->nativeSealBundleOwner() ||

@@ -542,12 +542,10 @@ namespace osuCrypto::LogVole::gpu
             [](int bits) { return bits >= 2 && bits <= 60; });
     }
 
-    bool nativeSealBundleCacheRequested()
+    bool nativeSealBundleCacheRequested(ProtocolCacheRole role)
     {
-        const auto owner = currentProtocolCacheScope();
         if (!enabled() ||
-            (owner.mRole != ProtocolCacheRole::Sender &&
-                owner.mRole != ProtocolCacheRole::Receiver)) return false;
+            (role != ProtocolCacheRole::Sender && role != ProtocolCacheRole::Receiver)) return false;
         const char* optIn = std::getenv("LV_GPU_NATIVE_SEAL_BUNDLE");
         return optIn && std::strcmp(optIn, "1") == 0 &&
             available() && currentDeviceOrdinal() == 0;
@@ -1512,18 +1510,17 @@ namespace osuCrypto::LogVole::gpu
                 const auto& certificate =
                     ctx.mRawModuli->mDynamicGpuCertificate;
                 return available() && currentDeviceOrdinal() == 0 &&
-                    certificate->rawOwnerRole() ==
-                        currentProtocolCacheScope().mRole
+                    certificate->rawOwnerRole() == ctx.mResourceScope.mRole
                     ? certificate : nullptr;
             }
-            return getRaw(ctx.mParams, ctx.mRawModuli->mValues, ctx.mGpuSetup);
+            return getRaw(ctx.mParams, ctx.mRawModuli->mValues, ctx.mResourceScope, ctx.mGpuSetup);
         }
         if (!available()) return nullptr;
 
         RingCacheKey key{};
         key.mDegree = ctx.mParams.mPolyModulusDegree;
         key.mBits.assign(ctx.mParams.mCoeffModulusBits.begin(), ctx.mParams.mCoeffModulusBits.end());
-        key.mRole = currentProtocolCacheScope().mRole;
+        key.mRole = ctx.mResourceScope.mRole;
 
         std::lock_guard<std::mutex> lock(gRingCacheMutex);
         auto it = ringCache().find(key);
@@ -1535,7 +1532,8 @@ namespace osuCrypto::LogVole::gpu
         return ring;
     }
 
-    std::shared_ptr<GpuRing> GpuRing::getRaw(const RingParams& params, std::span<const u64> primes, std::shared_ptr<GpuSetupContext> execution)
+    std::shared_ptr<GpuRing> GpuRing::getRaw(const RingParams& params, std::span<const u64> primes,
+        RingResourceScope owner, std::shared_ptr<GpuSetupContext> execution)
     {
         HostStep getStep("setup GPU raw ring get");
         if (!validRawPrimes(params.mPolyModulusDegree, primes) ||
@@ -1552,12 +1550,12 @@ namespace osuCrypto::LogVole::gpu
         {
             RawRingCacheKey key{params.mPolyModulusDegree,
                 std::vector<u64>(primes.begin(), primes.end()),
-                currentProtocolCacheScope().mRole,
-                nativeSealBundleCacheRequested()};
+                owner.mRole, owner.mNativeGpuTables};
             std::lock_guard<std::mutex> lock(gRawRingCacheMutex);
             if (auto it = rawRingCache().find(key); it != rawRingCache().end()) return it->second;
             std::shared_ptr<GpuRing> ring(new GpuRing());
             ring->mSetup = execution ? std::move(execution) : std::make_shared<GpuSetupContext>();
+            ring->mRawOwnerRole = owner.mRole;
             if (!ring->initRaw(params, primes)) return nullptr;
             rawRingCache().emplace(std::move(key), ring);
             return ring;
@@ -1571,8 +1569,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (!ready || !ready->mNativeSealBundleStorage || !ready->mRaw ||
             !ready->mDenoiseReady || !ready->mSampleMaxMultiple ||
-            !nativeSealBundleCacheRequested() ||
-            ready->mRawOwnerRole != currentProtocolCacheScope().mRole ||
+            !nativeSealBundleCacheRequested(ready->mRawOwnerRole) ||
             !(ready->mParams == params) ||
             ready->n() != params.mPolyModulusDegree ||
             ready->rho() != orderedPrimes.size() ||
@@ -1593,7 +1590,7 @@ namespace osuCrypto::LogVole::gpu
         {
             RawRingCacheKey key{params.mPolyModulusDegree,
                 std::vector<u64>(orderedPrimes.begin(), orderedPrimes.end()),
-                currentProtocolCacheScope().mRole, true};
+                ready->mRawOwnerRole, true};
             std::lock_guard<std::mutex> lock(gRawRingCacheMutex);
             if (auto it = rawRingCache().find(key); it != rawRingCache().end())
             {
@@ -1616,7 +1613,6 @@ namespace osuCrypto::LogVole::gpu
         const u32 rho = static_cast<u32>(primes.size());
         const std::size_t words = static_cast<std::size_t>(n) * rho;
         mParams = params;
-        mRawOwnerRole = currentProtocolCacheScope().mRole;
         mHostModuli.assign(primes.begin(), primes.end());
 
         // Status and prime owners outlive every asynchronous operation, even
@@ -1936,9 +1932,9 @@ namespace osuCrypto::LogVole::gpu
                 if (!validateRingContextMetadata(ctx)) return;
                 RawRingCacheKey key;
                 key.mDegree = ctx.mParams.mPolyModulusDegree;
-                key.mRole = currentProtocolCacheScope().mRole;
+                key.mRole = ctx.mResourceScope.mRole;
                 key.mPrimes = ctx.mRawModuli->mValues;
-                key.mNativeRequested = nativeSealBundleCacheRequested();
+                key.mNativeRequested = ctx.mResourceScope.mNativeGpuTables;
                 if (!validRawPrimes(key.mDegree, key.mPrimes) ||
                     key.mPrimes.size() != ctx.mParams.mCoeffModulusBits.size()) return;
                 std::unique_lock<std::mutex> lock(gRawRingCacheMutex, std::try_to_lock);
@@ -1949,14 +1945,15 @@ namespace osuCrypto::LogVole::gpu
                 RingCacheKey key{};
                 key.mDegree = ctx.mParams.mPolyModulusDegree;
                 key.mBits.assign(ctx.mParams.mCoeffModulusBits.begin(), ctx.mParams.mCoeffModulusBits.end());
-                key.mRole = currentProtocolCacheScope().mRole;
+                key.mRole = ctx.mResourceScope.mRole;
                 // Avoid spawning a worker for warm rings or waiting here while
                 // another thread already initializes one. The regular get
                 // path holds this mutex through initialization/publication.
                 std::unique_lock<std::mutex> lock(gRingCacheMutex, std::try_to_lock);
                 if (!lock.owns_lock() || ringCache().find(key) != ringCache().end()) return;
             }
-            const auto protocolScope = currentProtocolCacheScope();
+            auto protocolScope = currentProtocolCacheScope();
+            protocolScope.mRole = ctx.mResourceScope.mRole;
             auto* benchmarkContext = tCpuBenchmarkContext;
             auto next = std::make_unique<Impl>();
             next->mWorker = std::thread(
@@ -2201,7 +2198,8 @@ namespace osuCrypto::LogVole::gpu
     }
 
     std::shared_ptr<GpuPlainNtt> GpuPlainNtt::get(
-        const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder)
+        const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder,
+        RingResourceScope owner)
     {
         if (!available()) return nullptr;
 
@@ -2209,7 +2207,7 @@ namespace osuCrypto::LogVole::gpu
         if (!data) return nullptr;
         const u64 p = data->parms().plain_modulus().value();
         const u64 degree = data->parms().poly_modulus_degree();
-        const auto key = std::tuple{degree, p, currentProtocolCacheScope().mRole};
+        const auto key = std::tuple{degree, p, owner.mRole};
 
         using PlainKey = std::tuple<u64, u64, ProtocolCacheRole>;
         using PlainCache = std::vector<std::pair<PlainKey, std::shared_ptr<GpuPlainNtt>>>;
@@ -2251,14 +2249,14 @@ namespace osuCrypto::LogVole::gpu
         }
     }
 
-    std::shared_ptr<GpuPlainNtt> GpuPlainNtt::getRaw(u32 n, u64 p, std::shared_ptr<GpuSetupContext> execution)
+    std::shared_ptr<GpuPlainNtt> GpuPlainNtt::getRaw(u32 n, u64 p,
+        RingResourceScope owner, std::shared_ptr<GpuSetupContext> execution)
     {
         if (!validRawPrimes(n, std::span<const u64>(&p, 1)) ||
             !available() || currentDeviceOrdinal() != 0) return nullptr;
         try
         {
-            const RawPlainKey key{n, p, currentProtocolCacheScope().mRole,
-                nativeSealBundleCacheRequested()};
+            const RawPlainKey key{n, p, owner.mRole, owner.mNativeGpuTables};
             std::lock_guard<std::mutex> lock(rawPlainCacheMutex());
             for (const auto& [cachedKey, value] : rawPlainCache())
                 if (cachedKey == key) return value;
@@ -2275,8 +2273,7 @@ namespace osuCrypto::LogVole::gpu
         const std::shared_ptr<GpuPlainNtt>& ready)
     {
         if (!ready || !ready->mNativeSealBundleStorage ||
-            !nativeSealBundleCacheRequested() ||
-            ready->mNativeBundleOwnerRole != currentProtocolCacheScope().mRole ||
+            !nativeSealBundleCacheRequested(ready->mNativeBundleOwnerRole) ||
             ready->mView.mN != n || ready->mView.mRho != 1u ||
             ready->mView.mMinModulus != p ||
             ready->mView.mMaxModulus != p ||
@@ -2286,7 +2283,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
         try
         {
-            const RawPlainKey key{n, p, currentProtocolCacheScope().mRole,
+            const RawPlainKey key{n, p, ready->mNativeBundleOwnerRole,
                 true};
             std::lock_guard<std::mutex> lock(rawPlainCacheMutex());
             for (auto& [cachedKey, value] : rawPlainCache())

@@ -407,6 +407,76 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
     ScopedEnvironmentValue overlap("LV_GPU_SETUP_INIT_OVERLAP", "1");
     ScopedEnvironmentValue deferred("LV_GPU_DEFER_GOLDEN_VALIDATION", "1");
     {
+        ScopedEnvironmentValue lightweight("LV_GPU_SETUP_LIGHTWEIGHT_RING", "1");
+        ScopedEnvironmentValue fullChain("LV_GPU_SETUP_FULL_MOD_CHAIN", "0");
+        ScopedEnvironmentValue native("LV_GPU_NATIVE_SEAL_BUNDLE", "0");
+        RingParams params{};
+        params.mPolyModulusDegree = 2048;
+        assignValues<int>(params.mCoeffModulusBits, {29, 30});
+        RingNttContext original;
+        {
+            ScopedProtocolCacheScope sender(ProtocolCacheRole::Sender, 0);
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, original));
+        }
+        LOGVOLE_REQUIRE_TRUE(original.mGpuLightweight && original.mFactoryOwner);
+        auto retained = original.mFactoryOwner;
+        std::weak_ptr<const RingNttContext> record = retained;
+        std::weak_ptr<gpu::GpuExecutionContext> domain = original.mGpuExecution;
+        auto& main = gpu::contextSampleStream(original);
+        std::weak_ptr<gpu::OwnedGpuStream> mainOwner = main.allocationOwner();
+        const auto tables = gpu::GpuRing::get(original);
+        const auto p = seal::PlainModulus::Batching(params.mPolyModulusDegree, 17).value();
+        const auto plain = gpu::GpuPlainNtt::getRaw(params.mPolyModulusDegree,
+            p, original.mResourceScope, original.mGpuSetup);
+        LOGVOLE_REQUIRE_TRUE(tables && plain);
+        original = {};
+        std::weak_ptr<gpu::OwnedGpuStream> workerOwner;
+        std::packaged_task<void()> task([&] {
+            ScopedProtocolCacheScope receiver(ProtocolCacheRole::Receiver, 1);
+            ScopedEnvironmentValue otherNative("LV_GPU_NATIVE_SEAL_BUNDLE", "1");
+            ScopedEnvironmentValue otherMode("LV_GPU_SETUP_LIGHTWEIGHT_RING", "0");
+            for (unsigned round = 0; round != 2; ++round)
+            {
+                RingNttContext reused;
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, reused, retained));
+                LOGVOLE_REQUIRE_TRUE(reused.mFactoryOwner == retained);
+                LOGVOLE_REQUIRE_TRUE(reused.mGpuExecution == domain.lock());
+                LOGVOLE_REQUIRE_TRUE(reused.mResourceScope.mRole == ProtocolCacheRole::Sender);
+                LOGVOLE_REQUIRE_FALSE(reused.mResourceScope.mNativeGpuTables);
+                LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(reused) == tables);
+                LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::getRaw(params, reused.mRawModuli->mValues,
+                    reused.mResourceScope, reused.mGpuSetup) == tables);
+                LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(params.mPolyModulusDegree,
+                    p, reused.mResourceScope, reused.mGpuSetup) == plain);
+                auto& stream = gpu::contextSampleStream(reused);
+                workerOwner = stream.allocationOwner();
+                LOGVOLE_REQUIRE_TRUE(stream.raw() != mainOwner.lock()->raw());
+                LOGVOLE_REQUIRE_TRUE(stream.allocationOwner()->memory() == mainOwner.lock()->memory());
+                gpu::OwnedGpuBuffer buffer(stream.allocationOwner(), 31);
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(buffer.data(), buffer.size(), stream.raw()));
+            }
+        });
+        auto completed = task.get_future();
+        std::thread worker(std::move(task));
+        worker.join();
+        completed.get();
+        LOGVOLE_REQUIRE_FALSE(workerOwner.expired());
+        {
+            ScopedGpuEnabled cpu(false);
+            RingNttContext host;
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, host, retained));
+            LOGVOLE_REQUIRE_FALSE(host.mGpuLightweight);
+            LOGVOLE_REQUIRE_TRUE(host.mContext && !host.mRawModuli);
+            LOGVOLE_REQUIRE_TRUE(host.mFactoryOwner == retained && host.mGpuExecution == domain.lock());
+            LOGVOLE_REQUIRE_EQ(host.mModuli.size(), retained->mRawModuli->mValues.size());
+            for (std::size_t i = 0; i < host.mModuli.size(); ++i)
+                LOGVOLE_REQUIRE_EQ(host.mModuli[i].value(), retained->mRawModuli->mValues[i]);
+        }
+        retained.reset();
+        LOGVOLE_REQUIRE_TRUE(record.expired() && domain.expired());
+        LOGVOLE_REQUIRE_TRUE(mainOwner.expired() && workerOwner.expired());
+    }
+    {
         auto execution = std::make_shared<gpu::GpuExecutionContext>();
         std::weak_ptr<gpu::GpuExecutionContext> domain = execution;
         auto& main = execution->mainStream();
@@ -1216,7 +1286,8 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 LOGVOLE_EXPECT_EQ(dynamicCrt[party].mPlaintextModulusBits, eager.mPlaintextModulusBits);
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(
                     dynamicCrt[party].mPlaintextLiftModQj, eager.mPlaintextLiftModQj));
-                plainOwners[party] = gpu::GpuPlainNtt::getRaw(degree, eager.mPlaintextModulus);
+                plainOwners[party] = gpu::GpuPlainNtt::getRaw(
+                    degree, eager.mPlaintextModulus, selected.mResourceScope);
                 LOGVOLE_REQUIRE_TRUE(plainOwners[party] && plainOwners[party]->slotCount() == degree);
                 const auto lazyHost = getRingHostContext(selected);
                 LOGVOLE_REQUIRE_TRUE(lazyHost &&
@@ -1466,7 +1537,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     compositeParams.mCoeffModulusBits.resize(1u);
                     compositeParams.mCoeffModulusBits[0] = compositeBits;
                     LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::getRaw(compositeParams,
-                        std::span<const std::uint64_t>(&composite, 1u)) == nullptr);
+                        std::span<const std::uint64_t>(&composite, 1u), selected.mResourceScope) == nullptr);
                     LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(selected) == certificate);
                 }
             }

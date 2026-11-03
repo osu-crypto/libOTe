@@ -8569,9 +8569,10 @@ namespace osuCrypto::LogVole::gpu
         {
             if (zp.mGpuLightweight)
                 return GpuPlainNtt::getRaw(
-                    zp.mRing.mParams.mPolyModulusDegree, zp.mPlaintextModulus, zp.mRing.mGpuSetup);
+                    zp.mRing.mParams.mPolyModulusDegree, zp.mPlaintextModulus,
+                    zp.mRing.mResourceScope, zp.mRing.mGpuSetup);
             if (!zp.mBatchingContext || !zp.mBatchEncoder) return nullptr;
-            return GpuPlainNtt::get(*zp.mBatchingContext, *zp.mBatchEncoder);
+            return GpuPlainNtt::get(*zp.mBatchingContext, *zp.mBatchEncoder, zp.mRing.mResourceScope);
         }
     }
 

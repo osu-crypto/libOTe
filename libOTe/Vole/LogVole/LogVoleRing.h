@@ -15,6 +15,12 @@
 
 namespace osuCrypto::LogVole
 {
+    enum class ProtocolCacheRole : u8;
+    struct RingResourceScope
+    {
+        ProtocolCacheRole mRole{};
+        bool mNativeGpuTables = false;
+    };
     namespace gpu { class DeviceScalars; class RetainedPublicUniform; class GpuRing; class GpuSetupContext; class GpuExecutionContext; }
     struct RingOpsStats
     {
@@ -115,6 +121,7 @@ namespace osuCrypto::LogVole
         // The record itself leaves this field empty, preventing a self-cycle.
         std::shared_ptr<const RingNttContext> mFactoryOwner;
         RingParams mParams;
+        RingResourceScope mResourceScope;
         // Resource domain only; it never owns or refers back to ring caches.
         std::shared_ptr<gpu::GpuSetupContext> mGpuSetup;
         std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;
@@ -143,8 +150,8 @@ namespace osuCrypto::LogVole
     bool validateRingBatchShape(const std::vector<RnsPoly>& polys, const RingParams& params);
     bool validateRingBatchShape(std::span<const RnsPoly> polys, const RingParams& params);
     bool makeRingNttContext(const RingParams& params, RingNttContext& out);
-    // Reuse an explicitly retained CPU record across coroutine/worker role
-    // changes. A backend change still goes through the normal factory.
+    // A retained record fixes table and execution ownership across worker/role
+    // changes. CPU access materializes its exact host view when necessary.
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
         const std::shared_ptr<const RingNttContext>& retained);
     // Production tuples use audited metadata without device work. Other raw

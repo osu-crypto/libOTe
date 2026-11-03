@@ -141,7 +141,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP&)
                 priorDeviceRing = gpu::GpuRing::get(priorRing);
                 LOGVOLE_REQUIRE_TRUE(priorDeviceRing != nullptr);
                 priorPlain = gpu::GpuPlainNtt::getRaw(
-                    degree, priorZp.mPlaintextModulus);
+                    degree, priorZp.mPlaintextModulus, priorRing.mResourceScope);
                 LOGVOLE_REQUIRE_TRUE(priorPlain != nullptr);
                 priorPlainAlreadyNative =
                     priorPlain->nativeBundleOwnerRole() == role;
@@ -163,7 +163,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP&)
                 bundledZp[party].mNativePlainNtt->nativeBundleOwnerRole(),
                 role);
             LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(
-                degree, bundledZp[party].mPlaintextModulus) ==
+                degree, bundledZp[party].mPlaintextModulus, bundledRing[party].mResourceScope) ==
                 bundledZp[party].mNativePlainNtt);
             RingNttContext standaloneRing{};
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, standaloneRing));
@@ -173,7 +173,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP&)
             LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(standaloneRing) ==
                 certificate);
             LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::getRaw(params,
-                standaloneRing.mRawModuli->mValues) == certificate);
+                standaloneRing.mRawModuli->mValues, standaloneRing.mResourceScope) == certificate);
             if (production)
             {
                 // A preceding test can already have published the native
@@ -191,9 +191,9 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP&)
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(fallbackRing) ==
                     priorDeviceRing);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::getRaw(params,
-                    fallbackRing.mRawModuli->mValues) == priorDeviceRing);
+                    fallbackRing.mRawModuli->mValues, fallbackRing.mResourceScope) == priorDeviceRing);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(degree,
-                    bundledZp[party].mPlaintextModulus) == priorPlain);
+                    bundledZp[party].mPlaintextModulus, fallbackRing.mResourceScope) == priorPlain);
             }
             const auto expectedQ = seal::CoeffModulus::Create(degree, widths);
             for (std::size_t j = 0; j < widths.size(); ++j)
@@ -371,12 +371,27 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                 standalone.mRawModuli->mDynamicGpuCertificate);
             LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::getRaw(
                 params.mLogVole.mShrinkExpand.mRing,
-                standalone.mRawModuli->mValues) ==
+                standalone.mRawModuli->mValues, standalone.mResourceScope) ==
                 standalone.mRawModuli->mDynamicGpuCertificate);
             LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(
                 standalone.mParams.mPolyModulusDegree,
-                selected[party].mPlaintextModulus) ==
+                selected[party].mPlaintextModulus, selected[party].mRing.mResourceScope) ==
                 selected[party].mNativePlainNtt);
+            {
+                ScopedProtocolCacheScope otherRole(party ? ProtocolCacheRole::Sender :
+                    ProtocolCacheRole::Receiver, 0u);
+                ScopedEnvironmentValue otherMode("LV_GPU_NATIVE_SEAL_BUNDLE", "0");
+                RingNttContext retained;
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(standalone.mParams, retained,
+                    selected[party].mRing.mFactoryOwner));
+                LOGVOLE_REQUIRE_TRUE(retained.mFactoryOwner == selected[party].mRing.mFactoryOwner);
+                LOGVOLE_REQUIRE_TRUE(retained.mGpuExecution == selected[party].mRing.mGpuExecution);
+                LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(retained) ==
+                    selected[party].mRing.mRawModuli->mDynamicGpuCertificate);
+                LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(retained.mParams.mPolyModulusDegree,
+                    selected[party].mPlaintextModulus, retained.mResourceScope) ==
+                    selected[party].mNativePlainNtt);
+            }
             {
                 // Runtime callbacks use the party role with run ID zero after
                 // configure has published the native owners under a fresh run.
@@ -406,11 +421,11 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                         selected[party].mRing.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::getRaw(
                     params.mLogVole.mShrinkExpand.mRing,
-                    sequentialStandalone.mRawModuli->mValues) ==
+                    sequentialStandalone.mRawModuli->mValues, sequentialStandalone.mResourceScope) ==
                         selected[party].mRing.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(
                     sequentialStandalone.mParams.mPolyModulusDegree,
-                    sequential.mPlaintextModulus) ==
+                    sequential.mPlaintextModulus, sequential.mRing.mResourceScope) ==
                         selected[party].mNativePlainNtt);
             }
             {
@@ -425,7 +440,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                     standalone.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(
                     fallback.mParams.mPolyModulusDegree,
-                    selected[party].mPlaintextModulus) !=
+                    selected[party].mPlaintextModulus, fallback.mResourceScope) !=
                     selected[party].mNativePlainNtt);
             }
         }
