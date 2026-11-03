@@ -521,6 +521,52 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(std::all_of(plainResult.begin(), plainResult.end(), [](auto x) { return x == 0; }));
     }
     {
+        std::shared_ptr<gpu::GpuRing> ring;
+        std::shared_ptr<gpu::GpuPlainNtt> plain;
+        std::weak_ptr<gpu::GpuTableCache> cache;
+        std::weak_ptr<const ZpCrtContext> record;
+        {
+            ZpCrtContext context;
+            {
+                ScopedGpuEnabled cpu(false);
+                RingParams params{};
+                params.mPolyModulusDegree = 2048;
+                assignValues<int>(params.mCoeffModulusBits, {25, 26});
+                LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 17, context));
+            }
+            LOGVOLE_REQUIRE_FALSE(context.mGpuLightweight);
+            const auto ambient = gpu::gpuCurrentStream();
+            ring = gpu::GpuRing::get(context.mRing);
+            plain = gpu::GpuPlainNtt::get(*context.mBatchingContext,
+                *context.mBatchEncoder, context.mRing.mResourceScope);
+            LOGVOLE_REQUIRE_TRUE(ring && plain);
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuCurrentStream() == ambient);
+            cache = context.mRing.mResourceScope.mTables;
+            record = context.mFactoryOwner;
+        }
+        LOGVOLE_REQUIRE_TRUE(cache.expired() && record.expired());
+        const auto* factors = ring->pow2Factors(5);
+        LOGVOLE_REQUIRE_TRUE(factors && ring->pow2Factors(5) == factors);
+        gpu::GpuStream reader;
+        std::vector<std::uint64_t> hostFactors(ring->rho());
+        // The direct constant-buffer copy is also an asynchronous table read.
+        (void)ring->view(reader);
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(hostFactors.data(), factors,
+            hostFactors.size() * sizeof(std::uint64_t), reader.raw()));
+        gpu::OwnedGpuBuffer values(reader.allocationOwner(), plain->n() * sizeof(std::uint64_t));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(values.data(), values.size(), reader.raw()));
+        LOGVOLE_REQUIRE_TRUE(gpu::launchNttForward(plain->view(reader),
+            static_cast<std::uint64_t*>(values.data()), 1, nullptr, reader.raw()));
+        // Both eager allocation owners end before the queued read is observed.
+        ring.reset();
+        plain.reset();
+        std::vector<std::uint64_t> result(values.size() / sizeof(std::uint64_t), 1);
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(result.data(), values.data(), values.size(), reader.raw()));
+        LOGVOLE_REQUIRE_TRUE(reader.sync());
+        LOGVOLE_REQUIRE_TRUE(std::all_of(hostFactors.begin(), hostFactors.end(), [](auto x) { return x == 32; }));
+        LOGVOLE_REQUIRE_TRUE(std::all_of(result.begin(), result.end(), [](auto x) { return x == 0; }));
+    }
+    {
         auto execution = std::make_shared<gpu::GpuExecutionContext>();
         std::weak_ptr<gpu::GpuExecutionContext> domain = execution;
         auto& main = execution->mainStream();

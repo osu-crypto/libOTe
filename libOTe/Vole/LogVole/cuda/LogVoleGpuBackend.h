@@ -346,10 +346,10 @@ namespace osuCrypto::LogVole::gpu
         DenoiseConstView mDenoise{};
         bool mDenoiseReady = false;
 
-        std::vector<void*> mOwned;
+        std::vector<OwnedGpuBuffer> mOwned;
         // A cold native bundle can own ring and plaintext tables as two
         // disjoint slices of one allocation. Each immutable owner retains it.
-        std::shared_ptr<void> mNativeSealBundleStorage;
+        std::shared_ptr<OwnedGpuBuffer> mNativeSealBundleStorage;
         std::vector<std::pair<u32, const u64*>> mPow2Cache;
         std::vector<std::pair<u64, ScaleRoundConstView>> mScaleRoundCache;
         std::mutex mPow2Mutex;
@@ -441,8 +441,8 @@ namespace osuCrypto::LogVole::gpu
         const u32* mSlotMap = nullptr;
         const u32* mInverseSlotMap = nullptr;
         u32 mSlotCount = 0;
-        std::vector<void*> mOwned;
-        std::shared_ptr<void> mNativeSealBundleStorage;
+        std::vector<OwnedGpuBuffer> mOwned;
+        std::shared_ptr<OwnedGpuBuffer> mNativeSealBundleStorage;
         ProtocolCacheRole mNativeBundleOwnerRole = ProtocolCacheRole::Unspecified;
     };
 
