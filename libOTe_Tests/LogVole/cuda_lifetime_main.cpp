@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuMemory.h"
+#include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
 #include <cuda_runtime_api.h>
 #include <array>
 #include <future>
@@ -40,6 +41,37 @@ int main()
 {
     try
     {
+        {
+            osuCrypto::LogVole::WireMemoryPool wire;
+            osuCrypto::LogVole::WireMemoryPool unrelated;
+            auto memory = std::make_shared<GpuMemoryPool>(0);
+            auto stream = std::make_shared<OwnedGpuStream>(memory);
+            OwnedGpuBuffer device(stream, 4099);
+            auto* host = static_cast<unsigned char*>(wire.allocate(4099, 64));
+            require(host && !wire.allocate(std::numeric_limits<std::size_t>::max(), 64), "wire allocation bounds");
+            require(wire.contains(host + 31, 4068) && !wire.contains(host + 4098, 2), "wire range bounds");
+            require(!unrelated.contains(host, 4099) && !unrelated.release(host), "wire pools alias");
+            bool pinned = false;
+            require(wire.pin(host, 4099, pinned) && pinned, "wire registration");
+            std::fill_n(host, 4099, 73);
+            check(cudaMemcpyAsync(device.data(), host, 4099, cudaMemcpyHostToDevice,
+                static_cast<cudaStream_t>(stream->raw())));
+            stream->synchronize();
+            verify(device, 73);
+            wire.trim();
+            require(wire.isPinned(host, 4099), "trim freed active wire");
+            require(wire.release(host) && !wire.contains(host, 1), "wire release provenance");
+            require(wire.allocate(4099, 64) == host && wire.isPinned(host, 4099), "wire registration reuse");
+            require(wire.release(host), "wire reuse release");
+            wire.trim();
+            auto* root = wire.allocate(8192, 64, true, 37);
+            require(root && wire.isCudaOwned(root, 8192) && wire.ownerRunId(root, 8192) == 37, "CUDA wire owner");
+            require(wire.contract(root, 8192, 4099) && !wire.contains(root, 8192), "CUDA wire contraction");
+            require(wire.release(root), "CUDA wire release");
+            require(wire.allocate(8192, 64, true, 41) == root && wire.ownerRunId(root, 8192) == 41, "CUDA wire reuse");
+            // Destruction releases this still-active allocation too; clients
+            // must retain the pool for every active allocation they own.
+        }
         for (unsigned round = 0; round != 3; ++round)
         {
             auto memory = std::make_shared<GpuMemoryPool>(0);

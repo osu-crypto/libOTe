@@ -105,6 +105,7 @@ if(ENABLE_LOGVOLE)
         Vole/LogVole/LogVoleCpuSampler.cpp
         Vole/LogVole/LogVoleCpuZk.cpp
         Vole/LogVole/LogVoleEncoding.cpp
+        Vole/LogVole/LogVoleWireMemory.cpp
         Vole/LogVole/LogVoleLenc.cpp
         Vole/LogVole/LogVoleLhe.cpp
         Vole/LogVole/LogVoleRing.cpp
