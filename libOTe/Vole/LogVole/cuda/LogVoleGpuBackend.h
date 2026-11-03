@@ -50,7 +50,14 @@ namespace osuCrypto::LogVole::gpu
     bool preparePlaintextLiftDevice(const GpuRing& ring, u64 plaintextPrime,
         AlignedUnVec<u64>& residues);
 
-    // A stream plus a small scratch allocator for index arrays.
+    struct GpuProtocolScratch;
+    struct GpuProtocolScratchDeleter
+    {
+        void operator()(GpuProtocolScratch* scratch) const noexcept;
+    };
+
+    // A stream plus its reusable scratch. Scratch is released after draining
+    // this stream and before releasing the native stream owner.
     class GpuStream
     {
     public:
@@ -69,6 +76,7 @@ namespace osuCrypto::LogVole::gpu
         bool sync() const;
         // Explicit allocation owner retained by exported scalar buffers.
         const std::shared_ptr<OwnedGpuStream>& allocationOwner();
+        GpuProtocolScratch& protocolScratch();
 
         // Upload a small u32 index array and return a device pointer valid
         // until the next reset(). Uses a bump allocator on pinned + device
@@ -92,6 +100,7 @@ namespace osuCrypto::LogVole::gpu
 
         void* mStream = nullptr;
         std::shared_ptr<OwnedGpuStream> mAllocationOwner;
+        std::unique_ptr<GpuProtocolScratch, GpuProtocolScratchDeleter> mProtocolScratch;
         bool mHighestPriority = false;
         u32* mDeviceScratch = nullptr;
         u32* mHostScratch = nullptr;

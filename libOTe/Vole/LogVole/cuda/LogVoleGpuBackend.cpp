@@ -882,7 +882,10 @@ namespace osuCrypto::LogVole::gpu
     GpuStream::~GpuStream()
     {
         if (!mStream) return;
-        gpuStreamSync(mStream);
+        if (!gpuStreamSync(mStream)) std::terminate();
+        // Explicit dependency order, independent of which scratch accessor was
+        // called first. No scratch destructor can observe a destroyed stream.
+        mProtocolScratch.reset();
         if (mHighestPriority)
         {
             // This lean stream never owns allocator-managed storage and is not

@@ -367,6 +367,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
     if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     ScopedEnvironmentValue overlap("LV_GPU_SETUP_INIT_OVERLAP", "1");
+    ScopedEnvironmentValue deferred("LV_GPU_DEFER_GOLDEN_VALIDATION", "1");
     for (unsigned round = 0; round != 2; ++round)
     {
         RingNttContext context;
@@ -387,6 +388,25 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
             // The second cold initialization is joined by the destructor.
         }
         LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(context));
+        // Recovery may call abort before this worker creates its first stream.
+        // Leave validation active on both return and exception: stream-owned
+        // scratch must drain and release without depending on TLS registration
+        // order or synchronizing an already-destroyed stream.
+        struct Cancelled {};
+        std::packaged_task<void()> validation([&] {
+            LOGVOLE_REQUIRE_TRUE(gpu::abortGoldenValidationAttempt());
+            LOGVOLE_REQUIRE_TRUE(gpu::beginGoldenValidationAttempt(context));
+            if (round) throw Cancelled{};
+        });
+        auto completed = validation.get_future();
+        std::thread validator(std::move(validation));
+        validator.join();
+        bool cancelled = false;
+        try { completed.get(); }
+        catch (const Cancelled&) { cancelled = true; }
+        LOGVOLE_REQUIRE_EQ(cancelled, round != 0);
+        gpu::gpuCollectThreadResources();
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuLastErrorOk(nullptr));
     }
     // Repeated worker exit covers thread-local stream/scratch destruction. Trim
     // while owners are live must preserve them, then release their idle blocks.

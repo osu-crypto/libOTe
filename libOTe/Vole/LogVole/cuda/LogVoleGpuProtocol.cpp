@@ -1,4 +1,3 @@
-#include "libOTe/Vole/LogVole/cuda/LogVoleGpuThreadLocal.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 
@@ -1246,11 +1245,29 @@ namespace osuCrypto::LogVole::gpu
 
         constexpr u64 kCt2DomainTag = 0xC720AA55ull;
 
-        // Per-thread scratch for the Blake2xb stream and the SEAL prng seeds.
+        // Per-stream scratch for the Blake2xb stream and the SEAL prng seeds.
         // Sized once and reused so that repeated golden-seed attempts do not
         // churn hundreds of megabytes of device memory.
         struct SampleScratch
         {
+            explicit SampleScratch(GpuStream& owner) : mOwner(owner) {}
+            GpuStream& mOwner;
+            enum Slot { Stream, Seeds, Prefix, Ct2Seeds, RoundKeys, RejectEpochs, RootZetaRejects };
+            std::array<OwnedGpuBuffer, 7> mStorage;
+
+            template<typename T>
+            T* allocate(Slot slot, std::size_t count)
+            {
+                mStorage[slot].reset();
+                if (count > std::numeric_limits<std::size_t>::max() / sizeof(T)) return nullptr;
+                try
+                {
+                    mStorage[slot] = OwnedGpuBuffer(mOwner.allocationOwner(), count * sizeof(T));
+                    return static_cast<T*>(mStorage[slot].data());
+                }
+                catch (...) { return nullptr; }
+            }
+
             u64* mStream = nullptr;
             std::size_t mStreamWords = 0;
             u64* mSeeds = nullptr;
@@ -1279,22 +1296,10 @@ namespace osuCrypto::LogVole::gpu
             u32* mRootZetaFirstReject = nullptr;
             std::size_t mRootZetaRejectCapacity = 0;
 
-            ~SampleScratch()
-            {
-                gpuFree(mStream);
-                gpuFree(mSeeds);
-                gpuFree(mPrefix);
-                gpuFree(mCt2Seeds);
-                gpuFree(mRoundKeys);
-                gpuFree(mRejectEpochs);
-                gpuFree(mRootZetaFirstReject);
-            }
-
             bool ensureStream(std::size_t words)
             {
                 if (words <= mStreamWords) return true;
-                gpuFree(mStream);
-                mStream = static_cast<u64*>(gpuMalloc(words * sizeof(u64)));
+                mStream = allocate<u64>(Stream, words);
                 mStreamWords = mStream ? words : 0;
                 return mStream != nullptr;
             }
@@ -1302,8 +1307,7 @@ namespace osuCrypto::LogVole::gpu
             bool ensureSeeds(std::size_t words)
             {
                 if (words <= mSeedWords) return true;
-                gpuFree(mSeeds);
-                mSeeds = static_cast<u64*>(gpuMalloc(words * sizeof(u64)));
+                mSeeds = allocate<u64>(Seeds, words);
                 mSeedWords = mSeeds ? words : 0;
                 return mSeeds != nullptr;
             }
@@ -1312,7 +1316,7 @@ namespace osuCrypto::LogVole::gpu
             {
                 if (mPrefix) return true;
                 invalidatePrefixUpload();
-                mPrefix = static_cast<u64*>(gpuMalloc(9 * sizeof(u64)));
+                mPrefix = allocate<u64>(Prefix, 9);
                 return mPrefix != nullptr;
             }
 
@@ -1325,7 +1329,7 @@ namespace osuCrypto::LogVole::gpu
 
             bool uploadPrefix(const u64* words, std::size_t wordCount, void* stream)
             {
-                if (!mPrefix || !words || wordCount == 0 ||
+                if (stream != mOwner.raw() || !mPrefix || !words || wordCount == 0 ||
                     wordCount > mPrefixHost.size())
                 {
                     invalidatePrefixUpload();
@@ -1371,8 +1375,7 @@ namespace osuCrypto::LogVole::gpu
             bool ensureCt2Seeds(std::size_t words)
             {
                 if (words <= mCt2SeedWords) return true;
-                gpuFree(mCt2Seeds);
-                mCt2Seeds = static_cast<u64*>(gpuMalloc(words * sizeof(u64)));
+                mCt2Seeds = allocate<u64>(Ct2Seeds, words);
                 mCt2SeedWords = mCt2Seeds ? words : 0;
                 return mCt2Seeds != nullptr;
             }
@@ -1380,8 +1383,7 @@ namespace osuCrypto::LogVole::gpu
             bool ensureRoundKeys(std::size_t bytes)
             {
                 if (bytes <= mRoundKeyBytes) return true;
-                gpuFree(mRoundKeys);
-                mRoundKeys = static_cast<unsigned char*>(gpuMalloc(bytes));
+                mRoundKeys = allocate<unsigned char>(RoundKeys, bytes);
                 mRoundKeyBytes = mRoundKeys ? bytes : 0;
                 return mRoundKeys != nullptr;
             }
@@ -1391,18 +1393,18 @@ namespace osuCrypto::LogVole::gpu
             {
                 rejectEpochs = nullptr;
                 rejectEpoch = 0;
+                if (stream != mOwner.raw()) return false;
                 if (count == 0) return true;
 
                 if (count > mRejectCapacity)
                 {
-                    gpuFree(mRejectEpochs);
-                    mRejectEpochs = static_cast<u32*>(gpuMalloc(count * sizeof(u32)));
+                    mRejectEpochs = allocate<u32>(RejectEpochs, count);
                     mRejectCapacity = mRejectEpochs ? count : 0;
                     mRejectEpoch = 0;
                     if (!mRejectEpochs) return false;
                     if (!gpuMemsetZero(mRejectEpochs, count * sizeof(u32), stream))
                     {
-                        gpuFree(mRejectEpochs);
+                        mStorage[RejectEpochs].reset();
                         mRejectEpochs = nullptr;
                         mRejectCapacity = 0;
                         return false;
@@ -1432,46 +1434,12 @@ namespace osuCrypto::LogVole::gpu
             bool ensureRootZetaRejects(std::size_t count)
             {
                 if (count <= mRootZetaRejectCapacity) return true;
-                gpuFree(mRootZetaFirstReject);
-                mRootZetaFirstReject =
-                    static_cast<u32*>(gpuMalloc(count * sizeof(u32)));
+                mRootZetaFirstReject = allocate<u32>(RootZetaRejects, count);
                 mRootZetaRejectCapacity = mRootZetaFirstReject ? count : 0;
                 return mRootZetaFirstReject != nullptr;
             }
 
         };
-
-        // Indexed by stream slot: these buffers are read and written by device
-        // work, so the sender and the receiver must not share them now that they
-        // run on separate streams.
-        SampleScratch& sampleScratch()
-        {
-            thread_local GpuThreadLocal<SampleScratch[kStreamSlots]> sOwner;
-            auto& s = sOwner.get();
-            return s[threadStreamSlot()];
-        }
-
-        // Separate from sampleScratch(), not merely another reference indexed by
-        // the same role. The main and secondary streams execute concurrently;
-        // sharing any of the prefix, seed, round-key, stream, or reject buffers
-        // would turn the prefetch into a write-after-read race.
-        SampleScratch& senderPrefetchSampleScratch()
-        {
-            thread_local GpuThreadLocal<SampleScratch[kStreamSlots]> sOwner;
-            auto& s = sOwner.get();
-            return s[threadStreamSlot()];
-        }
-
-        // The receiver may queue several ancestor ct2 batches FIFO on its
-        // secondary stream while the ordinary receiver sampler continues on the
-        // main stream. Never alias either lane's prefix, seed, round-key, stream,
-        // or rejection storage: all are rewritten for the next sampled batch.
-        SampleScratch& receiverPrefetchSampleScratch()
-        {
-            thread_local GpuThreadLocal<SampleScratch[kStreamSlots]> sOwner;
-            auto& s = sOwner.get();
-            return s[threadStreamSlot()];
-        }
 
         // Tiny persistent scratch for the golden-seed check.
         struct ValidateScratch
@@ -1485,39 +1453,71 @@ namespace osuCrypto::LogVole::gpu
             void* mAttemptStream = nullptr;
             u32 mAttemptRho = 0;
 
-            ~ValidateScratch()
-            {
-                // Core normally finishes or aborts every attempt. This is only a
-                // last-resort lifetime guard for an exception/thread exit.
-                if (mAttemptActive && mAttemptStream) gpuStreamSync(mAttemptStream);
-                gpuFree(mMarginLo);
-                gpuFree(mMarginHi);
-                gpuFree(mLeaf);
-                gpuFree(mFlag);
-            }
+            explicit ValidateScratch(GpuStream& owner) : mOwner(owner) {}
+            GpuStream& mOwner;
+            std::array<OwnedGpuBuffer, 4> mStorage;
 
             bool ensure(u32 rho)
             {
+                if (!rho) return false;
                 if (rho <= mRho && mFlag) return true;
-                gpuFree(mMarginLo);
-                gpuFree(mMarginHi);
-                gpuFree(mLeaf);
-                gpuFree(mFlag);
-                mMarginLo = static_cast<u64*>(gpuMalloc(rho * sizeof(u64)));
-                mMarginHi = static_cast<u64*>(gpuMalloc(rho * sizeof(u64)));
-                mLeaf = static_cast<LeafGoldenSeedLimb*>(gpuMalloc(rho * sizeof(LeafGoldenSeedLimb)));
-                mFlag = static_cast<u32*>(gpuMalloc(sizeof(u32)));
-                mRho = (mMarginLo && mMarginHi && mLeaf && mFlag) ? rho : 0;
-                return mRho != 0;
+                try
+                {
+                    const auto& owner = mOwner.allocationOwner();
+                    // Build a complete replacement before publishing pointers.
+                    // The old scratch stays usable if allocation fails.
+                    std::array<OwnedGpuBuffer, 4> next;
+                    next[0] = OwnedGpuBuffer(owner, rho * sizeof(u64));
+                    next[1] = OwnedGpuBuffer(owner, rho * sizeof(u64));
+                    next[2] = OwnedGpuBuffer(owner, rho * sizeof(LeafGoldenSeedLimb));
+                    next[3] = OwnedGpuBuffer(owner, sizeof(u32));
+                    mStorage = std::move(next);
+                    mMarginLo = static_cast<u64*>(mStorage[0].data());
+                    mMarginHi = static_cast<u64*>(mStorage[1].data());
+                    mLeaf = static_cast<LeafGoldenSeedLimb*>(mStorage[2].data());
+                    mFlag = static_cast<u32*>(mStorage[3].data());
+                    mRho = rho;
+                    return mRho != 0;
+                }
+                catch (...) { return false; }
             }
         };
+    }
 
-        ValidateScratch& validateScratch()
-        {
-            thread_local GpuThreadLocal<ValidateScratch[kStreamSlots]> sOwner;
-            auto& s = sOwner.get();
-            return s[threadStreamSlot()];
-        }
+    struct GpuProtocolScratch
+    {
+        // Keep each sampling family separate even when it uses the same stream.
+        // Main and prefetch streams have distinct owners, so their asynchronous
+        // seed, prefix, and rejection writes cannot alias one another.
+        explicit GpuProtocolScratch(GpuStream& stream)
+            : sample(stream), senderPrefetch(stream), receiverPrefetch(stream),
+              setup(stream), validation(stream) {}
+        SampleScratch sample;
+        SampleScratch senderPrefetch;
+        SampleScratch receiverPrefetch;
+        SampleScratch setup;
+        ValidateScratch validation;
+    };
+
+    void GpuProtocolScratchDeleter::operator()(GpuProtocolScratch* scratch) const noexcept
+    {
+        delete scratch;
+    }
+
+    GpuProtocolScratch& GpuStream::protocolScratch()
+    {
+        if (!mProtocolScratch) mProtocolScratch.reset(new GpuProtocolScratch(*this));
+        return *mProtocolScratch;
+    }
+
+    namespace
+    {
+        SampleScratch& sampleScratch(GpuStream& stream) { return stream.protocolScratch().sample; }
+        SampleScratch& senderPrefetchSampleScratch(GpuStream& stream)
+        { return stream.protocolScratch().senderPrefetch; }
+        SampleScratch& receiverPrefetchSampleScratch(GpuStream& stream)
+        { return stream.protocolScratch().receiverPrefetch; }
+        ValidateScratch& validateScratch(GpuStream& stream) { return stream.protocolScratch().validation; }
 
         bool goldenSeedMargins(
             const Params& params, const RingNttContext& ctx, std::vector<u64>& lo, std::vector<u64>& hi)
@@ -2589,9 +2589,7 @@ namespace osuCrypto::LogVole::gpu
             gpuSetCurrentStream(stream.raw());
             // Setup uses the secondary stream. Its scratch must not alias the
             // online sampler or either prefetch sampler on another stream.
-            thread_local GpuThreadLocal<SampleScratch[kStreamSlots]> setupScratchOwner;
-            auto& setupScratch = setupScratchOwner.get();
-            auto& scratch = setupScratch[threadStreamSlot()];
+            auto& scratch = stream.protocolScratch().setup;
             GpuPolyBuffer sampled;
             struct DrainStream
             {
@@ -2753,7 +2751,7 @@ namespace osuCrypto::LogVole::gpu
         if (!ring || !ring->sampleMaxMultiple()) return false;
 
         auto& stream = threadStream();
-        auto& scratch = sampleScratch();
+        auto& scratch = sampleScratch(stream);
         const std::size_t streamWords = ring->polyWords() + kSampleSlackWords;
         const bool fusedSamplerNeedsEpoch =
             gpuFusedSamplerNeedsRejectEpoch(ring->n(), static_cast<u32>(streamWords), count);
@@ -5837,7 +5835,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
         if (seededZeta)
         {
-            auto& scratch = sampleScratch();
+            auto& scratch = sampleScratch(stream);
             if (!scratch.ensureCt2Seeds(2u * zetaTaskSeeds.size()) ||
                 !scratch.ensureRoundKeys(176u * zetaTaskSeeds.size()) ||
                 !scratch.ensureRootZetaRejects(zetaTaskSeeds.size()))
@@ -6673,7 +6671,7 @@ namespace osuCrypto::LogVole::gpu
         {
             return sampleCt2BatchWithScratch(
                 ring, cache, params, chunkCount, mu, seed, sid, instanceBase,
-                maskDigestHash, out, stream, sampleScratch());
+                maskDigestHash, out, stream, sampleScratch(stream));
         }
     }
 
@@ -6741,7 +6739,7 @@ namespace osuCrypto::LogVole::gpu
         if (!sampleCt2BatchWithScratch(
                 *ring, *cache, state.mParams.mRing, chunkCount, mu, seed, sid,
                 instanceBase, maskDigestHash, impl.mCt2, sampleStream,
-                senderPrefetchSampleScratch()) ||
+                senderPrefetchSampleScratch(sampleStream)) ||
             !gpuEventRecord(impl.mReadyEvent, sampleStream.raw()))
         {
             return false;
@@ -6952,7 +6950,7 @@ namespace osuCrypto::LogVole::gpu
         if (!sampleCt2BatchWithScratch(
                 *ring, *cache, state.mParams.mRing, chunkCount, mu, seed, sid,
                 instanceBase, maskDigestHash, impl.mCt2, sampleStream,
-                receiverPrefetchSampleScratch()) ||
+                receiverPrefetchSampleScratch(sampleStream)) ||
             !gpuEventRecord(impl.mReadyEvent, sampleStream.raw()))
         {
             return false;
@@ -7622,7 +7620,7 @@ namespace osuCrypto::LogVole::gpu
             !((ring->n() == 16384u && ring->rho() == 8u) ||
               (ring->n() == 8192u && ring->rho() == 4u))) return false;
         auto& stream = threadStream();
-        auto& scratch = sampleScratch();
+        auto& scratch = sampleScratch(stream);
         auto sampled = std::make_shared<DeviceBatch>();
         sampled->mImpl->mRing = ring;
         const u32 streamWords = static_cast<u32>(ring->polyWords() + kSampleSlackWords);
@@ -8123,7 +8121,7 @@ namespace osuCrypto::LogVole::gpu
         if (!ring || !ring->denoiseReady()) return false;
 
         auto& stream = threadStream();
-        auto& scratch = validateScratch();
+        auto& scratch = validateScratch(stream);
         if (scratch.mAttemptActive || !scratch.ensure(ring->rho()) ||
             !gpuMemsetZero(scratch.mFlag, sizeof(u32), stream.raw()))
         {
@@ -8137,9 +8135,9 @@ namespace osuCrypto::LogVole::gpu
 
     bool abortGoldenValidationAttempt()
     {
-        auto& scratch = validateScratch();
-        if (!scratch.mAttemptActive) return true;
         auto& stream = threadStream();
+        auto& scratch = validateScratch(stream);
+        if (!scratch.mAttemptActive) return true;
         if (scratch.mAttemptStream != stream.raw()) return false;
         const bool ok = stream.sync();
         scratch.mAttemptActive = false;
@@ -8150,9 +8148,9 @@ namespace osuCrypto::LogVole::gpu
 
     bool finishGoldenValidationAttempt(bool& ok)
     {
-        auto& scratch = validateScratch();
-        if (!scratch.mAttemptActive) return false;
         auto& stream = threadStream();
+        auto& scratch = validateScratch(stream);
+        if (!scratch.mAttemptActive) return false;
         if (scratch.mAttemptStream != stream.raw()) return false;
 
         u32 fail = 0;
@@ -8258,7 +8256,7 @@ namespace osuCrypto::LogVole::gpu
         const std::size_t aggCount = logicalDenoised / tau;
 
         auto& stream = threadStream();
-        auto& scratch = validateScratch();
+        auto& scratch = validateScratch(stream);
         if (!uploadGoldenMargins(
                 validatedLevelParams, ctx, *ring, scratch, stream))
             return false;
@@ -8329,7 +8327,7 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = threadStream();
         Region regKern(regions().mKernelUs, stream.raw());
 
-        auto& scratch = validateScratch();
+        auto& scratch = validateScratch(stream);
         if (scratch.mAttemptActive || !scratch.ensure(rho)) return false;
         if (!gpuMemcpyH2D(scratch.mMarginLo, marginLo.data(), rho * sizeof(u64), stream.raw()) ||
             !gpuMemcpyH2D(scratch.mMarginHi, marginHi.data(), rho * sizeof(u64), stream.raw()) ||
@@ -8372,7 +8370,7 @@ namespace osuCrypto::LogVole::gpu
                 (tbk.count() != params.mW && tbk.count() != padded)) return false;
 
             auto& stream = threadStream();
-            auto& scratch = validateScratch();
+            auto& scratch = validateScratch(stream);
             if (deferred)
             {
                 if (!scratch.mAttemptActive || scratch.mAttemptStream != stream.raw() ||
@@ -8420,7 +8418,7 @@ namespace osuCrypto::LogVole::gpu
         if (!enqueueLeafGoldenValidation(params, tbk, false)) return false;
         auto& stream = threadStream();
         u32 failed = 0;
-        const bool copied = gpuMemcpyD2H(&failed, validateScratch().mFlag, sizeof(u32), stream.raw());
+        const bool copied = gpuMemcpyD2H(&failed, validateScratch(stream).mFlag, sizeof(u32), stream.raw());
         const bool synced = stream.sync();
         if (!copied || !synced) return false;
         ok = failed == 0;
@@ -8508,7 +8506,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         auto& stream = threadStream();
-        auto& scratch = sampleScratch();
+        auto& scratch = sampleScratch(stream);
         const std::size_t streamWords = ring->polyWords() + kSampleSlackWords;
         if (!scratch.ensureSeeds(sealSeeds.size())) return false;
         const bool fusedSamplerNeedsEpoch = gpuFusedSamplerNeedsRejectEpoch(
