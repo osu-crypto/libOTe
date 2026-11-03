@@ -72,7 +72,7 @@ target_include_directories(libOTe_Tests PUBLIC
                     $<INSTALL_INTERFACE:include>)
 
 if(ENABLE_LOGVOLE)
-    target_sources(libOTe_Tests PRIVATE
+    set(LOGVOLE_TEST_SOURCES
         LogVole/tests/test_modes.cpp
         LogVole/tests/test_core.cpp
         LogVole/tests/test_cpu.cpp
@@ -89,6 +89,22 @@ if(ENABLE_LOGVOLE)
         LogVole/tests/test_shrinkexpand_coproto.cpp
         LogVole/tests/test_shrinkexpand.cpp
     )
+    target_sources(libOTe_Tests PRIVATE ${LOGVOLE_TEST_SOURCES})
+    if(ENABLE_LOGVOLE_CUDA)
+        # Focused target avoids compiling unrelated OT/frontend configurations.
+        add_executable(logvole_cuda_tests EXCLUDE_FROM_ALL
+            LogVole/cuda_test_main.cpp UInt_Tests.cpp ${LOGVOLE_TEST_SOURCES})
+        target_link_libraries(logvole_cuda_tests PRIVATE libOTe)
+        target_compile_features(logvole_cuda_tests PRIVATE cxx_std_20)
+        target_include_directories(logvole_cuda_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/..
+            ${CMAKE_CURRENT_BINARY_DIR}/..
+            ${CMAKE_CURRENT_SOURCE_DIR}/LogVole
+            ${CMAKE_CURRENT_SOURCE_DIR}/LogVole/tests)
+        if(MSVC)
+            target_compile_options(logvole_cuda_tests PRIVATE /bigobj)
+        endif()
+    endif()
     target_include_directories(libOTe_Tests PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/LogVole
         ${CMAKE_CURRENT_LIST_DIR}/LogVole/tests
