@@ -25,6 +25,7 @@
 #include <limits>
 #include <mutex>
 #include <sstream>
+#include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 
@@ -887,7 +888,7 @@ namespace osuCrypto::LogVole::gpu
             // This lean stream never owns allocator-managed storage and is not
             // registered with the allocator. Destroy it without publishing it
             // as the allocation stream, even transiently.
-            gpuStreamDestroy(mStream);
+            if (!mAllocationOwner) gpuStreamDestroy(mStream);
             return;
         }
         // Release this stream's own buffers *as* this stream. gpuFree tags a block
@@ -900,13 +901,25 @@ namespace osuCrypto::LogVole::gpu
         gpuFreeHost(mHostScratch);
         gpuFreeHost(mStaging);
         gpuSetCurrentStream(nullptr);
-        // The frees above return blocks to the caching allocator tagged with this
-        // stream. It is about to stop existing, so the allocator has to forget it
-        // first - the driver reuses cudaStream_t values, and a block left tagged
-        // with a dead handle would be mistaken for one belonging to whichever new
-        // stream inherits it.
+        // Detach from the legacy allocator now. Exported scalar buffers may
+        // retain the native stream independently after this wrapper dies; its
+        // eventual destruction must not consult that allocator's bookkeeping.
+        // Clearing the tags also prevents confusion when CUDA reuses handles.
         gpuForgetStream(mStream);
-        gpuStreamDestroy(mStream);
+        if (!mAllocationOwner) gpuStreamDestroy(mStream);
+    }
+
+    const std::shared_ptr<OwnedGpuStream>& GpuStream::allocationOwner()
+    {
+        if (!mAllocationOwner)
+        {
+            if (!mStream) throw std::runtime_error("CUDA stream is unavailable");
+            const int device = currentDeviceOrdinal();
+            if (device < 0) throw std::runtime_error("CUDA device is unavailable");
+            auto memory = std::make_shared<GpuMemoryPool>(device);
+            mAllocationOwner = std::make_shared<OwnedGpuStream>(std::move(memory), mStream);
+        }
+        return mAllocationOwner;
     }
 
     u8* GpuStream::staging(std::size_t bytes)

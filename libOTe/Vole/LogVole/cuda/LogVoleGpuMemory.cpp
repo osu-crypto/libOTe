@@ -202,7 +202,11 @@ namespace osuCrypto::LogVole::gpu
     int GpuMemoryPool::device() const noexcept { return mImpl->device; }
     void GpuMemoryPool::trim() { mImpl->trim(); }
 
-    OwnedGpuStream::OwnedGpuStream(std::shared_ptr<GpuMemoryPool> memory) : mMemory(std::move(memory))
+    OwnedGpuStream::OwnedGpuStream(std::shared_ptr<GpuMemoryPool> memory)
+        : OwnedGpuStream(std::move(memory), nullptr) {}
+
+    OwnedGpuStream::OwnedGpuStream(std::shared_ptr<GpuMemoryPool> memory, void* adoptedStream)
+        : mMemory(std::move(memory))
     {
         if (!mMemory) throw std::invalid_argument("CUDA stream requires a memory owner");
         DeviceScope scope(mMemory->device());
@@ -210,8 +214,9 @@ namespace osuCrypto::LogVole::gpu
         std::lock_guard lock(pool.mutex);
         if (!pool.nextStreamId) throw std::overflow_error("CUDA stream identity exhausted");
         mId = pool.nextStreamId++;
-        cudaStream_t stream = nullptr;
-        requireCuda(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), "cudaStreamCreate");
+        cudaStream_t stream = native(adoptedStream);
+        if (!stream)
+            requireCuda(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), "cudaStreamCreate");
         mStream = stream;
     }
 

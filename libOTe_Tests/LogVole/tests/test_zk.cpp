@@ -194,7 +194,7 @@ namespace
         if (device)
         {
             auto storage = std::make_shared<gpu::DeviceScalars>();
-            LOGVOLE_REQUIRE_TRUE(storage->resize(request));
+            LOGVOLE_REQUIRE_TRUE(storage->resize(request, gpu::threadStream()));
             LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(storage->data(), wires.data(),
                 wires.size() * sizeof(u64), gpu::threadStream().raw()));
             LOGVOLE_REQUIRE_TRUE(gpu::threadStream().sync());

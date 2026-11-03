@@ -236,7 +236,7 @@ namespace osuCrypto::LogVole::gpu
         if (hostOut && !pinned) return false;
         std::vector<u8> completed(seeds.size(), 1), activeCompleted(activeSeeds.size());
         StreamDrain drain{stream};
-        if (!samples->resize(outputBytes / sizeof(u64)) ||
+        if (!samples->resize(outputBytes / sizeof(u64), stream) ||
             !gpuMemsetZero(samples->data(), outputBytes, stream.raw())) return false;
         if (!activeSeeds.empty())
         {
@@ -267,6 +267,7 @@ namespace osuCrypto::LogVole::gpu
         }
         if ((hostOut && !gpuMemcpyD2H(pinned.get(), samples->data(), outputBytes, stream.raw())) || !stream.sync())
             return false;
+        samples->markReady();
         for (std::size_t i = 0; i < activeCompleted.size(); ++i)
             completed[outputRows.empty() ? i : outputRows[i]] = activeCompleted[i];
         if (hostOut)

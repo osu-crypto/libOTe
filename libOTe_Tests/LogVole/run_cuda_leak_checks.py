@@ -34,6 +34,7 @@ def main():
         ("wire-and-caches", ["LogVole_Encoding_PinnedWireBufferOwnership",
                              "LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch",
                              "LogVole_RingOps_PartyCachesDoNotAlias"]),
+        ("zk-scalar-use", ["LogVole_Zk_FreshMaskGpu"]),
         ("retention-cold", ["LogVole_RingOps_PublicUniformRetentionParity"]),
         ("protocol-modes", ["LogVole_Modes_"]),
     ]

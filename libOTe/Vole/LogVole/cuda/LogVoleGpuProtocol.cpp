@@ -2324,22 +2324,67 @@ namespace osuCrypto::LogVole::gpu
     PreparedRootFinalize::PreparedRootFinalize() : mImpl(std::make_unique<Impl>()) {}
     PreparedRootFinalize::~PreparedRootFinalize() = default;
 
-    DeviceScalars::~DeviceScalars()
+    void DeviceScalars::finishForeignUse()
     {
-        gpuFree(mData);
+        if (mProducerStream && mLastUse != mStorage.stream())
+            mLastUse->synchronize();
     }
 
-    bool DeviceScalars::resize(std::size_t count)
+    DeviceScalars::~DeviceScalars()
     {
-        if (count == mCount) return true;
-        gpuFree(mData);
-        mData = nullptr;
-        mCount = 0;
-        if (count == 0) return true;
-        mData = static_cast<u64*>(gpuMalloc(count * sizeof(u64)));
-        if (!mData) return false;
-        mCount = count;
-        return true;
+        // A foreign use must complete before the allocation is returned to
+        // its original stream's cache. The common same-stream path just queues
+        // a release event and does not introduce a host synchronization.
+        try { finishForeignUse(); }
+        catch (...) { std::terminate(); }
+    }
+
+    bool DeviceScalars::prepareUse(GpuStream& stream) const
+    {
+        if (empty()) return false;
+        try
+        {
+            const auto& next = stream.allocationOwner();
+            if (next != mLastUse)
+            {
+                if (mProducerStream) mLastUse->synchronize();
+                mLastUse = next;
+            }
+            mProducerStream = next->raw();
+            return true;
+        }
+        catch (...) { return false; }
+    }
+
+    bool DeviceScalars::resize(std::size_t count, GpuStream& stream)
+    {
+        if (count > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return false;
+        try
+        {
+            if (!count)
+            {
+                finishForeignUse();
+                mStorage.reset();
+                mLastUse.reset();
+                mData = nullptr;
+                mCount = 0;
+                mProducerStream = nullptr;
+                return true;
+            }
+            const auto& owner = stream.allocationOwner();
+            if (count == mCount && mStorage.stream() == owner) return prepareUse(stream);
+            // Construct before replacing the old output. Allocation failure
+            // leaves its contents and completion owner intact.
+            OwnedGpuBuffer next(owner, count * sizeof(u64));
+            finishForeignUse();
+            mStorage = std::move(next);
+            mLastUse = owner;
+            mData = static_cast<u64*>(mStorage.data());
+            mCount = count;
+            mProducerStream = stream.raw();
+            return true;
+        }
+        catch (...) { return false; }
     }
 
     bool syncStream()
@@ -2972,16 +3017,12 @@ namespace osuCrypto::LogVole::gpu
     bool fetchScalars(const DeviceScalars& src, std::span<u64> dst)
     {
         if (src.empty() || dst.size() < src.count()) return false;
-        // Order against the stream that produced the data before reading it. The
-        // producer no longer drains eagerly, because a caller that keeps the result
-        // on the device has no reason to wait for it.
-        if (auto* ps = src.producerStream(); ps && ps != threadStream().raw())
-        {
-            if (!gpuStreamSync(ps)) return false;
-        }
         auto& stream = threadStream();
-        return gpuMemcpyD2H(dst.data(), src.data(), src.count() * sizeof(u64), stream.raw()) &&
-               stream.sync();
+        if (!src.prepareUse(stream)) return false;
+        const bool ok = gpuMemcpyD2H(dst.data(), src.data(), src.count() * sizeof(u64), stream.raw()) &&
+            stream.sync();
+        if (ok) src.markReady();
+        return ok;
     }
 
     bool waitScalars(DeviceScalars& src)
@@ -2990,10 +3031,9 @@ namespace osuCrypto::LogVole::gpu
         if (auto* ps = src.producerStream())
         {
             if (!gpuStreamSync(ps)) return false;
-            // The producing thread may now exit and destroy its thread-local
-            // stream. Marking the handle ready prevents a later fetch from
-            // trying to synchronize that stale cudaStream_t.
-            src.setProducerStream(nullptr);
+            // The owner still retains the stream. A completed dependency needs
+            // no additional wait when this result moves to its next consumer.
+            src.markReady();
         }
         return true;
     }
@@ -8586,7 +8626,7 @@ namespace osuCrypto::LogVole::gpu
             // The scalar array is owned by a DeviceScalars when the caller wants
             // to keep it, and is scratch otherwise.
             auto scalars = std::make_shared<DeviceScalars>();
-            if (!scalars->resize(static_cast<std::size_t>(zpLabelCount)))
+            if (!scalars->resize(static_cast<std::size_t>(zpLabelCount), stream))
                 return false;
             u64* flat = scalars->data();
 
@@ -8664,7 +8704,7 @@ namespace osuCrypto::LogVole::gpu
                 // Device-output path: the caller receives a handle, not host bytes,
                 // so there is nothing to wait for here. Record the producing stream
                 // and let whoever eventually reads it order against that.
-                scalars->setProducerStream(stream.raw());
+                // resize() retained this stream before work was submitted.
             }
             if (coeffs) gpuFree(coeffs);
             if (ok && deviceOut) *deviceOut = std::move(scalars);
@@ -8835,10 +8875,11 @@ namespace osuCrypto::LogVole::gpu
         const char* fuse = std::getenv("LV_GPU_GARBLED_FUSED_INPUT");
         if (garbledInput && fuse && std::string(fuse) == "0")
         {
+            auto& repeatStream = threadStream();
             auto repeated = std::make_shared<DeviceScalars>();
-            if (!repeated->resize(chunkCount * slots) ||
+            if (!repeated->resize(chunkCount * slots, repeatStream) ||
                 !launchRepeatGarbledInputs(scalars, labelCount, slots,
-                    static_cast<u32>(chunkCount), repeated->data(), threadStream().raw()))
+                    static_cast<u32>(chunkCount), repeated->data(), repeatStream.raw()))
                 return nullptr;
             return wrapScalarsOnDevice(zp, repeated->data(), chunkCount * slots,
                 false, 0, padChunks, false, nullptr);
@@ -8995,11 +9036,9 @@ namespace osuCrypto::LogVole::gpu
         const std::size_t count = labelCount
             ? std::min<std::size_t>(static_cast<std::size_t>(labelCount), labels.count())
             : labels.count();
-        // The caller may have produced the input on another thread's stream.
-        if (auto* ps = labels.producerStream(); ps && ps != threadStream().raw())
-        {
-            if (!gpuStreamSync(ps)) return nullptr;
-        }
+        // This consumer returns before its read completes. Retain and record
+        // its stream before submission, even though the input is immutable.
+        if (!labels.prepareUse(threadStream())) return nullptr;
         return wrapScalarsOnDevice(
             zp, labels.data(), count, multiplyByDelta, padValue, padChunks,
             garbledInput, firstQueryAllocations,
@@ -9281,7 +9320,7 @@ namespace osuCrypto::LogVole::gpu
         else
         {
             prepared = std::make_shared<DeviceScalars>();
-            if (!prepared->resize(slots) || !launchPrepareDeltaSlots(
+            if (!prepared->resize(slots, stream) || !launchPrepareDeltaSlots(
                     garbledDeltas ? (*garbledDeltas)[0] : delta,
                     garbledDeltas ? (*garbledDeltas)[1] : 0,
                     garbledDeltas ? (*garbledDeltas)[2] : 0,
@@ -9304,7 +9343,7 @@ namespace osuCrypto::LogVole::gpu
         // will receive the upload, including after a protocol-role switch.
         auto& stream = threadStream();
         auto out = std::make_shared<DeviceScalars>();
-        if (!out->resize(src.size())) return nullptr;
+        if (!out->resize(src.size(), stream)) return nullptr;
         if (!gpuMemcpyH2D(out->data(), src.data(), src.size() * sizeof(u64), stream.raw()) ||
             !stream.sync())
         {
@@ -9312,7 +9351,7 @@ namespace osuCrypto::LogVole::gpu
         }
         // The upload is complete. Do not retain a thread-local stream handle
         // that becomes invalid if this token outlives the producing thread.
-        out->setProducerStream(nullptr);
+        out->markReady();
         return out;
     }
 
@@ -9337,14 +9376,14 @@ namespace osuCrypto::LogVole::gpu
             GpuStream& stream;
             ~DrainStream() { stream.sync(); }
         } drainStream{ stream };
-        if (!out->resize(static_cast<std::size_t>(count))) return nullptr;
+        if (!out->resize(static_cast<std::size_t>(count), stream)) return nullptr;
         deviceSeed.reset(gpuMalloc(sizeof(seedWords)));
         if (!deviceSeed || !gpuMemcpyH2D(deviceSeed.get(), seedWords.data(), sizeof(seedWords), stream.raw()) ||
             !launchAesCtrScalars(static_cast<const u64*>(deviceSeed.get()), out->data(),
                 count, modulus, stream.raw()) || !stream.sync()) return nullptr;
         // Work is complete, so consumers need no dependency on this thread's
         // stream and may keep the result after the producing thread exits.
-        out->setProducerStream(nullptr);
+        out->markReady();
         return out;
     }
 }

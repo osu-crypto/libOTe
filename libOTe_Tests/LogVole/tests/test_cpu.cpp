@@ -1043,7 +1043,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                             // before either socket or query seed is consumed.
                             auto prior = gpuProver.mWiresDevice;
                             auto undersized = std::make_shared<gpu::DeviceScalars>();
-                            LOGVOLE_REQUIRE_TRUE(undersized->resize(budget - 1u));
+                            LOGVOLE_REQUIRE_TRUE(undersized->resize(budget - 1u, gpu::threadStream()));
                             gpuProver.mWiresDevice = undersized;
                             bool rejected = false;
                             try

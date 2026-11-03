@@ -12,6 +12,7 @@
 // and produces bit-identical results.
 
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuMemory.h"
 
 #include <memory>
 #include <array>
@@ -28,6 +29,7 @@ namespace osuCrypto::LogVole
 
 namespace osuCrypto::LogVole::gpu
 {
+    class GpuStream;
     class ReceiverFirstQueryAllocations;
     using ReceiverFirstQueryAllocationsPtr = std::shared_ptr<ReceiverFirstQueryAllocations>;
 
@@ -261,21 +263,30 @@ namespace osuCrypto::LogVole::gpu
         DeviceScalars(const DeviceScalars&) = delete;
         DeviceScalars& operator=(const DeviceScalars&) = delete;
 
-        bool resize(std::size_t count);
+        // Output storage is reused only on the same allocation stream. A size
+        // or stream change replaces it; callers produce the complete output.
+        bool resize(std::size_t count, GpuStream& stream);
         u64* data() const { return mData; }
         std::size_t count() const { return mCount; }
         bool empty() const { return mCount == 0; }
 
-        // Stream the contents were produced on. A consumer that may run on another
-        // thread must order against this rather than assume stream ordering, since
-        // threadStream() is thread-keyed. Lets the producer skip an eager drain.
+        // Completion dependency for the last queued use, including asynchronous
+        // readers. The retained owner keeps this handle valid across thread exit.
         void* producerStream() const { return mProducerStream; }
-        void setProducerStream(void* s) { mProducerStream = s; }
+        // Establish ownership and order before submitting reads or writes on
+        // another stream. Host access/handoffs to this object must be serialized.
+        // False leaves the existing result and owner intact.
+        bool prepareUse(GpuStream& stream) const;
+        // Call only after the recorded producer has completed.
+        void markReady() const { mProducerStream = nullptr; }
 
     private:
+        OwnedGpuBuffer mStorage;
+        mutable std::shared_ptr<OwnedGpuStream> mLastUse;
+        void finishForeignUse();
         u64* mData = nullptr;
         std::size_t mCount = 0;
-        void* mProducerStream = nullptr;
+        mutable void* mProducerStream = nullptr;
     };
 
     using DeviceScalarsPtr = std::shared_ptr<DeviceScalars>;

@@ -14,6 +14,7 @@
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuMemory.h"
 
 #include <memory>
 #include <mutex>
@@ -66,6 +67,8 @@ namespace osuCrypto::LogVole::gpu
 
         void* raw() const { return mStream; }
         bool sync() const;
+        // Explicit allocation owner retained by exported scalar buffers.
+        const std::shared_ptr<OwnedGpuStream>& allocationOwner();
 
         // Upload a small u32 index array and return a device pointer valid
         // until the next reset(). Uses a bump allocator on pinned + device
@@ -88,6 +91,7 @@ namespace osuCrypto::LogVole::gpu
         GpuStream(bool highestPriority, bool allocateScratch);
 
         void* mStream = nullptr;
+        std::shared_ptr<OwnedGpuStream> mAllocationOwner;
         bool mHighestPriority = false;
         u32* mDeviceScratch = nullptr;
         u32* mHostScratch = nullptr;

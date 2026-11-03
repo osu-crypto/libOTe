@@ -222,6 +222,58 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*uploaded, fetched));
     LOGVOLE_REQUIRE_TRUE(fetched == input);
 
+    // The exported scalar owns its allocation stream after the original
+    // GpuStream wrapper has drained and released its own scratch. Neither a
+    // global allocator nor TLS retirement may be needed to release the result.
+    auto detached = std::make_shared<gpu::DeviceScalars>();
+    std::weak_ptr<gpu::OwnedGpuStream> detachedStream;
+    std::weak_ptr<gpu::GpuMemoryPool> detachedMemory;
+    {
+        gpu::GpuStream producer;
+        LOGVOLE_REQUIRE_TRUE(detached->resize(input.size(), producer));
+        detachedStream = producer.allocationOwner();
+        detachedMemory = producer.allocationOwner()->memory();
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(detached->data(), input.data(),
+            input.size() * sizeof(std::uint64_t), producer.raw()));
+        LOGVOLE_REQUIRE_TRUE(!detached->resize(std::numeric_limits<std::size_t>::max(), producer));
+        LOGVOLE_REQUIRE_TRUE(detached->count() == input.size());
+    }
+    LOGVOLE_REQUIRE_TRUE(!detachedStream.expired() && !detachedMemory.expired());
+    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*detached, fetched));
+    LOGVOLE_REQUIRE_TRUE(fetched == input);
+    auto readerOutput = std::make_shared<gpu::DeviceScalars>();
+    std::weak_ptr<gpu::OwnedGpuStream> readerOwner;
+    {
+        gpu::GpuStream reader;
+        LOGVOLE_REQUIRE_TRUE(readerOutput->resize(input.size(), reader));
+        readerOwner = reader.allocationOwner();
+        const auto& source = *detached;
+        LOGVOLE_REQUIRE_TRUE(source.prepareUse(reader));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2D(readerOutput->data(), source.data(),
+            input.size() * sizeof(std::uint64_t), reader.raw()));
+        // Release the source with an asynchronous reader still queued. A const
+        // borrow also participates in completion ownership.
+        detached.reset();
+        LOGVOLE_REQUIRE_TRUE(detachedStream.expired() && detachedMemory.expired());
+    }
+    LOGVOLE_REQUIRE_TRUE(!readerOwner.expired());
+    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*readerOutput, fetched));
+    LOGVOLE_REQUIRE_TRUE(fetched == input);
+    std::weak_ptr<gpu::OwnedGpuStream> foreignWriter;
+    {
+        gpu::GpuStream writer;
+        LOGVOLE_REQUIRE_TRUE(readerOutput->prepareUse(writer));
+        foreignWriter = writer.allocationOwner();
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(readerOutput->data(),
+            input.size() * sizeof(std::uint64_t), writer.raw()));
+        // Release while the foreign write may still be pending. The original
+        // allocation cannot return to its pool until that write completes.
+        readerOutput.reset();
+        LOGVOLE_REQUIRE_TRUE(!foreignWriter.expired());
+    }
+    LOGVOLE_REQUIRE_TRUE(foreignWriter.expired());
+    LOGVOLE_REQUIRE_TRUE(readerOwner.expired());
+
     const auto runId = allocateProtocolCacheRunId();
     // Warm both role streams, then hand cached storage from one role to the
     // next while its last device write may still be pending.
@@ -239,7 +291,7 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
             auto& stream = gpu::threadStream();
             previous = stream.raw();
             gpu::DeviceScalars retired;
-            LOGVOLE_REQUIRE_TRUE(retired.resize(expected.size()));
+            LOGVOLE_REQUIRE_TRUE(retired.resize(expected.size(), stream));
             LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(retired.data(),
                 expected.size() * sizeof(std::uint64_t), stream.raw()));
         }

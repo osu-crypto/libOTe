@@ -40,6 +40,9 @@ namespace osuCrypto::LogVole::gpu
     {
     public:
         explicit OwnedGpuStream(std::shared_ptr<GpuMemoryPool> memory);
+        // Transfers an exclusively owned stream on successful construction.
+        // Used while migrating existing stream owners to the explicit domain.
+        OwnedGpuStream(std::shared_ptr<GpuMemoryPool> memory, void* adoptedStream);
         ~OwnedGpuStream();
         OwnedGpuStream(const OwnedGpuStream&) = delete;
         OwnedGpuStream& operator=(const OwnedGpuStream&) = delete;

@@ -16936,6 +16936,7 @@ namespace osuCrypto::LogVole::gpu
         if (!stream) return;
         auto& a = allocator();
         std::lock_guard<std::mutex> lock(a.mMutex);
+        a.mLive.erase(stream);
         for (auto& list : a.mFree)
         {
             for (auto& entry : list)

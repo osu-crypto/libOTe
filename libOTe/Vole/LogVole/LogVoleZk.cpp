@@ -723,9 +723,10 @@ namespace osuCrypto::LogVole::gpu
 
         void* orderAgainst(const DeviceScalars& s)
         {
-            void* mine = threadStream().raw();
-            if (auto* ps = s.producerStream(); ps && ps != mine) gpuStreamSync(ps);
-            return mine;
+            auto& stream = threadStream();
+            if (!s.empty() && !s.prepareUse(stream))
+                throw std::runtime_error("LogVole ZK could not order scalar use");
+            return stream.raw();
         }
 
         // The device check has no CPU fallback once the output is on the GPU, so a
@@ -906,14 +907,10 @@ namespace osuCrypto::LogVole::gpu
     {
         if (!scalars || !enabled()) return;
         auto s = std::static_pointer_cast<DeviceScalars>(scalars);
-        orderAgainst(*s);
-        // Once the producing stream has been waited on there is nothing left to
-        // order against, and the handle is a liability: the producer is a protocol
-        // party running on its own host thread, threadStream() is thread_local, and
-        // when that thread exits the stream is destroyed. A later reader - the
-        // benchmark fetching the output to check it, say - would then hand a dead
-        // handle to cudaStreamSynchronize, which crashed the process.
-        s->setProducerStream(nullptr);
+        // This is a completion boundary, including when the producer happens to
+        // be the calling stream. Stream ordering alone cannot mark a result ready.
+        if (!waitScalars(*s))
+            throw std::runtime_error("LogVole ZK could not drain the scalar producer");
     }
 
     // Drains the calling thread's own stream as well. The check is queued there,
@@ -1201,7 +1198,7 @@ namespace osuCrypto::LogVole::gpu
         auto wires = std::make_shared<DeviceScalars>();
         std::shared_ptr<ZkOperandsDevice> temp;
         StreamDrain drain{stream};
-        if (!wires->resize(static_cast<std::size_t>(total))) return nullptr;
+        if (!wires->resize(static_cast<std::size_t>(total), stream)) return nullptr;
 
         // Only the layer-0 values and the mask cross the bus; the rest of the
         // witness is produced in place. Everything past the committed range is the
@@ -1251,7 +1248,7 @@ namespace osuCrypto::LogVole::gpu
         ok = ok && stream.sync();
         if (!ok) return nullptr;
 
-        wires->setProducerStream(nullptr);
+        wires->markReady();
         return wires;
     }
 
@@ -1289,13 +1286,13 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = threadStream();
         auto wires = std::make_shared<DeviceScalars>();
         StreamDrain drain{stream};
-        if (!wires->resize(static_cast<std::size_t>(total)) ||
+        if (!wires->resize(static_cast<std::size_t>(total), stream) ||
             !gpuMemcpyD2D(wires->data(), sampled->data(), 2u * entries * sizeof(u64), stream.raw()) ||
             !gpuMemsetZero(wires->data() + 2u * entries,
                 (total - 2u * entries) * sizeof(u64), stream.raw()) ||
             !gpuMemcpyD2D(wires->data() + 2u * entries, sampled->data() + 2u * entries,
                 masks * sizeof(u64), stream.raw()) || !stream.sync()) return nullptr;
-        wires->setProducerStream(nullptr);
+        wires->markReady();
         return wires;
     }
 
@@ -1309,11 +1306,11 @@ namespace osuCrypto::LogVole::gpu
         void* raw = orderAgainst(wires);
         (void)orderAgainst(publicProduct);
         auto& stream = threadStream();
-        if (!publicProduct.resize(static_cast<std::size_t>(st.entries()))) return false;
+        if (!publicProduct.resize(static_cast<std::size_t>(st.entries()), stream)) return false;
         const bool ok = launchZkMatMulGemm(
             wires.data() + st.offsetA(), wires.data() + st.offsetB(), publicProduct.data(),
             static_cast<u32>(st.mDim), toHostModulus(modulus), raw) && stream.sync();
-        publicProduct.setProducerStream(nullptr);
+        publicProduct.markReady();
         return ok;
     }
 
@@ -1420,11 +1417,9 @@ namespace osuCrypto
             if (device)
             {
                 auto& stream = gpu::threadStream();
-                const auto producer = device->producerStream();
-                if ((producer && producer != stream.raw() && !gpu::gpuStreamSync(producer)) ||
+                if (!device->prepareUse(stream) ||
                     !gpu::launchZkSetMask(device->data() + maskIndex, mask, stream.raw()))
                     throw std::runtime_error("LogVole ZK could not refresh the device mask");
-                device->setProducerStream(stream.raw());
             }
 #endif
             if (!wires.empty()) wires[maskIndex] = mask;
