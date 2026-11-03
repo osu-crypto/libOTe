@@ -25,10 +25,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
-#include <map>
-#include <mutex>
 #include <stdexcept>
-#include <tuple>
 #include <vector>
 
 namespace osuCrypto::LogVole
@@ -682,11 +679,11 @@ namespace osuCrypto::LogVole::gpu
             return HostModulus{ modulus, ratio[0], ratio[1] };
         }
 
-        bool multiplicationModulus(u64 modulus, HostModulus& out)
+        bool multiplicationModulus(u64 modulus, HostModulus& out, GpuStream& stream)
         {
             if (modulus < 2 || modulus >= (u64{1} << 61u)) return false;
             const char* setting = std::getenv("LV_GPU_ZK_DEVICE_CONSTANTS");
-            if (!setting || setting[0] != '0') return prepareZkModulusDevice(modulus, out);
+            if (!setting || setting[0] != '0') return prepareZkModulusDevice(modulus, out, stream);
             HostStep rollback("zk: host modulus constants rollback");
             out = toHostModulus(modulus);
             return true;
@@ -694,31 +691,34 @@ namespace osuCrypto::LogVole::gpu
 
         // Small owned device buffer. The ZK checks allocate a handful of these
         // once per statement and reuse them for every proof, which matters because
-        // the caching allocator's cheapest path is still a lookup and these are
-        // on the critical path of a sub-millisecond check.
+        // allocation and stream ordering must stay off the ordinary proof path.
         struct DeviceWords
         {
+            OwnedGpuBuffer mStorage;
             u64* mData = nullptr;
             std::size_t mCount = 0;
 
-            bool resize(std::size_t count)
+            bool prepareUse(GpuStream& stream)
             {
-                if (mCount >= count) return true;
-                release();
-                mData = static_cast<u64*>(gpuMalloc(count * sizeof(u64)));
-                if (!mData) return false;
-                mCount = count;
-                return true;
+                if (!mStorage) return false;
+                try { mStorage.handoff(stream.allocationOwner()); return true; }
+                catch (...) { return false; }
             }
 
-            void release()
+            bool resize(std::size_t count, GpuStream& stream)
             {
-                if (mData) gpuFree(mData);
-                mData = nullptr;
-                mCount = 0;
+                if (!count || count > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return false;
+                if (mCount >= count) return prepareUse(stream);
+                try
+                {
+                    OwnedGpuBuffer next(stream.allocationOwner(), count * sizeof(u64));
+                    mStorage = std::move(next);
+                    mData = static_cast<u64*>(mStorage.data());
+                    mCount = count;
+                    return true;
+                }
+                catch (...) { return false; }
             }
-
-            ~DeviceWords() { release(); }
         };
 
         void* orderAgainst(const DeviceScalars& s)
@@ -747,56 +747,73 @@ namespace osuCrypto::LogVole::gpu
         }
     }
 
-    bool prepareZkModulusDevice(u64 modulus, HostModulus& out)
+    struct GpuZkScratch
+    {
+        DeviceWords mModulusStorage;
+        DeviceWords mAcceptanceStorage;
+        std::vector<std::pair<u64, HostModulus>> mModuli;
+        HostModulus mRecent{};
+    };
+
+    void GpuZkScratchDeleter::operator()(GpuZkScratch* scratch) const noexcept { delete scratch; }
+
+    GpuZkScratch& GpuStream::zkScratch()
+    {
+        if (!mZkScratch) mZkScratch.reset(new GpuZkScratch());
+        return *mZkScratch;
+    }
+
+    bool prepareZkModulusDevice(u64 modulus, HostModulus& out, GpuStream& stream)
     {
         if (!enabled() || modulus < 2 || modulus >= (u64{1} << 61u)) return false;
         const int device = currentDeviceOrdinal();
         // Backend streams and allocation caches support the single visible
         // device at ordinal zero, matching GpuRing::getRaw's policy.
         if (device != 0) return false;
-        using Key = std::tuple<int, ProtocolCacheRole, u64>;
-        static std::map<Key, HostModulus> cache;
-        static std::mutex cacheMutex;
         try
         {
-            std::lock_guard<std::mutex> lock(cacheMutex);
-            const Key key{device, currentProtocolCacheScope().mRole, modulus};
-            if (const auto found = cache.find(key); found != cache.end())
+            if (stream.allocationOwner()->memory()->device() != device) return false;
+            auto& scratch = stream.zkScratch();
+            if (scratch.mRecent.mValue == modulus)
             {
-                out = found->second;
+                out = scratch.mRecent;
                 return true;
             }
+            for (const auto& [cached, value] : scratch.mModuli)
+                if (cached == modulus)
+                {
+                    out = scratch.mRecent = value;
+                    return true;
+                }
             HostStep preparation("gpu: zk modulus constants");
-            auto& stream = threadStream();
-            DeviceWords storage;
-            HostModulus next;
+            auto& storage = scratch.mModulusStorage;
+            HostModulus next{};
             StreamDrain drain{stream};
             static_assert(sizeof(HostModulus) == 3 * sizeof(u64));
-            if (!storage.resize(3) ||
+            if (!storage.resize(3, stream) ||
                 !launchZkPrepareModulus(modulus, reinterpret_cast<HostModulus*>(storage.mData), stream.raw()) ||
-                !gpuMemcpyD2H(&next, storage.mData, sizeof(next), stream.raw()) || !stream.sync()) return false;
+                !gpuMemcpyD2H(&next, storage.mData, sizeof(next), stream.raw()) || !drain.sync()) return false;
             if (next.mValue != modulus) return false;
-            cache.emplace(key, next);
-            out = next;
+            scratch.mModuli.emplace_back(modulus, next);
+            out = scratch.mRecent = next;
             return true;
         }
         catch (const std::exception&) { return false; }
     }
 
     bool zkAcceptDevice(const ZkProof& proof, u64 verifierValue, u64 delta,
-        u64 modulus, bool& accepted)
+        u64 modulus, bool& accepted, GpuStream& stream)
     {
         if (!enabled()) return false;
         HostModulus mod;
-        if (!prepareZkModulusDevice(modulus, mod)) return false;
+        if (!prepareZkModulusDevice(modulus, mod, stream)) return false;
         HostStep acceptance("gpu: zk proof acceptance");
-        auto& stream = threadStream();
-        DeviceWords storage;
+        auto& storage = stream.zkScratch().mAcceptanceStorage;
         u64 result = 0;
         StreamDrain drain{stream};
-        if (!storage.resize(1) ||
+        if (!storage.resize(1, stream) ||
             !launchZkAccept(proof.mU, proof.mV, verifierValue, delta, mod, storage.mData, stream.raw()) ||
-            !gpuMemcpyD2H(&result, storage.mData, sizeof(result), stream.raw()) || !stream.sync()) return false;
+            !gpuMemcpyD2H(&result, storage.mData, sizeof(result), stream.raw()) || !drain.sync()) return false;
         accepted = result != 0;
         return true;
     }
@@ -806,25 +823,41 @@ namespace osuCrypto::LogVole::gpu
     // that hand the same circuit object to both protocol wrappers.
     struct ZkOperandsDevice
     {
+        GpuTableReads mReads;
+        OwnedGpuBuffer mStorage;
         u32* mData = nullptr;
         std::size_t mCount = 0;
 
-        ~ZkOperandsDevice()
+        ~ZkOperandsDevice() { mReads.wait(); }
+
+        bool allocate(std::size_t count, GpuStream& stream)
         {
-            if (mData) gpuFree(mData);
+            if (mData || !count || count > std::numeric_limits<std::size_t>::max() / sizeof(u32)) return false;
+            try
+            {
+                mStorage = OwnedGpuBuffer(stream.allocationOwner(), count * sizeof(u32));
+                mData = static_cast<u32*>(mStorage.data());
+                mCount = count;
+                return true;
+            }
+            catch (...) { return false; }
         }
 
-        bool upload(std::span<const u32> host)
+        const u32* read(GpuStream& stream) const
         {
-            auto& stream = threadStream();
-            mData = static_cast<u32*>(gpuMalloc(host.size() * sizeof(u32)));
-            if (!mData) return false;
-            mCount = host.size();
+            mReads.record(stream.allocationOwner());
+            return mData;
+        }
+
+        bool upload(std::span<const u32> host, GpuStream& stream)
+        {
+            StreamDrain drain{stream};
+            if (!allocate(host.size(), stream)) return false;
             // Public preprocessing: the wiring does not change between proofs, so
             // this upload happens once and never on a proof's critical path.
             return gpuMemcpyH2D(
                        mData, host.data(), host.size() * sizeof(u32), stream.raw()) &&
-                   stream.sync();
+                   drain.sync();
         }
     };
 
@@ -836,22 +869,17 @@ namespace osuCrypto::LogVole::gpu
         const u32* mOperands = nullptr;
         DeviceWords mScratch;
         DeviceWords mOut;
+        u64 mWidth = 0, mDepth = 0;
 
-        bool prepare(const ZkMulCircuit& circuit)
+        bool prepare(const ZkMulCircuit& circuit, GpuStream& stream)
         {
+            if (!circuit.mWidth || !circuit.mDepth ||
+                circuit.mDepth == std::numeric_limits<u64>::max() ||
+                circuit.mWidth > std::numeric_limits<u32>::max() / (circuit.mDepth + 1)) return false;
             const std::size_t needed = static_cast<std::size_t>(2 * circuit.gateCount());
             if (!circuit.mOperandsDevice && circuit.mOperands.size() != needed) return false;
 
-            // Establish this thread's stream *before* allocating. gpuMalloc tags the
-            // block it hands out with the caller's current stream and, when it
-            // recycles a block another stream last used, makes that stream wait on
-            // an event from the previous owner. Allocating with whatever stream the
-            // VOLE happened to leave current puts that wait on the wrong stream, and
-            // then the check reads a buffer the previous owner is still writing:
-            // wrong U and V on the first proof of a process, or an illegal access.
-            (void)threadStream();
-            if (!mScratch.resize(kZkScratchWords) || !mOut.resize(2)) return false;
-            if (mOperands) return true;
+            if (!mScratch.resize(kZkScratchWords, stream) || !mOut.resize(2, stream)) return false;
 
             // Prefer the copy the circuit already carries; only upload one of our
             // own when the caller did not hand one over.
@@ -864,14 +892,24 @@ namespace osuCrypto::LogVole::gpu
             {
                 mOperandsOwned = std::make_shared<ZkOperandsDevice>();
                 if (!mOperandsOwned->upload(
-                        std::span<const u32>(circuit.mOperands.data(), needed)))
+                        std::span<const u32>(circuit.mOperands.data(), needed), stream))
                 {
                     mOperandsOwned.reset();
                     return false;
                 }
             }
             if (mOperandsOwned->mCount != needed) return false;
-            mOperands = mOperandsOwned->mData;
+            mOperands = mOperandsOwned->read(stream);
+            mWidth = circuit.mWidth;
+            mDepth = circuit.mDepth;
+            return true;
+        }
+
+        bool prepareUse(const ZkMulCircuit& circuit, GpuStream& stream)
+        {
+            if (mWidth != circuit.mWidth || mDepth != circuit.mDepth || !mOperandsOwned ||
+                !mScratch.prepareUse(stream) || !mOut.prepareUse(stream)) return false;
+            mOperands = mOperandsOwned->read(stream);
             return true;
         }
     };
@@ -887,16 +925,22 @@ namespace osuCrypto::LogVole::gpu
         u64 mDim = 0;
         u32 mReps = 0;
 
-        bool prepare(const ZkMatMulStatement& st)
+        bool prepare(const ZkMatMulStatement& st, GpuStream& stream)
         {
             if (!validateZkMatMulStatement(st) || st.mDim > std::numeric_limits<u32>::max()) return false;
             const auto entries = static_cast<std::size_t>(st.entries());
-            (void)threadStream();
-            if (!mCoefficients.resize(entries * st.repetitions()) ||
-                !mScratch.resize(2u * entries) || !mProduct.resize(entries) || !mOut.resize(2)) return false;
+            if (!mCoefficients.resize(entries * st.repetitions(), stream) ||
+                !mScratch.resize(2u * entries, stream) || !mProduct.resize(entries, stream) ||
+                !mOut.resize(2, stream)) return false;
             mDim = st.mDim;
             mReps = st.repetitions();
             return true;
+        }
+
+        bool prepareUse(GpuStream& stream)
+        {
+            return mCoefficients.prepareUse(stream) && mScratch.prepareUse(stream) &&
+                mProduct.prepareUse(stream) && mOut.prepareUse(stream);
         }
     };
 
@@ -927,7 +971,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (!enabled()) return nullptr;
         auto st = std::make_shared<ZkMulDeviceState>();
-        if (!st->prepare(circuit))
+        if (!st->prepare(circuit, threadStream()))
         {
             zkFail("mul device state build");
             return nullptr;
@@ -939,7 +983,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (!enabled()) return nullptr;
         auto out = std::make_shared<ZkMatMulDeviceState>();
-        if (!out->prepare(st)) return nullptr;
+        if (!out->prepare(st, threadStream())) return nullptr;
         return out;
     }
 
@@ -961,9 +1005,12 @@ namespace osuCrypto::LogVole::gpu
         orderAgainst(wires);
         void* raw = orderAgainst(macs);
         auto& stream = threadStream();
+        if (!state.prepareUse(circuit, stream)) return zkFail("mul prover ownership");
         HostModulus mod;
-        if (!multiplicationModulus(modulus, mod)) return zkFail("mul prover modulus");
+        if (!multiplicationModulus(modulus, mod, stream)) return zkFail("mul prover modulus");
         HostStep deviceCheck("gpu: zk multiplication prover");
+        std::array<u64, 2> host{};
+        StreamDrain drain{stream};
         if (!launchZkMulProver(
                 wires.data(), macs.data(), state.mOperands, circuit.gateCount(), circuit.mWidth,
                 circuit.maskIndex(), chi, mod, state.mScratch.mData,
@@ -972,8 +1019,7 @@ namespace osuCrypto::LogVole::gpu
             return zkFail("mul prover launch");
         }
 
-        u64 host[2] = { 0, 0 };
-        if (!gpuMemcpyD2H(host, state.mOut.mData, sizeof(host), raw) || !stream.sync())
+        if (!gpuMemcpyD2H(host.data(), state.mOut.mData, sizeof(host), raw) || !drain.sync())
         {
             return zkFail("mul prover readback");
         }
@@ -996,9 +1042,12 @@ namespace osuCrypto::LogVole::gpu
 
         void* raw = orderAgainst(keys);
         auto& stream = threadStream();
+        if (!state.prepareUse(circuit, stream)) return zkFail("mul verifier ownership");
         HostModulus mod;
-        if (!multiplicationModulus(modulus, mod)) return zkFail("mul verifier modulus");
+        if (!multiplicationModulus(modulus, mod, stream)) return zkFail("mul verifier modulus");
         HostStep deviceCheck("gpu: zk multiplication verifier");
+        u64 host = 0;
+        StreamDrain drain{stream};
         if (!launchZkMulVerifier(
                 keys.data(), state.mOperands, circuit.gateCount(), circuit.mWidth,
                 circuit.maskIndex(), chi, delta, mod, state.mScratch.mData,
@@ -1007,8 +1056,7 @@ namespace osuCrypto::LogVole::gpu
             return zkFail("mul verifier launch");
         }
 
-        u64 host = 0;
-        if (!gpuMemcpyD2H(&host, state.mOut.mData, sizeof(host), raw) || !stream.sync())
+        if (!gpuMemcpyD2H(&host, state.mOut.mData, sizeof(host), raw) || !drain.sync())
         {
             return zkFail("mul verifier readback");
         }
@@ -1033,6 +1081,7 @@ namespace osuCrypto::LogVole::gpu
         void* raw = orderAgainst(macs);
         std::array<u64, 2> host{};
         auto& stream = threadStream();
+        if (!state.prepareUse(stream)) return false;
         // H2D copies borrow the caller's challenge/product until the stream
         // drains, including when a later copy or launch fails.
         StreamDrain drain{stream};
@@ -1069,6 +1118,7 @@ namespace osuCrypto::LogVole::gpu
         void* raw = orderAgainst(keys);
         std::vector<u64> values(st.repetitions());
         auto& stream = threadStream();
+        if (!state.prepareUse(stream)) return false;
         // H2D copies borrow the caller's challenge/product until the stream
         // drains, including when a later copy or launch fails.
         StreamDrain drain{stream};
@@ -1097,7 +1147,7 @@ namespace osuCrypto::LogVole::gpu
         if (circuit.mOperands.size() != needed) return false;
 
         auto owned = std::make_shared<ZkOperandsDevice>();
-        if (!owned->upload(std::span<const u32>(circuit.mOperands.data(), needed))) return false;
+        if (!owned->upload(std::span<const u32>(circuit.mOperands.data(), needed), threadStream())) return false;
         circuit.mOperandsDevice = std::move(owned);
         return true;
     }
@@ -1124,13 +1174,11 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = threadStream();
         auto owned = std::make_shared<ZkOperandsDevice>();
         StreamDrain drain{stream};
-        owned->mData = static_cast<u32*>(gpuMalloc(count * sizeof(u32)));
-        if (!owned->mData) return false;
-        owned->mCount = count;
+        if (!owned->allocate(count, stream)) return false;
         // Upload and seeded generation both complete before publishing their
         // immutable handle, so no foreign producer stream is needed here.
-        if (!gpuMemcpyD2D(owned->mData, source->mData, count * sizeof(u32), stream.raw()) ||
-            !stream.sync()) return false;
+        if (!gpuMemcpyD2D(owned->mData, source->read(stream), count * sizeof(u32), stream.raw()) ||
+            !drain.sync()) return false;
         circuit.mOperandsDevice = std::move(owned);
         return true;
     }
@@ -1149,11 +1197,10 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = threadStream();
         auto operands = std::make_shared<ZkOperandsDevice>();
         StreamDrain drain{stream};
-        operands->mData = static_cast<u32*>(gpuMalloc(static_cast<std::size_t>(count) * sizeof(u32)));
-        if (!operands->mData) return false;
-        operands->mCount = static_cast<std::size_t>(count);
+        if (!operands->allocate(static_cast<std::size_t>(count), stream) ||
+            !residues->prepareUse(stream)) return false;
         if (!launchZkPackOperands(residues->data(), operands->mData, count, width, stream.raw()) ||
-            !stream.sync()) return false;
+            !drain.sync()) return false;
         ZkMulCircuit next;
         next.mWidth = width;
         next.mDepth = depth;
@@ -1177,8 +1224,8 @@ namespace osuCrypto::LogVole::gpu
         next.resize(count);
         auto& stream = threadStream();
         StreamDrain drain{stream};
-        if (!gpuMemcpyD2H(next.data(), owned->mData, count * sizeof(u32), stream.raw()) ||
-            !stream.sync()) return false;
+        if (!gpuMemcpyD2H(next.data(), owned->read(stream), count * sizeof(u32), stream.raw()) ||
+            !drain.sync()) return false;
         circuit.mOperands = std::move(next);
         return true;
     }
@@ -1228,17 +1275,17 @@ namespace osuCrypto::LogVole::gpu
         else
         {
             temp = std::make_shared<ZkOperandsDevice>();
-            if (!temp->upload(std::span<const u32>(circuit.mOperands.data(), operandWords)))
+            if (!temp->upload(std::span<const u32>(circuit.mOperands.data(), operandWords), stream))
             {
                 return nullptr;
             }
         }
         if (temp->mCount != operandWords) return nullptr;
-        operands = temp->mData;
+        operands = temp->read(stream);
         bool ok = true;
 
         HostModulus mod;
-        if (!multiplicationModulus(modulus, mod)) return nullptr;
+        if (!multiplicationModulus(modulus, mod, stream)) return nullptr;
         for (u64 layer = 0; layer < circuit.mDepth && ok; ++layer)
         {
             ok = launchZkMulEvalLayer(
@@ -1678,7 +1725,8 @@ namespace osuCrypto
         const char* deviceAcceptance = std::getenv("LV_GPU_ZK_ACCEPT_DEVICE");
         if (mCheckOnDevice && (!deviceAcceptance || deviceAcceptance[0] != '0'))
         {
-            if (!LogVole::gpu::zkAcceptDevice(proof, value, mVole.mDelta, mVole.modulus(), mAccepted))
+            if (!LogVole::gpu::zkAcceptDevice(proof, value, mVole.mDelta, mVole.modulus(), mAccepted,
+                    LogVole::gpu::threadStream()))
                 throw std::runtime_error("LogVole ZK could not execute acceptance on the device");
             mAcceptOnDevice = true;
         }

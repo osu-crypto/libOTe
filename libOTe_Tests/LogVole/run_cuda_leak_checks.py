@@ -38,6 +38,7 @@ def main():
         ("wire-and-caches", ["LogVole_Cpu_NttMatchesReference",
                              "LogVole_Cpu_CrtMixedWidthsMatchSeal",
                              "LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference",
+                             "LogVole_Cpu_GpuZkBufferOwnership",
                              "LogVole_Encoding_PinnedWireBufferOwnership",
                              "LogVole_Encoding_RootResidentWireExact",
                              "LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns",

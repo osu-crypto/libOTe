@@ -30,6 +30,7 @@
     X(Cpu, WitnessMatchesSequentialReference) \
     X(Cpu, GpuZkSeededPreparationMatchesReference) \
     X(Cpu, GpuZkMatMulSeededInputsMatchReference) \
+    X(Cpu, GpuZkBufferOwnership) \
     X(Cpu, ZkVectorMatchesReference) \
     X(Cpu, ZkProofMatchesReference) \
     X(Zk, FreshMaskCpu) \

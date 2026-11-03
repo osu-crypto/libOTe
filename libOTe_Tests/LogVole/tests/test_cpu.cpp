@@ -29,6 +29,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <future>
+#include <thread>
 #include <string>
 #include <tuple>
 
@@ -782,17 +784,19 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
     {
         ScopedProtocolCacheScope scope(role, allocateProtocolCacheRunId());
         if (!gpu::enabled()) continue; // explicit per-role GPU ablation
+        gpu::GpuExecutionContext constantsExecution;
+        auto& constantsStream = constantsExecution.mainStream();
         for (u64 modulus : {2ULL, 4ULL, 257ULL, 1000ULL, 2251799813554177ULL,
                 18014398508400641ULL, (1ULL << 61u) - 1u})
         {
             const seal::Modulus reference(modulus);
             gpu::HostModulus actual;
-            LOGVOLE_REQUIRE_TRUE(gpu::prepareZkModulusDevice(modulus, actual));
+            LOGVOLE_REQUIRE_TRUE(gpu::prepareZkModulusDevice(modulus, actual, constantsStream));
             LOGVOLE_REQUIRE_EQ(actual.mValue, modulus);
             LOGVOLE_REQUIRE_EQ(actual.mRatio0, reference.const_ratio()[0]);
             LOGVOLE_REQUIRE_EQ(actual.mRatio1, reference.const_ratio()[1]);
             gpu::HostModulus cached;
-            LOGVOLE_REQUIRE_TRUE(gpu::prepareZkModulusDevice(modulus, cached));
+            LOGVOLE_REQUIRE_TRUE(gpu::prepareZkModulusDevice(modulus, cached, constantsStream));
             LOGVOLE_REQUIRE_EQ(cached.mRatio0, actual.mRatio0);
             LOGVOLE_REQUIRE_EQ(cached.mRatio1, actual.mRatio1);
             for (u64 delta : std::array<u64, 4>{0, 1, modulus - 1u, ~u64(0)})
@@ -802,9 +806,9 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 const u64 expected = host_oracle::remainder(host_oracle::add(
                     host_oracle::multiply(proof.mV, delta), {proof.mU % modulus, 0}), modulus);
                 bool accepted = false;
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, expected, delta, modulus, accepted));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, expected, delta, modulus, accepted, constantsStream));
                 LOGVOLE_REQUIRE_TRUE(accepted && zkAccept(proof, expected, delta, modulus));
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, modulus, delta, modulus, accepted));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, modulus, delta, modulus, accepted, constantsStream));
                 LOGVOLE_REQUIRE_TRUE(!accepted && !zkAccept(proof, modulus, delta, modulus));
             }
         }
@@ -813,9 +817,9 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
     {
         gpu::HostModulus retained{17, 23, 31};
         bool accepted = true;
-        LOGVOLE_REQUIRE_TRUE(!gpu::prepareZkModulusDevice(invalid, retained));
+        LOGVOLE_REQUIRE_TRUE(!gpu::prepareZkModulusDevice(invalid, retained, gpu::threadStream()));
         LOGVOLE_REQUIRE_TRUE(retained.mValue == 17 && retained.mRatio0 == 23 && retained.mRatio1 == 31);
-        LOGVOLE_REQUIRE_TRUE(!gpu::zkAcceptDevice(ZkProof{}, 0, 0, invalid, accepted));
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkAcceptDevice(ZkProof{}, 0, 0, invalid, accepted, gpu::threadStream()));
         LOGVOLE_REQUIRE_TRUE(accepted);
     }
     for (u64 width : {1, 7, 8, 1031})
@@ -1170,10 +1174,10 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_EQ(proof.mV, referenceProof.mV);
                 LOGVOLE_REQUIRE_EQ(value, referenceValue);
                 bool accepted = false;
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted, gpu::threadStream()));
                 LOGVOLE_REQUIRE_TRUE(accepted);
                 proof.mU = (proof.mU + 1) % modulus;
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted, gpu::threadStream()));
                 LOGVOLE_REQUIRE_TRUE(!accepted);
             }
         }
@@ -1183,6 +1187,129 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(rangesEqual(copied.mOperands, reference.mOperands));
     }
 #else
+    LOGVOLE_SKIP() << "requires CUDA build";
+#endif
+}
+
+void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    struct RestoreGpu
+    {
+        bool old = gpu::enabled();
+        ~RestoreGpu() { gpu::setEnabled(old); }
+    } restore;
+    gpu::setEnabled(cmd.getOr("gpu", 0) != 0);
+    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    std::weak_ptr<gpu::OwnedGpuStream> constantsOwner;
+    {
+        gpu::GpuExecutionContext execution;
+        auto& stream = execution.mainStream();
+        constantsOwner = stream.allocationOwner();
+        for (u64 modulus : {2ULL, 65537ULL, (1ULL << 61) - 1})
+        {
+            const seal::Modulus expected(modulus);
+            for (unsigned repeat = 0; repeat != 2; ++repeat)
+            {
+                gpu::HostModulus actual{};
+                LOGVOLE_REQUIRE_TRUE(gpu::prepareZkModulusDevice(modulus, actual, stream));
+                LOGVOLE_REQUIRE_EQ(actual.mValue, modulus);
+                LOGVOLE_REQUIRE_EQ(actual.mRatio0, expected.const_ratio()[0]);
+                LOGVOLE_REQUIRE_EQ(actual.mRatio1, expected.const_ratio()[1]);
+            }
+        }
+        gpu::HostModulus unchanged{17, 23, 31};
+        LOGVOLE_REQUIRE_FALSE(gpu::prepareZkModulusDevice(1, unchanged, stream));
+        LOGVOLE_REQUIRE_EQ(unchanged.mValue, 17ULL);
+    }
+    LOGVOLE_REQUIRE_TRUE(constantsOwner.expired());
+
+    constexpr u64 width = 7, depth = 3, count = width * (depth + 1) + 4;
+    constexpr u64 modulus = 65537, delta = 19, chi = 73;
+    const block seed = toBlock(0x5a4b4f574e, 7);
+    ZkMulCircuit reference;
+    LOGVOLE_REQUIRE_TRUE(makeZkMulCircuitForBudget(count, depth, seed, reference));
+    PRNG random(toBlock(0x5a4b4f574e, 8));
+    AlignedUnVec<u64> witness;
+    LOGVOLE_REQUIRE_TRUE(zkMulWitness(reference, modulus, random, witness, count));
+    std::vector<u64> macs(count), keys(count);
+    const seal::Modulus mod(modulus);
+    for (u64 i = 0; i < count; ++i)
+    {
+        macs[i] = random.get<u64>() % modulus;
+        keys[i] = (macs[i] + modulus - mulMod(witness[i], delta, mod)) % modulus;
+    }
+    ZkProof expectedProof;
+    u64 expectedValue = 0;
+    LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, witness, macs, chi, modulus, 1, expectedProof));
+    LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(reference, keys, chi, delta, modulus, 1, expectedValue));
+
+    using Packet = std::tuple<ZkMulCircuit, std::shared_ptr<gpu::ZkMulDeviceState>,
+        std::shared_ptr<gpu::ZkMulDeviceState>, gpu::DeviceScalarsPtr,
+        gpu::DeviceScalarsPtr, gpu::DeviceScalarsPtr>;
+    std::weak_ptr<gpu::OwnedGpuStream> producer, receiver;
+    std::packaged_task<Packet()> setup([&] {
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, 0);
+        producer = gpu::threadStream().allocationOwner();
+        ZkMulCircuit circuit;
+        LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(count, depth, seed, circuit));
+        auto x = gpu::uploadScalars(witness), m = gpu::uploadScalars(macs), k = gpu::uploadScalars(keys);
+        // Queue scratch allocation after the completed input uploads. The
+        // first foreign proof must establish its own allocation dependencies.
+        auto prover = gpu::makeZkMulDeviceState(circuit);
+        auto verifier = gpu::makeZkMulDeviceState(circuit);
+        LOGVOLE_REQUIRE_TRUE(prover && verifier && x && m && k);
+        return Packet{std::move(circuit), std::move(prover), std::move(verifier),
+            std::move(x), std::move(m), std::move(k)};
+    });
+    auto ready = setup.get_future();
+    std::thread worker(std::move(setup));
+    worker.join();
+    auto [circuit, prover, verifier, x, m, k] = ready.get();
+    LOGVOLE_REQUIRE_FALSE(producer.expired());
+    auto check = [&] {
+        ZkProof proof;
+        u64 value = 0;
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulProverResponseDevice(circuit, *x, *m, chi, modulus, *prover, proof));
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulVerifierValueDevice(circuit, *k, chi, delta, modulus, *verifier, value));
+        LOGVOLE_REQUIRE_EQ(proof.mU, expectedProof.mU);
+        LOGVOLE_REQUIRE_EQ(proof.mV, expectedProof.mV);
+        LOGVOLE_REQUIRE_EQ(value, expectedValue);
+        bool accepted = false;
+        LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, delta, modulus, accepted, gpu::threadStream()));
+        LOGVOLE_REQUIRE_TRUE(accepted);
+    };
+    {
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, 0);
+        check();
+        auto wrong = circuit;
+        wrong.mWidth = 3;
+        wrong.mDepth = 7; // Same gate count, different compiled statement.
+        ZkProof unchanged{11, 13};
+        LOGVOLE_REQUIRE_FALSE(gpu::zkMulProverResponseDevice(wrong, *x, *m, chi, modulus, *prover, unchanged));
+        LOGVOLE_REQUIRE_EQ(unchanged.mU, 11ULL);
+        LOGVOLE_REQUIRE_EQ(unchanged.mV, 13ULL);
+    }
+    gpu::gpuCollectThreadResources();
+    LOGVOLE_REQUIRE_FALSE(producer.expired());
+    std::packaged_task<void()> reuse([&] {
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, 0);
+        receiver = gpu::threadStream().allocationOwner();
+        check();
+    });
+    auto completed = reuse.get_future();
+    std::thread consumer(std::move(reuse));
+    consumer.join();
+    completed.get();
+    gpu::gpuCollectThreadResources();
+    LOGVOLE_REQUIRE_FALSE(receiver.expired());
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(circuit));
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(circuit.mOperands, reference.mOperands));
+    circuit = {};
+    prover.reset(); verifier.reset(); x.reset(); m.reset(); k.reset();
+    LOGVOLE_REQUIRE_TRUE(producer.expired() && receiver.expired());
+#else
+    (void)cmd;
     LOGVOLE_SKIP() << "requires CUDA build";
 #endif
 }

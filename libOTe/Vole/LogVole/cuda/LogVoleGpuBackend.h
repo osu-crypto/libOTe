@@ -17,6 +17,7 @@
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuMemory.h"
 
 #include <memory>
+#include <exception>
 #include <mutex>
 #include <span>
 #include <string>
@@ -97,6 +98,11 @@ namespace osuCrypto::LogVole::gpu
     {
         void operator()(GpuGaussianScratch* scratch) const noexcept;
     };
+    struct GpuZkScratch;
+    struct GpuZkScratchDeleter
+    {
+        void operator()(GpuZkScratch* scratch) const noexcept;
+    };
 
     // A stream plus its reusable scratch. Scratch is released after draining
     // this stream and before releasing the native stream owner.
@@ -122,6 +128,7 @@ namespace osuCrypto::LogVole::gpu
         GpuProtocolScratch& protocolScratch();
         GpuTransferScratch& transferScratch();
         GpuGaussianScratch& gaussianScratch();
+        GpuZkScratch& zkScratch();
         bool pipelinedUploadEnabled() const { return mPipelinedUpload; }
 
         // Upload a small u32 index array and return a device pointer valid
@@ -152,6 +159,7 @@ namespace osuCrypto::LogVole::gpu
         std::unique_ptr<GpuProtocolScratch, GpuProtocolScratchDeleter> mProtocolScratch;
         std::unique_ptr<GpuTransferScratch, GpuTransferScratchDeleter> mTransferScratch;
         std::unique_ptr<GpuGaussianScratch, GpuGaussianScratchDeleter> mGaussianScratch;
+        std::unique_ptr<GpuZkScratch, GpuZkScratchDeleter> mZkScratch;
         bool mHighestPriority = false;
         bool mPipelinedUpload = false;
         OwnedGpuBuffer mDeviceScratchStorage;
@@ -198,7 +206,21 @@ namespace osuCrypto::LogVole::gpu
     struct StreamDrain
     {
         GpuStream& mStream;
-        ~StreamDrain() { mStream.sync(); }
+        bool mPending = true;
+        // Use at the final completion boundary; no more work may be submitted
+        // under this guard after a successful sync.
+        bool sync()
+        {
+            const bool ok = mStream.sync();
+            if (ok) mPending = false;
+            return ok;
+        }
+        ~StreamDrain()
+        {
+            // Borrowed host backing may expire immediately after this guard.
+            // A failed drain cannot safely return control to its destructors.
+            if (mPending && !mStream.sync()) std::terminate();
+        }
     };
 
     // Stream for the calling thread *and protocol role*, so the sender and the

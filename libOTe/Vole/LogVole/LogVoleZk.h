@@ -308,14 +308,15 @@ namespace osuCrypto::LogVole::gpu
     class DeviceScalars;
     using DeviceScalarsPtr = std::shared_ptr<DeviceScalars>;
     struct HostModulus;
+    class GpuStream;
 
-    // Synchronous exact descriptor generation, cached by device, party role,
-    // and actual modulus. The output is unchanged on failure.
-    bool prepareZkModulusDevice(u64 modulus, HostModulus& out);
+    // Synchronous exact descriptor generation, cached within the supplied
+    // stream's scratch. The output is unchanged on failure.
+    bool prepareZkModulusDevice(u64 modulus, HostModulus& out, GpuStream& stream);
     // Performs the final acceptance equation on the GPU. A successful call
     // may report accepted=false; execution failure leaves accepted unchanged.
     bool zkAcceptDevice(const ZkProof& proof, u64 verifierValue, u64 delta,
-        u64 modulus, bool& accepted);
+        u64 modulus, bool& accepted, GpuStream& stream);
     struct ZkMulDeviceState;
     std::shared_ptr<ZkMulDeviceState> makeZkMulDeviceState(const ZkMulCircuit& circuit);
     bool zkMulProverResponseDevice(const ZkMulCircuit& circuit,

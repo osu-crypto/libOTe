@@ -956,6 +956,7 @@ namespace osuCrypto::LogVole::gpu
         mProtocolScratch.reset();
         mTransferScratch.reset();
         mGaussianScratch.reset();
+        mZkScratch.reset();
         mDeviceScratchStorage.reset();
         mHostScratchStorage.reset();
         mStagingStorage.reset();
@@ -1099,10 +1100,7 @@ namespace osuCrypto::LogVole::gpu
     GpuStream& contextStream(const RingNttContext& ctx)
     {
         if (!ctx.mGpuExecution) throw std::invalid_argument("Missing CUDA execution owner");
-        auto& stream = ctx.mGpuExecution->mainStream();
-        // Transitional legacy table allocations still consult this stream.
-        gpuSetCurrentStream(stream.raw());
-        return stream;
+        return ctx.mGpuExecution->mainStream();
     }
 
     GpuStream& contextSampleStream(const RingNttContext& ctx)
