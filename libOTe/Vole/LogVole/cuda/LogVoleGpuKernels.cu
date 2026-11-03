@@ -21456,21 +21456,21 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool launchBlake2xbStreamForTest(
-        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount, void* stream)
+        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount,
+        u64* roots, std::size_t rootCapacityWords, void* stream)
     {
         if (streamCount == 0) return true;
+        static_assert(kPrngBufferWords == 512u);
+        if (!seeds || !out || !wordsPerStream || !roots ||
+            rootCapacityWords < blake2xbRootScratchWords(wordsPerStream, streamCount)) return false;
         cudaStream_t st = asStream(stream);
-        const u32 buffersPerStream = (wordsPerStream + kPrngBufferWords - 1u) / kPrngBufferWords;
-        const std::size_t rootWords = static_cast<std::size_t>(streamCount) * buffersPerStream * 8;
-        u64* roots = static_cast<u64*>(gpuMalloc(rootWords * sizeof(u64)));
-        if (!roots) return false;
+        const u32 buffersPerStream = wordsPerStream / kPrngBufferWords +
+            (wordsPerStream % kPrngBufferWords != 0u);
         prngRootKernel<<<grid2D(buffersPerStream, streamCount, 128), 128, 0, st>>>(
             seeds, roots, streamCount, buffersPerStream);
         prngBlockKernel<<<grid2D(buffersPerStream * kPrngBlocksPerBuffer, streamCount, 128), 128, 0, st>>>(
             roots, out, streamCount, wordsPerStream, buffersPerStream);
-        const bool ok = check(cudaGetLastError(), "blake2xbStream");
-        gpuFree(roots);
-        return ok;
+        return check(cudaGetLastError(), "blake2xbStream");
     }
 
 

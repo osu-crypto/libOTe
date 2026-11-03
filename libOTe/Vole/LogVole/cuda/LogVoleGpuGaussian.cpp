@@ -192,6 +192,7 @@ namespace osuCrypto::LogVole::gpu
     }
 
     static bool sampleGaussianCompactImpl(
+        GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianSampleBuffer* hostOut,
         GaussianDeviceSampleBuffer* deviceOut, u32 wordsPerPrefix, std::span<const u8> active)
@@ -236,14 +237,7 @@ namespace osuCrypto::LogVole::gpu
         if (prefixBytes > maxBytes / 2 || outputRowBytes > maxBytes || rowBytes > maxBytes ||
             outputBytes > maxBytes || activeSeeds.size() > (maxBytes - outputBytes) / rowBytes) return false;
         const std::size_t allPrefixBytes = activeSeeds.size() * prefixBytes;
-        auto& stream = threadSampleStream();
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restore;
-        gpuSetCurrentStream(stream.raw());
-        OwnedGpuBuffer deviceSeeds, prefixes, candidates, counts, complete, deviceRows;
+        OwnedGpuBuffer deviceSeeds, prefixes, candidates, counts, complete, deviceRows, roots;
         auto samples = std::make_shared<DeviceScalars>();
         auto pinned = hostOut ? stream.gaussianScratch().output.acquire(outputBytes) : std::shared_ptr<u64>{};
         if (hostOut && !pinned) return false;
@@ -258,14 +252,17 @@ namespace osuCrypto::LogVole::gpu
             candidates = tryAllocateGpuBuffer(stream, allPrefixBytes);
             counts = tryAllocateGpuBuffer(stream, activeSeeds.size() * countRowBytes);
             complete = tryAllocateGpuBuffer(stream, activeSeeds.size());
+            roots = tryAllocateGpuBuffer(stream, sizeof(u64) * blake2xbRootScratchWords(
+                wordsPerPrefix, static_cast<u32>(activeSeeds.size())));
             if (!outputRows.empty()) deviceRows = tryAllocateGpuBuffer(stream, outputRows.size() * sizeof(u32));
-            if (!deviceSeeds || !prefixes || !candidates || !counts || !complete ||
+            if (!deviceSeeds || !prefixes || !candidates || !counts || !complete || !roots ||
                 (!outputRows.empty() && (!deviceRows || !gpuMemcpyH2D(deviceRows.data(), outputRows.data(),
                     outputRows.size() * sizeof(u32), stream.raw()))) ||
                 !gpuMemcpyH2D(deviceSeeds.data(), activeSeeds.data(), activeSeeds.size_bytes(), stream.raw())) return false;
             HostStep step("setup: Gaussian GPU transform PRG");
             if (!launchBlake2xbStreamForTest(static_cast<const u64*>(deviceSeeds.data()),
-                    static_cast<u64*>(prefixes.data()), wordsPerPrefix, static_cast<u32>(activeSeeds.size()), stream.raw()))
+                    static_cast<u64*>(prefixes.data()), wordsPerPrefix, static_cast<u32>(activeSeeds.size()),
+                    static_cast<u64*>(roots.data()), roots.size() / sizeof(u64), stream.raw()))
                 return false;
         }
         if (!activeSeeds.empty())
@@ -302,21 +299,24 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool sampleGaussianCompactDevice(
+        GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianSampleBuffer& out, u32 wordsPerPrefix)
     {
-        return sampleGaussianCompactImpl(seeds, coefficients, sigma, clip, modulus, &out, nullptr, wordsPerPrefix, {});
+        return sampleGaussianCompactImpl(stream, seeds, coefficients, sigma, clip, modulus, &out, nullptr, wordsPerPrefix, {});
     }
 
     bool sampleGaussianCompactResidentDevice(
+        GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianDeviceSampleBuffer& out,
         u32 wordsPerPrefix, std::span<const u8> active)
     {
-        return sampleGaussianCompactImpl(seeds, coefficients, sigma, clip, modulus, nullptr, &out, wordsPerPrefix, active);
+        return sampleGaussianCompactImpl(stream, seeds, coefficients, sigma, clip, modulus, nullptr, &out, wordsPerPrefix, active);
     }
 
     bool sampleGaussianPrngPrefixesDevice(
+        GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds,
         u32 wordsPerPrefix,
         GaussianPrngPrefixBuffer& out)
@@ -331,24 +331,20 @@ namespace osuCrypto::LogVole::gpu
         if (prefixBytes > maxPrefixBytes || seeds.size() > maxPrefixBytes / prefixBytes) return false;
         const std::size_t bytes = seeds.size() * prefixBytes;
 
-        auto& stream = threadSampleStream();
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restore;
-        gpuSetCurrentStream(stream.raw());
-        OwnedGpuBuffer deviceSeeds, devicePrefixes;
+        OwnedGpuBuffer deviceSeeds, devicePrefixes, roots;
         auto pinned = stream.gaussianScratch().prefixes.acquire(bytes);
         if (!pinned) return false;
         StreamDrain drain{stream};
         deviceSeeds = tryAllocateGpuBuffer(stream, seeds.size_bytes());
         devicePrefixes = tryAllocateGpuBuffer(stream, bytes);
-        if (!deviceSeeds || !devicePrefixes ||
+        roots = tryAllocateGpuBuffer(stream, sizeof(u64) * blake2xbRootScratchWords(
+            wordsPerPrefix, static_cast<u32>(seeds.size())));
+        if (!deviceSeeds || !devicePrefixes || !roots ||
             !gpuMemcpyH2D(deviceSeeds.data(), seeds.data(), seeds.size_bytes(), stream.raw()) ||
             !launchBlake2xbStreamForTest(static_cast<const u64*>(deviceSeeds.data()),
                 static_cast<u64*>(devicePrefixes.data()), wordsPerPrefix,
-                static_cast<u32>(seeds.size()), stream.raw())) return false;
+                static_cast<u32>(seeds.size()), static_cast<u64*>(roots.data()),
+                roots.size() / sizeof(u64), stream.raw())) return false;
 
         if (!gpuMemcpyD2H(pinned.get(), devicePrefixes.data(), bytes, stream.raw()) || !stream.sync()) return false;
         out.mData = std::move(pinned);

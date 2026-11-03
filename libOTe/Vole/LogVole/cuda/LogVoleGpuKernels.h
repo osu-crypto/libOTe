@@ -1021,8 +1021,15 @@ namespace osuCrypto::LogVole::gpu
     // zero. The seed is two device u64 words; odd scalar counts are supported.
     bool launchAesCtrScalars(
         const u64* seed, u64* out, u64 count, u64 modulus, void* stream);
+    constexpr std::size_t blake2xbRootScratchWords(u32 wordsPerStream, u32 streamCount)
+    {
+        return static_cast<std::size_t>(streamCount) *
+            (wordsPerStream / 512u + (wordsPerStream % 512u != 0u)) * 8u;
+    }
+    // The caller owns root scratch through both launches on the supplied stream.
     bool launchBlake2xbStreamForTest(
-        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount, void* stream);
+        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount,
+        u64* roots, std::size_t rootCapacityWords, void* stream);
 
 
     // Exact hashSeedDigest RandomOracle(16) over label, size and coefficients.

@@ -88,6 +88,7 @@ namespace osuCrypto::LogVole::gpu
     {
     public:
         GpuStream();
+        explicit GpuStream(std::shared_ptr<GpuMemoryPool> memory);
         // A lean non-blocking stream at the device's greatest supported
         // priority. It has no default index scratch; callers prepare their
         // workspace storage explicitly before query submission. Returns null
@@ -125,10 +126,12 @@ namespace osuCrypto::LogVole::gpu
         }
 
     private:
-        GpuStream(bool highestPriority, bool allocateScratch);
+        GpuStream(bool highestPriority, bool allocateScratch,
+            std::shared_ptr<GpuMemoryPool> memory = {});
         bool ensureIndexScratch();
 
         void* mStream = nullptr;
+        std::shared_ptr<GpuMemoryPool> mMemory;
         std::shared_ptr<OwnedGpuStream> mAllocationOwner;
         std::unique_ptr<GpuProtocolScratch, GpuProtocolScratchDeleter> mProtocolScratch;
         std::unique_ptr<GpuTransferScratch, GpuTransferScratchDeleter> mTransferScratch;
@@ -145,6 +148,28 @@ namespace osuCrypto::LogVole::gpu
         u8* mStaging = nullptr;
         std::size_t mStagingBytes = 0;
     };
+
+    // Computation streams and scratch belong to this execution domain. Each
+    // host worker has independent main/sampling streams, sharing one private
+    // allocation pool. Join all users before releasing the last domain owner.
+    // Native stream/buffer owners never refer back to this object.
+    class GpuExecutionContext
+    {
+    public:
+        GpuExecutionContext();
+        ~GpuExecutionContext();
+        GpuExecutionContext(const GpuExecutionContext&) = delete;
+        GpuExecutionContext& operator=(const GpuExecutionContext&) = delete;
+        GpuStream& mainStream();
+        GpuStream& sampleStream();
+    private:
+        GpuStream& stream(bool sample);
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+    };
+
+    GpuStream& contextStream(const RingNttContext& ctx);
+    GpuStream& contextSampleStream(const RingNttContext& ctx);
 
     // Preserve the boolean failure convention of the protocol entry points.
     // The returned allocation retains its explicit stream even on early exit.

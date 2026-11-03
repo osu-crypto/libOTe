@@ -15,7 +15,7 @@
 
 namespace osuCrypto::LogVole
 {
-    namespace gpu { class DeviceScalars; class RetainedPublicUniform; class GpuRing; class GpuSetupContext; }
+    namespace gpu { class DeviceScalars; class RetainedPublicUniform; class GpuRing; class GpuSetupContext; class GpuExecutionContext; }
     struct RingOpsStats
     {
         static inline std::atomic<u64> resetEpoch{ 0u };
@@ -117,6 +117,7 @@ namespace osuCrypto::LogVole
         RingParams mParams;
         // Resource domain only; it never owns or refers back to ring caches.
         std::shared_ptr<gpu::GpuSetupContext> mGpuSetup;
+        std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;
         // Legacy host storage. Lightweight contexts keep this empty; explicit
         // host access materializes SEAL objects in the shared fallback owner.
         std::vector<seal::Modulus> mModuli;

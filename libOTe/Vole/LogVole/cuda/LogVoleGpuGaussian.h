@@ -10,6 +10,7 @@
 namespace osuCrypto::LogVole::gpu
 {
     class DeviceScalars;
+    class GpuStream;
     struct GaussianPrngPrefixBuffer
     {
         // Immutable, completed pinned download. Readers retain this ownership
@@ -21,6 +22,7 @@ namespace osuCrypto::LogVole::gpu
     // Exact BLAKE2xb byte prefixes for independent SEAL seeds. A prefix is a
     // whole number of SEAL's 4096-byte refills. Output is unchanged on failure.
     bool sampleGaussianPrngPrefixesDevice(
+        GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds,
         u32 wordsPerPrefix,
         GaussianPrngPrefixBuffer& out);
@@ -49,11 +51,13 @@ namespace osuCrypto::LogVole::gpu
     // wordsPerPrefix=0 chooses a conservative finite prefix. On false, out is
     // unchanged. Success may identify rows requiring exact CPU replay.
     bool sampleGaussianCompactDevice(
+        GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianSampleBuffer& out,
         u32 wordsPerPrefix = 0);
 
     bool sampleGaussianCompactResidentDevice(
+        GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianDeviceSampleBuffer& out,
         u32 wordsPerPrefix = 0, std::span<const u8> active = {});

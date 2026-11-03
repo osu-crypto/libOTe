@@ -886,6 +886,9 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+#if defined(ENABLE_LOGVOLE_CUDA)
+        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
+#endif
         auto shared = std::make_shared<const RingNttContext>(built);
         {
             std::lock_guard<std::mutex> lock(ringContextCacheMutex);
@@ -965,6 +968,7 @@ namespace osuCrypto::LogVole
         metadata->mBitCounts.assign(params.mCoeffModulusBits.begin(),
             params.mCoeffModulusBits.end());
         built.mGpuSetup = certificate->setupContext();
+        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
         metadata->mDynamicGpuCertificate = std::move(certificate);
         built.mRawModuli = std::move(metadata);
         built.mGpuLightweight = true;
@@ -2574,12 +2578,14 @@ namespace osuCrypto::LogVole
             }
             gpu::GaussianSampleBuffer sampled;
             bool transformed = false;
-            if (compatibleFactory && validPrefix && n <= std::numeric_limits<u32>::max())
+            if (compatibleFactory && validPrefix && n <= std::numeric_limits<u32>::max() &&
+                gpu::gaussianTransformHostCompatible())
             {
                 std::vector<seal::prng_seed_type> activeSeeds(activeRows.size());
                 for (std::size_t i = 0; i < activeRows.size(); ++i)
                     activeSeeds[i] = seeds[activeRows[i]];
-                transformed = gpu::sampleGaussianCompactDevice(activeSeeds, static_cast<u32>(n),
+                transformed = gpu::sampleGaussianCompactDevice(
+                    gpu::contextSampleStream(ctx), activeSeeds, static_cast<u32>(n),
                     noiseStandardDeviation, noiseMaxDeviation, ringModulusValue(ctx, 0), sampled,
                     static_cast<u32>(blocks * 512u));
             }
@@ -2627,7 +2633,7 @@ namespace osuCrypto::LogVole
                 for (std::size_t i = 0; i < activeRows.size(); ++i) activeSeeds[i] = seeds[activeRows[i]];
                 gpu::GaussianPrngPrefixBuffer downloaded;
                 devicePrefixes = gpu::sampleGaussianPrngPrefixesDevice(
-                    activeSeeds, static_cast<u32>(wordsPerPrefix), downloaded);
+                    gpu::contextSampleStream(ctx), activeSeeds, static_cast<u32>(wordsPerPrefix), downloaded);
                 if (devicePrefixes)
                 {
                     prefixOwner = std::move(downloaded.mData);
@@ -2683,8 +2689,9 @@ namespace osuCrypto::LogVole
             }
             gpu::GaussianDeviceSampleBuffer sampled;
             bool ready = (!transform || transform[0] != '0') && compatibleFactory && validPrefix &&
-                n <= std::numeric_limits<u32>::max() &&
-                gpu::sampleGaussianCompactResidentDevice(seeds, static_cast<u32>(n), sigma, clip,
+                n <= std::numeric_limits<u32>::max() && gpu::gaussianTransformHostCompatible() &&
+                gpu::sampleGaussianCompactResidentDevice(
+                    gpu::contextSampleStream(ctx), seeds, static_cast<u32>(n), sigma, clip,
                     ringModulusValue(ctx, 0), sampled, static_cast<u32>(blocks * 512u), active);
             if (ready)
             {
@@ -2708,10 +2715,10 @@ namespace osuCrypto::LogVole
                     for (const auto row : incomplete) retrySeeds.push_back(seeds[row]);
                     gpu::GaussianDeviceSampleBuffer retried;
                     if (!gpu::sampleGaussianCompactResidentDevice(
-                            retrySeeds, static_cast<u32>(n), sigma, clip,
+                            gpu::contextSampleStream(ctx), retrySeeds, static_cast<u32>(n), sigma, clip,
                             ringModulusValue(ctx, 0), retried,
                             static_cast<u32>(retryWords))) break;
-                    auto& stream = gpu::threadSampleStream();
+                    auto& stream = gpu::contextSampleStream(ctx);
                     gpu::StreamDrain drain{stream};
                     std::vector<std::size_t> remaining;
                     for (std::size_t i = 0; i < incomplete.size(); ++i)
@@ -2746,7 +2753,7 @@ namespace osuCrypto::LogVole
                 });
                 if (ready && !incomplete.empty())
                 {
-                    auto& stream = gpu::threadSampleStream();
+                    auto& stream = gpu::contextSampleStream(ctx);
                     gpu::StreamDrain drain{stream};
                     for (std::size_t i = 0; ready && i < incomplete.size(); ++i)
                         ready = gpu::gpuMemcpyH2D(sampled.mValues->data() + incomplete[i] * n,

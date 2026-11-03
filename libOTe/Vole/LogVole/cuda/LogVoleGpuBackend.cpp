@@ -958,7 +958,11 @@ namespace osuCrypto::LogVole::gpu
 
     GpuStream::GpuStream() : GpuStream(false, true) {}
 
-    GpuStream::GpuStream(bool highestPriority, bool allocateScratch)
+    GpuStream::GpuStream(std::shared_ptr<GpuMemoryPool> memory)
+        : GpuStream(false, true, std::move(memory)) {}
+
+    GpuStream::GpuStream(bool highestPriority, bool allocateScratch,
+        std::shared_ptr<GpuMemoryPool> memory) : mMemory(std::move(memory))
     {
         if (highestPriority)
         {
@@ -1019,8 +1023,10 @@ namespace osuCrypto::LogVole::gpu
             if (!mStream) throw std::runtime_error("CUDA stream is unavailable");
             const int device = currentDeviceOrdinal();
             if (device < 0) throw std::runtime_error("CUDA device is unavailable");
-            auto memory = std::make_shared<GpuMemoryPool>(device);
-            mAllocationOwner = std::make_shared<OwnedGpuStream>(std::move(memory), mStream);
+            if (!mMemory) mMemory = std::make_shared<GpuMemoryPool>(device);
+            if (mMemory->device() != device)
+                throw std::runtime_error("CUDA stream allocation device mismatch");
+            mAllocationOwner = std::make_shared<OwnedGpuStream>(mMemory, mStream);
         }
         return mAllocationOwner;
     }
@@ -1105,6 +1111,53 @@ namespace osuCrypto::LogVole::gpu
         }
         mScratchUsed = alignUp(off + idx.size(), 4);
         return mDeviceScratch + off;
+    }
+
+    struct GpuExecutionContext::Impl
+    {
+        struct Worker
+        {
+            std::unique_ptr<GpuStream> main, sample;
+        };
+        std::mutex mutex;
+        int device = -1;
+        std::shared_ptr<GpuMemoryPool> memory;
+        std::unordered_map<std::thread::id, Worker> workers;
+    };
+
+    GpuExecutionContext::GpuExecutionContext() : mImpl(std::make_unique<Impl>()) {}
+    GpuExecutionContext::~GpuExecutionContext() = default;
+
+    GpuStream& GpuExecutionContext::stream(bool sample)
+    {
+        std::lock_guard lock(mImpl->mutex);
+        const int device = currentDeviceOrdinal();
+        if (device < 0 || (mImpl->device >= 0 && mImpl->device != device))
+            throw std::runtime_error("CUDA execution context device mismatch");
+        mImpl->device = device;
+        if (!mImpl->memory) mImpl->memory = std::make_shared<GpuMemoryPool>(device);
+        auto& worker = mImpl->workers[std::this_thread::get_id()];
+        auto& stream = sample ? worker.sample : worker.main;
+        if (!stream) stream = std::make_unique<GpuStream>(mImpl->memory);
+        return *stream;
+    }
+
+    GpuStream& GpuExecutionContext::mainStream() { return stream(false); }
+    GpuStream& GpuExecutionContext::sampleStream() { return stream(true); }
+
+    GpuStream& contextStream(const RingNttContext& ctx)
+    {
+        if (!ctx.mGpuExecution) throw std::invalid_argument("Missing CUDA execution owner");
+        auto& stream = ctx.mGpuExecution->mainStream();
+        // Transitional legacy table allocations still consult this stream.
+        gpuSetCurrentStream(stream.raw());
+        return stream;
+    }
+
+    GpuStream& contextSampleStream(const RingNttContext& ctx)
+    {
+        if (!ctx.mGpuExecution) throw std::invalid_argument("Missing CUDA execution owner");
+        return ctx.mGpuExecution->sampleStream();
     }
 
     GpuStream& threadStream()

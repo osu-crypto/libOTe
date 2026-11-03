@@ -406,6 +406,42 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
     ScopedEnvironmentValue overlap("LV_GPU_SETUP_INIT_OVERLAP", "1");
     ScopedEnvironmentValue deferred("LV_GPU_DEFER_GOLDEN_VALIDATION", "1");
     {
+        auto execution = std::make_shared<gpu::GpuExecutionContext>();
+        std::weak_ptr<gpu::GpuExecutionContext> domain = execution;
+        auto& main = execution->mainStream();
+        auto& sample = execution->sampleStream();
+        LOGVOLE_REQUIRE_TRUE(&main == &execution->mainStream());
+        LOGVOLE_REQUIRE_TRUE(main.raw() != sample.raw());
+        LOGVOLE_REQUIRE_TRUE(main.allocationOwner()->memory() == sample.allocationOwner()->memory());
+        std::weak_ptr<gpu::OwnedGpuStream> mainOwner = main.allocationOwner();
+        std::weak_ptr<gpu::OwnedGpuStream> sampleOwner = sample.allocationOwner();
+        std::weak_ptr<gpu::GpuMemoryPool> memory = main.allocationOwner()->memory();
+        gpu::OwnedGpuBuffer exported(sample.allocationOwner(), 31);
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(exported.data(), exported.size(), sample.raw()));
+        exported.handoff(main.allocationOwner());
+        std::weak_ptr<gpu::OwnedGpuStream> workerOwner;
+        std::packaged_task<void()> task([&] {
+            auto& stream = execution->mainStream();
+            workerOwner = stream.allocationOwner();
+            LOGVOLE_REQUIRE_TRUE(stream.raw() != main.raw());
+            LOGVOLE_REQUIRE_TRUE(stream.allocationOwner()->memory() == main.allocationOwner()->memory());
+        });
+        auto completed = task.get_future();
+        std::thread worker(std::move(task));
+        worker.join();
+        completed.get();
+        execution.reset();
+        LOGVOLE_REQUIRE_TRUE(domain.expired() && workerOwner.expired());
+        LOGVOLE_REQUIRE_FALSE(mainOwner.expired() || sampleOwner.expired() || memory.expired());
+        std::array<std::uint8_t, 31> fetched{};
+        fetched.fill(0xff);
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), exported.data(), fetched.size(), exported.stream()->raw()));
+        exported.stream()->synchronize();
+        LOGVOLE_REQUIRE_TRUE(std::all_of(fetched.begin(), fetched.end(), [](auto v) { return v == 0; }));
+        exported.reset();
+        LOGVOLE_REQUIRE_TRUE(mainOwner.expired() && sampleOwner.expired() && memory.expired());
+    }
+    {
         auto execution = std::make_shared<gpu::GpuSetupContext>();
         std::weak_ptr<gpu::GpuSetupContext> contextOwner = execution;
         auto first = execution->stream();
@@ -2350,26 +2386,29 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP&)
         ScopedEnvironmentValue decline("LV_GPU_SETUP_GAUSSIAN_PRG_FORCE_DECLINE", "0");
         std::array<seal::prng_seed_type, 1> seeds{};
         seeds[0][0] = 0x50494E4E45445052ull;
+        gpu::GpuExecutionContext execution;
+        auto& stream = execution.sampleStream();
         gpu::GaussianPrngPrefixBuffer first, second;
-        LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(seeds, 512, first));
+        LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(stream, seeds, 512, first));
         LOGVOLE_REQUIRE_TRUE(first.mData != nullptr);
         LOGVOLE_REQUIRE_EQ(first.mWords, std::size_t(512));
         const std::vector<std::uint64_t> saved(first.mData.get(), first.mData.get() + first.mWords);
         seeds[0][1] = 0x5345434F4E44ull;
-        LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(seeds, 512, second));
+        LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(stream, seeds, 512, second));
         LOGVOLE_REQUIRE_TRUE(second.mData != nullptr);
         LOGVOLE_REQUIRE_TRUE(first.mData.get() != second.mData.get());
         LOGVOLE_REQUIRE_TRUE(std::equal(saved.begin(), saved.end(), first.mData.get()));
-        // Export pinned output across actual OS-thread exit, then retire that
-        // worker's stream cache before reading and releasing the output.
+        // Pinned output survives its worker's execution context and OS thread.
         std::weak_ptr<gpu::OwnedGpuStream> producer;
         std::packaged_task<gpu::GaussianPrngPrefixBuffer()> task([&] {
+            gpu::GpuExecutionContext workerExecution;
+            auto& workerStream = workerExecution.sampleStream();
             auto workerSeeds = seeds;
             workerSeeds[0][1] = 0;
             gpu::GaussianPrngPrefixBuffer exported, grown;
-            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(workerSeeds, 512, exported));
-            producer = gpu::threadSampleStream().allocationOwner();
-            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(seeds, 1024, grown));
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(workerStream, workerSeeds, 512, exported));
+            producer = workerStream.allocationOwner();
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianPrngPrefixesDevice(workerStream, seeds, 1024, grown));
             LOGVOLE_REQUIRE_TRUE(exported.mData.get() != grown.mData.get());
             LOGVOLE_REQUIRE_TRUE(std::equal(saved.begin(), saved.end(), exported.mData.get()));
             return exported;
@@ -2378,7 +2417,6 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP&)
         std::thread worker(std::move(task));
         worker.join();
         auto exported = future.get();
-        gpu::gpuCollectThreadResources();
         LOGVOLE_REQUIRE_TRUE(producer.expired());
         LOGVOLE_REQUIRE_EQ(exported.mWords, saved.size());
         LOGVOLE_REQUIRE_TRUE(std::equal(saved.begin(), saved.end(), exported.mData.get()));
@@ -2386,7 +2424,7 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP&)
         const auto previous = second.mData;
         const auto previousWords = second.mWords;
         ScopedEnvironmentValue forceDecline("LV_GPU_SETUP_GAUSSIAN_PRG_FORCE_DECLINE", "1");
-        LOGVOLE_REQUIRE_TRUE(!gpu::sampleGaussianPrngPrefixesDevice(seeds, 512, second));
+        LOGVOLE_REQUIRE_TRUE(!gpu::sampleGaussianPrngPrefixesDevice(stream, seeds, 512, second));
         LOGVOLE_REQUIRE_TRUE(second.mData == previous);
         LOGVOLE_REQUIRE_EQ(second.mWords, previousWords);
         LOGVOLE_REQUIRE_TRUE(std::equal(saved.begin(), saved.end(), first.mData.get()));
@@ -2581,8 +2619,7 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(seeds == referenceSeeds);
 
             gpu::GaussianSampleBuffer direct;
-            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactDevice(
-                seeds, static_cast<std::uint32_t>(n), sigma, 19.2, ringModulusValue(ctx, 0), direct));
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactDevice(gpu::contextSampleStream(ctx), seeds, static_cast<std::uint32_t>(n), sigma, 19.2, ringModulusValue(ctx, 0), direct));
             LOGVOLE_REQUIRE_EQ(direct.mValues.mWords, count * n);
             for (std::size_t row = 0; row < count; ++row)
             {
@@ -2597,14 +2634,14 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
                 const std::vector<std::uint64_t> snapshot(retained.get(), retained.get() + count * n);
                 const auto flags = direct.mComplete;
                 gpu::GaussianSampleBuffer incomplete;
-                LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactDevice(seeds, static_cast<std::uint32_t>(n),
+                LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactDevice(gpu::contextSampleStream(ctx), seeds, static_cast<std::uint32_t>(n),
                     sigma, 19.2, ringModulusValue(ctx, 0), incomplete, 512));
                 LOGVOLE_REQUIRE_TRUE(incomplete.mValues.mData != retained);
                 LOGVOLE_REQUIRE_TRUE(std::all_of(incomplete.mComplete.begin(), incomplete.mComplete.end(),
                     [](auto complete) { return complete == 0; }));
                 LOGVOLE_REQUIRE_TRUE(std::equal(snapshot.begin(), snapshot.end(), retained.get()));
                 ScopedEnvironmentValue forced("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_FORCE_DECLINE", "1");
-                LOGVOLE_REQUIRE_TRUE(!gpu::sampleGaussianCompactDevice(seeds, static_cast<std::uint32_t>(n),
+                LOGVOLE_REQUIRE_TRUE(!gpu::sampleGaussianCompactDevice(gpu::contextSampleStream(ctx), seeds, static_cast<std::uint32_t>(n),
                     sigma, 19.2, ringModulusValue(ctx, 0), direct));
                 LOGVOLE_REQUIRE_TRUE(direct.mValues.mData == retained && direct.mComplete == flags);
                 std::vector<std::uint64_t> fallback(expected.size(), marker);
@@ -2761,8 +2798,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
             const auto unchangedSeeds = seeds;
             LOGVOLE_REQUIRE_TRUE(seeds == expectedSeeds);
             gpu::GaussianDeviceSampleBuffer direct;
-            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactResidentDevice(
-                seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active));
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active));
             LOGVOLE_REQUIRE_TRUE(direct.mValues != nullptr);
             LOGVOLE_REQUIRE_EQ(direct.mValues->count(), words);
             LOGVOLE_REQUIRE_EQ(direct.mComplete.size(), count);
@@ -2801,8 +2837,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
 
             if (count != 4u || sigma == 0.0) continue;
             gpu::GaussianDeviceSampleBuffer incomplete;
-            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactResidentDevice(
-                seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), incomplete, 512, active));
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), incomplete, 512, active));
             LOGVOLE_REQUIRE_TRUE(incomplete.mValues != retained);
             LOGVOLE_REQUIRE_EQ(incomplete.mComplete.size(), active.size());
             for (std::size_t row = 0; row < active.size(); ++row)
@@ -2812,8 +2847,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
             gpu::DeviceScalarsPtr device = retained;
             {
                 ScopedEnvironmentValue decline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", "1");
-                LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
-                    seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active));
+                LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active));
                 LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
                 LOGVOLE_REQUIRE_FALSE(samplePolyErrorCompactBatchForSetup(
                     host, device, sigma, 19.2, seeds, ctx, 4, active));
@@ -2878,15 +2912,12 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                     replayHost, device, sigma, 19.2, seeds, ctx, 4, active));
                 LOGVOLE_REQUIRE_TRUE(replayHost == expected && device == retainedOwner);
             }
-            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
-                seeds, 0u, sigma, 19.2, ringModulusValue(ctx, 0), direct));
+            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, 0u, sigma, 19.2, ringModulusValue(ctx, 0), direct));
             LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
-            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
-                seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0,
+            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0,
                 std::span<const std::uint8_t>(active).first(3)));
             LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
-            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
-                {}, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct));
+            LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), {}, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct));
             LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
             {
                 struct RestoreRounding
@@ -2895,8 +2926,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                     ~RestoreRounding() { std::fesetround(mode); }
                 } rounding;
                 LOGVOLE_REQUIRE_EQ(std::fesetround(FE_UPWARD), 0);
-                LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(
-                    seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active));
+                LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active));
                 LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
                 LOGVOLE_REQUIRE_FALSE(samplePolyErrorCompactBatchForSetup(
                     host, device, sigma, 19.2, seeds, ctx, 4, active));
