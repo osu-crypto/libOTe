@@ -706,11 +706,11 @@ namespace osuCrypto
 	//		r1 = subc64(r_mod, p, bP);                   // if no borrow, r_mod >= p
 	//		auto r = (bP ? r_mod : r1);
 	//
-	//#if !defined(NDEBUG) && defined(__SIZEOF_INT128__)
+	//#ifndef NDEBUG
 	//		{
 	//			// Verify correctness modulo p (debug only).
-	//			__uint128_t prod = ((__uint128_t)in1.mVal * (__uint128_t)in2.mVal)
-	//				% (__uint128_t)mModulus;
+	//			UInt<128> prod = ((UInt<128>)in1.mVal * (UInt<128>)in2.mVal)
+	//				% (UInt<128>)mModulus;
 	//			auto check = Goldilocks{ (u64)r }.canonical();
 	//			assert(check.mVal == prod);
 	//		}
@@ -758,8 +758,8 @@ namespace osuCrypto
 		//#ifndef NDEBUG
 		//		{
 		//			// Verify correctness modulo p (debug only).
-		//			__uint128_t prod = ((__uint128_t)in1.mVal * (__uint128_t)in2.mVal)
-		//				% (__uint128_t)mModulus;
+		//			UInt<128> prod = ((UInt<128>)in1.mVal * (UInt<128>)in2.mVal)
+		//				% (UInt<128>)mModulus;
 		//			auto check = Goldilocks{ r }.canonical();
 		//			assert(check.mVal == prod);
 		//		}

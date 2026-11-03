@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Tools/Field/WordArithmetic.h"
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/Aligned.h"
 #include "cryptoTools/Crypto/PRNG.h"
@@ -6,9 +7,6 @@
 #include <list>
 #include <limits>
 
-#if defined(_MSC_VER) && defined(_M_X64)
-#include <intrin.h>
-#endif
 
 namespace osuCrypto
 {
@@ -180,33 +178,9 @@ namespace osuCrypto
             if (modulus == 0)
                 throw std::invalid_argument("PPRF sampling modulus must be nonzero. " LOCATION);
 
-#if defined(__SIZEOF_INT128__)
-            using uint128 = unsigned __int128;
-            auto value = (static_cast<uint128>(high) << 64) | low;
-            return static_cast<u64>(value % modulus);
-#elif defined(_MSC_VER) && defined(_M_X64)
-            u64 remainder = 0;
-            auto reducedHigh = high % modulus;
-            (void)_udiv128(reducedHigh, low, modulus, &remainder);
+            u64 quotientLow, quotientHigh, remainder;
+            wordArithmetic::divideFull(low, high, modulus, quotientLow, quotientHigh, remainder);
             return remainder;
-#else
-            // Portable fixed-work reduction of a two-limb integer. The
-            // conditional subtraction form avoids overflowing a u64 when
-            // doubling the current remainder.
-            u64 remainder = 0;
-            for (u64 i = 128; i-- > 0;)
-            {
-                auto bit = i < 64 ? ((low >> i) & 1) : ((high >> (i - 64)) & 1);
-                if (remainder >= modulus - remainder)
-                    remainder -= modulus - remainder;
-                else
-                    remainder += remainder;
-
-                if (bit)
-                    remainder = remainder == modulus - 1 ? 0 : remainder + 1;
-            }
-            return remainder;
-#endif
         }
 
         inline u64 sampleMod(PRNG& prng, u64 modulus)

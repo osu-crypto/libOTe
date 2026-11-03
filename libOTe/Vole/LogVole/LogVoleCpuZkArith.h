@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Tools/Field/UInt.h"
 
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 
@@ -13,7 +14,6 @@ namespace osuCrypto::LogVole::detail
 
         u64 multiply(u64 a, u64 b) const
         {
-#if defined(__SIZEOF_INT128__)
             if constexpr (Bits != 0)
             {
                 static_assert(Bits == 51 || Bits == 54);
@@ -23,8 +23,8 @@ namespace osuCrypto::LogVole::detail
                 constexpr u64 radix = u64{1} << Bits;
                 constexpr u64 mask = radix - 1;
                 const u64 gap = radix - q;
-                const __uint128_t product = static_cast<__uint128_t>(a) * b;
-                const __uint128_t folded = (static_cast<u64>(product) & mask) +
+                const osuCrypto::u128 product = static_cast<osuCrypto::u128>(a) * b;
+                const osuCrypto::u128 folded = (static_cast<u64>(product) & mask) +
                     (product >> Bits) * gap;
                 // q=2^Bits-gap, gap<2^24: the second fold is below
                 // 2^Bits+gap^2 < 2q. One subtraction makes it canonical.
@@ -32,7 +32,6 @@ namespace osuCrypto::LogVole::detail
                     static_cast<u64>(folded >> Bits) * gap;
                 return result >= q ? result - q : result;
             }
-#endif
             return mulMod(a, b, mMod);
         }
 
@@ -48,7 +47,6 @@ namespace osuCrypto::LogVole::detail
     template<typename Fn>
     auto withCpuZkArithmetic(const seal::Modulus& mod, Fn&& fn)
     {
-#if defined(__SIZEOF_INT128__)
         static const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_ZK_PSEUDO_REDUCE");
             return !value || value[0] != '0';
@@ -58,7 +56,6 @@ namespace osuCrypto::LogVole::detail
             return fn(CpuZkArithmetic<51>{mod});
         if (enabled && q < (u64{1} << 54) && (u64{1} << 54) - q < (u64{1} << 24))
             return fn(CpuZkArithmetic<54>{mod});
-#endif
         return fn(CpuZkArithmetic<0>{mod});
     }
 }

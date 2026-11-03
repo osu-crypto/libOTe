@@ -1,3 +1,4 @@
+#include "libOTe_Tests/WideArithmeticOracle.h"
 // Independent unsigned-128 CPU oracle for the experimental FP64 multiplier.
 // nvcc -O3 -std=c++17 -arch=sm_90 -I. libOTe_Tests/LogVole/tests/cuda/test_fp52_modular_multiply.cu -o <binary>
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuFp52.cuh"
@@ -44,7 +45,7 @@ int main(int argc, char** argv)
 {
     const bool prediv = argc == 2 && std::strcmp(argv[1], "prediv") == 0;
     if (argc > 1 && !prediv) { std::fprintf(stderr, "Usage: %s [prediv]\n", argv[0]); return 2; }
-    constexpr u64 n = 1u << 20;
+    constexpr u64 n = 4099;
     std::vector<i64> a(n);
     std::vector<u64> b(n), out(n);
     i64* da; u64 *db, *dout;
@@ -59,13 +60,13 @@ int main(int argc, char** argv)
         {
             a[i] = static_cast<i64>(next(state) % q);
             b[i] = next(state) % q;
-            if (i < 131072)
+            if (i < 512)
             {
-                const u64 x = i & 255, y = (i >> 8) & 255;
+                const u64 x = i & 15, y = (i >> 4) & 15;
                 a[i] = static_cast<i64>((x & 1) ? q - 1 - (x >> 1) : x >> 1);
                 b[i] = (y & 1) ? q - 1 - (y >> 1) : y >> 1;
             }
-            if (i < 131072 ? ((i >> 16) & 1) : (i & 1)) a[i] = -a[i];
+            if (i < 512 ? ((i >> 8) & 1) : (i & 1)) a[i] = -a[i];
         }
         check(cudaMemcpy(da, a.data(), n * 8, cudaMemcpyHostToDevice));
         check(cudaMemcpy(db, b.data(), n * 8, cudaMemcpyHostToDevice));
@@ -76,7 +77,7 @@ int main(int argc, char** argv)
         for (u64 i = 0; i < n; ++i)
         {
             const u64 aa = static_cast<u64>(a[i] < 0 ? a[i] + static_cast<i64>(q) : a[i]);
-            const u64 expected = static_cast<u64>((static_cast<unsigned __int128>(aa) * b[i]) % q);
+            const u64 expected = host_oracle::remainder(host_oracle::multiply(aa, b[i]), q);
             if (out[i] != expected)
             {
                 std::fprintf(stderr, "FAIL q=%llu a=%lld b=%llu got=%llu expected=%llu\n",

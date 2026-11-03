@@ -2,6 +2,7 @@
 #include <sstream>
 #include <stdexcept>
 #include "libOTe/Tools/Field/UInt.h"
+#include "libOTe_Tests/WideArithmeticOracle.h"
 
 using namespace osuCrypto;
 
@@ -285,3 +286,69 @@ void UInt_Conversions_Test() {
 //        return 1;
 //    }
 //}
+
+void UInt_WordArithmetic_Test()
+{
+    // Independent 16-bit multiplication and restoring-division oracle. Cover
+    // normalization extremes, both quotient corrections, carries and overflow.
+    constexpr u64 edges[] = {0, 1, 2, 3, 0xffffffff, 0x100000000,
+        0x100000001, 0x7fffffffffffffff, 0x8000000000000000,
+        0xffffffff00000000, 0xfffffffffffffffe, 0xffffffffffffffff};
+    auto check = [](u64 low, u64 high, u64 divisor) {
+        const auto input = limbs<128>({low, high});
+        const auto expectedProduct = host_oracle::multiply(low, high);
+        u64 actualLow, actualHigh;
+        mul128(low, high, actualLow, actualHigh);
+        ASSERT_EQ(actualLow, expectedProduct.lo);
+        ASSERT_EQ(actualHigh, expectedProduct.hi);
+        wordArithmetic::multiply(low, high, actualLow, actualHigh);
+        ASSERT_EQ(actualLow, expectedProduct.lo);
+        ASSERT_EQ(actualHigh, expectedProduct.hi);
+        const auto multiplier = limbs<128>({high, divisor});
+        const auto full = input * multiplier;
+        const auto expectedFull = host_oracle::Uint128{low, high} * host_oracle::Uint128{high, divisor};
+        ASSERT_EQ(full.v[0], expectedFull.lo);
+        ASSERT_EQ(full.v[1], expectedFull.hi);
+        u64 expectedRemainder = 0;
+        const auto expectedQuotient = host_oracle::divide({low, high}, divisor, expectedRemainder);
+        u128 quotient, remainder;
+        u128::div(input, u128{divisor}, quotient, remainder);
+        ASSERT_EQ(quotient.v[0], expectedQuotient.lo);
+        ASSERT_EQ(quotient.v[1], expectedQuotient.hi);
+        ASSERT_EQ(remainder.v[0], expectedRemainder);
+        ASSERT_EQ(remainder.v[1], u64{0});
+        ASSERT_EQ(quotient * divisor + remainder, input);
+        // Same division path is used by the PPRF sampling helper.
+        u64 q0, q1, r;
+        wordArithmetic::divideFull(low, high, divisor, q0, q1, r);
+        ASSERT_EQ(q0, quotient.v[0]); ASSERT_EQ(q1, quotient.v[1]);
+        ASSERT_EQ(r, expectedRemainder);
+    };
+    for (auto low : edges) for (auto high : edges) for (auto d : edges)
+        if (d) check(low, high, d);
+    u64 state = 0xc0ffee1234;
+    auto next = [&] {
+        state += 0x9e3779b97f4a7c15ULL;
+        auto x = state;
+        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+        return x ^ (x >> 31);
+    };
+    for (unsigned i = 0; i != 4096; ++i)
+    {
+        const u64 low = next(), high = next(), divisor = next();
+        check(low, high, divisor ? divisor : 1);
+    }
+    for (unsigned bits = 0; bits != 64; ++bits)
+        for (unsigned i = 0; i != 4; ++i)
+        {
+            const u64 divisor = (u64{1} << bits) | (next() & ((u64{1} << bits) - 1));
+            check(next(), next(), divisor);
+        }
+    bool rejected = false;
+    try { (void)(u128{1} / u128{}); }
+    catch (const std::domain_error&) { rejected = true; }
+    ASSERT_TRUE(rejected);
+    constexpr u128 one{1};
+    static_assert(static_cast<u64>(((one << 127) / u128{3}) >> 64) == 0x2aaaaaaaaaaaaaaa);
+}

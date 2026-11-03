@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <stdexcept>
 #include "util.h"
+#include "WordArithmetic.h"
 
 namespace osuCrypto 
 {
@@ -48,7 +49,7 @@ namespace osuCrypto
             // sign-extended before the modulo-2^64 conversion.
             v[0] = static_cast<u64>(x);
 
-            // spill remaining chunks if source wider than 64 bits (e.g., __int128)
+            // spill remaining chunks if source wider than 64 bits
             if constexpr (sizeof(UT) > 8)
             {
                 UT t = ux >> 64;
@@ -177,6 +178,13 @@ namespace osuCrypto
         friend constexpr UInt operator-(UInt a, const UInt& b) { a -= b; return a; }
 
         constexpr UInt& operator*=(const UInt& r) {
+            if constexpr (limbs == 2) {
+                u64 low, high;
+                mul128(v[0], r.v[0], low, high);
+                high += v[0] * r.v[1] + v[1] * r.v[0];
+                v = {low, high};
+                return *this;
+            }
             UInt out;
             for (std::size_t i = 0; i < limbs; ++i) {
                 u64 carry = 0; // full 64-bit accumulator
@@ -200,6 +208,12 @@ namespace osuCrypto
         friend constexpr UInt operator*(UInt a, const UInt& b) { a *= b; return a; }
 
         constexpr UInt& operator+=(u64 r) {
+            if constexpr (limbs == 2) {
+                const u64 before = v[0];
+                v[0] += r;
+                v[1] += v[0] < before;
+                return *this;
+            }
             u8 c = 0;
             v[0] = addc64(v[0], r, c, c);
             for (std::size_t i = 1; c && i < limbs; ++i)
@@ -214,6 +228,13 @@ namespace osuCrypto
             return *this;
         }
         constexpr UInt& operator*=(u64 r) {
+            if constexpr (limbs == 2) {
+                u64 low, high;
+                mul128(v[0], r, low, high);
+                high += v[1] * r;
+                v = {low, high};
+                return *this;
+            }
             UInt out;
             u64 carry = 0;
             for (std::size_t i = 0; i < limbs; ++i) {
@@ -236,7 +257,7 @@ namespace osuCrypto
         friend constexpr UInt operator-(UInt a, u64 b) { a -= b; return a; }
         friend constexpr UInt operator*(UInt a, u64 b) { a *= b; return a; }
 
-        // ---- division: restoring long division (no __int128) ----
+        // ---- division: restoring long division (multiple-word divisors) ----
         inline static constexpr void div(const UInt& numerator,
             const UInt& denominator,
             UInt& quo,
@@ -245,6 +266,16 @@ namespace osuCrypto
             if (denominator.is_zero())
                 throw std::domain_error("division by zero");
 
+            if constexpr (limbs == 2) {
+                if (!denominator.v[1]) {
+                    u64 low, high, remainder;
+                    wordArithmetic::divideFull(numerator.v[0], numerator.v[1],
+                        denominator.v[0], low, high, remainder);
+                    quo.v = {low, high};
+                    rem.v = {remainder, 0};
+                    return;
+                }
+            }
             quo = zero();
             rem = zero();
 

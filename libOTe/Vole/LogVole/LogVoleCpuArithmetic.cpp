@@ -1,3 +1,4 @@
+#include "libOTe/Tools/Field/UInt.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include <algorithm>
@@ -12,7 +13,6 @@ namespace osuCrypto::LogVole::detail
 {
     namespace
     {
-#if defined(__SIZEOF_INT128__)
         template<std::size_t Limbs>
         void composeRns(const u64* source, u64* destination,
             std::size_t count, const seal::util::RNSBase& base, std::size_t start = 0)
@@ -31,7 +31,7 @@ namespace osuCrypto::LogVole::detail
                     u64 carry = 0;
                     for (std::size_t w = 0; w < Limbs; ++w)
                     {
-                        const __uint128_t acc = static_cast<__uint128_t>(punctured[j * Limbs + w]) *
+                        const osuCrypto::u128 acc = static_cast<osuCrypto::u128>(punctured[j * Limbs + w]) *
                             scalar + sum[w] + carry;
                         sum[w] = static_cast<u64>(acc);
                         carry = static_cast<u64>(acc >> 64);
@@ -57,7 +57,6 @@ namespace osuCrypto::LogVole::detail
                 std::copy_n(sum, Limbs, destination + coeff * Limbs);
             }
         }
-#endif
 #if defined(LV_CPU_IFMA)
         template<unsigned Bits>
         __attribute__((target("avx512f,avx512dq"), always_inline))
@@ -150,9 +149,9 @@ namespace osuCrypto::LogVole::detail
                 gap[j] = _mm512_set1_epi64((u64{1} << Bits) - modulus);
                 inverse[j] = _mm512_set1_epi64(inv);
                 inverseShoup[j] = _mm512_set1_epi64(static_cast<u64>(
-                    (static_cast<__uint128_t>(inv) << ShoupBits) / modulus));
+                    (static_cast<osuCrypto::u128>(inv) << ShoupBits) / modulus));
                 plainShoup[j] = _mm512_set1_epi64(static_cast<u64>(
-                    (static_cast<__uint128_t>(plaintextModulus) << ShoupBits) / modulus));
+                    (static_cast<osuCrypto::u128>(plaintextModulus) << ShoupBits) / modulus));
                 const auto reciprocal = reciprocal2Pow128Wide(modulus);
                 reciprocalLow[j] = _mm512_set1_epi64(reciprocal.mLo);
                 reciprocalHigh[j] = _mm512_set1_epi64(reciprocal.mHi);
@@ -321,7 +320,7 @@ namespace osuCrypto::LogVole::detail
             const auto half = _mm512_set1_epi64(modulus >> 1);
             const auto operand = _mm512_set1_epi64(inverseLift);
             const auto shoup = _mm512_set1_epi64(static_cast<u64>(
-                (static_cast<__uint128_t>(inverseLift) << (Wide ? 60 : 63)) / modulus));
+                (static_cast<osuCrypto::u128>(inverseLift) << (Wide ? 60 : 63)) / modulus));
             for (std::size_t i = 0; i < count; i += 8)
             {
                 const auto lanes = static_cast<__mmask8>((1u << std::min<std::size_t>(8, count-i)) - 1);
@@ -370,8 +369,8 @@ namespace osuCrypto::LogVole::detail
                 moduli[j] = _mm512_set1_epi64(mod);
                 inv[j] = _mm512_set1_epi64(operand);
                 invShoup[j] = _mm512_set1_epi64(static_cast<u64>(
-                    (static_cast<__uint128_t>(operand) << (Wide ? 60 : 63)) / mod));
-                reciprocal[j] = _mm512_set1_epi64(static_cast<u64>((__uint128_t{1} << 64) / mod));
+                    (static_cast<osuCrypto::u128>(operand) << (Wide ? 60 : 63)) / mod));
+                reciprocal[j] = _mm512_set1_epi64(static_cast<u64>((osuCrypto::u128{1} << 64) / mod));
             }
             for (std::size_t w = 0; w < Words; ++w)
             {
@@ -397,8 +396,8 @@ namespace osuCrypto::LogVole::detail
                     {
                         powers[j][w] = _mm512_set1_epi64(power);
                         powersShoup[j][w] = _mm512_set1_epi64(
-                            static_cast<u64>((static_cast<__uint128_t>(power) << 63) / mod));
-                        power = static_cast<u64>((static_cast<__uint128_t>(power) << 52) % mod);
+                            static_cast<u64>((static_cast<osuCrypto::u128>(power) << 63) / mod));
+                        power = static_cast<u64>((static_cast<osuCrypto::u128>(power) << 52) % mod);
                     }
                     if constexpr (!LowDigit)
                     {
@@ -807,7 +806,6 @@ namespace osuCrypto::LogVole::detail
     bool cpuComposeRns(const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base)
     {
-#if defined(__SIZEOF_INT128__)
         static const bool enabled = [] {
             const char* value = std::getenv("LV_CPU_FAST_CRT");
             return !value || value[0] != '0';
@@ -842,9 +840,6 @@ namespace osuCrypto::LogVole::detail
         if (base.size() == 4) composeRns<4>(source, destination, count, base);
         else composeRns<8>(source, destination, count, base);
         return true;
-#else
-        return false;
-#endif
     }
 
     bool cpuCenteredHighDigit(const u64* source, u64* destination,

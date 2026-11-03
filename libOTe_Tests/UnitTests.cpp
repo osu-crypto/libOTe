@@ -163,6 +163,7 @@ namespace tests_libOTe
 			tc.add("Field_Audit_Test                        ", Field_Audit_Test);
 
 
+			tc.add("UInt_WordArithmetic_Test", UInt_WordArithmetic_Test);
 			tc.add("UInt_Basics_Test                        ", UInt_Basics_Test);
 			tc.add("UInt_Bitwise_Test                       ", UInt_Bitwise_Test);
 			tc.add("UInt_Shifts_Test                        ", UInt_Shifts_Test);

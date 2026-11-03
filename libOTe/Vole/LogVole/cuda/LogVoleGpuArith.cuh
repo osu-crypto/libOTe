@@ -7,6 +7,7 @@
 // native/src/seal/util/uintarithsmallmod.h, uintarith.h and dwthandler.h.
 
 #include <cstdint>
+#include "libOTe/Tools/Field/WordArithmetic.h"
 
 namespace osuCrypto::LogVole::gpu
 {
@@ -36,7 +37,9 @@ namespace osuCrypto::LogVole::gpu
 #if defined(__CUDA_ARCH__)
         return __umul64hi(a, b);
 #else
-        return static_cast<u64>((static_cast<unsigned __int128>(a) * b) >> 64);
+        u64 low, high;
+        wordArithmetic::multiply(a, b, low, high);
+        return high;
 #endif
     }
 

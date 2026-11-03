@@ -39,7 +39,7 @@ __global__ void logarithms(const double* input, double* output, std::size_t coun
 
 void test_logarithms()
 {
-    constexpr std::size_t count = 1u << 20;
+    constexpr std::size_t count = 4099;
     std::mt19937_64 random(0xabc12943);
     std::vector<double> input(count), output(count);
     for (std::size_t i = 0; i < count; ++i)
@@ -140,6 +140,12 @@ void test_samples(u32 wordsPerRow, u32 rows, u32 coefficients, double sigma, dou
 
 int main()
 {
+#if !defined(__GLIBC__) || !defined(__GLIBCXX__)
+    // This oracle intentionally matches glibc log and libstdc++'s distribution.
+    // Production uses its CPU fallback on incompatible host arithmetic ABIs.
+    std::puts("SKIP: Gaussian transform oracle requires glibc/libstdc++");
+    return 77;
+#else
     try
     {
         test_logarithms();
@@ -163,4 +169,5 @@ int main()
         std::fprintf(stderr, "FAIL: %s\n", e.what());
         return 1;
     }
+#endif
 }

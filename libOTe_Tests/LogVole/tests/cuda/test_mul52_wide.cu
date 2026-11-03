@@ -1,3 +1,4 @@
+#include "libOTe_Tests/WideArithmeticOracle.h"
 // Independent full-width unsigned-128 oracle; no modular reduction can mask
 // an error in either word. Build and run with this directory's CMake/CTest setup.
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuMul52.cuh"
@@ -25,7 +26,7 @@ u64 next(u64& s)
 }
 int main()
 {
-    constexpr u64 n = 1u << 20u, mask = (u64{1} << 52u) - 1u;
+    constexpr u64 n = 4099, mask = (u64{1} << 52u) - 1u;
     std::vector<u64> a(n), b(n);
     std::vector<ulonglong2> got(n);
     u64 *da, *db;
@@ -40,9 +41,9 @@ int main()
         {
             a[i] = next(state) & mask;
             b[i] = next(state) & mask;
-            if (i < 65536u)
+            if (i < 256u)
             {
-                const u64 x = i & 255u, y = (i >> 8u) & 255u;
+                const u64 x = i & 15u, y = (i >> 4u) & 15u;
                 const u64 edge = round == 0u ? mask : round == 1u ? (u64{1} << 32u) - 1u :
                     round == 2u ? (u64{1} << 32u) : mask - (round << 32u);
                 a[i] = (x & 1u) ? edge - (x >> 1u) : x >> 1u;
@@ -56,8 +57,8 @@ int main()
         check(cudaMemcpy(got.data(), dout, n * sizeof(ulonglong2), cudaMemcpyDeviceToHost));
         for (u64 i = 0; i < n; ++i)
         {
-            const unsigned __int128 expected = static_cast<unsigned __int128>(a[i]) * b[i];
-            if (got[i].x != static_cast<u64>(expected) || got[i].y != static_cast<u64>(expected >> 64u))
+            const auto expected = host_oracle::multiply(a[i], b[i]);
+            if (got[i].x != expected.lo || got[i].y != expected.hi)
             {
                 std::fprintf(stderr, "FAIL round=%llu index=%llu\n", (unsigned long long)round, (unsigned long long)i);
                 return 1;

@@ -1,3 +1,4 @@
+#include "libOTe/Tools/Field/UInt.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuZk.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include <algorithm>
@@ -178,11 +179,11 @@ namespace osuCrypto::LogVole::detail
             constexpr unsigned ShoupBits = Bits < 52 ? 63 : 60;
             const auto strideVector = _mm512_set1_epi64(stride);
             const auto strideShoup = _mm512_set1_epi64(static_cast<u64>(
-                (static_cast<__uint128_t>(stride) << ShoupBits) / q));
+                (static_cast<osuCrypto::u128>(stride) << ShoupBits) / q));
             delta %= q;
             const auto deltaVector = _mm512_set1_epi64(delta);
             const auto deltaShoup = _mm512_set1_epi64(static_cast<u64>(
-                (static_cast<__uint128_t>(delta) << ShoupBits) / q));
+                (static_cast<osuCrypto::u128>(delta) << ShoupBits) / q));
             const auto even = _mm512_setr_epi32(0,2,4,6,8,10,12,14,0,0,0,0,0,0,0,0);
             const auto odd = _mm512_setr_epi32(1,3,5,7,9,11,13,15,0,0,0,0,0,0,0,0);
             auto powers = _mm512_loadu_si512(weights), sumU = field.zero, sumV = field.zero;
@@ -240,7 +241,6 @@ namespace osuCrypto::LogVole::detail
             return bits;
         }
 
-#if defined(__SIZEOF_INT128__)
         // Each product is kept as lo52 + 2^52*hi52 without modular reduction.
         // A 512-term block gives at most 64 products per lane, or 128 for the
         // prover's cross sum. At 54 bits, hi52 < 2^56, so its cross accumulator
@@ -261,9 +261,9 @@ namespace osuCrypto::LogVole::detail
             u64 lows[8], highs[8];
             _mm512_storeu_si512(lows, low);
             _mm512_storeu_si512(highs, high);
-            __uint128_t sum = 0;
+            osuCrypto::u128 sum = 0;
             for (unsigned lane = 0; lane != 8; ++lane)
-                sum += (static_cast<__uint128_t>(highs[lane]) << 52) + lows[lane];
+                sum += (static_cast<osuCrypto::u128>(highs[lane]) << 52) + lows[lane];
             return static_cast<u64>(sum % modulus);
         }
 
@@ -362,7 +362,6 @@ namespace osuCrypto::LogVole::detail
             return enabled && (bits == 51 || bits == 54) ? bits : 0;
         }
 #endif
-#endif
 
         bool validMatrixRange(std::size_t n, std::size_t beginRow,
             std::size_t endRow, const seal::Modulus& modulus)
@@ -372,7 +371,6 @@ namespace osuCrypto::LogVole::detail
                 modulus.value() >= 2 && modulus.value() < (u64{1} << 61);
         }
 
-#if defined(__SIZEOF_INT128__)
         std::size_t scalarMatrixBlockSize(const seal::Modulus& modulus)
         {
             // Each product is <2^(2*bits). Limit each raw accumulator to
@@ -399,12 +397,12 @@ namespace osuCrypto::LogVole::detail
                     for (std::size_t start = 0; start < n; start += block)
                     {
                         const std::size_t end = std::min(n, start + block);
-                        __uint128_t raw0 = 0, raw1 = 0, raw2 = 0;
+                        osuCrypto::u128 raw0 = 0, raw1 = 0, raw2 = 0;
                         for (std::size_t k = start; k < end; ++k)
                         {
-                            raw0 += static_cast<__uint128_t>(mar[k]) * mbr[k];
-                            raw1 += static_cast<__uint128_t>(ar[k]) * mbr[k];
-                            raw2 += static_cast<__uint128_t>(br[k]) * mar[k];
+                            raw0 += static_cast<osuCrypto::u128>(mar[k]) * mbr[k];
+                            raw1 += static_cast<osuCrypto::u128>(ar[k]) * mbr[k];
+                            raw2 += static_cast<osuCrypto::u128>(br[k]) * mar[k];
                         }
                         sum0 = addMod(sum0, static_cast<u64>(raw0 % modulus.value()), modulus);
                         sumCross = addMod(sumCross,
@@ -429,15 +427,14 @@ namespace osuCrypto::LogVole::detail
                     for (std::size_t start = 0; start < n; start += block)
                     {
                         const std::size_t end = std::min(n, start + block);
-                        __uint128_t raw = 0;
+                        osuCrypto::u128 raw = 0;
                         for (std::size_t k = start; k < end; ++k)
-                            raw += static_cast<__uint128_t>(ar[k]) * br[k];
+                            raw += static_cast<osuCrypto::u128>(ar[k]) * br[k];
                         sum = addMod(sum, static_cast<u64>(raw % modulus.value()), modulus);
                     }
                     products[i * n + j] = sum;
                 }
         }
-#endif
     }
 
     bool cpuZkWitnessRange(const u32* operands, const u64* wires, u64* outputs,
@@ -499,7 +496,6 @@ namespace osuCrypto::LogVole::detail
         if (!validMatrixRange(n, beginRow, endRow, modulus)) return false;
         if (beginRow == endRow) return true;
         if (!a || !ma || !bt || !mbt || !a0 || !cross) return false;
-#if defined(__SIZEOF_INT128__)
 #if defined(LV_ZK_VECTOR)
         const int bits = matrixVectorBits(modulus);
         if (bits == 51) matrixProverTermsVector<51>(a, ma, bt, mbt, a0, cross,
@@ -510,9 +506,6 @@ namespace osuCrypto::LogVole::detail
 #endif
             matrixProverTermsScalar(a, ma, bt, mbt, a0, cross, n, beginRow, endRow, modulus);
         return true;
-#else
-        return false;
-#endif
     }
 
     bool cpuZkMatMulVerifierTerms(
@@ -522,7 +515,6 @@ namespace osuCrypto::LogVole::detail
         if (!validMatrixRange(n, beginRow, endRow, modulus)) return false;
         if (beginRow == endRow) return true;
         if (!a || !bt || !products) return false;
-#if defined(__SIZEOF_INT128__)
 #if defined(LV_ZK_VECTOR)
         const int bits = matrixVectorBits(modulus);
         if (bits == 51) matrixVerifierTermsVector<51>(a, bt, products, n, beginRow, endRow, modulus);
@@ -531,8 +523,5 @@ namespace osuCrypto::LogVole::detail
 #endif
             matrixVerifierTermsScalar(a, bt, products, n, beginRow, endRow, modulus);
         return true;
-#else
-        return false;
-#endif
     }
 }

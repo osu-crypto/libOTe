@@ -42,7 +42,6 @@ namespace
 {
     void checkMatMulCpuTerms()
     {
-#if defined(__SIZEOF_INT128__)
         struct Case { u64 modulus; std::size_t dimension; bool extreme; };
         // The p61 cases exceed the safe whole-dot accumulator length, while
         // n1025/p54 overflows an unbounded IFMA high-limb cross accumulator.
@@ -168,7 +167,6 @@ namespace
             nullptr, nullptr, nullptr, 2, 1, 1, mod));
         LOGVOLE_REQUIRE_TRUE(LogVole::detail::cpuZkMatMulVerifierTerms(nullptr, nullptr,
             nullptr, 2, 1, 1, mod));
-#endif
     }
 
     template<typename Prover, typename Verifier, typename Statement>

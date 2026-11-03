@@ -244,7 +244,7 @@ namespace osuCrypto
 				u64 a = in0.canonical().mVal;
 				u64 b = in1.canonical().mVal;
 				u64 prod = static_cast<u64>((u128(a) * u128(b)) % u128(Goldilocks::mModulus));
-				//u64 prod = (__uint128_t(in0.mVal) * in1.mVal) % __uint128_t(Goldilocks::mModulus);
+				//u64 prod = (UInt<128>(in0.mVal) * in1.mVal) % UInt<128>(Goldilocks::mModulus);
 				return Goldilocks{ prod };
 			};
 

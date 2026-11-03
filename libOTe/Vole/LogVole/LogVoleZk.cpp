@@ -1,3 +1,4 @@
+#include "libOTe/Tools/Field/UInt.h"
 #include "libOTe/Vole/LogVole/LogVoleZk.h"
 
 #include "libOTe/config.h"
@@ -412,7 +413,6 @@ namespace osuCrypto::LogVole
             std::size_t begin, std::size_t end, const seal::Modulus& mod)
         {
             std::array<u64, 2> result{0, 0};
-#if defined(__SIZEOF_INT128__)
             // Each canonical product is <2^(2*bits). The bounded chunk leaves
             // two spare accumulator bits, for every supported SEAL modulus.
             const unsigned shift = std::min<unsigned>(20, 126 - 2 * mod.bit_count());
@@ -420,24 +420,17 @@ namespace osuCrypto::LogVole
             for (std::size_t start = begin; start < end;)
             {
                 const auto stop = start + std::min(block, end - start);
-                __uint128_t a = 0, b = 0;
+                osuCrypto::u128 a = 0, b = 0;
                 for (std::size_t i = start; i < stop; ++i)
                 {
-                    a += static_cast<__uint128_t>(coefficients[i]) * first[i];
-                    if constexpr (Dual) b += static_cast<__uint128_t>(coefficients[i]) * second[i];
+                    a += static_cast<osuCrypto::u128>(coefficients[i]) * first[i];
+                    if constexpr (Dual) b += static_cast<osuCrypto::u128>(coefficients[i]) * second[i];
                 }
                 result[0] = addMod(result[0], static_cast<u64>(a % mod.value()), mod);
                 if constexpr (Dual)
                     result[1] = addMod(result[1], static_cast<u64>(b % mod.value()), mod);
                 start = stop;
             }
-#else
-            for (std::size_t i = begin; i < end; ++i)
-            {
-                result[0] = mulAddMod(coefficients[i], first[i], result[0], mod);
-                if constexpr (Dual) result[1] = mulAddMod(coefficients[i], second[i], result[1], mod);
-            }
-#endif
             return result;
         }
     }

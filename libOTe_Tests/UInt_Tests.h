@@ -12,3 +12,4 @@ void UInt_DivBasic_Test();
 void UInt_DivMultilimb_Test();
 void UInt_Stream_Test();
 void UInt_Conversions_Test();
+void UInt_WordArithmetic_Test();

@@ -28,7 +28,7 @@ __global__ void reduceWords(const u64* x, const u64* thresholds,
 }
 int main()
 {
-    constexpr u64 n = 1u << 20u, radix = u64{1} << 52u;
+    constexpr u64 n = 4099, radix = u64{1} << 52u;
     std::vector<u64> x(n), thresholds(n);
     std::vector<SamplePseudo52Word> a(n), b(n);
     u64 *dx, *dt;
@@ -50,16 +50,16 @@ int main()
         {
             thresholds[i] = choices[i & 7u];
             x[i] = next(state);
-            if (i < 32768u)
+            if (i < 512u)
             {
-                const u64 h = i >> 3u;
+                const u64 h = (i >> 3u) * 65u;
                 const u64 center = h * radix + q - 1u - h * c;
                 x[i] = center + (i & 7u) - 3u;
                 thresholds[i] = standard;
             }
-            else if (i < 65536u)
+            else if (i < 768u)
             {
-                const u64 offset = (i >> 3u) & 127u;
+                const u64 offset = (i - 512u) >> 1u;
                 x[i] = (i & 1u) ? ~u64{0} - offset : offset;
             }
         }

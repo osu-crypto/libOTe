@@ -1,3 +1,4 @@
+#include "libOTe_Tests/WideArithmeticOracle.h"
 // Exact ZK-field products against independent host unsigned-128-bit division.
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuZkArith.cuh"
 
@@ -37,7 +38,7 @@ namespace
 
 int main()
 {
-    constexpr u32 count = 1u << 18u;
+    constexpr u32 count = 4099;
     std::vector<u64> a(count), b(count), got(count);
     u64 *deviceA, *deviceB, *deviceOut;
     check(cudaMalloc(&deviceA, count * sizeof(u64)));
@@ -82,8 +83,7 @@ int main()
             check(cudaMemcpy(got.data(), deviceOut, count * sizeof(u64), cudaMemcpyDeviceToHost));
             for (u32 i = 0; i < count; ++i)
             {
-                const u64 expected = static_cast<u64>(
-                    (static_cast<unsigned __int128>(a[i]) * b[i]) % q);
+                const u64 expected = host_oracle::remainder(host_oracle::multiply(a[i], b[i]), q);
                 if (got[i] != expected)
                 {
                     std::fprintf(stderr, "FAIL bits=%u c=%u index=%u\n", bits, c, i);

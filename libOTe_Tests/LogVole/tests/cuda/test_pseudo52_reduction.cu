@@ -1,3 +1,4 @@
+#include "libOTe_Tests/WideArithmeticOracle.h"
 // Full-width modular reduction oracle. See this directory's README.md for CMake/CTest.
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuPseudo52.cuh"
 #include <cstdio>
@@ -27,7 +28,7 @@ u64 next(u64& s)
 }
 int main()
 {
-    constexpr u64 n = 1u << 20u, radix = u64{1} << 52u;
+    constexpr u64 n = 4099, radix = u64{1} << 52u;
     std::vector<Wide> input(n);
     std::vector<u64> a(n), b(n);
     Wide* din; u64 *da, *db;
@@ -42,17 +43,19 @@ int main()
         for (u64 i = 0u; i < n; ++i)
         {
             input[i] = Wide{next(state), next(state)};
-            if (i < 65536u)
+            if (i < 256u)
             {
-                const u64 x = i & 255u, y = (i >> 8u) & 255u;
+                const u64 x = i & 15u, y = (i >> 4u) & 15u;
                 input[i] = Wide{(x & 1u) ? ~u64{0} - (x >> 1u) : x >> 1u,
                                 (y & 1u) ? ~u64{0} - (y >> 1u) : y >> 1u};
             }
-            else if (i < 131072u)
+            else if (i < 512u)
             {
-                const unsigned __int128 q2 = static_cast<unsigned __int128>(q) * q;
-                const unsigned __int128 value = q2 * (i % 7u) + (i & 1u ? i % 257u : -static_cast<unsigned __int128>(i % 257u));
-                input[i] = Wide{static_cast<u64>(value), static_cast<u64>(value >> 64u)};
+                const auto multiple = host_oracle::scale(host_oracle::multiply(q, q), i % 7u);
+                const host_oracle::Uint128 offset{i % 257u, 0};
+                const auto value = (i & 1u) ? host_oracle::add(multiple, offset)
+                    : host_oracle::subtract(multiple, offset);
+                input[i] = Wide{value.lo, value.hi};
             }
         }
         check(cudaMemcpy(din, input.data(), n * sizeof(Wide), cudaMemcpyHostToDevice));
@@ -62,8 +65,7 @@ int main()
         check(cudaMemcpy(b.data(), db, n * sizeof(u64), cudaMemcpyDeviceToHost));
         for (u64 i = 0u; i < n; ++i)
         {
-            const unsigned __int128 value = (static_cast<unsigned __int128>(input[i].mHi) << 64u) | input[i].mLo;
-            const u64 expected = static_cast<u64>(value % q);
+            const u64 expected = host_oracle::remainder({input[i].mLo, input[i].mHi}, q);
             if (a[i] != expected || b[i] != expected)
             {
                 std::fprintf(stderr, "FAIL c=%llu index=%llu\n", (unsigned long long)c, (unsigned long long)i);

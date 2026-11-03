@@ -1,3 +1,4 @@
+#include "libOTe_Tests/WideArithmeticOracle.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuSampler.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuZkArith.h"
@@ -94,9 +95,6 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
 
 void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
 {
-#if !defined(__SIZEOF_INT128__)
-    LOGVOLE_SKIP() << "Independent margin oracle requires unsigned __int128";
-#else
     PRNG random(toBlock(0x474f4c44, 0x4d415247));
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
@@ -111,7 +109,7 @@ void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
             {
                 indices.push_back(j);
                 reduced.push_back(moduli[j]);
-                const auto fraction = (~__uint128_t{0}) / moduli[j].value();
+                const auto fraction = (~host_oracle::Uint128{0}) / moduli[j].value();
                 fractions.push_back({static_cast<u64>(fraction), static_cast<u64>(fraction >> 64)});
             }
             seal::util::RNSBase base(reduced, seal::MemoryPoolHandle::ThreadLocal());
@@ -129,21 +127,21 @@ void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
                         input[1+j*count+i] = edges[i];
                 }
                 const auto original = input;
-                __uint128_t closest = ~__uint128_t{0};
+                host_oracle::Uint128 closest = ~host_oracle::Uint128{0};
                 for (std::size_t i = 0; i < count; ++i)
                 {
-                    __uint128_t sum = __uint128_t{1} << 127;
+                    host_oracle::Uint128 sum = host_oracle::Uint128{1} << 127;
                     for (std::size_t j = 0; j < indices.size(); ++j)
                     {
                         const u64 q = reduced[j].value();
-                        const u64 residue = (static_cast<__uint128_t>(input[1+indices[j]*count+i] % q) *
+                        const u64 residue = (static_cast<host_oracle::Uint128>(input[1+indices[j]*count+i] % q) *
                             inverse[j].operand) % q;
-                        sum += residue * ((~__uint128_t{0}) / q);
+                        sum += residue * ((~host_oracle::Uint128{0}) / q);
                     }
-                    closest = std::min(closest, std::min(sum, __uint128_t{0} - sum));
+                    closest = std::min(closest, std::min(sum, host_oracle::Uint128{0} - sum));
                 }
-                for (const auto margin : {__uint128_t{0}, __uint128_t{1},
-                    (__uint128_t{1} << 127), ~__uint128_t{0}, closest, closest-1, closest+1})
+                for (const auto margin : {host_oracle::Uint128{0}, host_oracle::Uint128{1},
+                    (host_oracle::Uint128{1} << 127), ~host_oracle::Uint128{0}, closest, closest-1, closest+1})
                 {
                     bool accepted = false;
                     const bool used = LogVole::detail::cpuCheckRoundingMargin(input.data()+1, count,
@@ -166,7 +164,6 @@ void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
             }
         }
     }
-#endif
 }
 
 void LogVole_Cpu_ReduceMatchesReference(const oc::CLP&)
@@ -216,9 +213,6 @@ void LogVole_Cpu_ReduceMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_ScaleAndRoundMatchesReference(const oc::CLP&)
 {
-#if !defined(__SIZEOF_INT128__)
-    LOGVOLE_SKIP() << "Independent wide-division oracle requires unsigned __int128";
-#else
     PRNG random(toBlock(0x5343414c, 0x45524e44));
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
@@ -251,15 +245,15 @@ void LogVole_Cpu_ScaleAndRoundMatchesReference(const oc::CLP&)
             {
                 // Independent wide division, with the same specified 128-bit
                 // fractional rounding as the production scalar implementation.
-                __uint128_t fraction = __uint128_t{1} << 127;
+                host_oracle::Uint128 fraction = host_oracle::Uint128{1} << 127;
                 u64 result = 0;
                 for (unsigned j = 0; j < limbs; ++j)
                 {
                     const u64 q = moduli[j].value();
-                    const u64 x = static_cast<u64>((static_cast<__uint128_t>(input[j*count+k] % q) *
+                    const u64 x = static_cast<u64>((static_cast<host_oracle::Uint128>(input[j*count+k] % q) *
                         base.inv_punctured_prod_mod_base_array()[j].operand) % q);
-                    const __uint128_t numerator = static_cast<__uint128_t>(x) * p;
-                    const auto term = (numerator % q) * (~__uint128_t{0} / q);
+                    const host_oracle::Uint128 numerator = static_cast<host_oracle::Uint128>(x) * p;
+                    const auto term = (numerator % q) * (~host_oracle::Uint128{0} / q);
                     const auto next = fraction + term;
                     result = (result + static_cast<u64>(numerator / q) + (next < fraction)) % p;
                     fraction = next;
@@ -282,7 +276,6 @@ void LogVole_Cpu_ScaleAndRoundMatchesReference(const oc::CLP&)
             base, u64{1} << bits));
         LOGVOLE_REQUIRE_TRUE(std::all_of(unchanged.begin(), unchanged.end(), [](u64 x) { return x == 123; }));
     }
-#endif
 }
 
 void LogVole_Cpu_FusedGadgetMatchesBalancedReference(const oc::CLP&)
@@ -716,7 +709,6 @@ void LogVole_Cpu_CrtMixedWidthsMatchSeal(const oc::CLP&)
 
 void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
 {
-#if defined(__SIZEOF_INT128__)
     for (u64 width : {1, 7, 8, 9, 1031})
     for (u64 depth : {1, 3})
     for (u64 modulus : {u64{257}, u64{2251799813554177}, u64{18014398508400641}})
@@ -739,7 +731,7 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
             std::vector<u64> expected(circuit.voleCount()+13, 0);
             for (u64 i = 0; i < width; ++i) expected[i] = original.get<u64>() % modulus;
             for (u64 g = 0; g < circuit.gateCount(); ++g)
-                expected[circuit.outputWire(g)] = static_cast<__uint128_t>(expected[circuit.mOperands[2*g]]) *
+                expected[circuit.outputWire(g)] = static_cast<host_oracle::Uint128>(expected[circuit.mOperands[2*g]]) *
                     expected[circuit.mOperands[2*g+1]] % modulus;
             expected[circuit.maskIndex()] = original.get<u64>() % modulus;
             const auto next = original.get<block>();
@@ -753,7 +745,6 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
             }
         }
     }
-#endif
 }
 
 void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
@@ -808,8 +799,8 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             for (const auto proof : {ZkProof{0, 0}, ZkProof{modulus - 1u, modulus - 1u},
                     ZkProof{~u64(0), ~u64(0)}})
             {
-                const u64 expected = static_cast<u64>((static_cast<unsigned __int128>(proof.mV) * delta +
-                    proof.mU % modulus) % modulus);
+                const u64 expected = host_oracle::remainder(host_oracle::add(
+                    host_oracle::multiply(proof.mV, delta), {proof.mU % modulus, 0}), modulus);
                 bool accepted = false;
                 LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, expected, delta, modulus, accepted));
                 LOGVOLE_REQUIRE_TRUE(accepted && zkAccept(proof, expected, delta, modulus));
@@ -1364,9 +1355,6 @@ void LogVole_Cpu_DyadicMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_FusedDotMatchesReference(const oc::CLP&)
 {
-#if !defined(__SIZEOF_INT128__)
-    LOGVOLE_SKIP() << "Independent wide-product oracle requires unsigned __int128";
-#else
     PRNG random(toBlock(0x444f54, 0x49464d41));
     for (int bits : {30, 52, 55, 60})
     for (u64 gap : {1ULL, 32767ULL, 16777215ULL, 16777216ULL})
@@ -1395,9 +1383,9 @@ void LogVole_Cpu_FusedDotMatchesReference(const oc::CLP&)
         expected = c;
         for (std::size_t i = 0; i < count; ++i)
         {
-            __uint128_t sum = c[i+1] % q;
+            host_oracle::Uint128 sum = c[i+1] % q;
             for (std::size_t t = 0; t < terms; ++t)
-                sum += static_cast<__uint128_t>(ap[t][i] % q) * (bp[t][i] % q);
+                sum += static_cast<host_oracle::Uint128>(ap[t][i] % q) * (bp[t][i] % q);
             expected[i+1] = static_cast<u64>(sum % q);
         }
         const auto original = c;
@@ -1435,12 +1423,10 @@ void LogVole_Cpu_FusedDotMatchesReference(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(!dyadicInnerProductNttInplace(ap, bp, actual, ctx));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(actual.mCoeffs, expected.mCoeffs));
     }
-#endif
 }
 
 void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
 {
-#if defined(__SIZEOF_INT128__)
     PRNG random(toBlock(0x1eaf, 0x20260910));
     for (int bits : {52, 55})
     {
@@ -1456,7 +1442,7 @@ void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
             {
                 const std::array<u64, 7> edges{0, 1, q/2-1, q/2, q/2+1, q-2, q-1};
                 input[i+1] = i < edges.size() ? edges[i] : random.get<u64>() % q;
-                const u64 residue = static_cast<__uint128_t>(input[i+1]) * inverse % q;
+                const u64 residue = static_cast<host_oracle::Uint128>(input[i+1]) * inverse % q;
                 for (std::size_t j = 0; j < moduli.size(); ++j)
                     expected[1+j*count+i] = residue > q/2 ? moduli[j].value()-(q-residue) : residue;
             }
@@ -1500,7 +1486,6 @@ void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(ctx, canonical, 1, 4*bits, bits-1, expected, 2, true));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(actual.mDigest.mCoeffs, expected.mDigest.mCoeffs));
     }
-#endif
 }
 
 void LogVole_Cpu_ErrorSamplingMatchesSeal(const oc::CLP&)
@@ -1762,9 +1747,6 @@ void LogVole_Cpu_ZkArithmeticMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_ZkVectorMatchesReference(const oc::CLP&)
 {
-#if !defined(__SIZEOF_INT128__)
-    LOGVOLE_SKIP() << "Independent wide-division oracle requires unsigned __int128";
-#else
     PRNG random(toBlock(0x5a4b5645, 0x43544f52));
     for (int bits : {30, 51, 54, 60})
     for (u64 gap : {1ULL, 32767ULL, 16777215ULL, 16777216ULL})
@@ -1773,7 +1755,7 @@ void LogVole_Cpu_ZkVectorMatchesReference(const oc::CLP&)
         const u64 q = (u64{1} << bits) - gap;
         const seal::Modulus mod(q);
         const auto multiply = [q](u64 a, u64 b) {
-            return static_cast<u64>((static_cast<__uint128_t>(a) * b) % q);
+            return static_cast<u64>((static_cast<host_oracle::Uint128>(a) * b) % q);
         };
         std::vector<u64> wires(1026), labels(1026), outputs(count + 2);
         std::vector<u32> operands(2 * count + 2);
@@ -1825,7 +1807,6 @@ void LogVole_Cpu_ZkVectorMatchesReference(const oc::CLP&)
 #endif
         }
     }
-#endif
 }
 
 void LogVole_Cpu_ZkProofMatchesReference(const oc::CLP&)
