@@ -32,15 +32,21 @@ namespace
         LOGVOLE_REQUIRE_FALSE(device);
 #endif
         // Cross a complete recursive block and end with a partial CRT batch.
-        constexpr u64 count = (u64{1} << 18) + 3;
+        const u64 count = cmd.getOr("lvCount", (u64{1} << 18) + 3);
+        const u64 rounds = cmd.getOr("lvRounds", u64{2});
+        const u64 seed = cmd.getOr("lvSeed", u64{0});
+        const u32 threads = cmd.getOr("lvThreads", u32{2});
+        const bool randomInputs = cmd.getOr("lvRandom", 0) != 0;
+        LOGVOLE_REQUIRE_TRUE(count && rounds && threads);
         constexpr u64 delta = 19;
         LogVoleSender originalSender;
         LogVoleReceiver originalReceiver;
-        originalSender.configure(count, 55, 2, setting, mode);
-        originalReceiver.configure(count, 55, 2, setting, mode);
+        originalSender.configure(count, 55, threads, setting, mode);
+        originalReceiver.configure(count, 55, threads, setting, mode);
         originalSender.mKeepOutputOnDevice = device;
         originalReceiver.mKeepOutputOnDevice = device;
-        PRNG senderPrng(toBlock(100, 200)), receiverPrng(toBlock(300, 400));
+        PRNG senderPrng(toBlock(100 ^ seed, 200)), receiverPrng(toBlock(300 ^ seed, 400));
+        PRNG inputPrng(toBlock(500 ^ seed, 600));
         auto offline = coproto::LocalAsyncSocket::makePair();
         auto setup = macoro::sync_wait(macoro::when_all_ready(
             originalSender.offline(delta, senderPrng, offline[0]),
@@ -60,10 +66,11 @@ namespace
         LOGVOLE_REQUIRE_EQ(receiver.mKeepOutputOnDevice, device);
         std::vector<u64> x(count), keys(count), macs(count);
         const seal::Modulus p(sender.modulus());
-        for (u64 round = 0; round != 2; ++round)
+        for (u64 round = 0; round != rounds; ++round)
         {
             for (u64 i = 0; i != count; ++i)
-                x[i] = i % 3 == 0 ? 0 : (i % 3 == 1 ? p.value() - 1 : i + round);
+                x[i] = i % 3 == 0 ? 0 : (i % 3 == 1 ? p.value() - 1 :
+                    (randomInputs ? inputPrng.get<u64>() % p.value() : i + round));
             auto online = coproto::LocalAsyncSocket::makePair();
             auto query = macoro::sync_wait(macoro::when_all_ready(
                 sender.send(device ? span<u64>{} : span<u64>(keys), senderPrng, online[0]),
@@ -106,4 +113,9 @@ void LogVole_Modes_InteractiveGolden(const CLP& cmd)
 void LogVole_Modes_NonInteractive(const CLP& cmd)
 {
     checkMode(cmd, CivoleSetting::NoGoldenSeed, OnlineMode::NonInteractive);
+}
+
+void LogVole_Modes_InteractiveNoGolden(const CLP& cmd)
+{
+    checkMode(cmd, CivoleSetting::NoGoldenSeed, OnlineMode::Interactive);
 }

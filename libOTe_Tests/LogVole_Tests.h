@@ -4,6 +4,7 @@
 
 #define LIBOTE_LOGVOLE_TESTS(X) \
     X(Modes, InteractiveGolden) \
+    X(Modes, InteractiveNoGolden) \
     X(Modes, NonInteractive) \
     X(Garbled, LayoutAndValidation) \
     X(Garbled, SequentialRelation) \

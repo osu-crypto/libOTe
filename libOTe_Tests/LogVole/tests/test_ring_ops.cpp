@@ -658,7 +658,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 if (corruption == 3) malformed.mRing.mHostContextCache = crt[1].mRing.mHostContextCache;
                 if (corruption == 4) --malformed.mPlaintextModulusBits;
                 RnsPoly encoded;
-                encoded.mCoeffs = {0xdecafbadULL};
+                assignValues<std::uint64_t>(encoded.mCoeffs, {0xdecafbadULL});
                 LOGVOLE_REQUIRE_FALSE(wrapZpBatchCrt(
                     malformed, labels, false, 0u, 1u, encoded))
                     << " corruption " << corruption;
@@ -930,7 +930,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(unchanged,
                         std::vector<std::uint64_t>{23u, 47u}));
                     RnsPoly invalidShape;
-                    invalidShape.mCoeffs = {17u};
+                    assignValues<std::uint64_t>(invalidShape.mCoeffs, {17u});
                     LOGVOLE_REQUIRE_FALSE(unwrapRingLabelsCrt(
                         dynamicCrt[party], {invalidShape}, labels.size(),
                         false, 1u, unchanged));
@@ -1749,10 +1749,12 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         params.mCoeffModulusBits.resize(shape.second);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(),
             shape.first == 1024u ? 30 : shape.first == 8192u ? 55 : 52);
-        RingNttContext ctx;
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
         const auto run = allocateProtocolCacheRunId();
         ScopedProtocolCacheScope cacheScope(ProtocolCacheRole::Sender, run);
+        // Dynamic GPU contexts carry a party-local certificate. Construct the
+        // context in the same role that will sample from it.
+        RingNttContext ctx;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
         constexpr std::uint32_t count = 4;
         constexpr std::uint64_t nonce = 0x52455441494e4544ULL, domain = 0x5055424c4943ULL;
 
