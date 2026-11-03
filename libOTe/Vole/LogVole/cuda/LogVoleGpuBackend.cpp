@@ -317,7 +317,23 @@ namespace osuCrypto::LogVole::gpu
         // and worker threads never share a mutable stream.
         struct RawSetupStreamOwner
         {
+            RawSetupStreamOwner() = default;
+            RawSetupStreamOwner(const RawSetupStreamOwner&) = delete;
+            RawSetupStreamOwner& operator=(const RawSetupStreamOwner&) = delete;
             void* mStream = nullptr;
+            std::shared_ptr<OwnedGpuStream> mAllocationOwner;
+            const std::shared_ptr<OwnedGpuStream>& allocationOwner()
+            {
+                if (!mAllocationOwner)
+                {
+                    if (!ensureStream()) throw std::runtime_error("CUDA setup stream unavailable");
+                    const int device = currentDeviceOrdinal();
+                    if (device < 0) throw std::runtime_error("CUDA device unavailable");
+                    auto memory = std::make_shared<GpuMemoryPool>(device);
+                    mAllocationOwner = std::make_shared<OwnedGpuStream>(std::move(memory), mStream);
+                }
+                return mAllocationOwner;
+            }
             void* ensureStream()
             {
                 // A transient creation failure must not poison later raw
@@ -328,10 +344,10 @@ namespace osuCrypto::LogVole::gpu
             ~RawSetupStreamOwner()
             {
                 if (!mStream) return;
-                gpuStreamSync(mStream);
-                gpuSetCurrentStream(nullptr);
+                if (!gpuStreamSync(mStream)) std::terminate();
+                if (gpuCurrentStream() == mStream) gpuSetCurrentStream(nullptr);
                 gpuForgetStream(mStream);
-                gpuStreamDestroy(mStream);
+                if (!mAllocationOwner) gpuStreamDestroy(mStream);
             }
         };
 
@@ -363,16 +379,42 @@ namespace osuCrypto::LogVole::gpu
         struct RawSetupStream
         {
             void* mPrevious = gpuCurrentStream();
-            void* mStream = roleRawSetupStream().ensureStream();
+            RawSetupStreamOwner& mOwner = roleRawSetupStream();
+            void* mStream = mOwner.ensureStream();
+            const std::shared_ptr<OwnedGpuStream>& allocationOwner() { return mOwner.allocationOwner(); }
             RawSetupStream() { if (mStream) gpuSetCurrentStream(mStream); }
+            RawSetupStream(const RawSetupStream&) = delete;
+            RawSetupStream& operator=(const RawSetupStream&) = delete;
             ~RawSetupStream()
             {
                 // A failed launch/copy must drain before an arena or temporary
                 // host record expires. The owner keeps the stream registered.
-                if (mStream) gpuStreamSync(mStream);
+                if (mStream && !gpuStreamSync(mStream)) std::terminate();
                 gpuSetCurrentStream(mPrevious);
             }
             bool sync() const { return mStream && gpuStreamSync(mStream); }
+        };
+
+        // Temporary setup records never escape their synchronized producer.
+        // Reuse the explicit stream pool without consulting the ambient allocator.
+        class RawScratchArena
+        {
+            OwnedGpuBuffer mStorage;
+            std::size_t mUsed = 0;
+        public:
+            RawScratchArena(std::size_t bytes, RawSetupStream& stream)
+            {
+                try { mStorage = OwnedGpuBuffer(stream.allocationOwner(), bytes); }
+                catch (...) {}
+            }
+            template<typename T> T* take(std::size_t count)
+            {
+                const auto offset = alignUp(mUsed, std::max<std::size_t>(alignof(T), 16u));
+                if (!mStorage || offset > mStorage.size() || count > (mStorage.size() - offset) / sizeof(T))
+                    return nullptr;
+                mUsed = offset + count * sizeof(T);
+                return reinterpret_cast<T*>(static_cast<u8*>(mStorage.data()) + offset);
+            }
         };
 
         // One allocation keeps the generated tables contiguous and removes the
@@ -503,9 +545,10 @@ namespace osuCrypto::LogVole::gpu
         if (!dynamicSealSetupSupported(params) || !available() || currentDeviceOrdinal() != 0)
             return false;
         const u32 rho = static_cast<u32>(params.mCoeffModulusBits.size());
+        std::array<u8, 16u * sizeof(u64) + sizeof(u32)> hostRecord{};
         RawSetupStream stream;
         if (!stream.mStream) return false;
-        RawConstantArena arena(256u, stream.mStream);
+        RawScratchArena arena(256u, stream);
         auto* bits = arena.take<int>(rho);
         const std::size_t recordBytes = static_cast<std::size_t>(rho) * sizeof(u64) + sizeof(u32);
         auto* record = arena.take<u8>(recordBytes);
@@ -515,7 +558,6 @@ namespace osuCrypto::LogVole::gpu
             !gpuMemcpyH2D(bits, params.mCoeffModulusBits.data(), rho * sizeof(int), stream.mStream) ||
             !launchSelectSealCoeffModuli(params.mPolyModulusDegree, bits, rho,
                 primes, status, stream.mStream)) return false;
-        std::array<u8, 16u * sizeof(u64) + sizeof(u32)> hostRecord{};
         std::vector<u64> next(rho);
         u32 result = ~u32{0};
         if (!gpuMemcpyD2H(hostRecord.data(), record, recordBytes, stream.mStream) ||
@@ -534,9 +576,10 @@ namespace osuCrypto::LogVole::gpu
         if (n < 1024u || n > 131072u || (n & (n - 1u)) || !requestedBits ||
             minimumQ <= 2u * n || !available() || currentDeviceOrdinal() != 0)
             return false;
+        std::array<u8, sizeof(u64) + 2u * sizeof(u32)> hostRecord{};
         RawSetupStream stream;
         if (!stream.mStream) return false;
-        RawConstantArena arena(128u, stream.mStream);
+        RawScratchArena arena(128u, stream);
         auto* record = arena.take<u8>(sizeof(u64) + 2u * sizeof(u32));
         auto* prime = reinterpret_cast<u64*>(record);
         auto* bits = record ? reinterpret_cast<u32*>(record + sizeof(u64)) : nullptr;
@@ -544,7 +587,6 @@ namespace osuCrypto::LogVole::gpu
         if (!prime || !bits || !status ||
             !launchSelectSealPlainModulus(n, requestedBits, minimumQ,
                 prime, bits, status, stream.mStream)) return false;
-        std::array<u8, sizeof(u64) + 2u * sizeof(u32)> hostRecord{};
         u64 nextPrime = 0;
         u32 nextBits = 0, result = ~u32{0};
         if (!gpuMemcpyD2H(hostRecord.data(), record, hostRecord.size(), stream.mStream) ||
@@ -566,9 +608,10 @@ namespace osuCrypto::LogVole::gpu
         if (!ring.n() || !ring.rho() || ring.rho() > 16u ||
             plaintextPrime <= 2u * ring.n() || plaintextPrime >= view.mMinModulus ||
             !view.mBaseProd || !available() || currentDeviceOrdinal() != 0) return false;
+        std::array<u8, 16u * sizeof(u64) + sizeof(u32)> hostRecord{};
         RawSetupStream stream;
         if (!stream.mStream) return false;
-        RawConstantArena arena(256u, stream.mStream);
+        RawScratchArena arena(256u, stream);
         const std::size_t recordBytes = static_cast<std::size_t>(ring.rho()) * sizeof(u64) + sizeof(u32);
         auto* record = arena.take<u8>(recordBytes);
         auto* output = reinterpret_cast<u64*>(record);
@@ -576,7 +619,6 @@ namespace osuCrypto::LogVole::gpu
         if (!output || !status ||
             !launchPreparePlaintextLift(view, plaintextPrime, output, status, stream.mStream))
             return false;
-        std::array<u8, 16u * sizeof(u64) + sizeof(u32)> hostRecord{};
         std::vector<u64> next(ring.rho());
         u32 result = ~u32{0};
         if (!gpuMemcpyD2H(hostRecord.data(), record, recordBytes, stream.mStream) ||
