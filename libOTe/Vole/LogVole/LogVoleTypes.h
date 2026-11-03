@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/Aligned.h>
@@ -174,16 +175,16 @@ namespace osuCrypto::LogVole
         virtual ~LazyRingTensorHostState() = default;
         virtual const RingTensor& get() const = 0;
         // Optional export completes before returning; false permits get() fallback.
-        virtual bool copyCoefficientsTo(std::span<u8>) const { return false; }
-        virtual std::span<const u8> encodedCoefficients() const { return {}; }
+        virtual bool copyCoefficientsTo(WireView) const { return false; }
+        virtual ConstWireView encodedCoefficients() const { return {}; }
     };
 
     struct LazyLacctHostState
     {
         virtual ~LazyLacctHostState() = default;
         virtual const ShrinkExpandLacct& get() const = 0;
-        virtual bool copyCoefficientsTo(std::span<u8>) const { return false; }
-        virtual std::span<const u8> encodedCoefficients() const { return {}; }
+        virtual bool copyCoefficientsTo(WireView) const { return false; }
+        virtual ConstWireView encodedCoefficients() const { return {}; }
     };
 
     // Immutable first-layer LENC randomness retained by internal GPU setup.

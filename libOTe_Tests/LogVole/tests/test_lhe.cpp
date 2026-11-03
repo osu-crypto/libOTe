@@ -143,7 +143,7 @@ namespace
         LOGVOLE_REQUIRE_FALSE(owner->copyCoefficientsTo(std::span(actualBytes).first(actualBytes.size() - 1)));
         LOGVOLE_REQUIRE_TRUE(std::all_of(actualBytes.begin(), actualBytes.end(),
             [](std::uint8_t byte) { return byte == 0xA5u; }));
-        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(actualBytes));
+        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(std::span(actualBytes)));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(expectedBytes, actualBytes));
         const auto& host = owner->get();
         expect_tensor_equal(expected, host);
@@ -152,7 +152,7 @@ namespace
         mutableCopy.mPolys.front().mCoeffs.front() ^= 1;
         LOGVOLE_REQUIRE_EQ(owner->get().mPolys.front().mCoeffs.front(),
             expected.mPolys.front().mCoeffs.front());
-        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(actualBytes));
+        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(std::span(actualBytes)));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(expectedBytes, actualBytes));
     }
 

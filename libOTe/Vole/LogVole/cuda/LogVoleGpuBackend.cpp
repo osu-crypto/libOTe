@@ -1262,11 +1262,14 @@ namespace osuCrypto::LogVole::gpu
         };
 
         template <typename DirectCopy, typename FallbackCopy>
-        bool transferSetupWire(void* host, std::size_t bytes, GpuStream& stream,
+        bool transferSetupWire(ConstWireView wire, GpuStream& stream,
             bool registerFresh, bool fallbackOnPoolPinFailure,
             const DirectCopy& directCopy, const FallbackCopy& fallbackCopy,
             bool* cudaOwnedDirectCompleted = nullptr)
         {
+            void* host = const_cast<u8*>(wire.data());
+            const auto bytes = wire.size();
+            auto* memory = wire.mMemory;
             if (cudaOwnedDirectCompleted) *cudaOwnedDirectCompleted = false;
             SetupWireTransfer transfer{stream};
             const char* enabled = std::getenv("LV_GPU_SETUP_PINNED_WIRE");
@@ -1275,13 +1278,13 @@ namespace osuCrypto::LogVole::gpu
             // not by the lazily registered setup pool. Its allocator tracks
             // the active range until coproto finishes the borrowed TCP send.
             const bool cudaOwnedRoot = usePinned &&
-                isRootCudaWireHostRange(host, bytes);
-            const bool pooledOwner = usePinned && gpuIsSetupWireHostRange(host, bytes);
-            bool pooled = pooledOwner && gpuIsSetupWirePinnedHostRange(host, bytes);
+                isRootCudaWireHostRange(wire);
+            const bool pooledOwner = usePinned && memory && memory->contains(host, bytes) && !cudaOwnedRoot;
+            bool pooled = pooledOwner && memory->isPinned(host, bytes);
             if (pooledOwner && !pooled && registerFresh)
             {
                 HostStep registerStep("setup: persistent wire registration");
-                if (!gpuTryPinSetupWireHostRange(host, bytes, pooled) &&
+                if (!memory->pin(host, bytes, pooled) &&
                     !fallbackOnPoolPinFailure) return false;
             }
             if (!pooledOwner && !cudaOwnedRoot &&
@@ -1305,8 +1308,10 @@ namespace osuCrypto::LogVole::gpu
         }
     }
 
-    bool downloadSetupWire(void* hostDst, const void* deviceSrc, std::size_t bytes, GpuStream& stream)
+    bool downloadSetupWire(WireView wire, const void* deviceSrc, GpuStream& stream)
     {
+        void* hostDst = wire.data();
+        const auto bytes = wire.size();
         if (!bytes) return stream.sync();
         if (!hostDst || !deviceSrc ||
             reinterpret_cast<std::uintptr_t>(hostDst) >
@@ -1322,19 +1327,21 @@ namespace osuCrypto::LogVole::gpu
         // profiling. A previously registered pool block remains direct.
         const char* direct = std::getenv("LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD");
         const bool pinFreshPool = (!direct || direct[0] != '0') &&
-            gpuIsSetupWireHostRange(hostDst, bytes);
+            (wire.mMemory && wire.mMemory->contains(hostDst, bytes));
         bool cudaOwnedDirectCompleted = false;
-        const bool completed = transferSetupWire(hostDst, bytes, stream,
+        const bool completed = transferSetupWire(wire, stream,
             pinFreshPool, true,
             [&] { return gpuMemcpyD2H(hostDst, deviceSrc, bytes, stream.raw()); },
             [&] { return downloadToHost(hostDst, deviceSrc, bytes, stream); },
             &cudaOwnedDirectCompleted);
-        recordRootCudaWireDirectDownload(hostDst, bytes, cudaOwnedDirectCompleted);
+        recordRootCudaWireDirectDownload(wire, cudaOwnedDirectCompleted);
         return completed;
     }
 
-    bool uploadSetupWire(void* deviceDst, const void* hostSrc, std::size_t bytes, GpuStream& stream)
+    bool uploadSetupWire(void* deviceDst, ConstWireView wire, GpuStream& stream)
     {
+        const void* hostSrc = wire.data();
+        const auto bytes = wire.size();
         if (!bytes) return stream.sync();
         if (!deviceDst || !hostSrc ||
             reinterpret_cast<std::uintptr_t>(hostSrc) >
@@ -1345,7 +1352,7 @@ namespace osuCrypto::LogVole::gpu
         }
         // TCP receive/host encoding has already populated an H2D source. Pin it
         // once here and retain that registration for later reuse.
-        return transferSetupWire(const_cast<void*>(hostSrc), bytes, stream, true, false,
+        return transferSetupWire(wire, stream, true, false,
             [&] { return gpuMemcpyH2D(deviceDst, hostSrc, bytes, stream.raw()); },
             [&] { return uploadFromHost(deviceDst, hostSrc, bytes, stream); });
     }

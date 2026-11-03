@@ -1,6 +1,7 @@
 #pragma once
 
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
+#include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
 
 #include <algorithm>
 #include <span>
@@ -17,27 +18,41 @@ namespace osuCrypto::LogVole
     struct Params;
     namespace detail
     {
-        void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment);
-        void deallocateSetupWireBytes(void* pointer) noexcept;
+        std::shared_ptr<WireMemoryPool> makeSetupWireMemory(std::size_t bytes);
+        void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
+            WireMemoryPool* memory, bool cudaOwned, u64 runId);
+        void deallocateSetupWireBytes(void* pointer, WireMemoryPool* memory) noexcept;
 
         template<typename T> struct SetupWireAllocator
         {
             using value_type = T;
             using propagate_on_container_move_assignment = std::true_type;
-            using is_always_equal = std::true_type;
+            using propagate_on_container_copy_assignment = std::true_type;
+            using propagate_on_container_swap = std::true_type;
+            using is_always_equal = std::false_type;
             template<typename U> struct rebind { using other = SetupWireAllocator<U>; };
 
+            std::shared_ptr<WireMemoryPool> mMemory;
+            bool mCudaOwned = false;
+            u64 mRunId = 0;
+
             SetupWireAllocator() = default;
-            template<typename U> SetupWireAllocator(const SetupWireAllocator<U>&) noexcept {}
+            explicit SetupWireAllocator(std::shared_ptr<WireMemoryPool> memory,
+                bool cudaOwned = false, u64 runId = 0)
+                : mMemory(std::move(memory)), mCudaOwned(cudaOwned), mRunId(runId) {}
+            template<typename U> SetupWireAllocator(const SetupWireAllocator<U>& other) noexcept
+                : mMemory(other.mMemory), mCudaOwned(other.mCudaOwned), mRunId(other.mRunId) {}
+            SetupWireAllocator select_on_container_copy_construction() const
+            { return SetupWireAllocator(mMemory); }
 
             T* allocate(std::size_t count)
             {
                 if (count > std::numeric_limits<std::size_t>::max() / sizeof(T))
                     throw std::bad_array_new_length();
                 return static_cast<T*>(allocateSetupWireBytes(count * sizeof(T),
-                    std::max<std::size_t>(gDefaultAlignment, alignof(T))));
+                    std::max<std::size_t>(gDefaultAlignment, alignof(T)), mMemory.get(), mCudaOwned, mRunId));
             }
-            void deallocate(T* pointer, std::size_t) noexcept { deallocateSetupWireBytes(pointer); }
+            void deallocate(T* pointer, std::size_t) noexcept { deallocateSetupWireBytes(pointer, mMemory.get()); }
 
             // Buffer's resize has always left new bytes uninitialized. Preserve
             // that behavior instead of std::vector's default value-initializing
@@ -48,9 +63,10 @@ namespace osuCrypto::LogVole
             template<typename U> void destroy(U* pointer) { pointer->~U(); }
         };
         template<typename T, typename U>
-        bool operator==(const SetupWireAllocator<T>&, const SetupWireAllocator<U>&) noexcept { return true; }
+        bool operator==(const SetupWireAllocator<T>& a, const SetupWireAllocator<U>& b) noexcept
+        { return a.mMemory == b.mMemory; }
         template<typename T, typename U>
-        bool operator!=(const SetupWireAllocator<T>&, const SetupWireAllocator<U>&) noexcept { return false; }
+        bool operator!=(const SetupWireAllocator<T>& a, const SetupWireAllocator<U>& b) noexcept { return !(a == b); }
     }
 
     // A contiguous owning wire buffer. Large GPU buffers reuse page-aligned
@@ -64,20 +80,54 @@ namespace osuCrypto::LogVole
         using Base::Base;
         using element_type = u8;
         Buffer() = default;
+        explicit Buffer(std::size_t size, const Base::allocator_type& allocator = {})
+            : Base(allocator) { resize(size); }
+        explicit Buffer(std::shared_ptr<WireMemoryPool> memory)
+            : Base(detail::SetupWireAllocator<u8>(std::move(memory))) {}
         Buffer(const Buffer&) = default;
         Buffer(Buffer&&) noexcept = default;
         Buffer& operator=(const Buffer&) = default;
         Buffer& operator=(Buffer&&) noexcept = default;
 
+        std::shared_ptr<WireMemoryPool> memory() const { return Base::get_allocator().mMemory; }
+        WireView wireView() { return {Base::data(), Base::size(), memory().get()}; }
+        ConstWireView wireView() const { return {Base::data(), Base::size(), memory().get()}; }
+
+        void reserve(std::size_t capacity)
+        {
+            if (capacity <= Base::capacity()) return;
+            if (!memory())
+            {
+                if (auto pool = detail::makeSetupWireMemory(capacity))
+                {
+                    // Select provenance before allocating. Allocator copies
+                    // remain interchangeable; small/empty buffers allocate no
+                    // pool. Promotion copies only the bytes vector growth
+                    // already needs to move.
+                    Base next{detail::SetupWireAllocator<u8>(std::move(pool))};
+                    next.reserve(capacity);
+                    next.insert(next.end(), Base::begin(), Base::end());
+                    Base::swap(next);
+                    return;
+                }
+            }
+            Base::reserve(capacity);
+        }
+
         void resize(std::size_t size, AllocType type = AllocType::Uninitialized)
         {
             const auto oldSize = Base::size();
+            if (size > Base::capacity())
+            {
+                const auto capacity = Base::capacity();
+                reserve(std::max(size, capacity <= Base::max_size() / 2 ? 2 * capacity : size));
+            }
             Base::resize(size);
             if (type == AllocType::Zeroed && size > oldSize)
                 std::memset(Base::data() + oldSize, 0, size - oldSize);
         }
         // AlignedUnVector::clear releases capacity as well as its logical size.
-        void clear() noexcept { Base empty; Base::swap(empty); }
+        void clear() noexcept { Base empty(Base::get_allocator()); Base::swap(empty); }
         span<u8> subspan(u64 offset) { return span<u8>(Base::data(), Base::size()).subspan(offset); }
         span<const u8> subspan(u64 offset) const
         { return span<const u8>(Base::data(), Base::size()).subspan(offset); }
@@ -172,15 +222,13 @@ namespace osuCrypto::LogVole
     // can be moved into coproto. Only this one reservation asks the allocator
     // for CUDA page-locked pages; a decline returns the usual Buffer storage.
     Buffer reserveRootCudaWireBuffer(std::size_t bytes, u64 senderRunId,
-        bool& cudaOwned, bool recordSelection = true);
+        bool& cudaOwned, bool recordSelection = true, std::shared_ptr<WireMemoryPool> memory = {});
     // Shrink the logical wire without reallocating or copying its CUDA-owned
     // pages. The owning pool also contracts the active provenance range.
     bool shrinkRootCudaWireBuffer(Buffer& reserved,
         std::size_t exactBytes) noexcept;
-    bool isRootCudaWireHostRange(const void* pointer,
-        std::size_t bytes) noexcept;
-    void recordRootCudaWireDirectDownload(const void* pointer,
-        std::size_t bytes, bool completed) noexcept;
+    bool isRootCudaWireHostRange(ConstWireView wire) noexcept;
+    void recordRootCudaWireDirectDownload(ConstWireView wire, bool completed) noexcept;
 
     struct RootWireCudaAllocEvidence
     {

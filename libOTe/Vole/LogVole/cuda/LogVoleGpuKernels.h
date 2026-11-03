@@ -117,26 +117,11 @@ namespace osuCrypto::LogVole::gpu
     // Drain owners retired by exited workers, outside TLS/loader callbacks.
     // No synchronization when there are no retired resources.
     void gpuCollectThreadResources();
-    // Release idle device and pinned/setup-wire blocks; live buffers stay valid.
+    // Release idle legacy device and pinned scratch blocks; live buffers stay valid.
     // Call after joining work that may allocate or release buffers.
     void gpuTrimMemory();
     void* gpuMallocHost(std::size_t bytes);
     void gpuFreeHost(void* ptr);
-    // Setup-wire storage is ordinary page-aligned host memory so allocation
-    // does not eagerly fault and pin a large payload. The process-local pool
-    // registers a complete owned block lazily on its first GPU transfer and
-    // retains successful registration across reuse. Allocation/registration
-    // declines preserve the ordinary/staged fallback.
-    void* gpuTryAllocateSetupWireHost(std::size_t bytes);
-    // True only while the complete range belongs to a live setup-wire block.
-    bool gpuIsSetupWireHostRange(const void* ptr, std::size_t bytes);
-    // True only when the live range also has persistent CUDA registration.
-    bool gpuIsSetupWirePinnedHostRange(const void* ptr, std::size_t bytes);
-    // Try to register the complete page-aligned block containing this range.
-    // pinned=false is a benign decline; fatal CUDA errors return false.
-    bool gpuTryPinSetupWireHostRange(const void* ptr, std::size_t bytes, bool& pinned);
-    // Release an exact setup-wire base pointer; false means it is not ours.
-    bool gpuReleaseSetupWireHost(void* ptr) noexcept;
     // Optional registration of an exact caller-owned host span. A supported
     // decline returns true with registered=false; fatal CUDA errors return false.
     // Only a successful registration may be passed to gpuUnregisterHost.

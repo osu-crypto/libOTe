@@ -35,6 +35,7 @@ def main():
                             "LogVole_RingOps_GpuStreamStagingLifetime",
                             "LogVole_RingOps_GpuBufferResizeBounds"]),
         ("wire-and-caches", ["LogVole_Encoding_PinnedWireBufferOwnership",
+                             "LogVole_Encoding_RootResidentWireExact",
                              "LogVole_RingOps_GaussianPrefixBatchParity",
                              "LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch",
                              "LogVole_RingOps_PartyCachesDoNotAlias"]),

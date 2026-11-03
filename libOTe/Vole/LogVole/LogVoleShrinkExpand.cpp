@@ -52,11 +52,11 @@ namespace osuCrypto::LogVole
                     std::call_once(mOnce, [&] { mValue.mCt = mTensor->get(); });
                     return mValue;
                 }
-                bool copyCoefficientsTo(std::span<u8> destination) const override
+                bool copyCoefficientsTo(WireView destination) const override
                 {
                     return mTensor->copyCoefficientsTo(destination);
                 }
-                std::span<const u8> encodedCoefficients() const override
+                ConstWireView encodedCoefficients() const override
                 {
                     return mTensor->encodedCoefficients();
                 }

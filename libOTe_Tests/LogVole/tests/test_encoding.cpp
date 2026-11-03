@@ -21,6 +21,8 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <future>
+#include <thread>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -304,7 +306,7 @@ namespace
             mDevice = std::shared_ptr<void>(allocation, [](void* p) { gpu::gpuFree(p); });
             gpu::GpuStream stream;
             if (!stream.raw() || !gpu::uploadSetupWire(
-                    mDevice.get(), coefficients.data(), mBytes, stream) || !stream.sync())
+                    mDevice.get(), {reinterpret_cast<const std::uint8_t*>(coefficients.data()), mBytes}, stream) || !stream.sync())
                 throw std::runtime_error("Root wire test device upload failed");
         }
 
@@ -314,13 +316,13 @@ namespace
             return mHost;
         }
 
-        bool copyCoefficientsTo(std::span<std::uint8_t> destination) const override
+        bool copyCoefficientsTo(WireView destination) const override
         {
             ++mCopyRequests;
             if (!mAllowCopy || destination.size() != mBytes) return false;
             gpu::GpuStream stream;
             return stream.raw() && gpu::downloadSetupWire(
-                destination.data(), mDevice.get(), mBytes, stream) && stream.sync();
+                destination, mDevice.get(), stream) && stream.sync();
         }
 
         std::size_t hostRequests() const { return mHostRequests; }
@@ -579,13 +581,11 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
     Buffer requestedRootWire = reserveRootCudaWireBuffer(
         encoded.size(), 987u, cudaOwned);
     const auto* const requestedPointer = requestedRootWire.data();
-    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(requestedPointer,
-        requestedRootWire.size()), cudaOwned);
+    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(requestedRootWire.wireView()), cudaOwned);
     const auto requestedEncoded = encodeRootOfflineIntoBuffer(
         message, std::move(requestedRootWire), 1u);
     LOGVOLE_REQUIRE_TRUE(requestedEncoded.data() == requestedPointer);
-    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(requestedEncoded.data(),
-        requestedEncoded.size()), cudaOwned);
+    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(requestedEncoded.wireView()), cudaOwned);
     expect_bytes_equal(requestedEncoded, encoded);
     bool rejectedWrongSize = false;
     try
@@ -704,17 +704,15 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
         forecastRootBytes, cudaWireTestRunId, cudaOwned);
     LOGVOLE_REQUIRE_TRUE(cudaOwned);
     const auto* const reservedPointer = reserved.data();
-    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange(reservedPointer,
-        forecastRootBytes));
+    auto rootMemory = reserved.memory();
+    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange({reservedPointer, forecastRootBytes, rootMemory.get()}));
     LOGVOLE_REQUIRE_TRUE(shrinkRootCudaWireBuffer(reserved,
         exactRootBytes));
     LOGVOLE_REQUIRE_TRUE(reserved.data() == reservedPointer);
     LOGVOLE_REQUIRE_EQ(reserved.size(), exactRootBytes);
     LOGVOLE_REQUIRE_TRUE(reserved.capacity() >= forecastRootBytes);
-    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange(reservedPointer,
-        forecastRootBytes));
-    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange(reservedPointer,
-        exactRootBytes));
+    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange({reservedPointer, forecastRootBytes, rootMemory.get()}));
+    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange({reservedPointer, exactRootBytes, rootMemory.get()}));
     Buffer cudaWire = encodeRootOfflineIntoBuffer(resident,
         std::move(reserved), 4u);
     LOGVOLE_REQUIRE_TRUE(cudaWire.data() == reservedPointer);
@@ -729,11 +727,10 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     coproto::BufferingSocket socket;
     macoro::sync_wait(socket.send(std::move(cudaWire)));
     macoro::sync_wait(socket.flush());
-    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange(reservedPointer,
-        exactRootBytes));
+    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange({reservedPointer, exactRootBytes, rootMemory.get()}));
     bool reusedCudaOwned = false;
     Buffer reused = reserveRootCudaWireBuffer(forecastRootBytes,
-        cudaWireTestRunId, reusedCudaOwned);
+        cudaWireTestRunId, reusedCudaOwned, true, rootMemory);
     LOGVOLE_REQUIRE_TRUE(reusedCudaOwned);
     LOGVOLE_REQUIRE_TRUE(reused.data() == reservedPointer);
     LOGVOLE_EXPECT_EQ(ctR->hostRequests(), 0u);
@@ -1272,17 +1269,19 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
     constexpr std::size_t bytes = std::size_t{1} << 20;
     ScopedEnvironmentValue pinned("LV_GPU_SETUP_PINNED_WIRE", "1");
     ScopedEnvironmentValue directDownload("LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD", "1");
+    auto memory = std::make_shared<WireMemoryPool>();
     void* firstAllocation = nullptr;
     {
-        Buffer buffer(bytes);
+        Buffer buffer(memory);
+        buffer.resize(bytes);
         firstAllocation = buffer.data();
         LOGVOLE_REQUIRE_TRUE(firstAllocation != nullptr);
         LOGVOLE_REQUIRE_EQ(reinterpret_cast<std::uintptr_t>(buffer.data()) % oc::gDefaultAlignment,
             std::uintptr_t{0});
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(buffer.data(), buffer.size()));
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(buffer.data() + 31, buffer.size() - 31));
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(buffer.data() + buffer.size() - 1, 2));
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+        LOGVOLE_REQUIRE_TRUE(memory->contains(buffer.data(), buffer.size()));
+        LOGVOLE_REQUIRE_TRUE(memory->contains(buffer.data() + 31, buffer.size() - 31));
+        LOGVOLE_EXPECT_FALSE(memory->contains(buffer.data() + buffer.size() - 1, 2));
+        LOGVOLE_EXPECT_FALSE(memory->isPinned(buffer.data(), buffer.size()));
 
         gpu::GpuStream transferStream;
         LOGVOLE_REQUIRE_TRUE(transferStream.raw() != nullptr);
@@ -1299,8 +1298,8 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
             // pageable and exercises the bounded staged D2H fallback.
             ScopedEnvironmentValue stagedDownload("LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD", "0");
             LOGVOLE_REQUIRE_TRUE(
-                gpu::downloadSetupWire(buffer.data(), device.mPointer, bytes, transferStream));
-            LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+                gpu::downloadSetupWire(buffer.wireView(), device.mPointer, transferStream));
+            LOGVOLE_EXPECT_FALSE(memory->isPinned(buffer.data(), buffer.size()));
             LOGVOLE_EXPECT_EQ(buffer.front(), 0);
             LOGVOLE_EXPECT_EQ(buffer.back(), 0);
         }
@@ -1308,44 +1307,44 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         // can fill the Buffer directly. Later H2D and repeated D2H retain the
         // exact byte and lifetime checks below.
         LOGVOLE_REQUIRE_TRUE(
-            gpu::downloadSetupWire(buffer.data(), device.mPointer, bytes, transferStream));
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+            gpu::downloadSetupWire(buffer.wireView(), device.mPointer, transferStream));
+        LOGVOLE_REQUIRE_TRUE(memory->isPinned(buffer.data(), buffer.size()));
         LOGVOLE_EXPECT_EQ(buffer.front(), 0);
         LOGVOLE_EXPECT_EQ(buffer.back(), 0);
 
         std::fill(buffer.begin(), buffer.end(), 0x3c);
         buffer.back() = 0xa7;
         LOGVOLE_REQUIRE_TRUE(
-            gpu::uploadSetupWire(device.mPointer, buffer.data(), bytes, transferStream));
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+            gpu::uploadSetupWire(device.mPointer, buffer.wireView(), transferStream));
+        LOGVOLE_REQUIRE_TRUE(memory->isPinned(buffer.data(), buffer.size()));
         std::fill(buffer.begin(), buffer.end(), 0);
         LOGVOLE_REQUIRE_TRUE(
-            gpu::downloadSetupWire(buffer.data(), device.mPointer, bytes, transferStream));
+            gpu::downloadSetupWire(buffer.wireView(), device.mPointer, transferStream));
         LOGVOLE_EXPECT_EQ(buffer.front(), 0x3c);
         LOGVOLE_EXPECT_EQ(buffer.back(), 0xa7);
 
         bool pinnedRange = false;
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuTryPinSetupWireHostRange(
+        LOGVOLE_REQUIRE_TRUE(memory->pin(
             buffer.data() + 31, buffer.size() - 31, pinnedRange));
         LOGVOLE_REQUIRE_TRUE(pinnedRange);
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(buffer.data(), buffer.size()));
+        LOGVOLE_REQUIRE_TRUE(memory->isPinned(buffer.data(), buffer.size()));
         LOGVOLE_REQUIRE_TRUE(
-            gpu::gpuIsSetupWirePinnedHostRange(buffer.data() + 31, buffer.size() - 31));
+            memory->isPinned(buffer.data() + 31, buffer.size() - 31));
         pinnedRange = true;
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuTryPinSetupWireHostRange(
+        LOGVOLE_REQUIRE_TRUE(memory->pin(
             buffer.data() + buffer.size() - 1, 2, pinnedRange));
         LOGVOLE_EXPECT_FALSE(pinnedRange);
 
         Buffer copied = buffer;
         LOGVOLE_REQUIRE_TRUE(copied.data() != buffer.data());
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(copied.data(), copied.size()));
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(copied.data(), copied.size()));
+        LOGVOLE_REQUIRE_TRUE(memory->contains(copied.data(), copied.size()));
+        LOGVOLE_EXPECT_FALSE(memory->isPinned(copied.data(), copied.size()));
         LOGVOLE_REQUIRE_TRUE(std::equal(copied.begin(), copied.end(), buffer.begin()));
         LOGVOLE_EXPECT_EQ(copied.front(), 0x3c);
         LOGVOLE_EXPECT_EQ(copied.back(), 0xa7);
         pinnedRange = false;
         LOGVOLE_REQUIRE_TRUE(
-            gpu::gpuTryPinSetupWireHostRange(copied.data(), copied.size(), pinnedRange));
+            memory->pin(copied.data(), copied.size(), pinnedRange));
         LOGVOLE_REQUIRE_TRUE(pinnedRange);
 
         Buffer moved = std::move(buffer);
@@ -1358,39 +1357,89 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
             ScopedEnvironmentValue disabled("LV_GPU_SETUP_PINNED_WIRE", "0");
             moved.clear();
         }
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(firstAllocation, bytes));
+        LOGVOLE_EXPECT_FALSE(memory->contains(firstAllocation, bytes));
     }
 
-    Buffer reused(bytes);
+    Buffer reused(memory);
+    reused.resize(bytes);
     LOGVOLE_REQUIRE_TRUE(reused.data() == firstAllocation);
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(reused.data(), reused.size()));
+    LOGVOLE_REQUIRE_TRUE(memory->contains(reused.data(), reused.size()));
     // Registration belongs to the allocation and persists while it is free.
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(reused.data(), reused.size()));
+    LOGVOLE_REQUIRE_TRUE(memory->isPinned(reused.data(), reused.size()));
     std::fill(reused.begin(), reused.end(), 0x5a);
     reused.resize(bytes + 257u, oc::AllocType::Zeroed);
     LOGVOLE_REQUIRE_TRUE(std::all_of(reused.begin(), reused.begin() + bytes,
         [](std::uint8_t value) { return value == 0x5a; }));
     LOGVOLE_REQUIRE_TRUE(std::all_of(reused.begin() + bytes, reused.end(),
         [](std::uint8_t value) { return value == 0; }));
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(reused.data(), reused.size()));
-    LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(reused.data(), reused.size()));
+    LOGVOLE_REQUIRE_TRUE(memory->contains(reused.data(), reused.size()));
+    LOGVOLE_EXPECT_FALSE(memory->isPinned(reused.data(), reused.size()));
     bool resizedPinned = false;
     LOGVOLE_REQUIRE_TRUE(
-        gpu::gpuTryPinSetupWireHostRange(reused.data(), reused.size(), resizedPinned));
+        memory->pin(reused.data(), reused.size(), resizedPinned));
     LOGVOLE_REQUIRE_TRUE(resizedPinned);
-    LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWirePinnedHostRange(reused.data(), reused.size()));
+    LOGVOLE_REQUIRE_TRUE(memory->isPinned(reused.data(), reused.size()));
     reused.clear();
     {
         ScopedEnvironmentValue disabled("LV_GPU_SETUP_PINNED_WIRE", "0");
         Buffer ordinary(bytes);
         LOGVOLE_REQUIRE_TRUE(ordinary.data() != nullptr);
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(ordinary.data(), ordinary.size()));
-        LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(ordinary.data(), ordinary.size()));
+        LOGVOLE_EXPECT_FALSE(memory->contains(ordinary.data(), ordinary.size()));
+        LOGVOLE_EXPECT_FALSE(memory->isPinned(ordinary.data(), ordinary.size()));
         bool ordinaryPinned = true;
         LOGVOLE_REQUIRE_TRUE(
-            gpu::gpuTryPinSetupWireHostRange(ordinary.data(), ordinary.size(), ordinaryPinned));
+            memory->pin(ordinary.data(), ordinary.size(), ordinaryPinned));
         LOGVOLE_EXPECT_FALSE(ordinaryPinned);
     }
+    // Cross-pool assignment and swap must propagate the allocator together
+    // with its storage. The losing pool must not survive through a hidden owner.
+    reused.resize(bytes);
+    std::fill(reused.begin(), reused.end(), 0x41);
+    Buffer assigned(bytes);
+    std::weak_ptr<WireMemoryPool> replaced = assigned.memory();
+    assigned = reused;
+    LOGVOLE_REQUIRE_TRUE(replaced.expired());
+    LOGVOLE_REQUIRE_TRUE(assigned.memory() == memory && assigned.data() != reused.data());
+    LOGVOLE_REQUIRE_TRUE(std::equal(assigned.begin(), assigned.end(), reused.begin()));
+    Buffer swapped(bytes);
+    auto swapMemory = swapped.memory();
+    std::fill(swapped.begin(), swapped.end(), 0x27);
+    assigned.swap(swapped);
+    LOGVOLE_REQUIRE_TRUE(assigned.memory() == swapMemory && swapped.memory() == memory);
+    LOGVOLE_REQUIRE_EQ(assigned.front(), 0x27);
+    LOGVOLE_REQUIRE_EQ(swapped.back(), 0x41);
+
+    Buffer promoted(31);
+    LOGVOLE_REQUIRE_TRUE(!promoted.memory());
+    std::fill(promoted.begin(), promoted.end(), 0x63);
+    promoted.resize(bytes + 1, oc::AllocType::Zeroed);
+    LOGVOLE_REQUIRE_TRUE(promoted.memory());
+    LOGVOLE_REQUIRE_TRUE(std::all_of(promoted.begin(), promoted.begin() + 31,
+        [](auto value) { return value == 0x63; }));
+    LOGVOLE_REQUIRE_TRUE(std::all_of(promoted.begin() + 31, promoted.end(),
+        [](auto value) { return value == 0; }));
+    LOGVOLE_REQUIRE_TRUE(promoted.wireView().first<31>().mMemory == promoted.memory().get());
+    LOGVOLE_REQUIRE_TRUE(promoted.wireView().last(1).mMemory == promoted.memory().get());
+
+    std::weak_ptr<WireMemoryPool> exportedPool;
+    std::packaged_task<Buffer()> task([&] {
+        Buffer output(bytes);
+        exportedPool = output.memory();
+        std::fill(output.begin(), output.end(), 0x59);
+        bool pinned = false;
+        LOGVOLE_REQUIRE_TRUE(output.memory()->pin(output.data(), output.size(), pinned) && pinned);
+        return output;
+    });
+    auto future = task.get_future();
+    std::thread worker(std::move(task));
+    worker.join();
+    auto exported = future.get();
+    LOGVOLE_REQUIRE_TRUE(!exportedPool.expired());
+    LOGVOLE_REQUIRE_TRUE(exported.memory()->isPinned(exported.data(), exported.size()));
+    LOGVOLE_REQUIRE_EQ(exported.front(), 0x59);
+    LOGVOLE_REQUIRE_EQ(exported.back(), 0x59);
+    exported = Buffer{};
+    LOGVOLE_REQUIRE_TRUE(exportedPool.expired());
 #else
     (void)cmd;
 #endif

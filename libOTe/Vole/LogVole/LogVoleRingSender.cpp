@@ -58,11 +58,10 @@ namespace osuCrypto::LogVole
             bool start(const Buffer& wire, u64 runId, int device,
                 CpuBenchmarkContext* benchmarkContext)
             {
-                const void* const pointer = wire.data();
-                const std::size_t bytes = wire.size();
+                const auto view = wire.wireView();
                 try
                 {
-                    mThread = std::thread([this, pointer, bytes, runId, device,
+                    mThread = std::thread([this, view, runId, device,
                         benchmarkContext] {
                         try
                         {
@@ -75,7 +74,7 @@ namespace osuCrypto::LogVole
                             const u64 cpuBegin = cpuBenchmarkThreadNs();
                             bool pinned = false;
                             mPinned = cudaSetDevice(device) == cudaSuccess &&
-                                gpu::gpuTryPinSetupWireHostRange(pointer, bytes, pinned) &&
+                                view.mMemory && view.mMemory->pin(view.data(), view.size(), pinned) &&
                                 pinned;
                             mCpuNs = cpuBenchmarkThreadNs() - cpuBegin;
                             mEndNs = steadyClockNs();
@@ -324,10 +323,10 @@ namespace osuCrypto::LogVole
                 if (mReserved.empty())
                     mReserved.resize(static_cast<std::size_t>(
                         mEvidence.mWireBytes));
-                mEvidence.mEligible = gpu::gpuIsSetupWireHostRange(
+                mEvidence.mEligible = mReserved.memory() && mReserved.memory()->contains(
                     mReserved.data(), mReserved.size());
                 if (!mEvidence.mEligible) return;
-                mEvidence.mAlreadyPinned = gpu::gpuIsSetupWirePinnedHostRange(
+                mEvidence.mAlreadyPinned = mReserved.memory()->isPinned(
                     mReserved.data(), mReserved.size());
                 mEvidence.mPinSucceeded = mEvidence.mAlreadyPinned;
                 if (!mEvidence.mAlreadyPinned)

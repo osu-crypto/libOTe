@@ -5,7 +5,6 @@
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
-#include <cuda_runtime_api.h>
 #endif
 
 #include <algorithm>
@@ -17,11 +16,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 #if defined(__linux__)
 #include <sys/mman.h>
@@ -40,202 +37,24 @@ namespace osuCrypto::LogVole
                 std::chrono::steady_clock::now().time_since_epoch()).count());
         }
 
-#if defined(ENABLE_LOGVOLE_CUDA)
-        thread_local bool requestRootCudaWireAllocation = false;
-        thread_local u64 rootCudaWireAllocationRunId = 0;
-
-        // CUDA-owned Root wire pages are local to this sender process. The
-        // vector allocator remains responsible for their lifetime; released
-        // blocks may be reused but are never freed while coproto or TCP owns
-        // the moved Buffer. Idle blocks are released during pool destruction.
-        struct RootCudaWirePool
-        {
-            struct Block
-            {
-                void* mPointer = nullptr;
-                std::size_t mCapacity = 0;
-                std::size_t mActiveBytes = 0;
-                u64 mOwnerRunId = 0;
-            };
-
-            std::map<std::size_t, std::vector<Block*>> mFree;
-            std::unordered_map<void*, std::unique_ptr<Block>> mBlocks;
-            std::map<std::uintptr_t, Block*> mActive;
-            std::mutex mMutex;
-
-            RootCudaWirePool() { gpu::gpuInitializeMemoryPools(); }
-            ~RootCudaWirePool()
-            {
-                for (const auto& entry : mBlocks) cudaFreeHost(entry.first);
-            }
-
-            Block* findActiveLocked(const void* pointer,
-                std::size_t bytes) const noexcept
-            {
-                if (!pointer || !bytes) return nullptr;
-                const auto address = reinterpret_cast<std::uintptr_t>(pointer);
-                auto it = mActive.upper_bound(address);
-                if (it == mActive.begin()) return nullptr;
-                --it;
-                Block* const block = it->second;
-                const auto offset = address - it->first;
-                if (offset >= block->mActiveBytes ||
-                    bytes > block->mActiveBytes - offset)
-                    return nullptr;
-                return block;
-            }
-
-            void* allocate(std::size_t bytes, std::size_t alignment,
-                u64 ownerRunId) noexcept
-            {
-                if (!bytes || alignment > 4096u) return nullptr;
-                try
-                {
-                    std::lock_guard lock(mMutex);
-                    auto it = mFree.lower_bound(bytes);
-                    while (it != mFree.end() && it->second.empty()) ++it;
-                    const auto largestReusable = bytes <=
-                        std::numeric_limits<std::size_t>::max() / 2u
-                        ? 2u * bytes : std::numeric_limits<std::size_t>::max();
-                    if (it != mFree.end() && it->first <= largestReusable)
-                    {
-                        Block* const block = it->second.back();
-                        const auto [activeIt, activeInserted] = mActive.emplace(
-                            reinterpret_cast<std::uintptr_t>(
-                                block->mPointer), block);
-                        (void)activeIt;
-                        if (!activeInserted) return nullptr;
-                        block->mActiveBytes = bytes;
-                        block->mOwnerRunId = ownerRunId;
-                        it->second.pop_back();
-                        return block->mPointer;
-                    }
-                }
-                catch (...) { return nullptr; }
-
-                void* pointer = nullptr;
-                const auto error = cudaHostAlloc(&pointer, bytes,
-                    cudaHostAllocPortable);
-                if (error != cudaSuccess)
-                {
-                    const auto pending = cudaPeekAtLastError();
-                    if (pending == error) (void)cudaGetLastError();
-                    return nullptr;
-                }
-                if (reinterpret_cast<std::uintptr_t>(pointer) % alignment)
-                {
-                    (void)cudaFreeHost(pointer);
-                    return nullptr;
-                }
-                try
-                {
-                    auto block = std::make_unique<Block>(Block{
-                        pointer, bytes, bytes, ownerRunId});
-                    std::lock_guard lock(mMutex);
-                    auto [it, inserted] = mBlocks.emplace(pointer,
-                        std::move(block));
-                    if (!inserted)
-                    {
-                        (void)cudaFreeHost(pointer);
-                        return nullptr;
-                    }
-                    try
-                    {
-                        const auto [activeIt, activeInserted] = mActive.emplace(
-                            reinterpret_cast<std::uintptr_t>(pointer),
-                            it->second.get());
-                        (void)activeIt;
-                        if (!activeInserted)
-                            throw std::runtime_error("Root CUDA wire range already active");
-                    }
-                    catch (...)
-                    {
-                        mBlocks.erase(it);
-                        throw;
-                    }
-                    return pointer;
-                }
-                catch (...)
-                {
-                    (void)cudaFreeHost(pointer);
-                    return nullptr;
-                }
-            }
-
-            bool releaseKnown(void* pointer) noexcept
-            {
-                if (!pointer) return false;
-                try
-                {
-                    std::lock_guard lock(mMutex);
-                    auto it = mBlocks.find(pointer);
-                    if (it == mBlocks.end()) return false;
-                    if (mActive.erase(reinterpret_cast<std::uintptr_t>(pointer)))
-                    {
-                        Block* const block = it->second.get();
-                        block->mActiveBytes = 0;
-                        block->mOwnerRunId = 0;
-                        try { mFree[block->mCapacity].push_back(block); }
-                        catch (...) { /* Retain ownership without reuse. */ }
-                    }
-                    return true;
-                }
-                catch (...) { return true; }
-            }
-
-            bool contains(const void* pointer, std::size_t bytes) noexcept
-            {
-                try
-                {
-                    std::lock_guard lock(mMutex);
-                    return findActiveLocked(pointer, bytes) != nullptr;
-                }
-                catch (...) { return false; }
-            }
-
-            bool contractActive(void* pointer, std::size_t oldBytes,
-                std::size_t exactBytes) noexcept
-            {
-                if (!pointer || !exactBytes || exactBytes > oldBytes)
-                    return false;
-                try
-                {
-                    std::lock_guard lock(mMutex);
-                    auto it = mActive.find(
-                        reinterpret_cast<std::uintptr_t>(pointer));
-                    if (it == mActive.end() ||
-                        it->second->mActiveBytes != oldBytes)
-                        return false;
-                    it->second->mActiveBytes = exactBytes;
-                    return true;
-                }
-                catch (...) { return false; }
-            }
-
-            u64 ownerRunId(const void* pointer,
-                std::size_t bytes) noexcept
-            {
-                try
-                {
-                    std::lock_guard lock(mMutex);
-                    Block* const block = findActiveLocked(pointer, bytes);
-                    return block ? block->mOwnerRunId : 0;
-                }
-                catch (...) { return 0; }
-            }
-        };
-
-        RootCudaWirePool& rootCudaWirePool()
-        {
-            static RootCudaWirePool pool;
-            return pool;
-        }
-#endif
     }
 
     namespace detail
     {
-        void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment)
+        std::shared_ptr<WireMemoryPool> makeSetupWireMemory(std::size_t bytes)
+        {
+#if defined(ENABLE_LOGVOLE_CUDA)
+            const char* pinned = std::getenv("LV_GPU_SETUP_PINNED_WIRE");
+            if (bytes >= (std::size_t{1} << 20) && (!pinned || pinned[0] != '0') && gpu::enabled())
+                return std::make_shared<WireMemoryPool>();
+#else
+            (void)bytes;
+#endif
+            return {};
+        }
+
+        void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
+            WireMemoryPool* memory, bool cudaOwned, u64 runId)
         {
             if (!bytes) return nullptr;
             if (alignment < alignof(void*) || (alignment & (alignment - 1u)) ||
@@ -246,39 +65,37 @@ namespace osuCrypto::LogVole
             if (bytes > std::numeric_limits<std::size_t>::max() - overhead)
                 throw std::bad_array_new_length();
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (requestRootCudaWireAllocation && gpu::enabled())
+            if (memory && cudaOwned && gpu::enabled())
             {
                 HostStep cudaAllocationStep("setup: CUDA-owned Root wire allocation");
-                if (void* pointer = rootCudaWirePool().allocate(bytes,
-                        alignment, rootCudaWireAllocationRunId))
+                if (void* pointer = memory->allocate(bytes, alignment, true, runId))
                     return pointer;
             }
             const char* pinned = std::getenv("LV_GPU_SETUP_PINNED_WIRE");
-            if (bytes >= (std::size_t{1} << 20) && alignment <= 4096 &&
+            if (memory && bytes >= (std::size_t{1} << 20) && alignment <= 4096 &&
                 (!pinned || pinned[0] != '0') && gpu::enabled())
             {
                 HostStep allocationStep("setup: reusable wire allocation");
-                if (void* pointer = gpu::gpuTryAllocateSetupWireHost(bytes))
+                if (void* pointer = memory->allocate(bytes, alignment))
                 {
                     if (reinterpret_cast<std::uintptr_t>(pointer) % alignment == 0) return pointer;
-                    (void)gpu::gpuReleaseSetupWireHost(pointer);
+                    (void)memory->release(pointer);
                 }
             }
+#else
+            (void)memory;
+            (void)cudaOwned;
+            (void)runId;
 #endif
             void* pointer = AlignedAllocator<u8>::aligned_malloc(bytes, alignment);
             if (!pointer) throw std::bad_alloc();
             return pointer;
         }
 
-        void deallocateSetupWireBytes(void* pointer) noexcept
+        void deallocateSetupWireBytes(void* pointer, WireMemoryPool* memory) noexcept
         {
             if (!pointer) return;
-#if defined(ENABLE_LOGVOLE_CUDA)
-            if (rootCudaWirePool().releaseKnown(pointer)) return;
-            // Allocation provenance, not the current runtime flag, determines
-            // the matching release. Rollback may change while buffers survive.
-            if (gpu::gpuReleaseSetupWireHost(pointer)) return;
-#endif
+            if (memory && memory->release(pointer)) return;
             AlignedAllocator<u8>::aligned_free(pointer);
         }
     }
@@ -353,24 +170,17 @@ namespace osuCrypto::LogVole
         catch (...) { return {}; }
     }
 
-    bool isRootCudaWireHostRange(const void* pointer,
-        std::size_t bytes) noexcept
+    bool isRootCudaWireHostRange(ConstWireView wire) noexcept
     {
-#if defined(ENABLE_LOGVOLE_CUDA)
-        return rootCudaWirePool().contains(pointer, bytes);
-#else
-        (void)pointer;
-        (void)bytes;
-        return false;
-#endif
+        return wire.mMemory && wire.mMemory->isCudaOwned(wire.data(), wire.size());
     }
 
-    void recordRootCudaWireDirectDownload(const void* pointer,
-        std::size_t bytes, bool completed) noexcept
+    void recordRootCudaWireDirectDownload(ConstWireView wire, bool completed) noexcept
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (!completed || !bytes) return;
-        const u64 ownerRunId = rootCudaWirePool().ownerRunId(pointer, bytes);
+        const auto bytes = wire.size();
+        if (!completed || !bytes || !wire.mMemory) return;
+        const u64 ownerRunId = wire.mMemory->ownerRunId(wire.data(), bytes);
         if (!ownerRunId) return;
         try
         {
@@ -385,40 +195,21 @@ namespace osuCrypto::LogVole
         }
         catch (...) {}
 #else
-        (void)pointer;
-        (void)bytes;
+        (void)wire;
         (void)completed;
 #endif
     }
 
     Buffer reserveRootCudaWireBuffer(std::size_t bytes, u64 senderRunId,
-        bool& cudaOwned, bool recordSelection)
+        bool& cudaOwned, bool recordSelection, std::shared_ptr<WireMemoryPool> memory)
     {
         cudaOwned = false;
         const u64 wallBegin = rootCudaWireSteadyNs();
         const u64 cpuBegin = cpuBenchmarkThreadNs();
-        Buffer reserved;
-#if defined(ENABLE_LOGVOLE_CUDA)
-        struct RequestScope
-        {
-            bool mPreviousRequest = requestRootCudaWireAllocation;
-            u64 mPreviousRunId = rootCudaWireAllocationRunId;
-            explicit RequestScope(u64 runId)
-            {
-                requestRootCudaWireAllocation = true;
-                rootCudaWireAllocationRunId = runId;
-            }
-            ~RequestScope()
-            {
-                requestRootCudaWireAllocation = mPreviousRequest;
-                rootCudaWireAllocationRunId = mPreviousRunId;
-            }
-        } request(senderRunId);
-#else
-        (void)senderRunId;
-#endif
+        if (!memory) memory = std::make_shared<WireMemoryPool>();
+        Buffer reserved(detail::SetupWireAllocator<u8>(std::move(memory), true, senderRunId));
         reserved.resize(bytes);
-        cudaOwned = isRootCudaWireHostRange(reserved.data(), reserved.size());
+        cudaOwned = isRootCudaWireHostRange(reserved.wireView());
         const u64 cpuElapsed = cpuBenchmarkThreadNs() - cpuBegin;
         const u64 wallEnd = rootCudaWireSteadyNs();
         {
@@ -444,15 +235,15 @@ namespace osuCrypto::LogVole
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!exactBytes || exactBytes > reserved.size() ||
-            !isRootCudaWireHostRange(reserved.data(), reserved.size()))
+            !isRootCudaWireHostRange(reserved.wireView()))
             return false;
         const std::size_t oldBytes = reserved.size();
-        if (!rootCudaWirePool().contractActive(reserved.data(),
+        if (!reserved.memory()->contract(reserved.data(),
                 oldBytes, exactBytes)) return false;
         try { reserved.resize(exactBytes); }
         catch (...) { return false; }
         return reserved.size() == exactBytes &&
-            isRootCudaWireHostRange(reserved.data(), exactBytes);
+            isRootCudaWireHostRange(reserved.wireView());
 #else
         (void)reserved;
         (void)exactBytes;
@@ -466,8 +257,7 @@ namespace osuCrypto::LogVole
         const char* flag = std::getenv("LV_GPU_SETUP_WIRE_HUGE_PAGES");
         if ((flag && flag[0] == '0') || !gpu::enabled() || buffer.size() < (std::size_t{8} << 20))
             return;
-        if (gpu::gpuIsSetupWireHostRange(buffer.data(), buffer.size()) ||
-            isRootCudaWireHostRange(buffer.data(), buffer.size())) return;
+        if (buffer.memory() && buffer.memory()->contains(buffer.data(), buffer.size())) return;
         constexpr std::uintptr_t alignment = std::uintptr_t{2} << 20;
         const auto first = reinterpret_cast<std::uintptr_t>(buffer.data());
         if (first > std::numeric_limits<std::uintptr_t>::max() - buffer.size()) return;
@@ -1320,7 +1110,7 @@ namespace osuCrypto::LogVole
             const auto start = writer.mOffset;
             writer.writeU32(words);
             const auto bytes = static_cast<std::size_t>(words) * sizeof(u64);
-            if (lazy->copyCoefficientsTo(std::span<u8>(writer.mBuffer.data() + writer.mOffset, bytes)))
+            if (lazy->copyCoefficientsTo(writer.mBuffer.wireView().subspan(writer.mOffset, bytes)))
                 writer.mOffset += bytes;
             else
             {
@@ -1498,7 +1288,7 @@ namespace osuCrypto::LogVole
                 writer.writeU32(words);
                 const auto bytes = static_cast<std::size_t>(words) * sizeof(u64);
                 if (lazy->copyCoefficientsTo(
-                        std::span<u8>(writer.mBuffer.data() + writer.mOffset, bytes)))
+                        writer.mBuffer.wireView().subspan(writer.mOffset, bytes)))
                     writer.mOffset += bytes;
                 else
                 {
@@ -1535,7 +1325,7 @@ namespace osuCrypto::LogVole
             const auto bytes = static_cast<std::size_t>(words) * sizeof(u64);
             if (std::endian::native == std::endian::little &&
                 message.mOwnedPublicBStarWire->copyCoefficientsTo(
-                    std::span<u8>(writer.mBuffer.data() + writer.mOffset, bytes)))
+                    writer.mBuffer.wireView().subspan(writer.mOffset, bytes)))
                 writer.mOffset += bytes;
             else
             {
@@ -1626,11 +1416,11 @@ namespace osuCrypto::LogVole
                 mHost.mRows = rows;
                 mHost.mCols = cols;
             }
-            std::span<const u8> encodedCoefficients() const override
+            ConstWireView encodedCoefficients() const override
             {
-                return { mPayload->data() + mOffset, mBytes };
+                return mPayload->wireView().subspan(mOffset, mBytes);
             }
-            bool copyCoefficientsTo(std::span<u8> destination) const override
+            bool copyCoefficientsTo(WireView destination) const override
             {
                 if (destination.size() != mBytes) return false;
                 std::memmove(destination.data(), mPayload->data() + mOffset, mBytes);

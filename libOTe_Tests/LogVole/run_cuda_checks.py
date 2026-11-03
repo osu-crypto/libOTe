@@ -28,7 +28,7 @@ def main():
         "Cpu_ResamplingOverwritesPreviousQuery", "Cpu_ZkArithmeticMatchesReference",
         "Cpu_GpuZkMatMulSeededInputsMatchReference",
         "RingOps_PartyCachesDoNotAlias", "RingOps_ScalarUploadLifetimeAndRoleSwitch",
-        "RingOps_GpuBufferResizeBounds", "RingOps_GpuMemoryPoolLifecycle", "RingOps_GpuStreamStagingLifetime", "Encoding_PinnedWireBufferOwnership",
+        "RingOps_GpuBufferResizeBounds", "RingOps_GpuMemoryPoolLifecycle", "RingOps_GpuStreamStagingLifetime", "Encoding_PinnedWireBufferOwnership", "Encoding_RootResidentWireExact",
         "RingOps_GaussianPrefixBatchParity",
         "Civole_RejectsZeroDelta", "Civole_RejectsPeerOfflineWidth",
         "Civole_StateMachineAutoOfflineSequentialSids",

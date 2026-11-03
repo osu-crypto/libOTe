@@ -3824,11 +3824,11 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 // fallback. Supported devices now force an already-registered
                 // decline when each helper attempts its own registration.
             }
-            LOGVOLE_REQUIRE_TRUE(gpu::uploadSetupWire(cleanup.device, sourceSpan, bytes, uploadStream));
+            LOGVOLE_REQUIRE_TRUE(gpu::uploadSetupWire(cleanup.device, {sourceSpan, bytes}, uploadStream));
             // A synchronous upload permits immediate source reuse, and a
             // consumer on another stream requires no explicit dependency.
             std::fill(sourceSpan, sourceSpan + bytes, 0u);
-            LOGVOLE_REQUIRE_TRUE(gpu::downloadSetupWire(destinationSpan, cleanup.device, bytes, downloadStream));
+            LOGVOLE_REQUIRE_TRUE(gpu::downloadSetupWire({destinationSpan, bytes}, cleanup.device, downloadStream));
             std::size_t firstMismatch = 0;
             while (firstMismatch < bytes && destinationSpan[firstMismatch] == pattern(firstMismatch))
                 ++firstMismatch;

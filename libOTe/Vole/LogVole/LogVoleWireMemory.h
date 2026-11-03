@@ -52,6 +52,14 @@ namespace osuCrypto::LogVole
         template<typename U> requires(std::is_convertible_v<U(*)[], T(*)[]>)
         BasicWireView(const BasicWireView<U>& other)
             : Base(other.data(), other.size()), mMemory(other.mMemory) {}
+        BasicWireView first(std::size_t size) const { return {Base::first(size), mMemory}; }
+        BasicWireView last(std::size_t size) const { return {Base::last(size), mMemory}; }
+        template<std::size_t Count> BasicWireView first() const
+        { return {Base::template first<Count>(), mMemory}; }
+        template<std::size_t Count> BasicWireView last() const
+        { return {Base::template last<Count>(), mMemory}; }
+        template<std::size_t Offset, std::size_t Count = std::dynamic_extent> BasicWireView subspan() const
+        { return {Base::template subspan<Offset, Count>(), mMemory}; }
         BasicWireView subspan(std::size_t offset, std::size_t size = std::dynamic_extent) const
         { return {Base::subspan(offset, size), mMemory}; }
     };

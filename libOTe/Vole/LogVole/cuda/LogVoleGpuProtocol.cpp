@@ -983,8 +983,8 @@ namespace osuCrypto::LogVole::gpu
             const RingTensor& ct1,
             const ShrinkExpandLacct& lacct,
             bool ct1IsNtt,
-            std::span<const u8> encodedCt1 = {},
-            std::span<const u8> encodedLacct = {})
+            ConstWireView encodedCt1 = {},
+            ConstWireView encodedLacct = {})
         {
             auto ring = GpuRing::get(ctx);
             if (!ring) return nullptr;
@@ -1112,7 +1112,7 @@ namespace osuCrypto::LogVole::gpu
                 cache->mCt1Cols = ct1.mCols;
                 if (!cache->mCt1.resize(*ring, ct1Count, stream) ||
                     !(encodedCt1.empty() ? cache->mCt1.upload(ct1.mPolys, stream)
-                        : uploadSetupWire(cache->mCt1.data(stream), encodedCt1.data(), encodedCt1.size(), stream)))
+                        : uploadSetupWire(cache->mCt1.data(stream), encodedCt1, stream)))
                     return nullptr;
                 if (!ct1IsNtt &&
                     (!launchCanonicalize(ring->view(), cache->mCt1.data(stream), nullptr,
@@ -1126,7 +1126,7 @@ namespace osuCrypto::LogVole::gpu
                 cache->mLacctCols = lacct.mCt.mCols;
                 if (!cache->mLacct.resize(*ring, lacctCount, stream) ||
                     !(encodedLacct.empty() ? cache->mLacct.upload(lacct.mCt.mPolys, stream)
-                        : uploadSetupWire(cache->mLacct.data(stream), encodedLacct.data(), encodedLacct.size(), stream)))
+                        : uploadSetupWire(cache->mLacct.data(stream), encodedLacct, stream)))
                     return nullptr;
             }
 
@@ -1631,8 +1631,8 @@ namespace osuCrypto::LogVole::gpu
             lacctCount > std::numeric_limits<u32>::max() ||
             ct1Count > std::numeric_limits<std::size_t>::max() / polyBytes ||
             lacctCount > std::numeric_limits<std::size_t>::max() / polyBytes) return false;
-        const auto ct1Bytes = encodedCt1 ? encodedCt1->encodedCoefficients() : std::span<const u8>{};
-        const auto lacctBytes = encodedLacct ? encodedLacct->encodedCoefficients() : std::span<const u8>{};
+        const auto ct1Bytes = encodedCt1 ? encodedCt1->encodedCoefficients() : ConstWireView{};
+        const auto lacctBytes = encodedLacct ? encodedLacct->encodedCoefficients() : ConstWireView{};
         const bool ct1InputValid = encodedCt1
             ? ct1.mPolys.empty() && ct1Bytes.size() == ct1Count * polyBytes
             : ct1.mPolys.size() == ct1Count && validateRingBatchShape(ct1.mPolys, ctx.mParams);
@@ -1846,7 +1846,7 @@ namespace osuCrypto::LogVole::gpu
                 return mHost;
             }
 
-            bool copyCoefficientsTo(std::span<u8> destination) const override
+            bool copyCoefficientsTo(WireView destination) const override
             {
                 std::lock_guard use(mDeviceUseMutex);
                 if (destination.size() != mBuffer.bytes() || currentDeviceOrdinal() != mDevice)
@@ -1859,8 +1859,7 @@ namespace osuCrypto::LogVole::gpu
                 } restore;
                 auto& stream = threadSampleStream();
                 gpuSetCurrentStream(stream.raw());
-                const bool copied = downloadSetupWire(destination.data(), mBuffer.data(stream),
-                    destination.size(), stream);
+                const bool copied = downloadSetupWire(destination, mBuffer.data(stream), stream);
                 return stream.sync() && copied;
             }
 
@@ -5496,7 +5495,7 @@ namespace osuCrypto::LogVole::gpu
                     return false;
                 const auto encoded = state.mRootCtRWire->encodedCoefficients();
                 return encoded.size() == cache->mCtR.bytes() &&
-                    uploadSetupWire(cache->mCtR.data(stream), encoded.data(), encoded.size(), stream) &&
+                    uploadSetupWire(cache->mCtR.data(stream), encoded, stream) &&
                     launchCanonicalize(ring->view(), cache->mCtR.data(stream), nullptr,
                         static_cast<u32>(count), stream.raw()) &&
                     nttForward(*ring, cache->mCtR.data(stream), static_cast<u32>(count), stream);
@@ -5515,7 +5514,7 @@ namespace osuCrypto::LogVole::gpu
                     return false;
                 const auto encoded = state.mRootTopCtWire->encodedCoefficients();
                 return encoded.size() == cache->mTopCt.bytes() &&
-                    uploadSetupWire(cache->mTopCt.data(stream), encoded.data(), encoded.size(), stream);
+                    uploadSetupWire(cache->mTopCt.data(stream), encoded, stream);
             };
             const auto uploadLacct = [&] {
                 if (!state.mRootLacctLeftWire)
@@ -5531,7 +5530,7 @@ namespace osuCrypto::LogVole::gpu
                     return false;
                 const auto encoded = state.mRootLacctLeftWire->encodedCoefficients();
                 return encoded.size() == cache->mLacctLeft.bytes() &&
-                    uploadSetupWire(cache->mLacctLeft.data(stream), encoded.data(), encoded.size(), stream);
+                    uploadSetupWire(cache->mLacctLeft.data(stream), encoded, stream);
             };
             const auto uploadPublicBStar = [&] {
                 if (!state.mRootPublicBStarWire)
@@ -5545,7 +5544,7 @@ namespace osuCrypto::LogVole::gpu
                     return false;
                 const auto encoded = state.mRootPublicBStarWire->encodedCoefficients();
                 return encoded.size() == cache->mPublicBStar.bytes() &&
-                    uploadSetupWire(cache->mPublicBStar.data(stream), encoded.data(), encoded.size(), stream);
+                    uploadSetupWire(cache->mPublicBStar.data(stream), encoded, stream);
             };
 
             if (!uploadCtR() ||

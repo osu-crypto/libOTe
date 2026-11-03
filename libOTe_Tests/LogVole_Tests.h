@@ -59,6 +59,7 @@
     X(Core, LeafGoldenSeedMatchesDecoder) \
     X(Encoding, AllMessageRoundTrips) \
     X(Encoding, SingletonOfflinePayloadBound) \
+    X(Encoding, RootResidentWireExact) \
     X(Encoding, PinnedWireBufferOwnership) \
     X(KeyDeriveCore, AlgebraicRelation) \
     X(KeyDeriveCore, DeterministicRegressionSeeds) \

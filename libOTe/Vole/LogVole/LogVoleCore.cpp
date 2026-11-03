@@ -160,7 +160,7 @@ namespace osuCrypto::LogVole
                 RingNttContext ctx)
                 : mWire(std::move(wire)), mCtx(std::move(ctx)) {}
 
-            std::span<const u8> encodedCoefficients() const override
+            ConstWireView encodedCoefficients() const override
             {
                 return mWire->encodedCoefficients();
             }
@@ -2412,13 +2412,13 @@ namespace osuCrypto::LogVole
             : message.mLazyPublicBStar ? message.mLazyPublicBStar->get().mPolys
             : message.mPublicBStarNtt;
         const auto topCtWireBytes = ownedTopCtWire
-            ? message.mOwnedTopCtWire->encodedCoefficients() : std::span<const u8>{};
+            ? message.mOwnedTopCtWire->encodedCoefficients() : ConstWireView{};
         const auto lacctWireBytes = ownedLacctWire
-            ? message.mOwnedLacctLeftWire->encodedCoefficients() : std::span<const u8>{};
+            ? message.mOwnedLacctLeftWire->encodedCoefficients() : ConstWireView{};
         const auto ctRWireBytes = ownedCtRWire
-            ? message.mOwnedCtRWire->encodedCoefficients() : std::span<const u8>{};
+            ? message.mOwnedCtRWire->encodedCoefficients() : ConstWireView{};
         const auto publicBStarWireBytes = ownedPublicBStarWire
-            ? message.mOwnedPublicBStarWire->encodedCoefficients() : std::span<const u8>{};
+            ? message.mOwnedPublicBStarWire->encodedCoefficients() : ConstWireView{};
         const u64 rootPolyWords = ringPolyCoeffCount(message.mRing);
         const u64 ctRWireWords = ctRWireBytes.size() / sizeof(u64);
         const u64 lacctWireWords = lacctWireBytes.size() / sizeof(u64);

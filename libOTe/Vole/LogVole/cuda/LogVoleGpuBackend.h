@@ -183,8 +183,8 @@ namespace osuCrypto::LogVole::gpu
     // directly in either direction. LV_GPU_SETUP_PINNED_WIRE=0 restores ordinary
     // staged helpers. Both directions drain before returning, including failure,
     // and before releasing any temporary registration for external storage.
-    bool downloadSetupWire(void* hostDst, const void* deviceSrc, std::size_t bytes, GpuStream& stream);
-    bool uploadSetupWire(void* deviceDst, const void* hostSrc, std::size_t bytes, GpuStream& stream);
+    bool downloadSetupWire(WireView wire, const void* deviceSrc, GpuStream& stream);
+    bool uploadSetupWire(void* deviceDst, ConstWireView wire, GpuStream& stream);
 
     // Explicit native setup selects a role-local cache lane on device 0.
     // Factory construction still requires a nonzero owned protocol run.

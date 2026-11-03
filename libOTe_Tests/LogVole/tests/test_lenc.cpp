@@ -158,7 +158,7 @@ namespace
             [](std::uint8_t byte) { return byte == 0xA5u; }));
         // Export before requesting get(): transport must not depend on a host
         // tensor having already been materialized.
-        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(actualBytes));
+        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(std::span(actualBytes)));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(expectedBytes, actualBytes));
         const auto& host = owner->get();
         expect_tensor_equal(expected, host);
@@ -167,7 +167,7 @@ namespace
         mutableCopy.mPolys.front().mCoeffs.front() ^= 1;
         LOGVOLE_REQUIRE_EQ(owner->get().mPolys.front().mCoeffs.front(),
             expected.mPolys.front().mCoeffs.front());
-        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(actualBytes));
+        LOGVOLE_REQUIRE_TRUE(owner->copyCoefficientsTo(std::span(actualBytes)));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(expectedBytes, actualBytes));
     }
 
