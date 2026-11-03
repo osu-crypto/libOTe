@@ -3555,8 +3555,8 @@ namespace osuCrypto::LogVole
                         rootTbkDev &&
                         rootTbkDev->count() == state.mShrinkExpandState.mParams.mMu &&
                         (rootPublicSeed || deferRootValidation ||
-                         (isLeaf ? gpu::validateLeafGoldenSeedDevice(rootSeedParams, *rootTbkDev, rootOkDev)
-                                 : gpu::validateGoldenSeedDevice(rootSeedParams, *rootTbkDev, rootOkDev))))
+                         (isLeaf ? gpu::validateLeafGoldenSeedDevice(rootSeedParams, rootCtx, *rootTbkDev, rootOkDev)
+                                 : gpu::validateGoldenSeedDevice(rootSeedParams, rootCtx, *rootTbkDev, rootOkDev))))
                     {
                         RecursiveSeedEvalOutput next{};
                         if (!rootOkDev)
@@ -3757,8 +3757,8 @@ namespace osuCrypto::LogVole
                         senderCt2Prefetch.get()) &&
                     tbkDev && tbkDev->count() == static_cast<std::size_t>(wDoublePrime) * muHi &&
                     (publicSeedDev || deferThisValidation ||
-                     (isLeaf ? gpu::validateLeafGoldenSeedDevice(seedParamsDev, *tbkDev, candidateOkDev)
-                             : gpu::validateGoldenSeedDevice(seedParamsDev, *tbkDev, candidateOkDev))))
+                     (isLeaf ? gpu::validateLeafGoldenSeedDevice(seedParamsDev, gpuCtx, *tbkDev, candidateOkDev)
+                             : gpu::validateGoldenSeedDevice(seedParamsDev, gpuCtx, *tbkDev, candidateOkDev))))
                 {
                     RecursiveSeedEvalOutput next{};
                     if (!candidateOkDev)
@@ -3991,7 +3991,7 @@ namespace osuCrypto::LogVole
                     const Params topSeedParams = makeSeedParams(
                         state.mParams, state.mShrinkExpandState.mParams);
                     if (!gpu::queueLeafGoldenSeedValidation(
-                            topSeedParams, *deferred.mTbkDevice))
+                            topSeedParams, ctx, *deferred.mTbkDevice))
                     {
                         if (!gpu::abortGoldenValidationAttempt()) return false;
                         return evaluateSenderSeedCandidateImpl(

@@ -25,6 +25,22 @@
 
 namespace osuCrypto::LogVole::gpu
 {
+    // Caller-owned reuse of ring and plaintext tables. Table owners retain
+    // setup resources independently, with no reference back to this cache.
+    class GpuTableCache
+    {
+    public:
+        GpuTableCache();
+        ~GpuTableCache();
+        GpuTableCache(const GpuTableCache&) = delete;
+        GpuTableCache& operator=(const GpuTableCache&) = delete;
+    private:
+        friend class GpuRing;
+        friend class GpuPlainNtt;
+        friend class GpuRingSetupPrefetch;
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+    };
     // Explicit cold-setup execution domain. Copies of ring/CRT resources can
     // retain this domain; it owns reusable per-worker streams without TLS.
     // Callers must join all factory users before releasing their last owner.
@@ -240,6 +256,24 @@ namespace osuCrypto::LogVole::gpu
     bool copyRowsFromDevice(void* deviceDst, std::size_t dstPitch, const void* src,
         std::size_t rowBytes, std::size_t rows, GpuStream& stream);
 
+    // Immutable constants may be read concurrently on several streams. Retain
+    // native owners (never their scratch/context) and drain only at teardown.
+    // The repeated-stream fast path performs no lock or allocation.
+    class GpuTableReads
+    {
+    public:
+        void record(const std::shared_ptr<OwnedGpuStream>& stream) const
+        {
+            if (mRecent.load(std::memory_order_relaxed) != stream.get()) recordNew(stream);
+        }
+        void wait() const noexcept;
+    private:
+        void recordNew(const std::shared_ptr<OwnedGpuStream>& stream) const;
+        mutable std::atomic<OwnedGpuStream*> mRecent{nullptr};
+        mutable std::mutex mMutex;
+        mutable std::vector<std::shared_ptr<OwnedGpuStream>> mStreams;
+    };
+
     class GpuRing
     {
     public:
@@ -252,12 +286,12 @@ namespace osuCrypto::LogVole::gpu
         // Returns null for unsupported/malformed parameters or CUDA failure.
         static std::shared_ptr<GpuRing> getRaw(
             const RingParams& params, std::span<const u64> orderedPrimes,
-            RingResourceScope owner, std::shared_ptr<GpuSetupContext> execution = {});
+            const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution = {});
         // Publish an already certified native ring into the matching raw
         // role/mode lane. Existing sequential owners stay alive for borrowers.
         static bool publishRaw(const RingParams& params,
             std::span<const u64> orderedPrimes,
-            const std::shared_ptr<GpuRing>& ready);
+            const std::shared_ptr<GpuRing>& ready, const RingResourceScope& owner);
 
         ~GpuRing();
         GpuRing(const GpuRing&) = delete;
@@ -267,7 +301,13 @@ namespace osuCrypto::LogVole::gpu
         u32 rho() const { return mView.mRho; }
         std::size_t polyWords() const { return static_cast<std::size_t>(mView.mN) * mView.mRho; }
         std::size_t polyBytes() const { return polyWords() * sizeof(u64); }
-        const RingConstView& view() const { return mView; }
+        const RingConstView& view(GpuStream& stream) const
+        {
+            mReads.record(stream.allocationOwner());
+            return mView;
+        }
+        // Host metadata inspection does not submit device reads.
+        const RingConstView& metadata() const { return mView; }
         const DenoiseConstView& denoiseView() const { return mDenoise; }
         bool denoiseReady() const { return mDenoiseReady; }
 
@@ -294,6 +334,7 @@ namespace osuCrypto::LogVole::gpu
 
     private:
         GpuRing() = default;
+        GpuTableReads mReads;
         friend bool buildNativeSealSetupBundleDevice(const RingParams&,
             u32, NativeSealSetupBundle&, std::shared_ptr<GpuSetupContext>);
         bool init(const RingNttContext& ctx);
@@ -353,21 +394,26 @@ namespace osuCrypto::LogVole::gpu
         // Cached per (N, plaintext modulus). Returns null on failure.
         static std::shared_ptr<GpuPlainNtt> get(
             const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder,
-            RingResourceScope owner);
+            const RingResourceScope& owner);
         // Builds the plaintext NTT and SEAL batching permutation on the device.
         static std::shared_ptr<GpuPlainNtt> getRaw(u32 degree, u64 plaintextPrime,
-            RingResourceScope owner, std::shared_ptr<GpuSetupContext> execution = {});
+            const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution = {});
         // Admit a fully sealed private native-bundle owner into the immutable
         // role-keyed raw table cache. Call only at the host context commit
         // boundary; no table construction or D2H occurs here.
         static bool publishRaw(u32 degree, u64 plaintextPrime,
-            const std::shared_ptr<GpuPlainNtt>& ready);
+            const std::shared_ptr<GpuPlainNtt>& ready, const RingResourceScope& owner);
 
         ~GpuPlainNtt();
         GpuPlainNtt(const GpuPlainNtt&) = delete;
         GpuPlainNtt& operator=(const GpuPlainNtt&) = delete;
 
-        const RingConstView& view() const { return mView; }
+        const RingConstView& view(GpuStream& stream) const
+        {
+            mReads.record(stream.allocationOwner());
+            return mView;
+        }
+        const RingConstView& metadata() const { return mView; }
         u32 n() const { return mView.mN; }
         u32 slotCount() const { return mSlotCount; }
         ProtocolCacheRole nativeBundleOwnerRole() const
@@ -384,6 +430,7 @@ namespace osuCrypto::LogVole::gpu
 
     private:
         GpuPlainNtt() = default;
+        GpuTableReads mReads;
         friend bool buildNativeSealSetupBundleDevice(const RingParams&,
             u32, NativeSealSetupBundle&, std::shared_ptr<GpuSetupContext>);
         bool init(const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder);

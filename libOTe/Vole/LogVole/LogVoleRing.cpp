@@ -851,6 +851,10 @@ namespace osuCrypto::LogVole
             }
         }
 
+        RingResourceScope resources{key.mRole, key.mNativeSealBundleRequested};
+#if defined(ENABLE_LOGVOLE_CUDA)
+        resources.mTables = std::make_shared<gpu::GpuTableCache>();
+#endif
         RingNttContext built{};
         if (lightweight)
         {
@@ -868,7 +872,7 @@ namespace osuCrypto::LogVole
                 if (!gpu::selectSealCoeffModuliDevice(params, metadata->mValues, built.mGpuSetup)) return false;
                 metadata->mDynamicGpuCertificate =
                     gpu::GpuRing::getRaw(params, metadata->mValues,
-                        {key.mRole, key.mNativeSealBundleRequested}, built.mGpuSetup);
+                        resources, built.mGpuSetup);
                 if (!metadata->mDynamicGpuCertificate) return false;
                 built.mGpuSetup = metadata->mDynamicGpuCertificate->setupContext();
 #else
@@ -889,8 +893,9 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        built.mResourceScope = {key.mRole, key.mNativeSealBundleRequested};
+        built.mResourceScope = std::move(resources);
 #if defined(ENABLE_LOGVOLE_CUDA)
+        if (!built.mGpuSetup) built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>();
         built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
 #endif
         auto shared = std::make_shared<const RingNttContext>(built);
@@ -983,7 +988,8 @@ namespace osuCrypto::LogVole
             params.mCoeffModulusBits.end());
         built.mGpuSetup = certificate->setupContext();
         built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
-        built.mResourceScope = {certificate->rawOwnerRole(), certificate->nativeSealBundleOwner()};
+        built.mResourceScope = {certificate->rawOwnerRole(), certificate->nativeSealBundleOwner(),
+            std::make_shared<gpu::GpuTableCache>()};
         metadata->mDynamicGpuCertificate = std::move(certificate);
         built.mRawModuli = std::move(metadata);
         built.mGpuLightweight = true;

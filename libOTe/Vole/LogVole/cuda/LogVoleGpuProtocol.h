@@ -901,16 +901,19 @@ namespace osuCrypto::LogVole::gpu
     // validateGoldenSeedCandidate against a device-resident tbk.
     bool validateGoldenSeedDevice(
         const Params& params,
+        const RingNttContext& ctx,
         const DeviceBatch& tbk,
         bool& ok);
 
     // Leaf Q/p check over mW outputs; any physical padded suffix is ignored.
     bool validateLeafGoldenSeedDevice(
         const Params& params,
+        const RingNttContext& ctx,
         const DeviceBatch& tbk,
         bool& ok);
     bool queueLeafGoldenSeedValidation(
         const Params& params,
+        const RingNttContext& ctx,
         const DeviceBatch& tbk);
 
     // Batched shrinkExpandDenoiseComb: rho consecutive inputs give one output.

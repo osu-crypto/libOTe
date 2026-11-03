@@ -15,11 +15,14 @@
 
 namespace osuCrypto::LogVole
 {
+    namespace gpu { class GpuTableCache; }
     enum class ProtocolCacheRole : u8;
     struct RingResourceScope
     {
         ProtocolCacheRole mRole{};
         bool mNativeGpuTables = false;
+        // Contexts share immutable tables; tables never retain this cache.
+        std::shared_ptr<gpu::GpuTableCache> mTables;
     };
     namespace gpu { class DeviceScalars; class RetainedPublicUniform; class GpuRing; class GpuSetupContext; class GpuExecutionContext; }
     struct RingOpsStats

@@ -118,6 +118,8 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP&)
             ScopedProtocolCacheScope owner(role, run);
             std::shared_ptr<gpu::GpuPlainNtt> priorPlain;
             std::shared_ptr<gpu::GpuRing> priorDeviceRing;
+            RingNttContext priorRing{};
+            ZpCrtContext priorZp{};
             bool priorPlainAlreadyNative = false;
             if (production)
             {
@@ -133,8 +135,6 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP&)
                 // created by an explicit sequential opt-out.
                 ScopedEnvironmentValue optOut(
                     "LV_GPU_NATIVE_SEAL_BUNDLE", "0");
-                RingNttContext priorRing{};
-                ZpCrtContext priorZp{};
                 LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
                     params, plaintextBits, priorRing, priorZp));
                 LOGVOLE_REQUIRE_FALSE(priorZp.mNativeSealBundleCommitted);
@@ -252,8 +252,14 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP&)
         {
             ScopedProtocolCacheScope receiver(
                 ProtocolCacheRole::Receiver, allocateProtocolCacheRunId());
+            // A worker's ambient role cannot replace a retained context's
+            // explicit owner. Contradictory stored provenance is rejected.
             LOGVOLE_REQUIRE_TRUE(
-                gpu::GpuRing::get(bundledRing[0]) == nullptr);
+                gpu::GpuRing::get(bundledRing[0]) ==
+                    bundledRing[0].mRawModuli->mDynamicGpuCertificate);
+            auto wrongOwner = bundledRing[0];
+            wrongOwner.mResourceScope.mRole = ProtocolCacheRole::Receiver;
+            LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(wrongOwner) == nullptr);
         }
         {
             ScopedProtocolCacheScope sender(

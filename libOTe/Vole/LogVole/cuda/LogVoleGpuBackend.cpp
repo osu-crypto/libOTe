@@ -249,15 +249,6 @@ namespace osuCrypto::LogVole::gpu
         };
 
         using RingCache = std::unordered_map<RingCacheKey, std::shared_ptr<GpuRing>, RingCacheKeyHash>;
-        RingCache& ringCache()
-        {
-            static RingCache c = [] {
-                gpuInitializeMemoryPools();
-                return RingCache{};
-            }();
-            return c;
-        }
-        std::mutex gRingCacheMutex;
 
         struct RawRingCacheKey
         {
@@ -287,15 +278,10 @@ namespace osuCrypto::LogVole::gpu
         };
 
         using RawRingCache = std::unordered_map<RawRingCacheKey, std::shared_ptr<GpuRing>, RawRingCacheKeyHash>;
-        RawRingCache& rawRingCache()
-        {
-            static RawRingCache cache = [] {
-                gpuInitializeMemoryPools();
-                return RawRingCache{};
-            }();
-            return cache;
-        }
-        std::mutex gRawRingCacheMutex;
+        using PlainKey = std::tuple<u64, u64, ProtocolCacheRole>;
+        using PlainCache = std::vector<std::pair<PlainKey, std::shared_ptr<GpuPlainNtt>>>;
+        using RawPlainKey = std::tuple<u32, u64, ProtocolCacheRole, bool>;
+        using RawPlainCache = std::vector<std::pair<RawPlainKey, std::shared_ptr<GpuPlainNtt>>>;
 
         bool validRawPrimes(u32 n, std::span<const u64> primes)
         {
@@ -490,6 +476,10 @@ namespace osuCrypto::LogVole::gpu
         void* uploadVector(const std::vector<T>& host, std::vector<void*>& owned)
         {
             if (host.empty()) return nullptr;
+            // Establish bookkeeping capacity before acquiring device memory.
+            // A host allocation failure must not orphan an uploaded table.
+            if (owned.size() == owned.capacity())
+                owned.reserve(owned.size() ? owned.size() * 2 : 1);
             HostStep allocationStep("setup GPU constants allocate");
             void* d = gpuMalloc(host.size() * sizeof(T));
             allocationStep.stop();
@@ -504,6 +494,18 @@ namespace osuCrypto::LogVole::gpu
             return d;
         }
     }
+
+    struct GpuTableCache::Impl
+    {
+        std::mutex ringMutex, rawRingMutex, plainMutex, rawPlainMutex;
+        RingCache rings;
+        RawRingCache rawRings;
+        PlainCache plains;
+        RawPlainCache rawPlains;
+    };
+
+    GpuTableCache::GpuTableCache() : mImpl(std::make_unique<Impl>()) {}
+    GpuTableCache::~GpuTableCache() = default;
 
     struct GpuSetupContext::Impl
     {
@@ -617,7 +619,7 @@ namespace osuCrypto::LogVole::gpu
         AlignedUnVec<u64>& residues)
     {
         HostStep step("setup: dynamic GPU plaintext lift");
-        const auto& view = ring.view();
+        const auto& view = ring.metadata();
         if (!ring.n() || !ring.rho() || ring.rho() > 16u ||
             plaintextPrime <= 2u * ring.n() || plaintextPrime >= view.mMinModulus ||
             !view.mBaseProd || !available() || currentDeviceOrdinal() != 0) return false;
@@ -1491,13 +1493,31 @@ namespace osuCrypto::LogVole::gpu
 
     // ---- GpuRing ----------------------------------------------------------
 
+    void GpuTableReads::recordNew(const std::shared_ptr<OwnedGpuStream>& stream) const
+    {
+        std::lock_guard lock(mMutex);
+        if (std::find(mStreams.begin(), mStreams.end(), stream) == mStreams.end())
+            mStreams.push_back(stream);
+        mRecent.store(stream.get(), std::memory_order_relaxed);
+    }
+
+    void GpuTableReads::wait() const noexcept
+    {
+        // No reader can register after the last shared table owner is released.
+        // Retaining the native stream also covers concurrent worker teardown.
+        try { for (const auto& stream : mStreams) stream->synchronize(); }
+        catch (...) { std::terminate(); }
+    }
+
     GpuRing::~GpuRing()
     {
+        mReads.wait();
         for (void* p : mOwned) gpuFree(p);
     }
 
     std::shared_ptr<GpuRing> GpuRing::get(const RingNttContext& ctx)
     {
+        if (!ctx.mResourceScope.mTables) return nullptr;
         HostStep getStep("setup GPU ring get");
         if (ctx.mGpuLightweight)
         {
@@ -1522,21 +1542,23 @@ namespace osuCrypto::LogVole::gpu
         key.mBits.assign(ctx.mParams.mCoeffModulusBits.begin(), ctx.mParams.mCoeffModulusBits.end());
         key.mRole = ctx.mResourceScope.mRole;
 
-        std::lock_guard<std::mutex> lock(gRingCacheMutex);
-        auto it = ringCache().find(key);
-        if (it != ringCache().end()) return it->second;
+        auto& cache = *ctx.mResourceScope.mTables->mImpl;
+        std::lock_guard<std::mutex> lock(cache.ringMutex);
+        auto it = cache.rings.find(key);
+        if (it != cache.rings.end()) return it->second;
 
         std::shared_ptr<GpuRing> ring(new GpuRing());
+        ring->mSetup = ctx.mGpuSetup;
         if (!ring->init(ctx)) return nullptr;
-        ringCache().emplace(std::move(key), ring);
+        cache.rings.emplace(std::move(key), ring);
         return ring;
     }
 
     std::shared_ptr<GpuRing> GpuRing::getRaw(const RingParams& params, std::span<const u64> primes,
-        RingResourceScope owner, std::shared_ptr<GpuSetupContext> execution)
+        const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution)
     {
         HostStep getStep("setup GPU raw ring get");
-        if (!validRawPrimes(params.mPolyModulusDegree, primes) ||
+        if (!owner.mTables || !validRawPrimes(params.mPolyModulusDegree, primes) ||
             params.mCoeffModulusBits.size() != primes.size()) return nullptr;
         for (std::size_t j = 0; j < primes.size(); ++j)
         {
@@ -1551,13 +1573,14 @@ namespace osuCrypto::LogVole::gpu
             RawRingCacheKey key{params.mPolyModulusDegree,
                 std::vector<u64>(primes.begin(), primes.end()),
                 owner.mRole, owner.mNativeGpuTables};
-            std::lock_guard<std::mutex> lock(gRawRingCacheMutex);
-            if (auto it = rawRingCache().find(key); it != rawRingCache().end()) return it->second;
+            auto& cache = *owner.mTables->mImpl;
+            std::lock_guard<std::mutex> lock(cache.rawRingMutex);
+            if (auto it = cache.rawRings.find(key); it != cache.rawRings.end()) return it->second;
             std::shared_ptr<GpuRing> ring(new GpuRing());
             ring->mSetup = execution ? std::move(execution) : std::make_shared<GpuSetupContext>();
             ring->mRawOwnerRole = owner.mRole;
             if (!ring->initRaw(params, primes)) return nullptr;
-            rawRingCache().emplace(std::move(key), ring);
+            cache.rawRings.emplace(std::move(key), ring);
             return ring;
         }
         catch (...) { return nullptr; }
@@ -1565,11 +1588,11 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuRing::publishRaw(const RingParams& params,
         std::span<const u64> orderedPrimes,
-        const std::shared_ptr<GpuRing>& ready)
+        const std::shared_ptr<GpuRing>& ready, const RingResourceScope& owner)
     {
         if (!ready || !ready->mNativeSealBundleStorage || !ready->mRaw ||
             !ready->mDenoiseReady || !ready->mSampleMaxMultiple ||
-            !nativeSealBundleCacheRequested(ready->mRawOwnerRole) ||
+            !owner.mTables || !owner.mNativeGpuTables || owner.mRole != ready->mRawOwnerRole ||
             !(ready->mParams == params) ||
             ready->n() != params.mPolyModulusDegree ||
             ready->rho() != orderedPrimes.size() ||
@@ -1591,8 +1614,9 @@ namespace osuCrypto::LogVole::gpu
             RawRingCacheKey key{params.mPolyModulusDegree,
                 std::vector<u64>(orderedPrimes.begin(), orderedPrimes.end()),
                 ready->mRawOwnerRole, true};
-            std::lock_guard<std::mutex> lock(gRawRingCacheMutex);
-            if (auto it = rawRingCache().find(key); it != rawRingCache().end())
+            auto& cache = *owner.mTables->mImpl;
+            std::lock_guard<std::mutex> lock(cache.rawRingMutex);
+            if (auto it = cache.rawRings.find(key); it != cache.rawRings.end())
             {
                 // A same-role sequential table may have been built before the
                 // combined factory committed. A shared_ptr already borrowed
@@ -1600,7 +1624,7 @@ namespace osuCrypto::LogVole::gpu
                 it->second = ready;
                 return true;
             }
-            rawRingCache().emplace(std::move(key), ready);
+            cache.rawRings.emplace(std::move(key), ready);
             return true;
         }
         catch (...) { return false; }
@@ -1917,7 +1941,8 @@ namespace osuCrypto::LogVole::gpu
     GpuRingSetupPrefetch::GpuRingSetupPrefetch(const RingNttContext& ctx, bool gpuEnabled)
     {
         const char* value = std::getenv("LV_GPU_SETUP_INIT_OVERLAP");
-        if (!gpuEnabled || (value && value[0] == '0') || (!ctx.mContext && !ctx.mGpuLightweight)) return;
+        if (!gpuEnabled || !ctx.mResourceScope.mTables ||
+            (value && value[0] == '0') || (!ctx.mContext && !ctx.mGpuLightweight)) return;
         HostStep startStep("setup GPU ring prefetch start");
         int device = 0;
         if (cudaGetDevice(&device) != cudaSuccess) return;
@@ -1927,6 +1952,7 @@ namespace osuCrypto::LogVole::gpu
 
         try
         {
+            auto& cache = *ctx.mResourceScope.mTables->mImpl;
             if (ctx.mGpuLightweight)
             {
                 if (!validateRingContextMetadata(ctx)) return;
@@ -1937,8 +1963,8 @@ namespace osuCrypto::LogVole::gpu
                 key.mNativeRequested = ctx.mResourceScope.mNativeGpuTables;
                 if (!validRawPrimes(key.mDegree, key.mPrimes) ||
                     key.mPrimes.size() != ctx.mParams.mCoeffModulusBits.size()) return;
-                std::unique_lock<std::mutex> lock(gRawRingCacheMutex, std::try_to_lock);
-                if (!lock.owns_lock() || rawRingCache().find(key) != rawRingCache().end()) return;
+                std::unique_lock<std::mutex> lock(cache.rawRingMutex, std::try_to_lock);
+                if (!lock.owns_lock() || cache.rawRings.find(key) != cache.rawRings.end()) return;
             }
             else
             {
@@ -1949,8 +1975,8 @@ namespace osuCrypto::LogVole::gpu
                 // Avoid spawning a worker for warm rings or waiting here while
                 // another thread already initializes one. The regular get
                 // path holds this mutex through initialization/publication.
-                std::unique_lock<std::mutex> lock(gRingCacheMutex, std::try_to_lock);
-                if (!lock.owns_lock() || ringCache().find(key) != ringCache().end()) return;
+                std::unique_lock<std::mutex> lock(cache.ringMutex, std::try_to_lock);
+                if (!lock.owns_lock() || cache.rings.find(key) != cache.rings.end()) return;
             }
             auto protocolScope = currentProtocolCacheScope();
             protocolScope.mRole = ctx.mResourceScope.mRole;
@@ -2194,14 +2220,15 @@ namespace osuCrypto::LogVole::gpu
 
     GpuPlainNtt::~GpuPlainNtt()
     {
+        mReads.wait();
         for (void* p : mOwned) gpuFree(p);
     }
 
     std::shared_ptr<GpuPlainNtt> GpuPlainNtt::get(
         const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder,
-        RingResourceScope owner)
+        const RingResourceScope& owner)
     {
-        if (!available()) return nullptr;
+        if (!owner.mTables || !available()) return nullptr;
 
         auto data = batchingContext.first_context_data();
         if (!data) return nullptr;
@@ -2209,71 +2236,45 @@ namespace osuCrypto::LogVole::gpu
         const u64 degree = data->parms().poly_modulus_degree();
         const auto key = std::tuple{degree, p, owner.mRole};
 
-        using PlainKey = std::tuple<u64, u64, ProtocolCacheRole>;
-        using PlainCache = std::vector<std::pair<PlainKey, std::shared_ptr<GpuPlainNtt>>>;
-        static std::mutex mutex;
-        static PlainCache cache = [] {
-            gpuInitializeMemoryPools();
-            return PlainCache{};
-        }();
-
-        std::lock_guard<std::mutex> lock(mutex);
-        for (const auto& [k, v] : cache)
+        auto& cache = *owner.mTables->mImpl;
+        std::lock_guard<std::mutex> lock(cache.plainMutex);
+        for (const auto& [k, v] : cache.plains)
         {
             if (k == key) return v;
         }
 
         std::shared_ptr<GpuPlainNtt> tables(new GpuPlainNtt());
         if (!tables->init(batchingContext, encoder)) return nullptr;
-        cache.emplace_back(key, tables);
+        cache.plains.emplace_back(key, tables);
         return tables;
     }
 
-    namespace
-    {
-        using RawPlainKey = std::tuple<u32, u64, ProtocolCacheRole, bool>;
-        using RawPlainCache =
-            std::vector<std::pair<RawPlainKey, std::shared_ptr<GpuPlainNtt>>>;
-        RawPlainCache& rawPlainCache()
-        {
-            static RawPlainCache cache = [] {
-                gpuInitializeMemoryPools();
-                return RawPlainCache{};
-            }();
-            return cache;
-        }
-        std::mutex& rawPlainCacheMutex()
-        {
-            static std::mutex mutex;
-            return mutex;
-        }
-    }
-
     std::shared_ptr<GpuPlainNtt> GpuPlainNtt::getRaw(u32 n, u64 p,
-        RingResourceScope owner, std::shared_ptr<GpuSetupContext> execution)
+        const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution)
     {
-        if (!validRawPrimes(n, std::span<const u64>(&p, 1)) ||
+        if (!owner.mTables || !validRawPrimes(n, std::span<const u64>(&p, 1)) ||
             !available() || currentDeviceOrdinal() != 0) return nullptr;
         try
         {
             const RawPlainKey key{n, p, owner.mRole, owner.mNativeGpuTables};
-            std::lock_guard<std::mutex> lock(rawPlainCacheMutex());
-            for (const auto& [cachedKey, value] : rawPlainCache())
+            auto& cache = *owner.mTables->mImpl;
+            std::lock_guard<std::mutex> lock(cache.rawPlainMutex);
+            for (const auto& [cachedKey, value] : cache.rawPlains)
                 if (cachedKey == key) return value;
             std::shared_ptr<GpuPlainNtt> tables(new GpuPlainNtt());
             tables->mSetup = execution ? std::move(execution) : std::make_shared<GpuSetupContext>();
             if (!tables->initRaw(n, p)) return nullptr;
-            rawPlainCache().emplace_back(key, tables);
+            cache.rawPlains.emplace_back(key, tables);
             return tables;
         }
         catch (...) { return nullptr; }
     }
 
     bool GpuPlainNtt::publishRaw(u32 n, u64 p,
-        const std::shared_ptr<GpuPlainNtt>& ready)
+        const std::shared_ptr<GpuPlainNtt>& ready, const RingResourceScope& owner)
     {
         if (!ready || !ready->mNativeSealBundleStorage ||
-            !nativeSealBundleCacheRequested(ready->mNativeBundleOwnerRole) ||
+            !owner.mTables || !owner.mNativeGpuTables || owner.mRole != ready->mNativeBundleOwnerRole ||
             ready->mView.mN != n || ready->mView.mRho != 1u ||
             ready->mView.mMinModulus != p ||
             ready->mView.mMaxModulus != p ||
@@ -2285,8 +2286,9 @@ namespace osuCrypto::LogVole::gpu
         {
             const RawPlainKey key{n, p, ready->mNativeBundleOwnerRole,
                 true};
-            std::lock_guard<std::mutex> lock(rawPlainCacheMutex());
-            for (auto& [cachedKey, value] : rawPlainCache())
+            auto& cache = *owner.mTables->mImpl;
+            std::lock_guard<std::mutex> lock(cache.rawPlainMutex);
+            for (auto& [cachedKey, value] : cache.rawPlains)
                 if (cachedKey == key)
                 {
                     // A sequential opt-out may have populated this role's raw
@@ -2296,7 +2298,7 @@ namespace osuCrypto::LogVole::gpu
                     value = ready;
                     return true;
                 }
-            rawPlainCache().emplace_back(key, ready);
+            cache.rawPlains.emplace_back(key, ready);
             return true;
         }
         catch (...) { return false; }
@@ -2769,17 +2771,17 @@ namespace osuCrypto::LogVole::gpu
 
     bool nttForward(const GpuRing& ring, u64* polys, u32 count, GpuStream& stream)
     {
-        return launchNttForward(ring.view(), polys, count, nullptr, stream.raw());
+        return launchNttForward(ring.view(stream), polys, count, nullptr, stream.raw());
     }
 
     bool nttInverse(const GpuRing& ring, u64* polys, u32 count, GpuStream& stream)
     {
-        return launchNttInverse(ring.view(), polys, count, nullptr, stream.raw());
+        return launchNttInverse(ring.view(stream), polys, count, nullptr, stream.raw());
     }
 
     bool denoiseComb(const GpuRing& ring, const u64* in, u64* out, u32 outCount, GpuStream& stream)
     {
         if (!ring.denoiseReady()) return false;
-        return launchDenoiseComb(ring.view(), ring.denoiseView(), in, out, outCount, stream.raw());
+        return launchDenoiseComb(ring.view(stream), ring.denoiseView(), in, out, outCount, stream.raw());
     }
 }

@@ -95,8 +95,8 @@ namespace osuCrypto::LogVole
                         plain->nativeBundleOwnerRole() ==
                             ctx.mRing.mRawModuli->mDynamicGpuCertificate->rawOwnerRole() &&
                         plain->n() == ctx.mRing.mParams.mPolyModulusDegree &&
-                        plain->view().mMinModulus == ctx.mPlaintextModulus &&
-                        plain->view().mMaxModulus == ctx.mPlaintextModulus;
+                        plain->metadata().mMinModulus == ctx.mPlaintextModulus &&
+                        plain->metadata().mMaxModulus == ctx.mPlaintextModulus;
                 }
 #endif
                 return !ctx.mNativePlainNtt;
@@ -1203,7 +1203,7 @@ namespace osuCrypto::LogVole
             if (!validateZpContext(next) ||
                 !gpu::GpuPlainNtt::publishRaw(
                     ring.mPolyModulusDegree, next.mPlaintextModulus,
-                    next.mNativePlainNtt))
+                    next.mNativePlainNtt, next.mRing.mResourceScope))
                 return false;
             out = std::move(next);
             // The combined CRT result is committed now. Publish its immutable
@@ -1214,7 +1214,7 @@ namespace osuCrypto::LogVole
             // result or the caller's output.
             if (gpu::GpuRing::publishRaw(ring,
                     out.mRing.mRawModuli->mValues,
-                    out.mRing.mRawModuli->mDynamicGpuCertificate))
+                    out.mRing.mRawModuli->mDynamicGpuCertificate, out.mRing.mResourceScope))
                 (void)publishNativeGpuRingNttContext(out.mRing);
             return true;
         }
@@ -1232,7 +1232,7 @@ namespace osuCrypto::LogVole
             u64 plaintextPrime = 0;
             u32 selectedBits = 0;
             if (!gpu::selectSealPlainModulusDevice(ring.mPolyModulusDegree,
-                    plaintextModulusBits, deviceRing->view().mMinModulus,
+                    plaintextModulusBits, deviceRing->metadata().mMinModulus,
                     plaintextPrime, selectedBits, deviceRing->setupContext()) ||
                 !gpu::GpuPlainNtt::getRaw(ring.mPolyModulusDegree, plaintextPrime,
                     ringCtx.mResourceScope, deviceRing->setupContext()))

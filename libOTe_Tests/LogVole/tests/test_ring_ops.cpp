@@ -422,13 +422,30 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         auto retained = original.mFactoryOwner;
         std::weak_ptr<const RingNttContext> record = retained;
         std::weak_ptr<gpu::GpuExecutionContext> domain = original.mGpuExecution;
+        std::weak_ptr<gpu::GpuTableCache> tableCache = original.mResourceScope.mTables;
+        std::weak_ptr<gpu::GpuSetupContext> setup = original.mGpuSetup;
         auto& main = gpu::contextSampleStream(original);
         std::weak_ptr<gpu::OwnedGpuStream> mainOwner = main.allocationOwner();
-        const auto tables = gpu::GpuRing::get(original);
+        auto tables = gpu::GpuRing::get(original);
         const auto p = seal::PlainModulus::Batching(params.mPolyModulusDegree, 17).value();
-        const auto plain = gpu::GpuPlainNtt::getRaw(params.mPolyModulusDegree,
+        auto plain = gpu::GpuPlainNtt::getRaw(params.mPolyModulusDegree,
             p, original.mResourceScope, original.mGpuSetup);
         LOGVOLE_REQUIRE_TRUE(tables && plain);
+        std::weak_ptr<gpu::GpuRing> ringTable = tables;
+        std::weak_ptr<gpu::GpuPlainNtt> plainTable = plain;
+        {
+            auto isolated = original.mResourceScope;
+            isolated.mTables = std::make_shared<gpu::GpuTableCache>();
+            const auto otherRing = gpu::GpuRing::getRaw(params, tables->hostModuli(),
+                isolated, original.mGpuSetup);
+            const auto otherPlain = gpu::GpuPlainNtt::getRaw(params.mPolyModulusDegree,
+                p, isolated, original.mGpuSetup);
+            LOGVOLE_REQUIRE_TRUE(otherRing && otherRing != tables);
+            LOGVOLE_REQUIRE_TRUE(otherPlain && otherPlain != plain);
+            LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(original) == tables);
+            LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(params.mPolyModulusDegree,
+                p, original.mResourceScope, original.mGpuSetup) == plain);
+        }
         original = {};
         std::weak_ptr<gpu::OwnedGpuStream> workerOwner;
         std::packaged_task<void()> task([&] {
@@ -475,6 +492,33 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         retained.reset();
         LOGVOLE_REQUIRE_TRUE(record.expired() && domain.expired());
         LOGVOLE_REQUIRE_TRUE(mainOwner.expired() && workerOwner.expired());
+        LOGVOLE_REQUIRE_TRUE(tableCache.expired());
+        // Exported tables retain their setup stream, without retaining the
+        // table cache or compute domain. They remain usable after root release.
+        gpu::ScaleRoundConstView scale{};
+        LOGVOLE_REQUIRE_TRUE(tables->scaleRoundConstants(p, scale));
+        LOGVOLE_REQUIRE_TRUE(scale.mQ && scale.mCrtInvPunctured);
+        // An exported table can be used on an independent stream after its
+        // context has gone. Destroy both table owners before reading results.
+        gpu::GpuStream reader;
+        gpu::OwnedGpuBuffer ringValues(reader.allocationOwner(), tables->polyBytes());
+        gpu::OwnedGpuBuffer plainValues(reader.allocationOwner(), params.mPolyModulusDegree * sizeof(std::uint64_t));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(ringValues.data(), ringValues.size(), reader.raw()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(plainValues.data(), plainValues.size(), reader.raw()));
+        LOGVOLE_REQUIRE_TRUE(gpu::launchNttForward(tables->view(reader),
+            static_cast<std::uint64_t*>(ringValues.data()), 1, nullptr, reader.raw()));
+        LOGVOLE_REQUIRE_TRUE(gpu::launchNttForward(plain->view(reader),
+            static_cast<std::uint64_t*>(plainValues.data()), 1, nullptr, reader.raw()));
+        tables.reset();
+        plain.reset();
+        LOGVOLE_REQUIRE_TRUE(ringTable.expired() && plainTable.expired() && setup.expired());
+        std::vector<std::uint64_t> ringResult(ringValues.size() / sizeof(std::uint64_t), 1);
+        std::vector<std::uint64_t> plainResult(plainValues.size() / sizeof(std::uint64_t), 1);
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(ringResult.data(), ringValues.data(), ringValues.size(), reader.raw()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(plainResult.data(), plainValues.data(), plainValues.size(), reader.raw()));
+        LOGVOLE_REQUIRE_TRUE(reader.sync());
+        LOGVOLE_REQUIRE_TRUE(std::all_of(ringResult.begin(), ringResult.end(), [](auto x) { return x == 0; }));
+        LOGVOLE_REQUIRE_TRUE(std::all_of(plainResult.begin(), plainResult.end(), [](auto x) { return x == 0; }));
     }
     {
         auto execution = std::make_shared<gpu::GpuExecutionContext>();
@@ -644,10 +688,14 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
             auto& stream = gpu::threadStream();
             producer = stream.allocationOwner();
             pool = stream.allocationOwner()->memory();
+            auto ownedContext = plainContext;
+            ownedContext.mFactoryOwner.reset();
+            ownedContext.mRing.mFactoryOwner.reset();
+            ownedContext.mRing.mResourceScope.mTables = std::make_shared<gpu::GpuTableCache>();
             // Cold allocation and a cache hit both feed the ordinary wrap path.
-            auto first = gpu::wrapLabelsDevice(plainContext, labels, true, 0, 1);
+            auto first = gpu::wrapLabelsDevice(ownedContext, labels, true, 0, 1);
             LOGVOLE_REQUIRE_TRUE(first);
-            auto second = gpu::wrapLabelsDevice(plainContext, labels, true, 0, 1);
+            auto second = gpu::wrapLabelsDevice(ownedContext, labels, true, 0, 1);
             LOGVOLE_REQUIRE_TRUE(second);
             return second;
         });
@@ -757,7 +805,7 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
                 }
                 LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(seedsDevice.data(), seeds.data(), seedsDevice.size(), stream.raw()));
                 auto launch = [&](std::size_t rootCapacity) {
-                    return gpu::launchSampleUniformPolyBlake2xb(ring->view(),
+                    return gpu::launchSampleUniformPolyBlake2xb(ring->view(stream),
                         static_cast<const gpu::u64*>(seedsDevice.data()), static_cast<gpu::u64*>(prefixes.data()),
                         streamWords, ring->sampleMaxMultiple(), static_cast<gpu::u64*>(output.data()), nullptr,
                         count, static_cast<gpu::u32*>(epochs.data()), query + 1, query != 0,
@@ -995,8 +1043,8 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 deviceRings[party] = gpu::GpuRing::get(context);
                 LOGVOLE_REQUIRE_TRUE(deviceRings[party] != nullptr);
                 LOGVOLE_REQUIRE_TRUE(deviceRings[party]->hostModuli() == preset.primes);
-                LOGVOLE_REQUIRE_TRUE(deviceRings[party]->view().mRoots != nullptr);
-                LOGVOLE_REQUIRE_TRUE(deviceRings[party]->view().mInvRoots != nullptr);
+                LOGVOLE_REQUIRE_TRUE(deviceRings[party]->metadata().mRoots != nullptr);
+                LOGVOLE_REQUIRE_TRUE(deviceRings[party]->metadata().mInvRoots != nullptr);
 #endif
                 for (const char* option : {"LV_GPU_SETUP_LIGHTWEIGHT_RING", "LV_GPU_SETUP_LIGHTWEIGHT_CRT"})
                 {
@@ -1026,7 +1074,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
             LOGVOLE_EXPECT_TRUE(crt[0].mHostContextCache != crt[1].mHostContextCache);
 #if defined(ENABLE_LOGVOLE_CUDA)
             LOGVOLE_EXPECT_TRUE(deviceRings[0] != deviceRings[1]);
-            LOGVOLE_EXPECT_TRUE(deviceRings[0]->view().mRoots != deviceRings[1]->view().mRoots);
+            LOGVOLE_EXPECT_TRUE(deviceRings[0]->metadata().mRoots != deviceRings[1]->metadata().mRoots);
 #endif
         }
 
@@ -1297,9 +1345,9 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 std::vector<gpu::HostShoupOperand> roots(static_cast<std::size_t>(degree) * widths.size());
                 std::vector<gpu::HostShoupOperand> inverse(roots.size());
                 auto& stream = gpu::threadStream();
-                LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(roots.data(), certificate->view().mRoots,
+                LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(roots.data(), certificate->metadata().mRoots,
                     roots.size() * sizeof(roots[0]), stream));
-                LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(inverse.data(), certificate->view().mInvRoots,
+                LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(inverse.data(), certificate->metadata().mInvRoots,
                     inverse.size() * sizeof(inverse[0]), stream));
                 for (std::size_t limb = 0; limb < widths.size(); ++limb)
                 for (std::size_t i = 0; i < degree; ++i)
@@ -1320,11 +1368,11 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 std::vector<std::uint64_t> punctured(widths.size() * widths.size());
                 std::vector<gpu::HostShoupOperand> inversePunctured(widths.size());
                 LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(baseProduct.data(),
-                    certificate->view().mBaseProd, baseProduct.size() * sizeof(baseProduct[0]), stream));
+                    certificate->metadata().mBaseProd, baseProduct.size() * sizeof(baseProduct[0]), stream));
                 LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(punctured.data(),
-                    certificate->view().mPuncturedProd, punctured.size() * sizeof(punctured[0]), stream));
+                    certificate->metadata().mPuncturedProd, punctured.size() * sizeof(punctured[0]), stream));
                 LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(inversePunctured.data(),
-                    certificate->view().mInvPuncturedProd,
+                    certificate->metadata().mInvPuncturedProd,
                     inversePunctured.size() * sizeof(inversePunctured[0]), stream));
                 for (std::size_t i = 0; i < widths.size(); ++i)
                 {
@@ -1339,7 +1387,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 const auto batchData = eager.mBatchingContext->first_context_data();
                 LOGVOLE_REQUIRE_TRUE(batchData && batchData->plain_ntt_tables());
                 const auto& plainTables = *batchData->plain_ntt_tables();
-                const auto& plainView = plainOwners[party]->view();
+                const auto& plainView = plainOwners[party]->view(stream);
                 std::vector<gpu::HostShoupOperand> plainRoots(degree), plainInverse(degree);
                 std::vector<std::uint32_t> slotMap(degree), inverseSlotMap(degree);
                 LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(plainRoots.data(), plainView.mRoots,
@@ -1516,7 +1564,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     std::uint64_t unchangedPlain = 0xdecafbadULL;
                     std::uint32_t unchangedBits = 31u;
                     LOGVOLE_REQUIRE_FALSE(gpu::selectSealPlainModulusDevice(
-                        degree, 2u, certificate->view().mMinModulus,
+                        degree, 2u, certificate->metadata().mMinModulus,
                         unchangedPlain, unchangedBits));
                     LOGVOLE_EXPECT_EQ(unchangedPlain, 0xdecafbadULL);
                     LOGVOLE_EXPECT_EQ(unchangedBits, 31u);
@@ -1524,7 +1572,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     unchangedLift.resize(1);
                     unchangedLift[0] = 0xdecafbadULL;
                     LOGVOLE_REQUIRE_FALSE(gpu::preparePlaintextLiftDevice(
-                        *certificate, certificate->view().mMinModulus, unchangedLift));
+                        *certificate, certificate->metadata().mMinModulus, unchangedLift));
                     LOGVOLE_REQUIRE_EQ(unchangedLift.size(), 1u);
                     LOGVOLE_EXPECT_EQ(unchangedLift[0], 0xdecafbadULL);
 
@@ -1880,7 +1928,7 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(gpu::nttForward(
                 *ring, inPlace.data(stream), static_cast<std::uint32_t>(count), stream));
             LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardFrom(
-                ring->view(), outOfPlaceInput.data(stream), nullptr,
+                ring->view(stream), outOfPlaceInput.data(stream), nullptr,
                 outOfPlace.data(stream), nullptr, static_cast<std::uint32_t>(count),
                 stream.raw()));
             std::vector<RnsPoly> actualInPlace, actualOutOfPlace;
