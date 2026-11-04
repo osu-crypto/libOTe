@@ -318,40 +318,40 @@ namespace osuCrypto::LogVole::gpu
     bool zkAcceptDevice(const ZkProof& proof, u64 verifierValue, u64 delta,
         u64 modulus, bool& accepted, GpuStream& stream);
     struct ZkMulDeviceState;
-    std::shared_ptr<ZkMulDeviceState> makeZkMulDeviceState(const ZkMulCircuit& circuit);
+    std::shared_ptr<ZkMulDeviceState> makeZkMulDeviceState(const ZkMulCircuit& circuit, GpuStream& stream);
     bool zkMulProverResponseDevice(const ZkMulCircuit& circuit,
         const DeviceScalars& wires, const DeviceScalars& macs, u64 chi, u64 modulus,
-        ZkMulDeviceState& state, ZkProof& out);
+        ZkMulDeviceState& state, ZkProof& out, GpuStream& stream);
     bool zkMulVerifierValueDevice(const ZkMulCircuit& circuit,
         const DeviceScalars& keys, u64 chi, u64 delta, u64 modulus,
-        ZkMulDeviceState& state, u64& out);
+        ZkMulDeviceState& state, u64& out, GpuStream& stream);
 
     // Exact fresh PRNG(seed) A/B inputs and masks, with zero request padding.
     DeviceScalarsPtr zkMatMulWitnessInputsDevice(
-        const ZkMatMulStatement& st, u64 modulus, block seed, u64 voleSize = 0);
+        const ZkMatMulStatement& st, u64 modulus, block seed, GpuStream& stream, u64 voleSize = 0);
 
     // Construct the public product in a separate device allocation.
     bool zkMatMulFillProductDevice(
         const DeviceScalars& wires, const ZkMatMulStatement& st, u64 modulus,
-        DeviceScalars& publicProduct);
+        DeviceScalars& publicProduct, GpuStream& stream);
 
     // Uploads the circuit's wiring once and stores the handle in
     // circuit.mOperandsDevice, so internal copies owned by the same party can
     // reuse one device allocation. A separate party must generate or upload
     // its own copy. Optional: a device state that finds no handle uploads its own.
-    bool zkMulUploadOperands(ZkMulCircuit& circuit);
+    bool zkMulUploadOperands(ZkMulCircuit& circuit, GpuStream& stream);
 
     // Replace a device handle with an independent device allocation containing
     // identical public wiring. Host bytes and the input remain unchanged on
     // failure. This is local ownership detachment, not a transport operation.
-    bool zkMulDetachOperands(ZkMulCircuit& circuit);
+    bool zkMulDetachOperands(ZkMulCircuit& circuit, GpuStream& stream);
 
     // Exact seeded wiring generated on the GPU. The public host vector remains
     // empty until explicitly materialized; copies within that party may share
     // immutable device wiring.
     bool makeZkMulCircuitForBudgetDevice(
-        u64 voleBudget, u64 depth, block seed, ZkMulCircuit& out);
-    bool zkMulMaterializeOperands(ZkMulCircuit& circuit);
+        u64 voleBudget, u64 depth, block seed, ZkMulCircuit& out, GpuStream& stream);
+    bool zkMulMaterializeOperands(ZkMulCircuit& circuit, GpuStream& stream);
 
     // The prover's circuit evaluation, on the device, producing a witness that is
     // already where the proof wants it.
@@ -362,10 +362,10 @@ namespace osuCrypto::LogVole::gpu
     // uploaded. Every gate of a layer is independent, so this is `depth` launches.
     // Bit-identical to zkMulWitness.
     DeviceScalarsPtr zkMulWitnessDevice(
-        const ZkMulCircuit& circuit, u64 modulus, std::span<const u64> inputs, u64 voleSize);
+        const ZkMulCircuit& circuit, u64 modulus, std::span<const u64> inputs, u64 voleSize, GpuStream& stream);
     // Exact fresh PRNG(seed) inputs and mask, generated and retained on device.
     DeviceScalarsPtr zkMulWitnessDevice(
-        const ZkMulCircuit& circuit, u64 modulus, block seed, u64 voleSize);
+        const ZkMulCircuit& circuit, u64 modulus, block seed, u64 voleSize, GpuStream& stream);
 }
 #endif
 
@@ -385,6 +385,9 @@ namespace osuCrypto
 
     class ZkMulProver : public TimerAdapter
     {
+        // Join active proofs before reconfiguration/destruction. The execution
+        // owner precedes device state so its streams and scratch drain last.
+        std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
     public:
         LogVole::ZkMulCircuit mCircuit;
         LogVoleReceiver mVole;
@@ -463,6 +466,9 @@ namespace osuCrypto
 
     class ZkMulVerifier : public TimerAdapter
     {
+        // Join active proofs before reconfiguration/destruction. The execution
+        // owner precedes device state so its streams and scratch drain last.
+        std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
     public:
         LogVole::ZkMulCircuit mCircuit;
         LogVoleSender mVole;
@@ -506,6 +512,9 @@ namespace osuCrypto
 
     class ZkMatMulProver : public TimerAdapter
     {
+        // Join active proofs before reconfiguration/destruction. The execution
+        // owner precedes device state so its streams and scratch drain last.
+        std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
     public:
         LogVole::ZkMatMulStatement mStatement;
         LogVoleReceiver mVole;
@@ -547,6 +556,9 @@ namespace osuCrypto
 
     class ZkMatMulVerifier : public TimerAdapter
     {
+        // Join active proofs before reconfiguration/destruction. The execution
+        // owner precedes device state so its streams and scratch drain last.
+        std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
     public:
         LogVole::ZkMatMulStatement mStatement;
         LogVoleSender mVole;

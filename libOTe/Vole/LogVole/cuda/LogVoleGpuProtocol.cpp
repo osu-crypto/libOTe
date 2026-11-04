@@ -9243,45 +9243,40 @@ namespace osuCrypto::LogVole::gpu
         return true;
     }
 
-    DeviceScalarsPtr uploadScalars(std::span<const u64> src)
+    DeviceScalarsPtr uploadScalars(std::span<const u64> src, GpuStream& stream)
     {
         if (!enabled() || src.empty()) return nullptr;
         // Allocator reuse dependencies must be recorded on the stream that
         // will receive the upload, including after a protocol-role switch.
-        auto& stream = threadStream();
         auto out = std::make_shared<DeviceScalars>();
         if (!out->resize(src.size(), stream)) return nullptr;
+        StreamDrain drain{stream};
         if (!gpuMemcpyH2D(out->data(), src.data(), src.size() * sizeof(u64), stream.raw()) ||
-            !stream.sync())
+            !drain.sync())
         {
             return nullptr;
         }
-        // The upload is complete. Do not retain a thread-local stream handle
-        // that becomes invalid if this token outlives the producing thread.
+        // The upload is complete. The token retains native allocation ownership,
+        // independently of the producing execution context and host worker.
         out->markReady();
         return out;
     }
 
-    DeviceScalarsPtr sampleScalarsFromSeed(block seed, u64 count, u64 modulus)
+    DeviceScalarsPtr sampleScalarsFromSeed(block seed, u64 count, u64 modulus, GpuStream& stream)
     {
         if (!enabled() || !count || !modulus ||
             count > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return nullptr;
         HostStep sampleStep("gpu: sample input scalars");
-        auto& stream = threadStream();
         auto out = std::make_shared<DeviceScalars>();
         std::array<u64, 2> seedWords{};
         std::memcpy(seedWords.data(), &seed, sizeof(seedWords));
         OwnedGpuBuffer deviceSeed;
-        struct DrainStream
-        {
-            GpuStream& stream;
-            ~DrainStream() { stream.sync(); }
-        } drainStream{ stream };
+        StreamDrain drain{stream};
         if (!out->resize(static_cast<std::size_t>(count), stream)) return nullptr;
         deviceSeed = tryAllocateGpuBuffer(stream, sizeof(seedWords));
         if (!deviceSeed || !gpuMemcpyH2D(deviceSeed.data(), seedWords.data(), sizeof(seedWords), stream.raw()) ||
             !launchAesCtrScalars(static_cast<const u64*>(deviceSeed.data()), out->data(),
-                count, modulus, stream.raw()) || !stream.sync()) return nullptr;
+                count, modulus, stream.raw()) || !drain.sync()) return nullptr;
         // Work is complete, so consumers need no dependency on this thread's
         // stream and may keep the result after the producing thread exits.
         out->markReady();

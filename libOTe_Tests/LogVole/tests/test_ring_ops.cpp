@@ -215,10 +215,13 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
     if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     const std::vector<std::uint64_t> input{1, 2, 3, 0xffffffffffffffffull};
-    // Join an actual OS thread, including its TLS destructors, before consuming
-    // the token. MSVC std::async may retain a pool worker after future.get().
+    // Destroy the producer's execution context before consuming its token.
+    // MSVC std::async may retain a pool worker after future.get().
     std::packaged_task<std::shared_ptr<gpu::DeviceScalars>()> task(
-        [&] { return gpu::uploadScalars(input); });
+        [&] {
+            gpu::GpuExecutionContext execution;
+            return gpu::uploadScalars(input, execution.mainStream());
+        });
     auto result = task.get_future();
     std::thread worker(std::move(task));
     worker.join();
@@ -292,20 +295,19 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(readerOwner.expired());
 
     const auto runId = allocateProtocolCacheRunId();
-    // Warm both role streams, then hand cached storage from one role to the
-    // next while its last device write may still be pending.
-    for (auto role : {ProtocolCacheRole::Sender, ProtocolCacheRole::Receiver})
-    {
-        ScopedProtocolCacheScope scope(role, runId);
-        (void)gpu::threadStream();
-    }
+    // Each party owns its execution and pool, including when both parties
+    // submit work from the same host worker.
+    gpu::GpuExecutionContext senderExecution, receiverExecution;
+    LOGVOLE_REQUIRE_TRUE(senderExecution.mainStream().raw() != receiverExecution.mainStream().raw());
+    LOGVOLE_REQUIRE_TRUE(senderExecution.mainStream().allocationOwner()->memory() !=
+        receiverExecution.mainStream().allocationOwner()->memory());
     std::vector<std::uint64_t> expected(1u << 18, 0x9e3779b97f4a7c15ull);
     for (unsigned iteration = 0; iteration < 8; ++iteration)
     {
         void* previous = nullptr;
         {
             ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, runId);
-            auto& stream = gpu::threadStream();
+            auto& stream = senderExecution.mainStream();
             previous = stream.raw();
             gpu::DeviceScalars retired;
             LOGVOLE_REQUIRE_TRUE(retired.resize(expected.size(), stream));
@@ -314,7 +316,7 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
         }
         {
             ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, runId);
-            uploaded = gpu::uploadScalars(expected);
+            uploaded = gpu::uploadScalars(expected, receiverExecution.mainStream());
             LOGVOLE_REQUIRE_TRUE(uploaded);
             LOGVOLE_REQUIRE_TRUE(gpu::gpuStreamSync(previous));
             fetched.resize(expected.size());
@@ -331,6 +333,10 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
 void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
     ScopedGpuEnabled gpuScope(requested);
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
@@ -343,7 +349,7 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
     auto small = gpu::GpuRing::get(smallContext);
     auto large = gpu::GpuRing::get(largeContext);
     LOGVOLE_REQUIRE_TRUE(small && large);
-    auto& stream = gpu::threadStream();
+    auto& stream = operationExecution.mainStream();
     gpu::GpuPolyBuffer buffer;
     LOGVOLE_REQUIRE_TRUE(buffer.resize(*small, 1, stream));
     const auto oldData = buffer.data(stream);
@@ -414,6 +420,10 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
 
 void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
@@ -813,7 +823,6 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         catch (const Cancelled&) { cancelled = true; }
         LOGVOLE_REQUIRE_EQ(cancelled, round != 0);
         LOGVOLE_REQUIRE_TRUE(validationLifetime.expired());
-        gpu::gpuCollectThreadResources();
         LOGVOLE_REQUIRE_TRUE(gpu::gpuLastErrorOk(nullptr));
     }
     // A worker can export an unfinished wrapped polynomial, then retire its
@@ -852,7 +861,6 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         std::thread worker(std::move(task));
         worker.join();
         auto exported = result.get();
-        gpu::gpuCollectThreadResources();
         LOGVOLE_REQUIRE_TRUE(!producer.expired() && !pool.expired());
         std::vector<RnsPoly> fetched;
         LOGVOLE_REQUIRE_TRUE(gpu::download(*exported, fetched, readbackExecution.readbackStream()));
@@ -861,12 +869,13 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         exported.reset();
         LOGVOLE_REQUIRE_TRUE(producer.expired() && pool.expired());
     }
-    // Repeated worker exit covers thread-local stream/scratch destruction. Trim
+    // Repeated worker exit covers explicit stream/scratch destruction. Trim
     // while owners are live must preserve them, then release their idle blocks.
     for (unsigned round = 0; round != 3; ++round)
     {
         std::packaged_task<void()> task([round] {
-            auto& stream = gpu::threadStream();
+            gpu::GpuExecutionContext execution;
+            auto& stream = execution.mainStream();
             constexpr std::size_t count = 4099, bytes = count * sizeof(std::uint64_t);
             auto memory = stream.allocationOwner()->memory();
             gpu::OwnedGpuBuffer device(stream.allocationOwner(), bytes);
@@ -895,7 +904,6 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         std::thread worker(std::move(task));
         worker.join();
         result.get();
-        gpu::gpuCollectThreadResources();
     }
 #else
     (void)cmd;
@@ -1167,6 +1175,10 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP&)
 
 void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
     const bool requestGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
     ScopedGpuEnabled gpuScope(requestGpu);
@@ -1552,7 +1564,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 const auto* sealTables = lazyHost->key_context_data()->small_ntt_tables();
                 std::vector<gpu::HostShoupOperand> roots(static_cast<std::size_t>(degree) * widths.size());
                 std::vector<gpu::HostShoupOperand> inverse(roots.size());
-                auto& stream = gpu::threadStream();
+                auto& stream = operationExecution.mainStream();
                 LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(roots.data(), certificate->metadata().mRoots,
                     roots.size() * sizeof(roots[0]), stream));
                 LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(inverse.data(), certificate->metadata().mInvRoots,
@@ -1809,6 +1821,10 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 
 void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
     const auto params = make_small_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
@@ -1964,7 +1980,7 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
             {
                 auto ring = gpu::GpuRing::get(batchCtx);
                 LOGVOLE_REQUIRE_TRUE(ring != nullptr);
-                auto& stream = gpu::threadStream();
+                auto& stream = operationExecution.mainStream();
                 gpu::GpuPolyBuffer device;
                 LOGVOLE_REQUIRE_TRUE(device.resize(*ring, actual.size(), stream));
                 LOGVOLE_REQUIRE_TRUE(device.upload(actual, stream));
@@ -2094,6 +2110,10 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
 void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     const bool gpuWasEnabled = gpu::enabled();
     struct RestoreGpu
     {
@@ -2112,7 +2132,7 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
     auto ring = gpu::GpuRing::get(ctx);
     LOGVOLE_REQUIRE_TRUE(ring && ring->n() == params.mPolyModulusDegree &&
         ring->rho() == params.mCoeffModulusBits.size());
-    auto& stream = gpu::threadStream();
+    auto& stream = operationExecution.mainStream();
     for (std::size_t count : {std::size_t{1}, std::size_t{8}, std::size_t{16}})
     {
         std::vector<RnsPoly> original(count), expected(count);
@@ -3157,6 +3177,10 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
 void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
 
@@ -3203,7 +3227,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
             for (std::size_t i = 0; i < compactValues.size(); ++i)
                 compactValues[i] = values[(i + i / degree) % values.size()];
             const auto originalCompact = compactValues;
-            auto device = gpu::uploadScalars(compactValues);
+            auto device = gpu::uploadScalars(compactValues, operationExecution.mainStream());
             LOGVOLE_REQUIRE_TRUE(device != nullptr && gpu::waitScalars(*device));
             std::vector<RnsPoly> coefficients(count);
             for (std::size_t row = 0; row < count; ++row)

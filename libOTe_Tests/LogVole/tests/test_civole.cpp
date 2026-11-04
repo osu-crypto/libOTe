@@ -819,6 +819,10 @@ void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& c
 void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
 
@@ -850,7 +854,7 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
         sender.mKeepOutputOnDevice = true;
         receiver.mKeepOutputOnDevice = true;
         receiver.mInputDevice = gpu::sampleScalarsFromSeed(
-            oc::block(0x1939u, 0x2748u), n, receiver.modulus());
+            oc::block(0x1939u, 0x2748u), n, receiver.modulus(), operationExecution.mainStream());
         LOGVOLE_REQUIRE_TRUE(receiver.mInputDevice);
         auto inputDevice = std::static_pointer_cast<gpu::DeviceScalars>(
             receiver.mInputDevice);

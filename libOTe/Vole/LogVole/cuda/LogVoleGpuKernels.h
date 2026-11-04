@@ -107,9 +107,6 @@ namespace osuCrypto::LogVole::gpu
     bool gpuLastErrorOk(const char** msg);
 
     // ---- memory -----------------------------------------------------------
-    // Drain owners retired by exited workers, outside TLS/loader callbacks.
-    // No synchronization when there are no retired resources.
-    void gpuCollectThreadResources();
     // Optional registration of an exact caller-owned host span. A supported
     // decline returns true with registered=false; fatal CUDA errors return false.
     // Only a successful registration may be passed to gpuUnregisterHost.

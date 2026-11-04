@@ -4586,6 +4586,10 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
 
@@ -4610,7 +4614,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
             // Odd counts and several AES buffer boundaries must match the
             // exact scalar stream, including a deliberately short CPU buffer.
             oc::PRNG reference(seed, 3);
-            auto generated = gpu::sampleScalarsFromSeed(seed, count, modulus);
+            auto generated = gpu::sampleScalarsFromSeed(seed, count, modulus, operationExecution.mainStream());
             LOGVOLE_REQUIRE_TRUE(generated != nullptr);
             LOGVOLE_REQUIRE_EQ(generated->count(), count);
             LOGVOLE_EXPECT_TRUE(generated->producerStream() == nullptr);
@@ -4619,8 +4623,8 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
             for (auto value : values)
                 LOGVOLE_REQUIRE_EQ(value, reference.get<std::uint64_t>() % modulus);
         }
-        LOGVOLE_EXPECT_TRUE(gpu::sampleScalarsFromSeed(seed, 0u, 3u) == nullptr);
-        LOGVOLE_EXPECT_TRUE(gpu::sampleScalarsFromSeed(seed, 3u, 0u) == nullptr);
+        LOGVOLE_EXPECT_TRUE(gpu::sampleScalarsFromSeed(seed, 0u, 3u, operationExecution.mainStream()) == nullptr);
+        LOGVOLE_EXPECT_TRUE(gpu::sampleScalarsFromSeed(seed, 3u, 0u, operationExecution.mainStream()) == nullptr);
     }
 #endif
     ScopedEnvironmentValue serialCopy("LV_GPU_SETUP_PARALLEL_COPY", "0");

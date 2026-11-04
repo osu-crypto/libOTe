@@ -23,7 +23,6 @@
 #include <cstring>
 #include <exception>
 #include <thread>
-#include "libOTe/Vole/LogVole/cuda/LogVoleGpuThreadLocal.h"
 #include <limits>
 #include <map>
 #include <mutex>
@@ -34,105 +33,6 @@
 
 namespace osuCrypto::LogVole::gpu
 {
-    namespace
-    {
-        struct ThreadResourceGroup
-        {
-            std::atomic<bool> retired{false};
-            thread_storage_detail::ThreadResourceNode* head = nullptr;
-            ThreadResourceGroup* next = nullptr;
-        };
-
-        struct ThreadResourceRegistry
-        {
-            std::mutex mutex;
-            ThreadResourceGroup* head = nullptr;
-
-            void collect(bool all = false)
-            {
-                ThreadResourceGroup* retired = nullptr;
-                {
-                    std::lock_guard<std::mutex> lock(mutex);
-                    auto** link = &head;
-                    while (*link)
-                    {
-                        auto* group = *link;
-                        if (all || group->retired.load(std::memory_order_acquire))
-                        {
-                            *link = group->next;
-                            group->next = retired;
-                            retired = group;
-                        }
-                        else link = &group->next;
-                    }
-                }
-                if (!retired) return;
-                // Each retired GpuStream drains its own queued work before
-                // releasing scratch. Exported buffers retain their native
-                // stream owners independently; no device-wide barrier is needed.
-                while (retired)
-                {
-                    auto* group = retired;
-                    retired = group->next;
-                    // Retire a whole thread at once, then destroy its owners in
-                    // reverse construction order: scratch before its streams.
-                    while (group->head)
-                    {
-                        auto* node = group->head;
-                        group->head = node->next;
-                        node->destroy(node);
-                    }
-                    delete group;
-                }
-            }
-            ~ThreadResourceRegistry() { collect(true); }
-        };
-
-        ThreadResourceRegistry& threadResourceRegistry()
-        {
-            static ThreadResourceRegistry registry = [] {
-                // Initialize the runtime before this transitional registry is
-                // registered for process teardown. No storage is cached here.
-                (void)gpuDeviceAvailable();
-                return ThreadResourceRegistry{};
-            }();
-            return registry;
-        }
-
-        ThreadResourceGroup& threadResourceGroup()
-        {
-            // Constructed before the first GpuThreadLocal finishes construction,
-            // so it retires the group after all of that thread's wrappers exit.
-            struct Lease
-            {
-                ThreadResourceGroup* group;
-                Lease()
-                {
-                    auto owner = std::make_unique<ThreadResourceGroup>();
-                    auto& registry = threadResourceRegistry();
-                    std::lock_guard<std::mutex> lock(registry.mutex);
-                    owner->next = registry.head;
-                    registry.head = group = owner.release();
-                }
-                ~Lease() { group->retired.store(true, std::memory_order_release); }
-            };
-            thread_local Lease lease;
-            return *lease.group;
-        }
-    }
-
-    void thread_storage_detail::registerThreadResource(ThreadResourceNode* node)
-    {
-        auto& group = threadResourceGroup();
-        node->next = group.head;
-        group.head = node;
-    }
-
-    void gpuCollectThreadResources()
-    {
-        threadResourceRegistry().collect();
-    }
-
     int currentDeviceOrdinal()
     {
         int device = -1;
@@ -166,15 +66,6 @@ namespace osuCrypto::LogVole::gpu
             return on;
         }
 
-        bool lazyRoleStreamsEnabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_LAZY_ROLE_STREAMS");
-                return v ? std::strcmp(v, "1") == 0 : h200LazyResourcesDefault();
-            }();
-            return on;
-        }
-
         bool lazyIndexScratchEnabled()
         {
             const char* v = std::getenv("LV_GPU_LAZY_INDEX_SCRATCH");
@@ -187,33 +78,6 @@ namespace osuCrypto::LogVole::gpu
             const unsigned long kib = v ? std::strtoul(v, nullptr, 10) : 4096u;
             return std::size_t(kib >= 256u && kib <= 4096u && (kib & (kib - 1u)) == 0u
                 ? kib : 4096u) * 256u;
-        }
-
-        // Only the legacy main lane remains role-local during migration.
-        // Sampling streams and scratch are owned by explicit contexts.
-        GpuStream& lazyRoleStream()
-        {
-            switch (currentProtocolCacheScope().mRole)
-            {
-            case ProtocolCacheRole::Sender:
-            {
-                thread_local GpuThreadLocal<GpuStream> senderOwner;
-                auto& sender = senderOwner.get();
-                return sender;
-            }
-            case ProtocolCacheRole::Receiver:
-            {
-                thread_local GpuThreadLocal<GpuStream> receiverOwner;
-                auto& receiver = receiverOwner.get();
-                return receiver;
-            }
-            default:
-            {
-                thread_local GpuThreadLocal<GpuStream> unspecifiedOwner;
-                auto& unspecified = unspecifiedOwner.get();
-                return unspecified;
-            }
-            }
         }
 
         std::size_t alignUp(std::size_t v, std::size_t a)
@@ -1166,54 +1030,6 @@ namespace osuCrypto::LogVole::gpu
         return ctx.mGpuExecution->sampleStream();
     }
 
-    GpuStream& threadStream()
-    {
-        if (lazyRoleStreamsEnabled())
-        {
-            auto& stream = lazyRoleStream();
-            return stream;
-        }
-        // Keyed on the protocol role as well as the thread. The sender and the
-        // receiver run as interleaved coroutines on one host thread, so a purely
-        // thread-local stream serialised two parties whose GPU work is completely
-        // independent: nsys showed every kernel of a run on a single stream with
-        // the device idle 41% of the time. Their device buffers are disjoint, so
-        // separate streams are safe once the caching allocator is stream-aware.
-        thread_local GpuThreadLocal<GpuStream> unspecifiedOwner;
-        auto& unspecified = unspecifiedOwner.get();
-        thread_local GpuThreadLocal<GpuStream> senderOwner;
-        auto& sender = senderOwner.get();
-        thread_local GpuThreadLocal<GpuStream> receiverOwner;
-        auto& receiver = receiverOwner.get();
-
-        GpuStream* s = &unspecified;
-        switch (currentProtocolCacheScope().mRole)
-        {
-        case ProtocolCacheRole::Sender:
-            s = &sender;
-            break;
-        case ProtocolCacheRole::Receiver:
-            s = &receiver;
-            break;
-        default:
-            break;
-        }
-        return *s;
-    }
-
-    u32 threadStreamSlot()
-    {
-        switch (currentProtocolCacheScope().mRole)
-        {
-        case ProtocolCacheRole::Sender:
-            return 1;
-        case ProtocolCacheRole::Receiver:
-            return 2;
-        default:
-            return 0;
-        }
-    }
-
     bool downloadToHost(void* dst, const void* deviceSrc, std::size_t bytes, GpuStream& stream)
     {
         if (bytes == 0) return true;
@@ -2023,7 +1839,6 @@ namespace osuCrypto::LogVole::gpu
         if (mImpl->mWorker.joinable())
         {
             mImpl->mWorker.join();
-            gpuCollectThreadResources();
         }
         return mImpl->mSuccess;
     }

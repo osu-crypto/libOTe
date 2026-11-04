@@ -103,6 +103,10 @@ void LogVole_Garbled_LayoutAndValidation(const oc::CLP&)
 void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     gpu::GpuExecutionContext readbackExecution;
 #endif
     ScopedEnvironmentValue deltaDevice("LV_GPU_SETUP_DELTA_DEVICE", "1");
@@ -148,11 +152,11 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
             if (gpu::enabled() && round == 1)
             {
                 sender.mKeepOutputOnDevice = receiver.mKeepOutputOnDevice = true;
-                auto invalid = gpu::uploadScalars({x.data(), x.size() - 1});
+                auto invalid = gpu::uploadScalars({x.data(), x.size() - 1}, operationExecution.mainStream());
                 receiver.mInputDevice = invalid;
                 auto invalidQuery = coproto::LocalAsyncSocket::makePair();
                 rejects([&] { macoro::sync_wait(receiver.receive({}, a, rp, invalidQuery[1])); });
-                receiver.mInputDevice = gpu::uploadScalars(input);
+                receiver.mInputDevice = gpu::uploadScalars(input, operationExecution.mainStream());
                 LOGVOLE_REQUIRE_TRUE(receiver.mInputDevice);
                 input = {};
             }
@@ -204,6 +208,10 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
 
@@ -229,7 +237,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
             }
             std::vector<RnsPoly> expected;
             LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(ctx, repeated, false, 0, 1, expected));
-            auto input = gpu::uploadScalars(x);
+            auto input = gpu::uploadScalars(x, operationExecution.mainStream());
             for (bool deviceInput : {false, true})
             {
                 auto wrapped = deviceInput
@@ -251,7 +259,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
             std::vector<u64> expectedBits(count), actualBits(count);
             bitPrng.get(expectedBits.data(), expectedBits.size());
             for (auto& bit : expectedBits) bit &= 1u;
-            auto generatedBits = gpu::sampleScalarsFromSeed(bitSeed, count, 2);
+            auto generatedBits = gpu::sampleScalarsFromSeed(bitSeed, count, 2, operationExecution.mainStream());
             LOGVOLE_REQUIRE_TRUE(generatedBits);
             LOGVOLE_REQUIRE_EQ(generatedBits->count(), count);
             LOGVOLE_REQUIRE_TRUE(generatedBits->producerStream() == nullptr);

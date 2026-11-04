@@ -243,17 +243,6 @@ namespace osuCrypto::LogVole::gpu
         }
     };
 
-    // Stream for the calling thread *and protocol role*, so the sender and the
-    // receiver do not serialise on one stream when they are interleaved
-    // coroutines on the same host thread.
-    GpuStream& threadStream();
-
-    // 0 = unspecified, 1 = sender, 2 = receiver. Any per-thread scratch that is
-    // touched by device work must be indexed by this too, otherwise two streams
-    // would share one buffer.
-    u32 threadStreamSlot();
-    constexpr u32 kStreamSlots = 3;
-
     // Copies `bytes` from a device pointer into ordinary (pageable) host memory
     // at full PCIe speed.
     //

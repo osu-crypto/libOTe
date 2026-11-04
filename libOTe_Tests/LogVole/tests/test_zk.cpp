@@ -173,6 +173,10 @@ namespace
     void checkFreshMasks(const Statement& statement, CivoleSetting setting, bool device)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
+        osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
         osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
 
@@ -198,10 +202,10 @@ namespace
         if (device)
         {
             auto storage = std::make_shared<gpu::DeviceScalars>();
-            LOGVOLE_REQUIRE_TRUE(storage->resize(request, gpu::threadStream()));
+            LOGVOLE_REQUIRE_TRUE(storage->resize(request, operationExecution.mainStream()));
             LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(storage->data(), wires.data(),
-                wires.size() * sizeof(u64), gpu::threadStream().raw()));
-            LOGVOLE_REQUIRE_TRUE(gpu::threadStream().sync());
+                wires.size() * sizeof(u64), operationExecution.mainStream().raw()));
+            LOGVOLE_REQUIRE_TRUE(operationExecution.mainStream().sync());
             prover.mWiresDevice = storage;
         }
 #endif
@@ -610,6 +614,10 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
 void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
 
@@ -649,7 +657,7 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (device)
         {
-            prover.mWiresDevice = gpu::uploadScalars(wires);
+            prover.mWiresDevice = gpu::uploadScalars(wires, operationExecution.mainStream());
             LOGVOLE_REQUIRE_TRUE(prover.mWiresDevice != nullptr);
         }
 #endif

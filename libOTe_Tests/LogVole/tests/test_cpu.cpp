@@ -752,6 +752,10 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
 void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
 
@@ -821,9 +825,9 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
     {
         gpu::HostModulus retained{17, 23, 31};
         bool accepted = true;
-        LOGVOLE_REQUIRE_TRUE(!gpu::prepareZkModulusDevice(invalid, retained, gpu::threadStream()));
+        LOGVOLE_REQUIRE_TRUE(!gpu::prepareZkModulusDevice(invalid, retained, operationExecution.mainStream()));
         LOGVOLE_REQUIRE_TRUE(retained.mValue == 17 && retained.mRatio0 == 23 && retained.mRatio1 == 31);
-        LOGVOLE_REQUIRE_TRUE(!gpu::zkAcceptDevice(ZkProof{}, 0, 0, invalid, accepted, gpu::threadStream()));
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkAcceptDevice(ZkProof{}, 0, 0, invalid, accepted, operationExecution.mainStream()));
         LOGVOLE_REQUIRE_TRUE(accepted);
     }
     for (u64 width : {1, 7, 8, 1031})
@@ -833,7 +837,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
         const block circuitSeed = toBlock(0x5647, width + depth);
         ZkMulCircuit reference, actual;
         LOGVOLE_REQUIRE_TRUE(makeZkMulCircuitForBudget(budget, depth, circuitSeed, reference));
-        LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(budget, depth, circuitSeed, actual));
+        LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(budget, depth, circuitSeed, actual, operationExecution.mainStream()));
         LOGVOLE_REQUIRE_EQ(actual.mWidth, reference.mWidth);
         LOGVOLE_REQUIRE_EQ(actual.mDepth, reference.mDepth);
         LOGVOLE_REQUIRE_TRUE(actual.mOperands.empty());
@@ -841,19 +845,19 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
         ZkMulCircuit copied = actual;
         LOGVOLE_REQUIRE_TRUE(copied.mOperands.empty());
         LOGVOLE_REQUIRE_TRUE(copied.mOperandsDevice == actual.mOperandsDevice);
-        LOGVOLE_REQUIRE_TRUE(gpu::zkMulUploadOperands(actual));
-        LOGVOLE_REQUIRE_TRUE(!gpu::makeZkMulCircuitForBudgetDevice(1, depth, circuitSeed, actual));
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulUploadOperands(actual, operationExecution.mainStream()));
+        LOGVOLE_REQUIRE_TRUE(!gpu::makeZkMulCircuitForBudgetDevice(1, depth, circuitSeed, actual, operationExecution.mainStream()));
         LOGVOLE_REQUIRE_TRUE(actual.mOperandsDevice == copied.mOperandsDevice);
 
         ZkMulCircuit detached = copied;
-        LOGVOLE_REQUIRE_TRUE(gpu::zkMulDetachOperands(detached));
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulDetachOperands(detached, operationExecution.mainStream()));
         LOGVOLE_REQUIRE_TRUE(detached.mOperands.empty());
         LOGVOLE_REQUIRE_TRUE(detached.mOperandsDevice != copied.mOperandsDevice);
-        LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(detached));
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(detached, operationExecution.mainStream()));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(detached.mOperands, reference.mOperands));
         const auto detachedOwner = detached.mOperandsDevice;
         detached.mDepth = std::numeric_limits<u64>::max();
-        LOGVOLE_REQUIRE_TRUE(!gpu::zkMulDetachOperands(detached));
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkMulDetachOperands(detached, operationExecution.mainStream()));
         LOGVOLE_REQUIRE_TRUE(detached.mOperandsDevice == detachedOwner);
         LOGVOLE_REQUIRE_TRUE(rangesEqual(detached.mOperands, reference.mOperands));
         detached.mDepth = depth;
@@ -868,7 +872,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             {
                 const u32 bits = setting == CivoleSetting::GoldenSeed ? 55 : 52;
                 ZkMulProver reconfiguredProver;
-                reconfiguredProver.mDeviceState = gpu::makeZkMulDeviceState(copied);
+                reconfiguredProver.mDeviceState = gpu::makeZkMulDeviceState(copied, operationExecution.mainStream());
                 LOGVOLE_REQUIRE_TRUE(reconfiguredProver.mDeviceState != nullptr);
                 reconfiguredProver.configure(copied, bits, 1, setting, budget);
                 LOGVOLE_REQUIRE_TRUE(reconfiguredProver.mDeviceState == nullptr);
@@ -900,7 +904,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice != firstOwner);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice != copied.mOperandsDevice);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperands.empty());
-                LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(verifier.mCircuit));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(verifier.mCircuit, operationExecution.mainStream()));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(verifier.mCircuit.mOperands, reference.mOperands));
 
                 // CPU configuration retains the public API's eager host access,
@@ -913,7 +917,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 
                 // A public host edit supersedes an older device snapshot.
                 ZkMulCircuit edited = copied;
-                LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(edited));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(edited, operationExecution.mainStream()));
                 edited.mOperands[0] = (edited.mOperands[0] + 1) % width;
                 verifier.configure(edited, bits, 1, setting, budget);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice == nullptr);
@@ -924,7 +928,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 // unique allocation without a D2D clone or host round trip.
                 ZkMulCircuit unique;
                 LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(
-                    budget, depth, circuitSeed, unique));
+                    budget, depth, circuitSeed, unique, operationExecution.mainStream()));
                 LOGVOLE_REQUIRE_EQ(unique.mOperandsDevice.use_count(), 1);
                 const void* uniqueOwner = unique.mOperandsDevice.get();
                 verifier.mDeviceState = std::make_shared<int>(3);
@@ -933,12 +937,12 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice.get() == uniqueOwner);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperands.empty());
                 LOGVOLE_REQUIRE_TRUE(verifier.mDeviceState == nullptr);
-                LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(verifier.mCircuit));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(verifier.mCircuit, operationExecution.mainStream()));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(verifier.mCircuit.mOperands, reference.mOperands));
 
                 ZkMulCircuit invalidUnique;
                 LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(
-                    budget, depth, circuitSeed, invalidUnique));
+                    budget, depth, circuitSeed, invalidUnique, operationExecution.mainStream()));
                 LOGVOLE_REQUIRE_EQ(invalidUnique.mOperandsDevice.use_count(), 1);
                 invalidUnique.mDepth += 1;
                 threw = false;
@@ -1031,7 +1035,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                         receiverPrng(pairedProofRoots.get<block>());
                     AlignedUnVec<u64> witness;
                     LOGVOLE_REQUIRE_TRUE(zkMulWitness(reference, gpuProver.modulus(), witnessPrng, witness, budget));
-                    gpuProver.mWiresDevice = gpu::zkMulWitnessDevice(copied, gpuProver.modulus(), witnessSeed, budget);
+                    gpuProver.mWiresDevice = gpu::zkMulWitnessDevice(copied, gpuProver.modulus(), witnessSeed, budget, operationExecution.mainStream());
                     LOGVOLE_REQUIRE_TRUE(gpuProver.mWiresDevice != nullptr);
                     auto sockets = coproto::LocalAsyncSocket::makePair();
                     auto offline = macoro::sync_wait(macoro::when_all_ready(
@@ -1051,7 +1055,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                             // before either socket or query seed is consumed.
                             auto prior = gpuProver.mWiresDevice;
                             auto undersized = std::make_shared<gpu::DeviceScalars>();
-                            LOGVOLE_REQUIRE_TRUE(undersized->resize(budget - 1u, gpu::threadStream()));
+                            LOGVOLE_REQUIRE_TRUE(undersized->resize(budget - 1u, operationExecution.mainStream()));
                             gpuProver.mWiresDevice = undersized;
                             bool rejected = false;
                             try
@@ -1115,7 +1119,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             AlignedUnVec<u64> expected, fetched;
             LOGVOLE_REQUIRE_TRUE(zkMulWitness(reference, modulus, referencePrng, expected, budget + 13));
             // Exercise host-empty wiring before materializing any CPU copy.
-            auto device = gpu::zkMulWitnessDevice(copied, modulus, witnessSeed, budget + 13);
+            auto device = gpu::zkMulWitnessDevice(copied, modulus, witnessSeed, budget + 13, operationExecution.mainStream());
             LOGVOLE_REQUIRE_TRUE(device != nullptr);
             fetched.resize(expected.size());
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, std::span<u64>(fetched.data(), fetched.size()), readbackExecution.readbackStream()));
@@ -1128,14 +1132,14 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             for (auto& value : hostInputs) value = hostInputPrng.get<u64>() % modulus;
             LOGVOLE_REQUIRE_TRUE(hostInputPrng.get<block>() == referencePrng.get<block>());
             auto hostPrepared = gpu::zkMulWitnessDevice(reference, modulus,
-                std::span<const u64>(hostInputs.data(), hostInputs.size()), budget + 13);
+                std::span<const u64>(hostInputs.data(), hostInputs.size()), budget + 13, operationExecution.mainStream());
             LOGVOLE_REQUIRE_TRUE(hostPrepared != nullptr);
             AlignedUnVec<u64> hostPreparedWitness;
             hostPreparedWitness.resize(expected.size());
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*hostPrepared,
                 std::span<u64>(hostPreparedWitness.data(), hostPreparedWitness.size()), readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(expected, hostPreparedWitness));
-            LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(actual));
+            LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(actual, operationExecution.mainStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(actual.mOperands, reference.mOperands));
             LOGVOLE_REQUIRE_TRUE(copied.mOperands.empty());
 
@@ -1160,10 +1164,10 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 
             // Exercise the production GPU proof helpers in both constant/power
             // modes, rather than testing only the witness kernel.
-            auto deviceMacs = gpu::uploadScalars(macs);
-            auto deviceKeys = gpu::uploadScalars(keys);
-            auto proverState = gpu::makeZkMulDeviceState(copied);
-            auto verifierState = gpu::makeZkMulDeviceState(copied);
+            auto deviceMacs = gpu::uploadScalars(macs, operationExecution.mainStream());
+            auto deviceKeys = gpu::uploadScalars(keys, operationExecution.mainStream());
+            auto proverState = gpu::makeZkMulDeviceState(copied, operationExecution.mainStream());
+            auto verifierState = gpu::makeZkMulDeviceState(copied, operationExecution.mainStream());
             LOGVOLE_REQUIRE_TRUE(deviceMacs && deviceKeys && proverState && verifierState);
             for (const char* mode : {"1", "0"})
             {
@@ -1171,21 +1175,21 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 ZkProof proof;
                 u64 value = 0;
                 LOGVOLE_REQUIRE_TRUE(gpu::zkMulProverResponseDevice(
-                    copied, *device, *deviceMacs, 73, modulus, *proverState, proof));
+                    copied, *device, *deviceMacs, 73, modulus, *proverState, proof, operationExecution.mainStream()));
                 LOGVOLE_REQUIRE_TRUE(gpu::zkMulVerifierValueDevice(
-                    copied, *deviceKeys, 73, 19, modulus, *verifierState, value));
+                    copied, *deviceKeys, 73, 19, modulus, *verifierState, value, operationExecution.mainStream()));
                 LOGVOLE_REQUIRE_EQ(proof.mU, referenceProof.mU);
                 LOGVOLE_REQUIRE_EQ(proof.mV, referenceProof.mV);
                 LOGVOLE_REQUIRE_EQ(value, referenceValue);
                 bool accepted = false;
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted, gpu::threadStream()));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted, operationExecution.mainStream()));
                 LOGVOLE_REQUIRE_TRUE(accepted);
                 proof.mU = (proof.mU + 1) % modulus;
-                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted, gpu::threadStream()));
+                LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, 19, modulus, accepted, operationExecution.mainStream()));
                 LOGVOLE_REQUIRE_TRUE(!accepted);
             }
         }
-        LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(copied));
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(copied, operationExecution.mainStream()));
         LOGVOLE_REQUIRE_TRUE(copied.mOperands.data() != actual.mOperands.data());
         actual.mOperands[0] ^= 1;
         LOGVOLE_REQUIRE_TRUE(rangesEqual(copied.mOperands, reference.mOperands));
@@ -1197,6 +1201,10 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 
 void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     struct RestoreGpu
     {
@@ -1252,16 +1260,22 @@ void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
         std::shared_ptr<gpu::ZkMulDeviceState>, gpu::DeviceScalarsPtr,
         gpu::DeviceScalarsPtr, gpu::DeviceScalarsPtr>;
     std::weak_ptr<gpu::OwnedGpuStream> producer, receiver;
+    std::weak_ptr<gpu::GpuExecutionContext> producerContext, receiverContext;
     std::packaged_task<Packet()> setup([&] {
         ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, 0);
-        producer = gpu::threadStream().allocationOwner();
+        auto execution = std::make_shared<gpu::GpuExecutionContext>();
+        producerContext = execution;
+        auto& stream = execution->mainStream();
+        producer = stream.allocationOwner();
         ZkMulCircuit circuit;
-        LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(count, depth, seed, circuit));
-        auto x = gpu::uploadScalars(witness), m = gpu::uploadScalars(macs), k = gpu::uploadScalars(keys);
+        LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(count, depth, seed, circuit, stream));
+        auto x = gpu::uploadScalars(witness, stream);
+        auto m = gpu::uploadScalars(macs, stream);
+        auto k = gpu::uploadScalars(keys, stream);
         // Queue scratch allocation after the completed input uploads. The
         // first foreign proof must establish its own allocation dependencies.
-        auto prover = gpu::makeZkMulDeviceState(circuit);
-        auto verifier = gpu::makeZkMulDeviceState(circuit);
+        auto prover = gpu::makeZkMulDeviceState(circuit, stream);
+        auto verifier = gpu::makeZkMulDeviceState(circuit, stream);
         LOGVOLE_REQUIRE_TRUE(prover && verifier && x && m && k);
         return Packet{std::move(circuit), std::move(prover), std::move(verifier),
             std::move(x), std::move(m), std::move(k)};
@@ -1270,44 +1284,47 @@ void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
     std::thread worker(std::move(setup));
     worker.join();
     auto [circuit, prover, verifier, x, m, k] = ready.get();
+    LOGVOLE_REQUIRE_TRUE(producerContext.expired());
     LOGVOLE_REQUIRE_FALSE(producer.expired());
-    auto check = [&] {
+    auto check = [&](gpu::GpuStream& stream) {
         ZkProof proof;
         u64 value = 0;
-        LOGVOLE_REQUIRE_TRUE(gpu::zkMulProverResponseDevice(circuit, *x, *m, chi, modulus, *prover, proof));
-        LOGVOLE_REQUIRE_TRUE(gpu::zkMulVerifierValueDevice(circuit, *k, chi, delta, modulus, *verifier, value));
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulProverResponseDevice(circuit, *x, *m, chi, modulus, *prover, proof, stream));
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulVerifierValueDevice(circuit, *k, chi, delta, modulus, *verifier, value, stream));
         LOGVOLE_REQUIRE_EQ(proof.mU, expectedProof.mU);
         LOGVOLE_REQUIRE_EQ(proof.mV, expectedProof.mV);
         LOGVOLE_REQUIRE_EQ(value, expectedValue);
         bool accepted = false;
-        LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, delta, modulus, accepted, gpu::threadStream()));
+        LOGVOLE_REQUIRE_TRUE(gpu::zkAcceptDevice(proof, value, delta, modulus, accepted, stream));
         LOGVOLE_REQUIRE_TRUE(accepted);
     };
     {
         ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, 0);
-        check();
+        check(operationExecution.mainStream());
         auto wrong = circuit;
         wrong.mWidth = 3;
         wrong.mDepth = 7; // Same gate count, different compiled statement.
         ZkProof unchanged{11, 13};
-        LOGVOLE_REQUIRE_FALSE(gpu::zkMulProverResponseDevice(wrong, *x, *m, chi, modulus, *prover, unchanged));
+        LOGVOLE_REQUIRE_FALSE(gpu::zkMulProverResponseDevice(wrong, *x, *m, chi, modulus, *prover, unchanged, operationExecution.mainStream()));
         LOGVOLE_REQUIRE_EQ(unchanged.mU, 11ULL);
         LOGVOLE_REQUIRE_EQ(unchanged.mV, 13ULL);
     }
-    gpu::gpuCollectThreadResources();
     LOGVOLE_REQUIRE_FALSE(producer.expired());
     std::packaged_task<void()> reuse([&] {
         ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, 0);
-        receiver = gpu::threadStream().allocationOwner();
-        check();
+        auto execution = std::make_shared<gpu::GpuExecutionContext>();
+        receiverContext = execution;
+        auto& stream = execution->mainStream();
+        receiver = stream.allocationOwner();
+        check(stream);
     });
     auto completed = reuse.get_future();
     std::thread consumer(std::move(reuse));
     consumer.join();
     completed.get();
-    gpu::gpuCollectThreadResources();
+    LOGVOLE_REQUIRE_TRUE(receiverContext.expired());
     LOGVOLE_REQUIRE_FALSE(receiver.expired());
-    LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(circuit));
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(circuit, operationExecution.mainStream()));
     LOGVOLE_REQUIRE_TRUE(rangesEqual(circuit.mOperands, reference.mOperands));
     circuit = {};
     prover.reset(); verifier.reset(); x.reset(); m.reset(); k.reset();
@@ -1320,6 +1337,10 @@ void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
 
 void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
+#endif
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
@@ -1365,7 +1386,7 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
             for (unsigned i = 0; i < 4; ++i)
                 LOGVOLE_REQUIRE_EQ(cpuPrng.get<u64>(), stream.get<u64>());
 
-            auto device = gpu::zkMatMulWitnessInputsDevice(statement, modulus, seed, requested);
+            auto device = gpu::zkMatMulWitnessInputsDevice(statement, modulus, seed, operationExecution.mainStream(), requested);
             LOGVOLE_REQUIRE_TRUE(device != nullptr);
             LOGVOLE_REQUIRE_EQ(device->count(), count);
             AlignedUnVec<u64> fetched;
@@ -1375,12 +1396,12 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
 
             // Keep two independently owned device results alive at once. A
             // repeated seeded call must neither reuse nor overwrite the first.
-            auto replay = gpu::zkMatMulWitnessInputsDevice(statement, modulus, seed, requested);
+            auto replay = gpu::zkMatMulWitnessInputsDevice(statement, modulus, seed, operationExecution.mainStream(), requested);
             LOGVOLE_REQUIRE_TRUE(replay != nullptr);
             LOGVOLE_REQUIRE_TRUE(replay->data() != device->data());
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*replay, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(fetched, oracle));
-            auto another = gpu::zkMatMulWitnessInputsDevice(statement, modulus, toBlock(1, dim), requested);
+            auto another = gpu::zkMatMulWitnessInputsDevice(statement, modulus, toBlock(1, dim), operationExecution.mainStream(), requested);
             LOGVOLE_REQUIRE_TRUE(another != nullptr);
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(fetched, oracle));
@@ -1394,7 +1415,7 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
                     expected, expectedProduct));
                 gpu::DeviceScalars product;
                 LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulFillProductDevice(*device, statement,
-                    modulus, product));
+                    modulus, product, operationExecution.mainStream()));
                 actualProduct.resize(statement.entries());
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(product, actualProduct, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actualProduct, expectedProduct));
@@ -1411,22 +1432,22 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
     ZkMatMulStatement valid{};
     valid.mDim = 7;
     const block seed = toBlock(0x494e56414c4944, 7);
-    auto retained = gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed);
+    auto retained = gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed, operationExecution.mainStream());
     LOGVOLE_REQUIRE_TRUE(retained != nullptr);
     AlignedUnVec<u64> before, after;
     before.resize(retained->count());
     after.resize(retained->count());
     LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, before, readbackExecution.readbackStream()));
-    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, 0, seed) == nullptr);
-    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, 1, seed) == nullptr);
-    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed, valid.voleCount() - 1) == nullptr);
-    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed, std::numeric_limits<u64>::max()) == nullptr);
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, 0, seed, operationExecution.mainStream()) == nullptr);
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, 1, seed, operationExecution.mainStream()) == nullptr);
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed, operationExecution.mainStream(), valid.voleCount() - 1) == nullptr);
+    LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed, operationExecution.mainStream(), std::numeric_limits<u64>::max()) == nullptr);
     for (u64 dim : { u64{0}, std::numeric_limits<u64>::max(),
             static_cast<u64>(std::numeric_limits<u32>::max()), u64{1} << 32 })
     {
         auto invalid = valid;
         invalid.mDim = dim;
-        LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(invalid, largePrime, seed) == nullptr);
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(invalid, largePrime, seed, operationExecution.mainStream()) == nullptr);
     }
     LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, after, readbackExecution.readbackStream()));
     LOGVOLE_REQUIRE_TRUE(rangesEqual(before, after));

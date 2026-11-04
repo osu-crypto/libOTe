@@ -1065,10 +1065,10 @@ namespace osuCrypto::LogVole::gpu
 
     // Copies a host scalar array to the device. Exists so a caller can place its
     // input where wrapDeviceLabels wants it; the protocol itself never calls it.
-    DeviceScalarsPtr uploadScalars(std::span<const u64> src);
+    DeviceScalarsPtr uploadScalars(std::span<const u64> src, GpuStream& stream);
 
     // Exact cryptoTools AES-CTR u64 stream from a fresh PRNG(seed), reduced
     // modulo modulus on device. Synchronized before publication; no host array
     // is materialized. Null means unsupported input or a device failure.
-    DeviceScalarsPtr sampleScalarsFromSeed(block seed, u64 count, u64 modulus);
+    DeviceScalarsPtr sampleScalarsFromSeed(block seed, u64 count, u64 modulus, GpuStream& stream);
 }
