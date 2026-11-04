@@ -14073,6 +14073,148 @@ namespace osuCrypto::LogVole::gpu
         // computed once per 4 KiB refill instead of once per 64-byte block.
 
 
+        __global__ __launch_bounds__(128) void aesPrngExpandKernel(
+            const u64* seeds, unsigned char* roundKeys, u32 count)
+        {
+            for (u64 poly = static_cast<u64>(blockIdx.x) * blockDim.x + threadIdx.x;
+                 poly < count; poly += static_cast<u64>(gridDim.x) * blockDim.x)
+            {
+                u64 h[8];
+                h[0] = kBlake2bIV[0] ^ roParamWord0(16);
+#pragma unroll
+                for (u32 i = 1; i < 8; ++i) h[i] = kBlake2bIV[i];
+                u64 message[16];
+                message[0] = kAesPrngSeedDomain;
+#pragma unroll
+                for (u32 i = 0; i < 8; ++i) message[i + 1] = seeds[8u * poly + i];
+#pragma unroll
+                for (u32 i = 9; i < 16; ++i) message[i] = 0;
+                blake2bCompress(h, message, 72ull, 0ull, ~u64(0));
+                aes128ExpandToGlobal(h[0], h[1], roundKeys + 176u * poly);
+            }
+        }
+
+        __device__ __forceinline__ void aesPrngPair(
+            const unsigned char* roundKeys, const unsigned char* sbox,
+            u64 counter, u64& lo, u64& hi)
+        {
+            unsigned char state[16]{};
+#pragma unroll
+            for (u32 i = 0; i < 8; ++i)
+                state[i] = static_cast<unsigned char>(counter >> (8u * i));
+            aes128EncryptSharedSbox(roundKeys, state, sbox);
+            lo = hi = 0;
+#pragma unroll
+            for (u32 i = 0; i < 8; ++i)
+            {
+                lo |= static_cast<u64>(state[i]) << (8u * i);
+                hi |= static_cast<u64>(state[8u + i]) << (8u * i);
+            }
+        }
+
+        template<bool Uniform>
+        __global__ __launch_bounds__(128) void aesPrngStreamKernel(
+            const unsigned char* roundKeys, u64* out, u32 words, u32 count,
+            DeviceRing ring, const u64* maxMultiple, const u32* outIdx,
+            u32* rejectEpochs, u32 rejectEpoch)
+        {
+            __shared__ __align__(16) unsigned char key[176];
+            __shared__ __align__(16) unsigned char sbox[256];
+            if (threadIdx.x < 16)
+                reinterpret_cast<uint4*>(sbox)[threadIdx.x] =
+                    reinterpret_cast<const uint4*>(kAesSbox)[threadIdx.x];
+            for (u64 poly = blockIdx.x; poly < count; poly += gridDim.x)
+            {
+                if (threadIdx.x < 11)
+                    reinterpret_cast<uint4*>(key)[threadIdx.x] =
+                        reinterpret_cast<const uint4*>(roundKeys + 176u * poly)[threadIdx.x];
+                __syncthreads();
+                const u64 destination = Uniform && outIdx ? outIdx[poly] : poly;
+                const u64 blocks = (static_cast<u64>(words) + 1u) / 2u;
+                for (u64 counter = threadIdx.x; counter < blocks; counter += blockDim.x)
+                {
+                    u64 values[2];
+                    aesPrngPair(key, sbox, counter, values[0], values[1]);
+#pragma unroll
+                    for (u32 half = 0; half < 2; ++half)
+                    {
+                        const u64 index = 2u * counter + half;
+                        if (index >= words) continue;
+                        u64 value = values[half];
+                        if constexpr (Uniform)
+                        {
+                            const u32 limb = static_cast<u32>(index) >> ring.mLogN;
+                            if (value >= maxMultiple[limb])
+                                atomicExch(rejectEpochs + poly, rejectEpoch);
+                            value = barrettReduce64(value, ring.mMods[limb]);
+                        }
+                        out[destination * words + index] = value;
+                    }
+                }
+                __syncthreads();
+            }
+        }
+
+        // Regenerate initial candidates cooperatively; only replacement draw
+        // consumption is serial. This avoids a full-polynomial scalar replay.
+        __global__ __launch_bounds__(128) void aesUniformRepairKernel(
+            DeviceRing ring, const unsigned char* roundKeys, const u64* maxMultiple,
+            u64* out, const u32* outIdx, u32 count, const u32* rejectEpochs, u32 epoch)
+        {
+            __shared__ __align__(16) unsigned char key[176];
+            __shared__ __align__(16) unsigned char sbox[256];
+            __shared__ u64 candidates[256];
+            if (threadIdx.x < 16)
+                reinterpret_cast<uint4*>(sbox)[threadIdx.x] =
+                    reinterpret_cast<const uint4*>(kAesSbox)[threadIdx.x];
+            __syncthreads();
+            const u64 words = static_cast<u64>(ring.mN) * ring.mRho;
+            for (u64 poly = blockIdx.x; poly < count; poly += gridDim.x)
+            {
+                if (rejectEpochs[poly] != epoch) continue;
+                if (threadIdx.x < 11)
+                    reinterpret_cast<uint4*>(key)[threadIdx.x] =
+                        reinterpret_cast<const uint4*>(roundKeys + 176u * poly)[threadIdx.x];
+                __syncthreads();
+                u64 cursor = words;
+                u64 cachedCounter = ~u64(0), tailLo = 0, tailHi = 0;
+                const u64 destination = outIdx ? outIdx[poly] : poly;
+                for (u64 base = 0; base < words; base += 256u)
+                {
+                    u64 lo, hi;
+                    aesPrngPair(key, sbox, (base >> 1u) + threadIdx.x, lo, hi);
+                    candidates[2u * threadIdx.x] = lo;
+                    candidates[2u * threadIdx.x + 1u] = hi;
+                    __syncthreads();
+                    if (threadIdx.x == 0)
+                    {
+                        const u32 active = static_cast<u32>(words - base < 256u ? words - base : 256u);
+                        for (u32 i = 0; i < active; ++i)
+                        {
+                            const u64 index = base + i;
+                            const u32 limb = static_cast<u32>(index) >> ring.mLogN;
+                            const u64 limit = maxMultiple[limb];
+                            if (candidates[i] < limit) continue;
+                            u64 value;
+                            do
+                            {
+                                const u64 counter = cursor >> 1u;
+                                if (counter != cachedCounter)
+                                {
+                                    aesPrngPair(key, sbox, counter, tailLo, tailHi);
+                                    cachedCounter = counter;
+                                }
+                                value = cursor & 1u ? tailHi : tailLo;
+                                ++cursor;
+                            } while (value >= limit);
+                            out[destination * words + index] = barrettReduce64(value, ring.mMods[limb]);
+                        }
+                    }
+                    __syncthreads();
+                }
+            }
+        }
+
         // Input generation uses cryptoTools AES, independently of SEAL's
         // BLAKE2xb correlation sampler. Share the one key schedule per CTA.
         __global__ __launch_bounds__(256) void aesCtrScalarsKernel(
@@ -20882,6 +21024,52 @@ namespace osuCrypto::LogVole::gpu
         const u32 grid = static_cast<u32>(std::min<u64>((blocks + 255u) / 256u, 4096u));
         aesCtrScalarsKernel<<<grid, 256, 0, asStream(stream)>>>(seed, out, count, modulus);
         return check(cudaGetLastError(), "aesCtrScalars");
+    }
+
+    namespace
+    {
+        bool prepareAesPrngKeys(const u64* seeds, u32 count,
+            unsigned char* keys, std::size_t capacity, void* stream)
+        {
+            if (!seeds || !keys || (reinterpret_cast<std::uintptr_t>(keys) & 15u) ||
+                capacity / 176u < count) return false;
+            const u32 grid = static_cast<u32>(std::min<u64>((static_cast<u64>(count) + 127u) / 128u, 65535u));
+            aesPrngExpandKernel<<<grid, 128, 0, asStream(stream)>>>(seeds, keys, count);
+            return check(cudaGetLastError(), "aesPrngExpand");
+        }
+    }
+
+    bool launchAesPrngStream(const u64* seeds, u64* out, u32 words, u32 count,
+        unsigned char* keys, std::size_t capacity, void* stream)
+    {
+        if (!count) return true;
+        if (!out || !words || count > std::numeric_limits<std::size_t>::max() / sizeof(u64) / words ||
+            !prepareAesPrngKeys(seeds, count, keys, capacity, stream)) return false;
+        aesPrngStreamKernel<false><<<std::min(count, 65535u), 128, 0, asStream(stream)>>>(
+            keys, out, words, count, DeviceRing{}, nullptr, nullptr, nullptr, 0);
+        return check(cudaGetLastError(), "aesPrngStream");
+    }
+
+    bool launchSampleUniformPolyAes(const RingConstView& rc, const u64* seeds,
+        const u64* maxMultiple, u64* out, const u32* outIdx, u32 count,
+        unsigned char* keys, std::size_t capacity, u32* rejectEpochs,
+        u32 rejectEpoch, void* stream)
+    {
+        if (!count) return true;
+        const u64 words = static_cast<u64>(rc.mN) * rc.mRho;
+        if (!out || !maxMultiple || !rejectEpochs || !rejectEpoch || !words ||
+            !rc.mMods || rc.mLogN >= 32u || (u64{1} << rc.mLogN) != rc.mN ||
+            words > std::numeric_limits<u32>::max() ||
+            count > std::numeric_limits<std::size_t>::max() / sizeof(u64) / words ||
+            !prepareAesPrngKeys(seeds, count, keys, capacity, stream)) return false;
+        const auto grid = std::min(count, 65535u);
+        const auto ring = toDevice(rc);
+        aesPrngStreamKernel<true><<<grid, 128, 0, asStream(stream)>>>(
+            keys, out, static_cast<u32>(words), count, ring, maxMultiple, outIdx, rejectEpochs, rejectEpoch);
+        if (!check(cudaGetLastError(), "aesUniform")) return false;
+        aesUniformRepairKernel<<<grid, 128, 0, asStream(stream)>>>(
+            ring, keys, maxMultiple, out, outIdx, count, rejectEpochs, rejectEpoch);
+        return check(cudaGetLastError(), "aesUniformRepair");
     }
 
     bool launchBlake2xbStreamForTest(

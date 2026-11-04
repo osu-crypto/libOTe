@@ -1780,6 +1780,63 @@ void LogVole_Cpu_ResamplingOverwritesPreviousQuery(const oc::CLP&)
 
 void LogVole_Cpu_SamplerMatchesSeal(const oc::CLP&)
 {
+    // The direct, reusable PRNG and SEAL's optional boundary adapter use the
+    // same AES stream. The independent counter-mode oracle checks byte order.
+    {
+        auto factory = LogVole::detail::makeAesPrngFactory();
+        PRNG reusable(ZeroBlock);
+        const auto* backing = reusable.mBuffer.data();
+        for (unsigned trial = 0; trial < 4; ++trial)
+        {
+            seal::prng_seed_type seed{};
+            for (unsigned i = 0; i < seed.size(); ++i) seed[i] = 17u * i + trial;
+            const auto key = LogVole::detail::aesPrngKey(seed);
+            reusable.SetSeed(key);
+            LOGVOLE_REQUIRE_TRUE(reusable.mBuffer.data() == backing);
+            auto bridge = factory->create(seed);
+            AES cipher(key);
+            std::vector<block> oracle(2048);
+            cipher.ecbEncCounterMode(0, oracle.size(), oracle.data());
+            std::size_t offset = 0;
+            for (std::size_t bytes : {0, 1, 15, 16, 17, 4095, 4096, 4097})
+            {
+                std::vector<u8> direct(bytes), adapted(bytes);
+                reusable.get(direct.data(), bytes);
+                bridge->generate(bytes, reinterpret_cast<seal::seal_byte*>(adapted.data()));
+                LOGVOLE_REQUIRE_TRUE(direct == adapted);
+                LOGVOLE_REQUIRE_TRUE(std::equal(direct.begin(), direct.end(),
+                    reinterpret_cast<const u8*>(oracle.data()) + offset));
+                offset += bytes;
+            }
+            // Explicit reseeding after a partial refill keeps the allocation.
+            reusable.SetSeed(key);
+            LOGVOLE_REQUIRE_TRUE(reusable.mBuffer.data() == backing);
+            LOGVOLE_REQUIRE_EQ(reusable.get<u64>(), reinterpret_cast<const u64*>(oracle.data())[0]);
+
+            seal::EncryptionParameters parms(seal::scheme_type::ckks);
+            parms.set_poly_modulus_degree(1024);
+            const u64 q = (u64{3} << 58) + 123;
+            parms.set_coeff_modulus({seal::Modulus(q), seal::Modulus(q + 128)});
+            std::vector<u64> direct(2048), expected(2048);
+            reusable.SetSeed(key);
+            auto reference = factory->create(seed);
+            LogVole::detail::cpuSamplePolyUniform(reusable, parms, direct.data());
+            seal::util::sample_poly_uniform(reference, parms, expected.data());
+            LOGVOLE_REQUIRE_TRUE(direct == expected);
+            std::array<u8, 31> a{}, b{};
+            reusable.get(a.data(), a.size());
+            reference->generate(b.size(), reinterpret_cast<seal::seal_byte*>(b.data()));
+            LOGVOLE_REQUIRE_TRUE(a == b);
+        }
+        seal::prng_seed_type seed{};
+        const auto original = LogVole::detail::aesPrngKey(seed);
+        for (unsigned i = 0; i < seed.size(); ++i)
+        {
+            seed[i] = 1;
+            LOGVOLE_REQUIRE_FALSE(eq(LogVole::detail::aesPrngKey(seed), original));
+            seed[i] = 0;
+        }
+    }
     PRNG random(toBlock(0x739182, 0x193));
     auto fast = LogVole::detail::cpuBlake2xbFactory();
     seal::Blake2xbPRNGFactory reference;

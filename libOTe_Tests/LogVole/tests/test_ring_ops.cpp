@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuSampler.h"
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
 #include "libOTe/Vole/LogVole/LogVolePublicCache.h"
@@ -935,6 +936,93 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
 #if defined(ENABLE_LOGVOLE_CUDA)
     ScopedGpuEnabled enabled(cmd.getOr("gpu", 0) != 0);
     LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    {
+        // Small AES stream and full polynomial oracle, including odd stream
+        // lengths, mapped output rows and deliberately frequent rejection.
+        using oc::u64;
+        using oc::PRNG;
+        constexpr gpu::u32 count = 3, streamWords = 1031;
+        RingNttContext context;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), context));
+        auto ring = gpu::GpuRing::get(context);
+        LOGVOLE_REQUIRE_TRUE(ring);
+        gpu::GpuExecutionContext execution;
+        auto& stream = execution.mainStream();
+        const auto words = ring->polyWords();
+        std::array<seal::prng_seed_type, count> seeds{};
+        std::vector<u64> raw(count * streamWords + 2), sampled((count + 2) * words);
+        std::vector<u64> expected(count * streamWords);
+        std::vector<u64> limits(ringModulusCount(context));
+        const std::array<gpu::u32, count> destinations{2, 0, 1};
+        gpu::OwnedGpuBuffer seedStorage(stream.allocationOwner(), sizeof(seeds));
+        gpu::OwnedGpuBuffer keys(stream.allocationOwner(), count * 176u);
+        gpu::OwnedGpuBuffer rawStorage(stream.allocationOwner(), raw.size() * sizeof(u64));
+        gpu::OwnedGpuBuffer output(stream.allocationOwner(), sampled.size() * sizeof(u64));
+        gpu::OwnedGpuBuffer thresholds(stream.allocationOwner(), limits.size() * sizeof(u64));
+        gpu::OwnedGpuBuffer rows(stream.allocationOwner(), sizeof(destinations));
+        gpu::OwnedGpuBuffer epochs(stream.allocationOwner(), count * sizeof(gpu::u32));
+        gpu::StreamDrain drain{stream};
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(epochs.data(), epochs.size(), stream.raw()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(rows.data(), destinations.data(), sizeof(destinations), stream.raw()));
+        for (unsigned query = 0; query < 2; ++query)
+        {
+            for (unsigned row = 0; row < count; ++row)
+            {
+                for (unsigned i = 0; i < 8; ++i) seeds[row][i] = 101u * row + 17u * i + query;
+                PRNG reference(osuCrypto::LogVole::detail::aesPrngKey(seeds[row]));
+                reference.get(expected.data() + row * streamWords, streamWords);
+            }
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(seedStorage.data(), seeds.data(), sizeof(seeds), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(rawStorage.data(), rawStorage.size(), stream.raw()));
+            LOGVOLE_REQUIRE_FALSE(gpu::launchAesPrngStream(
+                static_cast<const gpu::u64*>(seedStorage.data()), static_cast<gpu::u64*>(rawStorage.data()) + 1,
+                streamWords, count, static_cast<unsigned char*>(keys.data()), keys.size() - 1, stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::launchAesPrngStream(
+                static_cast<const gpu::u64*>(seedStorage.data()), static_cast<gpu::u64*>(rawStorage.data()) + 1,
+                streamWords, count, static_cast<unsigned char*>(keys.data()), keys.size(), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(raw.data(), rawStorage.data(), rawStorage.size(), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(stream.sync());
+            LOGVOLE_REQUIRE_EQ(raw.front(), 0u);
+            LOGVOLE_REQUIRE_EQ(raw.back(), 0u);
+            LOGVOLE_REQUIRE_TRUE(std::equal(expected.begin(), expected.end(), raw.begin() + 1));
+
+            for (unsigned forced = 0; forced < 2; ++forced)
+            {
+                for (std::size_t limb = 0; limb < limits.size(); ++limb)
+                {
+                    const auto q = ringModulusValue(context, limb);
+                    limits[limb] = ~u64{0} - (~u64{0} % q) - 1u;
+                    if (forced) limits[limb] >>= 1u;
+                }
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(thresholds.data(), limits.data(), thresholds.size(), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(output.data(), output.size(), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(gpu::launchSampleUniformPolyAes(ring->view(stream),
+                    static_cast<const gpu::u64*>(seedStorage.data()), static_cast<const gpu::u64*>(thresholds.data()),
+                    static_cast<gpu::u64*>(output.data()) + words, static_cast<const gpu::u32*>(rows.data()), count,
+                    static_cast<unsigned char*>(keys.data()), keys.size(), static_cast<gpu::u32*>(epochs.data()),
+                    1u + query * 2u + forced, stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(sampled.data(), output.data(), output.size(), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(stream.sync());
+                LOGVOLE_REQUIRE_TRUE(std::all_of(sampled.begin(), sampled.begin() + words, [](auto v) { return v == 0; }));
+                LOGVOLE_REQUIRE_TRUE(std::all_of(sampled.end() - words, sampled.end(), [](auto v) { return v == 0; }));
+                std::vector<u64> initial(words);
+                for (unsigned row = 0; row < count; ++row)
+                {
+                    PRNG reference(osuCrypto::LogVole::detail::aesPrngKey(seeds[row]));
+                    reference.get(initial.data(), initial.size());
+                    for (std::size_t i = 0; i < words; ++i)
+                    {
+                        const auto limb = i / context.mParams.mPolyModulusDegree;
+                        auto value = initial[i];
+                        while (value >= limits[limb]) value = reference.get<u64>();
+                        const auto index = (1u + destinations[row]) * words + i;
+                        LOGVOLE_REQUIRE_EQ(sampled[index], value % ringModulusValue(context, limb));
+                    }
+                }
+            }
+        }
+        LOGVOLE_REQUIRE_TRUE(drain.sync());
+    }
     {
         ScopedEnvironmentValue uniform("LV_GPU_SETUP_UNIFORM_DEVICE", "1");
         ScopedEnvironmentValue decline("LV_GPU_SETUP_UNIFORM_FORCE_DECLINE", "0");

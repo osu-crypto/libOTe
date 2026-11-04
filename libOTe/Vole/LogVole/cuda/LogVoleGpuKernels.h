@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVolePrng.h"
 
 // Host-visible declarations for the LogVole CUDA kernels. This header is
 // deliberately free of both CUDA and SEAL types so that it can be included
@@ -993,6 +994,20 @@ namespace osuCrypto::LogVole::gpu
     // zero. The seed is two device u64 words; odd scalar counts are supported.
     bool launchAesCtrScalars(
         const u64* seed, u64* out, u64 count, u64 modulus, void* stream);
+    // cryptoTools AES stream keyed by RO_128(kAesPrngSeedDomain || seed[8]).
+    // Caller-provided key schedules require 176 bytes per stream, aligned to
+    // 16 bytes. No allocation.
+    bool launchAesPrngStream(
+        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount,
+        unsigned char* roundKeys, std::size_t roundKeyCapacityBytes, void* stream);
+    // Full-RNS uniform sampling, with initial candidates in limb-major order
+    // and unbounded ordered replacement draws after rho*N initial words.
+    // Key schedules and per-polynomial rejection epochs belong to the caller.
+    bool launchSampleUniformPolyAes(
+        const RingConstView& rc, const u64* seeds, const u64* maxMultiple,
+        u64* out, const u32* outIdx, u32 count,
+        unsigned char* roundKeys, std::size_t roundKeyCapacityBytes,
+        u32* rejectEpochs, u32 rejectEpoch, void* stream);
     constexpr std::size_t blake2xbRootScratchWords(u32 wordsPerStream, u32 streamCount)
     {
         return static_cast<std::size_t>(streamCount) *
