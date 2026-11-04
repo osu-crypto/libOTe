@@ -7,6 +7,7 @@
 #include "libOTe/Vole/LogVole/LogVoleCpuZkArith.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuZk.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -204,15 +205,59 @@ namespace osuCrypto::LogVole
         return true;
     }
 
+    struct ZkMulCpuWorkspace::Impl
+    {
+        u64 mWidth, mDepth;
+        std::size_t mProverChunks, mVerifierChunks;
+        std::vector<u64> mPartial;
+        detail::CpuExecutor mExecutor;
+
+        Impl(const ZkMulCircuit& circuit, u32 threads, CpuBenchmarkContext* benchmark)
+            : mWidth(circuit.mWidth), mDepth(circuit.mDepth),
+              mProverChunks(static_cast<std::size_t>(std::min<u64>(mWidth, std::max<u32>(1, threads)))),
+              mVerifierChunks(chunkCount(mWidth, threads)),
+              mPartial(std::max(2 * mProverChunks, mVerifierChunks * static_cast<std::size_t>(mDepth))),
+              mExecutor(std::min<u64>(std::max<u32>(1, threads), circuit.gateCount()), benchmark)
+        {}
+
+        bool matches(const ZkMulCircuit& circuit) const noexcept
+        {
+            return mWidth == circuit.mWidth && mDepth == circuit.mDepth;
+        }
+    };
+
+    ZkMulCpuWorkspace::ZkMulCpuWorkspace() noexcept = default;
+
+    ZkMulCpuWorkspace::ZkMulCpuWorkspace(
+        const ZkMulCircuit& circuit, u32 threads, CpuBenchmarkContext* benchmark)
+    {
+        // Match the circuit's existing u32 wire-index contract, and validate
+        // before multiplying sizes or constructing any pool/buffer.
+        const u64 maxWires = std::numeric_limits<u32>::max();
+        if (circuit.mWidth == 0 || circuit.mDepth == 0 ||
+            circuit.mWidth > maxWires || circuit.mDepth > maxWires / circuit.mWidth - 1)
+            throw std::invalid_argument("LogVole CPU proof workspace has invalid circuit geometry");
+        if (circuit.gateCount() > std::numeric_limits<std::size_t>::max() /
+                sizeof(std::array<u64, 2>))
+            throw std::invalid_argument("LogVole CPU proof workspace is too large");
+        mImpl = std::make_unique<Impl>(circuit, threads, benchmark);
+    }
+
+    ZkMulCpuWorkspace::~ZkMulCpuWorkspace() = default;
+    ZkMulCpuWorkspace::ZkMulCpuWorkspace(ZkMulCpuWorkspace&&) noexcept = default;
+    ZkMulCpuWorkspace& ZkMulCpuWorkspace::operator=(ZkMulCpuWorkspace&&) noexcept = default;
+
     bool zkMulProverResponse(
         const ZkMulCircuit& circuit,
         std::span<const u64> wires,
         std::span<const u64> macs,
         u64 chi,
         u64 modulus,
-        u32 threads,
+        ZkMulCpuWorkspace& workspace,
         ZkProof& out)
     {
+        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
+        auto& work = *workspace.mImpl;
         const u64 gates = circuit.gateCount();
         if (gates == 0 || modulus < 2) return false;
         if (wires.size() < circuit.voleCount() || macs.size() < circuit.voleCount()) return false;
@@ -226,14 +271,13 @@ namespace osuCrypto::LogVole
         // shared-cache reuse of random label/witness reads. There is no layer
         // barrier. Fixed ranges previously outperformed finer dynamic blocks
         // across the two settings.
-        const std::size_t chunks = static_cast<std::size_t>(
-            std::min<u64>(circuit.mWidth, std::max<u64>(1, threads)));
+        const std::size_t chunks = work.mProverChunks;
         seal::util::MultiplyUIntModOperand chiOperand;
         chiOperand.set(chi % modulus, mod);
-        std::vector<std::array<u64, 2>> partial(chunks, { 0, 0 });
+        auto partial = std::span(work.mPartial).first(2 * chunks);
 
         detail::withCpuZkArithmetic(mod, [&](const auto& arithmetic) {
-            detail::runParallelTasks(chunks, threads, [&](std::size_t c) {
+            work.mExecutor.run(chunks, [&](std::size_t, std::size_t c) {
                 u64 u = 0;
                 u64 v = 0;
                 for (u64 layer = 0; layer < circuit.mDepth; ++layer)
@@ -267,17 +311,18 @@ namespace osuCrypto::LogVole
                         pw = seal::util::multiply_uint_mod(pw, chiOperand, mod);
                     }
                 }
-                partial[c] = { u, v };
+                partial[2 * c] = u;
+                partial[2 * c + 1] = v;
                 return true;
             });
         });
 
         u64 u = 0;
         u64 v = 0;
-        for (const auto& p : partial)
+        for (std::size_t c = 0; c < chunks; ++c)
         {
-            u = addMod(u, p[0], mod);
-            v = addMod(v, p[1], mod);
+            u = addMod(u, partial[2 * c], mod);
+            v = addMod(v, partial[2 * c + 1], mod);
         }
 
         const auto mask = static_cast<std::size_t>(circuit.maskIndex());
@@ -292,9 +337,11 @@ namespace osuCrypto::LogVole
         u64 chi,
         u64 delta,
         u64 modulus,
-        u32 threads,
+        ZkMulCpuWorkspace& workspace,
         u64& out)
     {
+        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
+        auto& work = *workspace.mImpl;
         const u64 gates = circuit.gateCount();
         if (gates == 0 || modulus < 2) return false;
         if (keys.size() < circuit.voleCount()) return false;
@@ -304,14 +351,14 @@ namespace osuCrypto::LogVole
         const u64 firstOut = circuit.mWidth;
         const u32* ops = circuit.mOperands.data();
 
-        const std::size_t chunks = chunkCount(circuit.mWidth, threads);
+        const std::size_t chunks = work.mVerifierChunks;
         const std::size_t tasks = chunks * circuit.mDepth;
         seal::util::MultiplyUIntModOperand chiOperand;
         chiOperand.set(chi % modulus, mod);
-        std::vector<u64> partial(tasks, 0);
+        auto partial = std::span(work.mPartial).first(tasks);
 
         detail::withCpuZkArithmetic(mod, [&](const auto& arithmetic) {
-            detail::runParallelTasks(tasks, threads, [&](std::size_t task) {
+            work.mExecutor.run(tasks, [&](std::size_t, std::size_t task) {
                 u64 acc = 0;
                 const u64 layer = task / chunks, c = task % chunks;
                 {
@@ -1469,7 +1516,7 @@ namespace osuCrypto
 
     void ZkMulProver::configure(
         LogVole::ZkMulCircuit circuit, u32 plaintextModulusBits, u32 numThreads,
-        LogVole::CivoleSetting setting, u64 voleRequest)
+        LogVole::CivoleSetting setting, u64 voleRequest, LogVole::CpuBenchmarkContext* benchmark)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>();
@@ -1478,6 +1525,7 @@ namespace osuCrypto
         mCircuit = std::move(circuit);
         mVoleRequest = std::max(voleRequest, mCircuit.voleCount());
         mVole.configure(mVoleRequest, plaintextModulusBits, numThreads, setting);
+        mCpuWorkspace = ZkMulCpuWorkspace(mCircuit, numThreads, benchmark);
         mMacs.resize(0);
         mDeviceState.reset();
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1589,7 +1637,7 @@ namespace osuCrypto
 #endif
             ok = zkMulProverResponse(
                 mCircuit, wires, std::span<const u64>(mMacs.data(), mMacs.size()), mLastChallenge,
-                mVole.modulus(), mVole.mNumThreads, mLastProof);
+                mVole.modulus(), mCpuWorkspace, mLastProof);
         }
         if (!ok) throw std::runtime_error("LogVole ZK prover could not build its response");
         mCheckMs = msSinceCheck(tCheck);
@@ -1603,7 +1651,7 @@ namespace osuCrypto
 
     void ZkMulVerifier::configure(
         LogVole::ZkMulCircuit circuit, u32 plaintextModulusBits, u32 numThreads,
-        LogVole::CivoleSetting setting, u64 voleRequest)
+        LogVole::CivoleSetting setting, u64 voleRequest, LogVole::CpuBenchmarkContext* benchmark)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>();
@@ -1636,6 +1684,7 @@ namespace osuCrypto
         mCircuit = std::move(circuit);
         mVoleRequest = std::max(voleRequest, mCircuit.voleCount());
         mVole.configure(mVoleRequest, plaintextModulusBits, numThreads, setting);
+        mCpuWorkspace = ZkMulCpuWorkspace(mCircuit, numThreads, benchmark);
         mKeys.resize(0);
         mDeviceState.reset();
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1728,7 +1777,7 @@ namespace osuCrypto
 #endif
             ok = zkMulVerifierValue(
                 mCircuit, std::span<const u64>(mKeys.data(), mKeys.size()), mLastChallenge,
-                mVole.mDelta, mVole.modulus(), mVole.mNumThreads, value);
+                mVole.mDelta, mVole.modulus(), mCpuWorkspace, value);
         }
         if (!ok) throw std::runtime_error("LogVole ZK verifier could not evaluate the check");
         mCheckMs = msSinceCheck(tCheck);

@@ -77,6 +77,7 @@
 
 namespace osuCrypto::LogVole
 {
+    struct CpuBenchmarkContext;
     // The prover's response, and the only thing that travels per proof.
     struct ZkProof
     {
@@ -124,6 +125,31 @@ namespace osuCrypto::LogVole
     // Wiring is public, so it is drawn from a seed both parties can hold. Each
     // gate picks two uniform wires from the layer below.
     bool makeZkMulCircuit(u64 gateCount, u64 depth, block seed, ZkMulCircuit& out);
+
+    // Prepared CPU check storage and an exclusive, reusable worker pool.
+    // Construct before the first proof. A workspace is bound to width/depth;
+    // fresh witness, labels and challenges reuse the same numerical storage.
+    // Calls are synchronous and join every child before returning or throwing.
+    // Calls/moves/destruction require exclusive use. Optional benchmark storage
+    // is borrowed explicitly and must outlive the workspace.
+    class ZkMulCpuWorkspace
+    {
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+        friend bool zkMulProverResponse(const ZkMulCircuit&, std::span<const u64>,
+            std::span<const u64>, u64, u64, ZkMulCpuWorkspace&, ZkProof&);
+        friend bool zkMulVerifierValue(const ZkMulCircuit&, std::span<const u64>,
+            u64, u64, u64, ZkMulCpuWorkspace&, u64&);
+    public:
+        ZkMulCpuWorkspace() noexcept;
+        ZkMulCpuWorkspace(const ZkMulCircuit& circuit, u32 threads,
+            CpuBenchmarkContext* benchmark = nullptr);
+        ~ZkMulCpuWorkspace();
+        ZkMulCpuWorkspace(const ZkMulCpuWorkspace&) = delete;
+        ZkMulCpuWorkspace& operator=(const ZkMulCpuWorkspace&) = delete;
+        ZkMulCpuWorkspace(ZkMulCpuWorkspace&&) noexcept;
+        ZkMulCpuWorkspace& operator=(ZkMulCpuWorkspace&&) noexcept;
+    };
 
     // The CI-VOLE request size to ask for when `voleCount` values need
     // committing.
@@ -175,7 +201,7 @@ namespace osuCrypto::LogVole
         std::span<const u64> macs,
         u64 chi,
         u64 modulus,
-        u32 threads,
+        ZkMulCpuWorkspace& workspace,
         ZkProof& out);
 
     // B = sum_g chi^(g+1) * (K[x_g]*K[y_g] + K[z_g]*Delta) + K[r]
@@ -185,7 +211,7 @@ namespace osuCrypto::LogVole
         u64 chi,
         u64 delta,
         u64 modulus,
-        u32 threads,
+        ZkMulCpuWorkspace& workspace,
         u64& out);
 
     // ---- matrix multiplication ------------------------------------------
@@ -388,6 +414,7 @@ namespace osuCrypto
         // Join active proofs before reconfiguration/destruction. The execution
         // owner precedes device state so its streams and scratch drain last.
         std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
+        LogVole::ZkMulCpuWorkspace mCpuWorkspace;
     public:
         LogVole::ZkMulCircuit mCircuit;
         LogVoleReceiver mVole;
@@ -449,7 +476,8 @@ namespace osuCrypto
             u32 plaintextModulusBits = 55,
             u32 numThreads = 1,
             LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            u64 voleRequest = 0);
+            u64 voleRequest = 0,
+            LogVole::CpuBenchmarkContext* benchmark = nullptr);
 
         u64 modulus() const { return mVole.modulus(); }
         u64 voleRequest() const { return mVoleRequest; }
@@ -469,6 +497,7 @@ namespace osuCrypto
         // Join active proofs before reconfiguration/destruction. The execution
         // owner precedes device state so its streams and scratch drain last.
         std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
+        LogVole::ZkMulCpuWorkspace mCpuWorkspace;
     public:
         LogVole::ZkMulCircuit mCircuit;
         LogVoleSender mVole;
@@ -498,7 +527,8 @@ namespace osuCrypto
             u32 plaintextModulusBits = 55,
             u32 numThreads = 1,
             LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            u64 voleRequest = 0);
+            u64 voleRequest = 0,
+            LogVole::CpuBenchmarkContext* benchmark = nullptr);
 
         u64 modulus() const { return mVole.modulus(); }
         u64 voleRequest() const { return mVoleRequest; }

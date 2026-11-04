@@ -285,9 +285,10 @@ namespace
             }
             if constexpr (multiplication)
             {
+                ZkMulCpuWorkspace workspace(statement, 1);
                 ZkProof expectedProof;
                 LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(statement, actual, macs,
-                    prover.mLastChallenge, p, 1, expectedProof));
+                    prover.mLastChallenge, p, workspace, expectedProof));
                 LOGVOLE_REQUIRE_EQ(prover.mLastProof.mU, expectedProof.mU);
                 LOGVOLE_REQUIRE_EQ(prover.mLastProof.mV, expectedProof.mV);
             }

@@ -27,6 +27,7 @@ def main():
         "Cpu_NttMatchesReference", "Cpu_CrtMixedWidthsMatchSeal",
         "Cpu_DyadicMatchesReference", "Cpu_SamplerMatchesSeal", "Cpu_ErrorSamplingMatchesSeal",
         "Cpu_ResamplingOverwritesPreviousQuery", "Cpu_ParallelFailureJoinsChildren",
+        "Cpu_PreparedExecutionLifetime",
         "Cpu_ZkArithmeticMatchesReference",
         "Cpu_GpuZkMatMulSeededInputsMatchReference",
         "Cpu_GpuZkBufferOwnership", "Core_LeafGoldenSeedGpuParity",

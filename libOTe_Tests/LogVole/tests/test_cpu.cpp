@@ -6,6 +6,7 @@
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleZk.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
@@ -84,6 +85,116 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(propagated);
         LOGVOLE_REQUIRE_TRUE(joinedBeforeThrow);
     }
+}
+
+void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
+{
+    struct Failure {};
+    LogVole::detail::CpuExecutor executor(2);
+    std::array<std::thread::id, 2> threads;
+    std::array<std::size_t, 2> counts{};
+    for (unsigned phase = 0; phase < 3; ++phase)
+    {
+        LOGVOLE_REQUIRE_TRUE(executor.run(2, [&](std::size_t worker, std::size_t task) {
+            LOGVOLE_REQUIRE_EQ(worker, task);
+            if (phase == 0) threads[worker] = std::this_thread::get_id();
+            else LOGVOLE_REQUIRE_TRUE(threads[worker] == std::this_thread::get_id());
+            ++counts[worker];
+            return true;
+        }));
+    }
+    LOGVOLE_REQUIRE_TRUE(threads[0] != threads[1]);
+    LOGVOLE_REQUIRE_EQ(counts[0], 3u);
+    LOGVOLE_REQUIRE_EQ(counts[1], 3u);
+    for (bool dynamic : {false, true})
+    {
+        std::array<unsigned, 19> visits{};
+        LOGVOLE_REQUIRE_TRUE(executor.run(visits.size(), [&](std::size_t worker, std::size_t task) {
+            LOGVOLE_REQUIRE_TRUE(worker < counts.size());
+            ++counts[worker];
+            ++visits[task];
+            return true;
+        }, dynamic));
+        for (auto visitsToTask : visits) LOGVOLE_REQUIRE_EQ(visitsToTask, 1u);
+    }
+    for (unsigned failure : {0u, 1u, 2u}) // caller throw, child throw, caller false
+    {
+        std::atomic<bool> childStarted{false}, childFinished{false};
+        bool propagated = false, completed = true;
+        try
+        {
+            completed = executor.run(2, [&](std::size_t worker, std::size_t) -> bool {
+                if (worker == 1)
+                {
+                    childStarted.store(true, std::memory_order_release);
+                    childStarted.notify_all();
+                    if (failure != 1) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                    childFinished.store(true, std::memory_order_release);
+                    if (failure == 1) throw Failure{};
+                    return true;
+                }
+                childStarted.wait(false, std::memory_order_acquire);
+                if (failure == 0) throw Failure{};
+                return failure != 2;
+            });
+        }
+        catch (const Failure&) { propagated = true; }
+        LOGVOLE_REQUIRE_TRUE(childFinished.load(std::memory_order_acquire));
+        LOGVOLE_REQUIRE_EQ(propagated, failure != 2);
+        if (failure == 2) LOGVOLE_REQUIRE_FALSE(completed);
+        LOGVOLE_REQUIRE_TRUE(executor.run(2, [](std::size_t, std::size_t) { return true; }));
+    }
+    bool nestedRejected = false;
+    LOGVOLE_REQUIRE_TRUE(executor.run(1, [&](std::size_t, std::size_t) {
+        try { executor.run(1, [](std::size_t, std::size_t) { return true; }); }
+        catch (const std::logic_error&) { nestedRejected = true; }
+        return true;
+    }));
+    LOGVOLE_REQUIRE_TRUE(nestedRejected);
+    LOGVOLE_REQUIRE_TRUE(executor.run(0, [](std::size_t, std::size_t) { return false; }));
+
+    ZkMulCircuit circuit;
+    LOGVOLE_REQUIRE_TRUE(makeZkMulCircuit(51, 3, toBlock(0x50524550, 1), circuit));
+    ZkMulCpuWorkspace serial(circuit, 1), parallel(circuit, 3);
+    PRNG random(toBlock(0x50524550, 2));
+    constexpr u64 q = 65537, delta = 19;
+    const seal::Modulus mod(q);
+    AlignedUnVec<u64> wires;
+    std::vector<u64> macs(circuit.voleCount()), keys(circuit.voleCount());
+    for (unsigned query = 0; query < 4; ++query)
+    {
+        LOGVOLE_REQUIRE_TRUE(zkMulWitness(circuit, q, random, wires));
+        for (std::size_t i = 0; i < macs.size(); ++i)
+        {
+            macs[i] = random.get<u64>() % q;
+            keys[i] = (macs[i] + q - mulMod(wires[i], delta, mod)) % q;
+        }
+        const u64 chi = query == 0 ? 0 : random.get<u64>();
+        ZkProof expected, actual;
+        u64 expectedValue = 0, actualValue = 0;
+        LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, serial, expected));
+        LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, serial, expectedValue));
+        LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, parallel, actual));
+        LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, parallel, actualValue));
+        LOGVOLE_REQUIRE_EQ(actual.mU, expected.mU);
+        LOGVOLE_REQUIRE_EQ(actual.mV, expected.mV);
+        LOGVOLE_REQUIRE_EQ(actualValue, expectedValue);
+        LOGVOLE_REQUIRE_TRUE(zkAccept(actual, actualValue, delta, q));
+    }
+    // Move only while quiescent: the stable heap owner retains pool and scratch.
+    ZkMulCpuWorkspace moved(std::move(parallel));
+    ZkProof untouched{123, 456};
+    LOGVOLE_REQUIRE_FALSE(zkMulProverResponse(circuit, wires, macs, 1, q, parallel, untouched));
+    ZkMulCircuit wrongGeometry = circuit;
+    ++wrongGeometry.mDepth;
+    LOGVOLE_REQUIRE_FALSE(zkMulProverResponse(wrongGeometry, wires, macs, 1, q, moved, untouched));
+    LOGVOLE_REQUIRE_EQ(untouched.mU, 123u);
+    LOGVOLE_REQUIRE_EQ(untouched.mV, 456u);
+    LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, 1, q, moved, untouched));
+    bool invalidRejected = false;
+    try { ZkMulCpuWorkspace invalid(ZkMulCircuit{}, 2); }
+    catch (const std::invalid_argument&) { invalidRejected = true; }
+    LOGVOLE_REQUIRE_TRUE(invalidRejected);
 }
 
 void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
@@ -1050,14 +1161,15 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                         fallbackVerifier.mCircuit.mOperands.data());
                     LOGVOLE_REQUIRE_TRUE(copied.mOperands.empty());
                     LOGVOLE_REQUIRE_TRUE(fallbackOwner != copied.mOperandsDevice);
+                    ZkMulCpuWorkspace hostWorkspace(reference, 1);
                     ZkProof hostProof;
                     LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, witness, fallbackProver.mMacs,
-                        fallbackProver.mLastChallenge, fallbackProver.modulus(), 1, hostProof));
+                        fallbackProver.mLastChallenge, fallbackProver.modulus(), hostWorkspace, hostProof));
                     LOGVOLE_REQUIRE_EQ(fallbackProver.mLastProof.mU, hostProof.mU);
                     LOGVOLE_REQUIRE_EQ(fallbackProver.mLastProof.mV, hostProof.mV);
                     u64 hostValue = 0;
                     LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(reference, fallbackVerifier.mKeys,
-                        fallbackVerifier.mLastChallenge, 19, fallbackVerifier.modulus(), 1, hostValue));
+                        fallbackVerifier.mLastChallenge, 19, fallbackVerifier.modulus(), hostWorkspace, hostValue));
                     LOGVOLE_REQUIRE_EQ(fallbackVerifier.mLastValue, hostValue);
                 }
 
@@ -1151,9 +1263,10 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                             const seal::Modulus modulus(gpuProver.modulus());
                             for (std::size_t i = 0; i < budget; ++i)
                                 LOGVOLE_REQUIRE_EQ(macs[i], mulAddMod(witness[i], 19u, keys[i], modulus));
+                            ZkMulCpuWorkspace hostWorkspace(reference, 1);
                             ZkProof hostProof;
                             LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, witness, macs,
-                                gpuProver.mLastChallenge, gpuProver.modulus(), 1, hostProof));
+                                gpuProver.mLastChallenge, gpuProver.modulus(), hostWorkspace, hostProof));
                             LOGVOLE_REQUIRE_EQ(gpuProver.mLastProof.mU, hostProof.mU);
                             LOGVOLE_REQUIRE_EQ(gpuProver.mLastProof.mV, hostProof.mV);
                         }
@@ -1200,12 +1313,13 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 macs[i] = labelPrng.get<u64>() % modulus;
                 keys[i] = (macs[i] + modulus - mulMod(expected[i], 19, mod)) % modulus;
             }
+            ZkMulCpuWorkspace referenceWorkspace(reference, 1), actualWorkspace(actual, 4);
             ZkProof referenceProof, actualProof;
             u64 referenceValue = 0, actualValue = 0;
-            LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, expected, macs, 73, modulus, 1, referenceProof));
-            LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(actual, fetched, macs, 73, modulus, 4, actualProof));
-            LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(reference, keys, 73, 19, modulus, 1, referenceValue));
-            LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(actual, keys, 73, 19, modulus, 4, actualValue));
+            LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, expected, macs, 73, modulus, referenceWorkspace, referenceProof));
+            LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(actual, fetched, macs, 73, modulus, actualWorkspace, actualProof));
+            LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(reference, keys, 73, 19, modulus, referenceWorkspace, referenceValue));
+            LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(actual, keys, 73, 19, modulus, actualWorkspace, actualValue));
             LOGVOLE_REQUIRE_EQ(referenceProof.mU, actualProof.mU);
             LOGVOLE_REQUIRE_EQ(referenceProof.mV, actualProof.mV);
             LOGVOLE_REQUIRE_EQ(referenceValue, actualValue);
@@ -1300,10 +1414,11 @@ void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
         macs[i] = random.get<u64>() % modulus;
         keys[i] = (macs[i] + modulus - mulMod(witness[i], delta, mod)) % modulus;
     }
+    ZkMulCpuWorkspace expectedWorkspace(reference, 1);
     ZkProof expectedProof;
     u64 expectedValue = 0;
-    LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, witness, macs, chi, modulus, 1, expectedProof));
-    LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(reference, keys, chi, delta, modulus, 1, expectedValue));
+    LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, witness, macs, chi, modulus, expectedWorkspace, expectedProof));
+    LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(reference, keys, chi, delta, modulus, expectedWorkspace, expectedValue));
 
     using Packet = std::tuple<ZkMulCircuit, std::shared_ptr<gpu::ZkMulDeviceState>,
         std::shared_ptr<gpu::ZkMulDeviceState>, gpu::DeviceScalarsPtr,
@@ -2077,10 +2192,11 @@ void LogVole_Cpu_ZkProofMatchesReference(const oc::CLP&)
             bReference = addMod(bReference, keys[circuit.maskIndex()], mod);
             for (u32 threads : {1, 2, 3, 4, 8, 12, 16})
             {
+                ZkMulCpuWorkspace workspace(circuit, threads);
                 ZkProof proof;
                 u64 b = 0;
-                LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, threads, proof));
-                LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, threads, b));
+                LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, workspace, proof));
+                LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, workspace, b));
                 LOGVOLE_REQUIRE_EQ(proof.mU, reference.mU);
                 LOGVOLE_REQUIRE_EQ(proof.mV, reference.mV);
                 LOGVOLE_REQUIRE_EQ(b, bReference);
