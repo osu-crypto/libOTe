@@ -1,4 +1,9 @@
 #pragma once
+
+#include "libOTe/config.h"
+// Part of the RevCuckoo/Waterfall DMPF, which builds on DpfMult and the
+// sparse DPF (ENABLE_RINGLPN turns ENABLE_SPARSE_DPF on in CMake).
+#if defined(ENABLE_SPARSE_DPF)
 #include "libOTe/Tools/Coproto.h"
 #include "cryptoTools/Common/Matrix.h"
 #include "cryptoTools/Common/BitVector.h"
@@ -394,3 +399,5 @@ namespace osuCrypto
 	};
 
 }
+
+#endif // ENABLE_SPARSE_DPF

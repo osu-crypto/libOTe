@@ -1,5 +1,8 @@
 #pragma once
 
+#include "libOTe/config.h"
+#if defined(ENABLE_REGULAR_DPF)
+
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/Timer.h"
 #include "RegularDpf.h"
@@ -160,3 +163,5 @@ namespace osuCrypto
 
 
 }
+
+#endif // ENABLE_REGULAR_DPF

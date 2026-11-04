@@ -1242,6 +1242,7 @@ namespace osuCrypto
 	}
 
 
+#if defined(ENABLE_SPARSE_DPF)
 	template<typename F, typename CoeffCtx>
 	void RevCuckoo_bench_impl(const oc::CLP& cmd)
 	{
@@ -1570,11 +1571,18 @@ namespace osuCrypto
 		else
 			RevCuckoo_bench_impl<u64, CoeffCtxInteger>(cmd);
 	}
+#else
+	void RevCuckooBench(const oc::CLP& cmd)
+	{
+		std::cout << "RevCuckooBench requires ENABLE_SPARSE_DPF." << std::endl;
+	}
+#endif
 
 
 
 
 
+#if defined(ENABLE_REGULAR_DPF)
 	template<typename F, typename CoeffCtx>
 	void SumDmpf_bench_impl(const oc::CLP& cmd)
 	{
@@ -1708,6 +1716,12 @@ namespace osuCrypto
 		else
 			SumDmpf_bench_impl<u64, CoeffCtxInteger>(cmd);
 	}
+#else
+	void SumDmpfBench(const oc::CLP& cmd)
+	{
+		std::cout << "SumDmpfBench requires ENABLE_REGULAR_DPF." << std::endl;
+	}
+#endif
 
 
 	void NttBench(const oc::CLP& cmd)
@@ -2031,6 +2045,7 @@ namespace osuCrypto
 	}
 
 
+#if defined(ENABLE_SPARSE_DPF)
 	inline void WaterfallScatterPermuteBenchImpl(const CLP& cmd, const char* name)
 	{
 		using coproto::LocalAsyncSocket;
@@ -2193,7 +2208,14 @@ namespace osuCrypto
 	{
 		WaterfallScatterPermuteBenchImpl(cmd, "serial private-control");
 	}
+#else
+	inline void WaterfallScatterPermuteBench(const CLP& cmd)
+	{
+		std::cout << "WaterfallScatterPermuteBench requires ENABLE_SPARSE_DPF." << std::endl;
+	}
+#endif
 
+#if defined(ENABLE_SPARSE_DPF)
 	template<typename F, typename Context, u64 ValueBatch = 1>
 	void WaterfallDmpfBenchImpl(const CLP& cmd)
 	{
@@ -2372,6 +2394,12 @@ namespace osuCrypto
 			}
 		}
 	}
+#else
+	inline void WaterfallDmpfBench(const CLP& cmd)
+	{
+		std::cout << "WaterfallDmpfBench requires ENABLE_SPARSE_DPF." << std::endl;
+	}
+#endif
 
 	inline void WaksmanPermuteBench(const CLP& cmd)
 	{
@@ -2546,6 +2574,7 @@ namespace osuCrypto
 		}
 	}
 
+#if defined(ENABLE_SPARSE_DPF)
 	inline void BinarySolverBench(const CLP& cmd)
 	{
 		using coproto::LocalAsyncSocket;
@@ -2677,6 +2706,12 @@ namespace osuCrypto
 			std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per trial" << std::endl;
 		}
 	}
+#else
+	inline void BinarySolverBench(const CLP& cmd)
+	{
+		std::cout << "BinarySolverBench requires ENABLE_SPARSE_DPF." << std::endl;
+	}
+#endif
 
 	void Goldilocks_Mul_Bench(const CLP& cmd)
 	{

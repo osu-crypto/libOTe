@@ -1,4 +1,8 @@
 #include "Waterfall_Tests.h"
+#include "libOTe/config.h"
+#include "cryptoTools/Common/TestCollection.h"
+
+#if defined(ENABLE_SPARSE_DPF)
 
 #include "libOTe/Dpf/WaterfallDmpf.h"
 #include "libOTe/Dpf/Waterfall/WaterfallBasic.h"
@@ -1242,3 +1246,60 @@ namespace osuCrypto
 		Waterfall_dmpfNormalProfile_Impl(prng, WaterfallConfig::compact3N());
 	}
 }
+
+#else
+
+namespace osuCrypto
+{
+	void Waterfall_config_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Waterfall_validation_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Waterfall_emptySparseColumn_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Waterfall_placement_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Waterfall_hash_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Waterfall_candidates_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Waterfall_basicMpc_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Waterfall_reachabilityMpc_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Waterfall_scatterMpc_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Waterfall_dmpfEndToEnd_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+}
+
+#endif

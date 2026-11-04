@@ -9,6 +9,7 @@
 #include "libOTe/Tools/Popf/FeistelRistPopf.h"
 #include "libOTe/Tools/Popf/FeistelMulRistPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
+#include "libOTe/Base/BadMasMuk.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
 
 #include "cryptoTools/Common/BitVector.h"
@@ -145,6 +146,10 @@ namespace osuCrypto
 
 #ifdef ENABLE_MR
         flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);
+#endif
+
+#ifdef ENABLE_BMM
+        flagSet |= runIf(baseOT_example<BadMasMuk>, cmd, bmm);
 #endif
 
         return flagSet;

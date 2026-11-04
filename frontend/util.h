@@ -31,6 +31,7 @@ namespace osuCrypto
         moellerpopf{ "p", "moellerpopf" },
         ristrettopopf{ "r", "ristrettopopf" },
         mr{ "mr" },
+        bmm{ "bmm" },
         mrb{ "mrb" },
         Silent{ "s", "Silent" },
         vole{ "vole" },
@@ -126,6 +127,11 @@ namespace osuCrypto
     const bool mrEnabled = true;
 #else
     const bool mrEnabled = false;
+#endif
+#ifdef ENABLE_BMM
+    const bool bmmEnabled = true;
+#else
+    const bool bmmEnabled = false;
 #endif
 #ifdef ENABLE_IKNP
     const bool iknpEnabled = true;

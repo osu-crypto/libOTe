@@ -1,4 +1,8 @@
 #include "RevCuckoo_Tests.h"
+#include "libOTe/config.h"
+#include "cryptoTools/Common/TestCollection.h"
+
+#if defined(ENABLE_SPARSE_DPF)
 #include "libOTe/Dpf/RevCuckooDmpf.h"
 
 namespace osuCrypto
@@ -836,3 +840,50 @@ namespace osuCrypto
 
 	}
 }
+
+#else
+
+namespace osuCrypto
+{
+	void Goldreich_Proto_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Goldreich_stat_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void RevCuckoo_baseOtSlicing_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void RevCuckoo_seededSparseSets_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void RevCuckoo_iterative_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void RevCuckoo_singlePoint_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void RevCuckoo_robustness_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void RevCuckoo_failurePropagation_Test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+}
+
+#endif

@@ -78,7 +78,7 @@ endif()
 #############################################
 #    Build cryptoTools (common utilities)   #
 #############################################
-if((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_MRR OR
+if((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_BMM OR ENABLE_MRR OR
     (DEFINED ENABLE_ALL_OT AND ENABLE_ALL_OT)) AND
        NOT DEFINED ENABLE_EDWARDS25519_ASM)
     # These protocols use the batched Curve25519 backends. Prefer assembly

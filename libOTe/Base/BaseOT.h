@@ -9,6 +9,7 @@
 
 #include "SimplestOT.h"
 #include "MasnyRindal.h"
+#include "BadMasMuk.h"
 #include "McRosRoyTwist.h"
 #include "MasnyRindalKyber.h"
 #include "McRosRoy.h"
@@ -25,6 +26,8 @@ namespace osuCrypto
     using DefaultBaseOT = McRosRoyTwist;
 #elif defined ENABLE_MR
     using DefaultBaseOT = MasnyRindal;
+#elif defined ENABLE_BMM
+    using DefaultBaseOT = BadMasMuk;
 #elif defined ENABLE_MRR
     using DefaultBaseOT = McRosRoy;
 #elif defined ENABLE_MR_KYBER

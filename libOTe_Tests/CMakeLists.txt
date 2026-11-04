@@ -12,7 +12,6 @@ set(SRCS
     RevCuckoo_Tests.cpp
     Waterfall_Tests.cpp
     SilentOT_Tests.cpp
-    SpinIntegration.cpp
     SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp
     UnitTests.cpp
@@ -36,24 +35,6 @@ set(SRCS
 )
 
 add_library(libOTe_Tests STATIC ${SRCS})
-
-if(ENABLE_SIMPLESTOT AND ENABLE_MR AND ENABLE_MRR AND ENABLE_MRR_TWIST)
-    add_executable(curve25519_ot_tests EXCLUDE_FROM_ALL
-        Curve25519OT_Tests.cpp
-        BaseOT_Tests.cpp)
-    target_link_libraries(curve25519_ot_tests PRIVATE libOTe)
-    target_compile_definitions(curve25519_ot_tests PRIVATE
-        $<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:NDEBUG>)
-
-    if(MSVC)
-        target_compile_options(curve25519_ot_tests PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER} /bigobj>)
-    else()
-        target_compile_options(curve25519_ot_tests PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
-    endif()
-endif()
-
 
 target_compile_definitions(libOTe_Tests PRIVATE
     $<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:NDEBUG>

@@ -11,4 +11,5 @@ namespace tests_libOTe
 {
 	void TungstenCode_encode_test(const oc::CLP& cmd);
 	void TungstenCode_weight_test(const oc::CLP& cmd);
+	void TungstenCode_Audit_Test(const oc::CLP& cmd);
 }

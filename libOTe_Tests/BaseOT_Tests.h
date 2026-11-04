@@ -12,6 +12,7 @@ namespace tests_libOTe
 {
     void Bot_Simplest_Test();
     void Bot_MasnyRindal_Test();
+    void Bot_BadMasMuk_Test();
     void Bot_MasnyRindal_Kyber_Test();
     void Bot_Mock_Test();
 

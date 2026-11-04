@@ -19,6 +19,9 @@
 // build the library with Masney Rindal Base OT enabled
 #cmakedefine ENABLE_MR @ENABLE_MR@
 
+// build the library with Badrinarayanan Masny Mukherjee Base OT enabled
+#cmakedefine ENABLE_BMM @ENABLE_BMM@
+
 // build the library with Masney Rindal Kyber Base OT enabled
 #cmakedefine ENABLE_MR_KYBER @ENABLE_MR_KYBER@
 
@@ -77,6 +80,11 @@
 #cmakedefine ENABLE_INSECURE_SILVER @ENABLE_INSECURE_SILVER@
 
 #cmakedefine ENABLE_LDPC @ENABLE_LDPC@
+
+// AnyField OLE is built from the regular DPF, GMW circuits and noisy VOLE.
+#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS) && (defined(ENABLE_SILENT_VOLE) || defined(ENABLE_SILENTOT))
+#define LIBOTE_HAS_ANYFIELD_OLE
+#endif
 
 #if defined(ENABLE_MR_KYBER) && defined(_MSC_VER)
     #undef ENABLE_MR_KYBER

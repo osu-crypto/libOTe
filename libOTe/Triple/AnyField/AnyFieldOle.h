@@ -1,7 +1,7 @@
 #pragma once
 
 #include "libOTe/config.h"
-#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+#if defined(LIBOTE_HAS_ANYFIELD_OLE)
 
 #include "libOTe/Triple/AnyField/AnyFieldCtx.h"
 #include "libOTe/Dpf/SumDmpf.h"

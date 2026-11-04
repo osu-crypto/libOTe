@@ -1034,5 +1034,6 @@ void RegularPprf_ByTreeIndex_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_callback_test(const oc::CLP& cmd) { throwDisabled(); }
 void Pprf_Audit_Test(const oc::CLP& cmd) { throwDisabled(); }
 void StationaryPprf_inter_test(const oc::CLP& cmd) { throwDisabled(); }
+void HalfTreePprf_test(const oc::CLP& cmd) { throwDisabled(); }
 
 #endif

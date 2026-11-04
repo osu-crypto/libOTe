@@ -195,7 +195,7 @@ namespace osuCrypto
 
 	void AnyField_PositionCircuit_Test(const CLP&)
 	{
-#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+#if defined(LIBOTE_HAS_ANYFIELD_OLE)
 		auto runCase = [](u64 modulus, u64 coordinateBits, u64 dimensions) {
 			u64 domain = 1;
 			for (u64 i = 0; i < dimensions; ++i)
@@ -250,11 +250,11 @@ namespace osuCrypto
 		runCase(5, 3, 2);
 		runCase(8, 3, 2);
 #else
-		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
+		throw UnitTestSkipped("AnyField OLE requires ENABLE_REGULAR_DPF, ENABLE_CIRCUITS and ENABLE_SILENT_VOLE or ENABLE_SILENTOT.");
 #endif
 	}
 
-#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+#if defined(LIBOTE_HAS_ANYFIELD_OLE)
 	static_assert(sizeof(AnyFieldF2Ole::PackedPublic) == sizeof(u16));
 	static_assert(sizeof(AnyFieldF3Ole::PackedPublic) == sizeof(u32));
 	static_assert(sizeof(AnyFieldGoldilocksOle::PackedPublic) == sizeof(Goldilocks));
@@ -515,7 +515,7 @@ namespace osuCrypto
 
 	void AnyField_F3Ole_Test(const CLP& cmd)
 	{
-#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+#if defined(LIBOTE_HAS_ANYFIELD_OLE)
 		using TestOle = AnyFieldOle<AnyFieldF9Ctx, AnyFieldOleTestParams>;
 		runAnyFieldOleCase<TestOle>(1, false, "F3");
 		runAnyFieldOleCase<TestOle>(128, false, "F3");
@@ -532,13 +532,13 @@ namespace osuCrypto
 			runAnyFieldOleCase<BenchmarkOle>(cmd.getOr("n", 128ull), true, "F3");
 		}
 #else
-		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
+		throw UnitTestSkipped("AnyField OLE requires ENABLE_REGULAR_DPF, ENABLE_CIRCUITS and ENABLE_SILENT_VOLE or ENABLE_SILENTOT.");
 #endif
 	}
 
 	void AnyField_F2Ole_Test(const CLP& cmd)
 	{
-#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+#if defined(LIBOTE_HAS_ANYFIELD_OLE)
 		using TestOle = AnyFieldOle<AnyFieldF4Ctx, AnyFieldOleTestParams>;
 		if (cmd.isSet("channelBench"))
 		{
@@ -611,13 +611,13 @@ namespace osuCrypto
 			}
 		}
 #else
-		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
+		throw UnitTestSkipped("AnyField OLE requires ENABLE_REGULAR_DPF, ENABLE_CIRCUITS and ENABLE_SILENT_VOLE or ENABLE_SILENTOT.");
 #endif
 	}
 
 	void AnyField_GoldilocksOle_Test(const CLP& cmd)
 	{
-#if defined(ENABLE_REGULAR_DPF) && defined(ENABLE_CIRCUITS)
+#if defined(LIBOTE_HAS_ANYFIELD_OLE)
 #ifdef ENABLE_SPARSE_DPF
 		if (cmd.isSet("safeRevBench"))
 		{
@@ -655,7 +655,7 @@ namespace osuCrypto
 			runAnyFieldOleCase<AnyFieldGoldilocksOle>(
 				cmd.getOr("n", 1ull << 20), true, "Goldilocks");
 #else
-		throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_CIRCUITS are required.");
+		throw UnitTestSkipped("AnyField OLE requires ENABLE_REGULAR_DPF, ENABLE_CIRCUITS and ENABLE_SILENT_VOLE or ENABLE_SILENTOT.");
 #endif
 	}
 }
