@@ -1,7 +1,7 @@
 """Check CUDA ownership and process teardown with Compute Sanitizer.
 
-Run serially on a GPU-equipped Windows or Linux host. The three protocol modes
-use 8193 outputs and three queries each; this is a leak regression, not a load
+Run serially on a GPU-equipped Windows or Linux host. Each protocol mode
+runs in a separate process with 8193 outputs and three queries; this is a leak regression, not a load
 or performance test. Nonzero sanitizer results, skips, and timeouts fail the run.
 """
 import argparse
@@ -9,8 +9,9 @@ import json
 import os
 import pathlib
 import shutil
-import subprocess
 import time
+
+from cuda_test_process import run_bounded
 
 
 def main():
@@ -49,7 +50,9 @@ def main():
                              "LogVole_RingOps_PartyCachesDoNotAlias"]),
         ("zk-scalar-use", ["LogVole_Zk_FreshMaskGpu"]),
         ("retention-cold", ["LogVole_RingOps_PublicUniformRetentionParity"]),
-        ("protocol-modes", ["LogVole_Modes_"]),
+        ("mode-golden", ["LogVole_Modes_InteractiveGolden"]),
+        ("mode-no-golden", ["LogVole_Modes_InteractiveNoGolden"]),
+        ("mode-noninteractive", ["LogVole_Modes_NonInteractive"]),
         ("root-prefetch", ["LogVole_Core_RootFinalizePrefetchExactAndCleanup",
                            "LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact"]),
     ]
@@ -76,12 +79,8 @@ def main():
         with log_path.open("w") as log:
             log.write(repr(command) + "\n")
             log.flush()
-            try:
-                result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
-                                        timeout=min(40, remaining), env=environment)
-                code = result.returncode
-            except subprocess.TimeoutExpired:
-                code = 124
+            code = run_bounded(command, stdout=log,
+                               timeout=min(40, remaining), env=environment)
         output = log_path.read_text(errors="replace")
         clean = ("LEAK SUMMARY: 0 bytes leaked in 0 allocations" in output
                  and "ERROR SUMMARY: 0 errors" in output

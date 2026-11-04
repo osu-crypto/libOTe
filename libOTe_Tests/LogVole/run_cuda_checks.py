@@ -9,8 +9,9 @@ Large allocation tests are intentionally not selected.
 import argparse
 import json
 import pathlib
-import subprocess
 import time
+
+from cuda_test_process import run_bounded
 
 
 def main():
@@ -25,7 +26,8 @@ def main():
         "Cpu_ReduceMatchesReference", "Cpu_ScaleAndRoundMatchesReference",
         "Cpu_NttMatchesReference", "Cpu_CrtMixedWidthsMatchSeal",
         "Cpu_DyadicMatchesReference", "Cpu_SamplerMatchesSeal", "Cpu_ErrorSamplingMatchesSeal",
-        "Cpu_ResamplingOverwritesPreviousQuery", "Cpu_ZkArithmeticMatchesReference",
+        "Cpu_ResamplingOverwritesPreviousQuery", "Cpu_ParallelFailureJoinsChildren",
+        "Cpu_ZkArithmeticMatchesReference",
         "Cpu_GpuZkMatMulSeededInputsMatchReference",
         "Cpu_GpuZkBufferOwnership", "Core_LeafGoldenSeedGpuParity",
         "RingOps_PartyCachesDoNotAlias", "RingOps_ScalarUploadLifetimeAndRoleSwitch",
@@ -75,13 +77,9 @@ def main():
         with (args.log_dir / (name + ".log")).open("w") as log:
             log.write(repr(command) + "\n")
             log.flush()
-            try:
-                result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
-                                        timeout=min(40 if name.startswith("cpu-control-") else 20,
-                                                    remaining))
-                code = result.returncode
-            except subprocess.TimeoutExpired:
-                code = 124
+            code = run_bounded(command, stdout=log,
+                               timeout=min(40 if name.startswith("cpu-control-") else 20,
+                                           remaining))
         entry = dict(name=name, exit_code=code, seconds=round(time.monotonic() - tick, 2))
         results.append(entry)
         print(json.dumps(entry), flush=True)
