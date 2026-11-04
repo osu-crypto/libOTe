@@ -53,11 +53,16 @@ namespace osuCrypto::LogVole
         bool mExpandModChain = false;
         std::once_flag mOnce;
         std::shared_ptr<seal::SEALContext> mContext;
+        std::once_flag mSamplingOnce;
+        std::shared_ptr<const seal::EncryptionParameters> mSamplingParameters;
+        std::once_flag mRnsOnce;
+        std::unique_ptr<seal::util::RNSBase> mBaseQ;
     };
 
     namespace
     {
         bool validateLightweightRingContext(const RingNttContext& ctx);
+        const seal::util::RNSBase* getRingRnsBase(const RingNttContext& ctx);
         // Exact 64-bit reduction, equal to `value % modulus.value()` for every
         // 64-bit value, but multiply based rather than divide based.
         inline u64 reduceU64(u64 value, const seal::Modulus& modulus)
@@ -346,30 +351,29 @@ namespace osuCrypto::LogVole
             // reducing the known-zero high words of the full CRT integer.
             const std::size_t digitWords = std::min<std::size_t>(
                 coeffModCount, (static_cast<u64>(digitBits) + 63) / 64);
-            const auto hostContext = getRingHostContext(ctx);
-            auto contextData = hostContext ? hostContext->key_context_data() : nullptr;
-            if (!contextData)
+            const auto* rnsBase = getRingRnsBase(ctx);
+            if (!rnsBase)
             {
                 return false;
             }
 
             if (startLevel == 1 && levels == 1 && detail::cpuCenteredHighDigit(
                 canonical.mCoeffs.data(), out[0].mCoeffs.data(), n, digitBits,
-                *contextData->rns_tool()->base_q())) return true;
+                *rnsBase)) return true;
 
             // All scratch dies on this thread before return. A private SEAL
             // pool avoids contention between independent shrink chunks.
             auto pool = seal::MemoryPoolHandle::ThreadLocal();
             seal::util::Pointer<u64> composedPoly =
                 seal::util::allocate_poly(n, coeffModCount, pool);
-            const auto& baseQ = *contextData->rns_tool()->base_q();
+            const auto& baseQ = *rnsBase;
             if (!detail::cpuComposeRns(canonical.mCoeffs.data(), composedPoly.get(), n, baseQ))
             {
                 std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedPoly.get());
                 baseQ.compose_array(composedPoly.get(), n, pool);
             }
 
-            const u64* q = contextData->rns_tool()->base_q()->base_prod();
+            const u64* q = baseQ.base_prod();
             auto qHalf = seal::util::allocate_uint(coeffModCount, pool);
             seal::util::right_shift_uint(q, 1, coeffModCount, qHalf.get());
             auto value = seal::util::allocate_uint(coeffModCount, pool);
@@ -1017,11 +1021,63 @@ namespace osuCrypto::LogVole
         return cache.mContext;
     }
 
+    namespace
+    {
+        std::shared_ptr<const seal::EncryptionParameters> getRingSamplingParameters(const RingNttContext& ctx)
+        {
+            if (!ctx.mGpuLightweight)
+            {
+                auto data = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
+                return data ? std::shared_ptr<const seal::EncryptionParameters>(ctx.mContext, &data->parms()) : nullptr;
+            }
+            if (!validateLightweightRingContext(ctx)) return nullptr;
+            auto& cache = *ctx.mHostContextCache;
+            try
+            {
+                std::call_once(cache.mSamplingOnce, [&] {
+                    // Sampling and coefficient reduction consume only these
+                    // exact parameters. NTT/RNS tables remain lazy until an
+                    // operation actually needs the full host context.
+                    std::vector<seal::Modulus> moduli;
+                    moduli.reserve(cache.mRawModuli->mValues.size());
+                    for (u64 prime : cache.mRawModuli->mValues) moduli.emplace_back(prime);
+                    auto parms = std::make_shared<seal::EncryptionParameters>(seal::scheme_type::ckks);
+                    parms->set_poly_modulus_degree(cache.mParams.mPolyModulusDegree);
+                    parms->set_coeff_modulus(moduli);
+                    cache.mSamplingParameters = std::move(parms);
+                });
+            }
+            catch (const std::exception&) { return nullptr; }
+            return cache.mSamplingParameters;
+        }
+
+        const seal::util::RNSBase* getRingRnsBase(const RingNttContext& ctx)
+        {
+            if (!ctx.mGpuLightweight)
+            {
+                const auto data = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
+                return data ? data->rns_tool()->base_q() : nullptr;
+            }
+            const auto parms = getRingSamplingParameters(ctx);
+            if (!parms) return nullptr;
+            auto& cache = *ctx.mHostContextCache;
+            try
+            {
+                std::call_once(cache.mRnsOnce, [&] {
+                    cache.mBaseQ = std::make_unique<seal::util::RNSBase>(
+                        parms->coeff_modulus(), seal::MemoryPoolHandle::New());
+                });
+            }
+            catch (const std::exception&) { return nullptr; }
+            return cache.mBaseQ.get();
+        }
+    }
+
     const std::vector<seal::Modulus>& getRingHostModuli(const RingNttContext& ctx)
     {
         if (!ctx.mGpuLightweight) return ctx.mModuli;
-        const auto host = getRingHostContext(ctx);
-        if (host && host->key_context_data()) return host->key_context_data()->parms().coeff_modulus();
+        const auto parms = getRingSamplingParameters(ctx);
+        if (parms) return parms->coeff_modulus();
         return ctx.mModuli;
     }
 
@@ -1577,9 +1633,8 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const auto hostContext = getRingHostContext(ctx);
-        auto contextData = hostContext ? hostContext->key_context_data() : nullptr;
-        if (!contextData)
+        const auto* rnsBase = getRingRnsBase(ctx);
+        if (!rnsBase)
         {
             return false;
         }
@@ -1601,7 +1656,7 @@ namespace osuCrypto::LogVole
         const std::size_t coeffModCount = moduli.size();
         const std::size_t digitWords = std::min<std::size_t>(
             coeffModCount, (static_cast<u64>(digitBits) + 63) / 64);
-        const auto& baseQ = *contextData->rns_tool()->base_q();
+        const auto& baseQ = *rnsBase;
         if (startLevel == 0 && levels == 1 && detail::cpuLowDigitRns(
             canonical.mCoeffs.data(), out[0].mCoeffs.data(), n, digitBits, baseQ))
         {
@@ -1882,12 +1937,11 @@ namespace osuCrypto::LogVole
         out.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
         const block polySeed = deriveUniformPolySeed(ctx, seed, domainTag, index);
 
-        const auto hostContext = getRingHostContext(ctx);
-        auto contextData = hostContext ? hostContext->key_context_data() : nullptr;
-        if (contextData)
+        const auto parameters = getRingSamplingParameters(ctx);
+        if (parameters)
         {
             auto prng = polySamplingPrngFactory()->create(sealSeedFromBlock(polySeed));
-            detail::cpuSamplePolyUniform(prng, contextData->parms(), out.mCoeffs.data());
+            detail::cpuSamplePolyUniform(prng, *parameters, out.mCoeffs.data());
             bumpRingStat(RingOp::PrngPoly, ctx);
             return;
         }
@@ -1928,14 +1982,13 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, const std::array<u64, 8>& seed)
     {
         RnsPoly out{};
-        const auto hostContext = getRingHostContext(ctx);
-        const auto data = hostContext ? hostContext->key_context_data() : nullptr;
-        if (!data && ctx.mGpuLightweight)
+        const auto parameters = getRingSamplingParameters(ctx);
+        if (!parameters && ctx.mGpuLightweight)
             throw std::runtime_error("lightweight ring uniform sampler could not materialize its exact host context");
-        if (!data) return out;
+        if (!parameters) return out;
         resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
         auto source = polySamplingPrngFactory()->create(seed);
-        detail::cpuSamplePolyUniform(source, data->parms(), out.mCoeffs.data());
+        detail::cpuSamplePolyUniform(source, *parameters, out.mCoeffs.data());
         bumpRingStat(RingOp::PrngPoly, ctx);
         return out;
     }
@@ -2019,9 +2072,8 @@ namespace osuCrypto::LogVole
 
     RnsPoly sampleUniformPoly(const RingNttContext& ctx, PRNG& prng)
     {
-        const auto hostContext = getRingHostContext(ctx);
-        auto contextData = hostContext ? hostContext->key_context_data() : nullptr;
-        if (contextData)
+        const auto parameters = getRingSamplingParameters(ctx);
+        if (parameters)
         {
             return sampleUniformPolyFromSeed(ctx, sealSeedFromPrng(prng));
         }
@@ -2410,10 +2462,10 @@ namespace osuCrypto::LogVole
     {
         if (!canSamplePolyErrorCompact(ctx, noiseStandardDeviation, noiseMaxDeviation) ||
             limb0.size() != ctx.mParams.mPolyModulusDegree) return false;
-        const auto hostContext = getRingHostContext(ctx);
-        if (!hostContext || !hostContext->key_context_data()) return false;
+        const auto parameters = getRingSamplingParameters(ctx);
+        if (!parameters) return false;
         auto sealPrng = errorSamplingPrngFactory()->create(seed);
-        samplePolyNormal(sealPrng, hostContext->key_context_data()->parms(),
+        samplePolyNormal(sealPrng, *parameters,
             limb0.data(), noiseStandardDeviation, noiseMaxDeviation, true);
         bumpRingStat(RingOp::ErrorAdd, ctx);
         return true;
@@ -2569,9 +2621,9 @@ namespace osuCrypto::LogVole
                     noiseMaxDeviation, seeds[row], ctx);
             auto source = std::make_shared<GaussianPrefixPrng>(seeds[row],
                 prefixes.subspan(task * wordsPerPrefix, wordsPerPrefix));
-            const auto hostContext = getRingHostContext(ctx);
-            if (!hostContext || !hostContext->key_context_data()) return false;
-            samplePolyNormal(source, hostContext->key_context_data()->parms(),
+            const auto parameters = getRingSamplingParameters(ctx);
+            if (!parameters) return false;
+            samplePolyNormal(source, *parameters,
                 destination.data(), noiseStandardDeviation, noiseMaxDeviation, true);
             bumpRingStat(RingOp::ErrorAdd, ctx);
             return true;
@@ -2767,12 +2819,11 @@ namespace osuCrypto::LogVole
         const seal::prng_seed_type& seed,
         const RingNttContext& ctx)
     {
-        const auto hostContext = getRingHostContext(ctx);
-        if (!hostContext || !hostContext->key_context_data()) return false;
+        const auto parameters = getRingSamplingParameters(ctx);
+        if (!parameters) return false;
         auto sealPrng = errorSamplingPrngFactory()->create(seed);
 
-        auto& contextData = *hostContext->key_context_data();
-        auto& parms = contextData.parms();
+        const auto& parms = *parameters;
         auto& coeffModulus = parms.coeff_modulus();
         const std::size_t coeffModulusSize = coeffModulus.size();
         const std::size_t coeffCount = parms.poly_modulus_degree();
@@ -2797,9 +2848,9 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         const RingNttContext& ctx)
     {
-        const auto hostContext = getRingHostContext(ctx);
+        const auto parameters = getRingSamplingParameters(ctx);
         if (noiseStandardDeviation < 0 || !canonicalizePoly(poly, ctx) ||
-            !hostContext || !hostContext->key_context_data())
+            !parameters)
         {
             return false;
         }
@@ -2814,9 +2865,9 @@ namespace osuCrypto::LogVole
         const seal::prng_seed_type& seed,
         const RingNttContext& ctx)
     {
-        const auto hostContext = getRingHostContext(ctx);
+        const auto parameters = getRingSamplingParameters(ctx);
         if (noiseStandardDeviation < 0 || !canonicalizePoly(poly, ctx) ||
-            !hostContext || !hostContext->key_context_data())
+            !parameters)
         {
             return false;
         }

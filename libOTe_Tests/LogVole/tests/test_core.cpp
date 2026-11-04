@@ -658,6 +658,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         CivoleParams civole{};
         ::tests_libOTe::logvole_test::bindExecution(civole, testExecution);
         LOGVOLE_REQUIRE_TRUE(makeCivoleParams(setting, civole, 2u));
+        ::tests_libOTe::logvole_test::bindExecution(civole, testExecution);
         auto params = civole.mLogVole;
         LOGVOLE_REQUIRE_TRUE(params.mShrinkExpand.mTau >= 2u);
         const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
@@ -785,8 +786,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             LogVoleRingSender sender;
             Snapshot out;
             macoro::sync_wait(sender.offline(in, out.mState, prng, socket));
-            out.mRootWirePin = rootWirePinOverlapEvidenceSnapshot(*testExecution);
-            out.mRootCudaWire = rootWireCudaAllocEvidenceSnapshot(*testExecution);
+            out.mRootWirePin = rootWirePinOverlapEvidenceSnapshot(executionContext(out.mState));
+            out.mRootCudaWire = rootWireCudaAllocEvidenceSnapshot(executionContext(out.mState));
             macoro::sync_wait(socket.flush());
             auto bytes = socket.getOutbound();
             LOGVOLE_REQUIRE_TRUE(bytes && !bytes->empty());
@@ -1205,6 +1206,10 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_EQ(levels, 3u);
         // A copied public sender input cannot turn a receiver or another
         // offline run into the owner of this private, fixed child key.
+        ::tests_libOTe::logvole_test::ScopedProtocolCacheScope privateKeyOwner(
+            executionContext(recursiveActual.mState).shared_from_this(),
+            ProtocolCacheRole::Sender,
+            recursiveActual.mState.mShrinkExpandState.mTopSk1OwnerRunId);
         ShrinkExpandSenderOfflineInput fixedKeyInput{};
         ::tests_libOTe::logvole_test::bindExecution(fixedKeyInput, testExecution);
         fixedKeyInput.mParams =
@@ -1220,7 +1225,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         fixedKeyInput.mDeferTopSk1Host = true;
         fixedKeyInput.mDeferHostCiphertexts = true;
         {
-            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope receiverImpostor(testExecution,
+            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope receiverImpostor(executionContext(fixedKeyInput.mParams).shared_from_this(),
                 ProtocolCacheRole::Receiver,
                 fixedKeyInput.mFixedSk1OwnerRunId);
             oc::PRNG impostorPrng(seed, 3);
@@ -1229,7 +1234,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                 fixedKeyInput, impostorPrng, rejected));
         }
         {
-            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope wrongOfflineRun(testExecution,
+            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope wrongOfflineRun(executionContext(fixedKeyInput.mParams).shared_from_this(),
                 ProtocolCacheRole::Sender,
                 fixedKeyInput.mFixedSk1OwnerRunId + 1u);
             oc::PRNG impostorPrng(seed, 3);
@@ -1238,7 +1243,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                 fixedKeyInput, impostorPrng, rejected));
         }
         {
-            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope wrongRole(testExecution,
+            ::tests_libOTe::logvole_test::ScopedProtocolCacheScope wrongRole(executionContext(recursiveActual.mState).shared_from_this(),
                 ProtocolCacheRole::Receiver,
                 recursiveActual.mState.mShrinkExpandState.mTopSk1OwnerRunId);
             LOGVOLE_REQUIRE_FALSE(materializeSenderTopSk1HostViews(
@@ -4977,9 +4982,12 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
         std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits));
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    // Setup parity above exercises the GPU. Retain this test's original online
-    // backend: forcing GPU on the serial baseline also fails its local flow.
-    testExecution->mUseGpu = (gpuWasEnabled);
+    // This online fixture checks the materialized host output API.
+    testExecution->mUseGpu = false;
+    for (auto* level = &senderOffline.mState; level; level = level->mNextLevelState.get())
+        executionContext(*level).mUseGpu = false;
+    for (auto* level = &receiverOffline.mState; level; level = level->mNextLevelState.get())
+        executionContext(*level).mUseGpu = false;
 #endif
     SenderOnlineOutput senderOnline{};
     ReceiverOnlineOutput receiverOnline{};

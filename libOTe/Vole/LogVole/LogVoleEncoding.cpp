@@ -442,7 +442,10 @@ namespace osuCrypto::LogVole
         const char* flag = std::getenv("LV_GPU_SETUP_WIRE_HUGE_PAGES");
         if ((flag && flag[0] == '0') || !gpu::enabled(execution) || buffer.size() < (std::size_t{8} << 20))
             return;
-        if (gpu::gpuIsSetupWireHostRange((executionContext(buffer)).wireResources<gpu::SetupWireMemory>(), buffer.data(), buffer.size()) ||
+        // Fresh execution-owned receive buffers cannot borrow another
+        // session's already faulted pages. Give their first large socket copy
+        // the same huge-page hint as ordinary storage, before registration.
+        if (gpu::gpuIsSetupWirePinnedHostRange(execution.wireResources<gpu::SetupWireMemory>(), buffer.data(), buffer.size()) ||
             isRootCudaWireHostRange(execution, buffer.data(), buffer.size())) return;
         constexpr std::uintptr_t alignment = std::uintptr_t{2} << 20;
         const auto first = reinterpret_cast<std::uintptr_t>(buffer.data());
@@ -620,6 +623,13 @@ namespace osuCrypto::LogVole
                    sizeof(i64);
         }
 
+        ExecutionContextPtr wireExecutionOwner(ExecutionContext* execution)
+        {
+            if (!execution) return {};
+            auto owner = execution->weak_from_this().lock();
+            return owner ? std::move(owner) : execution->resourceOwner();
+        }
+
         struct BufferWriter
         {
             Buffer mBuffer;
@@ -627,8 +637,8 @@ namespace osuCrypto::LogVole
             u32 mWorkers = 1;
 
             explicit BufferWriter(std::size_t size, u32 workers = 1,
-                ExecutionContextPtr execution = std::make_shared<ExecutionContext>())
-                : mBuffer(size, std::move(execution)),
+                ExecutionContextPtr execution = {})
+                : mBuffer(size, execution ? std::move(execution) : std::make_shared<ExecutionContext>()),
                   mWorkers(setupCodecWorkers(workers, &executionContext(mBuffer)))
             {
                 adviseGpuSetupWireBuffer(mBuffer);
@@ -716,7 +726,8 @@ namespace osuCrypto::LogVole
                         const auto bytes = offsets[i + 1] - offsets[i];
                         if (bytes) std::memcpy(mBuffer.data() + offsets[i], polys[i].mCoeffs.data(), bytes);
                         return true;
-                    })) throw std::runtime_error("parallel offline encoding failed");
+                    }, false, &executionContext(mBuffer)))
+                        throw std::runtime_error("parallel offline encoding failed");
                     mOffset = offsets.back();
                     return;
                 }
@@ -979,9 +990,9 @@ namespace osuCrypto::LogVole
             u32 polyModulusDegree,
             u32 coeffModulusCount,
             u32 tau,
-            const Vec& coeffs)
+            const Vec& coeffs, ExecutionContext* execution = nullptr)
         {
-            BufferWriter writer(3u * sizeof(u32) + u64VectorByteSize(coeffs));
+            BufferWriter writer(3u * sizeof(u32) + u64VectorByteSize(coeffs), 1, wireExecutionOwner(execution));
             writer.writeU32(polyModulusDegree);
             writer.writeU32(coeffModulusCount);
             writer.writeU32(tau);
@@ -1207,20 +1218,30 @@ namespace osuCrypto::LogVole
 
     Buffer encode(const KeyDeriveRequest& message)
     {
-        return encodeKeyDerive(
-            message.mPolyModulusDegree,
-            message.mCoeffModulusCount,
-            message.mTau,
-            message.mDCoeffs);
+        return encode(message, nullptr);
     }
 
-    Buffer encode(const KeyDeriveResponse& message)
+    Buffer encode(const KeyDeriveRequest& message, ExecutionContext* execution)
     {
         return encodeKeyDerive(
             message.mPolyModulusDegree,
             message.mCoeffModulusCount,
             message.mTau,
-            message.mMNttCoeffs);
+            message.mDCoeffs, execution);
+    }
+
+    Buffer encode(const KeyDeriveResponse& message)
+    {
+        return encode(message, nullptr);
+    }
+
+    Buffer encode(const KeyDeriveResponse& message, ExecutionContext* execution)
+    {
+        return encodeKeyDerive(
+            message.mPolyModulusDegree,
+            message.mCoeffModulusCount,
+            message.mTau,
+            message.mMNttCoeffs, execution);
     }
 
     Buffer encode(const ShrinkExpandOfflineMessage& message)
@@ -1232,7 +1253,7 @@ namespace osuCrypto::LogVole
         const ShrinkExpandParams& params,
         const RingTensor& ct1,
         const ShrinkExpandLacct& lacct,
-        u32 workers)
+        u32 workers, ExecutionContext* execution = nullptr)
     {
         HostStep phase(executionContext(params), "setup codec: encode shrink expand");
         BufferWriter writer(
@@ -1240,7 +1261,7 @@ namespace osuCrypto::LogVole
             2u * sizeof(u32) +
             ringBatchByteSize(ct1.mPolys) +
             4u * sizeof(u32) +
-            ringBatchByteSize(lacct.mCt.mPolys), workers, params.mRing.mExecutionContext);
+            ringBatchByteSize(lacct.mCt.mPolys), workers, execution ? wireExecutionOwner(execution) : params.mRing.mExecutionContext);
         writer.writeParams(params);
         writer.writeU32(ct1.mRows);
         writer.writeU32(ct1.mCols);
@@ -1255,18 +1276,28 @@ namespace osuCrypto::LogVole
 
     Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers)
     {
+        return encode(message, workers, nullptr);
+    }
+
+    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers, ExecutionContext* execution)
+    {
         return encodeShrinkExpandOfflineTensors(message.mParams,
             message.mLazyCt1 ? message.mLazyCt1->get() : message.mCt1,
-            message.mLazyLacct ? message.mLazyLacct->get() : message.mLacct, workers);
+            message.mLazyLacct ? message.mLazyLacct->get() : message.mLacct, workers, execution);
     }
 
     Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers)
     {
+        return encodeShrinkExpandOfflineState(state, workers, nullptr);
+    }
+
+    Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers, ExecutionContext* execution)
+    {
         if (state.mSharedHostState)
-            return encodeShrinkExpandOfflineState(*state.mSharedHostState, workers);
+            return encodeShrinkExpandOfflineState(*state.mSharedHostState, workers, execution);
         if ((!state.mLazyCt1 && !state.mLazyLacct) ||
             std::endian::native != std::endian::little)
-            return encodeShrinkExpandOfflineTensors(state.mParams, state.hostCt1(), state.hostLacct(), workers);
+            return encodeShrinkExpandOfflineTensors(state.mParams, state.hostCt1(), state.hostLacct(), workers, execution);
 
         HostStep phase(executionContext(state), "setup codec: encode resident shrink expand");
         const u64 wordsPerPoly = ringPolyCoeffCount(state.mParams.mRing);
@@ -1279,7 +1310,8 @@ namespace osuCrypto::LogVole
         const u32 ct1Words = tensorWords(state.mCt1);
         const u32 lacctWords = tensorWords(state.mLacct.mCt);
         BufferWriter writer(paramsByteSize(state.mParams) + 8u * sizeof(u32) +
-            (static_cast<std::size_t>(ct1Words) + lacctWords) * sizeof(u64), workers);
+            (static_cast<std::size_t>(ct1Words) + lacctWords) * sizeof(u64), workers,
+            execution ? wireExecutionOwner(execution) : state.mParams.mRing.mExecutionContext);
         const auto writeTensor = [&](const RingTensor& tensor, u32 words,
                                      const auto& lazy, const auto& host) {
             const auto writeHost = [&](const RingTensor& materialized) {
@@ -1322,7 +1354,12 @@ namespace osuCrypto::LogVole
 
     Buffer encode(const PolyMessage& message)
     {
-        BufferWriter writer(2u * sizeof(u32) + u64VectorByteSize(message.mCoeffs));
+        return encode(message, nullptr);
+    }
+
+    Buffer encode(const PolyMessage& message, ExecutionContext* execution)
+    {
+        BufferWriter writer(2u * sizeof(u32) + u64VectorByteSize(message.mCoeffs), 1, wireExecutionOwner(execution));
         writer.writeU32(message.mPolyModulusDegree);
         writer.writeU32(message.mCoeffModulusCount);
         writer.writeU64Vector(message.mCoeffs);
@@ -1331,7 +1368,12 @@ namespace osuCrypto::LogVole
 
     Buffer encode(const SeedMessage& message)
     {
-        BufferWriter writer(message.mSeed.size());
+        return encode(message, nullptr);
+    }
+
+    Buffer encode(const SeedMessage& message, ExecutionContext* execution)
+    {
+        BufferWriter writer(message.mSeed.size(), 1, wireExecutionOwner(execution));
         writer.writeBytes(std::span<const u8>(message.mSeed.data(), message.mSeed.size()));
         return writer.finish();
     }
@@ -1429,8 +1471,13 @@ namespace osuCrypto::LogVole
 
     Buffer encode(const RootOfflineMessage& message, u32 workers)
     {
+        return encode(message, workers, nullptr);
+    }
+
+    Buffer encode(const RootOfflineMessage& message, u32 workers, ExecutionContext* execution)
+    {
         return encodeRootOfflineIntoBuffer(message,
-            Buffer(rootOfflineWireSize(message), message.mRing.mExecutionContext), workers);
+            Buffer(rootOfflineWireSize(message), execution ? wireExecutionOwner(execution) : message.mRing.mExecutionContext), workers);
     }
 
     Buffer encodeRootOfflineIntoBuffer(const RootOfflineMessage& message,
@@ -1532,17 +1579,27 @@ namespace osuCrypto::LogVole
 
     Buffer encode(const RootDigestMessage& message)
     {
-        BufferWriter writer(u64VectorByteSize(message.mDPrimeCoeffs));
+        return encode(message, nullptr);
+    }
+
+    Buffer encode(const RootDigestMessage& message, ExecutionContext* execution)
+    {
+        BufferWriter writer(u64VectorByteSize(message.mDPrimeCoeffs), 1, wireExecutionOwner(execution));
         writeRootU64Vector(writer, message.mDPrimeCoeffs);
         return writer.finish();
     }
 
     Buffer encode(const RootResponseMessage& message)
     {
+        return encode(message, nullptr);
+    }
+
+    Buffer encode(const RootResponseMessage& message, ExecutionContext* execution)
+    {
         BufferWriter writer(
             sizeof(u32) +
             message.mSeed.size() +
-            u64VectorByteSize(message.mSkPrimeCoeffs));
+            u64VectorByteSize(message.mSkPrimeCoeffs), 1, wireExecutionOwner(execution));
         writer.writeU32(checkedVectorSize(message.mSeed));
         writer.writeBytes(std::span<const u8>(message.mSeed.data(), message.mSeed.size()));
         writeRootU64Vector(writer, message.mSkPrimeCoeffs);
@@ -1653,6 +1710,7 @@ namespace osuCrypto::LogVole
 
         HostStep phase(execution, "setup codec: retain encoded shrink expand");
         ShrinkExpandOfflineMessage next{};
+        next.mParams.mRing.mExecutionContext = payload.executionOwner();
         u64 offset = 0;
         if (!readParams(payload, offset, next.mParams) || !validateShrinkExpandParams(next.mParams))
             return false;

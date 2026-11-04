@@ -581,8 +581,11 @@ namespace osuCrypto
         }
         auto& execution = executionContext(params);
         execution.mUseGpu = mUseGpu;
+        execution.mCacheGpuOptions = executionContext(mParams).mCacheGpuOptions;
         execution.mCpuBenchmark = executionContext(mParams).mCpuBenchmark;
-        execution.mScope = {execution.ownerId(), ProtocolCacheRole::Sender};
+        const auto suppliedRun = executionContext(mParams).mScope.mRunId;
+        execution.mScope = {suppliedRun && suppliedRun != mConfigureCacheRunId
+            ? suppliedRun : execution.ownerId(), ProtocolCacheRole::Sender};
         const auto configureRun = execution.mScope.mRunId;
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;
@@ -751,8 +754,11 @@ namespace osuCrypto
         }
         auto& execution = executionContext(params);
         execution.mUseGpu = mUseGpu;
+        execution.mCacheGpuOptions = executionContext(mParams).mCacheGpuOptions;
         execution.mCpuBenchmark = executionContext(mParams).mCpuBenchmark;
-        execution.mScope = {execution.ownerId(), ProtocolCacheRole::Receiver};
+        const auto suppliedRun = executionContext(mParams).mScope.mRunId;
+        execution.mScope = {suppliedRun && suppliedRun != mConfigureCacheRunId
+            ? suppliedRun : execution.ownerId(), ProtocolCacheRole::Receiver};
         const auto configureRun = execution.mScope.mRunId;
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;

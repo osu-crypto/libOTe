@@ -57,6 +57,7 @@
     X(Core, LeafGoldenSeedChecksOutputRounding) \
     X(Core, LeafGoldenSeedMatchesDecoder) \
     X(Encoding, AllMessageRoundTrips) \
+    X(Encoding, ExecutionOwnedWireFrames) \
     X(Encoding, SingletonOfflinePayloadBound) \
     X(Encoding, PinnedWireBufferOwnership) \
     X(KeyDeriveCore, AlgebraicRelation) \
@@ -97,6 +98,9 @@
     X(Core, ModeSelection) \
     X(Core, IndependentExecutionContexts) \
     X(Core, SeededSessionIsolation) \
+    X(Core, GpuMemoryPoolIsolation) \
+    X(Core, GpuSeededSessionIsolation) \
+    X(Core, GpuOptionIsolation) \
     X(Core, RuntimeCacheScopePropagatesToParallelWorkers) \
     X(Core, SeedLabelAggSumsTauBlocks) \
     X(Core, GdecompHiUnbundleLiftsOneLimbPerOutput) \

@@ -80,13 +80,16 @@ namespace osuCrypto::LogVole
     {
         void configureGarbled(u64 count, u32 threads, CivoleSetting setting,
             CivoleParams& params, GarbledLabelLayout& layout, u64& modulus,
-            bool& nativeBundleCommitted, bool useGpu, ProtocolCacheRole role)
+            bool& nativeBundleCommitted, bool useGpu, ProtocolCacheRole role, u64 suppliedRun)
         {
             CivoleParams next;
             ZpCrtContext selected{};
             if (!makeCivoleParams(setting, next, std::max(threads, 1u)))
                 throw std::invalid_argument("garbled labels require supported parameters");
             executionContext(next).mUseGpu = useGpu;
+            executionContext(next).mCacheGpuOptions = executionContext(params).mCacheGpuOptions;
+            executionContext(next).mCpuBenchmark = executionContext(params).mCpuBenchmark;
+            executionContext(next).mScope = {suppliedRun, role};
             bindExecutionRole(next.mLogVole.mShrinkExpand.mRing, role);
             if (!makeZpCrtContext(next.mLogVole.mShrinkExpand.mRing,
                     next.mLogVole.mShrinkExpand.mPlaintextModulusBits, selected) ||
@@ -144,7 +147,9 @@ namespace osuCrypto
     {
         bool nativeBundleCommitted = false;
         configureGarbled(n, threads, setting, mParams, mLayout, mModulus,
-            nativeBundleCommitted, mUseGpu, ProtocolCacheRole::Sender);
+            nativeBundleCommitted, mUseGpu, ProtocolCacheRole::Sender,
+            executionContext(mParams).mScope.mRunId != mConfigureCacheRunId
+                ? executionContext(mParams).mScope.mRunId : 0);
         mConfigureCacheRunId = executionContext(mParams).mScope.mRunId;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
         mState = {};
@@ -220,7 +225,9 @@ namespace osuCrypto
     {
         bool nativeBundleCommitted = false;
         configureGarbled(n, threads, setting, mParams, mLayout, mModulus,
-            nativeBundleCommitted, mUseGpu, ProtocolCacheRole::Receiver);
+            nativeBundleCommitted, mUseGpu, ProtocolCacheRole::Receiver,
+            executionContext(mParams).mScope.mRunId != mConfigureCacheRunId
+                ? executionContext(mParams).mScope.mRunId : 0);
         mConfigureCacheRunId = executionContext(mParams).mScope.mRunId;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
         mState = {};

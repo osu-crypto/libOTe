@@ -11,6 +11,7 @@
 // unit tests in libOTe_Tests/LogVole/tests/test_gpu_ring.cpp check this by
 // exact comparison.
 
+#include <atomic>
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
@@ -28,6 +29,9 @@ namespace osuCrypto::LogVole::gpu
     std::string deviceDescription();
     // Returns -1 if the current CUDA device cannot be queried.
     int currentDeviceOrdinal();
+    std::shared_ptr<DeviceMemoryPool> deviceMemoryPool(ExecutionContext& execution);
+    std::shared_ptr<PinnedMemoryPool> pinnedMemoryPool(ExecutionContext& execution);
+    std::shared_ptr<KernelConfiguration> kernelConfiguration(ExecutionContext& execution);
 
     // Dynamic, SEAL-compatible setup for the raw backend's supported geometry.
     // The device performs prime search/primality and multiprecision lift
@@ -49,6 +53,12 @@ namespace osuCrypto::LogVole::gpu
     bool preparePlaintextLiftDevice(const GpuRing& ring, u64 plaintextPrime,
         AlignedUnVec<u64>& residues);
 
+    struct DeviceMemoryDeleter
+    {
+        std::shared_ptr<DeviceMemoryPool> mPool;
+        void operator()(void* pointer) const noexcept { if (pointer) mPool->release(pointer); }
+    };
+
     // A stream plus a small scratch allocator for index arrays.
     class GpuStream
     {
@@ -68,6 +78,11 @@ namespace osuCrypto::LogVole::gpu
 
         void* raw() const { return mStream; }
         bool sync() const;
+        const std::shared_ptr<void>& lease() const { return mStreamLease; }
+        const std::shared_ptr<DeviceMemoryPool>& memoryPool() const { return mMemoryPool; }
+        const std::shared_ptr<PinnedMemoryPool>& pinnedPool() const { return mPinnedPool; }
+        u64 memorySlot() const { return mMemorySlot; }
+        void* allocate(std::size_t bytes) const { return mMemoryPool->allocate(bytes, mStream, mStreamLease); }
 
         // Upload a small u32 index array and return a device pointer valid
         // until the next reset(). Uses a bump allocator on pinned + device
@@ -92,7 +107,12 @@ namespace osuCrypto::LogVole::gpu
         ExecutionContext* mExecution = nullptr;
 
         void* mStream = nullptr;
+        std::shared_ptr<void> mStreamLease;
+        std::shared_ptr<DeviceMemoryPool> mMemoryPool;
+        std::shared_ptr<PinnedMemoryPool> mPinnedPool;
+        u64 mMemorySlot = ~u64{0};
         bool mHighestPriority = false;
+        bool mLazyIndexScratch = false;
         u32* mDeviceScratch = nullptr;
         u32* mHostScratch = nullptr;
         std::size_t mScratchWords = 0;
@@ -182,7 +202,7 @@ namespace osuCrypto::LogVole::gpu
         u32 rho() const { return mView.mRho; }
         std::size_t polyWords() const { return static_cast<std::size_t>(mView.mN) * mView.mRho; }
         std::size_t polyBytes() const { return polyWords() * sizeof(u64); }
-        const RingConstView& view() const { return mView; }
+        const RingConstView& view() const;
         const DenoiseConstView& denoiseView() const { return mDenoise; }
         bool denoiseReady() const { return mDenoiseReady; }
 
@@ -214,11 +234,15 @@ namespace osuCrypto::LogVole::gpu
         bool initRaw(const RingParams& params, std::span<const u64> orderedPrimes);
         bool initDenoise(const RingNttContext& ctx);
 
+        mutable std::once_flag mKernelConfigurationOnce;
+        mutable std::shared_ptr<KernelConfiguration> mKernelConfiguration;
+        mutable std::shared_ptr<DeviceMemoryPool> mMemoryPool;
         RingConstView mView{};
         DenoiseConstView mDenoise{};
         bool mDenoiseReady = false;
 
         std::vector<void*> mOwned;
+        std::vector<void*> mPooledOwned;
         // A cold native bundle can own ring and plaintext tables as two
         // disjoint slices of one allocation. Each immutable owner retains it.
         std::shared_ptr<void> mNativeSealBundleStorage;
@@ -280,7 +304,7 @@ namespace osuCrypto::LogVole::gpu
         GpuPlainNtt(const GpuPlainNtt&) = delete;
         GpuPlainNtt& operator=(const GpuPlainNtt&) = delete;
 
-        const RingConstView& view() const { return mView; }
+        const RingConstView& view() const;
         u32 n() const { return mView.mN; }
         u32 slotCount() const { return mSlotCount; }
         ProtocolCacheRole nativeBundleOwnerRole() const
@@ -302,11 +326,15 @@ namespace osuCrypto::LogVole::gpu
         bool init(const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder, ExecutionContext& execution);
         bool initRaw(u32 degree, u64 plaintextPrime);
 
+        mutable std::once_flag mKernelConfigurationOnce;
+        mutable std::shared_ptr<KernelConfiguration> mKernelConfiguration;
+        mutable std::shared_ptr<DeviceMemoryPool> mMemoryPool;
         RingConstView mView{};
         const u32* mSlotMap = nullptr;
         const u32* mInverseSlotMap = nullptr;
         u32 mSlotCount = 0;
         std::vector<void*> mOwned;
+        std::vector<void*> mPooledOwned;
         std::shared_ptr<void> mNativeSealBundleStorage;
         ProtocolCacheRole mNativeBundleOwnerRole = ProtocolCacheRole::Unspecified;
     };
@@ -330,6 +358,7 @@ namespace osuCrypto::LogVole::gpu
     public:
         GpuPolyBuffer() = default;
         explicit GpuPolyBuffer(const GpuRing& ring, std::size_t count);
+        GpuPolyBuffer(const GpuRing& ring, std::size_t count, GpuStream& stream);
         ~GpuPolyBuffer();
         GpuPolyBuffer(GpuPolyBuffer&& other) noexcept;
         GpuPolyBuffer& operator=(GpuPolyBuffer&& other) noexcept;
@@ -337,13 +366,17 @@ namespace osuCrypto::LogVole::gpu
         GpuPolyBuffer& operator=(const GpuPolyBuffer&) = delete;
 
         bool resize(const GpuRing& ring, std::size_t count);
+        bool resize(const GpuRing& ring, std::size_t count, GpuStream& stream);
         // Layout-only operations do not need NTT/CRT tables. Validate the word
         // count and allocation size without bootstrapping a GpuRing.
         bool resizeWords(std::size_t polyWords, std::size_t count);
+        bool resizeWords(std::size_t polyWords, std::size_t count, GpuStream& stream);
         void release();
 
-        u64* data() const { return mData; }
-        u64* poly(std::size_t idx) const { return mData + idx * mPolyWords; }
+        u64* data() const;
+        u64* data(GpuStream& stream) const;
+        u64* poly(std::size_t idx) const { return data() + idx * mPolyWords; }
+        u64* poly(std::size_t idx, GpuStream& stream) const { return data(stream) + idx * mPolyWords; }
         std::size_t count() const { return mCount; }
         std::size_t polyWords() const { return mPolyWords; }
         std::size_t bytes() const { return mCount * mPolyWords * sizeof(u64); }
@@ -368,11 +401,39 @@ namespace osuCrypto::LogVole::gpu
         bool zero(GpuStream& stream);
 
     private:
+        std::shared_ptr<DeviceMemoryPool> mMemoryPool;
+        std::shared_ptr<void> mAllocationLease;
+        mutable std::atomic<u64> mRegisteredStreams{0};
         u64* mData = nullptr;
         std::size_t mCount = 0;
         std::size_t mPolyWords = 0;
         std::size_t mCapacity = 0;
     };
+
+    // The same transfer code accepts ordinary host containers and device
+    // buffers. Device access records the actual consumer stream.
+    template<class Buffer, class Stream>
+    decltype(auto) streamData(Buffer& buffer, Stream& stream)
+    {
+        if constexpr (requires { buffer.data(stream); }) return buffer.data(stream);
+        else return buffer.data();
+    }
+
+    template<class Buffer, class Stream, class... Args>
+    decltype(auto) streamResize(Buffer& buffer, Stream& stream, Args&&... args)
+    {
+        if constexpr (requires { buffer.resize(std::forward<Args>(args)..., stream); })
+            return buffer.resize(std::forward<Args>(args)..., stream);
+        else return buffer.resize(std::forward<Args>(args)...);
+    }
+
+    template<class Buffer, class Stream, class... Args>
+    decltype(auto) streamResizeWords(Buffer& buffer, Stream& stream, Args&&... args)
+    {
+        if constexpr (requires { buffer.resizeWords(std::forward<Args>(args)..., stream); })
+            return buffer.resizeWords(std::forward<Args>(args)..., stream);
+        else return buffer.resizeWords(std::forward<Args>(args)...);
+    }
 
     // ---- primitive wrappers ----------------------------------------------
     // Each of these mirrors the identically named CPU routine.

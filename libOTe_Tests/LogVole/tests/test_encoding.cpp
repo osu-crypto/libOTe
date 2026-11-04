@@ -292,8 +292,8 @@ namespace
     class TestRootDeviceTensor final : public LazyRingTensorHostState
     {
     public:
-        explicit TestRootDeviceTensor(RingTensor host, bool allowCopy = true)
-            : mHost(std::move(host)), mAllowCopy(allowCopy)
+        explicit TestRootDeviceTensor(RingTensor host, bool allowCopy, ExecutionContextPtr execution)
+            : mExecution(std::move(execution)), mHost(std::move(host)), mAllowCopy(allowCopy)
         {
             std::vector<std::uint64_t> coefficients;
             for (const auto& poly : mHost.mPolys)
@@ -302,7 +302,7 @@ namespace
             void* allocation = gpu::gpuMalloc(mBytes);
             if (!allocation) throw std::runtime_error("Root wire test device allocation failed");
             mDevice = std::shared_ptr<void>(allocation, [](void* p) { gpu::gpuFree(p); });
-            gpu::GpuStream stream;
+            gpu::GpuStream stream(*mExecution);
             if (!stream.raw() || !gpu::uploadSetupWire(
                     mDevice.get(), coefficients.data(), mBytes, stream) || !stream.sync())
                 throw std::runtime_error("Root wire test device upload failed");
@@ -318,7 +318,7 @@ namespace
         {
             ++mCopyRequests;
             if (!mAllowCopy || destination.size() != mBytes) return false;
-            gpu::GpuStream stream;
+            gpu::GpuStream stream(*mExecution);
             return stream.raw() && gpu::downloadSetupWire(
                 destination.data(), mDevice.get(), mBytes, stream) && stream.sync();
         }
@@ -327,6 +327,7 @@ namespace
         std::size_t copyRequests() const { return mCopyRequests; }
 
     private:
+        ExecutionContextPtr mExecution;
         RingTensor mHost;
         std::shared_ptr<void> mDevice;
         std::size_t mBytes = 0;
@@ -359,6 +360,10 @@ namespace
             std::copy(expected.begin(), expected.end(), unaligned.begin() + 1);
             telemetry.reset();
             Message decoded{};
+            if constexpr (requires { message.mParams.mRing; })
+                ::tests_libOTe::logvole_test::bindExecution(decoded, message.mParams.mRing.mExecutionContext);
+            else
+                ::tests_libOTe::logvole_test::bindExecution(decoded, message.mRing.mExecutionContext);
             LOGVOLE_REQUIRE_TRUE(decode(as_span(unaligned).subspan(1), decoded, workers));
 #if defined(__linux__)
             LOGVOLE_EXPECT_EQ(telemetry.mWorkersChecked.load() != 0, expectParallel && workers > 1);
@@ -691,9 +696,9 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
 
     RootOfflineMessage resident = eager;
     ::tests_libOTe::logvole_test::bindExecution(resident, testExecution);
-    auto ctR = std::make_shared<TestRootDeviceTensor>(resident.mCtR);
-    auto lacct = std::make_shared<TestRootDeviceTensor>(resident.mLacctLeft.mCt);
-    auto topCt = std::make_shared<TestRootDeviceTensor>(resident.mTopCt);
+    auto ctR = std::make_shared<TestRootDeviceTensor>(resident.mCtR, true, testExecution);
+    auto lacct = std::make_shared<TestRootDeviceTensor>(resident.mLacctLeft.mCt, true, testExecution);
+    auto topCt = std::make_shared<TestRootDeviceTensor>(resident.mTopCt, true, testExecution);
     resident.mLazyCtR = ctR;
     resident.mLazyLacctLeft = lacct;
     resident.mLazyTopCt = topCt;
@@ -949,7 +954,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
         expect_bytes_equal(encode(staged, 4), as_span(exact));
     }
 
-    auto declining = std::make_shared<TestRootDeviceTensor>(eager.mTopCt, false);
+    auto declining = std::make_shared<TestRootDeviceTensor>(eager.mTopCt, false, testExecution);
     resident.mLazyTopCt = declining;
     expect_bytes_equal(encode(resident, 1), as_span(exact));
     LOGVOLE_EXPECT_EQ(declining->copyRequests(), 1u);
@@ -1313,7 +1318,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
     ScopedEnvironmentValue directDownload("LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD", "1");
     void* firstAllocation = nullptr;
     {
-        Buffer buffer(bytes);
+        Buffer buffer(bytes, testExecution);
         firstAllocation = buffer.data();
         LOGVOLE_REQUIRE_TRUE(firstAllocation != nullptr);
         LOGVOLE_REQUIRE_EQ(reinterpret_cast<std::uintptr_t>(buffer.data()) % oc::gDefaultAlignment,
@@ -1323,7 +1328,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data() + buffer.size() - 1, 2));
         LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), buffer.data(), buffer.size()));
 
-        gpu::GpuStream transferStream;
+        gpu::GpuStream transferStream(*testExecution);
         LOGVOLE_REQUIRE_TRUE(transferStream.raw() != nullptr);
         struct DeviceAllocation
         {
@@ -1400,7 +1405,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), firstAllocation, bytes));
     }
 
-    Buffer reused(bytes);
+    Buffer reused(bytes, testExecution);
     LOGVOLE_REQUIRE_TRUE(reused.data() == firstAllocation);
     LOGVOLE_REQUIRE_TRUE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), reused.data(), reused.size()));
     // Registration belongs to the allocation and persists while it is free.
@@ -1421,7 +1426,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
     reused.clear();
     {
         ScopedEnvironmentValue disabled("LV_GPU_SETUP_PINNED_WIRE", "0");
-        Buffer ordinary(bytes);
+        Buffer ordinary(bytes, testExecution);
         LOGVOLE_REQUIRE_TRUE(ordinary.data() != nullptr);
         LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWireHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), ordinary.data(), ordinary.size()));
         LOGVOLE_EXPECT_FALSE(gpu::gpuIsSetupWirePinnedHostRange(testExecution->wireResources<osuCrypto::LogVole::gpu::SetupWireMemory>(), ordinary.data(), ordinary.size()));
@@ -1433,4 +1438,43 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
 #else
     (void)cmd;
 #endif
+}
+
+void LogVole_Encoding_ExecutionOwnedWireFrames(const oc::CLP& cmd)
+{
+    auto execution = std::make_shared<ExecutionContext>();
+#if defined(ENABLE_LOGVOLE_CUDA)
+    execution->mUseGpu = cmd.getOr("gpu", 0) != 0;
+#else
+    (void)cmd;
+#endif
+    const auto check = [&](const auto& message) {
+        auto ordinary = encode(message);
+        auto owned = encode(message, execution.get());
+        LOGVOLE_REQUIRE_TRUE(owned.executionOwner() == execution);
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(ordinary, owned));
+    };
+    check(make_keyderive_request());
+    KeyDeriveResponse response{};
+    response.mPolyModulusDegree = 4;
+    response.mCoeffModulusCount = 2;
+    response.mTau = 1;
+    response.mMNttCoeffs.resize(8);
+    check(response);
+    PolyMessage polynomial{};
+    polynomial.mPolyModulusDegree = 4;
+    polynomial.mCoeffModulusCount = 2;
+    polynomial.mCoeffs.resize(8);
+    check(polynomial);
+    SeedMessage seed{};
+    seed.mSeed.resize(16);
+    check(seed);
+    RootDigestMessage digest{};
+    digest.mDPrimeCoeffs.resize((1u << 20) / sizeof(oc::u64));
+    for (std::size_t i = 0; i < digest.mDPrimeCoeffs.size(); ++i) digest.mDPrimeCoeffs[i] = i;
+    check(digest);
+    RootResponseMessage rootResponse{};
+    rootResponse.mSeed.resize(16);
+    rootResponse.mSkPrimeCoeffs = digest.mDPrimeCoeffs;
+    check(rootResponse);
 }

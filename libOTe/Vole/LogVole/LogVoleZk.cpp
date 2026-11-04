@@ -784,7 +784,7 @@ namespace osuCrypto::LogVole::gpu
             HostModulus next;
             StreamDrain drain{stream};
             static_assert(sizeof(HostModulus) == 3 * sizeof(u64));
-            if (!storage.resize(3) ||
+            if (!streamResize(storage, stream, 3) ||
                 !launchZkPrepareModulus(modulus, reinterpret_cast<HostModulus*>(storage.mData), stream.raw()) ||
                 !gpuMemcpyD2H(&next, storage.mData, sizeof(next), stream.raw()) || !stream.sync()) return false;
             if (next.mValue != modulus) return false;
@@ -806,7 +806,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceWords storage;
         u64 result = 0;
         StreamDrain drain{stream};
-        if (!storage.resize(1) ||
+        if (!streamResize(storage, stream, 1) ||
             !launchZkAccept(proof.mU, proof.mV, verifierValue, delta, mod, storage.mData, stream.raw()) ||
             !gpuMemcpyD2H(&result, storage.mData, sizeof(result), stream.raw()) || !stream.sync()) return false;
         accepted = result != 0;
@@ -835,7 +835,7 @@ namespace osuCrypto::LogVole::gpu
             // Public preprocessing: the wiring does not change between proofs, so
             // this upload happens once and never on a proof's critical path.
             return gpuMemcpyH2D(
-                       mData, host.data(), host.size() * sizeof(u32), stream.raw()) &&
+                       mData, streamData(host, stream), host.size() * sizeof(u32), stream.raw()) &&
                    stream.sync();
         }
     };
@@ -971,12 +971,12 @@ namespace osuCrypto::LogVole::gpu
 
         orderAgainst(wires);
         void* raw = orderAgainst(macs);
-        auto& stream = executionStream(wires.execution());
+        auto& stream = executionStream(macs.execution());
         HostModulus mod;
         if (!multiplicationModulus(executionContext(circuit), modulus, mod)) return zkFail("mul prover modulus");
         HostStep deviceCheck(wires.execution(), "gpu: zk multiplication prover");
         if (!launchZkMulProver(
-                wires.data(), macs.data(), state.mOperands, circuit.gateCount(), circuit.mWidth,
+                streamData(wires, stream), streamData(macs, stream), state.mOperands, circuit.gateCount(), circuit.mWidth,
                 circuit.maskIndex(), chi, mod, state.mScratch.mData,
                 state.mOut.mData, raw))
         {
@@ -1011,7 +1011,7 @@ namespace osuCrypto::LogVole::gpu
         if (!multiplicationModulus(executionContext(circuit), modulus, mod)) return zkFail("mul verifier modulus");
         HostStep deviceCheck(keys.execution(), "gpu: zk multiplication verifier");
         if (!launchZkMulVerifier(
-                keys.data(), state.mOperands, circuit.gateCount(), circuit.mWidth,
+                streamData(keys, stream), state.mOperands, circuit.gateCount(), circuit.mWidth,
                 circuit.maskIndex(), chi, delta, mod, state.mScratch.mData,
                 state.mOut.mData, raw))
         {
@@ -1043,20 +1043,20 @@ namespace osuCrypto::LogVole::gpu
         orderAgainst(wires);
         void* raw = orderAgainst(macs);
         std::array<u64, 2> host{};
-        auto& stream = executionStream(wires.execution());
+        auto& stream = executionStream(macs.execution());
         // H2D copies borrow the caller's challenge/product until the stream
         // drains, including when a later copy or launch fails.
         StreamDrain drain{stream};
         const HostModulus mod = toHostModulus(modulus);
-        if (!gpuMemcpyH2D(state.mCoefficients.mData, ch.mCoefficients.data(),
+        if (!gpuMemcpyH2D(state.mCoefficients.mData, streamData(ch.mCoefficients, stream),
                 ch.mCoefficients.size() * sizeof(u64), raw)) return false;
         std::vector<ZkProof> proofs(st.repetitions());
         for (u32 rep = 0; rep < st.repetitions(); ++rep)
         {
-            if (!launchZkMatMulProver(wires.data(), macs.data(),
+            if (!launchZkMatMulProver(streamData(wires, stream), streamData(macs, stream),
                     state.mCoefficients.mData + rep * st.entries(), static_cast<u32>(st.mDim),
                     st.maskIndex(rep), mod, state.mScratch.mData, state.mOut.mData, raw)) return false;
-            if (!gpuMemcpyD2H(host.data(), state.mOut.mData, sizeof(host), raw) || !stream.sync()) return false;
+            if (!gpuMemcpyD2H(streamData(host, stream), state.mOut.mData, sizeof(host), raw) || !stream.sync()) return false;
             proofs[rep] = {host[0], host[1]};
         }
         out = std::move(proofs);
@@ -1085,12 +1085,12 @@ namespace osuCrypto::LogVole::gpu
         StreamDrain drain{stream};
         const HostModulus mod = toHostModulus(modulus);
         // Public C is re-uploaded on every call, including same-shape statements.
-        if (!gpuMemcpyH2D(state.mCoefficients.mData, ch.mCoefficients.data(),
+        if (!gpuMemcpyH2D(state.mCoefficients.mData, streamData(ch.mCoefficients, stream),
                 ch.mCoefficients.size() * sizeof(u64), raw) ||
-            !gpuMemcpyH2D(state.mProduct.mData, publicProduct.data(), publicProduct.size() * sizeof(u64), raw)) return false;
+            !gpuMemcpyH2D(state.mProduct.mData, streamData(publicProduct, stream), publicProduct.size() * sizeof(u64), raw)) return false;
         for (u32 rep = 0; rep < st.repetitions(); ++rep)
         {
-            if (!launchZkMatMulVerifier(keys.data(), state.mProduct.mData,
+            if (!launchZkMatMulVerifier(streamData(keys, stream), state.mProduct.mData,
                     state.mCoefficients.mData + rep * st.entries(), static_cast<u32>(st.mDim),
                     st.maskIndex(rep), delta % modulus, mod, state.mScratch.mData, state.mOut.mData, raw) ||
                 !gpuMemcpyD2H(&values[rep], state.mOut.mData, sizeof(u64), raw) || !stream.sync()) return false;
@@ -1164,7 +1164,7 @@ namespace osuCrypto::LogVole::gpu
         operands->mData = static_cast<u32*>(gpuMalloc(static_cast<std::size_t>(count) * sizeof(u32)));
         if (!operands->mData) return false;
         operands->mCount = static_cast<std::size_t>(count);
-        if (!launchZkPackOperands(residues->data(), operands->mData, count, width, stream.raw()) ||
+        if (!launchZkPackOperands(streamData(*residues, stream), operands->mData, count, width, stream.raw()) ||
             !stream.sync()) return false;
         ZkMulCircuit next;
         next.mExecutionContext = execution.resourceOwner();
@@ -1190,7 +1190,7 @@ namespace osuCrypto::LogVole::gpu
         next.resize(count);
         auto& stream = executionStream(executionContext(circuit));
         StreamDrain drain{stream};
-        if (!gpuMemcpyD2H(next.data(), owned->mData, count * sizeof(u32), stream.raw()) ||
+        if (!gpuMemcpyD2H(streamData(next, stream), owned->mData, count * sizeof(u32), stream.raw()) ||
             !stream.sync()) return false;
         circuit.mOperands = std::move(next);
         return true;
@@ -1208,23 +1208,23 @@ namespace osuCrypto::LogVole::gpu
         if (!circuit.mOperandsDevice && circuit.mOperands.size() != operandWords) return nullptr;
 
         auto& stream = executionStream(executionContext(circuit));
-        auto wires = std::make_shared<DeviceScalars>();
+        auto wires = std::make_shared<DeviceScalars>(executionContext(circuit));
         std::shared_ptr<ZkOperandsDevice> temp;
         StreamDrain drain{stream};
-        if (!wires->resize(static_cast<std::size_t>(total))) return nullptr;
+        if (!streamResize(*wires, stream, static_cast<std::size_t>(total))) return nullptr;
 
         // Only the layer-0 values and the mask cross the bus; the rest of the
         // witness is produced in place. Everything past the committed range is the
         // request padding and stays zero.
         const std::size_t inputBytes = static_cast<std::size_t>(circuit.mWidth) * sizeof(u64);
-        if (!gpuMemsetZero(wires->data(), static_cast<std::size_t>(total) * sizeof(u64), stream.raw()))
+        if (!gpuMemsetZero(streamData(*wires, stream), static_cast<std::size_t>(total) * sizeof(u64), stream.raw()))
             return nullptr;
         const bool copied = deviceInputs
-            ? gpuMemcpyD2D(wires->data(), deviceInputs->data(), inputBytes, stream.raw()) &&
-              gpuMemcpyD2D(wires->data() + circuit.maskIndex(), deviceInputs->data() + circuit.mWidth,
+            ? gpuMemcpyD2D(streamData(*wires, stream), deviceInputs->data(stream), inputBytes, stream.raw()) &&
+              gpuMemcpyD2D(streamData(*wires, stream) + circuit.maskIndex(), deviceInputs->data(stream) + circuit.mWidth,
                            sizeof(u64), stream.raw())
-            : gpuMemcpyH2D(wires->data(), inputs.data(), inputBytes, stream.raw()) &&
-              gpuMemcpyH2D(wires->data() + circuit.maskIndex(), inputs.data() + circuit.mWidth,
+            : gpuMemcpyH2D(streamData(*wires, stream), streamData(inputs, stream), inputBytes, stream.raw()) &&
+              gpuMemcpyH2D(streamData(*wires, stream) + circuit.maskIndex(), streamData(inputs, stream) + circuit.mWidth,
                            sizeof(u64), stream.raw());
         if (!copied)
         {
@@ -1241,7 +1241,7 @@ namespace osuCrypto::LogVole::gpu
         else
         {
             temp = std::make_shared<ZkOperandsDevice>();
-            if (!temp->upload(executionContext(circuit), std::span<const u32>(circuit.mOperands.data(), operandWords)))
+            if (!temp->upload(executionContext(circuit), std::span<const u32>(streamData(circuit.mOperands, stream), operandWords)))
             {
                 return nullptr;
             }
@@ -1255,7 +1255,7 @@ namespace osuCrypto::LogVole::gpu
         for (u64 layer = 0; layer < circuit.mDepth && ok; ++layer)
         {
             ok = launchZkMulEvalLayer(
-                wires->data(), operands, layer * circuit.mWidth, circuit.mWidth, circuit.mWidth,
+                streamData(*wires, stream), operands, layer * circuit.mWidth, circuit.mWidth, circuit.mWidth,
                 mod, stream.raw());
         }
         ok = ok && stream.sync();
@@ -1297,13 +1297,13 @@ namespace osuCrypto::LogVole::gpu
         auto sampled = sampleScalarsFromSeed(execution, seed, 2u * entries + masks, modulus);
         if (!sampled) return nullptr;
         auto& stream = executionStream(execution);
-        auto wires = std::make_shared<DeviceScalars>();
+        auto wires = std::make_shared<DeviceScalars>(execution);
         StreamDrain drain{stream};
-        if (!wires->resize(static_cast<std::size_t>(total)) ||
-            !gpuMemcpyD2D(wires->data(), sampled->data(), 2u * entries * sizeof(u64), stream.raw()) ||
-            !gpuMemsetZero(wires->data() + 2u * entries,
+        if (!streamResize(*wires, stream, static_cast<std::size_t>(total)) ||
+            !gpuMemcpyD2D(streamData(*wires, stream), streamData(*sampled, stream), 2u * entries * sizeof(u64), stream.raw()) ||
+            !gpuMemsetZero(streamData(*wires, stream) + 2u * entries,
                 (total - 2u * entries) * sizeof(u64), stream.raw()) ||
-            !gpuMemcpyD2D(wires->data() + 2u * entries, sampled->data() + 2u * entries,
+            !gpuMemcpyD2D(streamData(*wires, stream) + 2u * entries, streamData(*sampled, stream) + 2u * entries,
                 masks * sizeof(u64), stream.raw()) || !stream.sync()) return nullptr;
         wires->setProducerStream(nullptr);
         return wires;
@@ -1319,9 +1319,9 @@ namespace osuCrypto::LogVole::gpu
         void* raw = orderAgainst(wires);
         (void)orderAgainst(publicProduct);
         auto& stream = executionStream(wires.execution());
-        if (!publicProduct.resize(static_cast<std::size_t>(st.entries()))) return false;
+        if (!streamResize(publicProduct, stream, static_cast<std::size_t>(st.entries()))) return false;
         const bool ok = launchZkMatMulGemm(
-            wires.data() + st.offsetA(), wires.data() + st.offsetB(), publicProduct.data(),
+            streamData(wires, stream) + st.offsetA(), streamData(wires, stream) + st.offsetB(), streamData(publicProduct, stream),
             static_cast<u32>(st.mDim), toHostModulus(modulus), raw) && stream.sync();
         publicProduct.setProducerStream(nullptr);
         return ok;
@@ -1432,7 +1432,7 @@ namespace osuCrypto
                 auto& stream = gpu::executionStream(device->execution());
                 const auto producer = device->producerStream();
                 if ((producer && producer != stream.raw() && !gpu::gpuStreamSync(producer)) ||
-                    !gpu::launchZkSetMask(device->data() + maskIndex, mask, stream.raw()))
+                    !gpu::launchZkSetMask(streamData(*device, stream) + maskIndex, mask, stream.raw()))
                     throw std::runtime_error("LogVole ZK could not refresh the device mask");
                 device->setProducerStream(stream.raw());
             }

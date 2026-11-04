@@ -260,6 +260,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
         CivoleParams params;
         ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         LOGVOLE_REQUIRE_TRUE(makeCivoleParams(setting, params, 4u));
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         ZpCrtContext ctx;
         ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
         LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params.mLogVole.mShrinkExpand.mRing,
@@ -666,6 +667,7 @@ void LogVole_Civole_NonInteractiveOracleAndMask(const oc::CLP&)
     CivoleParams civole{};
     ::tests_libOTe::logvole_test::bindExecution(civole, testExecution);
     LOGVOLE_REQUIRE_TRUE(makeNoGoldenSeedCivoleParams(civole));
+    ::tests_libOTe::logvole_test::bindExecution(civole, testExecution);
     auto params = civole.mLogVole;
     params.mOnlineMode = OnlineMode::NonInteractive;
     params.mSessionId = 101;

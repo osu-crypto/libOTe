@@ -64,6 +64,17 @@ namespace osuCrypto::LogVole
         std::unique_ptr<Entry[]> mEntries;
         std::atomic<u32> mUsed{ 0 };
         std::mutex mMutex;
+        std::once_flag mEnabledOnce;
+        bool mEnabled = false;
+
+        bool enabled()
+        {
+            std::call_once(mEnabledOnce, [&] {
+                const char* value = std::getenv("LV_STEP_PROFILE");
+                mEnabled = value && value[0] && value[0] != '0';
+            });
+            return mEnabled;
+        }
 
         struct Sample
         {
@@ -144,6 +155,9 @@ namespace osuCrypto::LogVole
     // distinct owners. No state is installed on the executing thread.
     class ExecutionContext : public std::enable_shared_from_this<ExecutionContext>
     {
+        struct ResourceStorage;
+        struct DeviceResourceStorage;
+        struct SharedResources;
         struct Diagnostics
         {
             RingOpsStats mRingOps;
@@ -152,13 +166,30 @@ namespace osuCrypto::LogVole
         };
         std::shared_ptr<Diagnostics> mDiagnostics;
 
+        explicit ExecutionContext(std::shared_ptr<SharedResources> shared)
+            : mDiagnostics(shared, &shared->mDiagnostics), mRingOps(mDiagnostics->mRingOps),
+              mTiming(mDiagnostics->mTiming), mHostSteps(mDiagnostics->mHostSteps),
+              mIdentity(shared, &shared->mIdentity),
+              mWireResources(shared, &shared->mWireResources) {}
+
     public:
-        ExecutionContext() : ExecutionContext(std::make_shared<Diagnostics>()) {}
+        ExecutionContext() : ExecutionContext(std::make_shared<SharedResources>()) {}
         explicit ExecutionContext(std::shared_ptr<Diagnostics> diagnostics)
             : mDiagnostics(std::move(diagnostics)), mRingOps(mDiagnostics->mRingOps),
               mTiming(mDiagnostics->mTiming), mHostSteps(mDiagnostics->mHostSteps) {}
 
+        ExecutionContext(std::shared_ptr<Diagnostics> diagnostics,
+            std::shared_ptr<u8> identity, std::shared_ptr<ResourceStorage> wire,
+            std::shared_ptr<DeviceResourceStorage> device)
+            : mDiagnostics(std::move(diagnostics)), mRingOps(mDiagnostics->mRingOps),
+              mTiming(mDiagnostics->mTiming), mHostSteps(mDiagnostics->mHostSteps),
+              mIdentity(std::move(identity)), mWireResources(std::move(wire)),
+              mDeviceResources(std::move(device)) {}
+
         bool mUseGpu = false;
+        // Production dispatch uses a stable per-owner option snapshot. Tools
+        // that deliberately vary environment knobs may request live reads.
+        bool mCacheGpuOptions = true;
         ProtocolCacheScope mScope{};
         CpuBenchmarkContext* mCpuBenchmark = nullptr;
         RingOpsStats& mRingOps;
@@ -174,13 +205,15 @@ namespace osuCrypto::LogVole
         // that refers to those tables. Streams and scratch never own tables.
         std::shared_ptr<ExecutionContext> resourceOwner(bool shareDeviceResources = true) const
         {
-            auto owner = std::make_shared<ExecutionContext>(mDiagnostics);
+            // Initialize shared storage directly: constructing fresh registries
+            // only to replace them adds allocations to every device token.
+            auto owner = std::make_shared<ExecutionContext>(mDiagnostics, mIdentity,
+                mWireResources, shareDeviceResources ? mDeviceResources
+                    : std::make_shared<DeviceResourceStorage>());
             owner->mUseGpu = mUseGpu;
+            owner->mCacheGpuOptions = mCacheGpuOptions;
             owner->mScope = mScope;
             owner->mCpuBenchmark = mCpuBenchmark;
-            owner->mIdentity = mIdentity;
-            owner->mWireResources = mWireResources;
-            if (shareDeviceResources) owner->mDeviceResources = mDeviceResources;
             return owner;
         }
 
@@ -193,14 +226,7 @@ namespace osuCrypto::LogVole
         template<class T, class... Args>
         T& deviceResources(Args&&... args) const
         {
-            std::shared_ptr<ResourceStorage> resources;
-            {
-                std::lock_guard lock(mDeviceResources->mMutex);
-                auto& worker = mDeviceResources->mWorkers[std::this_thread::get_id()];
-                if (!worker) worker = std::make_shared<ResourceStorage>();
-                resources = worker;
-            }
-            return resources->get<T>(std::forward<Args>(args)...);
+            return mDeviceResources->forThread().get<T>(std::forward<Args>(args)...);
         }
 
         template<class T, class... Args>
@@ -209,24 +235,103 @@ namespace osuCrypto::LogVole
             return mWireResources->get<T>(std::forward<Args>(args)...);
         }
 
+        // Raw resource owners may share storage across metadata copies without
+        // retaining a protocol cache. Entries must not own execution contexts.
+        template<class T, class... Args>
+        T& sharedResources(Args&&... args) const
+        {
+            return mWireResources->get<T>(std::forward<Args>(args)...);
+        }
+
     private:
         struct ResourceStorage
         {
+            struct Index
+            {
+                std::vector<std::pair<const std::type_info*, void*>> mEntries;
+                void* find(const std::type_info* type) const
+                {
+                    for (const auto& [known, value] : mEntries)
+                        if (known == type) return value;
+                    return nullptr;
+                }
+            };
             template<class T, class... Args>
             T& get(Args&&... args)
             {
+                const auto* type = &typeid(T);
+                auto* index = mIndex.load(std::memory_order_acquire);
+                if (index)
+                    if (auto* value = index->find(type)) return *static_cast<T*>(value);
                 std::lock_guard lock(mMutex);
-                auto& entry = mEntries[std::type_index(typeid(T))];
+                index = mIndex.load(std::memory_order_relaxed);
+                if (index)
+                    if (auto* value = index->find(type)) return *static_cast<T*>(value);
+                // The map resolves equivalent RTTI objects across libraries.
+                auto& entry = mEntries[std::type_index(*type)];
                 if (!entry) entry = std::make_shared<T>(std::forward<Args>(args)...);
+                auto next = std::make_unique<Index>();
+                if (index) next->mEntries = index->mEntries;
+                next->mEntries.emplace_back(type, entry.get());
+                auto* published = next.get();
+                mSnapshots.push_back(std::move(next));
+                // Published indices and resource objects remain alive until
+                // owner teardown. Hot lookups need no mutex or shared_ptr copy.
+                mIndex.store(published, std::memory_order_release);
                 return *static_cast<T*>(entry.get());
             }
             std::mutex mMutex;
             std::unordered_map<std::type_index, std::shared_ptr<void>> mEntries;
+            std::vector<std::unique_ptr<Index>> mSnapshots;
+            std::atomic<const Index*> mIndex{nullptr};
         };
         struct DeviceResourceStorage
         {
+            struct Worker
+            {
+                explicit Worker(std::thread::id id) : mId(id) {}
+                const std::thread::id mId;
+                std::unique_ptr<Worker> mNext;
+                ResourceStorage mResources;
+            };
             std::mutex mMutex;
-            std::unordered_map<std::thread::id, std::shared_ptr<ResourceStorage>> mWorkers;
+            std::unique_ptr<Worker> mWorkers;
+            std::atomic<Worker*> mFirstWorker{nullptr}, mPublishedWorkers{nullptr};
+
+            ResourceStorage& forThread()
+            {
+                const auto id = std::this_thread::get_id();
+                auto* first = mFirstWorker.load(std::memory_order_acquire);
+                if (first && first->mId == id) return first->mResources;
+                for (auto* worker = mPublishedWorkers.load(std::memory_order_acquire);
+                     worker; worker = worker->mNext.get())
+                    if (worker->mId == id) return worker->mResources;
+                std::lock_guard lock(mMutex);
+                for (auto* worker = mWorkers.get(); worker; worker = worker->mNext.get())
+                    if (worker->mId == id) return worker->mResources;
+                auto next = std::make_unique<Worker>(id);
+                auto* worker = next.get();
+                next->mNext = std::move(mWorkers);
+                mWorkers = std::move(next);
+                // Links and identities are immutable after publication. Every
+                // established worker can look up its storage without writing a
+                // shared cache line or competing for a registry mutex.
+                if (!mFirstWorker.load(std::memory_order_relaxed))
+                    mFirstWorker.store(worker, std::memory_order_release);
+                mPublishedWorkers.store(worker, std::memory_order_release);
+                return worker->mResources;
+            }
+        };
+        // These resources share a lifetime across metadata clones. Keep them
+        // in one allocation; temporary protocol parameter objects otherwise
+        // allocate four control blocks just to replace their default owner.
+        // Worker storage stays separate: stream metadata clones must be able
+        // to retain the wire/diagnostic owner without retaining their registry.
+        struct SharedResources
+        {
+            Diagnostics mDiagnostics;
+            u8 mIdentity = 0;
+            ResourceStorage mWireResources;
         };
         std::shared_ptr<u8> mIdentity = std::make_shared<u8>(0);
         mutable ResourceStorage mResources;
@@ -242,8 +347,7 @@ namespace osuCrypto::LogVole
     public:
         HostStep(ExecutionContext& execution, const char* name)
         {
-            const char* value = std::getenv("LV_STEP_PROFILE");
-            if (!value || !value[0] || value[0] == '0') return;
+            if (!execution.mHostSteps.enabled()) return;
             mEntry = &execution.mHostSteps.slot(name);
             mStart = std::chrono::steady_clock::now();
             mCpuStart = cpuBenchmarkThreadNs();
@@ -251,8 +355,7 @@ namespace osuCrypto::LogVole
 
         HostStep(ExecutionContext& execution, const char* name, u64 tag)
         {
-            const char* value = std::getenv("LV_STEP_PROFILE");
-            if (!value || !value[0] || value[0] == '0') return;
+            if (!execution.mHostSteps.enabled()) return;
             char buffer[56];
             std::snprintf(buffer, sizeof(buffer), "%s w=%llu", name,
                 static_cast<unsigned long long>(tag));
@@ -264,8 +367,7 @@ namespace osuCrypto::LogVole
         HostStep(ExecutionContext* execution, const char* name)
         {
             if (!execution) return;
-            const char* value = std::getenv("LV_STEP_PROFILE");
-            if (!value || !value[0] || value[0] == '0') return;
+            if (!execution->mHostSteps.enabled()) return;
             mEntry = &execution->mHostSteps.slot(name);
             mStart = std::chrono::steady_clock::now();
             mCpuStart = cpuBenchmarkThreadNs();

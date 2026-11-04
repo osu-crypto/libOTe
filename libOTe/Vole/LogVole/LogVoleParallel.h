@@ -18,13 +18,20 @@
 
 namespace osuCrypto::LogVole::detail
 {
-    inline std::size_t hardwareWorkerSlots(CpuBenchmarkContext* benchmarkContext = nullptr)
+    inline std::size_t hardwareWorkerSlots(CpuBenchmarkContext* benchmarkContext = nullptr,
+        ExecutionContext* execution = nullptr)
     {
         if (benchmarkContext) return benchmarkContext->mWorkerLimit
             ? std::min(benchmarkContext->mWorkerLimit, benchmarkContext->mCpus.size())
             : benchmarkContext->mCpus.size();
-        const auto hw = static_cast<std::size_t>(std::thread::hardware_concurrency());
-        return hw == 0 ? 1 : hw;
+        struct HardwareLimit
+        {
+            const std::size_t mValue = [] {
+                const auto hw = static_cast<std::size_t>(std::thread::hardware_concurrency());
+                return hw == 0 ? std::size_t{1} : hw;
+            }();
+        };
+        return execution ? execution->sharedResources<HardwareLimit>().mValue : HardwareLimit{}.mValue;
     }
 
     struct ParallelWorkerBudget
@@ -38,6 +45,7 @@ namespace osuCrypto::LogVole::detail
         explicit ParallelWorkerSlotGuard(std::size_t requestedWorkers, CpuBenchmarkContext* benchmarkContext = nullptr,
             ExecutionContext* execution = nullptr)
         {
+            if (requestedWorkers <= 1) return;
             // Ordinary calls own their worker budget. Contention with an
             // unrelated session must not change the number of workers granted.
             // Benchmark callers can explicitly share their own accounting.
@@ -49,13 +57,7 @@ namespace osuCrypto::LogVole::detail
             }
             mCounter = benchmarkContext ? &benchmarkContext->mWorkerSlots
                 : &execution->resources<ParallelWorkerBudget>().mSlotsInUse;
-            mGrantedWorkers = 1;
-            if (requestedWorkers <= 1)
-            {
-                return;
-            }
-
-            const std::size_t maxSlots = hardwareWorkerSlots(benchmarkContext);
+            const std::size_t maxSlots = hardwareWorkerSlots(benchmarkContext, execution);
             while (true)
             {
                 std::size_t used = mCounter->load(std::memory_order_acquire);
@@ -101,7 +103,8 @@ namespace osuCrypto::LogVole::detail
         std::size_t mReservedWorkers = 0;
     };
 
-    inline std::size_t resolveWorkerCount(u32 requestedWorkers, std::size_t taskCount)
+    inline std::size_t resolveWorkerCount(u32 requestedWorkers, std::size_t taskCount,
+        ExecutionContext* execution = nullptr)
     {
         if (taskCount <= 1)
         {
@@ -111,7 +114,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t workers = requestedWorkers;
         if (requestedWorkers == 0)
         {
-            workers = static_cast<std::size_t>(std::thread::hardware_concurrency());
+            workers = hardwareWorkerSlots(execution ? execution->mCpuBenchmark : nullptr, execution);
         }
         if (workers == 0)
         {
@@ -143,7 +146,7 @@ namespace osuCrypto::LogVole::detail
         }
 
         auto* benchmarkContext = execution ? execution->mCpuBenchmark : nullptr;
-        const std::size_t requested = resolveWorkerCount(requestedWorkers, taskCount);
+        const std::size_t requested = resolveWorkerCount(requestedWorkers, taskCount, execution);
         ParallelWorkerSlotGuard slotGuard(requested, benchmarkContext, execution);
         const std::size_t workerCount = std::min(requested, slotGuard.grantedWorkers());
         if (workerCount <= 1)

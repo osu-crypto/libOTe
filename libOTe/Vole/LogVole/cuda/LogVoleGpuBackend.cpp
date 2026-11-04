@@ -85,14 +85,7 @@ namespace osuCrypto::LogVole::gpu
             return words;
         }
 
-        void* allocateIndexScratch(std::size_t bytes, void* stream)
-        {
-            // Direct GpuStream users need not have selected this stream in
-            // threadStream(). Queue allocator reuse dependencies on the actual
-            // H2D destination stream, without changing the caller's context.
 
-            return gpuMalloc(bytes);
-        }
 
         std::size_t alignUp(std::size_t v, std::size_t a)
         {
@@ -219,8 +212,10 @@ namespace osuCrypto::LogVole::gpu
         struct RawSetupStream
         {
             void* mStream = nullptr;
+            std::shared_ptr<DeviceMemoryPool> mPool;
             explicit RawSetupStream(ExecutionContext& execution)
-                : mStream(roleRawSetupStream(execution).ensureStream()) {}
+                : mStream(roleRawSetupStream(execution).ensureStream()),
+                  mPool(deviceMemoryPool(execution)) {}
             ~RawSetupStream()
             {
                 // A failed launch/copy must drain before an arena or temporary
@@ -236,11 +231,13 @@ namespace osuCrypto::LogVole::gpu
         class RawConstantArena
         {
         public:
-            RawConstantArena(std::size_t bytes, void* stream)
-                : mData(static_cast<u8*>(gpuMalloc(bytes))), mCapacity(bytes), mStream(stream) {}
+            RawConstantArena(std::size_t bytes, const RawSetupStream& stream)
+                : mPool(stream.mPool),
+                  mData(static_cast<u8*>(mPool->allocate(bytes, stream.mStream))),
+                  mCapacity(bytes), mStream(stream.mStream) {}
             ~RawConstantArena()
             {
-                if (mData) { gpuStreamSync(mStream); gpuFree(mData); }
+                if (mData) { gpuStreamSync(mStream); mPool->release(mData); }
             }
             explicit operator bool() const { return mData != nullptr; }
             template<typename T> T* take(std::size_t count)
@@ -256,16 +253,19 @@ namespace osuCrypto::LogVole::gpu
             }
             void publish(std::vector<void*>& owned)
             {
+                mPool->use(mData); // Published constant views can use any stream.
                 owned.push_back(mData);
                 mData = nullptr;
             }
             void* release()
             {
+                mPool->use(mData);
                 void* owned = mData;
                 mData = nullptr;
                 return owned;
             }
         private:
+            std::shared_ptr<DeviceMemoryPool> mPool;
             u8* mData = nullptr;
             std::size_t mCapacity = 0;
             std::size_t mUsed = 0;
@@ -316,13 +316,19 @@ namespace osuCrypto::LogVole::gpu
         {
             if (host.empty()) return nullptr;
             HostStep allocationStep(execution, "setup GPU constants allocate");
-            void* d = gpuMalloc(host.size() * sizeof(T));
+            RawSetupStream stream(execution);
+            auto pool = deviceMemoryPool(execution);
+            void* d = stream.mStream ? pool->allocate(host.size() * sizeof(T), stream.mStream) : nullptr;
             allocationStep.stop();
             if (!d) return nullptr;
             HostStep uploadStep(execution, "setup GPU constants upload");
-            if (!gpuMemcpyH2D(d, host.data(), host.size() * sizeof(T), nullptr))
+            // Immutable tables can be read by any execution stream. Their final
+            // release drains unknown consumers; uploads use the owned setup stream.
+            pool->use(d);
+            if (!gpuMemcpyH2D(d, host.data(), host.size() * sizeof(T), stream.mStream) ||
+                !gpuStreamSync(stream.mStream))
             {
-                gpuFree(d);
+                pool->release(d);
                 return nullptr;
             }
             owned.push_back(d);
@@ -361,7 +367,7 @@ namespace osuCrypto::LogVole::gpu
         const u32 rho = static_cast<u32>(params.mCoeffModulusBits.size());
         RawSetupStream stream(executionContext(params));
         if (!stream.mStream) return false;
-        RawConstantArena arena(256u, stream.mStream);
+        RawConstantArena arena(256u, stream);
         auto* bits = arena.take<int>(rho);
         const std::size_t recordBytes = static_cast<std::size_t>(rho) * sizeof(u64) + sizeof(u32);
         auto* record = arena.take<u8>(recordBytes);
@@ -392,7 +398,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
         RawSetupStream stream(execution);
         if (!stream.mStream) return false;
-        RawConstantArena arena(128u, stream.mStream);
+        RawConstantArena arena(128u, stream);
         auto* record = arena.take<u8>(sizeof(u64) + 2u * sizeof(u32));
         auto* prime = reinterpret_cast<u64*>(record);
         auto* bits = record ? reinterpret_cast<u32*>(record + sizeof(u64)) : nullptr;
@@ -424,7 +430,7 @@ namespace osuCrypto::LogVole::gpu
             !view.mBaseProd || !available() || currentDeviceOrdinal() != 0) return false;
         RawSetupStream stream(ring.execution());
         if (!stream.mStream) return false;
-        RawConstantArena arena(256u, stream.mStream);
+        RawConstantArena arena(256u, stream);
         const std::size_t recordBytes = static_cast<std::size_t>(ring.rho()) * sizeof(u64) + sizeof(u32);
         auto* record = arena.take<u8>(recordBytes);
         auto* output = reinterpret_cast<u64*>(record);
@@ -483,7 +489,7 @@ namespace osuCrypto::LogVole::gpu
         {
             RawSetupStream stream(executionContext(params));
             if (!stream.mStream) return false;
-            RawConstantArena arena(capacity, stream.mStream);
+            RawConstantArena arena(capacity, stream);
             if (!arena) return false;
             constexpr std::size_t maxRecordBytes =
                 16u * 2u * sizeof(u64) + sizeof(u64) + 6u * sizeof(u32);
@@ -501,8 +507,10 @@ namespace osuCrypto::LogVole::gpu
             std::shared_ptr<GpuRing> ring(new GpuRing());
             std::shared_ptr<GpuPlainNtt> plain(new GpuPlainNtt());
             plain->mExecutionContext = executionContext(params).resourceOwner();
+            plain->mMemoryPool = stream.mPool;
             ring->mParams = params;
             ring->mParams.mExecutionContext = executionContext(params).resourceOwner();
+            ring->mMemoryPool = stream.mPool;
             allocateRawNttView(arena, ring->mView, n, rho);
             auto* ringScratch = arena.take<u64>(3u * rho);
             ring->mView.mBaseProd = arena.take<u64>(rho);
@@ -643,7 +651,7 @@ namespace osuCrypto::LogVole::gpu
             // Only after the final status/owner check and all stream work
             // complete can the shared immutable allocation leave the arena.
             std::shared_ptr<void> storage(arena.release(),
-                [](void* p) { gpuFree(p); });
+                [pool = stream.mPool](void* p) { pool->release(p); });
             ring->mNativeSealBundleStorage = storage;
             plain->mNativeSealBundleStorage = std::move(storage);
             ring->mDenoiseReady = rho > 1u;
@@ -679,6 +687,75 @@ namespace osuCrypto::LogVole::gpu
         return gpuDeviceName();
     }
 
+    namespace
+    {
+        struct KernelConfigurationOwner
+        {
+            std::shared_ptr<KernelConfiguration> mValue = std::make_shared<KernelConfiguration>();
+        };
+
+    }
+
+    std::shared_ptr<KernelConfiguration> kernelConfiguration(ExecutionContext& execution)
+    {
+        auto value = execution.sharedResources<KernelConfigurationOwner>().mValue;
+        value->setOptionsCaching(execution.mCacheGpuOptions);
+        return value;
+    }
+
+    const RingConstView& GpuRing::view() const
+    {
+        std::call_once(mKernelConfigurationOnce, [this] {
+            mKernelConfiguration = kernelConfiguration(executionContext(mParams));
+            mView.mKernelConfiguration = mKernelConfiguration.get();
+            mMemoryPool = deviceMemoryPool(executionContext(mParams));
+            mView.mMemoryPool = mMemoryPool.get();
+        });
+        return mView;
+    }
+
+    const RingConstView& GpuPlainNtt::view() const
+    {
+        std::call_once(mKernelConfigurationOnce, [this] {
+            mKernelConfiguration = kernelConfiguration(*mExecutionContext);
+            mView.mKernelConfiguration = mKernelConfiguration.get();
+            mMemoryPool = deviceMemoryPool(*mExecutionContext);
+            mView.mMemoryPool = mMemoryPool.get();
+        });
+        return mView;
+    }
+
+    namespace
+    {
+        struct MemoryPoolOwner
+        {
+            std::shared_ptr<DeviceMemoryPool> mDevice = std::make_shared<DeviceMemoryPool>();
+            std::shared_ptr<PinnedMemoryPool> mPinned = std::make_shared<PinnedMemoryPool>();
+            std::atomic<u64> mNextStream{0};
+        };
+
+        struct StreamLease
+        {
+            void* mStream = nullptr;
+            explicit StreamLease(void* stream) : mStream(stream) {}
+            ~StreamLease()
+            {
+                gpuStreamSync(mStream);
+                gpuStreamDestroy(mStream);
+            }
+        };
+    }
+
+    std::shared_ptr<DeviceMemoryPool> deviceMemoryPool(ExecutionContext& execution)
+    {
+        return execution.sharedResources<MemoryPoolOwner>().mDevice;
+    }
+
+    std::shared_ptr<PinnedMemoryPool> pinnedMemoryPool(ExecutionContext& execution)
+    {
+        return execution.sharedResources<MemoryPoolOwner>().mPinned;
+    }
+
     // ---- GpuStream --------------------------------------------------------
 
     GpuStream::GpuStream() : GpuStream(false, true) {}
@@ -706,11 +783,17 @@ namespace osuCrypto::LogVole::gpu
         {
             mStream = gpuStreamCreate();
         }
+        if (mStream) mStreamLease = std::make_shared<StreamLease>(mStream);
+        auto& pools = mExecution->sharedResources<MemoryPoolOwner>();
+        mMemoryPool = pools.mDevice;
+        mPinnedPool = pools.mPinned;
+        mMemorySlot = pools.mNextStream.fetch_add(1, std::memory_order_relaxed);
         if (!mStream || !allocateScratch) return;
         mScratchWords = indexScratchWords(); // default 4 MiB
-        if (lazyIndexScratchEnabled()) return;
-        mDeviceScratch = static_cast<u32*>(allocateIndexScratch(mScratchWords * sizeof(u32), mStream));
-        mHostScratch = static_cast<u32*>(gpuMallocHost(mScratchWords * sizeof(u32)));
+        mLazyIndexScratch = lazyIndexScratchEnabled();
+        if (mLazyIndexScratch) return;
+        mDeviceScratch = static_cast<u32*>(mMemoryPool->allocate(mScratchWords * sizeof(u32), mStream, mStreamLease));
+        mHostScratch = static_cast<u32*>(mPinnedPool->allocate(mScratchWords * sizeof(u32)));
     }
 
     std::unique_ptr<GpuStream> GpuStream::createHighestPriority()
@@ -727,15 +810,14 @@ namespace osuCrypto::LogVole::gpu
         if (mHighestPriority)
         {
             // This lean stream has no index or staging scratch.
-            gpuStreamDestroy(mStream);
+            mStreamLease.reset();
             return;
         }
         // Work has drained before any stream-owned memory is released.
-        gpuFree(mDeviceScratch);
-        gpuFreeHost(mHostScratch);
-        gpuFreeHost(mStaging);
-
-        gpuStreamDestroy(mStream);
+        mMemoryPool->release(mDeviceScratch);
+        mPinnedPool->release(mHostScratch);
+        mPinnedPool->release(mStaging);
+        mStreamLease.reset();
     }
 
     u8* GpuStream::staging(std::size_t bytes)
@@ -745,8 +827,8 @@ namespace osuCrypto::LogVole::gpu
         std::size_t want = mStagingBytes ? mStagingBytes : (std::size_t(8) << 20);
         while (want < bytes) want *= 2;
         gpuStreamSync(mStream);
-        gpuFreeHost(mStaging);
-        mStaging = static_cast<u8*>(gpuMallocHost(want));
+        mPinnedPool->release(mStaging);
+        mStaging = static_cast<u8*>(mPinnedPool->allocate(want));
         mStagingBytes = mStaging ? want : 0;
         return mStaging;
     }
@@ -775,12 +857,12 @@ namespace osuCrypto::LogVole::gpu
         // Most sampler/worker streams never upload an index array. Avoid
         // allocating and pinning their ring until it is actually needed.
         // Highest-priority lean streams have mScratchWords==0 and stay lean.
-        if (lazyIndexScratchEnabled() && mScratchWords != 0u)
+        if (mLazyIndexScratch && mScratchWords != 0u)
         {
             if (!mDeviceScratch)
-                mDeviceScratch = static_cast<u32*>(allocateIndexScratch(mScratchWords * sizeof(u32), mStream));
+                mDeviceScratch = static_cast<u32*>(mMemoryPool->allocate(mScratchWords * sizeof(u32), mStream, mStreamLease));
             if (!mHostScratch)
-                mHostScratch = static_cast<u32*>(gpuMallocHost(mScratchWords * sizeof(u32)));
+                mHostScratch = static_cast<u32*>(mPinnedPool->allocate(mScratchWords * sizeof(u32)));
         }
         if (!mDeviceScratch || !mHostScratch) return nullptr;
         if (mScratchUsed + idx.size() > mScratchWords)
@@ -805,7 +887,7 @@ namespace osuCrypto::LogVole::gpu
     {
         struct MainExecutionStream
         {
-            std::mutex mMutex;
+            // deviceResources selects storage exclusive to this CPU worker.
             std::unique_ptr<GpuStream> mStreams[kStreamSlots];
         };
         struct SampleExecutionStream : MainExecutionStream {};
@@ -814,7 +896,6 @@ namespace osuCrypto::LogVole::gpu
     GpuStream& executionStream(ExecutionContext& execution)
     {
         auto& streams = execution.deviceResources<MainExecutionStream>();
-        std::lock_guard lock(streams.mMutex);
         auto& stream = streams.mStreams[executionStreamSlot(execution)];
         if (!stream) stream = std::make_unique<GpuStream>(execution);
         return *stream;
@@ -823,7 +904,6 @@ namespace osuCrypto::LogVole::gpu
     GpuStream& sampleStream(ExecutionContext& execution)
     {
         auto& streams = execution.deviceResources<SampleExecutionStream>();
-        std::lock_guard lock(streams.mMutex);
         auto& stream = streams.mStreams[executionStreamSlot(execution)];
         if (!stream) stream = std::make_unique<GpuStream>(execution);
         return *stream;
@@ -856,21 +936,22 @@ namespace osuCrypto::LogVole::gpu
             u8* mPinned = nullptr;
             void* mEvent[2]{ nullptr, nullptr };
 
-            DownloadStaging()
+            std::shared_ptr<PinnedMemoryPool> mPool;
+            explicit DownloadStaging(std::shared_ptr<PinnedMemoryPool> pool) : mPool(std::move(pool))
             {
-                mPinned = static_cast<u8*>(gpuMallocHost(2 * kChunk));
+                mPinned = static_cast<u8*>(mPool->allocate(2 * kChunk));
                 mEvent[0] = gpuEventCreate();
                 mEvent[1] = gpuEventCreate();
             }
             ~DownloadStaging()
             {
-                gpuFreeHost(mPinned);
+                mPool->release(mPinned);
                 gpuEventDestroy(mEvent[0]);
                 gpuEventDestroy(mEvent[1]);
             }
             bool ready() const { return mPinned && mEvent[0] && mEvent[1]; }
         };
-        auto& staging = stream.execution().resources<DownloadStaging>();
+        auto& staging = stream.execution().resources<DownloadStaging>(stream.pinnedPool());
 
         if (!staging.ready())
         {
@@ -948,9 +1029,10 @@ namespace osuCrypto::LogVole::gpu
             void* mEvent[2]{ nullptr, nullptr };
             bool mPending[2]{ false, false };
 
-            UploadStaging()
+            std::shared_ptr<PinnedMemoryPool> mPool;
+            explicit UploadStaging(std::shared_ptr<PinnedMemoryPool> pool) : mPool(std::move(pool))
             {
-                mPinned = static_cast<u8*>(gpuMallocHost(2 * kChunk));
+                mPinned = static_cast<u8*>(mPool->allocate(2 * kChunk));
                 mEvent[0] = gpuEventCreate();
                 mEvent[1] = gpuEventCreate();
             }
@@ -958,13 +1040,13 @@ namespace osuCrypto::LogVole::gpu
             {
                 for (u32 i = 0; i < 2; ++i)
                     if (mPending[i] && mEvent[i]) gpuEventSync(mEvent[i]);
-                gpuFreeHost(mPinned);
+                mPool->release(mPinned);
                 gpuEventDestroy(mEvent[0]);
                 gpuEventDestroy(mEvent[1]);
             }
             bool ready() const { return mPinned && mEvent[0] && mEvent[1]; }
         };
-        auto& staging = stream.execution().resources<UploadStaging>();
+        auto& staging = stream.execution().resources<UploadStaging>(stream.pinnedPool());
 
         if (!staging.ready())
         {
@@ -1132,6 +1214,7 @@ namespace osuCrypto::LogVole::gpu
     GpuRing::~GpuRing()
     {
         for (void* p : mOwned) gpuFree(p);
+        for (void* p : mPooledOwned) mMemoryPool->release(p);
     }
 
     std::shared_ptr<GpuRing> GpuRing::get(const RingNttContext& ctx)
@@ -1161,13 +1244,14 @@ namespace osuCrypto::LogVole::gpu
         key.mBits.assign(ctx.mParams.mCoeffModulusBits.begin(), ctx.mParams.mCoeffModulusBits.end());
         key.mRole = (executionContext(ctx)).mScope.mRole;
 
-        std::lock_guard<std::mutex> lock((executionContext(ctx)).resources<RingCacheResources>().mMutex);
-        auto it = ringCache(executionContext(ctx)).find(key);
-        if (it != ringCache(executionContext(ctx)).end()) return it->second;
+        auto& resources = executionContext(ctx).resources<RingCacheResources>();
+        std::lock_guard<std::mutex> lock(resources.mMutex);
+        auto it = resources.mCache.find(key);
+        if (it != resources.mCache.end()) return it->second;
 
         std::shared_ptr<GpuRing> ring(new GpuRing());
         if (!ring->init(ctx)) return nullptr;
-        ringCache(executionContext(ctx)).emplace(std::move(key), ring);
+        resources.mCache.emplace(std::move(key), ring);
         return ring;
     }
 
@@ -1252,6 +1336,7 @@ namespace osuCrypto::LogVole::gpu
         const std::size_t words = static_cast<std::size_t>(n) * rho;
         mParams = params;
         mParams.mExecutionContext = executionContext(params).resourceOwner();
+        mMemoryPool = deviceMemoryPool(executionContext(params));
         mRawOwnerRole = (executionContext(params)).mScope.mRole;
         mHostModuli.assign(primes.begin(), primes.end());
 
@@ -1260,7 +1345,7 @@ namespace osuCrypto::LogVole::gpu
         u32 status = ~u32{0};
         RawSetupStream stream(executionContext(params));
         if (!stream.mStream) return false;
-        RawConstantArena arena(words * (2 * sizeof(HostShoupOperand) + 2 * sizeof(double)) + 16384, stream.mStream);
+        RawConstantArena arena(words * (2 * sizeof(HostShoupOperand) + 2 * sizeof(double)) + 16384, stream);
         if (!arena) return false;
         allocateRawNttView(arena, mView, n, primes);
         auto* devicePrimes = arena.take<u64>(rho);
@@ -1319,7 +1404,7 @@ namespace osuCrypto::LogVole::gpu
             mView.mFp52GadgetRatios = ratios;
         }
         if (!prepareH200RootPersistence(mView) || !stream.sync()) return false;
-        arena.publish(mOwned);
+        arena.publish(mPooledOwned);
         mDenoiseReady = rho > 1;
         mRaw = true;
         return true;
@@ -1339,6 +1424,7 @@ namespace osuCrypto::LogVole::gpu
 
         mParams = ctx.mParams;
         mParams.mExecutionContext = executionContext(ctx).resourceOwner();
+        mMemoryPool = deviceMemoryPool(executionContext(ctx));
         mView.mN = n;
         mView.mRho = rho;
         u32 logN = 0;
@@ -1428,16 +1514,16 @@ namespace osuCrypto::LogVole::gpu
 
         hostTablesStep.stop();
         HostStep constantsStep(executionContext(ctx), "setup GPU ring constants");
-        mView.mMods = uploadVector(executionContext(ctx), mods, mOwned);
-        mView.mRoots = uploadVector(executionContext(ctx), roots, mOwned);
-        mView.mInvRoots = uploadVector(executionContext(ctx), invRoots, mOwned);
-        mView.mInvDegree = uploadVector(executionContext(ctx), invDegree, mOwned);
-        mView.mScaledInvRoot = uploadVector(executionContext(ctx), scaledInvRoot, mOwned);
-        mView.mBaseProd = static_cast<const u64*>(uploadVector(executionContext(ctx), baseProd, mOwned));
-        mView.mBaseProdHalf = static_cast<const u64*>(uploadVector(executionContext(ctx), baseProdHalf, mOwned));
-        mView.mPuncturedProd = static_cast<const u64*>(uploadVector(executionContext(ctx), punctured, mOwned));
-        mView.mInvPuncturedProd = uploadVector(executionContext(ctx), invPunctured, mOwned);
-        mView.mGarnerInv = uploadVector(executionContext(ctx), garnerInv, mOwned);
+        mView.mMods = uploadVector(executionContext(ctx), mods, mPooledOwned);
+        mView.mRoots = uploadVector(executionContext(ctx), roots, mPooledOwned);
+        mView.mInvRoots = uploadVector(executionContext(ctx), invRoots, mPooledOwned);
+        mView.mInvDegree = uploadVector(executionContext(ctx), invDegree, mPooledOwned);
+        mView.mScaledInvRoot = uploadVector(executionContext(ctx), scaledInvRoot, mPooledOwned);
+        mView.mBaseProd = static_cast<const u64*>(uploadVector(executionContext(ctx), baseProd, mPooledOwned));
+        mView.mBaseProdHalf = static_cast<const u64*>(uploadVector(executionContext(ctx), baseProdHalf, mPooledOwned));
+        mView.mPuncturedProd = static_cast<const u64*>(uploadVector(executionContext(ctx), punctured, mPooledOwned));
+        mView.mInvPuncturedProd = uploadVector(executionContext(ctx), invPunctured, mPooledOwned);
+        mView.mGarnerInv = uploadVector(executionContext(ctx), garnerInv, mPooledOwned);
 
         // Compact inverse twiddles are immutable, prepared once with the ring
         // outside the online query, and never replace the integer fallback.
@@ -1454,14 +1540,14 @@ namespace osuCrypto::LogVole::gpu
             {
                 std::transform(invRoots.begin(), invRoots.end(), compact.begin(),
                     [](const HostShoupOperand& root) { return static_cast<double>(root.mOperand); });
-                mView.mFp52InvRoots = static_cast<const double*>(uploadVector(executionContext(ctx), compact, mOwned));
+                mView.mFp52InvRoots = static_cast<const double*>(uploadVector(executionContext(ctx), compact, mPooledOwned));
                 if (!mView.mFp52InvRoots) return false;
             }
             if (packedMode & 2u)
             {
                 std::transform(roots.begin(), roots.end(), compact.begin(),
                     [](const HostShoupOperand& root) { return static_cast<double>(root.mOperand); });
-                mView.mFp52Roots = static_cast<const double*>(uploadVector(executionContext(ctx), compact, mOwned));
+                mView.mFp52Roots = static_cast<const double*>(uploadVector(executionContext(ctx), compact, mPooledOwned));
                 if (!mView.mFp52Roots) return false;
             }
         }
@@ -1472,7 +1558,7 @@ namespace osuCrypto::LogVole::gpu
         for (u32 j = 0u; j < rho; ++j)
             sampleMax[j] = ~u64(0) -
                 seal::util::barrett_reduce_64(~u64(0), ctx.mModuli[j]) - 1u;
-        mSampleMaxMultiple = static_cast<const u64*>(uploadVector(executionContext(ctx), sampleMax, mOwned));
+        mSampleMaxMultiple = static_cast<const u64*>(uploadVector(executionContext(ctx), sampleMax, mPooledOwned));
 
         if (!mView.mMods || !mView.mRoots || !mView.mInvRoots || !mView.mInvDegree ||
             !mView.mScaledInvRoot || !mView.mBaseProd || !mView.mBaseProdHalf ||
@@ -1501,8 +1587,8 @@ namespace osuCrypto::LogVole::gpu
                 lift[j] = acc;
                 if (!seal::util::try_invert_uint_mod(acc, modJ, invLift[j])) return false;
             }
-            mCrtLift = static_cast<const u64*>(uploadVector(executionContext(ctx), lift, mOwned));
-            mInvCrtLift = static_cast<const u64*>(uploadVector(executionContext(ctx), invLift, mOwned));
+            mCrtLift = static_cast<const u64*>(uploadVector(executionContext(ctx), lift, mPooledOwned));
+            mInvCrtLift = static_cast<const u64*>(uploadVector(executionContext(ctx), invLift, mPooledOwned));
             if (!mCrtLift || !mInvCrtLift) return false;
         }
 
@@ -1593,7 +1679,7 @@ namespace osuCrypto::LogVole::gpu
                     {
 
                         CpuBenchmarkWorkerScope workerScope(benchmarkContext);
-                        CpuBenchmarkTaskScope taskScope;
+                        CpuBenchmarkTaskScope taskScope(benchmarkContext);
                         HostStep workerStep(executionContext(ownedContext), "setup GPU ring prefetch worker");
                         {
                             HostStep deviceStep(executionContext(ownedContext), "setup GPU ring select device");
@@ -1718,19 +1804,19 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        mDenoise.mQ = static_cast<const u64*>(uploadVector(executionContext(ctx), q, mOwned));
-        mDenoise.mMods = uploadVector(executionContext(ctx), mods, mOwned);
-        mDenoise.mSrcLimb = static_cast<const u32*>(uploadVector(executionContext(ctx), srcLimb, mOwned));
-        mDenoise.mCrtInvPunctured = static_cast<const u64*>(uploadVector(executionContext(ctx), crtInvPunctured, mOwned));
+        mDenoise.mQ = static_cast<const u64*>(uploadVector(executionContext(ctx), q, mPooledOwned));
+        mDenoise.mMods = uploadVector(executionContext(ctx), mods, mPooledOwned);
+        mDenoise.mSrcLimb = static_cast<const u32*>(uploadVector(executionContext(ctx), srcLimb, mPooledOwned));
+        mDenoise.mCrtInvPunctured = static_cast<const u64*>(uploadVector(executionContext(ctx), crtInvPunctured, mPooledOwned));
         mDenoise.mPuncturedProdModTarget =
-            static_cast<const u64*>(uploadVector(executionContext(ctx), puncturedProdModTarget, mOwned));
-        mDenoise.mCrtInvPuncturedShoup = uploadVector(executionContext(ctx), crtInvPuncturedShoup, mOwned);
-        mDenoise.mScaledPuncturedShoup = uploadVector(executionContext(ctx), scaledPuncturedShoup, mOwned);
-        mDenoise.mFracInvLo = static_cast<const u64*>(uploadVector(executionContext(ctx), fracInvLo, mOwned));
-        mDenoise.mFracInvHi = static_cast<const u64*>(uploadVector(executionContext(ctx), fracInvHi, mOwned));
-        mDenoise.mCrtLiftModTarget = static_cast<const u64*>(uploadVector(executionContext(ctx), crtLift, mOwned));
-        mDenoise.mInvCrtLiftModTarget = static_cast<const u64*>(uploadVector(executionContext(ctx), invCrtLift, mOwned));
-        mDenoise.mInvCrtLiftShoup = uploadVector(executionContext(ctx), invCrtLiftShoup, mOwned);
+            static_cast<const u64*>(uploadVector(executionContext(ctx), puncturedProdModTarget, mPooledOwned));
+        mDenoise.mCrtInvPuncturedShoup = uploadVector(executionContext(ctx), crtInvPuncturedShoup, mPooledOwned);
+        mDenoise.mScaledPuncturedShoup = uploadVector(executionContext(ctx), scaledPuncturedShoup, mPooledOwned);
+        mDenoise.mFracInvLo = static_cast<const u64*>(uploadVector(executionContext(ctx), fracInvLo, mPooledOwned));
+        mDenoise.mFracInvHi = static_cast<const u64*>(uploadVector(executionContext(ctx), fracInvHi, mPooledOwned));
+        mDenoise.mCrtLiftModTarget = static_cast<const u64*>(uploadVector(executionContext(ctx), crtLift, mPooledOwned));
+        mDenoise.mInvCrtLiftModTarget = static_cast<const u64*>(uploadVector(executionContext(ctx), invCrtLift, mPooledOwned));
+        mDenoise.mInvCrtLiftShoup = uploadVector(executionContext(ctx), invCrtLiftShoup, mPooledOwned);
 
         return mDenoise.mQ && mDenoise.mMods && mDenoise.mSrcLimb && mDenoise.mCrtInvPunctured &&
                mDenoise.mPuncturedProdModTarget && mDenoise.mCrtInvPuncturedShoup &&
@@ -1751,14 +1837,14 @@ namespace osuCrypto::LogVole::gpu
         {
             RawSetupStream stream(executionContext(mParams));
             if (!stream.mStream) return nullptr;
-            RawConstantArena arena(mView.mRho * sizeof(u64), stream.mStream);
+            RawConstantArena arena(mView.mRho * sizeof(u64), stream);
             auto* factors = arena.take<u64>(mView.mRho);
             if (!factors || !launchPreparePow2Factors(mView, shiftBits, factors, stream.mStream) ||
                 !stream.sync()) return nullptr;
             // Reserve before publishing ownership so allocation exceptions
             // cannot expose an uncached partial result.
             mPow2Cache.reserve(mPow2Cache.size() + 1);
-            arena.publish(mOwned);
+            arena.publish(mPooledOwned);
             mPow2Cache.emplace_back(shiftBits, factors);
             return factors;
         }
@@ -1781,7 +1867,7 @@ namespace osuCrypto::LogVole::gpu
             factors[j] = acc;
         }
 
-        const u64* d = static_cast<const u64*>(uploadVector(executionContext(mParams), factors, mOwned));
+        const u64* d = static_cast<const u64*>(uploadVector(executionContext(mParams), factors, mPooledOwned));
         if (!d) return nullptr;
         mPow2Cache.emplace_back(shiftBits, d);
         return d;
@@ -1801,8 +1887,7 @@ namespace osuCrypto::LogVole::gpu
             RawSetupStream stream(executionContext(mParams));
             if (!stream.mStream) return false;
             RawConstantArena arena(mView.mRho *
-                (5 * sizeof(u64) + sizeof(ScaleRoundFastLimb)) + 6u * 16u,
-                stream.mStream);
+                (5 * sizeof(u64) + sizeof(ScaleRoundFastLimb)) + 6u * 16u, stream);
             ScaleRoundConstView view;
             view.mCrtInvPunctured = arena.take<u64>(mView.mRho);
             view.mQ = arena.take<u64>(mView.mRho);
@@ -1812,7 +1897,7 @@ namespace osuCrypto::LogVole::gpu
             view.mFastLimbs = arena.take<ScaleRoundFastLimb>(mView.mRho);
             if (!launchPrepareScaleRoundConstants(mView, p, view, stream.mStream) || !stream.sync()) return false;
             mScaleRoundCache.reserve(mScaleRoundCache.size() + 1);
-            arena.publish(mOwned);
+            arena.publish(mPooledOwned);
             mScaleRoundCache.emplace_back(p, view);
             out = view;
             return true;
@@ -1825,6 +1910,7 @@ namespace osuCrypto::LogVole::gpu
     GpuPlainNtt::~GpuPlainNtt()
     {
         for (void* p : mOwned) gpuFree(p);
+        for (void* p : mPooledOwned) mMemoryPool->release(p);
     }
 
     std::shared_ptr<GpuPlainNtt> GpuPlainNtt::get(
@@ -1937,12 +2023,13 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPlainNtt::initRaw(u32 n, u64 p)
     {
+        mMemoryPool = deviceMemoryPool(*mExecutionContext);
         HostStep setupStep(*mExecutionContext, "setup GPU raw plaintext NTT init");
         u32 status = ~u32{0};
         RawSetupStream stream(*mExecutionContext);
         if (!stream.mStream) return false;
         RawConstantArena arena(static_cast<std::size_t>(n) *
-            (2 * sizeof(HostShoupOperand) + 2 * sizeof(u32)) + 1024, stream.mStream);
+            (2 * sizeof(HostShoupOperand) + 2 * sizeof(u32)) + 1024, stream);
         if (!arena) return false;
         allocateRawNttView(arena, mView, n, std::span<const u64>(&p, 1));
         auto* devicePrime = arena.take<u64>(1);
@@ -1956,7 +2043,7 @@ namespace osuCrypto::LogVole::gpu
             !launchPrepareRawSlotMaps(n, map, inverseMap, stream.mStream) ||
             !gpuMemcpyD2H(&status, deviceStatus, sizeof(status), stream.mStream) ||
             !stream.sync() || status != 0) return false;
-        arena.publish(mOwned);
+        arena.publish(mPooledOwned);
         mSlotMap = map;
         mInverseSlotMap = inverseMap;
         mSlotCount = n;
@@ -1965,6 +2052,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPlainNtt::init(const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder, ExecutionContext& execution)
     {
+        mMemoryPool = deviceMemoryPool(execution);
         auto data = batchingContext.first_context_data();
         if (!data || !data->plain_ntt_tables()) return false;
 
@@ -2039,13 +2127,13 @@ namespace osuCrypto::LogVole::gpu
             inverseMap[src] = i;
         }
 
-        mView.mMods = uploadVector(*mExecutionContext, mods, mOwned);
-        mView.mRoots = uploadVector(*mExecutionContext, roots, mOwned);
-        mView.mInvRoots = uploadVector(*mExecutionContext, invRoots, mOwned);
-        mView.mInvDegree = uploadVector(*mExecutionContext, invDegree, mOwned);
-        mView.mScaledInvRoot = uploadVector(*mExecutionContext, scaledInvRoot, mOwned);
-        mSlotMap = static_cast<const u32*>(uploadVector(*mExecutionContext, map, mOwned));
-        mInverseSlotMap = static_cast<const u32*>(uploadVector(*mExecutionContext, inverseMap, mOwned));
+        mView.mMods = uploadVector(*mExecutionContext, mods, mPooledOwned);
+        mView.mRoots = uploadVector(*mExecutionContext, roots, mPooledOwned);
+        mView.mInvRoots = uploadVector(*mExecutionContext, invRoots, mPooledOwned);
+        mView.mInvDegree = uploadVector(*mExecutionContext, invDegree, mPooledOwned);
+        mView.mScaledInvRoot = uploadVector(*mExecutionContext, scaledInvRoot, mPooledOwned);
+        mSlotMap = static_cast<const u32*>(uploadVector(*mExecutionContext, map, mPooledOwned));
+        mInverseSlotMap = static_cast<const u32*>(uploadVector(*mExecutionContext, inverseMap, mPooledOwned));
         // The CRT fields stay null: with rho == 1 no kernel that uses them is
         // ever launched against this view.
         if (!mView.mMods || !mView.mRoots || !mView.mInvRoots || !mView.mInvDegree ||
@@ -2063,13 +2151,20 @@ namespace osuCrypto::LogVole::gpu
         resize(ring, count);
     }
 
+    GpuPolyBuffer::GpuPolyBuffer(const GpuRing& ring, std::size_t count, GpuStream& stream)
+    {
+        resize(ring, count, stream);
+    }
+
     GpuPolyBuffer::~GpuPolyBuffer()
     {
         release();
     }
 
     GpuPolyBuffer::GpuPolyBuffer(GpuPolyBuffer&& other) noexcept
-        : mData(other.mData), mCount(other.mCount), mPolyWords(other.mPolyWords), mCapacity(other.mCapacity)
+        : mMemoryPool(std::move(other.mMemoryPool)), mAllocationLease(std::move(other.mAllocationLease)),
+          mRegisteredStreams(other.mRegisteredStreams.exchange(0, std::memory_order_relaxed)),
+          mData(other.mData), mCount(other.mCount), mPolyWords(other.mPolyWords), mCapacity(other.mCapacity)
     {
         other.mData = nullptr;
         other.mCount = 0;
@@ -2081,6 +2176,9 @@ namespace osuCrypto::LogVole::gpu
         if (this != &other)
         {
             release();
+            mMemoryPool = std::move(other.mMemoryPool);
+            mAllocationLease = std::move(other.mAllocationLease);
+            mRegisteredStreams.store(other.mRegisteredStreams.exchange(0, std::memory_order_relaxed), std::memory_order_relaxed);
             mData = other.mData;
             mCount = other.mCount;
             mPolyWords = other.mPolyWords;
@@ -2094,7 +2192,10 @@ namespace osuCrypto::LogVole::gpu
 
     void GpuPolyBuffer::release()
     {
-        gpuFree(mData);
+        if (mMemoryPool) mMemoryPool->release(mData);
+        else gpuFree(mData);
+        mAllocationLease.reset();
+        mRegisteredStreams.store(0, std::memory_order_relaxed);
         mData = nullptr;
         mCount = 0;
         mCapacity = 0;
@@ -2103,6 +2204,56 @@ namespace osuCrypto::LogVole::gpu
     bool GpuPolyBuffer::resize(const GpuRing& ring, std::size_t count)
     {
         return resizeWords(ring.polyWords(), count);
+    }
+
+    bool GpuPolyBuffer::resize(const GpuRing& ring, std::size_t count, GpuStream& stream)
+    {
+        return resizeWords(ring.polyWords(), count, stream);
+    }
+
+    bool GpuPolyBuffer::resizeWords(std::size_t polyWords, std::size_t count, GpuStream& stream)
+    {
+        if (!polyWords || polyWords > std::numeric_limits<std::size_t>::max() / sizeof(u64) ||
+            count > std::numeric_limits<std::size_t>::max() / sizeof(u64) / polyWords) return false;
+        if (mMemoryPool == stream.memoryPool() && polyWords == mPolyWords && count <= mCapacity)
+        {
+            mCount = count;
+            return true;
+        }
+        if (!count) { release(); mPolyWords = polyWords; return true; }
+        auto pool = stream.memoryPool();
+        auto* next = static_cast<u64*>(pool->allocate(count * polyWords * sizeof(u64), stream.raw(), stream.lease()));
+        if (!next) return false;
+        release();
+        mMemoryPool = std::move(pool);
+        mAllocationLease = stream.lease();
+        mData = next;
+        mPolyWords = polyWords;
+        mCount = mCapacity = count;
+        return true;
+    }
+
+    u64* GpuPolyBuffer::data() const
+    {
+        if (mMemoryPool) mMemoryPool->use(mData);
+        return mData;
+    }
+
+    u64* GpuPolyBuffer::data(GpuStream& stream) const
+    {
+        // Allocation already registered this stream. Its retained native lease
+        // also prevents handle reuse while the buffer remains alive.
+        if (mMemoryPool && mAllocationLease != stream.lease())
+        {
+            const u64 bit = mMemoryPool == stream.memoryPool() && stream.memorySlot() < 64
+                ? u64{1} << stream.memorySlot() : 0;
+            if (!bit || !(mRegisteredStreams.load(std::memory_order_acquire) & bit))
+            {
+                mMemoryPool->use(mData, stream.raw(), stream.lease());
+                if (bit) mRegisteredStreams.fetch_or(bit, std::memory_order_release);
+            }
+        }
+        return mData;
     }
 
     bool GpuPolyBuffer::resizeWords(std::size_t polyWords, std::size_t count)
@@ -2123,7 +2274,11 @@ namespace osuCrypto::LogVole::gpu
         // Allocate first, preserving the old buffer on allocation failure.
         auto* next = static_cast<u64*>(gpuMalloc(count * polyWords * sizeof(u64)));
         if (!next) return false;
-        gpuFree(mData);
+        if (mMemoryPool) mMemoryPool->release(mData);
+        else gpuFree(mData);
+        mMemoryPool.reset();
+        mAllocationLease.reset();
+        mRegisteredStreams.store(0, std::memory_order_relaxed);
         mData = next;
         mPolyWords = polyWords;
         mCount = mCapacity = count;
@@ -2132,6 +2287,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPolyBuffer::upload(std::span<const RnsPoly> polys, GpuStream& stream, std::size_t dstOffset)
     {
+        (void)data(stream);
         if (polys.empty()) return true;
         const std::size_t polyBytes = mPolyWords * sizeof(u64);
 
@@ -2162,9 +2318,9 @@ namespace osuCrypto::LogVole::gpu
             for (std::size_t i = 0; i < run; ++i)
             {
                 if (polys[done + i].mCoeffs.size() != mPolyWords) return false;
-                std::memcpy(stage + i * polyBytes, polys[done + i].mCoeffs.data(), polyBytes);
+                std::memcpy(stage + i * polyBytes, streamData(polys[done + i].mCoeffs, stream), polyBytes);
             }
-            if (!gpuMemcpyH2D(poly(dstOffset + done), stage, run * polyBytes, stream.raw()) ||
+            if (!gpuMemcpyH2D(poly(dstOffset + done, stream), stage, run * polyBytes, stream.raw()) ||
                 !stream.sync())
             {
                 return false;
@@ -2176,16 +2332,18 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPolyBuffer::upload(const RnsPoly& p, std::size_t dstIdx, GpuStream& stream)
     {
+        (void)data(stream);
         if (dstIdx >= mCount) return false;
         if (p.mCoeffs.size() != mPolyWords) return false;
-        return gpuMemcpyH2D(poly(dstIdx), p.mCoeffs.data(), mPolyWords * sizeof(u64), stream.raw());
+        return gpuMemcpyH2D(poly(dstIdx, stream), streamData(p.mCoeffs, stream), mPolyWords * sizeof(u64), stream.raw());
     }
 
     bool GpuPolyBuffer::download(
         std::vector<RnsPoly>& polys, GpuStream& stream, std::size_t srcOffset, std::size_t count) const
     {
+        (void)data(stream);
         const std::size_t num = count ? count : (mCount - srcOffset);
-        polys.resize(num);
+        streamResize(polys, stream, num);
         if (num == 0) return true;
 
         const std::size_t polyBytes = mPolyWords * sizeof(u64);
@@ -2201,19 +2359,19 @@ namespace osuCrypto::LogVole::gpu
             {
                 if (polys[done + i].mCoeffs.size() != mPolyWords)
                 {
-                    polys[done + i].mCoeffs.resize(mPolyWords);
+                    streamResize(polys[done + i].mCoeffs, stream, mPolyWords);
                 }
             }
             if (stage)
             {
-                if (!gpuMemcpyD2H(stage, poly(srcOffset + done), run * polyBytes, stream.raw()) ||
+                if (!gpuMemcpyD2H(stage, poly(srcOffset + done, stream), run * polyBytes, stream.raw()) ||
                     !stream.sync())
                 {
                     return false;
                 }
                 for (std::size_t i = 0; i < run; ++i)
                 {
-                    std::memcpy(polys[done + i].mCoeffs.data(), stage + i * polyBytes, polyBytes);
+                    std::memcpy(streamData(polys[done + i].mCoeffs, stream), stage + i * polyBytes, polyBytes);
                 }
             }
             else
@@ -2221,7 +2379,7 @@ namespace osuCrypto::LogVole::gpu
                 for (std::size_t i = 0; i < run; ++i)
                 {
                     if (!gpuMemcpyD2H(
-                            polys[done + i].mCoeffs.data(), poly(srcOffset + done + i), polyBytes,
+                            streamData(polys[done + i].mCoeffs, stream), poly(srcOffset + done + i, stream), polyBytes,
                             stream.raw()))
                     {
                         return false;
@@ -2238,6 +2396,7 @@ namespace osuCrypto::LogVole::gpu
         std::vector<RnsPoly>& polys, GpuStream& stream, u32 workers,
         std::size_t srcOffset, std::size_t count) const
     {
+        (void)data(stream);
         if (srcOffset > mCount || count > mCount - srcOffset ||
             !mPolyWords || mPolyWords > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return false;
         const std::size_t num = count ? count : mCount - srcOffset;
@@ -2352,17 +2511,16 @@ namespace osuCrypto::LogVole::gpu
             HostStep copyStep(stream.execution(), "setup: pipelined download host copy");
             auto copyOne = [&](std::size_t i) {
                 auto& coefficients = next[offset + i].mCoeffs;
-                coefficients.resize(mPolyWords);
-                std::memcpy(coefficients.data(), pinned + slot * slotBytes + i * polyBytes, polyBytes);
+                streamResize(coefficients, stream, mPolyWords);
+                std::memcpy(streamData(coefficients, stream), pinned + slot * slotBytes + i * polyBytes, polyBytes);
                 return true;
             };
             if (!copyPool)
                 return detail::runParallelTasks(length, copySlots ? 1 : workers, copyOne, false, &(stream.execution()));
 
             const auto activeWorkers = std::min(copyWorkers, length);
-            const auto cacheScope = (stream.execution()).mScope;
             auto worker = [&](std::size_t workerIdx) {
-                CpuBenchmarkTaskScope taskScope;
+                CpuBenchmarkTaskScope taskScope(stream.execution().mCpuBenchmark);
 
                 const auto begin = workerIdx * length / activeWorkers;
                 const auto end = (workerIdx + 1) * length / activeWorkers;
@@ -2395,7 +2553,7 @@ namespace osuCrypto::LogVole::gpu
             const u32 slot = static_cast<u32>((offset / runPolys) & 1u);
             // Slot i is reused only after its prior CPU copy finished. Queue
             // the next DMA before joining the previous chunk's host workers.
-            if (!gpuMemcpyD2H(pinned + slot * slotBytes, poly(srcOffset + offset),
+            if (!gpuMemcpyD2H(pinned + slot * slotBytes, poly(srcOffset + offset, stream),
                     length * polyBytes, stream.raw()) ||
                 !gpuEventRecord(staging.events[slot], stream.raw())) return false;
             if (previousLength && !materialize(previousOffset, previousLength, previousSlot)) return false;
@@ -2410,15 +2568,17 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPolyBuffer::downloadAsync(RnsPoly& p, std::size_t srcIdx, GpuStream& stream) const
     {
+        (void)data(stream);
         if (p.mCoeffs.size() != mPolyWords)
         {
             resizeZero(p.mCoeffs, mPolyWords);
         }
-        return gpuMemcpyD2H(p.mCoeffs.data(), poly(srcIdx), mPolyWords * sizeof(u64), stream.raw());
+        return gpuMemcpyD2H(streamData(p.mCoeffs, stream), poly(srcIdx, stream), mPolyWords * sizeof(u64), stream.raw());
     }
 
     bool GpuPolyBuffer::zero(GpuStream& stream)
     {
+        (void)data(stream);
         return gpuMemsetZero(mData, bytes(), stream.raw());
     }
 

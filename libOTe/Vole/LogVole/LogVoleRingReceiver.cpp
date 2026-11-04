@@ -463,12 +463,12 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole receiver could not prepare key-derive request");
         }
 
-        co_await detail::sendFrame(sock, encode(request));
+        co_await detail::sendFrame(sock, encode(request, &executionContext(input.mParams)));
 
 		u64 maxPayload = 0;
 		const bool validPayloadSize = keyDerivePayloadSize(input.mParams, request.mTau, maxPayload);
 		const auto responsePayload =
-			co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload));
+			co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), &executionContext(input.mParams));
 
         KeyDeriveResponse response{};
         if (!decode(responsePayload, response))
@@ -583,7 +583,7 @@ namespace osuCrypto::LogVole
                 {
                     HostStep step(executionContext(state), "root: encode digest", state.mParams.mW);
                     AutoTimer serTimer(executionContext(state).mTiming.mRootSerializeUs);
-                    digestPayload = encode(digest);
+                    digestPayload = encode(digest, &executionContext(state));
                 }
                 digestFrameSize = detail::frameBytes(digestPayload);
                 {
@@ -1023,7 +1023,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole receiver could not shrink");
         }
 
-        co_await detail::sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, shrink.mDigest)));
+        co_await detail::sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, shrink.mDigest), &executionContext(state)));
 
 		u64 maxPayload = 0;
 		const bool validPayloadSize = polyPayloadSize(state.mParams.mRing, maxPayload);

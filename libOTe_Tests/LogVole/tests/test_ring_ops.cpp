@@ -502,6 +502,40 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeZpCrtContext(testExecution, params, preset.bits, eagerCrt));
         LOGVOLE_EXPECT_EQ(eagerCrt.mPlaintextModulus, preset.plaintext);
         LOGVOLE_REQUIRE_TRUE(rangesEqual(eagerCrt.mPlaintextLiftModQj, preset.lift));
+        // CPU sampling/reduction of lightweight metadata must preserve exact
+        // outputs and parent PRNG consumption without needing NTT/RNS tables.
+        for (const auto& context : lightweight)
+        {
+            seal::prng_seed_type seed{};
+            for (std::size_t i = 0; i < seed.size(); ++i) seed[i] = 91u + i;
+            std::array<std::future<RnsPoly>, 4> samples;
+            for (auto& sample : samples)
+                sample = std::async(std::launch::async, [context, seed] { return sampleUniformPolyFromSeed(context, seed); });
+            const auto uniformReference = sampleUniformPolyFromSeed(eager, seed);
+            for (auto& sample : samples) expect_poly_equal(sample.get(), uniformReference);
+            expect_poly_equal(sampleUniformPolyFromSeed(context, seed), sampleUniformPolyFromSeed(eager, seed));
+            expect_poly_equal(deriveUniformPolyFromSeed(context, oc::toBlock(73), 19, 2),
+                deriveUniformPolyFromSeed(eager, oc::toBlock(73), 19, 2));
+            oc::PRNG actualPrng(oc::toBlock(113)), expectedPrng(oc::toBlock(113));
+            auto actual = sampleUniformPoly(context, actualPrng);
+            auto expected = sampleUniformPoly(eager, expectedPrng);
+            expect_poly_equal(actual, expected);
+            LOGVOLE_REQUIRE_TRUE(actualPrng.get<oc::block>() == expectedPrng.get<oc::block>());
+            std::vector<oc::u64> actualNoise(preset.degree), expectedNoise(preset.degree);
+            LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactFromSeed(actualNoise, 3.2, 19.2, seed, context));
+            LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactFromSeed(expectedNoise, 3.2, 19.2, seed, eager));
+            LOGVOLE_REQUIRE_TRUE(actualNoise == expectedNoise);
+            LOGVOLE_REQUIRE_TRUE(addPolyErrorFromSeed(actual, 3.2, 19.2, seed, context));
+            LOGVOLE_REQUIRE_TRUE(addPolyErrorFromSeed(expected, 3.2, 19.2, seed, eager));
+            expect_poly_equal(actual, expected);
+            std::vector<RnsPoly> actualDigits, expectedDigits;
+            LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRange(actual, preset.bits / 2, 0, 2, context, actualDigits));
+            LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRange(expected, preset.bits / 2, 0, 2, eager, expectedDigits));
+            expect_batch_equal(actualDigits, expectedDigits);
+            LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(actual, preset.bits / 2, 1, 1, context, actualDigits));
+            LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(expected, preset.bits / 2, 1, 1, eager, expectedDigits));
+            expect_batch_equal(actualDigits, expectedDigits);
+        }
         // Concurrent copies resolve to a single immutable host fallback owner.
         std::array<std::future<std::shared_ptr<seal::SEALContext>>, 4> readers;
         for (auto& reader : readers)
@@ -1252,6 +1286,8 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                         context.mWorkerLimit = workers;
                         ::tests_libOTe::logvole_test::ScopedCpuBenchmark restoreTelemetry(testExecution, testExecution->mCpuBenchmark);
                         testExecution->mCpuBenchmark = &context;
+                        ::tests_libOTe::logvole_test::ScopedCpuBenchmark streamTelemetry(
+                            stream.execution().shared_from_this(), &context);
                         const auto originalScope = testExecution->mScope;
                         const auto originalSlots = context.mWorkerSlots.load();
                         std::vector<RnsPoly> downloaded;
@@ -1797,11 +1833,11 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         params.mCoeffModulusBits.resize(shape.second);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(),
             shape.first == 1024u ? 30 : shape.first == 8192u ? 55 : 52);
+        const auto run = ::tests_libOTe::logvole_test::allocateRunId(testExecution);
+        ::tests_libOTe::logvole_test::ScopedProtocolCacheScope cacheScope(testExecution, ProtocolCacheRole::Sender, run);
         RingNttContext ctx;
         ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
         LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
-        const auto run = ::tests_libOTe::logvole_test::allocateRunId(testExecution);
-        ::tests_libOTe::logvole_test::ScopedProtocolCacheScope cacheScope(testExecution, ProtocolCacheRole::Sender, run);
         constexpr std::uint32_t count = 4;
         constexpr std::uint64_t nonce = 0x52455441494e4544ULL, domain = 0x5055424c4943ULL;
 

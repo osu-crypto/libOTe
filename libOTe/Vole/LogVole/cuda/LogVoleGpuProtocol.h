@@ -11,6 +11,7 @@
 // LogVoleRingReceiver::online / evaluateSenderSeedCandidate
 // and produces bit-identical results.
 
+#include <atomic>
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 
 #include <memory>
@@ -28,6 +29,8 @@ namespace osuCrypto::LogVole
 
 namespace osuCrypto::LogVole::gpu
 {
+    class GpuStream;
+    class DeviceMemoryPool;
     class ReceiverFirstQueryAllocations;
     using ReceiverFirstQueryAllocationsPtr = std::shared_ptr<ReceiverFirstQueryAllocations>;
 
@@ -103,6 +106,7 @@ namespace osuCrypto::LogVole::gpu
         ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
         ExecutionContext& execution() const;
         DeviceBatch();
+        explicit DeviceBatch(std::shared_ptr<GpuRing> ring);
         ~DeviceBatch();
         DeviceBatch(const DeviceBatch&) = delete;
         DeviceBatch& operator=(const DeviceBatch&) = delete;
@@ -124,6 +128,7 @@ namespace osuCrypto::LogVole::gpu
         ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
         ExecutionContext& execution() const;
         RetainedPublicUniform();
+        explicit RetainedPublicUniform(std::shared_ptr<GpuRing> ring);
         ~RetainedPublicUniform();
         RetainedPublicUniform(const RetainedPublicUniform&) = delete;
         RetainedPublicUniform& operator=(const RetainedPublicUniform&) = delete;
@@ -270,19 +275,23 @@ namespace osuCrypto::LogVole::gpu
     public:
         ExecutionContextPtr mExecutionContext = std::make_shared<ExecutionContext>();
         DeviceScalars() { mExecutionContext->mUseGpu = true; }
+        explicit DeviceScalars(ExecutionContext& execution)
+            : mExecutionContext(execution.resourceOwner()) {}
         ExecutionContext& execution() const { return *mExecutionContext; }
         ~DeviceScalars();
         DeviceScalars(const DeviceScalars&) = delete;
         DeviceScalars& operator=(const DeviceScalars&) = delete;
 
         bool resize(std::size_t count);
-        u64* data() const { return mData; }
+        bool resize(std::size_t count, GpuStream& stream);
+        u64* data() const;
+        u64* data(GpuStream& stream) const;
         std::size_t count() const { return mCount; }
         bool empty() const { return mCount == 0; }
 
         // Stream the contents were produced on. A consumer that may run on another
         // thread must order against this rather than assume stream ordering, since
-        // threadStream() is thread-keyed. Lets the producer skip an eager drain.
+        // executionStream() is worker-local. Lets the producer skip an eager drain.
         void* producerStream() const { return mProducerStream; }
         void setProducerStream(void* s, ExecutionContextPtr execution = {})
         {
@@ -291,6 +300,9 @@ namespace osuCrypto::LogVole::gpu
         }
 
     private:
+        std::shared_ptr<DeviceMemoryPool> mMemoryPool;
+        std::shared_ptr<void> mAllocationLease;
+        mutable std::atomic<u64> mRegisteredStreams{0};
         u64* mData = nullptr;
         std::size_t mCount = 0;
         void* mProducerStream = nullptr;

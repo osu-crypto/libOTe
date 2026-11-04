@@ -115,6 +115,7 @@ if(ENABLE_LOGVOLE)
     if(ENABLE_LOGVOLE_CUDA)
         list(APPEND SRCS
             Vole/LogVole/cuda/LogVoleGpuKernels.cu
+            Vole/LogVole/cuda/LogVoleGpuMemory.cu
             Vole/LogVole/cuda/LogVoleGpuZk.cu
             Vole/LogVole/cuda/LogVoleGpuBackend.cpp
             Vole/LogVole/cuda/LogVoleGpuGaussian.cpp

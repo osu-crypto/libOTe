@@ -224,7 +224,7 @@ namespace osuCrypto::LogVole
                 RootOfflineMessage* root)
                 : mExecutionContext(root ? root->mRing.mExecutionContext
                     : std::make_shared<ExecutionContext>()),
-                  mRoot(root), mCudaRequested(cudaRequested)
+                  mRoot(root), mReserved(0, mExecutionContext), mCudaRequested(cudaRequested)
             {
                 mEvidence.mSenderRunId = senderRunId;
                 mEvidence.mRequested = requested;
@@ -416,7 +416,7 @@ namespace osuCrypto::LogVole
 
                     payload = message.mEncodedShrinkExpandMessage.empty()
                         ? encode(message.mShrinkExpandMessage,
-                            params.mShrinkExpand.mNumWorkerThreads)
+                            params.mShrinkExpand.mNumWorkerThreads, &executionContext(params))
                         : std::move(message.mEncodedShrinkExpandMessage);
                 }
                 rootPin.startBeforeFrame();
@@ -443,7 +443,7 @@ namespace osuCrypto::LogVole
 
                     payload = rootPin.mReserved.empty()
                         ? encode(message.mRootMessage,
-                            params.mShrinkExpand.mNumWorkerThreads)
+                            params.mShrinkExpand.mNumWorkerThreads, &executionContext(params))
                         : encodeRootOfflineIntoBuffer(message.mRootMessage,
                             std::move(rootPin.mReserved),
                             params.mShrinkExpand.mNumWorkerThreads);
@@ -564,7 +564,7 @@ namespace osuCrypto::LogVole
                         if (!nonInteractive)
                         {
                             AutoTimer serTimer(executionContext(state).mTiming.mRootSerializeUs);
-                            responsePayload = encode(response);
+                            responsePayload = encode(response, &executionContext(state));
                         }
                     }
                     if (!nonInteractive)
@@ -732,7 +732,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole sender could not prepare shrink/expand offline message");
         }
 
-        co_await sendOfflineFrame(sock, encode(message, input.mParams.mNumWorkerThreads));
+        co_await sendOfflineFrame(sock, encode(message, input.mParams.mNumWorkerThreads, &executionContext(input.mParams)));
     }
 
     task<> LogVoleRingSender::offline(
@@ -824,7 +824,7 @@ namespace osuCrypto::LogVole
 		const bool validPayloadSize =
 			keyDerivePayloadSize(input.mParams, static_cast<u32>(input.mSk1.size()), maxPayload);
 		const auto requestPayload =
-			co_await detail::recvFrame<ProtocolCacheRole::Sender>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload));
+			co_await detail::recvFrame<ProtocolCacheRole::Sender>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), &executionContext(input.mParams));
 
         KeyDeriveRequest request{};
         if (!decode(requestPayload, request))
@@ -838,7 +838,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole sender rejected key-derive request");
         }
 
-        co_await detail::sendFrame(sock, encode(response));
+        co_await detail::sendFrame(sock, encode(response, &executionContext(input.mParams)));
     }
 
     task<> LogVoleRingSender::online(
@@ -967,7 +967,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole sender could not derive shrink/expand key");
         }
 
-        co_await detail::sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, skX)));
+        co_await detail::sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, skX), &executionContext(state)));
 
         ShrinkExpandExpandSenderInput expandInput = input;
         expandInput.mDigest = std::move(digest);

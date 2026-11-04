@@ -220,32 +220,33 @@ namespace osuCrypto::LogVole::gpu
         const std::size_t allPrefixBytes = activeSeeds.size() * prefixBytes;
         auto& stream = sampleStream(execution);
 
-        using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        Allocation deviceSeeds(nullptr, gpuFree), prefixes(nullptr, gpuFree), candidates(nullptr, gpuFree),
-            counts(nullptr, gpuFree), complete(nullptr, gpuFree), deviceRows(nullptr, gpuFree);
-        auto samples = std::make_shared<DeviceScalars>();
+        using Allocation = std::unique_ptr<void, DeviceMemoryDeleter>;
+        Allocation deviceSeeds(nullptr, DeviceMemoryDeleter{stream.memoryPool()}), prefixes(nullptr, DeviceMemoryDeleter{stream.memoryPool()}), candidates(nullptr, DeviceMemoryDeleter{stream.memoryPool()}),
+            counts(nullptr, DeviceMemoryDeleter{stream.memoryPool()}), complete(nullptr, DeviceMemoryDeleter{stream.memoryPool()}), deviceRows(nullptr, DeviceMemoryDeleter{stream.memoryPool()});
+        auto samples = std::make_shared<DeviceScalars>(execution);
         struct GaussianOutputCache : PinnedPrefixCache {};
         auto pinned = hostOut ? execution.deviceResources<GaussianOutputCache>().acquire(outputBytes) : std::shared_ptr<u64>{};
         if (hostOut && !pinned) return false;
         std::vector<u8> completed(seeds.size(), 1), activeCompleted(activeSeeds.size());
         StreamDrain drain{stream};
-        if (!samples->resize(outputBytes / sizeof(u64)) ||
-            !gpuMemsetZero(samples->data(), outputBytes, stream.raw())) return false;
+        if (!streamResize(*samples, stream, outputBytes / sizeof(u64)) ||
+            !gpuMemsetZero(streamData(*samples, stream), outputBytes, stream.raw())) return false;
         if (!activeSeeds.empty())
         {
-            deviceSeeds.reset(gpuMalloc(activeSeeds.size_bytes()));
-            prefixes.reset(gpuMalloc(allPrefixBytes));
-            candidates.reset(gpuMalloc(allPrefixBytes));
-            counts.reset(gpuMalloc(activeSeeds.size() * countRowBytes));
-            complete.reset(gpuMalloc(activeSeeds.size()));
-            if (!outputRows.empty()) deviceRows.reset(gpuMalloc(outputRows.size() * sizeof(u32)));
+            deviceSeeds.reset(stream.allocate(activeSeeds.size_bytes()));
+            prefixes.reset(stream.allocate(allPrefixBytes));
+            candidates.reset(stream.allocate(allPrefixBytes));
+            counts.reset(stream.allocate(activeSeeds.size() * countRowBytes));
+            complete.reset(stream.allocate(activeSeeds.size()));
+            if (!outputRows.empty()) deviceRows.reset(stream.allocate(outputRows.size() * sizeof(u32)));
             if (!deviceSeeds || !prefixes || !candidates || !counts || !complete ||
-                (!outputRows.empty() && (!deviceRows || !gpuMemcpyH2D(deviceRows.get(), outputRows.data(),
+                (!outputRows.empty() && (!deviceRows || !gpuMemcpyH2D(deviceRows.get(), streamData(outputRows, stream),
                     outputRows.size() * sizeof(u32), stream.raw()))) ||
-                !gpuMemcpyH2D(deviceSeeds.get(), activeSeeds.data(), activeSeeds.size_bytes(), stream.raw())) return false;
+                !gpuMemcpyH2D(deviceSeeds.get(), streamData(activeSeeds, stream), activeSeeds.size_bytes(), stream.raw())) return false;
             HostStep step(execution, "setup: Gaussian GPU transform PRG");
             if (!launchBlake2xbStreamForTest(static_cast<const u64*>(deviceSeeds.get()),
-                    static_cast<u64*>(prefixes.get()), wordsPerPrefix, static_cast<u32>(activeSeeds.size()), stream.raw()))
+                    static_cast<u64*>(prefixes.get()), wordsPerPrefix, static_cast<u32>(activeSeeds.size()), stream.raw(),
+                    stream.memoryPool().get()))
                 return false;
         }
         if (!activeSeeds.empty())
@@ -254,11 +255,11 @@ namespace osuCrypto::LogVole::gpu
             if (!launchGaussianTransform(static_cast<const u64*>(prefixes.get()), wordsPerPrefix,
                     static_cast<u32>(activeSeeds.size()), coefficients, sigma, clip, modulus,
                     static_cast<u64*>(candidates.get()), static_cast<u32*>(counts.get()),
-                    samples->data(), static_cast<u8*>(complete.get()), stream.raw(),
+                    streamData(*samples, stream), static_cast<u8*>(complete.get()), stream.raw(),
                     static_cast<const u32*>(deviceRows.get())) ||
-                !gpuMemcpyD2H(activeCompleted.data(), complete.get(), activeCompleted.size(), stream.raw())) return false;
+                !gpuMemcpyD2H(streamData(activeCompleted, stream), complete.get(), activeCompleted.size(), stream.raw())) return false;
         }
-        if ((hostOut && !gpuMemcpyD2H(pinned.get(), samples->data(), outputBytes, stream.raw())) || !stream.sync())
+        if ((hostOut && !gpuMemcpyD2H(pinned.get(), streamData(*samples, stream), outputBytes, stream.raw())) || !stream.sync())
             return false;
         for (std::size_t i = 0; i < activeCompleted.size(); ++i)
             completed[outputRows.empty() ? i : outputRows[i]] = activeCompleted[i];
@@ -312,19 +313,19 @@ namespace osuCrypto::LogVole::gpu
 
         auto& stream = sampleStream(execution);
 
-        using Allocation = std::unique_ptr<void, decltype(&gpuFree)>;
-        Allocation deviceSeeds(nullptr, gpuFree), devicePrefixes(nullptr, gpuFree);
+        using Allocation = std::unique_ptr<void, DeviceMemoryDeleter>;
+        Allocation deviceSeeds(nullptr, DeviceMemoryDeleter{stream.memoryPool()}), devicePrefixes(nullptr, DeviceMemoryDeleter{stream.memoryPool()});
         struct GaussianPrefixCache : PinnedPrefixCache {};
         auto pinned = execution.deviceResources<GaussianPrefixCache>().acquire(bytes);
         if (!pinned) return false;
         StreamDrain drain{stream};
-        deviceSeeds.reset(gpuMalloc(seeds.size_bytes()));
-        devicePrefixes.reset(gpuMalloc(bytes));
+        deviceSeeds.reset(stream.allocate(seeds.size_bytes()));
+        devicePrefixes.reset(stream.allocate(bytes));
         if (!deviceSeeds || !devicePrefixes ||
-            !gpuMemcpyH2D(deviceSeeds.get(), seeds.data(), seeds.size_bytes(), stream.raw()) ||
+            !gpuMemcpyH2D(deviceSeeds.get(), streamData(seeds, stream), seeds.size_bytes(), stream.raw()) ||
             !launchBlake2xbStreamForTest(static_cast<const u64*>(deviceSeeds.get()),
                 static_cast<u64*>(devicePrefixes.get()), wordsPerPrefix,
-                static_cast<u32>(seeds.size()), stream.raw())) return false;
+                static_cast<u32>(seeds.size()), stream.raw(), stream.memoryPool().get())) return false;
 
         if (!gpuMemcpyD2H(pinned.get(), devicePrefixes.get(), bytes, stream.raw()) || !stream.sync()) return false;
         out.mData = std::move(pinned);

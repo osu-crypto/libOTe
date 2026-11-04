@@ -17,6 +17,8 @@ namespace tests_libOTe::logvole_test
     template<class T>
     void bindExecution(T& value, const ExecutionPtr& execution)
     {
+        execution->mCacheGpuOptions = false;
+        if constexpr (requires { value.execution(); }) value.execution().mCacheGpuOptions = false;
         if constexpr (requires { value.mUseGpu = true; }) value.mUseGpu = execution->mUseGpu;
         if constexpr (requires { value.mExecutionContext = execution; }) value.mExecutionContext = execution;
         else if constexpr (requires { value.mParams; }) bindExecution(value.mParams, execution);

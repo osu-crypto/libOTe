@@ -15,6 +15,60 @@ namespace osuCrypto::LogVole::gpu
     using u32 = std::uint32_t;
     using u64 = std::uint64_t;
 
+    // Kernel attributes are cached by an explicit execution owner. A raw view
+    // without this owner retains the conservative configure-on-use path.
+    class KernelConfiguration
+    {
+    public:
+        KernelConfiguration();
+        ~KernelConfiguration();
+        KernelConfiguration(const KernelConfiguration&) = delete;
+        KernelConfiguration& operator=(const KernelConfiguration&) = delete;
+        void setOptionsCaching(bool enabled);
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+    };
+
+    struct MemoryPoolStats
+    {
+        u64 mAllocations = 0;
+        u64 mCacheHits = 0;
+        u64 mReleases = 0;
+        u64 mUntrackedUses = 0;
+    };
+
+    // One execution owner retains its own stream-ordered device cache. Stream
+    // leases are weak so a cache cannot keep its execution owner alive.
+    class DeviceMemoryPool
+    {
+    public:
+        DeviceMemoryPool();
+        ~DeviceMemoryPool();
+        DeviceMemoryPool(const DeviceMemoryPool&) = delete;
+        DeviceMemoryPool& operator=(const DeviceMemoryPool&) = delete;
+        void* allocate(std::size_t bytes, void* stream = nullptr, const std::shared_ptr<void>& lease = {});
+        void release(void* pointer) noexcept;
+        void use(void* pointer);
+        void use(void* pointer, void* stream, const std::shared_ptr<void>& lease);
+        MemoryPoolStats stats() const;
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+    };
+
+    class PinnedMemoryPool
+    {
+    public:
+        PinnedMemoryPool();
+        ~PinnedMemoryPool();
+        PinnedMemoryPool(const PinnedMemoryPool&) = delete;
+        PinnedMemoryPool& operator=(const PinnedMemoryPool&) = delete;
+        void* allocate(std::size_t bytes);
+        void release(void* pointer) noexcept;
+        MemoryPoolStats stats() const;
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+    };
+
     // Mirrors seal::util::MultiplyUIntModOperand.
     struct HostShoupOperand
     {
@@ -102,6 +156,8 @@ namespace osuCrypto::LogVole::gpu
         // Host metadata prepared in this ring's CUDA context. Zero leaves L2
         // policy untouched, including unsupported devices and synthetic views.
         std::size_t mH200RootL2MaxWindow = 0;
+        mutable KernelConfiguration* mKernelConfiguration = nullptr;
+        mutable DeviceMemoryPool* mMemoryPool = nullptr;
     };
 
     bool gpuDeviceAvailable();
@@ -1018,18 +1074,20 @@ namespace osuCrypto::LogVole::gpu
     // the Blake2xb stream in registers/shared memory and so needs no `scratch` at
     // all: callers use this to skip the outCount * streamWords staging buffer
     // (540 MB at n = 2^24) and pass a null scratch pointer.
-    bool gpuFusedSamplerActive(u32 n, u32 streamWords, u32 outCount);
+    bool gpuFusedSamplerActive(u32 n, u32 streamWords, u32 outCount,
+        KernelConfiguration* configuration = nullptr);
 
 
     // True when the selected non-materialized sampler publishes rare rejection
     // epochs and follows its common kernel with the exact cold replay. Callers use
     // this to reserve/advance the persistent per-polynomial epoch array without
     // allocating the otherwise-unused materialized stream.
-    bool gpuFusedSamplerNeedsRejectEpoch(u32 n, u32 streamWords, u32 outCount);
+    bool gpuFusedSamplerNeedsRejectEpoch(u32 n, u32 streamWords, u32 outCount,
+        KernelConfiguration* configuration = nullptr);
 
     // True when the materialized sampler replaces its full-polynomial fixup
     // scan with reduce-time detection and an epoch-gated rare repair pass.
-    bool gpuRejectReduceFusionActive();
+    bool gpuRejectReduceFusionActive(KernelConfiguration* configuration = nullptr);
 
 
     // Exact cryptoTools PRNG(seed).get<u64>() % modulus, starting at counter
@@ -1037,7 +1095,8 @@ namespace osuCrypto::LogVole::gpu
     bool launchAesCtrScalars(
         const u64* seed, u64* out, u64 count, u64 modulus, void* stream);
     bool launchBlake2xbStreamForTest(
-        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount, void* stream);
+        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount, void* stream,
+        DeviceMemoryPool* pool = nullptr);
 
 
     // Exact hashSeedDigest RandomOracle(16) over label, size and coefficients.

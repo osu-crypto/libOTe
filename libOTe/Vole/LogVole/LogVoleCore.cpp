@@ -4645,7 +4645,7 @@ namespace osuCrypto::LogVole
                 {
                     if (!prepareShrinkExpandSenderOffline(seInput, prng, seState)) return false;
                     nextMessage.mEncodedShrinkExpandMessage =
-                        encodeShrinkExpandOfflineState(seState, seParams.mNumWorkerThreads);
+                        encodeShrinkExpandOfflineState(seState, seParams.mNumWorkerThreads, &executionContext(seParams));
                 }
                 else
                 {

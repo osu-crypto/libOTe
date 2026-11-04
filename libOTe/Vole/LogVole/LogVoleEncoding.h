@@ -184,15 +184,22 @@ namespace osuCrypto::LogVole
 
     Buffer encode(const KeyDeriveRequest& message);
     Buffer encode(const KeyDeriveResponse& message);
+    Buffer encode(const KeyDeriveRequest& message, ExecutionContext* execution);
+    Buffer encode(const KeyDeriveResponse& message, ExecutionContext* execution);
     Buffer encode(const ShrinkExpandOfflineMessage& message);
     Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers);
+    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers, ExecutionContext* execution);
     // Borrow the completed sender tensors while producing independently owned
     // wire bytes. This avoids constructing a second mutable tensor package.
     Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers);
+    Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers, ExecutionContext* execution);
     Buffer encode(const PolyMessage& message);
     Buffer encode(const SeedMessage& message);
+    Buffer encode(const PolyMessage& message, ExecutionContext* execution);
+    Buffer encode(const SeedMessage& message, ExecutionContext* execution);
     Buffer encode(const RootOfflineMessage& message);
     Buffer encode(const RootOfflineMessage& message, u32 workers);
+    Buffer encode(const RootOfflineMessage& message, u32 workers, ExecutionContext* execution);
     // Internal single-use transport can reserve and pin its exact final wire
     // allocation while an earlier frame is in flight. The ordinary encode API
     // keeps allocating its own independent Buffer.
@@ -273,6 +280,8 @@ namespace osuCrypto::LogVole
     RootWirePinOverlapEvidence rootWirePinOverlapEvidenceSnapshot(ExecutionContext& execution);
     Buffer encode(const RootDigestMessage& message);
     Buffer encode(const RootResponseMessage& message);
+    Buffer encode(const RootDigestMessage& message, ExecutionContext* execution);
+    Buffer encode(const RootResponseMessage& message, ExecutionContext* execution);
 
     bool decode(std::span<const u8> payload, KeyDeriveRequest& message);
     bool decode(std::span<const u8> payload, KeyDeriveResponse& message);

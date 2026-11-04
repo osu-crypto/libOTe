@@ -323,6 +323,8 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
     {
         osuCrypto::LogVoleSender senderA, senderB;
         osuCrypto::LogVoleReceiver receiverA, receiverB;
+        senderA.mUseGpu = senderB.mUseGpu = true;
+        receiverA.mUseGpu = receiverB.mUseGpu = true;
         senderA.configure(8u, requestedBits, 1u, setting);
         senderB.configure(8u, requestedBits, 1u, setting);
         receiverA.configure(8u, requestedBits, 1u, setting);
@@ -352,6 +354,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
         CivoleParams params{};
         ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         LOGVOLE_REQUIRE_TRUE(makeCivoleParams(setting, params, 1u));
+        ::tests_libOTe::logvole_test::bindExecution(params, testExecution);
         std::array<ZpCrtContext, 2> selected{};
         for (std::size_t party = 0; party < selected.size(); ++party)
         {
@@ -451,6 +454,8 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
 
         osuCrypto::LogVoleGarbledSender garbledSenderA, garbledSenderB;
         osuCrypto::LogVoleGarbledReceiver garbledReceiverA, garbledReceiverB;
+        garbledSenderA.mUseGpu = garbledSenderB.mUseGpu = true;
+        garbledReceiverA.mUseGpu = garbledReceiverB.mUseGpu = true;
         garbledSenderA.configure(1u, 1u, setting);
         garbledSenderB.configure(1u, 1u, setting);
         garbledReceiverA.configure(1u, 1u, setting);
@@ -486,6 +491,9 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
             ::tests_libOTe::logvole_test::bindExecution(explicitlyScoped, testExecution);
             osuCrypto::LogVoleGarbledSender garbledScopedSender{};
             osuCrypto::LogVoleGarbledReceiver garbledScopedReceiver{};
+            garbledScopedSender.mUseGpu = garbledScopedReceiver.mUseGpu = true;
+            garbledScopedSender.execution().mScope = testExecution->mScope;
+            garbledScopedReceiver.execution().mScope = testExecution->mScope;
             explicitlyScoped.configure(8u, requestedBits, 1u, setting);
             garbledScopedSender.configure(1u, 1u, setting);
             garbledScopedReceiver.configure(1u, 1u, setting);
@@ -510,6 +518,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
             ::tests_libOTe::logvole_test::bindExecution(sequentialReceiver, testExecution);
             osuCrypto::LogVoleGarbledSender sequentialGarbledSender{};
             osuCrypto::LogVoleGarbledReceiver sequentialGarbledReceiver{};
+            sequentialGarbledSender.mUseGpu = sequentialGarbledReceiver.mUseGpu = true;
             sequentialSender.configure(8u, requestedBits, 1u, setting);
             sequentialReceiver.configure(8u, requestedBits, 1u, setting);
             sequentialGarbledSender.configure(1u, 1u, setting);

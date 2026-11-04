@@ -1167,7 +1167,9 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             hostInputs.resize(static_cast<std::size_t>(width + 1));
             for (auto& value : hostInputs) value = hostInputPrng.get<u64>() % modulus;
             LOGVOLE_REQUIRE_TRUE(hostInputPrng.get<block>() == referencePrng.get<block>());
-            auto hostPrepared = gpu::zkMulWitnessDevice(reference, modulus,
+            auto gpuReference = reference;
+            gpuReference.mExecutionContext = testExecution;
+            auto hostPrepared = gpu::zkMulWitnessDevice(gpuReference, modulus,
                 std::span<const u64>(hostInputs.data(), hostInputs.size()), budget + 13);
             LOGVOLE_REQUIRE_TRUE(hostPrepared != nullptr);
             AlignedUnVec<u64> hostPreparedWitness;

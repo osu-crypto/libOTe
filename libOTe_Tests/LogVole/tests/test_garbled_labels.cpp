@@ -111,6 +111,8 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
     {
         LogVoleGarbledSender sender;
         LogVoleGarbledReceiver receiver;
+        ::tests_libOTe::logvole_test::bindExecution(sender, testExecution);
+        ::tests_libOTe::logvole_test::bindExecution(receiver, testExecution);
         const u64 n = (setting == CivoleSetting::GoldenSeed ? 8192 : 16384) / 3 + 3;
         sender.configure(n, 2, setting);
         receiver.configure(n, 2, setting);

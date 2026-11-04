@@ -483,8 +483,7 @@ void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
             for (std::size_t k = 0; k < n; ++k)
             {
                 const std::uint64_t xKJ = xBatch[i].mCoeffs[j * n + k];
-                seal::util::set_uint(xKJ, rho, valMpi.get());
-                seal::util::multiply_uint(valMpi.get(), pJMpi.get(), rho, valMpi.get());
+                seal::util::multiply_uint(pJMpi.get(), rho, xKJ, rho, valMpi.get());
 
                 const std::uint64_t noiseVal = (prng.get<std::uint64_t>() % 1000) + 1;
                 const bool negative = (prng.get<std::uint64_t>() % 2) == 1;

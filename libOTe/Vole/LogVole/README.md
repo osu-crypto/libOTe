@@ -82,6 +82,13 @@ contexts; parameter copies within one party retain that explicit owner. Separate
 setup roles acquire separate owners. `execution().mTiming` and
 `execution().mRingOps` expose diagnostics for one session.
 
+Device and pinned allocation pools belong to that execution owner and survive
+while its device tokens or wire buffers need them. Reuse tracks the streams
+that actually consume each allocation. Production kernel and protocol tuning
+options are captured on first use for that owner; set environment options before
+configuration. Diagnostic tools that deliberately change options between calls
+can set `execution().mCacheGpuOptions = false` before configuration.
+
 Set `mKeepOutputOnDevice` to keep outputs in device memory;
 `outputDevice()` and `outputDeviceCount()` expose the resulting device token.
 The receiver can also supply its own input token through `mInputDevice`.
