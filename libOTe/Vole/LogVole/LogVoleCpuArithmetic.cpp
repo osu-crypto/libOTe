@@ -11,6 +11,47 @@
 
 namespace osuCrypto::LogVole::detail
 {
+    CpuArithmeticCache::CpuArithmeticCache()
+    {
+#if defined(LV_CPU_IFMA)
+        mCrtQuotient = [] {
+            const char* value = std::getenv("LV_CPU_CRT_QUOTIENT");
+            return !value || value[0] != '0';
+        }();
+#endif
+        mFastCrt = [] {
+            const char* value = std::getenv("LV_CPU_FAST_CRT");
+            return !value || value[0] != '0';
+        }();
+#if defined(LV_CPU_IFMA)
+        mVectorCrt = [] {
+            const char* value = std::getenv("LV_CPU_VECTOR_CRT");
+            return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
+                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
+        }();
+#endif
+#if defined(LV_CPU_IFMA)
+        mFusedGadget = [] {
+            const char* value = std::getenv("LV_CPU_FUSED_GADGET");
+            const char* vector = std::getenv("LV_CPU_VECTOR_CRT");
+            const char* fast = std::getenv("LV_CPU_FAST_CRT");
+            return (!value || value[0] != '0') && (!vector || vector[0] != '0') &&
+                (!fast || fast[0] != '0') && __builtin_cpu_supports("avx512f") &&
+                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
+        }();
+#endif
+#if defined(LV_CPU_IFMA)
+        mFusedLowDigit = [] {
+            const char* value = std::getenv("LV_CPU_FUSED_LOW_DIGIT");
+            const char* vector = std::getenv("LV_CPU_VECTOR_CRT");
+            const char* fast = std::getenv("LV_CPU_FAST_CRT");
+            return (!value || value[0] != '0') && (!vector || vector[0] != '0') &&
+                (!fast || fast[0] != '0') && __builtin_cpu_supports("avx512f") &&
+                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
+        }();
+#endif
+    }
+
     namespace
     {
         template<std::size_t Limbs>
@@ -340,7 +381,7 @@ namespace osuCrypto::LogVole::detail
 
         template<std::size_t Limbs, bool Wide, unsigned DigitBits = 0, bool LowDigit = false>
         __attribute__((target("avx512f,avx512dq,avx512ifma")))
-        void composeRnsVector(const u64* source, u64* destination,
+        void composeRnsVector(const CpuArithmeticCache& cache, const u64* source, u64* destination,
             std::size_t count, const seal::util::RNSBase& base)
         {
             // Eight independent CRT reconstructions in radix 2^52. Delaying
@@ -356,10 +397,7 @@ namespace osuCrypto::LogVole::detail
             const auto zero = _mm512_setzero_si512();
             const auto mask = _mm512_set1_epi64(maskValue);
             const auto one = _mm512_set1_epi64(1);
-            static const bool quotientEnabled = [] {
-                const char* value = std::getenv("LV_CPU_CRT_QUOTIENT");
-                return !value || value[0] != '0';
-            }();
+            const bool quotientEnabled = cache.mCrtQuotient;
             __m512i punctured[Limbs][PuncturedWords], q[Words], inv[Limbs], invShoup[Limbs],
                 reciprocal[Limbs], moduli[Limbs];
             for (std::size_t j = 0; j < Limbs; ++j)
@@ -803,22 +841,15 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuComposeRns(const u64* source, u64* destination,
+    bool cpuComposeRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base)
     {
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_FAST_CRT");
-            return !value || value[0] != '0';
-        }();
+        const bool enabled = cache.mFastCrt;
         if (!enabled || (base.size() != 4 && base.size() != 8)) return false;
         for (std::size_t i = 0; i < base.size(); ++i)
             if (base.base()[i].bit_count() > 61) return false;
 #if defined(LV_CPU_IFMA)
-        static const bool vectorEnabled = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_CRT");
-            return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
+        const bool vectorEnabled = cache.mVectorCrt;
         int maxBits = 0;
         for (std::size_t i = 0; i < base.size(); ++i)
             maxBits = std::max(maxBits, base.base()[i].bit_count());
@@ -826,13 +857,13 @@ namespace osuCrypto::LogVole::detail
         {
             if (base.size() == 4)
             {
-                if (maxBits <= 52) composeRnsVector<4, false>(source, destination, count, base);
-                else composeRnsVector<4, true>(source, destination, count, base);
+                if (maxBits <= 52) composeRnsVector<4, false>(cache, source, destination, count, base);
+                else composeRnsVector<4, true>(cache, source, destination, count, base);
             }
             else
             {
-                if (maxBits <= 52) composeRnsVector<8, false>(source, destination, count, base);
-                else composeRnsVector<8, true>(source, destination, count, base);
+                if (maxBits <= 52) composeRnsVector<8, false>(cache, source, destination, count, base);
+                else composeRnsVector<8, true>(cache, source, destination, count, base);
             }
             return true;
         }
@@ -842,52 +873,38 @@ namespace osuCrypto::LogVole::detail
         return true;
     }
 
-    bool cpuCenteredHighDigit(const u64* source, u64* destination,
+    bool cpuCenteredHighDigit(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_FUSED_GADGET");
-            const char* vector = std::getenv("LV_CPU_VECTOR_CRT");
-            const char* fast = std::getenv("LV_CPU_FAST_CRT");
-            return (!value || value[0] != '0') && (!vector || vector[0] != '0') &&
-                (!fast || fast[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
+        const bool enabled = cache.mFusedGadget;
         if (!enabled || count == 0 || count % 8) return false;
         const bool gold = base.size() == 4 && digitBits == 110;
         const bool noGold = base.size() == 8 && digitBits == 208;
         if (!gold && !noGold) return false;
         for (std::size_t j = 0; j < base.size(); ++j)
             if (base.base()[j].bit_count() != (gold ? 55 : 52)) return false;
-        if (gold) composeRnsVector<4, true, 110>(source, destination, count, base);
-        else composeRnsVector<8, false, 208>(source, destination, count, base);
+        if (gold) composeRnsVector<4, true, 110>(cache, source, destination, count, base);
+        else composeRnsVector<8, false, 208>(cache, source, destination, count, base);
         return true;
 #else
         return false;
 #endif
     }
 
-    bool cpuLowDigitRns(const u64* source, u64* destination,
+    bool cpuLowDigitRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_FUSED_LOW_DIGIT");
-            const char* vector = std::getenv("LV_CPU_VECTOR_CRT");
-            const char* fast = std::getenv("LV_CPU_FAST_CRT");
-            return (!value || value[0] != '0') && (!vector || vector[0] != '0') &&
-                (!fast || fast[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
+        const bool enabled = cache.mFusedLowDigit;
         if (!enabled || count == 0 || count % 8) return false;
         const bool gold = base.size() == 4 && digitBits == 110;
         const bool noGold = base.size() == 8 && digitBits == 208;
         if (!gold && !noGold) return false;
         for (std::size_t j = 0; j < base.size(); ++j)
             if (base.base()[j].bit_count() != (gold ? 55 : 52)) return false;
-        if (gold) composeRnsVector<4, true, 110, true>(source, destination, count, base);
-        else composeRnsVector<8, false, 208, true>(source, destination, count, base);
+        if (gold) composeRnsVector<4, true, 110, true>(cache, source, destination, count, base);
+        else composeRnsVector<8, false, 208, true>(cache, source, destination, count, base);
         return true;
 #else
         return false;

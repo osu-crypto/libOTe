@@ -503,7 +503,7 @@ void LogVole_Cpu_FusedGadgetMatchesBalancedReference(const oc::CLP&)
             LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(poly, digitBits, 0, 2, ctx, reference));
             LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(poly, digitBits, 1, 1, ctx, actual));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[0].mCoeffs, reference[1].mCoeffs));
-            const bool fused = LogVole::detail::cpuCenteredHighDigit(poly.mCoeffs.data(),
+            const bool fused = LogVole::detail::cpuCenteredHighDigit(*ctx.mCpuArithmeticCache, poly.mCoeffs.data(),
                 actual[0].mCoeffs.data(), 1024, digitBits, base);
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
             const auto enabled = [](const char* name) {
@@ -521,7 +521,7 @@ void LogVole_Cpu_FusedGadgetMatchesBalancedReference(const oc::CLP&)
             LOGVOLE_REQUIRE_TRUE(rangesEqual(recomposed.mCoeffs, poly.mCoeffs));
             // Unsupported shape must decline before changing any destination.
             std::vector<u64> untouched(limbs * 1024, 123);
-            LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuCenteredHighDigit(
+            LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuCenteredHighDigit(*ctx.mCpuArithmeticCache,
                 poly.mCoeffs.data(), untouched.data(), 1023, digitBits, base));
             LOGVOLE_REQUIRE_TRUE(std::all_of(untouched.begin(), untouched.end(), [](u64 x) { return x == 123; }));
         }
@@ -569,7 +569,7 @@ void LogVole_Cpu_LowDigitMatchesIntegerReference(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRange(poly, digitBits, 0, 1, ctx, actual));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[0].mCoeffs, expected));
         std::vector<u64> direct(limbs*1024+2, 123);
-        const bool used = LogVole::detail::cpuLowDigitRns(poly.mCoeffs.data(), direct.data()+1,
+        const bool used = LogVole::detail::cpuLowDigitRns(*ctx.mCpuArithmeticCache, poly.mCoeffs.data(), direct.data()+1,
             1024, digitBits, base);
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
         const auto enabled = [](const char* name) {
@@ -590,7 +590,7 @@ void LogVole_Cpu_LowDigitMatchesIntegerReference(const oc::CLP&)
         for (std::size_t count : {0, 1, 7, 9, 1023})
         {
             std::fill(direct.begin(), direct.end(), 123);
-            LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuLowDigitRns(
+            LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuLowDigitRns(*ctx.mCpuArithmeticCache,
                 poly.mCoeffs.data(), direct.data()+1, count, digitBits, base));
             LOGVOLE_REQUIRE_TRUE(std::all_of(direct.begin(), direct.end(), [](u64 x) { return x==123; }));
         }
@@ -849,7 +849,7 @@ void LogVole_Cpu_CrtMatchesSeal(const oc::CLP&)
             }
             auto expected = source;
             base.compose_array(expected.data(), count, seal::MemoryManager::GetPool());
-            const bool used = LogVole::detail::cpuComposeRns(source.data(), actual.data(), count, base);
+            const bool used = LogVole::detail::cpuComposeRns(*ctx.mCpuArithmeticCache, source.data(), actual.data(), count, base);
             if (used) LOGVOLE_REQUIRE_TRUE(actual == expected);
             else LOGVOLE_REQUIRE_TRUE(std::all_of(actual.begin(), actual.end(), [](u64 v) { return v == 12345; }));
         }
@@ -881,9 +881,41 @@ void LogVole_Cpu_CrtMixedWidthsMatchSeal(const oc::CLP&)
         }
         auto expected = input;
         base.compose_array(expected.data(), count, seal::MemoryPoolHandle::ThreadLocal());
-        if (LogVole::detail::cpuComposeRns(input.data(), actual.data(), count, base))
+        if (LogVole::detail::cpuComposeRns(*ctx.mCpuArithmeticCache, input.data(), actual.data(), count, base))
             LOGVOLE_REQUIRE_TRUE(actual == expected);
         else LOGVOLE_REQUIRE_TRUE(std::all_of(actual.begin(), actual.end(), [](u64 x) { return x == 12345; }));
+        auto enabled = *ctx.mCpuArithmeticCache;
+        enabled.mFastCrt = true;
+        enabled.mVectorCrt = false;
+        auto disabled = enabled;
+        disabled.mFastCrt = false;
+        std::fill(actual.begin(), actual.end(), u64{12345});
+        LOGVOLE_REQUIRE_FALSE(LogVole::detail::cpuComposeRns(
+            disabled, input.data(), actual.data(), count, base));
+        LOGVOLE_REQUIRE_TRUE(std::all_of(actual.begin(), actual.end(), [](u64 x) { return x == 12345; }));
+        LOGVOLE_REQUIRE_TRUE(LogVole::detail::cpuComposeRns(
+            enabled, input.data(), actual.data(), count, base));
+        LOGVOLE_REQUIRE_TRUE(actual == expected);
+        std::fill(actual.begin(), actual.end(), u64{12345});
+        LOGVOLE_REQUIRE_FALSE(LogVole::detail::cpuComposeRns(
+            disabled, input.data(), actual.data(), count, base));
+        LOGVOLE_REQUIRE_TRUE(std::all_of(actual.begin(), actual.end(), [](u64 x) { return x == 12345; }));
+
+        // A valid manually populated math context need not have prepared the
+        // optional optimization cache. Its existing SEAL fallback stays valid.
+        auto manual = ctx;
+        manual.mCpuArithmeticCache.reset();
+        RnsPoly poly;
+        poly.mCoeffs.resize(input.size());
+        std::copy(input.begin(), input.end(), poly.mCoeffs.begin());
+        std::vector<RnsPoly> cachedDigits, manualDigits;
+        LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRange(poly, topBits, 0, 1, ctx, cachedDigits));
+        LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRange(poly, topBits, 0, 1, manual, manualDigits));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(cachedDigits[0].mCoeffs, manualDigits[0].mCoeffs));
+        LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(poly, topBits, 1, 1, ctx, cachedDigits));
+        LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(poly, topBits, 1, 1, manual, manualDigits));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(cachedDigits[0].mCoeffs, manualDigits[0].mCoeffs));
+
     }
 }
 

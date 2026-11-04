@@ -1,6 +1,7 @@
 #pragma once
 
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuArithmeticCache.h"
 
 #include "cryptoTools/Crypto/PRNG.h"
 
@@ -10,6 +11,7 @@
 #include <array>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -143,6 +145,9 @@ namespace osuCrypto::LogVole
 
     struct RingNttContext
     {
+        // Empty temporary contexts do not parse settings. The real context
+        // build captures them once; retained/context copies keep that value.
+        std::optional<detail::CpuArithmeticCache> mCpuArithmeticCache;
         std::shared_ptr<RingContextFactory> mFactory;
         // A CRT-selected ring carries its explicit plaintext factory into leaf
         // rounding helpers. Both factory indices are weak; this adds no cycle.

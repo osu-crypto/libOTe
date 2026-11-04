@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cryptoTools/Common/Defines.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuArithmeticCache.h"
 #include "seal/modulus.h"
 #include "seal/util/rns.h"
 #include <cstddef>
@@ -55,18 +56,18 @@ namespace osuCrypto::LogVole::detail
     // Canonical RNS input (modulus-major) to canonical CRT integers
     // (coefficient-major). Input and output must not overlap. False leaves the
     // output untouched and asks the caller to use SEAL's general implementation.
-    bool cpuComposeRns(const u64* source, u64* destination,
+    bool cpuComposeRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base);
 
     // Fused CRT and balanced high-digit extraction (start=1, levels=1).
     // Canonical modulus-major input/output, nonoverlapping. Specializes the
     // production 4x55/110-bit and 8x52/208-bit shapes; false leaves output intact.
-    bool cpuCenteredHighDigit(const u64* source, u64* destination,
+    bool cpuCenteredHighDigit(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base);
 
     // Fused canonical CRT, unsigned low-digit extraction and RNS expansion.
     // Same production shapes and nonoverlap/canonical-input rules as above.
-    bool cpuLowDigitRns(const u64* source, u64* destination,
+    bool cpuLowDigitRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base);
 
     // Undo a recursive leaf's CRT lift, center its selected residue, and
