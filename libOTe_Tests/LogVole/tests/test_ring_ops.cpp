@@ -1,6 +1,7 @@
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
+#include "libOTe/Vole/LogVole/LogVolePublicCache.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVole.h"
@@ -2447,6 +2448,14 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         exact(*hostA, fetched);
         LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceB, fetched));
         exact(*hostB, fetched);
+        const std::weak_ptr<const gpu::RetainedPublicUniform> deviceLifetimeA = deviceA;
+        const std::weak_ptr<const gpu::RetainedPublicUniform> deviceLifetimeB = deviceB;
+        deviceA.reset();
+        deviceB.reset();
+        // Live host snapshots cannot keep an expired context's index or its
+        // device tokens alive after the explicit exports have been released.
+        LOGVOLE_REQUIRE_TRUE(deviceLifetimeA.expired());
+        LOGVOLE_REQUIRE_TRUE(deviceLifetimeB.expired());
     }
 
     for (const auto& shape : { std::pair{1024u, 2u}, {8192u, 4u}, {16384u, 8u} })
@@ -2483,6 +2492,18 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(ctx, owner, token));
             LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(ctx, owner, token));
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == token);
+            {
+                auto shared = ctx;
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(shared, span) == token);
+                auto separate = ctx;
+                separate.mPublicCache = std::make_shared<PublicPolynomialCache>();
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span) == nullptr);
+                LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(separate, owner, token));
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span) == token);
+                separate.mPublicCache.reset();
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span) == nullptr);
+                LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(separate, owner, token));
+            }
             std::vector<RnsPoly> fetched;
             LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*token, fetched));
             exact(expected, fetched);

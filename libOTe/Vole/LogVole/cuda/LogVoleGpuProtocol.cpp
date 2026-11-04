@@ -6,6 +6,7 @@
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
+#include "libOTe/Vole/LogVole/LogVolePublicCache.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include "cryptoTools/Crypto/PRNG.h"
@@ -69,20 +70,6 @@ namespace osuCrypto::LogVole::gpu
         }
 
         constexpr std::size_t publicRetentionByteLimit = std::size_t(256) << 20;
-        struct PublicRetentionEntry
-        {
-            std::weak_ptr<const std::vector<RnsPoly>> mHost;
-            RetainedPublicUniformPtr mDevice;
-        };
-        std::mutex publicRetentionMutex;
-        auto& publicRetentionEntries()
-        {
-            static std::vector<PublicRetentionEntry> entries = [] {
-                (void)gpuDeviceAvailable();
-                return std::vector<PublicRetentionEntry>{};
-            }();
-            return entries;
-        }
         std::atomic<u64> publicRetentionCaptures{0}, publicRetentionCopies{0};
         std::atomic<u64> publicRetentionCopiedBytes{0}, publicRetentionMisses{0};
         std::atomic<u64> publicRetentionHostMaterializations{0};
@@ -168,16 +155,17 @@ namespace osuCrypto::LogVole::gpu
         const std::shared_ptr<const std::vector<RnsPoly>>& host,
         const RetainedPublicUniformPtr& captured)
     {
-        if (!publicUniformRetentionEnabled() || !host || !captured || captured->count() == 0 ||
+        if (!ctx.mPublicCache || !publicUniformRetentionEnabled() || !host || !captured || captured->count() == 0 ||
             !retentionContextMatches(ctx, *captured->mImpl) ||
             !retentionHostMatches(*host, *captured->mImpl)) return false;
         const auto bytes = captured->mImpl->mValues.bytes();
         if (bytes > publicRetentionByteLimit) return false;
-        std::lock_guard<std::mutex> lock(publicRetentionMutex);
+        auto& retention = ctx.mPublicCache->mRetention;
+        std::lock_guard<std::mutex> lock(retention.mMutex);
         std::size_t retainedBytes = 0;
-        for (auto it = publicRetentionEntries().begin(); it != publicRetentionEntries().end();)
+        for (auto it = retention.mEntries.begin(); it != retention.mEntries.end();)
         {
-            if (it->mHost.expired()) it = publicRetentionEntries().erase(it);
+            if (it->mHost.expired()) it = retention.mEntries.erase(it);
             else
             {
                 auto previousHost = it->mHost.lock();
@@ -186,27 +174,28 @@ namespace osuCrypto::LogVole::gpu
                 ++it;
             }
         }
-        while (!publicRetentionEntries().empty() && retainedBytes > publicRetentionByteLimit - bytes)
+        while (!retention.mEntries.empty() && retainedBytes > publicRetentionByteLimit - bytes)
         {
-            retainedBytes -= publicRetentionEntries().front().mDevice->mImpl->mValues.bytes();
-            publicRetentionEntries().erase(publicRetentionEntries().begin());
+            retainedBytes -= retention.mEntries.front().mDevice->mImpl->mValues.bytes();
+            retention.mEntries.erase(retention.mEntries.begin());
         }
-        publicRetentionEntries().push_back({host, captured});
+        retention.mEntries.push_back({host, captured});
         return true;
     }
 
     RetainedPublicUniformPtr findPublicUniformRetention(
         const RingNttContext& ctx, std::span<const RnsPoly> host)
     {
-        if (!publicUniformRetentionEnabled() || host.empty()) return {};
+        if (!ctx.mPublicCache || !publicUniformRetentionEnabled() || host.empty()) return {};
+        auto& retention = ctx.mPublicCache->mRetention;
         RetainedPublicUniformPtr candidate;
         std::shared_ptr<const std::vector<RnsPoly>> owner;
         {
-            std::lock_guard<std::mutex> lock(publicRetentionMutex);
-            for (auto it = publicRetentionEntries().begin(); it != publicRetentionEntries().end();)
+            std::lock_guard<std::mutex> lock(retention.mMutex);
+            for (auto it = retention.mEntries.begin(); it != retention.mEntries.end();)
             {
                 auto live = it->mHost.lock();
-                if (!live) { it = publicRetentionEntries().erase(it); continue; }
+                if (!live) { it = retention.mEntries.erase(it); continue; }
                 if (live->data() == host.data() && live->size() == host.size())
                 {
                     owner = std::move(live);

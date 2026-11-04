@@ -57,6 +57,19 @@ namespace osuCrypto::LogVole
             std::mutex mMutex;
             std::unordered_map<Key, std::shared_ptr<Entry>, Hash> mEntries;
         };
+        struct RetentionEntry
+        {
+            std::weak_ptr<const std::vector<RnsPoly>> mHost;
+            std::shared_ptr<const gpu::RetainedPublicUniform> mDevice;
+        };
+        struct RetentionLane
+        {
+            std::mutex mMutex;
+            std::vector<RetentionEntry> mEntries;
+        };
         Lane mLhe, mLenc;
+        // The index never owns host snapshots. Tokens retain their own backing
+        // and never refer back to this cache, so exports can outlive the index.
+        RetentionLane mRetention;
     };
 }
