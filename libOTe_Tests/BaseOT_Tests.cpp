@@ -21,6 +21,7 @@
 #include "libOTe/Tools/Popf/FeistelMulRistPopf.h"
 
 #include "libOTe/Base/MasnyRindal.h"
+#include "libOTe/Base/BadMasMuk.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include "libOTe/Base/MockOt.h"
 #include <cryptoTools/Common/Log.h>
@@ -509,6 +510,87 @@ namespace tests_libOTe
         }
 #else
         throw UnitTestSkipped("MasnyRindal not enabled (ENABLE_MR).");
+#endif
+    }
+
+    void Bot_BadMasMuk_Test()
+    {
+#ifdef ENABLE_BMM
+        setThreadName("Sender");
+
+        PRNG prng0(block(8253465, 3434565));
+        PRNG prng1(block(82532335, 334565));
+        constexpr std::array<u64, 16> sizes = {
+            0, 1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 25, 40, 50, 128};
+        for (const auto numOTs : sizes)
+        {
+            auto sock = cp::LocalAsyncSocket::makePair();
+            std::vector<block> recvMsg(numOTs);
+            std::vector<std::array<block, 2>> sendMsg(numOTs);
+            BitVector choices(numOTs);
+            choices.randomize(prng0);
+
+            BadMasMuk sender;
+            auto p0 = sender.send(sendMsg, prng1, sock[0]);
+            BadMasMuk receiver;
+            auto p1 = receiver.receive(choices, recvMsg, prng0, sock[1]);
+            eval(p0, p1);
+
+            for (u64 i = 0; i < numOTs; ++i)
+            {
+                if (neq(recvMsg[i], sendMsg[i][choices[i]]) ||
+                    eq(sendMsg[i][0], sendMsg[i][1]))
+                {
+                    std::cout << "failed size=" << numOTs << ", OT=" << i
+                        << " exp=m[" << int(choices[i]) << "], act=" << recvMsg[i]
+                        << " true=" << sendMsg[i][0] << ", " << sendMsg[i][1]
+                        << std::endl;
+                    throw UnitTestFail();
+                }
+            }
+        }
+
+        // Both wire directions reject non-canonical Edwards25519 encodings.
+        {
+            auto sock = cp::LocalAsyncSocket::makePair();
+            std::vector<std::array<block, 2>> sendMsg(1);
+            BadMasMuk sender;
+            auto honest = sender.send(sendMsg, prng1, sock[0]);
+            auto malformedProtocol = [&]() -> task<> {
+                std::vector<u8> senderPoint(32);
+                co_await sock[1].recv(senderPoint);
+                // r || c0 || c1 with 128-bit tags.
+                std::vector<u8> invalidMsg(32 + 2 * 16, 0xff);
+                co_await sock[1].send(std::move(invalidMsg));
+            };
+            auto malformed = malformedProtocol();
+
+            bool rejected = false;
+            try { eval(honest, malformed); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail("BadMasMuk sender accepted an invalid point");
+        }
+        {
+            auto sock = cp::LocalAsyncSocket::makePair();
+            std::vector<block> recvMsg;
+            BitVector choices;
+            BadMasMuk receiver;
+            auto honest = receiver.receive(choices, recvMsg, prng0, sock[1]);
+            auto malformedProtocol = [&]() -> task<> {
+                std::vector<u8> invalidPoint(32, 0xff);
+                co_await sock[0].send(std::move(invalidPoint));
+            };
+            auto malformed = malformedProtocol();
+
+            bool rejected = false;
+            try { eval(honest, malformed); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail("BadMasMuk receiver accepted an invalid point");
+        }
+#else
+        throw UnitTestSkipped("BadMasMuk not enabled (ENABLE_BMM).");
 #endif
     }
 

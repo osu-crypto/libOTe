@@ -9,6 +9,7 @@
 
 #include "SimplestOT.h"
 #include "MasnyRindal.h"
+#include "BadMasMuk.h"
 #include "McRosRoyTwist.h"
 #include "MasnyRindalKyber.h"
 #include "McRosRoy.h"

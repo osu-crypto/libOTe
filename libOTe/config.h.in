@@ -19,6 +19,9 @@
 // build the library with Masney Rindal Base OT enabled
 #cmakedefine ENABLE_MR @ENABLE_MR@
 
+// build the library with Badrinarayanan Masny Mukherjee Base OT enabled
+#cmakedefine ENABLE_BMM @ENABLE_BMM@
+
 // build the library with Masney Rindal Kyber Base OT enabled
 #cmakedefine ENABLE_MR_KYBER @ENABLE_MR_KYBER@
 

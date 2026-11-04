@@ -22,6 +22,10 @@ if(ENABLE_MR)
     list(APPEND SRCS Base/MasnyRindal.cpp)
 endif()
 
+if(ENABLE_BMM)
+    list(APPEND SRCS Base/BadMasMuk.cpp)
+endif()
+
 if(ENABLE_MR_KYBER)
     list(APPEND SRCS Base/MasnyRindalKyber.cpp)
 endif()

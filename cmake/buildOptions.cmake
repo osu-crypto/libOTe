@@ -38,6 +38,9 @@ if(DEFINED ENABLE_ALL_OT)
 	# uses cryptoTools Edwards25519 and has a portable fallback
 	set(ENABLE_MR ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 
+	# uses cryptoTools Edwards25519 and has a portable fallback
+	set(ENABLE_BMM ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
+
 	# uses cryptoTools Ristretto255 and has a portable fallback
 	set(ENABLE_MRR ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 
@@ -80,6 +83,7 @@ option(ENABLE_SIMPLESTOT     "Build the Edwards25519 SimplestOT base OT" OFF)
 option(ENABLE_MRR            "Build the McQuoidRosulekRoy 20 PopfOT base OT using Ristretto KA" OFF)
 option(ENABLE_MRR_TWIST      "Build the McQuoidRosulekRoy 21 PopfOT base OT using Moeller KA" OFF)
 option(ENABLE_MR             "Build the Edwards25519 MasnyRindal base OT" OFF)
+option(ENABLE_BMM            "Build the Edwards25519 Badrinarayanan-Masny-Mukherjee base OT" OFF)
 option(ENABLE_MR_KYBER       "Build the Kyber (LWE based) library and MR-Kyber base OT" OFF)
 
 option(ENABLE_KOS            "Build the KOS OT-Ext protocol." OFF)
@@ -159,6 +163,7 @@ message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")
 message(STATUS "Option: ENABLE_MRR            = ${ENABLE_MRR}")
 message(STATUS "Option: ENABLE_MRR_TWIST      = ${ENABLE_MRR_TWIST}")
 message(STATUS "Option: ENABLE_MR             = ${ENABLE_MR}")
+message(STATUS "Option: ENABLE_BMM            = ${ENABLE_BMM}")
 message(STATUS "Option: ENABLE_MR_KYBER       = ${ENABLE_MR_KYBER}")
 
 message(STATUS "1-out-of-2 OT Extension protocols\n=======================================================")
@@ -214,6 +219,7 @@ if( NOT ENABLE_SIMPLESTOT AND
 	NOT ENABLE_MRR AND
 	NOT ENABLE_MRR_TWIST AND
 	NOT ENABLE_MR AND
+	NOT ENABLE_BMM AND
 	NOT ENABLE_MR_KYBER)
 	message(WARNING "NO Base OT enabled.")
 endif()

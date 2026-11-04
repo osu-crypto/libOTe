@@ -91,6 +91,7 @@ on platform/dependencies. The `ON`/`OFF` options include
  * `ENABLE_MRR` the McQuoid Rosulek Roy [[MRR20]](https://eprint.iacr.org/2020/1043) protocol (relic or sodium).
  * `ENABLE_MRR_TWIST` the McQuoid Rosulek Roy [[MRR21]](https://eprint.iacr.org/2021/682) protocol over Curve25519 and its twist (cryptoTools Montgomery25519).
  * `ENABLE_MR` the Masny Rindal [[MR19]](https://eprint.iacr.org/2019/706.pdf) protocol (relic or sodium).
+ * `ENABLE_BMM` the Badrinarayanan Masny Mukherjee tight OT [[BMM22]](https://eprint.iacr.org/2022/415.pdf) protocol (Edwards25519).
  * `ENABLE_MR_KYBER` the Masny Rindal [[MR19]](https://eprint.iacr.org/2019/706.pdf) protocol  (Kyber fork).
  * `ENABLE_NP` the Naor Pinkas [NP01] base OT (relic or sodium).
 

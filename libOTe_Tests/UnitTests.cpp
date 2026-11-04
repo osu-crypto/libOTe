@@ -205,6 +205,7 @@ namespace tests_libOTe
 			tc.add("Bot_McQuoidRR_Ristrestto_FM_Test        ", Bot_McQuoidRR_Ristrestto_FM_Test);
 
 			tc.add("Bot_MasnyRindal_Test                    ", Bot_MasnyRindal_Test);
+			tc.add("Bot_BadMasMuk_Test                      ", Bot_BadMasMuk_Test);
 			tc.add("Bot_MasnyRindal_Kyber_Test              ", Bot_MasnyRindal_Kyber_Test);
 			tc.add("Bot_Mock_Test                             ", Bot_Mock_Test);
 
@@ -256,6 +257,7 @@ namespace tests_libOTe
 			tc.add("Bot_McQuoidRR_Ristrestto_FM_Test         ", Bot_McQuoidRR_Ristrestto_FM_Test);
 														   
 			tc.add("Bot_MasnyRindal_Test                     ", Bot_MasnyRindal_Test);
+			tc.add("Bot_BadMasMuk_Test                       ", Bot_BadMasMuk_Test);
 			tc.add("Bot_MasnyRindal_Kyber_Test               ", Bot_MasnyRindal_Kyber_Test);
 														   
 			tc.add("Vole_SoftSpokenSmall_Test                ", Vole_SoftSpokenSmall_Test);
