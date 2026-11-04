@@ -845,7 +845,7 @@ namespace osuCrypto::LogVole::gpu
 
         const u32* read(GpuStream& stream) const
         {
-            mReads.record(stream.allocationOwner());
+            mReads.record(stream);
             return mData;
         }
 

@@ -68,8 +68,26 @@ namespace
             std::get<0>(setup).result();
             std::get<1>(setup).result();
         }
+#if defined(ENABLE_LOGVOLE_CUDA)
+        const auto checkExecution = [](const auto& state, const auto& mathFactory) {
+            const auto& selected = state.mCrtFactoryOwner;
+            LOGVOLE_REQUIRE_TRUE(selected && selected->mFactoryOwner == mathFactory.lock());
+            const auto& execution = selected->mRing.mGpuExecution;
+            LOGVOLE_REQUIRE_TRUE(execution && execution != selected->mFactoryOwner->mRing.mGpuExecution);
+            for (auto* level = &state.mLogVoleState; level; level = level->mNextLevelState.get())
+            {
+                const auto& ring = level->mShrinkExpandState.mRingFactoryOwner;
+                LOGVOLE_REQUIRE_TRUE(ring && ring->mGpuExecution == execution);
+            }
+        };
+        checkExecution(originalSender.mOfflineState, senderFactory);
+        checkExecution(originalReceiver.mOfflineState, receiverFactory);
+        LOGVOLE_REQUIRE_TRUE(originalSender.mOfflineState.mCrtFactoryOwner->mRing.mGpuExecution !=
+            originalReceiver.mOfflineState.mCrtFactoryOwner->mRing.mGpuExecution);
+#else
         LOGVOLE_REQUIRE_TRUE(originalSender.mOfflineState.mCrtFactoryOwner == senderFactory.lock());
         LOGVOLE_REQUIRE_TRUE(originalReceiver.mOfflineState.mCrtFactoryOwner == receiverFactory.lock());
+#endif
 
         if (mode == OnlineMode::Interactive)
         {

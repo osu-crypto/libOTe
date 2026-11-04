@@ -10,6 +10,7 @@
 
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #endif
 
 #include "seal/util/rns.h"
@@ -2074,7 +2075,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(se.mRing, ctx))
+        if (!makeRingNttContext(se.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
         {
             return false;
         }
@@ -2473,7 +2474,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(message.mRing, ctx))
+        if (!makeRingNttContext(message.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
         {
             return false;
         }
@@ -2607,7 +2608,7 @@ namespace osuCrypto::LogVole
             // before the Root's own timers start, so that the Root's first
             // synchronise is not credited with their work.
             RootStep step("prep: pre-shrink drain (diagnostic)");
-            gpu::syncStream();
+            gpu::syncStream(ctx);
         }
         gpu::DeviceBatchPtr hatDDev;
         if (gpu::enabled())
@@ -3817,7 +3818,7 @@ namespace osuCrypto::LogVole
             RingNttContext checkCtx{};
             std::vector<RoundingCheckConstants> rounding;
             RoundingCheckConstants leafRounding;
-            if (earlyCheck && (!makeRingNttContext(seedParams.mShrinkExpand.mRing, checkCtx) ||
+            if (earlyCheck && (!makeRingNttContext(seedParams.mShrinkExpand.mRing, checkCtx, state.mShrinkExpandState.mRingFactoryOwner) ||
                 !(isLeaf ? buildLeafRoundingCheckConstants(seedParams, checkCtx, leafRounding)
                          : buildRoundingCheckConstants(seedParams, checkCtx, rounding)))) return false;
             std::atomic<bool> candidateValid{true};
@@ -4110,10 +4111,11 @@ namespace osuCrypto::LogVole
             // the device keys safe to hand on. PublicSeed runs no validation, so the
             // drain has to be explicit: the keys are consumed by
             // whichever thread resumes the sender coroutine after the next socket
-            // wait, and threadStream() is keyed on the thread, so stream ordering
-            // alone does not guarantee the expansion has landed.
+            // wait. Drain the session's producer before publishing those keys.
             if (state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed &&
-                gpu::enabled() && eval.mTbkDevice && !gpu::syncStream())
+                gpu::enabled() && eval.mTbkDevice &&
+                (!state.mShrinkExpandState.mRingFactoryOwner ||
+                 !gpu::syncStream(*state.mShrinkExpandState.mRingFactoryOwner)))
             {
                 return false;
             }
@@ -4432,7 +4434,7 @@ namespace osuCrypto::LogVole
             std::vector<RnsPoly> exact;
 #if defined(ENABLE_LOGVOLE_CUDA)
             RingNttContext ctx{};
-            if (!makeRingNttContext(top.mParams.mRing, ctx) ||
+            if (!makeRingNttContext(top.mParams.mRing, ctx, top.mRingFactoryOwner) ||
                 !gpu::topSecretUniformBatchMatches(ctx, *top.mTopSk1Device,
                     top.mParams.mTau, top.mTopSk1OwnerRunId)) return false;
             HostStep step("setup sender: top sk1 final public host view");
@@ -4503,6 +4505,10 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
+            auto execution = input.mGpuExecution;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (!execution) execution = std::make_shared<gpu::GpuExecutionContext>();
+#endif
             std::vector<RnsPoly> eagerSk1 = input.mSk1;
             std::shared_ptr<gpu::DeviceBatch> residentS;
             std::shared_ptr<const LazySeedLabelHostState> lazyS;
@@ -4520,6 +4526,7 @@ namespace osuCrypto::LogVole
             {
                 if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing,
                         deltaCtx) ||
+                    !gpu::bindContextExecution(deltaCtx, execution) ||
                     !gpu::setupDeltaBatchMatches(deltaCtx,
                         *input.mWrappedDeltaDevice, 1u, deltaOwnerRunId))
                     return false;
@@ -4528,6 +4535,7 @@ namespace osuCrypto::LogVole
             {
                 if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing,
                         deltaCtx) ||
+                    !gpu::bindContextExecution(deltaCtx, execution) ||
                     input.mSenderOwnerRunId != deltaOwnerRunId ||
                     input.mLazyTopSk1->count() != tauHi ||
                     !input.mLazyTopSk1->matches(deltaCtx.mParams) ||
@@ -4629,6 +4637,7 @@ namespace osuCrypto::LogVole
 
                 ShrinkExpandSenderOfflineInput seInput{};
                 seInput.mParams = seParams;
+                seInput.mGpuExecution = execution;
                 seInput.mS = std::move(sRep);
                 seInput.mSDevice = residentS;
                 seInput.mLazyS = lazyS;
@@ -4722,6 +4731,7 @@ namespace osuCrypto::LogVole
 
                 SenderOfflineInput childInput{};
                 childInput.mParams = std::move(childParams);
+                childInput.mGpuExecution = execution;
                 if (nextState.mShrinkExpandState.mTopSk1Device)
                 {
                     childInput.mTopSk1Device =
@@ -4760,6 +4770,10 @@ namespace osuCrypto::LogVole
             bool isTopLevel,
             const ShrinkExpandReceiverState* reusableInternalState)
         {
+            auto execution = input.mGpuExecution;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (!execution) execution = std::make_shared<gpu::GpuExecutionContext>();
+#endif
             u32 tauHi = 0;
             u32 muHi = 0;
             const u32 rho = static_cast<u32>(input.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
@@ -4798,6 +4812,7 @@ namespace osuCrypto::LogVole
 
                 ShrinkExpandReceiverOfflineInput seInput{};
                 seInput.mParams = seParams;
+                seInput.mGpuExecution = execution;
                 seInput.mDeferHostSnapshot = input.mUseGpuResidentInternalState;
 
                 if (!finalizeShrinkExpandReceiverOffline(seInput, std::forward<Message>(message).mShrinkExpandMessage, seState))
@@ -4843,6 +4858,7 @@ namespace osuCrypto::LogVole
 
                 ReceiverOfflineInput childInput{};
                 childInput.mParams = std::move(childParams);
+                childInput.mGpuExecution = execution;
                 childInput.mLeafInputsAreGadget = true;
                 childInput.mUseGpuResidentInternalState = input.mUseGpuResidentInternalState;
 
@@ -5165,11 +5181,9 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
-            // The consumer of this batch may not run on this thread: the receiver
-            // coroutine suspends on the socket between the digest and the response,
-            // and threadStream() is keyed on the thread, so stream ordering alone
-            // does not guarantee the expand has landed. One drain per query.
-            if (!gpu::syncStream())
+            // The consumer may resume on another worker after the socket wait.
+            // Preserve the existing once-per-query producer completion boundary.
+            if (!gpu::syncStream(devCtx))
             {
                 return false;
             }

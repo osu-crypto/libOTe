@@ -1909,6 +1909,15 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole CI-VOLE sender offline input is invalid");
         }
 
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (!gpu::bindContextExecution(ctx.mRing,
+                std::make_shared<gpu::GpuExecutionContext>()))
+            throw std::runtime_error("LogVole CI-VOLE sender execution context is invalid");
+        // Retain this session's selected ring in its CRT record as well. The
+        // parent is an immutable math record, never a reference to this copy.
+        ctx.mFactoryOwner = std::make_shared<const ZpCrtContext>(ctx);
+#endif
+
         u32 ringWidth = 0;
         if (!computeInternalRingWidth(sessionParams.mLogVole, ctx, input.mW, ringWidth))
         {
@@ -2006,6 +2015,7 @@ namespace osuCrypto::LogVole
         SenderOfflineInput offlineInput{};
         offlineInput.mParams = params;
         offlineInput.mSenderOwnerRunId = offlineRunId;
+        offlineInput.mGpuExecution = ctx.mRing.mGpuExecution;
 #if defined(ENABLE_LOGVOLE_CUDA)
         offlineInput.mUseGpuResidentInternalState = gpu::enabled();
         offlineInput.mWrappedDeltaDevice = std::move(residentDelta);
@@ -2070,6 +2080,13 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole CI-VOLE receiver could not build CRT context");
         }
 
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (!gpu::bindContextExecution(ctx.mRing,
+                std::make_shared<gpu::GpuExecutionContext>()))
+            throw std::runtime_error("LogVole CI-VOLE receiver execution context is invalid");
+        ctx.mFactoryOwner = std::make_shared<const ZpCrtContext>(ctx);
+#endif
+
         u32 ringWidth = 0;
         if (!computeInternalRingWidth(sessionParams.mLogVole, ctx, meta.mLabelCount, ringWidth))
         {
@@ -2088,6 +2105,7 @@ namespace osuCrypto::LogVole
 
         ReceiverOfflineInput offlineInput{};
         offlineInput.mParams = params;
+        offlineInput.mGpuExecution = ctx.mRing.mGpuExecution;
 #if defined(ENABLE_LOGVOLE_CUDA)
         offlineInput.mUseGpuResidentInternalState = gpu::enabled();
 #endif

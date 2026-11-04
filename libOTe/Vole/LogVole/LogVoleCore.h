@@ -100,6 +100,9 @@ namespace osuCrypto::LogVole
     struct SenderOfflineInput
     {
         Params mParams;
+        // One execution domain for the entire recursive session. An absent
+        // owner selects a fresh domain during setup; children retain it.
+        std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;
         std::vector<RnsPoly> mSk1;
         // Internal CI-VOLE transport may keep its one wrapped delta in
         // coefficient domain on the sender GPU until seed-label repetition.
@@ -147,6 +150,7 @@ namespace osuCrypto::LogVole
     struct ReceiverOfflineInput
     {
         Params mParams;
+        std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;
         bool mLeafInputsAreGadget = false;
         bool mUseGpuResidentInternalState = false;
     };

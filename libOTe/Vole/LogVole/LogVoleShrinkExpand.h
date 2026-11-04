@@ -14,6 +14,7 @@ namespace osuCrypto::LogVole
     struct ShrinkExpandSenderOfflineInput
     {
         ShrinkExpandParams mParams;
+        std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;
         std::vector<RnsPoly> mS;
         // Internal sender setup only. The exact coefficient batch is borrowed
         // by LENC before its hostS() view is requested on decline/inspection.
@@ -32,6 +33,7 @@ namespace osuCrypto::LogVole
     struct ShrinkExpandReceiverOfflineInput
     {
         ShrinkExpandParams mParams;
+        std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;
         bool mDeferHostSnapshot = false;
     };
 

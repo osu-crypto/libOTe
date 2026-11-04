@@ -121,8 +121,8 @@ namespace osuCrypto::LogVole
 
     struct RingNttContext
     {
-        // Caller values retain the immutable factory record; lookup indices are weak.
-        // The record itself leaves this field empty, preventing a self-cycle.
+        // Caller values retain an immutable record; a session selection may
+        // retain its math parent. No record ever refers to itself; indices are weak.
         std::shared_ptr<const RingNttContext> mFactoryOwner;
         RingParams mParams;
         RingResourceScope mResourceScope;

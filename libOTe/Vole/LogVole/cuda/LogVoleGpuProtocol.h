@@ -310,11 +310,9 @@ namespace osuCrypto::LogVole::gpu
     // polynomial is 256 KiB, so upload + kernel + download is roughly 55 us
     // against about 1.1 ms for the four ntt_negacyclic_harvey calls. Returns
     // false if the GPU is unavailable, in which case the caller runs on the CPU.
-    // Drain the calling thread's stream. Needed when a device-resident result is
-    // handed to a consumer that may not run on the same thread - after a coroutine
-    // suspends on the socket it can resume elsewhere, and threadStream() is keyed on
-    // the thread, so stream ordering alone no longer guarantees the data is ready.
-    bool syncStream();
+    // Drain this context's current worker stream before a device result crosses
+    // a coroutine suspension and may be consumed on a different worker.
+    bool syncStream(const RingNttContext& ctx);
 
     bool nttHostBatch(const RingNttContext& ctx, std::span<RnsPoly> polys, bool inverse);
     // Optional full-u64 reduction before forward NTT, or canonical reduction

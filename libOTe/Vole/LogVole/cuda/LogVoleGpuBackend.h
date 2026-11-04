@@ -104,6 +104,9 @@ namespace osuCrypto::LogVole::gpu
         void operator()(GpuZkScratch* scratch) const noexcept;
     };
 
+    class GpuTableReadState;
+    class GpuTableReads;
+
     // A stream plus its reusable scratch. Scratch is released after draining
     // this stream and before releasing the native stream owner.
     class GpuStream
@@ -149,6 +152,8 @@ namespace osuCrypto::LogVole::gpu
         }
 
     private:
+        friend class GpuTableReads;
+        void recordTableRead(const std::shared_ptr<GpuTableReadState>& table);
         GpuStream(bool highestPriority, bool allocateScratch,
             std::shared_ptr<GpuMemoryPool> memory = {});
         bool ensureIndexScratch();
@@ -156,6 +161,9 @@ namespace osuCrypto::LogVole::gpu
         void* mStream = nullptr;
         std::shared_ptr<GpuMemoryPool> mMemory;
         std::shared_ptr<OwnedGpuStream> mAllocationOwner;
+        // Weak reverse registrations let teardown release completed readers
+        // from shared immutable tables without retaining those tables.
+        std::vector<std::weak_ptr<GpuTableReadState>> mTableReads;
         std::unique_ptr<GpuProtocolScratch, GpuProtocolScratchDeleter> mProtocolScratch;
         std::unique_ptr<GpuTransferScratch, GpuTransferScratchDeleter> mTransferScratch;
         std::unique_ptr<GpuGaussianScratch, GpuGaussianScratchDeleter> mGaussianScratch;
@@ -187,6 +195,8 @@ namespace osuCrypto::LogVole::gpu
         GpuStream& mainStream();
         GpuStream& sampleStream();
     private:
+        friend bool bindContextExecution(RingNttContext& ctx,
+            const std::shared_ptr<GpuExecutionContext>& execution);
         GpuStream& stream(bool sample);
         struct Impl;
         std::unique_ptr<Impl> mImpl;
@@ -194,6 +204,12 @@ namespace osuCrypto::LogVole::gpu
 
     GpuStream& contextStream(const RingNttContext& ctx);
     GpuStream& contextSampleStream(const RingNttContext& ctx);
+
+    // Select a session's execution and public operand owners while retaining
+    // the immutable math record. Rebinding the same record in one domain
+    // reuses its selected record; the domain's lookup owns only weak entries.
+    bool bindContextExecution(RingNttContext& ctx,
+        const std::shared_ptr<GpuExecutionContext>& execution);
 
     // Preserve the boolean failure convention of the protocol entry points.
     // The returned allocation retains its explicit stream even on early exit.
@@ -278,19 +294,31 @@ namespace osuCrypto::LogVole::gpu
     // Immutable constants may be read concurrently on several streams. Retain
     // native owners (never their scratch/context) and drain only at teardown.
     // The repeated-stream fast path performs no lock or allocation.
+    class GpuTableReadState
+    {
+        friend class GpuTableReads;
+        friend class GpuStream;
+        void retire(OwnedGpuStream* stream) noexcept;
+        std::atomic<OwnedGpuStream*> mRecent{nullptr};
+        std::mutex mMutex;
+        std::vector<std::shared_ptr<OwnedGpuStream>> mStreams;
+    };
+
     class GpuTableReads
     {
     public:
-        void record(const std::shared_ptr<OwnedGpuStream>& stream) const
+        GpuTableReads() = default;
+        GpuTableReads(const GpuTableReads&) = delete;
+        GpuTableReads& operator=(const GpuTableReads&) = delete;
+        void record(GpuStream& stream) const
         {
-            if (mRecent.load(std::memory_order_relaxed) != stream.get()) recordNew(stream);
+            const auto& owner = stream.allocationOwner();
+            if (mState->mRecent.load(std::memory_order_acquire) != owner.get()) recordNew(stream, owner);
         }
         void wait() const noexcept;
     private:
-        void recordNew(const std::shared_ptr<OwnedGpuStream>& stream) const;
-        mutable std::atomic<OwnedGpuStream*> mRecent{nullptr};
-        mutable std::mutex mMutex;
-        mutable std::vector<std::shared_ptr<OwnedGpuStream>> mStreams;
+        void recordNew(GpuStream& stream, const std::shared_ptr<OwnedGpuStream>& owner) const;
+        std::shared_ptr<GpuTableReadState> mState = std::make_shared<GpuTableReadState>();
     };
 
     class GpuRing
@@ -322,7 +350,7 @@ namespace osuCrypto::LogVole::gpu
         std::size_t polyBytes() const { return polyWords() * sizeof(u64); }
         const RingConstView& view(GpuStream& stream) const
         {
-            mReads.record(stream.allocationOwner());
+            mReads.record(stream);
             return mView;
         }
         // Host metadata inspection does not submit device reads.
@@ -429,7 +457,7 @@ namespace osuCrypto::LogVole::gpu
 
         const RingConstView& view(GpuStream& stream) const
         {
-            mReads.record(stream.allocationOwner());
+            mReads.record(stream);
             return mView;
         }
         const RingConstView& metadata() const { return mView; }

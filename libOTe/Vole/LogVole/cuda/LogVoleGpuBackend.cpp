@@ -4,6 +4,7 @@
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVolePublicCache.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
 
 #include "seal/util/ntt.h"
@@ -24,6 +25,7 @@
 #include <thread>
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuThreadLocal.h"
 #include <limits>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -949,6 +951,11 @@ namespace osuCrypto::LogVole::gpu
     {
         if (!mStream) return;
         if (!gpuStreamSync(mStream)) std::terminate();
+        // Every registered table read completed before its native owner is
+        // released. Shared tables must not accumulate streams from past sessions.
+        for (const auto& weak : mTableReads)
+            if (auto table = weak.lock()) table->retire(mAllocationOwner.get());
+        mTableReads.clear();
         // Explicit dependency order, independent of which scratch accessor was
         // called first. No scratch destructor can observe a destroyed stream.
         mProtocolScratch.reset();
@@ -974,6 +981,15 @@ namespace osuCrypto::LogVole::gpu
             mAllocationOwner = std::make_shared<OwnedGpuStream>(mMemory, mStream);
         }
         return mAllocationOwner;
+    }
+
+    void GpuStream::recordTableRead(const std::shared_ptr<GpuTableReadState>& table)
+    {
+        // Long-lived streams may see short-lived operand tables. Do not retain
+        // their expired weak control blocks for the rest of the session.
+        mTableReads.erase(std::remove_if(mTableReads.begin(), mTableReads.end(),
+            [](const auto& weak) { return weak.expired(); }), mTableReads.end());
+        mTableReads.emplace_back(table);
     }
 
     bool GpuStream::ensureIndexScratch()
@@ -1068,6 +1084,8 @@ namespace osuCrypto::LogVole::gpu
         int device = -1;
         std::shared_ptr<GpuMemoryPool> memory;
         std::unordered_map<std::thread::id, Worker> workers;
+        using Record = std::weak_ptr<const RingNttContext>;
+        std::map<Record, Record, std::owner_less<Record>> contexts;
     };
 
     GpuExecutionContext::GpuExecutionContext() : mImpl(std::make_unique<Impl>()) {}
@@ -1089,6 +1107,49 @@ namespace osuCrypto::LogVole::gpu
 
     GpuStream& GpuExecutionContext::mainStream() { return stream(false); }
     GpuStream& GpuExecutionContext::sampleStream() { return stream(true); }
+
+    bool bindContextExecution(RingNttContext& ctx,
+        const std::shared_ptr<GpuExecutionContext>& execution)
+    {
+        if (!execution || !validateRingContextMetadata(ctx)) return false;
+        if (ctx.mFactoryOwner && ctx.mFactoryOwner->mGpuExecution == execution &&
+            ctx.mGpuExecution == execution) return true;
+
+        // Selected records may retain a math parent, but neither a domain nor
+        // its native streams owns a selected record. Unwrap previous selections
+        // so rebinding never retains another session's execution or public cache.
+        auto base = ctx.mFactoryOwner;
+        while (base && base->mFactoryOwner) base = base->mFactoryOwner;
+        if (!base)
+        {
+            auto privateMath = ctx;
+            privateMath.mGpuExecution.reset();
+            privateMath.mPublicCache.reset();
+            base = std::make_shared<const RingNttContext>(std::move(privateMath));
+        }
+
+        std::shared_ptr<const RingNttContext> selected;
+        {
+            std::lock_guard lock(execution->mImpl->mutex);
+            auto& records = execution->mImpl->contexts;
+            for (auto it = records.begin(); it != records.end(); )
+                if (it->first.expired() || it->second.expired()) it = records.erase(it);
+                else ++it;
+            auto& slot = records[base];
+            selected = slot.lock();
+            if (!selected)
+            {
+                auto next = *base;
+                next.mFactoryOwner = base;
+                next.mGpuExecution = execution;
+                next.mPublicCache = std::make_shared<PublicPolynomialCache>();
+                selected = std::make_shared<const RingNttContext>(std::move(next));
+                slot = selected;
+            }
+        }
+        // Preserve the factory's exact CPU view when the backend is disabled.
+        return makeRingNttContext(ctx.mParams, ctx, selected);
+    }
 
     GpuStream& contextStream(const RingNttContext& ctx)
     {
@@ -1409,19 +1470,39 @@ namespace osuCrypto::LogVole::gpu
 
     // ---- GpuRing ----------------------------------------------------------
 
-    void GpuTableReads::recordNew(const std::shared_ptr<OwnedGpuStream>& stream) const
+    void GpuTableReads::recordNew(GpuStream& stream, const std::shared_ptr<OwnedGpuStream>& owner) const
+    {
+        std::lock_guard lock(mState->mMutex);
+        auto& readers = mState->mStreams;
+        if (std::find(readers.begin(), readers.end(), owner) == readers.end())
+        {
+            // Register the weak reverse edge first: if either allocation
+            // throws, stream teardown can still safely visit this table state.
+            stream.recordTableRead(mState);
+            readers.push_back(owner);
+        }
+        mState->mRecent.store(owner.get(), std::memory_order_release);
+    }
+
+    void GpuTableReadState::retire(OwnedGpuStream* stream) noexcept
     {
         std::lock_guard lock(mMutex);
-        if (std::find(mStreams.begin(), mStreams.end(), stream) == mStreams.end())
-            mStreams.push_back(stream);
-        mRecent.store(stream.get(), std::memory_order_relaxed);
+        if (mRecent.load(std::memory_order_relaxed) == stream)
+            mRecent.store(nullptr, std::memory_order_release);
+        mStreams.erase(std::remove_if(mStreams.begin(), mStreams.end(),
+            [stream](const auto& owner) { return owner.get() == stream; }), mStreams.end());
     }
 
     void GpuTableReads::wait() const noexcept
     {
         // No reader can register after the last shared table owner is released.
-        // Retaining the native stream also covers concurrent worker teardown.
-        try { for (const auto& stream : mStreams) stream->synchronize(); }
+        // Retirement holds the same lock until a completed reader is removed;
+        // unfinished readers retain their native streams through this wait.
+        try
+        {
+            std::lock_guard lock(mState->mMutex);
+            for (const auto& stream : mState->mStreams) stream->synchronize();
+        }
         catch (...) { std::terminate(); }
     }
 

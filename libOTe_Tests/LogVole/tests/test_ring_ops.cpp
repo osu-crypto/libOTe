@@ -407,6 +407,83 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
     ScopedEnvironmentValue overlap("LV_GPU_SETUP_INIT_OVERLAP", "1");
     ScopedEnvironmentValue deferred("LV_GPU_DEFER_GOLDEN_VALIDATION", "1");
     {
+        RingNttContext math;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), math));
+        auto firstExecution = std::make_shared<gpu::GpuExecutionContext>();
+        auto secondExecution = std::make_shared<gpu::GpuExecutionContext>();
+        std::weak_ptr<gpu::GpuExecutionContext> firstLifetime = firstExecution;
+        auto first = math, second = math, again = math;
+        LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(first, firstExecution));
+        LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(second, secondExecution));
+        LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(again, firstExecution));
+        LOGVOLE_REQUIRE_TRUE(first.mFactoryOwner == again.mFactoryOwner);
+        LOGVOLE_REQUIRE_TRUE(first.mFactoryOwner != second.mFactoryOwner);
+        LOGVOLE_REQUIRE_TRUE(first.mFactoryOwner->mFactoryOwner == math.mFactoryOwner);
+        LOGVOLE_REQUIRE_TRUE(first.mPublicCache == again.mPublicCache);
+        LOGVOLE_REQUIRE_TRUE(first.mPublicCache != second.mPublicCache && first.mPublicCache != math.mPublicCache);
+        LOGVOLE_REQUIRE_TRUE(first.mResourceScope.mTables == math.mResourceScope.mTables);
+        LOGVOLE_REQUIRE_TRUE(gpu::contextStream(first).raw() != gpu::contextStream(second).raw());
+        // A live bound record is reused across workers and role changes.
+        std::packaged_task<void()> task([&] {
+            ScopedProtocolCacheScope other(ProtocolCacheRole::Receiver, 77);
+            auto workerContext = math;
+            LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(workerContext, firstExecution));
+            LOGVOLE_REQUIRE_TRUE(workerContext.mFactoryOwner == first.mFactoryOwner);
+        });
+        auto completed = task.get_future();
+        std::thread worker(std::move(task));
+        worker.join();
+        completed.get();
+        {
+            ScopedGpuEnabled cpu(false);
+            auto host = math;
+            LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(host, firstExecution));
+            LOGVOLE_REQUIRE_TRUE(host.mFactoryOwner == first.mFactoryOwner);
+            LOGVOLE_REQUIRE_TRUE(host.mContext && !host.mGpuLightweight);
+            LOGVOLE_REQUIRE_TRUE(validateRingContextMetadata(host));
+        }
+        auto& stream = gpu::contextStream(first);
+        std::weak_ptr<gpu::OwnedGpuStream> native = stream.allocationOwner();
+        gpu::OwnedGpuBuffer exported(stream.allocationOwner(), 4 * sizeof(std::uint64_t));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(exported.data(), exported.size(), stream.raw()));
+        first = {}; again = {}; firstExecution.reset();
+        LOGVOLE_REQUIRE_TRUE(firstLifetime.expired());
+        // The weak binding index cannot form a cycle. Exported storage keeps
+        // only the native producer alive after its session domain disappears.
+        LOGVOLE_REQUIRE_FALSE(native.expired());
+        {
+            std::array<std::uint64_t, 4> fetched{1, 1, 1, 1};
+            const auto producer = native.lock();
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched.data(), exported.data(), exported.size(), producer->raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuStreamSync(producer->raw()));
+            for (auto value : fetched) LOGVOLE_REQUIRE_EQ(value, std::uint64_t{0});
+        }
+        exported.reset();
+        LOGVOLE_REQUIRE_TRUE(native.expired());
+        // Sharing an immutable table must not keep completed session streams
+        // or their private allocation pools alive across successive sessions.
+        const auto tables = gpu::GpuRing::get(math);
+        LOGVOLE_REQUIRE_TRUE(tables);
+        for (unsigned round = 0; round != 2; ++round)
+        {
+            std::weak_ptr<gpu::OwnedGpuStream> reader;
+            std::weak_ptr<gpu::GpuMemoryPool> memory;
+            {
+                auto execution = std::make_shared<gpu::GpuExecutionContext>();
+                auto selected = math;
+                LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(selected, execution));
+                auto& compute = gpu::contextStream(selected);
+                reader = compute.allocationOwner();
+                memory = compute.allocationOwner()->memory();
+                gpu::OwnedGpuBuffer values(compute.allocationOwner(), tables->polyBytes());
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(values.data(), values.size(), compute.raw()));
+                LOGVOLE_REQUIRE_TRUE(gpu::launchNttForward(tables->view(compute),
+                    static_cast<std::uint64_t*>(values.data()), 1, nullptr, compute.raw()));
+            }
+            LOGVOLE_REQUIRE_TRUE(reader.expired() && memory.expired());
+        }
+    }
+    {
         ScopedEnvironmentValue lightweight("LV_GPU_SETUP_LIGHTWEIGHT_RING", "1");
         ScopedEnvironmentValue fullChain("LV_GPU_SETUP_FULL_MOD_CHAIN", "0");
         ScopedEnvironmentValue native("LV_GPU_NATIVE_SEAL_BUNDLE", "0");
@@ -737,13 +814,14 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         std::weak_ptr<gpu::GpuMemoryPool> pool;
         std::packaged_task<gpu::DeviceBatchPtr()> task([&] {
             ScopedProtocolCacheScope scope(role, allocateProtocolCacheRunId());
-            auto& stream = gpu::threadStream();
-            producer = stream.allocationOwner();
-            pool = stream.allocationOwner()->memory();
             auto ownedContext = plainContext;
             ownedContext.mFactoryOwner.reset();
             ownedContext.mRing.mFactoryOwner.reset();
+            ownedContext.mRing.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
             ownedContext.mRing.mResourceScope.mTables = std::make_shared<gpu::GpuTableCache>();
+            auto& stream = gpu::contextStream(ownedContext.mRing);
+            producer = stream.allocationOwner();
+            pool = stream.allocationOwner()->memory();
             // Cold allocation and a cache hit both feed the ordinary wrap path.
             auto first = gpu::wrapLabelsDevice(ownedContext, labels, true, 0, 1);
             LOGVOLE_REQUIRE_TRUE(first);

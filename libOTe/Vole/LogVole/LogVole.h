@@ -30,8 +30,8 @@ namespace osuCrypto::LogVole
     // the concrete prime used by a session.
     struct ZpCrtContext
     {
-        // Caller values retain the immutable factory record; lookup indices are weak.
-        // The record itself leaves this field empty, preventing a self-cycle.
+        // Caller values retain an immutable record. A session selection may
+        // retain its math parent, without a self-reference or strong index.
         std::shared_ptr<const ZpCrtContext> mFactoryOwner;
         RingNttContext mRing;
         u32 mPlaintextModulusBits = 0;

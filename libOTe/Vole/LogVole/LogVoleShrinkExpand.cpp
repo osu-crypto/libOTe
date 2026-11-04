@@ -401,6 +401,8 @@ namespace osuCrypto::LogVole
             return false;
         }
 #if defined(ENABLE_LOGVOLE_CUDA)
+        if (!gpu::bindContextExecution(ctx, input.mGpuExecution ? input.mGpuExecution :
+                std::make_shared<gpu::GpuExecutionContext>())) return false;
         if (input.mFixedSk1Device &&
             (!gpu::topSecretUniformBatchMatches(ctx,
                 *input.mFixedSk1Device, input.mParams.mTau,
@@ -702,6 +704,11 @@ namespace osuCrypto::LogVole
         {
             return false;
         }
+
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (!gpu::bindContextExecution(ctx, input.mGpuExecution ? input.mGpuExecution :
+                std::make_shared<gpu::GpuExecutionContext>())) return false;
+#endif
 
         ShrinkExpandReceiverState next{};
         next.mParams = input.mParams;
