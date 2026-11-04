@@ -3770,13 +3770,9 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
         ScopedProtocolCacheScope scope(senderDevice ? ProtocolCacheRole::Sender : ProtocolCacheRole::Receiver,
             currentProtocolCacheScope().mRunId);
         ScopedEnvironmentValue pinnedWire("LV_GPU_SETUP_PINNED_WIRE", "1");
-        struct RestoreStream
-        {
-            void* previous = gpu::gpuCurrentStream();
-            ~RestoreStream() { gpu::gpuSetCurrentStream(previous); }
-        } restoreStream;
+
         gpu::GpuStream uploadStream, downloadStream;
-        gpu::gpuSetCurrentStream(uploadStream.raw());
+
         constexpr std::size_t bytes = (std::size_t{1} << 20) + 19u;
         const auto pattern = [](std::size_t i) {
             return static_cast<oc::u8>((i * 29u + (i >> 10u)) & 255u);
@@ -3792,23 +3788,20 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
             {
                 gpu::GpuStream& upload;
                 gpu::GpuStream& download;
-                void* device = nullptr;
+                gpu::OwnedGpuBuffer device;
                 void* registeredSource = nullptr;
                 void* registeredDestination = nullptr;
                 ~WireCleanup()
                 {
                     // Assertions can throw after either enqueue or registration.
                     // Drain before unregistering or allowing host vectors to die.
-                    (void)upload.sync();
-                    (void)download.sync();
+                    if (!upload.sync() || !download.sync()) std::terminate();
                     if (registeredSource) (void)gpu::gpuUnregisterHost(registeredSource);
                     if (registeredDestination) (void)gpu::gpuUnregisterHost(registeredDestination);
-                    gpu::gpuSetCurrentStream(upload.raw());
-                    gpu::gpuFree(device);
                 }
             } cleanup{ uploadStream, downloadStream };
-            cleanup.device = gpu::gpuMalloc(bytes);
-            LOGVOLE_REQUIRE_TRUE(cleanup.device != nullptr);
+            cleanup.device = gpu::OwnedGpuBuffer(uploadStream.allocationOwner(), bytes);
+            LOGVOLE_REQUIRE_TRUE(cleanup.device);
             for (std::size_t i = 0; i < bytes; ++i) sourceSpan[i] = pattern(i);
             if (registerFirst)
             {
@@ -3824,11 +3817,12 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 // fallback. Supported devices now force an already-registered
                 // decline when each helper attempts its own registration.
             }
-            LOGVOLE_REQUIRE_TRUE(gpu::uploadSetupWire(cleanup.device, {sourceSpan, bytes}, uploadStream));
-            // A synchronous upload permits immediate source reuse, and a
-            // consumer on another stream requires no explicit dependency.
+            LOGVOLE_REQUIRE_TRUE(gpu::uploadSetupWire(cleanup.device.data(), {sourceSpan, bytes}, uploadStream));
+            // A synchronous upload permits immediate source reuse. Transfer
+            // allocation ownership before the consumer uses another stream.
             std::fill(sourceSpan, sourceSpan + bytes, 0u);
-            LOGVOLE_REQUIRE_TRUE(gpu::downloadSetupWire({destinationSpan, bytes}, cleanup.device, downloadStream));
+            cleanup.device.handoff(downloadStream.allocationOwner());
+            LOGVOLE_REQUIRE_TRUE(gpu::downloadSetupWire({destinationSpan, bytes}, cleanup.device.data(), downloadStream));
             std::size_t firstMismatch = 0;
             while (firstMismatch < bytes && destinationSpan[firstMismatch] == pattern(firstMismatch))
                 ++firstMismatch;

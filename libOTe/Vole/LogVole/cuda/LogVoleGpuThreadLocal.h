@@ -38,7 +38,6 @@ namespace osuCrypto::LogVole::gpu
     public:
         GpuThreadLocal()
         {
-            gpuInitializeMemoryPools();
             gpuCollectThreadResources();
             auto owner = std::make_unique<Owner>();
             thread_storage_detail::registerThreadResource(owner.get());

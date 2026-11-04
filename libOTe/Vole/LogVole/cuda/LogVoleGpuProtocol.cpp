@@ -78,7 +78,7 @@ namespace osuCrypto::LogVole::gpu
         auto& publicRetentionEntries()
         {
             static std::vector<PublicRetentionEntry> entries = [] {
-                gpuInitializeMemoryPools();
+                (void)gpuDeviceAvailable();
                 return std::vector<PublicRetentionEntry>{};
             }();
             return entries;
@@ -928,11 +928,6 @@ namespace osuCrypto::LogVole::gpu
                         ScopedProtocolCacheScope roleScope(ProtocolCacheRole::Receiver, mRunId);
                         if (enabled() && currentDeviceOrdinal() == mDevice)
                         {
-                            struct RestoreStream
-                            {
-                                void* previous = gpuCurrentStream();
-                                ~RestoreStream() { gpuSetCurrentStream(previous); }
-                            } restoreStream;
                             auto& stream = threadStream();
                             StreamDrain drain{stream};
                             HostStep downloadStep("setup receiver: lazy NTT host download");
@@ -1586,11 +1581,6 @@ namespace osuCrypto::LogVole::gpu
         ScopedProtocolCacheScope roleScope(
             ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
         if (!enabled()) return false;
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restoreStream;
         HostStep setupStep("setup sender: shared device cache");
         // Publish only after buildOfflineCache completes its stream. Mutable
         // query buffers and sampler scratch remain outside the shared mirror.
@@ -1608,11 +1598,6 @@ namespace osuCrypto::LogVole::gpu
         ScopedProtocolCacheScope roleScope(
             ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
         if (!enabled()) return false;
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restoreStream;
         HostStep setupStep("setup receiver: shared device cache");
         // buildOfflineCache synchronizes before receiverCache publishes the
         // pointer. Only immutable buffers are shared; LevelSession and sampler
@@ -1678,11 +1663,6 @@ namespace osuCrypto::LogVole::gpu
         if (decline && decline[0] == '1') return false;
 
         HostStep totalStep("setup receiver: resident ciphertext NTT");
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restoreStream;
         // These are receiver-owned decoded tensors. No sender device buffer or
         // transport shortcut participates in constructing this mirror.
         auto cache = buildOfflineCache(ctx, state.mPublicANtt.get(), state.mPublicBNtt.get(),
@@ -1781,13 +1761,7 @@ namespace osuCrypto::LogVole::gpu
                 HostStep step(coefficients ? "setup: deferred LENC R coefficients" : "setup: deferred LENC R NTT");
                 if (currentDeviceOrdinal() != mDevice)
                     throw std::runtime_error("LogVole randomizers requested on a different CUDA device");
-                struct RestoreStream
-                {
-                    void* previous = gpuCurrentStream();
-                    ~RestoreStream() { gpuSetCurrentStream(previous); }
-                } restore;
                 GpuStream stream;
-                gpuSetCurrentStream(stream.raw());
                 GpuPolyBuffer coeff;
                 std::vector<RnsPoly> next;
                 StreamDrain drain{stream};
@@ -1845,13 +1819,7 @@ namespace osuCrypto::LogVole::gpu
                     HostStep step("setup: deferred sender tensor materialization");
                     if (currentDeviceOrdinal() != mDevice)
                         throw std::runtime_error("LogVole deferred tensor requested on a different CUDA device");
-                    struct RestoreStream
-                    {
-                        void* previous = gpuCurrentStream();
-                        ~RestoreStream() { gpuSetCurrentStream(previous); }
-                    } restore;
                     GpuStream stream;
-                    gpuSetCurrentStream(stream.raw());
                     std::vector<RnsPoly> next;
                     StreamDrain drain{stream};
                     const bool downloaded = mBuffer.download(next, stream);
@@ -1868,13 +1836,7 @@ namespace osuCrypto::LogVole::gpu
                 if (destination.size() != mBuffer.bytes() || currentDeviceOrdinal() != mDevice)
                     return false;
                 HostStep step("setup: device ciphertext to wire");
-                struct RestoreStream
-                {
-                    void* previous = gpuCurrentStream();
-                    ~RestoreStream() { gpuSetCurrentStream(previous); }
-                } restore;
                 auto& stream = threadSampleStream();
-                gpuSetCurrentStream(stream.raw());
                 const bool copied = downloadSetupWire(destination, mBuffer.data(stream), stream);
                 return stream.sync() && copied;
             }
@@ -2426,14 +2388,6 @@ namespace osuCrypto::LogVole::gpu
         // than a host synchronise, so a second stream no longer reintroduces the
         // same drain by the back door.
         auto& stream = threadSampleStream();
-        // Keep allocator ownership attached to this stream through buf's
-        // destruction, including failures that leave the host inputs intact.
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restoreStream;
-        gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer buf;
         // Keep fallback download destinations alive until the failure guard
         // drains any queued DMA, including a failed later download chunk.
@@ -2521,7 +2475,6 @@ namespace osuCrypto::LogVole::gpu
         // Secondary stream, for the same reason as nttHostBatch above: host in,
         // host out, nothing queued to order against.
         auto& stream = threadSampleStream();
-        gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer src;
         GpuPolyBuffer dst;
         bool ok = src.resize(*ring, 1, stream) && dst.resize(*ring, levels, stream) &&
@@ -2532,7 +2485,6 @@ namespace osuCrypto::LogVole::gpu
 
         // download() queues the copies and synchronises.
         if (ok) ok = dst.download(out, stream, 0, levels) && out.size() == levels;
-        gpuSetCurrentStream(threadStream().raw());
         return ok;
     }
 
@@ -2571,12 +2523,6 @@ namespace osuCrypto::LogVole::gpu
                     (static_cast<std::size_t>(streamWords) * sizeof(u64))) return false;
 
             auto& stream = threadSampleStream();
-            struct RestoreStream
-            {
-                void* previous = gpuCurrentStream();
-                ~RestoreStream() { gpuSetCurrentStream(previous); }
-            } restoreStream;
-            gpuSetCurrentStream(stream.raw());
             // Setup uses the secondary stream. Its scratch must not alias the
             // online sampler or either prefetch sampler on another stream.
             auto& scratch = stream.protocolScratch().setup;
@@ -3106,8 +3052,6 @@ namespace osuCrypto::LogVole::gpu
             ring->polyWords() > maxBytes / sizeof(u64) ||
             count > maxBytes / (ring->polyWords() * sizeof(u64))) return false;
         auto& stream = threadSampleStream();
-        struct RestoreStream { void* previous = gpuCurrentStream(); ~RestoreStream() { gpuSetCurrentStream(previous); } } restore;
-        gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer samples;
         OwnedGpuBuffer selectors, scales, denseInput;
         std::vector<u32> limbs;
@@ -3427,12 +3371,6 @@ namespace osuCrypto::LogVole::gpu
         }
 
         auto& stream = threadSampleStream();
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restoreStream;
-        gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer rBuffer, bBuffer, ctBuffer, scaledBuffer, compactNoiseSource;
         OwnedGpuBuffer deviceIndices;
         std::vector<RnsPoly> next;
@@ -3752,12 +3690,6 @@ namespace osuCrypto::LogVole::gpu
         }
 
         auto& stream = threadSampleStream();
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restoreStream;
-        gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer rBuffer, bBuffer, ctBuffer, scaledBuffer, compactNoiseSource, compactRandomizerSource;
         OwnedGpuBuffer deviceIndices, deviceFactors;
         std::vector<RnsPoly> next, firstRNtt;
@@ -4078,12 +4010,6 @@ namespace osuCrypto::LogVole::gpu
         if (compactNoise && !ones) return false;
 
         auto& stream = threadSampleStream();
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restoreStream;
-        gpuSetCurrentStream(stream.raw());
         GpuPolyBuffer rBuffer, skBuffer, aBuffer, ctBuffer, noiseBuffer;
         OwnedGpuBuffer deviceIndices;
         std::vector<RnsPoly> next;
@@ -5371,8 +5297,6 @@ namespace osuCrypto::LogVole::gpu
                 // receiver stream through its ready event. On teardown or an
                 // abandoned attempt, finish the dedicated producer before its
                 // cache-owned storage is returned to the allocator.
-                void* previous = gpuCurrentStream();
-                void* priority = mStream ? mStream->raw() : nullptr;
                 if (mStream && !mStream->sync()) std::terminate();
                 // Each allocation retains its own origin and last-use streams;
                 // suffix work may have moved to another receiver thread.
@@ -5383,7 +5307,6 @@ namespace osuCrypto::LogVole::gpu
                 mIndexStorage.reset();
                 mIndices = nullptr;
                 mStream.reset();
-                gpuSetCurrentStream(previous == priority ? nullptr : previous);
             }
 
             bool init(
@@ -6003,7 +5926,6 @@ namespace osuCrypto::LogVole::gpu
                 return bail("root priority prefetch: retained inputs");
 
             auto& treeImpl = *tree->mImpl;
-            auto& ordinaryStream = threadStream();
             auto next = std::make_shared<PreparedRootFinalize>();
             auto& impl = *next->mImpl;
             impl.mState = &state;
@@ -6021,13 +5943,6 @@ namespace osuCrypto::LogVole::gpu
             impl.mReadyEvent = gpuEventCreate();
             prepared = std::move(next);
             if (!impl.mReadyEvent) return false;
-
-            struct RestoreCurrentStream
-            {
-                void* mPrevious;
-                ~RestoreCurrentStream() { gpuSetCurrentStream(mPrevious); }
-            } restore{ ordinaryStream.raw() };
-            gpuSetCurrentStream(workspace->mStream->raw());
 
             // The device allocation and host backing of these immutable pairs
             // were prepared before send. The first call fills them once on this
@@ -6690,18 +6605,7 @@ namespace osuCrypto::LogVole::gpu
         const u32 mu = state.mParams.mMu;
         if (mu == 0u || cache->mPublicA.count() != mu) return false;
 
-        // threadStream() both obtains the main stream and publishes it to the
-        // caching allocator. Restore that publication on every exit; all
-        // allocations made while the prefetch is queued must instead be tagged
-        // with the secondary stream.
-        auto& mainStream = threadStream();
         auto& sampleStream = threadSampleStream();
-        struct RestoreCurrentStream
-        {
-            void* mStream;
-            ~RestoreCurrentStream() { gpuSetCurrentStream(mStream); }
-        } restore{ mainStream.raw() };
-        gpuSetCurrentStream(sampleStream.raw());
 
         auto next = std::make_unique<PreparedSenderCt2>();
         auto& impl = *next->mImpl;
@@ -6902,17 +6806,7 @@ namespace osuCrypto::LogVole::gpu
         const u32 mu = state.mParams.mMu;
         if (mu == 0u || cache->mPublicA.count() != mu) return false;
 
-        // Allocation ownership must be tagged to the producer stream. As with
-        // sender prefetch, restore the role's main stream on every exit so later
-        // allocations do not silently inherit the secondary stream.
-        auto& mainStream = threadStream();
         auto& sampleStream = threadSampleStream();
-        struct RestoreCurrentStream
-        {
-            void* mStream;
-            ~RestoreCurrentStream() { gpuSetCurrentStream(mStream); }
-        } restore{ mainStream.raw() };
-        gpuSetCurrentStream(sampleStream.raw());
 
         auto next = std::make_unique<PreparedReceiverCt2>();
         auto& impl = *next->mImpl;
@@ -9062,13 +8956,7 @@ namespace osuCrypto::LogVole::gpu
             (chainDecline && chainDecline[0] == '1')) return {};
 
         HostStep step("setup sender: resident wrapped delta");
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restore;
         auto& stream = threadStream();
-        gpuSetCurrentStream(stream.raw());
         auto ring = GpuRing::get(ctx.mRing);
         if (!ring || ring->n() != slots || ring->rho() != rho) return {};
         auto owner = std::make_shared<DeviceBatch>();
@@ -9165,9 +9053,7 @@ namespace osuCrypto::LogVole::gpu
         if (decline && decline[0] == '1') return false;
 
         HostStep deltaStep("setup: delta GPU preparation");
-        struct RestoreStream { void* previous = gpuCurrentStream(); ~RestoreStream() { gpuSetCurrentStream(previous); } } restore;
         auto& stream = threadStream();
-        gpuSetCurrentStream(stream.raw());
         const char* lightweight = std::getenv("LV_GPU_SETUP_DELTA_LIGHTWEIGHT");
         if (!lightweight || lightweight[0] != '0')
         {
@@ -9335,11 +9221,6 @@ namespace osuCrypto::LogVole::gpu
         if (!enabled() || !count || !modulus ||
             count > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return nullptr;
         HostStep sampleStep("gpu: sample input scalars");
-        struct RestoreStream
-        {
-            void* previous = gpuCurrentStream();
-            ~RestoreStream() { gpuSetCurrentStream(previous); }
-        } restoreStream;
         auto& stream = threadStream();
         auto out = std::make_shared<DeviceScalars>();
         std::array<u64, 2> seedWords{};

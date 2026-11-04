@@ -65,11 +65,9 @@ namespace osuCrypto::LogVole::gpu
                     }
                 }
                 if (!retired) return;
-                // Workers may have queued asynchronous transfers. Collect only
-                // on thread turnover, explicit trim or process teardown, never
-                // in a steady-state allocation or kernel loop.
-                gpuDeviceSync();
-                const auto previousStream = gpuCurrentStream();
+                // Each retired GpuStream drains its own queued work before
+                // releasing scratch. Exported buffers retain their native
+                // stream owners independently; no device-wide barrier is needed.
                 while (retired)
                 {
                     auto* group = retired;
@@ -84,15 +82,18 @@ namespace osuCrypto::LogVole::gpu
                     }
                     delete group;
                 }
-                gpuSetCurrentStream(previousStream);
             }
             ~ThreadResourceRegistry() { collect(true); }
         };
 
         ThreadResourceRegistry& threadResourceRegistry()
         {
-            gpuInitializeMemoryPools();
-            static ThreadResourceRegistry registry;
+            static ThreadResourceRegistry registry = [] {
+                // Initialize the runtime before this transitional registry is
+                // registered for process teardown. No storage is cached here.
+                (void)gpuDeviceAvailable();
+                return ThreadResourceRegistry{};
+            }();
             return registry;
         }
 
@@ -960,11 +961,6 @@ namespace osuCrypto::LogVole::gpu
         mDeviceScratchStorage.reset();
         mHostScratchStorage.reset();
         mStagingStorage.reset();
-        if (gpuCurrentStream() == mStream) gpuSetCurrentStream(nullptr);
-        // Other buffers still use the legacy allocator during migration.
-        // Detach its tags while the native stream is still alive. Exported
-        // explicit owners may retain the native stream after this wrapper.
-        if (!mHighestPriority) gpuForgetStream(mStream);
         if (!mAllocationOwner) gpuStreamDestroy(mStream);
     }
 
@@ -1114,7 +1110,6 @@ namespace osuCrypto::LogVole::gpu
         if (lazyRoleStreamsEnabled())
         {
             auto& stream = lazyRoleStream<false>();
-            gpuSetCurrentStream(stream.raw());
             return stream;
         }
         // Keyed on the protocol role as well as the thread. The sender and the
@@ -1142,7 +1137,6 @@ namespace osuCrypto::LogVole::gpu
         default:
             break;
         }
-        gpuSetCurrentStream(s->raw());
         return *s;
     }
 

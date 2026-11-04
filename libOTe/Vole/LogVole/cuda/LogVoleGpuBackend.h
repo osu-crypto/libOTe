@@ -225,8 +225,7 @@ namespace osuCrypto::LogVole::gpu
 
     // Stream for the calling thread *and protocol role*, so the sender and the
     // receiver do not serialise on one stream when they are interleaved
-    // coroutines on the same host thread. Also publishes the stream to the
-    // caching allocator via gpuSetCurrentStream.
+    // coroutines on the same host thread.
     GpuStream& threadStream();
     // Second stream for the calling role, for work independent of the main chain.
     GpuStream& threadSampleStream();

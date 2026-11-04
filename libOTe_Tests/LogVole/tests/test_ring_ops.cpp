@@ -300,7 +300,6 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
             ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, runId);
             uploaded = gpu::uploadScalars(expected);
             LOGVOLE_REQUIRE_TRUE(uploaded);
-            LOGVOLE_REQUIRE_TRUE(gpu::gpuCurrentStream() == gpu::threadStream().raw());
             LOGVOLE_REQUIRE_TRUE(gpu::gpuStreamSync(previous));
             fetched.resize(expected.size());
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*uploaded, fetched));
@@ -535,12 +534,10 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 17, context));
             }
             LOGVOLE_REQUIRE_FALSE(context.mGpuLightweight);
-            const auto ambient = gpu::gpuCurrentStream();
             ring = gpu::GpuRing::get(context.mRing);
             plain = gpu::GpuPlainNtt::get(*context.mBatchingContext,
                 *context.mBatchEncoder, context.mRing.mResourceScope);
             LOGVOLE_REQUIRE_TRUE(ring && plain);
-            LOGVOLE_REQUIRE_TRUE(gpu::gpuCurrentStream() == ambient);
             cache = context.mRing.mResourceScope.mTables;
             record = context.mFactoryOwner;
         }
@@ -765,30 +762,34 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         std::packaged_task<void()> task([round] {
             auto& stream = gpu::threadStream();
             constexpr std::size_t count = 4099, bytes = count * sizeof(std::uint64_t);
-            using Owner = std::unique_ptr<void, void(*)(void*)>;
-            Owner device(gpu::gpuMalloc(bytes), gpu::gpuFree);
-            Owner host(gpu::gpuMallocHost(bytes), gpu::gpuFreeHost);
+            auto memory = stream.allocationOwner()->memory();
+            gpu::OwnedGpuBuffer device(stream.allocationOwner(), bytes);
+            gpu::PinnedHostBuffer host(bytes);
             WireMemoryPool wireMemory;
             auto* wire = wireMemory.allocate(bytes, 64);
-            LOGVOLE_REQUIRE_TRUE(device && host && wire);
-            auto* source = static_cast<std::uint64_t*>(host.get());
+            LOGVOLE_REQUIRE_TRUE(device && host.data() && wire);
+            auto* source = static_cast<std::uint64_t*>(host.data());
             auto* fetched = static_cast<std::uint64_t*>(wire);
             for (std::size_t i = 0; i < count; ++i) source[i] = 0xfedcba9876543210ull ^ (i + round);
             bool pinned = false;
             LOGVOLE_REQUIRE_TRUE(wireMemory.pin(wire, bytes, pinned));
-            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(device.get(), source, bytes, stream.raw()));
+            gpu::StreamDrain drain{stream};
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(device.data(), source, bytes, stream.raw()));
             LOGVOLE_REQUIRE_TRUE(stream.sync());
-            gpu::gpuTrimMemory();
+            memory->trim();
             LOGVOLE_REQUIRE_TRUE(wireMemory.contains(wire, bytes));
-            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched, device.get(), bytes, stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(fetched, device.data(), bytes, stream.raw()));
             LOGVOLE_REQUIRE_TRUE(stream.sync());
             LOGVOLE_REQUIRE_TRUE(std::equal(source, source + count, fetched));
+            device.reset();
+            host.reset();
+            memory->trim();
         });
         auto result = task.get_future();
         std::thread worker(std::move(task));
         worker.join();
         result.get();
-        gpu::gpuTrimMemory();
+        gpu::gpuCollectThreadResources();
     }
 #else
     (void)cmd;
@@ -2379,6 +2380,20 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
 void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    // Construct both public caches on the CPU before retaining any GPU data.
+    // The standalone leak job also exercises this order at process teardown.
+    {
+        ScopedGpuEnabled cpuOnly(false);
+        RingParams params;
+        params.mPolyModulusDegree = 1024;
+        params.mCoeffModulusBits.resize(2);
+        std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), 30);
+        RingNttContext context;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, context));
+        const auto a = sharedLhePublicANtt(context, 4);
+        const auto b = sharedLencPublicBNtt(context, 2);
+        LOGVOLE_REQUIRE_TRUE(a && b && a->size() == 4 && b->size() == 4);
+    }
     const bool requested = cmd.getOr("gpu", 0) != 0;
     ScopedGpuEnabled gpuScope(requested);
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());

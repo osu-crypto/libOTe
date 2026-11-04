@@ -93,7 +93,7 @@ namespace osuCrypto::LogVole
             using Cache = std::unordered_map<PublicACacheKey, std::shared_ptr<PublicACacheEntry>, PublicACacheKeyHash>;
             static Cache cache = [] {
 #if defined(ENABLE_LOGVOLE_CUDA)
-                gpu::gpuInitializeMemoryPools();
+                (void)gpu::gpuDeviceAvailable();
 #endif
                 return Cache{};
             }();

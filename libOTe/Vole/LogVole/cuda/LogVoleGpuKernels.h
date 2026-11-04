@@ -107,21 +107,9 @@ namespace osuCrypto::LogVole::gpu
     bool gpuLastErrorOk(const char** msg);
 
     // ---- memory -----------------------------------------------------------
-    // Device allocations are recycled through a size-bucketed free list because
-    // cudaMalloc/cudaFree synchronise and are far too slow to call per query.
-    void* gpuMalloc(std::size_t bytes);
-    void gpuFree(void* ptr);
-    // Static caches call this before construction so their buffers are released
-    // before the allocator bookkeeping. Does not allocate CUDA storage.
-    void gpuInitializeMemoryPools();
     // Drain owners retired by exited workers, outside TLS/loader callbacks.
     // No synchronization when there are no retired resources.
     void gpuCollectThreadResources();
-    // Release idle legacy device and pinned scratch blocks; live buffers stay valid.
-    // Call after joining work that may allocate or release buffers.
-    void gpuTrimMemory();
-    void* gpuMallocHost(std::size_t bytes);
-    void gpuFreeHost(void* ptr);
     // Optional registration of an exact caller-owned host span. A supported
     // decline returns true with registered=false; fatal CUDA errors return false.
     // Only a successful registration may be passed to gpuUnregisterHost.
@@ -132,23 +120,10 @@ namespace osuCrypto::LogVole::gpu
     bool gpuMemcpyD2D(void* dst, const void* src, std::size_t bytes, void* stream);
     bool gpuMemsetZero(void* dst, std::size_t bytes, void* stream);
 
-    // Drop the caching allocator's references to `stream`, so cached blocks are not
-    // left tagged with a stream that is about to be destroyed. Must be called after
-    // the stream is synchronised and its buffers freed, and before it is destroyed.
-    void gpuForgetStream(void* stream);
-
     // ---- events ------------------------------------------------------------
     // Just enough to overlap two independent kernel chains on separate streams
     // and join them without a host round trip.
     bool gpuStreamWaitEvent(void* stream, void* event);
-    // Declares which stream the calling scope is about to use. gpuMalloc tags
-    // blocks with it and gpuFree records it, so the caching allocator can hand a
-    // recycled block straight back to the same stream and synchronise only when a
-    // block crosses streams. Without this, running two parties on two streams
-    // would let one stream reuse a block the other is still writing.
-    void gpuSetCurrentStream(void* stream);
-    void* gpuCurrentStream();
-
     void* gpuStreamCreate();
     void gpuStreamDestroy(void* stream);
     bool gpuStreamSync(void* stream);
