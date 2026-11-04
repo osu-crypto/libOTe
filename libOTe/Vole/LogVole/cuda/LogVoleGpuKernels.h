@@ -962,34 +962,6 @@ namespace osuCrypto::LogVole::gpu
         void* stream);
 
     // ---- pseudorandom sampling -------------------------------------------
-    // Blake2xb-based uniform polynomial sampling that matches SEAL's
-    // sample_poly_uniform driven by seal::Blake2xbPRNG.
-    //
-    // seeds:      device array of outCount * 8 u64 (the SEAL prng seed per poly)
-    // scratch:    device array of outCount * streamWords u64, streamWords >=
-    //             rho*N + kSampleSlackWords
-    // maxMultiple: device array of rho u64, precomputed as in
-    //             sample_poly_uniform
-    constexpr u32 kSampleSlackWords = 4096;
-
-    // True when the sampler will take a non-materialized path, which generates
-    // the Blake2xb stream in registers/shared memory and so needs no `scratch` at
-    // all: callers use this to skip the outCount * streamWords staging buffer
-    // (540 MB at n = 2^24) and pass a null scratch pointer.
-    bool gpuFusedSamplerActive(u32 n, u32 streamWords, u32 outCount);
-
-
-    // True when the selected non-materialized sampler publishes rare rejection
-    // epochs and follows its common kernel with the exact cold replay. Callers use
-    // this to reserve/advance the persistent per-polynomial epoch array without
-    // allocating the otherwise-unused materialized stream.
-    bool gpuFusedSamplerNeedsRejectEpoch(u32 n, u32 streamWords, u32 outCount);
-
-    // True when the materialized sampler replaces its full-polynomial fixup
-    // scan with reduce-time detection and an epoch-gated rare repair pass.
-    bool gpuRejectReduceFusionActive();
-
-
     // Exact cryptoTools PRNG(seed).get<u64>() % modulus, starting at counter
     // zero. The seed is two device u64 words; odd scalar counts are supported.
     bool launchAesCtrScalars(
@@ -1008,17 +980,6 @@ namespace osuCrypto::LogVole::gpu
         u64* out, const u32* outIdx, u32 count,
         unsigned char* roundKeys, std::size_t roundKeyCapacityBytes,
         u32* rejectEpochs, u32 rejectEpoch, void* stream);
-    constexpr std::size_t blake2xbRootScratchWords(u32 wordsPerStream, u32 streamCount)
-    {
-        return static_cast<std::size_t>(streamCount) *
-            (wordsPerStream / 512u + (wordsPerStream % 512u != 0u)) * 8u;
-    }
-    // The caller owns root scratch through both launches on the supplied stream.
-    bool launchBlake2xbStreamForTest(
-        const u64* seeds, u64* out, u32 wordsPerStream, u32 streamCount,
-        u64* roots, std::size_t rootCapacityWords, void* stream);
-
-
     // Exact hashSeedDigest RandomOracle(16) over label, size and coefficients.
     bool launchRootDigestHash(
         const u64* words, u32 count, u64* out, void* stream);
@@ -1091,29 +1052,5 @@ namespace osuCrypto::LogVole::gpu
         u64 modulusCount,
         u64* outSeeds,
         unsigned char* roundKeyScratch,
-        void* stream);
-
-
-
-
-    // `maxMultipleIsSealDefault` is provenance, not a value comparison. False
-    // keeps custom/forced thresholds on the accepted sampler; true permits the
-    // default-off pseudo55 preflight when every other production gate matches.
-    // Non-fused routes borrow roots through stream completion. Fused routes
-    // accept null root/prefix scratch and perform no allocation here.
-    bool launchSampleUniformPolyBlake2xb(
-        const RingConstView& rc,
-        const u64* seeds,
-        u64* scratch,
-        u32 streamWords,
-        const u64* maxMultiple,
-        u64* out,
-        const u32* outIdx,
-        u32 outCount,
-        u32* rejectEpochs,
-        u32 rejectEpoch,
-        bool maxMultipleIsSealDefault,
-        u64* roots,
-        std::size_t rootCapacityWords,
         void* stream);
 }

@@ -458,7 +458,7 @@ namespace osuCrypto::LogVole
     bool samplePolyErrorCompactFromSeed(
         std::span<u64> limb0, double noiseStandardDeviation, double noiseMaxDeviation,
         const seal::prng_seed_type& seed, const RingNttContext& ctx);
-    // Batched exact Gaussian draws. The GPU may expand BLAKE2xb prefixes;
+    // Batched exact Gaussian draws. The GPU may expand matching AES prefixes;
     // the unchanged CPU normal transform consumes them, with exact continuation
     // from the original seed if a prefix runs out. Inactive rows are untouched.
     bool samplePolyErrorCompactBatchFromSeeds(

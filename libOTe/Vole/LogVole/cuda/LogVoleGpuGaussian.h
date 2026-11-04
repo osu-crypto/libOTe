@@ -19,8 +19,8 @@ namespace osuCrypto::LogVole::gpu
         std::size_t mWords = 0;
     };
 
-    // Exact BLAKE2xb byte prefixes for independent SEAL seeds. A prefix is a
-    // whole number of SEAL's 4096-byte refills. Output is unchanged on failure.
+    // Exact domain-separated AES byte prefixes for independent 512-bit seeds.
+    // A prefix contains whole 4096-byte blocks. Output is unchanged on failure.
     bool sampleGaussianPrngPrefixesDevice(
         GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds,

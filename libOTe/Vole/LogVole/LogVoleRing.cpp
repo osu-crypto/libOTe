@@ -171,74 +171,48 @@ namespace osuCrypto::LogVole
             }
         }
 
-        class BufferedNormalEngine
+        // SEAL's normal distribution consumes u32 words. PRNG's default
+        // operator() is u64, so adapt the width explicitly without buffering,
+        // allocation, locks or virtual dispatch in the sampling loop.
+        struct AesNormalEngine
         {
-        public:
-            using result_type = seal::RandomToStandardAdapter::result_type;
-            explicit BufferedNormalEngine(std::shared_ptr<seal::UniformRandomGenerator> source)
-                : mSource(std::move(source)) {}
-            ~BufferedNormalEngine() { seal::util::seal_memzero(mBuffer.data(), sizeof(mBuffer)); }
-            static constexpr result_type min() { return std::numeric_limits<result_type>::min(); }
-            static constexpr result_type max() { return std::numeric_limits<result_type>::max(); }
-            result_type operator()()
-            {
-                if (mNext == mBuffer.size())
-                {
-                    mSource->generate(sizeof(mBuffer), reinterpret_cast<seal::seal_byte*>(mBuffer.data()));
-                    mNext = 0;
-                }
-                return mBuffer[mNext++];
-            }
-        private:
-            std::shared_ptr<seal::UniformRandomGenerator> mSource;
-            std::array<result_type, 1024> mBuffer;
-            std::size_t mNext = mBuffer.size();
+            using result_type = u32;
+            PRNG& source;
+            static constexpr result_type min() { return 0; }
+            static constexpr result_type max() { return ~result_type{0}; }
+            result_type operator()() { return source.get<result_type>(); }
         };
 
+        template<bool Add = false, typename Engine>
         void samplePolyNormal(
-            std::shared_ptr<seal::UniformRandomGenerator> prng,
+            Engine& engine,
             const seal::EncryptionParameters& parms,
             u64* destination,
             double noiseStandardDeviation,
             double noiseMaxDeviation,
             bool firstLimbOnly = false)
         {
-            auto& coeffModulus = parms.coeff_modulus();
+            const auto& coeffModulus = parms.coeff_modulus();
             const std::size_t coeffModulusSize = firstLimbOnly ? 1u : coeffModulus.size();
             const std::size_t coeffCount = parms.poly_modulus_degree();
+            seal::util::ClippedNormalDistribution dist(0, noiseStandardDeviation, noiseMaxDeviation);
 
-            auto sample = [&](auto& engine) {
-                seal::util::ClippedNormalDistribution dist(0, noiseStandardDeviation, noiseMaxDeviation);
-
-                SEAL_ITERATE(seal::util::iter(destination), coeffCount, [&](auto& I) {
-                    const i64 noise = static_cast<i64>(dist(engine));
-                    const u64 flag = static_cast<u64>(-static_cast<i64>(noise < 0));
-                    SEAL_ITERATE(
-                        seal::util::iter(seal::util::StrideIter<u64*>(&I, coeffCount), coeffModulus),
-                        coeffModulusSize,
-                        [&](auto J) {
-                            *::std::get<0>(J) = static_cast<u64>(noise) + (flag & ::std::get<1>(J).value());
-                        });
-                });
-            };
-            static const bool buffered = [] {
-                const char* value = std::getenv("LV_CPU_BUFFERED_ERROR");
-                return !value || value[0] != '0';
-            }();
-            if (buffered)
-            {
-                // This PRNG is local to one error polynomial. Buffering keeps
-                // the same u32 sequence and distribution, and avoids a mutex
-                // acquisition for every four random bytes. Unused tail bytes
-                // are discarded with this local PRNG, never the parent PRNG.
-                BufferedNormalEngine engine(prng);
-                sample(engine);
-            }
-            else
-            {
-                seal::RandomToStandardAdapter engine(prng);
-                sample(engine);
-            }
+            SEAL_ITERATE(seal::util::iter(destination), coeffCount, [&](auto& I) {
+                const i64 noise = static_cast<i64>(dist(engine));
+                const u64 flag = static_cast<u64>(-static_cast<i64>(noise < 0));
+                SEAL_ITERATE(
+                    seal::util::iter(seal::util::StrideIter<u64*>(&I, coeffCount), coeffModulus),
+                    coeffModulusSize,
+                    [&](auto J) {
+                        auto& value = *::std::get<0>(J);
+                        const auto& modulus = ::std::get<1>(J);
+                        const u64 addend = static_cast<u64>(noise) + (flag & modulus.value());
+                        if constexpr (Add)
+                            value = seal::util::add_uint_mod(value, addend, modulus);
+                        else
+                            value = addend;
+                    });
+            });
         }
 
         seal::prng_seed_type sealSeedFromPrng(PRNG& prng)
@@ -2476,18 +2450,6 @@ namespace osuCrypto::LogVole
         return out;
     }
 
-    static std::shared_ptr<seal::UniformRandomGeneratorFactory> errorSamplingPrngFactory()
-    {
-        static const bool vectorError = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_ERROR");
-            return !value || value[0] != '0';
-        }();
-        // The error distribution and all random draws stay unchanged. This
-        // also respects a SEAL build whose default PRNG is not BLAKE2xb.
-        return vectorError ? detail::cpuDefaultPrngFactory()
-                           : seal::UniformRandomGeneratorFactory::DefaultFactory();
-    }
-
     bool canSamplePolyErrorCompact(
         const RingNttContext& ctx, double noiseStandardDeviation, double noiseMaxDeviation)
     {
@@ -2527,8 +2489,9 @@ namespace osuCrypto::LogVole
             limb0.size() != ctx.mParams.mPolyModulusDegree) return false;
         const auto hostContext = getRingHostContext(ctx);
         if (!hostContext || !hostContext->key_context_data()) return false;
-        auto sealPrng = errorSamplingPrngFactory()->create(seed);
-        samplePolyNormal(sealPrng, hostContext->key_context_data()->parms(),
+        PRNG prng(detail::aesPrngKey(seed));
+        AesNormalEngine engine{prng};
+        samplePolyNormal(engine, hostContext->key_context_data()->parms(),
             limb0.data(), noiseStandardDeviation, noiseMaxDeviation, true);
         bumpRingStat(RingOp::ErrorAdd);
         return true;
@@ -2536,41 +2499,41 @@ namespace osuCrypto::LogVole
 
     namespace
     {
-        // Keep samplePolyNormal unchanged: replacing its byte source leaves
-        // the standard library's cached normal samples, clipping and floating
-        // point operations exactly as before.
-        class GaussianPrefixPrng final : public seal::UniformRandomGenerator
+        // The downloaded prefix and the CPU tail are the same AES stream.
+        // Borrow both; prefixOwner in the enclosing operation keeps the pinned
+        // bytes alive until the blocking CPU task group has joined.
+        class GaussianPrefixEngine
         {
         public:
-            GaussianPrefixPrng(const seal::prng_seed_type& seed, std::span<const u64> prefix)
-                : UniformRandomGenerator(seed), mPrefix(prefix) {}
-
-        protected:
-            seal::prng_type type() const noexcept override { return seal::prng_type::blake2xb; }
-            void refill_buffer() override
+            using result_type = u32;
+            GaussianPrefixEngine(PRNG& source, std::span<const u64> prefix)
+                : mSource(source), mPrefix(prefix) {}
+            static constexpr result_type min() { return 0; }
+            static constexpr result_type max() { return ~result_type{0}; }
+            result_type operator()()
             {
-                if (mPrefixBytesUsed < mPrefix.size_bytes())
+                if (mNext < mPrefix.size() * 2u)
                 {
-                    std::memcpy(buffer_begin_,
-                        reinterpret_cast<const u8*>(mPrefix.data()) + mPrefixBytesUsed, buffer_size_);
-                    mPrefixBytesUsed += buffer_size_;
-                    return;
+                    const u64 word = mPrefix[mNext / 2u];
+                    const auto shift = static_cast<unsigned>((mNext++ & 1u) * 32u);
+                    return static_cast<u32>(word >> shift);
                 }
-                if (!mContinuation)
+                if (!mTail)
                 {
-                    mContinuation = errorSamplingPrngFactory()->create(seed());
-                    // Recreate the precise next SEAL refill. Prefixes are local
-                    // to one polynomial; this never touches the parent PRNG.
-                    for (std::size_t skipped = 0; skipped < mPrefix.size_bytes(); skipped += buffer_size_)
-                        mContinuation->generate(buffer_size_, buffer_begin_);
+                    // cryptoTools PRNG exposes its AES counter and refill API.
+                    // Prefixes contain whole counter blocks: jump directly to
+                    // the next one instead of regenerating the prefix on CPU.
+                    mSource.mBlockIdx = mPrefix.size() / 2u;
+                    mSource.refillBuffer();
+                    mTail = true;
                 }
-                mContinuation->generate(buffer_size_, buffer_begin_);
+                return mSource.get<result_type>();
             }
-
         private:
+            PRNG& mSource;
             std::span<const u64> mPrefix;
-            std::size_t mPrefixBytesUsed = 0;
-            std::shared_ptr<seal::UniformRandomGenerator> mContinuation;
+            std::size_t mNext = 0;
+            bool mTail = false;
         };
     }
 
@@ -2595,8 +2558,6 @@ namespace osuCrypto::LogVole
         std::size_t wordsPerPrefix = 0;
         bool devicePrefixes = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        static const bool compatibleFactory = errorSamplingPrngFactory()->create(
-            seal::prng_seed_type{})->info().type() == seal::prng_type::blake2xb;
         const char* transformSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM");
         if (gpu::enabled() && (!transformSetting || transformSetting[0] != '0'))
         {
@@ -2613,7 +2574,7 @@ namespace osuCrypto::LogVole
             }
             gpu::GaussianSampleBuffer sampled;
             bool transformed = false;
-            if (compatibleFactory && validPrefix && n <= std::numeric_limits<u32>::max() &&
+            if (validPrefix && n <= std::numeric_limits<u32>::max() &&
                 gpu::gaussianTransformHostCompatible())
             {
                 std::vector<seal::prng_seed_type> activeSeeds(activeRows.size());
@@ -2661,7 +2622,7 @@ namespace osuCrypto::LogVole
                 const auto parsed = std::strtoull(overrideBlocks, &end, 10);
                 if (end != overrideBlocks && *end == '\0' && parsed) blocks = parsed;
             }
-            if (compatibleFactory && blocks <= std::numeric_limits<u32>::max() / 512u)
+            if (blocks <= std::numeric_limits<u32>::max() / 512u)
             {
                 wordsPerPrefix = static_cast<std::size_t>(blocks) * 512u;
                 std::vector<seal::prng_seed_type> activeSeeds(activeRows.size());
@@ -2684,8 +2645,8 @@ namespace osuCrypto::LogVole
             if (!devicePrefixes)
                 return samplePolyErrorCompactFromSeed(destination, noiseStandardDeviation,
                     noiseMaxDeviation, seeds[row], ctx);
-            auto source = std::make_shared<GaussianPrefixPrng>(seeds[row],
-                prefixes.subspan(task * wordsPerPrefix, wordsPerPrefix));
+            PRNG prng(detail::aesPrngKey(seeds[row]));
+            GaussianPrefixEngine source(prng, prefixes.subspan(task * wordsPerPrefix, wordsPerPrefix));
             const auto hostContext = getRingHostContext(ctx);
             if (!hostContext || !hostContext->key_context_data()) return false;
             samplePolyNormal(source, hostContext->key_context_data()->parms(),
@@ -2712,8 +2673,6 @@ namespace osuCrypto::LogVole
             const char* strictSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT");
             const bool strict = strictSetting && strictSetting[0] != '0';
             const char* transform = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM");
-            static const bool compatibleFactory = errorSamplingPrngFactory()->create(
-                seal::prng_seed_type{})->info().type() == seal::prng_type::blake2xb;
             u64 blocks = 0;
             bool validPrefix = true;
             if (const char* setting = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_PREFIX_BLOCKS"))
@@ -2723,7 +2682,7 @@ namespace osuCrypto::LogVole
                 validPrefix = end != setting && *end == '\0' && blocks <= std::numeric_limits<u32>::max() / 512u;
             }
             gpu::GaussianDeviceSampleBuffer sampled;
-            bool ready = (!transform || transform[0] != '0') && compatibleFactory && validPrefix &&
+            bool ready = (!transform || transform[0] != '0') && validPrefix &&
                 n <= std::numeric_limits<u32>::max() && gpu::gaussianTransformHostCompatible() &&
                 gpu::sampleGaussianCompactResidentDevice(
                     gpu::contextSampleStream(ctx), seeds, static_cast<u32>(n), sigma, clip,
@@ -2887,22 +2846,12 @@ namespace osuCrypto::LogVole
     {
         const auto hostContext = getRingHostContext(ctx);
         if (!hostContext || !hostContext->key_context_data()) return false;
-        auto sealPrng = errorSamplingPrngFactory()->create(seed);
-
-        auto& contextData = *hostContext->key_context_data();
-        auto& parms = contextData.parms();
-        auto& coeffModulus = parms.coeff_modulus();
-        const std::size_t coeffModulusSize = coeffModulus.size();
-        const std::size_t coeffCount = parms.poly_modulus_degree();
-
-        seal::util::Pointer<u64> temp =
-            seal::util::allocate_poly(coeffCount, coeffModulusSize, seal::MemoryPoolHandle::ThreadLocal());
-        seal::util::RNSIter tempIter(temp.get(), coeffCount);
-
-        samplePolyNormal(sealPrng, parms, temp.get(), noiseStandardDeviation, noiseMaxDeviation);
-
-        seal::util::PolyIter destinationIter(poly.mCoeffs.data(), coeffCount, coeffModulusSize);
-        seal::util::add_poly_coeffmod(destinationIter[0], tempIter, coeffModulusSize, coeffModulus, destinationIter[0]);
+        PRNG prng(detail::aesPrngKey(seed));
+        AesNormalEngine engine{prng};
+        // Apply each sampled error directly. This keeps the coefficient/limb
+        // traversal and removes the full-RNS temporary and SEAL TLS pool borrow.
+        samplePolyNormal<true>(engine, hostContext->key_context_data()->parms(),
+            poly.mCoeffs.data(), noiseStandardDeviation, noiseMaxDeviation);
 
         bumpRingStat(RingOp::ErrorAdd);
         return true;

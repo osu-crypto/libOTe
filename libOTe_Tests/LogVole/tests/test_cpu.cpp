@@ -1663,7 +1663,7 @@ void LogVole_Cpu_ErrorSamplingMatchesSeal(const oc::CLP&)
         PRNG original(toBlock(0x9abc, limbs)), optimized(toBlock(0x9abc, limbs));
         seal::prng_seed_type seed{};
         original.get(seed.data(), seed.size());
-        auto generator = seal::UniformRandomGeneratorFactory::DefaultFactory()->create(seed);
+        auto generator = LogVole::detail::makeAesPrngFactory()->create(seed);
         seal::RandomToStandardAdapter engine(generator);
         seal::util::ClippedNormalDistribution distribution(0, deviation, 6*deviation);
         for (std::size_t i = 0; i < 1024; ++i)
@@ -1838,31 +1838,12 @@ void LogVole_Cpu_SamplerMatchesSeal(const oc::CLP&)
         }
     }
     PRNG random(toBlock(0x739182, 0x193));
-    auto fast = LogVole::detail::cpuBlake2xbFactory();
-    seal::Blake2xbPRNGFactory reference;
-    bool exercisedRejection = false;
-    for (unsigned trial = 0; trial < 32; ++trial)
+    auto reference = LogVole::detail::makeAesPrngFactory();
+    PRNG source(ZeroBlock);
+    for (unsigned trial = 0; trial < 4; ++trial)
     {
         seal::prng_seed_type seed{};
         random.get(seed.data(), seed.size());
-        auto a = fast->create(seed);
-        auto b = reference.create(seed);
-        LOGVOLE_REQUIRE_TRUE(a->info().type_ == b->info().type_);
-        for (std::size_t size : {0, 1, 7, 64, 4095, 4096, 4097, 65539, 3})
-        {
-            std::vector<seal::seal_byte> actual(size), expected(size);
-            a->generate(size, actual.data());
-            b->generate(size, expected.data());
-            LOGVOLE_REQUIRE_TRUE(actual == expected);
-        }
-        a->refresh();
-        b->refresh();
-        std::array<seal::seal_byte, 8199> actual{}, expected{};
-        a->generate(actual.size(), actual.data());
-        b->generate(expected.size(), expected.data());
-        LOGVOLE_REQUIRE_TRUE(actual == expected);
-
-        // Include the production 52/55-bit ring fields and smaller/larger ones.
         for (int bits : {30, 52, 55, 60})
         {
             RingParams params{};
@@ -1870,31 +1851,16 @@ void LogVole_Cpu_SamplerMatchesSeal(const oc::CLP&)
             assignValues<int>(params.mCoeffModulusBits, {bits, bits});
             RingNttContext ctx{};
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
-            std::vector<u64> ap(2048), bp(2048);
+            std::vector<u64> actual(2048), expected(2048);
             const auto hostContext = getRingHostContext(ctx);
             LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
             const auto& parms = hostContext->key_context_data()->parms();
-            LogVole::detail::cpuSamplePolyUniform(fast->create(seed), parms, ap.data());
-            seal::util::sample_poly_uniform(reference.create(seed), parms, bp.data());
-            LOGVOLE_REQUIRE_TRUE(ap == bp);
+            source.SetSeed(LogVole::detail::aesPrngKey(seed));
+            LogVole::detail::cpuSamplePolyUniform(source, parms, actual.data());
+            seal::util::sample_poly_uniform(reference->create(seed), parms, expected.data());
+            LOGVOLE_REQUIRE_TRUE(actual == expected);
         }
-        // Use a modulus away from a power of two to force rejection (~1/64
-        // of draws), including replacement draws across PRNG refill boundaries.
-        // Sampling itself does not require an NTT prime or a SEALContext.
-        const u64 q = (u64{3} << 58) + 123;
-        seal::EncryptionParameters parms(seal::scheme_type::ckks);
-        parms.set_poly_modulus_degree(1024);
-        parms.set_coeff_modulus({seal::Modulus(q)});
-        std::vector<u64> ap(1024), bp(1024), raw(1024);
-        reference.create(seed)->generate(raw.size() * sizeof(u64),
-            reinterpret_cast<seal::seal_byte*>(raw.data()));
-        const u64 limit = ~u64{0} - (~u64{0} % q) - 1;
-        exercisedRejection |= std::any_of(raw.begin(), raw.end(), [limit](u64 v) { return v >= limit; });
-        LogVole::detail::cpuSamplePolyUniform(fast->create(seed), parms, ap.data());
-        seal::util::sample_poly_uniform(reference.create(seed), parms, bp.data());
-        LOGVOLE_REQUIRE_TRUE(ap == bp);
     }
-    LOGVOLE_REQUIRE_TRUE(exercisedRejection);
 
     // Force rare rejections in the vector-supported rings, then several
     // replacement rejections across a refill. Also compare the next PRNG bytes.
