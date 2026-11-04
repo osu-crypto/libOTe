@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
+#include "libOTe/Vole/LogVole/LogVolePublicCache.h"
 
 // config.h defines ENABLE_LOGVOLE_CUDA and is not pulled in by LogVoleRing.h,
 // so it has to precede the guard below or the GPU path silently compiles away.
@@ -894,6 +895,7 @@ namespace osuCrypto::LogVole
         }
 
         built.mResourceScope = std::move(resources);
+        built.mPublicCache = std::make_shared<PublicPolynomialCache>();
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!built.mGpuSetup) built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>();
         built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
@@ -982,6 +984,7 @@ namespace osuCrypto::LogVole
             return false;
         RingNttContext built{};
         built.mParams = params;
+        built.mPublicCache = std::make_shared<PublicPolynomialCache>();
         auto metadata = std::make_shared<RingModulusMetadata>();
         metadata->mValues.assign(orderedPrimes.begin(), orderedPrimes.end());
         metadata->mBitCounts.assign(params.mCoeffModulusBits.begin(),

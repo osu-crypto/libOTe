@@ -108,6 +108,7 @@ namespace osuCrypto::LogVole
     };
 
     struct RingHostContextCache;
+    struct PublicPolynomialCache;
 
     struct RingModulusMetadata
     {
@@ -125,6 +126,8 @@ namespace osuCrypto::LogVole
         std::shared_ptr<const RingNttContext> mFactoryOwner;
         RingParams mParams;
         RingResourceScope mResourceScope;
+        // Shared by context copies; exported polynomials do not retain it.
+        std::shared_ptr<PublicPolynomialCache> mPublicCache;
         // Resource domain only; it never owns or refers back to ring caches.
         std::shared_ptr<gpu::GpuSetupContext> mGpuSetup;
         std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;

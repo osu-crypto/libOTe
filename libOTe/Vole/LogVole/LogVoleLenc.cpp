@@ -1,6 +1,7 @@
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 #include "libOTe/config.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
+#include "libOTe/Vole/LogVole/LogVolePublicCache.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
@@ -22,7 +23,6 @@
 #include <exception>
 #include <limits>
 #include <mutex>
-#include <unordered_map>
 
 namespace osuCrypto::LogVole
 {
@@ -153,67 +153,17 @@ namespace osuCrypto::LogVole
                 ctx, 0xC0DEC0DEull, 0x1EEC0DEu, 2u * tau, true, captured);
         }
 
-        struct PublicBCacheKey
-        {
-            RingParams mRing;
-            u32 mTau = 0;
-            u64 mRunId = 0;
-            ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
-            int mDevice = -1;
-
-            bool operator==(const PublicBCacheKey& other) const
-            {
-                return mRing == other.mRing && mTau == other.mTau &&
-                    mRunId == other.mRunId && mRole == other.mRole &&
-                    mDevice == other.mDevice;
-            }
-        };
-
-        struct PublicBCacheKeyHash
-        {
-            std::size_t operator()(const PublicBCacheKey& key) const
-            {
-                std::size_t h = std::hash<u32>{}(key.mRing.mPolyModulusDegree);
-                h ^= std::hash<u32>{}(key.mTau) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
-                h ^= std::hash<u64>{}(key.mRunId) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
-                h ^= std::hash<u8>{}(static_cast<u8>(key.mRole)) +
-                    0x9e3779b9u + (h << 6u) + (h >> 2u);
-                h ^= std::hash<int>{}(key.mDevice) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
-                for (int bits : key.mRing.mCoeffModulusBits)
-                {
-                    const std::size_t b = std::hash<int>{}(bits);
-                    h ^= b + 0x9e3779b9u + (h << 6u) + (h >> 2u);
-                }
-                return h;
-            }
-        };
-
-        struct PublicBCacheEntry
-        {
-            std::mutex mMutex;
-            std::shared_ptr<const std::vector<RnsPoly>> mHost;
-            std::shared_ptr<const gpu::RetainedPublicUniform> mDevice;
-        };
-
-        auto& publicBCache()
-        {
-            using Cache = std::unordered_map<PublicBCacheKey, std::shared_ptr<PublicBCacheEntry>, PublicBCacheKeyHash>;
-            static Cache cache = [] {
-#if defined(ENABLE_LOGVOLE_CUDA)
-                (void)gpu::gpuDeviceAvailable();
-#endif
-                return Cache{};
-            }();
-            return cache;
-        }
-        std::mutex publicBCacheMutex;
+        using PublicBCacheKey = PublicPolynomialCache::Key;
+        using PublicBCacheEntry = PublicPolynomialCache::Entry;
 
         std::shared_ptr<PublicBCacheEntry> getOrCreateCachedPublicBEntry(
             const RingNttContext& ctx, u32 tau)
         {
+            if (!ctx.mPublicCache) return {};
+            auto& cache = ctx.mPublicCache->mLenc;
             PublicBCacheKey key{};
             key.mRing = ctx.mParams;
-            key.mTau = tau;
+            key.mCount = tau;
             key.mRole = currentProtocolCacheScope().mRole;
 #if defined(ENABLE_LOGVOLE_CUDA)
             // Retained device operands belong to one cold protocol run. Keep
@@ -226,22 +176,23 @@ namespace osuCrypto::LogVole
 #endif
 
             {
-                std::lock_guard<std::mutex> lock(publicBCacheMutex);
+                std::lock_guard<std::mutex> lock(cache.mMutex);
                 // Run-scoped device retention must not accumulate a new full
-                // host snapshot forever. Keep every entry still owned by a
-                // protocol state, plus the legacy process-wide run-0 cache.
+                // host snapshot forever. Keep entries used by a concurrent
+                // lookup, plus entries used outside a protocol run. Exported
+                // results retain their own backing independently.
                 if (key.mRunId != 0)
                 {
-                    for (auto entry = publicBCache().begin(); entry != publicBCache().end();)
+                    for (auto entry = cache.mEntries.begin(); entry != cache.mEntries.end();)
                     {
                         if (entry->first.mRunId != 0 && entry->first.mRunId != key.mRunId &&
                             entry->second.use_count() == 1)
-                            entry = publicBCache().erase(entry);
+                            entry = cache.mEntries.erase(entry);
                         else ++entry;
                     }
                 }
-                auto it = publicBCache().find(key);
-                if (it != publicBCache().end())
+                auto it = cache.mEntries.find(key);
+                if (it != cache.mEntries.end())
                 {
                     return it->second;
                 }
@@ -264,8 +215,8 @@ namespace osuCrypto::LogVole
 #endif
             }
 
-            std::lock_guard<std::mutex> lock(publicBCacheMutex);
-            auto [it, inserted] = publicBCache().emplace(std::move(key), candidate);
+            std::lock_guard<std::mutex> lock(cache.mMutex);
+            auto [it, inserted] = cache.mEntries.emplace(std::move(key), candidate);
             (void)inserted;
             return it->second;
         }

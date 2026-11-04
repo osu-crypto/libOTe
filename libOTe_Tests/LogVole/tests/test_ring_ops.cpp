@@ -2380,8 +2380,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
 void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
-    // Construct both public caches on the CPU before retaining any GPU data.
-    // The standalone leak job also exercises this order at process teardown.
+    // Exercise CPU cache construction before any GPU retention in this test.
     {
         ScopedGpuEnabled cpuOnly(false);
         RingParams params;
@@ -2413,6 +2412,42 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         for (std::size_t i = 0; i < a.size(); ++i)
             LOGVOLE_REQUIRE_TRUE(rangesEqual(a[i].mCoeffs, b[i].mCoeffs)) << " polynomial " << i;
     };
+
+    // Context copies share public operands. Exported host/device results keep
+    // their own backing alive without retaining the cache or a context.
+    {
+        ScopedProtocolCacheScope role(ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+        std::weak_ptr<PublicPolynomialCache> lifetime;
+        gpu::RetainedPublicUniformPtr deviceA, deviceB;
+        std::shared_ptr<const std::vector<RnsPoly>> hostA, hostB;
+        {
+            RingParams params;
+            params.mPolyModulusDegree = 1024;
+            params.mCoeffModulusBits.resize(2);
+            std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), 30);
+            RingNttContext context;
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, context));
+            LOGVOLE_REQUIRE_TRUE(context.mPublicCache);
+            lifetime = context.mPublicCache;
+            deviceA = retainedLhePublicANtt(context, 4);
+            deviceB = retainedLencPublicBNtt(context, 2);
+            hostA = sharedLhePublicANtt(context, 4);
+            hostB = sharedLencPublicBNtt(context, 2);
+            LOGVOLE_REQUIRE_TRUE(deviceA && deviceB && hostA && hostB);
+            auto copy = context;
+            context = {};
+            LOGVOLE_REQUIRE_FALSE(lifetime.expired());
+            LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(copy, 4) == hostA);
+            LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(copy, 2) == hostB);
+            copy = {};
+        }
+        LOGVOLE_REQUIRE_TRUE(lifetime.expired());
+        std::vector<RnsPoly> fetched;
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceA, fetched));
+        exact(*hostA, fetched);
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceB, fetched));
+        exact(*hostB, fetched);
+    }
 
     for (const auto& shape : { std::pair{1024u, 2u}, {8192u, 4u}, {16384u, 8u} })
     {
