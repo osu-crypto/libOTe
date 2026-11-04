@@ -803,6 +803,57 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
 #if defined(ENABLE_LOGVOLE_CUDA)
     ScopedGpuEnabled enabled(cmd.getOr("gpu", 0) != 0);
     LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    {
+        ScopedEnvironmentValue uniform("LV_GPU_SETUP_UNIFORM_DEVICE", "1");
+        ScopedEnvironmentValue decline("LV_GPU_SETUP_UNIFORM_FORCE_DECLINE", "0");
+        ScopedEnvironmentValue retain("LV_GPU_SETUP_PUBLIC_RETAIN", "1");
+        ScopedEnvironmentValue retainDecline("LV_GPU_SETUP_PUBLIC_RETAIN_FORCE_DECLINE", "0");
+        RingNttContext base;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), base));
+        std::vector<std::array<std::uint64_t, 8>> seeds(3);
+        for (std::size_t row = 0; row < seeds.size(); ++row)
+            for (std::size_t word = 0; word < seeds[row].size(); ++word)
+                seeds[row][word] = 0x53545245414dull + row * 31u + word;
+        std::vector<RnsPoly> expected;
+        {
+            ScopedGpuEnabled cpu(false);
+            for (const auto& seed : seeds) expected.push_back(sampleUniformPolyFromSeed(base, seed));
+        }
+        std::weak_ptr<gpu::GpuExecutionContext> firstLifetime, secondLifetime;
+        gpu::RetainedPublicUniformPtr saved;
+        const auto scope = currentProtocolCacheScope();
+        {
+            auto first = base, second = base;
+            first.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
+            second.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
+            firstLifetime = first.mGpuExecution;
+            secondLifetime = second.mGpuExecution;
+            const auto firstStream = gpu::contextSampleStream(first).raw();
+            const auto secondStream = gpu::contextSampleStream(second).raw();
+            LOGVOLE_REQUIRE_TRUE(firstStream != secondStream);
+            LOGVOLE_REQUIRE_TRUE(gpu::contextSampleStream(first).raw() == firstStream);
+            std::packaged_task<void()> task([&] {
+                ScopedProtocolCacheScope workerScope(scope);
+                std::vector<RnsPoly> actual;
+                LOGVOLE_REQUIRE_TRUE(gpu::sampleUniformBatchFromSeedsDevice(first, seeds, false, actual, &saved));
+                expect_batch_equal(actual, expected);
+            });
+            auto result = task.get_future();
+            std::thread worker(std::move(task));
+            worker.join();
+            result.get();
+            std::vector<RnsPoly> actual;
+            LOGVOLE_REQUIRE_TRUE(gpu::sampleUniformBatchFromSeedsDevice(second, seeds, false, actual));
+            expect_batch_equal(actual, expected);
+        }
+        // Exporting a completed batch retains its native allocation and stream,
+        // never the high-level execution domain or that domain's scratch.
+        LOGVOLE_REQUIRE_TRUE(firstLifetime.expired() && secondLifetime.expired());
+        LOGVOLE_REQUIRE_TRUE(saved);
+        std::vector<RnsPoly> fetched;
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*saved, fetched));
+        expect_batch_equal(fetched, expected);
+    }
     for (bool production : {false, true})
     {
         auto params = make_small_params();

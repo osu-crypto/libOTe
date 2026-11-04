@@ -227,8 +227,6 @@ namespace osuCrypto::LogVole::gpu
     // receiver do not serialise on one stream when they are interleaved
     // coroutines on the same host thread.
     GpuStream& threadStream();
-    // Second stream for the calling role, for work independent of the main chain.
-    GpuStream& threadSampleStream();
 
     // 0 = unspecified, 1 = sender, 2 = receiver. Any per-thread scratch that is
     // touched by device work must be indexed by this too, otherwise two streams

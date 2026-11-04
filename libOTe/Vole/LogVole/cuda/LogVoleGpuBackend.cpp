@@ -187,11 +187,8 @@ namespace osuCrypto::LogVole::gpu
                 ? kib : 4096u) * 256u;
         }
 
-        // Keep main and sampler stream families independent. A role-specific
-        // call constructs only its own thread-local stream, not two unrelated
-        // streams and their pinned index buffers. Destruction retains the same
-        // GpuStream drain/allocator-forget protocol.
-        template<bool SampleLane>
+        // Only the legacy main lane remains role-local during migration.
+        // Sampling streams and scratch are owned by explicit contexts.
         GpuStream& lazyRoleStream()
         {
             switch (currentProtocolCacheScope().mRole)
@@ -1109,7 +1106,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (lazyRoleStreamsEnabled())
         {
-            auto& stream = lazyRoleStream<false>();
+            auto& stream = lazyRoleStream();
             return stream;
         }
         // Keyed on the protocol role as well as the thread. The sender and the
@@ -1138,30 +1135,6 @@ namespace osuCrypto::LogVole::gpu
             break;
         }
         return *s;
-    }
-
-    GpuStream& threadSampleStream()
-    {
-        if (lazyRoleStreamsEnabled()) return lazyRoleStream<true>();
-        // A second stream per role, used only for work independent of the main
-        // chain, so an instruction-bound kernel can overlap a bandwidth-bound one.
-        // Keyed the same way as threadStream so the two parties do not share it.
-        thread_local GpuThreadLocal<GpuStream> unspecifiedOwner;
-        auto& unspecified = unspecifiedOwner.get();
-        thread_local GpuThreadLocal<GpuStream> senderOwner;
-        auto& sender = senderOwner.get();
-        thread_local GpuThreadLocal<GpuStream> receiverOwner;
-        auto& receiver = receiverOwner.get();
-
-        switch (currentProtocolCacheScope().mRole)
-        {
-        case ProtocolCacheRole::Sender:
-            return sender;
-        case ProtocolCacheRole::Receiver:
-            return receiver;
-        default:
-            return unspecified;
-        }
     }
 
     u32 threadStreamSlot()

@@ -289,7 +289,7 @@ namespace osuCrypto::LogVole::gpu
         bool downloaded = false;
         if (enabled() && currentDeviceOrdinal() == value.mDevice)
         {
-            auto& stream = threadSampleStream();
+            auto& stream = contextSampleStream(ctx);
             std::lock_guard use(value.mDeviceUseMutex);
             downloaded = value.mValues.download(next, stream, 0, value.mValues.count());
         }
@@ -1805,9 +1805,10 @@ namespace osuCrypto::LogVole::gpu
         class GpuSetupTensorHostState final : public LazyRingTensorHostState
         {
         public:
-            GpuSetupTensorHostState(std::shared_ptr<GpuRing> ring, GpuPolyBuffer&& buffer,
+            GpuSetupTensorHostState(std::shared_ptr<GpuRing> ring,
+                std::shared_ptr<GpuExecutionContext> execution, GpuPolyBuffer&& buffer,
                 u32 rows, u32 cols)
-                : mRing(std::move(ring)), mBuffer(std::move(buffer)),
+                : mRing(std::move(ring)), mExecution(std::move(execution)), mBuffer(std::move(buffer)),
                   mDevice(currentDeviceOrdinal())
             {
                 mHost.mRows = rows;
@@ -1821,7 +1822,7 @@ namespace osuCrypto::LogVole::gpu
                     HostStep step("setup: deferred sender tensor materialization");
                     if (currentDeviceOrdinal() != mDevice)
                         throw std::runtime_error("LogVole deferred tensor requested on a different CUDA device");
-                    GpuStream stream;
+                    auto& stream = mExecution->sampleStream();
                     std::vector<RnsPoly> next;
                     StreamDrain drain{stream};
                     const bool downloaded = mBuffer.download(next, stream);
@@ -1838,13 +1839,14 @@ namespace osuCrypto::LogVole::gpu
                 if (destination.size() != mBuffer.bytes() || currentDeviceOrdinal() != mDevice)
                     return false;
                 HostStep step("setup: device ciphertext to wire");
-                auto& stream = threadSampleStream();
+                auto& stream = mExecution->sampleStream();
                 const bool copied = downloadSetupWire(destination, mBuffer.data(stream), stream);
                 return stream.sync() && copied;
             }
 
         private:
             std::shared_ptr<GpuRing> mRing;
+            std::shared_ptr<GpuExecutionContext> mExecution;
             GpuPolyBuffer mBuffer;
             mutable std::mutex mDeviceUseMutex;
             int mDevice;
@@ -1857,10 +1859,10 @@ namespace osuCrypto::LogVole::gpu
         const RingNttContext& ctx, GpuPolyBuffer&& buffer, u32 rows, u32 cols)
     {
         auto ring = GpuRing::get(ctx);
-        if (!ring || !rows || !cols || buffer.count() != static_cast<std::size_t>(rows) * cols ||
+        if (!ctx.mGpuExecution || !ring || !rows || !cols || buffer.count() != static_cast<std::size_t>(rows) * cols ||
             buffer.polyWords() != ring->polyWords()) return {};
         return std::make_shared<GpuSetupTensorHostState>(std::move(ring),
-            std::move(buffer), rows, cols);
+            ctx.mGpuExecution, std::move(buffer), rows, cols);
     }
 
     // ---- DeviceBatch ------------------------------------------------------
@@ -2169,7 +2171,9 @@ namespace osuCrypto::LogVole::gpu
         block mMaskDigestHash{};
         u32 mChunkCount = 0;
         u32 mMu = 0;
-        void* mProducerStream = nullptr;
+        // Retain the native stream even if the context is released before
+        // an abandoned plan finishes cleanup. Never retain context scratch.
+        std::shared_ptr<OwnedGpuStream> mProducerOwner;
         void* mReadyEvent = nullptr;
         bool mEventRecorded = false;
         bool mConsumed = false;
@@ -2181,11 +2185,11 @@ namespace osuCrypto::LogVole::gpu
             // other path (invalid candidate, deferred retry, allocation/launch
             // failure), do not release storage that the secondary stream may
             // still be writing.
-            if (!mConsumed && mProducerStream)
+            if (!mConsumed && mProducerOwner)
             {
                 const bool eventDone =
                     mEventRecorded && mReadyEvent && gpuEventSync(mReadyEvent);
-                if (!eventDone) gpuStreamSync(mProducerStream);
+                if (!eventDone && !gpuStreamSync(mProducerOwner->raw())) std::terminate();
             }
             gpuEventDestroy(mReadyEvent);
         }
@@ -2202,7 +2206,9 @@ namespace osuCrypto::LogVole::gpu
         block mMaskDigestHash{};
         u32 mChunkCount = 0;
         u32 mMu = 0;
-        void* mProducerStream = nullptr;
+        // Retain the native stream even if the context is released before
+        // an abandoned plan finishes cleanup. Never retain context scratch.
+        std::shared_ptr<OwnedGpuStream> mProducerOwner;
         void* mReadyEvent = nullptr;
         bool mEventRecorded = false;
         bool mConsumed = false;
@@ -2213,11 +2219,11 @@ namespace osuCrypto::LogVole::gpu
             // metadata stopped matching, or a later prefetch failed. Its storage
             // is still owned here, so do not release it while the secondary stream
             // may be writing it.
-            if (!mConsumed && mProducerStream)
+            if (!mConsumed && mProducerOwner)
             {
                 const bool eventDone =
                     mEventRecorded && mReadyEvent && gpuEventSync(mReadyEvent);
-                if (!eventDone) gpuStreamSync(mProducerStream);
+                if (!eventDone && !gpuStreamSync(mProducerOwner->raw())) std::terminate();
             }
             gpuEventDestroy(mReadyEvent);
         }
@@ -2389,7 +2395,7 @@ namespace osuCrypto::LogVole::gpu
         // caching allocator now expresses cross-stream reuse as an event wait rather
         // than a host synchronise, so a second stream no longer reintroduces the
         // same drain by the back door.
-        auto& stream = threadSampleStream();
+        auto& stream = contextSampleStream(ctx);
         GpuPolyBuffer buf;
         // Keep fallback download destinations alive until the failure guard
         // drains any queued DMA, including a failed later download chunk.
@@ -2476,7 +2482,7 @@ namespace osuCrypto::LogVole::gpu
 
         // Secondary stream, for the same reason as nttHostBatch above: host in,
         // host out, nothing queued to order against.
-        auto& stream = threadSampleStream();
+        auto& stream = contextSampleStream(ctx);
         GpuPolyBuffer src;
         GpuPolyBuffer dst;
         bool ok = src.resize(*ring, 1, stream) && dst.resize(*ring, levels, stream) &&
@@ -2524,7 +2530,7 @@ namespace osuCrypto::LogVole::gpu
             if (seeds.size() > std::numeric_limits<std::size_t>::max() /
                     (static_cast<std::size_t>(streamWords) * sizeof(u64))) return false;
 
-            auto& stream = threadSampleStream();
+            auto& stream = contextSampleStream(ctx);
             // Setup uses the secondary stream. Its scratch must not alias the
             // online sampler or either prefetch sampler on another stream.
             auto& scratch = stream.protocolScratch().setup;
@@ -2660,7 +2666,7 @@ namespace osuCrypto::LogVole::gpu
         std::vector<RnsPoly> next;
         {
             HostStep downloadStep("setup: uniform device download");
-            auto& stream = threadSampleStream();
+            auto& stream = contextSampleStream(ctx);
             if (!retained->mImpl->mValues.download(next, stream, 0, retained->count()) ||
                 next.size() != seeds.size()) return false;
         }
@@ -3061,7 +3067,7 @@ namespace osuCrypto::LogVole::gpu
         if (!ring || ring->rho() != ringModulusCount(ctx) || !ring->polyWords() ||
             ring->polyWords() > maxBytes / sizeof(u64) ||
             count > maxBytes / (ring->polyWords() * sizeof(u64))) return false;
-        auto& stream = threadSampleStream();
+        auto& stream = contextSampleStream(ctx);
         GpuPolyBuffer samples;
         OwnedGpuBuffer selectors, scales, denseInput;
         std::vector<u32> limbs;
@@ -3380,7 +3386,7 @@ namespace osuCrypto::LogVole::gpu
                 !(factors[col] = ring->pow2Factors(static_cast<u32>(bits)))) return false;
         }
 
-        auto& stream = threadSampleStream();
+        auto& stream = contextSampleStream(ctx);
         GpuPolyBuffer rBuffer, bBuffer, ctBuffer, scaledBuffer, compactNoiseSource;
         OwnedGpuBuffer deviceIndices;
         std::vector<RnsPoly> next;
@@ -3699,7 +3705,7 @@ namespace osuCrypto::LogVole::gpu
                 !(factors[power] = ring->pow2Factors(static_cast<u32>(bits)))) return false;
         }
 
-        auto& stream = threadSampleStream();
+        auto& stream = contextSampleStream(ctx);
         GpuPolyBuffer rBuffer, bBuffer, ctBuffer, scaledBuffer, compactNoiseSource, compactRandomizerSource;
         OwnedGpuBuffer deviceIndices, deviceFactors;
         std::vector<RnsPoly> next, firstRNtt;
@@ -4019,7 +4025,7 @@ namespace osuCrypto::LogVole::gpu
         const auto* ones = compactNoise ? ring->pow2Factors(0) : nullptr;
         if (compactNoise && !ones) return false;
 
-        auto& stream = threadSampleStream();
+        auto& stream = contextSampleStream(ctx);
         GpuPolyBuffer rBuffer, skBuffer, aBuffer, ctBuffer, noiseBuffer;
         OwnedGpuBuffer deviceIndices;
         std::vector<RnsPoly> next;
@@ -4280,7 +4286,8 @@ namespace osuCrypto::LogVole::gpu
             return true;
         }
 
-        auto& producer = threadSampleStream();
+        if (!state.mRingFactoryOwner || !state.mRingFactoryOwner->mGpuExecution) return true;
+        auto& producer = contextSampleStream(*state.mRingFactoryOwner);
         ReceiverShrinkTileEvents owned(producer);
         if (!owned.create(tiles + 1u)) return true;
 
@@ -6615,7 +6622,8 @@ namespace osuCrypto::LogVole::gpu
         const u32 mu = state.mParams.mMu;
         if (mu == 0u || cache->mPublicA.count() != mu) return false;
 
-        auto& sampleStream = threadSampleStream();
+        if (!state.mRingFactoryOwner || !state.mRingFactoryOwner->mGpuExecution) return false;
+        auto& sampleStream = contextSampleStream(*state.mRingFactoryOwner);
 
         auto next = std::make_unique<PreparedSenderCt2>();
         auto& impl = *next->mImpl;
@@ -6627,7 +6635,7 @@ namespace osuCrypto::LogVole::gpu
         impl.mMaskDigestHash = maskDigestHash;
         impl.mChunkCount = chunkCount;
         impl.mMu = mu;
-        impl.mProducerStream = sampleStream.raw();
+        impl.mProducerOwner = sampleStream.allocationOwner();
         impl.mReadyEvent = gpuEventCreate();
         if (!impl.mReadyEvent) return false;
 
@@ -6816,7 +6824,8 @@ namespace osuCrypto::LogVole::gpu
         const u32 mu = state.mParams.mMu;
         if (mu == 0u || cache->mPublicA.count() != mu) return false;
 
-        auto& sampleStream = threadSampleStream();
+        if (!state.mRingFactoryOwner || !state.mRingFactoryOwner->mGpuExecution) return false;
+        auto& sampleStream = contextSampleStream(*state.mRingFactoryOwner);
 
         auto next = std::make_unique<PreparedReceiverCt2>();
         auto& impl = *next->mImpl;
@@ -6828,7 +6837,7 @@ namespace osuCrypto::LogVole::gpu
         impl.mMaskDigestHash = maskDigestHash;
         impl.mChunkCount = chunkCount;
         impl.mMu = mu;
-        impl.mProducerStream = sampleStream.raw();
+        impl.mProducerOwner = sampleStream.allocationOwner();
         impl.mReadyEvent = gpuEventCreate();
         if (!impl.mReadyEvent) return false;
 
