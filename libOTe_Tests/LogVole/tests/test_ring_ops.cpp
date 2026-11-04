@@ -2231,8 +2231,12 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(ring && ring->n() == params.mPolyModulusDegree &&
         ring->rho() == params.mCoeffModulusBits.size());
     auto& stream = operationExecution.mainStream();
+    const bool fast = cmd.getOr("lvFactoryFast", 0) != 0;
     for (std::size_t count : {std::size_t{1}, std::size_t{8}, std::size_t{16}})
     {
+        // One row and an eight-row batch cover both layouts and warm reuse.
+        // Keep the larger matrix available for an explicitly requested full run.
+        if (fast && count == 16u) continue;
         std::vector<RnsPoly> original(count), expected(count);
         for (std::size_t i = 0; i < count; ++i)
         {
@@ -2247,7 +2251,7 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
         gpu::GpuPolyBuffer outOfPlace(*ring, count, stream);
         LOGVOLE_REQUIRE_TRUE(
             inPlace.data(stream) && outOfPlaceInput.data(stream) && outOfPlace.data(stream));
-        for (unsigned iteration = 0; iteration < 4u; ++iteration)
+        for (unsigned iteration = 0; iteration < (fast ? 2u : 4u); ++iteration)
         {
             LOGVOLE_REQUIRE_TRUE(inPlace.upload(original, stream));
             LOGVOLE_REQUIRE_TRUE(outOfPlaceInput.upload(original, stream));

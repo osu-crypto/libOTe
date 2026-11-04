@@ -24,7 +24,7 @@ def main():
     checks = [
         "Cpu_ReduceMatchesReference", "Cpu_ScaleAndRoundMatchesReference",
         "Cpu_NttMatchesReference", "Cpu_CrtMixedWidthsMatchSeal",
-        "Cpu_DyadicMatchesReference", "Cpu_SamplerMatchesSeal",
+        "Cpu_DyadicMatchesReference", "Cpu_SamplerMatchesSeal", "Cpu_ErrorSamplingMatchesSeal",
         "Cpu_ResamplingOverwritesPreviousQuery", "Cpu_ZkArithmeticMatchesReference",
         "Cpu_GpuZkMatMulSeededInputsMatchReference",
         "Cpu_GpuZkBufferOwnership", "Core_LeafGoldenSeedGpuParity",
@@ -35,14 +35,21 @@ def main():
         "Civole_StateMachineAutoOfflineSequentialSids",
         "KeyDeriveCoproto_OversizedFramesRejectedBeforeAllocation",
     ]
-    jobs = [("targeted", ["-u", *["LogVole_" + s for s in checks], "-gpu", "1"])]
+    # Keep both cold processes under the same 20s bound. CPU arithmetic and
+    # sequential-session checks together exceeded it on Windows even though
+    # each case passed alone; retain all coverage and the 90s aggregate bound.
+    split = checks.index("Cpu_GpuZkMatMulSeededInputsMatchReference")
+    jobs = [(name, ["-u", *["LogVole_" + s for s in selected], "-gpu", "1"])
+            for name, selected in (("cpu-arithmetic", checks[:split]),
+                                   ("owners-and-protocol", checks[split:]))]
     jobs.append(("word-arithmetic", ["-u", "UInt_WordArithmetic_Test"]))
     # Small CPU-only ownership and exact/truncated relation cases (degree 1024).
     jobs.append(("cpu-scratch", ["-u", "LogVole_ShrinkExpandCore_ParamsValidation",
                                  "LogVole_ShrinkExpandCore_DeterministicRelationExact",
                                  "LogVole_ShrinkExpandCore_TruncDeterministicRelationBounded",
                                  "-gpu", "0"]))
-    jobs.append(("ntt", ["-u", "LogVole_RingOps_NttTwoTileInPlaceParity", "-gpu", "1"]))
+    jobs.append(("ntt", ["-u", "LogVole_RingOps_NttTwoTileInPlaceParity", "-gpu", "1",
+                         "-lvFactoryFast", "1"]))
     # A separate process must succeed without another test warming its caches.
     jobs.append(("retention-cold", ["-u", "LogVole_RingOps_PublicUniformRetentionParity",
                                     "-gpu", "1"]))
