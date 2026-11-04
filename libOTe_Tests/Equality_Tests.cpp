@@ -1,4 +1,8 @@
 #include "Equality_Tests.h"
+#include "libOTe/config.h"
+#include "cryptoTools/Common/TestCollection.h"
+
+#if defined(ENABLE_SPARSE_DPF)
 #include "libOTe/Dpf/RevCuckoo/Equality.h"
 #include "macoro/sync_wait.h"
 #include "macoro/when_all.h"
@@ -493,3 +497,35 @@ namespace osuCrypto
 
 	}
 }
+
+#else
+
+namespace osuCrypto
+{
+	void BitInject_basic_test(const CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void OtEquality_basic_Test(const CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void HybEquality_basic_Test(const CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Dedup_orTree_test(const CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void Dedup_protocol_test(const CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+}
+
+#endif

@@ -983,6 +983,18 @@ inline u64 eval(
 
 void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 {
+	// Mirrors the base OT choice in SilentVole{Sender,Receiver}::genBaseCors.
+	// One-flow base OTs give 3 rounds for genBaseCors and for a full silent
+	// run. SimplestOT (sender -> receiver -> sender) adds one round to
+	// genBaseCors, and its last flight cannot be merged with the silent
+	// phase, which adds another.
+#if (defined ENABLE_MRR_TWIST && defined ENABLE_SSE) || defined ENABLE_MR || 	defined ENABLE_MRR || defined ENABLE_MR_KYBER || !defined ENABLE_SIMPLESTOT
+	const u64 baseCorRounds = 3;
+	const u64 silentRounds = 3;
+#else
+	const u64 baseCorRounds = 4;
+	const u64 silentRounds = 5;
+#endif
 
 	Timer timer;
 	timer.setTimePoint("start");
@@ -1015,45 +1027,10 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 				AlignedUnVector<block> c(n), z0(n), z1(n);
 				auto p0 = recv.silentReceive(c, z0, prng, chls[0]);
 				auto p1 = send.silentSend(x, z1, prng, chls[1]);
-				std::string baseName;
-				//
-//#if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
-//                using BaseOT = McRosRoyTwist;
-//#elif defined ENABLE_MR
-//                using BaseOT = MasnyRindal;
-//#elif defined ENABLE_MRR
-//                using BaseOT = McRosRoy;
-//#elif defined ENABLE_MR_KYBER
-
-#if defined ENABLE_SIMPLESTOT
-				u64 expRound = 3;
-				baseName = "using DefaultBaseOT = SimplestOT;";
-#elif defined ENABLE_MRR_TWIST && defined ENABLE_SSE
-				u64 expRound = 3;
-				baseName = "using DefaultBaseOT = McRosRoyTwist;";
-#elif defined ENABLE_MR
-				u64 expRound = 3;
-				baseName = "using DefaultBaseOT = MasnyRindal;";
-#elif defined ENABLE_MRR
-				u64 expRound = 3;
-				baseName = "using DefaultBaseOT = McRosRoy;";
-#elif defined ENABLE_MR_KYBER
-				u64 expRound = 3;
-				baseName = "using DefaultBaseOT = MasnyRindalKyber;";
-#elif defined ENABLE_MOCK_OT
-				u64 expRound = 3;
-				baseName = "using DefaultBaseOT = INSECURE_MOCK_OT;";
-#else
-				baseName = "????";
-				u64 expRound = 0;
-#endif
 
 				auto rounds = eval(p0, p1, chls[1], chls[0]);
-				if (rounds != expRound)
-				{
-					std::cout << baseName << std::endl;
-					throw std::runtime_error("act " + std::to_string(rounds) + "!= exp " + std::to_string(expRound) + " " + COPROTO_LOCATION);
-				}
+				if (rounds != silentRounds)
+					throw std::runtime_error("silent rounds " + std::to_string(rounds) + " != " + std::to_string(silentRounds) + " " + COPROTO_LOCATION);
 
 
 				for (u64 i = 0; i < n; ++i)
@@ -1072,8 +1049,8 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 				auto p1 = recv.genBaseCors(prng, chls[1]);
 
 				auto rounds = eval(p0, p1, chls[1], chls[0]);
-				if (rounds != 3)
-					throw RTE_LOC;
+				if (rounds != baseCorRounds)
+					throw std::runtime_error("genBaseCors rounds " + std::to_string(rounds) + " != " + std::to_string(baseCorRounds) + " " + COPROTO_LOCATION);
 
 				p0 = send.silentSendInplace(x, n, prng, chls[0]);
 				p1 = recv.silentReceiveInplace(n, prng, chls[1]);
@@ -1120,6 +1097,7 @@ void Vole_Silent_mal_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_malBase_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_Clear_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_Rounds_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_NoiseSampling_test(const oc::CLP& cmd) { throwDisabled(); }
 
 
 #endif

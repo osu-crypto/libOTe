@@ -42,8 +42,6 @@
 using namespace osuCrypto;
 namespace tests_libOTe
 {
-	void TungstenCode_Audit_Test(const CLP& cmd);
-
 	TestCollection Tests([](TestCollection& tc)
 		{
 			tc.add("AnyField_F9_Test                       ", AnyField_F9_Test);
@@ -90,9 +88,9 @@ namespace tests_libOTe
 			tc.add("TungstenCode_weight_test                ", TungstenCode_weight_test);
 			tc.add("TungstenCode_Audit_Test                 ", TungstenCode_Audit_Test);
 
-			tc.add("Permutation_bijection                    ", Permutation_bijection_test);
-			tc.add("Permutation_data                         ", Permutation_data_test);
-			tc.add("Permutation_chunk                        ", Permutation_chunk_test);
+			tc.add("Permutation_bijection_test               ", Permutation_bijection_test);
+			tc.add("Permutation_data_test                    ", Permutation_data_test);
+			tc.add("Permutation_chunk_test                   ", Permutation_chunk_test);
 			tc.add("Permutation_Audit_Test                  ", Permutation_Audit_Test);
 
 			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
@@ -226,43 +224,6 @@ namespace tests_libOTe
 			tc.add("Pprf_Audit_Test                           ", Pprf_Audit_Test);
 			tc.add("StationaryPprf_inter_test                ", StationaryPprf_inter_test);
 
-			tc.add("RegularDpf_Multiply_Test                 ", RegularDpf_Multiply_Test);
-			tc.add("MsvcAesHashCoroutine_Regression_Test      ", MsvcAesHashCoroutine_Regression_Test);
-			tc.add("RegularDpf_Proto_Test                    ", RegularDpf_Proto_Test);
-			tc.add("RegularDpf_Puncture_Test                 ", RegularDpf_Puncture_Test);
-			tc.add("RegularDpf_keyGen_Test                   ", RegularDpf_keyGen_Test);
-
-			tc.add("SumDmpf_Proto_Test                       ", SumDmpf_Proto_Test);
-			tc.add("SparseDpf_Mtx_Test                       ", SparseDpf_Mtx_Test);
-			tc.add("SparseDpf_Vec_Test                       ", SparseDpf_Vec_Test);
-			tc.add("SparseDpf_Punct_Test                     ", SparseDpf_Punct_Test);
-			tc.add("SparseDpf_InactiveLevel_Test             ", SparseDpf_InactiveLevel_Test);
-			tc.add("CachedDpf_LeafRekey_Test                 ", CachedDpf_LeafRekey_Test);
-			tc.add("DpfTreeHash_Rekey_Test                   ", DpfTreeHash_Rekey_Test);
-			tc.add("SparseDpf_CorrectionEncoding_Test        ", SparseDpf_CorrectionEncoding_Test);
-			
-			tc.add("TritDpf_Proto_Test                       ", TritDpf_Proto_Test);
-			tc.add("Dpf_Audit_Test                           ", Dpf_Audit_Test);
-														   
-														   
-														   
-			tc.add("Bot_Simplest_Test                        ", Bot_Simplest_Test);
-														   
-			tc.add("Bot_McQuoidRR_Moeller_EKE_Test           ", Bot_McQuoidRR_Moeller_EKE_Test);
-			tc.add("Bot_McQuoidRR_Moeller_MR_Test            ", Bot_McQuoidRR_Moeller_MR_Test);
-			tc.add("Bot_McQuoidRR_Moeller_F_Test             ", Bot_McQuoidRR_Moeller_F_Test);
-			tc.add("Bot_McQuoidRR_Moeller_FM_Test            ", Bot_McQuoidRR_Moeller_FM_Test);
-														   
-			tc.add("Bot_McQuoidRR_Ristrestto_F_Test          ", Bot_McQuoidRR_Ristrestto_F_Test);
-			tc.add("Bot_McQuoidRR_Ristrestto_FM_Test         ", Bot_McQuoidRR_Ristrestto_FM_Test);
-														   
-			tc.add("Bot_MasnyRindal_Test                     ", Bot_MasnyRindal_Test);
-			tc.add("Bot_BadMasMuk_Test                       ", Bot_BadMasMuk_Test);
-			tc.add("Bot_MasnyRindal_Kyber_Test               ", Bot_MasnyRindal_Kyber_Test);
-														   
-			tc.add("Vole_SoftSpokenSmall_Test                ", Vole_SoftSpokenSmall_Test);
-			tc.add("DotExt_Kos_Test                          ", DotExt_Kos_Test);
-			tc.add("DotExt_Iknp_Test                         ", DotExt_Iknp_Test);
 
 
 			tc.add("OtExt_genBaseOts_Test                   ", OtExt_genBaseOts_Test);

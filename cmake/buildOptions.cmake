@@ -129,23 +129,43 @@ EVAL(FETCH_SEAL_IMPL
 	(DEFINED FETCH_SEAL AND FETCH_SEAL) OR
 	((NOT DEFINED FETCH_SEAL) AND (FETCH_AUTO AND ENABLE_LOGVOLE)))
 
-if(ENABLE_SILENT_VOLE OR ENABLE_SILENTOT OR ENABLE_SOFTSPOKEN_OT)
-	set(ENABLE_PPRF true)
-endif()
+# Feature dependencies. Enabling a feature turns on everything it needs, so
+# any combination of options builds. Most derived features come first.
 
-option(VERBOSE_FETCH        "Print build info for fetched libraries" ON)
-
-if(ENABLE_IKNP)
-	set(ENABLE_KOS true)
-endif()
-
+# Foleage expands its noise with the ternary DPF and generates its base
+# correlations with SoftSpoken OT.
 if(ENABLE_FOLEAGE)
 	set(ENABLE_TERNARY_DPF true)
+	set(ENABLE_SOFTSPOKEN_OT true)
+endif()
+
+# RingLPN expands its sparse noise with the RevCuckoo DMPF, uses noisy VOLE,
+# and generates its base correlations with SoftSpoken OT.
+if(ENABLE_RINGLPN)
+	set(ENABLE_SPARSE_DPF true)
+	set(ENABLE_SILENT_VOLE true)
+	set(ENABLE_SOFTSPOKEN_OT true)
 endif()
 
 if(ENABLE_SPARSE_DPF)
 	set(ENABLE_REGULAR_DPF true)
 endif()
+
+# Silent VOLE's default base type (SilentBaseType::BaseExtend) extends its
+# base OTs with SoftSpoken.
+if(ENABLE_SILENT_VOLE)
+	set(ENABLE_SOFTSPOKEN_OT true)
+endif()
+
+if(ENABLE_SILENT_VOLE OR ENABLE_SILENTOT OR ENABLE_SOFTSPOKEN_OT)
+	set(ENABLE_PPRF true)
+endif()
+
+if(ENABLE_IKNP)
+	set(ENABLE_KOS true)
+endif()
+
+option(VERBOSE_FETCH        "Print build info for fetched libraries" ON)
 
 message(STATUS "General Options\n=======================================================")
 

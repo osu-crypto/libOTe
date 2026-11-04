@@ -510,6 +510,7 @@ namespace osuCrypto
 
 	void convertToOle_Test(const CLP& cmd)
 	{
+#ifdef ENABLE_RINGLPN
 		// given ots, we convert them to OLEs.
 		u64 n = 1ull << 10;
 		std::vector<block> recvOts(n);
@@ -548,6 +549,9 @@ namespace osuCrypto
 				throw RTE_LOC;
 			}
 		}
+#else
+		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
+#endif
 	}
 
 	void RingLpn_GenBase_test(const CLP& cmd)

@@ -1,4 +1,8 @@
 #include "BinarySolver_Tests.h"
+#include "libOTe/config.h"
+#include "cryptoTools/Common/TestCollection.h"
+
+#if defined(ENABLE_SPARSE_DPF)
 #include "libOTe/Dpf/RevCuckoo/BinarySolver.h"
 
 namespace osuCrypto
@@ -881,3 +885,50 @@ namespace osuCrypto
 	}
 
 }
+
+#else
+
+namespace osuCrypto
+{
+	void BinSolver_multiply_test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void BinSolver_multiplyMtx_test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void BinSolver_firstOneBit_test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void BinSolver_solve_test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void BinSolver_firstOneBitMany_test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void BinSolver_multiplyMany_test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void BinSolver_multiplyMtxMany_test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+
+	void BinSolver_solveMany_test(const oc::CLP& )
+	{
+		throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+	}
+}
+
+#endif

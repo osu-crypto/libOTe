@@ -73,6 +73,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DENABLE_SIMPLESTOT=ON
           -DENABLE_MR=ON
+          -DENABLE_BMM=ON
           -DENABLE_MRR=ON
           -DENABLE_MRR_TWIST=ON
           -DENABLE_LOGVOLE=OFF
@@ -82,13 +83,14 @@ jobs:
           -DENABLE_SODIUM=ON
           -DSODIUM_MONTGOMERY=OFF
 
-      - name: Build focused Curve25519 OT tests
-        run: cmake --build out/build/linux --target curve25519_ot_tests --parallel 4
+      - name: Build frontend
+        run: cmake --build out/build/linux --target frontend_libOTe --parallel 4
 
       - name: Verify fallback configuration
         run: |
           grep -q '^ENABLE_SIMPLESTOT:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_MR:BOOL=ON$' out/build/linux/CMakeCache.txt
+          grep -q '^ENABLE_BMM:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_MRR:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_MRR_TWIST:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_LOGVOLE:BOOL=OFF$' out/build/linux/CMakeCache.txt
@@ -98,8 +100,8 @@ jobs:
           grep -q '^ENABLE_SODIUM:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^SODIUM_MONTGOMERY:BOOL=OFF$' out/build/linux/CMakeCache.txt
 
-      - name: Test Curve25519 OT consumers
-        run: ./out/build/linux/libOTe_Tests/curve25519_ot_tests
+      - name: Test Curve25519 base OTs
+        run: ./out/build/linux/frontend/frontend_libOTe -u Bot_
 
   build-macos:
     needs: build-ubuntu

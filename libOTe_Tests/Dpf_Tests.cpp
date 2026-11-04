@@ -12,6 +12,7 @@
 #include "libOTe/Dpf/RevCuckoo/GoldreichHash.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Dpf/SumDmpf.h"
+#include "libOTe/Dpf/CachedDpfExpansion.h"
 #include <type_traits>
 
 using namespace oc;

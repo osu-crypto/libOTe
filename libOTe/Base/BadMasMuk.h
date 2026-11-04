@@ -58,7 +58,7 @@ namespace osuCrypto
     //   term omits abort events of order q^3/2^lambda and q^4/2^lambda.
     //   With 128-bit tags that bound is only meaningful up to about 2^32
     //   random-oracle queries. This is a gap in the proof, not a known
-    //   attack; the authors have been contacted.
+    //   attack; the authors have confirmed it (Nov 2026).
     //
     // tagSize in the .cpp is the only knob for lambda; bump the domain-string
     // version if it changes.
