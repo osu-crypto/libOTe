@@ -692,14 +692,21 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
             // The second cold initialization is joined by the destructor.
         }
         LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(context));
-        // Recovery may call abort before this worker creates its first stream.
-        // Leave validation active on both return and exception: stream-owned
-        // scratch must drain and release without depending on TLS registration
-        // order or synchronizing an already-destroyed stream.
+        // The attempt retains its execution domain after the input context is
+        // released. Normal return and exception unwinding both drain its flag
+        // and scratch without TLS registration or an explicit abort.
         struct Cancelled {};
+        std::weak_ptr<gpu::GpuExecutionContext> validationLifetime;
         std::packaged_task<void()> validation([&] {
-            LOGVOLE_REQUIRE_TRUE(gpu::abortGoldenValidationAttempt());
-            LOGVOLE_REQUIRE_TRUE(gpu::beginGoldenValidationAttempt(context));
+            auto ownedContext = context;
+            ownedContext.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
+            validationLifetime = ownedContext.mGpuExecution;
+            gpu::GoldenValidationAttempt attempt, competing;
+            LOGVOLE_REQUIRE_TRUE(attempt.abort());
+            LOGVOLE_REQUIRE_TRUE(attempt.begin(ownedContext));
+            LOGVOLE_REQUIRE_FALSE(competing.begin(ownedContext));
+            ownedContext = {};
+            LOGVOLE_REQUIRE_FALSE(validationLifetime.expired());
             if (round) throw Cancelled{};
         });
         auto completed = validation.get_future();
@@ -709,6 +716,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         try { completed.get(); }
         catch (const Cancelled&) { cancelled = true; }
         LOGVOLE_REQUIRE_EQ(cancelled, round != 0);
+        LOGVOLE_REQUIRE_TRUE(validationLifetime.expired());
         gpu::gpuCollectThreadResources();
         LOGVOLE_REQUIRE_TRUE(gpu::gpuLastErrorOk(nullptr));
     }

@@ -31,6 +31,8 @@
 
 namespace osuCrypto::LogVole
 {
+    namespace gpu { class GoldenValidationAttempt; }
+
     namespace
     {
         // Temporary: per-step timing for the Root recursion level, dumped at exit
@@ -3493,10 +3495,11 @@ namespace osuCrypto::LogVole
             std::span<const u8> seed,
             RecursiveSeedEvalOutput& out,
             bool isLeaf,
-            bool deferGoldenValidation,
+            gpu::GoldenValidationAttempt* validationAttempt,
             u32 ct2PrefetchLevelsRemaining = 0u,
             bool retainHostCache = false)
         {
+            const bool deferGoldenValidation = validationAttempt != nullptr;
             u32 tauHi = 0;
             u32 muHi = 0;
             if (!computeTauHi(state.mParams, tauHi) ||
@@ -3671,7 +3674,7 @@ namespace osuCrypto::LogVole
             {
                 HostStep step("send: child eval", state.mParams.mW);
                 if (!evaluateSenderSeedCandidateImpl(
-                        *state.mNextLevelState, seed, childEval, false, deferGoldenValidation,
+                        *state.mNextLevelState, seed, childEval, false, validationAttempt,
                         ct2PrefetchLevelsRemaining == 0u
                             ? 0u
                             : ct2PrefetchLevelsRemaining - 1u, true))
@@ -3713,7 +3716,7 @@ namespace osuCrypto::LogVole
                 }
 
                 gpu::DeviceBatchPtr childDev = childEval.mTbkDevice;
-                if (childEval.mValidationPending && !childDev)
+                if (childEval.mValidationPending && (!childDev || !validationAttempt))
                 {
                     return false;
                 }
@@ -3739,7 +3742,7 @@ namespace osuCrypto::LogVole
                 if (childDev &&
                     (childEval.mValidationPending
                          ? gpu::denoiseAndAggValidateDevice(
-                               gpuCtx, *childDev, tauHi, childSeedParamsDev, kPrimeDev,
+                               *validationAttempt, gpuCtx, *childDev, tauHi, childSeedParamsDev, kPrimeDev,
                                state.mNextLevelState->mParams.mW)
                          : gpu::denoiseAndAggDevice(
                                gpuCtx, *childDev, tauHi, kPrimeDev,
@@ -3963,19 +3966,20 @@ namespace osuCrypto::LogVole
                 gpu::topSenderCt2PrefetchEnabled())
             {
                 return evaluateSenderSeedCandidateImpl(
-                    state, seed, out, true, false, publicPrefetchLevels);
+                    state, seed, out, true, nullptr, publicPrefetchLevels);
             }
             if (gpu::enabled() &&
                 state.mParams.mCt2SeedMode == Ct2SeedMode::GoldenSeed &&
                 gpu::deferredGoldenValidationEnabled())
             {
                 RingNttContext ctx{};
+                gpu::GoldenValidationAttempt attempt;
                 if (makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner) &&
-                    gpu::beginGoldenValidationAttempt(ctx))
+                    attempt.begin(ctx))
                 {
                     RecursiveSeedEvalOutput deferred{};
                     const bool evaluated = evaluateSenderSeedCandidateImpl(
-                        state, seed, deferred, true, true,
+                        state, seed, deferred, true, &attempt,
                         gpu::topSenderCt2PrefetchLevels(
                             defaultTopSenderCt2PrefetchLevels(state)));
                     if (!evaluated || !deferred.mValid ||
@@ -3983,23 +3987,23 @@ namespace osuCrypto::LogVole
                     {
                         // No deferred state was published. Drain scratch and rerun
                         // the exact same supplied seed through the legacy path.
-                        if (!gpu::abortGoldenValidationAttempt()) return false;
+                        if (!attempt.abort()) return false;
                         return evaluateSenderSeedCandidateImpl(
-                            state, seed, out, true, false);
+                            state, seed, out, true, nullptr);
                     }
 
                     const Params topSeedParams = makeSeedParams(
                         state.mParams, state.mShrinkExpandState.mParams);
                     if (!gpu::queueLeafGoldenSeedValidation(
-                            topSeedParams, ctx, *deferred.mTbkDevice))
+                            attempt, topSeedParams, ctx, *deferred.mTbkDevice))
                     {
-                        if (!gpu::abortGoldenValidationAttempt()) return false;
+                        if (!attempt.abort()) return false;
                         return evaluateSenderSeedCandidateImpl(
-                            state, seed, out, true, false);
+                            state, seed, out, true, nullptr);
                     }
 
                     bool accepted = false;
-                    if (!gpu::finishGoldenValidationAttempt(accepted)) return false;
+                    if (!attempt.finish(accepted)) return false;
                     if (!accepted)
                     {
                         out = RecursiveSeedEvalOutput{};
@@ -4013,7 +4017,7 @@ namespace osuCrypto::LogVole
                 }
             }
 #endif
-            return evaluateSenderSeedCandidateImpl(state, seed, out, true, false);
+            return evaluateSenderSeedCandidateImpl(state, seed, out, true, nullptr);
         }
 
         bool findRecursiveGoldenSeedAndEvaluate(

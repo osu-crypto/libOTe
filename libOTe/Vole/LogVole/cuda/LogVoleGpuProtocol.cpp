@@ -8010,13 +8010,19 @@ namespace osuCrypto::LogVole::gpu
         return deferredGoldenValidationEnabledImpl();
     }
 
-    bool beginGoldenValidationAttempt(const RingNttContext& ctx)
+    GoldenValidationAttempt::~GoldenValidationAttempt()
     {
-        if (!enabled() || !deferredGoldenValidationEnabledImpl()) return false;
+        if (!abort()) std::terminate();
+    }
+
+    bool GoldenValidationAttempt::begin(const RingNttContext& ctx)
+    {
+        if (mStream || !ctx.mGpuExecution || !enabled() ||
+            !deferredGoldenValidationEnabledImpl()) return false;
         auto ring = GpuRing::get(ctx);
         if (!ring || !ring->denoiseReady()) return false;
 
-        auto& stream = threadStream();
+        auto& stream = contextStream(ctx);
         auto& scratch = validateScratch(stream);
         if (scratch.mAttemptActive || !scratch.ensure(ring->rho()) ||
             !gpuMemsetZero(scratch.mFlag, sizeof(u32), stream.raw()))
@@ -8026,36 +8032,46 @@ namespace osuCrypto::LogVole::gpu
         scratch.mAttemptActive = true;
         scratch.mAttemptStream = stream.raw();
         scratch.mAttemptRho = ring->rho();
+        mExecution = ctx.mGpuExecution;
+        mStream = &stream;
         return true;
     }
 
-    bool abortGoldenValidationAttempt()
+    bool GoldenValidationAttempt::abort()
     {
-        auto& stream = threadStream();
+        if (!mStream) return true;
+        auto& stream = *mStream;
         auto& scratch = validateScratch(stream);
-        if (!scratch.mAttemptActive) return true;
-        if (scratch.mAttemptStream != stream.raw()) return false;
-        const bool ok = stream.sync();
+        if (!scratch.mAttemptActive || scratch.mAttemptStream != stream.raw() ||
+            !stream.sync()) return false;
         scratch.mAttemptActive = false;
         scratch.mAttemptStream = nullptr;
         scratch.mAttemptRho = 0;
-        return ok;
+        mStream = nullptr;
+        mExecution.reset();
+        return true;
     }
 
-    bool finishGoldenValidationAttempt(bool& ok)
+    bool GoldenValidationAttempt::finish(bool& ok)
     {
-        auto& stream = threadStream();
+        if (!mStream) return false;
+        auto& stream = *mStream;
         auto& scratch = validateScratch(stream);
         if (!scratch.mAttemptActive) return false;
         if (scratch.mAttemptStream != stream.raw()) return false;
 
         u32 fail = 0;
+        // Keep the host destination alive even if the first drain fails.
+        StreamDrain drain{stream};
         const bool copied = gpuMemcpyD2H(&fail, scratch.mFlag, sizeof(u32), stream.raw());
-        const bool synced = stream.sync();
+        if (!drain.sync()) return false;
         scratch.mAttemptActive = false;
         scratch.mAttemptStream = nullptr;
         scratch.mAttemptRho = 0;
-        if (!copied || !synced) return false;
+        // The execution domain must outlive the drain guard's stream borrow.
+        // Release it when this attempt is destroyed or is begun again.
+        mStream = nullptr;
+        if (!copied) return false;
         ok = (fail == 0);
         return true;
     }
@@ -8117,6 +8133,7 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool denoiseAndAggValidateDevice(
+        GoldenValidationAttempt& attempt,
         const RingNttContext& ctx,
         const DeviceBatch& in,
         u32 tau,
@@ -8151,7 +8168,8 @@ namespace osuCrypto::LogVole::gpu
         if ((logicalDenoised % tau) != 0) return false;
         const std::size_t aggCount = logicalDenoised / tau;
 
-        auto& stream = threadStream();
+        if (!attempt.stream()) return false;
+        auto& stream = *attempt.stream();
         auto& scratch = validateScratch(stream);
         if (!uploadGoldenMargins(
                 validatedLevelParams, ctx, *ring, scratch, stream))
@@ -8220,11 +8238,13 @@ namespace osuCrypto::LogVole::gpu
         std::vector<u64> marginLo(rho), marginHi(rho);
         if (!goldenSeedMargins(params, ctx, marginLo, marginHi)) return false;
 
-        auto& stream = threadStream();
+        auto& stream = contextStream(ctx);
         Region regKern(regions().mKernelUs, stream.raw());
 
         auto& scratch = validateScratch(stream);
         if (scratch.mAttemptActive || !scratch.ensure(rho)) return false;
+        u32 fail = 0;
+        StreamDrain drain{stream};
         if (!gpuMemcpyH2D(scratch.mMarginLo, marginLo.data(), rho * sizeof(u64), stream.raw()) ||
             !gpuMemcpyH2D(scratch.mMarginHi, marginHi.data(), rho * sizeof(u64), stream.raw()) ||
             !gpuMemsetZero(scratch.mFlag, sizeof(u32), stream.raw()))
@@ -8240,8 +8260,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
         }
 
-        u32 fail = 0;
-        if (!gpuMemcpyD2H(&fail, scratch.mFlag, sizeof(u32), stream.raw()) || !stream.sync())
+        if (!gpuMemcpyD2H(&fail, scratch.mFlag, sizeof(u32), stream.raw()) || !drain.sync())
         {
             return false;
         }
@@ -8252,7 +8271,7 @@ namespace osuCrypto::LogVole::gpu
     namespace
     {
         bool enqueueLeafGoldenValidation(const Params& params, const RingNttContext& ctx,
-            const DeviceBatch& tbk, bool deferred)
+            const DeviceBatch& tbk, GpuStream& stream, bool deferred)
         {
             HostStep validationStep("gpu: leaf golden enqueue");
             if (!enabled() || !params.mW || !params.mShrinkExpand.mMu || tbk.empty() ||
@@ -8265,7 +8284,6 @@ namespace osuCrypto::LogVole::gpu
                 tbk.mImpl->mBuf.count() < tbk.count() ||
                 (tbk.count() != params.mW && tbk.count() != padded)) return false;
 
-            auto& stream = threadStream();
             auto& scratch = validateScratch(stream);
             if (deferred)
             {
@@ -8302,22 +8320,26 @@ namespace osuCrypto::LogVole::gpu
         }
     }
 
-    bool queueLeafGoldenSeedValidation(const Params& params, const RingNttContext& ctx,
+    bool queueLeafGoldenSeedValidation(GoldenValidationAttempt& attempt,
+        const Params& params, const RingNttContext& ctx,
         const DeviceBatch& tbk)
     {
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
-        return enqueueLeafGoldenValidation(params, ctx, tbk, true);
+        return attempt.stream() &&
+            enqueueLeafGoldenValidation(params, ctx, tbk, *attempt.stream(), true);
     }
 
     bool validateLeafGoldenSeedDevice(const Params& params, const RingNttContext& ctx,
         const DeviceBatch& tbk, bool& ok)
     {
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
-        if (!enqueueLeafGoldenValidation(params, ctx, tbk, false)) return false;
-        auto& stream = threadStream();
+        if (!enabled() || !ctx.mGpuExecution) return false;
+        auto& stream = contextStream(ctx);
+        if (!enqueueLeafGoldenValidation(params, ctx, tbk, stream, false)) return false;
         u32 failed = 0;
+        StreamDrain drain{stream};
         const bool copied = gpuMemcpyD2H(&failed, validateScratch(stream).mFlag, sizeof(u32), stream.raw());
-        const bool synced = stream.sync();
+        const bool synced = drain.sync();
         if (!copied || !synced) return false;
         ok = failed == 0;
         return true;

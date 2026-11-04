@@ -5238,10 +5238,12 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
                 paddedRejectedCandidate.data(), paddedRejectedCandidate.size()));
         LOGVOLE_REQUIRE_TRUE(candidateDev != nullptr);
         LOGVOLE_REQUIRE_EQ(candidateDev->count(), 16u);
-        LOGVOLE_REQUIRE_TRUE(gpu::beginGoldenValidationAttempt(paddedCtx));
+        gpu::GoldenValidationAttempt attempt;
+        LOGVOLE_REQUIRE_TRUE(attempt.begin(paddedCtx));
 
         gpu::DeviceBatchPtr prefix;
         LOGVOLE_REQUIRE_TRUE(gpu::denoiseAndAggValidateDevice(
+            attempt,
             paddedCtx,
             *candidateDev,
             1u,
@@ -5252,7 +5254,7 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
         LOGVOLE_REQUIRE_EQ(prefix->count(), 2u);
 
         bool accepted = true;
-        LOGVOLE_REQUIRE_TRUE(gpu::finishGoldenValidationAttempt(accepted));
+        LOGVOLE_REQUIRE_TRUE(attempt.finish(accepted));
         LOGVOLE_EXPECT_FALSE(accepted);
     }
 #endif
@@ -5982,9 +5984,10 @@ void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
                 LOGVOLE_EXPECT_EQ(deviceOk, !bad);
                 if (gpu::deferredGoldenValidationEnabled())
                 {
-                    LOGVOLE_REQUIRE_TRUE(gpu::beginGoldenValidationAttempt(deviceContext));
-                    LOGVOLE_REQUIRE_TRUE(gpu::queueLeafGoldenSeedValidation(params, deviceContext, *device));
-                    LOGVOLE_REQUIRE_TRUE(gpu::finishGoldenValidationAttempt(deviceOk));
+                    gpu::GoldenValidationAttempt attempt;
+                    LOGVOLE_REQUIRE_TRUE(attempt.begin(deviceContext));
+                    LOGVOLE_REQUIRE_TRUE(gpu::queueLeafGoldenSeedValidation(attempt, params, deviceContext, *device));
+                    LOGVOLE_REQUIRE_TRUE(attempt.finish(deviceOk));
                     LOGVOLE_EXPECT_EQ(deviceOk, !bad);
                 }
             }
@@ -6029,6 +6032,29 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
         auto safeDevice = gpu::upload(zp.mRing, safe);
         auto unsafeDevice = gpu::upload(zp.mRing, unsafe);
         LOGVOLE_REQUIRE_TRUE(safeDevice && unsafeDevice);
+        if (rho == 4u && gpu::deferredGoldenValidationEnabled())
+        {
+            auto isolated = zp.mRing;
+            isolated.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
+            gpu::GoldenValidationAttempt rejected, accepted;
+            LOGVOLE_REQUIRE_TRUE(rejected.begin(zp.mRing));
+            LOGVOLE_REQUIRE_TRUE(accepted.begin(isolated));
+            // Both consume the same immutable math context and device batches,
+            // but their explicitly owned flags must remain independent.
+            LOGVOLE_REQUIRE_TRUE(gpu::queueLeafGoldenSeedValidation(rejected, params, zp.mRing, *unsafeDevice));
+            LOGVOLE_REQUIRE_TRUE(gpu::queueLeafGoldenSeedValidation(accepted, params, zp.mRing, *safeDevice));
+            bool ok = false;
+            LOGVOLE_REQUIRE_TRUE(accepted.finish(ok));
+            LOGVOLE_REQUIRE_TRUE(ok);
+            LOGVOLE_REQUIRE_TRUE(rejected.finish(ok));
+            LOGVOLE_REQUIRE_FALSE(ok);
+            LOGVOLE_REQUIRE_FALSE(rejected.finish(ok));
+            // A completed attempt can reuse its flag without retaining failure.
+            LOGVOLE_REQUIRE_TRUE(rejected.begin(zp.mRing));
+            LOGVOLE_REQUIRE_TRUE(gpu::queueLeafGoldenSeedValidation(rejected, params, zp.mRing, *safeDevice));
+            LOGVOLE_REQUIRE_TRUE(rejected.finish(ok));
+            LOGVOLE_REQUIRE_TRUE(ok);
+        }
         for (const bool bad : {false, true})
         {
             const auto& batch = bad ? unsafe : safe;
@@ -6042,11 +6068,12 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_EQ(hostOk, deviceOk);
             if (gpu::deferredGoldenValidationEnabled())
             {
-                LOGVOLE_REQUIRE_TRUE(gpu::beginGoldenValidationAttempt(zp.mRing));
-                LOGVOLE_REQUIRE_TRUE(gpu::queueLeafGoldenSeedValidation(params, zp.mRing, *device));
+                gpu::GoldenValidationAttempt attempt;
+                LOGVOLE_REQUIRE_TRUE(attempt.begin(zp.mRing));
+                LOGVOLE_REQUIRE_TRUE(gpu::queueLeafGoldenSeedValidation(attempt, params, zp.mRing, *device));
                 // A subsequent successful check must not erase a prior failure.
-                LOGVOLE_REQUIRE_TRUE(gpu::queueLeafGoldenSeedValidation(params, zp.mRing, *safeDevice));
-                LOGVOLE_REQUIRE_TRUE(gpu::finishGoldenValidationAttempt(deviceOk));
+                LOGVOLE_REQUIRE_TRUE(gpu::queueLeafGoldenSeedValidation(attempt, params, zp.mRing, *safeDevice));
+                LOGVOLE_REQUIRE_TRUE(attempt.finish(deviceOk));
                 LOGVOLE_REQUIRE_EQ(hostOk, deviceOk);
             }
         }

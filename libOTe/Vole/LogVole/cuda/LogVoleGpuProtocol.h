@@ -30,6 +30,7 @@ namespace osuCrypto::LogVole
 namespace osuCrypto::LogVole::gpu
 {
     class GpuStream;
+    class GpuExecutionContext;
     class ReceiverFirstQueryAllocations;
     using ReceiverFirstQueryAllocationsPtr = std::shared_ptr<ReceiverFirstQueryAllocations>;
 
@@ -888,16 +889,36 @@ namespace osuCrypto::LogVole::gpu
     // device flag, and the sender reads that flag once after queuing the top
     // check. LV_GPU_DEFER_GOLDEN_VALIDATION=0 restores the per-level checks.
     bool deferredGoldenValidationEnabled();
-    bool beginGoldenValidationAttempt(const RingNttContext& ctx);
+
+    // One synchronous recursive evaluation borrows this attempt. It owns the
+    // execution domain and fixes one stream for every level's validation flag.
+    // Destruction drains an unfinished attempt, including exception unwinding.
+    // No per-attempt allocation or implicit current-stream lookup is required.
+    class GoldenValidationAttempt
+    {
+    public:
+        GoldenValidationAttempt() = default;
+        ~GoldenValidationAttempt();
+        GoldenValidationAttempt(const GoldenValidationAttempt&) = delete;
+        GoldenValidationAttempt& operator=(const GoldenValidationAttempt&) = delete;
+        bool begin(const RingNttContext& ctx);
+        bool finish(bool& ok);
+        bool abort();
+        // Borrowed only until finish/abort/destruction. Null while inactive.
+        GpuStream* stream() const { return mStream; }
+    private:
+        std::shared_ptr<GpuExecutionContext> mExecution;
+        GpuStream* mStream = nullptr;
+    };
+
     bool denoiseAndAggValidateDevice(
+        GoldenValidationAttempt& attempt,
         const RingNttContext& ctx,
         const DeviceBatch& in,
         u32 tau,
         const Params& validatedLevelParams,
         DeviceBatchPtr& out,
         u64 logicalInputCount = 0);
-    bool finishGoldenValidationAttempt(bool& ok);
-    bool abortGoldenValidationAttempt();
 
     // validateGoldenSeedCandidate against a device-resident tbk.
     bool validateGoldenSeedDevice(
@@ -913,6 +934,7 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch& tbk,
         bool& ok);
     bool queueLeafGoldenSeedValidation(
+        GoldenValidationAttempt& attempt,
         const Params& params,
         const RingNttContext& ctx,
         const DeviceBatch& tbk);

@@ -27,7 +27,7 @@ def main():
         "Cpu_DyadicMatchesReference", "Cpu_SamplerMatchesSeal",
         "Cpu_ResamplingOverwritesPreviousQuery", "Cpu_ZkArithmeticMatchesReference",
         "Cpu_GpuZkMatMulSeededInputsMatchReference",
-        "Cpu_GpuZkBufferOwnership",
+        "Cpu_GpuZkBufferOwnership", "Core_LeafGoldenSeedGpuParity",
         "RingOps_PartyCachesDoNotAlias", "RingOps_ScalarUploadLifetimeAndRoleSwitch",
         "RingOps_GpuBufferResizeBounds", "RingOps_GpuMemoryPoolLifecycle", "RingOps_UniformSamplerScratchOwnership", "RingOps_GpuStreamStagingLifetime", "Encoding_PinnedWireBufferOwnership", "Encoding_RootResidentWireExact",
         "RingOps_GaussianPrefixBatchParity", "NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns",
