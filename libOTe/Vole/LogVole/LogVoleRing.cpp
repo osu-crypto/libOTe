@@ -241,16 +241,6 @@ namespace osuCrypto::LogVole
             }
         }
 
-        std::shared_ptr<seal::UniformRandomGeneratorFactory> polySamplingPrngFactory()
-        {
-#ifdef SEAL_USE_AES_CTR_DRBG
-            static const auto factory = std::make_shared<seal::AesCtrDrbgPRNGFactory>();
-#else
-            static const auto factory = detail::cpuDefaultPrngFactory();
-#endif
-            return factory;
-        }
-
         seal::prng_seed_type sealSeedFromPrng(PRNG& prng)
         {
             seal::prng_seed_type seed{};
@@ -260,8 +250,13 @@ namespace osuCrypto::LogVole
 
         seal::prng_seed_type sealSeedFromBlock(block seedBlock)
         {
-            PRNG prng(seedBlock);
-            return sealSeedFromPrng(prng);
+            // The first four cryptoTools counter blocks are exactly the old
+            // PRNG(seedBlock) expansion, without allocating a PRNG buffer.
+            alignas(16) std::array<block, 4> blocks;
+            AES(seedBlock).ecbEncCounterMode(0, blocks.size(), blocks.data());
+            seal::prng_seed_type seed;
+            std::memcpy(seed.data(), blocks.data(), sizeof(seed));
+            return seed;
         }
 
         template<typename T>
@@ -1119,7 +1114,7 @@ namespace osuCrypto::LogVole
                 seal::EncryptionParameters parms(seal::scheme_type::ckks);
                 parms.set_poly_modulus_degree(cache.mParams.mPolyModulusDegree);
                 parms.set_coeff_modulus(moduli);
-                parms.set_random_generator(polySamplingPrngFactory());
+                parms.set_random_generator(detail::makeAesPrngFactory());
                 auto host = std::make_shared<seal::SEALContext>(
                     parms, cache.mExpandModChain, seal::sec_level_type::none);
                 if (!host->key_context_data() ||
@@ -1176,7 +1171,7 @@ namespace osuCrypto::LogVole
         seal::EncryptionParameters parms(seal::scheme_type::ckks);
         parms.set_poly_modulus_degree(params.mPolyModulusDegree);
         parms.set_coeff_modulus(moduli);
-        parms.set_random_generator(polySamplingPrngFactory());
+        parms.set_random_generator(detail::makeAesPrngFactory());
 
         RingNttContext next{};
         next.mParams = params;
@@ -1991,7 +1986,7 @@ namespace osuCrypto::LogVole
     }
 
     static void deriveUniformPolyFromSeedInplace(
-        const RingNttContext& ctx, block seed, u64 domainTag, u32 index, RnsPoly& out)
+        const RingNttContext& ctx, block seed, u64 domainTag, u32 index, RnsPoly& out, PRNG& prng)
     {
         AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
         AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
@@ -2005,7 +2000,7 @@ namespace osuCrypto::LogVole
         auto contextData = hostContext ? hostContext->key_context_data() : nullptr;
         if (contextData)
         {
-            auto prng = polySamplingPrngFactory()->create(sealSeedFromBlock(polySeed));
+            prng.SetSeed(detail::aesPrngKey(sealSeedFromBlock(polySeed)));
             detail::cpuSamplePolyUniform(prng, contextData->parms(), out.mCoeffs.data());
             bumpRingStat(RingOp::PrngPoly);
             return;
@@ -2032,7 +2027,8 @@ namespace osuCrypto::LogVole
     RnsPoly deriveUniformPolyFromSeed(const RingNttContext& ctx, block seed, u64 domainTag, u32 index)
     {
         RnsPoly out{};
-        deriveUniformPolyFromSeedInplace(ctx, seed, domainTag, index, out);
+        PRNG prng(ZeroBlock);
+        deriveUniformPolyFromSeedInplace(ctx, seed, domainTag, index, out, prng);
         return out;
     }
 
@@ -2053,7 +2049,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("lightweight ring uniform sampler could not materialize its exact host context");
         if (!data) return out;
         resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-        auto source = polySamplingPrngFactory()->create(seed);
+        PRNG source(detail::aesPrngKey(seed));
         detail::cpuSamplePolyUniform(source, data->parms(), out.mCoeffs.data());
         bumpRingStat(RingOp::PrngPoly);
         return out;
@@ -2267,10 +2263,8 @@ namespace osuCrypto::LogVole
         AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-        // This is a batch, so the round trip amortises: the host alternative is
-        // `count` separate Blake2xb XOF streams through SEAL at roughly 0.26 ms
-        // each. It is the Root recursion level's ct2 sampling, which was the last
-        // Blake2xb left on the host (4.7% of host cycles).
+        // Batched sampling amortises the device round trip. CPU and CUDA use
+        // the same domain-separated AES counter stream.
         if (count >= 4)
         {
             std::vector<RnsPoly> gpuOut;
@@ -2287,9 +2281,10 @@ namespace osuCrypto::LogVole
         }
 #endif
         out.resize(count);
+        PRNG prng(ZeroBlock);
         for (u32 i = 0; i < count; ++i)
         {
-            deriveUniformPolyFromSeedInplace(ctx, seed, domainTag, i, out[i]);
+            deriveUniformPolyFromSeedInplace(ctx, seed, domainTag, i, out[i], prng);
         }
     }
 
@@ -2419,12 +2414,13 @@ namespace osuCrypto::LogVole
         const std::size_t totalCount = seeds.size() * static_cast<std::size_t>(perSeedCount);
         out.resize(totalCount);
         (void)requestedWorkers;
+        PRNG prng(ZeroBlock);
         for (std::size_t seedIdx = 0; seedIdx < seeds.size(); ++seedIdx)
         {
             for (u32 polyIdx = 0; polyIdx < perSeedCount; ++polyIdx)
             {
                 deriveUniformPolyFromSeedInplace(ctx, seeds[seedIdx], domainTag, polyIdx,
-                    out[seedIdx * static_cast<std::size_t>(perSeedCount) + polyIdx]);
+                    out[seedIdx * static_cast<std::size_t>(perSeedCount) + polyIdx], prng);
             }
         }
         return true;

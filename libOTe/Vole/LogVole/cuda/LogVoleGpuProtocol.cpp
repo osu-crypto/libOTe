@@ -1227,15 +1227,15 @@ namespace osuCrypto::LogVole::gpu
 
         constexpr u64 kCt2DomainTag = 0xC720AA55ull;
 
-        // Per-stream scratch for the Blake2xb stream and the SEAL prng seeds.
+        // Per-stream AES sampling scratch and the 512-bit polynomial seeds.
         // Sized once and reused so that repeated golden-seed attempts do not
         // churn hundreds of megabytes of device memory.
         struct SampleScratch
         {
             explicit SampleScratch(GpuStream& owner) : mOwner(owner) {}
             GpuStream& mOwner;
-            enum Slot { Stream, Seeds, Prefix, Ct2Seeds, RoundKeys, RejectEpochs, RootZetaRejects, Roots };
-            std::array<OwnedGpuBuffer, 8> mStorage;
+            enum Slot { Seeds, Prefix, Ct2Seeds, RoundKeys, RejectEpochs, RootZetaRejects };
+            std::array<OwnedGpuBuffer, 6> mStorage;
 
             template<typename T>
             T* allocate(Slot slot, std::size_t count)
@@ -1250,10 +1250,6 @@ namespace osuCrypto::LogVole::gpu
                 catch (...) { return nullptr; }
             }
 
-            u64* mStream = nullptr;
-            std::size_t mStreamWords = 0;
-            u64* mRoots = nullptr;
-            std::size_t mRootWords = 0;
             u64* mSeeds = nullptr;
             std::size_t mSeedWords = 0;
             // ct2 seed derivation: the 9-word RO prefix and the per-chunk
@@ -1280,34 +1276,12 @@ namespace osuCrypto::LogVole::gpu
             u32* mRootZetaFirstReject = nullptr;
             std::size_t mRootZetaRejectCapacity = 0;
 
-            bool ensureStream(std::size_t words)
-            {
-                if (words <= mStreamWords) return true;
-                mStream = allocate<u64>(Stream, words);
-                mStreamWords = mStream ? words : 0;
-                return mStream != nullptr;
-            }
-
             bool ensureSeeds(std::size_t words)
             {
                 if (words <= mSeedWords) return true;
                 mSeeds = allocate<u64>(Seeds, words);
                 mSeedWords = mSeeds ? words : 0;
                 return mSeeds != nullptr;
-            }
-
-            bool ensureUniformStream(std::size_t wordsPerStream, std::size_t count)
-            {
-                if (!wordsPerStream || wordsPerStream > std::numeric_limits<u32>::max() ||
-                    count > std::numeric_limits<u32>::max() ||
-                    count > std::numeric_limits<std::size_t>::max() / wordsPerStream) return false;
-                if (!ensureStream(count * wordsPerStream)) return false;
-                const auto roots = blake2xbRootScratchWords(
-                    static_cast<u32>(wordsPerStream), static_cast<u32>(count));
-                if (roots <= mRootWords) return true;
-                mRoots = allocate<u64>(Roots, roots);
-                mRootWords = mRoots ? roots : 0;
-                return mRoots != nullptr;
             }
 
             bool ensurePrefix()
@@ -2498,16 +2472,8 @@ namespace osuCrypto::LogVole::gpu
 
     bool setupUniformSamplingEnabled()
     {
-#ifdef SEAL_USE_AES_CTR_DRBG
-        return false;
-#else
         const char* value = std::getenv("LV_GPU_SETUP_UNIFORM_DEVICE");
-        if ((value && value[0] == '0') || !enabled()) return false;
-        static const bool compatibleFactory =
-            seal::UniformRandomGeneratorFactory::DefaultFactory()->create(
-                seal::prng_seed_type{})->info().type() == seal::prng_type::blake2xb;
-        return compatibleFactory;
-#endif
+        return (!value || value[0] != '0') && enabled();
     }
 
     namespace
@@ -2523,12 +2489,10 @@ namespace osuCrypto::LogVole::gpu
             if (decline && decline[0] == '1') return false;
             auto ring = GpuRing::get(ctx);
             if (!ring || !ring->sampleMaxMultiple() ||
-                ring->polyWords() > std::numeric_limits<u32>::max() - kSampleSlackWords)
-                return false;
+                ring->polyWords() > std::numeric_limits<u32>::max()) return false;
             const u32 count = static_cast<u32>(seeds.size());
-            const u32 streamWords = static_cast<u32>(ring->polyWords() + kSampleSlackWords);
             if (seeds.size() > std::numeric_limits<std::size_t>::max() /
-                    (static_cast<std::size_t>(streamWords) * sizeof(u64))) return false;
+                    (ring->polyWords() * sizeof(u64))) return false;
 
             auto& stream = contextSampleStream(ctx);
             // Setup uses the secondary stream. Its scratch must not alias the
@@ -2541,21 +2505,19 @@ namespace osuCrypto::LogVole::gpu
                 bool armed = true;
                 ~DrainStream() { if (armed) stream.sync(); }
             } drainStream{ stream };
-            const bool needStream = !gpuFusedSamplerActive(ring->n(), streamWords, count);
-            const bool needEpoch = gpuFusedSamplerNeedsRejectEpoch(ring->n(), streamWords, count) ||
-                (needStream && gpuRejectReduceFusionActive());
+
             if (!sampled.resize(*ring, count, stream) || !scratch.ensureSeeds(seeds.size() * 8u) ||
-                (needStream && !scratch.ensureUniformStream(streamWords, seeds.size()))) return false;
+                !scratch.ensureRoundKeys(seeds.size() * 176u)) return false;
             u32* rejectEpochs = nullptr;
             u32 rejectEpoch = 0;
-            if (needEpoch && !scratch.nextRejectEpoch(count, stream.raw(), rejectEpochs, rejectEpoch))
+            if (!scratch.nextRejectEpoch(count, stream.raw(), rejectEpochs, rejectEpoch))
                 return false;
             {
                 HostStep launchStep("setup: uniform device sample and NTT");
                 if (!gpuMemcpyH2D(scratch.mSeeds, seeds.data(), seeds.size_bytes(), stream.raw()) ||
-                    !launchSampleUniformPolyBlake2xb(ring->view(stream), scratch.mSeeds, scratch.mStream,
-                        streamWords, ring->sampleMaxMultiple(), sampled.data(stream), nullptr, count,
-                        rejectEpochs, rejectEpoch, true, scratch.mRoots, scratch.mRootWords, stream.raw()) ||
+                    !launchSampleUniformPolyAes(ring->view(stream), scratch.mSeeds,
+                        ring->sampleMaxMultiple(), sampled.data(stream), nullptr, count,
+                        scratch.mRoundKeys, scratch.mRoundKeyBytes, rejectEpochs, rejectEpoch, stream.raw()) ||
                     (outputNtt && !launchNttForward(
                         ring->view(stream), sampled.data(stream), count, nullptr, stream.raw()))) return false;
             }
@@ -2704,26 +2666,12 @@ namespace osuCrypto::LogVole::gpu
 
         auto& stream = contextStream(ctx);
         auto& scratch = sampleScratch(stream);
-        const std::size_t streamWords = ring->polyWords() + kSampleSlackWords;
-        const bool fusedSamplerNeedsEpoch =
-            gpuFusedSamplerNeedsRejectEpoch(ring->n(), static_cast<u32>(streamWords), count);
-        const bool needStream =
-            !gpuFusedSamplerActive(ring->n(), static_cast<u32>(streamWords), count);
-        const bool needRejectEpoch =
-            fusedSamplerNeedsEpoch || (needStream && gpuRejectReduceFusionActive());
         if (!scratch.ensureSeeds(static_cast<std::size_t>(count) * 8) ||
             !scratch.ensureRoundKeys(static_cast<std::size_t>(count) * 176) ||
-            (needStream &&
-             !scratch.ensureUniformStream(streamWords, count)) ||
-            !scratch.ensurePrefix())
-        {
-            return false;
-        }
+            !scratch.ensurePrefix()) return false;
         u32* rejectEpochs = nullptr;
         u32 rejectEpoch = 0;
-        if (needRejectEpoch &&
-            !scratch.nextRejectEpoch(count, stream.raw(), rejectEpochs, rejectEpoch))
-            return false;
+        if (!scratch.nextRejectEpoch(count, stream.raw(), rejectEpochs, rejectEpoch)) return false;
 
         // scratch.mPrefix is 9 words, so it comfortably holds the 2-word seed.
         u64 seedWords[2];
@@ -2737,10 +2685,9 @@ namespace osuCrypto::LogVole::gpu
                       static_cast<u64>(ctx.mParams.mCoeffModulusBits.size()), scratch.mSeeds,
                       scratch.mRoundKeys,
                       stream.raw()) &&
-                  launchSampleUniformPolyBlake2xb(
-                      ring->view(stream), scratch.mSeeds, scratch.mStream, static_cast<u32>(streamWords),
-                      ring->sampleMaxMultiple(), dst.data(stream), nullptr, count, rejectEpochs, rejectEpoch, true,
-                      scratch.mRoots, scratch.mRootWords, stream.raw());
+                  launchSampleUniformPolyAes(
+                      ring->view(stream), scratch.mSeeds, ring->sampleMaxMultiple(), dst.data(stream), nullptr,
+                      count, scratch.mRoundKeys, scratch.mRoundKeyBytes, rejectEpochs, rejectEpoch, stream.raw());
 
         if (ok) ok = dst.download(out, stream, 0, count);
         // Partial launch failures must drain before the output allocation dies.
@@ -6501,20 +6448,11 @@ namespace osuCrypto::LogVole::gpu
             const std::size_t total = static_cast<std::size_t>(chunkCount) * mu;
             if (!out.resize(ring, total, stream)) return false;
 
-            const std::size_t streamWords = ring.polyWords() + kSampleSlackWords;
-            if (!scratch.ensureSeeds(total * 8) ||
-                !scratch.ensureRoundKeys(total * 176)) return false;
-            const bool fusedSamplerNeedsEpoch = gpuFusedSamplerNeedsRejectEpoch(
-                ring.n(), static_cast<u32>(streamWords), static_cast<u32>(total));
-            const bool needStream = !gpuFusedSamplerActive(
-                ring.n(), static_cast<u32>(streamWords), static_cast<u32>(total));
-            if (needStream && !scratch.ensureUniformStream(streamWords, total))
-                return false;
+            if (total > std::numeric_limits<u32>::max() ||
+                !scratch.ensureSeeds(total * 8) || !scratch.ensureRoundKeys(total * 176)) return false;
             u32* rejectEpochs = nullptr;
             u32 rejectEpoch = 0;
-            if ((fusedSamplerNeedsEpoch || (needStream && gpuRejectReduceFusionActive())) &&
-                !scratch.nextRejectEpoch(total, stream.raw(), rejectEpochs, rejectEpoch))
-                return false;
+            if (!scratch.nextRejectEpoch(total, stream.raw(), rejectEpochs, rejectEpoch)) return false;
 
             // The 16-byte commitment is computed once when the Root digest becomes
             // authoritative and reused at every recursion level. The remaining
@@ -6567,10 +6505,10 @@ namespace osuCrypto::LogVole::gpu
                     return false;
             }
 
-            return launchSampleUniformPolyBlake2xb(
-                ring.view(stream), scratch.mSeeds, scratch.mStream, static_cast<u32>(streamWords),
-                cache.mMaxMultiple, out.data(stream), nullptr, static_cast<u32>(total), rejectEpochs,
-                rejectEpoch, true, scratch.mRoots, scratch.mRootWords, stream.raw());
+            return launchSampleUniformPolyAes(
+                ring.view(stream), scratch.mSeeds, cache.mMaxMultiple, out.data(stream), nullptr,
+                static_cast<u32>(total), scratch.mRoundKeys, scratch.mRoundKeyBytes,
+                rejectEpochs, rejectEpoch, stream.raw());
         }
 
         bool sampleCt2Batch(
@@ -6695,7 +6633,6 @@ namespace osuCrypto::LogVole::gpu
                 return false;
 
             u64 seedBytes = 0u;
-            u64 streamBytes = 0u;
             u64 ct2SeedBytes = 0u;
             u64 roundKeyBytes = 0u;
             u64 rejectBytes = 0u;
@@ -6730,30 +6667,9 @@ namespace osuCrypto::LogVole::gpu
                 if (!checkedMul(chunks, 2u * sizeof(u64), request)) return false;
                 ct2SeedBytes = std::max(ct2SeedBytes, request);
 
-                if (polyWords > std::numeric_limits<u32>::max() - kSampleSlackWords)
-                    return false;
-                const u32 wordsPerStream =
-                    static_cast<u32>(polyWords) + kSampleSlackWords;
-                const u32 rowCount = static_cast<u32>(rows);
-                const bool fused = gpuFusedSamplerActive(
-                    ringParams.mPolyModulusDegree, wordsPerStream, rowCount);
-                const bool needStream = !fused;
-                const bool needRejectEpoch =
-                    gpuFusedSamplerNeedsRejectEpoch(
-                        ringParams.mPolyModulusDegree, wordsPerStream, rowCount) ||
-                    (needStream && gpuRejectReduceFusionActive());
-                if (needStream)
-                {
-                    if (!checkedMul(rows, wordsPerStream, request) ||
-                        !checkedMul(request, sizeof(u64), request))
-                        return false;
-                    streamBytes = std::max(streamBytes, request);
-                }
-                if (needRejectEpoch)
-                {
-                    if (!checkedMul(rows, sizeof(u32), request)) return false;
-                    rejectBytes = std::max(rejectBytes, request);
-                }
+                if (polyWords > std::numeric_limits<u32>::max()) return false;
+                if (!checkedMul(rows, sizeof(u32), request)) return false;
+                rejectBytes = std::max(rejectBytes, request);
             }
 
             // The 16-byte online seed path always creates the fixed nine-word
@@ -6761,7 +6677,6 @@ namespace osuCrypto::LogVole::gpu
             // the FIFO sequence and remains one live allocation.
             return addTrackedAllocation(9u * sizeof(u64), trackedBytes) &&
                    addTrackedAllocation(seedBytes, trackedBytes) &&
-                   addTrackedAllocation(streamBytes, trackedBytes) &&
                    addTrackedAllocation(ct2SeedBytes, trackedBytes) &&
                    addTrackedAllocation(roundKeyBytes, trackedBytes) &&
                    addTrackedAllocation(rejectBytes, trackedBytes);
@@ -6907,46 +6822,11 @@ namespace osuCrypto::LogVole::gpu
 
         auto regKern = std::make_unique<Region>(regions().mKernelUs, stream.raw());
 
-        // ct2 for every chunk.
-        //
-        // This is the one part of the expand that depends on nothing else here and
-        // is not consumed until the fused inverse transform at the end. It is also
-        // the opposite kind of kernel from everything in between: one block per
-        // polynomial walking a Blake2xb stream, so a level with few chunks leaves
-        // most of the device idle (22 GB/s at 8 polynomials against 305 at 256),
-        // while the gadget/transform/inner-product chain around it is bandwidth
-        // bound. Overlapping the two is therefore the textbook case, and it needs no
-        // change to what ct2 *is*: same seed, same session id, same root digest,
-        // same instance index, same per-row derivation.
-        //
-        // A first attempt measured neutral and was reverted, with the cause
-        // identified as the caching allocator: reusing a block another stream last
-        // used costs a device-side dependency on that stream, so the sampler's
-        // buffers kept re-joining the compute stream. DeviceAllocator::alloc now
-        // prefers a fresh pool allocation over a foreign block, which removes that
-        // edge, so the overlap is enabled here. LV_GPU_CT2_OVERLAP=0 disables it.
-        // Re-measured with both known obstacles removed, and it is still not worth
-        // it: **+0.5%** (40.12 against 39.93 M VOLE/s per party at 2^22, three runs
-        // each), 93.7 against 93.1 at 2^24.
-        //
-        // Two things had to be fixed to measure it honestly. The caching allocator
-        // handed the sampler blocks the compute stream had last used, which costs a
-        // device-side dependency and silently serialised the two streams; and the
-        // overlap needs a *write-after-read* edge as well, because the ct2 buffer is
-        // recycled memory the previous level's transform may still be reading, and
-        // cudaMallocAsync memory is only valid on a second stream behind a
-        // dependency. Without that edge the second half of the output was wrong at
-        // 2^22 while 2^20 passed.
-        //
-        // With the edge in place the sampler cannot start until the compute stream
-        // has drained its earlier reads, and a level's own chain is a dependency
-        // chain, so there is little independent work left to hide the sampler
-        // behind. That is the reason the overlap does not pay, not the allocator.
-        //
-        // The opt-in cross-recursion experiment avoids that edge: its output is a
-        // separately owned allocation queued after Root and retained until this
-        // exact ancestor consumes it. Treat every mismatch or failed event wait as
-        // a soft miss and run this established synchronous path unchanged.
+        // ct2 sampling is independent of this level's arithmetic chain. A
+        // recycled sampler buffer still needs the write-after-read edge from
+        // its previous consumer. Cross-recursion prefetch instead owns separate
+        // output until this exact ancestor consumes it; a mismatch or failed
+        // event wait falls back to the same seeded synchronous sampling path.
         bool havePreparedCt2 = false;
         if (preparedCt2 && preparedCt2->mImpl)
         {
@@ -7493,17 +7373,8 @@ namespace osuCrypto::LogVole::gpu
 
     bool rootKPrimeSamplingEnabled()
     {
-#ifdef SEAL_USE_AES_CTR_DRBG
-        return false; // The device sampler reproduces SEAL's Blake2xb stream.
-#else
-        static const bool on = [] {
-            const char* v = std::getenv("LV_GPU_ROOT_KPRIME_SAMPLE");
-            if (v && v[0] == '0') return false;
-            return seal::UniformRandomGeneratorFactory::DefaultFactory()->create(
-                seal::prng_seed_type{})->info().type() == seal::prng_type::blake2xb;
-        }();
-        return on && enabled();
-#endif
+        const char* value = std::getenv("LV_GPU_ROOT_KPRIME_SAMPLE");
+        return (!value || value[0] != '0') && enabled();
     }
 
     bool sampleRootKPrimeDevice(const RingNttContext& ctx,
@@ -7523,21 +7394,16 @@ namespace osuCrypto::LogVole::gpu
         auto& scratch = sampleScratch(stream);
         auto sampled = std::make_shared<DeviceBatch>();
         sampled->mImpl->mRing = ring;
-        const u32 streamWords = static_cast<u32>(ring->polyWords() + kSampleSlackWords);
-        const bool needStream = !gpuFusedSamplerActive(ring->n(), streamWords, 1u);
-        const bool needEpoch = gpuFusedSamplerNeedsRejectEpoch(ring->n(), streamWords, 1u) ||
-            (needStream && gpuRejectReduceFusionActive());
         if (!sampled->mImpl->mBuf.resize(*ring, 1u, stream) || !scratch.ensureSeeds(8u) ||
-            (needStream && !scratch.ensureUniformStream(streamWords, 1u))) return false;
+            !scratch.ensureRoundKeys(176u)) return false;
         u32* rejectEpochs = nullptr;
         u32 rejectEpoch = 0u;
-        if (needEpoch && !scratch.nextRejectEpoch(1u, stream.raw(), rejectEpochs, rejectEpoch))
-            return false;
+        if (!scratch.nextRejectEpoch(1u, stream.raw(), rejectEpochs, rejectEpoch)) return false;
         const bool queued =
             gpuMemcpyH2D(scratch.mSeeds, seed.data(), sizeof(seed), stream.raw()) &&
-            launchSampleUniformPolyBlake2xb(ring->view(stream), scratch.mSeeds, scratch.mStream,
-                streamWords, ring->sampleMaxMultiple(), sampled->mImpl->mBuf.data(stream),
-                nullptr, 1u, rejectEpochs, rejectEpoch, true, scratch.mRoots, scratch.mRootWords, stream.raw());
+            launchSampleUniformPolyAes(ring->view(stream), scratch.mSeeds,
+                ring->sampleMaxMultiple(), sampled->mImpl->mBuf.data(stream), nullptr, 1u,
+                scratch.mRoundKeys, scratch.mRoundKeyBytes, rejectEpochs, rejectEpoch, stream.raw());
         // The producer must be complete before crossing a coroutine suspension.
         // No full-polynomial download or upload is performed on success. Drain
         // failed enqueues too, before the caller replays the same seed on CPU.
@@ -8433,19 +8299,11 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = contextStream(ctx);
         StreamDrain drain{stream};
         auto& scratch = sampleScratch(stream);
-        const std::size_t streamWords = ring->polyWords() + kSampleSlackWords;
-        if (!scratch.ensureSeeds(sealSeeds.size())) return false;
-        const bool fusedSamplerNeedsEpoch = gpuFusedSamplerNeedsRejectEpoch(
-            ring->n(), static_cast<u32>(streamWords), static_cast<u32>(seeds.size()));
-        const bool needStream = !gpuFusedSamplerActive(
-            ring->n(), static_cast<u32>(streamWords), static_cast<u32>(seeds.size()));
-        if (needStream && !scratch.ensureUniformStream(streamWords, seeds.size()))
-            return false;
+        if (!scratch.ensureSeeds(sealSeeds.size()) ||
+            !scratch.ensureRoundKeys(seeds.size() * 176u)) return false;
         u32* rejectEpochs = nullptr;
         u32 rejectEpoch = 0;
-        if ((fusedSamplerNeedsEpoch || (needStream && gpuRejectReduceFusionActive())) &&
-            !scratch.nextRejectEpoch(seeds.size(), stream.raw(), rejectEpochs, rejectEpoch))
-            return false;
+        if (!scratch.nextRejectEpoch(seeds.size(), stream.raw(), rejectEpochs, rejectEpoch)) return false;
 
         auto maxStorage = tryAllocateGpuBuffer(stream, maxMultiple.size() * sizeof(u64));
         auto* dMax = static_cast<u64*>(maxStorage.data());
@@ -8458,10 +8316,10 @@ namespace osuCrypto::LogVole::gpu
         bool ok =
             gpuMemcpyH2D(scratch.mSeeds, sealSeeds.data(), sealSeeds.size() * sizeof(u64), stream.raw()) &&
             gpuMemcpyH2D(dMax, maxMultiple.data(), maxMultiple.size() * sizeof(u64), stream.raw()) &&
-            launchSampleUniformPolyBlake2xb(
-                ring->view(stream), scratch.mSeeds, scratch.mStream, static_cast<u32>(streamWords), dMax,
-                dst.data(stream), nullptr, static_cast<u32>(seeds.size()), rejectEpochs, rejectEpoch,
-                maxMultipleOverride.empty(), scratch.mRoots, scratch.mRootWords, stream.raw());
+            launchSampleUniformPolyAes(
+                ring->view(stream), scratch.mSeeds, dMax, dst.data(stream), nullptr,
+                static_cast<u32>(seeds.size()), scratch.mRoundKeys, scratch.mRoundKeyBytes,
+                rejectEpochs, rejectEpoch, stream.raw());
 
         if (ok) ok = dst.download(out, stream, 0, seeds.size());
         return ok;
