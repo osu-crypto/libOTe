@@ -1,5 +1,7 @@
 #include "BaseOT_Tests.h"
 
+#include <cryptoTools/Common/TestCollection.h>
+
 #include <exception>
 #include <iostream>
 
@@ -8,8 +10,17 @@ namespace
     template<typename Test>
     void run(const char* name, Test&& test)
     {
-        test();
-        std::cout << name << " passed\n";
+        // A protocol that is not enabled in this build is a notice, not a
+        // failure, matching how the main unit test runner treats skips.
+        try
+        {
+            test();
+            std::cout << name << " passed\n";
+        }
+        catch (const osuCrypto::UnitTestSkipped& skip)
+        {
+            std::cout << name << " skipped: " << skip.what() << "\n";
+        }
     }
 }
 
