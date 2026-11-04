@@ -21,7 +21,7 @@
 using namespace osuCrypto;
 using namespace osuCrypto::LogVole;
 
-void LogVole_Zk_RequestSizeBounds(const oc::CLP&)
+void LogVole_Zk_RequestSizeBounds(const oc::CLP& cmd)
 {
     auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
 
@@ -38,6 +38,150 @@ void LogVole_Zk_RequestSizeBounds(const oc::CLP&)
         catch (const std::invalid_argument&) { rejected = true; }
         LOGVOLE_REQUIRE_TRUE(rejected);
     }
+
+    const block seed = toBlock(0x424f554e, 1);
+    ZkMulCircuit valid;
+    LOGVOLE_REQUIRE_TRUE(makeZkMulCircuitForBudget(3, 1, seed, valid));
+    LOGVOLE_REQUIRE_EQ(valid.voleCount(), 3ull);
+    auto unchanged = valid;
+    for (const auto depth : {u64{0}, u64{2}, std::numeric_limits<u64>::max()})
+        LOGVOLE_REQUIRE_TRUE(!makeZkMulCircuitForBudget(3, depth, seed, unchanged));
+    LOGVOLE_REQUIRE_TRUE(!makeZkMulCircuitForBudget(
+        std::numeric_limits<u64>::max(), std::numeric_limits<u64>::max(), seed, unchanged));
+    LOGVOLE_REQUIRE_TRUE(!makeZkMulCircuit(largest, 1, seed, unchanged));
+    LOGVOLE_REQUIRE_EQ(unchanged.mWidth, valid.mWidth);
+    LOGVOLE_REQUIRE_EQ(unchanged.mDepth, valid.mDepth);
+    LOGVOLE_REQUIRE_TRUE(std::equal(unchanged.mOperands.begin(), unchanged.mOperands.end(),
+        valid.mOperands.begin(), valid.mOperands.end()));
+
+    constexpr u64 p = 97, chi = 7, delta = 11;
+    const std::array<u64, 3> input{3, 5, 7};
+    auto checkRejected = [&](const ZkMulCircuit& invalid) {
+        AlignedUnVec<u64> witness(input.size());
+        std::copy(input.begin(), input.end(), witness.begin());
+        PRNG prng(seed), untouched(seed);
+        LOGVOLE_REQUIRE_TRUE(!zkMulWitness(invalid, p, prng, witness));
+        LOGVOLE_REQUIRE_TRUE(std::equal(witness.begin(), witness.end(), input.begin(), input.end()));
+        LOGVOLE_REQUIRE_EQ(prng.get<u64>(), untouched.get<u64>());
+        ZkProof proof{13, 14};
+        u64 value = 15;
+        LOGVOLE_REQUIRE_TRUE(!zkMulProverResponse(invalid, input, input, chi, p, 2, proof));
+        LOGVOLE_REQUIRE_TRUE(!zkMulVerifierValue(invalid, input, chi, delta, p, 2, value));
+        LOGVOLE_REQUIRE_EQ(proof.mU, 13ull);
+        LOGVOLE_REQUIRE_EQ(proof.mV, 14ull);
+        LOGVOLE_REQUIRE_EQ(value, 15ull);
+
+        // Reject before replacing a previously configured statement or state.
+        auto checkConfigure = [&](auto& party) {
+            party.mCircuit = valid;
+            const auto priorState = std::make_shared<int>(17);
+            party.mDeviceState = priorState;
+            bool rejected = false;
+            try { party.configure(invalid, 55, 1); }
+            catch (const std::runtime_error&) { rejected = true; }
+            LOGVOLE_REQUIRE_TRUE(rejected);
+            LOGVOLE_REQUIRE_TRUE(party.mDeviceState == priorState);
+            LOGVOLE_REQUIRE_EQ(party.mCircuit.mWidth, valid.mWidth);
+            LOGVOLE_REQUIRE_EQ(party.mCircuit.mDepth, valid.mDepth);
+            LOGVOLE_REQUIRE_TRUE(std::equal(party.mCircuit.mOperands.begin(), party.mCircuit.mOperands.end(),
+                valid.mOperands.begin(), valid.mOperands.end()));
+            LOGVOLE_REQUIRE_EQ(party.voleRequest(), 0ull);
+        };
+        ZkMulProver prover;
+        ZkMulVerifier verifier;
+        checkConfigure(prover);
+        checkConfigure(verifier);
+    };
+    for (const auto& [width, depth] : std::array<std::pair<u64, u64>, 5>{{
+             {0, 1}, {1, 0}, {1, std::numeric_limits<u64>::max()},
+             {largest, 1}, {std::numeric_limits<u64>::max(), 2}}})
+    {
+        auto invalid = valid;
+        invalid.mWidth = width;
+        invalid.mDepth = depth;
+        checkRejected(invalid);
+    }
+    for (const u32 index : {u32{2}, u32{4}, std::numeric_limits<u32>::max()})
+    {
+        auto invalid = valid;
+        invalid.mOperands[0] = index;
+        checkRejected(invalid);
+    }
+    auto missing = valid;
+    missing.mOperands.resize(missing.mOperands.size() - 1);
+    checkRejected(missing);
+
+    for (const auto request : {std::numeric_limits<u64>::max(),
+             static_cast<u64>(std::numeric_limits<std::size_t>::max() / sizeof(u64))})
+    {
+        AlignedUnVec<u64> preserved(1);
+        preserved[0] = 19;
+        PRNG prng(seed), untouched(seed);
+        LOGVOLE_REQUIRE_TRUE(!zkMulWitness(valid, p, prng, preserved, request));
+        LOGVOLE_REQUIRE_EQ(preserved.size(), 1ull);
+        LOGVOLE_REQUIRE_EQ(preserved[0], 19ull);
+        LOGVOLE_REQUIRE_EQ(prng.get<u64>(), untouched.get<u64>());
+    }
+
+    // A valid circuit retains the same seeded witness and proof identity.
+    AlignedUnVec<u64> witness;
+    PRNG witnessPrng(seed), expectedPrng(seed);
+    LOGVOLE_REQUIRE_TRUE(zkMulWitness(valid, p, witnessPrng, witness));
+    const seal::Modulus modulus(p);
+    const u64 x = expectedPrng.get<u64>() % p;
+    LOGVOLE_REQUIRE_EQ(witness[0], x);
+    LOGVOLE_REQUIRE_EQ(witness[1], mulMod(x, x, modulus));
+    LOGVOLE_REQUIRE_EQ(witness[2], expectedPrng.get<u64>() % p);
+    std::array<u64, 3> macs;
+    for (std::size_t i = 0; i < macs.size(); ++i)
+        macs[i] = mulAddMod(witness[i], delta, input[i], modulus);
+    ZkProof proof;
+    u64 value = 0;
+    LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(valid, witness, macs, chi, p, 2, proof));
+    LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(valid, input, chi, delta, p, 2, value));
+    LOGVOLE_REQUIRE_TRUE(zkAccept(proof, value, delta, p));
+
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) != 0)
+    {
+        testExecution->mUseGpu = true;
+        LOGVOLE_REQUIRE_TRUE(gpu::enabled(*testExecution));
+        auto invalidHost = valid;
+        invalidHost.mExecutionContext = testExecution;
+        invalidHost.mOperands[0] = 4;
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkMulUploadOperands(invalidHost));
+        LOGVOLE_REQUIRE_TRUE(invalidHost.mOperandsDevice == nullptr);
+
+        ZkMulCircuit device;
+        LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulCircuitForBudgetDevice(*testExecution, 17, 1, seed, device));
+        auto state = gpu::makeZkMulDeviceState(device);
+        LOGVOLE_REQUIRE_TRUE(state != nullptr);
+        // Equal operand counts do not make a handle valid for different geometry.
+        auto reshaped = device;
+        reshaped.mWidth = 1;
+        reshaped.mDepth = 8;
+        LOGVOLE_REQUIRE_EQ(reshaped.gateCount(), device.gateCount());
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkMulUploadOperands(reshaped));
+        LOGVOLE_REQUIRE_TRUE(gpu::makeZkMulDeviceState(reshaped) == nullptr);
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkMulMaterializeOperands(reshaped));
+        LOGVOLE_REQUIRE_TRUE(reshaped.mOperands.empty());
+        LOGVOLE_REQUIRE_TRUE(gpu::zkMulWitnessDevice(reshaped, p, seed, 17) == nullptr);
+        checkRejected(reshaped);
+        auto words = gpu::sampleScalarsFromSeed(*testExecution, seed, 17, p);
+        LOGVOLE_REQUIRE_TRUE(words != nullptr);
+        proof = {13, 14};
+        value = 15;
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkMulProverResponseDevice(
+            reshaped, *words, *words, chi, p, *state, proof));
+        LOGVOLE_REQUIRE_TRUE(!gpu::zkMulVerifierValueDevice(
+            reshaped, *words, chi, delta, p, *state, value));
+        LOGVOLE_REQUIRE_EQ(proof.mU, 13ull);
+        LOGVOLE_REQUIRE_EQ(proof.mV, 14ull);
+        LOGVOLE_REQUIRE_EQ(value, 15ull);
+    }
+#else
+    (void)cmd;
+#endif
 }
 
 namespace

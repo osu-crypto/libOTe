@@ -292,6 +292,74 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_EQ(buffer.polyWords(), large->polyWords());
     LOGVOLE_REQUIRE_TRUE(buffer.resize(*large, 1));
     LOGVOLE_REQUIRE_TRUE(buffer.data() == preserved);
+
+    gpu::DeviceScalars scalars(*testExecution);
+    LOGVOLE_REQUIRE_TRUE(scalars.resize(4));
+    const std::array<std::uint64_t, 4> scalarValues{11, 23, 37, 53};
+    std::array<std::uint64_t, 4> scalarResult{};
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(scalars.data(), scalarValues.data(),
+        sizeof(scalarValues), stream.raw()));
+    LOGVOLE_REQUIRE_TRUE(stream.sync());
+    const auto scalarData = scalars.data();
+    const auto invalidScalars = std::numeric_limits<std::size_t>::max() / sizeof(std::uint64_t) + 2u;
+    LOGVOLE_REQUIRE_TRUE(!scalars.resize(invalidScalars));
+    LOGVOLE_REQUIRE_TRUE(scalars.data() == scalarData);
+    LOGVOLE_REQUIRE_EQ(scalars.count(), scalarValues.size());
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(scalarResult.data(), scalars.data(),
+        sizeof(scalarResult), stream.raw()));
+    LOGVOLE_REQUIRE_TRUE(stream.sync());
+    LOGVOLE_REQUIRE_TRUE(scalarResult == scalarValues);
+
+    auto* const staging = stream.staging(32);
+    LOGVOLE_REQUIRE_TRUE(staging != nullptr);
+    staging[0] = 0x53;
+    staging[31] = 0xa7;
+    const auto stagingBytes = stream.stagingCapacity();
+    // This request reaches the pool's size rejection without a huge allocation.
+    LOGVOLE_REQUIRE_TRUE(stream.staging(std::numeric_limits<std::size_t>::max() / 2u + 1u) == nullptr);
+    LOGVOLE_REQUIRE_EQ(stream.stagingCapacity(), stagingBytes);
+    LOGVOLE_REQUIRE_TRUE(stream.staging(std::numeric_limits<std::size_t>::max()) == nullptr);
+    LOGVOLE_REQUIRE_TRUE(stream.staging(32) == staging);
+    LOGVOLE_REQUIRE_EQ(staging[0], 0x53);
+    LOGVOLE_REQUIRE_EQ(staging[31], 0xa7);
+
+    // Pool bucket slack must not turn a transfer past the logical end into
+    // a successful copy, even when the physical allocation is large enough.
+    gpu::GpuPolyBuffer bounded;
+    LOGVOLE_REQUIRE_TRUE(bounded.resizeWords(3, 1, stream));
+    std::vector<RnsPoly> batch(2);
+    assignValues<std::uint64_t>(batch[0].mCoeffs, {17, 19, 23});
+    assignValues<std::uint64_t>(batch[1].mCoeffs, {29, 31, 37});
+    const auto first = std::span<const RnsPoly>(batch).first(1);
+    LOGVOLE_REQUIRE_TRUE(bounded.upload(first, stream));
+    LOGVOLE_REQUIRE_TRUE(stream.sync());
+    LOGVOLE_REQUIRE_TRUE(!bounded.upload(batch, stream));
+    LOGVOLE_REQUIRE_TRUE(!bounded.upload(first, stream, 1));
+    LOGVOLE_REQUIRE_TRUE(!bounded.upload({}, stream, std::numeric_limits<std::size_t>::max()));
+    LOGVOLE_REQUIRE_TRUE(bounded.upload({}, stream, 1));
+    std::vector<RnsPoly> untouched(1);
+    assignValues<std::uint64_t>(untouched[0].mCoeffs, {0x55});
+    LOGVOLE_REQUIRE_TRUE(!bounded.download(untouched, stream, 2));
+    LOGVOLE_REQUIRE_TRUE(!bounded.download(untouched, stream, 0, 2));
+    LOGVOLE_REQUIRE_TRUE(!bounded.download(untouched, stream, 1, 1));
+    LOGVOLE_REQUIRE_EQ(untouched.size(), 1u);
+    LOGVOLE_REQUIRE_EQ(untouched[0].mCoeffs.size(), 1u);
+    LOGVOLE_REQUIRE_EQ(untouched[0].mCoeffs[0], 0x55u);
+    LOGVOLE_REQUIRE_TRUE(bounded.download(untouched, stream));
+    LOGVOLE_REQUIRE_EQ(untouched.size(), 1u);
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(untouched[0].mCoeffs, batch[0].mCoeffs));
+
+    LOGVOLE_REQUIRE_TRUE(bounded.resizeWords(3, 2, stream));
+    LOGVOLE_REQUIRE_TRUE(bounded.upload(first, stream));
+    LOGVOLE_REQUIRE_TRUE(stream.sync());
+    assignValues<std::uint64_t>(batch[0].mCoeffs, {41, 43, 47});
+    assignValues<std::uint64_t>(batch[1].mCoeffs, {59, 61});
+    LOGVOLE_REQUIRE_TRUE(!bounded.upload(batch, stream));
+    LOGVOLE_REQUIRE_TRUE(bounded.download(untouched, stream, 0, 1));
+    LOGVOLE_REQUIRE_EQ(untouched[0].mCoeffs[0], 17u);
+    LOGVOLE_REQUIRE_EQ(untouched[0].mCoeffs[1], 19u);
+    LOGVOLE_REQUIRE_EQ(untouched[0].mCoeffs[2], 23u);
+
     LOGVOLE_REQUIRE_TRUE(buffer.resize(*small, 0));
     LOGVOLE_REQUIRE_TRUE(buffer.data() == nullptr);
     LOGVOLE_REQUIRE_EQ(buffer.count(), 0ull);

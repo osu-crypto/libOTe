@@ -634,8 +634,8 @@ namespace osuCrypto::LogVole::gpu
 
     // ---- gadget decomposition --------------------------------------------
     // Shares the cached mode parser between ring setup and online dispatch.
-    bool h200Fp52GadgetConstantsEnabled();
-    bool h200Fp52GadgetPredivEnabled();
+    bool h200Fp52GadgetConstantsEnabled(KernelConfiguration* configuration = nullptr);
+    bool h200Fp52GadgetPredivEnabled(KernelConfiguration* configuration = nullptr);
     // Setup-only; the caller owns 80 doubles and synchronizes before publishing
     // the ring. The online gadget only reads this immutable device allocation.
     bool launchPrepareH200Fp52GadgetConstants(

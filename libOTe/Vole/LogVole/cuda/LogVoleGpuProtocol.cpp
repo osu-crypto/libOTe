@@ -2517,6 +2517,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool DeviceScalars::resize(std::size_t count)
     {
+        if (count > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return false;
         if (count == mCount) return true;
         if (mMemoryPool) mMemoryPool->release(mData);
         else gpuFree(mData);

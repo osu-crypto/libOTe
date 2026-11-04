@@ -634,9 +634,10 @@ namespace osuCrypto::LogVole::gpu
             plain->mSlotMap = slotMap;
             plain->mInverseSlotMap = inverseSlotMap;
             plain->mSlotCount = n;
-            if (fp52Shape && h200Fp52GadgetConstantsEnabled())
+            auto* const configuration = ring->view().mKernelConfiguration;
+            if (fp52Shape && h200Fp52GadgetConstantsEnabled(configuration))
             {
-                const bool prediv = h200Fp52GadgetPredivEnabled();
+                const bool prediv = h200Fp52GadgetPredivEnabled(configuration);
                 auto* constants = arena.take<double>(prediv ? 144u : 80u);
                 if (!constants) return false;
                 auto* ratios = prediv ? constants + 80u : nullptr;
@@ -825,11 +826,22 @@ namespace osuCrypto::LogVole::gpu
         if (bytes <= mStagingBytes) return mStaging;
         // Pinning is expensive, so grow in large steps and never shrink.
         std::size_t want = mStagingBytes ? mStagingBytes : (std::size_t(8) << 20);
-        while (want < bytes) want *= 2;
-        gpuStreamSync(mStream);
+        while (want < bytes)
+        {
+            if (want > std::numeric_limits<std::size_t>::max() / 2u)
+                return nullptr;
+            want *= 2u;
+        }
+        auto* next = static_cast<u8*>(mPinnedPool->allocate(want));
+        if (!next) return nullptr;
+        if (!gpuStreamSync(mStream))
+        {
+            mPinnedPool->release(next);
+            return nullptr;
+        }
         mPinnedPool->release(mStaging);
-        mStaging = static_cast<u8*>(mPinnedPool->allocate(want));
-        mStagingBytes = mStaging ? want : 0;
+        mStaging = next;
+        mStagingBytes = want;
         return mStaging;
     }
 
@@ -1393,9 +1405,10 @@ namespace osuCrypto::LogVole::gpu
                 const_cast<u64*>(mInvCrtLift), const_cast<u64*>(mSampleMaxMultiple), deviceStatus, stream.mStream) ||
             !gpuMemcpyD2H(&status, deviceStatus, sizeof(status), stream.mStream) ||
             !stream.sync() || status != 0) return false;
-        if (fp52Shape && h200Fp52GadgetConstantsEnabled())
+        auto* const configuration = view().mKernelConfiguration;
+        if (fp52Shape && h200Fp52GadgetConstantsEnabled(configuration))
         {
-            const bool prediv = h200Fp52GadgetPredivEnabled();
+            const bool prediv = h200Fp52GadgetPredivEnabled(configuration);
             auto* constants = arena.take<double>(prediv ? 144u : 80u);
             if (!constants) return false;
             auto* ratios = prediv ? constants + 80u : nullptr;
@@ -1598,12 +1611,13 @@ namespace osuCrypto::LogVole::gpu
             mDenoiseReady = initDenoise(ctx);
         }
         HostStep gadgetStep(executionContext(ctx), "setup GPU ring gadget constants");
-        if (h200Fp52GadgetConstantsEnabled() &&
+        auto* const configuration = view().mKernelConfiguration;
+        if (h200Fp52GadgetConstantsEnabled(configuration) &&
             h200LazyResourcesDefault() && n == 16384u && rho == 8u &&
             mView.mMinModulus > (u64{1} << 51u) && mView.mMaxModulus < (u64{1} << 52u))
         {
             double* constants = nullptr;
-            const bool prediv = h200Fp52GadgetPredivEnabled();
+            const bool prediv = h200Fp52GadgetPredivEnabled(configuration);
             {
                 // Drain the explicit setup stream before releasing its
                 // stream, which also carries the preceding constant uploads.
@@ -2287,8 +2301,14 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPolyBuffer::upload(std::span<const RnsPoly> polys, GpuStream& stream, std::size_t dstOffset)
     {
-        (void)data(stream);
+        if (dstOffset > mCount || polys.size() > mCount - dstOffset) return false;
         if (polys.empty()) return true;
+        if (!mData || !mPolyWords ||
+            mPolyWords > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return false;
+        // Reject the complete batch before any transfer can overwrite storage.
+        for (const auto& poly : polys)
+            if (poly.mCoeffs.size() != mPolyWords) return false;
+        (void)data(stream);
         const std::size_t polyBytes = mPolyWords * sizeof(u64);
 
         // Coalesce the per-polynomial copies through pinned staging: one large
@@ -2317,7 +2337,6 @@ namespace osuCrypto::LogVole::gpu
             const std::size_t run = std::min(maxRun, polys.size() - done);
             for (std::size_t i = 0; i < run; ++i)
             {
-                if (polys[done + i].mCoeffs.size() != mPolyWords) return false;
                 std::memcpy(stage + i * polyBytes, streamData(polys[done + i].mCoeffs, stream), polyBytes);
             }
             if (!gpuMemcpyH2D(poly(dstOffset + done, stream), stage, run * polyBytes, stream.raw()) ||
@@ -2332,17 +2351,20 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPolyBuffer::upload(const RnsPoly& p, std::size_t dstIdx, GpuStream& stream)
     {
-        (void)data(stream);
         if (dstIdx >= mCount) return false;
         if (p.mCoeffs.size() != mPolyWords) return false;
+        (void)data(stream);
         return gpuMemcpyH2D(poly(dstIdx, stream), streamData(p.mCoeffs, stream), mPolyWords * sizeof(u64), stream.raw());
     }
 
     bool GpuPolyBuffer::download(
         std::vector<RnsPoly>& polys, GpuStream& stream, std::size_t srcOffset, std::size_t count) const
     {
-        (void)data(stream);
+        if (srcOffset > mCount || count > mCount - srcOffset) return false;
         const std::size_t num = count ? count : (mCount - srcOffset);
+        if (num && (!mData || !mPolyWords ||
+            mPolyWords > std::numeric_limits<std::size_t>::max() / sizeof(u64))) return false;
+        (void)data(stream);
         streamResize(polys, stream, num);
         if (num == 0) return true;
 

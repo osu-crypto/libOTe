@@ -12,6 +12,7 @@
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include <cuda_runtime_api.h>
 #endif
 
 #include <algorithm>
@@ -287,20 +288,37 @@ void LogVole_Core_GpuOptionIsolation(const CLP&)
             if (present) setEnvironment(name, value.c_str(), 1);
             else unsetEnvironment(name);
         }
-    } restoreEnabled("LOGVOLE_GPU_FUSED_SAMPLE"), restoreMinimum("LV_FUSED_SAMPLE_MIN_POLYS");
+    } restoreEnabled("LOGVOLE_GPU_FUSED_SAMPLE"), restoreMinimum("LV_FUSED_SAMPLE_MIN_POLYS"),
+      restoreGadgetMode("LV_GPU_NOGOLD_H200_GADGET_GARNER");
     setEnvironment("LOGVOLE_GPU_FUSED_SAMPLE", "1", 1);
     setEnvironment("LV_FUSED_SAMPLE_MIN_POLYS", "1", 1);
+    setEnvironment("LV_GPU_NOGOLD_H200_GADGET_GARNER", "12", 1);
     gpu::KernelConfiguration first;
     setEnvironment("LOGVOLE_GPU_FUSED_SAMPLE", "0", 1);
+    setEnvironment("LV_GPU_NOGOLD_H200_GADGET_GARNER", "4", 1);
     gpu::KernelConfiguration second;
     constexpr u32 n = 8192, words = 4 * n + gpu::kSampleSlackWords, count = 1024;
     LOGVOLE_REQUIRE_TRUE(gpu::gpuFusedSamplerActive(n, words, count, &first));
     LOGVOLE_REQUIRE_FALSE(gpu::gpuFusedSamplerActive(n, words, count, &second));
     LOGVOLE_REQUIRE_FALSE(gpu::gpuFusedSamplerActive(n, words, count));
+    LOGVOLE_REQUIRE_TRUE(gpu::h200Fp52GadgetConstantsEnabled(&first));
+    LOGVOLE_REQUIRE_TRUE(gpu::h200Fp52GadgetPredivEnabled(&first));
+    LOGVOLE_REQUIRE_FALSE(gpu::h200Fp52GadgetConstantsEnabled(&second));
+    LOGVOLE_REQUIRE_FALSE(gpu::h200Fp52GadgetPredivEnabled(&second));
+    LOGVOLE_REQUIRE_FALSE(gpu::h200Fp52GadgetConstantsEnabled());
     first.setOptionsCaching(false);
     LOGVOLE_REQUIRE_FALSE(gpu::gpuFusedSamplerActive(n, words, count, &first));
+    LOGVOLE_REQUIRE_FALSE(gpu::h200Fp52GadgetConstantsEnabled(&first));
+    LOGVOLE_REQUIRE_FALSE(gpu::h200Fp52GadgetPredivEnabled(&first));
     first.setOptionsCaching(true);
     LOGVOLE_REQUIRE_TRUE(gpu::gpuFusedSamplerActive(n, words, count, &first));
+    LOGVOLE_REQUIRE_TRUE(gpu::h200Fp52GadgetConstantsEnabled(&first));
+    LOGVOLE_REQUIRE_TRUE(gpu::h200Fp52GadgetPredivEnabled(&first));
+    setEnvironment("LV_GPU_NOGOLD_H200_GADGET_GARNER", "10", 1);
+    gpu::KernelConfiguration constantsOnly;
+    LOGVOLE_REQUIRE_TRUE(gpu::h200Fp52GadgetConstantsEnabled(&constantsOnly));
+    LOGVOLE_REQUIRE_FALSE(gpu::h200Fp52GadgetPredivEnabled(&constantsOnly));
+    LOGVOLE_REQUIRE_TRUE(gpu::h200Fp52GadgetPredivEnabled(&first));
     RestoreEnvironment restoreValidation("LV_GPU_DEFER_GOLDEN_VALIDATION");
     setEnvironment("LV_GPU_DEFER_GOLDEN_VALIDATION", "1", 1);
     ExecutionContext firstExecution;
@@ -311,6 +329,58 @@ void LogVole_Core_GpuOptionIsolation(const CLP&)
     LOGVOLE_REQUIRE_FALSE(gpu::deferredGoldenValidationEnabled(secondExecution));
     firstExecution.mCacheGpuOptions = false;
     LOGVOLE_REQUIRE_FALSE(gpu::deferredGoldenValidationEnabled(firstExecution));
+
+#if CUDART_VERSION >= 11000
+    if (gpu::gpuDeviceIsH200())
+    {
+        std::size_t originalLimit = 0;
+        const auto queried = cudaDeviceGetLimit(&originalLimit, cudaLimitPersistingL2CacheSize);
+        if (queried == cudaErrorUnsupportedLimit || queried == cudaErrorNotSupported)
+        {
+            (void)cudaGetLastError();
+            return;
+        }
+        LOGVOLE_REQUIRE_EQ(queried, cudaSuccess);
+        struct RestoreL2Limit
+        {
+            std::size_t mOriginal;
+            ~RestoreL2Limit() { (void)cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, mOriginal); }
+        } restoreLimit{originalLimit};
+        const auto disabled = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, 0);
+        if (disabled == cudaErrorUnsupportedLimit || disabled == cudaErrorNotSupported)
+        {
+            (void)cudaGetLastError();
+            return;
+        }
+        LOGVOLE_REQUIRE_EQ(disabled, cudaSuccess);
+        RestoreEnvironment restoreRootL2("LV_GPU_NOGOLD_H200_ROOT_L2"),
+            restoreH200Ntt("LV_GPU_NTT_LOG14_H200");
+        setEnvironment("LV_GPU_NOGOLD_H200_ROOT_L2", "3", 1);
+        setEnvironment("LV_GPU_NTT_LOG14_H200", "1", 1);
+        gpu::KernelConfiguration rootOptions;
+        gpu::RingConstView view{};
+        view.mN = 16384;
+        view.mLogN = 14;
+        view.mRho = 8;
+        view.mKernelConfiguration = &rootOptions;
+        LOGVOLE_REQUIRE_TRUE(gpu::prepareH200RootPersistence(view));
+        std::size_t afterLimit = 0;
+        LOGVOLE_REQUIRE_EQ(cudaDeviceGetLimit(&afterLimit, cudaLimitPersistingL2CacheSize), cudaSuccess);
+        LOGVOLE_REQUIRE_EQ(afterLimit, 0u);
+        LOGVOLE_REQUIRE_EQ(view.mH200RootL2MaxWindow, 0u);
+
+        // The application may reserve capacity explicitly; ring preparation may
+        // use that capacity without resizing the shared CUDA-context set-aside.
+        LOGVOLE_REQUIRE_EQ(cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, std::size_t{1} << 20), cudaSuccess);
+        std::size_t configuredLimit = 0;
+        LOGVOLE_REQUIRE_EQ(cudaDeviceGetLimit(&configuredLimit, cudaLimitPersistingL2CacheSize), cudaSuccess);
+        LOGVOLE_REQUIRE_TRUE(gpu::prepareH200RootPersistence(view));
+        LOGVOLE_REQUIRE_EQ(cudaDeviceGetLimit(&afterLimit, cudaLimitPersistingL2CacheSize), cudaSuccess);
+        LOGVOLE_REQUIRE_EQ(afterLimit, configuredLimit);
+        LOGVOLE_REQUIRE_TRUE(view.mH200RootL2MaxWindow <= configuredLimit);
+        LOGVOLE_REQUIRE_TRUE(view.mH200RootL2MaxWindow != 0);
+    }
+#endif
 #else
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
 #endif

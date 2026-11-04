@@ -135,6 +135,7 @@ namespace osuCrypto::LogVole::gpu
         noGoldDenoiseShoupEnabled,
         noGoldDenoiseUnrollEnabled,
         noGoldDenoiseThreads,
+        gadgetGarnerEnabled,
         gadgetHi110SpecializedEnabled,
         gadgetHi110CompactCrtEnabled,
         gadgetHi110Radix55ReduceEnabled,
@@ -1065,6 +1066,14 @@ namespace osuCrypto::LogVole::gpu
                     return end != v && *end == '\0' && n <= 10u ? static_cast<u32>(n) : 0u;
                 }();
                 return mode;
+            });
+        }
+
+        bool gadgetGarnerEnabled(KernelConfiguration* configuration = nullptr)
+        {
+            return cachedKernelOption(configuration, KernelOption::gadgetGarnerEnabled, [&]() -> bool {
+                const char* value = std::getenv("LV_GADGET_GARNER");
+                return value && value[0] != '\0' && value[0] != '0';
             });
         }
 
@@ -2139,8 +2148,8 @@ namespace osuCrypto::LogVole::gpu
             return cachedKernelOption(configuration, KernelOption::noGoldH200RootL2Mode, [&]() -> u32 {
                 const u32 mode = [&] {
                     const char* v = std::getenv("LV_GPU_NOGOLD_H200_ROOT_L2");
-                    // Stage 199: both root windows, with setup scoped to the ring.
-                    // Explicit zero leaves the application's cache policy alone.
+                    // Apply both stream-local root windows when the application
+                    // has already reserved persisting L2 capacity for its context.
                     if (!v) return 3u;
                     return v && v[0] >= '1' && v[0] <= '3' && v[1] == '\0'
                         ? static_cast<u32>(v[0] - '0') : 0u;
@@ -17031,6 +17040,7 @@ namespace osuCrypto::LogVole::gpu
         (void)noGoldDenoiseShoupEnabled(this);
         (void)noGoldDenoiseUnrollEnabled(this);
         (void)noGoldDenoiseThreads(this);
+        (void)gadgetGarnerEnabled(this);
         (void)gadgetHi110SpecializedEnabled(this);
         (void)gadgetHi110CompactCrtEnabled(this);
         (void)gadgetHi110Radix55ReduceEnabled(this);
@@ -20418,39 +20428,30 @@ namespace osuCrypto::LogVole::gpu
             !check(cudaGetDeviceProperties(&prop, device), "root L2 properties")) return false;
         if (prop.major != 9 || !std::strstr(prop.name, "H200") ||
             !prop.persistingL2CacheMaxSize || !prop.accessPolicyMaxWindowSize) return true;
-        const char* setting = std::getenv("LV_GPU_NOGOLD_H200_ROOT_L2_MIB");
-        const size_t mib = !setting ? 8u : std::strcmp(setting, "1") == 0 ? 1u :
-            setting && std::strcmp(setting, "2") == 0 ? 2u :
-            setting && std::strcmp(setting, "4") == 0 ? 4u :
-            setting && std::strcmp(setting, "8") == 0 ? 8u :
-            setting && std::strcmp(setting, "12") == 0 ? 12u : 16u;
-        const size_t bytes = std::min(mib << 20u, static_cast<size_t>(prop.persistingL2CacheMaxSize));
-        const cudaError_t status = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, bytes);
-        // Persistence is an optional performance hint. MIG/MPS configurations
-        // that do not permit it keep the unchanged normal-cache implementation.
+        size_t actual = 0u;
+        const cudaError_t status = cudaDeviceGetLimit(&actual, cudaLimitPersistingL2CacheSize);
+        // The set-aside belongs to the application CUDA context, not this ring.
+        // Never change it on behalf of one execution owner. Unsupported and
+        // zero-capacity contexts retain the normal-cache implementation.
         if (status == cudaErrorUnsupportedLimit || status == cudaErrorNotSupported)
         {
             cudaGetLastError();
             return true;
         }
-        if (!check(status, "root L2 set-aside")) return false;
-        size_t actual = 0u;
-        if (!check(cudaDeviceGetLimit(&actual, cudaLimitPersistingL2CacheSize), "root L2 limit")) return false;
-        if (actual) rc.mH200RootL2MaxWindow = static_cast<size_t>(prop.accessPolicyMaxWindowSize);
-        std::fprintf(stderr, "[h200-root-l2] set_aside_bytes=%zu max_window_bytes=%zu\n",
-            actual, rc.mH200RootL2MaxWindow);
+        if (!check(status, "root L2 limit")) return false;
+        rc.mH200RootL2MaxWindow = std::min(actual, static_cast<size_t>(prop.accessPolicyMaxWindowSize));
 #endif
         return true;
     }
 
-    bool h200Fp52GadgetConstantsEnabled()
+    bool h200Fp52GadgetConstantsEnabled(KernelConfiguration* configuration)
     {
-        return noGoldH200GadgetGarnerMode() >= 10u;
+        return noGoldH200GadgetGarnerMode(configuration) >= 10u;
     }
 
-    bool h200Fp52GadgetPredivEnabled()
+    bool h200Fp52GadgetPredivEnabled(KernelConfiguration* configuration)
     {
-        const u32 mode = noGoldH200GadgetGarnerMode();
+        const u32 mode = noGoldH200GadgetGarnerMode(configuration);
         return mode == 12u || mode == 13u;
     }
 
@@ -20481,13 +20482,6 @@ namespace osuCrypto::LogVole::gpu
         if (inCount == 0 || levels == 0) return true;
         if (rc.mRho > kMaxWords) return false;
         const DeviceRing rg = toDevice(rc);
-        // LV_GADGET_GARNER=1 composes the coefficient by mixed radix instead of the
-        // punctured-product CRT sum. Both produce the same integer; this exists to
-        // measure the two against each other on one build.
-        const bool garner = [] {
-            const char* v = std::getenv("LV_GADGET_GARNER");
-            return v && v[0] != '\0' && v[0] != '0';
-        }();
         const u32 threads = 128;
         const dim3 grid = grid2D(rc.mN, inCount, threads);
         cudaStream_t st = asStream(stream);
@@ -20621,6 +20615,10 @@ namespace osuCrypto::LogVole::gpu
                     ? "gadgetDecomposeHi208Rho8H200Pseudo52"
                     : "gadgetDecomposeHi208Rho8H200");
         }
+        // LV_GADGET_GARNER selects exact mixed-radix composition instead of the
+        // punctured-product CRT sum. The H200 path above has its own dispatch
+        // and does not need this option lookup.
+        const bool garner = gadgetGarnerEnabled(rc.mKernelConfiguration);
         // The single 128-bit Barrett reduction per output limb requires the
         // high word to be below the modulus. A balanced 110-bit digit has
         // magnitude at most 2^109, so its high word is at most 2^45. Keep this

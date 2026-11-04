@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -84,6 +85,26 @@ namespace osuCrypto::LogVole
             while (v == 0) v = nextFieldElement(prng, modulus);
             return v;
         }
+
+        bool validMulCircuitGeometry(const ZkMulCircuit& circuit)
+        {
+            // All public operand indices are u32. Check by division before
+            // using the unchecked layout accessors or forming allocation sizes.
+            const u64 maxScalars = std::numeric_limits<std::ptrdiff_t>::max() / sizeof(u64);
+            const u64 maxWires = std::min<u64>(std::numeric_limits<u32>::max(), maxScalars - 1);
+            return circuit.mWidth != 0 && circuit.mDepth != 0 &&
+                circuit.mDepth < maxWires &&
+                circuit.mWidth <= maxWires / (circuit.mDepth + 1);
+        }
+
+        bool validMulCircuitHostOperands(const ZkMulCircuit& circuit)
+        {
+            if (!validMulCircuitGeometry(circuit) ||
+                circuit.mOperands.size() != 2 * circuit.gateCount()) return false;
+            const u64 wires = circuit.wireCount();
+            return std::all_of(circuit.mOperands.begin(), circuit.mOperands.end(),
+                [wires](u32 index) { return index < wires; });
+        }
     }
 
     u64 zkChallengeScalar(block seed, u64 modulus)
@@ -103,7 +124,7 @@ namespace osuCrypto::LogVole
 
     bool makeZkMulCircuitForBudget(u64 voleBudget, u64 depth, block seed, ZkMulCircuit& out)
     {
-        if (voleBudget < 2 || depth == 0) return false;
+        if (voleBudget < 2 || depth == 0 || depth >= voleBudget - 1) return false;
         // voleCount = width * (depth + 1) + 1 has to fit, so take the largest
         // width that does and let the caller see the resulting gate count.
         const u64 width = (voleBudget - 1) / (depth + 1);
@@ -116,31 +137,31 @@ namespace osuCrypto::LogVole
         if (gateCount == 0 || depth == 0) return false;
         if (gateCount % depth) return false;
 
-        out = ZkMulCircuit{};
-        out.mDepth = depth;
-        out.mWidth = gateCount / depth;
-        if (out.mWidth == 0) return false;
-        if (out.wireCount() > std::numeric_limits<u32>::max()) return false;
+        ZkMulCircuit next;
+        next.mDepth = depth;
+        next.mWidth = gateCount / depth;
+        if (!validMulCircuitGeometry(next)) return false;
 
-        out.mOperands.resize(static_cast<std::size_t>(2 * gateCount));
+        next.mOperands.resize(static_cast<std::size_t>(2 * gateCount));
         PRNG prng(seed);
-        const seal::Modulus widthMod(std::max<u64>(2, out.mWidth));
+        const seal::Modulus widthMod(std::max<u64>(2, next.mWidth));
 
         // Gate g sits in layer 1 + g / width and draws both operands from the
         // layer below, which is what makes the witness evaluation width-parallel.
         for (u64 layer = 0; layer < depth; ++layer)
         {
-            const u64 base = layer * out.mWidth;   // first wire of the layer below
-            for (u64 j = 0; j < out.mWidth; ++j)
+            const u64 base = layer * next.mWidth;   // first wire of the layer below
+            for (u64 j = 0; j < next.mWidth; ++j)
             {
-                const u64 g = layer * out.mWidth + j;
+                const u64 g = layer * next.mWidth + j;
                 const u64 left = prng.get<u64>(), right = prng.get<u64>();
-                out.mOperands[static_cast<std::size_t>(2 * g)] =
-                    static_cast<u32>(base + (out.mWidth == 1 ? 0 : seal::util::barrett_reduce_64(left, widthMod)));
-                out.mOperands[static_cast<std::size_t>(2 * g + 1)] =
-                    static_cast<u32>(base + (out.mWidth == 1 ? 0 : seal::util::barrett_reduce_64(right, widthMod)));
+                next.mOperands[static_cast<std::size_t>(2 * g)] =
+                    static_cast<u32>(base + (next.mWidth == 1 ? 0 : seal::util::barrett_reduce_64(left, widthMod)));
+                next.mOperands[static_cast<std::size_t>(2 * g + 1)] =
+                    static_cast<u32>(base + (next.mWidth == 1 ? 0 : seal::util::barrett_reduce_64(right, widthMod)));
             }
         }
+        out = std::move(next);
         return true;
     }
 
@@ -155,12 +176,12 @@ namespace osuCrypto::LogVole
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize, u32 threads)
     {
-        if (modulus < 2 || circuit.gateCount() == 0) return false;
-        if (circuit.mOperands.size() != 2 * circuit.gateCount()) return false;
+        if (modulus < 2 || !validMulCircuitHostOperands(circuit)) return false;
         if (voleSize && voleSize < circuit.voleCount()) return false;
 
         const seal::Modulus mod(modulus);
         const u64 total = voleSize ? voleSize : circuit.voleCount();
+        if (total > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(u64)) return false;
         wires.resize(static_cast<std::size_t>(total));
         std::fill(wires.data() + circuit.voleCount(), wires.data() + total, u64(0));
 
@@ -215,10 +236,8 @@ namespace osuCrypto::LogVole
         u32 threads,
         ZkProof& out)
     {
-        const u64 gates = circuit.gateCount();
-        if (gates == 0 || modulus < 2) return false;
+        if (modulus < 2 || !validMulCircuitHostOperands(circuit)) return false;
         if (wires.size() < circuit.voleCount() || macs.size() < circuit.voleCount()) return false;
-        if (circuit.mOperands.size() != 2 * gates) return false;
 
         const seal::Modulus mod(modulus);
         const u64 firstOut = circuit.mWidth;
@@ -297,10 +316,8 @@ namespace osuCrypto::LogVole
         u32 threads,
         u64& out)
     {
-        const u64 gates = circuit.gateCount();
-        if (gates == 0 || modulus < 2) return false;
+        if (modulus < 2 || !validMulCircuitHostOperands(circuit)) return false;
         if (keys.size() < circuit.voleCount()) return false;
-        if (circuit.mOperands.size() != 2 * gates) return false;
 
         const seal::Modulus mod(modulus);
         const u64 firstOut = circuit.mWidth;
@@ -820,23 +837,39 @@ namespace osuCrypto::LogVole::gpu
     {
         u32* mData = nullptr;
         std::size_t mCount = 0;
+        u64 mWidth = 0;
+        u64 mDepth = 0;
+
+        bool matches(const ZkMulCircuit& circuit) const
+        {
+            return validMulCircuitGeometry(circuit) && mData &&
+                mWidth == circuit.mWidth && mDepth == circuit.mDepth &&
+                mCount == 2 * circuit.gateCount();
+        }
 
         ~ZkOperandsDevice()
         {
             if (mData) gpuFree(mData);
         }
 
-        bool upload(ExecutionContext& execution, std::span<const u32> host)
+        bool upload(const ZkMulCircuit& circuit)
         {
-            auto& stream = executionStream(execution);
+            if (!validMulCircuitHostOperands(circuit)) return false;
+            const auto host = std::span<const u32>(circuit.mOperands.data(), circuit.mOperands.size());
+            auto& stream = executionStream(executionContext(circuit));
             mData = static_cast<u32*>(gpuMalloc(host.size() * sizeof(u32)));
             if (!mData) return false;
-            mCount = host.size();
             // Public preprocessing: the wiring does not change between proofs, so
             // this upload happens once and never on a proof's critical path.
-            return gpuMemcpyH2D(
-                       mData, streamData(host, stream), host.size() * sizeof(u32), stream.raw()) &&
-                   stream.sync();
+            if (!gpuMemcpyH2D(
+                       mData, streamData(host, stream), host.size() * sizeof(u32), stream.raw()) ||
+                !stream.sync()) return false;
+            // These private immutable owners are the bounds certificate for
+            // device-only callers, which must not download wiring per proof.
+            mCount = host.size();
+            mWidth = circuit.mWidth;
+            mDepth = circuit.mDepth;
+            return true;
         }
     };
 
@@ -848,11 +881,15 @@ namespace osuCrypto::LogVole::gpu
         const u32* mOperands = nullptr;
         DeviceWords mScratch;
         DeviceWords mOut;
+        u64 mWidth = 0;
+        u64 mDepth = 0;
 
         bool prepare(const ZkMulCircuit& circuit)
         {
+            if (!validMulCircuitGeometry(circuit)) return false;
             const std::size_t needed = static_cast<std::size_t>(2 * circuit.gateCount());
             if (!circuit.mOperandsDevice && circuit.mOperands.size() != needed) return false;
+            if (mOperands) return mWidth == circuit.mWidth && mDepth == circuit.mDepth;
 
             // Establish this thread's stream *before* allocating. gpuMalloc tags the
             // block it hands out with the caller's current stream and, when it
@@ -863,7 +900,6 @@ namespace osuCrypto::LogVole::gpu
             // wrong U and V on the first proof of a process, or an illegal access.
             (void)executionStream(executionContext(circuit));
             if (!mScratch.resize(kZkScratchWords) || !mOut.resize(2)) return false;
-            if (mOperands) return true;
 
             // Prefer the copy the circuit already carries; only upload one of our
             // own when the caller did not hand one over.
@@ -875,15 +911,16 @@ namespace osuCrypto::LogVole::gpu
             else
             {
                 mOperandsOwned = std::make_shared<ZkOperandsDevice>();
-                if (!mOperandsOwned->upload(executionContext(circuit),
-                        std::span<const u32>(circuit.mOperands.data(), needed)))
+                if (!mOperandsOwned->upload(circuit))
                 {
                     mOperandsOwned.reset();
                     return false;
                 }
             }
-            if (mOperandsOwned->mCount != needed) return false;
+            if (!mOperandsOwned->matches(circuit)) return false;
             mOperands = mOperandsOwned->mData;
+            mWidth = circuit.mWidth;
+            mDepth = circuit.mDepth;
             return true;
         }
     };
@@ -963,7 +1000,9 @@ namespace osuCrypto::LogVole::gpu
         ZkMulDeviceState& state,
         ZkProof& out)
     {
-        if (!enabled(wires.execution()) || !state.mOperands) return zkFail("mul prover state");
+        if (!enabled(wires.execution()) || !state.mOperands ||
+            !validMulCircuitGeometry(circuit) || state.mWidth != circuit.mWidth ||
+            state.mDepth != circuit.mDepth) return zkFail("mul prover state");
         if (wires.count() < circuit.voleCount() || macs.count() < circuit.voleCount())
         {
             return zkFail("mul prover operand size");
@@ -1002,7 +1041,9 @@ namespace osuCrypto::LogVole::gpu
         ZkMulDeviceState& state,
         u64& out)
     {
-        if (!enabled(keys.execution()) || !state.mOperands) return zkFail("mul verifier state");
+        if (!enabled(keys.execution()) || !state.mOperands ||
+            !validMulCircuitGeometry(circuit) || state.mWidth != circuit.mWidth ||
+            state.mDepth != circuit.mDepth) return zkFail("mul verifier state");
         if (keys.count() < circuit.voleCount()) return zkFail("mul verifier operand size");
 
         void* raw = orderAgainst(keys);
@@ -1101,28 +1142,24 @@ namespace osuCrypto::LogVole::gpu
 
     bool zkMulUploadOperands(ZkMulCircuit& circuit)
     {
-        if (!enabled(executionContext(circuit)) || circuit.gateCount() == 0) return false;
-        const std::size_t needed = static_cast<std::size_t>(2 * circuit.gateCount());
+        if (!enabled(executionContext(circuit)) || !validMulCircuitGeometry(circuit)) return false;
         if (circuit.mOperandsDevice)
-            return std::static_pointer_cast<ZkOperandsDevice>(circuit.mOperandsDevice)->mCount == needed;
-        if (circuit.mOperands.size() != needed) return false;
+        {
+            if (!circuit.mOperands.empty() && !validMulCircuitHostOperands(circuit)) return false;
+            return std::static_pointer_cast<ZkOperandsDevice>(circuit.mOperandsDevice)->matches(circuit);
+        }
 
         auto owned = std::make_shared<ZkOperandsDevice>();
-        if (!owned->upload(executionContext(circuit), std::span<const u32>(circuit.mOperands.data(), needed))) return false;
+        if (!owned->upload(circuit)) return false;
         circuit.mOperandsDevice = std::move(owned);
         return true;
     }
 
     static bool zkMulDeviceOperandsValid(const ZkMulCircuit& circuit)
     {
-        if (!circuit.mOperandsDevice || !circuit.mWidth ||
-            !circuit.mDepth || circuit.mDepth == std::numeric_limits<u64>::max() ||
-            circuit.mWidth > std::numeric_limits<u32>::max() / (circuit.mDepth + 1))
-            return false;
-        const u64 words = 2 * circuit.gateCount();
-        if (words > std::numeric_limits<std::size_t>::max() / sizeof(u32)) return false;
+        if (!circuit.mOperandsDevice) return false;
         const auto source = std::static_pointer_cast<ZkOperandsDevice>(circuit.mOperandsDevice);
-        return source->mData && source->mCount == static_cast<std::size_t>(words);
+        return source->matches(circuit);
     }
 
     bool zkMulDetachOperands(ExecutionContext& execution, ZkMulCircuit& circuit)
@@ -1139,6 +1176,8 @@ namespace osuCrypto::LogVole::gpu
         owned->mData = static_cast<u32*>(gpuMalloc(count * sizeof(u32)));
         if (!owned->mData) return false;
         owned->mCount = count;
+        owned->mWidth = source->mWidth;
+        owned->mDepth = source->mDepth;
         // Upload and seeded generation both complete before publishing their
         // immutable handle, so no foreign producer stream is needed here.
         if (!gpuMemcpyD2D(owned->mData, source->mData, count * sizeof(u32), stream.raw()) ||
@@ -1154,6 +1193,11 @@ namespace osuCrypto::LogVole::gpu
             return false;
         const u64 width = (voleBudget - 1) / (depth + 1);
         if (!width || width > std::numeric_limits<u32>::max() / (depth + 1)) return false;
+        ZkMulCircuit next;
+        next.mExecutionContext = execution.resourceOwner();
+        next.mWidth = width;
+        next.mDepth = depth;
+        if (!validMulCircuitGeometry(next)) return false;
         HostStep preparationStep(execution, "gpu: zk prepare circuit");
         const u64 count = 2 * width * depth;
         auto residues = sampleScalarsFromSeed(execution, seed, count, width);
@@ -1164,12 +1208,10 @@ namespace osuCrypto::LogVole::gpu
         operands->mData = static_cast<u32*>(gpuMalloc(static_cast<std::size_t>(count) * sizeof(u32)));
         if (!operands->mData) return false;
         operands->mCount = static_cast<std::size_t>(count);
+        operands->mWidth = width;
+        operands->mDepth = depth;
         if (!launchZkPackOperands(streamData(*residues, stream), operands->mData, count, width, stream.raw()) ||
             !stream.sync()) return false;
-        ZkMulCircuit next;
-        next.mExecutionContext = execution.resourceOwner();
-        next.mWidth = width;
-        next.mDepth = depth;
         next.mOperandsDevice = std::move(operands);
         out = std::move(next);
         return true;
@@ -1177,15 +1219,14 @@ namespace osuCrypto::LogVole::gpu
 
     bool zkMulMaterializeOperands(ZkMulCircuit& circuit)
     {
+        if (!validMulCircuitGeometry(circuit)) return false;
         const auto count = static_cast<std::size_t>(2 * circuit.gateCount());
-        if (!count) return false;
-        if (circuit.mOperands.size() == count) return true;
+        if (circuit.mOperands.size() == count) return validMulCircuitHostOperands(circuit);
         // Explicit materialization releases a device-only circuit to a CPU
         // consumer, including after GPU execution has been disabled. Its
         // existing allocation already establishes the CUDA ownership here.
-        if (!circuit.mOperandsDevice) return false;
+        if (!zkMulDeviceOperandsValid(circuit)) return false;
         const auto owned = std::static_pointer_cast<ZkOperandsDevice>(circuit.mOperandsDevice);
-        if (owned->mCount != count) return false;
         AlignedUnVec<u32> next;
         next.resize(count);
         auto& stream = executionStream(executionContext(circuit));
@@ -1200,12 +1241,13 @@ namespace osuCrypto::LogVole::gpu
         const ZkMulCircuit& circuit, u64 modulus, std::span<const u64> inputs, u64 voleSize,
         const DeviceScalarsPtr& deviceInputs)
     {
-        if (!enabled(executionContext(circuit)) || circuit.gateCount() == 0 || modulus < 2) return nullptr;
+        if (!enabled(executionContext(circuit)) || !validMulCircuitGeometry(circuit) || modulus < 2) return nullptr;
         const u64 total = std::max(voleSize, circuit.voleCount());
+        if (total > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(u64)) return nullptr;
         if ((deviceInputs ? deviceInputs->count() : inputs.size()) < circuit.mWidth + 1)
             return nullptr;
-        const std::size_t operandWords = static_cast<std::size_t>(2 * circuit.gateCount());
-        if (!circuit.mOperandsDevice && circuit.mOperands.size() != operandWords) return nullptr;
+        if (circuit.mOperandsDevice ? !zkMulDeviceOperandsValid(circuit)
+            : !validMulCircuitHostOperands(circuit)) return nullptr;
 
         auto& stream = executionStream(executionContext(circuit));
         auto wires = std::make_shared<DeviceScalars>(executionContext(circuit));
@@ -1241,12 +1283,12 @@ namespace osuCrypto::LogVole::gpu
         else
         {
             temp = std::make_shared<ZkOperandsDevice>();
-            if (!temp->upload(executionContext(circuit), std::span<const u32>(streamData(circuit.mOperands, stream), operandWords)))
+            if (!temp->upload(circuit))
             {
                 return nullptr;
             }
         }
-        if (temp->mCount != operandWords) return nullptr;
+        if (!temp->matches(circuit)) return nullptr;
         operands = temp->mData;
         bool ok = true;
 
@@ -1274,7 +1316,7 @@ namespace osuCrypto::LogVole::gpu
     DeviceScalarsPtr zkMulWitnessDevice(
         const ZkMulCircuit& circuit, u64 modulus, block seed, u64 voleSize)
     {
-        if (!enabled(executionContext(circuit)) || modulus < 2 || !circuit.mWidth || !circuit.mDepth) return nullptr;
+        if (!enabled(executionContext(circuit)) || modulus < 2 || !validMulCircuitGeometry(circuit)) return nullptr;
         HostStep preparationStep(executionContext(circuit), "gpu: zk prepare witness inputs");
         auto inputs = sampleScalarsFromSeed(executionContext(circuit), seed, circuit.mWidth + 1, modulus);
         if (!inputs) return nullptr;
@@ -1337,6 +1379,17 @@ namespace osuCrypto
     namespace
     {
         using namespace LogVole;
+
+        bool validMulCircuitForConfigure(const ZkMulCircuit& circuit)
+        {
+            if (!validMulCircuitGeometry(circuit)) return false;
+            if (!circuit.mOperands.empty()) return validMulCircuitHostOperands(circuit);
+#if defined(ENABLE_LOGVOLE_CUDA)
+            return gpu::zkMulDeviceOperandsValid(circuit);
+#else
+            return false;
+#endif
+        }
 
         double msSinceCheck(std::chrono::steady_clock::time_point t)
         {
@@ -1447,6 +1500,10 @@ namespace osuCrypto
         LogVole::ZkMulCircuit circuit, u32 plaintextModulusBits, u32 numThreads,
         LogVole::CivoleSetting setting, u64 voleRequest)
     {
+        if (!validMulCircuitForConfigure(circuit))
+            throw std::runtime_error("LogVole ZK prover circuit is invalid");
+        // Host wiring is authoritative; an older device snapshot may differ.
+        if (!circuit.mOperands.empty()) circuit.mOperandsDevice.reset();
         mVole.mUseGpu = mVole.mUseGpu || mUseDevice;
         mVole.execution().mUseGpu = mVole.mUseGpu;
         circuit.mExecutionContext = mVole.execution().resourceOwner();
@@ -1574,6 +1631,8 @@ namespace osuCrypto
         LogVole::ZkMulCircuit circuit, u32 plaintextModulusBits, u32 numThreads,
         LogVole::CivoleSetting setting, u64 voleRequest)
     {
+        if (!validMulCircuitForConfigure(circuit))
+            throw std::runtime_error("LogVole ZK verifier circuit is invalid");
         mVole.mUseGpu = mVole.mUseGpu || mUseDevice;
         mVole.execution().mUseGpu = mVole.mUseGpu;
         circuit.mExecutionContext = mVole.execution().resourceOwner();
