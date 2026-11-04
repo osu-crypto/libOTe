@@ -9,7 +9,6 @@
 #include "libOTe_Tests/OT_Tests.h"
 #include "libOTe_Tests/NcoOT_Tests.h"
 #include "libOTe_Tests/SilentOT_Tests.h"
-#include "libOTe_Tests/SpinIntegration.h"
 #include "libOTe_Tests/SoftSpoken_Tests.h"
 #include "libOTe_Tests/bitpolymul_Tests.h"
 #include "libOTe_Tests/Vole_Tests.h"
@@ -243,12 +242,12 @@ namespace tests_libOTe
 			tc.add("DotExt_Kos_SplitDelta_Test              ", DotExt_Kos_SplitDelta_Test);
 			tc.add("DotExt_Kos_MapReuse_Test                ", DotExt_Kos_MapReuse_Test);
 			tc.add("OtExt_Silent_random_Test                ", OtExt_Silent_random_Test);
-			tc.add("Spin_Integration_Test                  ", Spin_Integration_Test);
 			tc.add("OtExt_Silent_correlated_Test            ", OtExt_Silent_correlated_Test);
 			tc.add("OtExt_Silent_inplace_Test               ", OtExt_Silent_inplace_Test);
 			tc.add("OtExt_Silent_paramSweep_Test            ", OtExt_Silent_paramSweep_Test);
 			tc.add("OtExt_Silent_QuasiCyclic_Test           ", OtExt_Silent_QuasiCyclic_Test);
 			tc.add("OtExt_Silent_Tungsten_Test              ", OtExt_Silent_Tungsten_Test);
+			tc.add("OtExt_Silent_Spin_Test                  ", OtExt_Silent_Spin_Test);
 			tc.add("OtExt_Silent_stationary_Test            ", OtExt_Silent_stationary_Test);
 			tc.add("OtExt_Silent_baseOT_Test                ", OtExt_Silent_baseOT_Test);
 			tc.add("OtExt_Silent_mal_Test                   ", OtExt_Silent_mal_Test);

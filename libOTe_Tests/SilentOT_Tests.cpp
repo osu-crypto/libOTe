@@ -12,6 +12,9 @@
 #include "Common.h"
 #include "libOTe/Triple/SilentOtTriple/SilentOtTriple.h"
 #include "coproto/Socket/BufferingSocket.h"
+#ifdef ENABLE_SPIN
+#include "libOTe/Tools/Spin/SpinCode.h"
+#endif
 #include <limits>
 
 using namespace oc;
@@ -1230,6 +1233,58 @@ void OtExt_Silent_Tungsten_Test(const oc::CLP& cmd)
     }
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT or ENABLE_INSECURE_SILVER are not defined.");
+#endif
+}
+
+// Silent OT with the SPIN code (MultType::Spin). The default sizes select
+// both SPIN parameter sets silent OT uses (T64S12R2 up to 2^16 OTs, T128S19
+// above). The SPIN encoder itself is tested by the SPIN library.
+void OtExt_Silent_Spin_Test(const oc::CLP& cmd)
+{
+#if defined(ENABLE_SILENTOT) && defined(ENABLE_SPIN)
+    if (!spin::capabilities().avx2)
+        throw UnitTestSkipped("SPIN requires AVX2");
+
+    auto sockets = cp::LocalAsyncSocket::makePair();
+    std::vector<u64> nn = cmd.getManyOr<u64>("n", { 8193, 65537 });
+    bool verbose = cmd.getOr("v", 0) > 1;
+    u64 threads = cmd.getOr("t", 4);
+    u64 s = cmd.getOr("s", 2);
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+
+    SilentOtExtSender sender;
+    SilentOtExtReceiver recver;
+    for (auto n : nn)
+    {
+        // Random OT.
+        {
+            std::vector<std::array<block, 2>> msg2(n);
+            std::vector<block> msg1(n);
+            BitVector choice(n);
+            sender.configure(n, s, threads, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Spin);
+            recver.configure(n, s, threads, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Spin);
+            fakeBase(n, s, threads, prng, recver, sender);
+            auto p0 = sender.silentSend(msg2, prng, sockets[0]);
+            auto p1 = recver.silentReceive(choice, msg1, prng, sockets[1]);
+            eval(p0, p1);
+            checkRandom(msg1, msg2, choice, n, verbose);
+        }
+
+        // Correlated OT.
+        {
+            sender.configure(n, s, threads, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Spin);
+            recver.configure(n, s, threads, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Spin);
+            auto type = ChoiceBitPacking::False;
+            fakeBase(n, s, threads, prng, recver, sender);
+            auto delta = *sender.mDelta;
+            auto p0 = sender.silentSendInplace(delta, n, prng, sockets[0]);
+            auto p1 = recver.silentReceiveInplace(n, prng, sockets[1], type);
+            eval(p0, p1);
+            checkCorrelated(recver.mA, sender.mB, recver.mC, delta, n, verbose, type);
+        }
+    }
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT and ENABLE_SPIN are required.");
 #endif
 }
 
