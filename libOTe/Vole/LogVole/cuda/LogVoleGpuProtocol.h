@@ -142,7 +142,7 @@ namespace osuCrypto::LogVole::gpu
     RetainedPublicUniformPtr findPublicUniformRetention(
         const RingNttContext& ctx, std::span<const RnsPoly> host);
     bool fetchRetainedPublicUniform(
-        const RetainedPublicUniform& source, std::vector<RnsPoly>& out);
+        const RetainedPublicUniform& source, std::vector<RnsPoly>& out, GpuStream& stream);
     // Validate a retained operand without touching host polynomial storage.
     // The token is scoped to its exact ring, protocol role/run and CUDA device;
     // outputNtt distinguishes legacy raw public A from transformed public B.
@@ -199,7 +199,7 @@ namespace osuCrypto::LogVole::gpu
         const std::array<u64, 8>& seed, DeviceBatchPtr& out);
 
     bool rootDigestHashEnabled();
-    bool hashRootDigestDevice(const DeviceBatch& digest, block& out);
+    bool hashRootDigestDevice(const DeviceBatch& digest, block& out, GpuStream& stream);
 
     // A coefficient-domain ct2 batch sampled ahead of the sender's top
     // recursive expansion. The implementation owns both the device output and
@@ -295,7 +295,9 @@ namespace osuCrypto::LogVole::gpu
 
     // Copies a device scalar array to the host. Provided so that callers who
     // asked to keep the output on the GPU can still read it when they need to.
-    bool fetchScalars(const DeviceScalars& src, std::span<u64> dst);
+    // The caller reuses an explicitly owned reader stream. Foreign production
+    // is ordered before readback, and every path drains borrowed host storage.
+    bool fetchScalars(const DeviceScalars& src, std::span<u64> dst, GpuStream& stream);
 
     // Waits until a device scalar result is complete without copying it. This is
     // useful at a throughput boundary: returning a device handle is intentionally
@@ -549,7 +551,8 @@ namespace osuCrypto::LogVole::gpu
         std::vector<RnsPoly>& out);
 
     // Copies a device batch back to host polynomials.
-    bool download(const DeviceBatch& batch, std::vector<RnsPoly>& out, std::size_t count = 0);
+    bool download(const DeviceBatch& batch, std::vector<RnsPoly>& out,
+        GpuStream& stream, std::size_t count = 0);
     // Uploads host polynomials into a fresh device batch.
     DeviceBatchPtr upload(const RingNttContext& ctx, std::span<const RnsPoly> polys);
 

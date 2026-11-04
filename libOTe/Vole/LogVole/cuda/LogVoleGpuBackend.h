@@ -153,6 +153,7 @@ namespace osuCrypto::LogVole::gpu
 
     private:
         friend class GpuTableReads;
+        friend class GpuExecutionContext;
         void recordTableRead(const std::shared_ptr<GpuTableReadState>& table);
         GpuStream(bool highestPriority, bool allocateScratch,
             std::shared_ptr<GpuMemoryPool> memory = {});
@@ -182,7 +183,7 @@ namespace osuCrypto::LogVole::gpu
     };
 
     // Computation streams and scratch belong to this execution domain. Each
-    // host worker has independent main/sampling streams, sharing one private
+    // host worker has lazy main/sampling/readback streams, sharing one private
     // allocation pool. Join all users before releasing the last domain owner.
     // Native stream/buffer owners never refer back to this object.
     class GpuExecutionContext
@@ -194,10 +195,13 @@ namespace osuCrypto::LogVole::gpu
         GpuExecutionContext& operator=(const GpuExecutionContext&) = delete;
         GpuStream& mainStream();
         GpuStream& sampleStream();
+        // Readback does not allocate the compute lanes' index scratch.
+        GpuStream& readbackStream();
     private:
         friend bool bindContextExecution(RingNttContext& ctx,
             const std::shared_ptr<GpuExecutionContext>& execution);
-        GpuStream& stream(bool sample);
+        enum class Lane { Main, Sample, Readback };
+        GpuStream& stream(Lane lane);
         struct Impl;
         std::unique_ptr<Impl> mImpl;
     };

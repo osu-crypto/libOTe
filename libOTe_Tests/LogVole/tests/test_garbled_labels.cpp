@@ -4,6 +4,7 @@
 #include "libOTe/config.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #endif
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "macoro/sync_wait.h"
@@ -101,6 +102,9 @@ void LogVole_Garbled_LayoutAndValidation(const oc::CLP&)
 
 void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    gpu::GpuExecutionContext readbackExecution;
+#endif
     ScopedEnvironmentValue deltaDevice("LV_GPU_SETUP_DELTA_DEVICE", "1");
     ScopedEnvironmentValue deltaStrict("LV_GPU_SETUP_DELTA_DEVICE_STRICT", "1");
     ScopedEnvironmentValue deltaDecline("LV_GPU_SETUP_DELTA_DEVICE_FORCE_DECLINE", "0");
@@ -163,7 +167,11 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
             together(sender.send(b, sp, query[0]), receiver.receive(input, a, rp, query[1]));
             if (oldA && !receiver.mKeepOutputOnDevice) LOGVOLE_REQUIRE_TRUE(a.mScalars.data() == oldA);
             if (oldB && !sender.mKeepOutputOnDevice) LOGVOLE_REQUIRE_TRUE(b.mScalars.data() == oldB);
-            a.wait(); b.wait(); a.fetch(); b.fetch();
+            a.wait(); b.wait();
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (a.mDevice) a.fetch(readbackExecution.readbackStream());
+            if (b.mDevice) b.fetch(readbackExecution.readbackStream());
+#endif
             LOGVOLE_REQUIRE_EQ(a.mSid, round);
             LOGVOLE_REQUIRE_EQ(b.mSid, round);
             for (u64 i = 0; i < n; ++i)
@@ -196,6 +204,10 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     GpuScope gpuScope(cmd);
     if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
@@ -225,7 +237,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
                     : gpu::wrapLabelsDevice(ctx, x, false, 0, layout.ringCount(), true);
                 LOGVOLE_REQUIRE_TRUE(wrapped);
                 std::vector<RnsPoly> actual;
-                LOGVOLE_REQUIRE_TRUE(gpu::download(*wrapped, actual));
+                LOGVOLE_REQUIRE_TRUE(gpu::download(*wrapped, actual, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_EQ(actual.size(), expected.size());
                 for (u64 c = 0; c < actual.size(); ++c)
                     LOGVOLE_REQUIRE_TRUE(std::equal(actual[c].mCoeffs.begin(), actual[c].mCoeffs.end(),
@@ -243,7 +255,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(generatedBits);
             LOGVOLE_REQUIRE_EQ(generatedBits->count(), count);
             LOGVOLE_REQUIRE_TRUE(generatedBits->producerStream() == nullptr);
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*generatedBits, actualBits));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*generatedBits, actualBits, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(expectedBits == actualBits);
             std::fill(repeated.begin(), repeated.end(), 0);
             for (u64 i = 0; i < count; ++i)
@@ -254,7 +266,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
             auto wrappedBits = gpu::wrapDeviceLabels(ctx, *generatedBits,
                 count, false, 0, layout.ringCount(), true);
             LOGVOLE_REQUIRE_TRUE(wrappedBits);
-            LOGVOLE_REQUIRE_TRUE(gpu::download(*wrappedBits, actualBitPacking));
+            LOGVOLE_REQUIRE_TRUE(gpu::download(*wrappedBits, actualBitPacking, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_EQ(actualBitPacking.size(), expectedBitPacking.size());
             for (u64 c = 0; c < actualBitPacking.size(); ++c)
                 LOGVOLE_REQUIRE_TRUE(std::equal(actualBitPacking[c].mCoeffs.begin(), actualBitPacking[c].mCoeffs.end(),

@@ -752,6 +752,10 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
 void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     struct FlagScope
     {
         const char* name;
@@ -1086,9 +1090,9 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                             keys.resize(budget);
                             macs.resize(budget);
                             downloadedWitness.resize(budget);
-                            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*keysDevice, keys));
-                            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*macsDevice, macs));
-                            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*witnessDevice, downloadedWitness));
+                            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*keysDevice, keys, readbackExecution.readbackStream()));
+                            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*macsDevice, macs, readbackExecution.readbackStream()));
+                            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*witnessDevice, downloadedWitness, readbackExecution.readbackStream()));
                             witness[reference.maskIndex()] = downloadedWitness[reference.maskIndex()];
                             LOGVOLE_REQUIRE_TRUE(rangesEqual(downloadedWitness, witness));
                             const seal::Modulus modulus(gpuProver.modulus());
@@ -1114,7 +1118,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             auto device = gpu::zkMulWitnessDevice(copied, modulus, witnessSeed, budget + 13);
             LOGVOLE_REQUIRE_TRUE(device != nullptr);
             fetched.resize(expected.size());
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, std::span<u64>(fetched.data(), fetched.size())));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, std::span<u64>(fetched.data(), fetched.size()), readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(expected, fetched));
             // LV_GPU_ZK_PREPARATION=0 prepares only the input scalars on the
             // host, then evaluates the same circuit through this GPU overload.
@@ -1129,7 +1133,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             AlignedUnVec<u64> hostPreparedWitness;
             hostPreparedWitness.resize(expected.size());
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*hostPrepared,
-                std::span<u64>(hostPreparedWitness.data(), hostPreparedWitness.size())));
+                std::span<u64>(hostPreparedWitness.data(), hostPreparedWitness.size()), readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(expected, hostPreparedWitness));
             LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(actual));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(actual.mOperands, reference.mOperands));
@@ -1317,6 +1321,10 @@ void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
 void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     struct GpuScope
     {
         bool previous = gpu::enabled();
@@ -1362,7 +1370,7 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_EQ(device->count(), count);
             AlignedUnVec<u64> fetched;
             fetched.resize(static_cast<std::size_t>(count));
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(fetched, oracle));
 
             // Keep two independently owned device results alive at once. A
@@ -1370,11 +1378,11 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
             auto replay = gpu::zkMatMulWitnessInputsDevice(statement, modulus, seed, requested);
             LOGVOLE_REQUIRE_TRUE(replay != nullptr);
             LOGVOLE_REQUIRE_TRUE(replay->data() != device->data());
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*replay, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*replay, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(fetched, oracle));
             auto another = gpu::zkMatMulWitnessInputsDevice(statement, modulus, toBlock(1, dim), requested);
             LOGVOLE_REQUIRE_TRUE(another != nullptr);
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(fetched, oracle));
 
             // The existing product kernel must accept the returned placement,
@@ -1388,13 +1396,13 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulFillProductDevice(*device, statement,
                     modulus, product));
                 actualProduct.resize(statement.entries());
-                LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(product, actualProduct));
+                LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(product, actualProduct, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actualProduct, expectedProduct));
                 // Public product evaluation writes a separate destination;
                 // neither live private witness, mask nor padding may change.
-                LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched));
+                LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(fetched, oracle));
-                LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*replay, fetched));
+                LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*replay, fetched, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(fetched, oracle));
             }
         }
@@ -1408,7 +1416,7 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
     AlignedUnVec<u64> before, after;
     before.resize(retained->count());
     after.resize(retained->count());
-    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, before));
+    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, before, readbackExecution.readbackStream()));
     LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, 0, seed) == nullptr);
     LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, 1, seed) == nullptr);
     LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(valid, largePrime, seed, valid.voleCount() - 1) == nullptr);
@@ -1420,7 +1428,7 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
         invalid.mDim = dim;
         LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulWitnessInputsDevice(invalid, largePrime, seed) == nullptr);
     }
-    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, after));
+    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, after, readbackExecution.readbackStream()));
     LOGVOLE_REQUIRE_TRUE(rangesEqual(before, after));
 #else
     (void)cmd;

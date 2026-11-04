@@ -9,6 +9,7 @@
 #include "macoro/when_all.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #endif
 #include <tuple>
 #include <vector>
@@ -20,6 +21,10 @@ namespace
 {
     void checkMode(const CLP& cmd, CivoleSetting setting, OnlineMode mode)
     {
+#if defined(ENABLE_LOGVOLE_CUDA)
+        osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
         const bool device = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
         struct RestoreBackend
@@ -131,9 +136,9 @@ namespace
                 LOGVOLE_REQUIRE_EQ(sender.outputDeviceCount(), count);
                 LOGVOLE_REQUIRE_EQ(receiver.outputDeviceCount(), count);
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                    *std::static_pointer_cast<gpu::DeviceScalars>(sender.outputDevice()), keys));
+                    *std::static_pointer_cast<gpu::DeviceScalars>(sender.outputDevice()), keys, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                    *std::static_pointer_cast<gpu::DeviceScalars>(receiver.outputDevice()), macs));
+                    *std::static_pointer_cast<gpu::DeviceScalars>(receiver.outputDevice()), macs, readbackExecution.readbackStream()));
             }
 #endif
             for (u64 i = 0; i != count; ++i)

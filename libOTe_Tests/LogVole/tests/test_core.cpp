@@ -716,6 +716,10 @@ namespace
 void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     ScopedGpuEnabled requestedGpu(cmd.getOr("gpu", 0) != 0);
     if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     ScopedEnvironmentValue chain("LV_GPU_SETUP_DELTA_CHAIN_DEVICE", "1");
@@ -768,7 +772,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(wrapZpConstantCrt(zp, scalar, true, 2u, hostDelta));
         }
         std::vector<RnsPoly> exactDelta;
-        LOGVOLE_REQUIRE_TRUE(gpu::download(*delta, exactDelta, 1u));
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*delta, exactDelta, readbackExecution.readbackStream(), 1u));
         LOGVOLE_REQUIRE_EQ(exactDelta.size(), 1u);
         expect_poly_equal(exactDelta[0], hostDelta);
 
@@ -784,7 +788,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             std::vector<RnsPoly>{hostDelta}, 1u,
             params.mShrinkExpand.mAlpha, tauHi,
             params.mShrinkExpand.mRing, expectedRep));
-        LOGVOLE_REQUIRE_TRUE(gpu::download(*rep, actualRep, repCount));
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*rep, actualRep, readbackExecution.readbackStream(), repCount));
         comparisonStage = "CI delta device repetition";
         expect_batch_equal(expectedRep, actualRep);
 
@@ -997,7 +1001,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                     params.mShrinkExpand.mRing, hostRep));
             }
             LOGVOLE_REQUIRE_TRUE(gpu::download(*privateRep,
-                deviceRep, privateRows));
+                deviceRep, readbackExecution.readbackStream(), privateRows));
             comparisonStage = width == 1u
                 ? "top HE gamma-one full-poly repetition"
                 : "top HE multi-digit selected-limb repetition";
@@ -1015,7 +1019,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         std::vector<RnsPoly> expectedRoot, actualRoot;
         LOGVOLE_REQUIRE_TRUE(replicateRootHiKeyByLimb(topSecret.hostSk1(),
             tauHi, params.mShrinkExpand.mRing, expectedRoot));
-        LOGVOLE_REQUIRE_TRUE(gpu::download(*rootReplica, actualRoot, rootRows));
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*rootReplica, actualRoot, readbackExecution.readbackStream(), rootRows));
         comparisonStage = "Root high-key whole-poly D2D replication";
         expect_batch_equal(expectedRoot, actualRoot);
         {
@@ -2255,6 +2259,10 @@ void LogVole_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)
 
 void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
     const Params params = make_root_params();
     ShrinkExpandParams trunc{};
     LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, false, trunc));
@@ -2769,7 +2777,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                     eagerPrng.get<oc::block>());
                 std::vector<RnsPoly> wireBStar;
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(
-                    *owner, wireBStar));
+                    *owner, wireBStar, readbackExecution.readbackStream()));
                 expect_batch_equal(wireBStar, eagerBStar);
 
                 oc::PRNG rejectedPrng(oc::block(0xB57A5602u, 0xB57A5603u));
@@ -3149,6 +3157,10 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
 void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     const bool gpuWasEnabled = gpu::enabled();
     struct RestoreGpu
     {
@@ -3297,6 +3309,17 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
         prepared,
         dPrimeDevice));
     LOGVOLE_REQUIRE_TRUE(prepared != nullptr);
+    if (gpu::rootDigestHashEnabled())
+    {
+        // Require the device entry point itself to succeed; a CPU fallback in
+        // finishRootDigestHash must not hide a missing or incorrect reader.
+        LOGVOLE_REQUIRE_TRUE(digestState.mGpuExecution ==
+            receiver.mShrinkExpandState.mRingFactoryOwner->mGpuExecution);
+        oc::block actual;
+        LOGVOLE_REQUIRE_TRUE(gpu::hashRootDigestDevice(*dPrimeDevice, actual,
+            readbackExecution.readbackStream()));
+        LOGVOLE_REQUIRE_TRUE(actual == hashSeedDigest(digestState.mDPrime));
+    }
     LOGVOLE_REQUIRE_TRUE(finishRootDigestHash(digestState));
     LOGVOLE_REQUIRE_TRUE(digestState.mDPrimeHashValid);
 
@@ -3346,8 +3369,8 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
         digestState.mDPrimeHash, nullptr, monolithicKey));
     std::vector<RnsPoly> splitHost;
     std::vector<RnsPoly> monolithicHost;
-    LOGVOLE_REQUIRE_TRUE(gpu::download(*splitKey, splitHost));
-    LOGVOLE_REQUIRE_TRUE(gpu::download(*monolithicKey, monolithicHost));
+    LOGVOLE_REQUIRE_TRUE(gpu::download(*splitKey, splitHost, readbackExecution.readbackStream()));
+    LOGVOLE_REQUIRE_TRUE(gpu::download(*monolithicKey, monolithicHost, readbackExecution.readbackStream()));
     expect_batch_equal(splitHost, monolithicHost);
     gpu::DeviceBatchPtr wireKey;
     LOGVOLE_REQUIRE_TRUE(runFinalizeFor(
@@ -3355,7 +3378,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(wireKey != nullptr);
     LOGVOLE_REQUIRE_TRUE(wireReceiver.mRootGpuCache != nullptr);
     std::vector<RnsPoly> wireHost;
-    LOGVOLE_REQUIRE_TRUE(gpu::download(*wireKey, wireHost));
+    LOGVOLE_REQUIRE_TRUE(gpu::download(*wireKey, wireHost, readbackExecution.readbackStream()));
     expect_batch_equal(wireHost, monolithicHost);
     LOGVOLE_EXPECT_TRUE(wireReceiver.mRootCtRRt.mPolys.empty());
     LOGVOLE_EXPECT_TRUE(wireReceiver.mRootPublicBStarNtt.empty());
@@ -3401,9 +3424,9 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
     std::vector<RnsPoly> mismatchFallbackHost;
     std::vector<RnsPoly> mismatchReferenceHost;
     LOGVOLE_REQUIRE_TRUE(gpu::download(
-        *mismatchFallbackKey, mismatchFallbackHost));
+        *mismatchFallbackKey, mismatchFallbackHost, readbackExecution.readbackStream()));
     LOGVOLE_REQUIRE_TRUE(gpu::download(
-        *mismatchReferenceKey, mismatchReferenceHost));
+        *mismatchReferenceKey, mismatchReferenceHost, readbackExecution.readbackStream()));
     expect_batch_equal(mismatchFallbackHost, mismatchReferenceHost);
     alternateHash.reset();
 #endif
@@ -3411,6 +3434,10 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
 
 void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     ScopedGpuEnabled gpuEnabled(true);
     if (!gpu::enabled() || !gpu::rootFinalizeReceiverPrefetchEnabled()) return;
@@ -3553,14 +3580,14 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(finalize(prepared.get(), splitKey));
         LOGVOLE_REQUIRE_TRUE(splitKey != nullptr);
         std::vector<RnsPoly> splitHost;
-        LOGVOLE_REQUIRE_TRUE(gpu::download(*splitKey, splitHost));
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*splitKey, splitHost, readbackExecution.readbackStream()));
         prepared.reset();
 
         gpu::DeviceBatchPtr monolithicKey;
         LOGVOLE_REQUIRE_TRUE(finalize(nullptr, monolithicKey));
         LOGVOLE_REQUIRE_TRUE(monolithicKey != nullptr);
         std::vector<RnsPoly> monolithicHost;
-        LOGVOLE_REQUIRE_TRUE(gpu::download(*monolithicKey, monolithicHost));
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*monolithicKey, monolithicHost, readbackExecution.readbackStream()));
         expect_batch_equal(splitHost, monolithicHost);
         LOGVOLE_REQUIRE_TRUE(receiver.mRootCtRRt.mPolys.empty());
         LOGVOLE_REQUIRE_TRUE(receiver.mRootPublicBStarNtt.empty());
@@ -4558,6 +4585,10 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 
 void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
     // This fixture isolates recursive eager-cache sharing. The separate
     // resident-state fixture covers optional top-level NTT cache retention.
     ScopedEnvironmentValue residentNtt("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT", "0");
@@ -4584,7 +4615,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
             LOGVOLE_REQUIRE_EQ(generated->count(), count);
             LOGVOLE_EXPECT_TRUE(generated->producerStream() == nullptr);
             std::vector<std::uint64_t> values(count);
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*generated, values));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*generated, values, readbackExecution.readbackStream()));
             for (auto value : values)
                 LOGVOLE_REQUIRE_EQ(value, reference.get<std::uint64_t>() % modulus);
         }

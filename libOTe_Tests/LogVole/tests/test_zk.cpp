@@ -172,6 +172,10 @@ namespace
     template<typename Prover, typename Verifier, typename Statement>
     void checkFreshMasks(const Statement& statement, CivoleSetting setting, bool device)
     {
+#if defined(ENABLE_LOGVOLE_CUDA)
+        osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
         constexpr bool multiplication = std::is_same_v<Prover, ZkMulProver>;
         Prover prover;
         Verifier verifier;
@@ -258,11 +262,11 @@ namespace
                 macs.resize(request);
                 keys.resize(request);
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                    *std::static_pointer_cast<gpu::DeviceScalars>(prover.mWiresDevice), actual));
+                    *std::static_pointer_cast<gpu::DeviceScalars>(prover.mWiresDevice), actual, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                    *std::static_pointer_cast<gpu::DeviceScalars>(prover.mVole.outputDevice()), macs));
+                    *std::static_pointer_cast<gpu::DeviceScalars>(prover.mVole.outputDevice()), macs, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                    *std::static_pointer_cast<gpu::DeviceScalars>(verifier.mVole.outputDevice()), keys));
+                    *std::static_pointer_cast<gpu::DeviceScalars>(verifier.mVole.outputDevice()), keys, readbackExecution.readbackStream()));
             }
 #endif
             for (u32 rep = 0; rep < maskCount; ++rep)
@@ -605,6 +609,10 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
 
 void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
     bool device = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
     GpuScope scope;
@@ -677,11 +685,11 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
             macs.resize(request);
             keys.resize(request);
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                *std::static_pointer_cast<gpu::DeviceScalars>(prover.mWiresDevice), actual));
+                *std::static_pointer_cast<gpu::DeviceScalars>(prover.mWiresDevice), actual, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                *std::static_pointer_cast<gpu::DeviceScalars>(prover.mVole.outputDevice()), macs));
+                *std::static_pointer_cast<gpu::DeviceScalars>(prover.mVole.outputDevice()), macs, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                *std::static_pointer_cast<gpu::DeviceScalars>(verifier.mVole.outputDevice()), keys));
+                *std::static_pointer_cast<gpu::DeviceScalars>(verifier.mVole.outputDevice()), keys, readbackExecution.readbackStream()));
             ZkMatMulChallenge challenge;
             zkMatMulChallenge(statement, prover.mLastSeed, prover.modulus(), challenge);
             std::vector<ZkProof> expectedProofs;

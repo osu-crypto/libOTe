@@ -9,6 +9,7 @@
 
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #endif
 
 #include <algorithm>
@@ -552,7 +553,10 @@ namespace osuCrypto::LogVole
             {
                 auto dev = std::static_pointer_cast<gpu::DeviceBatch>(input.mXDevice);
                 auto& mutableInput = const_cast<ReceiverOnlineInput&>(input);
-                if (!gpu::download(*dev, mutableInput.mX, static_cast<std::size_t>(input.mXCount)))
+                const auto& owner = state.mShrinkExpandState.mRingFactoryOwner;
+                if (!owner || !owner->mGpuExecution ||
+                    !gpu::download(*dev, mutableInput.mX, gpu::contextStream(*owner),
+                        static_cast<std::size_t>(input.mXCount)))
                 {
                     throw std::runtime_error("LogVole receiver could not fetch root input");
                 }

@@ -46,13 +46,15 @@ namespace osuCrypto::LogVole
         throw std::runtime_error("could not complete garbled labels on device");
     }
 
-    void GarbledLabelBatch::fetch()
+    void GarbledLabelBatch::fetch(gpu::GpuStream& stream)
     {
         if (!mDevice) return;
 #if defined(ENABLE_LOGVOLE_CUDA)
         mScalars.resize(mLayout.scalarCount());
         if (gpu::fetchScalars(*std::static_pointer_cast<gpu::DeviceScalars>(mDevice),
-                {mScalars.data(), mScalars.size()})) return;
+                {mScalars.data(), mScalars.size()}, stream)) return;
+#else
+        (void)stream;
 #endif
         throw std::runtime_error("could not fetch garbled labels from device");
     }

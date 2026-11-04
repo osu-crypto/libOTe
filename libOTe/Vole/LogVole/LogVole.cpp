@@ -1517,7 +1517,7 @@ namespace osuCrypto::LogVole
             if (!batch || batch->count() != expectedChunks)
                 return false;
             std::vector<RnsPoly> completed;
-            if (!gpu::download(*batch, completed, expectedChunks) ||
+            if (!gpu::download(*batch, completed, gpu::contextStream(ctx.mRing), expectedChunks) ||
                 completed.size() != expectedChunks)
                 return false;
             out = std::move(completed);
@@ -2481,7 +2481,7 @@ namespace osuCrypto::LogVole
             if (!haveMacs)
             {
                 macs.resize(0);
-                if (!gpu::download(*dev, online.mTbm, static_cast<std::size_t>(online.mTbmCount)))
+                if (!gpu::download(*dev, online.mTbm, gpu::contextStream(ctx.mRing), static_cast<std::size_t>(online.mTbmCount)))
                 {
                     throw std::runtime_error("LogVole CI-VOLE receiver could not fetch MACs");
                 }

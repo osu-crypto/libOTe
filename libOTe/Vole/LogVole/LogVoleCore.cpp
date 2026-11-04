@@ -735,7 +735,7 @@ namespace osuCrypto::LogVole
                     gpu::DeviceBatchPtr aggDev;
                     std::vector<RnsPoly> aggHost;
                     if (gpu::denoiseAndAggDevice(ctx, *dev, tauHi, aggDev) && aggDev &&
-                        gpu::download(*aggDev, aggHost, 1) && aggHost.size() == 1)
+                        gpu::download(*aggDev, aggHost, gpu::contextStream(ctx), 1) && aggHost.size() == 1)
                     {
                         out = std::move(aggHost[0]);
                         return true;
@@ -2008,7 +2008,7 @@ namespace osuCrypto::LogVole
                             count(), mOwnerRunId)
                         : gpu::setupSeedLabelRepBatchMatches(mCtx, *mDevice,
                             count(), mOwnerRunId);
-                    if (matches && gpu::download(*mDevice, exact, count()) &&
+                    if (matches && gpu::download(*mDevice, exact, gpu::contextStream(mCtx), count()) &&
                         validateRingBatchShape(exact, mCtx.mParams))
                     {
                         mHost = std::move(exact);
@@ -2332,7 +2332,7 @@ namespace osuCrypto::LogVole
             if (!gpu::retainedRootBStarNttMatches(ctx, *retainedBStarNtt,
                     randomizer) ||
                 !gpu::fetchRetainedPublicUniform(*retainedBStarNtt,
-                    publicBStarNtt))
+                    publicBStarNtt, gpu::contextStream(ctx)))
             {
                 if (bStarStrict) return false;
                 publicBStarNtt = deriveUniformPolyBatchFromNonce(
@@ -2982,6 +2982,7 @@ namespace osuCrypto::LogVole
         }
 
         RootDigestState nextState{};
+        nextState.mGpuExecution = ctx.mGpuExecution;
         nextState.mDRt = std::move(rootDigest);
         nextState.mRootTree = std::move(rootTree);
         nextState.mGpuSession = std::move(gpuSessionOut);
@@ -3025,10 +3026,11 @@ namespace osuCrypto::LogVole
 
         RootStep step("wire: hash dPrime after send");
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::rootDigestHashEnabled() && digestState.mDPrimeGpu)
+        if (gpu::rootDigestHashEnabled() && digestState.mDPrimeGpu && digestState.mGpuExecution)
         {
             const auto device = std::static_pointer_cast<gpu::DeviceBatch>(digestState.mDPrimeGpu);
-            if (gpu::hashRootDigestDevice(*device, digestState.mDPrimeHash))
+            if (gpu::hashRootDigestDevice(*device, digestState.mDPrimeHash,
+                    digestState.mGpuExecution->mainStream()))
             {
                 digestState.mDPrimeHashValid = true;
                 return true;
@@ -3226,7 +3228,7 @@ namespace osuCrypto::LogVole
             if (!skxDone && kPrime.mCoeffs.empty() && preparedKPrimeDev)
             {
                 std::vector<RnsPoly> host;
-                if (!gpu::download(*preparedKPrimeDev, host, 1u) || host.size() != 1u ||
+                if (!gpu::download(*preparedKPrimeDev, host, gpu::contextStream(ctx), 1u) || host.size() != 1u ||
                     !validateRingPolyShape(host[0], ctx.mParams)) return false;
                 kPrime = std::move(host[0]);
                 residentKPrime = preparedKPrimeDev;
@@ -3459,7 +3461,7 @@ namespace osuCrypto::LogVole
         {
             std::vector<RnsPoly> host;
             const auto device = std::static_pointer_cast<gpu::DeviceBatch>(state.mRootKPrimeRtDevice);
-            if (!gpu::download(*device, host, 1u) || host.size() != 1u ||
+            if (!gpu::download(*device, host, gpu::contextStream(ctx), 1u) || host.size() != 1u ||
                 !validateRingPolyShape(host[0], ctx.mParams)) return false;
             *state.mRootKPrimeRt = std::move(host[0]);
         }
@@ -4134,7 +4136,10 @@ namespace osuCrypto::LogVole
             }
             if (eval.mTbk.empty() && eval.mTbkDevice)
             {
-                if (!gpu::download(*eval.mTbkDevice, eval.mTbk, state.mParams.mW))
+                const auto& owner = state.mShrinkExpandState.mRingFactoryOwner;
+                if (!owner || !owner->mGpuExecution ||
+                    !gpu::download(*eval.mTbkDevice, eval.mTbk,
+                        gpu::contextStream(*owner), state.mParams.mW))
                 {
                     return false;
                 }
@@ -4390,7 +4395,7 @@ namespace osuCrypto::LogVole
                         std::vector<RnsPoly> exact;
                         if (gpu::setupSeedLabelRepBatchMatches(mCtx,
                                 *mDevice, count(), mOwnerRunId) &&
-                            gpu::download(*mDevice, exact, count()) &&
+                            gpu::download(*mDevice, exact, gpu::contextStream(mCtx), count()) &&
                             validateRingBatchShape(exact, mCtx.mParams))
                         {
                             mHost = std::move(exact);
@@ -4438,7 +4443,7 @@ namespace osuCrypto::LogVole
                 !gpu::topSecretUniformBatchMatches(ctx, *top.mTopSk1Device,
                     top.mParams.mTau, top.mTopSk1OwnerRunId)) return false;
             HostStep step("setup sender: top sk1 final public host view");
-            if (!gpu::download(*top.mTopSk1Device, exact, top.mParams.mTau) ||
+            if (!gpu::download(*top.mTopSk1Device, exact, gpu::contextStream(ctx), top.mParams.mTau) ||
                 !validateRingBatchShape(exact, ctx.mParams))
             {
                 const char* strict = std::getenv("LV_GPU_SETUP_TOP_SK1_CONSUMER_STRICT");
@@ -4681,7 +4686,7 @@ namespace osuCrypto::LogVole
                 std::vector<RnsPoly> exact;
                 if (gpu::setupDeltaBatchMatches(deltaCtx,
                         *input.mWrappedDeltaDevice, 1u, deltaOwnerRunId) &&
-                    gpu::download(*input.mWrappedDeltaDevice, exact, 1u) &&
+                    gpu::download(*input.mWrappedDeltaDevice, exact, gpu::contextStream(deltaCtx), 1u) &&
                     exact.size() == 1u &&
                     validateRingPolyShape(exact[0], deltaCtx.mParams))
                     eagerSk1 = std::move(exact);
@@ -5445,7 +5450,7 @@ namespace osuCrypto::LogVole
         {
             const auto topDev =
                 std::static_pointer_cast<gpu::DeviceBatch>(digestState.mTopInputsNttGpu);
-            if (topDev && gpu::download(*topDev, replayedTopInputs))
+            if (topDev && gpu::download(*topDev, replayedTopInputs, gpu::contextStream(ctx)))
                 hostTopInputs = &replayedTopInputs;
         }
 #endif

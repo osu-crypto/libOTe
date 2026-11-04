@@ -58,6 +58,9 @@ def main():
         environment = os.environ.copy()
         if name == "root-prefetch":
             environment["LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH"] = "1"
+            # Exercise the opt-in deferred device hash in this fresh process;
+            # its execution owner must survive the intervening wire exchange.
+            environment["LV_GPU_ROOT_DIGEST_HASH"] = "1"
         command = [sanitizer, "--tool", "memcheck", "--leak-check", "full",
                    "--error-exitcode", "99"]
         command += ([str(lifetime)] if tests is None else

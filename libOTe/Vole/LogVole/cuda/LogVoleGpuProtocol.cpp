@@ -219,14 +219,14 @@ namespace osuCrypto::LogVole::gpu
         return {};
     }
 
-    bool fetchRetainedPublicUniform(const RetainedPublicUniform& source, std::vector<RnsPoly>& out)
+    bool fetchRetainedPublicUniform(const RetainedPublicUniform& source,
+        std::vector<RnsPoly>& out, GpuStream& stream)
     {
         const auto scope = currentProtocolCacheScope();
         if (!enabled() || source.count() == 0 ||
             source.mImpl->mDevice != currentDeviceOrdinal() ||
             source.mImpl->mRole != scope.mRole || source.mImpl->mRunId != scope.mRunId)
             return false;
-        auto& stream = threadStream();
         std::lock_guard use(source.mImpl->mDeviceUseMutex);
         return source.mImpl->mValues.download(out, stream);
     }
@@ -2964,13 +2964,14 @@ namespace osuCrypto::LogVole::gpu
         return owner;
     }
 
-    bool fetchScalars(const DeviceScalars& src, std::span<u64> dst)
+    bool fetchScalars(const DeviceScalars& src, std::span<u64> dst, GpuStream& stream)
     {
         if (src.empty() || dst.size() < src.count()) return false;
-        auto& stream = threadStream();
         if (!src.prepareUse(stream)) return false;
-        const bool ok = gpuMemcpyD2H(dst.data(), src.data(), src.count() * sizeof(u64), stream.raw()) &&
-            stream.sync();
+        StreamDrain drain{stream};
+        const bool copied = gpuMemcpyD2H(dst.data(), src.data(), src.count() * sizeof(u64), stream.raw());
+        const bool synced = drain.sync();
+        const bool ok = copied && synced;
         if (ok) src.markReady();
         return ok;
     }
@@ -3017,7 +3018,8 @@ namespace osuCrypto::LogVole::gpu
         return true;
     }
 
-    bool download(const DeviceBatch& batch, std::vector<RnsPoly>& out, std::size_t count)
+    bool download(const DeviceBatch& batch, std::vector<RnsPoly>& out,
+        GpuStream& stream, std::size_t count)
     {
         if (!batch.mImpl || batch.count() == 0) return false;
         // The compact recursive representation is intentionally device-only;
@@ -3026,7 +3028,6 @@ namespace osuCrypto::LogVole::gpu
         if (batch.mImpl->mLogicalCount &&
             batch.mImpl->mLogicalCount != batch.mImpl->mBuf.count())
             return false;
-        auto& stream = threadStream();
         if (!ensurePlainBroadcastMaterialized(*batch.mImpl, stream)) return false;
         Region regDown(regions().mDownloadUs, stream.raw());
         return batch.mImpl->mBuf.download(out, stream, 0, count ? count : batch.count());
@@ -7480,14 +7481,14 @@ namespace osuCrypto::LogVole::gpu
         }
     }
 
-    bool hashRootDigestDevice(const DeviceBatch& digest, block& out)
+    bool hashRootDigestDevice(const DeviceBatch& digest, block& out, GpuStream& stream)
     {
         if (!rootDigestHashEnabled() || !digest.mImpl ||
             digest.mImpl->mLogicalCount || digest.mImpl->mBuf.count() != 1u ||
             !digest.mImpl->mRing || digest.mImpl->mRing->polyWords() >
                 std::numeric_limits<u32>::max()) return false;
-        return hashRootWordsDevice(digest.mImpl->mBuf.data(threadStream()),
-            static_cast<u32>(digest.mImpl->mRing->polyWords()), out, threadStream());
+        return hashRootWordsDevice(digest.mImpl->mBuf.data(stream),
+            static_cast<u32>(digest.mImpl->mRing->polyWords()), out, stream);
     }
 
     bool rootKPrimeSamplingEnabled()

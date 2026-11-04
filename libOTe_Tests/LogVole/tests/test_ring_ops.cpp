@@ -6,6 +6,7 @@
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVole.h"
 #include "libOTe/config.h"
+#include "libOTe/Vole/LogVole/LogVoleGarbled.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuGaussian.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
@@ -205,6 +206,10 @@ namespace
 void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
     ScopedGpuEnabled gpuScope(requested);
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
@@ -221,8 +226,18 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(uploaded);
     LOGVOLE_REQUIRE_TRUE(uploaded->producerStream() == nullptr);
     std::vector<std::uint64_t> fetched(input.size());
-    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*uploaded, fetched));
+    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*uploaded, fetched, readbackExecution.readbackStream()));
     LOGVOLE_REQUIRE_TRUE(fetched == input);
+    {
+        GarbledLabelBatch labels;
+        labels.mLayout = GarbledLabelLayout(1, 4);
+        labels.mModulus = 257;
+        labels.mDevice = uploaded;
+        labels.fetch(readbackExecution.readbackStream());
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(labels.mScalars, input));
+        const auto label = labels.label(0);
+        for (unsigned j = 0; j != 3; ++j) LOGVOLE_REQUIRE_EQ(label[j], input[j]);
+    }
 
     // The exported scalar owns its allocation stream after the original
     // GpuStream wrapper has drained and released its own scratch. Neither a
@@ -241,7 +256,7 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(detached->count() == input.size());
     }
     LOGVOLE_REQUIRE_TRUE(!detachedStream.expired() && !detachedMemory.expired());
-    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*detached, fetched));
+    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*detached, fetched, readbackExecution.readbackStream()));
     LOGVOLE_REQUIRE_TRUE(fetched == input);
     auto readerOutput = std::make_shared<gpu::DeviceScalars>();
     std::weak_ptr<gpu::OwnedGpuStream> readerOwner;
@@ -259,7 +274,7 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(detachedStream.expired() && detachedMemory.expired());
     }
     LOGVOLE_REQUIRE_TRUE(!readerOwner.expired());
-    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*readerOutput, fetched));
+    LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*readerOutput, fetched, readbackExecution.readbackStream()));
     LOGVOLE_REQUIRE_TRUE(fetched == input);
     std::weak_ptr<gpu::OwnedGpuStream> foreignWriter;
     {
@@ -303,7 +318,7 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(uploaded);
             LOGVOLE_REQUIRE_TRUE(gpu::gpuStreamSync(previous));
             fetched.resize(expected.size());
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*uploaded, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*uploaded, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(fetched == expected);
         }
     }
@@ -399,6 +414,10 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
 
 void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
     ScopedGpuEnabled gpuScope(requested);
@@ -836,7 +855,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         gpu::gpuCollectThreadResources();
         LOGVOLE_REQUIRE_TRUE(!producer.expired() && !pool.expired());
         std::vector<RnsPoly> fetched;
-        LOGVOLE_REQUIRE_TRUE(gpu::download(*exported, fetched));
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*exported, fetched, readbackExecution.readbackStream()));
         LOGVOLE_REQUIRE_EQ(fetched.size(), std::size_t(1));
         expect_poly_equal(expectedWrap, fetched[0]);
         exported.reset();
@@ -886,6 +905,10 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
 
 void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     ScopedGpuEnabled enabled(cmd.getOr("gpu", 0) != 0);
     LOGVOLE_REQUIRE_TRUE(gpu::enabled());
@@ -937,7 +960,7 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(firstLifetime.expired() && secondLifetime.expired());
         LOGVOLE_REQUIRE_TRUE(saved);
         std::vector<RnsPoly> fetched;
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*saved, fetched));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*saved, fetched, readbackExecution.readbackStream()));
         expect_batch_equal(fetched, expected);
     }
     for (bool production : {false, true})
@@ -2518,6 +2541,10 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP&)
 void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     // Exercise CPU cache construction before any GPU retention in this test.
     {
         ScopedGpuEnabled cpuOnly(false);
@@ -2581,9 +2608,9 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         }
         LOGVOLE_REQUIRE_TRUE(lifetime.expired());
         std::vector<RnsPoly> fetched;
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceA, fetched));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceA, fetched, readbackExecution.readbackStream()));
         exact(*hostA, fetched);
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceB, fetched));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceB, fetched, readbackExecution.readbackStream()));
         exact(*hostB, fetched);
         const std::weak_ptr<const gpu::RetainedPublicUniform> deviceLifetimeA = deviceA;
         const std::weak_ptr<const gpu::RetainedPublicUniform> deviceLifetimeB = deviceB;
@@ -2648,7 +2675,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(separate, owner, token));
             }
             std::vector<RnsPoly> fetched;
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*token, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*token, fetched, readbackExecution.readbackStream()));
             exact(expected, fetched);
 
             // Const ownership must originate from the captured allocations.
@@ -2714,7 +2741,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             // storage; retaining the completed device owner remains safe.
             owner.reset();
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == nullptr);
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*token, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*token, fetched, readbackExecution.readbackStream()));
             exact(expected, fetched);
         }
 
@@ -2763,9 +2790,9 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         const auto retainedB = gpu::findPublicUniformRetention(ctx, *publicB);
         LOGVOLE_REQUIRE_TRUE(retainedA && retainedB && retainedA != retainedB);
         std::vector<RnsPoly> downloaded;
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedA, downloaded));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedA, downloaded, readbackExecution.readbackStream()));
         exact(expectedA, downloaded);
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedB, downloaded));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedB, downloaded, readbackExecution.readbackStream()));
         exact(expectedB, downloaded);
         LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(ctx, count) == publicA);
         LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(ctx, count / 2) == publicB);
@@ -2800,7 +2827,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             }
             else LOGVOLE_REQUIRE_EQ(after.mCopies, before.mCopies);
         }
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedA, downloaded));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedA, downloaded, readbackExecution.readbackStream()));
         exact(expectedA, downloaded);
         exact(expectedA, *publicA);
         exact(expectedB, *publicB);
@@ -3130,6 +3157,10 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
 void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
     ScopedGpuEnabled gpuScope(requested);
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
@@ -3229,7 +3260,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
             }
             LOGVOLE_REQUIRE_TRUE(compactValues == originalCompact);
             std::vector<std::uint64_t> fetched(compactValues.size());
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(fetched == originalCompact);
             std::vector<RnsPoly> rejected = coefficients;
             const auto* storage = rejected.data();
@@ -3267,7 +3298,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(std::all_of(direct.mComplete.begin(), direct.mComplete.end(),
                 [](auto complete) { return complete == 1u; }));
             std::vector<std::uint64_t> fetched(words, marker);
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*direct.mValues, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*direct.mValues, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(fetched == expected);
             const auto retained = direct.mValues;
             const auto retainedFlags = direct.mComplete;
@@ -3284,14 +3315,14 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(host.empty() && device != nullptr);
                 LOGVOLE_REQUIRE_EQ(device->count(), words);
                 LOGVOLE_REQUIRE_TRUE(device != retained);
-                LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched));
+                LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_TRUE(fetched == expected);
                 const auto materializedOwner = device;
                 LOGVOLE_REQUIRE_TRUE(materializePolyErrorCompactBatchForSetup(
                     host, device, sigma, 19.2, seeds, ctx, 4, active));
                 LOGVOLE_REQUIRE_TRUE(host == expected && device == materializedOwner);
             }
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(fetched == expected);
             LOGVOLE_REQUIRE_TRUE(seeds == unchangedSeeds);
             for (unsigned i = 0; i < 8u; ++i)
@@ -3399,11 +3430,11 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(
                 host, device, sigma, 19.2, seeds, ctx, 4, inactive));
             LOGVOLE_REQUIRE_TRUE(host.empty() && device != nullptr && device->count() == words);
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(std::all_of(fetched.begin(), fetched.end(), [](auto x) { return x == 0u; }));
             LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(host, device, sigma, 19.2, {}, ctx));
             LOGVOLE_REQUIRE_TRUE(host.empty() && device == nullptr);
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, fetched));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(fetched == expected);
         }
     }

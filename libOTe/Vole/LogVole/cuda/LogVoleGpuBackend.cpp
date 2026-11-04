@@ -1078,7 +1078,7 @@ namespace osuCrypto::LogVole::gpu
     {
         struct Worker
         {
-            std::unique_ptr<GpuStream> main, sample;
+            std::unique_ptr<GpuStream> main, sample, readback;
         };
         std::mutex mutex;
         int device = -1;
@@ -1091,7 +1091,7 @@ namespace osuCrypto::LogVole::gpu
     GpuExecutionContext::GpuExecutionContext() : mImpl(std::make_unique<Impl>()) {}
     GpuExecutionContext::~GpuExecutionContext() = default;
 
-    GpuStream& GpuExecutionContext::stream(bool sample)
+    GpuStream& GpuExecutionContext::stream(Lane lane)
     {
         std::lock_guard lock(mImpl->mutex);
         const int device = currentDeviceOrdinal();
@@ -1100,13 +1100,16 @@ namespace osuCrypto::LogVole::gpu
         mImpl->device = device;
         if (!mImpl->memory) mImpl->memory = std::make_shared<GpuMemoryPool>(device);
         auto& worker = mImpl->workers[std::this_thread::get_id()];
-        auto& stream = sample ? worker.sample : worker.main;
-        if (!stream) stream = std::make_unique<GpuStream>(mImpl->memory);
+        auto& stream = lane == Lane::Readback ? worker.readback :
+            lane == Lane::Sample ? worker.sample : worker.main;
+        if (!stream)
+            stream.reset(new GpuStream(false, lane != Lane::Readback, mImpl->memory));
         return *stream;
     }
 
-    GpuStream& GpuExecutionContext::mainStream() { return stream(false); }
-    GpuStream& GpuExecutionContext::sampleStream() { return stream(true); }
+    GpuStream& GpuExecutionContext::mainStream() { return stream(Lane::Main); }
+    GpuStream& GpuExecutionContext::sampleStream() { return stream(Lane::Sample); }
+    GpuStream& GpuExecutionContext::readbackStream() { return stream(Lane::Readback); }
 
     bool bindContextExecution(RingNttContext& ctx,
         const std::shared_ptr<GpuExecutionContext>& execution)
@@ -1228,7 +1231,10 @@ namespace osuCrypto::LogVole::gpu
         if (!staging.reserve(stream, bytes <= kChunk ? bytes : 2 * kChunk))
         {
             // No pinned memory available; the slow path is still correct.
-            return gpuMemcpyD2H(dst, deviceSrc, bytes, stream.raw()) && stream.sync();
+            StreamDrain drain{stream};
+            const bool copied = gpuMemcpyD2H(dst, deviceSrc, bytes, stream.raw());
+            const bool complete = drain.sync();
+            return copied && complete;
         }
         DrainTransferOnFailure drain{stream};
         u8* pinned = staging.mPinned;
@@ -2591,6 +2597,9 @@ namespace osuCrypto::LogVole::gpu
             }
             else
             {
+                // A later failed copy must not leave earlier writes using
+                // the caller's host coefficients after this function returns.
+                StreamDrain drain{stream};
                 for (std::size_t i = 0; i < run; ++i)
                 {
                     if (!gpuMemcpyD2H(
@@ -2600,7 +2609,7 @@ namespace osuCrypto::LogVole::gpu
                         return false;
                     }
                 }
-                if (!stream.sync()) return false;
+                if (!drain.sync()) return false;
             }
             done += run;
         }
@@ -2743,7 +2752,7 @@ namespace osuCrypto::LogVole::gpu
             previousLength = length;
             previousSlot = slot;
         }
-        if (!materialize(previousOffset, previousLength, previousSlot) || !stream.sync()) return false;
+        if (!materialize(previousOffset, previousLength, previousSlot) || !drain.sync()) return false;
         polys = std::move(next);
         return true;
     }

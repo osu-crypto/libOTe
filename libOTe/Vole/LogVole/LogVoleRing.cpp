@@ -2820,7 +2820,7 @@ namespace osuCrypto::LogVole
         if (device)
         {
             if (device->count() != words) return false;
-            if (gpu::enabled() && gpu::fetchScalars(*device, next)) { host = std::move(next); return true; }
+            if (gpu::enabled() && gpu::fetchScalars(*device, next, gpu::contextStream(ctx))) { host = std::move(next); return true; }
             // A declined asynchronous fetch must drain before CPU replay can
             // reuse its destination, including copy/sync error exits.
             if (gpu::enabled()) gpu::contextStream(ctx).sync();

@@ -5,6 +5,7 @@
 #include "libOTe/config.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
 #endif
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
@@ -631,6 +632,10 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
 
 void LogVole_Civole_NonInteractiveOracleAndMask(const oc::CLP&)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
     CivoleParams civole{};
     LOGVOLE_REQUIRE_TRUE(makeNoGoldenSeedCivoleParams(civole));
     auto params = civole.mLogVole;
@@ -706,7 +711,7 @@ void LogVole_Civole_NonInteractiveOracleAndMask(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(sender.mRootKPrimeRtDevice);
         std::vector<RnsPoly> deviceMask;
         const auto device = std::static_pointer_cast<gpu::DeviceBatch>(sender.mRootKPrimeRtDevice);
-        LOGVOLE_REQUIRE_TRUE(gpu::download(*device, deviceMask, 1));
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*device, deviceMask, readbackExecution.readbackStream(), 1));
         LOGVOLE_EXPECT_TRUE(rangesEqual(deviceMask[0].mCoeffs, cpuMask.mCoeffs));
     }
 #endif
@@ -814,6 +819,10 @@ void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& c
 void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
+    osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
+#endif
+
+#if defined(ENABLE_LOGVOLE_CUDA)
     ScopedGpuEnabled gpuEnabled(cmd.getOr("gpu", 0) != 0);
     if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     constexpr u64 n = u64{1} << 25;
@@ -908,12 +917,12 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
                 b.resize(n);
             }
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                *senderOutput, std::span<u64>(b.data(), b.size())));
+                *senderOutput, std::span<u64>(b.data(), b.size()), readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                *receiverOutput, std::span<u64>(a.data(), a.size())));
+                *receiverOutput, std::span<u64>(a.data(), a.size()), readbackExecution.readbackStream()));
             if (query == 0u)
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(
-                    *inputDevice, std::span<u64>(x.data(), x.size())));
+                    *inputDevice, std::span<u64>(x.data(), x.size()), readbackExecution.readbackStream()));
             const seal::Modulus modulus(receiver.modulus());
             for (std::size_t i = 0; i < x.size(); ++i)
                 if (a[i] != mulAddMod(x[i], delta, b[i], modulus))

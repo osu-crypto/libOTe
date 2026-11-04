@@ -31,6 +31,9 @@ namespace osuCrypto::LogVole
 
     struct RootDigestState
     {
+        // The deferred hash may run after a socket suspension on another
+        // worker. This high-level state owns its execution domain explicitly.
+        std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;
         RnsPoly mDRt;
         RnsPoly mYLeft;
         RnsPoly mDPrime;

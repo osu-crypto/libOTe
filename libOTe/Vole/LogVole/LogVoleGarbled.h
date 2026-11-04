@@ -6,6 +6,7 @@
 
 namespace osuCrypto::LogVole
 {
+    namespace gpu { class GpuStream; }
     // An additive label in Z_p^3, stored without truncation or hashing. This is
     // not an XOR/free-XOR block. The supported parameter sets target 128-bit
     // computational security under the existing semi-honest LogVole assumptions.
@@ -40,7 +41,8 @@ namespace osuCrypto::LogVole
 
         u64 size() const { return mLayout.mLabelCount; }
         void wait(); // Complete device production without downloading.
-        void fetch(); // Materialize host scalars when output was kept on device.
+        // Materialize device scalars on the caller's reusable reader stream.
+        void fetch(gpu::GpuStream& stream);
         GarbledLabel label(u64 i) const;
         // Garbler helper: derive the label for a field value from its zero label.
         GarbledLabel labelForValue(u64 i, u64 value, const GarbledLabel& deltas) const;
