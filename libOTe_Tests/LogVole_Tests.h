@@ -24,6 +24,7 @@
     X(Cpu, FusedDotMatchesReference) \
     X(Cpu, SamplerMatchesSeal) \
     X(Cpu, ResamplingOverwritesPreviousQuery) \
+    X(Cpu, ParallelFailureJoinsChildren) \
     X(Cpu, ErrorSamplingMatchesSeal) \
     X(Cpu, RecursiveLeafMatchesIntegerReference) \
     X(Cpu, ZkArithmeticMatchesReference) \

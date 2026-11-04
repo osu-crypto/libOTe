@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <exception>
 #include <thread>
 #include <vector>
 
@@ -229,20 +230,35 @@ namespace osuCrypto::LogVole::detail
 
         macoro::thread_pool::work work;
         macoro::thread_pool pool(workerCount - 1, work);
-        std::vector<macoro::eager_task<>> tasks;
-        tasks.reserve(workerCount - 1);
-        for (std::size_t i = 1; i < workerCount; ++i)
+        try
         {
-            tasks.push_back(runPoolWorker(pool, worker, i, cacheScope, tCpuBenchmarkContext) | macoro::make_eager());
+            // Construct every lazy child and the blocking join before any
+            // child starts. Allocation failure during setup cannot abandon a
+            // running task that borrows worker or this function's locals.
+            std::vector<macoro::task<>> tasks;
+            tasks.reserve(workerCount - 1);
+            for (std::size_t i = 1; i < workerCount; ++i)
+                tasks.push_back(runPoolWorker(pool, worker, i, cacheScope, tCpuBenchmarkContext));
+            auto joined = macoro::make_blocking(macoro::when_all_ready(std::move(tasks)));
+
+            std::exception_ptr callerError;
+            try { worker(0); }
+            catch (...)
+            {
+                failed.store(true, std::memory_order_release);
+                callerError = std::current_exception();
+            }
+            auto results = joined.get();
+            work.reset();
+            if (callerError) std::rethrow_exception(callerError);
+            for (auto& result : results) result.result();
         }
-
-        worker(0);
-
-        auto results = macoro::sync_wait(macoro::when_all_ready(std::move(tasks)));
-        work.reset();
-        for (auto& result : results)
+        catch (...)
         {
-            result.result();
+            // Release the work guard before the pool joins, including failures
+            // while constructing the still-lazy children and join state.
+            work.reset();
+            throw;
         }
 
         return !failed.load(std::memory_order_acquire);

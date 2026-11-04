@@ -5,6 +5,7 @@
 #include "libOTe/Vole/LogVole/LogVoleCpuZk.h"
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
+#include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleZk.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
@@ -25,6 +26,8 @@
 #include "seal/randomtostd.h"
 
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -36,6 +39,52 @@
 
 using namespace osuCrypto;
 using namespace osuCrypto::LogVole;
+
+void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
+{
+    struct Failure {};
+    bool propagated = false;
+    try
+    {
+        LogVole::detail::runParallelTasks(1, 1, [](std::size_t) -> bool { throw Failure{}; });
+    }
+    catch (const Failure&) { propagated = true; }
+    LOGVOLE_REQUIRE_TRUE(propagated);
+    if (LogVole::detail::hardwareWorkerSlots() < 2) return;
+
+    for (bool callerThrows : {true, false})
+    {
+        std::atomic<bool> childStarted{false}, childFinished{false};
+        propagated = false;
+        bool joinedBeforeThrow = false;
+        try
+        {
+            (void)LogVole::detail::runParallelTasks(2, 2, [&](std::size_t task) -> bool {
+                if (task == 1)
+                {
+                    childStarted.store(true, std::memory_order_release);
+                    childStarted.notify_all();
+                    // Leave a child actively using its parent's captures when
+                    // the caller throws. This is a lifetime test, not load.
+                    if (callerThrows) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                    childFinished.store(true, std::memory_order_release);
+                    if (!callerThrows) throw Failure{};
+                    return true;
+                }
+                childStarted.wait(false, std::memory_order_acquire);
+                if (callerThrows) throw Failure{};
+                return true;
+            });
+        }
+        catch (const Failure&)
+        {
+            propagated = true;
+            joinedBeforeThrow = childFinished.load(std::memory_order_acquire);
+        }
+        LOGVOLE_REQUIRE_TRUE(propagated);
+        LOGVOLE_REQUIRE_TRUE(joinedBeforeThrow);
+    }
+}
 
 void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
 {
