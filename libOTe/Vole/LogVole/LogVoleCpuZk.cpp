@@ -14,6 +14,24 @@
 
 namespace osuCrypto::LogVole::detail
 {
+    CpuZkOptions captureCpuZkOptions()
+    {
+        const auto enabled = [](const char* name) {
+            const char* value = std::getenv(name);
+            return !value || value[0] != '0';
+        };
+        CpuZkOptions options;
+        options.mPseudoReduce = enabled("LV_CPU_ZK_PSEUDO_REDUCE");
+#if defined(LV_ZK_VECTOR)
+        const bool vector = __builtin_cpu_supports("avx512f") &&
+            __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
+        options.mVectorGates = vector && options.mPseudoReduce && enabled("LV_CPU_VECTOR_ZK");
+        options.mVectorWitness = options.mVectorGates && enabled("LV_CPU_VECTOR_WITNESS");
+        options.mVectorMatMul = vector && enabled("LV_CPU_VECTOR_MATMUL");
+#endif
+        return options;
+    }
+
     namespace
     {
 #if defined(LV_ZK_VECTOR)
@@ -226,17 +244,11 @@ namespace osuCrypto::LogVole::detail
             }
         }
 
-        int vectorBits(const seal::Modulus& modulus, std::size_t count)
+        int vectorBits(const seal::Modulus& modulus, std::size_t count,
+            const CpuZkOptions& options)
         {
-            static const bool enabled = [] {
-                const char* value = std::getenv("LV_CPU_VECTOR_ZK");
-                const char* pseudo = std::getenv("LV_CPU_ZK_PSEUDO_REDUCE");
-                return (!value || value[0] != '0') && (!pseudo || pseudo[0] != '0') &&
-                    __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512dq") &&
-                    __builtin_cpu_supports("avx512ifma");
-            }();
             const int bits = modulus.bit_count();
-            if (!enabled || count < 8 || (bits != 51 && bits != 54) ||
+            if (!options.mVectorGates || count < 8 || (bits != 51 && bits != 54) ||
                 (u64{1} << bits) - modulus.value() >= (u64{1} << 24)) return 0;
             return bits;
         }
@@ -350,16 +362,10 @@ namespace osuCrypto::LogVole::detail
                 }
         }
 
-        int matrixVectorBits(const seal::Modulus& modulus)
+        int matrixVectorBits(const seal::Modulus& modulus, const CpuZkOptions& options)
         {
-            static const bool enabled = [] {
-                const char* value = std::getenv("LV_CPU_VECTOR_MATMUL");
-                return (!value || value[0] != '0') &&
-                    __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512dq") &&
-                    __builtin_cpu_supports("avx512ifma");
-            }();
             const int bits = modulus.bit_count();
-            return enabled && (bits == 51 || bits == 54) ? bits : 0;
+            return options.mVectorMatMul && (bits == 51 || bits == 54) ? bits : 0;
         }
 #endif
 
@@ -438,15 +444,11 @@ namespace osuCrypto::LogVole::detail
     }
 
     bool cpuZkWitnessRange(const u32* operands, const u64* wires, u64* outputs,
-        std::size_t count, const seal::Modulus& modulus)
+        std::size_t count, const seal::Modulus& modulus, const CpuZkOptions& options)
     {
 #if defined(LV_ZK_VECTOR)
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_WITNESS");
-            return !value || value[0] != '0';
-        }();
-        if (!enabled) return false;
-        const int bits = vectorBits(modulus, count);
+        if (!options.mVectorWitness) return false;
+        const int bits = vectorBits(modulus, count, options);
         if (bits == 51) witnessRange<51>(operands, wires, outputs, count, modulus);
         else if (bits == 54) witnessRange<54>(operands, wires, outputs, count, modulus);
         else return false;
@@ -458,10 +460,10 @@ namespace osuCrypto::LogVole::detail
 
     bool cpuZkProverRange(const u32* operands, const u64* wires, const u64* macs,
         const u64* outputs, std::size_t count, u64 firstPower, u64 chi,
-        const seal::Modulus& modulus, std::array<u64, 2>& result)
+        const seal::Modulus& modulus, std::array<u64, 2>& result, const CpuZkOptions& options)
     {
 #if defined(LV_ZK_VECTOR)
-        const int bits = vectorBits(modulus, count);
+        const int bits = vectorBits(modulus, count, options);
         if (bits == 51) gateRange<51, true>(operands, wires, macs, outputs, count, firstPower, chi, 0, modulus, result.data());
         else if (bits == 54) gateRange<54, true>(operands, wires, macs, outputs, count, firstPower, chi, 0, modulus, result.data());
         else return false;
@@ -473,10 +475,10 @@ namespace osuCrypto::LogVole::detail
 
     bool cpuZkVerifierRange(const u32* operands, const u64* keys, const u64* outputs,
         std::size_t count, u64 firstPower, u64 chi, u64 delta,
-        const seal::Modulus& modulus, u64& result)
+        const seal::Modulus& modulus, u64& result, const CpuZkOptions& options)
     {
 #if defined(LV_ZK_VECTOR)
-        const int bits = vectorBits(modulus, count);
+        const int bits = vectorBits(modulus, count, options);
         u64 sums[2];
         if (bits == 51) gateRange<51, false>(operands, nullptr, keys, outputs, count, firstPower, chi, delta, modulus, sums);
         else if (bits == 54) gateRange<54, false>(operands, nullptr, keys, outputs, count, firstPower, chi, delta, modulus, sums);
@@ -491,13 +493,13 @@ namespace osuCrypto::LogVole::detail
     bool cpuZkMatMulProverTerms(
         const u64* a, const u64* ma, const u64* bt, const u64* mbt,
         u64* a0, u64* cross, std::size_t n, std::size_t beginRow,
-        std::size_t endRow, const seal::Modulus& modulus)
+        std::size_t endRow, const seal::Modulus& modulus, const CpuZkOptions& options)
     {
         if (!validMatrixRange(n, beginRow, endRow, modulus)) return false;
         if (beginRow == endRow) return true;
         if (!a || !ma || !bt || !mbt || !a0 || !cross) return false;
 #if defined(LV_ZK_VECTOR)
-        const int bits = matrixVectorBits(modulus);
+        const int bits = matrixVectorBits(modulus, options);
         if (bits == 51) matrixProverTermsVector<51>(a, ma, bt, mbt, a0, cross,
             n, beginRow, endRow, modulus);
         else if (bits == 54) matrixProverTermsVector<54>(a, ma, bt, mbt, a0, cross,
@@ -510,13 +512,13 @@ namespace osuCrypto::LogVole::detail
 
     bool cpuZkMatMulVerifierTerms(
         const u64* a, const u64* bt, u64* products, std::size_t n,
-        std::size_t beginRow, std::size_t endRow, const seal::Modulus& modulus)
+        std::size_t beginRow, std::size_t endRow, const seal::Modulus& modulus, const CpuZkOptions& options)
     {
         if (!validMatrixRange(n, beginRow, endRow, modulus)) return false;
         if (beginRow == endRow) return true;
         if (!a || !bt || !products) return false;
 #if defined(LV_ZK_VECTOR)
-        const int bits = matrixVectorBits(modulus);
+        const int bits = matrixVectorBits(modulus, options);
         if (bits == 51) matrixVerifierTermsVector<51>(a, bt, products, n, beginRow, endRow, modulus);
         else if (bits == 54) matrixVerifierTermsVector<54>(a, bt, products, n, beginRow, endRow, modulus);
         else

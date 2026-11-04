@@ -28,7 +28,7 @@ def main():
         "Cpu_DyadicMatchesReference", "Cpu_SamplerMatchesSeal", "Cpu_ErrorSamplingMatchesSeal",
         "Cpu_ResamplingOverwritesPreviousQuery", "Cpu_ParallelFailureJoinsChildren",
         "Cpu_PreparedExecutionLifetime",
-        "Cpu_ZkArithmeticMatchesReference",
+        "Cpu_ZkArithmeticMatchesReference", "Cpu_ZkProofMatchesReference",
         "Cpu_GpuZkMatMulSeededInputsMatchReference",
         "Cpu_GpuZkBufferOwnership", "Core_LeafGoldenSeedGpuParity",
         "RingOps_PartyCachesDoNotAlias", "RingOps_ScalarUploadLifetimeAndRoleSwitch",

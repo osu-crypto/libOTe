@@ -3,7 +3,6 @@
 
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 
-#include <cstdlib>
 
 namespace osuCrypto::LogVole::detail
 {
@@ -45,12 +44,8 @@ namespace osuCrypto::LogVole::detail
     };
 
     template<typename Fn>
-    auto withCpuZkArithmetic(const seal::Modulus& mod, Fn&& fn)
+    auto withCpuZkArithmetic(const seal::Modulus& mod, bool enabled, Fn&& fn)
     {
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_ZK_PSEUDO_REDUCE");
-            return !value || value[0] != '0';
-        }();
         const u64 q = mod.value();
         if (enabled && q < (u64{1} << 51) && (u64{1} << 51) - q < (u64{1} << 24))
             return fn(CpuZkArithmetic<51>{mod});

@@ -149,6 +149,8 @@ namespace osuCrypto::LogVole
         ZkMulCpuWorkspace& operator=(const ZkMulCpuWorkspace&) = delete;
         ZkMulCpuWorkspace(ZkMulCpuWorkspace&&) noexcept;
         ZkMulCpuWorkspace& operator=(ZkMulCpuWorkspace&&) noexcept;
+        bool prepared() const noexcept;
+        std::size_t workers() const noexcept;
     };
 
     // The CI-VOLE request size to ask for when `voleCount` values need
@@ -415,12 +417,15 @@ namespace osuCrypto
         // owner precedes device state so its streams and scratch drain last.
         std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
         LogVole::ZkMulCpuWorkspace mCpuWorkspace;
+        LogVole::CpuBenchmarkContext* mCpuBenchmark = nullptr;
     public:
         LogVole::ZkMulCircuit mCircuit;
         LogVoleReceiver mVole;
 
         // Run the check on the GPU over device-resident MACs. Ignored when the
-        // CUDA backend is not in use.
+        // CUDA backend is not in use. Set before configure() so preparation
+        // does not reserve CPU resources for a GPU session. A declined GPU
+        // path prepares temporary CPU fallback resources only when needed.
         bool mUseDevice = false;
 
         // LogVole::gpu::DeviceScalars holding mCircuit.voleCount() wire values.
@@ -498,6 +503,7 @@ namespace osuCrypto
         // owner precedes device state so its streams and scratch drain last.
         std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
         LogVole::ZkMulCpuWorkspace mCpuWorkspace;
+        LogVole::CpuBenchmarkContext* mCpuBenchmark = nullptr;
     public:
         LogVole::ZkMulCircuit mCircuit;
         LogVoleSender mVole;

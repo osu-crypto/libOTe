@@ -155,7 +155,17 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
 
     ZkMulCircuit circuit;
     LOGVOLE_REQUIRE_TRUE(makeZkMulCircuit(51, 3, toBlock(0x50524550, 1), circuit));
-    ZkMulCpuWorkspace serial(circuit, 1), parallel(circuit, 3);
+    ZkMulCpuWorkspace serial(circuit, 1), parallel(circuit, 3), automatic(circuit, 0);
+    LOGVOLE_REQUIRE_TRUE(serial.prepared() && parallel.prepared());
+    LOGVOLE_REQUIRE_EQ(serial.workers(), 1u);
+    LOGVOLE_REQUIRE_TRUE(automatic.workers() >= 1);
+    if (std::thread::hardware_concurrency() > 1)
+        LOGVOLE_REQUIRE_TRUE(automatic.workers() > 1);
+    CpuBenchmarkContext partition;
+    partition.mCpus = {0};
+    partition.mWorkerLimit = 1;
+    ZkMulCpuWorkspace limited(circuit, 0, &partition);
+    LOGVOLE_REQUIRE_EQ(limited.workers(), 1u);
     PRNG random(toBlock(0x50524550, 2));
     constexpr u64 q = 65537, delta = 19;
     const seal::Modulus mod(q);
@@ -180,9 +190,17 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
         LOGVOLE_REQUIRE_EQ(actual.mV, expected.mV);
         LOGVOLE_REQUIRE_EQ(actualValue, expectedValue);
         LOGVOLE_REQUIRE_TRUE(zkAccept(actual, actualValue, delta, q));
+        LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, automatic, actual));
+        LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, automatic, actualValue));
+        LOGVOLE_REQUIRE_EQ(actual.mU, expected.mU);
+        LOGVOLE_REQUIRE_EQ(actual.mV, expected.mV);
+        LOGVOLE_REQUIRE_EQ(actualValue, expectedValue);
     }
     // Move only while quiescent: the stable heap owner retains pool and scratch.
     ZkMulCpuWorkspace moved(std::move(parallel));
+    LOGVOLE_REQUIRE_TRUE(moved.prepared());
+    LOGVOLE_REQUIRE_FALSE(parallel.prepared());
+    LOGVOLE_REQUIRE_EQ(parallel.workers(), 0u);
     ZkProof untouched{123, 456};
     LOGVOLE_REQUIRE_FALSE(zkMulProverResponse(circuit, wires, macs, 1, q, parallel, untouched));
     ZkMulCircuit wrongGeometry = circuit;
@@ -1118,12 +1136,12 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     // their first host access, with GPU execution disabled too.
                     ZkMulVerifier fallbackVerifier;
                     fallbackVerifier.mUseDevice = true;
-                    fallbackVerifier.configure(copied, bits, 1, setting, budget);
+                    fallbackVerifier.configure(copied, bits, 2, setting, budget);
                     LOGVOLE_REQUIRE_TRUE(fallbackVerifier.mCircuit.mOperands.empty());
                     const auto fallbackOwner = fallbackVerifier.mCircuit.mOperandsDevice;
                     ZkMulProver fallbackProver;
                     fallbackProver.mUseDevice = true;
-                    fallbackProver.configure(copied, bits, 1, setting, budget);
+                    fallbackProver.configure(copied, bits, 2, setting, budget);
                     LOGVOLE_REQUIRE_TRUE(fallbackProver.mCircuit.mOperands.empty());
                     const auto fallbackProverOwner = fallbackProver.mCircuit.mOperandsDevice;
                     GpuScope hostOnly;
@@ -2064,90 +2082,108 @@ void LogVole_Cpu_SamplerMatchesSeal(const oc::CLP&)
 
 void LogVole_Cpu_ZkArithmeticMatchesReference(const oc::CLP&)
 {
-    PRNG random(toBlock(0x738, 0x514));
-    const std::array<u64, 9> moduli = {257, (u64{1} << 50) + 27,
-        (u64{1} << 51) - 1, (u64{1} << 51) - 16777215,
-        2251799813554177ULL, 18014398508400641ULL,
-        (u64{1} << 54) - 1, (u64{1} << 54) - 16777215,
-        (u64{1} << 54) - 16777217};
-    for (u64 q : moduli)
+    const auto configured = LogVole::detail::captureCpuZkOptions();
+    for (bool scalar : {false, true})
     {
-        const seal::Modulus mod(q);
-        LogVole::detail::withCpuZkArithmetic(mod, [&](const auto& arithmetic) {
-            const std::array<u64, 7> edges = {0, 1, 2, q/2, q-1, q, ~u64{0}};
-            for (u64 a : edges) for (u64 b : edges)
-                LOGVOLE_REQUIRE_EQ(arithmetic.multiply(a, b), mulMod(a, b, mod));
-            for (unsigned i = 0; i < 100000; ++i)
-            {
-                const u64 a = random.get<u64>() % q;
-                const u64 b = random.get<u64>() % q;
-                const u64 c = random.get<u64>() % q;
-                LOGVOLE_REQUIRE_EQ(arithmetic.multiplyAdd(a, b, c), mulAddMod(a, b, c, mod));
-            }
-        });
+        auto options = configured;
+        if (scalar)
+        {
+            options.mPseudoReduce = false;
+            options.mVectorGates = false;
+            options.mVectorWitness = false;
+            options.mVectorMatMul = false;
+        }
+        PRNG random(toBlock(0x738, 0x514));
+        const std::array<u64, 9> moduli = {257, (u64{1} << 50) + 27,
+            (u64{1} << 51) - 1, (u64{1} << 51) - 16777215,
+            2251799813554177ULL, 18014398508400641ULL,
+            (u64{1} << 54) - 1, (u64{1} << 54) - 16777215,
+            (u64{1} << 54) - 16777217};
+        for (u64 q : moduli)
+        {
+            const seal::Modulus mod(q);
+            LogVole::detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
+                const std::array<u64, 7> edges = {0, 1, 2, q/2, q-1, q, ~u64{0}};
+                for (u64 a : edges) for (u64 b : edges)
+                    LOGVOLE_REQUIRE_EQ(arithmetic.multiply(a, b), mulMod(a, b, mod));
+                for (unsigned i = 0; i < 100000; ++i)
+                {
+                    const u64 a = random.get<u64>() % q;
+                    const u64 b = random.get<u64>() % q;
+                    const u64 c = random.get<u64>() % q;
+                    LOGVOLE_REQUIRE_EQ(arithmetic.multiplyAdd(a, b, c), mulAddMod(a, b, c, mod));
+                }
+            });
+        }
     }
 }
 
 void LogVole_Cpu_ZkVectorMatchesReference(const oc::CLP&)
 {
-    PRNG random(toBlock(0x5a4b5645, 0x43544f52));
-    for (int bits : {30, 51, 54, 60})
-    for (u64 gap : {1ULL, 32767ULL, 16777215ULL, 16777216ULL})
-    for (std::size_t count : {0, 1, 7, 8, 9, 15, 17, 1024})
+    const auto configured = LogVole::detail::captureCpuZkOptions();
+    for (bool scalar : {false, true})
     {
-        const u64 q = (u64{1} << bits) - gap;
-        const seal::Modulus mod(q);
-        const auto multiply = [q](u64 a, u64 b) {
-            return static_cast<u64>((static_cast<host_oracle::Uint128>(a) * b) % q);
-        };
-        std::vector<u64> wires(1026), labels(1026), outputs(count + 2);
-        std::vector<u32> operands(2 * count + 2);
-        random.get(wires.data(), wires.size());
-        random.get(labels.data(), labels.size());
-        random.get(outputs.data(), outputs.size());
-        const std::array<u64, 8> edges = {0, 1, q-1, q, q+1, 2*q-1, 2*q, ~u64{0}};
-        for (std::size_t i = 0; i < edges.size(); ++i)
+        auto options = configured;
+        if (scalar)
         {
-            wires[i+1] = edges[i];
-            labels[i+1] = edges[edges.size()-i-1];
-            if (i < count) outputs[i+1] = edges[i];
+            options.mPseudoReduce = false;
+            options.mVectorGates = false;
+            options.mVectorWitness = false;
+            options.mVectorMatMul = false;
         }
-        for (std::size_t i = 0; i < 2 * count; ++i)
-            operands[i+1] = i < 16 ? (i/2 + (i%2)*3) % 8 : random.get<u32>() % 1024;
-        for (u64 chi : {u64{0}, u64{1}, q-1, ~u64{0}, random.get<u64>()})
-        for (u64 delta : {u64{0}, u64{1}, q-1, ~u64{0}})
+        PRNG random(toBlock(0x5a4b5645, 0x43544f52));
+        for (int bits : {30, 51, 54, 60})
+        for (u64 gap : {1ULL, 32767ULL, 16777215ULL, 16777216ULL})
+        for (std::size_t count : {0, 1, 7, 8, 9, 15, 17, 1024})
         {
-            const u64 firstPower = random.get<u64>();
-            std::array<u64, 2> expected{0, 0}, actual{123, 456};
-            u64 verifier = 0, actualVerifier = 789, power = firstPower % q;
-            for (std::size_t i = 0; i < count; ++i)
+            const u64 q = (u64{1} << bits) - gap;
+            const seal::Modulus mod(q);
+            const auto multiply = [q](u64 a, u64 b) {
+                return static_cast<u64>((static_cast<host_oracle::Uint128>(a) * b) % q);
+            };
+            std::vector<u64> wires(1026), labels(1026), outputs(count + 2);
+            std::vector<u32> operands(2 * count + 2);
+            random.get(wires.data(), wires.size());
+            random.get(labels.data(), labels.size());
+            random.get(outputs.data(), outputs.size());
+            const std::array<u64, 8> edges = {0, 1, q-1, q, q+1, 2*q-1, 2*q, ~u64{0}};
+            for (std::size_t i = 0; i < edges.size(); ++i)
             {
-                const u32 x = operands[2*i+1]+1, y = operands[2*i+2]+1;
-                const u64 a0 = multiply(labels[x], labels[y]);
-                const u64 a1 = (outputs[i+1] % q + 2*q - multiply(wires[x], labels[y])
-                    - multiply(wires[y], labels[x])) % q;
-                const u64 b = (a0 + multiply(delta, outputs[i+1])) % q;
-                expected[0] = (expected[0] + multiply(power, a0)) % q;
-                expected[1] = (expected[1] + multiply(power, a1)) % q;
-                verifier = (verifier + multiply(power, b)) % q;
-                power = multiply(power, chi);
+                wires[i+1] = edges[i];
+                labels[i+1] = edges[edges.size()-i-1];
+                if (i < count) outputs[i+1] = edges[i];
             }
-            const bool used = LogVole::detail::cpuZkProverRange(operands.data()+1, wires.data()+1,
-                labels.data()+1, outputs.data()+1, count, firstPower, chi, mod, actual);
-            LOGVOLE_REQUIRE_EQ(LogVole::detail::cpuZkVerifierRange(operands.data()+1, labels.data()+1,
-                outputs.data()+1, count, firstPower, chi, delta, mod, actualVerifier), used);
-            const std::array<u64, 2> original{123, 456};
-            LOGVOLE_REQUIRE_TRUE(actual == (used ? expected : original));
-            LOGVOLE_REQUIRE_EQ(actualVerifier, used ? verifier : u64{789});
-#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
-            const char* enabled = std::getenv("LV_CPU_VECTOR_ZK");
-            const char* pseudo = std::getenv("LV_CPU_ZK_PSEUDO_REDUCE");
-            const bool expectedFast = (bits == 51 || bits == 54) && gap < (u64{1} << 24) && count >= 8 &&
-                (!enabled || enabled[0] != '0') && (!pseudo || pseudo[0] != '0') &&
-                __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512dq") &&
-                __builtin_cpu_supports("avx512ifma");
-            LOGVOLE_REQUIRE_EQ(used, expectedFast);
-#endif
+            for (std::size_t i = 0; i < 2 * count; ++i)
+                operands[i+1] = i < 16 ? (i/2 + (i%2)*3) % 8 : random.get<u32>() % 1024;
+            for (u64 chi : {u64{0}, u64{1}, q-1, ~u64{0}, random.get<u64>()})
+            for (u64 delta : {u64{0}, u64{1}, q-1, ~u64{0}})
+            {
+                const u64 firstPower = random.get<u64>();
+                std::array<u64, 2> expected{0, 0}, actual{123, 456};
+                u64 verifier = 0, actualVerifier = 789, power = firstPower % q;
+                for (std::size_t i = 0; i < count; ++i)
+                {
+                    const u32 x = operands[2*i+1]+1, y = operands[2*i+2]+1;
+                    const u64 a0 = multiply(labels[x], labels[y]);
+                    const u64 a1 = (outputs[i+1] % q + 2*q - multiply(wires[x], labels[y])
+                        - multiply(wires[y], labels[x])) % q;
+                    const u64 b = (a0 + multiply(delta, outputs[i+1])) % q;
+                    expected[0] = (expected[0] + multiply(power, a0)) % q;
+                    expected[1] = (expected[1] + multiply(power, a1)) % q;
+                    verifier = (verifier + multiply(power, b)) % q;
+                    power = multiply(power, chi);
+                }
+                const bool used = LogVole::detail::cpuZkProverRange(operands.data()+1, wires.data()+1,
+                    labels.data()+1, outputs.data()+1, count, firstPower, chi, mod, actual, options);
+                LOGVOLE_REQUIRE_EQ(LogVole::detail::cpuZkVerifierRange(operands.data()+1, labels.data()+1,
+                    outputs.data()+1, count, firstPower, chi, delta, mod, actualVerifier, options), used);
+                const std::array<u64, 2> original{123, 456};
+                LOGVOLE_REQUIRE_TRUE(actual == (used ? expected : original));
+                LOGVOLE_REQUIRE_EQ(actualVerifier, used ? verifier : u64{789});
+                const bool expectedFast = options.mVectorGates &&
+                    (bits == 51 || bits == 54) && gap < (u64{1} << 24) && count >= 8;
+                LOGVOLE_REQUIRE_EQ(used, expectedFast);
+            }
         }
     }
 }

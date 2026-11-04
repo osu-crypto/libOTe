@@ -42,6 +42,7 @@ namespace
 {
     void checkMatMulCpuTerms()
     {
+        const auto options = LogVole::detail::captureCpuZkOptions();
         struct Case { u64 modulus; std::size_t dimension; bool extreme; };
         // The p61 cases exceed the safe whole-dot accumulator length, while
         // n1025/p54 overflows an unbounded IFMA high-limb cross accumulator.
@@ -57,8 +58,14 @@ namespace
             {2305843009213693951, 33, true}, {2305843009213693951, 65, true}
         }};
         constexpr u64 guard = std::numeric_limits<u64>::max() - 37;
+        for (bool scalar : {false, true})
         for (const auto& test : cases)
         {
+            // Keep the original large accumulator-boundary cases once. Small
+            // rows cover selection of the separate scalar configuration.
+            if (scalar && test.dimension > 65) continue;
+            auto selected = options;
+            if (scalar) selected.mVectorMatMul = false;
             const auto n = test.dimension, entries = n * n;
             const auto p = test.modulus;
             const seal::Modulus mod(p);
@@ -92,9 +99,9 @@ namespace
             {
                 const auto end = begin + 1;
                 LOGVOLE_REQUIRE_TRUE(LogVole::detail::cpuZkMatMulProverTerms(
-                    a, ma, bt, mbt, a0, cross, n, begin, end, mod));
+                    a, ma, bt, mbt, a0, cross, n, begin, end, mod, selected));
                 LOGVOLE_REQUIRE_TRUE(LogVole::detail::cpuZkMatMulVerifierTerms(
-                    ma, mbt, products, n, begin, end, mod));
+                    ma, mbt, products, n, begin, end, mod, selected));
                 for (std::size_t j = 0; j < n; ++j)
                 {
                     u64 expectedA0 = 0, expectedCross = 0;
@@ -149,24 +156,24 @@ namespace
         {
             LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuZkMatMulProverTerms(input.data(), input.data(),
                 input.data(), input.data(), output.data(), other.data(),
-                range[0], range[1], range[2], mod));
+                range[0], range[1], range[2], mod, options));
             LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuZkMatMulVerifierTerms(input.data(), input.data(),
-                output.data(), range[0], range[1], range[2], mod));
+                output.data(), range[0], range[1], range[2], mod, options));
             unchanged();
         }
         LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuZkMatMulProverTerms(nullptr, input.data(),
-            input.data(), input.data(), output.data(), other.data(), 2, 0, 1, mod));
+            input.data(), input.data(), output.data(), other.data(), 2, 0, 1, mod, options));
         LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuZkMatMulVerifierTerms(input.data(), nullptr,
-            output.data(), 2, 0, 1, mod));
+            output.data(), 2, 0, 1, mod, options));
         LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuZkMatMulProverTerms(input.data(), input.data(),
-            input.data(), input.data(), output.data(), other.data(), 2, 0, 1, zeroMod));
+            input.data(), input.data(), output.data(), other.data(), 2, 0, 1, zeroMod, options));
         LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuZkMatMulVerifierTerms(input.data(), input.data(),
-            output.data(), 2, 0, 1, zeroMod));
+            output.data(), 2, 0, 1, zeroMod, options));
         unchanged();
         LOGVOLE_REQUIRE_TRUE(LogVole::detail::cpuZkMatMulProverTerms(nullptr, nullptr, nullptr,
-            nullptr, nullptr, nullptr, 2, 1, 1, mod));
+            nullptr, nullptr, nullptr, 2, 1, 1, mod, options));
         LOGVOLE_REQUIRE_TRUE(LogVole::detail::cpuZkMatMulVerifierTerms(nullptr, nullptr,
-            nullptr, 2, 1, 1, mod));
+            nullptr, 2, 1, 1, mod, options));
     }
 
     template<typename Prover, typename Verifier, typename Statement>
