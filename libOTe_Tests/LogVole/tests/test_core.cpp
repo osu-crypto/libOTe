@@ -397,27 +397,25 @@ namespace
         return out;
     }
 
-    thread_local const char* comparisonStage = "unspecified";
-    thread_local std::size_t comparisonBatchIndex = 0;
-
-    void expect_poly_equal(const RnsPoly& a, const RnsPoly& b)
+    void expect_poly_equal(const RnsPoly& a, const RnsPoly& b,
+        const char* stage = "unspecified", std::size_t batchIndex = 0)
     {
         LOGVOLE_REQUIRE_EQ(a.mCoeffs.size(), b.mCoeffs.size());
         for (std::size_t i = 0; i < a.mCoeffs.size(); ++i)
         {
             LOGVOLE_EXPECT_EQ(a.mCoeffs[i], b.mCoeffs[i])
-                << comparisonStage << " batch idx " << comparisonBatchIndex
+                << stage << " batch idx " << batchIndex
                 << " coeff idx " << i;
         }
     }
 
-    void expect_batch_equal(const std::vector<RnsPoly>& a, const std::vector<RnsPoly>& b)
+    void expect_batch_equal(const std::vector<RnsPoly>& a, const std::vector<RnsPoly>& b,
+        const char* stage = "unspecified")
     {
         LOGVOLE_REQUIRE_EQ(a.size(), b.size());
         for (std::size_t i = 0; i < a.size(); ++i)
         {
-            comparisonBatchIndex = i;
-            expect_poly_equal(a[i], b[i]);
+            expect_poly_equal(a[i], b[i], stage, i);
         }
     }
 
@@ -789,8 +787,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             params.mShrinkExpand.mAlpha, tauHi,
             params.mShrinkExpand.mRing, expectedRep));
         LOGVOLE_REQUIRE_TRUE(gpu::download(*rep, actualRep, readbackExecution.readbackStream(), repCount));
-        comparisonStage = "CI delta device repetition";
-        expect_batch_equal(expectedRep, actualRep);
+        expect_batch_equal(expectedRep, actualRep, "CI delta device repetition");
 
         {
             ScopedProtocolCacheScope wrongRole(ProtocolCacheRole::Receiver, runId);
@@ -942,8 +939,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                     cudaActual.mRootCudaWire.mAllocationBeginNs);
             }
         }
-        comparisonStage = "CI delta public snapshot";
-        expect_batch_equal(baseline.mState.mSk1, selected.mState.mSk1);
+        expect_batch_equal(baseline.mState.mSk1, selected.mState.mSk1, "CI delta public snapshot");
         // The top HE secret is distinct from mSk1's wrapped CI delta. It was
         // sampled once from the same parent SEAL row draws and stayed private
         // on the sender device until Ct1/Root completed.
@@ -952,9 +948,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(topSecret.mLazyTopSk1 != nullptr);
         LOGVOLE_REQUIRE_EQ(topSecret.mTopSk1OwnerRunId, runId);
         LOGVOLE_REQUIRE_TRUE(topSecret.mSk1.empty());
-        comparisonStage = "top HE secret seed replay";
         expect_batch_equal(baseline.mState.mShrinkExpandState.mSk1,
-            topSecret.hostSk1());
+            topSecret.hostSk1(), "top HE secret seed replay");
         LOGVOLE_REQUIRE_TRUE(gpu::topSecretUniformBatchMatches(zp.mRing,
             *topSecret.mTopSk1Device, tauHi, runId));
         LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(zp.mRing,
@@ -1002,10 +997,9 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             }
             LOGVOLE_REQUIRE_TRUE(gpu::download(*privateRep,
                 deviceRep, readbackExecution.readbackStream(), privateRows));
-            comparisonStage = width == 1u
+            expect_batch_equal(hostRep, deviceRep, width == 1u
                 ? "top HE gamma-one full-poly repetition"
-                : "top HE multi-digit selected-limb repetition";
-            expect_batch_equal(hostRep, deviceRep);
+                : "top HE multi-digit selected-limb repetition");
         }
         auto rootReplica = gpu::rootHiReplicateResident(zp.mRing,
             *topSecret.mTopSk1Device, tauHi);
@@ -1020,8 +1014,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(replicateRootHiKeyByLimb(topSecret.hostSk1(),
             tauHi, params.mShrinkExpand.mRing, expectedRoot));
         LOGVOLE_REQUIRE_TRUE(gpu::download(*rootReplica, actualRoot, readbackExecution.readbackStream(), rootRows));
-        comparisonStage = "Root high-key whole-poly D2D replication";
-        expect_batch_equal(expectedRoot, actualRoot);
+        expect_batch_equal(expectedRoot, actualRoot, "Root high-key whole-poly D2D replication");
         {
             ScopedProtocolCacheScope wrongRole(ProtocolCacheRole::Receiver, runId);
             LOGVOLE_REQUIRE_FALSE(gpu::topSecretUniformBatchMatches(zp.mRing,
@@ -1052,9 +1045,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(selected.mState.mShrinkExpandState.mSk1.empty());
         LOGVOLE_REQUIRE_TRUE(selected.mState.mShrinkExpandState.mLazyS != nullptr);
         LOGVOLE_REQUIRE_TRUE(selected.mState.mShrinkExpandState.mS.empty());
-        comparisonStage = "CI delta selected seed-label host view";
         expect_batch_equal(expectedRep,
-            selected.mState.mShrinkExpandState.hostS());
+            selected.mState.mShrinkExpandState.hostS(), "CI delta selected seed-label host view");
         auto detached = selected.mState.mShrinkExpandState;
         materializeShrinkExpandHostState(detached);
         expect_batch_equal(expectedRep, detached.mS);
@@ -1249,22 +1241,18 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             const auto& seActual = actualLevel->mShrinkExpandState;
             LOGVOLE_REQUIRE_TRUE(seActual.mTopSk1Device.get() == privateOwner);
             LOGVOLE_REQUIRE_TRUE(seActual.mSk1.empty());
-            comparisonStage = "recursive top fixed-key seed replay";
-            expect_batch_equal(seReference.mSk1, seActual.hostSk1());
+            expect_batch_equal(seReference.mSk1, seActual.hostSk1(), "recursive top fixed-key seed replay");
             if (levels)
             {
                 LOGVOLE_REQUIRE_TRUE(actualLevel->mSk1.empty());
-                comparisonStage = "recursive child fixed-key host view";
                 expect_batch_equal(referenceLevel->mSk1,
-                    actualLevel->hostSk1());
+                    actualLevel->hostSk1(), "recursive child fixed-key host view");
                 LOGVOLE_REQUIRE_TRUE(seActual.mLazyS != nullptr);
                 LOGVOLE_REQUIRE_TRUE(seActual.mS.empty());
-                comparisonStage = "recursive child device seed-label repetition";
-                expect_batch_equal(seReference.mS, seActual.hostS());
+                expect_batch_equal(seReference.mS, seActual.hostS(), "recursive child device seed-label repetition");
             }
-            comparisonStage = "recursive top/child Ct1";
             expect_batch_equal(seReference.mCt1.mPolys,
-                seActual.hostCt1().mPolys);
+                seActual.hostCt1().mPolys, "recursive top/child Ct1");
             referenceLevel = referenceLevel->mNextLevelState.get();
             actualLevel = actualLevel->mNextLevelState.get();
             ++levels;
