@@ -128,15 +128,16 @@ namespace
         ScopedEnvironmentValue eagerRing("LV_GPU_SETUP_LIGHTWEIGHT_RING", "0");
         ScopedEnvironmentValue eagerCrt("LV_GPU_SETUP_LIGHTWEIGHT_CRT", "0");
         ZpCrtContext reference, candidate;
+        auto factory = std::make_shared<ZpContextFactory>();
         {
             ScopedEnvironmentValue originalBatching("LV_GPU_SETUP_BATCHING_SINGLE_LIMB", "0");
-            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, reference));
+            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, reference, factory));
         }
         {
             ScopedEnvironmentValue compactBatching("LV_GPU_SETUP_BATCHING_SINGLE_LIMB", "1");
-            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, candidate));
+            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, candidate, factory));
             ZpCrtContext again;
-            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, again));
+            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, again, factory));
             LOGVOLE_EXPECT_TRUE(again.mBatchingContext == candidate.mBatchingContext);
         }
         // Only the encoding helper changes. The cryptographic ring and full-Q
@@ -747,10 +748,12 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         exported.reset();
         LOGVOLE_REQUIRE_TRUE(producer.expired());
     }
-    // A process-wide lookup index must not keep factory resources alive.
+    // An explicit weak lookup index must not keep factory resources alive.
     // Reuse is preserved while caller contexts retain their immutable record.
     std::weak_ptr<const RingNttContext> ringRecord;
     std::weak_ptr<const ZpCrtContext> crtRecord;
+    std::weak_ptr<RingContextFactory> ringFactoryLifetime;
+    std::weak_ptr<ZpContextFactory> crtFactoryLifetime;
     {
         ScopedGpuEnabled cpu(false);
         RingParams unique{};
@@ -758,7 +761,9 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         assignValues<int>(unique.mCoeffModulusBits, {26, 27, 28});
         RingNttContext first, second;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(unique, first));
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(unique, second));
+        auto ringFactory = first.mFactory;
+        ringFactoryLifetime = ringFactory;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(unique, second, first.mFactory));
         LOGVOLE_REQUIRE_TRUE(first.mFactoryOwner && first.mFactoryOwner == second.mFactoryOwner);
         ringRecord = first.mFactoryOwner;
         second = {};
@@ -773,11 +778,21 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         }
         ZpCrtContext crt, again;
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(unique, 19, crt));
-        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(unique, 19, again));
+        auto crtFactory = crt.mFactory;
+        crtFactoryLifetime = crtFactory;
+        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(unique, 19, again, crt.mFactory));
         LOGVOLE_REQUIRE_TRUE(crt.mFactoryOwner && crt.mFactoryOwner == again.mFactoryOwner);
         crtRecord = crt.mFactoryOwner;
+        // Indices remain alive after all records are released and must not
+        // retain records, host tables, or execution resources through a cycle.
+        first = {};
+        crt = {};
+        again = {};
+        LOGVOLE_REQUIRE_TRUE(ringRecord.expired() && crtRecord.expired());
+        LOGVOLE_REQUIRE_FALSE(ringFactoryLifetime.expired() || crtFactoryLifetime.expired());
     }
     LOGVOLE_REQUIRE_TRUE(ringRecord.expired() && crtRecord.expired());
+    LOGVOLE_REQUIRE_TRUE(ringFactoryLifetime.expired() && crtFactoryLifetime.expired());
     for (unsigned round = 0; round != 2; ++round)
     {
         RingNttContext context;
@@ -1237,6 +1252,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(context.mModuli.empty() && context.mRawModuli);
             LOGVOLE_REQUIRE_TRUE(validateRingContextMetadata(context));
             RingNttContext again;
+            again.mFactory = context.mFactory;
             LOGVOLE_REQUIRE_TRUE(makeGpuRingNttContext(params, again));
             LOGVOLE_EXPECT_TRUE(again.mHostContextCache == context.mHostContextCache);
             LOGVOLE_EXPECT_TRUE(again.mRawModuli == context.mRawModuli);
@@ -1282,7 +1298,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     }
                 }
                 ZpCrtContext restored;
-                LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, restored));
+                LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, restored, crt[party].mFactory));
                 LOGVOLE_REQUIRE_TRUE(restored.mGpuLightweight);
                 LOGVOLE_EXPECT_TRUE(restored.mHostContextCache == crt[party].mHostContextCache);
             }
@@ -1516,6 +1532,9 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
         }};
         for (const auto& [degree, widths] : dynamicCases)
         {
+            // Ownership regressions select small dynamic tuples and both
+            // production presets; the full setup/table matrix remains default.
+            if (cmd.getOr("lvFactoryFast", 0) && degree == 65536u) continue;
             RingParams params{};
             params.mPolyModulusDegree = degree;
             params.mCoeffModulusBits.resize(widths.size());
@@ -1887,7 +1906,7 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, minimalRing));
                 LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(batchParams, plaintextBits, minimalCrt));
                 RingNttContext again;
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, again));
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, again, minimalRing.mFactory));
                 LOGVOLE_EXPECT_TRUE(again.mContext == minimalRing.mContext);
             }
             auto expectSameUsableContexts = [](const auto& full, const auto& minimal) {
@@ -1948,6 +1967,7 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
         // cases exercise both NTT kernels without relying on batch dispatch.
         for (std::size_t count : { std::size_t(1), std::size_t(5), std::size_t(65) })
         {
+            if (cmd.getOr("lvFactoryFast", 0) && count == 65) continue;
             if (!eightLimbs && count == 65) continue;
             std::vector<RnsPoly> actual(count + 2);
             for (std::size_t i = 0; i < actual.size(); ++i)

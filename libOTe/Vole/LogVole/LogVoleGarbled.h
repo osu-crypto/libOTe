@@ -77,6 +77,7 @@ namespace osuCrypto
         }
 
     private:
+        std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         LogVole::CivoleParams mParams;
         LogVole::CivoleSenderState mState;
         LogVole::GarbledLabelLayout mLayout;
@@ -114,6 +115,7 @@ namespace osuCrypto
         const LogVole::GarbledLabelLayout& layout() const { return mLayout; }
 
     private:
+        std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         LogVole::CivoleParams mParams;
         LogVole::CivoleReceiverState mState;
         LogVole::GarbledLabelLayout mLayout;

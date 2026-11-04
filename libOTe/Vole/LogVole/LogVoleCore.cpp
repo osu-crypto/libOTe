@@ -4511,6 +4511,13 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
+            auto ringOwner = input.mRingFactoryOwner;
+            if (!ringOwner)
+            {
+                RingNttContext math;
+                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, math)) return false;
+                ringOwner = std::move(math.mFactoryOwner);
+            }
             auto execution = input.mGpuExecution;
             auto cpuScratch = input.mCpuScratch ? input.mCpuScratch :
                 std::make_shared<detail::ShrinkExpandScratch>();
@@ -4533,7 +4540,7 @@ namespace osuCrypto::LogVole
             if (internalWrappedDelta)
             {
                 if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing,
-                        deltaCtx) ||
+                        deltaCtx, ringOwner) ||
                     !gpu::bindContextExecution(deltaCtx, execution) ||
                     !gpu::setupDeltaBatchMatches(deltaCtx,
                         *input.mWrappedDeltaDevice, 1u, deltaOwnerRunId))
@@ -4542,7 +4549,7 @@ namespace osuCrypto::LogVole
             if (internalTopSecret)
             {
                 if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing,
-                        deltaCtx) ||
+                        deltaCtx, ringOwner) ||
                     !gpu::bindContextExecution(deltaCtx, execution) ||
                     input.mSenderOwnerRunId != deltaOwnerRunId ||
                     input.mLazyTopSk1->count() != tauHi ||
@@ -4647,6 +4654,7 @@ namespace osuCrypto::LogVole
                 seInput.mParams = seParams;
                 seInput.mGpuExecution = execution;
                 seInput.mCpuScratch = cpuScratch;
+                seInput.mRingFactoryOwner = ringOwner;
                 seInput.mS = std::move(sRep);
                 seInput.mSDevice = residentS;
                 seInput.mLazyS = lazyS;
@@ -4742,6 +4750,7 @@ namespace osuCrypto::LogVole
                 childInput.mParams = std::move(childParams);
                 childInput.mGpuExecution = execution;
                 childInput.mCpuScratch = cpuScratch;
+                childInput.mRingFactoryOwner = ringOwner;
                 if (nextState.mShrinkExpandState.mTopSk1Device)
                 {
                     childInput.mTopSk1Device =
@@ -4780,6 +4789,13 @@ namespace osuCrypto::LogVole
             bool isTopLevel,
             const ShrinkExpandReceiverState* reusableInternalState)
         {
+            auto ringOwner = input.mRingFactoryOwner;
+            if (!ringOwner)
+            {
+                RingNttContext math;
+                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, math)) return false;
+                ringOwner = std::move(math.mFactoryOwner);
+            }
             auto execution = input.mGpuExecution;
             auto cpuScratch = input.mCpuScratch ? input.mCpuScratch :
                 std::make_shared<detail::ShrinkExpandScratch>();
@@ -4826,6 +4842,7 @@ namespace osuCrypto::LogVole
                 seInput.mParams = seParams;
                 seInput.mGpuExecution = execution;
                 seInput.mCpuScratch = cpuScratch;
+                seInput.mRingFactoryOwner = ringOwner;
                 seInput.mDeferHostSnapshot = input.mUseGpuResidentInternalState;
 
                 if (!finalizeShrinkExpandReceiverOffline(seInput, std::forward<Message>(message).mShrinkExpandMessage, seState))
@@ -4873,6 +4890,7 @@ namespace osuCrypto::LogVole
                 childInput.mParams = std::move(childParams);
                 childInput.mGpuExecution = execution;
                 childInput.mCpuScratch = cpuScratch;
+                childInput.mRingFactoryOwner = ringOwner;
                 childInput.mLeafInputsAreGadget = true;
                 childInput.mUseGpuResidentInternalState = input.mUseGpuResidentInternalState;
 
@@ -5937,7 +5955,8 @@ namespace osuCrypto::LogVole
         const std::size_t rho = ringModulusCount(ctx);
         if (!rho || !validateRingContextMetadata(ctx) ||
             !(ctx.mParams == params.mShrinkExpand.mRing) || !std::isfinite(log2B) ||
-            !makeZpCrtContext(params.mShrinkExpand.mRing, params.mShrinkExpand.mPlaintextModulusBits, zp))
+            !makeZpCrtContext(params.mShrinkExpand.mRing, params.mShrinkExpand.mPlaintextModulusBits,
+                zp, ctx.mCrtFactory ? ctx.mCrtFactory : std::make_shared<ZpContextFactory>(ctx.mFactory)))
             return false;
 
         const u64 p = zp.mPlaintextModulus;

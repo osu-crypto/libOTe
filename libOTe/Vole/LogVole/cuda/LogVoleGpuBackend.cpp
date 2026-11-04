@@ -1008,6 +1008,7 @@ namespace osuCrypto::LogVole::gpu
             {
                 auto next = *base;
                 next.mFactoryOwner = base;
+                next.mCrtFactory = ctx.mCrtFactory;
                 next.mGpuExecution = execution;
                 next.mPublicCache = std::make_shared<PublicPolynomialCache>();
                 selected = std::make_shared<const RingNttContext>(std::move(next));

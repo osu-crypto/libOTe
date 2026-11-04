@@ -82,13 +82,15 @@ namespace osuCrypto::LogVole
     {
         void configureGarbled(u64 count, u32 threads, CivoleSetting setting,
             CivoleParams& params, GarbledLabelLayout& layout, u64& modulus,
-            bool& nativeBundleCommitted)
+            bool& nativeBundleCommitted,
+            std::shared_ptr<const ZpCrtContext>& factoryOwner)
         {
             CivoleParams next;
             ZpCrtContext selected{};
             if (!makeCivoleParams(setting, next, std::max(threads, 1u)) ||
                 !makeZpCrtContext(next.mLogVole.mShrinkExpand.mRing,
-                    next.mLogVole.mShrinkExpand.mPlaintextModulusBits, selected) ||
+                    next.mLogVole.mShrinkExpand.mPlaintextModulusBits, selected,
+                    factoryOwner ? factoryOwner->mFactory : nullptr) ||
                 selected.mPlaintextModulus <= (u64{1} << 43))
                 throw std::invalid_argument("garbled labels require a supported 128-bit parameter set");
             GarbledLabelLayout shape(count, next.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
@@ -104,6 +106,7 @@ namespace osuCrypto::LogVole
             layout = shape;
             modulus = selected.mPlaintextModulus;
             nativeBundleCommitted = selected.mNativeSealBundleCommitted;
+            factoryOwner = std::move(selected.mFactoryOwner);
         }
 
         std::array<u8, 32> garbledHeader(const GarbledLabelLayout& layout, u64 modulus)
@@ -148,7 +151,7 @@ namespace osuCrypto
             ProtocolCacheRole::Sender, configureRun);
         bool nativeBundleCommitted = false;
         configureGarbled(n, threads, setting, mParams, mLayout, mModulus,
-            nativeBundleCommitted);
+            nativeBundleCommitted, mConfigureFactoryOwner);
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
         mState = {};
@@ -177,6 +180,7 @@ namespace osuCrypto
         std::vector<u64> slots;
         CivoleSenderOfflineInput input;
         input.mParams = mParams;
+        input.mCrtFactoryOwner = mConfigureFactoryOwner;
         input.mW = mLayout.scalarCount();
         bool prepareDeltaOnDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -229,7 +233,7 @@ namespace osuCrypto
             ProtocolCacheRole::Receiver, configureRun);
         bool nativeBundleCommitted = false;
         configureGarbled(n, threads, setting, mParams, mLayout, mModulus,
-            nativeBundleCommitted);
+            nativeBundleCommitted, mConfigureFactoryOwner);
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
         mState = {};
@@ -249,6 +253,7 @@ namespace osuCrypto
         if (!ack[0]) throw std::invalid_argument("garbled-label configurations do not match");
         CivoleReceiverOfflineInput input;
         input.mParams = mParams;
+        input.mCrtFactoryOwner = mConfigureFactoryOwner;
         input.mW = mLayout.scalarCount();
         CivoleReceiverState state;
         co_await civoleReceiverOffline(input, state, sock);

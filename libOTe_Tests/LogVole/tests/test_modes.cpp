@@ -47,18 +47,21 @@ namespace
         constexpr u64 delta = 19;
         LogVoleSender originalSender;
         LogVoleReceiver originalReceiver;
-        originalSender.configure(count, 55, threads, setting, mode);
-        originalReceiver.configure(count, 55, threads, setting, mode);
-        auto observeFactory = [](const CivoleParams& params, ProtocolCacheRole role)
+        auto senderReuse = std::make_shared<ZpContextFactory>();
+        auto receiverReuse = std::make_shared<ZpContextFactory>();
+        originalSender.configure(count, 55, threads, setting, mode, senderReuse);
+        originalReceiver.configure(count, 55, threads, setting, mode, receiverReuse);
+        auto observeFactory = [](const CivoleParams& params, ProtocolCacheRole role,
+            const std::shared_ptr<ZpContextFactory>& factory)
         {
             ScopedProtocolCacheScope scope(role, 0);
             ZpCrtContext context;
             LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mLogVole.mShrinkExpand.mRing,
-                params.mLogVole.mShrinkExpand.mPlaintextModulusBits, context));
+                params.mLogVole.mShrinkExpand.mPlaintextModulusBits, context, factory));
             return std::weak_ptr<const ZpCrtContext>(context.mFactoryOwner);
         };
-        const auto senderFactory = observeFactory(originalSender.mParams, ProtocolCacheRole::Sender);
-        const auto receiverFactory = observeFactory(originalReceiver.mParams, ProtocolCacheRole::Receiver);
+        const auto senderFactory = observeFactory(originalSender.mParams, ProtocolCacheRole::Sender, senderReuse);
+        const auto receiverFactory = observeFactory(originalReceiver.mParams, ProtocolCacheRole::Receiver, receiverReuse);
         LOGVOLE_REQUIRE_FALSE(senderFactory.expired());
         LOGVOLE_REQUIRE_FALSE(receiverFactory.expired());
         originalSender.mKeepOutputOnDevice = device;

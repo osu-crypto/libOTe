@@ -396,7 +396,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(input.mParams.mRing, ctx))
+        if (!makeRingNttContext(input.mParams.mRing, ctx, input.mRingFactoryOwner))
         {
             return false;
         }
@@ -702,7 +702,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(input.mParams.mRing, ctx))
+        if (!makeRingNttContext(input.mParams.mRing, ctx, input.mRingFactoryOwner))
         {
             return false;
         }

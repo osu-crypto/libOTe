@@ -108,7 +108,29 @@ namespace osuCrypto::LogVole
     };
 
     struct RingHostContextCache;
+    class ZpContextFactory;
     struct PublicPolynomialCache;
+    struct RingNttContext;
+
+    // Explicit reuse domain. Records retain their factory; the factory indexes
+    // records weakly, so neither cached tables nor execution outlive callers.
+    class RingContextFactory
+    {
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+        friend bool makeRingNttContext(const RingParams&, RingNttContext&,
+            std::shared_ptr<RingContextFactory>);
+        friend bool makeGpuRingNttContext(const RingParams&, RingNttContext&);
+        friend bool publishNativeGpuRingNttContext(RingNttContext&);
+        bool make(const RingParams& params, RingNttContext& out, bool lightweight,
+            const std::shared_ptr<RingContextFactory>& owner);
+        bool publish(RingNttContext& ready);
+    public:
+        RingContextFactory();
+        ~RingContextFactory();
+        RingContextFactory(const RingContextFactory&) = delete;
+        RingContextFactory& operator=(const RingContextFactory&) = delete;
+    };
 
     struct RingModulusMetadata
     {
@@ -121,6 +143,10 @@ namespace osuCrypto::LogVole
 
     struct RingNttContext
     {
+        std::shared_ptr<RingContextFactory> mFactory;
+        // A CRT-selected ring carries its explicit plaintext factory into leaf
+        // rounding helpers. Both factory indices are weak; this adds no cycle.
+        std::shared_ptr<ZpContextFactory> mCrtFactory;
         // Caller values retain an immutable record; a session selection may
         // retain its math parent. No record ever refers to itself; indices are weak.
         std::shared_ptr<const RingNttContext> mFactoryOwner;
@@ -155,7 +181,8 @@ namespace osuCrypto::LogVole
     bool validateRingPolyShape(const RnsPoly& poly, const RingParams& params);
     bool validateRingBatchShape(const std::vector<RnsPoly>& polys, const RingParams& params);
     bool validateRingBatchShape(std::span<const RnsPoly> polys, const RingParams& params);
-    bool makeRingNttContext(const RingParams& params, RingNttContext& out);
+    bool makeRingNttContext(const RingParams& params, RingNttContext& out,
+        std::shared_ptr<RingContextFactory> factory = {});
     // A retained record fixes table and execution ownership across worker/role
     // changes. CPU access materializes its exact host view when necessary.
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,

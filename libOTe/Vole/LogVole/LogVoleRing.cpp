@@ -806,18 +806,20 @@ namespace osuCrypto::LogVole
         using RingContextCache = std::
             unordered_map<RingContextCacheKey, std::weak_ptr<const RingNttContext>, RingContextCacheKeyHash>;
 
-        // A lookup index never extends resource lifetime past its callers.
-        RingContextCache& ringContextCache()
-        {
-            static RingContextCache cache;
-            return cache;
-        }
-        std::mutex ringContextCacheMutex;
-
         bool makeRingNttContextUncached(const RingParams& params, bool expandModChain, RingNttContext& out);
     }
 
-    static bool makeRingNttContextCached(const RingParams& params, RingNttContext& out, bool lightweight)
+    struct RingContextFactory::Impl
+    {
+        RingContextCache mCache;
+        std::mutex mMutex;
+    };
+
+    RingContextFactory::RingContextFactory() : mImpl(std::make_unique<Impl>()) {}
+    RingContextFactory::~RingContextFactory() = default;
+
+    bool RingContextFactory::make(const RingParams& params, RingNttContext& out,
+        bool lightweight, const std::shared_ptr<RingContextFactory>& owner)
     {
         if (!validateRingParams(params))
         {
@@ -838,9 +840,9 @@ namespace osuCrypto::LogVole
 #endif
 
         {
-            std::lock_guard<std::mutex> lock(ringContextCacheMutex);
-            auto it = ringContextCache().find(key);
-            if (it != ringContextCache().end())
+            std::lock_guard<std::mutex> lock(mImpl->mMutex);
+            auto it = mImpl->mCache.find(key);
+            if (it != mImpl->mCache.end())
             {
                 if (auto record = it->second.lock())
                 {
@@ -848,7 +850,7 @@ namespace osuCrypto::LogVole
                     out.mFactoryOwner = std::move(record);
                     return true;
                 }
-                ringContextCache().erase(it);
+                mImpl->mCache.erase(it);
             }
         }
 
@@ -894,6 +896,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        built.mFactory = owner;
         built.mResourceScope = std::move(resources);
         built.mPublicCache = std::make_shared<PublicPolynomialCache>();
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -902,8 +905,9 @@ namespace osuCrypto::LogVole
 #endif
         auto shared = std::make_shared<const RingNttContext>(built);
         {
-            std::lock_guard<std::mutex> lock(ringContextCacheMutex);
-            auto& slot = ringContextCache()[key];
+            std::lock_guard<std::mutex> lock(mImpl->mMutex);
+            std::erase_if(mImpl->mCache, [](const auto& entry) { return entry.second.expired(); });
+            auto& slot = mImpl->mCache[key];
             if (auto existing = slot.lock()) shared = std::move(existing);
             else slot = shared;
             out = *shared;
@@ -912,7 +916,8 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool makeRingNttContext(const RingParams& params, RingNttContext& out)
+    bool makeRingNttContext(const RingParams& params, RingNttContext& out,
+        std::shared_ptr<RingContextFactory> factory)
     {
         bool lightweight = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -923,7 +928,9 @@ namespace osuCrypto::LogVole
             (!productionRingModuli(params).empty() ||
                 (gpu::dynamicSealSetupSupported(params) && gpu::currentDeviceOrdinal() == 0));
 #endif
-        return makeRingNttContextCached(params, out, lightweight);
+        if (!factory) factory = out.mFactory;
+        if (!factory) factory = std::make_shared<RingContextFactory>();
+        return factory->make(params, out, lightweight, factory);
     }
 
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
@@ -964,7 +971,8 @@ namespace osuCrypto::LogVole
             return false;
 #endif
         }
-        return makeRingNttContextCached(params, out, true);
+        auto factory = out.mFactory ? out.mFactory : std::make_shared<RingContextFactory>();
+        return factory->make(params, out, true, factory);
     }
 
     bool makeNativeGpuRingNttContextFromCertificate(
@@ -1015,6 +1023,12 @@ namespace osuCrypto::LogVole
 
     bool publishNativeGpuRingNttContext(RingNttContext& ready)
     {
+        auto factory = ready.mFactory;
+        return factory && factory->publish(ready);
+    }
+
+    bool RingContextFactory::publish(RingNttContext& ready)
+    {
 #if defined(ENABLE_LOGVOLE_CUDA)
         HostStep publicationStep("setup: native ring context publication");
         const auto owner = ready.mResourceScope;
@@ -1038,9 +1052,10 @@ namespace osuCrypto::LogVole
             record.mFactoryOwner.reset();
             auto shared = std::make_shared<const RingNttContext>(std::move(record));
             ready.mFactoryOwner = shared;
-            std::lock_guard<std::mutex> lock(ringContextCacheMutex);
-            if (auto it = ringContextCache().find(key);
-                it != ringContextCache().end())
+            std::lock_guard<std::mutex> lock(mImpl->mMutex);
+            std::erase_if(mImpl->mCache, [](const auto& entry) { return entry.second.expired(); });
+            if (auto it = mImpl->mCache.find(key);
+                it != mImpl->mCache.end())
             {
                 // The static lightweight context can have been cached by a
                 // standalone budget check before the combined GPU factory.
@@ -1048,7 +1063,7 @@ namespace osuCrypto::LogVole
                 it->second = std::move(shared);
                 return true;
             }
-            ringContextCache().emplace(std::move(key), std::move(shared));
+            mImpl->mCache.emplace(std::move(key), std::move(shared));
             return true;
         }
         catch (...) { return false; }

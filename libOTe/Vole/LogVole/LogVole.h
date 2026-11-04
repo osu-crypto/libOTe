@@ -18,6 +18,22 @@
 namespace osuCrypto::LogVole
 {
     struct ZpHostContextCache;
+    struct ZpCrtContext;
+    class ZpContextFactory
+    {
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+        friend bool makeZpCrtContext(const RingParams&, u32, ZpCrtContext&,
+            std::shared_ptr<ZpContextFactory>);
+        bool make(const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out,
+            const std::shared_ptr<ZpContextFactory>& owner);
+    public:
+        explicit ZpContextFactory(std::shared_ptr<RingContextFactory> ringFactory = {});
+        ~ZpContextFactory();
+        ZpContextFactory(const ZpContextFactory&) = delete;
+        ZpContextFactory& operator=(const ZpContextFactory&) = delete;
+        const std::shared_ptr<RingContextFactory>& ringFactory() const;
+    };
     namespace gpu { class GpuPlainNtt; }
 
     // Public session identifier used by the low-level CI-VOLE API. The
@@ -30,6 +46,7 @@ namespace osuCrypto::LogVole
     // the concrete prime used by a session.
     struct ZpCrtContext
     {
+        std::shared_ptr<ZpContextFactory> mFactory;
         // Caller values retain an immutable record. A session selection may
         // retain its math parent, without a self-reference or strong index.
         std::shared_ptr<const ZpCrtContext> mFactoryOwner;
@@ -63,7 +80,7 @@ namespace osuCrypto::LogVole
     // independent factories.
     bool makeNativeSealSetupContexts(const RingParams& ring,
         u32 plaintextModulusBits, RingNttContext& ringOut,
-        ZpCrtContext& zpOut);
+        ZpCrtContext& zpOut, std::shared_ptr<ZpContextFactory> factory = {});
 
     struct CivoleParams
     {
@@ -85,6 +102,8 @@ namespace osuCrypto::LogVole
     // sender's global VOLE key, and mW is the requested output length.
     struct CivoleSenderOfflineInput
     {
+        // Pins the configure result and its explicit reuse domain across await.
+        std::shared_ptr<const ZpCrtContext> mCrtFactoryOwner;
         CivoleParams mParams;
         u64 mDelta = 0;
         u64 mW = 0;
@@ -106,6 +125,7 @@ namespace osuCrypto::LogVole
     // output length and must match the sender's advertised length.
     struct CivoleReceiverOfflineInput
     {
+        std::shared_ptr<const ZpCrtContext> mCrtFactoryOwner;
         CivoleParams mParams;
         u64 mW = 0;
     };
@@ -276,7 +296,8 @@ namespace osuCrypto
             u32 plaintextModulusBits = 55,
             u32 numThreads = 1,
             LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            LogVole::OnlineMode mode = LogVole::OnlineMode::Interactive);
+            LogVole::OnlineMode mode = LogVole::OnlineMode::Interactive,
+            std::shared_ptr<LogVole::ZpContextFactory> factory = {});
 
         bool isConfigured() const { return mState != State::Default; }
         bool hasOffline() const { return mState == State::Offline; }
@@ -361,7 +382,8 @@ namespace osuCrypto
             u32 plaintextModulusBits = 55,
             u32 numThreads = 1,
             LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            LogVole::OnlineMode mode = LogVole::OnlineMode::Interactive);
+            LogVole::OnlineMode mode = LogVole::OnlineMode::Interactive,
+            std::shared_ptr<LogVole::ZpContextFactory> factory = {});
 
         // Leave the MACs in GPU memory instead of writing them to `a`, for
         // callers whose next step also runs on the GPU. After receive(),
@@ -433,7 +455,8 @@ namespace osuCrypto::LogVole
 
     u64 zpSlotCount(const ZpCrtContext& ctx);
     u64 zpRingLabelCount(const ZpCrtContext& ctx, u64 zpLabelCount);
-    bool makeZpCrtContext(const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out);
+    bool makeZpCrtContext(const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out,
+        std::shared_ptr<ZpContextFactory> factory = {});
 
     bool wrapZpBatchCrt(
         const ZpCrtContext& ctx,
