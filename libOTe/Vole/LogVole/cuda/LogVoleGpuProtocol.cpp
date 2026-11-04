@@ -70,11 +70,6 @@ namespace osuCrypto::LogVole::gpu
         }
 
         constexpr std::size_t publicRetentionByteLimit = std::size_t(256) << 20;
-        std::atomic<u64> publicRetentionCaptures{0}, publicRetentionCopies{0};
-        std::atomic<u64> publicRetentionCopiedBytes{0}, publicRetentionMisses{0};
-        std::atomic<u64> publicRetentionHostMaterializations{0};
-        std::atomic<u64> publicRetentionHostMaterializedBytes{0};
-
         bool retentionContextMatches(const RingNttContext& ctx,
             const RetainedPublicUniform::Impl& value)
         {
@@ -114,8 +109,12 @@ namespace osuCrypto::LogVole::gpu
             const bool queued = gpuMemcpyD2D(destination.data(stream), values.data(stream), values.bytes(), stream.raw());
             const bool completed = stream.sync();
             if (!queued || !completed) return false;
-            publicRetentionCopies.fetch_add(1, std::memory_order_relaxed);
-            publicRetentionCopiedBytes.fetch_add(values.bytes(), std::memory_order_relaxed);
+            if (ctx.mPublicCache)
+            {
+                auto& counters = ctx.mPublicCache->mRetentionCounters;
+                counters.mCopies.fetch_add(1, std::memory_order_relaxed);
+                counters.mCopiedBytes.fetch_add(values.bytes(), std::memory_order_relaxed);
+            }
             return true;
         }
 
@@ -138,8 +137,12 @@ namespace osuCrypto::LogVole::gpu
                 words * sizeof(u64), stream.raw());
             const bool completed = stream.sync();
             if (!queued || !completed) return false;
-            publicRetentionCopies.fetch_add(1, std::memory_order_relaxed);
-            publicRetentionCopiedBytes.fetch_add(words * sizeof(u64), std::memory_order_relaxed);
+            if (ctx.mPublicCache)
+            {
+                auto& counters = ctx.mPublicCache->mRetentionCounters;
+                counters.mCopies.fetch_add(1, std::memory_order_relaxed);
+                counters.mCopiedBytes.fetch_add(words * sizeof(u64), std::memory_order_relaxed);
+            }
             return true;
         }
     }
@@ -208,7 +211,11 @@ namespace osuCrypto::LogVole::gpu
         // Do not inspect a borrowed span until its registered owner is locked.
         if (candidate && retentionContextMatches(ctx, *candidate->mImpl) &&
             retentionHostMatches(*owner, *candidate->mImpl)) return candidate;
-        publicRetentionMisses.fetch_add(1, std::memory_order_relaxed);
+        if (ctx.mPublicCache)
+        {
+            auto& counters = ctx.mPublicCache->mRetentionCounters;
+            counters.mMisses.fetch_add(1, std::memory_order_relaxed);
+        }
         return {};
     }
 
@@ -314,21 +321,27 @@ namespace osuCrypto::LogVole::gpu
         for (const auto& poly : *snapshot)
             value.mHostCoefficients.push_back(poly.mCoeffs.data());
         value.mHostSnapshot = snapshot;
-        publicRetentionHostMaterializations.fetch_add(1, std::memory_order_relaxed);
-        publicRetentionHostMaterializedBytes.fetch_add(
-            value.mValues.bytes(), std::memory_order_relaxed);
+        if (ctx.mPublicCache)
+        {
+            auto& counters = ctx.mPublicCache->mRetentionCounters;
+            counters.mHostMaterializations.fetch_add(1, std::memory_order_relaxed);
+            counters.mHostMaterializedBytes.fetch_add(
+                value.mValues.bytes(), std::memory_order_relaxed);
+        }
         out = std::move(snapshot);
         return true;
     }
 
-    PublicUniformRetentionStats publicUniformRetentionStats()
+    PublicUniformRetentionStats publicUniformRetentionStats(const RingNttContext& ctx)
     {
-        return {publicRetentionCaptures.load(std::memory_order_relaxed),
-            publicRetentionCopies.load(std::memory_order_relaxed),
-            publicRetentionCopiedBytes.load(std::memory_order_relaxed),
-            publicRetentionMisses.load(std::memory_order_relaxed),
-            publicRetentionHostMaterializations.load(std::memory_order_relaxed),
-            publicRetentionHostMaterializedBytes.load(std::memory_order_relaxed)};
+        if (!ctx.mPublicCache) return {};
+        const auto& counters = ctx.mPublicCache->mRetentionCounters;
+        return {counters.mCaptures.load(std::memory_order_relaxed),
+            counters.mCopies.load(std::memory_order_relaxed),
+            counters.mCopiedBytes.load(std::memory_order_relaxed),
+            counters.mMisses.load(std::memory_order_relaxed),
+            counters.mHostMaterializations.load(std::memory_order_relaxed),
+            counters.mHostMaterializedBytes.load(std::memory_order_relaxed)};
     }
 
     namespace
@@ -2576,7 +2589,11 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<RetainedPublicUniform> next;
         if (!sampleUniformBatchOwner(ctx, seeds, outputNtt, true, next) ||
             next->mImpl->mValues.bytes() > publicRetentionByteLimit) return false;
-        publicRetentionCaptures.fetch_add(1, std::memory_order_relaxed);
+        if (ctx.mPublicCache)
+        {
+            auto& counters = ctx.mPublicCache->mRetentionCounters;
+            counters.mCaptures.fetch_add(1, std::memory_order_relaxed);
+        }
         out = std::move(next);
         return true;
     }
@@ -2656,7 +2673,11 @@ namespace osuCrypto::LogVole::gpu
             value.mHostCoefficients.reserve(next.size());
             for (const auto& poly : next)
                 value.mHostCoefficients.push_back(poly.mCoeffs.data());
-            publicRetentionCaptures.fetch_add(1, std::memory_order_relaxed);
+            if (ctx.mPublicCache)
+            {
+                auto& counters = ctx.mPublicCache->mRetentionCounters;
+                counters.mCaptures.fetch_add(1, std::memory_order_relaxed);
+            }
         }
         out = std::move(next);
         if (captured)

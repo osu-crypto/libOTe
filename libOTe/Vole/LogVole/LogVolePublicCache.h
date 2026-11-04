@@ -1,6 +1,7 @@
 #pragma once
 
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -57,6 +58,11 @@ namespace osuCrypto::LogVole
             std::mutex mMutex;
             std::unordered_map<Key, std::shared_ptr<Entry>, Hash> mEntries;
         };
+        struct RetentionCounters
+        {
+            std::atomic<u64> mCaptures{0}, mCopies{0}, mCopiedBytes{0};
+            std::atomic<u64> mMisses{0}, mHostMaterializations{0}, mHostMaterializedBytes{0};
+        };
         struct RetentionEntry
         {
             std::weak_ptr<const std::vector<RnsPoly>> mHost;
@@ -71,5 +77,6 @@ namespace osuCrypto::LogVole
         // The index never owns host snapshots. Tokens retain their own backing
         // and never refer back to this cache, so exports can outlive the index.
         RetentionLane mRetention;
+        RetentionCounters mRetentionCounters;
     };
 }

@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <random>
 #include <span>
 #include <string>
@@ -93,6 +94,73 @@ namespace
         ScopedGpuEnabled& operator=(const ScopedGpuEnabled&) = delete;
     private:
         bool mWasEnabled;
+    };
+
+    // Observe only explicitly supplied resource owners. Weak baselines do not
+    // keep a factory record warm or alter the lifetime being tested.
+    class RetentionBaseline
+    {
+        using Stats = gpu::PublicUniformRetentionStats;
+        struct Entry
+        {
+            std::weak_ptr<PublicPolynomialCache> mOwner;
+            Stats mBefore;
+        };
+        std::vector<Entry> mEntries;
+    public:
+        void capture(const RingNttContext& ctx)
+        {
+            if (!ctx.mPublicCache) return;
+            for (const auto& entry : mEntries)
+                if (entry.mOwner.lock() == ctx.mPublicCache) return;
+            mEntries.push_back({ctx.mPublicCache, gpu::publicUniformRetentionStats(ctx)});
+        }
+        template<typename State>
+        void captureTree(const State& state)
+        {
+            for (auto* node = &state; node; node = node->mNextLevelState.get())
+                if (const auto& owner = node->mShrinkExpandState.mRingFactoryOwner)
+                    capture(*owner);
+        }
+        Stats delta(const RingNttContext& ctx) const
+        {
+            if (!ctx.mPublicCache) return {};
+            auto result = gpu::publicUniformRetentionStats(ctx);
+            for (const auto& entry : mEntries)
+            {
+                if (entry.mOwner.lock() != ctx.mPublicCache) continue;
+                result.mCaptures -= entry.mBefore.mCaptures;
+                result.mCopies -= entry.mBefore.mCopies;
+                result.mCopiedBytes -= entry.mBefore.mCopiedBytes;
+                result.mMisses -= entry.mBefore.mMisses;
+                result.mHostMaterializations -= entry.mBefore.mHostMaterializations;
+                result.mHostMaterializedBytes -= entry.mBefore.mHostMaterializedBytes;
+                break;
+            }
+            return result;
+        }
+        template<typename State>
+        Stats deltaTree(const State& state) const
+        {
+            Stats result{};
+            std::vector<const PublicPolynomialCache*> seen;
+            for (auto* node = &state; node; node = node->mNextLevelState.get())
+            {
+                const auto& owner = node->mShrinkExpandState.mRingFactoryOwner;
+                if (!owner || !owner->mPublicCache) continue;
+                const auto* cache = owner->mPublicCache.get();
+                if (std::find(seen.begin(), seen.end(), cache) != seen.end()) continue;
+                seen.push_back(cache);
+                const auto change = delta(*owner);
+                result.mCaptures += change.mCaptures;
+                result.mCopies += change.mCopies;
+                result.mCopiedBytes += change.mCopiedBytes;
+                result.mMisses += change.mMisses;
+                result.mHostMaterializations += change.mHostMaterializations;
+                result.mHostMaterializedBytes += change.mHostMaterializedBytes;
+            }
+            return result;
+        }
     };
 #endif
 
@@ -2084,16 +2152,18 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
             ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, run);
             oc::PRNG actualPrng(seed, 3);
             SenderOfflineOutput actual;
-            const auto retentionBefore = gpu::publicUniformRetentionStats();
+            RetentionBaseline retentionBefore;
+            retentionBefore.capture(ctx);
+            retentionBefore.captureTree(expected.mState);
             LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(input, actualPrng, actual));
-            const auto retentionAfter = gpu::publicUniformRetentionStats();
+            const auto retentionAfter = retentionBefore.deltaTree(actual.mState);
             if (forcedReplay)
-                LOGVOLE_REQUIRE_EQ(retentionAfter.mCopies, retentionBefore.mCopies);
+                LOGVOLE_REQUIRE_EQ(retentionAfter.mCopies, 0u);
             else
             {
-                LOGVOLE_REQUIRE_TRUE(retentionAfter.mCaptures > retentionBefore.mCaptures);
-                LOGVOLE_REQUIRE_TRUE(retentionAfter.mCopies > retentionBefore.mCopies);
-                LOGVOLE_REQUIRE_TRUE(retentionAfter.mCopiedBytes > retentionBefore.mCopiedBytes);
+                LOGVOLE_REQUIRE_TRUE(retentionAfter.mCaptures > 0u);
+                LOGVOLE_REQUIRE_TRUE(retentionAfter.mCopies > 0u);
+                LOGVOLE_REQUIRE_TRUE(retentionAfter.mCopiedBytes > 0u);
             }
             std::array<std::uint64_t, 16> nextActual;
             actualPrng.get(nextActual.data(), nextActual.size());
@@ -2686,12 +2756,12 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                     r1, r2Ntt, publicBRootNtt, eagerBStar,
                     gadgetLogBase, 1, eagerPrng, 0.0, 0.0,
                     eagerTop, 4));
-                const auto before = gpu::publicUniformRetentionStats();
+                const auto before = gpu::publicUniformRetentionStats(productionCtx);
                 LOGVOLE_REQUIRE_TRUE(buildRootTopCt(productionCtx,
                     r1, r2Ntt, publicBRootNtt, {}, gadgetLogBase, 1,
                     retainedPrng, 0.0, 0.0, retainedTop, 4,
                     {}, nullptr, nullptr, nullptr, nullptr, owner.get()));
-                const auto after = gpu::publicUniformRetentionStats();
+                const auto after = gpu::publicUniformRetentionStats(productionCtx);
                 LOGVOLE_EXPECT_EQ(after.mHostMaterializations,
                     before.mHostMaterializations);
                 expect_batch_equal(retainedTop.mPolys, eagerTop.mPolys);
@@ -3137,6 +3207,31 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
     receiver.mParams = params;
     receiver.mShrinkExpandState = seReceiver;
     LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(receiver, offlineMessage));
+
+    // Observe a real setup's counters through a graph that shares its context.
+    // Graph traversal must count that resource domain once and weak baselines
+    // must report only subsequent work. No extra GPU work is needed here.
+    {
+        const auto& owner = receiver.mShrinkExpandState.mRingFactoryOwner;
+        LOGVOLE_REQUIRE_TRUE(owner);
+        ReceiverState sharedGraph;
+        sharedGraph.mShrinkExpandState.mRingFactoryOwner = owner;
+        sharedGraph.mNextLevelState = std::make_unique<ReceiverState>();
+        sharedGraph.mNextLevelState->mShrinkExpandState.mRingFactoryOwner = owner;
+        const auto equalStats = [](const auto& a, const auto& b) {
+            LOGVOLE_REQUIRE_EQ(a.mCaptures, b.mCaptures);
+            LOGVOLE_REQUIRE_EQ(a.mCopies, b.mCopies);
+            LOGVOLE_REQUIRE_EQ(a.mCopiedBytes, b.mCopiedBytes);
+            LOGVOLE_REQUIRE_EQ(a.mMisses, b.mMisses);
+            LOGVOLE_REQUIRE_EQ(a.mHostMaterializations, b.mHostMaterializations);
+            LOGVOLE_REQUIRE_EQ(a.mHostMaterializedBytes, b.mHostMaterializedBytes);
+        };
+        RetentionBaseline observation;
+        equalStats(observation.deltaTree(sharedGraph), gpu::publicUniformRetentionStats(*owner));
+        observation.captureTree(sharedGraph);
+        equalStats(observation.deltaTree(sharedGraph), gpu::PublicUniformRetentionStats{});
+        equalStats(observation.delta(RingNttContext{}), gpu::PublicUniformRetentionStats{});
+    }
 
     // This production tuple exercises the actual receiver Root device chain.
     // Feed the exact independent Root frame through the transport decoder so
@@ -4333,15 +4428,18 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 auto lazyInput = input;
                 lazyInput.mDeferHostSnapshot = true;
                 ShrinkExpandReceiverState lazyState{};
-                const auto beforeRetainedReceiver = gpu::publicUniformRetentionStats();
+                RetentionBaseline beforeRetainedReceiver;
+                beforeRetainedReceiver.capture(ringCtx);
+                if (cpuReference.mRingFactoryOwner)
+                    beforeRetainedReceiver.capture(*cpuReference.mRingFactoryOwner);
                 LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(lazyInput, std::move(encoded), lazyState));
-                const auto afterRetainedReceiver = gpu::publicUniformRetentionStats();
+                LOGVOLE_REQUIRE_TRUE(lazyState.mRingFactoryOwner);
+                const auto afterRetainedReceiver = beforeRetainedReceiver.delta(*lazyState.mRingFactoryOwner);
                 LOGVOLE_REQUIRE_TRUE(lazyState.mLazyCt1Ntt && lazyState.mLazyLacct && lazyState.mGpuCache);
                 LOGVOLE_EXPECT_TRUE(lazyState.mCt1.mPolys.empty() && lazyState.mLacct.mCt.mPolys.empty());
                 LOGVOLE_EXPECT_TRUE(!lazyState.mPublicANtt && !lazyState.mPublicBNtt);
                 LOGVOLE_REQUIRE_TRUE(lazyState.mPublicANttDevice && lazyState.mPublicBNttDevice);
-                LOGVOLE_EXPECT_EQ(afterRetainedReceiver.mHostMaterializations,
-                    beforeRetainedReceiver.mHostMaterializations);
+                LOGVOLE_EXPECT_EQ(afterRetainedReceiver.mHostMaterializations, 0u);
                 encoded = {};
                 payload.clear();
                 {

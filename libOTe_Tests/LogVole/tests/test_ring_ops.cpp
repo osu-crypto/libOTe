@@ -2481,12 +2481,12 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
                 ScopedGpuEnabled cpuReference(false);
                 expected = deriveUniformPolyBatchFromNonce(ctx, nonce, domain, count, actualNtt);
             }
-            const auto before = gpu::publicUniformRetentionStats();
+            const auto before = gpu::publicUniformRetentionStats(ctx);
             gpu::RetainedPublicUniformPtr token;
             auto sampled = deriveUniformPolyBatchFromNonce(ctx, nonce, domain, count, actualNtt, &token);
             exact(expected, sampled);
             LOGVOLE_REQUIRE_TRUE(token && token->count() == count);
-            LOGVOLE_REQUIRE_TRUE(gpu::publicUniformRetentionStats().mCaptures > before.mCaptures);
+            LOGVOLE_REQUIRE_TRUE(gpu::publicUniformRetentionStats(ctx).mCaptures > before.mCaptures);
             auto owner = std::make_shared<const std::vector<RnsPoly>>(std::move(sampled));
             const std::span<const RnsPoly> span(*owner);
             LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(ctx, owner, token));
@@ -2495,9 +2495,15 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             {
                 auto shared = ctx;
                 LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(shared, span) == token);
+                const auto sharedStatsBefore = gpu::publicUniformRetentionStats(ctx);
                 auto separate = ctx;
                 separate.mPublicCache = std::make_shared<PublicPolynomialCache>();
+                const auto isolatedBefore = gpu::publicUniformRetentionStats(separate);
+                LOGVOLE_REQUIRE_EQ(isolatedBefore.mCaptures, 0u);
+                LOGVOLE_REQUIRE_EQ(isolatedBefore.mMisses, 0u);
                 LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span) == nullptr);
+                LOGVOLE_REQUIRE_EQ(gpu::publicUniformRetentionStats(separate).mMisses, 1u);
+                LOGVOLE_REQUIRE_EQ(gpu::publicUniformRetentionStats(ctx).mMisses, sharedStatsBefore.mMisses);
                 LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(separate, owner, token));
                 LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span) == token);
                 separate.mPublicCache.reset();
@@ -2583,10 +2589,10 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             expectedA = deriveUniformPolyBatchFromNonce(ctx, 0xA11ACE5Eull, 0xA110CA7Aull, count);
             expectedB = deriveUniformPolyBatchFromNonce(ctx, 0xC0DEC0DEull, 0x1EEC0DEu, count, true);
         }
-        const auto beforeRetainOnly = gpu::publicUniformRetentionStats();
+        const auto beforeRetainOnly = gpu::publicUniformRetentionStats(ctx);
         const auto deviceA = retainedLhePublicANtt(ctx, count);
         const auto deviceB = retainedLencPublicBNtt(ctx, count / 2);
-        const auto afterRetainOnly = gpu::publicUniformRetentionStats();
+        const auto afterRetainOnly = gpu::publicUniformRetentionStats(ctx);
         LOGVOLE_REQUIRE_TRUE(deviceA && deviceB && deviceA != deviceB);
         LOGVOLE_REQUIRE_TRUE(gpu::retainedPublicUniformMatches(ctx, *deviceA, count, false));
         LOGVOLE_REQUIRE_TRUE(gpu::retainedPublicUniformMatches(ctx, *deviceB, count, true));
@@ -2597,13 +2603,13 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceB, materializedB));
         exact(expectedA, *materializedA);
         exact(expectedB, *materializedB);
-        const auto afterMaterialize = gpu::publicUniformRetentionStats();
+        const auto afterMaterialize = gpu::publicUniformRetentionStats(ctx);
         LOGVOLE_REQUIRE_EQ(afterMaterialize.mHostMaterializations,
             afterRetainOnly.mHostMaterializations + 2u);
         auto sameA = materializedB;
         LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceA, sameA));
         LOGVOLE_REQUIRE_TRUE(sameA == materializedA);
-        LOGVOLE_REQUIRE_EQ(gpu::publicUniformRetentionStats().mHostMaterializations,
+        LOGVOLE_REQUIRE_EQ(gpu::publicUniformRetentionStats(ctx).mHostMaterializations,
             afterMaterialize.mHostMaterializations);
         {
             ScopedProtocolCacheScope peer(ProtocolCacheRole::Receiver, run);
@@ -2642,10 +2648,10 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk, 8, expected, 3.2, 19.2,
                     &referencePrng, false, a, 4));
             }
-            const auto before = gpu::publicUniformRetentionStats();
+            const auto before = gpu::publicUniformRetentionStats(ctx);
             LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk, 8, actual, 3.2, 19.2,
                 &actualPrng, false, a, 4));
-            const auto after = gpu::publicUniformRetentionStats();
+            const auto after = gpu::publicUniformRetentionStats(ctx);
             LOGVOLE_REQUIRE_EQ(expected.mRows, actual.mRows);
             LOGVOLE_REQUIRE_EQ(expected.mCols, actual.mCols);
             exact(expected.mPolys, actual.mPolys);

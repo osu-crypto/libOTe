@@ -172,7 +172,8 @@ namespace osuCrypto::LogVole::gpu
         u64 mHostMaterializations = 0;
         u64 mHostMaterializedBytes = 0;
     };
-    PublicUniformRetentionStats publicUniformRetentionStats();
+    // Snapshot only this explicit resource domain. Missing owners report zero.
+    PublicUniformRetentionStats publicUniformRetentionStats(const RingNttContext& ctx);
 
     // Repetition and RNS projection for sender setup. Publishes a complete
     // independent host snapshot only after the device work succeeds; input
