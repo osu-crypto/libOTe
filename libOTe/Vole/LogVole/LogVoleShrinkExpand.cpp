@@ -432,6 +432,8 @@ namespace osuCrypto::LogVole
 #endif
 
         ShrinkExpandSenderState next{};
+        next.mCpuScratch = input.mCpuScratch ? input.mCpuScratch :
+            std::make_shared<detail::ShrinkExpandScratch>();
         next.mParams = input.mParams;
         next.mRingFactoryOwner = ctx.mFactoryOwner;
         next.mS = input.mS;
@@ -711,6 +713,8 @@ namespace osuCrypto::LogVole
 #endif
 
         ShrinkExpandReceiverState next{};
+        next.mCpuScratch = input.mCpuScratch ? input.mCpuScratch :
+            std::make_shared<detail::ShrinkExpandScratch>();
         next.mParams = input.mParams;
         next.mRingFactoryOwner = ctx.mFactoryOwner;
         HostStep publicDataStep("setup receiver: public data");
@@ -980,7 +984,8 @@ namespace osuCrypto::LogVole
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
         // Reuse storage only; query-bound coefficients are always rebuilt.
-        thread_local std::vector<RnsPoly> senderCt2;
+        auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
+        auto& senderCt2 = scratch.ct2();
         if (!buildHashedCt2(
                 ctx,
                 state.mParams.mMu,
@@ -1042,8 +1047,9 @@ namespace osuCrypto::LogVole
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        // Keep a separate reusable allocation for the receiver's coefficients.
-        thread_local std::vector<RnsPoly> receiverCt2;
+        // Each active operation leases its own reusable coefficient storage.
+        auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
+        auto& receiverCt2 = scratch.ct2();
         const bool senderRole = currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender;
         HostStep sampleStep(senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling");
         if (!buildHashedCt2(

@@ -1,5 +1,6 @@
 #pragma once
 #include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/Aligned.h>
@@ -247,6 +248,10 @@ namespace osuCrypto::LogVole
 
     struct ShrinkExpandSenderState
     {
+        // Setup supplies the workspace owner. Empty states allocate nothing;
+        // copies share capacity while overlapping operations lease separately.
+        // The scratch retains no state or context references.
+        std::shared_ptr<detail::ShrinkExpandScratch> mCpuScratch;
         ShrinkExpandParams mParams;
         // Retain factory resources across offline/online operations and copies.
         std::shared_ptr<const RingNttContext> mRingFactoryOwner;
@@ -300,6 +305,7 @@ namespace osuCrypto::LogVole
 
     struct ShrinkExpandReceiverState
     {
+        std::shared_ptr<detail::ShrinkExpandScratch> mCpuScratch;
         ShrinkExpandParams mParams;
         // Retain factory resources across offline/online operations and copies.
         std::shared_ptr<const RingNttContext> mRingFactoryOwner;

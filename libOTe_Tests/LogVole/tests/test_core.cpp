@@ -4642,6 +4642,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
 
     SenderOfflineInput senderInput{};
     senderInput.mParams = params;
+    senderInput.mCpuScratch = std::make_shared<detail::ShrinkExpandScratch>();
     senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7851u);
 
     SenderOfflineOutput senderOffline{};
@@ -4690,11 +4691,20 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
 
     ReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;
+    receiverInput.mCpuScratch = std::make_shared<detail::ShrinkExpandScratch>();
 
     ReceiverOfflineOutput receiverOffline{};
     LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState->mNextLevelState != nullptr);
+    LOGVOLE_REQUIRE_TRUE(senderInput.mCpuScratch != receiverInput.mCpuScratch);
+    for (const SenderState* level = &senderOffline.mState; level; level = level->mNextLevelState.get())
+        if (level->mShrinkExpandState.mParams.mMu)
+            LOGVOLE_REQUIRE_TRUE(level->mShrinkExpandState.mCpuScratch == senderInput.mCpuScratch);
+    for (const ReceiverState* level = &receiverOffline.mState; level; level = level->mNextLevelState.get())
+        if (level->mShrinkExpandState.mParams.mMu)
+            LOGVOLE_REQUIRE_TRUE(level->mShrinkExpandState.mCpuScratch == receiverInput.mCpuScratch);
+
 
 #if defined(ENABLE_LOGVOLE_CUDA)
     bool receiverDeviceEnabled = false;

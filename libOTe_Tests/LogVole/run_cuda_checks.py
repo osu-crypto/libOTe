@@ -37,6 +37,11 @@ def main():
     ]
     jobs = [("targeted", ["-u", *["LogVole_" + s for s in checks], "-gpu", "1"])]
     jobs.append(("word-arithmetic", ["-u", "UInt_WordArithmetic_Test"]))
+    # Small CPU-only ownership and exact/truncated relation cases (degree 1024).
+    jobs.append(("cpu-scratch", ["-u", "LogVole_ShrinkExpandCore_ParamsValidation",
+                                 "LogVole_ShrinkExpandCore_DeterministicRelationExact",
+                                 "LogVole_ShrinkExpandCore_TruncDeterministicRelationBounded",
+                                 "-gpu", "0"]))
     jobs.append(("ntt", ["-u", "LogVole_RingOps_NttTwoTileInPlaceParity", "-gpu", "1"]))
     # A separate process must succeed without another test warming its caches.
     jobs.append(("retention-cold", ["-u", "LogVole_RingOps_PublicUniformRetentionParity",

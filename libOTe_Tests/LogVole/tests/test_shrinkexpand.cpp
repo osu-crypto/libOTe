@@ -340,6 +340,61 @@ namespace
 
 void LogVole_ShrinkExpandCore_ParamsValidation(const oc::CLP&)
 {
+    using Scratch = detail::ShrinkExpandScratch;
+    {
+        ShrinkExpandSenderState sender;
+        LOGVOLE_REQUIRE_FALSE(sender.mCpuScratch);
+        sender.mCpuScratch = std::make_shared<Scratch>();
+        const auto copy = sender;
+        ShrinkExpandReceiverState receiver;
+        LOGVOLE_REQUIRE_FALSE(receiver.mCpuScratch);
+        receiver.mCpuScratch = std::make_shared<Scratch>();
+        LOGVOLE_REQUIRE_TRUE(sender.mCpuScratch == copy.mCpuScratch);
+        LOGVOLE_REQUIRE_TRUE(sender.mCpuScratch != receiver.mCpuScratch);
+    }
+    std::weak_ptr<Scratch> lifetime;
+    {
+        auto owner = std::make_shared<Scratch>();
+        lifetime = owner;
+        const std::uint64_t* firstData = nullptr;
+        const std::uint64_t* secondData = nullptr;
+        {
+            auto first = Scratch::acquire(owner);
+            first.ct2().resize(1);
+            resizeFill<std::uint64_t>(first.ct2()[0].mCoeffs, 32, 17);
+            firstData = first.ct2()[0].mCoeffs.data();
+
+            // A nested borrow also covers overlapping state-copy operations:
+            // neither operation may overwrite the other's live coefficients.
+            auto second = Scratch::acquire(owner);
+            second.ct2().resize(1);
+            resizeFill<std::uint64_t>(second.ct2()[0].mCoeffs, 32, 29);
+            secondData = second.ct2()[0].mCoeffs.data();
+            auto moved = std::move(first);
+            LOGVOLE_REQUIRE_TRUE(firstData != secondData);
+            LOGVOLE_REQUIRE_EQ(moved.ct2()[0].mCoeffs[0], 17u);
+            LOGVOLE_REQUIRE_EQ(moved.ct2()[0].mCoeffs[31], 17u);
+        }
+        struct Cancelled {};
+        try
+        {
+            auto lease = Scratch::acquire(owner);
+            throw Cancelled{};
+        }
+        catch (const Cancelled&) {}
+        {
+            // Return and exception unwinding retain reusable capacity. A lease
+            // keeps its pool alive even after the caller releases its owner.
+            auto lease = Scratch::acquire(owner);
+            LOGVOLE_REQUIRE_EQ(lease.ct2().size(), 1u);
+            const auto data = lease.ct2()[0].mCoeffs.data();
+            LOGVOLE_REQUIRE_TRUE(data == firstData || data == secondData);
+            owner.reset();
+            LOGVOLE_REQUIRE_FALSE(lifetime.expired());
+        }
+    }
+    LOGVOLE_REQUIRE_TRUE(lifetime.expired());
+
     auto params = make_params();
     LOGVOLE_REQUIRE_TRUE(validateShrinkExpandParams(params));
 
@@ -374,6 +429,8 @@ void LogVole_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
 
     ShrinkExpandReceiverState receiverState{};
     LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(receiverInput, senderState, receiverState));
+    LOGVOLE_REQUIRE_TRUE(senderState.mCpuScratch && receiverState.mCpuScratch);
+    LOGVOLE_REQUIRE_TRUE(senderState.mCpuScratch != receiverState.mCpuScratch);
     LOGVOLE_EXPECT_EQ(receiverState.mCt1.mRows, params.mMu);
     LOGVOLE_EXPECT_EQ(receiverState.mLacct.mCt.mRows, senderState.mLacct.mCt.mRows);
 }

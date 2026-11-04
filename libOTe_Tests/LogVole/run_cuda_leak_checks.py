@@ -37,6 +37,7 @@ def main():
                             "LogVole_RingOps_GpuBufferResizeBounds",
                             "LogVole_Core_LeafGoldenSeedGpuParity"]),
         ("wire-and-caches", ["LogVole_Cpu_NttMatchesReference",
+                             "LogVole_ShrinkExpandCore_ParamsValidation",
                              "LogVole_Cpu_CrtMixedWidthsMatchSeal",
                              "LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference",
                              "LogVole_Cpu_GpuZkBufferOwnership",

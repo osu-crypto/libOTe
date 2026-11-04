@@ -103,6 +103,7 @@ if(ENABLE_LOGVOLE)
         Vole/LogVole/LogVoleCore.cpp
         Vole/LogVole/LogVoleCpuArithmetic.cpp
         Vole/LogVole/LogVoleCpuSampler.cpp
+        Vole/LogVole/LogVoleCpuScratch.cpp
         Vole/LogVole/LogVoleCpuZk.cpp
         Vole/LogVole/LogVoleEncoding.cpp
         Vole/LogVole/LogVoleWireMemory.cpp

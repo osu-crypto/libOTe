@@ -4240,6 +4240,7 @@ namespace osuCrypto::LogVole
         template <typename State>
         void copySetupMetadata(const State& source, State& destination)
         {
+            destination.mCpuScratch = source.mCpuScratch;
             destination.mParams = source.mParams;
             destination.mRingFactoryOwner = source.mRingFactoryOwner;
             destination.mPublicANtt = source.mPublicANtt;
@@ -4511,6 +4512,8 @@ namespace osuCrypto::LogVole
             }
 
             auto execution = input.mGpuExecution;
+            auto cpuScratch = input.mCpuScratch ? input.mCpuScratch :
+                std::make_shared<detail::ShrinkExpandScratch>();
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (!execution) execution = std::make_shared<gpu::GpuExecutionContext>();
 #endif
@@ -4643,6 +4646,7 @@ namespace osuCrypto::LogVole
                 ShrinkExpandSenderOfflineInput seInput{};
                 seInput.mParams = seParams;
                 seInput.mGpuExecution = execution;
+                seInput.mCpuScratch = cpuScratch;
                 seInput.mS = std::move(sRep);
                 seInput.mSDevice = residentS;
                 seInput.mLazyS = lazyS;
@@ -4737,6 +4741,7 @@ namespace osuCrypto::LogVole
                 SenderOfflineInput childInput{};
                 childInput.mParams = std::move(childParams);
                 childInput.mGpuExecution = execution;
+                childInput.mCpuScratch = cpuScratch;
                 if (nextState.mShrinkExpandState.mTopSk1Device)
                 {
                     childInput.mTopSk1Device =
@@ -4776,6 +4781,8 @@ namespace osuCrypto::LogVole
             const ShrinkExpandReceiverState* reusableInternalState)
         {
             auto execution = input.mGpuExecution;
+            auto cpuScratch = input.mCpuScratch ? input.mCpuScratch :
+                std::make_shared<detail::ShrinkExpandScratch>();
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (!execution) execution = std::make_shared<gpu::GpuExecutionContext>();
 #endif
@@ -4818,6 +4825,7 @@ namespace osuCrypto::LogVole
                 ShrinkExpandReceiverOfflineInput seInput{};
                 seInput.mParams = seParams;
                 seInput.mGpuExecution = execution;
+                seInput.mCpuScratch = cpuScratch;
                 seInput.mDeferHostSnapshot = input.mUseGpuResidentInternalState;
 
                 if (!finalizeShrinkExpandReceiverOffline(seInput, std::forward<Message>(message).mShrinkExpandMessage, seState))
@@ -4864,6 +4872,7 @@ namespace osuCrypto::LogVole
                 ReceiverOfflineInput childInput{};
                 childInput.mParams = std::move(childParams);
                 childInput.mGpuExecution = execution;
+                childInput.mCpuScratch = cpuScratch;
                 childInput.mLeafInputsAreGadget = true;
                 childInput.mUseGpuResidentInternalState = input.mUseGpuResidentInternalState;
 

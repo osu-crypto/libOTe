@@ -15,6 +15,7 @@ namespace osuCrypto::LogVole
     {
         ShrinkExpandParams mParams;
         std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;
+        std::shared_ptr<detail::ShrinkExpandScratch> mCpuScratch;
         std::vector<RnsPoly> mS;
         // Internal sender setup only. The exact coefficient batch is borrowed
         // by LENC before its hostS() view is requested on decline/inspection.
@@ -34,6 +35,7 @@ namespace osuCrypto::LogVole
     {
         ShrinkExpandParams mParams;
         std::shared_ptr<gpu::GpuExecutionContext> mGpuExecution;
+        std::shared_ptr<detail::ShrinkExpandScratch> mCpuScratch;
         bool mDeferHostSnapshot = false;
     };
 
