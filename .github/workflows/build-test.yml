@@ -78,7 +78,7 @@ jobs:
           -DENABLE_LOGVOLE=OFF
           -DENABLE_CIRCUITS=OFF
           -DENABLE_EDWARDS25519_ASM=OFF
-          -DENABLE_EDWARDS25519_IFMA=OFF
+          -DOC_ENABLE_AVX512_IFMA=OFF
           -DENABLE_SODIUM=ON
           -DSODIUM_MONTGOMERY=OFF
 
@@ -94,7 +94,7 @@ jobs:
           grep -q '^ENABLE_LOGVOLE:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_CIRCUITS:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_EDWARDS25519_ASM:BOOL=OFF$' out/build/linux/CMakeCache.txt
-          grep -q '^ENABLE_EDWARDS25519_IFMA:BOOL=OFF$' out/build/linux/CMakeCache.txt
+          grep -q '^OC_ENABLE_AVX512_IFMA:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_SODIUM:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^SODIUM_MONTGOMERY:BOOL=OFF$' out/build/linux/CMakeCache.txt
 

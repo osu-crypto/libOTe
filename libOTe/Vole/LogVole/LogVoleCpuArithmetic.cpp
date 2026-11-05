@@ -3,16 +3,15 @@
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include <algorithm>
 
-#if defined(LIBOTE_LOGVOLE_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
 #include <immintrin.h>
-#define LV_CPU_IFMA 1
 #endif
 
 namespace osuCrypto::LogVole::detail
 {
     CpuArithmeticCache::CpuArithmeticCache(Mode mode)
     {
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         if (mode == Mode::Automatic)
         {
             mAvx512 = __builtin_cpu_supports("avx512f") &&
@@ -70,7 +69,7 @@ namespace osuCrypto::LogVole::detail
                 std::copy_n(sum, Limbs, destination + coeff * Limbs);
             }
         }
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         template<unsigned Bits>
         __attribute__((target("avx512f,avx512dq"), always_inline))
         inline __m512i reduceInput(__m512i value, __m512i q, __m512i gap)
@@ -720,7 +719,7 @@ namespace osuCrypto::LogVole::detail
     bool cpuReduceMod(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, const seal::Modulus& modulus, const u64* rejectionLimit)
     {
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool enabled = cache.avx512();
         const u64 q = modulus.value();
         const int bits = modulus.bit_count();
@@ -738,7 +737,7 @@ namespace osuCrypto::LogVole::detail
     bool cpuScaleAndRoundRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base, u64 plaintextModulus)
     {
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool enabled = cache.ifma();
         if (!enabled || (base.size() != 4 && base.size() != 8) || plaintextModulus < 2) return false;
         const int bits = base.base()[0].bit_count();
@@ -775,7 +774,7 @@ namespace osuCrypto::LogVole::detail
         std::span<const seal::util::MultiplyUIntModOperand> inverse,
         std::span<const wideU64> reciprocal, wideU64 margin, bool& accepted)
     {
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool enabled = cache.ifma();
         if (!enabled || sourceLimbs.empty() || sourceLimbs.size() > 8 ||
             inverse.size() != sourceLimbs.size() || reciprocal.size() != sourceLimbs.size() ||
@@ -805,7 +804,7 @@ namespace osuCrypto::LogVole::detail
         if (!enabled || (base.size() != 4 && base.size() != 8)) return false;
         for (std::size_t i = 0; i < base.size(); ++i)
             if (base.base()[i].bit_count() > 61) return false;
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool vectorEnabled = cache.ifma();
         int maxBits = 0;
         for (std::size_t i = 0; i < base.size(); ++i)
@@ -833,7 +832,7 @@ namespace osuCrypto::LogVole::detail
     bool cpuCenteredHighDigit(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool enabled = cache.ifma();
         if (!enabled || count == 0 || count % 8) return false;
         const bool gold = base.size() == 4 && digitBits == 110;
@@ -852,7 +851,7 @@ namespace osuCrypto::LogVole::detail
     bool cpuLowDigitRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool enabled = cache.ifma();
         if (!enabled || count == 0 || count % 8) return false;
         const bool gold = base.size() == 4 && digitBits == 110;
@@ -872,7 +871,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, const seal::Modulus& sourceModulus, u64 inverseLift,
         std::span<const seal::Modulus> destinationModuli)
     {
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool enabled = cache.ifma();
         const auto bits = sourceModulus.bit_count();
         if (!enabled || count == 0 || destinationModuli.empty() ||
@@ -896,7 +895,7 @@ namespace osuCrypto::LogVole::detail
     bool cpuDyadicInnerProduct(const CpuArithmeticCache& cache, const u64* const* a, const u64* const* b,
         std::size_t terms, u64* c, std::size_t count, const seal::Modulus& modulus)
     {
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool enabled = cache.ifma();
         const int bits = modulus.bit_count();
         // Two-term measurements showed no benefit over the existing dyadic
@@ -915,7 +914,7 @@ namespace osuCrypto::LogVole::detail
     bool cpuDyadicProduct(const CpuArithmeticCache& cache, const u64* a, const u64* b, u64* c,
         std::size_t count, const seal::Modulus& modulus)
     {
-#if defined(LV_CPU_IFMA)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool enabled = cache.ifma();
         const u64 q = modulus.value();
         if (!enabled || count < 8) return false;

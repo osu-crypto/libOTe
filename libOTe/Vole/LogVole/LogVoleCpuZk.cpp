@@ -5,9 +5,8 @@
 #include <cstdlib>
 #include <limits>
 
-#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
 #include <immintrin.h>
-#define LV_ZK_VECTOR 1
 #define LV_ZK_TARGET __attribute__((target("avx512f,avx512dq,avx512ifma")))
 #define LV_ZK_INLINE LV_ZK_TARGET __attribute__((always_inline)) inline
 #endif
@@ -22,7 +21,7 @@ namespace osuCrypto::LogVole::detail
         };
         CpuZkOptions options;
         options.mPseudoReduce = enabled("LV_CPU_ZK_PSEUDO_REDUCE");
-#if defined(LV_ZK_VECTOR)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const bool vector = __builtin_cpu_supports("avx512f") &&
             __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
         options.mVectorGates = vector && options.mPseudoReduce && enabled("LV_CPU_VECTOR_ZK");
@@ -34,7 +33,7 @@ namespace osuCrypto::LogVole::detail
 
     namespace
     {
-#if defined(LV_ZK_VECTOR)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         template<unsigned Bits>
         struct VectorField
         {
@@ -446,7 +445,7 @@ namespace osuCrypto::LogVole::detail
     bool cpuZkWitnessRange(const u32* operands, const u64* wires, u64* outputs,
         std::size_t count, const seal::Modulus& modulus, const CpuZkOptions& options)
     {
-#if defined(LV_ZK_VECTOR)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         if (!options.mVectorWitness) return false;
         const int bits = vectorBits(modulus, count, options);
         if (bits == 51) witnessRange<51>(operands, wires, outputs, count, modulus);
@@ -462,7 +461,7 @@ namespace osuCrypto::LogVole::detail
         const u64* outputs, std::size_t count, u64 firstPower, u64 chi,
         const seal::Modulus& modulus, std::array<u64, 2>& result, const CpuZkOptions& options)
     {
-#if defined(LV_ZK_VECTOR)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const int bits = vectorBits(modulus, count, options);
         if (bits == 51) gateRange<51, true>(operands, wires, macs, outputs, count, firstPower, chi, 0, modulus, result.data());
         else if (bits == 54) gateRange<54, true>(operands, wires, macs, outputs, count, firstPower, chi, 0, modulus, result.data());
@@ -477,7 +476,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, u64 firstPower, u64 chi, u64 delta,
         const seal::Modulus& modulus, u64& result, const CpuZkOptions& options)
     {
-#if defined(LV_ZK_VECTOR)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const int bits = vectorBits(modulus, count, options);
         u64 sums[2];
         if (bits == 51) gateRange<51, false>(operands, nullptr, keys, outputs, count, firstPower, chi, delta, modulus, sums);
@@ -498,7 +497,7 @@ namespace osuCrypto::LogVole::detail
         if (!validMatrixRange(n, beginRow, endRow, modulus)) return false;
         if (beginRow == endRow) return true;
         if (!a || !ma || !bt || !mbt || !a0 || !cross) return false;
-#if defined(LV_ZK_VECTOR)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const int bits = matrixVectorBits(modulus, options);
         if (bits == 51) matrixProverTermsVector<51>(a, ma, bt, mbt, a0, cross,
             n, beginRow, endRow, modulus);
@@ -517,7 +516,7 @@ namespace osuCrypto::LogVole::detail
         if (!validMatrixRange(n, beginRow, endRow, modulus)) return false;
         if (beginRow == endRow) return true;
         if (!a || !bt || !products) return false;
-#if defined(LV_ZK_VECTOR)
+#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
         const int bits = matrixVectorBits(modulus, options);
         if (bits == 51) matrixVerifierTermsVector<51>(a, bt, products, n, beginRow, endRow, modulus);
         else if (bits == 54) matrixVerifierTermsVector<54>(a, bt, products, n, beginRow, endRow, modulus);

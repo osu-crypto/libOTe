@@ -130,7 +130,7 @@ set(SRCS "${SRCS}")
 
 add_library(libOTe STATIC ${SRCS})
 
-if(ENABLE_LOGVOLE)
+if(ENABLE_LOGVOLE AND OC_ENABLE_AVX512_IFMA)
     # Compile-time availability and runtime CPU/OS support are separate checks.
     # Unsupported architectures or compilers retain the scalar implementations.
     include(CheckCXXSourceCompiles)
@@ -148,10 +148,11 @@ if(ENABLE_LOGVOLE)
                 __builtin_cpu_supports("avx512dq") &&
                 __builtin_cpu_supports("avx512ifma");
         }
-    ]=] LIBOTE_LOGVOLE_CPU_IFMA)
-    if(LIBOTE_LOGVOLE_CPU_IFMA)
-        set_property(SOURCE Vole/LogVole/LogVoleCpuArithmetic.cpp APPEND
-            PROPERTY COMPILE_DEFINITIONS LIBOTE_LOGVOLE_CPU_IFMA=1)
+    ]=] OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
+    if(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
+        set_property(SOURCE Vole/LogVole/LogVoleCpuArithmetic.cpp
+            Vole/LogVole/LogVoleCpuZk.cpp APPEND
+            PROPERTY COMPILE_DEFINITIONS OC_COMPILER_HAS_AVX512_IFMA_DISPATCH=1)
     endif()
 endif()
 
