@@ -503,6 +503,7 @@ namespace osuCrypto
         if (this != &other)
         {
             mTimer = other.mTimer;
+            mOptions = other.mOptions;
             mRequestSize = other.mRequestSize;
             mPlaintextModulusBits = other.mPlaintextModulusBits;
             mModulus = other.mModulus;
@@ -537,6 +538,7 @@ namespace osuCrypto
         if (this != &other)
         {
             mTimer = other.mTimer;
+            mOptions = other.mOptions;
             mRequestSize = other.mRequestSize;
             mPlaintextModulusBits = other.mPlaintextModulusBits;
             mModulus = other.mModulus;
@@ -606,6 +608,7 @@ namespace osuCrypto
         }
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;
+        params.mLogVole.mAllowPartialRootWidth = mOptions.mAllowPartialRootWidth;
         if (!factory && mConfigureFactoryOwner) factory = mConfigureFactoryOwner->mFactory;
         if (!resolveCivoleModulusWithEvidence(
                 params, modulus, &nativeBundleCommitted, &factoryOwner, std::move(factory)))
@@ -781,6 +784,7 @@ namespace osuCrypto
         }
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;
+        params.mLogVole.mAllowPartialRootWidth = mOptions.mAllowPartialRootWidth;
         if (!factory && mConfigureFactoryOwner) factory = mConfigureFactoryOwner->mFactory;
         if (!resolveCivoleModulusWithEvidence(
                 params, modulus, &nativeBundleCommitted, &factoryOwner, std::move(factory)))

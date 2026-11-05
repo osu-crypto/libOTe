@@ -783,21 +783,10 @@ namespace osuCrypto::LogVole
             return (muHi == 0) ? 0 : ((params.mW + muHi - 1u) / muHi);
         }
 
-        // Experimental support for a final recursive Root whose logical width is
-        // smaller than the truncated shrink/expand block.  The established Root
-        // shape remains the only accepted one unless the switch is explicitly
-        // enabled; in particular, exact-width alpha=2/alpha=4 runs do not consult
-        // the environment or take a different path.
-        bool partialRootWidthEnabled()
+        bool validRootWidth(const Params& params, u32 muHi)
         {
-            const char* value = std::getenv("LV_PARTIAL_ROOT_WIDTH");
-            return value != nullptr && std::strcmp(value, "1") == 0;
-        }
-
-        bool validRootWidth(u32 w, u32 muHi)
-        {
-            return w == muHi ||
-                   (w != 0u && w < muHi && partialRootWidthEnabled());
+            return params.mW == muHi ||
+                   (params.mAllowPartialRootWidth && params.mW != 0u && params.mW < muHi);
         }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2557,7 +2546,7 @@ namespace osuCrypto::LogVole
         const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
         const u32 muHi = state.mParams.mShrinkExpand.mAlpha * tauHi * rho;
         if (rho == 0 ||
-            !validRootWidth(state.mParams.mW, muHi) ||
+            !validRootWidth(state.mParams, muHi) ||
             (xDevice ? xDeviceCount > state.mParams.mW
                      : x.size() > state.mParams.mW) ||
             state.mRootRandomizerWidth != rootRandomizerWidth(state.mParams.mShrinkExpand))
@@ -3523,7 +3512,7 @@ namespace osuCrypto::LogVole
                 evalRecursiveMode(state.mParams.mW, alpha, tauHi, rho);
             if (mode == RecursiveMode::Root)
             {
-                if (!validRootWidth(state.mParams.mW, muHi) ||
+                if (!validRootWidth(state.mParams, muHi) ||
                     !state.mRootKPrimeRt ||
                     !state.mRootDPrimeRt ||
                     !state.mRootDPrimeHashValid)
@@ -4732,7 +4721,7 @@ namespace osuCrypto::LogVole
 
             if (mode == RecursiveMode::Root)
             {
-                if (!validRootWidth(input.mParams.mW, muHi) ||
+                if (!validRootWidth(input.mParams, muHi) ||
                     !prepareRootOfflineSender(nextState, prng, nextMessage.mRootMessage, encodeTransportMessages))
                 {
                     return false;
@@ -4872,7 +4861,7 @@ namespace osuCrypto::LogVole
 
             if (mode == RecursiveMode::Root)
             {
-                if (!validRootWidth(input.mParams.mW, muHi) ||
+                if (!validRootWidth(input.mParams, muHi) ||
                     !finalizeRootOfflineReceiver(nextState, std::forward<Message>(message).mRootMessage))
                 {
                     return false;

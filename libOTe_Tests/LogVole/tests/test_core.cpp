@@ -5107,8 +5107,6 @@ void LogVole_Core_RecursiveGadgetInputSubproblem(const oc::CLP&)
 
 void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
 {
-    ScopedEnvironmentValue partialRoot("LV_PARTIAL_ROOT_WIDTH", "1");
-
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool gpuWasEnabled = gpu::enabled();
     struct RestoreGpu
@@ -5128,12 +5126,15 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
     for (const std::uint32_t width : { 8u, 16u })
     {
         Params params = make_alpha4_root_params(width);
+        params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
         const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
         const std::uint32_t rho = static_cast<std::uint32_t>(
             params.mShrinkExpand.mRing.mCoeffModulusBits.size());
         const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
         LOGVOLE_REQUIRE_EQ(muHi, 16u);
         LOGVOLE_REQUIRE_TRUE(width <= muHi);
+        LOGVOLE_REQUIRE_FALSE(params.mAllowPartialRootWidth);
+        params.mAllowPartialRootWidth = width < muHi;
 
         RingNttContext ctx{};
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
@@ -5192,7 +5193,19 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
 
         if (width == 8u)
         {
-            // The switch permits one incomplete Root block, not an oversized
+            // An independent instance still rejects this same partial width.
+            // Its policy cannot be changed by the opted-in instance above.
+            auto strictSender = senderInput;
+            strictSender.mParams.mAllowPartialRootWidth = false;
+            SenderOfflineOutput strictSenderOutput;
+            LOGVOLE_REQUIRE_FALSE(prepare_sender_offline_for_test(strictSender, strictSenderOutput));
+            auto strictReceiver = receiverInput;
+            strictReceiver.mParams.mAllowPartialRootWidth = false;
+            ReceiverOfflineOutput strictReceiverOutput;
+            LOGVOLE_REQUIRE_FALSE(finalizeReceiverOffline(
+                strictReceiver, senderOffline.mMessage, strictReceiverOutput));
+
+            // The option permits one incomplete Root block, not an oversized
             // logical input and not arbitrary Root widths.
             std::vector<RnsPoly> overwideInput = onlineInput.mX;
             overwideInput.push_back(zero_poly(ctx));
@@ -5222,6 +5235,7 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
             // failure in the padded half must still reject that Q/q_j check.
             LOGVOLE_REQUIRE_TRUE(makeEffectiveTruncParams(
                 params, paddedSeedParams));
+            LOGVOLE_REQUIRE_TRUE(paddedSeedParams.mAllowPartialRootWidth);
             LOGVOLE_REQUIRE_EQ(paddedSeedParams.mW, 8u);
             LOGVOLE_REQUIRE_EQ(paddedSeedParams.mShrinkExpand.mMu, 16u);
             paddedRejectedCandidate.assign(muHi, zero_poly(ctx));
@@ -5295,7 +5309,6 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
 
 void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
 {
-    ScopedEnvironmentValue partialRoot("LV_PARTIAL_ROOT_WIDTH", "0");
     const Params params = make_rejected_root_width_params();
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
@@ -5332,6 +5345,8 @@ void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
 void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP&)
 {
     Params params = make_recursive_params(2);
+    params.mAllowPartialRootWidth = true;
+    params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
         static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
@@ -5359,6 +5374,12 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP&)
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();
+    LOGVOLE_REQUIRE_TRUE(senderState.mNextLevelState != nullptr);
+    LOGVOLE_REQUIRE_TRUE(receiverState.mNextLevelState != nullptr);
+    for (auto* level = &senderState; level; level = level->mNextLevelState.get())
+        LOGVOLE_REQUIRE_TRUE(level->mParams.mAllowPartialRootWidth);
+    for (auto* level = &receiverState; level; level = level->mNextLevelState.get())
+        LOGVOLE_REQUIRE_TRUE(level->mParams.mAllowPartialRootWidth);
 
     const std::uint32_t plainSampleBits =
         std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);

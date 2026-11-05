@@ -240,6 +240,12 @@ namespace osuCrypto::LogVole
 
 namespace osuCrypto
 {
+    struct LogVoleOptions
+    {
+        // Experimental partial-root support; the width calculation is unchanged.
+        bool mAllowPartialRootWidth = false;
+    };
+
     // Semi-honest LogVole chosen-input VOLE sender.
     //
     // For receiver input x and sender scalar Delta, send() outputs b such that
@@ -258,6 +264,7 @@ namespace osuCrypto
         };
 
         LogVoleSender() = default;
+        explicit LogVoleSender(LogVoleOptions options) : mOptions(options) {}
         LogVoleSender(const LogVoleSender&) = delete;
         LogVoleSender& operator=(const LogVoleSender&) = delete;
         LogVoleSender(LogVoleSender&& other);
@@ -331,6 +338,8 @@ namespace osuCrypto
         void clear();
 
     private:
+        LogVoleOptions mOptions;
+
         // Keep configure-time tables reusable until reconfiguration or clear().
         std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         u64 mConfigureCacheRunId = 0;
@@ -352,6 +361,7 @@ namespace osuCrypto
         };
 
         LogVoleReceiver() = default;
+        explicit LogVoleReceiver(LogVoleOptions options) : mOptions(options) {}
         LogVoleReceiver(const LogVoleReceiver&) = delete;
         LogVoleReceiver& operator=(const LogVoleReceiver&) = delete;
         LogVoleReceiver(LogVoleReceiver&& other);
@@ -426,6 +436,8 @@ namespace osuCrypto
         void clear();
 
     private:
+        LogVoleOptions mOptions;
+
         // Keep configure-time tables reusable until reconfiguration or clear().
         std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         u64 mConfigureCacheRunId = 0;

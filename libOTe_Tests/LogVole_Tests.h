@@ -6,6 +6,7 @@
     X(Modes, InteractiveGolden) \
     X(Modes, InteractiveNoGolden) \
     X(Modes, NonInteractive) \
+    X(Modes, PartialRootWidthOptions) \
     X(Garbled, LayoutAndValidation) \
     X(Garbled, SequentialRelation) \
     X(Garbled, GpuPackingMatchesCrt) \

@@ -366,6 +366,10 @@ namespace osuCrypto::LogVole
         // Unused by Ct2SeedMode::GoldenSeed, which rejects bad coefficients
         // instead of bounding them.
         u32 mCt2StatBits = 128;
+
+        // Permit a nonzero Root width below the full shrink/expand block.
+        // Copied with the parameters into each recursive level.
+        bool mAllowPartialRootWidth = false;
     };
 
     struct SenderState

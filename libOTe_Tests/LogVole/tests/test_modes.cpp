@@ -175,3 +175,44 @@ void LogVole_Modes_InteractiveNoGolden(const CLP& cmd)
 {
     checkMode(cmd, CivoleSetting::NoGoldenSeed, OnlineMode::Interactive);
 }
+
+void LogVole_Modes_PartialRootWidthOptions(const CLP&)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    struct RestoreBackend
+    {
+        bool previous = gpu::enabled();
+        ~RestoreBackend() { gpu::setEnabled(previous); }
+    } restore;
+    gpu::setEnabled(false);
+#endif
+    const auto check = []<typename Party>() {
+        LogVoleOptions options;
+        LOGVOLE_REQUIRE_FALSE(options.mAllowPartialRootWidth);
+        options.mAllowPartialRootWidth = true;
+        Party original(options);
+        options.mAllowPartialRootWidth = false; // Constructor owns its copy.
+        Party strict;
+        auto factory = std::make_shared<ZpContextFactory>();
+        const auto configure = [&](Party& party) {
+            party.configure(1, 55, 1, CivoleSetting::GoldenSeed,
+                OnlineMode::Interactive, factory);
+        };
+        configure(original);
+        configure(strict);
+        LOGVOLE_REQUIRE_TRUE(original.mParams.mLogVole.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_FALSE(strict.mParams.mLogVole.mAllowPartialRootWidth);
+
+        Party moved(std::move(original));
+        LOGVOLE_REQUIRE_TRUE(moved.mParams.mLogVole.mAllowPartialRootWidth);
+        Party assigned;
+        assigned = std::move(moved);
+        LOGVOLE_REQUIRE_TRUE(assigned.mParams.mLogVole.mAllowPartialRootWidth);
+        assigned.clear();
+        configure(assigned);
+        LOGVOLE_REQUIRE_TRUE(assigned.mParams.mLogVole.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_FALSE(strict.mParams.mLogVole.mAllowPartialRootWidth);
+    };
+    check.operator()<LogVoleSender>();
+    check.operator()<LogVoleReceiver>();
+}
