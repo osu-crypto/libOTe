@@ -8,6 +8,7 @@ set(SRCS
     Tools/LDPC/Mtx.cpp
     Tools/LDPC/Util.cpp
     Tools/LinearCode.cpp
+    Tools/CpuCapabilities.cpp
     Tools/Tools.cpp
     Tools/TungstenCode/TungstenData.cpp
     TwoChooseOne/ConfigureCode.cpp
@@ -130,7 +131,7 @@ set(SRCS "${SRCS}")
 
 add_library(libOTe STATIC ${SRCS})
 
-if(ENABLE_LOGVOLE AND OC_ENABLE_AVX512_IFMA)
+if(OC_ENABLE_AVX512_IFMA)
     # Compile-time availability and runtime CPU/OS support are separate checks.
     # Unsupported architectures or compilers retain the scalar implementations.
     include(CheckCXXSourceCompiles)
@@ -150,7 +151,8 @@ if(ENABLE_LOGVOLE AND OC_ENABLE_AVX512_IFMA)
         }
     ]=] OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
     if(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
-        set_property(SOURCE Vole/LogVole/LogVoleCpuArithmetic.cpp
+        set_property(SOURCE Tools/CpuCapabilities.cpp
+            Vole/LogVole/LogVoleCpuArithmetic.cpp
             Vole/LogVole/LogVoleCpuZk.cpp APPEND
             PROPERTY COMPILE_DEFINITIONS OC_COMPILER_HAS_AVX512_IFMA_DISPATCH=1)
     endif()

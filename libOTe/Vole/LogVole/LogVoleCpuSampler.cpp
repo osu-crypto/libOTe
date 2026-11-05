@@ -20,7 +20,7 @@ namespace osuCrypto::LogVole::detail
     namespace
     {
         template<typename Fill>
-        void sampleUniform(const CpuArithmeticCache& cache, Fill&& fill, const seal::EncryptionParameters& parms,
+        void sampleUniform(const CpuCapabilities& cache, Fill&& fill, const seal::EncryptionParameters& parms,
             std::uint64_t* destination)
         {
             const auto& moduli = parms.coeff_modulus();
@@ -77,7 +77,7 @@ namespace osuCrypto::LogVole::detail
         return std::make_shared<SealAesPrngFactory>();
     }
 
-    void cpuSamplePolyUniform(const CpuArithmeticCache& cache, PRNG& prng,
+    void cpuSamplePolyUniform(const CpuCapabilities& cache, PRNG& prng,
         const seal::EncryptionParameters& parms, std::uint64_t* destination)
     {
         sampleUniform(cache, [&](std::size_t bytes, seal::seal_byte* out) {
@@ -85,7 +85,7 @@ namespace osuCrypto::LogVole::detail
         }, parms, destination);
     }
 
-    void cpuSamplePolyUniform(const CpuArithmeticCache& cache, std::shared_ptr<seal::UniformRandomGenerator> prng,
+    void cpuSamplePolyUniform(const CpuCapabilities& cache, std::shared_ptr<seal::UniformRandomGenerator> prng,
         const seal::EncryptionParameters& parms, std::uint64_t* destination)
     {
         sampleUniform(cache, [&](std::size_t bytes, seal::seal_byte* out) {

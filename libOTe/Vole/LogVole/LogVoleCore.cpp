@@ -608,7 +608,7 @@ namespace osuCrypto::LogVole
                 hostModuli.size() != ringModulusCount(ctx)) return false;
             const auto n = ctx.mParams.mPolyModulusDegree;
             const u64* values = poly.mCoeffs.data();
-            if (detail::cpuCheckRoundingMargin(ctx.mCpuArithmeticCache, values, n, hostModuli,
+            if (cpuCheckRoundingMargin(ctx.mCpuCapabilities, values, n, hostModuli,
                 constants.mSrcLimbIndices, constants.mCrtInvPunctured,
                 constants.mFracInvModulus, constants.mMargin, accepted)) return true;
             accepted = true;

@@ -824,7 +824,7 @@ namespace osuCrypto::LogVole
                     const auto* a = (*publicANtt)[row].mCoeffs.data() + j*n;
                     const auto* b = skNtt.mCoeffs.data() + j*n;
                     auto* c = result[row].mCoeffs.data() + j*n;
-                    if (!detail::cpuDyadicMultiplySubtract(ctx.mCpuArithmeticCache, a, b, c, n, modulus))
+                    if (!cpuDyadicMultiplySubtract(ctx.mCpuCapabilities, a, b, c, n, modulus))
                         for (std::size_t i = 0; i < n; ++i)
                             c[i] = seal::util::sub_uint_mod(seal::util::barrett_reduce_64(c[i], modulus),
                                 mulMod(seal::util::barrett_reduce_64(a[i], modulus), b[i], modulus), modulus);

@@ -1,15 +1,15 @@
 #pragma once
 
-namespace osuCrypto::LogVole::detail
+namespace osuCrypto
 {
     // CPU dispatch decisions captured once by the owner and borrowed read-only.
     // Scalar mode skips detection; neither mode reads process configuration.
-    class CpuArithmeticCache
+    class CpuCapabilities
     {
     public:
         enum class Mode { Automatic, Scalar };
 
-        explicit CpuArithmeticCache(Mode mode = Mode::Automatic);
+        explicit CpuCapabilities(Mode mode = Mode::Automatic);
 
         bool avx512() const noexcept { return mAvx512; }
         bool ifma() const noexcept { return mIfma; }

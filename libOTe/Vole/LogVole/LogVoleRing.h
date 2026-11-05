@@ -1,7 +1,7 @@
 #pragma once
 
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
-#include "libOTe/Vole/LogVole/LogVoleCpuArithmeticCache.h"
+#include "libOTe/Tools/CpuCapabilities.h"
 
 #include "cryptoTools/Crypto/PRNG.h"
 
@@ -146,7 +146,7 @@ namespace osuCrypto::LogVole
     {
         // Empty contexts use scalar dispatch. The factory detects capabilities
         // once on construction; retained/context copies reuse that decision.
-        detail::CpuArithmeticCache mCpuArithmeticCache{detail::CpuArithmeticCache::Mode::Scalar};
+        CpuCapabilities mCpuCapabilities{CpuCapabilities::Mode::Scalar};
         std::shared_ptr<RingContextFactory> mFactory;
         // A CRT-selected ring carries its explicit plaintext factory into leaf
         // rounding helpers. Both factory indices are weak; this adds no cycle.

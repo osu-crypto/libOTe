@@ -388,7 +388,7 @@ namespace osuCrypto::LogVole
                 AlignedUnVec<u64> scaled(n);
                 seal::util::multiply_poly_scalar_coeffmod(
                     bNtt.mCoeffs.data() + offset, n, scaleModQj, modulus, scaled.data());
-                if (detail::cpuDyadicMultiplyAdd(ctx.mCpuArithmeticCache, scaled.data(), digitNtt.mCoeffs.data() + offset,
+                if (cpuDyadicMultiplyAdd(ctx.mCpuCapabilities, scaled.data(), digitNtt.mCoeffs.data() + offset,
                     accNtt.mCoeffs.data() + offset, n, modulus)) return;
                 for (std::size_t c = 0; c < n; ++c)
                 {
@@ -522,7 +522,7 @@ namespace osuCrypto::LogVole
             seal::util::MultiplyUIntModOperand inverseLift;
             inverseLift.set(invCrtLiftModQj, modulus);
             const std::size_t offset = static_cast<std::size_t>(limbIdx) * n;
-            const bool vectorized = detail::cpuUnliftCenteredRns(ctx.mCpuArithmeticCache,
+            const bool vectorized = cpuUnliftCenteredRns(ctx.mCpuCapabilities,
                 liftedPoly.mCoeffs.data() + offset, plainPoly.mCoeffs.data(), n,
                 modulus, invCrtLiftModQj, moduli);
             for (std::size_t c = 0; !vectorized && c < n; ++c)

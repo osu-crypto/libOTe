@@ -372,7 +372,7 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
-            if (startLevel == 1 && levels == 1 && detail::cpuCenteredHighDigit(ctx.mCpuArithmeticCache,
+            if (startLevel == 1 && levels == 1 && cpuCenteredHighDigit(ctx.mCpuCapabilities,
                 canonical.mCoeffs.data(), out[0].mCoeffs.data(), n, digitBits,
                 *contextData->rns_tool()->base_q())) return true;
 
@@ -382,7 +382,7 @@ namespace osuCrypto::LogVole
             seal::util::Pointer<u64> composedPoly =
                 seal::util::allocate_poly(n, coeffModCount, pool);
             const auto& baseQ = *contextData->rns_tool()->base_q();
-            if (!detail::cpuComposeRns(ctx.mCpuArithmeticCache, canonical.mCoeffs.data(), composedPoly.get(), n, baseQ))
+            if (!cpuComposeRns(ctx.mCpuCapabilities, canonical.mCoeffs.data(), composedPoly.get(), n, baseQ))
             {
                 std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedPoly.get());
                 baseQ.compose_array(composedPoly.get(), n, pool);
@@ -865,7 +865,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        built.mCpuArithmeticCache = detail::CpuArithmeticCache{};
+        built.mCpuCapabilities = CpuCapabilities{};
         built.mFactory = owner;
         built.mResourceScope = std::move(resources);
         built.mPublicCache = std::make_shared<PublicPolynomialCache>();
@@ -962,7 +962,7 @@ namespace osuCrypto::LogVole
             return false;
         RingNttContext built{};
         built.mParams = params;
-        built.mCpuArithmeticCache = detail::CpuArithmeticCache{};
+        built.mCpuCapabilities = CpuCapabilities{};
         built.mPublicCache = std::make_shared<PublicPolynomialCache>();
         auto metadata = std::make_shared<RingModulusMetadata>();
         metadata->mValues.assign(orderedPrimes.begin(), orderedPrimes.end());
@@ -1189,7 +1189,7 @@ namespace osuCrypto::LogVole
         for (std::size_t j = 0; j < moduli.size(); ++j)
         {
             auto* coeffs = poly.mCoeffs.data() + j * n;
-            if (!detail::cpuReduceMod(ctx.mCpuArithmeticCache, coeffs, coeffs, n, moduli[j]))
+            if (!cpuReduceMod(ctx.mCpuCapabilities, coeffs, coeffs, n, moduli[j]))
                 seal::util::modulo_poly_coeffs(coeffs, n, moduli[j], coeffs);
         }
         return true;
@@ -1382,7 +1382,7 @@ namespace osuCrypto::LogVole
         {
             const auto& modulus = moduli[modIdx];
             const std::size_t offset = modIdx * n;
-            if (detail::cpuDyadicMultiplyAdd(ctx.mCpuArithmeticCache, aNtt.mCoeffs.data() + offset,
+            if (cpuDyadicMultiplyAdd(ctx.mCpuCapabilities, aNtt.mCoeffs.data() + offset,
                 bNtt.mCoeffs.data() + offset, cNtt.mCoeffs.data() + offset, n, modulus))
                 continue;
             // barrett_reduce_64 computes x mod q exactly for any 64-bit x, so
@@ -1431,9 +1431,9 @@ namespace osuCrypto::LogVole
                 a[t] = left[first+t]->mCoeffs.data() + j * n;
                 b[t] = right[first+t]->mCoeffs.data() + j * n;
             }
-            if (detail::cpuDyadicInnerProduct(ctx.mCpuArithmeticCache, a, b, terms, c, n, modulus)) continue;
+            if (cpuDyadicInnerProduct(ctx.mCpuCapabilities, a, b, terms, c, n, modulus)) continue;
             for (std::size_t t = 0; t < terms; ++t)
-                if (!detail::cpuDyadicMultiplyAdd(ctx.mCpuArithmeticCache, a[t], b[t], c, n, modulus))
+                if (!cpuDyadicMultiplyAdd(ctx.mCpuCapabilities, a[t], b[t], c, n, modulus))
                     for (std::size_t i = 0; i < n; ++i)
                         c[i] = mulAddMod(reduceU64(a[t][i], modulus), reduceU64(b[t][i], modulus),
                             reduceU64(c[i], modulus), modulus);
@@ -1692,7 +1692,7 @@ namespace osuCrypto::LogVole
         const std::size_t digitWords = std::min<std::size_t>(
             coeffModCount, (static_cast<u64>(digitBits) + 63) / 64);
         const auto& baseQ = *contextData->rns_tool()->base_q();
-        if (startLevel == 0 && levels == 1 && detail::cpuLowDigitRns(ctx.mCpuArithmeticCache,
+        if (startLevel == 0 && levels == 1 && cpuLowDigitRns(ctx.mCpuCapabilities,
             canonical.mCoeffs.data(), out[0].mCoeffs.data(), n, digitBits, baseQ))
         {
             bumpRingStat(RingOp::GadgetDecompose);
@@ -1701,7 +1701,7 @@ namespace osuCrypto::LogVole
         auto pool = seal::MemoryPoolHandle::ThreadLocal();
         seal::util::Pointer<u64> composedPoly =
             seal::util::allocate_poly(n, coeffModCount, pool);
-        if (!detail::cpuComposeRns(ctx.mCpuArithmeticCache, canonical.mCoeffs.data(), composedPoly.get(), n, baseQ))
+        if (!cpuComposeRns(ctx.mCpuCapabilities, canonical.mCoeffs.data(), composedPoly.get(), n, baseQ))
         {
             std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedPoly.get());
             baseQ.compose_array(composedPoly.get(), n, pool);
@@ -1977,7 +1977,7 @@ namespace osuCrypto::LogVole
         if (contextData)
         {
             prng.SetSeed(detail::aesPrngKey(sealSeedFromBlock(polySeed)));
-            detail::cpuSamplePolyUniform(ctx.mCpuArithmeticCache, prng, contextData->parms(), out.mCoeffs.data());
+            detail::cpuSamplePolyUniform(ctx.mCpuCapabilities, prng, contextData->parms(), out.mCoeffs.data());
             bumpRingStat(RingOp::PrngPoly);
             return;
         }
@@ -2026,7 +2026,7 @@ namespace osuCrypto::LogVole
         if (!data) return out;
         resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
         PRNG source(detail::aesPrngKey(seed));
-        detail::cpuSamplePolyUniform(ctx.mCpuArithmeticCache, source, data->parms(), out.mCoeffs.data());
+        detail::cpuSamplePolyUniform(ctx.mCpuCapabilities, source, data->parms(), out.mCoeffs.data());
         bumpRingStat(RingOp::PrngPoly);
         return out;
     }

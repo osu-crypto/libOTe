@@ -7,22 +7,8 @@
 #include <immintrin.h>
 #endif
 
-namespace osuCrypto::LogVole::detail
+namespace osuCrypto::LogVole
 {
-    CpuArithmeticCache::CpuArithmeticCache(Mode mode)
-    {
-#if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
-        if (mode == Mode::Automatic)
-        {
-            mAvx512 = __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq");
-            mIfma = mAvx512 && __builtin_cpu_supports("avx512ifma");
-        }
-#else
-        (void)mode;
-#endif
-    }
-
     namespace
     {
         template<std::size_t Limbs>
@@ -352,7 +338,7 @@ namespace osuCrypto::LogVole::detail
 
         template<std::size_t Limbs, bool Wide, unsigned DigitBits = 0, bool LowDigit = false>
         __attribute__((target("avx512f,avx512dq,avx512ifma")))
-        void composeRnsVector(const CpuArithmeticCache& cache, const u64* source, u64* destination,
+        void composeRnsVector(const CpuCapabilities& cache, const u64* source, u64* destination,
             std::size_t count, const seal::util::RNSBase& base)
         {
             // Eight independent CRT reconstructions in radix 2^52. Delaying
@@ -716,7 +702,7 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuReduceMod(const CpuArithmeticCache& cache, const u64* source, u64* destination,
+    bool cpuReduceMod(const CpuCapabilities& cache, const u64* source, u64* destination,
         std::size_t count, const seal::Modulus& modulus, const u64* rejectionLimit)
     {
 #if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
@@ -734,7 +720,7 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuScaleAndRoundRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
+    bool cpuScaleAndRoundRns(const CpuCapabilities& cache, const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base, u64 plaintextModulus)
     {
 #if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
@@ -761,7 +747,7 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuDenoiseRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
+    bool cpuDenoiseRns(const CpuCapabilities& cache, const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base, std::size_t target)
     {
         const bool enabled = true;
@@ -769,7 +755,7 @@ namespace osuCrypto::LogVole::detail
             cache, source, destination, count, base, base.base()[target].value());
     }
 
-    bool cpuCheckRoundingMargin(const CpuArithmeticCache& cache, const u64* source, std::size_t count,
+    bool cpuCheckRoundingMargin(const CpuCapabilities& cache, const u64* source, std::size_t count,
         std::span<const seal::Modulus> moduli, std::span<const std::size_t> sourceLimbs,
         std::span<const seal::util::MultiplyUIntModOperand> inverse,
         std::span<const wideU64> reciprocal, wideU64 margin, bool& accepted)
@@ -797,7 +783,7 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuComposeRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
+    bool cpuComposeRns(const CpuCapabilities& cache, const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base)
     {
         const bool enabled = true;
@@ -829,7 +815,7 @@ namespace osuCrypto::LogVole::detail
         return true;
     }
 
-    bool cpuCenteredHighDigit(const CpuArithmeticCache& cache, const u64* source, u64* destination,
+    bool cpuCenteredHighDigit(const CpuCapabilities& cache, const u64* source, u64* destination,
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
 #if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
@@ -848,7 +834,7 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuLowDigitRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
+    bool cpuLowDigitRns(const CpuCapabilities& cache, const u64* source, u64* destination,
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
 #if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
@@ -867,7 +853,7 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuUnliftCenteredRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
+    bool cpuUnliftCenteredRns(const CpuCapabilities& cache, const u64* source, u64* destination,
         std::size_t count, const seal::Modulus& sourceModulus, u64 inverseLift,
         std::span<const seal::Modulus> destinationModuli)
     {
@@ -892,7 +878,7 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuDyadicInnerProduct(const CpuArithmeticCache& cache, const u64* const* a, const u64* const* b,
+    bool cpuDyadicInnerProduct(const CpuCapabilities& cache, const u64* const* a, const u64* const* b,
         std::size_t terms, u64* c, std::size_t count, const seal::Modulus& modulus)
     {
 #if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
@@ -911,7 +897,7 @@ namespace osuCrypto::LogVole::detail
     }
 
     template<bool Subtract>
-    bool cpuDyadicProduct(const CpuArithmeticCache& cache, const u64* a, const u64* b, u64* c,
+    bool cpuDyadicProduct(const CpuCapabilities& cache, const u64* a, const u64* b, u64* c,
         std::size_t count, const seal::Modulus& modulus)
     {
 #if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
@@ -932,13 +918,13 @@ namespace osuCrypto::LogVole::detail
         return false;
     }
 
-    bool cpuDyadicMultiplyAdd(const CpuArithmeticCache& cache, const u64* a, const u64* b, u64* c,
+    bool cpuDyadicMultiplyAdd(const CpuCapabilities& cache, const u64* a, const u64* b, u64* c,
         std::size_t count, const seal::Modulus& modulus)
     {
         return cpuDyadicProduct<false>(cache, a, b, c, count, modulus);
     }
 
-    bool cpuDyadicMultiplySubtract(const CpuArithmeticCache& cache, const u64* a, const u64* b, u64* c,
+    bool cpuDyadicMultiplySubtract(const CpuCapabilities& cache, const u64* a, const u64* b, u64* c,
         std::size_t count, const seal::Modulus& modulus)
     {
         return cpuDyadicProduct<true>(cache, a, b, c, count, modulus);

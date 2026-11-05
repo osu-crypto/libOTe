@@ -275,7 +275,7 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
 
 void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
 {
-    const LogVole::detail::CpuArithmeticCache cpu;
+    const osuCrypto::CpuCapabilities cpu;
     PRNG random(toBlock(0x474f4c44, 0x4d415247));
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
@@ -325,7 +325,7 @@ void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
                     (host_oracle::Uint128{1} << 127), ~host_oracle::Uint128{0}, closest, closest-1, closest+1})
                 {
                     bool accepted = false;
-                    const bool used = LogVole::detail::cpuCheckRoundingMargin(cpu, input.data()+1, count,
+                    const bool used = LogVole::cpuCheckRoundingMargin(cpu, input.data()+1, count,
                         moduli, indices, inverse, fractions,
                         {static_cast<u64>(margin), static_cast<u64>(margin >> 64)}, accepted);
                     LOGVOLE_REQUIRE_EQ(accepted, used && (count == 0 || closest >= margin));
@@ -334,7 +334,7 @@ void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
                 }
                 bool accepted = true;
                 const std::vector<std::size_t> invalid{moduli.size()};
-                LOGVOLE_REQUIRE_FALSE(LogVole::detail::cpuCheckRoundingMargin(cpu, input.data()+1, count,
+                LOGVOLE_REQUIRE_FALSE(LogVole::cpuCheckRoundingMargin(cpu, input.data()+1, count,
                     moduli, invalid, inverse, fractions, {}, accepted));
                 LOGVOLE_REQUIRE_TRUE(accepted);
             }
@@ -344,11 +344,11 @@ void LogVole_Cpu_GoldenMarginMatchesIntegerReference(const oc::CLP&)
 
 void LogVole_Cpu_ReduceMatchesReference(const oc::CLP&)
 {
-    const LogVole::detail::CpuArithmeticCache cpu;
-    const LogVole::detail::CpuArithmeticCache scalar(LogVole::detail::CpuArithmeticCache::Mode::Scalar);
+    const osuCrypto::CpuCapabilities cpu;
+    const osuCrypto::CpuCapabilities scalar(osuCrypto::CpuCapabilities::Mode::Scalar);
     std::array<u64, 8> source{}, destination;
     destination.fill(123);
-    LOGVOLE_REQUIRE_FALSE(LogVole::detail::cpuReduceMod(
+    LOGVOLE_REQUIRE_FALSE(LogVole::cpuReduceMod(
         scalar, source.data(), destination.data(), source.size(), seal::Modulus((u64{1} << 52) - 1)));
     LOGVOLE_REQUIRE_TRUE(std::all_of(destination.begin(), destination.end(), [](u64 x) { return x == 123; }));
     PRNG random(toBlock(0x52454455, 0x4345));
@@ -367,12 +367,12 @@ void LogVole_Cpu_ReduceMatchesReference(const oc::CLP&)
             expected[i+1] = input[i+1] % q;
         }
         const auto original = actual;
-        const bool used = LogVole::detail::cpuReduceMod(cpu, input.data()+1, actual.data()+1, count, modulus);
+        const bool used = LogVole::cpuReduceMod(cpu, input.data()+1, actual.data()+1, count, modulus);
         LOGVOLE_REQUIRE_TRUE(actual == (used ? expected : original));
         const bool expectedFast = (bits == 52 || bits == 55) && gap < (u64{1} << 24) && cpu.avx512();
         LOGVOLE_REQUIRE_EQ(used, expectedFast);
         auto alias = input;
-        LOGVOLE_REQUIRE_EQ(LogVole::detail::cpuReduceMod(cpu, alias.data()+1, alias.data()+1, count, modulus), used);
+        LOGVOLE_REQUIRE_EQ(LogVole::cpuReduceMod(cpu, alias.data()+1, alias.data()+1, count, modulus), used);
         if (used) for (std::size_t i = 0; i < count; ++i) LOGVOLE_REQUIRE_EQ(alias[i+1], expected[i+1]);
         LOGVOLE_REQUIRE_EQ(alias.front(), input.front());
         LOGVOLE_REQUIRE_EQ(alias.back(), input.back());
@@ -383,7 +383,7 @@ void LogVole_Cpu_ReduceMatchesReference(const oc::CLP&)
             const u64 limit = ~u64{0};
             input[count] = limit;
             actual = original;
-            LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuReduceMod(cpu,
+            LOGVOLE_REQUIRE_TRUE(!LogVole::cpuReduceMod(cpu,
                 input.data()+1, actual.data()+1, count, modulus, &limit));
             LOGVOLE_REQUIRE_TRUE(actual == original);
         }
@@ -392,7 +392,7 @@ void LogVole_Cpu_ReduceMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_ScaleAndRoundMatchesReference(const oc::CLP&)
 {
-    const LogVole::detail::CpuArithmeticCache cpu;
+    const osuCrypto::CpuCapabilities cpu;
     PRNG random(toBlock(0x5343414c, 0x45524e44));
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
@@ -441,13 +441,13 @@ void LogVole_Cpu_ScaleAndRoundMatchesReference(const oc::CLP&)
                 expected[k+1] = result;
             }
             const auto original = actual;
-            const bool used = LogVole::detail::cpuScaleAndRoundRns(cpu, input.data(), actual.data()+1, count, base, p);
+            const bool used = LogVole::cpuScaleAndRoundRns(cpu, input.data(), actual.data()+1, count, base, p);
             LOGVOLE_REQUIRE_TRUE(actual == (used ? expected : original));
             const bool expectedFast = (limbs == 4 || limbs == 8) && (bits == 52 || bits == 55) && cpu.ifma();
             LOGVOLE_REQUIRE_EQ(used, expectedFast);
         }
         std::vector<u64> unchanged(16, 123), input(8 * limbs);
-        LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuScaleAndRoundRns(cpu, input.data(), unchanged.data(), 8,
+        LOGVOLE_REQUIRE_TRUE(!LogVole::cpuScaleAndRoundRns(cpu, input.data(), unchanged.data(), 8,
             base, u64{1} << bits));
         LOGVOLE_REQUIRE_TRUE(std::all_of(unchanged.begin(), unchanged.end(), [](u64 x) { return x == 123; }));
     }
@@ -498,16 +498,16 @@ void LogVole_Cpu_FusedGadgetMatchesBalancedReference(const oc::CLP&)
             LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(poly, digitBits, 0, 2, ctx, reference));
             LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(poly, digitBits, 1, 1, ctx, actual));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[0].mCoeffs, reference[1].mCoeffs));
-            const bool fused = LogVole::detail::cpuCenteredHighDigit(ctx.mCpuArithmeticCache, poly.mCoeffs.data(),
+            const bool fused = LogVole::cpuCenteredHighDigit(ctx.mCpuCapabilities, poly.mCoeffs.data(),
                 actual[0].mCoeffs.data(), 1024, digitBits, base);
-            LOGVOLE_REQUIRE_EQ(fused, ctx.mCpuArithmeticCache.ifma());
+            LOGVOLE_REQUIRE_EQ(fused, ctx.mCpuCapabilities.ifma());
             if (fused) LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[0].mCoeffs, reference[1].mCoeffs));
             RnsPoly recomposed;
             LOGVOLE_REQUIRE_TRUE(gadgetRecomposeBits(reference, digitBits, ctx, recomposed));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(recomposed.mCoeffs, poly.mCoeffs));
             // Unsupported shape must decline before changing any destination.
             std::vector<u64> untouched(limbs * 1024, 123);
-            LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuCenteredHighDigit(ctx.mCpuArithmeticCache,
+            LOGVOLE_REQUIRE_TRUE(!LogVole::cpuCenteredHighDigit(ctx.mCpuCapabilities,
                 poly.mCoeffs.data(), untouched.data(), 1023, digitBits, base));
             LOGVOLE_REQUIRE_TRUE(std::all_of(untouched.begin(), untouched.end(), [](u64 x) { return x == 123; }));
         }
@@ -555,10 +555,10 @@ void LogVole_Cpu_LowDigitMatchesIntegerReference(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRange(poly, digitBits, 0, 1, ctx, actual));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[0].mCoeffs, expected));
         std::vector<u64> direct(limbs*1024+2, 123);
-        const bool used = LogVole::detail::cpuLowDigitRns(ctx.mCpuArithmeticCache, poly.mCoeffs.data(), direct.data()+1,
+        const bool used = LogVole::cpuLowDigitRns(ctx.mCpuCapabilities, poly.mCoeffs.data(), direct.data()+1,
             1024, digitBits, base);
         const bool supported = ((limbs==4 && bits==55 && digitBits==110) ||
-            (limbs==8 && bits==52 && digitBits==208)) && ctx.mCpuArithmeticCache.ifma();
+            (limbs==8 && bits==52 && digitBits==208)) && ctx.mCpuCapabilities.ifma();
         LOGVOLE_REQUIRE_EQ(used, supported);
         if (used) LOGVOLE_REQUIRE_TRUE(std::equal(expected.begin(), expected.end(), direct.begin()+1));
         else LOGVOLE_REQUIRE_TRUE(std::all_of(direct.begin(), direct.end(), [](u64 x) { return x==123; }));
@@ -567,7 +567,7 @@ void LogVole_Cpu_LowDigitMatchesIntegerReference(const oc::CLP&)
         for (std::size_t count : {0, 1, 7, 9, 1023})
         {
             std::fill(direct.begin(), direct.end(), 123);
-            LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuLowDigitRns(ctx.mCpuArithmeticCache,
+            LOGVOLE_REQUIRE_TRUE(!LogVole::cpuLowDigitRns(ctx.mCpuCapabilities,
                 poly.mCoeffs.data(), direct.data()+1, count, digitBits, base));
             LOGVOLE_REQUIRE_TRUE(std::all_of(direct.begin(), direct.end(), [](u64 x) { return x==123; }));
         }
@@ -826,7 +826,7 @@ void LogVole_Cpu_CrtMatchesSeal(const oc::CLP&)
             }
             auto expected = source;
             base.compose_array(expected.data(), count, seal::MemoryManager::GetPool());
-            const bool used = LogVole::detail::cpuComposeRns(ctx.mCpuArithmeticCache, source.data(), actual.data(), count, base);
+            const bool used = LogVole::cpuComposeRns(ctx.mCpuCapabilities, source.data(), actual.data(), count, base);
             if (used) LOGVOLE_REQUIRE_TRUE(actual == expected);
             else LOGVOLE_REQUIRE_TRUE(std::all_of(actual.begin(), actual.end(), [](u64 v) { return v == 12345; }));
         }
@@ -858,25 +858,25 @@ void LogVole_Cpu_CrtMixedWidthsMatchSeal(const oc::CLP&)
         }
         auto expected = input;
         base.compose_array(expected.data(), count, seal::MemoryPoolHandle::ThreadLocal());
-        if (LogVole::detail::cpuComposeRns(ctx.mCpuArithmeticCache, input.data(), actual.data(), count, base))
+        if (LogVole::cpuComposeRns(ctx.mCpuCapabilities, input.data(), actual.data(), count, base))
             LOGVOLE_REQUIRE_TRUE(actual == expected);
         else LOGVOLE_REQUIRE_TRUE(std::all_of(actual.begin(), actual.end(), [](u64 x) { return x == 12345; }));
-        const LogVole::detail::CpuArithmeticCache scalar(LogVole::detail::CpuArithmeticCache::Mode::Scalar);
+        const osuCrypto::CpuCapabilities scalar(osuCrypto::CpuCapabilities::Mode::Scalar);
         LOGVOLE_REQUIRE_FALSE(scalar.avx512());
         LOGVOLE_REQUIRE_FALSE(scalar.ifma());
         // Alternate independent dispatch objects; both must reconstruct exactly
         // the same integers, without changing the other object's selection.
-        for (const auto* dispatch : std::array<const LogVole::detail::CpuArithmeticCache*, 3>{
-            &ctx.mCpuArithmeticCache, &scalar, &ctx.mCpuArithmeticCache})
+        for (const auto* dispatch : std::array<const osuCrypto::CpuCapabilities*, 3>{
+            &ctx.mCpuCapabilities, &scalar, &ctx.mCpuCapabilities})
         {
             std::fill(actual.begin(), actual.end(), u64{12345});
-            LOGVOLE_REQUIRE_TRUE(LogVole::detail::cpuComposeRns(
+            LOGVOLE_REQUIRE_TRUE(LogVole::cpuComposeRns(
                 *dispatch, input.data(), actual.data(), count, base));
             LOGVOLE_REQUIRE_TRUE(actual == expected);
         }
 
         auto manual = ctx;
-        manual.mCpuArithmeticCache = scalar;
+        manual.mCpuCapabilities = scalar;
         RnsPoly poly;
         poly.mCoeffs.resize(input.size());
         std::copy(input.begin(), input.end(), poly.mCoeffs.begin());
@@ -1645,7 +1645,7 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
 
 void LogVole_Cpu_DyadicMatchesReference(const oc::CLP&)
 {
-    const LogVole::detail::CpuArithmeticCache cpu;
+    const osuCrypto::CpuCapabilities cpu;
     PRNG random(toBlock(0x398, 0x8941));
     for (unsigned bits : {52, 55})
     for (u64 gap : {1, 81919, 16777215, 16777217})
@@ -1681,8 +1681,8 @@ void LogVole_Cpu_DyadicMatchesReference(const oc::CLP&)
                     ? seal::util::sub_uint_mod(result[i] % q, mulMod(x[i] % q, y[i] % q, mod), mod)
                     : mulAddMod(x[i] % q, y[i] % q, result[i] % q, mod);
             const auto original = result;
-            const auto operation = subtract ? LogVole::detail::cpuDyadicMultiplySubtract
-                : LogVole::detail::cpuDyadicMultiplyAdd;
+            const auto operation = subtract ? LogVole::cpuDyadicMultiplySubtract
+                : LogVole::cpuDyadicMultiplyAdd;
             const bool used = operation(
                 cpu, x.data()+1, y.data()+1, result.data()+1, count, mod);
             LOGVOLE_REQUIRE_TRUE(result == (used ? expected : original));
@@ -1693,7 +1693,7 @@ void LogVole_Cpu_DyadicMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_FusedDotMatchesReference(const oc::CLP&)
 {
-    const LogVole::detail::CpuArithmeticCache cpu;
+    const osuCrypto::CpuCapabilities cpu;
     PRNG random(toBlock(0x444f54, 0x49464d41));
     for (int bits : {30, 52, 55, 60})
     for (u64 gap : {1ULL, 32767ULL, 16777215ULL, 16777216ULL})
@@ -1728,7 +1728,7 @@ void LogVole_Cpu_FusedDotMatchesReference(const oc::CLP&)
             expected[i+1] = static_cast<u64>(sum % q);
         }
         const auto original = c;
-        const bool used = LogVole::detail::cpuDyadicInnerProduct(cpu, ap.data(), bp.data(), terms, c.data()+1, count, modulus);
+        const bool used = LogVole::cpuDyadicInnerProduct(cpu, ap.data(), bp.data(), terms, c.data()+1, count, modulus);
         LOGVOLE_REQUIRE_TRUE(c == (used ? expected : original));
         const bool expectedFast = (bits == 52 || bits == 55) && gap < (u64{1} << 24) &&
             terms >= 3 && terms <= 32 && cpu.ifma();
@@ -1762,7 +1762,7 @@ void LogVole_Cpu_FusedDotMatchesReference(const oc::CLP&)
 
 void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
 {
-    const LogVole::detail::CpuArithmeticCache cpu;
+    const osuCrypto::CpuCapabilities cpu;
     PRNG random(toBlock(0x1eaf, 0x20260910));
     for (int bits : {52, 55})
     {
@@ -1782,7 +1782,7 @@ void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
                 for (std::size_t j = 0; j < moduli.size(); ++j)
                     expected[1+j*count+i] = residue > q/2 ? moduli[j].value()-(q-residue) : residue;
             }
-            const bool dispatched = LogVole::detail::cpuUnliftCenteredRns(cpu, input.data()+1, output.data()+1,
+            const bool dispatched = LogVole::cpuUnliftCenteredRns(cpu, input.data()+1, output.data()+1,
                 count, moduli[selected], inverse, moduli);
             if (dispatched) LOGVOLE_REQUIRE_TRUE(output == expected);
             else LOGVOLE_REQUIRE_TRUE(std::all_of(output.begin(), output.end(), [](u64 x) { return x == 0x12345678; }));
@@ -1790,7 +1790,7 @@ void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
             {
                 const auto before = output;
                 input[count] = value;
-                LOGVOLE_REQUIRE_FALSE(LogVole::detail::cpuUnliftCenteredRns(cpu, input.data()+1,
+                LOGVOLE_REQUIRE_FALSE(LogVole::cpuUnliftCenteredRns(cpu, input.data()+1,
                     output.data()+1, count, moduli[selected], inverse, moduli));
                 LOGVOLE_REQUIRE_TRUE(output == before);
             }
@@ -1798,8 +1798,8 @@ void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
         std::array<u64, 8> input{}, output;
         output.fill(0x12345678);
         const std::array<seal::Modulus, 1> small{seal::Modulus(257)};
-        LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuUnliftCenteredRns(cpu, input.data(), output.data(), 8, moduli[0], 1, small));
-        LOGVOLE_REQUIRE_TRUE(!LogVole::detail::cpuUnliftCenteredRns(cpu, input.data(), output.data(), 8, small[0], 1, small));
+        LOGVOLE_REQUIRE_TRUE(!LogVole::cpuUnliftCenteredRns(cpu, input.data(), output.data(), 8, moduli[0], 1, small));
+        LOGVOLE_REQUIRE_TRUE(!LogVole::cpuUnliftCenteredRns(cpu, input.data(), output.data(), 8, small[0], 1, small));
         LOGVOLE_REQUIRE_TRUE(std::all_of(output.begin(), output.end(), [](u64 x) { return x == 0x12345678; }));
 
         RingParams params{};
@@ -1960,7 +1960,7 @@ void LogVole_Cpu_ResamplingOverwritesPreviousQuery(const oc::CLP&)
 
 void LogVole_Cpu_SamplerMatchesSeal(const oc::CLP&)
 {
-    const LogVole::detail::CpuArithmeticCache cpu;
+    const osuCrypto::CpuCapabilities cpu;
     // The direct, reusable PRNG and SEAL's optional boundary adapter use the
     // same AES stream. The independent counter-mode oracle checks byte order.
     {

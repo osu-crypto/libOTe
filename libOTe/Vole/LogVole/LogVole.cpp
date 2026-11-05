@@ -1823,7 +1823,7 @@ namespace osuCrypto::LogVole
                     seal::Plaintext plain;
                     plain.resize(slotCount);
 
-                    const bool vectorRounded = scaleAndRound && detail::cpuScaleAndRoundRns(ctx.mRing.mCpuArithmeticCache,
+                    const bool vectorRounded = scaleAndRound && cpuScaleAndRoundRns(ctx.mRing.mCpuCapabilities,
                         labels[labelIdx].mCoeffs.data(), plain.data(), n, fullBase, plainModulusValue);
                     RnsPoly canonical;
                     if (!vectorRounded)

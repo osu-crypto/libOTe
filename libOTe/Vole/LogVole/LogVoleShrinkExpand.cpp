@@ -1311,7 +1311,7 @@ namespace osuCrypto::LogVole
                 const auto& constants = recovery[j];
                 const std::size_t reducedCount = constants.mSrcLimbIndices.size();
 
-                if (detail::cpuDenoiseRns(ctx.mCpuArithmeticCache, polyIn.mCoeffs.data(), polyOut.mCoeffs.data() + j*n,
+                if (cpuDenoiseRns(ctx.mCpuCapabilities, polyIn.mCoeffs.data(), polyOut.mCoeffs.data() + j*n,
                     n, fullBase, j)) continue;
 
                 for (std::size_t k = 0; k < n; ++k)
