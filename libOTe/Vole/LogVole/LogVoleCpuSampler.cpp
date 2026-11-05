@@ -20,7 +20,7 @@ namespace osuCrypto::LogVole::detail
     namespace
     {
         template<typename Fill>
-        void sampleUniform(Fill&& fill, const seal::EncryptionParameters& parms,
+        void sampleUniform(const CpuArithmeticCache& cache, Fill&& fill, const seal::EncryptionParameters& parms,
             std::uint64_t* destination)
         {
             const auto& moduli = parms.coeff_modulus();
@@ -31,7 +31,7 @@ namespace osuCrypto::LogVole::detail
             {
                 constexpr std::uint64_t max = ~std::uint64_t{0};
                 const auto limit = max - seal::util::barrett_reduce_64(max, modulus) - 1;
-                if (!cpuReduceMod(destination, destination, count, modulus, &limit))
+                if (!cpuReduceMod(cache, destination, destination, count, modulus, &limit))
                 {
                     for (std::size_t i = 0; i < count; ++i)
                     {
@@ -77,18 +77,18 @@ namespace osuCrypto::LogVole::detail
         return std::make_shared<SealAesPrngFactory>();
     }
 
-    void cpuSamplePolyUniform(PRNG& prng,
+    void cpuSamplePolyUniform(const CpuArithmeticCache& cache, PRNG& prng,
         const seal::EncryptionParameters& parms, std::uint64_t* destination)
     {
-        sampleUniform([&](std::size_t bytes, seal::seal_byte* out) {
+        sampleUniform(cache, [&](std::size_t bytes, seal::seal_byte* out) {
             prng.get(reinterpret_cast<u8*>(out), bytes);
         }, parms, destination);
     }
 
-    void cpuSamplePolyUniform(std::shared_ptr<seal::UniformRandomGenerator> prng,
+    void cpuSamplePolyUniform(const CpuArithmeticCache& cache, std::shared_ptr<seal::UniformRandomGenerator> prng,
         const seal::EncryptionParameters& parms, std::uint64_t* destination)
     {
-        sampleUniform([&](std::size_t bytes, seal::seal_byte* out) {
+        sampleUniform(cache, [&](std::size_t bytes, seal::seal_byte* out) {
             prng->generate(bytes, out);
         }, parms, destination);
     }

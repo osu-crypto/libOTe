@@ -130,6 +130,31 @@ set(SRCS "${SRCS}")
 
 add_library(libOTe STATIC ${SRCS})
 
+if(ENABLE_LOGVOLE)
+    # Compile-time availability and runtime CPU/OS support are separate checks.
+    # Unsupported architectures or compilers retain the scalar implementations.
+    include(CheckCXXSourceCompiles)
+    check_cxx_source_compiles([=[
+        #if !defined(__x86_64__) || !(defined(__GNUC__) || defined(__clang__))
+        #error Unsupported compiler or architecture
+        #endif
+        #include <immintrin.h>
+        __attribute__((target("avx512f,avx512dq,avx512ifma")))
+        __m512i probe(__m512i x) {
+            return _mm512_madd52lo_epu64(x, x, _mm512_mullo_epi64(x, x));
+        }
+        int main() {
+            return __builtin_cpu_supports("avx512f") &&
+                __builtin_cpu_supports("avx512dq") &&
+                __builtin_cpu_supports("avx512ifma");
+        }
+    ]=] LIBOTE_LOGVOLE_CPU_IFMA)
+    if(LIBOTE_LOGVOLE_CPU_IFMA)
+        set_property(SOURCE Vole/LogVole/LogVoleCpuArithmetic.cpp APPEND
+            PROPERTY COMPILE_DEFINITIONS LIBOTE_LOGVOLE_CPU_IFMA=1)
+    endif()
+endif()
+
 # Source/dependency targets inherit the directory option. Export it as well for
 # consumers that instantiate coroutine templates from the installed headers.
 target_compile_options(libOTe INTERFACE ${LIBOTE_ASAN_COMPILE_OPTIONS})

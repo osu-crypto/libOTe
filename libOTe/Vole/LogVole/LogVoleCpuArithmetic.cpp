@@ -2,53 +2,25 @@
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include <algorithm>
-#include <cstdlib>
 
-#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#if defined(LIBOTE_LOGVOLE_CPU_IFMA)
 #include <immintrin.h>
 #define LV_CPU_IFMA 1
 #endif
 
 namespace osuCrypto::LogVole::detail
 {
-    CpuArithmeticCache::CpuArithmeticCache()
+    CpuArithmeticCache::CpuArithmeticCache(Mode mode)
     {
 #if defined(LV_CPU_IFMA)
-        mCrtQuotient = [] {
-            const char* value = std::getenv("LV_CPU_CRT_QUOTIENT");
-            return !value || value[0] != '0';
-        }();
-#endif
-        mFastCrt = [] {
-            const char* value = std::getenv("LV_CPU_FAST_CRT");
-            return !value || value[0] != '0';
-        }();
-#if defined(LV_CPU_IFMA)
-        mVectorCrt = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_CRT");
-            return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
-#endif
-#if defined(LV_CPU_IFMA)
-        mFusedGadget = [] {
-            const char* value = std::getenv("LV_CPU_FUSED_GADGET");
-            const char* vector = std::getenv("LV_CPU_VECTOR_CRT");
-            const char* fast = std::getenv("LV_CPU_FAST_CRT");
-            return (!value || value[0] != '0') && (!vector || vector[0] != '0') &&
-                (!fast || fast[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
-#endif
-#if defined(LV_CPU_IFMA)
-        mFusedLowDigit = [] {
-            const char* value = std::getenv("LV_CPU_FUSED_LOW_DIGIT");
-            const char* vector = std::getenv("LV_CPU_VECTOR_CRT");
-            const char* fast = std::getenv("LV_CPU_FAST_CRT");
-            return (!value || value[0] != '0') && (!vector || vector[0] != '0') &&
-                (!fast || fast[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
+        if (mode == Mode::Automatic)
+        {
+            mAvx512 = __builtin_cpu_supports("avx512f") &&
+                __builtin_cpu_supports("avx512dq");
+            mIfma = mAvx512 && __builtin_cpu_supports("avx512ifma");
+        }
+#else
+        (void)mode;
 #endif
     }
 
@@ -397,7 +369,7 @@ namespace osuCrypto::LogVole::detail
             const auto zero = _mm512_setzero_si512();
             const auto mask = _mm512_set1_epi64(maskValue);
             const auto one = _mm512_set1_epi64(1);
-            const bool quotientEnabled = cache.mCrtQuotient;
+            const bool quotientEnabled = true;
             __m512i punctured[Limbs][PuncturedWords], q[Words], inv[Limbs], invShoup[Limbs],
                 reciprocal[Limbs], moduli[Limbs];
             for (std::size_t j = 0; j < Limbs; ++j)
@@ -745,15 +717,11 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuReduceMod(const u64* source, u64* destination,
+    bool cpuReduceMod(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, const seal::Modulus& modulus, const u64* rejectionLimit)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_REDUCE");
-            return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq");
-        }();
+        const bool enabled = cache.avx512();
         const u64 q = modulus.value();
         const int bits = modulus.bit_count();
         if (!enabled || (bits != 52 && bits != 55) || (u64{1} << bits) - q >= (u64{1} << 24))
@@ -767,15 +735,11 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuScaleAndRoundRns(const u64* source, u64* destination,
+    bool cpuScaleAndRoundRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base, u64 plaintextModulus)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_ROUND");
-            return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
+        const bool enabled = cache.ifma();
         if (!enabled || (base.size() != 4 && base.size() != 8) || plaintextModulus < 2) return false;
         const int bits = base.base()[0].bit_count();
         if ((bits != 52 && bits != 55) || plaintextModulus >= (u64{1} << bits)) return false;
@@ -798,28 +762,21 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuDenoiseRns(const u64* source, u64* destination,
+    bool cpuDenoiseRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base, std::size_t target)
     {
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_DENOISE");
-            return !value || value[0] != '0';
-        }();
+        const bool enabled = true;
         return enabled && target < base.size() && cpuScaleAndRoundRns(
-            source, destination, count, base, base.base()[target].value());
+            cache, source, destination, count, base, base.base()[target].value());
     }
 
-    bool cpuCheckRoundingMargin(const u64* source, std::size_t count,
+    bool cpuCheckRoundingMargin(const CpuArithmeticCache& cache, const u64* source, std::size_t count,
         std::span<const seal::Modulus> moduli, std::span<const std::size_t> sourceLimbs,
         std::span<const seal::util::MultiplyUIntModOperand> inverse,
         std::span<const wideU64> reciprocal, wideU64 margin, bool& accepted)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_GOLDEN_CHECK");
-            return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
+        const bool enabled = cache.ifma();
         if (!enabled || sourceLimbs.empty() || sourceLimbs.size() > 8 ||
             inverse.size() != sourceLimbs.size() || reciprocal.size() != sourceLimbs.size() ||
             sourceLimbs[0] >= moduli.size()) return false;
@@ -844,12 +801,12 @@ namespace osuCrypto::LogVole::detail
     bool cpuComposeRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, const seal::util::RNSBase& base)
     {
-        const bool enabled = cache.mFastCrt;
+        const bool enabled = true;
         if (!enabled || (base.size() != 4 && base.size() != 8)) return false;
         for (std::size_t i = 0; i < base.size(); ++i)
             if (base.base()[i].bit_count() > 61) return false;
 #if defined(LV_CPU_IFMA)
-        const bool vectorEnabled = cache.mVectorCrt;
+        const bool vectorEnabled = cache.ifma();
         int maxBits = 0;
         for (std::size_t i = 0; i < base.size(); ++i)
             maxBits = std::max(maxBits, base.base()[i].bit_count());
@@ -877,7 +834,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
 #if defined(LV_CPU_IFMA)
-        const bool enabled = cache.mFusedGadget;
+        const bool enabled = cache.ifma();
         if (!enabled || count == 0 || count % 8) return false;
         const bool gold = base.size() == 4 && digitBits == 110;
         const bool noGold = base.size() == 8 && digitBits == 208;
@@ -896,7 +853,7 @@ namespace osuCrypto::LogVole::detail
         std::size_t count, unsigned digitBits, const seal::util::RNSBase& base)
     {
 #if defined(LV_CPU_IFMA)
-        const bool enabled = cache.mFusedLowDigit;
+        const bool enabled = cache.ifma();
         if (!enabled || count == 0 || count % 8) return false;
         const bool gold = base.size() == 4 && digitBits == 110;
         const bool noGold = base.size() == 8 && digitBits == 208;
@@ -911,16 +868,12 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuUnliftCenteredRns(const u64* source, u64* destination,
+    bool cpuUnliftCenteredRns(const CpuArithmeticCache& cache, const u64* source, u64* destination,
         std::size_t count, const seal::Modulus& sourceModulus, u64 inverseLift,
         std::span<const seal::Modulus> destinationModuli)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_RECURSIVE_LEAF");
-            return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
+        const bool enabled = cache.ifma();
         const auto bits = sourceModulus.bit_count();
         if (!enabled || count == 0 || destinationModuli.empty() ||
             (bits != 52 && bits != 55) || inverseLift >= sourceModulus.value()) return false;
@@ -940,17 +893,11 @@ namespace osuCrypto::LogVole::detail
 #endif
     }
 
-    bool cpuDyadicInnerProduct(const u64* const* a, const u64* const* b,
+    bool cpuDyadicInnerProduct(const CpuArithmeticCache& cache, const u64* const* a, const u64* const* b,
         std::size_t terms, u64* c, std::size_t count, const seal::Modulus& modulus)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_FUSED_DOT");
-            const char* vector = std::getenv("LV_CPU_VECTOR_DYADIC");
-            return (!value || value[0] != '0') && (!vector || vector[0] != '0') &&
-                __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512dq") &&
-                __builtin_cpu_supports("avx512ifma");
-        }();
+        const bool enabled = cache.ifma();
         const int bits = modulus.bit_count();
         // Two-term measurements showed no benefit over the existing dyadic
         // kernel, and a small 52-bit regression. Fuse only longer products.
@@ -965,15 +912,11 @@ namespace osuCrypto::LogVole::detail
     }
 
     template<bool Subtract>
-    bool cpuDyadicProduct(const u64* a, const u64* b, u64* c,
+    bool cpuDyadicProduct(const CpuArithmeticCache& cache, const u64* a, const u64* b, u64* c,
         std::size_t count, const seal::Modulus& modulus)
     {
 #if defined(LV_CPU_IFMA)
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_VECTOR_DYADIC");
-            return (!value || value[0] != '0') && __builtin_cpu_supports("avx512f") &&
-                __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        }();
+        const bool enabled = cache.ifma();
         const u64 q = modulus.value();
         if (!enabled || count < 8) return false;
         if (q < (u64{1} << 52) && (u64{1} << 52) - q < (u64{1} << 24))
@@ -990,15 +933,15 @@ namespace osuCrypto::LogVole::detail
         return false;
     }
 
-    bool cpuDyadicMultiplyAdd(const u64* a, const u64* b, u64* c,
+    bool cpuDyadicMultiplyAdd(const CpuArithmeticCache& cache, const u64* a, const u64* b, u64* c,
         std::size_t count, const seal::Modulus& modulus)
     {
-        return cpuDyadicProduct<false>(a, b, c, count, modulus);
+        return cpuDyadicProduct<false>(cache, a, b, c, count, modulus);
     }
 
-    bool cpuDyadicMultiplySubtract(const u64* a, const u64* b, u64* c,
+    bool cpuDyadicMultiplySubtract(const CpuArithmeticCache& cache, const u64* a, const u64* b, u64* c,
         std::size_t count, const seal::Modulus& modulus)
     {
-        return cpuDyadicProduct<true>(a, b, c, count, modulus);
+        return cpuDyadicProduct<true>(cache, a, b, c, count, modulus);
     }
 }
