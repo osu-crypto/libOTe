@@ -28,12 +28,6 @@ namespace osuCrypto::LogVole::gpu
             *destination = mask;
         }
 
-        bool deviceConstantsEnabled()
-        {
-            const char* value = std::getenv("LV_GPU_ZK_DEVICE_CONSTANTS");
-            return !value || value[0] != '0';
-        }
-
         __global__ void zkPrepareModulusKernel(u64 modulus, HostModulus* out)
         {
             // Binary long division of the single set bit 2^128. The
@@ -68,13 +62,9 @@ namespace osuCrypto::LogVole::gpu
                 operands[i] = static_cast<u32>((i / 2 / width) * width + residues[i]);
         }
 
-        u32 zkPseudoBits(u64 modulus)
+        u32 zkPseudoBits(u64 modulus, const LogVoleZkOptions& settings)
         {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_ZK_PSEUDO_REDUCE");
-                return !(v && v[0] == '0');
-            }();
-            if (!on) return 0;
+            if (!settings.mGpuPseudoReduce) return 0;
             for (u32 bits : {54u, 51u})
             {
                 const u64 radix = u64{1} << bits;
@@ -96,19 +86,10 @@ namespace osuCrypto::LogVole::gpu
             return static_cast<cudaStream_t>(s);
         }
 
-        bool zkDebug()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv("LOGVOLE_GPU_DEBUG");
-                return v && v[0] != '\0' && v[0] != '0';
-            }();
-            return on;
-        }
-
-        inline bool check(cudaError_t e, const char* where)
+        inline bool check(cudaError_t e, const char* where, bool debug)
         {
             if (e == cudaSuccess) return true;
-            if (zkDebug())
+            if (debug)
             {
                 std::fprintf(stderr, "[lvzk] %s: %s\n", where, cudaGetErrorString(e));
             }
@@ -516,20 +497,20 @@ namespace osuCrypto::LogVole::gpu
         }
     }
 
-    bool launchZkPrepareModulus(u64 modulus, HostModulus* out, void* stream)
+    bool launchZkPrepareModulus(u64 modulus, HostModulus* out, void* stream, bool debug)
     {
         if (modulus < 2 || modulus >= (u64{1} << 61u) || !out) return false;
         zkPrepareModulusKernel<<<1, 1, 0, asStream(stream)>>>(modulus, out);
-        return check(cudaGetLastError(), "zkPrepareModulus");
+        return check(cudaGetLastError(), "zkPrepareModulus", debug);
     }
 
     bool launchZkAccept(u64 proofU, u64 proofV, u64 verifierValue, u64 delta,
-        const HostModulus& mod, u64* accepted, void* stream)
+        const HostModulus& mod, u64* accepted, void* stream, bool debug)
     {
         if (mod.mValue < 2 || mod.mValue >= (u64{1} << 61u) || !accepted) return false;
         zkAcceptKernel<<<1, 1, 0, asStream(stream)>>>(
             proofU, proofV, verifierValue, delta, toDevice(mod), accepted);
-        return check(cudaGetLastError(), "zkAccept");
+        return check(cudaGetLastError(), "zkAccept", debug);
     }
 
     bool launchZkMulProver(
@@ -543,12 +524,12 @@ namespace osuCrypto::LogVole::gpu
         const HostModulus& mod,
         u64* scratch,
         u64* outUV,
-        void* stream)
+        void* stream, const LogVoleZkOptions& settings, bool debug)
     {
         if (!gateCount || !wires || !macs || !operands || !scratch || !outUV) return false;
         const GpuModulus m = toDevice(mod);
         const u32 blocks = reduceBlocks(gateCount);
-        const bool deviceStep = deviceConstantsEnabled();
+        const bool deviceStep = settings.mDeviceConstants;
         const u64 chiStep = deviceStep ? 0u : powModDevice(chi, static_cast<u64>(blocks) * kZkThreads, m);
 
         const auto launch = [&](auto tag) {
@@ -556,17 +537,17 @@ namespace osuCrypto::LogVole::gpu
             zkMulProverKernel<bits><<<blocks, kZkThreads, reduceShared(2), asStream(stream)>>>(
                 wires, macs, operands, gateCount, firstOutWire, chi, chiStep, deviceStep, m, scratch);
         };
-        const u32 bits = zkPseudoBits(mod.mValue);
+        const u32 bits = zkPseudoBits(mod.mValue, settings);
         if (bits == 54u) launch(std::integral_constant<u32, 54u>{});
         else if (bits == 51u) launch(std::integral_constant<u32, 51u>{});
         else launch(std::integral_constant<u32, 0u>{});
-        if (!check(cudaGetLastError(), "zkMulProver")) return false;
+        if (!check(cudaGetLastError(), "zkMulProver", debug)) return false;
 
         // The partials are laid out [U blocks][V blocks], so the reducer's lane
         // stride is `blocks`, not kZkReduceBlocks.
         zkReduceKernel<2><<<1, kZkThreads, reduceShared(2), asStream(stream)>>>(
             scratch, blocks, macs + maskIndex, wires + maskIndex, m, outUV);
-        return check(cudaGetLastError(), "zkMulProverReduce");
+        return check(cudaGetLastError(), "zkMulProverReduce", debug);
     }
 
     bool launchZkMulVerifier(
@@ -580,12 +561,12 @@ namespace osuCrypto::LogVole::gpu
         const HostModulus& mod,
         u64* scratch,
         u64* outB,
-        void* stream)
+        void* stream, const LogVoleZkOptions& settings, bool debug)
     {
         if (!gateCount || !keys || !operands || !scratch || !outB) return false;
         const GpuModulus m = toDevice(mod);
         const u32 blocks = reduceBlocks(gateCount);
-        const bool deviceStep = deviceConstantsEnabled();
+        const bool deviceStep = settings.mDeviceConstants;
         const u64 chiStep = deviceStep ? 0u : powModDevice(chi, static_cast<u64>(blocks) * kZkThreads, m);
 
         const auto launch = [&](auto tag) {
@@ -594,21 +575,21 @@ namespace osuCrypto::LogVole::gpu
                 keys, operands, gateCount, firstOutWire, chi, chiStep, deviceStep,
                 deviceStep ? delta : delta % mod.mValue, m, scratch);
         };
-        const u32 bits = zkPseudoBits(mod.mValue);
+        const u32 bits = zkPseudoBits(mod.mValue, settings);
         if (bits == 54u) launch(std::integral_constant<u32, 54u>{});
         else if (bits == 51u) launch(std::integral_constant<u32, 51u>{});
         else launch(std::integral_constant<u32, 0u>{});
-        if (!check(cudaGetLastError(), "zkMulVerifier")) return false;
+        if (!check(cudaGetLastError(), "zkMulVerifier", debug)) return false;
 
         zkReduceKernel<1><<<1, kZkThreads, reduceShared(1), asStream(stream)>>>(
             scratch, blocks, keys + maskIndex, nullptr, m, outB);
-        return check(cudaGetLastError(), "zkMulVerifierReduce");
+        return check(cudaGetLastError(), "zkMulVerifierReduce", debug);
     }
 
     bool launchZkMatMulProver(
         const u64* wires, const u64* macs, const u64* coefficients,
         u32 n, u64 maskIndex, const HostModulus& mod,
-        u64* scratch, u64* outUV, void* stream)
+        u64* scratch, u64* outUV, void* stream, const LogVoleZkOptions& settings, bool debug)
     {
         const u64 entries = static_cast<u64>(n) * n;
         if (!n || !wires || !macs || !coefficients || !scratch || !outUV ||
@@ -621,20 +602,20 @@ namespace osuCrypto::LogVole::gpu
             zkMatMulProverKernel<bits><<<blocks, kZkThreads, reduceShared(2), asStream(stream)>>>(
                 wires, macs, coefficients, n, m, scratch);
         };
-        const u32 bits = zkPseudoBits(mod.mValue);
+        const u32 bits = zkPseudoBits(mod.mValue, settings);
         if (bits == 54u) launch(std::integral_constant<u32, 54u>{});
         else if (bits == 51u) launch(std::integral_constant<u32, 51u>{});
         else launch(std::integral_constant<u32, 0u>{});
-        if (!check(cudaGetLastError(), "zkMatMulProver")) return false;
+        if (!check(cudaGetLastError(), "zkMatMulProver", debug)) return false;
         zkReduceKernel<2><<<1, kZkThreads, reduceShared(2), asStream(stream)>>>(
             scratch, entries, macs + maskIndex, wires + maskIndex, m, outUV);
-        return check(cudaGetLastError(), "zkMatMulProverReduce");
+        return check(cudaGetLastError(), "zkMatMulProverReduce", debug);
     }
 
     bool launchZkMatMulVerifier(
         const u64* keys, const u64* publicProduct, const u64* coefficients,
         u32 n, u64 maskIndex, u64 delta, const HostModulus& mod,
-        u64* scratch, u64* outB, void* stream)
+        u64* scratch, u64* outB, void* stream, const LogVoleZkOptions& settings, bool debug)
     {
         const u64 entries = static_cast<u64>(n) * n;
         if (!n || !keys || !publicProduct || !coefficients || !scratch || !outB ||
@@ -647,32 +628,32 @@ namespace osuCrypto::LogVole::gpu
             zkMatMulVerifierKernel<bits><<<blocks, kZkThreads, reduceShared(1), asStream(stream)>>>(
                 keys, publicProduct, coefficients, n, delta, m, scratch);
         };
-        const u32 bits = zkPseudoBits(mod.mValue);
+        const u32 bits = zkPseudoBits(mod.mValue, settings);
         if (bits == 54u) launch(std::integral_constant<u32, 54u>{});
         else if (bits == 51u) launch(std::integral_constant<u32, 51u>{});
         else launch(std::integral_constant<u32, 0u>{});
-        if (!check(cudaGetLastError(), "zkMatMulVerifier")) return false;
+        if (!check(cudaGetLastError(), "zkMatMulVerifier", debug)) return false;
         zkReduceKernel<1><<<1, kZkThreads, reduceShared(1), asStream(stream)>>>(
             scratch, entries, keys + maskIndex, nullptr, m, outB);
-        return check(cudaGetLastError(), "zkMatMulVerifierReduce");
+        return check(cudaGetLastError(), "zkMatMulVerifierReduce", debug);
     }
 
-    bool launchZkSetMask(u64* destination, u64 mask, void* stream)
+    bool launchZkSetMask(u64* destination, u64 mask, void* stream, bool debug)
     {
         if (!destination) return false;
         zkSetMaskKernel<<<1, 1, 0, asStream(stream)>>>(destination, mask);
-        return check(cudaGetLastError(), "zkSetMask");
+        return check(cudaGetLastError(), "zkSetMask", debug);
     }
 
     bool launchZkPackOperands(
-        const u64* residues, u32* operands, u64 count, u64 width, void* stream)
+        const u64* residues, u32* operands, u64 count, u64 width, void* stream, bool debug)
     {
         if (!residues || !operands || !count || !width) return false;
         const u64 needed = (count + kZkThreads - 1) / kZkThreads;
         const u32 blocks = static_cast<u32>(needed < 65535 ? needed : 65535);
         zkPackOperandsKernel<<<blocks, kZkThreads, 0, asStream(stream)>>>(
             residues, operands, count, width);
-        return check(cudaGetLastError(), "zkPackOperands");
+        return check(cudaGetLastError(), "zkPackOperands", debug);
     }
 
     bool launchZkMulEvalLayer(
@@ -682,22 +663,22 @@ namespace osuCrypto::LogVole::gpu
         u64 width,
         u64 firstOutWire,
         const HostModulus& mod,
-        void* stream)
+        void* stream, bool debug)
     {
         if (!wires || !operands || !width) return false;
         const u32 blocks = static_cast<u32>((width + kZkThreads - 1) / kZkThreads);
         zkMulEvalLayerKernel<<<blocks, kZkThreads, 0, asStream(stream)>>>(
             wires, operands, firstGate, width, firstOutWire, toDevice(mod));
-        return check(cudaGetLastError(), "zkMulEvalLayer");
+        return check(cudaGetLastError(), "zkMulEvalLayer", debug);
     }
 
     bool launchZkMatMulGemm(
-        const u64* a, const u64* b, u64* c, u32 n, const HostModulus& mod, void* stream)
+        const u64* a, const u64* b, u64* c, u32 n, const HostModulus& mod, void* stream, bool debug)
     {
         if (!n || !a || !b || !c) return false;
         const dim3 threads(kGemmTile, kGemmTile);
         const dim3 blocks((n + kGemmTile - 1) / kGemmTile, (n + kGemmTile - 1) / kGemmTile);
         zkGemmKernel<<<blocks, threads, 0, asStream(stream)>>>(a, b, c, n, toDevice(mod));
-        return check(cudaGetLastError(), "zkGemm");
+        return check(cudaGetLastError(), "zkGemm", debug);
     }
 }

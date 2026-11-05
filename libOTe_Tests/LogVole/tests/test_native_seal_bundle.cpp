@@ -11,8 +11,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdlib>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -20,31 +18,6 @@ using namespace osuCrypto::LogVole;
 
 namespace
 {
-    class ScopedEnvironmentValue
-    {
-    public:
-        ScopedEnvironmentValue(const char* name, const char* value) : mName(name)
-        {
-            if (const char* old = std::getenv(name))
-            {
-                mHadOld = true;
-                mOld = old;
-            }
-            if (value) ::tests_libOTe::logvole_test::setEnvironment(name, value, 1);
-            else ::tests_libOTe::logvole_test::unsetEnvironment(name);
-        }
-        ~ScopedEnvironmentValue()
-        {
-            if (mHadOld) ::tests_libOTe::logvole_test::setEnvironment(mName.c_str(), mOld.c_str(), 1);
-            else ::tests_libOTe::logvole_test::unsetEnvironment(mName.c_str());
-        }
-        ScopedEnvironmentValue(const ScopedEnvironmentValue&) = delete;
-        ScopedEnvironmentValue& operator=(const ScopedEnvironmentValue&) = delete;
-    private:
-        std::string mName, mOld;
-        bool mHadOld = false;
-    };
-
     RingParams makeParams(std::uint32_t degree, const std::vector<int>& widths)
     {
         RingParams params{};
@@ -80,18 +53,9 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (!gpu::available()) return;
-    const bool wasEnabled = gpu::enabled();
-    gpu::setEnabled(true);
-    struct RestoreGpu
-    {
-        bool old;
-        ~RestoreGpu() { gpu::setEnabled(old); }
-    } restore{wasEnabled};
-    ScopedEnvironmentValue fullChain("LV_GPU_SETUP_FULL_MOD_CHAIN", "0");
-    ScopedEnvironmentValue ringMode("LV_GPU_SETUP_LIGHTWEIGHT_RING", "1");
-    ScopedEnvironmentValue crtMode("LV_GPU_SETUP_LIGHTWEIGHT_CRT", "1");
-    ScopedEnvironmentValue singleLimb("LV_GPU_SETUP_BATCHING_SINGLE_LIMB", "1");
-    ScopedEnvironmentValue bundleMode("LV_GPU_NATIVE_SEAL_BUNDLE", "1");
+    osuCrypto::LogVoleOptions options;
+    options.mUseGpu = true;
+    options.mAdvanced.mContexts.mNativeSealBundle = true;
     struct Case
     {
         std::uint32_t degree;
@@ -118,7 +82,12 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             const auto role = party ? ProtocolCacheRole::Receiver :
                 ProtocolCacheRole::Sender;
             ScopedProtocolCacheScope owner(role, run);
-            auto factory = std::make_shared<ZpContextFactory>();
+            auto factory = std::make_shared<ZpContextFactory>(
+                std::make_shared<RingContextFactory>(options));
+            auto sequentialOptions = options;
+            sequentialOptions.mAdvanced.mContexts.mNativeSealBundle = false;
+            auto sequentialFactory = std::make_shared<ZpContextFactory>(
+                std::make_shared<RingContextFactory>(sequentialOptions));
             std::shared_ptr<gpu::GpuPlainNtt> priorPlain;
             std::shared_ptr<gpu::GpuRing> priorDeviceRing;
             RingNttContext priorRing{};
@@ -134,12 +103,9 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
                         params, plaintextBits, earlyRing, earlyZp, factory));
                     LOGVOLE_REQUIRE_FALSE(earlyZp.mNativeSealBundleCommitted);
                 }
-                // The native publication must supersede a same-role table
-                // created by an explicit sequential opt-out.
-                ScopedEnvironmentValue optOut(
-                    "LV_GPU_NATIVE_SEAL_BUNDLE", "0");
+                // Keep a separate sequential owner alive while native setup is published.
                 LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
-                    params, plaintextBits, priorRing, priorZp, factory));
+                    params, plaintextBits, priorRing, priorZp, sequentialFactory));
                 LOGVOLE_REQUIRE_FALSE(priorZp.mNativeSealBundleCommitted);
                 priorDeviceRing = gpu::GpuRing::get(priorRing);
                 LOGVOLE_REQUIRE_TRUE(priorDeviceRing != nullptr);
@@ -179,16 +145,12 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
                 standaloneRing.mRawModuli->mValues, standaloneRing.mResourceScope) == certificate);
             if (production)
             {
-                // A preceding test can already have published the native
-                // same-role owner. In that case this call reuses it; only a
-                // genuinely sequential prior table must be superseded.
+                // The native owner cannot replace the sequential owner's tables.
                 LOGVOLE_REQUIRE_TRUE(priorPlainAlreadyNative
                     ? priorPlain == bundledZp[party].mNativePlainNtt
                     : priorPlain != bundledZp[party].mNativePlainNtt);
-                ScopedEnvironmentValue explicitFallback(
-                    "LV_GPU_NATIVE_SEAL_BUNDLE", "0");
                 RingNttContext fallbackRing{};
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, fallbackRing, factory->ringFactory()));
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, fallbackRing, sequentialFactory->ringFactory()));
                 LOGVOLE_REQUIRE_TRUE(fallbackRing.mRawModuli &&
                     !fallbackRing.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(fallbackRing) ==
@@ -205,12 +167,13 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             RingNttContext eagerRing{};
             ZpCrtContext eagerZp{};
             {
-                ScopedEnvironmentValue eagerRingMode(
-                    "LV_GPU_SETUP_LIGHTWEIGHT_RING", "0");
-                ScopedEnvironmentValue eagerCrtMode(
-                    "LV_GPU_SETUP_LIGHTWEIGHT_CRT", "0");
+                auto eagerOptions = options;
+                eagerOptions.mAdvanced.mContexts.mLightweightRing = false;
+                eagerOptions.mAdvanced.mContexts.mLightweightCrt = false;
+                auto eagerFactory = std::make_shared<ZpContextFactory>(
+                    std::make_shared<RingContextFactory>(eagerOptions));
                 LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
-                    params, plaintextBits, eagerRing, eagerZp, factory));
+                    params, plaintextBits, eagerRing, eagerZp, eagerFactory));
             }
             LOGVOLE_REQUIRE_FALSE(eagerZp.mNativeSealBundleCommitted);
             expectSameMetadata(bundledRing[party], bundledZp[party],
@@ -218,10 +181,8 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             RingNttContext optOutRing{};
             ZpCrtContext optOutZp{};
             {
-                ScopedEnvironmentValue optOut(
-                    "LV_GPU_NATIVE_SEAL_BUNDLE", "0");
                 LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
-                    params, plaintextBits, optOutRing, optOutZp, factory));
+                    params, plaintextBits, optOutRing, optOutZp, sequentialFactory));
             }
             LOGVOLE_REQUIRE_FALSE(optOutZp.mNativeSealBundleCommitted);
             expectSameMetadata(bundledRing[party], bundledZp[party],
@@ -274,13 +235,13 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             untouched.mOwnerRunId = 91u;
             LOGVOLE_REQUIRE_FALSE(
                 gpu::buildNativeSealSetupBundleDevice(
-                    failedQ, plaintextBits, untouched));
+                    failedQ, plaintextBits, untouched, std::make_shared<gpu::GpuSetupContext>(options)));
             LOGVOLE_EXPECT_EQ(untouched.mPlaintextPrime,
                 0xdecafbadULL);
             LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, 91u);
             LOGVOLE_REQUIRE_FALSE(
                 gpu::buildNativeSealSetupBundleDevice(
-                    params, 2u, untouched));
+                    params, 2u, untouched, std::make_shared<gpu::GpuSetupContext>(options)));
             LOGVOLE_EXPECT_EQ(untouched.mPlaintextPrime,
                 0xdecafbadULL);
             LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, 91u);
@@ -294,18 +255,9 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (!gpu::available()) return;
-    const bool wasEnabled = gpu::enabled();
-    gpu::setEnabled(true);
-    struct RestoreGpu
-    {
-        bool old;
-        ~RestoreGpu() { gpu::setEnabled(old); }
-    } restore{wasEnabled};
-    ScopedEnvironmentValue fullChain("LV_GPU_SETUP_FULL_MOD_CHAIN", "0");
-    ScopedEnvironmentValue ringMode("LV_GPU_SETUP_LIGHTWEIGHT_RING", "1");
-    ScopedEnvironmentValue crtMode("LV_GPU_SETUP_LIGHTWEIGHT_CRT", "1");
-    ScopedEnvironmentValue singleLimb("LV_GPU_SETUP_BATCHING_SINGLE_LIMB", "1");
-    ScopedEnvironmentValue bundleMode("LV_GPU_NATIVE_SEAL_BUNDLE", "1");
+    osuCrypto::LogVoleOptions options;
+    options.mUseGpu = true;
+    options.mAdvanced.mContexts.mNativeSealBundle = true;
     ScopedProtocolCacheScope noIncomingRun(
         ProtocolCacheRole::Unspecified, 0u);
     const auto previousScope = currentProtocolCacheScope();
@@ -321,13 +273,20 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
     }};
     for (const auto& [setting, requestedBits, exactPrime] : cases)
     {
-        osuCrypto::LogVoleSender senderA, senderB;
-        osuCrypto::LogVoleReceiver receiverA, receiverB;
-        auto factory = std::make_shared<ZpContextFactory>();
-        senderA.configure(8u, requestedBits, 1u, setting, OnlineMode::Interactive, factory);
-        senderB.configure(8u, requestedBits, 1u, setting, OnlineMode::Interactive, factory);
-        receiverA.configure(8u, requestedBits, 1u, setting, OnlineMode::Interactive, factory);
-        receiverB.configure(8u, requestedBits, 1u, setting, OnlineMode::Interactive, factory);
+
+        auto factory = std::make_shared<ZpContextFactory>(
+                std::make_shared<RingContextFactory>(options));
+        osuCrypto::LogVoleOptions sessionOptions = options;
+        sessionOptions.mRequestSize = 8u;
+        sessionOptions.mPlaintextModulusBits = requestedBits;
+        sessionOptions.mNumThreads = 1u;
+        sessionOptions.mSetting = setting;
+        sessionOptions.mMode = OnlineMode::Interactive;
+        osuCrypto::LogVoleSender senderA(sessionOptions, factory);
+        osuCrypto::LogVoleSender senderB(sessionOptions, factory);
+
+        osuCrypto::LogVoleReceiver receiverA(sessionOptions, factory);
+        osuCrypto::LogVoleReceiver receiverB(sessionOptions, factory);
         const std::array<std::uint64_t, 4> runs{{
             senderA.configureCacheRunId(), senderB.configureCacheRunId(),
             receiverA.configureCacheRunId(), receiverB.configureCacheRunId()
@@ -390,7 +349,6 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
             {
                 ScopedProtocolCacheScope otherRole(party ? ProtocolCacheRole::Sender :
                     ProtocolCacheRole::Receiver, 0u);
-                ScopedEnvironmentValue otherMode("LV_GPU_NATIVE_SEAL_BUNDLE", "0");
                 RingNttContext retained;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(standalone.mParams, retained,
                     selected[party].mRing.mFactoryOwner));
@@ -439,11 +397,12 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                         selected[party].mNativePlainNtt);
             }
             {
-                ScopedEnvironmentValue explicitFallback(
-                    "LV_GPU_NATIVE_SEAL_BUNDLE", "0");
                 RingNttContext fallback{};
+                auto fallbackOptions = options;
+                fallbackOptions.mAdvanced.mContexts.mNativeSealBundle = false;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(
-                    params.mLogVole.mShrinkExpand.mRing, fallback));
+                    params.mLogVole.mShrinkExpand.mRing, fallback,
+                    std::make_shared<RingContextFactory>(fallbackOptions)));
                 LOGVOLE_REQUIRE_TRUE(fallback.mRawModuli &&
                     !fallback.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(fallback) !=
@@ -460,12 +419,15 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
             selected[0].mRing.mRawModuli->mDynamicGpuCertificate !=
             selected[1].mRing.mRawModuli->mDynamicGpuCertificate);
 
-        osuCrypto::LogVoleGarbledSender garbledSenderA, garbledSenderB;
-        osuCrypto::LogVoleGarbledReceiver garbledReceiverA, garbledReceiverB;
-        garbledSenderA.configure(1u, 1u, setting);
-        garbledSenderB.configure(1u, 1u, setting);
-        garbledReceiverA.configure(1u, 1u, setting);
-        garbledReceiverB.configure(1u, 1u, setting);
+        osuCrypto::LogVoleOptions garbledOptions = options;
+        garbledOptions.mRequestSize = 1u;
+        garbledOptions.mNumThreads = 1u;
+        garbledOptions.mSetting = setting;
+        osuCrypto::LogVoleGarbledSender garbledSenderA(garbledOptions);
+        osuCrypto::LogVoleGarbledSender garbledSenderB(garbledOptions);
+
+        osuCrypto::LogVoleGarbledReceiver garbledReceiverA(garbledOptions);
+        osuCrypto::LogVoleGarbledReceiver garbledReceiverB(garbledOptions);
         const std::array<std::uint64_t, 4> garbledRuns{{
             garbledSenderA.configureCacheRunId(),
             garbledSenderB.configureCacheRunId(),
@@ -493,12 +455,11 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
         {
             ScopedProtocolCacheScope explicitOwner(
                 ProtocolCacheRole::Unspecified, suppliedRun);
-            osuCrypto::LogVoleSender explicitlyScoped{};
-            osuCrypto::LogVoleGarbledSender garbledScopedSender{};
-            osuCrypto::LogVoleGarbledReceiver garbledScopedReceiver{};
-            explicitlyScoped.configure(8u, requestedBits, 1u, setting);
-            garbledScopedSender.configure(1u, 1u, setting);
-            garbledScopedReceiver.configure(1u, 1u, setting);
+
+            osuCrypto::LogVoleSender explicitlyScoped(sessionOptions);
+
+            osuCrypto::LogVoleGarbledSender garbledScopedSender(garbledOptions);
+            osuCrypto::LogVoleGarbledReceiver garbledScopedReceiver(garbledOptions);
             LOGVOLE_EXPECT_EQ(explicitlyScoped.configureCacheRunId(),
                 suppliedRun);
             LOGVOLE_EXPECT_EQ(garbledScopedSender.configureCacheRunId(),
@@ -513,15 +474,20 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                 garbledScopedReceiver.nativeSealBundleAtConfigure());
         }
         {
-            ScopedEnvironmentValue optOut("LV_GPU_NATIVE_SEAL_BUNDLE", "0");
-            osuCrypto::LogVoleSender sequentialSender{};
-            osuCrypto::LogVoleReceiver sequentialReceiver{};
-            osuCrypto::LogVoleGarbledSender sequentialGarbledSender{};
-            osuCrypto::LogVoleGarbledReceiver sequentialGarbledReceiver{};
-            sequentialSender.configure(8u, requestedBits, 1u, setting);
-            sequentialReceiver.configure(8u, requestedBits, 1u, setting);
-            sequentialGarbledSender.configure(1u, 1u, setting);
-            sequentialGarbledReceiver.configure(1u, 1u, setting);
+
+            osuCrypto::LogVoleOptions sequentialSenderOptions;
+            sequentialSenderOptions.mRequestSize = 8u;
+            sequentialSenderOptions.mPlaintextModulusBits = requestedBits;
+            sequentialSenderOptions.mNumThreads = 1u;
+            sequentialSenderOptions.mSetting = setting;
+            osuCrypto::LogVoleSender sequentialSender(sequentialSenderOptions);
+            osuCrypto::LogVoleReceiver sequentialReceiver(sequentialSenderOptions);
+            osuCrypto::LogVoleOptions sequentialGarbledSenderOptions;
+            sequentialGarbledSenderOptions.mRequestSize = 1u;
+            sequentialGarbledSenderOptions.mNumThreads = 1u;
+            sequentialGarbledSenderOptions.mSetting = setting;
+            osuCrypto::LogVoleGarbledSender sequentialGarbledSender(sequentialGarbledSenderOptions);
+            osuCrypto::LogVoleGarbledReceiver sequentialGarbledReceiver(sequentialGarbledSenderOptions);
             LOGVOLE_REQUIRE_FALSE(
                 sequentialSender.nativeSealBundleAtConfigure());
             LOGVOLE_REQUIRE_FALSE(

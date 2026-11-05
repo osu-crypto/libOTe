@@ -1,5 +1,6 @@
 #pragma once
 #include "libOTe/Vole/LogVole/LogVolePrng.h"
+#include "libOTe/Vole/LogVole/LogVoleKernelOptions.h"
 
 // Host-visible declarations for the LogVole CUDA kernels. This header is
 // deliberately free of both CUDA and SEAL types so that it can be included
@@ -65,7 +66,7 @@ namespace osuCrypto::LogVole::gpu
 
     // Device-resident constants for one RingParams instance. All pointers are
     // device pointers owned by GpuRingContext.
-    struct RingConstView
+    struct RingDeviceConstView
     {
         u32 mN = 0;
         u32 mLogN = 0;
@@ -102,6 +103,17 @@ namespace osuCrypto::LogVole::gpu
         // policy untouched, including unsupported devices and synthetic views.
         std::size_t mH200RootL2MaxWindow = 0;
     };
+
+    // Host-only launch metadata. Kernel parameters use the unchanged device
+    // base above, so settings never enlarge device arguments or enter device memory.
+    struct RingConstView : RingDeviceConstView
+    {
+        LogVoleGpuKernelOptions mKernelOptions;
+        u32 mSmCount = 142;
+        bool mH200Shared = false;
+    };
+
+    bool prepareKernelDispatch(RingConstView& rc, const LogVoleGpuKernelOptions& options);
 
     bool gpuDeviceAvailable();
     const char* gpuDeviceName();
@@ -248,7 +260,6 @@ namespace osuCrypto::LogVole::gpu
     };
 
     // False when LOGVOLE_GPU_FUSED_IP=0 asks for the unfused two-kernel path.
-    bool gpuFusedIpActive();
 
     // Inverse NTT with one elementwise operation folded into the shared-memory
     // load and one into the store:
@@ -536,8 +547,8 @@ namespace osuCrypto::LogVole::gpu
 
     // ---- gadget decomposition --------------------------------------------
     // Shares the cached mode parser between ring setup and online dispatch.
-    bool h200Fp52GadgetConstantsEnabled();
-    bool h200Fp52GadgetPredivEnabled();
+    bool h200Fp52GadgetConstantsEnabled(const LogVoleGpuKernelOptions& options);
+    bool h200Fp52GadgetPredivEnabled(const LogVoleGpuKernelOptions& options);
     // Setup-only; the caller owns 80 doubles and synchronizes before publishing
     // the ring. The online gadget only reads this immutable device allocation.
     bool launchPrepareH200Fp52GadgetConstants(
@@ -982,7 +993,7 @@ namespace osuCrypto::LogVole::gpu
         u32* rejectEpochs, u32 rejectEpoch, void* stream);
     // Exact hashSeedDigest RandomOracle(16) over label, size and coefficients.
     bool launchRootDigestHash(
-        const u64* words, u32 count, u64* out, void* stream);
+        const RingConstView& rc, const u64* words, u32 count, u64* out, void* stream);
 
     // Root randomizer sampler for N=8192, rho=4, g=110. `taskSeeds` contains
     // exactly 3*rangesPerPoly cryptoTools AES-CTR keys in [poly][range] order;
@@ -1026,7 +1037,7 @@ namespace osuCrypto::LogVole::gpu
     // and requires the golden seed to be 16 bytes. `ct2Scratch` needs
     // 2*chunkCount u64, `outSeeds` needs 8*chunkCount*mu u64.
     bool launchCt2Seeds(
-        const u64* prefix,
+        const LogVoleGpuKernelOptions& options, const u64* prefix,
         u64 instanceBase,
         u32 chunkCount,
         u32 mu,
@@ -1044,7 +1055,7 @@ namespace osuCrypto::LogVole::gpu
     // which is exactly deriveUniformPolyFromSeed's seed derivation. `outSeeds`
     // needs 8 * seedCount * perSeedCount u64.
     bool launchPolySeeds(
-        const u64* seeds,
+        const LogVoleGpuKernelOptions& options, const u64* seeds,
         u32 seedCount,
         u32 perSeedCount,
         u64 domainTag,

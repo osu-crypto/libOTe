@@ -3,10 +3,11 @@
 #include <cryptoTools/Common/CLP.h>
 
 #define LIBOTE_LOGVOLE_TESTS(X) \
+    X(RingOps, BackendSelectionOwnership) \
     X(Modes, InteractiveGolden) \
     X(Modes, InteractiveNoGolden) \
     X(Modes, NonInteractive) \
-    X(Modes, PartialRootWidthOptions) \
+    X(Modes, ProtocolOptions) \
     X(Garbled, LayoutAndValidation) \
     X(Garbled, SequentialRelation) \
     X(Garbled, GpuPackingMatchesCrt) \
@@ -56,6 +57,7 @@
     X(Core, RootOnlineStateReuseAcrossQueries) \
     X(Core, TwoLevelCoprotoRelation) \
     X(Core, ThreeLevelOfflineReuseAndInvalidWidth) \
+    X(Core, GpuSetupOptions) \
     X(Core, GpuResidentSetupState) \
     X(Core, GpuSetupDeltaChain) \
     X(Core, TwoLevelCoprotoMultiThreadSkipTbkOutput) \
@@ -109,6 +111,7 @@
     X(Core, GdecompHiUnbundleLiftsOneLimbPerOutput) \
     X(Core, RepOfflineSenderInputGammaOneRepeats) \
     X(Core, SeedLabelSampleCt2FromSeedDeterministic) \
+    X(RingOps, KernelOptions) \
     X(RingOps, NttTwoTileInPlaceParity) \
     X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
     X(Core, RootTruncParamsAndKeyReplication) \

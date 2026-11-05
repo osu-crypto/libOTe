@@ -23,24 +23,23 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        bool parallelLheSetupEnabled()
+        bool parallelLheSetupEnabled(const LogVoleGpuSetupOptions& options, const RingNttContext& ctx)
         {
             // Explicit 1 also permits CPU-only equivalence tests. The default
             // applies only to GPU protocols; 0 restores the serial setup.
-            const char* value = std::getenv("LV_GPU_SETUP_LHE");
-            if (value) return value[0] != '0';
+            if (options.mParallelLhe != LogVoleChoice::Automatic)
+                return options.mParallelLhe == LogVoleChoice::Enabled;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            return gpu::enabled();
+            return gpu::enabled(ctx);
 #else
             return false;
 #endif
         }
 
-        bool deviceLheSetupEnabled()
+        bool deviceLheSetupEnabled(const LogVoleGpuSetupOptions& options, const RingNttContext& ctx)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            const char* value = std::getenv("LV_GPU_SETUP_LHE_DEVICE");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return options.mLheDevice && gpu::enabled(ctx);
 #else
             return false;
 #endif
@@ -69,13 +68,13 @@ namespace osuCrypto::LogVole
             key.mRunId = scope.mRunId;
             key.mRole = scope.mRole;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (gpu::publicUniformRetentionEnabled()) key.mDevice = gpu::currentDeviceOrdinal();
+            if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions)) key.mDevice = gpu::currentDeviceOrdinal();
 #endif
 
             {
                 std::lock_guard<std::mutex> lock(cache.mMutex);
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (gpu::publicUniformRetentionEnabled() && key.mRunId != 0)
+                if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions) && key.mRunId != 0)
                 {
                     // A completed run's otherwise unowned host snapshot can
                     // retire; the retention registry holds only a weak owner.
@@ -258,16 +257,17 @@ namespace osuCrypto::LogVole
         const gpu::DeviceBatch* rootSecretDevice,
         const LazyRootSecretHostState* rootSecretHost,
         u64 rootSecretOwnerRunId,
-        bool topSecretDomain)
+        bool topSecretDomain,
+        const LogVoleGpuSetupOptions& options)
     {
-        HostStep setupStep("setup: lhe ciphertext");
+        HostStep setupStep(hostProfiler(ctx), "setup: lhe ciphertext");
         const auto rCount = randomizers ? randomizers->count()
             : rootR1Host ? rootR1Host->count() : rInput.size();
         const auto skCount = rootSecretHost ? rootSecretHost->count() : sk1.size();
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool rootBatchValid = !rootR1Device || !gpu::enabled() ||
+        const bool rootBatchValid = !rootR1Device || !gpu::enabled(ctx) ||
             (rootR1Host && gpu::rootErrorBatchMatches(ctx, *rootR1Device, rCount));
-        const bool rootSecretValid = !rootSecretDevice || !gpu::enabled() ||
+        const bool rootSecretValid = !rootSecretDevice || !gpu::enabled(ctx) ||
             (rootSecretHost && (topSecretDomain
                 ? gpu::topSecretUniformBatchMatches(ctx, *rootSecretDevice,
                     skCount, rootSecretOwnerRunId)
@@ -308,7 +308,7 @@ namespace osuCrypto::LogVole
         else
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (deviceLheSetupEnabled())
+            if (deviceLheSetupEnabled(options, ctx))
                 retainedPublicANtt = retainedLhePublicANtt(ctx, publicCount);
 #endif
             if (!retainedPublicANtt)
@@ -335,7 +335,7 @@ namespace osuCrypto::LogVole
                 ringAddInplace(poly, error, ctx);
         };
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (deviceLheSetupEnabled())
+        if (deviceLheSetupEnabled(options, ctx))
         {
             // An initial r1 residency decline still keeps the already-drawn
             // row seeds. Only that decline materializes host rows for the
@@ -344,12 +344,10 @@ namespace osuCrypto::LogVole
                 ? rootR1Host->hostCoefficients() : rInput;
             const auto& deviceSk = rootSecretHost && !rootSecretDevice
                 ? rootSecretHost->hostCoefficients() : sk1;
-            const char* compactFlag = std::getenv("LV_GPU_SETUP_COMPACT_NOISE");
-            const char* compactStrictFlag = std::getenv("LV_GPU_SETUP_COMPACT_NOISE_STRICT");
             // Keep compact errors through GPU expansion and addition. Exact
             // resident sampling avoids a q0 download/upload between helpers.
-            const bool compactRequested = !compactFlag || compactFlag[0] != '0';
-            const bool compactStrict = compactRequested && compactStrictFlag && compactStrictFlag[0] != '0';
+            const bool compactRequested = options.mCompactNoise;
+            const bool compactStrict = compactRequested && options.mCompactNoiseStrict;
             const bool compactEnabled = compactRequested &&
                 canSamplePolyErrorCompact(ctx, noiseStandardDeviation, noiseMaxDeviation);
             if (compactStrict && !compactEnabled) return false;
@@ -394,10 +392,8 @@ namespace osuCrypto::LogVole
                 if (deferredCiphertext) *deferredCiphertext = std::move(lazyCiphertext);
                 return true;
             }
-            const char* strict = std::getenv("LV_GPU_SETUP_LHE_DEVICE_STRICT");
-            const char* topStrict = std::getenv("LV_GPU_SETUP_TOP_SK1_CONSUMER_STRICT");
-            if (compactStrict || (strict && strict[0] != '0') ||
-                (topSecretDomain && topStrict && topStrict[0] != '0')) return false;
+            if (compactStrict || options.mLheDeviceStrict ||
+                (topSecretDomain && options.mTopSecretConsumerStrict)) return false;
         }
 #endif
         if (residentNoise && !materializePolyErrorCompactBatchForSetup(compactNoise, residentNoise,
@@ -424,7 +420,7 @@ namespace osuCrypto::LogVole
         if (rPowerOffset)
         {
             shiftedR.resize(r.size());
-            const u32 shiftWorkers = parallelLheSetupEnabled() ? requestedWorkers : 1;
+            const u32 shiftWorkers = parallelLheSetupEnabled(options, ctx) ? requestedWorkers : 1;
             if (!detail::runParallelTasks(r.size(), shiftWorkers, [&](std::size_t i) {
                     return multiplyByGPower(ctx, r[i], gadgetLogBase, rPowerOffset, shiftedR[i]);
                 })) return false;
@@ -445,7 +441,7 @@ namespace osuCrypto::LogVole
         }
 
 
-        if (parallelLheSetupEnabled())
+        if (parallelLheSetupEnabled(options, ctx))
         {
             // Canonicalize each source once. Column zero then needs only a
             // copy; the remaining columns use SEAL's precomputed scalar
@@ -563,12 +559,13 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>* publicANtt,
         u32 requestedWorkers,
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext,
-        std::shared_ptr<const LazyLencRandomizerState> randomizers)
+        std::shared_ptr<const LazyLencRandomizerState> randomizers,
+        const LogVoleGpuSetupOptions& options)
     {
         return lheEnc1Impl(ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
             noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 0u,
             deferredCiphertext, randomizers, nullptr, nullptr,
-            nullptr, nullptr, 0, false);
+            nullptr, nullptr, 0, false, options);
     }
 
     bool lheEnc1Trunc(
@@ -590,13 +587,14 @@ namespace osuCrypto::LogVole
         const gpu::DeviceBatch* rootSecretDevice,
         const LazyRootSecretHostState* rootSecretHost,
         u64 rootSecretOwnerRunId,
-        bool topSecretDomain)
+        bool topSecretDomain,
+        const LogVoleGpuSetupOptions& options)
     {
         return lheEnc1Impl(ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
             noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 1u,
             deferredCiphertext, randomizers, rootR1Device, rootR1Host,
             rootSecretDevice, rootSecretHost, rootSecretOwnerRunId,
-            topSecretDomain);
+            topSecretDomain, options);
     }
 
     bool lheApplyCt1(
@@ -797,10 +795,7 @@ namespace osuCrypto::LogVole
         // and batched. This is the Root recursion level's hot path, and it used to
         // pay one transform per row per direction; batching lets the CUDA backend
         // amortise a single device round trip over all of them.
-        static const bool inplace = [] {
-            const char* value = std::getenv("LV_CPU_INPLACE_LHE");
-            return !value || value[0] != '0';
-        }();
+        const bool inplace = ctx.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe;
         std::vector<RnsPoly> result = inplace && ownedCipher && publicANtt != ownedCipher
             ? std::move(*ownedCipher) : std::vector<RnsPoly>(cipher.begin(), cipher.end());
         if (!cipherInputIsNtt && !forwardNttBatch(result, ctx))

@@ -32,23 +32,7 @@ using namespace osuCrypto::LogVole;
 
 namespace
 {
-    class ScopedEnvironmentValue
-    {
-    public:
-        ScopedEnvironmentValue(const char* name, const char* value) : mName(name)
-        {
-            if (const char* old = std::getenv(name)) { mHadOld = true; mOld = old; }
-            ::tests_libOTe::logvole_test::setEnvironment(name, value, 1);
-        }
-        ~ScopedEnvironmentValue()
-        {
-            if (mHadOld) ::tests_libOTe::logvole_test::setEnvironment(mName.c_str(), mOld.c_str(), 1);
-            else ::tests_libOTe::logvole_test::unsetEnvironment(mName.c_str());
-        }
-    private:
-        std::string mName, mOld;
-        bool mHadOld = false;
-    };
+
 
     KeyDeriveRequest make_keyderive_request()
     {
@@ -314,7 +298,7 @@ namespace
             return mHost;
         }
 
-        bool copyCoefficientsTo(WireView destination) const override
+        bool copyCoefficientsTo(WireView destination, const oc::LogVoleWireOptions&) const override
         {
             ++mCopyRequests;
             if (!mAllowCopy || destination.size() != mBytes) return false;
@@ -340,15 +324,25 @@ namespace
 
     template<typename Message>
     void expect_large_parallel_wire(const Message& message, std::size_t firstTensorOffset,
-        CpuBenchmarkContext& telemetry, bool expectParallel)
+        CpuBenchmarkContext& telemetry, bool expectParallel, bool useGpu)
     {
         const auto expected = scalar_wire(message);
         LOGVOLE_REQUIRE_TRUE(expected.size() > (std::size_t(1) << 20));
-        const auto serial = encode(message, 1);
+        const auto serial = encode(message, 1, {}, useGpu);
+        oc::LogVoleEncodingOptions scalarOptions;
+        scalarOptions.mSetupMemcpy = false;
+        scalarOptions.mParallel = false;
+        expect_bytes_equal(encode(message, 8, scalarOptions, useGpu), as_span(expected));
+        Message scalarDecoded{};
+        LOGVOLE_REQUIRE_TRUE(decode(as_span(expected), scalarDecoded, 8, scalarOptions, useGpu));
+        expect_bytes_equal(as_span(scalar_wire(scalarDecoded)), as_span(expected));
+        oc::LogVoleEncodingOptions serialOptions;
+        serialOptions.mParallel = false;
+        expect_bytes_equal(encode(message, 8, serialOptions, useGpu), as_span(expected));
         for (auto workers : { 0u, 1u, 8u })
         {
             telemetry.reset();
-            const auto wire = encode(message, workers);
+            const auto wire = encode(message, workers, {}, useGpu);
             expect_bytes_equal(wire, as_span(expected));
             expect_bytes_equal(wire, serial);
 #if defined(__linux__)
@@ -361,7 +355,7 @@ namespace
             std::copy(expected.begin(), expected.end(), unaligned.begin() + 1);
             telemetry.reset();
             Message decoded{};
-            LOGVOLE_REQUIRE_TRUE(decode(as_span(unaligned).subspan(1), decoded, workers));
+            LOGVOLE_REQUIRE_TRUE(decode(as_span(unaligned).subspan(1), decoded, workers, {}, useGpu));
 #if defined(__linux__)
             LOGVOLE_EXPECT_EQ(telemetry.mWorkersChecked.load() != 0, expectParallel && workers > 1);
 #endif
@@ -379,14 +373,14 @@ namespace
                 expected.size() - 1u })
         {
             Message decoded{};
-            LOGVOLE_EXPECT_FALSE(decode(as_span(expected).first(size), decoded, 8));
+            LOGVOLE_EXPECT_FALSE(decode(as_span(expected).first(size), decoded, 8, {}, useGpu));
         }
         const auto rejectMutation = [&](std::size_t offset, std::uint32_t value) {
             auto bad = expected;
             for (unsigned byte = 0; byte < 4; ++byte)
                 bad[offset + byte] = static_cast<std::uint8_t>(value >> (8u * byte));
             Message decoded{};
-            LOGVOLE_EXPECT_FALSE(decode(as_span(bad), decoded, 8));
+            LOGVOLE_EXPECT_FALSE(decode(as_span(bad), decoded, 8, {}, useGpu));
         };
         rejectMutation(0, 0);
         rejectMutation(firstTensorOffset, 0);
@@ -395,21 +389,17 @@ namespace
         auto trailing = expected;
         trailing.push_back(0);
         Message decoded{};
-        LOGVOLE_EXPECT_FALSE(decode(as_span(trailing), decoded, 8));
+        LOGVOLE_EXPECT_FALSE(decode(as_span(trailing), decoded, 8, {}, useGpu));
     }
 
     void expect_parallel_offline_codec(const oc::CLP& cmd)
     {
         bool haveGpu = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool previousGpu = gpu::enabled();
-        struct RestoreGpu { bool mPrevious; ~RestoreGpu() { gpu::setEnabled(mPrevious); } } restoreGpu{ previousGpu };
-        gpu::setEnabled(cmd.getOr("gpu", 0) != 0);
-        haveGpu = gpu::enabled();
+        haveGpu = cmd.getOr("gpu", 0) != 0 && gpu::available();
 #else
         (void)cmd;
 #endif
-        ScopedEnvironmentValue parallelCodec("LV_GPU_SETUP_PARALLEL_CODEC", "1");
         ScopedProtocolCacheScope roleScope(ProtocolCacheRole::Unspecified, currentProtocolCacheScope().mRunId);
         CpuBenchmarkContext telemetry;
         telemetry.mWorkerLimit = 8;
@@ -426,9 +416,8 @@ namespace
             ~RestoreTelemetry() { tCpuBenchmarkContext = mPrevious; }
         } restoreTelemetry{ tCpuBenchmarkContext };
         tCpuBenchmarkContext = &telemetry;
-        const char* nativeCodec = std::getenv("LV_SETUP_MEMCPY_CODEC");
         const bool expectParallel = haveGpu && std::endian::native == std::endian::little &&
-            (!nativeCodec || nativeCodec[0] != '0') && telemetry.mCpus.size() > 1u;
+            telemetry.mCpus.size() > 1u;
 
         RingParams ring{};
         ring.mPolyModulusDegree = 8192;
@@ -452,7 +441,7 @@ namespace
         shrink.mLacct.mLevels = 3;
         shrink.mLacct.mCt = make_tensor(ring, 5, 3, 0x8001020304050607ull);
         const auto ringHeader = 8u + 2u * ring.mCoeffModulusBits.size();
-        expect_large_parallel_wire(shrink, ringHeader + 20u + 3u + 8u, telemetry, expectParallel);
+        expect_large_parallel_wire(shrink, ringHeader + 20u + 3u + 8u, telemetry, expectParallel, haveGpu);
 
         RootOfflineMessage root{};
         root.mRing = ring;
@@ -466,7 +455,7 @@ namespace
         root.mTopCt = make_tensor(ring, 9, 1, 0xFFEEDDCCBBAA9988ull);
         for (std::uint64_t i = 0; i < 5; ++i)
             root.mPublicBStarNtt.push_back(make_poly(ring, 0x9000000000000000ull + 1234567u * i));
-        expect_large_parallel_wire(root, ringHeader + 20u, telemetry, expectParallel);
+        expect_large_parallel_wire(root, ringHeader + 20u, telemetry, expectParallel, haveGpu);
     }
 }
 
@@ -645,13 +634,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0) == 0 || std::endian::native != std::endian::little) return;
-    const bool previousGpu = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool previous;
-        ~RestoreGpu() { gpu::setEnabled(previous); }
-    } restore{previousGpu};
-    gpu::setEnabled(true);
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
 
     const RingParams ring = make_ring();
     RootOfflineMessage eager{};
@@ -670,7 +653,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     eager.mCtR.mPolys.front().mCoeffs.front() = 0x0123456789ABCDEFull;
     eager.mTopCt.mPolys.back().mCoeffs.back() = std::numeric_limits<std::uint64_t>::max();
     const auto exact = scalar_wire(eager);
-    expect_bytes_equal(encode(eager, 1), as_span(exact));
+    expect_bytes_equal(encode(eager, 1, {}, true), as_span(exact));
 
     RootOfflineMessage resident = eager;
     auto ctR = std::make_shared<TestRootDeviceTensor>(resident.mCtR);
@@ -684,10 +667,10 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     resident.mTopCt.mPolys.clear();
     for (auto workers : { 1u, 4u })
     {
-        const auto wire = encode(resident, workers);
+        const auto wire = encode(resident, workers, {}, true);
         expect_bytes_equal(wire, as_span(exact));
         RootOfflineMessage decoded{};
-        LOGVOLE_REQUIRE_TRUE(decode(wire, decoded, workers));
+        LOGVOLE_REQUIRE_TRUE(decode(wire, decoded, workers, {}, true));
         expect_tensor_equal(decoded.mCtR, eager.mCtR);
         expect_tensor_equal(decoded.mLacctLeft.mCt, eager.mLacctLeft.mCt);
         expect_tensor_equal(decoded.mTopCt, eager.mTopCt);
@@ -714,7 +697,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange({reservedPointer, forecastRootBytes, rootMemory.get()}));
     LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange({reservedPointer, exactRootBytes, rootMemory.get()}));
     Buffer cudaWire = encodeRootOfflineIntoBuffer(resident,
-        std::move(reserved), 4u);
+        std::move(reserved), 4u, {}, true);
     LOGVOLE_REQUIRE_TRUE(cudaWire.data() == reservedPointer);
     expect_bytes_equal(cudaWire, as_span(exact));
     const auto cudaEvidence = rootWireCudaAllocEvidenceSnapshot();
@@ -742,15 +725,40 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     LOGVOLE_EXPECT_EQ(lacct->copyRequests(), 3u);
     LOGVOLE_EXPECT_EQ(topCt->copyRequests(), 3u);
 
+    // Deferred materialization retains diagnostics without retaining a context
+    // factory or putting profiling state on the wire buffer itself.
+    {
+        osuCrypto::LogVoleExecutionOptions options;
+        options.mAdvanced.mHostStepProfile = true;
+        auto factory = std::make_shared<RingContextFactory>(options);
+        std::weak_ptr<HostStepProfiler> lifetime = factory->hostProfilerOwner();
+        std::weak_ptr<RingContextFactory> factoryLifetime = factory;
+        RootOfflineMessage profiled;
+        auto wire = encode(eager, 1, {}, true);
+        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
+            std::move(wire), profiled, 4, {}, true, factory->hostProfilerOwner()));
+        factory.reset();
+        LOGVOLE_REQUIRE_TRUE(factoryLifetime.expired());
+        LOGVOLE_REQUIRE_FALSE(lifetime.expired());
+        const auto count = [&] {
+            std::uint64_t total = 0;
+            for (const auto& entry : lifetime.lock()->snapshot()) total += entry.mCount;
+            return total;
+        };
+        const auto before = count();
+        expect_tensor_equal(profiled.mLazyTopCt->get(), eager.mTopCt);
+        LOGVOLE_REQUIRE_EQ(count(), before + 1);
+        expect_tensor_equal(profiled.mLazyTopCt->get(), eager.mTopCt);
+        LOGVOLE_REQUIRE_EQ(count(), before + 1);
+        profiled = {};
+        LOGVOLE_REQUIRE_TRUE(lifetime.expired());
+    }
+
     // The socket decoder owns its exact received bytes and leaves all Root
     // tensors, including NTT-domain BStar, unsplit until their first consumer.
-    ScopedEnvironmentValue encodedRoot("LV_GPU_SETUP_ROOT_ENCODED_RECEIVE", "1");
-    ScopedEnvironmentValue encodedCtR("LV_GPU_SETUP_ROOT_CTR_ENCODED_RECEIVE", "1");
-    ScopedEnvironmentValue encodedLacct("LV_GPU_SETUP_ROOT_LACCT_ENCODED_RECEIVE", "1");
-    ScopedEnvironmentValue encodedBStar("LV_GPU_SETUP_ROOT_BSTAR_ENCODED_RECEIVE", "1");
     RootOfflineMessage retained{};
-    auto received = encode(eager, 1);
-    LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(received), retained, 4));
+    auto received = encode(eager, 1, {}, true);
+    LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(received), retained, 4, {}, true));
     LOGVOLE_REQUIRE_TRUE(retained.mOwnedCtRWire && retained.mLazyCtR);
     LOGVOLE_REQUIRE_TRUE(retained.mOwnedLacctLeftWire && retained.mLazyLacctLeft);
     LOGVOLE_REQUIRE_TRUE(retained.mOwnedTopCtWire && retained.mLazyTopCt);
@@ -769,7 +777,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
         ringTensorSize(eager.mTopCt) * ringPolyCoeffCount(ring) * sizeof(std::uint64_t));
     LOGVOLE_EXPECT_EQ(retained.mOwnedPublicBStarWire->encodedCoefficients().size(),
         eager.mPublicBStarNtt.size() * ringPolyCoeffCount(ring) * sizeof(std::uint64_t));
-    expect_bytes_equal(encode(retained, 4), as_span(exact));
+    expect_bytes_equal(encode(retained, 4, {}, true), as_span(exact));
     LOGVOLE_EXPECT_TRUE(retained.mCtR.mPolys.empty());
     LOGVOLE_EXPECT_TRUE(retained.mLacctLeft.mCt.mPolys.empty());
     LOGVOLE_EXPECT_TRUE(retained.mTopCt.mPolys.empty());
@@ -784,16 +792,16 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     RootOfflineMessage otherParty = eager;
     ++otherParty.mPublicBStarNtt.front().mCoeffs.front();
     RootOfflineMessage otherRetained{};
-    auto otherWire = encode(otherParty, 1);
+    auto otherWire = encode(otherParty, 1, {}, true);
     LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
-        std::move(otherWire), otherRetained, 4));
+        std::move(otherWire), otherRetained, 4, {}, true));
     LOGVOLE_REQUIRE_TRUE(otherRetained.mOwnedPublicBStarWire);
     LOGVOLE_EXPECT_TRUE(otherRetained.mOwnedPublicBStarWire !=
         retained.mOwnedPublicBStarWire);
     LOGVOLE_EXPECT_TRUE(otherRetained.mOwnedPublicBStarWire->encodedCoefficients().data() !=
         retained.mOwnedPublicBStarWire->encodedCoefficients().data());
     const auto otherExact = scalar_wire(otherParty);
-    expect_bytes_equal(encode(otherRetained, 4), as_span(otherExact));
+    expect_bytes_equal(encode(otherRetained, 4, {}, true), as_span(otherExact));
     LOGVOLE_EXPECT_EQ(retainedBStar.front().mCoeffs.front(),
         eager.mPublicBStarNtt.front().mCoeffs.front());
     LOGVOLE_EXPECT_TRUE(retained.mCtR.mPolys.empty());
@@ -812,114 +820,118 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
         topCtOffset, eager.mTopCt);
     const auto expectRejected = [&](Buffer&& malformed) {
         RootOfflineMessage eagerRejected{};
-        LOGVOLE_EXPECT_FALSE(decode(malformed, eagerRejected, 4));
+        LOGVOLE_EXPECT_FALSE(decode(malformed, eagerRejected, 4, {}, true));
         const auto ctROwner = retained.mOwnedCtRWire;
         const auto lacctOwner = retained.mOwnedLacctLeftWire;
         const auto owner = retained.mOwnedTopCtWire;
         const auto publicBStarOwner = retained.mOwnedPublicBStarWire;
-        LOGVOLE_EXPECT_FALSE(decodeRootOfflineForTransport(std::move(malformed), retained, 4));
+        LOGVOLE_EXPECT_FALSE(decodeRootOfflineForTransport(std::move(malformed), retained, 4, {}, true));
         LOGVOLE_EXPECT_TRUE(retained.mOwnedCtRWire == ctROwner);
         LOGVOLE_EXPECT_TRUE(retained.mOwnedLacctLeftWire == lacctOwner);
         LOGVOLE_EXPECT_TRUE(retained.mOwnedTopCtWire == owner);
         LOGVOLE_EXPECT_TRUE(retained.mOwnedPublicBStarWire == publicBStarOwner);
     };
-    auto impossibleCtRCount = encode(eager, 1);
+    auto impossibleCtRCount = encode(eager, 1, {}, true);
     std::fill_n(impossibleCtRCount.begin() + ctROffset + 2u * sizeof(std::uint32_t),
         sizeof(std::uint32_t), std::uint8_t{0xFF});
     expectRejected(std::move(impossibleCtRCount));
-    auto impossibleCtRRows = encode(eager, 1);
+    auto impossibleCtRRows = encode(eager, 1, {}, true);
     std::fill_n(impossibleCtRRows.begin() + ctROffset,
         sizeof(std::uint32_t), std::uint8_t{0xFF});
     expectRejected(std::move(impossibleCtRRows));
-    auto impossibleLacctCount = encode(eager, 1);
+    auto impossibleLacctCount = encode(eager, 1, {}, true);
     std::fill_n(impossibleLacctCount.begin() + lacctOffset + 2u * sizeof(std::uint32_t),
         sizeof(std::uint32_t), std::uint8_t{0xFF});
     expectRejected(std::move(impossibleLacctCount));
-    auto impossibleLacctRows = encode(eager, 1);
+    auto impossibleLacctRows = encode(eager, 1, {}, true);
     std::fill_n(impossibleLacctRows.begin() + lacctOffset,
         sizeof(std::uint32_t), std::uint8_t{0xFF});
     expectRejected(std::move(impossibleLacctRows));
-    auto impossibleCount = encode(eager, 1);
+    auto impossibleCount = encode(eager, 1, {}, true);
     std::fill_n(impossibleCount.begin() + topCtOffset + 2u * sizeof(std::uint32_t),
         sizeof(std::uint32_t), std::uint8_t{0xFF});
     expectRejected(std::move(impossibleCount));
-    auto impossibleBStarCount = encode(eager, 1);
+    auto impossibleBStarCount = encode(eager, 1, {}, true);
     std::fill_n(impossibleBStarCount.begin() + publicBStarOffset,
         sizeof(std::uint32_t), std::uint8_t{0xFF});
     expectRejected(std::move(impossibleBStarCount));
-    auto impossibleBStarWords = encode(eager, 1);
+    auto impossibleBStarWords = encode(eager, 1, {}, true);
     std::fill_n(impossibleBStarWords.begin() + publicBStarOffset + sizeof(std::uint32_t),
         sizeof(std::uint32_t), std::uint8_t{0xFF});
     expectRejected(std::move(impossibleBStarWords));
-    auto truncated = encode(eager, 1);
+    auto truncated = encode(eager, 1, {}, true);
     truncated.resize(truncated.size() - 1u);
     expectRejected(std::move(truncated));
-    auto trailing = encode(eager, 1);
+    auto trailing = encode(eager, 1, {}, true);
     trailing.push_back(0);
     expectRejected(std::move(trailing));
 
     // A direct/public decode remains eager even when its input was produced
     // by the same resident sender message.
     RootOfflineMessage direct{};
-    LOGVOLE_REQUIRE_TRUE(decode(encode(eager, 1), direct, 4));
+    LOGVOLE_REQUIRE_TRUE(decode(encode(eager, 1, {}, true), direct, 4, {}, true));
     LOGVOLE_EXPECT_TRUE(!direct.mCtR.mPolys.empty() && !direct.mOwnedCtRWire);
     LOGVOLE_EXPECT_TRUE(!direct.mLacctLeft.mCt.mPolys.empty() && !direct.mOwnedLacctLeftWire);
     LOGVOLE_EXPECT_TRUE(!direct.mTopCt.mPolys.empty() && !direct.mOwnedTopCtWire);
     LOGVOLE_EXPECT_TRUE(!direct.mPublicBStarNtt.empty() && !direct.mOwnedPublicBStarWire);
     RootOfflineMessage refreshed = retained;
-    LOGVOLE_REQUIRE_TRUE(decode(encode(eager, 1), refreshed, 4));
+    LOGVOLE_REQUIRE_TRUE(decode(encode(eager, 1, {}, true), refreshed, 4, {}, true));
     LOGVOLE_EXPECT_TRUE(!refreshed.mOwnedPublicBStarWire && !refreshed.mLazyPublicBStar);
     LOGVOLE_EXPECT_EQ(refreshed.mPublicBStarNtt.size(), eager.mPublicBStarNtt.size());
-    expect_bytes_equal(encode(refreshed, 4), as_span(exact));
+    expect_bytes_equal(encode(refreshed, 4, {}, true), as_span(exact));
     {
-        ScopedEnvironmentValue ctROptOut("LV_GPU_SETUP_ROOT_CTR_ENCODED_RECEIVE", "0");
+        oc::LogVoleEncodingOptions options;
+        options.mRootCtREncodedReceive = false;
         RootOfflineMessage stagedCtR{};
-        auto stagedWire = encode(eager, 1);
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedCtR, 4));
+        auto stagedWire = encode(eager, 1, {}, true);
+        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedCtR, 4, options, true));
         LOGVOLE_EXPECT_TRUE(!stagedCtR.mCtR.mPolys.empty() && !stagedCtR.mOwnedCtRWire);
         LOGVOLE_EXPECT_TRUE(stagedCtR.mLacctLeft.mCt.mPolys.empty() && stagedCtR.mOwnedLacctLeftWire);
         LOGVOLE_EXPECT_TRUE(stagedCtR.mTopCt.mPolys.empty() && stagedCtR.mOwnedTopCtWire);
-        expect_bytes_equal(encode(stagedCtR, 4), as_span(exact));
+        expect_bytes_equal(encode(stagedCtR, 4, {}, true), as_span(exact));
     }
     {
-        ScopedEnvironmentValue lacctOptOut("LV_GPU_SETUP_ROOT_LACCT_ENCODED_RECEIVE", "0");
+        oc::LogVoleEncodingOptions options;
+        options.mRootLacctEncodedReceive = false;
         RootOfflineMessage stagedLacct{};
-        auto stagedWire = encode(eager, 1);
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedLacct, 4));
+        auto stagedWire = encode(eager, 1, {}, true);
+        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedLacct, 4, options, true));
         LOGVOLE_EXPECT_TRUE(!stagedLacct.mLacctLeft.mCt.mPolys.empty() &&
             !stagedLacct.mOwnedLacctLeftWire);
         LOGVOLE_EXPECT_TRUE(stagedLacct.mCtR.mPolys.empty() && stagedLacct.mOwnedCtRWire);
         LOGVOLE_EXPECT_TRUE(stagedLacct.mTopCt.mPolys.empty() && stagedLacct.mOwnedTopCtWire);
-        expect_bytes_equal(encode(stagedLacct, 4), as_span(exact));
+        expect_bytes_equal(encode(stagedLacct, 4, {}, true), as_span(exact));
     }
     {
-        ScopedEnvironmentValue bStarOptOut("LV_GPU_SETUP_ROOT_BSTAR_ENCODED_RECEIVE", "0");
+        oc::LogVoleEncodingOptions options;
+        options.mRootBStarEncodedReceive = false;
         RootOfflineMessage stagedBStar{};
-        auto stagedWire = encode(eager, 1);
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedBStar, 4));
+        auto stagedWire = encode(eager, 1, {}, true);
+        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedBStar, 4, options, true));
         LOGVOLE_EXPECT_TRUE(!stagedBStar.mPublicBStarNtt.empty() &&
             !stagedBStar.mOwnedPublicBStarWire);
         LOGVOLE_EXPECT_TRUE(stagedBStar.mCtR.mPolys.empty() && stagedBStar.mOwnedCtRWire);
         LOGVOLE_EXPECT_TRUE(stagedBStar.mLacctLeft.mCt.mPolys.empty() &&
             stagedBStar.mOwnedLacctLeftWire);
         LOGVOLE_EXPECT_TRUE(stagedBStar.mTopCt.mPolys.empty() && stagedBStar.mOwnedTopCtWire);
-        expect_bytes_equal(encode(stagedBStar, 4), as_span(exact));
+        expect_bytes_equal(encode(stagedBStar, 4, {}, true), as_span(exact));
     }
     {
-        ScopedEnvironmentValue optOut("LV_GPU_SETUP_ROOT_ENCODED_RECEIVE", "0");
+        oc::LogVoleEncodingOptions options;
+        options.mRootEncodedReceive = false;
         RootOfflineMessage staged{};
-        auto stagedWire = encode(eager, 1);
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), staged, 4));
+        auto stagedWire = encode(eager, 1, {}, true);
+        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), staged, 4, options, true));
         LOGVOLE_EXPECT_TRUE(!staged.mCtR.mPolys.empty() && !staged.mOwnedCtRWire);
         LOGVOLE_EXPECT_TRUE(!staged.mLacctLeft.mCt.mPolys.empty() && !staged.mOwnedLacctLeftWire);
         LOGVOLE_EXPECT_TRUE(!staged.mTopCt.mPolys.empty() && !staged.mOwnedTopCtWire);
         LOGVOLE_EXPECT_TRUE(!staged.mPublicBStarNtt.empty() && !staged.mOwnedPublicBStarWire);
-        expect_bytes_equal(encode(staged, 4), as_span(exact));
+        expect_bytes_equal(encode(staged, 4, {}, true), as_span(exact));
     }
 
     auto declining = std::make_shared<TestRootDeviceTensor>(eager.mTopCt, false);
     resident.mLazyTopCt = declining;
-    expect_bytes_equal(encode(resident, 1), as_span(exact));
+    expect_bytes_equal(encode(resident, 1, {}, true), as_span(exact));
     LOGVOLE_EXPECT_EQ(declining->copyRequests(), 1u);
     LOGVOLE_EXPECT_EQ(declining->hostRequests(), 1u);
 #else
@@ -1084,6 +1096,12 @@ void LogVole_Encoding_RootDigestAndResponseRoundTrip(const oc::CLP&)
         std::numeric_limits<std::uint64_t>::max(),
     });
 
+    oc::LogVoleEncodingOptions scalarOptions;
+    scalarOptions.mRootU64Memcpy = false;
+    expect_bytes_equal(encode(digest, scalarOptions), std::span<const std::uint8_t>(goldenDigestWire));
+    RootDigestMessage scalarDigest{};
+    LOGVOLE_REQUIRE_TRUE(decode(std::span<const std::uint8_t>(goldenDigestWire), scalarDigest, scalarOptions));
+    LOGVOLE_EXPECT_TRUE(rangesEqual(scalarDigest.mDPrimeCoeffs, digest.mDPrimeCoeffs));
     const auto encodedDigest = encode(digest);
     expect_bytes_equal(
         std::span<const std::uint8_t>(encodedDigest.data(), encodedDigest.size()),
@@ -1257,18 +1275,10 @@ void LogVole_Encoding_AllMessageRoundTrips(const oc::CLP& cmd)
 void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
-    const bool previousGpu = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool mPrevious;
-        ~RestoreGpu() { gpu::setEnabled(mPrevious); }
-    } restoreGpu{previousGpu};
-    gpu::setEnabled(cmd.getOr("gpu", 0) != 0);
-    if (!gpu::enabled()) return;
+    if (cmd.getOr("gpu", 0) == 0) return;
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
 
     constexpr std::size_t bytes = std::size_t{1} << 20;
-    ScopedEnvironmentValue pinned("LV_GPU_SETUP_PINNED_WIRE", "1");
-    ScopedEnvironmentValue directDownload("LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD", "1");
     auto memory = std::make_shared<WireMemoryPool>();
     void* firstAllocation = nullptr;
     {
@@ -1292,14 +1302,15 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         {
             // The opt-out keeps this fresh, active pool-owned destination
             // pageable and exercises the bounded staged D2H fallback.
-            ScopedEnvironmentValue stagedDownload("LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD", "0");
+            oc::LogVoleWireOptions stagedOptions;
+            stagedOptions.mDirectDownload = false;
             LOGVOLE_REQUIRE_TRUE(
-                gpu::downloadSetupWire(buffer.wireView(), device.data(), transferStream));
+                gpu::downloadSetupWire(buffer.wireView(), device.data(), transferStream, stagedOptions));
             LOGVOLE_EXPECT_FALSE(memory->isPinned(buffer.data(), buffer.size()));
             LOGVOLE_EXPECT_EQ(buffer.front(), 0);
             LOGVOLE_EXPECT_EQ(buffer.back(), 0);
         }
-        // The default registers that same active pool owner before D2H so CUDA
+        // The default registers its active pool owner before D2H so CUDA
         // can fill the Buffer directly. Later H2D and repeated D2H retain the
         // exact byte and lifetime checks below.
         LOGVOLE_REQUIRE_TRUE(
@@ -1348,9 +1359,11 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(moved.data() == firstAllocation);
         copied.clear();
         {
-            // Deallocation follows pointer provenance even if rollback changes
-            // after allocation.
-            ScopedEnvironmentValue disabled("LV_GPU_SETUP_PINNED_WIRE", "0");
+            // A separate disabled policy does not change this buffer's provenance.
+            oc::LogVoleWireOptions disabled;
+            disabled.mPinned = false;
+            Buffer independent(bytes, disabled);
+            LOGVOLE_REQUIRE_TRUE(!independent.memory());
             moved.clear();
         }
         LOGVOLE_EXPECT_FALSE(memory->contains(firstAllocation, bytes));
@@ -1377,8 +1390,12 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(memory->isPinned(reused.data(), reused.size()));
     reused.clear();
     {
-        ScopedEnvironmentValue disabled("LV_GPU_SETUP_PINNED_WIRE", "0");
-        Buffer ordinary(bytes);
+        oc::LogVoleWireOptions disabled;
+        disabled.mPinned = false;
+        disabled.mDirectDownload = false;
+        disabled.mHugePages = false;
+        Buffer ordinary(bytes, disabled);
+        std::fill(ordinary.begin(), ordinary.end(), 0x35);
         LOGVOLE_REQUIRE_TRUE(ordinary.data() != nullptr);
         LOGVOLE_EXPECT_FALSE(memory->contains(ordinary.data(), ordinary.size()));
         LOGVOLE_EXPECT_FALSE(memory->isPinned(ordinary.data(), ordinary.size()));
@@ -1391,13 +1408,13 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
     // with its storage. The losing pool must not survive through a hidden owner.
     reused.resize(bytes);
     std::fill(reused.begin(), reused.end(), 0x41);
-    Buffer assigned(bytes);
+    Buffer assigned(bytes, {}, true);
     std::weak_ptr<WireMemoryPool> replaced = assigned.memory();
     assigned = reused;
     LOGVOLE_REQUIRE_TRUE(replaced.expired());
     LOGVOLE_REQUIRE_TRUE(assigned.memory() == memory && assigned.data() != reused.data());
     LOGVOLE_REQUIRE_TRUE(std::equal(assigned.begin(), assigned.end(), reused.begin()));
-    Buffer swapped(bytes);
+    Buffer swapped(bytes, {}, true);
     auto swapMemory = swapped.memory();
     std::fill(swapped.begin(), swapped.end(), 0x27);
     assigned.swap(swapped);
@@ -1408,7 +1425,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
     Buffer promoted(31);
     LOGVOLE_REQUIRE_TRUE(!promoted.memory());
     std::fill(promoted.begin(), promoted.end(), 0x63);
-    promoted.resize(bytes + 1, oc::AllocType::Zeroed);
+    promoted.resize(bytes + 1, oc::AllocType::Zeroed, {}, true);
     LOGVOLE_REQUIRE_TRUE(promoted.memory());
     LOGVOLE_REQUIRE_TRUE(std::all_of(promoted.begin(), promoted.begin() + 31,
         [](auto value) { return value == 0x63; }));
@@ -1419,7 +1436,7 @@ void LogVole_Encoding_PinnedWireBufferOwnership(const oc::CLP& cmd)
 
     std::weak_ptr<WireMemoryPool> exportedPool;
     std::packaged_task<Buffer()> task([&] {
-        Buffer output(bytes);
+        Buffer output(bytes, {}, true);
         exportedPool = output.memory();
         std::fill(output.begin(), output.end(), 0x59);
         bool pinned = false;

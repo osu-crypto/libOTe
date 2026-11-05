@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_TestOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVole.h"
@@ -50,52 +51,20 @@ using namespace osuCrypto::LogVole;
 
 namespace
 {
-    class ScopedEnvironmentValue
+
+
+    RingNttContext cpuReferenceContext(const RingNttContext& source)
     {
-    public:
-        ScopedEnvironmentValue(const char* name, const char* value)
-            : mName(name)
-        {
-            if (const char* old = std::getenv(name))
-            {
-                mHadOld = true;
-                mOld = old;
-            }
-            if (value)
-                ::tests_libOTe::logvole_test::setEnvironment(name, value, 1);
-            else
-                ::tests_libOTe::logvole_test::unsetEnvironment(name);
-        }
+        auto options = source.mExecutionOptions;
+        options.mUseGpu = false;
+        RingNttContext result;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(source.mParams, result,
+            std::make_shared<RingContextFactory>(options)));
+        return result;
+    }
 
-        ~ScopedEnvironmentValue()
-        {
-            if (mHadOld)
-                ::tests_libOTe::logvole_test::setEnvironment(mName.c_str(), mOld.c_str(), 1);
-            else
-                ::tests_libOTe::logvole_test::unsetEnvironment(mName.c_str());
-        }
-
-        ScopedEnvironmentValue(const ScopedEnvironmentValue&) = delete;
-        ScopedEnvironmentValue& operator=(const ScopedEnvironmentValue&) = delete;
-
-    private:
-        std::string mName;
-        std::string mOld;
-        bool mHadOld = false;
-    };
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    class ScopedGpuEnabled
-    {
-    public:
-        explicit ScopedGpuEnabled(bool enabled) : mWasEnabled(gpu::enabled()) { gpu::setEnabled(enabled); }
-        ~ScopedGpuEnabled() { gpu::setEnabled(mWasEnabled); }
-        ScopedGpuEnabled(const ScopedGpuEnabled&) = delete;
-        ScopedGpuEnabled& operator=(const ScopedGpuEnabled&) = delete;
-    private:
-        bool mWasEnabled;
-    };
-
     // Observe only explicitly supplied resource owners. Weak baselines do not
     // keep a factory record warm or alter the lifetime being tested.
     class RetentionBaseline
@@ -269,6 +238,16 @@ namespace
         {
             return false;
         }
+    }
+
+    template<class State>
+    void useCpuReference(State& state, ProtocolCacheRole role)
+    {
+        auto options = state.mShrinkExpandState.mRingFactoryOwner
+            ? state.mShrinkExpandState.mRingFactoryOwner->mExecutionOptions : osuCrypto::LogVoleExecutionOptions{};
+        options.mUseGpu = false;
+        for (auto* level = &state; level; level = level->mNextLevelState.get())
+            *level = tests_libOTe::logvole_test::withAdvancedOptions(std::move(*level), options, role);
     }
 
     bool run_local_online_for_test(
@@ -713,21 +692,20 @@ namespace
 
 void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = true;
+    osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled requestedGpu(cmd.getOr("gpu", 0) != 0);
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
-    ScopedEnvironmentValue chain("LV_GPU_SETUP_DELTA_CHAIN_DEVICE", "1");
-    ScopedEnvironmentValue deviceDelta("LV_GPU_SETUP_DELTA_DEVICE", "1");
-    ScopedEnvironmentValue directWire("LV_GPU_SETUP_DIRECT_WIRE", "1");
-    ScopedEnvironmentValue deviceLenc("LV_GPU_SETUP_LENC_DEVICE", "1");
-    ScopedEnvironmentValue devicePadding("LV_GPU_SETUP_LENC_DEVICE_PADDING", "1");
-    ScopedEnvironmentValue captureDecline("LV_GPU_SETUP_DELTA_DEVICE_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue chainDecline("LV_GPU_SETUP_DELTA_CHAIN_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue lencDecline("LV_GPU_SETUP_LENC_DEVICE_FORCE_DECLINE", "0");
+    if (cmd.getOr("gpu", 0)) LOGVOLE_REQUIRE_TRUE(gpu::available());
+    if (!cmd.getOr("gpu", 0)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    tests_libOTe::logvole_test::ScopedOptionValue chain(setupOptions.mDeltaChainDevice, true);
+    tests_libOTe::logvole_test::ScopedOptionValue deviceDelta(setupOptions.mDeltaDevice, true);
+    tests_libOTe::logvole_test::ScopedOptionValue deviceLenc(setupOptions.mLencDevice, true);
+    tests_libOTe::logvole_test::ScopedOptionValue devicePadding(setupOptions.mLencDevicePadding, true);
 
     for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
     {
@@ -756,7 +734,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         ScopedProtocolCacheScope ownerScope(ProtocolCacheRole::Sender, runId);
         ZpCrtContext zp{};
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mShrinkExpand.mRing,
-            params.mShrinkExpand.mPlaintextModulusBits, zp));
+            params.mShrinkExpand.mPlaintextModulusBits, zp,
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced))));
         LOGVOLE_REQUIRE_TRUE(zp.mGpuLightweight);
         const oc::u64 scalar = zp.mPlaintextModulus - 1u;
         auto delta = gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr);
@@ -766,8 +745,10 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             zp.mRing, *delta, 1u, runId));
         RnsPoly hostDelta{};
         {
-            ScopedGpuEnabled cpuReference(false);
-            LOGVOLE_REQUIRE_TRUE(wrapZpConstantCrt(zp, scalar, true, 2u, hostDelta));
+            ZpCrtContext cpuZp;
+            LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mShrinkExpand.mRing,
+                params.mShrinkExpand.mPlaintextModulusBits, cpuZp));
+            LOGVOLE_REQUIRE_TRUE(wrapZpConstantCrt(cpuZp, scalar, true, 2u, hostDelta));
         }
         std::vector<RnsPoly> exactDelta;
         LOGVOLE_REQUIRE_TRUE(gpu::download(*delta, exactDelta, readbackExecution.readbackStream(), 1u));
@@ -819,7 +800,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_FALSE(gpu::setupDeltaBatchMatches(
             zp.mRing, *delta, 2u, runId));
         {
-            ScopedEnvironmentValue forced("LV_GPU_SETUP_DELTA_DEVICE_FORCE_DECLINE", "1");
+            tests_libOTe::logvole_test::ScopedOptionValue forced(zp.mRing.mExecutionOptions.mAdvanced.mProtocol.mFailures.mDeltaDevice, true);
             LOGVOLE_REQUIRE_TRUE(gpu::wrapSetupDeltaResident(
                 zp, scalar, {}, nullptr) == nullptr);
         }
@@ -848,12 +829,15 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         const auto runOffline = [&](const SenderOfflineInput& in,
             oc::u64 scopeRun, bool useGpu) {
             ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, scopeRun);
-            ScopedGpuEnabled gpuMode(useGpu);
+            auto selectedOptions = advanced;
+            selectedOptions.mUseGpu = useGpu;
             oc::PRNG prng(seed, 3);
             coproto::BufferingSocket socket;
             LogVoleRingSender sender;
             Snapshot out;
-            macoro::sync_wait(sender.offline(in, out.mState, prng, socket));
+            auto configured = tests_libOTe::logvole_test::withAdvancedOptions(
+                in, selectedOptions, ProtocolCacheRole::Sender);
+            macoro::sync_wait(sender.offline(configured, out.mState, prng, socket));
             out.mRootWirePin = rootWirePinOverlapEvidenceSnapshot();
             out.mRootCudaWire = rootWireCudaAllocEvidenceSnapshot();
             macoro::sync_wait(socket.flush());
@@ -863,12 +847,12 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             prng.get(out.mNextRandom.data(), out.mNextRandom.size());
             return out;
         };
-        const auto baseline = runOffline(hostInput,
+        const auto baseline = runOffline(tests_libOTe::logvole_test::withSetupOptions(hostInput, setupOptions),
             allocateProtocolCacheRunId(), false);
         auto selected = [&] {
-            ScopedEnvironmentValue rootPinOverlap(
-                "LV_GPU_ROOT_WIRE_PIN_OVERLAP", "1");
-            return runOffline(selectedInput, runId, true);
+            auto pinInput = selectedInput;
+            pinInput.mParams.mShrinkExpand.mTransport.mEncoding.mRootWirePinOverlap = true;
+            return runOffline(tests_libOTe::logvole_test::withSetupOptions(pinInput, setupOptions), runId, true);
         }();
         LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.mWire, selected.mWire));
         LOGVOLE_REQUIRE_TRUE(baseline.mNextRandom == selected.mNextRandom);
@@ -896,14 +880,11 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(cudaInput.mWrappedDeltaDevice != nullptr);
             cudaInput.mSenderOwnerRunId = cudaRunId;
             auto cudaActual = [&] {
-                ScopedEnvironmentValue cudaWire(
-                    "LV_GPU_ROOT_WIRE_CUDA_ALLOC", "1");
-                ScopedEnvironmentValue rootPinOverlap(
-                    "LV_GPU_ROOT_WIRE_PIN_OVERLAP", "0");
-                ScopedEnvironmentValue earlyWire(
-                    "LV_GPU_ROOT_WIRE_CUDA_ALLOC_EARLY",
-                    earlyCudaWire ? "1" : "0");
-                return runOffline(cudaInput, cudaRunId, true);
+                auto& encoding = cudaInput.mParams.mShrinkExpand.mTransport.mEncoding;
+                encoding.mRootWireCudaAlloc = true;
+                encoding.mRootWirePinOverlap = false;
+                encoding.mRootWireCudaAllocEarly = earlyCudaWire;
+                return runOffline(tests_libOTe::logvole_test::withSetupOptions(cudaInput, setupOptions), cudaRunId, true);
             }();
             LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.mWire,
                 cudaActual.mWire));
@@ -989,7 +970,6 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                 *privateRep, privateRows, runId));
             std::vector<RnsPoly> hostRep, deviceRep;
             {
-                ScopedGpuEnabled cpuOracle(false);
                 LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
                     privateHost->hostCoefficients(), width,
                     params.mShrinkExpand.mAlpha, width,
@@ -1055,25 +1035,24 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             selected.mState.mShrinkExpandState.hostS());
 
         {
-            ScopedEnvironmentValue forced("LV_GPU_SETUP_LENC_DEVICE_FORCE_DECLINE", "1");
-            auto declined = runOffline(selectedInput, runId, true);
+            tests_libOTe::logvole_test::ScopedOptionValue forced(advanced.mAdvanced.mProtocol.mFailures.mLencDevice, true);
+            auto declined = runOffline(tests_libOTe::logvole_test::withSetupOptions(selectedInput, setupOptions), runId, true);
             LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.mWire, declined.mWire));
             LOGVOLE_REQUIRE_TRUE(baseline.mNextRandom == declined.mNextRandom);
         }
         {
-            ScopedEnvironmentValue forced("LV_GPU_SETUP_DELTA_CHAIN_FORCE_DECLINE", "1");
-            auto declined = runOffline(selectedInput, runId, true);
+            tests_libOTe::logvole_test::ScopedOptionValue forced(advanced.mAdvanced.mProtocol.mFailures.mDeltaChain, true);
+            auto declined = runOffline(tests_libOTe::logvole_test::withSetupOptions(selectedInput, setupOptions), runId, true);
             LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.mWire, declined.mWire));
             LOGVOLE_REQUIRE_TRUE(baseline.mNextRandom == declined.mNextRandom);
             LOGVOLE_REQUIRE_TRUE(declined.mState.mShrinkExpandState.mLazyS == nullptr);
         }
         {
-            ScopedEnvironmentValue eagerWire("LV_GPU_SETUP_DIRECT_WIRE", "0");
-            ScopedEnvironmentValue cudaWire(
-                "LV_GPU_ROOT_WIRE_CUDA_ALLOC", "1");
-            ScopedEnvironmentValue earlyWire(
-                "LV_GPU_ROOT_WIRE_CUDA_ALLOC_EARLY", "1");
-            auto eager = runOffline(selectedInput, runId, true);
+            auto eagerInput = selectedInput;
+            eagerInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = false;
+            eagerInput.mParams.mShrinkExpand.mTransport.mEncoding.mRootWireCudaAlloc = true;
+            eagerInput.mParams.mShrinkExpand.mTransport.mEncoding.mRootWireCudaAllocEarly = true;
+            auto eager = runOffline(tests_libOTe::logvole_test::withSetupOptions(eagerInput, setupOptions), runId, true);
             LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.mWire, eager.mWire));
             LOGVOLE_REQUIRE_TRUE(baseline.mNextRandom == eager.mNextRandom);
             LOGVOLE_REQUIRE_TRUE(eager.mState.mShrinkExpandState.mLazyS == nullptr);
@@ -1088,7 +1067,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             oc::PRNG publicPrng(seed, 3);
             SenderOfflineOutput publicOutput{};
             LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(
-                hostInput, publicPrng, publicOutput));
+                tests_libOTe::logvole_test::withSetupOptions(hostInput, setupOptions), publicPrng, publicOutput));
             LOGVOLE_REQUIRE_TRUE(publicOutput.mState.mShrinkExpandState.mLazyS == nullptr);
             LOGVOLE_REQUIRE_TRUE(!publicOutput.mState.mShrinkExpandState.mS.empty());
             LOGVOLE_REQUIRE_TRUE(publicOutput.mState.mShrinkExpandState.mTopSk1Device == nullptr);
@@ -1101,7 +1080,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         recursiveHost.mParams.mW = 4u * muHi;
         SenderOfflineInput recursiveSelected = selectedInput;
         recursiveSelected.mParams.mW = recursiveHost.mParams.mW;
-        const auto runRecursiveSelected = [&] {
+        const auto runRecursiveSelected = [&](bool topSecretDevice = true) {
             const oc::u64 freshRun = allocateProtocolCacheRunId();
             std::shared_ptr<gpu::DeviceBatch> freshDelta;
             {
@@ -1113,17 +1092,18 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             auto inputForRun = recursiveSelected;
             inputForRun.mWrappedDeltaDevice = freshDelta;
             inputForRun.mSenderOwnerRunId = freshRun;
-            return runOffline(inputForRun, freshRun, true);
+            tests_libOTe::logvole_test::ScopedOptionValue topDevice(
+                advanced.mAdvanced.mProtocol.mTopSecretDevice, topSecretDevice);
+            return runOffline(tests_libOTe::logvole_test::withSetupOptions(inputForRun, setupOptions), freshRun, true);
         };
-        const auto recursiveBaseline = runOffline(recursiveHost,
+        const auto recursiveBaseline = runOffline(tests_libOTe::logvole_test::withSetupOptions(recursiveHost, setupOptions),
             allocateProtocolCacheRunId(), false);
         // This three-level tree follows the production recursive transport
         // shape: the terminal Root reuses its parent's shrink state, so the
         // pin worker must launch during an ancestor frame instead of Root's
         // own (absent) shrink frame.
         auto recursiveActual = [&] {
-            ScopedEnvironmentValue rootPinOverlap(
-                "LV_GPU_ROOT_WIRE_PIN_OVERLAP", "1");
+            recursiveSelected.mParams.mShrinkExpand.mTransport.mEncoding.mRootWirePinOverlap = true;
             return runRecursiveSelected();
         }();
         LOGVOLE_REQUIRE_TRUE(rangesEqual(recursiveBaseline.mWire,
@@ -1152,7 +1132,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             n25Host.mParams.mTotalLabelCount = oc::u64{1} << 25;
             SenderOfflineInput n25Selected = selectedInput;
             n25Selected.mParams = n25Host.mParams;
-            const auto n25Baseline = runOffline(n25Host,
+            const auto n25Baseline = runOffline(tests_libOTe::logvole_test::withSetupOptions(n25Host, setupOptions),
                 allocateProtocolCacheRunId(), false);
             const oc::u64 n25RunId = allocateProtocolCacheRunId();
             {
@@ -1164,16 +1144,11 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(n25Selected.mWrappedDeltaDevice != nullptr);
             n25Selected.mSenderOwnerRunId = n25RunId;
             auto n25Actual = [&] {
-                ScopedEnvironmentValue rootPinOverlap(
-                    "LV_GPU_ROOT_WIRE_PIN_OVERLAP",
-                    cudaWireN25 ? "0" : "1");
-                ScopedEnvironmentValue cudaWire(
-                    "LV_GPU_ROOT_WIRE_CUDA_ALLOC",
-                    cudaWireN25 ? "1" : "0");
-                ScopedEnvironmentValue earlyWire(
-                    "LV_GPU_ROOT_WIRE_CUDA_ALLOC_EARLY",
-                    earlyCudaWireN25 ? "1" : "0");
-                return runOffline(n25Selected, n25RunId, true);
+                auto& encoding = n25Selected.mParams.mShrinkExpand.mTransport.mEncoding;
+                encoding.mRootWirePinOverlap = !cudaWireN25;
+                encoding.mRootWireCudaAlloc = cudaWireN25;
+                encoding.mRootWireCudaAllocEarly = earlyCudaWireN25;
+                return runOffline(tests_libOTe::logvole_test::withSetupOptions(n25Selected, setupOptions), n25RunId, true);
             }();
             LOGVOLE_REQUIRE_TRUE(rangesEqual(n25Baseline.mWire,
                 n25Actual.mWire));
@@ -1281,7 +1256,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             oc::PRNG impostorPrng(seed, 3);
             ShrinkExpandSenderState rejected{};
             LOGVOLE_REQUIRE_FALSE(prepareShrinkExpandSenderOffline(
-                fixedKeyInput, impostorPrng, rejected));
+                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected));
         }
         {
             ScopedProtocolCacheScope wrongOfflineRun(
@@ -1290,7 +1265,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             oc::PRNG impostorPrng(seed, 3);
             ShrinkExpandSenderState rejected{};
             LOGVOLE_REQUIRE_FALSE(prepareShrinkExpandSenderOffline(
-                fixedKeyInput, impostorPrng, rejected));
+                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected));
         }
         {
             ScopedProtocolCacheScope wrongRole(
@@ -1308,33 +1283,33 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         const auto unmodifiedChild = firstChild->mSk1[0].mCoeffs[0];
         recursiveActual.mState.mShrinkExpandState.mSk1[0].mCoeffs[0] ^= 1u;
         LOGVOLE_REQUIRE_EQ(firstChild->mSk1[0].mCoeffs[0], unmodifiedChild);
-        for (const char* stage : {
-                 "LV_GPU_SETUP_TOP_SK1_DEVICE_FORCE_DECLINE",
-                 "LV_GPU_SETUP_TOP_SK1_REP_FORCE_DECLINE",
-                 "LV_GPU_SETUP_TOP_SK1_LHE_FORCE_DECLINE",
-                 "LV_GPU_SETUP_TOP_SK1_ROOT_FORCE_DECLINE",
-                 "LV_GPU_SETUP_TOP_SK1_LENC_FORCE_DECLINE" })
+        for (auto stage : {
+                 &osuCrypto::LogVoleFailureOptions::mTopSk1Device,
+                 &osuCrypto::LogVoleFailureOptions::mTopSk1Rep,
+                 &osuCrypto::LogVoleFailureOptions::mTopSk1Lhe,
+                 &osuCrypto::LogVoleFailureOptions::mTopSk1Root,
+                 &osuCrypto::LogVoleFailureOptions::mTopSk1Lenc })
         {
-            ScopedEnvironmentValue forced(stage, "1");
+            tests_libOTe::logvole_test::ScopedOptionValue forced(
+                advanced.mAdvanced.mProtocol.mFailures.*stage, true);
             auto declined = runRecursiveSelected();
             LOGVOLE_REQUIRE_TRUE(rangesEqual(recursiveBaseline.mWire,
                 declined.mWire));
             LOGVOLE_REQUIRE_TRUE(recursiveBaseline.mNextRandom ==
                 declined.mNextRandom);
-            if (std::string(stage) == "LV_GPU_SETUP_TOP_SK1_DEVICE_FORCE_DECLINE")
+            if (stage == &osuCrypto::LogVoleFailureOptions::mTopSk1Device)
                 LOGVOLE_REQUIRE_TRUE(declined.mState.mShrinkExpandState.mTopSk1Device == nullptr);
         }
         {
-            ScopedEnvironmentValue strict("LV_GPU_SETUP_TOP_SK1_CONSUMER_STRICT", "1");
-            ScopedEnvironmentValue decline("LV_GPU_SETUP_TOP_SK1_REP_FORCE_DECLINE", "1");
+            tests_libOTe::logvole_test::ScopedOptionValue strict(setupOptions.mTopSecretConsumerStrict, true);
+            tests_libOTe::logvole_test::ScopedOptionValue decline(advanced.mAdvanced.mProtocol.mFailures.mTopSk1Rep, true);
             bool rejected = false;
             try { (void)runRecursiveSelected(); }
             catch (const std::runtime_error&) { rejected = true; }
             LOGVOLE_REQUIRE_TRUE(rejected);
         }
         {
-            ScopedEnvironmentValue optout("LV_GPU_SETUP_TOP_SK1_DEVICE", "0");
-            auto eager = runRecursiveSelected();
+            auto eager = runRecursiveSelected(false);
             LOGVOLE_REQUIRE_TRUE(rangesEqual(recursiveBaseline.mWire, eager.mWire));
             LOGVOLE_REQUIRE_TRUE(recursiveBaseline.mNextRandom == eager.mNextRandom);
             LOGVOLE_REQUIRE_TRUE(eager.mState.mShrinkExpandState.mTopSk1Device == nullptr);
@@ -1488,15 +1463,16 @@ void LogVole_Core_GdecompHiUnbundleLiftsOneLimbPerOutput(const oc::CLP&)
 
 void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled requestedGpu(cmd.getOr("gpu", 0) != 0);
-    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE(gpu::enabled(advanced));
 #else
     (void)cmd;
 #endif
     const auto params = make_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced)));
 
     const auto s = sample_batch(ctx, 1, 0x3003u);
     std::vector<RnsPoly> actual;
@@ -1507,7 +1483,7 @@ void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP& cmd)
         expect_poly_equal(poly, s[0]);
     }
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::enabled())
+    if (gpu::enabled(advanced))
     {
         // Exercise the device entry point directly so fallback cannot conceal
         // a declined launch. Repetition must preserve even unreduced words.
@@ -1528,15 +1504,16 @@ void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP& cmd)
 
 void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesResidues(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled requestedGpu(cmd.getOr("gpu", 0) != 0);
-    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE(gpu::enabled(advanced));
 #else
     (void)cmd;
 #endif
     const auto params = make_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced)));
 
     const std::uint32_t alpha = 2;
     const std::uint32_t tau = 3;
@@ -1572,15 +1549,16 @@ void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesResidues(const oc::CLP& 
 
 void LogVole_Core_RecursiveLiftOracleKeepsSenderResiduesUnscaled(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled requestedGpu(cmd.getOr("gpu", 0) != 0);
-    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE(gpu::enabled(advanced));
 #else
     (void)cmd;
 #endif
     const auto params = make_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced)));
 
     const std::uint32_t alpha = 2;
     const std::uint32_t tauHi = 2;
@@ -1641,7 +1619,7 @@ void LogVole_Core_RecursiveLiftOracleKeepsSenderResiduesUnscaled(const oc::CLP& 
     }
     LOGVOLE_EXPECT_TRUE(wouldCatchDoubleLift);
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::enabled())
+    if (gpu::enabled(advanced))
     {
         std::vector<RnsPoly> device;
         LOGVOLE_REQUIRE_TRUE(gpu::seedLabelRepDevice(ctx, s, tauHi, alpha, tauHi, device));
@@ -1748,8 +1726,9 @@ void LogVole_Core_RootScaledNttAddMatchesCoeffDomain(const oc::CLP&)
     expect_poly_equal(accNtt, expected);
 }
 
-void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP&)
+void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleGpuSetupOptions setupOptions;
     const auto params = make_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
@@ -1791,7 +1770,7 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP&)
         prng,
         0.0,
         0.0,
-        topCt));
+        topCt, 1,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
     LOGVOLE_EXPECT_EQ(topCt.mRows, leftWidth);
     LOGVOLE_EXPECT_EQ(topCt.mCols, tauHi + randomizer);
     LOGVOLE_REQUIRE_EQ(topCt.mPolys.size(), static_cast<std::size_t>(leftWidth) * (tauHi + randomizer));
@@ -1829,20 +1808,18 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP&)
     // Keep device activation inside this direct-ciphertext fixture. Other toy
     // recursive tests retain their established CPU/GPU scope.
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled useGpu(true);
-    const bool haveGpu = gpu::enabled();
-    if (const char* strict = std::getenv("LV_GPU_SETUP_ROOT_DEVICE_STRICT"))
+    const bool haveGpu = cmd.getOr("gpu", 0) != 0 && gpu::available();
+    if (const char* strict = (setupOptions.mRootDeviceStrict ? "1" : "0"))
         if (strict[0] == '1') LOGVOLE_REQUIRE_TRUE(haveGpu);
 #else
     const bool haveGpu = false;
 #endif
-    ScopedEnvironmentValue rootDecline("LV_GPU_SETUP_ROOT_DEVICE_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue compactDecline("LV_GPU_SETUP_ROOT_COMPACT_NOISE_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue extraDownload("LV_GPU_SETUP_EXTRA_PIPELINED_DOWNLOAD", "1");
-    ScopedEnvironmentValue reuseDownloadWorkers("LV_GPU_SETUP_DOWNLOAD_REUSE_WORKERS", "1");
+
     auto checkDeviceParity = [&](const RingParams& ring, std::uint32_t gadgetBits) {
+        osuCrypto::LogVoleExecutionOptions advanced;
+        advanced.mUseGpu = haveGpu;
         RingNttContext parityContext{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, parityContext));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, parityContext, std::make_shared<RingContextFactory>(advanced)));
         const auto left = sample_batch(parityContext, 5, 0x7351u);
         auto rightNtt = sample_batch(parityContext, 5, 0x7352u);
         auto rootB = sample_batch(parityContext, 2, 0x7353u);
@@ -1855,13 +1832,11 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP&)
             oc::PRNG referencePrng(oc::block(0x7355u, 0), 3);
             RingTensor expected{};
             {
-                ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_ROOT_DEVICE", "0");
-                ScopedEnvironmentValue batchOption("LV_GPU_SETUP_BATCH_NTT", "0");
-#if defined(ENABLE_LOGVOLE_CUDA)
-                ScopedGpuEnabled cpuReference(false);
-#endif
-                LOGVOLE_REQUIRE_TRUE(buildRootTopCt(parityContext, left, rightNtt, rootB, starB,
-                    gadgetBits, 1, referencePrng, sigma, 6 * sigma, expected, 1));
+                tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mRootDevice, false);
+                tests_libOTe::logvole_test::ScopedOptionValue batchOption(setupOptions.mBatchNtt, false);
+                auto cpuContext = cpuReferenceContext(parityContext);
+                LOGVOLE_REQUIRE_TRUE(buildRootTopCt(cpuContext, left, rightNtt, rootB, starB,
+                    gadgetBits, 1, referencePrng, sigma, 6 * sigma, expected, 1,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
             }
             const auto nextReference = referencePrng.get<oc::block>();
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1872,7 +1847,7 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP&)
                 std::vector<RnsPoly> aliasedNoise(expected.mPolys.size(), zero_poly(parityContext));
                 const auto originalNoise = aliasedNoise;
                 {
-                    ScopedEnvironmentValue forced("LV_GPU_SETUP_ROOT_DEVICE_FORCE_DECLINE", "1");
+                    tests_libOTe::logvole_test::ScopedOptionValue forced(parityContext.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootDevice, true);
                     const auto* storage = aliasedNoise.data();
                     LOGVOLE_REQUIRE_FALSE(gpu::assembleRootTopCtDevice(parityContext,
                         left, rightNtt, rootB, starB, gadgetBits, 1u, aliasedNoise, aliasedNoise));
@@ -1888,18 +1863,18 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP&)
             for (const char* compact : { "0", "1" })
             for (std::uint32_t workers : { 1u, 4u })
             {
-                ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_ROOT_DEVICE", haveGpu ? "1" : "0");
-                ScopedEnvironmentValue strictOption("LV_GPU_SETUP_ROOT_DEVICE_STRICT", "1");
-                ScopedEnvironmentValue batchOption("LV_GPU_SETUP_BATCH_NTT", batch);
-                ScopedEnvironmentValue compactOption("LV_GPU_SETUP_ROOT_COMPACT_NOISE", compact);
-                ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mRootDevice, (haveGpu ? "1" : "0")[0] != '0');
+                tests_libOTe::logvole_test::ScopedOptionValue strictOption(setupOptions.mRootDeviceStrict, true);
+                tests_libOTe::logvole_test::ScopedOptionValue batchOption(setupOptions.mBatchNtt, (batch)[0] != '0');
+                tests_libOTe::logvole_test::ScopedOptionValue compactOption(setupOptions.mRootCompactNoise, (compact)[0] != '0');
+                tests_libOTe::logvole_test::ScopedOptionValue compactStrict(setupOptions.mRootCompactNoiseStrict, true);
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (haveGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+                if (haveGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled(parityContext));
 #endif
                 oc::PRNG actualPrng(oc::block(0x7355u, 0), 3);
                 RingTensor actual{};
                 LOGVOLE_REQUIRE_TRUE(buildRootTopCt(parityContext, left, rightNtt, rootB, starB,
-                    gadgetBits, 1, actualPrng, sigma, 6 * sigma, actual, workers));
+                    gadgetBits, 1, actualPrng, sigma, 6 * sigma, actual, workers,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
                 LOGVOLE_REQUIRE_EQ(actual.mRows, expected.mRows);
                 LOGVOLE_REQUIRE_EQ(actual.mCols, expected.mCols);
                 LOGVOLE_REQUIRE_EQ(actual.mPolys.size(), expected.mPolys.size());
@@ -1915,23 +1890,23 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP&)
             }
             if (haveGpu)
             {
-                ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_ROOT_DEVICE", "1");
-                ScopedEnvironmentValue strictOption("LV_GPU_SETUP_ROOT_DEVICE_STRICT", "0");
-                ScopedEnvironmentValue compactOption("LV_GPU_SETUP_ROOT_COMPACT_NOISE", "1");
-                ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT", "0");
-                ScopedEnvironmentValue decline("LV_GPU_SETUP_ROOT_COMPACT_NOISE_FORCE_DECLINE", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mRootDevice, true);
+                tests_libOTe::logvole_test::ScopedOptionValue strictOption(setupOptions.mRootDeviceStrict, false);
+                tests_libOTe::logvole_test::ScopedOptionValue compactOption(setupOptions.mRootCompactNoise, true);
+                tests_libOTe::logvole_test::ScopedOptionValue compactStrict(setupOptions.mRootCompactNoiseStrict, false);
+                tests_libOTe::logvole_test::ScopedOptionValue decline(parityContext.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootCompactNoise, true);
                 oc::PRNG replayPrng(oc::block(0x7355u, 0), 3);
                 RingTensor replay{};
                 LOGVOLE_REQUIRE_TRUE(buildRootTopCt(parityContext, left, rightNtt, rootB, starB,
-                    gadgetBits, 1, replayPrng, sigma, 6 * sigma, replay, 4));
+                    gadgetBits, 1, replayPrng, sigma, 6 * sigma, replay, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
                 expect_batch_equal(replay.mPolys, expected.mPolys);
                 LOGVOLE_EXPECT_EQ(replayPrng.get<oc::block>(), nextReference);
-                ScopedEnvironmentValue requireCompact("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue requireCompact(setupOptions.mRootCompactNoiseStrict, true);
                 oc::PRNG rejectedPrng(oc::block(0x7355u, 0), 3);
                 RingTensor rejected = expected;
                 const auto* storage = rejected.mPolys.data();
                 LOGVOLE_REQUIRE_TRUE(!buildRootTopCt(parityContext, left, rightNtt, rootB, starB,
-                    gadgetBits, 1, rejectedPrng, sigma, 6 * sigma, rejected, 4));
+                    gadgetBits, 1, rejectedPrng, sigma, 6 * sigma, rejected, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
                 LOGVOLE_REQUIRE_TRUE(rejected.mPolys.data() == storage);
                 expect_batch_equal(rejected.mPolys, expected.mPolys);
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
@@ -1950,19 +1925,21 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP&)
 
 void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
 {
-    ScopedEnvironmentValue residentDefault("LV_GPU_SETUP_GAUSSIAN_RESIDENT", "0");
+    osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled useGpu(requested);
-    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::available());
+    if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     const bool haveGaussian = gpu::gaussianTransformHostCompatible();
-    ScopedEnvironmentValue compactOption("LV_GPU_SETUP_ROOT_COMPACT_NOISE", "1");
-    ScopedEnvironmentValue strictOption("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT", "1");
-    ScopedEnvironmentValue declineOption("LV_GPU_SETUP_ROOT_COMPACT_NOISE_FORCE_DECLINE", "0");
+    tests_libOTe::logvole_test::ScopedOptionValue compactOption(setupOptions.mRootCompactNoise, true);
+    tests_libOTe::logvole_test::ScopedOptionValue strictOption(setupOptions.mRootCompactNoiseStrict, true);
+
     const auto checkRing = [&](const RingParams& params) {
+        osuCrypto::LogVoleExecutionOptions advanced;
+        advanced.mUseGpu = true;
+        advanced.mAdvanced.mProtocol.mGaussianResident = false;
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced)));
         for (const std::uint32_t count : { 1u, 5u })
         for (const double sigma : { 0.0, 3.2 })
         for (const bool outputNtt : { false, true })
@@ -1971,10 +1948,10 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
             oc::PRNG referencePrng(seed, 3);
             std::vector<RnsPoly> expected;
             {
-                ScopedGpuEnabled cpuReference(false);
+                auto cpuContext = cpuReferenceContext(ctx);
                 // Exercise the original seven-argument public API as well.
-                LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(ctx, count, referencePrng,
-                    sigma, 6 * sigma, outputNtt, expected));
+                LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(cpuContext, count, referencePrng,
+                    sigma, 6 * sigma, outputNtt, expected, 1, setupOptions));
             }
             const auto nextReference = referencePrng.get<oc::block>();
             for (const std::uint32_t workers : { 1u, 4u })
@@ -1982,57 +1959,57 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
                 oc::PRNG actualPrng(seed, 3);
                 std::vector<RnsPoly> actual;
                 LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(ctx, count, actualPrng,
-                    sigma, 6 * sigma, outputNtt, actual, workers));
+                    sigma, 6 * sigma, outputNtt, actual, workers, setupOptions));
                 expect_batch_equal(actual, expected);
                 LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), nextReference);
             }
             {
-                ScopedEnvironmentValue resident("LV_GPU_SETUP_GAUSSIAN_RESIDENT", "1");
-                ScopedEnvironmentValue residentStrict("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", haveGaussian ? "1" : "0");
-                ScopedEnvironmentValue residentDecline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", "0");
-                ScopedEnvironmentValue transform("LV_GPU_SETUP_GAUSSIAN_TRANSFORM", "1");
-                ScopedEnvironmentValue transformStrict("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_STRICT", haveGaussian ? "1" : "0");
-                ScopedEnvironmentValue transformDecline("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_FORCE_DECLINE", "0");
+                tests_libOTe::logvole_test::ScopedOptionValue resident(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResident, true);
+                tests_libOTe::logvole_test::ScopedOptionValue residentStrict(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResidentStrict, (haveGaussian));
+                tests_libOTe::logvole_test::ScopedOptionValue residentDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mGaussianResident, false);
+                tests_libOTe::logvole_test::ScopedOptionValue transform(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransform, true);
+                tests_libOTe::logvole_test::ScopedOptionValue transformStrict(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformStrict, (haveGaussian));
+                tests_libOTe::logvole_test::ScopedOptionValue transformDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mGaussianTransform, false);
                 for (const char* blocks : {"0", "1"})
                 {
-                    ScopedEnvironmentValue prefix("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_PREFIX_BLOCKS", blocks);
+                    tests_libOTe::logvole_test::ScopedOptionValue prefix(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformPrefixBlocks, static_cast<std::uint64_t>(std::strtoull(blocks, nullptr, 10)));
                     oc::PRNG actualPrng(seed, 3);
                     std::vector<RnsPoly> actual;
                     LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(ctx, count, actualPrng,
-                        sigma, 6 * sigma, outputNtt, actual, 4));
+                        sigma, 6 * sigma, outputNtt, actual, 4, setupOptions));
                     expect_batch_equal(actual, expected);
                     LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), nextReference);
                 }
                 if (sigma > 0.0)
                 {
-                    ScopedEnvironmentValue decline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", "1");
+                    tests_libOTe::logvole_test::ScopedOptionValue decline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mGaussianResident, true);
                     {
-                        ScopedEnvironmentValue replay("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", "0");
+                        tests_libOTe::logvole_test::ScopedOptionValue replay(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResidentStrict, false);
                         oc::PRNG replayPrng(seed, 3);
                         std::vector<RnsPoly> replayOutput;
                         LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(ctx, count, replayPrng,
-                            sigma, 6 * sigma, outputNtt, replayOutput, 4));
+                            sigma, 6 * sigma, outputNtt, replayOutput, 4, setupOptions));
                         expect_batch_equal(replayOutput, expected);
                         LOGVOLE_EXPECT_EQ(replayPrng.get<oc::block>(), nextReference);
                     }
-                    ScopedEnvironmentValue requireResident("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", "1");
+                    tests_libOTe::logvole_test::ScopedOptionValue requireResident(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResidentStrict, true);
                     oc::PRNG rejectedPrng(seed, 3);
                     auto rejected = expected;
                     const auto* storage = rejected.data();
                     LOGVOLE_REQUIRE_FALSE(sampleRootErrorBatch(ctx, count, rejectedPrng,
-                        sigma, 6 * sigma, outputNtt, rejected, 4));
+                        sigma, 6 * sigma, outputNtt, rejected, 4, setupOptions));
                     LOGVOLE_REQUIRE_TRUE(rejected.data() == storage);
                     expect_batch_equal(rejected, expected);
                     LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
                 }
             }
-            ScopedEnvironmentValue decline("LV_GPU_SETUP_ROOT_COMPACT_NOISE_FORCE_DECLINE", "1");
+            tests_libOTe::logvole_test::ScopedOptionValue decline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootCompactNoise, true);
             {
-                ScopedEnvironmentValue fallback("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT", "0");
+                tests_libOTe::logvole_test::ScopedOptionValue fallback(setupOptions.mRootCompactNoiseStrict, false);
                 oc::PRNG replayPrng(seed, 3);
                 std::vector<RnsPoly> replay;
                 LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(ctx, count, replayPrng,
-                    sigma, 6 * sigma, outputNtt, replay, 4));
+                    sigma, 6 * sigma, outputNtt, replay, 4, setupOptions));
                 expect_batch_equal(replay, expected);
                 LOGVOLE_EXPECT_EQ(replayPrng.get<oc::block>(), nextReference);
             }
@@ -2040,7 +2017,7 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
             auto rejected = expected;
             const auto* storage = rejected.data();
             LOGVOLE_REQUIRE_TRUE(!sampleRootErrorBatch(ctx, count, rejectedPrng,
-                sigma, 6 * sigma, outputNtt, rejected, 4));
+                sigma, 6 * sigma, outputNtt, rejected, 4, setupOptions));
             LOGVOLE_REQUIRE_TRUE(rejected.data() == storage);
             expect_batch_equal(rejected, expected);
             LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
@@ -2069,38 +2046,35 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
 
 void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = true;
+    osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled gpuScope(requested);
-    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::available());
+    if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     const bool haveGaussian = gpu::gaussianTransformHostCompatible();
-    ScopedEnvironmentValue resident("LV_GPU_SETUP_GAUSSIAN_RESIDENT", "1");
-    ScopedEnvironmentValue residentStrict("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", haveGaussian ? "1" : "0");
-    ScopedEnvironmentValue residentDecline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue transform("LV_GPU_SETUP_GAUSSIAN_TRANSFORM", "1");
-    ScopedEnvironmentValue transformStrict("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_STRICT", haveGaussian ? "1" : "0");
-    ScopedEnvironmentValue transformDecline("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue prefix("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_PREFIX_BLOCKS", "0");
-    ScopedEnvironmentValue compact("LV_GPU_SETUP_COMPACT_NOISE", "1");
-    ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "1");
-    ScopedEnvironmentValue rootCompact("LV_GPU_SETUP_ROOT_COMPACT_NOISE", "1");
-    ScopedEnvironmentValue rootCompactStrict("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT", "1");
-    ScopedEnvironmentValue rootCompactDecline("LV_GPU_SETUP_ROOT_COMPACT_NOISE_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue lencDevice("LV_GPU_SETUP_LENC_DEVICE", "1");
-    ScopedEnvironmentValue lencStrict("LV_GPU_SETUP_LENC_DEVICE_STRICT", "1");
-    ScopedEnvironmentValue lencDecline("LV_GPU_SETUP_LENC_DEVICE_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue lheDevice("LV_GPU_SETUP_LHE_DEVICE", "1");
-    ScopedEnvironmentValue lheStrict("LV_GPU_SETUP_LHE_DEVICE_STRICT", "1");
-    ScopedEnvironmentValue lheDecline("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue rootDevice("LV_GPU_SETUP_ROOT_DEVICE", "1");
-    ScopedEnvironmentValue rootStrict("LV_GPU_SETUP_ROOT_DEVICE_STRICT", "1");
-    ScopedEnvironmentValue publicRetention("LV_GPU_SETUP_PUBLIC_RETAIN", "1");
-    ScopedEnvironmentValue publicUniform("LV_GPU_SETUP_UNIFORM_DEVICE", "1");
-    ScopedEnvironmentValue publicUniformStrict("LV_GPU_SETUP_UNIFORM_DEVICE_STRICT", "1");
-    ScopedEnvironmentValue publicUniformDecline("LV_GPU_SETUP_UNIFORM_FORCE_DECLINE", "0");
-    ScopedEnvironmentValue compactExpansion("LV_GPU_SETUP_COMPACT_EXPAND_DIRECT", "1");
-    ScopedEnvironmentValue compactPipeline("LV_GPU_SETUP_COMPACT_PIPELINED_DOWNLOAD", "1");
+    tests_libOTe::logvole_test::ScopedOptionValue resident(advanced.mAdvanced.mProtocol.mGaussianResident, true);
+    tests_libOTe::logvole_test::ScopedOptionValue residentStrict(advanced.mAdvanced.mProtocol.mGaussianResidentStrict, (haveGaussian));
+
+    tests_libOTe::logvole_test::ScopedOptionValue transform(advanced.mAdvanced.mProtocol.mGaussianTransform, true);
+    tests_libOTe::logvole_test::ScopedOptionValue transformStrict(advanced.mAdvanced.mProtocol.mGaussianTransformStrict, (haveGaussian));
+
+    tests_libOTe::logvole_test::ScopedOptionValue prefix(advanced.mAdvanced.mProtocol.mGaussianTransformPrefixBlocks, std::uint64_t{0});
+    tests_libOTe::logvole_test::ScopedOptionValue compact(setupOptions.mCompactNoise, true);
+    tests_libOTe::logvole_test::ScopedOptionValue compactStrict(setupOptions.mCompactNoiseStrict, true);
+    tests_libOTe::logvole_test::ScopedOptionValue rootCompact(setupOptions.mRootCompactNoise, true);
+    tests_libOTe::logvole_test::ScopedOptionValue rootCompactStrict(setupOptions.mRootCompactNoiseStrict, true);
+
+    tests_libOTe::logvole_test::ScopedOptionValue lencDevice(setupOptions.mLencDevice, true);
+    tests_libOTe::logvole_test::ScopedOptionValue lencStrict(setupOptions.mLencDeviceStrict, true);
+
+    tests_libOTe::logvole_test::ScopedOptionValue lheDevice(setupOptions.mLheDevice, true);
+    tests_libOTe::logvole_test::ScopedOptionValue lheStrict(setupOptions.mLheDeviceStrict, true);
+
+    tests_libOTe::logvole_test::ScopedOptionValue rootDevice(setupOptions.mRootDevice, true);
+    tests_libOTe::logvole_test::ScopedOptionValue rootStrict(setupOptions.mRootDeviceStrict, true);
+    tests_libOTe::logvole_test::ScopedOptionValue publicUniformStrict(advanced.mAdvanced.mProtocol.mUniformSamplingStrict, true);
 
     for (bool noGolden : {false, true})
     {
@@ -2118,7 +2092,7 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
         }
         params.mShrinkExpand.mNumWorkerThreads = 4;
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
         SenderOfflineInput input;
         input.mParams = params;
         input.mSk1 = sample_batch(ctx, params.mGamma, 0x475257495245u);
@@ -2128,18 +2102,17 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
         oc::PRNG referencePrng(seed, 3);
         SenderOfflineOutput expected;
         {
-            ScopedGpuEnabled cpuReference(false);
-            LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(input, referencePrng, expected));
+            tests_libOTe::logvole_test::ScopedOptionValue cpuReference(advanced.mUseGpu, false);
+            LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Sender), referencePrng, expected));
         }
         std::array<std::uint64_t, 16> nextReference;
         referencePrng.get(nextReference.data(), nextReference.size());
         for (bool forcedReplay : {false, true})
         {
-            ScopedEnvironmentValue decline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", forcedReplay ? "1" : "0");
-            ScopedEnvironmentValue strict("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", forcedReplay || !haveGaussian ? "0" : "1");
-            ScopedEnvironmentValue publicDecline("LV_GPU_SETUP_PUBLIC_RETAIN_FORCE_DECLINE", forcedReplay ? "1" : "0");
-            ScopedEnvironmentValue extraDownload("LV_GPU_SETUP_EXTRA_PIPELINED_DOWNLOAD", forcedReplay ? "0" : "1");
-            ScopedEnvironmentValue reuseDownloadWorkers("LV_GPU_SETUP_DOWNLOAD_REUSE_WORKERS", "1");
+            tests_libOTe::logvole_test::ScopedOptionValue decline(advanced.mAdvanced.mProtocol.mFailures.mGaussianResident, (forcedReplay ? "1" : "0")[0] == '1');
+            tests_libOTe::logvole_test::ScopedOptionValue strict(advanced.mAdvanced.mProtocol.mGaussianResidentStrict, !(forcedReplay || !haveGaussian));
+            tests_libOTe::logvole_test::ScopedOptionValue publicDecline(advanced.mAdvanced.mProtocol.mFailures.mPublicRetain, (forcedReplay ? "1" : "0")[0] == '1');
+            tests_libOTe::logvole_test::ScopedOptionValue extraDownload(advanced.mAdvanced.mProtocol.mExtraPipelinedDownload, !forcedReplay);
             const auto run = allocateProtocolCacheRunId();
             ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, run);
             oc::PRNG actualPrng(seed, 3);
@@ -2147,7 +2120,7 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
             RetentionBaseline retentionBefore;
             retentionBefore.capture(ctx);
             retentionBefore.captureTree(expected.mState);
-            LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(input, actualPrng, actual));
+            LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Sender), actualPrng, actual));
             const auto retentionAfter = retentionBefore.deltaTree(actual.mState);
             if (forcedReplay)
                 LOGVOLE_REQUIRE_EQ(retentionAfter.mCopies, 0u);
@@ -2175,7 +2148,7 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(!a && !e);
             ReceiverOfflineOutput receiver;
             ScopedProtocolCacheScope receiverScope(ProtocolCacheRole::Receiver, run);
-            LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, actual.mMessage, receiver));
+            LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), actual.mMessage, receiver));
         }
     }
 #else
@@ -2245,8 +2218,10 @@ void LogVole_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)
     expect_poly_equal(actual, expected);
 }
 
-void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
+void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleExecutionOptions advanced;
+    osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
@@ -2263,14 +2238,14 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
     seInput.mS = sample_batch(ctx, trunc.mMu, 0x7501u);
 
     ShrinkExpandSenderState seSender{};
-    LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(seInput, seSender));
+    LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(tests_libOTe::logvole_test::withSetupOptions(seInput, setupOptions), seSender));
 
     SenderState sender{};
     sender.mParams = params;
     sender.mShrinkExpandState = seSender;
 
     RootOfflineMessage message{};
-    LOGVOLE_REQUIRE_TRUE(prepare_root_offline_sender_for_test(sender, message));
+    LOGVOLE_REQUIRE_TRUE(prepare_root_offline_sender_for_test(tests_libOTe::logvole_test::withSetupOptions(sender, setupOptions), message));
 
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1;
     const std::uint32_t rho = static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
@@ -2307,44 +2282,44 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
     // exact-replay check for the CPU fallback. This includes the noisy root
     // ciphertext and the receiver's root and shrink/expand transforms.
 #if defined(ENABLE_LOGVOLE_CUDA)
-    const bool gpuWasEnabled = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool mEnabled;
-        ~RestoreGpu() { gpu::setEnabled(mEnabled); }
-    } restoreGpu{ gpuWasEnabled };
-    gpu::setEnabled(true);
+    advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
+    if (advanced.mUseGpu) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #endif
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
     Buffer serialMessage;
     std::vector<RnsPoly> serialRootCt;
     std::vector<RnsPoly> serialShrinkCt;
     std::uint64_t serialNextRandom = 0;
     for (const char* option : { "0", "1" })
     {
-        ScopedEnvironmentValue batchOption("LV_GPU_SETUP_BATCH_NTT", option);
+        tests_libOTe::logvole_test::ScopedOptionValue batchOption(setupOptions.mBatchNtt, (option)[0] != '0');
         SenderState replaySender{};
         replaySender.mParams = params;
         replaySender.mShrinkExpandState = seSender;
         replaySender.mShrinkExpandState.mParams.mNumWorkerThreads = 4;
+        replaySender = tests_libOTe::logvole_test::withAdvancedOptions(std::move(replaySender), advanced, ProtocolCacheRole::Sender);
         oc::PRNG replayPrng(oc::block(0x7502u, 0x7503u));
         RootOfflineMessage replayMessage{};
-        LOGVOLE_REQUIRE_TRUE(prepareRootOfflineSender(replaySender, replayPrng, replayMessage));
+        LOGVOLE_REQUIRE_TRUE(prepareRootOfflineSender(tests_libOTe::logvole_test::withSetupOptions(replaySender, setupOptions), replayPrng, replayMessage));
         const auto nextRandom = replayPrng.get<std::uint64_t>();
         const auto encoded = encode(replayMessage);
 
         ReceiverState replayReceiver{};
         replayReceiver.mParams = params;
+        replayReceiver = tests_libOTe::logvole_test::withAdvancedOptions(std::move(replayReceiver), advanced, ProtocolCacheRole::Receiver);
         LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(replayReceiver, replayMessage));
         ShrinkExpandReceiverOfflineInput seReceiverInput{};
         seReceiverInput.mParams = trunc;
+        seReceiverInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seReceiverInput), advanced, ProtocolCacheRole::Receiver);
         ShrinkExpandReceiverState seReceiver{};
         LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(
-            seReceiverInput, seSender, seReceiver));
+            tests_libOTe::logvole_test::withSetupOptions(seReceiverInput, setupOptions), seSender, seReceiver));
 
         RootOfflineMessage ownedRoot = replayMessage;
         const auto* rootStorage = ownedRoot.mTopCt.mPolys.data();
         ReceiverState movedRoot{};
         movedRoot.mParams = params;
+        movedRoot = tests_libOTe::logvole_test::withAdvancedOptions(std::move(movedRoot), advanced, ProtocolCacheRole::Receiver);
         LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(movedRoot, std::move(ownedRoot)));
         LOGVOLE_EXPECT_TRUE(movedRoot.mRootTopCt.mPolys.data() == rootStorage);
         expect_batch_equal(movedRoot.mRootCtRRt.mPolys, replayReceiver.mRootCtRRt.mPolys);
@@ -2360,7 +2335,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
         const auto* shrinkStorage = ownedShrink.mLacct.mCt.mPolys.data();
         ShrinkExpandReceiverState movedShrink{};
         LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(
-            seReceiverInput, std::move(ownedShrink), movedShrink));
+            tests_libOTe::logvole_test::withSetupOptions(seReceiverInput, setupOptions), std::move(ownedShrink), movedShrink));
         LOGVOLE_EXPECT_TRUE(movedShrink.mLacct.mCt.mPolys.data() == shrinkStorage);
         expect_batch_equal(movedShrink.mCt1.mPolys, seReceiver.mCt1.mPolys);
         expect_batch_equal(movedShrink.mLacct.mCt.mPolys, seReceiver.mLacct.mCt.mPolys);
@@ -2375,7 +2350,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
         const auto* malformedStorage = malformedShrink.mCt1.mPolys.data();
         const auto* previousStorage = movedShrink.mCt1.mPolys.data();
         LOGVOLE_EXPECT_FALSE(finalizeShrinkExpandReceiverOffline(
-            seReceiverInput, std::move(malformedShrink), movedShrink));
+            tests_libOTe::logvole_test::withSetupOptions(seReceiverInput, setupOptions), std::move(malformedShrink), movedShrink));
         LOGVOLE_EXPECT_TRUE(malformedShrink.mCt1.mPolys.data() == malformedStorage);
         LOGVOLE_EXPECT_TRUE(movedShrink.mCt1.mPolys.data() == previousStorage);
 
@@ -2404,18 +2379,15 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
     // without advancing the parent PRNG a second time.
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool replayGpuEnabled = gpu::enabled();
+        const bool replayGpuEnabled = gpu::enabled(advanced);
 #else
         constexpr bool replayGpuEnabled = false;
 #endif
-        ScopedEnvironmentValue retainPublic("LV_GPU_SETUP_PUBLIC_RETAIN", "1");
-        ScopedEnvironmentValue publicDecline("LV_GPU_SETUP_PUBLIC_RETAIN_FORCE_DECLINE", "0");
-        ScopedEnvironmentValue lencDevice("LV_GPU_SETUP_LENC_DEVICE", "1");
-        ScopedEnvironmentValue rootDevice("LV_GPU_SETUP_ROOT_DEVICE", "1");
-        ScopedEnvironmentValue rootR1Device("LV_GPU_SETUP_ROOT_R1_DEVICE", "1");
-        ScopedEnvironmentValue rootSkDevice("LV_GPU_SETUP_ROOT_SKRR_DEVICE", "1");
-        ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "0");
-        ScopedEnvironmentValue rootCompactStrict("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT", "0");
+
+        tests_libOTe::logvole_test::ScopedOptionValue lencDevice(setupOptions.mLencDevice, true);
+        tests_libOTe::logvole_test::ScopedOptionValue rootDevice(setupOptions.mRootDevice, true);
+        tests_libOTe::logvole_test::ScopedOptionValue compactStrict(setupOptions.mCompactNoiseStrict, false);
+        tests_libOTe::logvole_test::ScopedOptionValue rootCompactStrict(setupOptions.mRootCompactNoiseStrict, false);
         struct Replay
         {
             Buffer mWire;
@@ -2445,34 +2417,29 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                                 const char* bStarOption = "1",
                                 const char* bStarCaptureDecline = "0") {
             ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, runId);
-            ScopedEnvironmentValue forceRoot("LV_GPU_SETUP_ROOT_DEVICE_FORCE_DECLINE", rootDecline);
-            ScopedEnvironmentValue forceLenc("LV_GPU_SETUP_LENC_DEVICE_FORCE_DECLINE", lencDecline);
-            ScopedEnvironmentValue forceR1("LV_GPU_SETUP_ROOT_R1_DEVICE_FORCE_DECLINE", r1Decline);
-            ScopedEnvironmentValue forceLhe("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", lheDecline);
-            ScopedEnvironmentValue useR1("LV_GPU_SETUP_ROOT_R1_DEVICE", r1Option);
-            ScopedEnvironmentValue useSk("LV_GPU_SETUP_ROOT_SKRR_DEVICE", skOption);
-            ScopedEnvironmentValue forceSk("LV_GPU_SETUP_ROOT_SKRR_DEVICE_FORCE_DECLINE", skDecline);
-            ScopedEnvironmentValue forceSkx("LV_GPU_ROOT_SKX_FORCE_DECLINE", skxDecline);
-            ScopedEnvironmentValue rootToken("LV_GPU_SETUP_ROOT_PUBLIC_B_TOKEN", tokenOption);
-            ScopedEnvironmentValue rootBStar("LV_GPU_SETUP_ROOT_BSTAR_DEVICE", bStarOption);
-            ScopedEnvironmentValue forceBStar(
-                "LV_GPU_SETUP_ROOT_BSTAR_DEVICE_FORCE_DECLINE",
-                bStarCaptureDecline);
-            ScopedEnvironmentValue strictBStar(
-                "LV_GPU_SETUP_ROOT_BSTAR_DEVICE_STRICT", "0");
-            ScopedEnvironmentValue strictRoot("LV_GPU_SETUP_ROOT_DEVICE_STRICT",
-                replayGpuEnabled && rootDecline[0] == '0' ? "1" : "0");
-            ScopedEnvironmentValue strictLenc("LV_GPU_SETUP_LENC_DEVICE_STRICT",
-                replayGpuEnabled && lencDecline[0] == '0' ? "1" : "0");
-            ScopedEnvironmentValue strictLhe("LV_GPU_SETUP_LHE_DEVICE_STRICT",
-                replayGpuEnabled && lheDecline[0] == '0' ? "1" : "0");
+            tests_libOTe::logvole_test::ScopedOptionValue forceRoot(advanced.mAdvanced.mProtocol.mFailures.mRootDevice, (rootDecline)[0] == '1');
+            tests_libOTe::logvole_test::ScopedOptionValue forceLenc(advanced.mAdvanced.mProtocol.mFailures.mLencDevice, (lencDecline)[0] == '1');
+            tests_libOTe::logvole_test::ScopedOptionValue forceR1(advanced.mAdvanced.mProtocol.mFailures.mRootR1Device, (r1Decline)[0] == '1');
+            tests_libOTe::logvole_test::ScopedOptionValue forceLhe(advanced.mAdvanced.mProtocol.mFailures.mLheDevice, (lheDecline)[0] == '1');
+            tests_libOTe::logvole_test::ScopedOptionValue forceSk(advanced.mAdvanced.mProtocol.mFailures.mRootSkRRDevice, (skDecline)[0] == '1');
+            tests_libOTe::logvole_test::ScopedOptionValue forceSkx(advanced.mAdvanced.mProtocol.mFailures.mRootSkX, (skxDecline)[0] == '1');
+            tests_libOTe::logvole_test::ScopedOptionValue forceBStar(advanced.mAdvanced.mProtocol.mFailures.mRootBStarDevice, (bStarCaptureDecline)[0] == '1');
+            tests_libOTe::logvole_test::ScopedOptionValue strictRoot(setupOptions.mRootDeviceStrict, (replayGpuEnabled && rootDecline[0] == '0' ? "1" : "0")[0] != '0');
+            tests_libOTe::logvole_test::ScopedOptionValue strictLenc(setupOptions.mLencDeviceStrict, (replayGpuEnabled && lencDecline[0] == '0' ? "1" : "0")[0] != '0');
+            tests_libOTe::logvole_test::ScopedOptionValue strictLhe(setupOptions.mLheDeviceStrict, (replayGpuEnabled && lheDecline[0] == '0' ? "1" : "0")[0] != '0');
             SenderState nextSender{};
             nextSender.mParams = params;
+            nextSender.mParams.mShrinkExpand.mGpuSetup.mRootR1Device = r1Option[0] != '0';
+            nextSender.mParams.mShrinkExpand.mGpuSetup.mRootSecretDevice = skOption[0] != '0';
+            nextSender.mParams.mShrinkExpand.mGpuSetup.mRootPublicBToken = tokenOption[0] != '0';
+            nextSender.mParams.mShrinkExpand.mGpuSetup.mRootBStarDevice = bStarOption[0] != '0';
             nextSender.mShrinkExpandState = seSender;
+            nextSender = tests_libOTe::logvole_test::withAdvancedOptions(
+                std::move(nextSender), advanced, ProtocolCacheRole::Sender);
             oc::PRNG nextPrng(oc::block(0x76B0u, 0x76B1u));
             RootOfflineMessage nextMessage{};
             LOGVOLE_REQUIRE_TRUE(prepareRootOfflineSender(
-                nextSender, nextPrng, nextMessage, deferHost));
+                tests_libOTe::logvole_test::withSetupOptions(nextSender, setupOptions), nextPrng, nextMessage, deferHost));
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (replayGpuEnabled && runId == 0x76B002u)
             {
@@ -2483,13 +2450,20 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                 LOGVOLE_REQUIRE_TRUE(gpu::rootErrorBatchMatches(ctx,
                     *rootOwner, leftWidth));
                 RingNttContext reordered = ctx;
-                std::swap(reordered.mModuli[0], reordered.mModuli[1]);
+                if (reordered.mRawModuli)
+                {
+                    auto moduli = std::make_shared<RingModulusMetadata>(*reordered.mRawModuli);
+                    std::swap(moduli->mValues[0], moduli->mValues[1]);
+                    reordered.mRawModuli = std::move(moduli);
+                }
+                else
+                    std::swap(reordered.mModuli[0], reordered.mModuli[1]);
                 LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(reordered,
                     *rootOwner, leftWidth));
                 RingParams widerParams = trunc.mRing;
                 widerParams.mPolyModulusDegree *= 2;
                 RingNttContext widerCtx{};
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(widerParams, widerCtx));
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(widerParams, widerCtx, std::make_shared<RingContextFactory>(advanced)));
                 LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(widerCtx,
                     *rootOwner, leftWidth));
                 const auto secretOwner = std::static_pointer_cast<gpu::DeviceBatch>(
@@ -2505,7 +2479,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                 LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(widerCtx,
                     *secretOwner, tauHi, runId));
                 {
-                    ScopedEnvironmentValue forcedSkx("LV_GPU_ROOT_SKX_FORCE_DECLINE", "1");
+                    tests_libOTe::logvole_test::ScopedOptionValue forcedSkx(advanced.mAdvanced.mProtocol.mFailures.mRootSkX, true);
                     LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(reordered,
                         *secretOwner, tauHi, runId));
                     LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(widerCtx,
@@ -2516,6 +2490,8 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                     wrongRun.mLazyRootSkRRt = nextSender.mLazyRootSkRRt;
                     wrongRun.mRootSkRRtOwnerRunId =
                         nextSender.mRootSkRRtOwnerRunId + 1u;
+                    wrongRun = tests_libOTe::logvole_test::withAdvancedOptions(
+                        std::move(wrongRun), advanced, ProtocolCacheRole::Sender);
                     RootDigestMessage badRequest{};
                     badRequest.mDPrimeCoeffs =
                         sample_batch(ctx, 1u, 0x76B0D1u)[0].mCoeffs;
@@ -2557,7 +2533,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                         otherB, nextMessage.mPublicBStarNtt,
                         seSender.mParams.mGadgetLogBase, 1, rejectedPrng,
                         0.0, 0.0, unchanged, 4, {}, nullptr, nullptr,
-                        rootOwner.get(), nextSender.mLazyRootR1Rt.get()));
+                        rootOwner.get(), nextSender.mLazyRootR1Rt.get(), nullptr, setupOptions));
                 }
                 LOGVOLE_EXPECT_TRUE(unchanged.mPolys.empty());
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(),
@@ -2665,7 +2641,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
             RingTensor unchanged = message.mTopCt;
             LOGVOLE_REQUIRE_FALSE(buildRootTopCt(ctx, sender.mRootR1Rt,
                 otherR, {}, message.mPublicBStarNtt, seSender.mParams.mGadgetLogBase,
-                1, rejectedPrng, 0.0, 0.0, unchanged, 4, {}, nullptr, otherB.get()));
+                1, rejectedPrng, 0.0, 0.0, unchanged, 4, {}, nullptr, otherB.get(), nullptr, nullptr, nullptr, setupOptions));
             expect_batch_equal(unchanged.mPolys, message.mTopCt.mPolys);
             LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), referencePrng.get<oc::block>());
         }
@@ -2681,16 +2657,11 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                 resizeFill<int>(ring.mCoeffModulusBits, rho,
                     noGoldenSeed ? 52 : 55);
                 RingNttContext productionCtx{};
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, productionCtx));
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, productionCtx, std::make_shared<RingContextFactory>(advanced)));
                 const std::uint64_t runId = noGoldenSeed ? 0xB57A5202u : 0xB57A5201u;
                 ScopedProtocolCacheScope senderScope(
                     ProtocolCacheRole::Sender, runId);
-                ScopedEnvironmentValue retainOption(
-                    "LV_GPU_SETUP_PUBLIC_RETAIN", "1");
-                ScopedEnvironmentValue sampleOption(
-                    "LV_GPU_SETUP_UNIFORM_DEVICE", "1");
-                ScopedEnvironmentValue bStarDecline(
-                    "LV_GPU_SETUP_ROOT_BSTAR_DEVICE_FORCE_DECLINE", "0");
+
                 auto owner = gpu::retainRootBStarNttDevice(
                     productionCtx, 2u);
                 LOGVOLE_REQUIRE_TRUE(owner != nullptr);
@@ -2739,24 +2710,21 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                 auto publicBRootNtt = deriveUniformPolyBatchFromNonce(
                     productionCtx, 0xB57A5500u, 0xB57A5501u, 1u, true);
                 const std::uint32_t gadgetLogBase = noGoldenSeed ? 208u : 110u;
-                ScopedEnvironmentValue rootDevice(
-                    "LV_GPU_SETUP_ROOT_DEVICE", "1");
-                ScopedEnvironmentValue rootStrict(
-                    "LV_GPU_SETUP_ROOT_DEVICE_STRICT", "1");
-                ScopedEnvironmentValue compactOption(
-                    "LV_GPU_SETUP_ROOT_COMPACT_NOISE", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue rootDevice(setupOptions.mRootDevice, true);
+                tests_libOTe::logvole_test::ScopedOptionValue rootStrict(setupOptions.mRootDeviceStrict, true);
+                tests_libOTe::logvole_test::ScopedOptionValue compactOption(setupOptions.mRootCompactNoise, true);
                 oc::PRNG eagerPrng(oc::block(0xB57A5600u, 0xB57A5601u));
                 oc::PRNG retainedPrng(oc::block(0xB57A5600u, 0xB57A5601u));
                 RingTensor eagerTop{}, retainedTop{};
                 LOGVOLE_REQUIRE_TRUE(buildRootTopCt(productionCtx,
                     r1, r2Ntt, publicBRootNtt, eagerBStar,
                     gadgetLogBase, 1, eagerPrng, 0.0, 0.0,
-                    eagerTop, 4));
+                    eagerTop, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
                 const auto before = gpu::publicUniformRetentionStats(productionCtx);
                 LOGVOLE_REQUIRE_TRUE(buildRootTopCt(productionCtx,
                     r1, r2Ntt, publicBRootNtt, {}, gadgetLogBase, 1,
                     retainedPrng, 0.0, 0.0, retainedTop, 4,
-                    {}, nullptr, nullptr, nullptr, nullptr, owner.get()));
+                    {}, nullptr, nullptr, nullptr, nullptr, owner.get(), setupOptions));
                 const auto after = gpu::publicUniformRetentionStats(productionCtx);
                 LOGVOLE_EXPECT_EQ(after.mHostMaterializations,
                     before.mHostMaterializations);
@@ -2775,7 +2743,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
                     r1, r2Ntt, publicBRootNtt, {}, gadgetLogBase, 1,
                     rejectedPrng, 0.0, 0.0, unchanged, 4,
                     {}, nullptr, nullptr, nullptr, nullptr,
-                    wrongNonce.get()));
+                    wrongNonce.get(), setupOptions));
                 expect_batch_equal(unchanged.mPolys, retainedTop.mPolys);
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(),
                     referencePrng.get<oc::block>());
@@ -2943,18 +2911,13 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     RootOfflineMessage wireRoot{};
     bool expectOwnedRootWire = false;
     {
-        ScopedEnvironmentValue encodedReceive("LV_GPU_SETUP_ROOT_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedCtR("LV_GPU_SETUP_ROOT_CTR_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedLacct("LV_GPU_SETUP_ROOT_LACCT_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedBStar("LV_GPU_SETUP_ROOT_BSTAR_ENCODED_RECEIVE", "1");
-        ScopedGpuEnabled useGpu(true);
         ScopedProtocolCacheScope receiverRole(
             ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-        expectOwnedRootWire = gpu::enabled() &&
+        expectOwnedRootWire = gpu::available() &&
             std::endian::native == std::endian::little;
-        auto receivedRoot = encode(offlineMessage, 4);
+        auto receivedRoot = encode(offlineMessage, 4, {}, gpu::available());
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
-            std::move(receivedRoot), wireRoot, 4));
+            std::move(receivedRoot), wireRoot, 4, {}, gpu::available()));
     }
     LOGVOLE_REQUIRE_TRUE(static_cast<bool>(wireRoot.mOwnedCtRWire) == expectOwnedRootWire);
     LOGVOLE_REQUIRE_TRUE(static_cast<bool>(wireRoot.mOwnedLacctLeftWire) == expectOwnedRootWire);
@@ -2993,7 +2956,6 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
         // through its once-only host view, not an eager wire decode.
         RootDigestState declinedDigest{};
         RootDigestMessage declinedMessage{};
-        ScopedGpuEnabled declineGpu(false);
         LOGVOLE_REQUIRE_TRUE(prepare_root_digest_receiver_for_test(
             wireReceiver, x, declinedDigest, declinedMessage, true));
         LOGVOLE_EXPECT_TRUE(rangesEqual(
@@ -3002,7 +2964,6 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     }
     RnsPoly declinedKey{};
     {
-        ScopedGpuEnabled declineGpu(false);
         LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(
             wireReceiver, digestState, response, declinedKey));
     }
@@ -3021,15 +2982,14 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
 
     RootOfflineMessage eagerLacctRoot{};
     {
-        ScopedEnvironmentValue encodedReceive("LV_GPU_SETUP_ROOT_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedCtR("LV_GPU_SETUP_ROOT_CTR_ENCODED_RECEIVE", "0");
-        ScopedEnvironmentValue eagerLacct("LV_GPU_SETUP_ROOT_LACCT_ENCODED_RECEIVE", "0");
-        ScopedGpuEnabled useGpu(true);
+        oc::LogVoleEncodingOptions options;
+        options.mRootCtREncodedReceive = false;
+        options.mRootLacctEncodedReceive = false;
         ScopedProtocolCacheScope receiverRole(
             ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-        auto receivedRoot = encode(offlineMessage, 4);
+        auto receivedRoot = encode(offlineMessage, 4, {}, gpu::available());
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
-            std::move(receivedRoot), eagerLacctRoot, 4));
+            std::move(receivedRoot), eagerLacctRoot, 4, options, gpu::available()));
     }
     LOGVOLE_EXPECT_TRUE(!eagerLacctRoot.mOwnedCtRWire &&
         !eagerLacctRoot.mCtR.mPolys.empty());
@@ -3047,7 +3007,6 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
         !eagerLacctReceiver.mRootLacctLeft.mCt.mPolys.empty());
     RnsPoly eagerLacctKey{};
     {
-        ScopedGpuEnabled declineGpu(false);
         LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(
             eagerLacctReceiver, digestState, response, eagerLacctKey));
     }
@@ -3055,14 +3014,13 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
 
     RootOfflineMessage eagerBStarRoot{};
     {
-        ScopedEnvironmentValue encodedReceive("LV_GPU_SETUP_ROOT_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue eagerBStar("LV_GPU_SETUP_ROOT_BSTAR_ENCODED_RECEIVE", "0");
-        ScopedGpuEnabled useGpu(true);
+        oc::LogVoleEncodingOptions options;
+        options.mRootBStarEncodedReceive = false;
         ScopedProtocolCacheScope receiverRole(
             ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-        auto receivedRoot = encode(offlineMessage, 4);
+        auto receivedRoot = encode(offlineMessage, 4, {}, gpu::available());
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
-            std::move(receivedRoot), eagerBStarRoot, 4));
+            std::move(receivedRoot), eagerBStarRoot, 4, options, gpu::available()));
     }
     LOGVOLE_EXPECT_TRUE(!eagerBStarRoot.mOwnedPublicBStarWire &&
         !eagerBStarRoot.mPublicBStarNtt.empty());
@@ -3077,7 +3035,6 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
         !eagerBStarReceiver.mRootPublicBStarNtt.empty());
     RnsPoly eagerBStarKey{};
     {
-        ScopedGpuEnabled declineGpu(false);
         LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(
             eagerBStarReceiver, digestState, response, eagerBStarKey));
     }
@@ -3149,18 +3106,8 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
 #endif
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    const bool gpuWasEnabled = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool mEnabled;
-        ~RestoreGpu() { gpu::setEnabled(mEnabled); }
-    } restoreGpu{ gpuWasEnabled };
 
-    gpu::setEnabled(true);
-    // CPU-only CI skips this device-specific exactness gate. CUDA builds exercise
-    // the accepted default path; setting LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH
-    // to zero selects the monolithic rollback and skips this test.
-    if (!gpu::enabled() || !gpu::rootFinalizeReceiverPrefetchEnabled()) return;
+    if (!gpu::available()) return;
 
     const std::uint64_t runId = allocateProtocolCacheRunId();
     ScopedProtocolCacheScope receiverScope(
@@ -3177,11 +3124,14 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(tauHi, 1u);
     LOGVOLE_REQUIRE_EQ(rootLeftWidth(tauHi, rho), 4u);
 
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = true;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
 
     ShrinkExpandSenderOfflineInput seInput{};
     seInput.mParams = trunc;
+    seInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seInput), advanced, ProtocolCacheRole::Sender);
     seInput.mS = sample_batch(ctx, trunc.mMu, 0x7D8101u);
     ShrinkExpandSenderState seSender{};
     LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(seInput, seSender));
@@ -3199,6 +3149,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
 
     ShrinkExpandReceiverOfflineInput seReceiverInput{};
     seReceiverInput.mParams = trunc;
+    seReceiverInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seReceiverInput), advanced, ProtocolCacheRole::Receiver);
     ShrinkExpandReceiverState seReceiver{};
     LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(
         seReceiverInput, seSender, seReceiver));
@@ -3238,17 +3189,9 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
     // CtR begins in coefficient domain on the wire, with no host scatter/NTT.
     RootOfflineMessage wireRoot{};
     {
-        ScopedEnvironmentValue encodedReceive(
-            "LV_GPU_SETUP_ROOT_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedCtR(
-            "LV_GPU_SETUP_ROOT_CTR_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedLacct(
-            "LV_GPU_SETUP_ROOT_LACCT_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedBStar(
-            "LV_GPU_SETUP_ROOT_BSTAR_ENCODED_RECEIVE", "1");
-        auto rootPayload = encode(offlineMessage, 4);
+        auto rootPayload = encode(offlineMessage, 4, {}, true);
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
-            std::move(rootPayload), wireRoot, 4));
+            std::move(rootPayload), wireRoot, 4, {}, true));
     }
     LOGVOLE_REQUIRE_TRUE(wireRoot.mOwnedCtRWire != nullptr);
     LOGVOLE_REQUIRE_TRUE(wireRoot.mOwnedPublicBStarWire != nullptr);
@@ -3297,7 +3240,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
         prepared,
         dPrimeDevice));
     LOGVOLE_REQUIRE_TRUE(prepared != nullptr);
-    if (gpu::rootDigestHashEnabled())
+    if (gpu::rootDigestHashEnabled(ctx.mExecutionOptions))
     {
         // Require the device entry point itself to succeed; a CPU fallback in
         // finishRootDigestHash must not hide a missing or incorrect reader.
@@ -3427,8 +3370,7 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
 #endif
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled gpuEnabled(true);
-    if (!gpu::enabled() || !gpu::rootFinalizeReceiverPrefetchEnabled()) return;
+    if (!gpu::available()) return;
 
     const auto runId = allocateProtocolCacheRunId();
     ScopedProtocolCacheScope receiverScope(ProtocolCacheRole::Receiver, runId);
@@ -3451,11 +3393,14 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
     ShrinkExpandParams trunc{};
     LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, true, trunc));
     LOGVOLE_REQUIRE_EQ(trunc.mMu, 16u);
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = true;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
 
     ShrinkExpandSenderOfflineInput seInput{};
     seInput.mParams = trunc;
+    seInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seInput), advanced, ProtocolCacheRole::Sender);
     seInput.mS = sample_batch(ctx, trunc.mMu, 0x7D8201u);
     ShrinkExpandSenderState seSender{};
     SenderState sender{};
@@ -3471,6 +3416,7 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
 
     ShrinkExpandReceiverOfflineInput seReceiverInput{};
     seReceiverInput.mParams = trunc;
+    seReceiverInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seReceiverInput), advanced, ProtocolCacheRole::Receiver);
     ShrinkExpandReceiverState seReceiver{};
     LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(
         seReceiverInput, seSender, seReceiver));
@@ -3480,17 +3426,9 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
     // consumes them; no sender cache or host polynomial is shared with it.
     RootOfflineMessage wireRoot{};
     {
-        ScopedEnvironmentValue encodedReceive(
-            "LV_GPU_SETUP_ROOT_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedCtR(
-            "LV_GPU_SETUP_ROOT_CTR_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedLacct(
-            "LV_GPU_SETUP_ROOT_LACCT_ENCODED_RECEIVE", "1");
-        ScopedEnvironmentValue encodedBStar(
-            "LV_GPU_SETUP_ROOT_BSTAR_ENCODED_RECEIVE", "1");
-        auto rootPayload = encode(offlineMessage, 4);
+        auto rootPayload = encode(offlineMessage, 4, {}, true);
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
-            std::move(rootPayload), wireRoot, 4));
+            std::move(rootPayload), wireRoot, 4, {}, true));
     }
     LOGVOLE_REQUIRE_TRUE(wireRoot.mOwnedCtRWire != nullptr);
     LOGVOLE_REQUIRE_TRUE(wireRoot.mOwnedPublicBStarWire != nullptr);
@@ -3587,7 +3525,6 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
     // Check the public host outputs directly, including their final Z_p relation.
-    ScopedGpuEnabled cpuOnly(false);
 #endif
     Params params = make_golden_params();
     params.mW = params.mShrinkExpand.mAlpha * (params.mShrinkExpand.mTau - 1u) *
@@ -3846,40 +3783,143 @@ void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
+void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0)) LOGVOLE_REQUIRE_TRUE(gpu::available());
+    if (!cmd.getOr("gpu", 0)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    Params params = make_recursive_params(2);
+    params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+    SenderOfflineInput input{};
+    input.mParams = params;
+    input.mSk1 = sample_batch(ctx, params.mGamma, 0x5091u);
+    input.mUseGpuResidentInternalState = true;
+    const auto run = [&](oc::LogVoleGpuSetupOptions options, oc::LogVoleExecutionOptions advanced = {}) {
+        advanced.mUseGpu = true;
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+        auto selected = input;
+        selected.mParams.mShrinkExpand.mGpuSetup = options;
+        RingNttContext configured;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, configured,
+            std::make_shared<RingContextFactory>(advanced)));
+        selected.mRingFactoryOwner = configured.mFactoryOwner;
+        oc::PRNG prng(oc::block(0x5092u, 0));
+        coproto::BufferingSocket socket;
+        LogVoleRingSender sender;
+        SenderState state;
+        macoro::sync_wait(sender.offline(selected, state, prng, socket));
+        macoro::sync_wait(socket.flush());
+        auto bytes = socket.getOutbound();
+        LOGVOLE_REQUIRE_TRUE(bytes && !bytes->empty());
+        for (auto* level = &state; level; level = level->mNextLevelState.get())
+        {
+            LOGVOLE_REQUIRE_TRUE(level->mShrinkExpandState.mRingFactoryOwner);
+            LOGVOLE_REQUIRE_TRUE(level->mShrinkExpandState.mRingFactoryOwner->mExecutionOptions == advanced);
+            LOGVOLE_REQUIRE_EQ(level->mParams.mShrinkExpand.mGpuSetup.mDirectWire, options.mDirectWire);
+            LOGVOLE_REQUIRE_EQ(level->mParams.mShrinkExpand.mGpuSetup.mLazyCiphertexts, options.mLazyCiphertexts);
+        }
+        return std::make_pair(Buffer(bytes->begin(), bytes->end()), prng.get<oc::block>());
+    };
+    const auto baseline = run({});
+    oc::LogVoleExecutionOptions advanced;
+    advanced.mAdvanced.mStreams.mLazyIndexScratch = oc::LogVoleChoice::Enabled;
+    advanced.mAdvanced.mStreams.mIndexScratchKiB = 256;
+    advanced.mAdvanced.mStreams.mPipelinedUpload = true;
+    advanced.mAdvanced.mStreams.mDownloadSlotMiB = 1;
+    advanced.mAdvanced.mStreams.mPolyStageMiB = 1;
+    advanced.mAdvanced.mStreams.mReuseDownloadStaging = false;
+    advanced.mAdvanced.mStreams.mDownloadReuseWorkers = false;
+    advanced.mAdvanced.mProtocol.mLencRandomizerResidency = false;
+    advanced.mAdvanced.mProtocol.mPublicUniformRetention = false;
+    advanced.mAdvanced.mProtocol.mUniformSampling = false;
+    advanced.mAdvanced.mProtocol.mUniformSamplingStrict = true;
+    advanced.mAdvanced.mProtocol.mShareCache = false;
+    advanced.mAdvanced.mProtocol.mShareSenderCache = false;
+    advanced.mAdvanced.mProtocol.mLeafBDevice = false;
+    advanced.mAdvanced.mProtocol.mSenderPublicAOnly = false;
+    advanced.mAdvanced.mProtocol.mExtraPipelinedDownload = false;
+    advanced.mAdvanced.mProtocol.mPipelinedDownload = false;
+    advanced.mAdvanced.mProtocol.mDirectDownload = false;
+    const auto configured = run({}, advanced);
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.first, configured.first));
+    LOGVOLE_REQUIRE_TRUE(baseline.second == configured.second);
+    // Each rollback must preserve wire bytes and parent PRNG consumption.
+    for (auto member : { &oc::LogVoleGpuSetupOptions::mDirectWire,
+            &oc::LogVoleGpuSetupOptions::mLazyCiphertexts,
+            &oc::LogVoleGpuSetupOptions::mRootPublicBToken,
+            &oc::LogVoleGpuSetupOptions::mRootBStarDevice,
+            &oc::LogVoleGpuSetupOptions::mRootR1Device,
+            &oc::LogVoleGpuSetupOptions::mRootSecretDevice,
+            &oc::LogVoleGpuSetupOptions::mBatchNtt,
+            &oc::LogVoleGpuSetupOptions::mParallelCopy,
+            &oc::LogVoleGpuSetupOptions::mParallelMessageCopy,
+            &oc::LogVoleGpuSetupOptions::mSharedState,
+            &oc::LogVoleGpuSetupOptions::mRootDevice,
+            &oc::LogVoleGpuSetupOptions::mRootCompactNoise,
+            &oc::LogVoleGpuSetupOptions::mLencDevice,
+            &oc::LogVoleGpuSetupOptions::mLheDevice,
+            &oc::LogVoleGpuSetupOptions::mLencDevicePadding,
+            &oc::LogVoleGpuSetupOptions::mCompactNoise,
+            &oc::LogVoleGpuSetupOptions::mLencRandomizerOutput })
+    {
+        oc::LogVoleGpuSetupOptions options;
+        options.*member = false;
+        const auto actual = run(options);
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.first, actual.first));
+        LOGVOLE_REQUIRE_TRUE(baseline.second == actual.second);
+    }
+    oc::LogVoleGpuSetupOptions strict;
+    strict.mRootDeviceStrict = true;
+    strict.mRootCompactNoiseStrict = true;
+    strict.mLencDeviceStrict = true;
+    strict.mLheDeviceStrict = true;
+    strict.mCompactNoiseStrict = true;
+    strict.mLencRandomizerOutputStrict = true;
+    strict.mRootBStarDeviceStrict = true;
+    strict.mRootR1DeviceStrict = true;
+    strict.mRootSecretDeviceStrict = true;
+    const auto actual = run(strict);
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.first, actual.first));
+    LOGVOLE_REQUIRE_TRUE(baseline.second == actual.second);
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires CUDA";
+#endif
+}
+
 void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
+    osuCrypto::LogVoleGpuSetupOptions setupOptions;
     // Force the transfer pipeline even for small fixtures, which the
     // production default deliberately keeps on the simpler download path.
-    ScopedEnvironmentValue receiverPipeline("LV_GPU_SETUP_RECEIVER_PIPELINED_DOWNLOAD", "1");
-    ScopedEnvironmentValue lazyCiphertexts("LV_GPU_SETUP_LAZY_CIPHERTEXTS", "1");
-    ScopedEnvironmentValue encodedReceive("LV_GPU_SETUP_ENCODED_RECEIVE", "1");
-    ScopedEnvironmentValue lazyReceiver("LV_GPU_SETUP_RECEIVER_LAZY_NTT", "1");
-    ScopedEnvironmentValue residentNttDefault("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT", "0");
-    ScopedEnvironmentValue residentNttStrictDefault("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT_STRICT", "0");
-    ScopedEnvironmentValue residentNttDeclineDefault("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT_FORCE_DECLINE", "0");
+    tests_libOTe::logvole_test::ScopedOptionValue receiverPipeline(advanced.mAdvanced.mProtocol.mReceiverPipelinedDownload, osuCrypto::LogVoleChoice::Enabled);
+    tests_libOTe::logvole_test::ScopedOptionValue residentNttDefault(setupOptions.mReceiverResidentNtt, false);
+    tests_libOTe::logvole_test::ScopedOptionValue residentNttStrictDefault(setupOptions.mReceiverResidentNttStrict, false);
+
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled requestedGpu(cmd.getOr("gpu", 0) != 0);
+    if (advanced.mUseGpu) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #else
     (void)cmd;
 #endif
-    ScopedEnvironmentValue sharedState("LV_GPU_SETUP_SHARED_STATE", "1");
-    ScopedEnvironmentValue sharedCache("LV_GPU_SETUP_SHARE_CACHE", "1");
-    ScopedEnvironmentValue sharedSenderCache("LV_GPU_SETUP_SHARE_SENDER_CACHE", "1");
+    tests_libOTe::logvole_test::ScopedOptionValue sharedState(setupOptions.mSharedState, true);
     bool senderDevice = false, receiverDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
     {
         ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
-        senderDevice = gpu::enabled();
+        senderDevice = gpu::enabled(advanced);
     }
     {
         ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-        receiverDevice = gpu::enabled();
+        receiverDevice = gpu::enabled(advanced);
     }
     if (senderDevice || receiverDevice)
     {
         ScopedProtocolCacheScope scope(senderDevice ? ProtocolCacheRole::Sender : ProtocolCacheRole::Receiver,
             currentProtocolCacheScope().mRunId);
-        ScopedEnvironmentValue pinnedWire("LV_GPU_SETUP_PINNED_WIRE", "1");
 
         gpu::GpuStream uploadStream, downloadStream;
 
@@ -3889,6 +3929,9 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
         };
         for (bool registerFirst : { false, true })
         {
+            // The full fixture deliberately provokes an already-registered API error.
+            // The bounded settings check keeps CUDA API-error reporting strict.
+            if (cmd.getOr("lvFactoryFast", 0) && registerFirst) continue;
             // Offsets also exercise wire headers that do not align ciphertext
             // spans to either machine words or pages. Guards remain outside it.
             std::vector<oc::u8> source(bytes + 8u, 0xa5u), destination(bytes + 10u, 0x5au);
@@ -3958,9 +4001,10 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     }
 #endif
     Params params = make_recursive_params(3);
+    if (cmd.getOr("lvFactoryFast", 0)) params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
     params.mShrinkExpand.mNumWorkerThreads = 4;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
     SenderOfflineInput senderInput{};
     senderInput.mParams = params;
     senderInput.mSk1 = sample_batch(ctx, params.mGamma, 0x781234u);
@@ -3971,21 +4015,22 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     oc::PRNG baselinePrng(seed, 3), residentPrng(seed, 3), wirePrng(seed, 3), legacyWirePrng(seed, 3);
     SenderOfflineOutput baselineSender{}, residentSender{};
     ReceiverOfflineOutput baselineReceiver{}, residentReceiver{};
-    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, baselinePrng, baselineSender));
-    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, baselineSender.mMessage, baselineReceiver));
+    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), baselinePrng, baselineSender));
+    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), baselineSender.mMessage, baselineReceiver));
     senderInput.mUseGpuResidentInternalState = true;
     receiverInput.mUseGpuResidentInternalState = true;
-    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, residentPrng, residentSender));
-    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, residentSender.mMessage, residentReceiver));
+    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), residentPrng, residentSender));
+    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), residentSender.mMessage, residentReceiver));
     SenderOfflineOutput wireSender{}, legacyWireSender{};
     {
-        ScopedEnvironmentValue directWire("LV_GPU_SETUP_DIRECT_WIRE", "1");
-        LOGVOLE_REQUIRE_TRUE(detail::prepareSenderOfflineForTransport(senderInput, wirePrng, wireSender));
+        senderInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = true;
+        LOGVOLE_REQUIRE_TRUE(detail::prepareSenderOfflineForTransport(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), wirePrng, wireSender));
     }
     {
-        ScopedEnvironmentValue directWire("LV_GPU_SETUP_DIRECT_WIRE", "0");
-        LOGVOLE_REQUIRE_TRUE(detail::prepareSenderOfflineForTransport(senderInput, legacyWirePrng, legacyWireSender));
+        senderInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = false;
+        LOGVOLE_REQUIRE_TRUE(detail::prepareSenderOfflineForTransport(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), legacyWirePrng, legacyWireSender));
     }
+    senderInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = true;
     for (unsigned i = 0; i < 16; ++i)
     {
         const auto expected = baselinePrng.get<std::uint64_t>();
@@ -4028,7 +4073,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 wireMessage->mEncodedShrinkExpandMessage.back() ^= 1u;
                 LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(
                     std::move(wireMessage->mEncodedShrinkExpandMessage),
-                    wireMessage->mShrinkExpandMessage, 4));
+                    wireMessage->mShrinkExpandMessage, 4, {}, receiverDevice));
                 wireMessage->mEncodedShrinkExpandMessage.clear();
                 const auto& received = wireMessage->mShrinkExpandMessage;
                 LOGVOLE_EXPECT_EQ(static_cast<bool>(received.mLazyCt1), receiverDevice);
@@ -4050,7 +4095,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 // path whose first lazy materialization is checked below.
                 auto roundTripBytes = expected;
                 ShrinkExpandOfflineMessage roundTrip{};
-                LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(roundTripBytes), roundTrip, 4));
+                LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(roundTripBytes), roundTrip, 4, {}, gpu::enabled(advanced)));
                 LOGVOLE_REQUIRE_TRUE(roundTrip.mLazyCt1 && roundTrip.mLazyLacct);
                 LOGVOLE_EXPECT_TRUE(rangesEqual(expected, encode(roundTrip, 4)));
             }
@@ -4067,9 +4112,9 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     LOGVOLE_EXPECT_TRUE(!wireMessage && !legacyWireMessage && !wireState && !expectedWireMessage);
     ReceiverOfflineOutput wireReceiver{};
     {
-        ScopedEnvironmentValue residentNtt("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT", "1");
-        ScopedEnvironmentValue strictNtt("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT_STRICT", "1");
-        LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, std::move(wireSender.mMessage), wireReceiver));
+        tests_libOTe::logvole_test::ScopedOptionValue residentNtt(setupOptions.mReceiverResidentNtt, true);
+        tests_libOTe::logvole_test::ScopedOptionValue strictNtt(setupOptions.mReceiverResidentNttStrict, true);
+        LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), std::move(wireSender.mMessage), wireReceiver));
     }
     for (const ReceiverState* level = &wireReceiver.mState; level; level = level->mNextLevelState.get())
     {
@@ -4218,7 +4263,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     seInput.mParams = residentSender.mState.mNextLevelState->mShrinkExpandState.mParams;
     ShrinkExpandReceiverState converted{};
     LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(
-        seInput, residentSender.mState.mNextLevelState->mShrinkExpandState, converted));
+        tests_libOTe::logvole_test::withSetupOptions(seInput, setupOptions), residentSender.mState.mNextLevelState->mShrinkExpandState, converted));
     expect_batch_equal(converted.mCt1.mPolys, baselineReceiver.mState.mNextLevelState->mShrinkExpandState.mCt1.mPolys);
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -4243,7 +4288,10 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     ReceiverOnlineOutput referenceM{}, actualM{}, wireM{};
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
-        ScopedGpuEnabled cpuOnly(false);
+        for (auto* state : {&baselineSender.mState, &residentSender.mState, &wireSender.mState})
+            useCpuReference(*state, ProtocolCacheRole::Sender);
+        for (auto* state : {&baselineReceiver.mState, &residentReceiver.mState, &wireReceiver.mState})
+            useCpuReference(*state, ProtocolCacheRole::Receiver);
 #endif
         LOGVOLE_REQUIRE_TRUE(run_local_online_for_test(baselineSender.mState, baselineReceiver.mState, onlineInput, referenceK, referenceM));
         LOGVOLE_REQUIRE_TRUE(run_local_online_for_test(residentSender.mState, residentReceiver.mState, onlineInput, actualK, actualM));
@@ -4330,13 +4378,14 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 
     // Explicit rollback and unavailable eager caches retain the full public
     // host representation instead of publishing an unusable compact view.
-    for (const char* control : { "LV_GPU_SETUP_SHARED_STATE", "LV_GPU_SETUP_SHARE_CACHE" })
+    for (bool sharedState : {false, true})
     {
-        ScopedEnvironmentValue disabled(control, "0");
+        tests_libOTe::logvole_test::ScopedOptionValue stateOption(setupOptions.mSharedState, sharedState);
+        tests_libOTe::logvole_test::ScopedOptionValue disabled(advanced.mAdvanced.mProtocol.mShareCache, !sharedState);
         SenderOfflineOutput fallbackSender{};
         ReceiverOfflineOutput fallbackReceiver{};
-        LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(senderInput, fallbackSender));
-        LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, fallbackSender.mMessage, fallbackReceiver));
+        LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), fallbackSender));
+        LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), fallbackSender.mMessage, fallbackReceiver));
         for (const SenderState* level = &fallbackSender.mState; level; level = level->mNextLevelState.get())
         {
             LOGVOLE_EXPECT_TRUE(level->mShrinkExpandState.mSharedHostState == nullptr);
@@ -4355,6 +4404,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
         // full public host snapshots must remain byte-for-byte identical.
         for (unsigned shape = 0; shape < 3; ++shape)
         {
+            if (cmd.getOr("lvFactoryFast", 0) && shape != 0) continue;
             RingParams ring = params.mShrinkExpand.mRing;
             if (shape)
             {
@@ -4363,7 +4413,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 std::fill(ring.mCoeffModulusBits.begin(), ring.mCoeffModulusBits.end(), shape == 1 ? 55 : 52);
             }
             RingNttContext ringCtx{};
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, ringCtx));
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, ringCtx, std::make_shared<RingContextFactory>(advanced)));
             for (bool truncated : {false, true})
             {
                 ShrinkExpandReceiverOfflineInput input{};
@@ -4393,8 +4443,8 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 const auto encodedWire = encode(wire);
                 ShrinkExpandReceiverState cpuReference{};
                 {
-                    ScopedGpuEnabled cpuOnly(false);
-                    LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(input, wire, cpuReference));
+                    tests_libOTe::logvole_test::ScopedOptionValue cpuOnly(advanced.mUseGpu, false);
+                    LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Receiver), wire, cpuReference));
                 }
                 const auto checkHost = [&](const ShrinkExpandReceiverState& actual) {
                     expect_batch_equal(cpuReference.mCt1.mPolys, actual.mCt1.mPolys);
@@ -4404,17 +4454,17 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                     LOGVOLE_EXPECT_EQ(actual.mLacct.mWidthPadded, cpuReference.mLacct.mWidthPadded);
                     LOGVOLE_EXPECT_EQ(actual.mLacct.mLevels, cpuReference.mLacct.mLevels);
                 };
-                ScopedEnvironmentValue residentNtt("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT", "1");
-                ScopedEnvironmentValue strictNtt("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT_STRICT", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue residentNtt(setupOptions.mReceiverResidentNtt, true);
+                tests_libOTe::logvole_test::ScopedOptionValue strictNtt(setupOptions.mReceiverResidentNttStrict, true);
                 for (std::uint32_t workers : {1u, 4u})
                 {
                     input.mParams.mNumWorkerThreads = workers;
                     wire.mParams = input.mParams;
                     for (const char* batchMode : {"0", "1"})
                     {
-                        ScopedEnvironmentValue batch("LV_GPU_SETUP_BATCH_NTT", batchMode);
+                        tests_libOTe::logvole_test::ScopedOptionValue batch(setupOptions.mBatchNtt, (batchMode)[0] != '0');
                         ShrinkExpandReceiverState actual{};
-                        LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(input, wire, actual));
+                        LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Receiver), wire, actual));
                         checkHost(actual);
                         LOGVOLE_REQUIRE_TRUE(actual.mGpuCache != nullptr);
                         const auto retained = actual.mGpuCache;
@@ -4422,7 +4472,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                         LOGVOLE_EXPECT_TRUE(actual.mGpuCache == retained);
                         // Reinitializing a state replaces its completed mirror.
                         auto movedWire = wire;
-                        LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(input, std::move(movedWire), actual));
+                        LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Receiver), std::move(movedWire), actual));
                         checkHost(actual);
                         LOGVOLE_EXPECT_TRUE(actual.mGpuCache && actual.mGpuCache != retained);
                     }
@@ -4437,7 +4487,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 // before first host access to exercise receiver ownership.
                 auto payload = encode(wire);
                 ShrinkExpandOfflineMessage encoded{};
-                LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(payload), encoded, 4));
+                LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(payload), encoded, 4, {}, gpu::enabled(advanced)));
                 LOGVOLE_REQUIRE_TRUE(encoded.mLazyCt1 && encoded.mLazyLacct);
                 LOGVOLE_EXPECT_TRUE(encoded.mCt1.mPolys.empty() && encoded.mLacct.mCt.mPolys.empty());
                 auto lazyInput = input;
@@ -4447,7 +4497,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 beforeRetainedReceiver.capture(ringCtx);
                 if (cpuReference.mRingFactoryOwner)
                     beforeRetainedReceiver.capture(*cpuReference.mRingFactoryOwner);
-                LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(lazyInput, std::move(encoded), lazyState));
+                LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(lazyInput, setupOptions), advanced, ProtocolCacheRole::Receiver), std::move(encoded), lazyState));
                 LOGVOLE_REQUIRE_TRUE(lazyState.mRingFactoryOwner);
                 const auto afterRetainedReceiver = beforeRetainedReceiver.delta(*lazyState.mRingFactoryOwner);
                 LOGVOLE_REQUIRE_TRUE(lazyState.mLazyCt1Ntt && lazyState.mLazyLacct && lazyState.mGpuCache);
@@ -4458,9 +4508,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 encoded = {};
                 payload.clear();
                 {
-                    // The first getter runs after GPU execution is disabled,
-                    // so its NTT result must come from the retained wire.
-                    ScopedGpuEnabled cpuOnly(false);
+                    // The host getter replays the retained wire independently.
                     concurrentHostReads(lazyState);
                     expect_batch_equal(cpuReference.mCt1.mPolys, lazyState.hostCt1().mPolys);
                     expect_batch_equal(cpuReference.mLacct.mCt.mPolys, lazyState.hostLacct().mCt.mPolys);
@@ -4496,23 +4544,22 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                         auto untouched = wire;
                         untouched.mCt1.mPolys[0].mCoeffs[0] ^= 1u;
                         const auto before = encode(untouched);
-                        LOGVOLE_EXPECT_FALSE(decodeShrinkExpandOfflineForTransport(std::move(bad), untouched, 4));
+                        LOGVOLE_EXPECT_FALSE(decodeShrinkExpandOfflineForTransport(std::move(bad), untouched, 4, {}, gpu::enabled(advanced)));
                         LOGVOLE_EXPECT_TRUE(rangesEqual(before, encode(untouched)));
                         LOGVOLE_EXPECT_TRUE(!untouched.mLazyCt1 && !untouched.mLazyLacct);
                     }
                     auto validBytes = encode(wire);
                     ShrinkExpandOfflineMessage invalidLazy{};
-                    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(validBytes), invalidLazy, 4));
+                    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(validBytes), invalidLazy, 4, {}, gpu::enabled(advanced)));
                     ++invalidLazy.mCt1.mCols;
                     auto unchanged = cpuReference;
                     unchanged.mCt1.mPolys[0].mCoeffs[0] ^= 1u;
                     const auto markerValue = unchanged.mCt1.mPolys[0].mCoeffs[0];
-                    LOGVOLE_EXPECT_FALSE(finalizeShrinkExpandReceiverOffline(lazyInput, std::move(invalidLazy), unchanged));
+                    LOGVOLE_EXPECT_FALSE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withSetupOptions(lazyInput, setupOptions), std::move(invalidLazy), unchanged));
                     LOGVOLE_EXPECT_EQ(unchanged.mCt1.mPolys[0].mCoeffs[0], markerValue);
                     LOGVOLE_EXPECT_TRUE(!unchanged.mGpuCache && !unchanged.mLazyCt1Ntt);
 
                     // CPU-only transport retains the public eager contract.
-                    ScopedGpuEnabled cpuOnly(false);
                     auto cpuBytes = encode(wire);
                     ShrinkExpandOfflineMessage cpuDecoded{};
                     LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(cpuBytes), cpuDecoded, 4));
@@ -4522,7 +4569,10 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 
                 for (const char* failurePoint : {"1", "2"})
                 {
-                    ScopedEnvironmentValue decline("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT_FORCE_DECLINE", failurePoint);
+                    tests_libOTe::logvole_test::ScopedOptionValue decline(advanced.mAdvanced.mProtocol.mFailures.mReceiverResidentNtt, (failurePoint)[0] == '1' ? osuCrypto::LogVoleFailureStage::BeforeWork : osuCrypto::LogVoleFailureStage::AfterWork);
+                    tests_libOTe::logvole_test::ScopedOptionValue rawDecline(
+                        ringCtx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mReceiverResidentNtt,
+                        advanced.mAdvanced.mProtocol.mFailures.mReceiverResidentNtt);
                     // Direct helper failure before or after the actual device
                     // NTT must retain the same coefficient-domain fallback.
                     auto raw = cpuReference;
@@ -4534,11 +4584,11 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                     auto marker = cpuReference;
                     marker.mCt1.mPolys[0].mCoeffs[0] ^= 1u;
                     const auto markerValue = marker.mCt1.mPolys[0].mCoeffs[0];
-                    LOGVOLE_EXPECT_FALSE(finalizeShrinkExpandReceiverOffline(input, wire, marker));
+                    LOGVOLE_EXPECT_FALSE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Receiver), wire, marker));
                     LOGVOLE_EXPECT_EQ(marker.mCt1.mPolys[0].mCoeffs[0], markerValue);
                     {
-                        ScopedEnvironmentValue fallback("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT_STRICT", "0");
-                        LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(input, wire, marker));
+                        tests_libOTe::logvole_test::ScopedOptionValue fallback(setupOptions.mReceiverResidentNttStrict, false);
+                        LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Receiver), wire, marker));
                     }
                     checkHost(marker);
                     LOGVOLE_EXPECT_TRUE(marker.mGpuCache == nullptr);
@@ -4547,15 +4597,15 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 
                     auto encodedBytes = encode(wire);
                     ShrinkExpandOfflineMessage encodedFailure{};
-                    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(encodedBytes), encodedFailure, 4));
+                    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(encodedBytes), encodedFailure, 4, {}, gpu::enabled(advanced)));
                     marker.mCt1.mPolys[0].mCoeffs[0] ^= 1u;
                     const auto encodedMarkerValue = marker.mCt1.mPolys[0].mCoeffs[0];
-                    LOGVOLE_EXPECT_FALSE(finalizeShrinkExpandReceiverOffline(lazyInput, std::move(encodedFailure), marker));
+                    LOGVOLE_EXPECT_FALSE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(lazyInput, setupOptions), advanced, ProtocolCacheRole::Receiver), std::move(encodedFailure), marker));
                     LOGVOLE_EXPECT_EQ(marker.mCt1.mPolys[0].mCoeffs[0], encodedMarkerValue);
                     LOGVOLE_EXPECT_TRUE(!marker.mGpuCache && !marker.mLazyCt1Ntt && !marker.mLazyLacct);
                     {
-                        ScopedEnvironmentValue fallback("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT_STRICT", "0");
-                        LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(lazyInput, std::move(encodedFailure), marker));
+                        tests_libOTe::logvole_test::ScopedOptionValue fallback(setupOptions.mReceiverResidentNttStrict, false);
+                        LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(lazyInput, setupOptions), advanced, ProtocolCacheRole::Receiver), std::move(encodedFailure), marker));
                     }
                     checkHost(marker);
                     LOGVOLE_EXPECT_TRUE(!marker.mGpuCache && !marker.mLazyCt1Ntt && !marker.mLazyLacct);
@@ -4571,8 +4621,11 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 #endif
 }
 
-void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
+void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
+    osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
@@ -4583,16 +4636,9 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
 
     // This fixture isolates recursive eager-cache sharing. The separate
     // resident-state fixture covers optional top-level NTT cache retention.
-    ScopedEnvironmentValue residentNtt("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT", "0");
+    tests_libOTe::logvole_test::ScopedOptionValue residentNtt(setupOptions.mReceiverResidentNtt, false);
 #if defined(ENABLE_LOGVOLE_CUDA)
-    const bool gpuWasEnabled = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool mEnabled;
-        ~RestoreGpu() { gpu::setEnabled(mEnabled); }
-    } restoreGpu{ gpuWasEnabled };
-    gpu::setEnabled(true);
-    if (gpu::enabled())
+    if (gpu::enabled(advanced))
     {
         const auto seed = oc::block(0x414553435452ull, 0x123456789ull);
         for (std::size_t count : { 1u, 2u, 3u, 257u, 1025u, 8193u })
@@ -4615,18 +4661,15 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
         LOGVOLE_EXPECT_TRUE(gpu::sampleScalarsFromSeed(seed, 3u, 0u, operationExecution.mainStream()) == nullptr);
     }
 #endif
-    ScopedEnvironmentValue serialCopy("LV_GPU_SETUP_PARALLEL_COPY", "0");
-    ScopedEnvironmentValue serialMessageCopy("LV_GPU_SETUP_PARALLEL_MESSAGE_COPY", "0");
-    ScopedEnvironmentValue stagedDownload("LV_GPU_SETUP_DIRECT_DOWNLOAD", "0");
-    ScopedEnvironmentValue sharedReceiverCache("LV_GPU_SETUP_SHARE_CACHE", "1");
-    ScopedEnvironmentValue sharedSenderCache("LV_GPU_SETUP_SHARE_SENDER_CACHE", "1");
-    ScopedEnvironmentValue senderPublicAOnly("LV_GPU_SETUP_SENDER_PUBLIC_A_ONLY", "1");
-    ScopedEnvironmentValue deviceLeafB("LV_GPU_SETUP_LEAF_B_DEVICE", "1");
+    tests_libOTe::logvole_test::ScopedOptionValue serialCopy(setupOptions.mParallelCopy, false);
+    tests_libOTe::logvole_test::ScopedOptionValue serialMessageCopy(setupOptions.mParallelMessageCopy, false);
+    tests_libOTe::logvole_test::ScopedOptionValue stagedDownload(advanced.mAdvanced.mProtocol.mDirectDownload, false);
     Params params = make_recursive_params(3);
+    if (cmd.getOr("lvFactoryFast", 0)) params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
     params.mShrinkExpand.mNumWorkerThreads = 4;
 
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
 
     SenderOfflineInput senderInput{};
     senderInput.mParams = params;
@@ -4634,7 +4677,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
     senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7851u);
 
     SenderOfflineOutput senderOffline{};
-    LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(senderInput, senderOffline));
+    LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), senderOffline));
     LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mNextLevelState->mNextLevelState != nullptr);
     LOGVOLE_EXPECT_TRUE(senderOffline.mMessage.mHasShrinkExpandMessage);
@@ -4648,7 +4691,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
     {
         ScopedProtocolCacheScope roleScope(
             ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
-        senderDeviceEnabled = gpu::enabled();
+        senderDeviceEnabled = gpu::enabled(advanced);
     }
     auto expectSharedSenderCache = [&](const SenderOfflineOutput& output) {
         if (!senderDeviceEnabled) return;
@@ -4664,14 +4707,14 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
     {
         SenderOfflineOutput lazySender;
         {
-            ScopedEnvironmentValue disabledSenderCache("LV_GPU_SETUP_SHARE_SENDER_CACHE", "0");
-            LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(senderInput, lazySender));
+            tests_libOTe::logvole_test::ScopedOptionValue disabledSenderCache(advanced.mAdvanced.mProtocol.mShareSenderCache, false);
+            LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), lazySender));
         }
         for (const SenderState* level = &lazySender.mState; level; level = level->mNextLevelState.get())
             LOGVOLE_EXPECT_TRUE(level->mShrinkExpandState.mGpuCache == nullptr);
 
         const auto oldCache = senderOffline.mState.mNextLevelState->mShrinkExpandState.mGpuCache;
-        LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(senderInput, senderOffline));
+        LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), senderOffline));
         expectSharedSenderCache(senderOffline);
         LOGVOLE_EXPECT_TRUE(senderOffline.mState.mNextLevelState->mShrinkExpandState.mGpuCache != oldCache);
     }
@@ -4682,7 +4725,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
     receiverInput.mCpuScratch = std::make_shared<detail::ShrinkExpandScratch>();
 
     ReceiverOfflineOutput receiverOffline{};
-    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
+    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), senderOffline.mMessage, receiverOffline));
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState->mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(senderInput.mCpuScratch != receiverInput.mCpuScratch);
@@ -4693,13 +4736,12 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
         if (level->mShrinkExpandState.mParams.mMu)
             LOGVOLE_REQUIRE_TRUE(level->mShrinkExpandState.mCpuScratch == receiverInput.mCpuScratch);
 
-
 #if defined(ENABLE_LOGVOLE_CUDA)
     bool receiverDeviceEnabled = false;
     {
         ScopedProtocolCacheScope roleScope(
             ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-        receiverDeviceEnabled = gpu::enabled();
+        receiverDeviceEnabled = gpu::enabled(advanced);
     }
     auto expectSharedReceiverCache = [&](const ReceiverOfflineOutput& output) {
         if (!receiverDeviceEnabled) return;
@@ -4719,8 +4761,9 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
     {
         ReceiverOfflineOutput lazyReceiver{};
         {
-            ScopedEnvironmentValue disabledCache("LV_GPU_SETUP_SHARE_CACHE", "0");
-            LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, lazyReceiver));
+            tests_libOTe::logvole_test::ScopedOptionValue disabledCache(advanced.mAdvanced.mProtocol.mShareCache, false);
+            tests_libOTe::logvole_test::ScopedOptionValue hostLeafB(advanced.mAdvanced.mProtocol.mLeafBDevice, false);
+            LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), senderOffline.mMessage, lazyReceiver));
         }
         for (const ReceiverState* level = &lazyReceiver.mState; level; level = level->mNextLevelState.get())
             LOGVOLE_EXPECT_TRUE(level->mShrinkExpandState.mGpuCache == nullptr);
@@ -4740,7 +4783,6 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
             std::vector<RnsPoly> referenceDigests, candidateDigests;
             std::vector<std::vector<RnsPoly>> referenceChildren, candidateChildren;
             {
-                ScopedEnvironmentValue hostLeafB("LV_GPU_SETUP_LEAF_B_DEVICE", "0");
                 LOGVOLE_REQUIRE_TRUE(gpu::shrinkChunks(reference, x, muHi, tauHi,
                     referenceSession, referenceDigests, referenceChildren));
             }
@@ -4755,24 +4797,24 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
         // Reinitializing an existing output must discard its previous device
         // mirror. Keep that mirror alive so pointer inequality is meaningful.
         const auto oldCache = receiverOffline.mState.mNextLevelState->mShrinkExpandState.mGpuCache;
-        LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
+        LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), senderOffline.mMessage, receiverOffline));
         expectSharedReceiverCache(receiverOffline);
         LOGVOLE_EXPECT_TRUE(receiverOffline.mState.mNextLevelState->mShrinkExpandState.mGpuCache != oldCache);
     }
 #endif
 
     {
-        ScopedEnvironmentValue parallelCopy("LV_GPU_SETUP_PARALLEL_COPY", "1");
-        ScopedEnvironmentValue parallelMessageCopy("LV_GPU_SETUP_PARALLEL_MESSAGE_COPY", "1");
-        ScopedEnvironmentValue directDownload("LV_GPU_SETUP_DIRECT_DOWNLOAD", "1");
+        tests_libOTe::logvole_test::ScopedOptionValue parallelCopy(setupOptions.mParallelCopy, true);
+        tests_libOTe::logvole_test::ScopedOptionValue parallelMessageCopy(setupOptions.mParallelMessageCopy, true);
+        tests_libOTe::logvole_test::ScopedOptionValue directDownload(advanced.mAdvanced.mProtocol.mDirectDownload, true);
         SenderOfflineOutput parallelSender{};
-        LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(senderInput, parallelSender));
+        LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), parallelSender));
 #if defined(ENABLE_LOGVOLE_CUDA)
         expectSharedSenderCache(parallelSender);
 #endif
         ReceiverOfflineOutput parallelReceiver{};
         LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(
-            receiverInput, parallelSender.mMessage, parallelReceiver));
+            tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), parallelSender.mMessage, parallelReceiver));
 #if defined(ENABLE_LOGVOLE_CUDA)
         expectSharedReceiverCache(parallelReceiver);
 #endif
@@ -4900,7 +4942,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
     const auto* ownedTopStorage = senderOffline.mMessage.mShrinkExpandMessage.mLacct.mCt.mPolys.data();
     ReceiverOfflineOutput movedOffline{};
     LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(
-        receiverInput, std::move(senderOffline.mMessage), movedOffline));
+        tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), std::move(senderOffline.mMessage), movedOffline));
 #if defined(ENABLE_LOGVOLE_CUDA)
     expectSharedReceiverCache(movedOffline);
 #endif
@@ -4937,7 +4979,8 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
 #if defined(ENABLE_LOGVOLE_CUDA)
     // Setup parity above exercises the GPU. Retain this test's original online
     // backend: forcing GPU on the serial baseline also fails its local flow.
-    gpu::setEnabled(gpuWasEnabled);
+    useCpuReference(senderOffline.mState, ProtocolCacheRole::Sender);
+    useCpuReference(receiverOffline.mState, ProtocolCacheRole::Receiver);
 #endif
     SenderOnlineOutput senderOnline{};
     ReceiverOnlineOutput receiverOnline{};
@@ -4972,21 +5015,21 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
     LOGVOLE_REQUIRE_LT(rejectedParams.mW, muHi);
 
     RingNttContext rejectedCtx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(rejectedParams.mShrinkExpand.mRing, rejectedCtx));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(rejectedParams.mShrinkExpand.mRing, rejectedCtx, std::make_shared<RingContextFactory>(advanced)));
 
     SenderOfflineInput rejectedSenderInput{};
     rejectedSenderInput.mParams = rejectedParams;
     rejectedSenderInput.mSk1 = sample_batch(rejectedCtx, 1, 0x7D01u);
 
     SenderOfflineOutput rejectedSenderOutput{};
-    LOGVOLE_EXPECT_FALSE(prepare_sender_offline_for_test(rejectedSenderInput, rejectedSenderOutput));
+    LOGVOLE_EXPECT_FALSE(prepare_sender_offline_for_test(tests_libOTe::logvole_test::withSetupOptions(rejectedSenderInput, setupOptions), rejectedSenderOutput));
 
     ReceiverOfflineInput rejectedReceiverInput{};
     rejectedReceiverInput.mParams = rejectedParams;
 
     OfflineMessage emptyMessage{};
     ReceiverOfflineOutput rejectedReceiverOutput{};
-    LOGVOLE_EXPECT_FALSE(finalizeReceiverOffline(rejectedReceiverInput, emptyMessage, rejectedReceiverOutput));
+    LOGVOLE_EXPECT_FALSE(finalizeReceiverOffline(tests_libOTe::logvole_test::withSetupOptions(rejectedReceiverInput, setupOptions), emptyMessage, rejectedReceiverOutput));
 }
 
 void run_recursive_gadget_subproblem_test(bool deterministic)
@@ -5107,17 +5150,6 @@ void LogVole_Core_RecursiveGadgetInputSubproblem(const oc::CLP&)
 
 void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
 {
-#if defined(ENABLE_LOGVOLE_CUDA)
-    const bool gpuWasEnabled = gpu::enabled();
-    struct RestoreGpu
-    {
-        bool mEnabled;
-        ~RestoreGpu() { gpu::setEnabled(mEnabled); }
-    } restoreGpu{ gpuWasEnabled };
-    // First prove the host implementation independently.  The focused device
-    // validation check below re-enables CUDA when a device is available.
-    gpu::setEnabled(false);
-#endif
 
     Params paddedSeedParams{};
     std::vector<RnsPoly> paddedRejectedCandidate;
@@ -5276,9 +5308,12 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
     }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    gpu::setEnabled(true);
-    if (gpu::enabled())
+    if (gpu::available())
     {
+        auto advanced = paddedCtx.mExecutionOptions;
+        advanced.mUseGpu = true;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(paddedCtx.mParams, paddedCtx,
+            std::make_shared<RingContextFactory>(advanced)));
         auto candidateDev = gpu::upload(
             paddedCtx,
             std::span<const RnsPoly>(
@@ -5342,9 +5377,24 @@ void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
         alpha4SenderInput, alpha4SenderOutput));
 }
 
-void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP&)
+void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0)) LOGVOLE_REQUIRE_TRUE(gpu::available());
+#endif
     Params params = make_recursive_params(2);
+    const bool transport = cmd.getOr("legacy_transport", 0) == 0;
+    params.mShrinkExpand.mTransport = {transport, transport, transport, transport};
+    if (cmd.getOr("scalar_wire", 0) != 0)
+    {
+        auto& encoding = params.mShrinkExpand.mTransport.mEncoding;
+        encoding.mWire = {false, false, false};
+        encoding.mRootU64Memcpy = false;
+        encoding.mSetupMemcpy = false;
+        encoding.mParallel = false;
+        encoding.mEncodedReceive = false;
+        encoding.mRootEncodedReceive = false;
+    }
     params.mAllowPartialRootWidth = true;
     params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
@@ -5361,6 +5411,54 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP&)
 
     ReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;
+    oc::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
+    if (cmd.getOr("cpu_options", 0) != 0)
+        advanced.mAdvanced.mCpu = {false, false, false};
+    if (cmd.getOr("protocol_options", 0) != 0)
+    {
+        auto& policy = advanced.mAdvanced.mProtocol;
+        policy.mRootDirectUpload = true;
+        policy.mRootKPrimeResident = true;
+        policy.mRootSkNttResident = false;
+        policy.mRootKPrimePreupload = true;
+        policy.mRootDPrimeResident = false;
+        policy.mRootFinalizePriorityPrefetch = false;
+        policy.mIdentityLeaf = false;
+        policy.mPlainBroadcastSingleLimb = false;
+        policy.mReuseHiDigits = false;
+        policy.mDirectRecursiveLeaf = false;
+        policy.mRecursiveDiagonal = false;
+        policy.mRecursiveLeafSelfZero = false;
+        policy.mRecursiveLeafSparseInverse = false;
+        policy.mFusedUnwrap = false;
+        policy.mFusedScaleUnwrap = false;
+        policy.mFusedWrap = false;
+        policy.mRootZeta = false;
+        policy.mNoGoldRootZeta = false;
+        policy.mNoGoldRootPinnedSeeds = false;
+        policy.mSenderInplaceKey = false;
+        policy.mCt2PrefixCache = true;
+        policy.mTopSenderCt2Prefetch = false;
+        policy.mReceiverCt2Prefetch = oc::LogVoleChoice::Disabled;
+        policy.mReceiverShrinkTilePipeline = true;
+        policy.mReceiverShrinkTileCount = 2;
+        policy.mDeferredGoldenValidation = false;
+        policy.mInplaceHiDigit = false;
+        policy.mLencRandomizerResidency = false;
+        policy.mRootDigestHash = true;
+        policy.mRootKPrimeSampling = false;
+        policy.mNoGoldRootPriorityPrefetch = false;
+    }
+    const auto makeOwner = [&](ProtocolCacheRole role) {
+        ScopedProtocolCacheScope scope(role, allocateProtocolCacheRunId());
+        RingNttContext selected;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, selected,
+            std::make_shared<RingContextFactory>(advanced)));
+        return selected.mFactoryOwner;
+    };
+    senderInput.mRingFactoryOwner = makeOwner(ProtocolCacheRole::Sender);
+    receiverInput.mRingFactoryOwner = makeOwner(ProtocolCacheRole::Receiver);
 
     LogVoleRingSender sender{};
     LogVoleRingReceiver receiver{};
@@ -5377,9 +5475,15 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(senderState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiverState.mNextLevelState != nullptr);
     for (auto* level = &senderState; level; level = level->mNextLevelState.get())
+    {
         LOGVOLE_REQUIRE_TRUE(level->mParams.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_TRUE(level->mShrinkExpandState.mRingFactoryOwner->mExecutionOptions == advanced);
+    }
     for (auto* level = &receiverState; level; level = level->mNextLevelState.get())
+    {
         LOGVOLE_REQUIRE_TRUE(level->mParams.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_TRUE(level->mShrinkExpandState.mRingFactoryOwner->mExecutionOptions == advanced);
+    }
 
     const std::uint32_t plainSampleBits =
         std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
@@ -5409,6 +5513,17 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP&)
     const auto receiverBytesSent = onlineSockets[1].bytesSent() - receiverSentBefore;
     const auto receiverBytesReceived = onlineSockets[1].bytesReceived() - receiverReceivedBefore;
 
+#if defined(ENABLE_LOGVOLE_CUDA)
+    gpu::GpuExecutionContext readbackExecution;
+    if (senderOnline.mTbkDevice)
+        LOGVOLE_REQUIRE_TRUE(gpu::download(
+            *std::static_pointer_cast<gpu::DeviceBatch>(senderOnline.mTbkDevice),
+            senderOnline.mTbk, readbackExecution.readbackStream()));
+    if (receiverOnline.mTbmDevice)
+        LOGVOLE_REQUIRE_TRUE(gpu::download(
+            *std::static_pointer_cast<gpu::DeviceBatch>(receiverOnline.mTbmDevice),
+            receiverOnline.mTbm, readbackExecution.readbackStream()));
+#endif
     LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
     LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
     LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
@@ -5529,15 +5644,17 @@ void LogVole_Core_EarlyGoldenMatchesFullEvaluation(const oc::CLP&)
     for (std::uint32_t workers : {1u, 2u, 4u})
     {
         Params params = make_recursive_params(3);
+        params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
+        LOGVOLE_REQUIRE_TRUE(params.mEarlyGoldenCheck);
         params.mShrinkExpand.mNumWorkerThreads = workers;
         RingNttContext ctx{};
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
         SenderOnlineOutput referenceSender;
         ReceiverOnlineOutput referenceReceiver;
         std::array<oc::block, 2> referenceNext{};
-        for (const char* early : {"0", "1"})
+        for (const bool early : {false, true})
         {
-            ScopedEnvironmentValue option("LV_CPU_EARLY_GOLDEN_CHECK", early);
+            params.mEarlyGoldenCheck = early;
             SenderOfflineInput input{};
             input.mParams = params;
             input.mSk1 = sample_batch(ctx, 1, 0x7E101u);
@@ -5547,6 +5664,10 @@ void LogVole_Core_EarlyGoldenMatchesFullEvaluation(const oc::CLP&)
             receiverInput.mParams = params;
             ReceiverOfflineOutput receiver;
             LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, sender.mMessage, receiver));
+            for (auto* level = &sender.mState; level; level = level->mNextLevelState.get())
+                LOGVOLE_REQUIRE_EQ(level->mParams.mEarlyGoldenCheck, early);
+            for (auto* level = &receiver.mState; level; level = level->mNextLevelState.get())
+                LOGVOLE_REQUIRE_EQ(level->mParams.mEarlyGoldenCheck, early);
             ReceiverOnlineInput onlineInput{};
             onlineInput.mSid = 19;
             onlineInput.mX = sample_small_plain_batch(ctx, params.mW, 0x7E102u, 20);
@@ -5558,7 +5679,7 @@ void LogVole_Core_EarlyGoldenMatchesFullEvaluation(const oc::CLP&)
                 sender.mState, receiver.mState, onlineInput,
                 senderPrng, receiverPrng, actualSender, actualReceiver));
             const std::array<oc::block, 2> next{senderPrng.get<oc::block>(), receiverPrng.get<oc::block>()};
-            if (early[0] == '0')
+            if (!early)
             {
                 referenceSender = std::move(actualSender);
                 referenceReceiver = std::move(actualReceiver);
@@ -5925,9 +6046,6 @@ void LogVole_Core_LeafGoldenSeedMatchesDecoder(const oc::CLP&)
 
 void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
 {
-#if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled useCpu(false);
-#endif
     Params params = make_golden_params();
     auto& se = params.mShrinkExpand;
     se.mRing.mPolyModulusDegree = 8192;
@@ -6021,10 +6139,11 @@ void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (cmd.getOr("gpu", 0) != 0)
         {
-            ScopedGpuEnabled useGpu(true);
-            LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+            LOGVOLE_REQUIRE_TRUE(gpu::available());
+            osuCrypto::LogVoleExecutionOptions advanced;
+            advanced.mUseGpu = true;
             RingNttContext deviceContext;
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(se.mRing, deviceContext));
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(se.mRing, deviceContext, std::make_shared<RingContextFactory>(advanced)));
             for (std::size_t i = 0; i < rho; ++i)
                 LOGVOLE_REQUIRE_EQ(ringModulusValue(deviceContext, i), zp.mRing.mModuli[i].value());
             auto safeDevice = gpu::upload(deviceContext, safe);
@@ -6036,7 +6155,7 @@ void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
                 bool deviceOk = false;
                 LOGVOLE_REQUIRE_TRUE(gpu::validateLeafGoldenSeedDevice(params, deviceContext, *device, deviceOk));
                 LOGVOLE_EXPECT_EQ(deviceOk, !bad);
-                if (gpu::deferredGoldenValidationEnabled())
+                if (gpu::deferredGoldenValidationEnabled(deviceContext.mExecutionOptions.mAdvanced.mProtocol))
                 {
                     gpu::GoldenValidationAttempt attempt;
                     LOGVOLE_REQUIRE_TRUE(attempt.begin(deviceContext));
@@ -6057,9 +6176,10 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    ScopedGpuEnabled useGpu(requested);
-    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::available());
+    if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    osuCrypto::LogVoleExecutionOptions advanced;
+    advanced.mUseGpu = true;
     for (const std::uint32_t rho : {4u, 5u, 8u})
     {
         Params params = make_golden_params();
@@ -6068,7 +6188,8 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
         params.mW = params.mShrinkExpand.mMu - 1;
         ZpCrtContext zp;
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mShrinkExpand.mRing,
-            params.mShrinkExpand.mPlaintextModulusBits, zp));
+            params.mShrinkExpand.mPlaintextModulusBits, zp,
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced))));
         const auto n = params.mShrinkExpand.mRing.mPolyModulusDegree;
         auto boundary = makeZeroPolys(params, 1).front();
         for (std::size_t i = 0; i < rho; ++i)
@@ -6086,10 +6207,10 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
         auto safeDevice = gpu::upload(zp.mRing, safe);
         auto unsafeDevice = gpu::upload(zp.mRing, unsafe);
         LOGVOLE_REQUIRE_TRUE(safeDevice && unsafeDevice);
-        if (rho == 4u && gpu::deferredGoldenValidationEnabled())
+        if (rho == 4u && gpu::deferredGoldenValidationEnabled(advanced.mAdvanced.mProtocol))
         {
             auto isolated = zp.mRing;
-            isolated.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
+            isolated.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(advanced);
             gpu::GoldenValidationAttempt rejected, accepted;
             LOGVOLE_REQUIRE_TRUE(rejected.begin(zp.mRing));
             LOGVOLE_REQUIRE_TRUE(accepted.begin(isolated));
@@ -6120,7 +6241,7 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_EQ(hostOk, !bad);
             LOGVOLE_REQUIRE_TRUE(gpu::validateLeafGoldenSeedDevice(params, zp.mRing, *device, deviceOk));
             LOGVOLE_REQUIRE_EQ(hostOk, deviceOk);
-            if (gpu::deferredGoldenValidationEnabled())
+            if (gpu::deferredGoldenValidationEnabled(advanced.mAdvanced.mProtocol))
             {
                 gpu::GoldenValidationAttempt attempt;
                 LOGVOLE_REQUIRE_TRUE(attempt.begin(zp.mRing));

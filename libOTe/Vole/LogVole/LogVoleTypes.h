@@ -1,5 +1,7 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleAdvancedOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
+#include "libOTe/Vole/LogVole/LogVoleEncodingOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
 
 #include <cryptoTools/Common/Defines.h>
@@ -130,6 +132,8 @@ namespace osuCrypto::LogVole
         bool mLeafInputsAreGadget = false;
         ShrinkExpandMode mMode = ShrinkExpandMode::FullNoise;
         i64 mNoiseBound = 2;
+        LogVoleGpuSetupOptions mGpuSetup;
+        LogVoleTransportOptions mTransport;
     };
 
     // How the sender fixes the seed that the ct2 masks are derived from.
@@ -177,7 +181,7 @@ namespace osuCrypto::LogVole
         virtual ~LazyRingTensorHostState() = default;
         virtual const RingTensor& get() const = 0;
         // Optional export completes before returning; false permits get() fallback.
-        virtual bool copyCoefficientsTo(WireView) const { return false; }
+        virtual bool copyCoefficientsTo(WireView, const LogVoleWireOptions& = {}) const { return false; }
         virtual ConstWireView encodedCoefficients() const { return {}; }
     };
 
@@ -185,7 +189,7 @@ namespace osuCrypto::LogVole
     {
         virtual ~LazyLacctHostState() = default;
         virtual const ShrinkExpandLacct& get() const = 0;
-        virtual bool copyCoefficientsTo(WireView) const { return false; }
+        virtual bool copyCoefficientsTo(WireView, const LogVoleWireOptions& = {}) const { return false; }
         virtual ConstWireView encodedCoefficients() const { return {}; }
     };
 
@@ -370,6 +374,9 @@ namespace osuCrypto::LogVole
         // Permit a nonzero Root width below the full shrink/expand block.
         // Copied with the parameters into each recursive level.
         bool mAllowPartialRootWidth = false;
+
+        // Reject invalid GoldenSeed candidates during CPU expansion when eligible.
+        bool mEarlyGoldenCheck = true;
     };
 
     struct SenderState

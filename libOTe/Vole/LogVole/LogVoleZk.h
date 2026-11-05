@@ -65,6 +65,7 @@
 // checks that equality rather than only checking that the proof verifies.
 
 #include "libOTe/config.h"
+#include "libOTe/Vole/LogVole/LogVoleZkOptions.h"
 
 #include "libOTe/Vole/LogVole/LogVole.h"
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
@@ -143,7 +144,7 @@ namespace osuCrypto::LogVole
     public:
         ZkMulCpuWorkspace() noexcept;
         ZkMulCpuWorkspace(const ZkMulCircuit& circuit, u32 threads,
-            CpuBenchmarkContext* benchmark = nullptr);
+            CpuBenchmarkContext* benchmark = nullptr, const LogVoleZkOptions& settings = {});
         ~ZkMulCpuWorkspace();
         ZkMulCpuWorkspace(const ZkMulCpuWorkspace&) = delete;
         ZkMulCpuWorkspace& operator=(const ZkMulCpuWorkspace&) = delete;
@@ -187,13 +188,13 @@ namespace osuCrypto::LogVole
     // the slack is zeroed and never read by the check.
     bool zkMulWitness(
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize = 0);
+        u64 voleSize = 0, const LogVoleZkOptions& settings = {});
 
     // Evaluate each independent layer with a bounded worker count. Random
     // input/mask draws retain the sequential API's exact PRNG consumption.
     bool zkMulWitness(
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize, u32 threads);
+        u64 voleSize, u32 threads, const LogVoleZkOptions& settings = {});
 
     // U = sum_g chi^(g+1) * M[x_g] * M[y_g]                      + M[r]
     // V = sum_g chi^(g+1) * (M[z_g] - x_g*M[y_g] - y_g*M[x_g])    - r
@@ -289,7 +290,7 @@ namespace osuCrypto::LogVole
         const ZkMatMulChallenge& ch,
         u64 modulus,
         u32 threads,
-        ZkProof& out);
+        ZkProof& out, const LogVoleZkOptions& settings = {});
 
     // Repeated matrix checks retain every equation. The scalar overloads above
     // and below reject statements with more than one repetition.
@@ -300,7 +301,7 @@ namespace osuCrypto::LogVole
         const ZkMatMulChallenge& ch,
         u64 modulus,
         u32 threads,
-        std::vector<ZkProof>& out);
+        std::vector<ZkProof>& out, const LogVoleZkOptions& settings = {});
 
     bool zkMatMulVerifierValue(
         const ZkMatMulStatement& st,
@@ -310,7 +311,7 @@ namespace osuCrypto::LogVole
         u64 delta,
         u64 modulus,
         u32 threads,
-        u64& out);
+        u64& out, const LogVoleZkOptions& settings = {});
 
     bool zkMatMulVerifierValue(
         const ZkMatMulStatement& st,
@@ -320,7 +321,7 @@ namespace osuCrypto::LogVole
         u64 delta,
         u64 modulus,
         u32 threads,
-        std::vector<u64>& out);
+        std::vector<u64>& out, const LogVoleZkOptions& settings = {});
 
     bool zkMatMulAccept(std::span<const ZkProof> proofs, std::span<const u64> values,
         u64 delta, u64 modulus);
@@ -349,10 +350,10 @@ namespace osuCrypto::LogVole::gpu
     std::shared_ptr<ZkMulDeviceState> makeZkMulDeviceState(const ZkMulCircuit& circuit, GpuStream& stream);
     bool zkMulProverResponseDevice(const ZkMulCircuit& circuit,
         const DeviceScalars& wires, const DeviceScalars& macs, u64 chi, u64 modulus,
-        ZkMulDeviceState& state, ZkProof& out, GpuStream& stream);
+        ZkMulDeviceState& state, ZkProof& out, GpuStream& stream, const LogVoleZkOptions& settings = {});
     bool zkMulVerifierValueDevice(const ZkMulCircuit& circuit,
         const DeviceScalars& keys, u64 chi, u64 delta, u64 modulus,
-        ZkMulDeviceState& state, u64& out, GpuStream& stream);
+        ZkMulDeviceState& state, u64& out, GpuStream& stream, const LogVoleZkOptions& settings = {});
 
     // Exact fresh PRNG(seed) A/B inputs and masks, with zero request padding.
     DeviceScalarsPtr zkMatMulWitnessInputsDevice(
@@ -390,10 +391,10 @@ namespace osuCrypto::LogVole::gpu
     // uploaded. Every gate of a layer is independent, so this is `depth` launches.
     // Bit-identical to zkMulWitness.
     DeviceScalarsPtr zkMulWitnessDevice(
-        const ZkMulCircuit& circuit, u64 modulus, std::span<const u64> inputs, u64 voleSize, GpuStream& stream);
+        const ZkMulCircuit& circuit, u64 modulus, std::span<const u64> inputs, u64 voleSize, GpuStream& stream, const LogVoleZkOptions& settings = {});
     // Exact fresh PRNG(seed) inputs and mask, generated and retained on device.
     DeviceScalarsPtr zkMulWitnessDevice(
-        const ZkMulCircuit& circuit, u64 modulus, block seed, u64 voleSize, GpuStream& stream);
+        const ZkMulCircuit& circuit, u64 modulus, block seed, u64 voleSize, GpuStream& stream, const LogVoleZkOptions& settings = {});
 }
 #endif
 
@@ -413,17 +414,22 @@ namespace osuCrypto
 
     class ZkMulProver : public TimerAdapter
     {
+        const LogVoleZkOptions mSettings;
+        const LogVoleOptions mVoleOptions;
         // Join active proofs before reconfiguration/destruction. The execution
         // owner precedes device state so its streams and scratch drain last.
         std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
         LogVole::ZkMulCpuWorkspace mCpuWorkspace;
         LogVole::CpuBenchmarkContext* mCpuBenchmark = nullptr;
     public:
+        explicit ZkMulProver(LogVoleZkOptions settings = {}, LogVoleOptions voleOptions = {})
+            : mSettings(std::move(settings)), mVoleOptions(std::move(voleOptions)) {}
+
         LogVole::ZkMulCircuit mCircuit;
         LogVoleReceiver mVole;
 
         // Run the check on the GPU over device-resident MACs. Ignored when the
-        // CUDA backend is not in use. Set before configure() so preparation
+        // CUDA backend is not in use. Set before prepare() so preparation
         // does not reserve CPU resources for a GPU session. A declined GPU
         // path prepares temporary CPU fallback resources only when needed.
         bool mUseDevice = false;
@@ -476,12 +482,8 @@ namespace osuCrypto
 
         // `voleRequest` (0 = exactly the circuit's committed count) is the size
         // handed to the VOLE; see LogVole::zkVoleRequestSize.
-        void configure(
+        void prepare(
             LogVole::ZkMulCircuit circuit,
-            u32 plaintextModulusBits = 55,
-            u32 numThreads = 1,
-            LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            u64 voleRequest = 0,
             LogVole::CpuBenchmarkContext* benchmark = nullptr);
 
         u64 modulus() const { return mVole.modulus(); }
@@ -499,15 +501,20 @@ namespace osuCrypto
 
     class ZkMulVerifier : public TimerAdapter
     {
+        const LogVoleZkOptions mSettings;
+        const LogVoleOptions mVoleOptions;
         // Join active proofs before reconfiguration/destruction. The execution
         // owner precedes device state so its streams and scratch drain last.
         std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
         LogVole::ZkMulCpuWorkspace mCpuWorkspace;
         LogVole::CpuBenchmarkContext* mCpuBenchmark = nullptr;
     public:
+        explicit ZkMulVerifier(LogVoleZkOptions settings = {}, LogVoleOptions voleOptions = {})
+            : mSettings(std::move(settings)), mVoleOptions(std::move(voleOptions)) {}
+
         LogVole::ZkMulCircuit mCircuit;
         LogVoleSender mVole;
-        // Set before configure() to retain device-only wiring. Configuration
+        // Set before prepare() to retain device-only wiring. Configuration
         // takes a moved unique allocation or detaches shared input handles;
         // CPU configuration materializes an independent host copy.
         bool mUseDevice = false;
@@ -528,12 +535,8 @@ namespace osuCrypto
         double mDrainMs = 0;
         bool mCheckOnDevice = false;
 
-        void configure(
+        void prepare(
             LogVole::ZkMulCircuit circuit,
-            u32 plaintextModulusBits = 55,
-            u32 numThreads = 1,
-            LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            u64 voleRequest = 0,
             LogVole::CpuBenchmarkContext* benchmark = nullptr);
 
         u64 modulus() const { return mVole.modulus(); }
@@ -548,10 +551,15 @@ namespace osuCrypto
 
     class ZkMatMulProver : public TimerAdapter
     {
+        const LogVoleZkOptions mSettings;
+        const LogVoleOptions mVoleOptions;
         // Join active proofs before reconfiguration/destruction. The execution
         // owner precedes device state so its streams and scratch drain last.
         std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
     public:
+        explicit ZkMatMulProver(LogVoleZkOptions settings = {}, LogVoleOptions voleOptions = {})
+            : mSettings(std::move(settings)), mVoleOptions(std::move(voleOptions)) {}
+
         LogVole::ZkMatMulStatement mStatement;
         LogVoleReceiver mVole;
         bool mUseDevice = false;
@@ -571,12 +579,8 @@ namespace osuCrypto
         double mDrainMs = 0;
         bool mCheckOnDevice = false;
 
-        void configure(
-            LogVole::ZkMatMulStatement statement,
-            u32 plaintextModulusBits = 55,
-            u32 numThreads = 1,
-            LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            u64 voleRequest = 0);
+        void prepare(
+            LogVole::ZkMatMulStatement statement);
 
         u64 modulus() const { return mVole.modulus(); }
         u64 voleRequest() const { return mVoleRequest; }
@@ -592,10 +596,15 @@ namespace osuCrypto
 
     class ZkMatMulVerifier : public TimerAdapter
     {
+        const LogVoleZkOptions mSettings;
+        const LogVoleOptions mVoleOptions;
         // Join active proofs before reconfiguration/destruction. The execution
         // owner precedes device state so its streams and scratch drain last.
         std::shared_ptr<LogVole::gpu::GpuExecutionContext> mGpuExecution;
     public:
+        explicit ZkMatMulVerifier(LogVoleZkOptions settings = {}, LogVoleOptions voleOptions = {})
+            : mSettings(std::move(settings)), mVoleOptions(std::move(voleOptions)) {}
+
         LogVole::ZkMatMulStatement mStatement;
         LogVoleSender mVole;
         bool mUseDevice = false;
@@ -612,12 +621,8 @@ namespace osuCrypto
         double mDrainMs = 0;
         bool mCheckOnDevice = false;
 
-        void configure(
-            LogVole::ZkMatMulStatement statement,
-            u32 plaintextModulusBits = 55,
-            u32 numThreads = 1,
-            LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            u64 voleRequest = 0);
+        void prepare(
+            LogVole::ZkMatMulStatement statement);
 
         u64 modulus() const { return mVole.modulus(); }
         u64 voleRequest() const { return mVoleRequest; }

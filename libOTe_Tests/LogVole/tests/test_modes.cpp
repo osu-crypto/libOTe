@@ -27,13 +27,7 @@ namespace
 
         const bool device = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        struct RestoreBackend
-        {
-            bool previous = gpu::enabled();
-            ~RestoreBackend() { gpu::setEnabled(previous); }
-        } restore;
-        gpu::setEnabled(device);
-        if (device) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+        if (device) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #else
         LOGVOLE_REQUIRE_FALSE(device);
 #endif
@@ -45,12 +39,23 @@ namespace
         const bool randomInputs = cmd.getOr("lvRandom", 0) != 0;
         LOGVOLE_REQUIRE_TRUE(count && rounds && threads);
         constexpr u64 delta = 19;
-        LogVoleSender originalSender;
-        LogVoleReceiver originalReceiver;
-        auto senderReuse = std::make_shared<ZpContextFactory>();
-        auto receiverReuse = std::make_shared<ZpContextFactory>();
-        originalSender.configure(count, 55, threads, setting, mode, senderReuse);
-        originalReceiver.configure(count, 55, threads, setting, mode, receiverReuse);
+        LogVoleOptions options;
+        options.mUseGpu = device;
+        options.mAdvanced.mProtocol.mRootProfile = cmd.getOr("lvRootProfile", 0) != 0;
+        options.mAdvanced.mHostStepProfile = cmd.getOr("lvHostProfile", 0) != 0;
+
+        auto senderReuse = std::make_shared<ZpContextFactory>(
+            std::make_shared<RingContextFactory>(options));
+        auto receiverReuse = std::make_shared<ZpContextFactory>(
+            std::make_shared<RingContextFactory>(options));
+        osuCrypto::LogVoleOptions originalSenderOptions = options;
+        originalSenderOptions.mRequestSize = count;
+        originalSenderOptions.mPlaintextModulusBits = 55;
+        originalSenderOptions.mNumThreads = threads;
+        originalSenderOptions.mSetting = setting;
+        originalSenderOptions.mMode = mode;
+        LogVoleSender originalSender(originalSenderOptions, senderReuse);
+        LogVoleReceiver originalReceiver(originalSenderOptions, receiverReuse);
         auto observeFactory = [](const CivoleParams& params, ProtocolCacheRole role,
             const std::shared_ptr<ZpContextFactory>& factory)
         {
@@ -152,6 +157,20 @@ namespace
                 LOGVOLE_REQUIRE_EQ(receiver.mLastOnlineComm.mBytesReceived, 0u);
             }
         }
+        if (options.mAdvanced.mHostStepProfile)
+        {
+            LOGVOLE_REQUIRE_TRUE(receiver.hostProfiler() != nullptr);
+            LOGVOLE_REQUIRE_TRUE(receiver.hostProfiler() != sender.hostProfiler());
+            LOGVOLE_REQUIRE_TRUE(!receiver.hostProfiler()->snapshot().empty());
+            LOGVOLE_REQUIRE_TRUE(!sender.hostProfiler()->snapshot().empty());
+        }
+        if (options.mAdvanced.mProtocol.mRootProfile)
+        {
+            const auto* profiler = receiverReuse->ringFactory()->rootProfiler();
+            LOGVOLE_REQUIRE_TRUE(profiler != nullptr);
+            LOGVOLE_REQUIRE_TRUE(profiler->mUsed.load() != 0);
+            LOGVOLE_REQUIRE_TRUE(profiler != senderReuse->ringFactory()->rootProfiler());
+        }
         sender.clear();
         receiver.clear();
         LOGVOLE_REQUIRE_FALSE(sender.outputDevice());
@@ -176,43 +195,239 @@ void LogVole_Modes_InteractiveNoGolden(const CLP& cmd)
     checkMode(cmd, CivoleSetting::NoGoldenSeed, OnlineMode::Interactive);
 }
 
-void LogVole_Modes_PartialRootWidthOptions(const CLP&)
+void LogVole_Modes_ProtocolOptions(const CLP&)
 {
-#if defined(ENABLE_LOGVOLE_CUDA)
-    struct RestoreBackend
-    {
-        bool previous = gpu::enabled();
-        ~RestoreBackend() { gpu::setEnabled(previous); }
-    } restore;
-    gpu::setEnabled(false);
-#endif
     const auto check = []<typename Party>() {
-        LogVoleOptions options;
-        LOGVOLE_REQUIRE_FALSE(options.mAllowPartialRootWidth);
-        options.mAllowPartialRootWidth = true;
-        Party original(options);
-        options.mAllowPartialRootWidth = false; // Constructor owns its copy.
-        Party strict;
-        auto factory = std::make_shared<ZpContextFactory>();
-        const auto configure = [&](Party& party) {
-            party.configure(1, 55, 1, CivoleSetting::GoldenSeed,
-                OnlineMode::Interactive, factory);
+        static_assert(!requires(Party& party) { party.configure(1); });
+        const auto rejects = [](const LogVoleOptions& options) {
+            bool rejected = false;
+            try { Party party(options); }
+            catch (const std::exception&) { rejected = true; }
+            LOGVOLE_REQUIRE_TRUE(rejected);
         };
-        configure(original);
-        configure(strict);
+        LogVoleOptions invalid;
+        rejects(invalid); // The constructor requires an explicit nonzero size.
+        invalid.mRequestSize = 1;
+        invalid.mPlaintextModulusBits = 1;
+        rejects(invalid);
+        invalid.mPlaintextModulusBits = 55;
+        invalid.mMode = OnlineMode::NonInteractive;
+        rejects(invalid); // NonInteractive requires NoGoldenSeed.
+        LogVoleOptions options;
+        options.mRequestSize = 7;
+        options.mNumThreads = 2;
+        LOGVOLE_REQUIRE_FALSE(options.mAdvanced.mAllowPartialRootWidth);
+        options.mAdvanced.mAllowPartialRootWidth = true;
+        LOGVOLE_REQUIRE_TRUE(options.mAdvanced.mEarlyGoldenCheck);
+        options.mAdvanced.mEarlyGoldenCheck = false;
+        const LogVoleGpuSetupOptions defaults;
+        options.mAdvanced.mGpuSetup.mDirectWire = !defaults.mDirectWire;
+        options.mAdvanced.mGpuSetup.mLazyCiphertexts = !defaults.mLazyCiphertexts;
+        options.mAdvanced.mGpuSetup.mRootPublicBToken = !defaults.mRootPublicBToken;
+        options.mAdvanced.mGpuSetup.mRootBStarDevice = !defaults.mRootBStarDevice;
+        options.mAdvanced.mGpuSetup.mRootBStarDeviceStrict = !defaults.mRootBStarDeviceStrict;
+        options.mAdvanced.mGpuSetup.mRootR1Device = !defaults.mRootR1Device;
+        options.mAdvanced.mGpuSetup.mRootR1DeviceStrict = !defaults.mRootR1DeviceStrict;
+        options.mAdvanced.mGpuSetup.mRootSecretDevice = !defaults.mRootSecretDevice;
+        options.mAdvanced.mGpuSetup.mRootSecretDeviceStrict = !defaults.mRootSecretDeviceStrict;
+        options.mAdvanced.mGpuSetup.mLheDevice = !defaults.mLheDevice;
+        options.mAdvanced.mGpuSetup.mLheDeviceStrict = !defaults.mLheDeviceStrict;
+        options.mAdvanced.mGpuSetup.mLencDevice = !defaults.mLencDevice;
+        options.mAdvanced.mGpuSetup.mLencDeviceStrict = !defaults.mLencDeviceStrict;
+        options.mAdvanced.mGpuSetup.mLencDevicePadding = !defaults.mLencDevicePadding;
+        options.mAdvanced.mGpuSetup.mCompactNoise = !defaults.mCompactNoise;
+        options.mAdvanced.mGpuSetup.mCompactNoiseStrict = !defaults.mCompactNoiseStrict;
+        options.mAdvanced.mGpuSetup.mLencRandomizerOutput = !defaults.mLencRandomizerOutput;
+        options.mAdvanced.mGpuSetup.mLencRandomizerOutputStrict = !defaults.mLencRandomizerOutputStrict;
+        options.mAdvanced.mGpuSetup.mDeltaDevice = !defaults.mDeltaDevice;
+        options.mAdvanced.mGpuSetup.mDeltaDeviceStrict = !defaults.mDeltaDeviceStrict;
+        options.mAdvanced.mGpuSetup.mReceiverResidentNtt = !defaults.mReceiverResidentNtt;
+        options.mAdvanced.mGpuSetup.mReceiverResidentNttStrict = !defaults.mReceiverResidentNttStrict;
+        options.mAdvanced.mGpuSetup.mBatchNtt = !defaults.mBatchNtt;
+        options.mAdvanced.mGpuSetup.mParallelCopy = !defaults.mParallelCopy;
+        options.mAdvanced.mGpuSetup.mParallelMessageCopy = !defaults.mParallelMessageCopy;
+        options.mAdvanced.mGpuSetup.mSharedState = !defaults.mSharedState;
+        options.mAdvanced.mGpuSetup.mRootDevice = !defaults.mRootDevice;
+        options.mAdvanced.mGpuSetup.mRootDeviceStrict = !defaults.mRootDeviceStrict;
+        options.mAdvanced.mGpuSetup.mRootCompactNoise = !defaults.mRootCompactNoise;
+        options.mAdvanced.mGpuSetup.mRootCompactNoiseStrict = !defaults.mRootCompactNoiseStrict;
+        options.mAdvanced.mGpuSetup.mTopSecretConsumerStrict = !defaults.mTopSecretConsumerStrict;
+        options.mAdvanced.mGpuSetup.mDeltaChainDevice = !defaults.mDeltaChainDevice;
+        options.mAdvanced.mGpuSetup.mDeltaChainStrict = !defaults.mDeltaChainStrict;
+        options.mAdvanced.mGpuSetup.mTopSecretRepDevice = !defaults.mTopSecretRepDevice;
+        options.mAdvanced.mGpuSetup.mParallelLhe = LogVoleChoice::Disabled;
+        options.mAdvanced.mGpuSetup.mParallelLenc = LogVoleChoice::Enabled;
+        options.mAdvanced.mGpuSetup.mPublicSenderCt2PrefetchLevels = 3;
+        const auto selectedGpu = options.mAdvanced.mGpuSetup;
+        const auto checkGpu = [](const auto& actual, const auto& expected) {
+            LOGVOLE_REQUIRE_TRUE(actual.mDirectWire == expected.mDirectWire);
+            LOGVOLE_REQUIRE_TRUE(actual.mLazyCiphertexts == expected.mLazyCiphertexts);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootPublicBToken == expected.mRootPublicBToken);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootBStarDevice == expected.mRootBStarDevice);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootBStarDeviceStrict == expected.mRootBStarDeviceStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootR1Device == expected.mRootR1Device);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootR1DeviceStrict == expected.mRootR1DeviceStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootSecretDevice == expected.mRootSecretDevice);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootSecretDeviceStrict == expected.mRootSecretDeviceStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mLheDevice == expected.mLheDevice);
+            LOGVOLE_REQUIRE_TRUE(actual.mLheDeviceStrict == expected.mLheDeviceStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mLencDevice == expected.mLencDevice);
+            LOGVOLE_REQUIRE_TRUE(actual.mLencDeviceStrict == expected.mLencDeviceStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mLencDevicePadding == expected.mLencDevicePadding);
+            LOGVOLE_REQUIRE_TRUE(actual.mCompactNoise == expected.mCompactNoise);
+            LOGVOLE_REQUIRE_TRUE(actual.mCompactNoiseStrict == expected.mCompactNoiseStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mLencRandomizerOutput == expected.mLencRandomizerOutput);
+            LOGVOLE_REQUIRE_TRUE(actual.mLencRandomizerOutputStrict == expected.mLencRandomizerOutputStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mDeltaDevice == expected.mDeltaDevice);
+            LOGVOLE_REQUIRE_TRUE(actual.mDeltaDeviceStrict == expected.mDeltaDeviceStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mReceiverResidentNtt == expected.mReceiverResidentNtt);
+            LOGVOLE_REQUIRE_TRUE(actual.mReceiverResidentNttStrict == expected.mReceiverResidentNttStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mBatchNtt == expected.mBatchNtt);
+            LOGVOLE_REQUIRE_TRUE(actual.mParallelCopy == expected.mParallelCopy);
+            LOGVOLE_REQUIRE_TRUE(actual.mParallelMessageCopy == expected.mParallelMessageCopy);
+            LOGVOLE_REQUIRE_TRUE(actual.mSharedState == expected.mSharedState);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootDevice == expected.mRootDevice);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootDeviceStrict == expected.mRootDeviceStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootCompactNoise == expected.mRootCompactNoise);
+            LOGVOLE_REQUIRE_TRUE(actual.mRootCompactNoiseStrict == expected.mRootCompactNoiseStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mTopSecretConsumerStrict == expected.mTopSecretConsumerStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mDeltaChainDevice == expected.mDeltaChainDevice);
+            LOGVOLE_REQUIRE_TRUE(actual.mDeltaChainStrict == expected.mDeltaChainStrict);
+            LOGVOLE_REQUIRE_TRUE(actual.mTopSecretRepDevice == expected.mTopSecretRepDevice);
+            LOGVOLE_REQUIRE_TRUE(actual.mParallelLhe == expected.mParallelLhe);
+            LOGVOLE_REQUIRE_TRUE(actual.mParallelLenc == expected.mParallelLenc);
+            LOGVOLE_REQUIRE_TRUE(actual.mPublicSenderCt2PrefetchLevels == expected.mPublicSenderCt2PrefetchLevels);
+        };
+        options.mAdvanced.mTransport.mOwnedSetupSend = false;
+        options.mAdvanced.mTransport.mOwnedRootMessages = false;
+        options.mAdvanced.mTransport.mDeferRootDigestHash = false;
+        options.mAdvanced.mTransport.mMoveReceivedState = false;
+        const auto checkTransport = [](const auto& party, bool expected) {
+            LOGVOLE_REQUIRE_EQ(party.mParams.mLogVole.mShrinkExpand.mTransport.mOwnedSetupSend, expected);
+            LOGVOLE_REQUIRE_EQ(party.mParams.mLogVole.mShrinkExpand.mTransport.mOwnedRootMessages, expected);
+            LOGVOLE_REQUIRE_EQ(party.mParams.mLogVole.mShrinkExpand.mTransport.mDeferRootDigestHash, expected);
+            LOGVOLE_REQUIRE_EQ(party.mParams.mLogVole.mShrinkExpand.mTransport.mMoveReceivedState, expected);
+        };
+        options.mAdvanced.mStreams.mIndexScratchKiB = 256;
+        options.mAdvanced.mStreams.mPipelinedUpload = true;
+        options.mAdvanced.mProtocol.mFusedWrap = false;
+        options.mAdvanced.mProtocol.mCt2PrefixCache = true;
+        const auto selectedOptions = options;
+        auto factory = std::make_shared<ZpContextFactory>(
+            std::make_shared<RingContextFactory>(options));
+        Party original(options, factory);
+        LOGVOLE_REQUIRE_EQ(original.requestSize(), 7ull);
+        LOGVOLE_REQUIRE_EQ(original.numThreads(), 2u);
+        options.mRequestSize = 1;
+        options.mNumThreads = 0; // Preserve the existing normalization to one.
+        options.mAdvanced = {};
+        options.mAdvanced.mGpuSetup = defaults;
+        options.mAdvanced.mTransport = {};
+        options.mAdvanced.mAllowPartialRootWidth = false; // Constructor owns its copy.
+        options.mAdvanced.mEarlyGoldenCheck = true;
+        Party strict(options);
+        LOGVOLE_REQUIRE_EQ(strict.requestSize(), 1ull);
+        LOGVOLE_REQUIRE_EQ(strict.numThreads(), 1u);
+        LOGVOLE_REQUIRE_EQ(original.options().mRequestSize, 7ull);
+        LOGVOLE_REQUIRE_EQ(original.options().mNumThreads, 2u);
+        LOGVOLE_REQUIRE_FALSE(original.options() == strict.options());
+        // A mismatch is rejected locally, before entering offline transport.
+        auto sockets = coproto::LocalAsyncSocket::makePair();
+        PRNG prng(toBlock(71, 29));
+        AlignedUnVec<u64> wrongSize(2);
+        bool sizeRejected = false;
+        try
+        {
+            if constexpr (std::is_same_v<Party, LogVoleSender>)
+                macoro::sync_wait(original.send(1, wrongSize, prng, sockets[0]));
+            else
+                macoro::sync_wait(original.receive(wrongSize, wrongSize, prng, sockets[0]));
+        }
+        catch (const std::runtime_error&) { sizeRejected = true; }
+        LOGVOLE_REQUIRE_TRUE(sizeRejected);
+        LOGVOLE_REQUIRE_FALSE(original.hasOffline());
+        LOGVOLE_REQUIRE_EQ(original.requestSize(), 7ull);
+        bool rejected = false;
+        try { Party incompatible(options, factory); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        LOGVOLE_REQUIRE_TRUE(rejected);
         LOGVOLE_REQUIRE_TRUE(original.mParams.mLogVole.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_FALSE(original.mParams.mLogVole.mEarlyGoldenCheck);
+        checkGpu(original.mParams.mLogVole.mShrinkExpand.mGpuSetup, selectedGpu);
+        checkTransport(original, false);
         LOGVOLE_REQUIRE_FALSE(strict.mParams.mLogVole.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_TRUE(strict.mParams.mLogVole.mEarlyGoldenCheck);
+        checkGpu(strict.mParams.mLogVole.mShrinkExpand.mGpuSetup, defaults);
+        checkTransport(strict, true);
 
         Party moved(std::move(original));
         LOGVOLE_REQUIRE_TRUE(moved.mParams.mLogVole.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_FALSE(moved.mParams.mLogVole.mEarlyGoldenCheck);
+        checkGpu(moved.mParams.mLogVole.mShrinkExpand.mGpuSetup, selectedGpu);
+        checkTransport(moved, false);
         Party assigned;
         assigned = std::move(moved);
         LOGVOLE_REQUIRE_TRUE(assigned.mParams.mLogVole.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_FALSE(assigned.mParams.mLogVole.mEarlyGoldenCheck);
+        checkGpu(assigned.mParams.mLogVole.mShrinkExpand.mGpuSetup, selectedGpu);
+        checkTransport(assigned, false);
         assigned.clear();
-        configure(assigned);
+        assigned = Party(selectedOptions, factory);
         LOGVOLE_REQUIRE_TRUE(assigned.mParams.mLogVole.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_FALSE(assigned.mParams.mLogVole.mEarlyGoldenCheck);
+        checkGpu(assigned.mParams.mLogVole.mShrinkExpand.mGpuSetup, selectedGpu);
+        checkTransport(assigned, false);
         LOGVOLE_REQUIRE_FALSE(strict.mParams.mLogVole.mAllowPartialRootWidth);
+        LOGVOLE_REQUIRE_TRUE(strict.mParams.mLogVole.mEarlyGoldenCheck);
+        checkGpu(strict.mParams.mLogVole.mShrinkExpand.mGpuSetup, defaults);
+        checkTransport(strict, true);
     };
+    // A derived ring with different dimensions retains the supplied owner's settings.
+    {
+        RingParams ring;
+        ring.mPolyModulusDegree = 1024;
+        ring.mCoeffModulusBits.resize(2);
+        std::fill(ring.mCoeffModulusBits.begin(), ring.mCoeffModulusBits.end(), 30);
+        LogVoleExecutionOptions advanced;
+        advanced.mAdvanced.mProtocol.mUniformSampling = false;
+        advanced.mAdvanced.mProtocol.mShareCache = false;
+        RingNttContext first, second;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, first,
+            std::make_shared<RingContextFactory>(advanced)));
+        ring.mPolyModulusDegree = 2048;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, second, first.mFactoryOwner));
+        LOGVOLE_REQUIRE_TRUE(second.mExecutionOptions == advanced);
+        LOGVOLE_REQUIRE_TRUE(second.mFactory == first.mFactory);
+    }
     check.operator()<LogVoleSender>();
     check.operator()<LogVoleReceiver>();
+#if defined(ENABLE_LOGVOLE_CUDA)
+    LogVoleGpuProtocolOptions policy;
+    LOGVOLE_REQUIRE_TRUE(policy.valid());
+    LOGVOLE_REQUIRE_TRUE(gpu::rootFinalizeReceiverPrefetchEnabled(policy));
+    LOGVOLE_REQUIRE_TRUE(gpu::deferredGoldenValidationEnabled(policy));
+    LOGVOLE_REQUIRE_EQ(gpu::topSenderCt2PrefetchLevels(0, policy), 1u);
+    LOGVOLE_REQUIRE_EQ(gpu::topSenderCt2PrefetchLevels(99, policy), 3u);
+    LOGVOLE_REQUIRE_EQ(gpu::receiverCt2PrefetchLevels(1, {}, {}, policy), 0u);
+    for (int level : {1, 2, 3})
+    {
+        policy.mSenderCt2PrefetchLevels = level;
+        policy.mReceiverCt2PrefetchLevels = level;
+        policy.mReceiverCt2Prefetch = LogVoleChoice::Enabled;
+        LOGVOLE_REQUIRE_TRUE(policy.valid());
+        LOGVOLE_REQUIRE_EQ(gpu::topSenderCt2PrefetchLevels(3, policy), static_cast<u32>(level));
+        LOGVOLE_REQUIRE_EQ(gpu::receiverCt2PrefetchLevels(1, {}, {}, policy), static_cast<u32>(level));
+    }
+    policy.mTopSenderCt2Prefetch = false;
+    policy.mReceiverCt2Prefetch = LogVoleChoice::Disabled;
+    policy.mRootFinalizePriorityPrefetch = false;
+    policy.mDeferredGoldenValidation = false;
+    LOGVOLE_REQUIRE_EQ(gpu::topSenderCt2PrefetchLevels(3, policy), 0u);
+    LOGVOLE_REQUIRE_EQ(gpu::receiverCt2PrefetchLevels(1, {}, {}, policy), 0u);
+    LOGVOLE_REQUIRE_FALSE(gpu::rootFinalizeReceiverPrefetchEnabled(policy));
+    LOGVOLE_REQUIRE_FALSE(gpu::deferredGoldenValidationEnabled(policy));
+    policy.mSenderCt2PrefetchLevels = 4;
+    LOGVOLE_REQUIRE_FALSE(policy.valid());
+#endif
+
 }

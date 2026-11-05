@@ -188,12 +188,16 @@ namespace
 #endif
 
         constexpr bool multiplication = std::is_same_v<Prover, ZkMulProver>;
-        Prover prover;
-        Verifier verifier;
-        prover.mUseDevice = verifier.mUseDevice = device;
+        LogVoleOptions voleOptions;
+        voleOptions.mUseGpu = device;
         const u64 request = device ? 65536 : 16;
-        prover.configure(statement, 55, 1, setting, request);
-        verifier.configure(statement, 55, 1, setting, request);
+        voleOptions.mRequestSize = request;
+        voleOptions.mSetting = setting;
+        Prover prover({}, voleOptions);
+        Verifier verifier({}, voleOptions);
+        prover.mUseDevice = verifier.mUseDevice = device;
+        prover.prepare(statement);
+        verifier.prepare(statement);
         const u64 p = prover.modulus(), delta = 19, maskIndex = statement.maskIndex();
         u32 maskCount = 1;
         if constexpr (!multiplication) maskCount = statement.repetitions();
@@ -332,21 +336,10 @@ namespace
         checkFreshMasks<ZkMatMulProver, ZkMatMulVerifier>(matrix, setting, device);
     }
 
-#if defined(ENABLE_LOGVOLE_CUDA)
-    struct GpuScope
-    {
-        bool previous = gpu::enabled();
-        ~GpuScope() { gpu::setEnabled(previous); }
-    };
-#endif
 }
 
 void LogVole_Zk_FreshMaskCpu(const CLP&)
 {
-#if defined(ENABLE_LOGVOLE_CUDA)
-    GpuScope scope;
-    gpu::setEnabled(false);
-#endif
     checkBothStatements(CivoleSetting::GoldenSeed, false);
     checkBothStatements(CivoleSetting::NoGoldenSeed, false);
 }
@@ -354,11 +347,9 @@ void LogVole_Zk_FreshMaskCpu(const CLP&)
 void LogVole_Zk_FreshMaskGpu(const CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
-    GpuScope scope;
     const bool requested = cmd.getOr("gpu", 0) != 0;
-    gpu::setEnabled(requested);
     if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
-    LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
     checkBothStatements(CivoleSetting::GoldenSeed, true);
     // Resident NoGoldenSeed witness packing currently targets H200.
     if (gpu::deviceDescription().find("H200") != std::string::npos)
@@ -631,15 +622,16 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
 
     bool device = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    GpuScope scope;
     device = cmd.getOr("gpu", 0) != 0;
-    gpu::setEnabled(device);
-    if (device) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    if (device) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #else
     (void)cmd;
 #endif
-    ZkMatMulProver prover;
-    ZkMatMulVerifier verifier;
+    LogVoleOptions voleOptions;
+    voleOptions.mUseGpu = device;
+    voleOptions.mRequestSize = device ? 65536 : 64;
+    ZkMatMulProver prover({}, voleOptions);
+    ZkMatMulVerifier verifier({}, voleOptions);
     prover.mUseDevice = verifier.mUseDevice = device;
     PRNG witnessPrng(toBlock(0x7265636f6e666967, 1));
     PRNG senderPrng(toBlock(0x7265636f6e666967, 2));
@@ -654,10 +646,9 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
     if (device) statements.push_back({257, 1});
     for (const auto statement : statements)
     {
-        const u64 request = std::max<u64>(device ? 65536 : 64,
-            zkVoleRequestSize(statement.voleCount()));
-        prover.configure(statement, 55, 1, CivoleSetting::GoldenSeed, request);
-        verifier.configure(statement, 55, 1, CivoleSetting::GoldenSeed, request);
+        prover.prepare(statement);
+        verifier.prepare(statement);
+        const auto request = prover.mVole.requestSize();
         LOGVOLE_REQUIRE_TRUE(!prover.mDeviceState && !verifier.mDeviceState);
         AlignedUnVec<u64> wires, publicProduct;
         LOGVOLE_REQUIRE_TRUE(zkMatMulWitness(statement, prover.modulus(), 1, witnessPrng,

@@ -254,7 +254,8 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out);
     bool sampleRootErrorBatch(
         const RingNttContext& ctx, u32 count, PRNG& prng, double sigma,
-        double maxDeviation, bool outputNtt, std::vector<RnsPoly>& out, u32 requestedWorkers);
+        double maxDeviation, bool outputNtt, std::vector<RnsPoly>& out, u32 requestedWorkers,
+        const LogVoleGpuSetupOptions& options = {});
 
     bool addScaledNttInplace(
         RnsPoly& accNtt,
@@ -284,7 +285,8 @@ namespace osuCrypto::LogVole
         const gpu::RetainedPublicUniform* retainedPublicBFullNtt = nullptr,
         const gpu::DeviceBatch* rootR1Device = nullptr,
         const LazyRootErrorHostState* rootR1Host = nullptr,
-        const gpu::RetainedPublicUniform* retainedBStarNtt = nullptr);
+        const gpu::RetainedPublicUniform* retainedBStarNtt = nullptr,
+        const LogVoleGpuSetupOptions& options = {});
 
     // requestedWorkers > 1 splits the coefficients across the worker pool, each
     // range drawing from its own PRNG keyed from `prng`. zeta is the receiver's
@@ -357,7 +359,8 @@ namespace osuCrypto::LogVole
     // success. The state owns mDPrime for the whole Root exchange, so callers can
     // safely invoke this after scheduling the digest buffer and before waiting
     // for or consuming the sender's response.
-    bool finishRootDigestHash(RootDigestState& digestState);
+    // The optional profiler is borrowed only for this synchronous call.
+    bool finishRootDigestHash(RootDigestState& digestState, RootStepProfiler* profiler = nullptr);
 
     // Public random-oracle response H((sid, non-interactive), d'). Uses the
     // full canonical randomized digest and ring parameters; no sender secret
@@ -606,7 +609,7 @@ namespace osuCrypto::LogVole
         u32 alpha,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, const std::shared_ptr<const RingNttContext>& ringOwner = {});
 
     bool seedLabelSampleCt2FromSeed(
         std::span<const u8> seed,
@@ -645,14 +648,14 @@ namespace osuCrypto::LogVole
     bool validateGoldenSeedCandidate(
         const Params& params,
         const std::vector<RnsPoly>& tbkPerSampledPoly,
-        bool& out);
+        bool& out, HostStepProfiler* profile = nullptr);
 
     // Leaf validation takes exactly mW logical output polynomials. Intermediate
     // levels continue to validate the entire padded sample with Q/q_j.
     bool validateLeafGoldenSeedCandidate(
         const Params& params,
         const std::vector<RnsPoly>& tbk,
-        bool& out);
+        bool& out, HostStepProfiler* profile = nullptr);
 
     bool findGoldenSeed(
         const Params& params,

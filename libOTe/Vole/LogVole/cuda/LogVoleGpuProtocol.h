@@ -39,7 +39,8 @@ namespace osuCrypto::LogVole::gpu
     // publishing the finalized state. Every consumer checks this state's
     // identity, query SID, role, device, ordered ring primes and exact shape;
     // a miss takes the unchanged allocation path.
-    ReceiverFirstQueryAllocationsPtr beginReceiverFirstQueryAllocations(const Params& params);
+    ReceiverFirstQueryAllocationsPtr beginReceiverFirstQueryAllocations(const Params& params,
+        const std::shared_ptr<const RingNttContext>& ringOwner = {});
     void finishReceiverFirstQueryAllocations(const ReceiverFirstQueryAllocationsPtr& plan);
     bool sealReceiverFirstQueryAllocationOwner(
         const ReceiverFirstQueryAllocationsPtr& plan, const void* owner);
@@ -52,9 +53,6 @@ namespace osuCrypto::LogVole::gpu
         const ReceiverFirstQueryAllocationsPtr& plan,
         bool& ready, bool& wrapSelected, bool& nodesSelected);
 
-    // Runtime switch. enabled() is false when no CUDA device is present.
-    void setEnabled(bool on);
-    bool enabled();
     std::string deviceDescription();
 
     // Prepare the immutable receiver offline mirror before making exact state
@@ -77,7 +75,7 @@ namespace osuCrypto::LogVole::gpu
     // Sender counterpart: share only within one sender's exact setup copies,
     // before concurrent online use.
     bool prepareReusableSenderCache(ShrinkExpandSenderState& state);
-    bool lencRandomizerResidencyEnabled();
+    bool lencRandomizerResidencyEnabled(const LogVoleExecutionOptions& options);
 
     // Device state that has to survive from a level's shrink to its expand.
     class LevelSession
@@ -130,7 +128,7 @@ namespace osuCrypto::LogVole::gpu
     };
     using RetainedPublicUniformPtr = std::shared_ptr<const RetainedPublicUniform>;
 
-    bool publicUniformRetentionEnabled();
+    bool publicUniformRetentionEnabled(const LogVoleExecutionOptions& options);
     // Register only the original captured host allocations moved directly into
     // a const owner. They must not have been modified after sampling. A copied
     // vector cannot register; lookup requires its live immutable owner, exact
@@ -192,13 +190,13 @@ namespace osuCrypto::LogVole::gpu
     bool setupSeedLabelRepBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount, u64 ownerRunId);
 
-    bool rootKPrimeSamplingEnabled();
+    bool rootKPrimeSamplingEnabled(const LogVoleExecutionOptions& options);
     // Direct SEAL-seed replay. Publishes a coefficient-domain, synchronized
     // device polynomial; never consumes protocol PRNG state itself.
     bool sampleRootKPrimeDevice(const RingNttContext& ctx,
         const std::array<u64, 8>& seed, DeviceBatchPtr& out);
 
-    bool rootDigestHashEnabled();
+    bool rootDigestHashEnabled(const LogVoleExecutionOptions& options);
     bool hashRootDigestDevice(const DeviceBatch& digest, block& out, GpuStream& stream);
 
     // A coefficient-domain ct2 batch sampled ahead of the sender's top
@@ -518,7 +516,7 @@ namespace osuCrypto::LogVole::gpu
     // Exact setup sampling from already-consumed SEAL seeds. The opt-in gate
     // also checks that the configured SEAL factory uses Blake2xb. On failure,
     // out is unchanged and callers can replay the same seeds on the CPU.
-    bool setupUniformSamplingEnabled();
+    bool setupUniformSamplingEnabled(const LogVoleExecutionOptions& options);
     bool sampleUniformBatchFromSeedsDevice(
         const RingNttContext& ctx,
         std::span<const std::array<u64, 8>> seeds,
@@ -577,8 +575,8 @@ namespace osuCrypto::LogVole::gpu
     // returned as a device batch, so nothing crosses PCIe. `allowTilePipeline`
     // is supplied only by the outer recursive receiver frames; the backend still
     // enforces the opt-in switch and exact production geometry.
-    // LV_GPU_RECEIVER_SHRINK_TILE_PIPELINE=1 enables the experiment;
-    // LV_GPU_RECEIVER_SHRINK_TILES selects the bounded 2/4-way split (default 4).
+    // mProtocol.mReceiverShrinkTilePipeline=1 enables the experiment;
+    // mProtocol.mReceiverShrinkTileCount selects the bounded 2/4-way split (default 4).
     bool shrinkChunksDevice(
         const ShrinkExpandReceiverState& state,
         std::span<const RnsPoly> xHost,
@@ -653,7 +651,7 @@ namespace osuCrypto::LogVole::gpu
         PreparedRootFinalize* prepared = nullptr,
         const DeviceBatch* dPrimeDevice = nullptr);
 
-    // The default LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH path uses a pre-created
+    // The default mProtocol.mRootFinalizePriorityPrefetch path uses a pre-created
     // Root cache stream at the device's greatest priority plus retained device
     // dPrime; set it to 0 for the monolithic rollback. It queues exactly the
     // response-independent prefix immediately after dPrime is sent and hands
@@ -661,7 +659,7 @@ namespace osuCrypto::LogVole::gpu
     // A false return may still leave `prepared` non-null: it owns partially
     // queued work for deferred, exception-safe cleanup while the caller runs
     // the unchanged monolithic fallback.
-    bool rootFinalizeReceiverPrefetchEnabled();
+    bool rootFinalizeReceiverPrefetchEnabled(const LogVoleGpuProtocolOptions& options);
     bool prefetchRootFinalizeReceiverDevice(
         const ReceiverState& state,
         const RingNttContext& ctx,
@@ -744,13 +742,13 @@ namespace osuCrypto::LogVole::gpu
     // Receiver counterpart to the sender prefetch scheduler. The measured
     // default selects three levels only for 2^24/2^25-label requests whose exact
     // tracked output-plus-scratch allocation is at most 2 GiB. Every other
-    // request remains synchronous. LV_GPU_RECEIVER_CT2_PREFETCH=0 is the full
+    // request remains synchronous. mProtocol.mReceiverCt2Prefetch=0 is the full
     // rollback, =1 forces the scheduler, and LEVELS selects 1..3 when enabled.
     // Request-dependent selection is evaluated per call, never cached.
     u32 receiverCt2PrefetchLevels(
         u64 totalLabelCount,
         std::span<const ShrinkExpandReceiverState* const> states,
-        std::span<const u32> chunkCounts);
+        std::span<const u32> chunkCounts, const LogVoleGpuProtocolOptions& options);
     bool prefetchReceiverCt2(
         const ShrinkExpandReceiverState& state,
         std::span<const u8> seed,
@@ -764,10 +762,10 @@ namespace osuCrypto::LogVole::gpu
     // secondary stream before evaluating the recursive child. A dedicated
     // scratch lane and owned output/event keep it disjoint from every ordinary
     // sampleCt2Batch call. The caller supplies the request-size-dependent
-    // default; LV_GPU_TOP_CT2_PREFETCH_LEVELS explicitly overrides it.
-    // LV_GPU_TOP_CT2_PREFETCH=0 is the full scheduling rollback.
-    bool topSenderCt2PrefetchEnabled();
-    u32 topSenderCt2PrefetchLevels(u32 adaptiveDefault);
+    // default; mProtocol.mSenderCt2PrefetchLevels explicitly overrides it.
+    // mProtocol.mTopSenderCt2Prefetch=0 is the full scheduling rollback.
+    bool topSenderCt2PrefetchEnabled(const LogVoleGpuProtocolOptions& options);
+    u32 topSenderCt2PrefetchLevels(u32 adaptiveDefault, const LogVoleGpuProtocolOptions& options);
     bool prefetchSenderCt2(
         const ShrinkExpandSenderState& state,
         std::span<const u8> seed,
@@ -803,14 +801,14 @@ namespace osuCrypto::LogVole::gpu
     // reply to the root digest, so it is on the critical path of both parties and
     // it does not scale with the label count.
     //
-    // When residentKPrime is non-null and LV_GPU_ROOT_KPRIME_RESIDENT=1, a
+    // When residentKPrime is non-null and mProtocol.mRootKPrimeResident=1, a
     // one-polynomial coefficient-domain copy of tbkPrime is returned after the
     // function's mandatory output download has synchronized its producer
     // stream. The caller may therefore hand it to a later stream without an
     // event. A null returned handle is a soft miss and preserves the host path.
-    // LV_GPU_ROOT_SK_NTT_RESIDENT caches the immutable transformed secret key by
-    // default; LV_GPU_ROOT_KPRIME_PREUPLOAD independently enables the synchronized
-    // fresh key upload before the Root request arrives. LV_GPU_ROOT_OPERAND_RESIDENCY
+    // mProtocol.mRootSkNttResident caches the immutable transformed secret key by
+    // default; mProtocol.mRootKPrimePreupload independently enables the synchronized
+    // fresh key upload before the Root request arrives. mProtocol.mRootOperandResidency
     // enables both. Each handle is validated and each missing operand independently
     // takes the established upload path.
     // recoverNonInteractiveMask changes the result to tbkPrime - <sk1,g^-1(d)>,
@@ -888,8 +886,8 @@ namespace osuCrypto::LogVole::gpu
     // Default-on scheduling optimization for GoldenSeed. Each non-top sampled
     // batch is checked by the downstream denoise kernel, all levels OR into one
     // device flag, and the sender reads that flag once after queuing the top
-    // check. LV_GPU_DEFER_GOLDEN_VALIDATION=0 restores the per-level checks.
-    bool deferredGoldenValidationEnabled();
+    // check. mProtocol.mDeferredGoldenValidation=0 restores the per-level checks.
+    bool deferredGoldenValidationEnabled(const LogVoleGpuProtocolOptions& options);
 
     // One synchronous recursive evaluation borrows this attempt. It owns the
     // execution domain and fixes one stream for every level's validation flag.

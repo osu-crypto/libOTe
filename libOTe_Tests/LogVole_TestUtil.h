@@ -11,25 +11,6 @@
 
 namespace tests_libOTe::logvole_test
 {
-    inline int setEnvironment(const char* name, const char* value, int overwrite)
-    {
-#if defined(_WIN32)
-        if (!overwrite && std::getenv(name)) return 0;
-        return _putenv_s(name, value);
-#else
-        return ::setenv(name, value, overwrite);
-#endif
-    }
-
-    inline int unsetEnvironment(const char* name)
-    {
-#if defined(_WIN32)
-        return _putenv_s(name, "");
-#else
-        return ::unsetenv(name);
-#endif
-    }
-
     template<typename T, typename = void>
     struct is_streamable : std::false_type
     {};

@@ -775,16 +775,38 @@ namespace osuCrypto::LogVole
         using RingContextCache = std::
             unordered_map<RingContextCacheKey, std::weak_ptr<const RingNttContext>, RingContextCacheKeyHash>;
 
-        bool makeRingNttContextUncached(const RingParams& params, bool expandModChain, RingNttContext& out);
+        bool makeRingNttContextUncached(const RingParams& params, bool expandModChain, RingNttContext& out, HostStepProfiler* profile);
     }
 
     struct RingContextFactory::Impl
     {
         RingContextCache mCache;
         std::mutex mMutex;
+        std::unique_ptr<RootStepProfiler> mRootProfiler;
+        std::shared_ptr<HostStepProfiler> mHostProfiler;
     };
 
-    RingContextFactory::RingContextFactory() : mImpl(std::make_unique<Impl>()) {}
+    RingContextFactory::RingContextFactory(LogVoleExecutionOptions options)
+        : mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
+    {
+        if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
+        if (mExecutionOptions.mAdvanced.mHostStepProfile)
+            mImpl->mHostProfiler = std::make_shared<HostStepProfiler>();
+        if (mExecutionOptions.mAdvanced.mProtocol.mRootProfile)
+            mImpl->mRootProfiler = std::make_unique<RootStepProfiler>();
+    }
+    RootStepProfiler* RingContextFactory::rootProfiler() const noexcept
+    {
+        return mImpl->mRootProfiler.get();
+    }
+    HostStepProfiler* RingContextFactory::hostProfiler() const noexcept
+    {
+        return mImpl->mHostProfiler.get();
+    }
+    const std::shared_ptr<HostStepProfiler>& RingContextFactory::hostProfilerOwner() const noexcept
+    {
+        return mImpl->mHostProfiler;
+    }
     RingContextFactory::~RingContextFactory() = default;
 
     bool RingContextFactory::make(const RingParams& params, RingNttContext& out,
@@ -801,11 +823,10 @@ namespace osuCrypto::LogVole
         key.mRole = currentProtocolCacheScope().mRole;
         key.mGpuLightweight = lightweight;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* fullChain = std::getenv("LV_GPU_SETUP_FULL_MOD_CHAIN");
-        key.mExpandModChain = !gpu::enabled() || (fullChain && fullChain[0] == '1');
+        key.mExpandModChain = !gpu::enabled(mExecutionOptions) || mExecutionOptions.mAdvanced.mContexts.mFullModChain;
         key.mNativeSealBundleRequested = lightweight && !key.mExpandModChain &&
             gpu::dynamicSealSetupSupported(params) &&
-            gpu::nativeSealBundleCacheRequested(key.mRole);
+            gpu::nativeSealBundleCacheRequested(key.mRole, mExecutionOptions);
 #endif
 
         {
@@ -825,16 +846,16 @@ namespace osuCrypto::LogVole
 
         RingResourceScope resources{key.mRole, key.mNativeSealBundleRequested};
 #if defined(ENABLE_LOGVOLE_CUDA)
-        resources.mTables = std::make_shared<gpu::GpuTableCache>();
+        resources.mTables = std::make_shared<gpu::GpuTableCache>(mExecutionOptions, hostProfilerOwner());
 #endif
         RingNttContext built{};
         if (lightweight)
         {
-            HostStep contextStep("setup: lightweight ring context");
+            HostStep contextStep(hostProfiler(), "setup: lightweight ring context");
             const auto primes = productionRingModuli(params);
             built.mParams = params;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>();
+            built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner());
 #endif
             auto metadata = std::make_shared<RingModulusMetadata>();
             if (!primes.empty()) metadata->mValues.assign(primes.begin(), primes.end());
@@ -860,18 +881,20 @@ namespace osuCrypto::LogVole
             built.mHostContextCache->mRole = key.mRole;
             built.mHostContextCache->mExpandModChain = key.mExpandModChain;
         }
-        else if (!makeRingNttContextUncached(params, key.mExpandModChain, built))
+        else if (!makeRingNttContextUncached(params, key.mExpandModChain, built, hostProfiler()))
         {
             return false;
         }
 
+        built.mExecutionOptions = mExecutionOptions;
+        built.mHostProfiler = hostProfilerOwner();
         built.mCpuCapabilities = CpuCapabilities{};
         built.mFactory = owner;
         built.mResourceScope = std::move(resources);
         built.mPublicCache = std::make_shared<PublicPolynomialCache>();
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (!built.mGpuSetup) built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>();
-        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
+        if (!built.mGpuSetup) built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner());
+        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(mExecutionOptions, hostProfilerOwner());
 #endif
         auto shared = std::make_shared<const RingNttContext>(built);
         {
@@ -889,17 +912,17 @@ namespace osuCrypto::LogVole
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
         std::shared_ptr<RingContextFactory> factory)
     {
+        if (!factory) factory = out.mFactory;
+        if (!factory) factory = std::make_shared<RingContextFactory>();
         bool lightweight = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* setting = std::getenv("LV_GPU_SETUP_LIGHTWEIGHT_RING");
-        const char* fullChain = std::getenv("LV_GPU_SETUP_FULL_MOD_CHAIN");
-        lightweight = gpu::enabled() && (!setting || setting[0] != '0') &&
-            (!fullChain || fullChain[0] != '1') &&
+        const auto& options = factory->executionOptions().mAdvanced.mContexts;
+        lightweight = gpu::enabled(factory->executionOptions()) && options.mLightweightRing &&
+            !options.mFullModChain &&
             (!productionRingModuli(params).empty() ||
                 (gpu::dynamicSealSetupSupported(params) && gpu::currentDeviceOrdinal() == 0));
 #endif
-        if (!factory) factory = out.mFactory;
-        if (!factory) factory = std::make_shared<RingContextFactory>();
+
         return factory->make(params, out, lightweight, factory);
     }
 
@@ -912,7 +935,7 @@ namespace osuCrypto::LogVole
             auto owner = retained;
             RingNttContext selected = *owner;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (!gpu::enabled() && selected.mGpuLightweight)
+            if (!gpu::enabled(selected) && selected.mGpuLightweight)
 #else
             if (selected.mGpuLightweight)
 #endif
@@ -927,7 +950,8 @@ namespace osuCrypto::LogVole
             out = std::move(selected);
             return true;
         }
-        return makeRingNttContext(params, out);
+        return makeRingNttContext(params, out,
+            retained ? retained->mFactory : std::shared_ptr<RingContextFactory>{});
     }
 
     bool makeGpuRingNttContext(const RingParams& params, RingNttContext& out)
@@ -935,13 +959,15 @@ namespace osuCrypto::LogVole
         if (productionRingModuli(params).empty())
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (!gpu::enabled() || gpu::currentDeviceOrdinal() != 0 ||
+            if (!gpu::available() || gpu::currentDeviceOrdinal() != 0 ||
                 !gpu::dynamicSealSetupSupported(params)) return false;
 #else
             return false;
 #endif
         }
-        auto factory = out.mFactory ? out.mFactory : std::make_shared<RingContextFactory>();
+        LogVoleExecutionOptions options;
+        options.mUseGpu = true;
+        auto factory = out.mFactory ? out.mFactory : std::make_shared<RingContextFactory>(options);
         return factory->make(params, out, true, factory);
     }
 
@@ -969,9 +995,11 @@ namespace osuCrypto::LogVole
         metadata->mBitCounts.assign(params.mCoeffModulusBits.begin(),
             params.mCoeffModulusBits.end());
         built.mGpuSetup = certificate->setupContext();
-        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>();
+        built.mExecutionOptions = built.mGpuSetup->executionOptions();
+        built.mHostProfiler = built.mGpuSetup->hostProfilerOwner();
+        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(built.mExecutionOptions, built.mHostProfiler);
         built.mResourceScope = {certificate->rawOwnerRole(), certificate->nativeSealBundleOwner(),
-            std::make_shared<gpu::GpuTableCache>()};
+            std::make_shared<gpu::GpuTableCache>(built.mExecutionOptions, built.mHostProfiler)};
         metadata->mDynamicGpuCertificate = std::move(certificate);
         built.mRawModuli = std::move(metadata);
         built.mGpuLightweight = true;
@@ -1001,9 +1029,10 @@ namespace osuCrypto::LogVole
     bool RingContextFactory::publish(RingNttContext& ready)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
-        HostStep publicationStep("setup: native ring context publication");
+        HostStep publicationStep(hostProfiler(), "setup: native ring context publication");
         const auto owner = ready.mResourceScope;
-        if (!gpu::nativeSealBundleCacheRequested(owner.mRole) ||
+        if (ready.mExecutionOptions != mExecutionOptions ||
+            !gpu::nativeSealBundleCacheRequested(owner.mRole, mExecutionOptions) ||
             !ready.mGpuLightweight || !ready.mRawModuli ||
             !ready.mRawModuli->mDynamicGpuCertificate ||
             !ready.mRawModuli->mDynamicGpuCertificate->nativeSealBundleOwner() ||
@@ -1083,7 +1112,7 @@ namespace osuCrypto::LogVole
         try
         {
             std::call_once(ctx.mHostContextCache->mOnce, [&] {
-                HostStep fallbackStep("setup: ring host fallback materialization");
+                HostStep fallbackStep(hostProfiler(ctx), "setup: ring host fallback materialization");
                 std::vector<seal::Modulus> moduli;
                 moduli.reserve(cache.mRawModuli->mValues.size());
                 for (u64 prime : cache.mRawModuli->mValues) moduli.emplace_back(prime);
@@ -1117,9 +1146,9 @@ namespace osuCrypto::LogVole
 
     namespace
     {
-    bool makeRingNttContextUncached(const RingParams& params, bool expandModChain, RingNttContext& out)
+    bool makeRingNttContextUncached(const RingParams& params, bool expandModChain, RingNttContext& out, HostStepProfiler* profile)
     {
-        HostStep contextStep("setup: ring context build");
+        HostStep contextStep(profile, "setup: ring context build");
         if (!validateRingParams(params))
         {
             return false;
@@ -1128,7 +1157,7 @@ namespace osuCrypto::LogVole
         std::vector<seal::Modulus> moduli;
         try
         {
-            HostStep primesStep("setup: ring modulus generation");
+            HostStep primesStep(profile, "setup: ring modulus generation");
             std::vector<int> coeffModulusBits(
                 params.mCoeffModulusBits.begin(),
                 params.mCoeffModulusBits.end());
@@ -1153,7 +1182,7 @@ namespace osuCrypto::LogVole
         next.mParams = params;
         next.mModuli = std::move(moduli);
         {
-            HostStep sealStep("setup: ring SEAL context");
+            HostStep sealStep(profile, "setup: ring SEAL context");
             // LogVole consumes the key-level NTT/RNS tables and never modulus
             // switches. SEAL still constructs its original key and first data
             // contexts when expansion is disabled; only unused lower levels
@@ -1228,11 +1257,7 @@ namespace osuCrypto::LogVole
 
     bool forwardNttCanonical(RnsPoly& poly, const RingNttContext& ctx)
     {
-        static const bool enabled = [] {
-            const char* value = std::getenv("LV_CPU_SKIP_REDUNDANT_REDUCE");
-            return !value || value[0] != '0';
-        }();
-        return forwardNttImpl(poly, ctx, !enabled);
+        return forwardNttImpl(poly, ctx, !ctx.mExecutionOptions.mAdvanced.mCpu.mSkipRedundantReduce);
     }
 
     bool inverseNtt(RnsPoly& poly, const RingNttContext& ctx)
@@ -1282,9 +1307,8 @@ namespace osuCrypto::LogVole
         for (const auto& poly : polys)
             if (!validateShapeAgainstContext(poly, ctx)) return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* canonicalizeSetting = std::getenv("LV_GPU_SETUP_NTT_CANONICALIZE");
-        const bool deviceCanonicalize = (ctx.mGpuLightweight || polys.size() >= kNttBatchGpuThreshold) && gpu::enabled() &&
-            (!canonicalizeSetting || canonicalizeSetting[0] != '0');
+        const bool deviceCanonicalize = (ctx.mGpuLightweight || polys.size() >= kNttBatchGpuThreshold) && gpu::enabled(ctx) &&
+            ctx.mExecutionOptions.mAdvanced.mProtocol.mNttCanonicalize;
         if (deviceCanonicalize)
         {
             if (gpu::nttHostBatch(ctx, polys, false, true))
@@ -1293,8 +1317,7 @@ namespace osuCrypto::LogVole
                     bumpRingStat(RingOp::Ntt);
                 return true;
             }
-            const char* strict = std::getenv("LV_GPU_SETUP_NTT_CANONICALIZE_STRICT");
-            if (strict && strict[0] != '0') return false;
+            if (ctx.mExecutionOptions.mAdvanced.mProtocol.mNttCanonicalizeStrict) return false;
             // The helper left every host input unchanged. Replay the CPU
             // reduction and transform without making another device attempt.
         }
@@ -1331,9 +1354,8 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (ctx.mGpuLightweight || polys.size() >= kNttBatchGpuThreshold)
         {
-            const char* canonicalizeSetting = std::getenv("LV_GPU_SETUP_NTT_CANONICALIZE");
-            const bool deviceCanonicalize = gpu::enabled() &&
-                (!canonicalizeSetting || canonicalizeSetting[0] != '0');
+            const bool deviceCanonicalize = gpu::enabled(ctx) &&
+                ctx.mExecutionOptions.mAdvanced.mProtocol.mNttCanonicalize;
             if (gpu::nttHostBatch(ctx, polys, true, deviceCanonicalize))
             {
                 for (auto& poly : polys)
@@ -1343,8 +1365,7 @@ namespace osuCrypto::LogVole
                 }
                 return true;
             }
-            const char* strict = std::getenv("LV_GPU_SETUP_NTT_CANONICALIZE_STRICT");
-            if (deviceCanonicalize && strict && strict[0] != '0') return false;
+            if (deviceCanonicalize && ctx.mExecutionOptions.mAdvanced.mProtocol.mNttCanonicalizeStrict) return false;
         }
 #endif
         for (auto& poly : polys)
@@ -2034,13 +2055,12 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
     static bool useDeviceUniformSetup(const RingNttContext& ctx)
     {
-        if (!gpu::enabled()) return false;
-        const bool available = gpu::setupUniformSamplingEnabled() &&
+        if (!gpu::enabled(ctx)) return false;
+        const bool available = gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions) &&
             (ctx.mGpuLightweight ? validateLightweightRingContext(ctx) :
                 (ctx.mContext && ctx.mContext->key_context_data()));
-        const char* requested = std::getenv("LV_GPU_SETUP_UNIFORM_DEVICE");
-        const char* strict = std::getenv("LV_GPU_SETUP_UNIFORM_DEVICE_STRICT");
-        if (!available && (!requested || requested[0] != '0') && strict && strict[0] == '1')
+        if (!available && ctx.mExecutionOptions.mAdvanced.mProtocol.mUniformSampling &&
+            ctx.mExecutionOptions.mAdvanced.mProtocol.mUniformSamplingStrict)
             throw std::runtime_error("setup uniform device sampler is unavailable");
         return available;
     }
@@ -2059,7 +2079,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& hostCoefficients() const override
         {
             std::call_once(mOnce, [&] {
-                HostStep step("setup sender: top sk1 exact seed replay");
+                HostStep step(hostProfiler(mCtx), "setup sender: top sk1 exact seed replay");
                 std::vector<RnsPoly> next(mSeeds.size());
                 for (std::size_t row = 0; row < mSeeds.size(); ++row)
                     next[row] = sampleUniformPolyFromSeed(mCtx, mSeeds[row]);
@@ -2092,8 +2112,7 @@ namespace osuCrypto::LogVole
             }
             return out;
         }
-        const char* strict = std::getenv("LV_GPU_SETUP_UNIFORM_DEVICE_STRICT");
-        if (strict && strict[0] == '1')
+        if (ctx.mExecutionOptions.mAdvanced.mProtocol.mUniformSamplingStrict)
             throw std::runtime_error("setup uniform device sampler failed");
         if (captured) captured->reset();
         // The parent stream has already advanced. Replay precisely those SEAL
@@ -2168,13 +2187,11 @@ namespace osuCrypto::LogVole
     {
         if (!count) return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* option = std::getenv("LV_GPU_SETUP_TOP_SK1_DEVICE");
-        const char* strictOption = std::getenv("LV_GPU_SETUP_TOP_SK1_DEVICE_STRICT");
-        const bool requested = gpu::enabled() &&
+        const bool requested = gpu::enabled(ctx) &&
             currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender &&
             currentProtocolCacheScope().mRunId &&
-            (!option || option[0] != '0');
-        const bool strict = requested && strictOption && strictOption[0] != '0';
+            ctx.mExecutionOptions.mAdvanced.mProtocol.mTopSecretDevice;
+        const bool strict = requested && ctx.mExecutionOptions.mAdvanced.mProtocol.mTopSecretDeviceStrict;
         if (requested && useDeviceUniformSetup(ctx))
         {
             std::vector<seal::prng_seed_type> seeds(count);
@@ -2560,20 +2577,11 @@ namespace osuCrypto::LogVole
         std::size_t wordsPerPrefix = 0;
         bool devicePrefixes = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* transformSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM");
-        if (gpu::enabled() && (!transformSetting || transformSetting[0] != '0'))
+        if (gpu::enabled(ctx) && ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransform)
         {
-            const char* strictSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_STRICT");
-            const bool strict = strictSetting && strictSetting[0] != '0';
-            u64 blocks = 0;
-            bool validPrefix = true;
-            if (const char* overrideBlocks = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_PREFIX_BLOCKS"))
-            {
-                char* end = nullptr;
-                blocks = std::strtoull(overrideBlocks, &end, 10);
-                validPrefix = end != overrideBlocks && *end == '\0' &&
-                    blocks <= std::numeric_limits<u32>::max() / 512u;
-            }
+            const bool strict = ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformStrict;
+            const u64 blocks = ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformPrefixBlocks;
+            const bool validPrefix = blocks <= std::numeric_limits<u32>::max() / 512u;
             gpu::GaussianSampleBuffer sampled;
             bool transformed = false;
             if (validPrefix && n <= std::numeric_limits<u32>::max() &&
@@ -2585,7 +2593,7 @@ namespace osuCrypto::LogVole
                 transformed = gpu::sampleGaussianCompactDevice(
                     gpu::contextSampleStream(ctx), activeSeeds, static_cast<u32>(n),
                     noiseStandardDeviation, noiseMaxDeviation, ringModulusValue(ctx, 0), sampled,
-                    static_cast<u32>(blocks * 512u));
+                    static_cast<u32>(blocks * 512u), ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures);
             }
             // A declined strict transform must not publish any destination
             // samples. Successful finite prefixes may still require exact
@@ -2597,7 +2605,7 @@ namespace osuCrypto::LogVole
                     auto destination = limb0.subspan(row * n, n);
                     if (!sampled.mComplete[task])
                     {
-                        HostStep replayStep("setup: Gaussian CPU replay");
+                        HostStep replayStep(hostProfiler(ctx), "setup: Gaussian CPU replay");
                         return samplePolyErrorCompactFromSeed(destination, noiseStandardDeviation,
                             noiseMaxDeviation, seeds[row], ctx);
                     }
@@ -2607,23 +2615,16 @@ namespace osuCrypto::LogVole
                     return true;
                 });
         }
-        const char* setting = std::getenv("LV_GPU_SETUP_GAUSSIAN_PRG");
-        const bool requested = gpu::enabled() && (!setting || setting[0] != '0');
+        const bool requested = gpu::enabled(ctx) && ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianPrg;
         if (requested)
         {
-            const char* strictSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_PRG_STRICT");
-            const bool strict = strictSetting && strictSetting[0] != '0';
+            const bool strict = ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianPrgStrict;
             // Three u32 words per coefficient exceed the normal polar sampler's
             // expected consumption; arbitrary clipping still has exact CPU
             // continuation when that finite prefix is exhausted.
             const u64 defaultBlocks = (static_cast<u64>(n) * 3u + 1023u) / 1024u;
-            u64 blocks = defaultBlocks;
-            if (const char* overrideBlocks = std::getenv("LV_GPU_SETUP_GAUSSIAN_PRG_PREFIX_BLOCKS"))
-            {
-                char* end = nullptr;
-                const auto parsed = std::strtoull(overrideBlocks, &end, 10);
-                if (end != overrideBlocks && *end == '\0' && parsed) blocks = parsed;
-            }
+            const u64 blocks = ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianPrgPrefixBlocks
+                ? ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianPrgPrefixBlocks : defaultBlocks;
             if (blocks <= std::numeric_limits<u32>::max() / 512u)
             {
                 wordsPerPrefix = static_cast<std::size_t>(blocks) * 512u;
@@ -2631,7 +2632,7 @@ namespace osuCrypto::LogVole
                 for (std::size_t i = 0; i < activeRows.size(); ++i) activeSeeds[i] = seeds[activeRows[i]];
                 gpu::GaussianPrngPrefixBuffer downloaded;
                 devicePrefixes = gpu::sampleGaussianPrngPrefixesDevice(
-                    gpu::contextSampleStream(ctx), activeSeeds, static_cast<u32>(wordsPerPrefix), downloaded);
+                    gpu::contextSampleStream(ctx), activeSeeds, static_cast<u32>(wordsPerPrefix), downloaded, ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures);
                 if (devicePrefixes)
                 {
                     prefixOwner = std::move(downloaded.mData);
@@ -2669,26 +2670,17 @@ namespace osuCrypto::LogVole
             (!active.empty() && active.size() != seeds.size())) return false;
         if (seeds.empty()) { host.clear(); device.reset(); return true; }
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* resident = std::getenv("LV_GPU_SETUP_GAUSSIAN_RESIDENT");
-        if (gpu::enabled() && (!resident || resident[0] != '0'))
+        if (gpu::enabled(ctx) && ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResident)
         {
-            const char* strictSetting = std::getenv("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT");
-            const bool strict = strictSetting && strictSetting[0] != '0';
-            const char* transform = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM");
-            u64 blocks = 0;
-            bool validPrefix = true;
-            if (const char* setting = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_PREFIX_BLOCKS"))
-            {
-                char* end = nullptr;
-                blocks = std::strtoull(setting, &end, 10);
-                validPrefix = end != setting && *end == '\0' && blocks <= std::numeric_limits<u32>::max() / 512u;
-            }
+            const bool strict = ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResidentStrict;
+            const u64 blocks = ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformPrefixBlocks;
+            const bool validPrefix = blocks <= std::numeric_limits<u32>::max() / 512u;
             gpu::GaussianDeviceSampleBuffer sampled;
-            bool ready = (!transform || transform[0] != '0') && validPrefix &&
+            bool ready = ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransform && validPrefix &&
                 n <= std::numeric_limits<u32>::max() && gpu::gaussianTransformHostCompatible() &&
                 gpu::sampleGaussianCompactResidentDevice(
                     gpu::contextSampleStream(ctx), seeds, static_cast<u32>(n), sigma, clip,
-                    ringModulusValue(ctx, 0), sampled, static_cast<u32>(blocks * 512u), active);
+                    ringModulusValue(ctx, 0), sampled, static_cast<u32>(blocks * 512u), active, ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures);
             if (ready)
             {
                 std::vector<std::size_t> incomplete;
@@ -2705,7 +2697,7 @@ namespace osuCrypto::LogVole
                         attempt < 8u && retryWords <= std::numeric_limits<u32>::max();
                         ++attempt)
                 {
-                    HostStep retryStep("setup: Gaussian resident GPU repair retry");
+                    HostStep retryStep(hostProfiler(ctx), "setup: Gaussian resident GPU repair retry");
                     std::vector<seal::prng_seed_type> retrySeeds;
                     retrySeeds.reserve(incomplete.size());
                     for (const auto row : incomplete) retrySeeds.push_back(seeds[row]);
@@ -2713,7 +2705,7 @@ namespace osuCrypto::LogVole
                     if (!gpu::sampleGaussianCompactResidentDevice(
                             gpu::contextSampleStream(ctx), retrySeeds, static_cast<u32>(n), sigma, clip,
                             ringModulusValue(ctx, 0), retried,
-                            static_cast<u32>(retryWords))) break;
+                            static_cast<u32>(retryWords), {}, ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures)) break;
                     auto& stream = gpu::contextSampleStream(ctx);
                     gpu::StreamDrain drain{stream};
                     std::vector<std::size_t> remaining;
@@ -2743,7 +2735,7 @@ namespace osuCrypto::LogVole
                 }
                 std::vector<std::vector<u64>> repaired(incomplete.size());
                 ready = ready && detail::runParallelTasks(incomplete.size(), requestedWorkers, [&](std::size_t i) {
-                    HostStep repairStep("setup: Gaussian resident CPU repair");
+                    HostStep repairStep(hostProfiler(ctx), "setup: Gaussian resident CPU repair");
                     repaired[i].resize(n);
                     return samplePolyErrorCompactFromSeed(repaired[i], sigma, clip, seeds[incomplete[i]], ctx);
                 });
@@ -2792,10 +2784,10 @@ namespace osuCrypto::LogVole
         if (device)
         {
             if (device->count() != words) return false;
-            if (gpu::enabled() && gpu::fetchScalars(*device, next, gpu::contextStream(ctx))) { host = std::move(next); return true; }
+            if (gpu::enabled(ctx) && gpu::fetchScalars(*device, next, gpu::contextStream(ctx))) { host = std::move(next); return true; }
             // A declined asynchronous fetch must drain before CPU replay can
             // reuse its destination, including copy/sync error exits.
-            if (gpu::enabled()) gpu::contextStream(ctx).sync();
+            if (gpu::enabled(ctx)) gpu::contextStream(ctx).sync();
             std::fill(next.begin(), next.end(), 0);
         }
 #else

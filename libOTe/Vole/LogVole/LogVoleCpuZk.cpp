@@ -13,20 +13,15 @@
 
 namespace osuCrypto::LogVole::detail
 {
-    CpuZkOptions captureCpuZkOptions()
+    CpuZkOptions captureCpuZkOptions(const LogVoleZkOptions& settings)
     {
-        const auto enabled = [](const char* name) {
-            const char* value = std::getenv(name);
-            return !value || value[0] != '0';
-        };
         CpuZkOptions options;
-        options.mPseudoReduce = enabled("LV_CPU_ZK_PSEUDO_REDUCE");
+        options.mPseudoReduce = settings.mCpuPseudoReduce;
 #if defined(OC_ENABLE_AVX512_IFMA) && defined(OC_COMPILER_HAS_AVX512_IFMA_DISPATCH)
-        const bool vector = __builtin_cpu_supports("avx512f") &&
-            __builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512ifma");
-        options.mVectorGates = vector && options.mPseudoReduce && enabled("LV_CPU_VECTOR_ZK");
-        options.mVectorWitness = options.mVectorGates && enabled("LV_CPU_VECTOR_WITNESS");
-        options.mVectorMatMul = vector && enabled("LV_CPU_VECTOR_MATMUL");
+        const bool vector = settings.mAdvanced.mCpu.ifma();
+        options.mVectorGates = vector && options.mPseudoReduce && settings.mCpuVectorGates;
+        options.mVectorWitness = options.mVectorGates && settings.mCpuVectorWitness;
+        options.mVectorMatMul = vector && settings.mCpuVectorMatMul;
 #endif
         return options;
     }

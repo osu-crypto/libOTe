@@ -1,3 +1,5 @@
+#include "cryptoTools/Common/CLP.h"
+#include "libOTe_Tests/LogVole_TestOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
@@ -23,49 +25,7 @@ using namespace osuCrypto::LogVole;
 
 namespace
 {
-    class ScopedEnvironmentValue
-    {
-    public:
-        ScopedEnvironmentValue(const char* name, const char* value)
-            : mName(name)
-        {
-            if (const char* old = std::getenv(name))
-            {
-                mHadOld = true;
-                mOld = old;
-            }
-            if (value) ::tests_libOTe::logvole_test::setEnvironment(name, value, 1);
-            else ::tests_libOTe::logvole_test::unsetEnvironment(name);
-        }
-        ~ScopedEnvironmentValue()
-        {
-            if (mHadOld) ::tests_libOTe::logvole_test::setEnvironment(mName.c_str(), mOld.c_str(), 1);
-            else ::tests_libOTe::logvole_test::unsetEnvironment(mName.c_str());
-        }
-        ScopedEnvironmentValue(const ScopedEnvironmentValue&) = delete;
-        ScopedEnvironmentValue& operator=(const ScopedEnvironmentValue&) = delete;
-    private:
-        std::string mName;
-        std::string mOld;
-        bool mHadOld = false;
-    };
 
-#if defined(ENABLE_LOGVOLE_CUDA)
-    class ScopedGpuEnabled
-    {
-    public:
-        explicit ScopedGpuEnabled(bool enabled)
-            : mWasEnabled(gpu::enabled())
-        {
-            gpu::setEnabled(enabled);
-        }
-        ~ScopedGpuEnabled() { gpu::setEnabled(mWasEnabled); }
-        ScopedGpuEnabled(const ScopedGpuEnabled&) = delete;
-        ScopedGpuEnabled& operator=(const ScopedGpuEnabled&) = delete;
-    private:
-        bool mWasEnabled;
-    };
-#endif
 
     struct LencParams
     {
@@ -229,18 +189,29 @@ namespace
         LOGVOLE_REQUIRE_TRUE(rangesEqual(shortOutput, before));
     }
 
-    void check_trunc_setup_parity(const LencParams& params, std::uint32_t width = 0)
+    void check_trunc_setup_parity(const LencParams& params, bool useGpu, std::uint32_t width = 0)
     {
-        ScopedEnvironmentValue residentDefault("LV_GPU_SETUP_GAUSSIAN_RESIDENT", "0");
+        osuCrypto::LogVoleGpuSetupOptions setupOptions;
+        osuCrypto::LogVoleExecutionOptions advanced;
+        advanced.mUseGpu = useGpu;
+        advanced.mAdvanced.mStreams.mIndexScratchKiB = 256;
+        advanced.mAdvanced.mStreams.mReuseDownloadStaging = false;
+        advanced.mAdvanced.mProtocol.mGaussianResident = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool haveGpu = gpu::enabled();
+        const bool haveGpu = gpu::enabled(advanced);
         const bool haveGaussian = haveGpu && gpu::gaussianTransformHostCompatible();
 #else
         const bool haveGpu = false;
         const bool haveGaussian = false;
 #endif
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx,
+            std::make_shared<RingContextFactory>(advanced)));
+        RingNttContext cpuCtx;
+        auto cpuOptions = advanced;
+        cpuOptions.mUseGpu = false;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, cpuCtx,
+            std::make_shared<RingContextFactory>(cpuOptions)));
         check_compact_noise_parity(ctx);
         auto s = sample_batch(ctx, params.mMu, 0x1E2CB47Cu);
         const auto publicB = buildLencPublicBNtt(ctx, params.mTauHi + 1);
@@ -257,47 +228,44 @@ namespace
             oc::PRNG referencePrng(oc::block(0x1E2C5EEDu, 0), 3);
             LencEncodeOutput expected{};
             {
-                ScopedEnvironmentValue option("LV_GPU_SETUP_LENC", "0");
-                ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_LENC_DEVICE", "0");
-#if defined(ENABLE_LOGVOLE_CUDA)
-                // The reference uses host transforms throughout, including
-                // generic batch helpers reached by the serial implementation.
-                ScopedGpuEnabled cpuReference(false);
-#endif
+                tests_libOTe::logvole_test::ScopedOptionValue option(setupOptions.mParallelLenc, (false) ? osuCrypto::LogVoleChoice::Enabled : osuCrypto::LogVoleChoice::Disabled);
+                tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mLencDevice, false);
+                // Keep every transform in the reference on the CPU.
+                const auto& ctx = cpuCtx;
                 LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, referencePrng,
-                    expected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 1));
+                    expected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 1, false, false, nullptr, nullptr, setupOptions));
             }
             const auto nextReference = referencePrng.get<oc::block>();
             if (haveGpu)
             {
-                ScopedEnvironmentValue resident("LV_GPU_SETUP_GAUSSIAN_RESIDENT", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue resident(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResident, true);
                 // Unknown host arithmetic must exercise exact host replay; strict rejection is checked separately.
-                ScopedEnvironmentValue residentStrict("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", haveGaussian ? "1" : "0");
-                ScopedEnvironmentValue residentDecline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", "0");
-                ScopedEnvironmentValue transform("LV_GPU_SETUP_GAUSSIAN_TRANSFORM", "1");
-                ScopedEnvironmentValue transformStrict("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_STRICT", haveGaussian ? "1" : "0");
-                ScopedEnvironmentValue transformDecline("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_FORCE_DECLINE", "0");
-                ScopedEnvironmentValue device("LV_GPU_SETUP_LENC_DEVICE", "1");
-                ScopedEnvironmentValue deviceStrict("LV_GPU_SETUP_LENC_DEVICE_STRICT", "1");
-                ScopedEnvironmentValue deviceDecline("LV_GPU_SETUP_LENC_DEVICE_FORCE_DECLINE", "0");
-                ScopedEnvironmentValue compact("LV_GPU_SETUP_COMPACT_NOISE", "1");
-                ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "1");
-                ScopedEnvironmentValue padding("LV_GPU_SETUP_LENC_DEVICE_PADDING", "1");
-                ScopedEnvironmentValue randomizer("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT", "1");
-                ScopedEnvironmentValue randomizerStrict("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_STRICT", "1");
-                ScopedEnvironmentValue randomizerDecline("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_FORCE_DECLINE", "0");
+                tests_libOTe::logvole_test::ScopedOptionValue residentStrict(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResidentStrict, (haveGaussian));
+                tests_libOTe::logvole_test::ScopedOptionValue residentDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mGaussianResident, false);
+                tests_libOTe::logvole_test::ScopedOptionValue transform(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransform, true);
+                tests_libOTe::logvole_test::ScopedOptionValue transformStrict(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformStrict, (haveGaussian));
+                tests_libOTe::logvole_test::ScopedOptionValue transformDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mGaussianTransform, false);
+                tests_libOTe::logvole_test::ScopedOptionValue device(setupOptions.mLencDevice, true);
+                tests_libOTe::logvole_test::ScopedOptionValue deviceStrict(setupOptions.mLencDeviceStrict, true);
+                tests_libOTe::logvole_test::ScopedOptionValue deviceDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencDevice, false);
+                tests_libOTe::logvole_test::ScopedOptionValue compact(setupOptions.mCompactNoise, true);
+                tests_libOTe::logvole_test::ScopedOptionValue compactStrict(setupOptions.mCompactNoiseStrict, true);
+                tests_libOTe::logvole_test::ScopedOptionValue padding(setupOptions.mLencDevicePadding, true);
+                tests_libOTe::logvole_test::ScopedOptionValue randomizer(setupOptions.mLencRandomizerOutput, true);
+                tests_libOTe::logvole_test::ScopedOptionValue randomizerStrict(setupOptions.mLencRandomizerOutputStrict, true);
+                tests_libOTe::logvole_test::ScopedOptionValue randomizerDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencRandomizerOutput, false);
                 auto invoke = [&](oc::PRNG& prng, LencEncodeOutput& out, bool emitR) {
                     return lencEncTrunc(ctx, s, params.mTauHi, params.mGadgetLogBase,
                         params.mPlaintextModulusBits, prng, out, sigma, 6 * sigma,
-                        width, emitR, gadgetLeaves, &publicB, 4);
+                        width, emitR, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions);
                 };
                 // Focus on resident R/ciphertext sampling and finite-prefix
                 // repair without multiplying the complete option matrix below.
                 for (const char* blocks : {"0", "1"})
                 for (bool emitR : {false, true})
                 {
-                    ScopedEnvironmentValue prefix("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_PREFIX_BLOCKS", blocks);
+                    tests_libOTe::logvole_test::ScopedOptionValue prefix(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformPrefixBlocks, static_cast<std::uint64_t>(std::strtoull(blocks, nullptr, 10)));
                     oc::PRNG actualPrng(oc::block(0x1E2C5EEDu, 0), 3);
                     LencEncodeOutput actual;
                     LOGVOLE_REQUIRE_TRUE(invoke(actualPrng, actual, emitR));
@@ -305,12 +273,11 @@ namespace
                     LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), nextReference);
                 }
                 {
-                    ScopedEnvironmentValue retain("LV_GPU_SETUP_LENC_RANDOMIZER_RESIDENT", "1");
                     oc::PRNG retainedPrng(oc::block(0x1E2C5EEDu, 0), 3);
                     LencEncodeOutput retained;
                     LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
                         params.mGadgetLogBase, params.mPlaintextModulusBits, retainedPrng,
-                        retained, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, true));
+                        retained, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, true, nullptr, nullptr, setupOptions));
                     LOGVOLE_REQUIRE_TRUE(retained.mLazyRandomizers != nullptr);
                     LOGVOLE_REQUIRE_EQ(retained.mLazyRandomizers->count(), s.size());
                     LOGVOLE_REQUIRE_TRUE(retained.mR.empty() && retained.mRNtt.empty());
@@ -325,15 +292,13 @@ namespace
                     std::vector<RnsPoly> starB{publicB.back()};
                     oc::PRNG lheReferencePrng(oc::block(0xC7, 1), 3), rootReferencePrng(oc::block(0xC7, 2), 3);
                     {
-#if defined(ENABLE_LOGVOLE_CUDA)
-                        ScopedGpuEnabled cpuReference(false);
-#endif
+                        const auto& ctx = cpuCtx;
                         LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, expected.mRNtt, sk,
                             params.mGadgetLogBase, referenceLhe, sigma, 6 * sigma, &lheReferencePrng,
-                            true, publicA.get(), 1));
+                            true, publicA.get(), 1, nullptr,  {}, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions));
                         LOGVOLE_REQUIRE_TRUE(buildRootTopCt(ctx, expected.mR, expected.mRNtt,
                             rootB, starB, params.mGadgetLogBase, 1, rootReferencePrng, sigma,
-                            6 * sigma, referenceRoot, 1));
+                            6 * sigma, referenceRoot, 1,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
                     }
                     const auto nextLhe = lheReferencePrng.get<oc::block>();
                     const auto nextRoot = rootReferencePrng.get<oc::block>();
@@ -341,21 +306,21 @@ namespace
                     // snapshot. Decline replays existing seeds, never resamples.
                     for (const char* decline : {"0", "1"})
                     {
-                        ScopedEnvironmentValue lheDevice("LV_GPU_SETUP_LHE_DEVICE", "1");
-                        ScopedEnvironmentValue lheDecline("LV_GPU_SETUP_LHE_DEVICE_FORCE_DECLINE", decline);
-                        ScopedEnvironmentValue lheStrict("LV_GPU_SETUP_LHE_DEVICE_STRICT", decline[0] == '0' ? "1" : "0");
-                        ScopedEnvironmentValue rootDevice("LV_GPU_SETUP_ROOT_DEVICE", "1");
-                        ScopedEnvironmentValue rootDecline("LV_GPU_SETUP_ROOT_DEVICE_FORCE_DECLINE", decline);
-                        ScopedEnvironmentValue rootStrict("LV_GPU_SETUP_ROOT_DEVICE_STRICT", decline[0] == '0' ? "1" : "0");
-                        ScopedEnvironmentValue allowFallback("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "0");
-                        ScopedEnvironmentValue rootCompact("LV_GPU_SETUP_ROOT_COMPACT_NOISE", "1");
-                        ScopedEnvironmentValue rootCompactStrict("LV_GPU_SETUP_ROOT_COMPACT_NOISE_STRICT", "0");
+                        tests_libOTe::logvole_test::ScopedOptionValue lheDevice(setupOptions.mLheDevice, true);
+                        tests_libOTe::logvole_test::ScopedOptionValue lheDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLheDevice, (decline)[0] == '1');
+                        tests_libOTe::logvole_test::ScopedOptionValue lheStrict(setupOptions.mLheDeviceStrict, (decline[0] == '0' ? "1" : "0")[0] != '0');
+                        tests_libOTe::logvole_test::ScopedOptionValue rootDevice(setupOptions.mRootDevice, true);
+                        tests_libOTe::logvole_test::ScopedOptionValue rootDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootDevice, (decline)[0] == '1');
+                        tests_libOTe::logvole_test::ScopedOptionValue rootStrict(setupOptions.mRootDeviceStrict, (decline[0] == '0' ? "1" : "0")[0] != '0');
+                        tests_libOTe::logvole_test::ScopedOptionValue allowFallback(setupOptions.mCompactNoiseStrict, false);
+                        tests_libOTe::logvole_test::ScopedOptionValue rootCompact(setupOptions.mRootCompactNoise, true);
+                        tests_libOTe::logvole_test::ScopedOptionValue rootCompactStrict(setupOptions.mRootCompactNoiseStrict, false);
                         RingTensor actualLhe, actualRoot;
                         oc::PRNG lhePrng(oc::block(0xC7, 1), 3), rootPrng(oc::block(0xC7, 2), 3);
                         LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, {}, sk, params.mGadgetLogBase,
-                            actualLhe, sigma, 6 * sigma, &lhePrng, true, publicA.get(), 4, nullptr, owner));
+                            actualLhe, sigma, 6 * sigma, &lhePrng, true, publicA.get(), 4, nullptr, owner, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions));
                         LOGVOLE_REQUIRE_TRUE(buildRootTopCt(ctx, expected.mR, {}, rootB, starB,
-                            params.mGadgetLogBase, 1, rootPrng, sigma, 6 * sigma, actualRoot, 4, owner));
+                            params.mGadgetLogBase, 1, rootPrng, sigma, 6 * sigma, actualRoot, 4, owner, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
                         expect_tensor_equal(referenceLhe, actualLhe);
                         expect_tensor_equal(referenceRoot, actualRoot);
                         LOGVOLE_EXPECT_EQ(lhePrng.get<oc::block>(), nextLhe);
@@ -378,15 +343,19 @@ namespace
                     const auto* rejectedData = rejected.mPolys.data();
                     oc::PRNG invalidPrng(oc::block(0xC7, 1), 3), untouchedPrng(oc::block(0xC7, 1), 3);
                     LOGVOLE_REQUIRE_FALSE(lheEnc1Trunc(ctx, expected.mRNtt, sk, params.mGadgetLogBase,
-                        rejected, sigma, 6 * sigma, &invalidPrng, true, publicA.get(), 4, nullptr, owner));
+                        rejected, sigma, 6 * sigma, &invalidPrng, true, publicA.get(), 4, nullptr, owner, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions));
                     LOGVOLE_REQUIRE_TRUE(rejected.mPolys.data() == rejectedData);
                     LOGVOLE_EXPECT_EQ(invalidPrng.get<oc::block>(), untouchedPrng.get<oc::block>());
                     {
-                        ScopedEnvironmentValue optOut("LV_GPU_SETUP_LENC_RANDOMIZER_RESIDENT", "0");
+                        auto eagerOptions = ctx.mExecutionOptions;
+                        eagerOptions.mAdvanced.mProtocol.mLencRandomizerResidency = false;
+                        RingNttContext eagerCtx;
+                        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, eagerCtx,
+                            std::make_shared<RingContextFactory>(eagerOptions)));
                         oc::PRNG eagerPrng(oc::block(0x1E2C5EEDu, 0), 3);
-                        LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
+                        LOGVOLE_REQUIRE_TRUE(lencEncTrunc(eagerCtx, s, params.mTauHi,
                             params.mGadgetLogBase, params.mPlaintextModulusBits, eagerPrng,
-                            retained, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, true));
+                            retained, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, true, nullptr, nullptr, setupOptions));
                         LOGVOLE_REQUIRE_FALSE(retained.mLazyRandomizers);
                         expect_encoding_equal(expected, retained);
                         LOGVOLE_EXPECT_EQ(eagerPrng.get<oc::block>(), nextReference);
@@ -397,7 +366,7 @@ namespace
                     LencEncodeOutput deferred;
                     LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
                         params.mGadgetLogBase, params.mPlaintextModulusBits, deferredPrng,
-                        deferred, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true));
+                        deferred, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, false, nullptr, nullptr, setupOptions));
                     expect_deferred_tensor_equal(deferred.mLazyCt, deferred.mLacct.mCt, expected.mLacct.mCt);
                     LOGVOLE_EXPECT_EQ(deferredPrng.get<oc::block>(), nextReference);
                     auto materialized = deferred;
@@ -415,7 +384,7 @@ namespace
                         oc::PRNG untouchedPrng(oc::block(0x1E2C5EEDu, 0), 3);
                         LOGVOLE_REQUIRE_FALSE(lencEncTrunc(ctx, s, 0,
                             params.mGadgetLogBase, params.mPlaintextModulusBits, rejectedPrng,
-                            rejected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true));
+                            rejected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, false, nullptr, nullptr, setupOptions));
                         LOGVOLE_REQUIRE_TRUE(rejected.mLazyCt == retained);
                         LOGVOLE_REQUIRE_TRUE(rejected.mLacct.mCt.mPolys.data() == storage);
                         expect_encoding_equal(expected, rejected);
@@ -440,16 +409,16 @@ namespace
                 }
                 if (sigma > 0.0)
                 {
-                    ScopedEnvironmentValue decline("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE", "1");
+                    tests_libOTe::logvole_test::ScopedOptionValue decline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mGaussianResident, true);
                     {
-                        ScopedEnvironmentValue replay("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", "0");
+                        tests_libOTe::logvole_test::ScopedOptionValue replay(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResidentStrict, false);
                         oc::PRNG replayPrng(oc::block(0x1E2C5EEDu, 0), 3);
                         LencEncodeOutput actual;
                         LOGVOLE_REQUIRE_TRUE(invoke(replayPrng, actual, true));
                         expect_encoding_equal(expected, actual);
                         LOGVOLE_EXPECT_EQ(replayPrng.get<oc::block>(), nextReference);
                     }
-                    ScopedEnvironmentValue requireResident("LV_GPU_SETUP_GAUSSIAN_RESIDENT_STRICT", "1");
+                    tests_libOTe::logvole_test::ScopedOptionValue requireResident(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResidentStrict, true);
                     oc::PRNG rejectedPrng(oc::block(0x1E2C5EEDu, 0), 3);
                     oc::PRNG seedPrefix(oc::block(0x1E2C5EEDu, 0), 3);
                     for (std::size_t i = 0; i < static_cast<std::size_t>(expected.mLacct.mLevels) *
@@ -480,88 +449,93 @@ namespace
                 if (!emitRCoeffDomain && !compactNoise) continue;
                 if (deviceRandomizerOutput && !compactNoise) continue;
                 if (devicePadding && (!deviceAssembly || directDownload || workers != 4u || deviceRandomizerOutput)) continue;
-                ScopedEnvironmentValue option("LV_GPU_SETUP_LENC", "1");
-                ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_LENC_DEVICE", deviceAssembly ? "1" : "0");
+                tests_libOTe::logvole_test::ScopedOptionValue option(setupOptions.mParallelLenc, (true) ? osuCrypto::LogVoleChoice::Enabled : osuCrypto::LogVoleChoice::Disabled);
+                tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mLencDevice, (deviceAssembly ? "1" : "0")[0] != '0');
                 // Strict mode makes the device-selected branch fail instead
                 // of silently satisfying this equality test with CPU fallback.
-                ScopedEnvironmentValue strictOption("LV_GPU_SETUP_LENC_DEVICE_STRICT", "1");
-                ScopedEnvironmentValue compactOption("LV_GPU_SETUP_COMPACT_NOISE", compactNoise ? "1" : "0");
-                ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "1");
-                ScopedEnvironmentValue forceOption("LV_GPU_SETUP_LENC_DEVICE_FORCE_DECLINE", "0");
-                ScopedEnvironmentValue downloadOption("LV_GPU_SETUP_DIRECT_DOWNLOAD", directDownload ? "1" : "0");
-                ScopedEnvironmentValue randomizerOutput("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT", deviceRandomizerOutput ? "1" : "0");
-                ScopedEnvironmentValue randomizerStrict("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_STRICT", "1");
-                ScopedEnvironmentValue randomizerDecline("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_FORCE_DECLINE", "0");
+                tests_libOTe::logvole_test::ScopedOptionValue strictOption(setupOptions.mLencDeviceStrict, true);
+                tests_libOTe::logvole_test::ScopedOptionValue compactOption(setupOptions.mCompactNoise, (compactNoise ? "1" : "0")[0] != '0');
+                tests_libOTe::logvole_test::ScopedOptionValue compactStrict(setupOptions.mCompactNoiseStrict, true);
+                tests_libOTe::logvole_test::ScopedOptionValue forceOption(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencDevice, false);
+                auto advanced = ctx.mExecutionOptions;
+                advanced.mAdvanced.mProtocol.mPipelinedDownload = false;
+                advanced.mAdvanced.mProtocol.mDirectDownload = directDownload;
+                RingNttContext selected;
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ctx.mParams, selected,
+                    std::make_shared<RingContextFactory>(advanced)));
+                tests_libOTe::logvole_test::ScopedOptionValue randomizerOutput(setupOptions.mLencRandomizerOutput, (deviceRandomizerOutput ? "1" : "0")[0] != '0');
+                tests_libOTe::logvole_test::ScopedOptionValue randomizerStrict(setupOptions.mLencRandomizerOutputStrict, true);
+                tests_libOTe::logvole_test::ScopedOptionValue randomizerDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencRandomizerOutput, false);
                 // Generic expansion must not inherit the unrelated root hook.
-                ScopedEnvironmentValue rootDecline("LV_GPU_SETUP_ROOT_COMPACT_NOISE_FORCE_DECLINE", "1");
-                ScopedEnvironmentValue paddingOption("LV_GPU_SETUP_LENC_DEVICE_PADDING", devicePadding ? "1" : "0");
+                tests_libOTe::logvole_test::ScopedOptionValue rootDecline(selected.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootCompactNoise, true);
+                tests_libOTe::logvole_test::ScopedOptionValue paddingOption(setupOptions.mLencDevicePadding, (devicePadding ? "1" : "0")[0] != '0');
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (deviceAssembly) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+                if (deviceAssembly) LOGVOLE_REQUIRE_TRUE(gpu::enabled(ctx));
 #endif
                 oc::PRNG actualPrng(oc::block(0x1E2C5EEDu, 0), 3);
                 LencEncodeOutput actual{};
-                LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
+                LOGVOLE_REQUIRE_TRUE(lencEncTrunc(selected, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, actualPrng,
-                    actual, sigma, 6 * sigma, width, emitRCoeffDomain, gadgetLeaves, &publicB, workers));
+                    actual, sigma, 6 * sigma, width, emitRCoeffDomain, gadgetLeaves, &publicB, workers, false, false, nullptr, nullptr, setupOptions));
                 expect_encoding_equal(expected, actual, emitRCoeffDomain);
                 LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), nextReference);
             }
             if (haveGpu)
             {
-                ScopedEnvironmentValue option("LV_GPU_SETUP_LENC", "1");
-                ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_LENC_DEVICE", "1");
-                ScopedEnvironmentValue compactOption("LV_GPU_SETUP_COMPACT_NOISE", "1");
-                ScopedEnvironmentValue forceOption("LV_GPU_SETUP_LENC_DEVICE_FORCE_DECLINE", "1");
-                ScopedEnvironmentValue deviceStrict("LV_GPU_SETUP_LENC_DEVICE_STRICT", "0");
-                ScopedEnvironmentValue compactStrict("LV_GPU_SETUP_COMPACT_NOISE_STRICT", "0");
-                ScopedEnvironmentValue paddingOption("LV_GPU_SETUP_LENC_DEVICE_PADDING", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue option(setupOptions.mParallelLenc, (true) ? osuCrypto::LogVoleChoice::Enabled : osuCrypto::LogVoleChoice::Disabled);
+                tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mLencDevice, true);
+                tests_libOTe::logvole_test::ScopedOptionValue compactOption(setupOptions.mCompactNoise, true);
+                tests_libOTe::logvole_test::ScopedOptionValue forceOption(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencDevice, true);
+                tests_libOTe::logvole_test::ScopedOptionValue deviceStrict(setupOptions.mLencDeviceStrict, false);
+                tests_libOTe::logvole_test::ScopedOptionValue compactStrict(setupOptions.mCompactNoiseStrict, false);
+                tests_libOTe::logvole_test::ScopedOptionValue paddingOption(setupOptions.mLencDevicePadding, true);
                 for (bool emitRCoeffDomain : { true, false })
                 {
                     oc::PRNG fallbackPrng(oc::block(0x1E2C5EEDu, 0), 3);
                     LencEncodeOutput actual;
                     LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
                         params.mGadgetLogBase, params.mPlaintextModulusBits, fallbackPrng,
-                        actual, sigma, 6 * sigma, width, emitRCoeffDomain, gadgetLeaves, &publicB, 4));
+                        actual, sigma, 6 * sigma, width, emitRCoeffDomain, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
                     expect_encoding_equal(expected, actual, emitRCoeffDomain);
                     LOGVOLE_EXPECT_EQ(fallbackPrng.get<oc::block>(), nextReference);
                 }
                 // Prove that forced decline cannot silently satisfy strict GPU
                 // parity; the non-strict calls above must replay compact R/noise.
-                ScopedEnvironmentValue strictOption("LV_GPU_SETUP_LENC_DEVICE_STRICT", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue strictOption(setupOptions.mLencDeviceStrict, true);
                 oc::PRNG failedPrng(oc::block(0x1E2C5EEDu, 0), 3);
                 LencEncodeOutput failed;
                 failed.mLacct.mWidthPadded = 0xBADu;
                 LOGVOLE_EXPECT_FALSE(lencEncTrunc(ctx, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, failedPrng,
-                    failed, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4));
+                    failed, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
                 LOGVOLE_EXPECT_EQ(failed.mLacct.mWidthPadded, 0xBADu);
             }
             if (haveGpu)
             {
-                ScopedEnvironmentValue option("LV_GPU_SETUP_LENC", "1");
-                ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_LENC_DEVICE", "1");
-                ScopedEnvironmentValue compactOption("LV_GPU_SETUP_COMPACT_NOISE", "1");
-                ScopedEnvironmentValue forceOption("LV_GPU_SETUP_LENC_DEVICE_FORCE_DECLINE", "0");
-                ScopedEnvironmentValue deviceStrict("LV_GPU_SETUP_LENC_DEVICE_STRICT", "1");
-                ScopedEnvironmentValue randomizerOutput("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT", "1");
-                ScopedEnvironmentValue randomizerDecline("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_FORCE_DECLINE", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue option(setupOptions.mParallelLenc, (true) ? osuCrypto::LogVoleChoice::Enabled : osuCrypto::LogVoleChoice::Disabled);
+                tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mLencDevice, true);
+                tests_libOTe::logvole_test::ScopedOptionValue compactOption(setupOptions.mCompactNoise, true);
+                tests_libOTe::logvole_test::ScopedOptionValue forceOption(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencDevice, false);
+                tests_libOTe::logvole_test::ScopedOptionValue deviceStrict(setupOptions.mLencDeviceStrict, true);
+                tests_libOTe::logvole_test::ScopedOptionValue randomizerOutput(setupOptions.mLencRandomizerOutput, true);
+                tests_libOTe::logvole_test::ScopedOptionValue randomizerDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencRandomizerOutput, true);
                 {
-                    ScopedEnvironmentValue allowReplay("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_STRICT", "0");
+                    tests_libOTe::logvole_test::ScopedOptionValue allowReplay(setupOptions.mLencRandomizerOutputStrict, false);
                     oc::PRNG fallbackPrng(oc::block(0x1E2C5EEDu, 0), 3);
                     LencEncodeOutput actual;
                     LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
                         params.mGadgetLogBase, params.mPlaintextModulusBits, fallbackPrng,
-                        actual, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4));
+                        actual, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
                     expect_encoding_equal(expected, actual);
                     LOGVOLE_EXPECT_EQ(fallbackPrng.get<oc::block>(), nextReference);
                 }
-                ScopedEnvironmentValue requireOutput("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_STRICT", "1");
+                tests_libOTe::logvole_test::ScopedOptionValue requireOutput(setupOptions.mLencRandomizerOutputStrict, true);
                 oc::PRNG rejectedPrng(oc::block(0x1E2C5EEDu, 0), 3);
                 LencEncodeOutput rejected = expected;
                 const auto* storage = rejected.mR.data();
                 LOGVOLE_REQUIRE_TRUE(!lencEncTrunc(ctx, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, rejectedPrng,
-                    rejected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4));
+                    rejected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
                 LOGVOLE_REQUIRE_TRUE(rejected.mR.data() == storage);
                 expect_encoding_equal(expected, rejected);
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
@@ -571,19 +545,19 @@ namespace
                 LencEncodeOutput nttOnly;
                 LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, nttOnlyPrng,
-                    nttOnly, sigma, 6 * sigma, width, false, gadgetLeaves, &publicB, 4));
+                    nttOnly, sigma, 6 * sigma, width, false, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
                 expect_encoding_equal(expected, nttOnly, false);
                 LOGVOLE_EXPECT_EQ(nttOnlyPrng.get<oc::block>(), nextReference);
             }
         }
         if (haveGpu)
         {
-            ScopedEnvironmentValue option("LV_GPU_SETUP_LENC", "1");
-            ScopedEnvironmentValue deviceOption("LV_GPU_SETUP_LENC_DEVICE", "1");
-            ScopedEnvironmentValue deviceStrict("LV_GPU_SETUP_LENC_DEVICE_STRICT", "1");
-            ScopedEnvironmentValue decline("LV_GPU_SETUP_LENC_DEVICE_FORCE_DECLINE", "0");
-            ScopedEnvironmentValue compactOption("LV_GPU_SETUP_COMPACT_NOISE", "1");
-            ScopedEnvironmentValue paddingOption("LV_GPU_SETUP_LENC_DEVICE_PADDING", "1");
+            tests_libOTe::logvole_test::ScopedOptionValue option(setupOptions.mParallelLenc, (true) ? osuCrypto::LogVoleChoice::Enabled : osuCrypto::LogVoleChoice::Disabled);
+            tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mLencDevice, true);
+            tests_libOTe::logvole_test::ScopedOptionValue deviceStrict(setupOptions.mLencDeviceStrict, true);
+            tests_libOTe::logvole_test::ScopedOptionValue decline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencDevice, false);
+            tests_libOTe::logvole_test::ScopedOptionValue compactOption(setupOptions.mCompactNoise, true);
+            tests_libOTe::logvole_test::ScopedOptionValue paddingOption(setupOptions.mLencDevicePadding, true);
             // A power-of-two input needs neither a host copy nor a device tail.
             auto exactWidthInput = s;
             while ((exactWidthInput.size() & (exactWidthInput.size() - 1u)) != 0)
@@ -592,18 +566,16 @@ namespace
             oc::PRNG referencePrng(oc::block(0x1E2C4ADu, 0), 3);
             LencEncodeOutput expected;
             {
-#if defined(ENABLE_LOGVOLE_CUDA)
-                ScopedGpuEnabled cpuReference(false);
-#endif
+                const auto& ctx = cpuCtx;
                 LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, exactWidthInput, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, referencePrng,
-                    expected, 3.2, 19.2, 0, true, true, &publicB, 1));
+                    expected, 3.2, 19.2, 0, true, true, &publicB, 1, false, false, nullptr, nullptr, setupOptions));
             }
             oc::PRNG actualPrng(oc::block(0x1E2C4ADu, 0), 3);
             LencEncodeOutput actual;
             LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, exactWidthInput, params.mTauHi,
                 params.mGadgetLogBase, params.mPlaintextModulusBits, actualPrng,
-                actual, 3.2, 19.2, 0, true, true, &publicB, 4));
+                actual, 3.2, 19.2, 0, true, true, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
             expect_encoding_equal(expected, actual);
             expect_batch_equal(exactWidthInput, unchangedInput);
             LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), referencePrng.get<oc::block>());
@@ -615,7 +587,7 @@ namespace
             const auto* storage = actual.mR.data();
             LOGVOLE_REQUIRE_TRUE(!lencEncTrunc(ctx, invalidInput, params.mTauHi,
                 params.mGadgetLogBase, params.mPlaintextModulusBits, invalidPrng,
-                actual, 3.2, 19.2, 0, true, true, &publicB, 4));
+                actual, 3.2, 19.2, 0, true, true, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
             LOGVOLE_REQUIRE_TRUE(actual.mR.data() == storage);
             expect_encoding_equal(expected, actual);
             LOGVOLE_EXPECT_EQ(invalidPrng.get<oc::block>(), untouchedPrng.get<oc::block>());
@@ -820,8 +792,9 @@ void LogVole_LencOps_EvalRejectsMuMismatch(const oc::CLP&)
         eval));
 }
 
-void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP&)
+void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP& cmd)
 {
+    osuCrypto::LogVoleGpuSetupOptions setupOptions;
     const auto params = make_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
@@ -860,22 +833,21 @@ void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP&)
     expect_batch_equal(enc1.mRNtt, enc2.mRNtt);
     expect_tensor_equal(enc1.mLacct.mCt, enc2.mLacct.mCt);
 
+    const bool useGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    ScopedGpuEnabled useGpu(true);
-    // Test runners can demand device coverage explicitly. Otherwise the same
-    // fixture remains usable in CPU-only environments, as before.
-    if (const char* strict = std::getenv("LV_GPU_SETUP_LENC_DEVICE_STRICT"))
-        if (strict[0] == '1') LOGVOLE_REQUIRE_TRUE(gpu::enabled());
+    if (useGpu) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #endif
     // Cover leaf activeTau smaller than, larger than, and equal to the
     // internal activeTau, including explicit padding beyond the input width.
-    check_trunc_setup_parity(params);
+    check_trunc_setup_parity(params, useGpu);
     auto varied = params;
     varied.mTauHi = 1;
     varied.mPlaintextModulusBits = 40;
-    check_trunc_setup_parity(varied);
+    check_trunc_setup_parity(varied, useGpu);
     varied.mTauHi = 2;
-    check_trunc_setup_parity(varied, 8);
+    check_trunc_setup_parity(varied, useGpu, 8);
+
+    if (cmd.getOr("lvFactoryFast", 0)) return;
 
     auto production = params;
     production.mTauHi = 1;
@@ -883,11 +855,11 @@ void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP&)
     production.mPlaintextModulusBits = 55;
     production.mRing.mPolyModulusDegree = 8192;
     assignValues<int>(production.mRing.mCoeffModulusBits, { 55, 55, 55, 55 });
-    check_trunc_setup_parity(production);
+    check_trunc_setup_parity(production, useGpu);
     production.mGadgetLogBase = 208;
     production.mRing.mPolyModulusDegree = 16384;
     assignValues<int>(production.mRing.mCoeffModulusBits, { 52, 52, 52, 52, 52, 52, 52, 52 });
-    check_trunc_setup_parity(production);
+    check_trunc_setup_parity(production, useGpu);
 }
 
 void LogVole_LencOps_TruncDigestTreeDeterministic(const oc::CLP&)

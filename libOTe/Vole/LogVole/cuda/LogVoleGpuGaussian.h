@@ -25,7 +25,7 @@ namespace osuCrypto::LogVole::gpu
         GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds,
         u32 wordsPerPrefix,
-        GaussianPrngPrefixBuffer& out);
+        GaussianPrngPrefixBuffer& out, const LogVoleFailureOptions& failures = {});
 
     struct GaussianSampleBuffer
     {
@@ -54,11 +54,11 @@ namespace osuCrypto::LogVole::gpu
         GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianSampleBuffer& out,
-        u32 wordsPerPrefix = 0);
+        u32 wordsPerPrefix = 0, const LogVoleFailureOptions& failures = {});
 
     bool sampleGaussianCompactResidentDevice(
         GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianDeviceSampleBuffer& out,
-        u32 wordsPerPrefix = 0, std::span<const u8> active = {});
+        u32 wordsPerPrefix = 0, std::span<const u8> active = {}, const LogVoleFailureOptions& failures = {});
 }

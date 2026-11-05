@@ -40,9 +40,27 @@ their exported `CUDA::cudart` link dependency.
 ## Protocol modes and API
 
 The public wrappers are `osuCrypto::LogVoleSender` and `LogVoleReceiver` in
-`LogVole.h`. Both parties call
-`configure(n, plaintextModulusBits, numThreads, setting, mode)`, use the actual
+`LogVole.h`. Construct each party with a `LogVoleOptions` value, use the actual
 prime returned by `modulus()`, and then perform offline setup and online queries.
+
+```cpp
+osuCrypto::LogVoleOptions options;
+options.mRequestSize = 1024;
+options.mPlaintextModulusBits = 55;
+options.mNumThreads = 4;
+options.mUseGpu = false;
+options.mSetting = osuCrypto::LogVole::CivoleSetting::GoldenSeed;
+options.mMode = osuCrypto::LogVole::OnlineMode::Interactive;
+osuCrypto::LogVoleSender sender(options);
+osuCrypto::LogVoleReceiver receiver(options);
+```
+
+The constructor captures its options. There is no separate `configure` API or
+implicit sizing from query buffers. Default-constructed or cleared parties are
+empty move targets; construct a new party to select a new configuration.
+Tuning, transport, and experimental controls live under `options.mAdvanced`.
+Resource owners capture the shared `LogVoleExecutionOptions` base (backend and
+tuning), allowing reuse across protocol sizes without retaining protocol state.
 Both peers must use the same setting, online mode, and updated wire format.
 The added mode metadata changes setup framing from the upstream base revision.
 
@@ -71,10 +89,23 @@ Use distinct session IDs across clients sharing a public key. The regression
 test `LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries` demonstrates
 this deferred lifecycle and rejects replay.
 
-CUDA applications include `cuda/LogVoleGpuProtocol.h` and call
-`LogVole::gpu::setEnabled(true)` before configuration. Check `gpu::enabled()`
-when GPU execution is required. CPU remains available in a CUDA build via
-`setEnabled(false)`. Set `mKeepOutputOnDevice` to keep outputs in device memory;
+CUDA applications set `options.mUseGpu = true` and pass
+those options to the sender and receiver constructors.
+Check `LogVole::gpu::enabled(options)` when GPU execution
+is required. The default is CPU; each party can select its backend independently.
+Optional diagnostics are constructor settings as well:
+`options.mAdvanced.mHostStepProfile` enables host-step timing (default false).
+The context owns the timing table; CPU contexts, GPU resources, and deferred
+message decoders reuse that owner's table. `sender.hostProfiler()` and
+`receiver.hostProfiler()` expose their tables (null when disabled); snapshot or
+reset them between completed queries. Reporting occurs when the last profiler
+owner is released. CPU-benchmark TLS accounting remains a separate cleanup.
+`options.mAdvanced.mStreams.mDebug` enables CUDA decline/error logging and
+synchronized region timing; `mProtocol.mRootProfile` enables root timing;
+`mKernels.mNoGoldH200InverseOpTrace` traces the selected inverse operations.
+All three default to false.
+
+Set `mKeepOutputOnDevice` to keep outputs in device memory;
 `outputDevice()` and `outputDeviceCount()` expose the resulting device token.
 The receiver can also supply its own input token through `mInputDevice`.
 The two parties retain separate protocol state and communicate through coproto
@@ -82,7 +113,11 @@ socket messages.
 
 `LogVoleGarbled.h` provides three-component additive 128-bit garbled labels.
 `LogVoleZk.h` provides multiplication-circuit and matrix-product checks on top of
-the correlations. Neither API changes the underlying semi-honest VOLE threat
+the correlations. Proof wrappers capture VOLE settings in their constructors;
+`prepare(statement)` prepares a statement using those settings and at least
+`options.mRequestSize` VOLE outputs. Garbled wrappers interpret `mRequestSize`
+as the number of labels and use the selected setting's audited modulus width.
+Neither API changes the underlying semi-honest VOLE threat
 model. Garbled labels are additive field tuples, not XOR/free-XOR blocks.
 
 Matrix checks follow the public-product workload in Section 12.2 and Table 6
@@ -92,7 +127,7 @@ there is no Freivalds-style matrix projection. CPU checking packs B's columns
 contiguously and accumulates exact products in bounded 128-bit chunks,
 reducing once per chunk. It dispatches to AVX-512 IFMA on compatible CPUs for
 51- and 54-bit fields, with an exact scalar fallback. Set
-`LV_CPU_VECTOR_MATMUL=0` to exercise that fallback. Unweighted inner products
+`mCpuVectorMatMul = false` in `LogVoleZkOptions` to exercise that fallback. Unweighted inner products
 are reused across repetitions, giving CPU work `O(n^3 + repetitions*n^2)`;
 CUDA currently performs `O(repetitions*n^3)` work. The private VOLE input
 contains A, B, then one fresh mask per repetition, totaling `2*n*n + repetitions` entries.
@@ -153,3 +188,15 @@ ctest --test-dir out/build/logvole-cuda-tests --output-on-failure
 The source extraction includes library code, public examples, correctness tests,
 and build integration. Research drivers, parameter-search scripts, datasets,
 plots, profiling outputs, and benchmark results are excluded.
+
+## Refactoring backlog
+
+- Prune transport/encoding optionality after the ownership refactor. Audit the
+  18 switches under `mAdvanced.mTransport`: retain only controls justified by a
+  concrete caller requirement or measured supported-platform tradeoff. Make
+  established ownership/move and endian-safe codec paths standard; use the
+  configured thread count for parallel work. Remove unneeded experimental
+  root-pinning/allocation variants and their alternative implementations, not
+  just their flags. Preserve required portability, allocation-failure fallback,
+  protocol bytes, and structured lifetimes. Do not assume every current default
+  is universally fastest; record the reason for each retained control.

@@ -208,7 +208,8 @@ namespace osuCrypto::LogVole
         bool deferCiphertextHost = false,
         bool deferRandomizerHost = false,
         const gpu::DeviceBatch* seedLabelDevice = nullptr,
-        const LazySeedLabelHostState* seedLabelHost = nullptr);
+        const LazySeedLabelHostState* seedLabelHost = nullptr,
+        const LogVoleGpuSetupOptions& options = {});
 
     bool lencDigestTrunc(
         const RingNttContext& ctx,

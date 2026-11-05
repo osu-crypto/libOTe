@@ -42,7 +42,7 @@ namespace osuCrypto::LogVole
         task<> keyDerive(
             const KeyDeriveReceiverInput& input,
             KeyDeriveReceiverOutput& output,
-            Socket& sock);
+            Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
 
         task<> online(
             ReceiverState& state,

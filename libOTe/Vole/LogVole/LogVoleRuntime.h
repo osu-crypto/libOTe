@@ -73,11 +73,73 @@ namespace osuCrypto::LogVole
         ProtocolCacheScope mPrevious{};
     };
 
+    // Root diagnostics belong to the ring factory reuse domain.
+    // Disabled factories allocate no profiler; there is no process-wide table.
+    struct RootStepProfiler
+    {
+        struct Entry
+        {
+            const char* mName;
+            std::atomic<u64> mUs{ 0 };
+            std::atomic<u64> mCount{ 0 };
+            // First call and worst call, because a one-time device cache
+            // upload inside a step is indistinguishable from a per-query cost
+            // in the mean.
+            std::atomic<u64> mFirstUs{ 0 };
+            std::atomic<u64> mMaxUs{ 0 };
+        };
+        static constexpr u32 kMax = 32;
+        Entry mEntries[kMax]{};
+        std::atomic<u32> mUsed{ 0 };
+        std::mutex mMutex;
+
+        ~RootStepProfiler()
+        {
+            if (!mUsed.load()) return;
+            const u32 n = mUsed.load();
+            std::fprintf(stderr, "\n[root] per-step host time\n");
+            u64 total = 0;
+            for (u32 i = 0; i < n; ++i) total += mEntries[i].mUs.load();
+            for (u32 i = 0; i < n; ++i)
+            {
+                const u64 us = mEntries[i].mUs.load();
+                const u64 cnt = mEntries[i].mCount.load();
+                const u64 first = mEntries[i].mFirstUs.load();
+                const double rest =
+                    cnt > 1 ? double(us - first) / double(cnt - 1) / 1000.0 : 0.0;
+                std::fprintf(
+                    stderr,
+                    "[root] %-34s %8.3f ms  x%-4llu %5.1f%%  first %7.3f  max %7.3f  "
+                    "mean-after-first %7.3f\n",
+                    mEntries[i].mName, double(us) / 1000.0, (unsigned long long)cnt,
+                    total ? 100.0 * double(us) / double(total) : 0.0, double(first) / 1000.0,
+                    double(mEntries[i].mMaxUs.load()) / 1000.0, rest);
+            }
+            std::fprintf(stderr, "[root] %-34s %8.3f ms\n", "TOTAL", double(total) / 1000.0);
+        }
+
+        // Names are string literals; callers join all steps before destruction.
+        Entry& slot(const char* name)
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            const u32 n = mUsed.load(std::memory_order_acquire);
+            for (u32 i = 0; i < n; ++i)
+            {
+                if (mEntries[i].mName == name) return mEntries[i];
+            }
+            if (n >= kMax) return mEntries[kMax - 1];
+            mEntries[n].mName = name;
+            mUsed.store(n + 1, std::memory_order_release);
+            return mEntries[n];
+        }
+    };
+
+
     // ---- host step timing -------------------------------------------------
     //
-    // Wall-clock and current-thread CPU accounting for named regions, enabled with
-    // LV_STEP_PROFILE=1 and dumped at exit. Header only so every translation
-    // unit can use the same table.
+    // Wall-clock and current-thread CPU accounting for named regions, enabled
+    // explicitly by the caller. Each execution domain owns its table and reports
+    // it when the last owner is released.
     //
     // The first call is reported apart from the rest because a one-time device
     // cache upload or NTT-table build inside a step is otherwise
@@ -176,40 +238,25 @@ namespace osuCrypto::LogVole
         }
     };
 
-    inline HostStepProfiler& hostStepProfiler()
-    {
-        static HostStepProfiler p;
-        return p;
-    }
-
-    inline bool hostStepEnabled()
-    {
-        static const bool on = [] {
-            const char* v = std::getenv("LV_STEP_PROFILE");
-            return v && v[0] != '\0' && v[0] != '0';
-        }();
-        return on;
-    }
-
     class HostStep
     {
     public:
-        explicit HostStep(const char* name)
+        HostStep(HostStepProfiler* profiler, const char* name)
         {
-            if (!hostStepEnabled()) return;
-            mEntry = &hostStepProfiler().slot(name);
+            if (!profiler) return;
+            mEntry = &profiler->slot(name);
             startCpu();
             mStart = std::chrono::steady_clock::now();
         }
 
         // `tag` is appended to the name, so a recursive caller can keep its
         // levels apart (pass the level's width, for instance).
-        HostStep(const char* name, u64 tag)
+        HostStep(HostStepProfiler* profiler, const char* name, u64 tag)
         {
-            if (!hostStepEnabled()) return;
+            if (!profiler) return;
             char buf[56];
             std::snprintf(buf, sizeof(buf), "%s w=%llu", name, static_cast<unsigned long long>(tag));
-            mEntry = &hostStepProfiler().slot(buf);
+            mEntry = &profiler->slot(buf);
             startCpu();
             mStart = std::chrono::steady_clock::now();
         }

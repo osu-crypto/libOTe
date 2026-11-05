@@ -28,22 +28,21 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        bool gpuSetupLencEnabled()
+        bool gpuSetupLencEnabled(const LogVoleGpuSetupOptions& options, const RingNttContext& ctx)
         {
-            const char* value = std::getenv("LV_GPU_SETUP_LENC");
-            if (value) return value[0] != '0';
+            if (options.mParallelLenc != LogVoleChoice::Automatic)
+                return options.mParallelLenc == LogVoleChoice::Enabled;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            return gpu::enabled();
+            return gpu::enabled(ctx);
 #else
             return false;
 #endif
         }
 
-        bool gpuSetupLencDeviceEnabled()
+        bool gpuSetupLencDeviceEnabled(const LogVoleGpuSetupOptions& options, const RingNttContext& ctx)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            const char* value = std::getenv("LV_GPU_SETUP_LENC_DEVICE");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return options.mLencDevice && gpu::enabled(ctx);
 #else
             return false;
 #endif
@@ -168,7 +167,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
             // Retained device operands belong to one cold protocol run. Keep
             // the old host-only cache scope when this feature is disabled.
-            if (gpu::publicUniformRetentionEnabled())
+            if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions))
             {
                 key.mRunId = currentProtocolCacheScope().mRunId;
                 key.mDevice = gpu::currentDeviceOrdinal();
@@ -647,7 +646,7 @@ namespace osuCrypto::LogVole
                 resizeZero(zeroPadding.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             }
 
-            HostStep leafStep(leafInputsAreGadget
+            HostStep leafStep(hostProfiler(ctx), leafInputsAreGadget
                 ? "cpu shrink detail: recursive leaves" : "cpu shrink detail: initial leaves");
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
@@ -669,7 +668,7 @@ namespace osuCrypto::LogVole
             }
 
             leafStep.stop();
-            HostStep internalStep("cpu shrink detail: internal nodes");
+            HostStep internalStep(hostProfiler(ctx), "cpu shrink detail: internal nodes");
             const u32 maxActiveTau = std::max(tauLeaf, tauHi);
             AlignedUnVec<const RnsPoly*> bPtrs(2u * maxActiveTau);
             AlignedUnVec<const RnsPoly*> pairPtrs(2u * maxActiveTau);
@@ -1439,9 +1438,10 @@ namespace osuCrypto::LogVole
         bool deferCiphertextHost,
         bool deferRandomizerHost,
         const gpu::DeviceBatch* seedLabelDevice,
-        const LazySeedLabelHostState* seedLabelHost)
+        const LazySeedLabelHostState* seedLabelHost,
+        const LogVoleGpuSetupOptions& options)
     {
-        HostStep setupStep("setup: lenc truncated");
+        HostStep setupStep(hostProfiler(ctx), "setup: lenc truncated");
         const auto sCount = seedLabelHost ? seedLabelHost->count() : s.size();
         if (!sCount || sCount > std::numeric_limits<u32>::max() ||
             tauHi == 0 || noiseStandardDeviation < 0 ||
@@ -1487,7 +1487,7 @@ namespace osuCrypto::LogVole
         u32 width = 0;
         if (!lencTreeWidth(sCount, requestedWidthPadded, width)) return false;
 
-        const bool deviceAssemblyRequested = gpuSetupLencDeviceEnabled();
+        const bool deviceAssemblyRequested = gpuSetupLencDeviceEnabled(options, ctx);
         std::shared_ptr<const std::vector<RnsPoly>> cachedPublicBNtt;
         std::shared_ptr<const gpu::RetainedPublicUniform> retainedPublicBNtt;
         if (publicBNtt)
@@ -1514,7 +1514,7 @@ namespace osuCrypto::LogVole
         std::vector<const RnsPoly*> publicBInternalHi, publicBLeaf;
         bool retainRandomizers = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        retainRandomizers = deferRandomizerHost && gpuSetupLencDeviceEnabled() && gpu::lencRandomizerResidencyEnabled();
+        retainRandomizers = deferRandomizerHost && gpuSetupLencDeviceEnabled(options, ctx) && gpu::lencRandomizerResidencyEnabled(ctx.mExecutionOptions);
 #endif
         RecursiveLeafScaling leafScaling{};
         if (leafInputsAreGadget && !retainRandomizers && !buildRecursiveLeafScaling(ctx, leafScaling))
@@ -1526,15 +1526,12 @@ namespace osuCrypto::LogVole
         const u32 ctTauMax = std::max(tauHi, tauLeaf);
         std::vector<std::vector<RnsPoly>> rLayersNtt(levels, std::vector<RnsPoly>(width));
 
-        const char* paddingSetting = std::getenv("LV_GPU_SETUP_LENC_DEVICE_PADDING");
-        const bool devicePadding = deviceAssemblyRequested && (!paddingSetting || paddingSetting[0] != '0');
-        const bool setupBatch = gpuSetupLencEnabled() || deviceAssemblyRequested;
-        const char* compactFlag = std::getenv("LV_GPU_SETUP_COMPACT_NOISE");
-        const char* compactStrictFlag = std::getenv("LV_GPU_SETUP_COMPACT_NOISE_STRICT");
+        const bool devicePadding = deviceAssemblyRequested && options.mLencDevicePadding;
+        const bool setupBatch = gpuSetupLencEnabled(options, ctx) || deviceAssemblyRequested;
         // Keep errors compact through GPU expansion. Exact Gaussian sampling
         // can retain q0 on device; original seeds support every fallback.
-        const bool compactRequested = deviceAssemblyRequested && (!compactFlag || compactFlag[0] != '0');
-        const bool compactStrict = compactRequested && compactStrictFlag && compactStrictFlag[0] != '0';
+        const bool compactRequested = deviceAssemblyRequested && options.mCompactNoise;
+        const bool compactStrict = compactRequested && options.mCompactNoiseStrict;
         const bool compactNoiseEnabled = compactRequested &&
             canSamplePolyErrorCompact(ctx, noiseStandardDeviation, noiseMaxDeviation);
         if (compactStrict && !compactNoiseEnabled) return false;
@@ -1653,8 +1650,7 @@ namespace osuCrypto::LogVole
                     retainRandomizers ? mu : 0u, retainRandomizers ? &lazyRandomizers : nullptr,
                     retainedPublicBNtt.get(),
                     devicePadding ? seedLabelDevice : nullptr);
-                const char* strict = std::getenv("LV_GPU_SETUP_LENC_DEVICE_STRICT");
-                if (!deviceAssembled && (compactStrict || (strict && strict[0] != '0'))) return false;
+                if (!deviceAssembled && (compactStrict || options.mLencDeviceStrict)) return false;
             }
 #endif
             if (compactNoiseEnabled && !deviceAssembled &&
@@ -1829,19 +1825,17 @@ namespace osuCrypto::LogVole
                 // state. All other RNS expansion took place on the device.
                 bool deviceExpanded = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-                const char* outputSetting = std::getenv("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT");
-                if (gpu::enabled() && (!outputSetting || outputSetting[0] != '0'))
+                if (gpu::enabled(ctx) && options.mLencRandomizerOutput)
                 {
-                    HostStep outputStep("setup: lenc randomizer GPU output");
-                    const char* decline = std::getenv("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_FORCE_DECLINE");
-                    if (!decline || decline[0] != '1')
+                    HostStep outputStep(hostProfiler(ctx), "setup: lenc randomizer GPU output");
+                    const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencRandomizerOutput;
+                    if (!decline)
                         deviceExpanded = residentRandomizers
                             ? gpu::expandErrorCompactDevice(ctx, *residentRandomizers, false, next.mR, mu, requestedWorkers)
                             : gpu::expandErrorCompactDevice(ctx,
                                 std::span<const u64>(compactRandomizers).first(static_cast<std::size_t>(mu) * n),
                                 false, next.mR, requestedWorkers);
-                    const char* strict = std::getenv("LV_GPU_SETUP_LENC_RANDOMIZER_OUTPUT_STRICT");
-                    if (!deviceExpanded && strict && strict[0] != '0') return false;
+                    if (!deviceExpanded && options.mLencRandomizerOutputStrict) return false;
                 }
 #endif
                 if (!deviceExpanded &&

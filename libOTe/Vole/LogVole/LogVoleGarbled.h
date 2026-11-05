@@ -54,13 +54,12 @@ namespace osuCrypto
     class LogVoleGarbledSender
     {
     public:
-        LogVoleGarbledSender() = default;
+        explicit LogVoleGarbledSender(LogVoleOptions options);
+        const LogVoleOptions& options() const { return mOptions; }
         LogVoleGarbledSender(const LogVoleGarbledSender&) = delete;
         LogVoleGarbledSender& operator=(const LogVoleGarbledSender&) = delete;
         bool mKeepOutputOnDevice = false;
 
-        void configure(u64 labelCount, u32 numThreads = 1,
-            LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed);
         // Samples three independent uniform nonzero deltas from this private
         // PRNG and CRT-encodes their repeating triple into the leaf key.
         task<> offline(PRNG& prng, Socket& sock);
@@ -77,6 +76,7 @@ namespace osuCrypto
         }
 
     private:
+        LogVoleOptions mOptions;
         std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         LogVole::CivoleParams mParams;
         LogVole::CivoleSenderState mState;
@@ -92,7 +92,8 @@ namespace osuCrypto
     class LogVoleGarbledReceiver
     {
     public:
-        LogVoleGarbledReceiver() = default;
+        explicit LogVoleGarbledReceiver(LogVoleOptions options);
+        const LogVoleOptions& options() const { return mOptions; }
         LogVoleGarbledReceiver(const LogVoleGarbledReceiver&) = delete;
         LogVoleGarbledReceiver& operator=(const LogVoleGarbledReceiver&) = delete;
         bool mKeepOutputOnDevice = false;
@@ -101,8 +102,6 @@ namespace osuCrypto
         // span to receive(). Production on another stream is ordered internally.
         std::shared_ptr<void> mInputDevice;
 
-        void configure(u64 labelCount, u32 numThreads = 1,
-            LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed);
         task<> offline(Socket& sock);
         // a[i][j] = b[i][j] + x[i] * delta[j] mod p, j = 0,1,2.
         // For Boolean garbling each x[i] is a bit; field-valued inputs are also
@@ -115,6 +114,7 @@ namespace osuCrypto
         const LogVole::GarbledLabelLayout& layout() const { return mLayout; }
 
     private:
+        LogVoleOptions mOptions;
         std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         LogVole::CivoleParams mParams;
         LogVole::CivoleReceiverState mState;

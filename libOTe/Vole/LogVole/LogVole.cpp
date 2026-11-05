@@ -505,7 +505,6 @@ namespace osuCrypto
             mTimer = other.mTimer;
             mOptions = other.mOptions;
             mRequestSize = other.mRequestSize;
-            mPlaintextModulusBits = other.mPlaintextModulusBits;
             mModulus = other.mModulus;
             mDelta = other.mDelta;
             mNumThreads = other.mNumThreads;
@@ -540,7 +539,6 @@ namespace osuCrypto
             mTimer = other.mTimer;
             mOptions = other.mOptions;
             mRequestSize = other.mRequestSize;
-            mPlaintextModulusBits = other.mPlaintextModulusBits;
             mModulus = other.mModulus;
             mNumThreads = other.mNumThreads;
             mNextSid = other.mNextSid;
@@ -563,14 +561,15 @@ namespace osuCrypto
         return *this;
     }
 
-    void LogVoleSender::configure(
-        u64 n,
-        u32 plaintextModulusBits,
-        u32 numThreads,
-        LogVole::CivoleSetting setting,
-        LogVole::OnlineMode mode,
+    LogVoleSender::LogVoleSender(LogVoleOptions options,
         std::shared_ptr<LogVole::ZpContextFactory> factory)
+        : mOptions(std::move(options))
     {
+        const auto n = mOptions.mRequestSize;
+        auto plaintextModulusBits = mOptions.mPlaintextModulusBits;
+        auto numThreads = mOptions.mNumThreads;
+        const auto setting = mOptions.mSetting;
+        const auto mode = mOptions.mMode;
         const auto inheritedRun = LogVole::currentProtocolCacheScope().mRunId;
         const auto configureRun = inheritedRun ? inheritedRun :
             LogVole::allocateProtocolCacheRunId();
@@ -608,8 +607,14 @@ namespace osuCrypto
         }
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;
-        params.mLogVole.mAllowPartialRootWidth = mOptions.mAllowPartialRootWidth;
-        if (!factory && mConfigureFactoryOwner) factory = mConfigureFactoryOwner->mFactory;
+        params.mLogVole.mAllowPartialRootWidth = mOptions.mAdvanced.mAllowPartialRootWidth;
+        params.mLogVole.mEarlyGoldenCheck = mOptions.mAdvanced.mEarlyGoldenCheck;
+        params.mLogVole.mShrinkExpand.mGpuSetup = mOptions.mAdvanced.mGpuSetup;
+        params.mLogVole.mShrinkExpand.mTransport = mOptions.mAdvanced.mTransport;
+        if (!factory) factory = std::make_shared<ZpContextFactory>(
+            std::make_shared<RingContextFactory>(mOptions));
+        if (factory->ringFactory()->executionOptions() != static_cast<const LogVoleExecutionOptions&>(mOptions))
+            throw std::invalid_argument("LogVole factory options do not match constructor options");
         if (!resolveCivoleModulusWithEvidence(
                 params, modulus, &nativeBundleCommitted, &factoryOwner, std::move(factory)))
         {
@@ -617,7 +622,6 @@ namespace osuCrypto
         }
 
         mRequestSize = n;
-        mPlaintextModulusBits = plaintextModulusBits;
         mModulus = modulus;
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
@@ -700,9 +704,7 @@ namespace osuCrypto
     {
         if (!isConfigured())
         {
-            if (b.empty() && mKeepOutputOnDevice)
-                throw std::runtime_error("LogVole CI-VOLE device-only sender requires configured size");
-            configure(b.size(), mPlaintextModulusBits, mNumThreads, mSetting);
+            throw std::runtime_error("LogVole CI-VOLE sender requires constructor options");
         }
         if (b.size() != mRequestSize && !(mKeepOutputOnDevice && b.empty()))
         {
@@ -723,7 +725,6 @@ namespace osuCrypto
     void LogVoleSender::clear()
     {
         mRequestSize = 0;
-        mPlaintextModulusBits = 55;
         mModulus = 0;
         mDelta = 0;
         mNumThreads = 1;
@@ -741,14 +742,15 @@ namespace osuCrypto
         mConfigureFactoryOwner.reset();
     }
 
-    void LogVoleReceiver::configure(
-        u64 n,
-        u32 plaintextModulusBits,
-        u32 numThreads,
-        LogVole::CivoleSetting setting,
-        LogVole::OnlineMode mode,
+    LogVoleReceiver::LogVoleReceiver(LogVoleOptions options,
         std::shared_ptr<LogVole::ZpContextFactory> factory)
+        : mOptions(std::move(options))
     {
+        const auto n = mOptions.mRequestSize;
+        auto plaintextModulusBits = mOptions.mPlaintextModulusBits;
+        auto numThreads = mOptions.mNumThreads;
+        const auto setting = mOptions.mSetting;
+        const auto mode = mOptions.mMode;
         const auto inheritedRun = LogVole::currentProtocolCacheScope().mRunId;
         const auto configureRun = inheritedRun ? inheritedRun :
             LogVole::allocateProtocolCacheRunId();
@@ -784,8 +786,14 @@ namespace osuCrypto
         }
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;
-        params.mLogVole.mAllowPartialRootWidth = mOptions.mAllowPartialRootWidth;
-        if (!factory && mConfigureFactoryOwner) factory = mConfigureFactoryOwner->mFactory;
+        params.mLogVole.mAllowPartialRootWidth = mOptions.mAdvanced.mAllowPartialRootWidth;
+        params.mLogVole.mEarlyGoldenCheck = mOptions.mAdvanced.mEarlyGoldenCheck;
+        params.mLogVole.mShrinkExpand.mGpuSetup = mOptions.mAdvanced.mGpuSetup;
+        params.mLogVole.mShrinkExpand.mTransport = mOptions.mAdvanced.mTransport;
+        if (!factory) factory = std::make_shared<ZpContextFactory>(
+            std::make_shared<RingContextFactory>(mOptions));
+        if (factory->ringFactory()->executionOptions() != static_cast<const LogVoleExecutionOptions&>(mOptions))
+            throw std::invalid_argument("LogVole factory options do not match constructor options");
         if (!resolveCivoleModulusWithEvidence(
                 params, modulus, &nativeBundleCommitted, &factoryOwner, std::move(factory)))
         {
@@ -793,7 +801,6 @@ namespace osuCrypto
         }
 
         mRequestSize = n;
-        mPlaintextModulusBits = plaintextModulusBits;
         mModulus = modulus;
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
@@ -864,7 +871,7 @@ namespace osuCrypto
         }
         if (!isConfigured())
         {
-            configure(inputSize, mPlaintextModulusBits, mNumThreads, mSetting);
+            throw std::runtime_error("LogVole CI-VOLE receiver requires constructor options");
         }
         if (inputSize != mRequestSize)
         {
@@ -928,7 +935,6 @@ namespace osuCrypto
     void LogVoleReceiver::clear()
     {
         mRequestSize = 0;
-        mPlaintextModulusBits = 55;
         mModulus = 0;
         mNumThreads = 1;
         mNextSid = 0;
@@ -1087,21 +1093,17 @@ namespace osuCrypto::LogVole
         const auto ownerScope = currentProtocolCacheScope();
         key.mRole = ownerScope.mRole;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* fullChain = std::getenv("LV_GPU_SETUP_FULL_MOD_CHAIN");
-        key.mExpandModChain = !gpu::enabled() || (fullChain && fullChain[0] == '1');
-        const char* singleLimb = std::getenv("LV_GPU_SETUP_BATCHING_SINGLE_LIMB");
-        key.mSingleBatchLimb = gpu::enabled() && (!singleLimb || singleLimb[0] != '0');
-        const char* lightweight = std::getenv("LV_GPU_SETUP_LIGHTWEIGHT_CRT");
-        const char* lightweightRing = std::getenv("LV_GPU_SETUP_LIGHTWEIGHT_RING");
-        key.mGpuLightweight = gpu::enabled() && (!lightweight || lightweight[0] != '0') &&
-            (!lightweightRing || lightweightRing[0] != '0') &&
+        const auto& options = ringFactory()->executionOptions().mAdvanced.mContexts;
+        key.mExpandModChain = !gpu::enabled(ringFactory()->executionOptions()) || options.mFullModChain;
+        key.mSingleBatchLimb = gpu::enabled(ringFactory()->executionOptions()) && options.mBatchingSingleLimb;
+        key.mGpuLightweight = gpu::enabled(ringFactory()->executionOptions()) && options.mLightweightCrt &&
+            options.mLightweightRing &&
             !key.mExpandModChain && key.mSingleBatchLimb &&
             gpuZpTupleSupported(ring, plaintextModulusBits);
-        const char* bundleControl = std::getenv("LV_GPU_NATIVE_SEAL_BUNDLE");
         key.mNativeSealBundleRequested = key.mGpuLightweight &&
             (ownerScope.mRole == ProtocolCacheRole::Sender ||
                 ownerScope.mRole == ProtocolCacheRole::Receiver) &&
-            bundleControl && std::strcmp(bundleControl, "1") == 0;
+            options.mNativeSealBundle;
 #endif
 
         {
@@ -1163,22 +1165,15 @@ namespace osuCrypto::LogVole
         if (!factory) factory = zpOut.mFactory;
         if (!factory) factory = std::make_shared<ZpContextFactory>(ringOut.mFactory);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* optIn = std::getenv("LV_GPU_NATIVE_SEAL_BUNDLE");
-        const char* lightweightRing = std::getenv("LV_GPU_SETUP_LIGHTWEIGHT_RING");
-        const char* lightweightCrt = std::getenv("LV_GPU_SETUP_LIGHTWEIGHT_CRT");
-        const char* fullChain = std::getenv("LV_GPU_SETUP_FULL_MOD_CHAIN");
-        const char* singleLimb = std::getenv("LV_GPU_SETUP_BATCHING_SINGLE_LIMB");
+        const auto& options = factory->ringFactory()->executionOptions().mAdvanced.mContexts;
         const auto ownerScope = currentProtocolCacheScope();
-        const bool requested = gpu::enabled() &&
+        const bool requested = gpu::enabled(factory->ringFactory()->executionOptions()) &&
             gpu::dynamicSealSetupSupported(ring) &&
             (ownerScope.mRole == ProtocolCacheRole::Sender ||
                 ownerScope.mRole == ProtocolCacheRole::Receiver) &&
             ownerScope.mRunId != 0u &&
-            optIn && std::strcmp(optIn, "1") == 0 &&
-            (!lightweightRing || lightweightRing[0] != '0') &&
-            (!lightweightCrt || lightweightCrt[0] != '0') &&
-            (!fullChain || fullChain[0] != '1') &&
-            (!singleLimb || singleLimb[0] != '0');
+            options.mNativeSealBundle && options.mLightweightRing &&
+            options.mLightweightCrt && !options.mFullModChain && options.mBatchingSingleLimb;
         if (requested)
         {
             // The CRT factory creates or reuses the ring internally. A prior
@@ -1209,13 +1204,14 @@ namespace osuCrypto::LogVole
         const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out,
         const std::shared_ptr<RingContextFactory>& ringFactory)
     {
-        HostStep contextStep("setup: GPU CRT context build");
+        HostStep contextStep(ringFactory ? ringFactory->hostProfiler() : nullptr, "setup: GPU CRT context build");
         if (!gpuZpTupleSupported(ring, plaintextModulusBits)) return false;
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         gpu::NativeSealSetupBundle prepared{};
         if (gpu::buildNativeSealSetupBundleDevice(
-                ring, plaintextModulusBits, prepared))
+                ring, plaintextModulusBits, prepared,
+                std::make_shared<gpu::GpuSetupContext>(ringFactory->executionOptions(), ringFactory->hostProfilerOwner())))
         {
             if (prepared.mOwnerRole != currentProtocolCacheScope().mRole ||
                 prepared.mOwnerRunId != currentProtocolCacheScope().mRunId ||
@@ -1372,7 +1368,7 @@ namespace osuCrypto::LogVole
         bool singleBatchLimb, ZpCrtContext& out,
         const std::shared_ptr<RingContextFactory>& ringFactory)
     {
-        HostStep contextStep("setup: CRT context build");
+        HostStep contextStep(ringFactory ? ringFactory->hostProfiler() : nullptr, "setup: CRT context build");
         if (plaintextModulusBits == 0)
         {
             return false;
@@ -1404,7 +1400,7 @@ namespace osuCrypto::LogVole
 
         seal::Modulus batchingPlainModulus{};
         u32 selectedPlaintextBits = 0;
-        HostStep primesStep("setup: plaintext modulus generation");
+        HostStep primesStep(ringFactory ? ringFactory->hostProfiler() : nullptr, "setup: plaintext modulus generation");
         for (u32 bits = plaintextModulusBits; bits >= 2; --bits)
         {
             try
@@ -1446,7 +1442,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        HostStep sealStep("setup: batching SEAL context");
+        HostStep sealStep(ringFactory ? ringFactory->hostProfiler() : nullptr, "setup: batching SEAL context");
         // BatchEncoder and the GPU plaintext transform read only the first
         // data context. Keep that context unchanged and omit unused levels.
         auto batchingContext = std::make_shared<seal::SEALContext>(batchingParams, expandModChain, seal::sec_level_type::none);
@@ -1477,7 +1473,7 @@ namespace osuCrypto::LogVole
         next.mPlaintextModulus = batchingPlainModulus.value();
         next.mBatchingContext = std::move(batchingContext);
         {
-            HostStep encoderStep("setup: batch encoder tables");
+            HostStep encoderStep(ringFactory ? ringFactory->hostProfiler() : nullptr, "setup: batch encoder tables");
             next.mBatchEncoder = std::make_shared<seal::BatchEncoder>(*next.mBatchingContext);
         }
         next.mPlaintextLiftModQj.resize(rho);
@@ -1526,7 +1522,7 @@ namespace osuCrypto::LogVole
         std::lock_guard<std::mutex> lock(ctx.mHostContextCache->mMutex);
         if (ctx.mHostContextCache->mContext) return ctx.mHostContextCache->mContext;
 
-        HostStep fallbackStep("setup: CRT host fallback materialization");
+        HostStep fallbackStep(hostProfiler(ctx.mRing), "setup: CRT host fallback materialization");
         const auto runId = currentProtocolCacheScope().mRunId;
         ScopedProtocolCacheScope ownerScope(cache.mRole, runId);
         ZpCrtContext host{};
@@ -1589,7 +1585,7 @@ namespace osuCrypto::LogVole
                 !validateZpValue(ctx, padValue))
                 return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (gpu::enabled())
+            if (gpu::enabled(ctx.mRing))
             {
                 // The public API returns a host polynomial. Complete the
                 // BatchEncoder inverse NTT and CRT lift on the device, then
@@ -1638,7 +1634,7 @@ namespace osuCrypto::LogVole
                 !validateZpValue(ctx, value))
                 return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (gpu::enabled())
+            if (gpu::enabled(ctx.mRing))
             {
                 // One scalar plus the device-side pad broadcast represents
                 // the same all-slot constant as the host BatchEncoder path.
@@ -1682,7 +1678,7 @@ namespace osuCrypto::LogVole
                 !validateZpValue(ctx, padValue))
                 return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (gpu::enabled())
+            if (gpu::enabled(ctx.mRing))
             {
                 AutoTimer wrapTimer(globalTimingStats.mWrapTimeUs);
                 const u64 expectedChunks = zpRingLabelCount(ctx, labels.size());
@@ -1751,7 +1747,7 @@ namespace osuCrypto::LogVole
 
         const u64 chunkCount = zpRingLabelCount(ctx, zpLabelCount);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (ctx.mGpuLightweight && !scaleAndRound && gpu::enabled())
+        if (ctx.mGpuLightweight && !scaleAndRound && gpu::enabled(ctx.mRing))
         {
             // Public callers still request host scalars. Compose Q, reduce
             // modulo p and BatchEncoder-decode on the role's GPU; publish the
@@ -1771,7 +1767,7 @@ namespace osuCrypto::LogVole
         }
         // Try the complete device pipeline before asking a lightweight context
         // to construct any host SEAL state. A decline remains replayable.
-        if (scaleAndRound && gpu::enabled() && chunkCount == labels.size())
+        if (scaleAndRound && gpu::enabled(ctx.mRing) && chunkCount == labels.size())
         {
             out.resize(static_cast<std::size_t>(zpLabelCount));
             if (gpu::unwrapLabelsBatch(ctx, labels, zpLabelCount, out.data()))
@@ -1957,7 +1953,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx.mRing,
-                std::make_shared<gpu::GpuExecutionContext>()))
+                std::make_shared<gpu::GpuExecutionContext>(ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler)))
             throw std::runtime_error("LogVole CI-VOLE sender execution context is invalid");
         // Retain this session's selected ring in its CRT record as well. The
         // parent is an immutable math record, never a reference to this copy.
@@ -2008,17 +2004,13 @@ namespace osuCrypto::LogVole
         gpu::DeviceBatchPtr residentDelta{};
 #endif
         {
-            HostStep deltaStep("setup: delta preparation");
+            HostStep deltaStep(hostProfiler(ctx.mRing), "setup: delta preparation");
             bool strictDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            const char* deviceDelta = std::getenv("LV_GPU_SETUP_DELTA_DEVICE");
-            if (gpu::enabled() && (!deviceDelta || deviceDelta[0] != '0'))
+            if (gpu::enabled(ctx.mRing) && params.mShrinkExpand.mGpuSetup.mDeltaDevice)
             {
-                const char* strict = std::getenv("LV_GPU_SETUP_DELTA_DEVICE_STRICT");
-                strictDevice = strict && strict[0] != '0';
-                const char* chain = std::getenv("LV_GPU_SETUP_DELTA_CHAIN_DEVICE");
-                const char* chainStrict = std::getenv("LV_GPU_SETUP_DELTA_CHAIN_STRICT");
-                if ((!chain || chain[0] != '0') && params.mGamma == 1u &&
+                strictDevice = params.mShrinkExpand.mGpuSetup.mDeltaDeviceStrict;
+                if (params.mShrinkExpand.mGpuSetup.mDeltaChainDevice && params.mGamma == 1u &&
                     ctx.mGpuLightweight)
                 {
                     residentDelta = gpu::wrapSetupDeltaResident(ctx, input.mDelta,
@@ -2026,7 +2018,7 @@ namespace osuCrypto::LogVole
                         input.mGarbledDeltaPattern ? &*input.mGarbledDeltaPattern : nullptr);
                     if (residentDelta)
                         wrapped = true;
-                    else if (chainStrict && chainStrict[0] == '1')
+                    else if (params.mShrinkExpand.mGpuSetup.mDeltaChainStrict)
                         throw std::runtime_error(
                             "LogVole CI-VOLE sender resident delta capture declined");
                 }
@@ -2039,7 +2031,7 @@ namespace osuCrypto::LogVole
 #endif
             if (!wrapped && !strictDevice)
             {
-                HostStep cpuStep("setup: delta CPU preparation");
+                HostStep cpuStep(hostProfiler(ctx.mRing), "setup: delta CPU preparation");
                 wrapped = wrapHost(wrappedDelta);
             }
         }
@@ -2064,7 +2056,7 @@ namespace osuCrypto::LogVole
         offlineInput.mGpuExecution = ctx.mRing.mGpuExecution;
         offlineInput.mRingFactoryOwner = ctx.mRing.mFactoryOwner;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        offlineInput.mUseGpuResidentInternalState = gpu::enabled();
+        offlineInput.mUseGpuResidentInternalState = gpu::enabled(ctx.mRing);
         offlineInput.mWrappedDeltaDevice = std::move(residentDelta);
         if (offlineInput.mWrappedDeltaDevice)
             offlineInput.mWrappedDeltaHostFallback = std::move(wrapHost);
@@ -2130,7 +2122,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx.mRing,
-                std::make_shared<gpu::GpuExecutionContext>()))
+                std::make_shared<gpu::GpuExecutionContext>(ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler)))
             throw std::runtime_error("LogVole CI-VOLE receiver execution context is invalid");
         ctx.mFactoryOwner = std::make_shared<const ZpCrtContext>(ctx);
 #endif
@@ -2156,7 +2148,7 @@ namespace osuCrypto::LogVole
         offlineInput.mGpuExecution = ctx.mRing.mGpuExecution;
         offlineInput.mRingFactoryOwner = ctx.mRing.mFactoryOwner;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        offlineInput.mUseGpuResidentInternalState = gpu::enabled();
+        offlineInput.mUseGpuResidentInternalState = gpu::enabled(ctx.mRing);
 #endif
 
         LogVoleRingReceiver receiver{};
@@ -2266,7 +2258,7 @@ namespace osuCrypto::LogVole
         onlineOptions.mSkipTbkOutput = true;
         onlineOptions.mUsePrecomputed = senderHasPrecompute(state.mLogVoleState);
         {
-            HostStep step("send: logvole online");
+            HostStep step(hostProfiler(ctxOwner->mRing), "send: logvole online");
             co_await sender.online(state.mLogVoleState, onlineOptions, online, prng, sock);
         }
 
@@ -2283,7 +2275,7 @@ namespace osuCrypto::LogVole
         next.mComm = online.mComm;
 
         const bool writeToCaller = options.mKeysOut.size() == static_cast<std::size_t>(state.mW);
-        HostStep unwrapStep("cpu sender: unwrap keys and copy");
+        HostStep unwrapStep(hostProfiler(ctx.mRing), "cpu sender: unwrap keys and copy");
         bool haveKeys = false;
         const auto& ringKeys = *state.mLogVoleState.mPrecomputedTbk;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2294,7 +2286,7 @@ namespace osuCrypto::LogVole
             auto dev = std::static_pointer_cast<gpu::DeviceBatch>(ringKeysDevice);
             if (options.mKeepKeysOnDevice)
             {
-                HostStep step("send: unwrap keys -> device");
+                HostStep step(hostProfiler(ctx.mRing), "send: unwrap keys -> device");
                 // Nothing crosses PCIe for the sender either: the keys are
                 // unwrapped in place and left for a device-side consumer.
                 if (auto scalars = gpu::unwrapLabelsToDevice(ctx, *dev, ringKeyCount, state.mW))
@@ -2373,7 +2365,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole CI-VOLE receiver has no matching offline CRT owner");
         const auto& ctx = *ctxOwner;
         {
-            HostStep step("recv: crt ctx + validate + sid");
+            HostStep step(hostProfiler(ctx.mRing), "recv: crt ctx + validate + sid");
             if ((!xOnDevice && !validateZpValues(ctx, x)) ||
                 !prepareReceiverSidForSetX(state, sid))
             {
@@ -2399,9 +2391,9 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         // Wrap straight into device memory: only the scalars are uploaded and the
         // 256 KiB-per-chunk host representation is never built.
-        if (gpu::enabled())
+        if (gpu::enabled(ctx.mRing))
         {
-            HostStep step("recv: wrap x -> device");
+            HostStep step(hostProfiler(ctx.mRing), "recv: wrap x -> device");
             gpu::DeviceBatchPtr dev{};
             if (xOnDevice)
             {
@@ -2434,7 +2426,7 @@ namespace osuCrypto::LogVole
 #endif
         if (!onlineInput.mXDevice)
         {
-            HostStep wrapStep("cpu receiver: wrap inputs");
+            HostStep wrapStep(hostProfiler(ctx.mRing), "cpu receiver: wrap inputs");
             if (xOnDevice)
             {
                 throw std::runtime_error(
@@ -2480,7 +2472,7 @@ namespace osuCrypto::LogVole
         LogVoleRingReceiver receiver{};
         ReceiverOnlineOutput online{};
         {
-            HostStep step("recv: logvole online");
+            HostStep step(hostProfiler(ctx.mRing), "recv: logvole online");
             co_await receiver.online(
                 state.mLogVoleState, onlineInput, online, prng, sock,
                 state.mFirstQueryGpuAllocations, &state);
@@ -2493,7 +2485,7 @@ namespace osuCrypto::LogVole
 
         const bool writeToCaller =
             options.mMacsOut.size() == static_cast<std::size_t>(state.mW);
-        HostStep unwrapStep("cpu receiver: unwrap macs and copy");
+        HostStep unwrapStep(hostProfiler(ctx.mRing), "cpu receiver: unwrap macs and copy");
 
         AlignedUnVec<u64> macs;
         bool haveMacs = false;
@@ -2506,7 +2498,7 @@ namespace osuCrypto::LogVole
             auto dev = std::static_pointer_cast<gpu::DeviceBatch>(online.mTbmDevice);
             if (options.mKeepMacsOnDevice)
             {
-                HostStep step("recv: unwrap macs -> device");
+                HostStep step(hostProfiler(ctx.mRing), "recv: unwrap macs -> device");
                 // Nothing crosses PCIe: the caller consumes the result on the GPU.
                 if (auto scalars = gpu::unwrapLabelsToDevice(
                         ctx, *dev, static_cast<u64>(online.mTbmCount), state.mW))

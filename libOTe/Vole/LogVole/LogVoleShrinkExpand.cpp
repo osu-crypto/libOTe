@@ -52,9 +52,9 @@ namespace osuCrypto::LogVole
                     std::call_once(mOnce, [&] { mValue.mCt = mTensor->get(); });
                     return mValue;
                 }
-                bool copyCoefficientsTo(WireView destination) const override
+                bool copyCoefficientsTo(WireView destination, const LogVoleWireOptions& options) const override
                 {
-                    return mTensor->copyCoefficientsTo(destination);
+                    return mTensor->copyCoefficientsTo(destination, options);
                 }
                 ConstWireView encodedCoefficients() const override
                 {
@@ -80,21 +80,19 @@ namespace osuCrypto::LogVole
         constexpr double kNoiseStdS = 3.19;
         constexpr double kNoiseLambda = 128.0;
 
-        bool setupBatchNttEnabled()
+        bool setupBatchNttEnabled(const LogVoleGpuSetupOptions& options, const RingNttContext& ctx)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            const char* value = std::getenv("LV_GPU_SETUP_BATCH_NTT");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return options.mBatchNtt && gpu::enabled(ctx);
 #else
             return false;
 #endif
         }
 
-        bool setupParallelMessageCopyEnabled()
+        bool setupParallelMessageCopyEnabled(const LogVoleGpuSetupOptions& options, const RingNttContext& ctx)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            const char* value = std::getenv("LV_GPU_SETUP_PARALLEL_MESSAGE_COPY");
-            return (!value || value[0] != '0') && gpu::enabled();
+            return options.mParallelMessageCopy && gpu::enabled(ctx);
 #else
             return false;
 #endif
@@ -381,7 +379,7 @@ namespace osuCrypto::LogVole
         ShrinkExpandOfflineMessage* message,
         ShrinkExpandSenderState& senderState)
     {
-        HostStep setupStep("setup sender: shrink expand total");
+        HostStep setupStep(hostProfiler(input.mRingFactoryOwner), "setup sender: shrink expand total");
         // A direct caller must not promote a receiver scope into a sender
         // capability merely by invoking the sender API with a private token.
         if (input.mFixedSk1Device &&
@@ -402,7 +400,7 @@ namespace osuCrypto::LogVole
         }
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx, input.mGpuExecution ? input.mGpuExecution :
-                std::make_shared<gpu::GpuExecutionContext>())) return false;
+                std::make_shared<gpu::GpuExecutionContext>(ctx.mExecutionOptions, ctx.mHostProfiler))) return false;
         if (input.mFixedSk1Device &&
             (!gpu::topSecretUniformBatchMatches(ctx,
                 *input.mFixedSk1Device, input.mParams.mTau,
@@ -416,7 +414,7 @@ namespace osuCrypto::LogVole
         if (input.mSDevice)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (message || !gpu::enabled() ||
+            if (message || !gpu::enabled(ctx) ||
                 !gpu::setupSeedLabelRepBatchMatches(ctx,
                     *input.mSDevice, input.mParams.mMu,
                     currentProtocolCacheScope().mRunId)) return false;
@@ -428,7 +426,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         // Join before leaving this timed setup scope. Independent CPU sampling
         // can overlap first-use GPU initialization without excluding its cost.
-        gpu::GpuRingSetupPrefetch ringPrefetch(ctx, gpu::enabled());
+        gpu::GpuRingSetupPrefetch ringPrefetch(ctx, gpu::enabled(ctx));
 #endif
 
         ShrinkExpandSenderState next{};
@@ -450,7 +448,7 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            HostStep sk1Step("setup sender: top sk1 uniform sampling");
+            HostStep sk1Step(hostProfiler(ctx), "setup sender: top sk1 uniform sampling");
             if (input.mDeferTopSk1Host && !message &&
                 input.mParams.mTruncateOneGadgetDigit)
             {
@@ -466,11 +464,11 @@ namespace osuCrypto::LogVole
             else next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, prng);
         }
 
-        HostStep publicDataStep("setup sender: public data");
+        HostStep publicDataStep(hostProfiler(ctx), "setup sender: public data");
         const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (input.mDeferHostCiphertexts && !message && gpu::enabled() &&
-            gpu::publicUniformRetentionEnabled())
+        if (input.mDeferHostCiphertexts && !message && gpu::enabled(ctx) &&
+            gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions))
         {
             next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu);
             next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau);
@@ -523,7 +521,7 @@ namespace osuCrypto::LogVole
                 input.mParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message,
                 input.mDeferHostCiphertexts && !message,
-                input.mSDevice.get(), input.mLazyS.get());
+                input.mSDevice.get(), input.mLazyS.get(), input.mParams.mGpuSetup);
         }
         else
         {
@@ -575,7 +573,7 @@ namespace osuCrypto::LogVole
                 input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
                 lenc.mLazyRandomizers, nullptr, nullptr,
                 next.mTopSk1Device.get(), next.mLazyTopSk1.get(),
-                next.mTopSk1OwnerRunId, static_cast<bool>(next.mTopSk1Device));
+                next.mTopSk1OwnerRunId, static_cast<bool>(next.mTopSk1Device), input.mParams.mGpuSetup);
         }
         else
         {
@@ -592,7 +590,7 @@ namespace osuCrypto::LogVole
                 next.mPublicANtt.get(),
                 input.mParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
-                lenc.mLazyRandomizers);
+                lenc.mLazyRandomizers, input.mParams.mGpuSetup);
         }
         if (!ct1Ok)
         {
@@ -610,8 +608,8 @@ namespace osuCrypto::LogVole
 
         ShrinkExpandOfflineMessage nextMessage{};
         nextMessage.mParams = next.mParams;
-        HostStep messageCopyStep("setup sender: offline message copy");
-        if (setupParallelMessageCopyEnabled())
+        HostStep messageCopyStep(hostProfiler(ctx), "setup sender: offline message copy");
+        if (setupParallelMessageCopyEnabled(input.mParams.mGpuSetup, ctx))
         {
             nextMessage.mCt1.mRows = next.mCt1.mRows;
             nextMessage.mCt1.mCols = next.mCt1.mCols;
@@ -670,7 +668,7 @@ namespace osuCrypto::LogVole
         Message&& message,
         ShrinkExpandReceiverState& receiverState)
     {
-        HostStep setupStep("setup receiver: shrink expand total");
+        HostStep setupStep(hostProfiler(input.mRingFactoryOwner), "setup receiver: shrink expand total");
         if (!validateShrinkExpandReceiverOfflineInput(input) ||
             !validateStateParamsMatch(input.mParams, message.mParams))
         {
@@ -709,7 +707,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx, input.mGpuExecution ? input.mGpuExecution :
-                std::make_shared<gpu::GpuExecutionContext>())) return false;
+                std::make_shared<gpu::GpuExecutionContext>(ctx.mExecutionOptions, ctx.mHostProfiler))) return false;
 #endif
 
         ShrinkExpandReceiverState next{};
@@ -717,7 +715,7 @@ namespace osuCrypto::LogVole
             std::make_shared<detail::ShrinkExpandScratch>();
         next.mParams = input.mParams;
         next.mRingFactoryOwner = ctx.mFactoryOwner;
-        HostStep publicDataStep("setup receiver: public data");
+        HostStep publicDataStep(hostProfiler(ctx), "setup receiver: public data");
         const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (input.mDeferHostSnapshot)
@@ -755,12 +753,11 @@ namespace osuCrypto::LogVole
         next.mLacct = std::forward<Message>(message).mLacct;
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* residentNtt = std::getenv("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT");
-        if (!residentNtt || residentNtt[0] != '0')
+        if (input.mParams.mGpuSetup.mReceiverResidentNtt)
         {
             ScopedProtocolCacheScope roleScope(
                 ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-            if (gpu::enabled())
+            if (gpu::enabled(ctx))
             {
                 if (gpu::finalizeReceiverSetupDevice(ctx, next, input.mDeferHostSnapshot,
                         message.mLazyCt1, message.mLazyLacct))
@@ -768,8 +765,7 @@ namespace osuCrypto::LogVole
                     receiverState = std::move(next);
                     return true;
                 }
-                const char* strict = std::getenv("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT_STRICT");
-                if (strict && strict[0] == '1') return false;
+                if (input.mParams.mGpuSetup.mReceiverResidentNttStrict) return false;
             }
         }
 #endif
@@ -794,7 +790,7 @@ namespace osuCrypto::LogVole
 
         // These ciphertext transforms are independent. Batching lets setup use
         // the existing device NTT instead of serial host transforms per cell.
-        if (setupBatchNttEnabled())
+        if (setupBatchNttEnabled(input.mParams.mGpuSetup, ctx))
         {
             if (!forwardNttBatch(next.mCt1.mPolys, ctx)) return false;
         }
@@ -1051,7 +1047,7 @@ namespace osuCrypto::LogVole
         auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
         auto& receiverCt2 = scratch.ct2();
         const bool senderRole = currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender;
-        HostStep sampleStep(senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling");
+        HostStep sampleStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling");
         if (!buildHashedCt2(
                 ctx,
                 state.mParams.mMu,
@@ -1065,7 +1061,7 @@ namespace osuCrypto::LogVole
         }
 
         sampleStep.stop();
-        HostStep applyStep(senderRole ? "cpu sender expand detail: apply" : "cpu receiver expand detail: apply");
+        HostStep applyStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: apply" : "cpu receiver expand detail: apply");
         std::vector<RnsPoly> ct1AppliedNtt;
         bool applyOk = false;
         if (state.mParams.mTruncateOneGadgetDigit)
@@ -1098,7 +1094,7 @@ namespace osuCrypto::LogVole
         }
 
         applyStep.stop();
-        HostStep decryptStep(senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt");
+        HostStep decryptStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt");
         std::vector<RnsPoly> decPartialNtt;
         if (!lheDec(
                 ctx,
@@ -1114,14 +1110,10 @@ namespace osuCrypto::LogVole
         }
 
         decryptStep.stop();
-        HostStep evalStep(senderRole ? "cpu sender expand detail: tree eval" : "cpu receiver expand detail: tree eval");
+        HostStep evalStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: tree eval" : "cpu receiver expand detail: tree eval");
         std::vector<RnsPoly> evalNtt;
         bool evalOk = false;
-        static const bool fusedEvalEnabled = [] {
-            const char* value = std::getenv("LV_CPU_FUSED_EXPAND_EVAL");
-            return !value || value[0] != '0';
-        }();
-        const bool fusedEval = fusedEvalEnabled && state.mParams.mTruncateOneGadgetDigit;
+        const bool fusedEval = ctx.mExecutionOptions.mAdvanced.mCpu.mFusedExpandEval && state.mParams.mTruncateOneGadgetDigit;
         if (fusedEval)
         {
             evalOk = lencSubtractEvalTruncNttInplace(
@@ -1166,7 +1158,7 @@ namespace osuCrypto::LogVole
         }
 
         evalStep.stop();
-        HostStep finishStep(senderRole ? "cpu sender expand detail: finish" : "cpu receiver expand detail: finish");
+        HostStep finishStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: finish" : "cpu receiver expand detail: finish");
         ShrinkExpandReceiverExpandOutput next{};
         next.mTbm.resize(state.mParams.mMu);
         for (u32 row = 0; row < state.mParams.mMu; ++row)

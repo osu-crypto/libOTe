@@ -31,7 +31,11 @@ namespace osuCrypto::LogVole::gpu
     class GpuTableCache
     {
     public:
-        GpuTableCache();
+        explicit GpuTableCache(LogVoleExecutionOptions options = {},
+            std::shared_ptr<HostStepProfiler> profiler = {});
+        const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
+        HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
+        const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
         ~GpuTableCache();
         GpuTableCache(const GpuTableCache&) = delete;
         GpuTableCache& operator=(const GpuTableCache&) = delete;
@@ -40,7 +44,9 @@ namespace osuCrypto::LogVole::gpu
         friend class GpuPlainNtt;
         friend class GpuRingSetupPrefetch;
         struct Impl;
+        std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::unique_ptr<Impl> mImpl;
+        const LogVoleExecutionOptions mExecutionOptions;
     };
     // Explicit cold-setup execution domain. Copies of ring/CRT resources can
     // retain this domain; it owns reusable per-worker streams without TLS.
@@ -48,14 +54,20 @@ namespace osuCrypto::LogVole::gpu
     class GpuSetupContext
     {
     public:
-        GpuSetupContext();
+        explicit GpuSetupContext(LogVoleExecutionOptions options = {},
+            std::shared_ptr<HostStepProfiler> profiler = {});
+        const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
+        HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
+        const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
         ~GpuSetupContext();
         GpuSetupContext(const GpuSetupContext&) = delete;
         GpuSetupContext& operator=(const GpuSetupContext&) = delete;
         std::shared_ptr<OwnedGpuStream> stream();
     private:
         struct Impl;
+        std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::unique_ptr<Impl> mImpl;
+        const LogVoleExecutionOptions mExecutionOptions;
     };
 
     bool available();
@@ -113,13 +125,17 @@ namespace osuCrypto::LogVole::gpu
     {
     public:
         GpuStream();
-        explicit GpuStream(std::shared_ptr<GpuMemoryPool> memory);
+        explicit GpuStream(LogVoleGpuStreamOptions options, std::shared_ptr<HostStepProfiler> profile = {});
+        const LogVoleGpuStreamOptions& options() const { return mOptions; }
+        HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
+        const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
+        explicit GpuStream(std::shared_ptr<GpuMemoryPool> memory, LogVoleGpuStreamOptions options = {}, std::shared_ptr<HostStepProfiler> profile = {});
         // A lean non-blocking stream at the device's greatest supported
         // priority. It has no default index scratch; callers prepare their
         // workspace storage explicitly before query submission. Returns null
         // when the device exposes no useful
         // priority range or stream creation fails.
-        static std::unique_ptr<GpuStream> createHighestPriority();
+        static std::unique_ptr<GpuStream> createHighestPriority(LogVoleGpuStreamOptions options = {}, std::shared_ptr<HostStepProfiler> profile = {});
         ~GpuStream();
         GpuStream(const GpuStream&) = delete;
         GpuStream& operator=(const GpuStream&) = delete;
@@ -156,9 +172,11 @@ namespace osuCrypto::LogVole::gpu
         friend class GpuExecutionContext;
         void recordTableRead(const std::shared_ptr<GpuTableReadState>& table);
         GpuStream(bool highestPriority, bool allocateScratch,
-            std::shared_ptr<GpuMemoryPool> memory = {});
+            std::shared_ptr<GpuMemoryPool> memory = {}, LogVoleGpuStreamOptions options = {}, std::shared_ptr<HostStepProfiler> profile = {});
         bool ensureIndexScratch();
 
+        const LogVoleGpuStreamOptions mOptions;
+        const std::shared_ptr<HostStepProfiler> mHostProfiler;
         void* mStream = nullptr;
         std::shared_ptr<GpuMemoryPool> mMemory;
         std::shared_ptr<OwnedGpuStream> mAllocationOwner;
@@ -189,7 +207,11 @@ namespace osuCrypto::LogVole::gpu
     class GpuExecutionContext
     {
     public:
-        GpuExecutionContext();
+        explicit GpuExecutionContext(LogVoleExecutionOptions options = {},
+            std::shared_ptr<HostStepProfiler> profiler = {});
+        const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
+        HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
+        const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
         ~GpuExecutionContext();
         GpuExecutionContext(const GpuExecutionContext&) = delete;
         GpuExecutionContext& operator=(const GpuExecutionContext&) = delete;
@@ -203,7 +225,9 @@ namespace osuCrypto::LogVole::gpu
         enum class Lane { Main, Sample, Readback };
         GpuStream& stream(Lane lane);
         struct Impl;
+        std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::unique_ptr<Impl> mImpl;
+        const LogVoleExecutionOptions mExecutionOptions;
     };
 
     GpuStream& contextStream(const RingNttContext& ctx);
@@ -254,7 +278,7 @@ namespace osuCrypto::LogVole::gpu
     bool downloadToHost(void* dst, const void* deviceSrc, std::size_t bytes, GpuStream& stream);
 
     // Copies ordinary pageable host memory to the device. The default uses CUDA's
-    // direct pageable path; LV_GPU_PIPELINED_UPLOAD=1 opts into a double-buffered
+    // direct pageable path; mPipelinedUpload opts into a double-buffered
     // pinned pipeline that can help platforms with a slower driver staging path.
     // The returned copy remains stream ordered and is not synchronised here.
     bool uploadFromHost(void* deviceDst, const void* src, std::size_t bytes, GpuStream& stream);
@@ -263,17 +287,19 @@ namespace osuCrypto::LogVole::gpu
     // and retained when their storage comes from the reusable wire pool. Fresh
     // pool-owned D2H destinations attempt persistent registration and direct
     // transfer; unsupported or failed registration uses bounded staging.
-    // LV_GPU_SETUP_DIRECT_WIRE_DOWNLOAD=0 restores the prior fresh-D2H staging
+    // Disabling mDirectDownload restores the prior fresh-D2H staging
     // policy for A/B profiling. Blocks registered by prior H2D reuse transfer
-    // directly in either direction. LV_GPU_SETUP_PINNED_WIRE=0 restores ordinary
+    // directly in either direction. Disabling mPinned restores ordinary
     // staged helpers. Both directions drain before returning, including failure,
     // and before releasing any temporary registration for external storage.
-    bool downloadSetupWire(WireView wire, const void* deviceSrc, GpuStream& stream);
-    bool uploadSetupWire(void* deviceDst, ConstWireView wire, GpuStream& stream);
+    bool downloadSetupWire(WireView wire, const void* deviceSrc, GpuStream& stream,
+        const LogVoleWireOptions& options = {});
+    bool uploadSetupWire(void* deviceDst, ConstWireView wire, GpuStream& stream,
+        const LogVoleWireOptions& options = {});
 
     // Explicit native setup selects a role-local cache lane on device 0.
     // Factory construction still requires a nonzero owned protocol run.
-    bool nativeSealBundleCacheRequested(ProtocolCacheRole role);
+    bool nativeSealBundleCacheRequested(ProtocolCacheRole role, const LogVoleExecutionOptions& settings);
 
     // Upload a compact host matrix into pitched device rows. The caller keeps
     // src alive until stream completion; untouched device columns stay unused.
@@ -341,6 +367,9 @@ namespace osuCrypto::LogVole::gpu
         u32 rho() const { return mView.mRho; }
         std::size_t polyWords() const { return static_cast<std::size_t>(mView.mN) * mView.mRho; }
         std::size_t polyBytes() const { return polyWords() * sizeof(u64); }
+        const LogVoleExecutionOptions& executionOptions() const { return mSetup->executionOptions(); }
+        HostStepProfiler* hostProfiler() const { return mSetup->hostProfiler(); }
+        const LogVoleGpuKernelOptions& kernelOptions() const { return mView.mKernelOptions; }
         const RingConstView& view(GpuStream& stream) const
         {
             mReads.record(stream);
@@ -403,7 +432,7 @@ namespace osuCrypto::LogVole::gpu
         RingParams mParams{};
     };
 
-    // GPU first-use overlap (LV_GPU_SETUP_INIT_OVERLAP=0 disables). Declare this
+    // GPU first-use overlap, selected by mContexts.mInitOverlap. Declare this
     // inside the timed setup scope, before independent CPU work. It owns a
     // context copy and joins on destruction, including early returns. Normal
     // GpuRing::get calls remain the synchronization/fallback boundary.
@@ -448,6 +477,9 @@ namespace osuCrypto::LogVole::gpu
         GpuPlainNtt(const GpuPlainNtt&) = delete;
         GpuPlainNtt& operator=(const GpuPlainNtt&) = delete;
 
+        const LogVoleExecutionOptions& executionOptions() const { return mSetup->executionOptions(); }
+        HostStepProfiler* hostProfiler() const { return mSetup->hostProfiler(); }
+        const LogVoleGpuKernelOptions& kernelOptions() const { return mView.mKernelOptions; }
         const RingConstView& view(GpuStream& stream) const
         {
             mReads.record(stream);

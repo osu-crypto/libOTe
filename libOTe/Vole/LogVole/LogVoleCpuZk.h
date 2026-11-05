@@ -2,12 +2,13 @@
 
 #include "cryptoTools/Common/Defines.h"
 #include "seal/modulus.h"
+#include "libOTe/Vole/LogVole/LogVoleZkOptions.h"
 #include <array>
 #include <cstddef>
 
 namespace osuCrypto::LogVole::detail
 {
-    // Capture environment/ISA choices once at preparation, then pass this
+    // Resolve supplied settings and ISA support once at preparation, then pass this
     // immutable value to kernels. Different owners may choose scalar/vector
     // execution independently; no process-wide cache or lazy first-call probe.
     struct CpuZkOptions
@@ -17,7 +18,7 @@ namespace osuCrypto::LogVole::detail
         bool mVectorWitness = false;
         bool mVectorMatMul = false;
     };
-    CpuZkOptions captureCpuZkOptions();
+    CpuZkOptions captureCpuZkOptions(const LogVoleZkOptions& settings = {});
 
     // Independent witness gates whose operand wires are already available.
     // Output must not overlap any referenced input. False leaves it untouched.
@@ -43,7 +44,7 @@ namespace osuCrypto::LogVole::detail
     // false before writing; valid empty row ranges succeed without dereferencing.
     // Exact bounded raw-product accumulation uses the shared UInt type, with
     // an optional AVX-512 IFMA path for 51/54-bit fields. Set
-    // LV_CPU_VECTOR_MATMUL=0 before capturing options to force scalar accumulation.
+    // mCpuVectorMatMul=false in the supplied settings to force scalar accumulation.
     bool cpuZkMatMulProverTerms(
         const u64* a, const u64* ma, const u64* bTranspose, const u64* mbTranspose,
         u64* a0, u64* cross, std::size_t n, std::size_t beginRow,

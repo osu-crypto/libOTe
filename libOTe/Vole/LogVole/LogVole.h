@@ -240,10 +240,16 @@ namespace osuCrypto::LogVole
 
 namespace osuCrypto
 {
-    struct LogVoleOptions
+    // Set all session configuration before constructing either party.
+    // mRequestSize counts scalar VOLE outputs (labels for the garbled API).
+    struct LogVoleOptions : LogVoleExecutionOptions
     {
-        // Experimental partial-root support; the width calculation is unchanged.
-        bool mAllowPartialRootWidth = false;
+        u64 mRequestSize = 0;
+        u32 mPlaintextModulusBits = 55;
+        u32 mNumThreads = 1;
+        LogVole::CivoleSetting mSetting = LogVole::CivoleSetting::GoldenSeed;
+        LogVole::OnlineMode mMode = LogVole::OnlineMode::Interactive;
+        bool operator==(const LogVoleOptions&) const = default;
     };
 
     // Semi-honest LogVole chosen-input VOLE sender.
@@ -263,22 +269,29 @@ namespace osuCrypto
             Offline
         };
 
+        // Empty move target; queries require construction with options.
         LogVoleSender() = default;
-        explicit LogVoleSender(LogVoleOptions options) : mOptions(options) {}
+        explicit LogVoleSender(LogVoleOptions options,
+            std::shared_ptr<LogVole::ZpContextFactory> factory = {});
+        const LogVoleOptions& options() const { return mOptions; }
+        LogVole::HostStepProfiler* hostProfiler() const
+        {
+            return mConfigureFactoryOwner ? LogVole::hostProfiler(mConfigureFactoryOwner->mRing) : nullptr;
+        }
+        std::shared_ptr<LogVole::HostStepProfiler> hostProfilerOwner() const
+        {
+            return mConfigureFactoryOwner ? mConfigureFactoryOwner->mRing.mHostProfiler : nullptr;
+        }
         LogVoleSender(const LogVoleSender&) = delete;
         LogVoleSender& operator=(const LogVoleSender&) = delete;
         LogVoleSender(LogVoleSender&& other);
         LogVoleSender& operator=(LogVoleSender&& other);
 
-        u64 mRequestSize = 0;
-        u32 mPlaintextModulusBits = 55;
         u64 mModulus = 0;
         u64 mDelta = 0;
-        u32 mNumThreads = 1;
         LogVole::CivoleSid mNextSid = 0;
         LogVole::CommunicationStats mLastOnlineComm;
         State mState = State::Default;
-        LogVole::CivoleSetting mSetting = LogVole::CivoleSetting::GoldenSeed;
         LogVole::CivoleParams mParams;
         LogVole::CivoleSenderState mOfflineState;
 
@@ -294,22 +307,12 @@ namespace osuCrypto
         const std::shared_ptr<void>& outputDevice() const { return mOutputDevice; }
         u64 outputDeviceCount() const { return mOutputDeviceCount; }
 
-        // Select the number of VOLE outputs, requested plaintext modulus bit
-        // count, worker thread count, and which correctness setting to run. The
-        // actual prime p can be read with modulus() after configuration; a
-        // setting that fixes p (NoGoldenSeed) overrides the requested bit count.
-        void configure(
-            u64 n,
-            u32 plaintextModulusBits = 55,
-            u32 numThreads = 1,
-            LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            LogVole::OnlineMode mode = LogVole::OnlineMode::Interactive,
-            std::shared_ptr<LogVole::ZpContextFactory> factory = {});
-
         bool isConfigured() const { return mState != State::Default; }
         bool hasOffline() const { return mState == State::Offline; }
         u64 modulus() const { return mModulus; }
-        // Diagnostic evidence for the SEAL context selected by configure().
+        u64 requestSize() const { return mRequestSize; }
+        u32 numThreads() const { return mNumThreads; }
+        // Diagnostic evidence for the SEAL context selected at construction.
         u64 configureCacheRunId() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }
         LogVole::CivoleSetting setting() const { return mSetting; }
@@ -327,8 +330,8 @@ namespace osuCrypto
             PRNG& prng,
             Socket& sock);
 
-        // One-shot convenience entrypoint. If needed, this configures from
-        // b.size() and runs offline(delta, sock) before the online send.
+        // One-shot convenience entrypoint. Runs offline if needed, using the
+        // size and protocol options supplied at construction.
         task<> send(
             u64 delta,
             span<u64> b,
@@ -339,8 +342,12 @@ namespace osuCrypto
 
     private:
         LogVoleOptions mOptions;
+        u64 mRequestSize = 0;
+        u32 mNumThreads = 1;
+        LogVole::CivoleSetting mSetting = LogVole::CivoleSetting::GoldenSeed;
 
-        // Keep configure-time tables reusable until reconfiguration or clear().
+
+        // Keep construction-time tables reusable until clear().
         std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         u64 mConfigureCacheRunId = 0;
         bool mNativeSealBundleAtConfigure = false;
@@ -360,21 +367,28 @@ namespace osuCrypto
             Offline
         };
 
+        // Empty move target; queries require construction with options.
         LogVoleReceiver() = default;
-        explicit LogVoleReceiver(LogVoleOptions options) : mOptions(options) {}
+        explicit LogVoleReceiver(LogVoleOptions options,
+            std::shared_ptr<LogVole::ZpContextFactory> factory = {});
+        const LogVoleOptions& options() const { return mOptions; }
+        LogVole::HostStepProfiler* hostProfiler() const
+        {
+            return mConfigureFactoryOwner ? LogVole::hostProfiler(mConfigureFactoryOwner->mRing) : nullptr;
+        }
+        std::shared_ptr<LogVole::HostStepProfiler> hostProfilerOwner() const
+        {
+            return mConfigureFactoryOwner ? mConfigureFactoryOwner->mRing.mHostProfiler : nullptr;
+        }
         LogVoleReceiver(const LogVoleReceiver&) = delete;
         LogVoleReceiver& operator=(const LogVoleReceiver&) = delete;
         LogVoleReceiver(LogVoleReceiver&& other);
         LogVoleReceiver& operator=(LogVoleReceiver&& other);
 
-        u64 mRequestSize = 0;
-        u32 mPlaintextModulusBits = 55;
         u64 mModulus = 0;
-        u32 mNumThreads = 1;
         LogVole::CivoleSid mNextSid = 0;
         LogVole::CommunicationStats mLastOnlineComm;
         State mState = State::Default;
-        LogVole::CivoleSetting mSetting = LogVole::CivoleSetting::GoldenSeed;
         LogVole::CivoleParams mParams;
         LogVole::CivoleReceiverState mOfflineState;
         std::shared_ptr<void> mOutputDevice;
@@ -387,13 +401,6 @@ namespace osuCrypto
         // public parameters and receive() completes locally; its buffered
         // outbound digest can be delivered to the sender later. Applications
         // must assign distinct SIDs across receivers sharing a public key.
-        void configure(
-            u64 n,
-            u32 plaintextModulusBits = 55,
-            u32 numThreads = 1,
-            LogVole::CivoleSetting setting = LogVole::CivoleSetting::GoldenSeed,
-            LogVole::OnlineMode mode = LogVole::OnlineMode::Interactive,
-            std::shared_ptr<LogVole::ZpContextFactory> factory = {});
 
         // Leave the MACs in GPU memory instead of writing them to `a`, for
         // callers whose next step also runs on the GPU. After receive(),
@@ -411,7 +418,9 @@ namespace osuCrypto
         bool isConfigured() const { return mState != State::Default; }
         bool hasOffline() const { return mState == State::Offline; }
         u64 modulus() const { return mModulus; }
-        // Diagnostic evidence for the SEAL context selected by configure().
+        u64 requestSize() const { return mRequestSize; }
+        u32 numThreads() const { return mNumThreads; }
+        // Diagnostic evidence for the SEAL context selected at construction.
         u64 configureCacheRunId() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }
         LogVole::CivoleSetting setting() const { return mSetting; }
@@ -437,8 +446,12 @@ namespace osuCrypto
 
     private:
         LogVoleOptions mOptions;
+        u64 mRequestSize = 0;
+        u32 mNumThreads = 1;
+        LogVole::CivoleSetting mSetting = LogVole::CivoleSetting::GoldenSeed;
 
-        // Keep configure-time tables reusable until reconfiguration or clear().
+
+        // Keep construction-time tables reusable until clear().
         std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         u64 mConfigureCacheRunId = 0;
         bool mNativeSealBundleAtConfigure = false;

@@ -60,7 +60,7 @@ namespace osuCrypto::LogVole::detail
     }
 
     template<ProtocolCacheRole Role>
-    inline task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize)
+    inline task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize, const LogVoleWireOptions& options, bool useGpu = false, HostStepProfiler* profile = nullptr)
     {
         std::array<u8, kFrameHeaderSize> header{};
         const auto waitStart = std::chrono::steady_clock::now();
@@ -79,13 +79,13 @@ namespace osuCrypto::LogVole::detail
             throw std::length_error("LogVole frame is too large");
         }
 
-        Buffer payload(static_cast<std::size_t>(size));
-        adviseGpuSetupWireBuffer(payload);
+        Buffer payload(static_cast<std::size_t>(size), options, useGpu, profile);
+        adviseGpuSetupWireBuffer(payload, options, useGpu);
         if (!payload.empty())
         {
             if constexpr (Role == ProtocolCacheRole::Receiver)
             {
-                HostStep phase("transport receiver: receive frame payload");
+                HostStep phase(profile, "transport receiver: receive frame payload");
                 co_await sock.recv(payload);
             }
             else

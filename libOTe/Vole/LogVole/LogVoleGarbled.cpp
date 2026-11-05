@@ -83,17 +83,30 @@ namespace osuCrypto::LogVole
         void configureGarbled(u64 count, u32 threads, CivoleSetting setting,
             CivoleParams& params, GarbledLabelLayout& layout, u64& modulus,
             bool& nativeBundleCommitted,
-            std::shared_ptr<const ZpCrtContext>& factoryOwner)
+            std::shared_ptr<const ZpCrtContext>& factoryOwner, const LogVoleOptions& options)
         {
+            if (options.mMode != OnlineMode::Interactive)
+                throw std::invalid_argument("garbled labels require interactive mode");
             CivoleParams next;
             ZpCrtContext selected{};
+            auto factory = factoryOwner ? factoryOwner->mFactory :
+                std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options));
+            if (factory->ringFactory()->executionOptions() != static_cast<const LogVoleExecutionOptions&>(options))
+                throw std::invalid_argument("LogVole factory options do not match constructor options");
             if (!makeCivoleParams(setting, next, std::max(threads, 1u)) ||
                 !makeZpCrtContext(next.mLogVole.mShrinkExpand.mRing,
                     next.mLogVole.mShrinkExpand.mPlaintextModulusBits, selected,
-                    factoryOwner ? factoryOwner->mFactory : nullptr) ||
+                    factory) ||
                 selected.mPlaintextModulus <= (u64{1} << 43))
                 throw std::invalid_argument("garbled labels require a supported 128-bit parameter set");
+            const auto fixedBits = civoleSettingPlaintextModulusBits(setting);
+            if (!fixedBits && options.mPlaintextModulusBits != next.mLogVole.mShrinkExpand.mPlaintextModulusBits)
+                throw std::invalid_argument("garbled labels require the selected parameter set modulus width");
             GarbledLabelLayout shape(count, next.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+            next.mLogVole.mAllowPartialRootWidth = options.mAdvanced.mAllowPartialRootWidth;
+            next.mLogVole.mEarlyGoldenCheck = options.mAdvanced.mEarlyGoldenCheck;
+            next.mLogVole.mShrinkExpand.mGpuSetup = options.mAdvanced.mGpuSetup;
+            next.mLogVole.mShrinkExpand.mTransport = options.mAdvanced.mTransport;
             next.mLogVole.mTotalLabelCount = shape.scalarCount();
             const auto& shrink = next.mLogVole.mShrinkExpand;
             const u64 minimumWidth = shrink.mAlpha * (shrink.mTau - 1) * shrink.mRing.mCoeffModulusBits.size();
@@ -142,8 +155,12 @@ namespace osuCrypto
 {
     using namespace LogVole;
 
-    void LogVoleGarbledSender::configure(u64 n, u32 threads, CivoleSetting setting)
+    LogVoleGarbledSender::LogVoleGarbledSender(LogVoleOptions options)
+        : mOptions(std::move(options))
     {
+        const auto n = mOptions.mRequestSize;
+        const auto threads = mOptions.mNumThreads;
+        const auto setting = mOptions.mSetting;
         const auto inheritedRun = currentProtocolCacheScope().mRunId;
         const auto configureRun = inheritedRun ? inheritedRun :
             allocateProtocolCacheRunId();
@@ -151,7 +168,7 @@ namespace osuCrypto
             ProtocolCacheRole::Sender, configureRun);
         bool nativeBundleCommitted = false;
         configureGarbled(n, threads, setting, mParams, mLayout, mModulus,
-            nativeBundleCommitted, mConfigureFactoryOwner);
+            nativeBundleCommitted, mConfigureFactoryOwner, mOptions);
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
         mState = {};
@@ -184,8 +201,7 @@ namespace osuCrypto
         input.mW = mLayout.scalarCount();
         bool prepareDeltaOnDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const char* deviceDelta = std::getenv("LV_GPU_SETUP_DELTA_DEVICE");
-        prepareDeltaOnDevice = gpu::enabled() && (!deviceDelta || deviceDelta[0] != '0');
+        prepareDeltaOnDevice = gpu::enabled(mOptions) && mParams.mLogVole.mShrinkExpand.mGpuSetup.mDeltaDevice;
 #endif
         if (prepareDeltaOnDevice) input.mGarbledDeltaPattern = deltas;
         else
@@ -224,8 +240,12 @@ namespace osuCrypto
         labels = std::move(next);
     }
 
-    void LogVoleGarbledReceiver::configure(u64 n, u32 threads, CivoleSetting setting)
+    LogVoleGarbledReceiver::LogVoleGarbledReceiver(LogVoleOptions options)
+        : mOptions(std::move(options))
     {
+        const auto n = mOptions.mRequestSize;
+        const auto threads = mOptions.mNumThreads;
+        const auto setting = mOptions.mSetting;
         const auto inheritedRun = currentProtocolCacheScope().mRunId;
         const auto configureRun = inheritedRun ? inheritedRun :
             allocateProtocolCacheRunId();
@@ -233,7 +253,7 @@ namespace osuCrypto
             ProtocolCacheRole::Receiver, configureRun);
         bool nativeBundleCommitted = false;
         configureGarbled(n, threads, setting, mParams, mLayout, mModulus,
-            nativeBundleCommitted, mConfigureFactoryOwner);
+            nativeBundleCommitted, mConfigureFactoryOwner, mOptions);
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
         mState = {};
@@ -273,7 +293,7 @@ namespace osuCrypto
         if (!mInputDevice && std::any_of(x.begin(), x.end(), [&](u64 v) { return v >= mModulus; }))
             throw std::invalid_argument("garbled-label input is outside Z_p");
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (mInputDevice && (!gpu::enabled() ||
+        if (mInputDevice && (!gpu::enabled(mOptions) ||
             std::static_pointer_cast<gpu::DeviceScalars>(mInputDevice)->count() != mLayout.mLabelCount))
             throw std::invalid_argument("garbled-label device input has the wrong size or no GPU backend");
 #else

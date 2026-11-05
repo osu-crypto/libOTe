@@ -34,18 +34,6 @@ namespace osuCrypto::LogVole::gpu
 {
     namespace
     {
-        bool environmentFlagDefaultOn(const char* name)
-        {
-            const char* value = std::getenv(name);
-            return !(value && value[0] == '0');
-        }
-
-        bool environmentFlagOptIn(const char* name)
-        {
-            const char* value = std::getenv(name);
-            return value && value[0] == '1';
-        }
-
         constexpr u32 kMaxWords = 8;   // generic gadget decomposition limit
         constexpr u32 kMaxRawSetupWords = 16; // bounded GPU-native SEAL setup limit
         static_assert(sizeof(HostModulus) == sizeof(GpuModulus));
@@ -232,7 +220,7 @@ namespace osuCrypto::LogVole::gpu
             atomicOr(status, 4u);
         }
 
-        __global__ void rawSetupPlaintextLiftKernel(RingConstView rc,
+        __global__ void rawSetupPlaintextLiftKernel(RingDeviceConstView rc,
             u64 plaintextPrime, u64* residues, u32* status)
         {
             __shared__ u64 quotient[kMaxRawSetupWords];
@@ -266,7 +254,7 @@ namespace osuCrypto::LogVole::gpu
             residues[j] = value;
         }
 
-        __global__ void rawSetupPlaintextLiftFromDeviceKernel(RingConstView rc,
+        __global__ void rawSetupPlaintextLiftFromDeviceKernel(RingDeviceConstView rc,
             const u64* orderedQ, const u64* selectedP, u64* residues,
             const u32* fiveStatuses)
         {
@@ -315,7 +303,7 @@ namespace osuCrypto::LogVole::gpu
             residues[j] = value;
         }
 
-        __global__ void rawSetupModuliKernel(RingConstView rc, const u64* primes,
+        __global__ void rawSetupModuliKernel(RingDeviceConstView rc, const u64* primes,
             u64* scratch, u32* status, const u32* upstreamStatus)
         {
             const u32 j = threadIdx.x;
@@ -351,7 +339,7 @@ namespace osuCrypto::LogVole::gpu
             atomicOr(status, 2u);
         }
 
-        __global__ void rawSetupMinimumRootsKernel(RingConstView rc,
+        __global__ void rawSetupMinimumRootsKernel(RingDeviceConstView rc,
             u64* scratch, const u32* status)
         {
             const u32 i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -372,7 +360,7 @@ namespace osuCrypto::LogVole::gpu
                     static_cast<unsigned long long>(root));
         }
 
-        __global__ void rawSetupNttScalarsKernel(RingConstView rc,
+        __global__ void rawSetupNttScalarsKernel(RingDeviceConstView rc,
             u64* scratch, const u32* status)
         {
             const u32 j = threadIdx.x;
@@ -389,7 +377,7 @@ namespace osuCrypto::LogVole::gpu
                 rawSetupShoup(mulMod(lastRoot, inverseDegree, mod), mod);
         }
 
-        __global__ void rawSetupNttTablesKernel(RingConstView rc,
+        __global__ void rawSetupNttTablesKernel(RingDeviceConstView rc,
             const u64* scratch, const u32* status)
         {
             const u32 i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -426,7 +414,7 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        __global__ void rawSetupCrtKernel(RingConstView rc, DenoiseConstView dc,
+        __global__ void rawSetupCrtKernel(RingDeviceConstView rc, DenoiseConstView dc,
             u64* crtLift, u64* invCrtLift, u64* sampleMax, const u32* status)
         {
             const u32 j = threadIdx.x;
@@ -511,14 +499,14 @@ namespace osuCrypto::LogVole::gpu
             inverseMap[second] = n / 2u + i;
         }
 
-        __global__ void rawSetupPow2Kernel(RingConstView rc, u32 shift, u64* factors)
+        __global__ void rawSetupPow2Kernel(RingDeviceConstView rc, u32 shift, u64* factors)
         {
             const u32 j = threadIdx.x;
             if (j < rc.mRho)
                 factors[j] = rawSetupPow(2, shift, static_cast<const GpuModulus*>(rc.mMods)[j]);
         }
 
-        __global__ void rawSetupScaleRoundKernel(RingConstView rc, u64 p, ScaleRoundConstView out)
+        __global__ void rawSetupScaleRoundKernel(RingDeviceConstView rc, u64 p, ScaleRoundConstView out)
         {
             const u32 j = threadIdx.x;
             if (j >= rc.mRho) return;
@@ -535,1198 +523,10 @@ namespace osuCrypto::LogVole::gpu
                     inv.mQuotient, pShoup, mod.mRatio0, mod.mRatio1};
         }
 
-        u32 deviceSmCount()
-        {
-            static const u32 count = [] {
-                int device = 0;
-                cudaDeviceProp prop{};
-                if (cudaGetDevice(&device) == cudaSuccess &&
-                    cudaGetDeviceProperties(&prop, device) == cudaSuccess &&
-                    prop.multiProcessorCount > 0)
-                {
-                    return static_cast<u32>(prop.multiProcessorCount);
-                }
-                // Preserve the original L40S crossover if device discovery fails.
-                return 142u;
-            }();
-            return count;
-        }
-
-        // Stage-114 H200 path. Hopper can opt a block into at least 128 KiB
-        // of dynamic shared memory, enough to keep the complete N=16384
-        // plaintext inverse resident. That removes the tiled scratch chain at
-        // the no-golden-seed input boundary. It is enabled only on an H200 after
-        // passing exactness and both production-size gates; zero is the full
-        // same-binary rollback.
-        bool nttLog14H200Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200");
-            return on;
-        }
-
-        // Stage-115 sidecar for the transforms that dominate NoGoldenSeed.
-        // The accepted two-tile kernels retain runtime N/rho/stage arithmetic;
-        // this fixed H200 shape exposes all 13 tile-local stages to nvcc.
-        // Explicit zero retains the generic same-binary rollback.
-        bool nttLog14H200FixedTransformsEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FIXED_TRANSFORMS");
-            return on;
-        }
-
-        // Stage-116 NoGoldenSeed pointwise sidecar. The production log14/rho8
-        // tuple has eight tree terms, so the legacy six-term combined accumulator
-        // rejects it and leaves three complete global-memory passes in expand.
-        // Explicit zero retains the original three-pass implementation.
-        bool noGoldH200CombinedAccumulatorEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_COMBINED_ACCUMULATOR");
-            return on;
-        }
-
-        bool noGoldH200AccumulatorPseudo52Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_ACCUM_PSEUDO52");
-            return on;
-        }
-
-        // Stage-155 winner: exact FP64, two 512-thread resident CTAs, 32 KiB
-        // cached roots and prefix unroll 4. The full-tile variant is retained
-        // behind an explicit TWOTILE=0 ablation.
-        // Called only inside the H200 log14/rho8 dispatch, with strict modulus
-        // bounds below. Explicit zero restores the accepted integer inverse.
-        u32 noGoldH200InverseFp52Threads()
-        {
-            static const u32 threads = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52");
-                if (!v || !v[0]) return 1024u;
-                if (v[0] == '0') return 0u;
-                return std::strcmp(v, "512") == 0 ? 512u : 1024u;
-            }();
-            return threads;
-        }
-
-        bool noGoldH200InverseFp52CacheRoots()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_CACHE_ROOTS");
-                return !v || v[0] == '1';
-            }();
-            return on;
-        }
-
-        bool noGoldH200InverseCachedSuffix()
-        {
-            static const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG14_H200_INVERSE_CACHED_SUFFIX");
-            return on;
-        }
-
-        u32 noGoldH200InverseFp52Schedule()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_SCHEDULE");
-                const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 4u;
-                return n <= 5u ? static_cast<u32>(n) : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200InverseFp52TwoTile()
-        {
-            static const u32 unroll = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_TWOTILE");
-                const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 4u;
-                return n == 1u || n == 2u || n == 4u || n == 8u ? static_cast<u32>(n) : 0u;
-            }();
-            return unroll;
-        }
-
-        u32 noGoldH200InverseFp52TileCacheStage()
-        {
-            static const u32 stage = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_TILE_CACHE_STAGE");
-                const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 2u;
-                return n >= 1u && n <= 6u ? static_cast<u32>(n) : 2u;
-            }();
-            return stage;
-        }
-
-        u32 noGoldH200InverseFp52Tile1024Mode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_TILE_THREADS");
-                // Wide batches retain the faster 512-thread kernel. Only the
-                // measured narrow H200/rho8x52 batches use 1024/cache-stage 1.
-                if (!v) return 2u;
-                if (v && std::strcmp(v, "1024") == 0) return 1u;
-                if (v && std::strcmp(v, "hybrid1") == 0) return 2u;
-                if (v && std::strcmp(v, "hybrid2") == 0) return 3u;
-                return 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200InverseFp52TileMinBlocks()
-        {
-            static const u32 blocks = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_TILE_MIN_BLOCKS");
-                if (v && std::strcmp(v, "64") == 0) return 64u;
-                if (v && std::strcmp(v, "128") == 0) return 128u;
-                if (v && std::strcmp(v, "256") == 0) return 256u;
-                if (!v && noGoldH200InverseFp52Tile1024Mode() >= 2u) return 64u;
-                return 0u;
-            }();
-            return blocks;
-        }
-
-        u32 noGoldH200InverseFp52PrefixSchedule()
-        {
-            static const u32 schedule = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_PREFIX");
-                // Stage 188: two independent pairs plus next-group root/data
-                // prefetch. Seven-trial ablations confirm the combined gain.
-                // Explicit 1 retains interleaving without prefetch; 0 rolls
-                // back the earlier interleaving change as well.
-                if (!v) return 10u;
-                char* end = nullptr;
-                const unsigned long n = std::strtoul(v, &end, 10);
-                return end != v && *end == '\0' && n <= 16u ? static_cast<u32>(n) : 0u;
-            }();
-            return schedule;
-        }
-
-        u32 noGoldH200InverseFp52StaticOps()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_FP52_STATIC_OPS");
-                return v && v[0] >= '1' && v[0] <= '3' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-
-        u32 noGoldH200ForwardFp52Mode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_FORWARD_FP52");
-                const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 1u;
-                return n <= 5u ? static_cast<u32>(n) : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200ForwardFp52Extra()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_FORWARD_FP52_EXTRA");
-                const unsigned long n = v ? std::strtoul(v, nullptr, 10) : 3u;
-                return n <= 3u ? static_cast<u32>(n) : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200ForwardFp52Tail()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_FORWARD_FP52_TAIL");
-                // Stage-188 repeat: four groups in the register-parked first
-                // half, two in the second. Zero keeps the preceding tail.
-                if (!v) return 6u;
-                return v && v[0] >= '1' && v[0] <= '8' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200AccumulatorSchedule()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_SCHEDULE");
-                if (!v) return 0u;
-                const unsigned long n = std::strtoul(v, nullptr, 10);
-                return n <= 6u ? static_cast<u32>(n) : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200AccumulatorTileBlocks()
-        {
-            static const u32 blocks = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_TILE_BLOCKS");
-                if (!v) return 0u;
-                const unsigned long n = std::strtoul(v, nullptr, 10);
-                return n >= 1u && n <= 64u ? static_cast<u32>(n) : 0u;
-            }();
-            return blocks;
-        }
-
-        u32 noGoldH200AccumulatorPackedMode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_PACKED");
-                return v && v[0] >= '1' && v[0] <= '7' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200AccumulatorOrder()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_ORDER");
-                return v && v[0] >= '1' && v[0] <= '4' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200AccumulatorCarryMode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_CARRY");
-                return v && v[0] >= '1' && v[0] <= '4' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200AccumulatorLoadMode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_ACCUM_LOAD");
-                // Packed pointer pairs, explicit carry/borrow, L1+L2 loads.
-                // Other explicit packed/order/carry schedules take precedence.
-                if (!v) return 6u;
-                char* end = nullptr;
-                const unsigned long n = std::strtoul(v, &end, 10);
-                return end != v && *end == '\0' && n <= 10u ? static_cast<u32>(n) : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200PointwiseMode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_POINTWISE");
-                // Stage 199: checked exact-FP64 single products, full-u128
-                // pseudo52 carry reduction for the two/six-term paths.
-                if (!v) return 3u;
-                return v && v[0] >= '1' && v[0] <= '3' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200PointwiseThreads()
-        {
-            static const u32 threads = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_POINTWISE_THREADS");
-                if (v && std::strcmp(v, "128") == 0) return 128u;
-                if (v && std::strcmp(v, "512") == 0) return 512u;
-                if (v && std::strcmp(v, "1024") == 0) return 1024u;
-                return 256u;
-            }();
-            return threads;
-        }
-
-        u32 noGoldH200OuterReuseMode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_OUTER_REUSE");
-                if (!v) return 0u;
-                char* end = nullptr;
-                const unsigned long n = std::strtoul(v, &end, 10);
-                return end != v && *end == '\0' && n <= 10u ? static_cast<u32>(n) : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200GadgetGarnerMode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_GADGET_GARNER");
-                // Stage 199: retain exact prior Garner digits as doubles,
-                // using GPU-prepared constants and checked canonical inputs.
-                // The general 64-bit input reducer remains available.
-                if (!v) return 14u;
-                char* end = nullptr;
-                const unsigned long n = std::strtoul(v, &end, 10);
-                return end != v && *end == '\0' && n <= 14u ? static_cast<u32>(n) : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200GadgetFoldMode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_GADGET_FOLD");
-                // Explicit carry in both pseudo52 folding and compact Horner.
-                if (!v) return 3u;
-                return v && v[0] >= '1' && v[0] <= '3' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-        u32 noGoldH200GadgetSchedule()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_GADGET_SCHEDULE");
-                return v && v[0] >= '1' && v[0] <= '4' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-        // Split the fixed 131072-word NoGoldenSeed sampler across CTAs instead
-        // of one 107-register CTA serializing all 256 roots and 64 passes.
-        bool noGoldH200SplitSamplerEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_SPLIT_SAMPLE");
-            return on;
-        }
-
-        // Stage-142 H200 winner: two parts and a shared keyed BLAKE2 prefix.
-        // These choices are used only inside the H200 log14/rho8 dispatch.
-        // PARTS=4 and SHARED_PREFIX=0 retain the established four-part symbol.
-        u32 noGoldH200SampleParts()
-        {
-            static const u32 parts = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_SAMPLE_PARTS");
-                if (!v || !v[0]) return 2u;
-                if (std::strcmp(v, "2") == 0) return 2u;
-                if (std::strcmp(v, "4") == 0) return 4u;
-                if (std::strcmp(v, "8") == 0) return 8u;
-                if (std::strcmp(v, "16") == 0) return 16u;
-                return 2u;
-            }();
-            return parts;
-        }
-
-        u32 noGoldH200SampleReduction()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_SAMPLE_REDUCE");
-                // Exact full-u64 single fold; retain the original threshold
-                // comparison and cold ordered-replay contract (Stage 201).
-                if (!v) return 1u;
-                return v && (v[0] == '1' || v[0] == '2') && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
-
-        bool noGoldH200SampleSharedPrefixEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_SAMPLE_SHARED_PREFIX");
-            return on;
-        }
-
-        bool noGoldH200Gadget208Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_GADGET208");
-            return on;
-        }
-
-        bool noGoldH200Gadget208Pseudo52Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_H200_GADGET208_PSEUDO52");
-            return on;
-        }
-
-        bool nttLog14H200InverseWarp05Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_WARP05");
-            return on;
-        }
-
-        // Stage 127 removes the global -> shared -> warp-register input pass.
-        // Zero retains the synchronization-safe Stage-126 shared-input path.
-        bool nttLog14H200InverseDirectLoadEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_DIRECT_LOAD");
-            return on;
-        }
-
-        // Stage 129 pairs S7/S8, S9/S10 and S11/S12 after the warp prefix.
-        // It requires direct loads; zero isolates the Stage-127 input change.
-        bool nttLog14H200InversePairedSuffixEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_INVERSE_PAIRED_SUFFIX");
-            return on;
-        }
-
-        bool nttLog14H200ForwardWarp712Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FORWARD_WARP712");
-            return on;
-        }
-
-        // Stage 133 pairs S0/S1, S2/S3 and S4/S5 with two 512-thread
-        // CTAs per SM. Zero keeps the preceding 1024-thread single-stage prefix.
-        bool nttLog14H200ForwardPairedPrefixEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_FORWARD_PAIRED_PREFIX");
-            return on;
-        }
-
-        bool nttLog14H200CenteredEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG14_H200_CENTERED");
-            return on;
-        }
-
-        bool deviceSupportsLog14H200Shared()
-        {
-            static const bool supported = [] {
-                int device = 0;
-                cudaDeviceProp prop{};
-                return cudaGetDevice(&device) == cudaSuccess &&
-                    cudaGetDeviceProperties(&prop, device) == cudaSuccess &&
-                    prop.major == 9 &&
-                    std::strstr(prop.name, "H200") != nullptr &&
-                    prop.sharedMemPerBlockOptin >= 16384u * sizeof(u64);
-            }();
-            return supported;
-        }
-
         bool log14H200Shape(const RingConstView& rc)
         {
-            return nttLog14H200Enabled() && deviceSupportsLog14H200Shared() &&
+            return rc.mKernelOptions.mNttLog14H200 && rc.mH200Shared &&
                 rc.mN == 16384u && rc.mLogN == 14u && rc.mRho == 8u;
-        }
-
-        // The original 1024-thread choice was tuned on an L40S, where a 64 KiB
-        // transform tile limits the kernel to one block per SM. Hopper has a
-        // larger shared-memory budget and can make a different threads-vs-blocks
-        // trade. The transform loops already stride by blockDim.x, so this
-        // changes only work assignment, never arithmetic or evaluation order.
-        u32 parseNttThreads(const char* name, u32 fallback)
-        {
-            const char* v = std::getenv(name);
-            if (!v || !v[0]) return fallback;
-            const unsigned long parsed = std::strtoul(v, nullptr, 10);
-            if (parsed == 256 || parsed == 512 || parsed == 1024)
-                return static_cast<u32>(parsed);
-            return fallback;
-        }
-
-        u32 nttForwardThreads()
-        {
-            static const u32 value = [] {
-                const u32 common = parseNttThreads("LV_NTT_THREADS", kNttThreads);
-                return parseNttThreads("LV_NTT_FORWARD_THREADS", common);
-            }();
-            return value;
-        }
-
-        u32 nttInverseThreads()
-        {
-            static const u32 value = [] {
-                const u32 common = parseNttThreads("LV_NTT_THREADS", kNttThreads);
-                return parseNttThreads("LV_NTT_INVERSE_THREADS", common);
-            }();
-            return value;
-        }
-
-        // Hopper can hold two 64-register, 512-thread fixed inverse CTAs per SM.
-        // Explicit 1024 retains the one-CTA rollback; the rejected 256-thread
-        // shape is not instantiated because its parked values spill to stack.
-        u32 nttLog14H200InverseThreads()
-        {
-            static const u32 value = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG14_H200_INVERSE_THREADS");
-                return v && std::strcmp(v, "1024") == 0
-                    ? 1024u
-                    : 512u;
-            }();
-            return value;
-        }
-
-        u32 nttFusedIpThreads()
-        {
-            static const u32 value = [] {
-                return parseNttThreads("LV_NTT_FUSED_IP_THREADS", nttInverseThreads());
-            }();
-            return value;
-        }
-
-        u32 ct2PolySeedThreads()
-        {
-            static const u32 value = [] {
-                const char* v = std::getenv("LV_CT2_SEED_THREADS");
-                if (!v || !v[0]) return 32u;
-                const unsigned long parsed = std::strtoul(v, nullptr, 10);
-                return (parsed == 32 || parsed == 64 || parsed == 128)
-                    ? static_cast<u32>(parsed)
-                    : 32u;
-            }();
-            return value;
-        }
-
-        bool ct2SplitAesEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_CT2_SPLIT_AES");
-            return on;
-        }
-
-        // Four counter lanes per polynomial make 32 polynomials exactly one
-        // full 128-thread CTA. At those full-CTA geometries, stage the divergent
-        // AES S-box in shared memory once and amortize one barrier over all 128
-        // encryptions. Partial/small CTAs retain the constant-memory kernel;
-        // setting the switch to zero restores it for full CTAs as well.
-        bool ct2AesSharedSboxEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_CT2_AES_SHARED_SBOX");
-            return on;
-        }
-
-
-
-        // Scale-and-round's numerator has the special form x*p with x,p<q.
-        // A per-limb Shoup quotient therefore replaces the generic 128/64
-        // reciprocal division with one multiply-high and at most one correction.
-        // Keep the reciprocal implementation available for exact A/B and rollback.
-        bool scaleAndRoundShoupEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_SHOUP");
-            return on;
-        }
-
-        // The Shoup path already has q in its modulus record. It can also fold
-        // the fractional carry into the quotient before the one per-limb modular
-        // correction. Keep both changes under one independent arithmetic rollback.
-        bool scaleAndRoundFastArithmeticEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_FAST_ARITH");
-            return on;
-        }
-
-        // Fixed production geometry and a compact limb table remove DeviceRing,
-        // dynamic rho/N control, and six unused pointer parameters from the hot
-        // kernel. The accepted Shoup kernel remains the same-binary rollback.
-        bool scaleAndRoundHotRho4Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_HOT_RHO4");
-            return on;
-        }
-
-        // For rho=4, the carry from the four omitted fractional low words can
-        // affect the rounded result only when the wrapped high-word sum is one
-        // of UINT64_MAX-2, UINT64_MAX-1, or UINT64_MAX. Zero restores the
-        // accepted full-width carry path for exact A/B.
-        bool scaleAndRoundHotHiCarryEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_SCALE_HOT_HI_CARRY");
-            return on;
-        }
-
-        // Reuse the accepted rho=4 high-word carry arithmetic at the selected
-        // scale -> plaintext-NTT boundary. Zero retains the older 38-register
-        // fused symbol for diagnostics; LV_GPU_FUSED_SCALE_UNWRAP=0 is the full
-        // rollback to the established split chain.
-        bool scaleNttForwardGatherHiCarryEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SCALE_UNWRAP_HI_CARRY");
-            return on;
-        }
-
-        // The accepted fused unwrap lets coefficient owners scatter decoded
-        // values through inverseSlotMap. The production BatchEncoder
-        // permutation sends every warp's stores to unrelated sectors. This
-        // path instead lets slot owners gather from the completed shared
-        // tile through slotMap and publish adjacent output labels. Default on;
-        // zero selects the separate, codegen-stable coefficient-owned rollback.
-        bool scaleNttForwardGatherSlotOwnedEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FUSED_SCALE_UNWRAP_SLOT_OWNED");
-            return on;
-        }
-
-
-        // The production one-tile transform has fixed N=8192 geometry. Exposing
-        // every stage to nvcc removes the runtime stage loop and its variable
-        // shift/mask/root-address arithmetic. The generic kernel remains the
-        // complete rollback and handles every other degree/tile count.
-        bool nttLog13SpecializedEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_SPECIALIZED");
-            return on;
-        }
-
-        // Fixed-stage address arithmetic has b = i*gap + j, hence the butterfly
-        // base is exactly b + i*gap. Keep both symbols in the binary so the simpler
-        // expression can be isolated from the rest of the LogN=13 specialization.
-        bool nttLog13SimpleIndexEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_SIMPLE_INDEX");
-            return on;
-        }
-
-        // Every Shoup table entry is two adjacent u64 words. CUDA allocations
-        // are at least 256-byte aligned, every table begins at its allocation
-        // base, and both the entry stride and fixed-limb offsets are multiples
-        // of 16 bytes. Expose that alignment to the hot fixed standard NTTs so
-        // nvcc can issue one 128-bit load instead of two 64-bit loads. Separate
-        // kernel symbols retain the scalar-load path as an exact =0 rollback.
-        bool nttLog13VectorShoupLoadsEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_VECTOR_SHOUP_LOADS");
-            return on;
-        }
-
-        // For the fixed one-tile transform, S0 can consume its two global
-        // inputs directly and publish the butterfly outputs to shared memory.
-        // This removes the raw-input shared write/read pass and the barrier
-        // between them. Keep forward and inverse independent: their launch
-        // geometry and critical-path placement differ on H200.
-        bool nttLog13ForwardFusedFirstStageEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_FUSED_FIRST_STAGE");
-            return on;
-        }
-
-        // In the accepted fixed rho=4 forward transform, S11's two butterflies
-        // for one four-coefficient group are produced by adjacent lanes and S12
-        // immediately pairs their sums and differences. Exchange the one value
-        // each lane needs with its neighbour and write the final adjacent pair
-        // directly. This removes both shared publications and the final CTA
-        // barrier while retaining the accepted vector-Shoup loads. The separate
-        // kernel symbol keeps `=0` as a byte-identical rollback to the preceding
-        // accepted path.
-        bool nttLog13ForwardFusedLastTwoStagesEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_FUSED_LAST_TWO_STAGES");
-            return on;
-        }
-
-        // Stage-109: once S6 has published its fixed-log13 layout,
-        // every remaining forward butterfly is warp-private. Carry each S7
-        // pair through S8--S12 in registers and publish the final adjacent pair
-        // directly. Keep the preceding S11/S12 symbols as an exact `=0`
-        // rollback path.
-        bool nttLog13ForwardWarpStages712Enabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_FORWARD_WARP_STAGES_7_12");
-                return !(v && std::strcmp(v, "0") == 0);
-            }();
-            return on;
-        }
-
-
-        // Stage-88 sidecars apply the accepted S11/S12 register tail to the
-        // two remaining production forward bodies. Keep the families separate
-        // so either accepted default can be rolled back independently.
-        bool nttLog13ForwardCenteredFromFusedLastTwoStagesEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_CENTERED_FROM_FUSED_LAST_TWO_STAGES");
-            return on;
-        }
-
-        bool nttLog13ForwardPlainBroadcastFusedLastTwoStagesEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_FORWARD_PLAIN_BROADCAST_FUSED_LAST_TWO_STAGES");
-            return on;
-        }
-
-        bool nttLog13InverseFusedFirstStageEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_FIRST_STAGE");
-            return on;
-        }
-
-        // For the fixed simple-index direct inverse, S11 produces two adjacent
-        // 2048-word halves that the scaled final stage immediately pairs across
-        // the 4096-word gap. One thread owns both S11 butterflies and both final
-        // butterflies, so it can feed the S11 results straight into the final
-        // arithmetic and omit the intervening shared-memory publication and CTA
-        // barrier. Keep the exact staged body in the same binary while this
-        // is accepted by default; set the switch to 0 for the preceding tail.
-        bool nttLog13InverseFusedLastTwoStagesEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_TWO_STAGES");
-            return on;
-        }
-
-        // The hot fixed ReverseSub inverse can consume the immutable S9 shared
-        // state directly. Recompute S10's sum and difference parities in two
-        // tightly scoped passes, then feed S11 and the scaled final stage without
-        // publishing either S10 or S11 to shared memory. This is deliberately a
-        // separate kernel symbol: set
-        // LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_STAGES=0 to restore the
-        // byte-identical S10 + fused-S11 fallback; every non-production tuple
-        // continues to use that fallback.
-        bool nttLog13InverseFusedLastThreeStagesEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_STAGES");
-            return on;
-        }
-
-        // Add and Negate use separate fixed-log13 symbols derived from the
-        // accepted ReverseSub fusion. Keep the independent switch so `=0`
-        // restores their exact staged fallbacks without disabling ReverseSub.
-        bool nttLog13InverseFusedLastThreeAddNegateEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FUSED_LAST_THREE_ADD_NEGATE");
-            return on;
-        }
-
-        // Stage-110 candidate: the alpha=2 production path can keep the fixed
-        // inverse S0 pair in registers through the warp-private S1--S5 prefix,
-        // then publish only S5 for the accepted shared S6--S9 and fused tail.
-        // This is enabled by default after the fixed-alpha=2 Stage-110 gates.
-        // The separate kernel symbols below leave every accepted inverse body
-        // available in the same binary, `=0` is an exact rollback, and the host
-        // dispatch additionally requires an explicit alpha=2 permission from
-        // the protocol caller.
-        bool nttLog13InversePostWarpStages05Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_POST_WARP_STAGES_0_5");
-            return on;
-        }
-
-        // The fixed tau=1 tree sidecar already computes its two-product input
-        // inside the inverse kernel. Its S0 butterfly can consume p[2b] and
-        // p[2b+1] directly, avoiding the raw-product shared-memory pass and its
-        // CTA barrier. The legacy materialized path remains an exact rollback.
-        bool nttLog13InverseTreeFusedFirstStageEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_TREE_FUSED_FIRST_STAGE");
-            return on;
-        }
-
-        // The fixed simple-index tree transform has a warp-private S1..S5
-        // prefix. A distinct accepted symbol keeps each materialized S0 pair
-        // in registers across those five stages and publishes only S5. The
-        // preceding pseudo-55 kernel remains the exact `=0` rollback.
-        bool nttLog13InverseTreeWarpStagesEnabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv(
-                    "LV_GPU_NTT_LOG13_INVERSE_TREE_WARP_STAGES_1_5");
-                return !(v && std::strcmp(v, "0") == 0);
-            }();
-            return on;
-        }
-
-        // Stage-112 accepted path: the alpha=2 tree path feeds the pseudo-55
-        // product pair directly into S0 and the warp-private S1--S5 prefix,
-        // publishing only S5. It is default-on after passing the local and
-        // end-to-end gates; `=0` retains Stage 104 exactly.
-        // Production dispatch also requires explicit alpha=2 provenance from
-        // the protocol caller.
-        bool nttLog13InverseTreeProductWarpStages05Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_STAGES_0_5");
-            return on;
-        }
-
-        // Vector successor to the direct Stage-112a fusion. Every
-        // product input is naturally 16-byte aligned, so load the two adjacent
-        // S0 coefficients as one pair. It is default-on at the retained
-        // 40-register ceiling; `=0` selects the scalar Stage-112a intermediate.
-        bool nttLog13InverseTreeProductWarpVectorPairsEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_INVERSE_TREE_PRODUCT_WARP_VECTOR_PAIRS");
-            return on;
-        }
-
-        // In the common in-place rho=4 forward transform, the final gap-one
-        // butterfly owns both canonical outputs. Store them immediately instead of
-        // materialising stage 12 in shared memory, synchronising the whole block and
-        // streaming shared memory once more. Other flag/rho variants deliberately
-        // retain the shared tail and this independent switch is the exact rollback.
-        bool nttLog13DirectStoreEnabled()
-        {
-            static const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG13_DIRECT_STORE");
-            return on;
-        }
-
-        // A centred lift from source limb j back into target limb j is exactly
-        // the original canonical residue. Skip its sign/magnitude reconstruction
-        // for the one diagonal block out of every rho. H200 end-to-end results
-        // were mixed at the noise floor, so retain this as an opt-in experiment.
-        bool nttCenteredDiagonalIdentityEnabled()
-        {
-            static const bool on = environmentFlagOptIn("LV_GPU_NTT_CENTERED_DIAG_IDENTITY");
-            return on;
-        }
-
-        // The fixed 512-thread inverse body now needs 32 registers. It beats the
-        // generic inverse at b64/grid256 and every larger tested grid, but loses
-        // at b32/grid128 and below, so dispatch remains gated by the total grid.
-        // Keep an independent rollback so the forward specialization can be
-        // measured without changing inverse geometry.
-        bool nttLog13InverseSpecializedEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_SPECIALIZED");
-            return on;
-        }
-
-        // The three production fixed-inverse tuples all load their operand
-        // unchanged and differ only in the post-operation. Their final butterfly
-        // owns both output coefficients, so it can canonicalise, apply the exact
-        // post-op and store directly without a shared-memory round trip or block
-        // barrier. Keep the existing fixed kernel as an independent same-binary
-        // rollback and for every other pre/post tuple.
-        bool nttLog13InverseDirectStoreEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_DIRECT_STORE");
-            return on;
-        }
-
-        // The residual Root inverses below the accepted 512-thread crossover
-        // still have fixed N=8192/rho=4 geometry. A separate 1024-thread body
-        // retains the generic kernel's two-CTA occupancy while exposing every
-        // stage and storing the final canonical coefficients directly. It is
-        // opt-in until its positive primitive result clears the full protocol.
-        bool nttLog13InverseSmallDirectEnabled()
-        {
-            static const bool on = environmentFlagOptIn("LV_GPU_NTT_LOG13_INVERSE_SMALL_DIRECT");
-            return on;
-        }
-
-        // The plaintext wrap boundary gathers slot-ordered labels into one
-        // fixed N=8192 inverse and broadcasts each canonical coefficient to the
-        // four ciphertext limbs. Specializing that complete boundary exposes
-        // the warp-local early stages and removes the raw gathered shared-memory
-        // pass. Keep the runtime-geometry kernel as the exact toggle-off rollback.
-        bool nttLog13InverseScatterFixedEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_SCATTER_FIXED");
-            return on;
-        }
-
-        // The two hot materialized inner products below feed a fixed N=8192
-        // inverse immediately. Their exact index formulas let the inverse fill
-        // shared memory directly without the generic fused kernel's register-heavy
-        // index loop. Keep this independent of both inverse-direct-store and the
-        // older LOGVOLE_GPU_FUSED_IP experiment for isolated rollback.
-        bool nttLog13InverseFixedIpEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NTT_LOG13_INVERSE_FIXED_IP");
-            return on;
-        }
-
-
-        // The production sender's fixed-width key product uses one sk polynomial
-        // for every public-A row in a chunk. Keep that coefficient in a
-        // register while evaluating the rows, avoiding the generic indexed
-        // kernel's repeated load and pointer-table barrier. The established
-        // indexed symbol remains the exact same-binary rollback. Verified H200
-        // A/B/A trials select this path by default; set
-        // LV_GPU_FIXED_IP_MU_ROW_REUSE=0 to disable it.
-        bool fixedIpMuRowReuseEnabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GPU_FIXED_IP_MU_ROW_REUSE");
-                // Retain the original experiment spelling for reproducibility.
-                if (!v) v = std::getenv("LV_GPU_FIXED_IP_MU16_ROW_REUSE");
-                return !(v && v[0] == '0');
-            }();
-            return on;
-        }
-
-        // Wider benchmark alpha tuples use the same sender outer-product shape.
-        // Enable the exact, spill-free 32--128-row instantiations by default;
-        // an explicit zero restores the indexed fallback. The accepted mu=8/16
-        // row-reuse symbols remain untouched.
-        bool fixedIpWideMuRowReuseEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_FIXED_IP_WIDE_MU_ROW_REUSE");
-            return on;
-        }
-
-        // The production coefficient moduli have q=2^55-c with
-        // 0<c<2^21.  Pointwise products and the fixed one/two/six-term sums
-        // can therefore use two radix-2^55 folds instead of the generic
-        // 128-bit Barrett reduction.  Keep every candidate in a separate
-        // symbol.  The optimized path is the default; set the switch to zero
-        // to retain the exact same-binary rollback to the generic reducers.
-        bool pointwisePseudo55ReduceEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_POINTWISE_PSEUDO55_REDUCE");
-            return on;
-        }
-
-
-        u32 rootZetaSampleThreads()
-        {
-            static const u32 value = [] {
-                const char* v = std::getenv("LV_GPU_ROOT_ZETA_THREADS");
-                if (!v || !v[0]) return 256u;
-                const unsigned long parsed = std::strtoul(v, nullptr, 10);
-                return parsed == 128ul ? 128u : 256u;
-            }();
-            return value;
-        }
-
-        u32 nttLog13InverseThreads()
-        {
-            static const u32 value =
-                parseNttThreads("LV_NTT_LOG13_INVERSE_THREADS", 512u);
-            return value;
-        }
-
-        u32 nttLog13InverseMinBlocks()
-        {
-            static const u32 value = [] {
-                const char* v = std::getenv("LV_NTT_LOG13_INVERSE_MIN_BLOCKS");
-                if (!v || !v[0]) return 256u;
-                const unsigned long parsed = std::strtoul(v, nullptr, 10);
-                return parsed > 0xFFFFFFFFul ? 0xFFFFFFFFu : static_cast<u32>(parsed);
-            }();
-            return value;
-        }
-
-        // The production GoldenSeed accumulator has fixed N/rho/mu geometry.
-        // Exposing that geometry to nvcc removes the per-thread divide/modulo and
-        // lets it keep eight 256-thread CTAs resident. Keep the runtime-geometry
-        // kernel as the complete rollback and for every other parameter set.
-        bool expandAccumulatorSpecializedEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_SPECIALIZED");
-            return on;
-        }
-
-        // q*2^64 is an exact non-negative multiple of q larger than one residue
-        // product. It can therefore replace q^2 in the Golden accumulator's key
-        // complement and save one wide multiply. Keep an independent rollback so
-        // its arithmetic contribution can be measured without changing tiling.
-        bool expandAccumulatorQ64ComplementEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_Q64_COMPLEMENT");
-            return on;
-        }
-
-
-        // The production 55-bit coefficient primes have the pseudo-Mersenne
-        // form q = 2^55-c with 0<c<2^21. Two radix-2^55 folds can therefore
-        // replace the generic 128-bit Barrett reduction using only narrow
-        // products. Keep this as a separate default-on kernel, with an explicit
-        // =0 rollback, so the accepted Q64/tiled symbol remains a
-        // codegen-stable exact fallback.
-        bool expandAccumulatorPseudo55Enabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55");
-            return on;
-        }
-
-        // Stage-111 fast path for the fixed alpha=2 accumulator. The accepted
-        // mu=8/six-term symbol uses one serial Wide carry recurrence for its
-        // seven positive products. A separate sidecar splits those products
-        // over two independent recurrences and joins them once. The path is now
-        // on by default after passing both fixed-alpha size gates;
-        // an explicit `=0` retains the accepted symbol byte-for-byte.
-        bool expandAccumulatorGoldenPseudo55DualEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_GOLDEN_DUAL");
-            return on;
-        }
-
-        // Benchmark alpha overrides widen the receiver tree from six products
-        // to eight through fourteen. Combine their ct1, key and tree passes for
-        // the exact audited wide tuples by default; an explicit zero restores
-        // the complete same-binary fallback. The accepted mu=8/six-term
-        // dispatch remains unchanged.
-        bool expandAccumulatorPseudo55WideEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_WIDE");
-            return on;
-        }
-
-        // Split the wide tuple's positive products between two independent
-        // exact 128-bit carry chains. The exact spill-free symbol is selected by
-        // default; an explicit zero retains the accepted Stage-99 wide kernel as
-        // an in-binary rollback.
-        bool expandAccumulatorPseudo55DualEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL");
-            return on;
-        }
-
-        // Keep the Stage-101 dual carry grouping, but interleave every shared
-        // A/B pointer pair so one explicit 128-bit shared load replaces two
-        // scalar pointer loads in the rolled product loop. Select the exact
-        // 32-register symbol by default; an explicit zero retains the accepted
-        // Stage-101 and Stage-99 bodies as independent same-binary rollbacks.
-        bool expandAccumulatorPseudo55DualPackedPairsEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_PSEUDO55_DUAL_PACKED_PAIRS");
-            return on;
-        }
-
-
-        // The eight operand bases are constant across all 32 coefficient tiles
-        // of one (chunk,row,limb). Amortize their setup and the block barrier over
-        // several tiles while retaining the original one-tile specialization for
-        // exact same-binary rollback.
-        bool expandAccumulatorTiledEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_EXPAND_ACCUM_TILED");
-            return on;
-        }
-
-
-        // Materialized sampling almost never rejects under the production
-        // moduli. Let a single block-wide vote skip the ballot/prefix/fixup
-        // barriers for those common tiles; retain the original specialization for
-        // exact same-binary rollback and forced-rejection validation.
-        bool rejectFastpathEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_REJECT_FASTPATH");
-            return on;
-        }
-
-        // The materialized sampler already reads every generated word while
-        // reducing it. Detect rejections in that pass and reserve a full ordered
-        // scan for the exceptionally rare polynomial that actually rejected.
-        // The old fixup-then-reduce sequence remains an exact runtime rollback.
-        bool rejectReduceFusionEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_REJECT_REDUCE_FUSION");
-            return on;
-        }
-
-        // rho is fixed by RingParams and is four in the primary parameter set.
-        // Specializing it makes every reduced CRT source limb and constant-table
-        // offset a compile-time value. Keep the runtime kernel available for exact
-        // A/B and as a conservative fallback.
-        bool denoiseSpecializedEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_SPECIALIZED");
-            return on;
-        }
-
-        // Every multiplier in the fixed rho=4 denoise is a persistent ring
-        // constant. Its Shoup quotient replaces the generic 128-bit Barrett
-        // reductions; the original specialized kernel remains the exact rollback.
-        bool denoiseShoupEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_SHOUP");
-            return on;
-        }
-
-        // For N=8192, rho=4, flatten (output,target) into grid.y. That exposes
-        // the exact input/output shifts to nvcc and removes a once-only loop.
-        // Keep this toggle independent of the Shoup arithmetic for isolated A/B.
-        bool denoiseHotGeometryEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_DENOISE_HOT_GEOMETRY");
-            return on;
-        }
-
-        // Standalone GoldenSeed validation only needs the source-limb CRT
-        // inverses. Their persistent Shoup quotients remove the generic 128-bit
-        // Barrett reductions from the fixed rho=4, N=8192 production path. The
-        // existing specialized and runtime kernels remain exact rollbacks.
-        bool goldenValidateShoupEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GOLDEN_VALIDATE_SHOUP");
-            return on;
-        }
-
-        // rho=8 is exact as well, but the fully unrolled kernel uses 72 registers
-        // against 60 for the runtime loop and was neutral in end-to-end A/B. Leave
-        // it available for other GPUs without paying that occupancy cost by default.
-        bool denoiseSpecializedRho8Enabled()
-        {
-            static const bool on = environmentFlagOptIn("LV_GPU_DENOISE_SPECIALIZED_RHO8");
-            return on;
-        }
-
-        // Stage-142: the exact eight-limb Shoup port wins the repeated two-size
-        // H200 gate. The launcher still checks device, shape and modulus bounds;
-        // explicit zero preserves the general/legacy denoising dispatch.
-        bool noGoldDenoiseShoupEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_DENOISE_SHOUP");
-            return on;
-        }
-
-        bool noGoldDenoiseUnrollEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_NOGOLD_DENOISE_UNROLL");
-            return on;
-        }
-
-        u32 noGoldDenoiseThreads()
-        {
-            static const u32 count = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_DENOISE_THREADS");
-                if (v && std::strcmp(v, "256") == 0) return 256u;
-                if (v && std::strcmp(v, "512") == 0) return 512u;
-                return 128u;
-            }();
-            return count;
-        }
-
-        // The production centred-high decomposition has the fixed tuple
-        // rho=4, digitBits=110, startLevel=1, levels=1. Exposing it to nvcc
-        // removes both runtime balanced-digit iterations and their register
-        // arrays. The general kernel remains the exact same-binary rollback.
-        bool gadgetHi110SpecializedEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110");
-            return on;
-        }
-
-        // In the production rho=4 base every coefficient modulus has fewer than
-        // 55 bits. Consequently each three-modulus punctured product has only
-        // three non-zero words, each scaled punctured product is already below Q,
-        // and adding two canonical representatives cannot overflow 256 bits.
-        // Expose those bounds to a separate kernel while retaining the preceding
-        // Hi110 symbol as an exact, codegen-stable =0 fallback.
-        bool gadgetHi110CompactCrtEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_COMPACT_CRT");
-            return on;
-        }
-
-        // A balanced 110-bit magnitude can be folded modulo a 55-bit q in base
-        // 2^55 with one Shoup multiplication instead of a full 128-bit Barrett
-        // reduction. The production kernel saved 7.4% locally and won at both
-        // n=24 and n=25; zero retains the accepted compact-Barrett rollback.
-        bool gadgetHi110Radix55ReduceEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_RADIX55_REDUCE");
-            return on;
-        }
-
-        // For the production q=2^55-c primes, c<2^21, the 110-bit magnitude
-        // can be folded twice with native partial products. Default on after
-        // the dense/sparse resource, exactness, sanitizer and both-size A/B
-        // gates; zero selects the accepted Shoup-fold rollback symbols.
-        bool gadgetHi110Pseudo55SecondFoldEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_PSEUDO55_SECOND_FOLD");
-            return on;
-        }
-
-        // The recursive-leaf parent has exactly two active CRT residues: limbs
-        // 0/1 for even input parents and limbs 2/3 for odd input parents. Default
-        // on after exact/resource/sanitizer and both-size A/B gates; zero keeps
-        // the accepted four-term gadget as the complete same-binary fallback.
-        bool gadgetHi110SparsePairEnabled()
-        {
-            static const bool on = environmentFlagDefaultOn("LV_GPU_GADGET_HI110_SPARSE_PAIR");
-            return on;
-        }
-
-        // Do not refactor launchGadgetDecompose's accepted Garner switch merely
-        // to share this cold host predicate: keeping the accepted dispatcher
-        // text unchanged also keeps its rollback audit simple.
-        bool gadgetHi110SparsePairGarnerEnabled()
-        {
-            static const bool on = [] {
-                const char* v = std::getenv("LV_GADGET_GARNER");
-                return v && v[0] != '\0' && v[0] != '0';
-            }();
-            return on;
         }
 
         cudaError_t gLastError = cudaSuccess;
@@ -1748,23 +548,12 @@ namespace osuCrypto::LogVole::gpu
             return static_cast<cudaStream_t>(s);
         }
 
-        u32 noGoldH200RootL2Mode()
-        {
-            static const u32 mode = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_ROOT_L2");
-                // Stage 199: both root windows, with setup scoped to the ring.
-                // Explicit zero leaves the application's cache policy alone.
-                if (!v) return 3u;
-                return v && v[0] >= '1' && v[0] <= '3' && v[1] == '\0'
-                    ? static_cast<u32>(v[0] - '0') : 0u;
-            }();
-            return mode;
-        }
+
 
         bool configureH200RootPersistence(const RingConstView& rc, void* stream, bool inverse)
         {
 #if CUDART_VERSION >= 11000
-            const u32 mode = noGoldH200RootL2Mode();
+            const u32 mode = rc.mKernelOptions.mNoGoldH200RootL2Mode;
             if (!(mode & (inverse ? 1u : 2u)) || !log14H200Shape(rc)) return true;
             const size_t maxWindow = rc.mH200RootL2MaxWindow;
             if (!maxWindow) return true;
@@ -1775,14 +564,7 @@ namespace osuCrypto::LogVole::gpu
             cudaStreamAttrValue value{};
             value.accessPolicyWindow.base_ptr = const_cast<void*>(roots);
             value.accessPolicyWindow.num_bytes = bytes;
-            static const float hitRatio = [] {
-                const char* v = std::getenv("LV_GPU_NOGOLD_H200_ROOT_L2_HIT_PERCENT");
-                if (v && std::strcmp(v, "25") == 0) return 0.25f;
-                if (v && std::strcmp(v, "50") == 0) return 0.5f;
-                if (v && std::strcmp(v, "75") == 0) return 0.75f;
-                return 1.0f;
-            }();
-            value.accessPolicyWindow.hitRatio = hitRatio;
+            value.accessPolicyWindow.hitRatio = rc.mKernelOptions.mRootL2HitPercent * 0.01f;
             value.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
             value.accessPolicyWindow.missProp = cudaAccessPropertyNormal;
             // Include these per-launch host calls in every timed comparison;
@@ -6404,7 +5186,7 @@ namespace osuCrypto::LogVole::gpu
         // forward: one block per (poly, limb) halves the traffic but also halves the
         // parallelism, so it wins only once the grid fills the device. Measured at
         // n = 2^24: 90.1 vs 89.8 M VOLE/s per party with and without the threshold.
-        u32 inverseTwoTileMinBlocks() { return 2u * deviceSmCount(); }
+
 
         // Largest fused inner product whose operand pointers are hoisted into
         // shared memory. The protocol's inner products are over tau, rho or the
@@ -7425,7 +6207,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         template<u32 InputMode>
-        bool launchForwardFp52Tail(DeviceRing rg, const u64* input, const u32* inputIdx,
+        bool launchForwardFp52Tail(const LogVoleGpuKernelOptions& options, DeviceRing rg, const u64* input, const u32* inputIdx,
             const u32* inputLimb, u64* output, const u32* outputIdx, u32 polyCount, cudaStream_t stream)
         {
             const auto launch = [&](auto mode) {
@@ -7438,7 +6220,7 @@ namespace osuCrypto::LogVole::gpu
                     rg, input, inputIdx, inputLimb, output, outputIdx);
                 return check(cudaGetLastError(), "forward FP52 tail");
             };
-            switch (noGoldH200ForwardFp52Tail())
+            switch (options.mNoGoldH200ForwardFp52Tail)
             {
             case 1u: return launch(std::integral_constant<u32, 1u>{});
             case 2u: return launch(std::integral_constant<u32, 2u>{});
@@ -10858,7 +9640,7 @@ namespace osuCrypto::LogVole::gpu
         // ---- CRT limb helpers --------------------------------------------
 
         __global__ void seedLabelRepKernel(
-            RingConstView rc, const u64* input, u64* output, u32 tau,
+            RingDeviceConstView rc, const u64* input, u64* output, u32 tau,
             u32 count, bool gammaOne)
         {
             const u64 words = static_cast<u64>(rc.mRho) * rc.mN;
@@ -13963,7 +12745,6 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(forward8192FusedLastTwo)"))
                 return false;
-            if (nttLog13ForwardWarpStages712Enabled())
             {
                 if (!check(
                         cudaFuncSetAttribute(
@@ -14467,17 +13248,6 @@ namespace osuCrypto::LogVole::gpu
         return check(cudaDeviceSynchronize(), "deviceSync");
     }
 
-    // The separate inner-product + plain inverse pair is faster on H200 after
-    // specializing the plain inverse down to 32 registers/thread: it sustains two
-    // resident 1024-thread blocks, while the 58-register fused kernel is limited
-    // to one. LOGVOLE_GPU_FUSED_IP=1 retains the fused path for other devices and
-    // for direct A/B measurements.
-        bool gpuFusedIpActive()
-        {
-            static const bool on = environmentFlagOptIn("LOGVOLE_GPU_FUSED_IP");
-            return on;
-        }
-
     bool launchNttForward(
         const RingConstView& rc, u64* data, u32 polyCount, const u32* polyIdx, void* stream)
     {
@@ -14502,17 +13272,17 @@ namespace osuCrypto::LogVole::gpu
         // register-parked variant is used only when there are already enough blocks
         // to fill the device twice over.
         if (tiles == 2u && (rc.mN >> 1) == kNttThreads * kInvRegs &&
-            polyCount * rc.mRho >= 2u * deviceSmCount())
+            polyCount * rc.mRho >= 2u * rc.mSmCount)
         {
             if (log14H200Shape(rc) &&
-                nttLog14H200FixedTransformsEnabled())
+                rc.mKernelOptions.mNttLog14H200FixedTransforms)
             {
-                const u32 fpMode = noGoldH200ForwardFp52Mode();
+                const u32 fpMode = rc.mKernelOptions.mNoGoldH200ForwardFp52Mode;
                 if (fpMode && rc.mMinModulus > (u64{1} << 51u) &&
                     rc.mMinModulus <= rc.mMaxModulus && rc.mMaxModulus < (u64{1} << 52u))
                 {
-                    if (fpMode == 1u && !rc.mFp52Roots && noGoldH200ForwardFp52Tail())
-                        return launchForwardFp52Tail<0u>(rg, data, polyIdx, nullptr, data, polyIdx, polyCount, st);
+                    if (fpMode == 1u && !rc.mFp52Roots && rc.mKernelOptions.mNoGoldH200ForwardFp52Tail)
+                        return launchForwardFp52Tail<0u>(rc.mKernelOptions, rg, data, polyIdx, nullptr, data, polyIdx, polyCount, st);
                     if (fpMode == 1u && rc.mFp52Roots)
                     {
                         constexpr int bytes = 12288u * sizeof(double);
@@ -14543,9 +13313,9 @@ namespace osuCrypto::LogVole::gpu
                         default: return launch(std::integral_constant<u32, 12u>{}, U1{});
                     }
                 }
-                if (nttLog14H200ForwardWarp712Enabled())
+                if (rc.mKernelOptions.mNttLog14H200ForwardWarp712)
                 {
-                    if (nttLog14H200ForwardPairedPrefixEnabled())
+                    if (rc.mKernelOptions.mNttLog14H200ForwardPairedPrefix)
                     {
                         if (!check(cudaFuncSetAttribute(
                                 nttForwardTwoTile16384Rho8Kernel<true, true, 512u>,
@@ -14610,21 +13380,21 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        if (nttLog13SpecializedEnabled() && rc.mN == 8192u && rc.mRho == 4u && tiles == 1u)
+        if (rc.mKernelOptions.mNttLog13Specialized && rc.mN == 8192u && rc.mRho == 4u && tiles == 1u)
         {
-            const bool simpleIndex = nttLog13SimpleIndexEnabled();
-            const bool directStore = nttLog13DirectStoreEnabled();
-            const bool fusedFirstStage = nttLog13ForwardFusedFirstStageEnabled();
+            const bool simpleIndex = rc.mKernelOptions.mNttLog13SimpleIndex;
+            const bool directStore = rc.mKernelOptions.mNttLog13DirectStore;
+            const bool fusedFirstStage = rc.mKernelOptions.mNttLog13ForwardFusedFirstStage;
             const bool fusedLastTwoStages =
-                nttLog13ForwardFusedLastTwoStagesEnabled();
-            const bool vectorShoupLoads = nttLog13VectorShoupLoadsEnabled();
+                rc.mKernelOptions.mNttLog13ForwardFusedLastTwoStages;
+            const bool vectorShoupLoads = rc.mKernelOptions.mNttLog13VectorShoupLoads;
             if (
                 simpleIndex && !directStore && vectorShoupLoads &&
                 fusedLastTwoStages)
             {
                 if (
-                    nttLog13ForwardWarpStages712Enabled() &&
-                    nttForwardThreads() == kNttThreads)
+                    rc.mKernelOptions.mNttLog13ForwardWarpStages712 &&
+                    rc.mKernelOptions.mNttForwardThreads == kNttThreads)
                 {
                     nttForwardWarpStages7128192Rho4Kernel<<<
                         polyCount * rc.mRho, kNttThreads, shBytes, st>>>(
@@ -14633,7 +13403,7 @@ namespace osuCrypto::LogVole::gpu
                 else
                 {
                     nttForwardFusedLastTwo8192Rho4Kernel<<<
-                        polyCount * rc.mRho, nttForwardThreads(), shBytes, st>>>(
+                        polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                         rg, data, polyIdx, fusedFirstStage);
                 }
             }
@@ -14641,35 +13411,35 @@ namespace osuCrypto::LogVole::gpu
             {
                 nttForwardKernel<
                     false, false, false, true, 4u, true, false, false, true><<<
-                    polyCount * rc.mRho, nttForwardThreads(), shBytes, st>>>(
+                    polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                     rg, data, polyIdx, 0u, nullptr, nullptr, nullptr,
                     nullptr, 0u, nullptr, 0u, fusedFirstStage);
             }
             else if (simpleIndex && directStore)
             {
                 nttForwardKernel<false, false, false, true, 4u, true, true><<<
-                    polyCount * rc.mRho, nttForwardThreads(), shBytes, st>>>(
+                    polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                     rg, data, polyIdx, 0u, nullptr, nullptr, nullptr,
                     nullptr, 0u, nullptr, 0u, fusedFirstStage);
             }
             else if (simpleIndex)
             {
                 nttForwardKernel<false, false, false, true, 4u, true, false><<<
-                    polyCount * rc.mRho, nttForwardThreads(), shBytes, st>>>(
+                    polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                     rg, data, polyIdx, 0u, nullptr, nullptr, nullptr,
                     nullptr, 0u, nullptr, 0u, fusedFirstStage);
             }
             else if (directStore)
             {
                 nttForwardKernel<false, false, false, true, 4u, false, true><<<
-                    polyCount * rc.mRho, nttForwardThreads(), shBytes, st>>>(
+                    polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                     rg, data, polyIdx, 0u, nullptr, nullptr, nullptr,
                     nullptr, 0u, nullptr, 0u, fusedFirstStage);
             }
             else
             {
                 nttForwardKernel<false, false, false, true, 4u><<<
-                    polyCount * rc.mRho, nttForwardThreads(), shBytes, st>>>(
+                    polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                     rg, data, polyIdx, 0u, nullptr, nullptr, nullptr,
                     nullptr, 0u, nullptr, 0u, fusedFirstStage);
             }
@@ -14681,13 +13451,13 @@ namespace osuCrypto::LogVole::gpu
                 nttForwardKernel<
                     false, false, false, false, 0u, false, false,
                     false, false, true><<<
-                    polyCount * rc.mRho * tiles, nttForwardThreads(), shBytes, st>>>(
+                    polyCount * rc.mRho * tiles, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                     rg, data, polyIdx, logTiles, nullptr, nullptr, nullptr);
             }
             else
             {
                 nttForwardKernel<false, false, false><<<
-                    polyCount * rc.mRho * tiles, nttForwardThreads(), shBytes, st>>>(
+                    polyCount * rc.mRho * tiles, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                     rg, data, polyIdx, logTiles, nullptr, nullptr, nullptr);
             }
         }
@@ -14729,12 +13499,12 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        if (nttLog13SpecializedEnabled() && rc.mN == 8192u && rc.mRho == 1u && tiles == 1u)
+        if (rc.mKernelOptions.mNttLog13Specialized && rc.mN == 8192u && rc.mRho == 1u && tiles == 1u)
         {
-            const bool fusedFirstStage = nttLog13ForwardFusedFirstStageEnabled();
-            if (nttLog13SimpleIndexEnabled())
+            const bool fusedFirstStage = rc.mKernelOptions.mNttLog13ForwardFusedFirstStage;
+            if (rc.mKernelOptions.mNttLog13SimpleIndex)
             {
-                if (nttLog13VectorShoupLoadsEnabled())
+                if (rc.mKernelOptions.mNttLog13VectorShoupLoads)
                 {
                     if (!check(
                             cudaFuncSetAttribute(
@@ -14748,7 +13518,7 @@ namespace osuCrypto::LogVole::gpu
                     nttForwardKernel<
                         false, false, true, true, 1u, true,
                         false, false, true><<<
-                        polyCount, nttForwardThreads(), shBytes, st>>>(
+                        polyCount, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                         rg, data, nullptr, 0u, nullptr, nullptr, nullptr,
                         inverseSlotMap, slotCount, out, outCount, fusedFirstStage);
                 }
@@ -14762,7 +13532,7 @@ namespace osuCrypto::LogVole::gpu
                             "cudaFuncSetAttribute(forwardGather8192SimpleIndex)"))
                         return false;
                     nttForwardKernel<false, false, true, true, 1u, true><<<
-                        polyCount, nttForwardThreads(), shBytes, st>>>(
+                        polyCount, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                         rg, data, nullptr, 0u, nullptr, nullptr, nullptr,
                         inverseSlotMap, slotCount, out, outCount, fusedFirstStage);
                 }
@@ -14777,7 +13547,7 @@ namespace osuCrypto::LogVole::gpu
                         "cudaFuncSetAttribute(forwardGather8192)"))
                     return false;
                 nttForwardKernel<false, false, true, true, 1u><<<
-                    polyCount, nttForwardThreads(), shBytes, st>>>(
+                    polyCount, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                     rg, data, nullptr, 0u, nullptr, nullptr, nullptr,
                     inverseSlotMap, slotCount, out, outCount, fusedFirstStage);
             }
@@ -14792,7 +13562,7 @@ namespace osuCrypto::LogVole::gpu
                     "cudaFuncSetAttribute(forwardGather)"))
                 return false;
             nttForwardKernel<false, false, true><<<
-                polyCount * tiles, nttForwardThreads(), shBytes, st>>>(
+                polyCount * tiles, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
                 rg, data, nullptr, logTiles, nullptr, nullptr, nullptr,
                 inverseSlotMap, slotCount, out, outCount);
         }
@@ -14818,12 +13588,12 @@ namespace osuCrypto::LogVole::gpu
         const DeviceRing rg = toDevice(rc);
         const u32 logTiles = log2Exact(tiles);
         const size_t shBytes = static_cast<size_t>(rc.mN >> logTiles) * sizeof(u64);
-        if (nttLog13SpecializedEnabled() && rc.mN == 8192u && rc.mRho == 4u && tiles == 1u)
+        if (rc.mKernelOptions.mNttLog13Specialized && rc.mN == 8192u && rc.mRho == 4u && tiles == 1u)
         {
-            const bool fusedFirstStage = nttLog13ForwardFusedFirstStageEnabled();
-            if (nttLog13SimpleIndexEnabled())
+            const bool fusedFirstStage = rc.mKernelOptions.mNttLog13ForwardFusedFirstStage;
+            if (rc.mKernelOptions.mNttLog13SimpleIndex)
             {
-                if (nttLog13VectorShoupLoadsEnabled())
+                if (rc.mKernelOptions.mNttLog13VectorShoupLoads)
                 {
                     if (!check(
                             cudaFuncSetAttribute(
@@ -14837,7 +13607,7 @@ namespace osuCrypto::LogVole::gpu
                     nttForwardKernel<
                         true, false, false, true, 4u, true,
                         false, false, true><<<
-                        polyCount * rc.mRho, nttForwardThreads(), shBytes,
+                        polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes,
                         asStream(stream)>>>(
                         rg, out, outIdx, 0u, in, inIdx, nullptr,
                         nullptr, 0u, nullptr, 0u, fusedFirstStage);
@@ -14852,7 +13622,7 @@ namespace osuCrypto::LogVole::gpu
                             "cudaFuncSetAttribute(forwardFrom8192SimpleIndex)"))
                         return false;
                     nttForwardKernel<true, false, false, true, 4u, true><<<
-                        polyCount * rc.mRho, nttForwardThreads(), shBytes,
+                        polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes,
                         asStream(stream)>>>(
                         rg, out, outIdx, 0u, in, inIdx, nullptr,
                         nullptr, 0u, nullptr, 0u, fusedFirstStage);
@@ -14868,7 +13638,7 @@ namespace osuCrypto::LogVole::gpu
                         "cudaFuncSetAttribute(forwardFrom8192)"))
                     return false;
                 nttForwardKernel<true, false, false, true, 4u><<<
-                    polyCount * rc.mRho, nttForwardThreads(), shBytes,
+                    polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes,
                     asStream(stream)>>>(
                     rg, out, outIdx, 0u, in, inIdx, nullptr,
                     nullptr, 0u, nullptr, 0u, fusedFirstStage);
@@ -14884,7 +13654,7 @@ namespace osuCrypto::LogVole::gpu
                     "cudaFuncSetAttribute(forwardFrom)"))
                 return false;
             nttForwardKernel<true, false, false><<<
-                polyCount * rc.mRho * tiles, nttForwardThreads(), shBytes, asStream(stream)>>>(
+                polyCount * rc.mRho * tiles, rc.mKernelOptions.mNttForwardThreads, shBytes, asStream(stream)>>>(
                 rg, out, outIdx, logTiles, in, inIdx, nullptr);
         }
         return check(cudaGetLastError(), "nttForwardFrom");
@@ -14892,12 +13662,12 @@ namespace osuCrypto::LogVole::gpu
 
     bool canLaunchNttForwardFromPlainBroadcast(const RingConstView& rc)
     {
-        if (!rc.mMods || !rc.mRoots || nttForwardThreads() != kNttThreads)
+        if (!rc.mMods || !rc.mRoots || rc.mKernelOptions.mNttForwardThreads != kNttThreads)
             return false;
         if (log14H200Shape(rc)) return true;
         return rc.mN == 8192u && rc.mLogN == 13u && rc.mRho == 4u &&
-               nttLog13SpecializedEnabled() && nttLog13SimpleIndexEnabled() &&
-               nttLog13VectorShoupLoadsEnabled();
+               rc.mKernelOptions.mNttLog13Specialized && rc.mKernelOptions.mNttLog13SimpleIndex &&
+               rc.mKernelOptions.mNttLog13VectorShoupLoads;
     }
 
     bool launchNttForwardFromPlainBroadcast(
@@ -14919,9 +13689,9 @@ namespace osuCrypto::LogVole::gpu
             rc.mN == 16384u ? 8192u : rc.mN) * sizeof(u64);
         if (log14H200Shape(rc))
         {
-            if (noGoldH200ForwardFp52Mode() && (noGoldH200ForwardFp52Extra() & 1u) &&
-                nttLog14H200FixedTransformsEnabled() && in != out &&
-                polyCount * rc.mRho >= 2u * deviceSmCount() &&
+            if (rc.mKernelOptions.mNoGoldH200ForwardFp52Mode && (rc.mKernelOptions.mNoGoldH200ForwardFp52Extra & 1u) &&
+                rc.mKernelOptions.mNttLog14H200FixedTransforms && in != out &&
+                polyCount * rc.mRho >= 2u * rc.mSmCount &&
                 rc.mMinModulus > (u64{1} << 51u) && rc.mMinModulus <= rc.mMaxModulus &&
                 rc.mMaxModulus < (u64{1} << 52u))
             {
@@ -14935,8 +13705,8 @@ namespace osuCrypto::LogVole::gpu
                         toDevice(rc), in, inIdx, nullptr, out, outIdx, rc.mFp52Roots);
                     return check(cudaGetLastError(), "forward plain packed FP52");
                 }
-                if (noGoldH200ForwardFp52Tail())
-                    return launchForwardFp52Tail<1u>(toDevice(rc), in, inIdx, nullptr, out, outIdx, polyCount, asStream(stream));
+                if (rc.mKernelOptions.mNoGoldH200ForwardFp52Tail)
+                    return launchForwardFp52Tail<1u>(rc.mKernelOptions, toDevice(rc), in, inIdx, nullptr, out, outIdx, polyCount, asStream(stream));
                 if (!check(cudaFuncSetAttribute(nttForwardFrom16384Rho8Fp52Kernel<1u>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward plain FP52 shared"))
                     return false;
@@ -14944,10 +13714,10 @@ namespace osuCrypto::LogVole::gpu
                     toDevice(rc), in, inIdx, nullptr, out, outIdx);
                 return check(cudaGetLastError(), "forward plain FP52");
             }
-            if (nttLog14H200ForwardWarp712Enabled())
+            if (rc.mKernelOptions.mNttLog14H200ForwardWarp712)
             {
-                if (nttLog14H200ForwardPairedPrefixEnabled() &&
-                    polyCount * rc.mRho >= 2u * deviceSmCount())
+                if (rc.mKernelOptions.mNttLog14H200ForwardPairedPrefix &&
+                    polyCount * rc.mRho >= 2u * rc.mSmCount)
                 {
                     if (!check(cudaFuncSetAttribute(
                             nttForwardFromPlainBroadcast16384Rho8Kernel<true, true, 512u>,
@@ -14992,15 +13762,15 @@ namespace osuCrypto::LogVole::gpu
         }
 
         const bool fusedLastTwo =
-            nttLog13ForwardPlainBroadcastFusedLastTwoStagesEnabled();
+            rc.mKernelOptions.mNttLog13ForwardPlainBroadcastFusedLastTwoStages;
         const bool warpStages712 = fusedLastTwo &&
-            nttLog13ForwardWarpStages712Enabled();
+            rc.mKernelOptions.mNttLog13ForwardWarpStages712;
         if (warpStages712)
         {
             nttForwardFromPlainBroadcastWarpStages7128192Rho4Kernel<<<
                 polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
                 toDevice(rc), in, inIdx, out, outIdx,
-                nttLog13ForwardFusedFirstStageEnabled());
+                rc.mKernelOptions.mNttLog13ForwardFusedFirstStage);
         }
         else if (fusedLastTwo)
         {
@@ -15014,7 +13784,7 @@ namespace osuCrypto::LogVole::gpu
             nttForwardFromPlainBroadcastFusedLastTwo8192Rho4Kernel<<<
                 polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
                 toDevice(rc), in, inIdx, out, outIdx,
-                nttLog13ForwardFusedFirstStageEnabled());
+                rc.mKernelOptions.mNttLog13ForwardFusedFirstStage);
         }
         else
         {
@@ -15028,7 +13798,7 @@ namespace osuCrypto::LogVole::gpu
             nttForwardFromPlainBroadcast8192Rho4Kernel<<<
                 polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
                 toDevice(rc), in, inIdx, out, outIdx,
-                nttLog13ForwardFusedFirstStageEnabled());
+                rc.mKernelOptions.mNttLog13ForwardFusedFirstStage);
         }
         return check(
             cudaGetLastError(),
@@ -15055,12 +13825,12 @@ namespace osuCrypto::LogVole::gpu
         const DeviceRing rg = toDevice(rc);
         const u32 logTiles = log2Exact(tiles);
         const size_t shBytes = static_cast<size_t>(rc.mN >> logTiles) * sizeof(u64);
-        if (nttLog13SpecializedEnabled() && rc.mN == 8192u && rc.mRho == 4u && tiles == 1u)
+        if (rc.mKernelOptions.mNttLog13Specialized && rc.mN == 8192u && rc.mRho == 4u && tiles == 1u)
         {
-            const bool fusedFirstStage = nttLog13ForwardFusedFirstStageEnabled();
-            if (nttLog13SimpleIndexEnabled())
+            const bool fusedFirstStage = rc.mKernelOptions.mNttLog13ForwardFusedFirstStage;
+            if (rc.mKernelOptions.mNttLog13SimpleIndex)
             {
-                if (nttCenteredDiagonalIdentityEnabled())
+                if (rc.mKernelOptions.mNttCenteredDiagonalIdentity)
                 {
                     if (!check(
                             cudaFuncSetAttribute(
@@ -15072,20 +13842,20 @@ namespace osuCrypto::LogVole::gpu
                         return false;
                     nttForwardKernel<
                         true, true, false, true, 4u, true, false, true><<<
-                        polyCount * rc.mRho, nttForwardThreads(), shBytes,
+                        polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes,
                         asStream(stream)>>>(
                         rg, out, outIdx, 0u, in, inIdx, limbSel,
                         nullptr, 0u, nullptr, 0u, fusedFirstStage);
                 }
                 else
                 {
-                    if (nttLog13VectorShoupLoadsEnabled())
+                    if (rc.mKernelOptions.mNttLog13VectorShoupLoads)
                     {
                         const bool fusedLastTwo =
-                            nttForwardThreads() == kNttThreads &&
-                            nttLog13ForwardCenteredFromFusedLastTwoStagesEnabled();
+                            rc.mKernelOptions.mNttForwardThreads == kNttThreads &&
+                            rc.mKernelOptions.mNttLog13ForwardCenteredFromFusedLastTwoStages;
                         const bool warpStages712 = fusedLastTwo &&
-                            nttLog13ForwardWarpStages712Enabled();
+                            rc.mKernelOptions.mNttLog13ForwardWarpStages712;
                         if (warpStages712)
                         {
                             nttForwardCenteredLimbFromWarpStages7128192Rho4Kernel<<<
@@ -15121,7 +13891,7 @@ namespace osuCrypto::LogVole::gpu
                             nttForwardKernel<
                                 true, true, false, true, 4u, true,
                                 false, false, true><<<
-                                polyCount * rc.mRho, nttForwardThreads(), shBytes,
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes,
                                 asStream(stream)>>>(
                                 rg, out, outIdx, 0u, in, inIdx, limbSel,
                                 nullptr, 0u, nullptr, 0u, fusedFirstStage);
@@ -15137,7 +13907,7 @@ namespace osuCrypto::LogVole::gpu
                                 "cudaFuncSetAttribute(forwardCenteredLimbFrom8192SimpleIndex)"))
                             return false;
                         nttForwardKernel<true, true, false, true, 4u, true><<<
-                            polyCount * rc.mRho, nttForwardThreads(), shBytes,
+                            polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes,
                             asStream(stream)>>>(
                             rg, out, outIdx, 0u, in, inIdx, limbSel,
                             nullptr, 0u, nullptr, 0u, fusedFirstStage);
@@ -15146,7 +13916,7 @@ namespace osuCrypto::LogVole::gpu
             }
             else
             {
-                if (nttCenteredDiagonalIdentityEnabled())
+                if (rc.mKernelOptions.mNttCenteredDiagonalIdentity)
                 {
                     if (!check(
                             cudaFuncSetAttribute(
@@ -15158,7 +13928,7 @@ namespace osuCrypto::LogVole::gpu
                         return false;
                     nttForwardKernel<
                         true, true, false, true, 4u, false, false, true><<<
-                        polyCount * rc.mRho, nttForwardThreads(), shBytes,
+                        polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes,
                         asStream(stream)>>>(
                         rg, out, outIdx, 0u, in, inIdx, limbSel,
                         nullptr, 0u, nullptr, 0u, fusedFirstStage);
@@ -15173,7 +13943,7 @@ namespace osuCrypto::LogVole::gpu
                             "cudaFuncSetAttribute(forwardCenteredLimbFrom8192)"))
                         return false;
                     nttForwardKernel<true, true, false, true, 4u><<<
-                        polyCount * rc.mRho, nttForwardThreads(), shBytes,
+                        polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes,
                         asStream(stream)>>>(
                         rg, out, outIdx, 0u, in, inIdx, limbSel,
                         nullptr, 0u, nullptr, 0u, fusedFirstStage);
@@ -15181,12 +13951,12 @@ namespace osuCrypto::LogVole::gpu
             }
         }
         else if (log14H200Shape(rc) &&
-            nttLog14H200FixedTransformsEnabled() &&
-            nttLog14H200CenteredEnabled() &&
-            nttForwardThreads() == kNttThreads && in != out &&
-            polyCount * rc.mRho >= 2u * deviceSmCount())
+            rc.mKernelOptions.mNttLog14H200FixedTransforms &&
+            rc.mKernelOptions.mNttLog14H200Centered &&
+            rc.mKernelOptions.mNttForwardThreads == kNttThreads && in != out &&
+            polyCount * rc.mRho >= 2u * rc.mSmCount)
         {
-            if (noGoldH200ForwardFp52Mode() && (noGoldH200ForwardFp52Extra() & 2u) &&
+            if (rc.mKernelOptions.mNoGoldH200ForwardFp52Mode && (rc.mKernelOptions.mNoGoldH200ForwardFp52Extra & 2u) &&
                 rc.mMinModulus > (u64{1} << 51u) && rc.mMinModulus <= rc.mMaxModulus &&
                 rc.mMaxModulus < (u64{1} << 52u))
             {
@@ -15200,8 +13970,8 @@ namespace osuCrypto::LogVole::gpu
                         rg, in, inIdx, limbSel, out, outIdx, rc.mFp52Roots);
                     return check(cudaGetLastError(), "forward centered packed FP52");
                 }
-                if (noGoldH200ForwardFp52Tail())
-                    return launchForwardFp52Tail<2u>(rg, in, inIdx, limbSel, out, outIdx, polyCount, asStream(stream));
+                if (rc.mKernelOptions.mNoGoldH200ForwardFp52Tail)
+                    return launchForwardFp52Tail<2u>(rc.mKernelOptions, rg, in, inIdx, limbSel, out, outIdx, polyCount, asStream(stream));
                 if (!check(cudaFuncSetAttribute(nttForwardFrom16384Rho8Fp52Kernel<2u>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward centered FP52 shared"))
                     return false;
@@ -15209,9 +13979,9 @@ namespace osuCrypto::LogVole::gpu
                     rg, in, inIdx, limbSel, out, outIdx);
                 return check(cudaGetLastError(), "forward centered FP52");
             }
-            if (nttLog14H200ForwardWarp712Enabled())
+            if (rc.mKernelOptions.mNttLog14H200ForwardWarp712)
             {
-                if (nttLog14H200ForwardPairedPrefixEnabled())
+                if (rc.mKernelOptions.mNttLog14H200ForwardPairedPrefix)
                 {
                     if (!check(cudaFuncSetAttribute(
                             nttForwardCenteredLimbFrom16384Rho8Kernel<true, true, 512u>,
@@ -15253,7 +14023,7 @@ namespace osuCrypto::LogVole::gpu
         }
         else
         {
-            if (nttCenteredDiagonalIdentityEnabled())
+            if (rc.mKernelOptions.mNttCenteredDiagonalIdentity)
             {
                 if (!check(
                         cudaFuncSetAttribute(
@@ -15265,7 +14035,7 @@ namespace osuCrypto::LogVole::gpu
                     return false;
                 nttForwardKernel<
                     true, true, false, false, 0u, false, false, true><<<
-                    polyCount * rc.mRho * tiles, nttForwardThreads(), shBytes,
+                    polyCount * rc.mRho * tiles, rc.mKernelOptions.mNttForwardThreads, shBytes,
                     asStream(stream)>>>(
                     rg, out, outIdx, logTiles, in, inIdx, limbSel);
             }
@@ -15279,7 +14049,7 @@ namespace osuCrypto::LogVole::gpu
                         "cudaFuncSetAttribute(forwardCenteredLimbFrom)"))
                     return false;
                 nttForwardKernel<true, true, false><<<
-                    polyCount * rc.mRho * tiles, nttForwardThreads(), shBytes,
+                    polyCount * rc.mRho * tiles, rc.mKernelOptions.mNttForwardThreads, shBytes,
                     asStream(stream)>>>(
                     rg, out, outIdx, logTiles, in, inIdx, limbSel);
             }
@@ -15330,12 +14100,12 @@ namespace osuCrypto::LogVole::gpu
             return false;
 
         const size_t shBytes = static_cast<size_t>(plainRc.mN) * sizeof(u64);
-        if (nttLog13InverseScatterFixedEnabled() &&
-            nttLog13SpecializedEnabled() && plainRc.mN == 8192u &&
+        if (ringRc.mKernelOptions.mNttLog13InverseScatterFixed &&
+            ringRc.mKernelOptions.mNttLog13Specialized && plainRc.mN == 8192u &&
             plainRc.mLogN == 13u && ringRc.mRho == 4u)
         {
             const DeviceInverseRho4 iv = toDeviceInverseRho4(plainRc);
-            if (nttLog13SimpleIndexEnabled())
+            if (ringRc.mKernelOptions.mNttLog13SimpleIndex)
             {
                 if (!check(
                         cudaFuncSetAttribute(
@@ -15373,7 +14143,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
 
         nttInverseScatterBroadcastKernel<<<
-            chunkCount, nttInverseThreads(), shBytes, asStream(stream)>>>(
+            chunkCount, ringRc.mKernelOptions.mNttInverseThreads, shBytes, asStream(stream)>>>(
             toDevice(plainRc), labels, labelCount, padValue, inverseSlotMap,
             ringRc.mRho, ringRc.mRho, out, garbledInput);
         return check(cudaGetLastError(), "nttInverseScatterBroadcast");
@@ -15389,8 +14159,8 @@ namespace osuCrypto::LogVole::gpu
             return plainRc.mN == 16384u && plainRc.mLogN == 14u;
         return plainRc.mN == 8192u && plainRc.mLogN == 13u &&
                ringRc.mN == 8192u && ringRc.mLogN == 13u &&
-               ringRc.mRho == 4u && nttLog13InverseScatterFixedEnabled() &&
-               nttLog13SpecializedEnabled() && nttLog13SimpleIndexEnabled();
+               ringRc.mRho == 4u && ringRc.mKernelOptions.mNttLog13InverseScatterFixed &&
+               ringRc.mKernelOptions.mNttLog13Specialized && ringRc.mKernelOptions.mNttLog13SimpleIndex;
     }
 
     bool launchNttInverseScatterSingleLimb(
@@ -15503,31 +14273,31 @@ namespace osuCrypto::LogVole::gpu
 
         // Two tiles is the case the register-parked variant was written for, and it
         // is the only one the ring degrees in use reach (tiles = n / 8192).
-        const u32 fp1024Min = noGoldH200InverseFp52TileMinBlocks();
+        const u32 fp1024Min = (rc.mKernelOptions.mNoGoldH200InverseFp52TileMinBlocks == 4294967295u ? (rc.mKernelOptions.mNoGoldH200InverseFp52Tile1024Mode >= 2u ? 64u : 0u) : rc.mKernelOptions.mNoGoldH200InverseFp52TileMinBlocks);
         const bool narrowFp1024 = fp1024Min && polyCount * rc.mRho >= fp1024Min &&
-            noGoldH200InverseFp52Tile1024Mode() && noGoldH200InverseFp52Threads() &&
-            noGoldH200InverseFp52TwoTile() == 4u && noGoldH200InverseFp52TileCacheStage() <= 2u &&
-            ip.mTerms == 0u && log14H200Shape(rc) && nttLog14H200FixedTransformsEnabled() &&
+            rc.mKernelOptions.mNoGoldH200InverseFp52Tile1024Mode && rc.mKernelOptions.mNoGoldH200InverseFp52Threads &&
+            rc.mKernelOptions.mNoGoldH200InverseFp52TwoTile == 4u && rc.mKernelOptions.mNoGoldH200InverseFp52TileCacheStage <= 2u &&
+            ip.mTerms == 0u && log14H200Shape(rc) && rc.mKernelOptions.mNttLog14H200FixedTransforms &&
             rc.mMinModulus > (u64{1} << 51u) && rc.mMinModulus <= rc.mMaxModulus &&
             rc.mMaxModulus < (u64{1} << 52u);
         if (tiles == 2u && (rc.mN >> 1) == kNttThreads * kInvRegs &&
-            (polyCount * rc.mRho >= inverseTwoTileMinBlocks() || narrowFp1024))
+            (polyCount * rc.mRho >= (2u * rc.mSmCount) || narrowFp1024))
         {
             if (ip.mTerms == 0u && log14H200Shape(rc) &&
-                nttLog14H200FixedTransformsEnabled())
+                rc.mKernelOptions.mNttLog14H200FixedTransforms)
             {
-                const u32 fpThreads = noGoldH200InverseFp52Threads();
+                const u32 fpThreads = rc.mKernelOptions.mNoGoldH200InverseFp52Threads;
                 if (fpThreads && rc.mMinModulus > (u64{1} << 51u) &&
                     rc.mMinModulus <= rc.mMaxModulus && rc.mMaxModulus < (u64{1} << 52u))
                 {
-                    const u32 twoTile = noGoldH200InverseFp52TwoTile();
+                    const u32 twoTile = rc.mKernelOptions.mNoGoldH200InverseFp52TwoTile;
                     if (twoTile)
                     {
-                        const u32 tileMode = noGoldH200InverseFp52Tile1024Mode();
+                        const u32 tileMode = rc.mKernelOptions.mNoGoldH200InverseFp52Tile1024Mode;
                         const bool hybridNarrow = tileMode >= 2u &&
-                            polyCount * rc.mRho < inverseTwoTileMinBlocks();
+                            polyCount * rc.mRho < (2u * rc.mSmCount);
                         const u32 cacheStage = hybridNarrow ? tileMode - 1u :
-                            noGoldH200InverseFp52TileCacheStage();
+                            rc.mKernelOptions.mNoGoldH200InverseFp52TileCacheStage;
                         if (twoTile == 4u && cacheStage <= 2u && (tileMode == 1u || hybridNarrow))
                         {
                             const auto launch1024 = [&](auto stage, auto packed) {
@@ -15547,20 +14317,16 @@ namespace osuCrypto::LogVole::gpu
                             };
                             return rc.mFp52InvRoots ? byCache(std::true_type{}) : byCache(std::false_type{});
                         }
-                        if (twoTile == 4u && noGoldH200InverseFp52TileCacheStage() == 2u && rc.mFp52InvRoots)
+                        if (twoTile == 4u && rc.mKernelOptions.mNoGoldH200InverseFp52TileCacheStage == 2u && rc.mFp52InvRoots)
                         {
                             constexpr int bytes = 12288u * sizeof(double);
-                            const u32 prefixSchedule = noGoldH200InverseFp52PrefixSchedule();
-                            static const bool traceOps = [] {
-                                const char* v = std::getenv("LV_GPU_NOGOLD_H200_INVERSE_OP_TRACE");
-                                return v && std::strcmp(v, "1") == 0;
-                            }();
-                            if (traceOps)
+                            const u32 prefixSchedule = rc.mKernelOptions.mNoGoldH200InverseFp52PrefixSchedule;
+                            if (rc.mKernelOptions.mNoGoldH200InverseOpTrace)
                                 std::fprintf(stderr, "[inverse-ops] polys=%u pre=%u post=%u indexed=%u\n",
                                     polyCount, preOp, postOp, polyIdx ? 1u : 0u);
                             if (prefixSchedule)
                             {
-                                const u32 staticOps = noGoldH200InverseFp52StaticOps();
+                                const u32 staticOps = rc.mKernelOptions.mNoGoldH200InverseFp52StaticOps;
                                 if (prefixSchedule == 1u && staticOps && preOp == kElemOpNone)
                                 {
                                     const auto launchStatic = [&](auto ops) {
@@ -15639,7 +14405,7 @@ namespace osuCrypto::LogVole::gpu
                                 default: return launch(std::integral_constant<u32, 1u>{}, stage);
                             }
                         };
-                        switch (noGoldH200InverseFp52TileCacheStage())
+                        switch (rc.mKernelOptions.mNoGoldH200InverseFp52TileCacheStage)
                         {
                             case 1u: return byUnroll(std::integral_constant<u32, 1u>{});
                             case 3u: return byUnroll(std::integral_constant<u32, 3u>{});
@@ -15668,11 +14434,11 @@ namespace osuCrypto::LogVole::gpu
                     using U1 = std::integral_constant<u32, 1u>;
                     using U2 = std::integral_constant<u32, 2u>;
                     using U4 = std::integral_constant<u32, 4u>;
-                    if (noGoldH200InverseFp52CacheRoots())
+                    if (rc.mKernelOptions.mNoGoldH200InverseFp52CacheRoots)
                     {
                         if (fpThreads == 512u)
                             return launch(T512{}, std::true_type{}, U2{}, U1{}, std::false_type{});
-                        switch (noGoldH200InverseFp52Schedule())
+                        switch (rc.mKernelOptions.mNoGoldH200InverseFp52Schedule)
                         {
                             case 1u: return launch(T1024{}, std::true_type{}, U2{}, U1{}, std::false_type{});
                             case 2u: return launch(T1024{}, std::true_type{}, U1{}, U2{}, std::false_type{});
@@ -15688,19 +14454,19 @@ namespace osuCrypto::LogVole::gpu
                     return fpThreads == 512u ? launch(T512{}, std::false_type{}, U1{}, U1{}, std::false_type{}) :
                         launch(T1024{}, std::false_type{}, U1{}, U1{}, std::false_type{});
                 }
-                const u32 threads = nttLog14H200InverseThreads();
+                const u32 threads = rc.mKernelOptions.mNttLog14H200InverseThreads;
                 // The direct prefix uses 128-bit input loads. Unaligned
                 // caller-owned arrays retain the scalar shared-input path.
                 const bool alignedInputs =
                     (reinterpret_cast<size_t>(data) & 15u) == 0u &&
                     (preOp == kElemOpNone ||
                      (reinterpret_cast<size_t>(preB) & 15u) == 0u);
-                if (threads == 512u && nttLog14H200InverseWarp05Enabled() &&
-                    nttLog14H200InverseDirectLoadEnabled() && alignedInputs)
+                if (threads == 512u && rc.mKernelOptions.mNttLog14H200InverseWarp05 &&
+                    rc.mKernelOptions.mNttLog14H200InverseDirectLoad && alignedInputs)
                 {
-                    if (nttLog14H200InversePairedSuffixEnabled())
+                    if (rc.mKernelOptions.mNttLog14H200InversePairedSuffix)
                     {
-                        if (noGoldH200InverseCachedSuffix())
+                        if (rc.mKernelOptions.mNoGoldH200InverseCachedSuffix)
                         {
                             const size_t cachedBytes = shBytes + 1024u * sizeof(ShoupOperand);
                             if (!check(cudaFuncSetAttribute(
@@ -15738,7 +14504,7 @@ namespace osuCrypto::LogVole::gpu
                 }
                 else if (threads == 512u)
                 {
-                    if (nttLog14H200InverseWarp05Enabled())
+                    if (rc.mKernelOptions.mNttLog14H200InverseWarp05)
                     {
                         if (!check(
                                 cudaFuncSetAttribute(
@@ -15795,33 +14561,33 @@ namespace osuCrypto::LogVole::gpu
         if (ip.mTerms != 0)
         {
             nttInverseKernel<true><<<
-                polyCount * rc.mRho * tiles, nttFusedIpThreads(), shBytes, st>>>(
+                polyCount * rc.mRho * tiles, (rc.mKernelOptions.mNttFusedIpThreads ? rc.mKernelOptions.mNttFusedIpThreads : rc.mKernelOptions.mNttInverseThreads), shBytes, st>>>(
                 rg, data, polyIdx, preOp, preB, postOp, postB, ip, logTiles);
         }
         else
         {
             const u64 blocks = static_cast<u64>(polyCount) * rc.mRho;
             const bool fixedGeometry =
-                nttLog13SpecializedEnabled() &&
-                nttLog13InverseSpecializedEnabled() && rc.mN == 8192u &&
+                rc.mKernelOptions.mNttLog13Specialized &&
+                rc.mKernelOptions.mNttLog13InverseSpecialized && rc.mN == 8192u &&
                 rc.mRho == 4u && tiles == 1u;
             const bool fusedFirstStage =
-                nttLog13InverseFusedFirstStageEnabled();
+                rc.mKernelOptions.mNttLog13InverseFusedFirstStage;
             const bool fusedLastTwoStages =
-                nttLog13InverseFusedLastTwoStagesEnabled();
+                rc.mKernelOptions.mNttLog13InverseFusedLastTwoStages;
             const bool fusedLastThreeStages =
-                nttLog13InverseFusedLastThreeStagesEnabled();
+                rc.mKernelOptions.mNttLog13InverseFusedLastThreeStages;
             const bool fusedLastThreeAddNegate =
-                nttLog13InverseFusedLastThreeAddNegateEnabled();
+                rc.mKernelOptions.mNttLog13InverseFusedLastThreeAddNegate;
             const bool vectorShoupLoads =
-                nttLog13VectorShoupLoadsEnabled();
+                rc.mKernelOptions.mNttLog13VectorShoupLoads;
             const bool postWarpStages05 = alphaIsTwo &&
-                nttLog13InversePostWarpStages05Enabled();
-            if (fixedGeometry && blocks >= nttLog13InverseMinBlocks())
+                rc.mKernelOptions.mNttLog13InversePostWarpStages05;
+            if (fixedGeometry && blocks >= rc.mKernelOptions.mNttLog13InverseMinBlocks)
             {
                 const bool direct =
-                    nttLog13InverseDirectStoreEnabled() && preOp == kElemOpNoneHost;
-                if (nttLog13SimpleIndexEnabled())
+                    rc.mKernelOptions.mNttLog13InverseDirectStore && preOp == kElemOpNoneHost;
+                if (rc.mKernelOptions.mNttLog13SimpleIndex)
                 {
                     if (direct && postOp == static_cast<u32>(ElemOp::Add))
                     {
@@ -15829,7 +14595,7 @@ namespace osuCrypto::LogVole::gpu
                             postWarpStages05 && fusedLastThreeStages &&
                             fusedLastThreeAddNegate && fusedFirstStage &&
                             fusedLastTwoStages && vectorShoupLoads &&
-                            nttLog13InverseThreads() == 512u && blocks >= 256u)
+                            rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             if (!configureNttInversePostWarpStages05Shared())
                                 return false;
@@ -15841,7 +14607,7 @@ namespace osuCrypto::LogVole::gpu
                             fusedLastThreeStages && fusedLastThreeAddNegate &&
                             fusedFirstStage &&
                             fusedLastTwoStages && vectorShoupLoads &&
-                            nttLog13InverseThreads() == 512u && blocks >= 256u)
+                            rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             nttInverseFusedLastThree8192Rho4PostKernel<0u><<<
                                 polyCount * 4u, 512u, shBytes, st>>>(
@@ -15850,21 +14616,21 @@ namespace osuCrypto::LogVole::gpu
                         else if (fusedLastTwoStages && vectorShoupLoads)
                         {
                             nttInverseFixed8192Kernel<4u, true, 0u, true, true><<<
-                                polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else if (fusedLastTwoStages)
                         {
                             nttInverseFixed8192Kernel<4u, true, 0u, true><<<
-                                polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else
                         {
                             nttInverseFixed8192Kernel<4u, true, 0u><<<
-                                polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
@@ -15875,7 +14641,7 @@ namespace osuCrypto::LogVole::gpu
                             postWarpStages05 && fusedLastThreeStages &&
                             fusedLastThreeAddNegate && fusedFirstStage &&
                             fusedLastTwoStages && vectorShoupLoads &&
-                            nttLog13InverseThreads() == 512u && blocks >= 256u)
+                            rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             if (!configureNttInversePostWarpStages05Shared())
                                 return false;
@@ -15887,7 +14653,7 @@ namespace osuCrypto::LogVole::gpu
                             fusedLastThreeStages && fusedLastThreeAddNegate &&
                             fusedFirstStage &&
                             fusedLastTwoStages && vectorShoupLoads &&
-                            nttLog13InverseThreads() == 512u && blocks >= 256u)
+                            rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             nttInverseFusedLastThree8192Rho4PostKernel<2u><<<
                                 polyCount * 4u, 512u, shBytes, st>>>(
@@ -15896,21 +14662,21 @@ namespace osuCrypto::LogVole::gpu
                         else if (fusedLastTwoStages && vectorShoupLoads)
                         {
                             nttInverseFixed8192Kernel<4u, true, 2u, true, true><<<
-                                polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else if (fusedLastTwoStages)
                         {
                             nttInverseFixed8192Kernel<4u, true, 2u, true><<<
-                                polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else
                         {
                             nttInverseFixed8192Kernel<4u, true, 2u><<<
-                                polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
@@ -15921,7 +14687,7 @@ namespace osuCrypto::LogVole::gpu
                             postWarpStages05 && fusedLastThreeStages &&
                             fusedFirstStage && fusedLastTwoStages &&
                             vectorShoupLoads &&
-                            nttLog13InverseThreads() == 512u && blocks >= 256u)
+                            rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             if (!configureNttInversePostWarpStages05Shared())
                                 return false;
@@ -15932,7 +14698,7 @@ namespace osuCrypto::LogVole::gpu
                         else if (
                             fusedLastThreeStages && fusedFirstStage &&
                             fusedLastTwoStages && vectorShoupLoads &&
-                            nttLog13InverseThreads() == 512u && blocks >= 256u)
+                            rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             nttInverseFusedLastThree8192Rho4ReverseSubKernel<<<
                                 polyCount * 4u, 512u, shBytes, st>>>(
@@ -15941,21 +14707,21 @@ namespace osuCrypto::LogVole::gpu
                         else if (fusedLastTwoStages && vectorShoupLoads)
                         {
                             nttInverseFixed8192Kernel<4u, true, 4u, true, true><<<
-                                polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else if (fusedLastTwoStages)
                         {
                             nttInverseFixed8192Kernel<4u, true, 4u, true><<<
-                                polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
                         else
                         {
                             nttInverseFixed8192Kernel<4u, true, 4u><<<
-                                polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
@@ -15963,7 +14729,7 @@ namespace osuCrypto::LogVole::gpu
                     else
                     {
                         nttInverseFixed8192Kernel<4u, true><<<
-                            polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                            polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                             fusedFirstStage);
                     }
@@ -15973,42 +14739,42 @@ namespace osuCrypto::LogVole::gpu
                     if (direct && postOp == static_cast<u32>(ElemOp::Add))
                     {
                         nttInverseFixed8192Kernel<4u, false, 0u><<<
-                            polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                            polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                             fusedFirstStage);
                     }
                     else if (direct && postOp == static_cast<u32>(ElemOp::Negate))
                     {
                         nttInverseFixed8192Kernel<4u, false, 2u><<<
-                            polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                            polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                             fusedFirstStage);
                     }
                     else if (direct && postOp == static_cast<u32>(ElemOp::ReverseSub))
                     {
                         nttInverseFixed8192Kernel<4u, false, 4u><<<
-                            polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                            polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u,
                             fusedFirstStage);
                     }
                     else
                     {
                         nttInverseFixed8192Kernel<4u><<<
-                            polyCount * rc.mRho, nttLog13InverseThreads(), shBytes, st>>>(
+                            polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                             rg, data, polyIdx, preOp, preB, postOp, postB, ip, 0u);
                     }
                 }
             }
             else if (
-                fixedGeometry && nttLog13InverseSmallDirectEnabled() &&
-                blocks < nttLog13InverseMinBlocks() &&
+                fixedGeometry && rc.mKernelOptions.mNttLog13InverseSmallDirect &&
+                blocks < rc.mKernelOptions.mNttLog13InverseMinBlocks &&
                 preOp == kElemOpNoneHost && postOp == kElemOpNoneHost)
             {
                 // The low-grid path deliberately uses 1024 threads regardless
                 // of the accepted large-grid 512-thread setting. At 32
                 // registers and 64 KiB shared memory this matches the generic
                 // kernel's two resident CTAs while retaining fixed indexing.
-                if (nttLog13SimpleIndexEnabled())
+                if (rc.mKernelOptions.mNttLog13SimpleIndex)
                 {
                     nttInverseFixed8192Kernel<4u, true, kElemOpDirectCopy><<<
                         static_cast<u32>(blocks), kNttThreads, shBytes, st>>>(
@@ -16026,7 +14792,7 @@ namespace osuCrypto::LogVole::gpu
             else
             {
                 nttInverseKernel<false><<<
-                    polyCount * rc.mRho * tiles, nttInverseThreads(), shBytes, st>>>(
+                    polyCount * rc.mRho * tiles, rc.mKernelOptions.mNttInverseThreads, shBytes, st>>>(
                     rg, data, polyIdx, preOp, preB, postOp, postB, ip, logTiles);
             }
         }
@@ -16062,7 +14828,7 @@ namespace osuCrypto::LogVole::gpu
 
         bool pointwisePseudo55ProductionEligible(const RingConstView& rc)
         {
-            return pointwisePseudo55ReduceEnabled() &&
+            return rc.mKernelOptions.mPointwisePseudo55Reduce &&
                 pointwisePseudo55ShapeEligible(rc);
         }
 
@@ -16105,7 +14871,7 @@ namespace osuCrypto::LogVole::gpu
             u32 treeTerms,
             u32 outCount)
         {
-            return noGoldH200CombinedAccumulatorEnabled() &&
+            return rc.mKernelOptions.mNoGoldH200CombinedAccumulator &&
                 log14H200Shape(rc) && mu == 16u && treeTerms == 8u &&
                 outCount != 0u && outCount <= 65535u &&
                 (outCount % 16u) == 0u && rc.mMods &&
@@ -16140,12 +14906,12 @@ namespace osuCrypto::LogVole::gpu
                 : (rawTileBlocks > 64u
                        ? 64u
                        : static_cast<u32>(rawTileBlocks));
-            const u32 overrideTileBlocks = noGoldH200AccumulatorTileBlocks();
+            const u32 overrideTileBlocks = rc.mKernelOptions.mNoGoldH200AccumulatorTileBlocks;
             const u32 tileBlocks = overrideTileBlocks ? overrideTileBlocks : automaticTileBlocks;
             const dim3 grid(tileBlocks, kMu * kRho, chunks);
             constexpr u64 kRadix52 = u64{ 1 } << 52u;
             const bool pseudo52 =
-                noGoldH200AccumulatorPseudo52Enabled() &&
+                rc.mKernelOptions.mNoGoldH200AccumulatorPseudo52 &&
                 rc.mMaxModulus < kRadix52 &&
                 rc.mMinModulus > kRadix52 - (u64{ 1 } << 24u);
             if (pseudo52)
@@ -16156,11 +14922,11 @@ namespace osuCrypto::LogVole::gpu
                         toDevice(rc), ct1, uDigits, publicA, skNtt, lacct,
                         nodes, lacctAIdx, lacctBIdx, out);
                 };
-                const u32 packedMode = noGoldH200AccumulatorPackedMode();
-                const u32 order = noGoldH200AccumulatorOrder();
-                const u32 carryMode = noGoldH200AccumulatorCarryMode();
-                const u32 loadMode = noGoldH200AccumulatorLoadMode();
-                if (loadMode && carryMode == 0u && packedMode == 0u && order == 0u && noGoldH200AccumulatorSchedule() == 0u)
+                const u32 packedMode = rc.mKernelOptions.mNoGoldH200AccumulatorPackedMode;
+                const u32 order = rc.mKernelOptions.mNoGoldH200AccumulatorOrder;
+                const u32 carryMode = rc.mKernelOptions.mNoGoldH200AccumulatorCarryMode;
+                const u32 loadMode = rc.mKernelOptions.mNoGoldH200AccumulatorLoadMode;
+                if (loadMode && carryMode == 0u && packedMode == 0u && order == 0u && rc.mKernelOptions.mNoGoldH200AccumulatorSchedule == 0u)
                 {
                     // Modes 1--3 isolate load policy; 4--6 combine the policy
                     // with packed pointers and explicit carry/borrow chains.
@@ -16196,7 +14962,7 @@ namespace osuCrypto::LogVole::gpu
                     }
                     return check(cudaGetLastError(), "expandAccumulatorTau1NoGoldH200Load");
                 }
-                if (carryMode && packedMode == 0u && order == 0u && noGoldH200AccumulatorSchedule() == 0u)
+                if (carryMode && packedMode == 0u && order == 0u && rc.mKernelOptions.mNoGoldH200AccumulatorSchedule == 0u)
                 {
                     const auto carry = [&](auto mode, auto packedPointers) {
                         constexpr u32 c = decltype(mode)::value;
@@ -16218,7 +14984,7 @@ namespace osuCrypto::LogVole::gpu
                     }
                     return check(cudaGetLastError(), "expandAccumulatorTau1NoGoldH200Carry");
                 }
-                if (order && noGoldH200AccumulatorSchedule() == 0u &&
+                if (order && rc.mKernelOptions.mNoGoldH200AccumulatorSchedule == 0u &&
                     (packedMode == 0u || packedMode == 7u) && (chunks % (1u << order)) == 0u)
                 {
                     const auto reordered = [&](auto rowTile, auto chunkTile, auto narrow) {
@@ -16263,7 +15029,7 @@ namespace osuCrypto::LogVole::gpu
                             using U2 = std::integral_constant<u32, 2u>;
                             using U4 = std::integral_constant<u32, 4u>;
                             using U8 = std::integral_constant<u32, 8u>;
-                            switch (noGoldH200AccumulatorSchedule())
+                            switch (rc.mKernelOptions.mNoGoldH200AccumulatorSchedule)
                             {
                             case 1u: narrow(U2{}, U8{}); break;
                             case 2u: narrow(U4{}, U8{}); break;
@@ -16289,7 +15055,7 @@ namespace osuCrypto::LogVole::gpu
                 using U2 = std::integral_constant<u32, 2u>;
                 using U4 = std::integral_constant<u32, 4u>;
                 using U8 = std::integral_constant<u32, 8u>;
-                switch (noGoldH200AccumulatorSchedule())
+                switch (rc.mKernelOptions.mNoGoldH200AccumulatorSchedule)
                 {
                     case 1u: launch(U2{}, U8{}); break;
                     case 2u: launch(U4{}, U8{}); break;
@@ -16450,9 +15216,9 @@ namespace osuCrypto::LogVole::gpu
             u32 outCount,
             void* stream)
         {
-            if (expandAccumulatorPseudo55DualEnabled())
+            if (rc.mKernelOptions.mExpandAccumulatorPseudo55Dual)
             {
-                if (expandAccumulatorPseudo55DualPackedPairsEnabled())
+                if (rc.mKernelOptions.mExpandAccumulatorPseudo55DualPackedPairs)
                 {
                     return
                         launchExpandAccumulatorTau1WidePseudo55DualPackedPairsImpl<
@@ -16503,14 +15269,14 @@ namespace osuCrypto::LogVole::gpu
         bool fixedIpInverseEligible(const RingConstView& rc, u32 outCount)
         {
             const u64 blocks = static_cast<u64>(outCount) * 4u;
-            return nttLog13InverseFixedIpEnabled() &&
-                nttLog13SpecializedEnabled() &&
-                nttLog13InverseSpecializedEnabled() &&
-                nttLog13InverseDirectStoreEnabled() &&
-                nttLog13InverseThreads() == 512u &&
+            return rc.mKernelOptions.mNttLog13InverseFixedIp &&
+                rc.mKernelOptions.mNttLog13Specialized &&
+                rc.mKernelOptions.mNttLog13InverseSpecialized &&
+                rc.mKernelOptions.mNttLog13InverseDirectStore &&
+                rc.mKernelOptions.mNttLog13InverseThreads == 512u &&
                 rc.mN == 8192u && rc.mLogN == 13u && rc.mRho == 4u &&
                 rc.mMods && rc.mInvRoots && rc.mInvDegree && rc.mScaledInvRoot &&
-                outCount != 0u && blocks >= nttLog13InverseMinBlocks() &&
+                outCount != 0u && blocks >= rc.mKernelOptions.mNttLog13InverseMinBlocks &&
                 blocks <= 0x7fffffffu;
         }
     }
@@ -16538,11 +15304,11 @@ namespace osuCrypto::LogVole::gpu
             return true;
         }
 
-        return expandAccumulatorPseudo55WideEnabled() &&
-            expandAccumulatorSpecializedEnabled() &&
-            expandAccumulatorTiledEnabled() &&
-            expandAccumulatorQ64ComplementEnabled() &&
-            expandAccumulatorPseudo55Enabled() &&
+        return rc.mKernelOptions.mExpandAccumulatorPseudo55Wide &&
+            rc.mKernelOptions.mExpandAccumulatorSpecialized &&
+            rc.mKernelOptions.mExpandAccumulatorTiled &&
+            rc.mKernelOptions.mExpandAccumulatorQ64Complement &&
+            rc.mKernelOptions.mExpandAccumulatorPseudo55 &&
             expandAccumulatorWideStructuralEligible(
                 rc, mu, treeTerms, outCount);
     }
@@ -16559,7 +15325,7 @@ namespace osuCrypto::LogVole::gpu
         bool& launched)
     {
         launched = false;
-        if (!fixedIpMuRowReuseEnabled() || (mu != 8u && mu != 16u) ||
+        if (!rc.mKernelOptions.mFixedIpMuRowReuse || (mu != 8u && mu != 16u) ||
             rc.mN != 8192u || rc.mLogN != 13u || rc.mRho != 4u || !rc.mMods ||
             chunkCount < 8u || chunkCount > 65535u ||
             !publicA || !skNtt || !out || publicA == skNtt ||
@@ -16611,8 +15377,8 @@ namespace osuCrypto::LogVole::gpu
         bool& launched)
     {
         launched = false;
-        const u32 h200Mode = noGoldH200OuterReuseMode();
-        if (h200Mode && fixedIpWideMuRowReuseEnabled() && mu == 32u &&
+        const u32 h200Mode = rc.mKernelOptions.mNoGoldH200OuterReuseMode;
+        if (h200Mode && rc.mKernelOptions.mFixedIpWideMuRowReuse && mu == 32u &&
             log14H200Shape(rc) && rc.mMods &&
             rc.mMinModulus > (u64{1} << 52u) - (u64{1} << 24u) && rc.mMaxModulus < (u64{1} << 52u) &&
             chunkCount >= 8u && chunkCount <= 65535u && publicA && skNtt && out &&
@@ -16643,7 +15409,7 @@ namespace osuCrypto::LogVole::gpu
             launched = true;
             return check(cudaGetLastError(), "innerProductOuter32H200");
         }
-        if (!fixedIpWideMuRowReuseEnabled() ||
+        if (!rc.mKernelOptions.mFixedIpWideMuRowReuse ||
             !pointwisePseudo55ProductionEligible(rc) ||
             !innerProductOuterWideMuStructuralEligible(rc, mu, chunkCount) ||
             !publicA || !skNtt || !out || publicA == skNtt ||
@@ -16709,22 +15475,22 @@ namespace osuCrypto::LogVole::gpu
         const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
         const DeviceInverseRho4 iv = toDeviceInverseRho4(rc);
         const bool fusedFirstStage =
-            nttLog13InverseTreeFusedFirstStageEnabled();
-        const bool simpleIndex = nttLog13SimpleIndexEnabled();
+            rc.mKernelOptions.mNttLog13InverseTreeFusedFirstStage;
+        const bool simpleIndex = rc.mKernelOptions.mNttLog13SimpleIndex;
         const bool usePseudo55 = simpleIndex && fusedFirstStage &&
             pointwisePseudo55ProductionEligible(rc);
         if (usePseudo55)
         {
-            if (nttLog13InverseTreeWarpStagesEnabled())
+            if (rc.mKernelOptions.mNttLog13InverseTreeWarpStages)
             {
                 if (alphaIsTwo &&
-                    nttLog13InverseTreeProductWarpStages05Enabled())
+                    rc.mKernelOptions.mNttLog13InverseTreeProductWarpStages05)
                 {
                     const bool vectorPairAligned =
                         ((reinterpret_cast<std::uintptr_t>(publicB) |
                           reinterpret_cast<std::uintptr_t>(nodes)) & 15u) == 0u;
                     if (vectorPairAligned &&
-                        nttLog13InverseTreeProductWarpVectorPairsEnabled())
+                        rc.mKernelOptions.mNttLog13InverseTreeProductWarpVectorPairs)
                     {
                         if (!configurePointwisePseudo55TreeProductWarpVectorShared())
                             return false;
@@ -16809,7 +15575,7 @@ namespace osuCrypto::LogVole::gpu
 
         const u32 parentCount = logicalCount >> 1u;
         if (!fixedIpInverseEligible(rc, parentCount) ||
-            !nttLog13SimpleIndexEnabled() || !nodes || !leftB || !rightB ||
+            !rc.mKernelOptions.mNttLog13SimpleIndex || !nodes || !leftB || !rightB ||
             !packed || !out || packed == nodes || packed == leftB ||
             packed == rightB || packed == out || out == nodes ||
             out == leftB || out == rightB ||
@@ -16846,7 +15612,7 @@ namespace osuCrypto::LogVole::gpu
 
         const u32 parentCount = logicalCount >> 1u;
         if (!fixedIpInverseEligible(rc, parentCount) ||
-            !nttLog13SimpleIndexEnabled() || !nodes || !leftB || !rightB ||
+            !rc.mKernelOptions.mNttLog13SimpleIndex || !nodes || !leftB || !rightB ||
             !packed || !out || packed == nodes || packed == leftB ||
             packed == rightB || packed == out || out == nodes ||
             out == leftB || out == rightB ||
@@ -16972,7 +15738,7 @@ namespace osuCrypto::LogVole::gpu
             fixedGeometry && pointwisePseudo55ProductionEligible(rc);
         if (fixedGeometry)
         {
-            const u32 h200Arithmetic = noGoldH200PointwiseMode();
+            const u32 h200Arithmetic = rc.mKernelOptions.mNoGoldH200PointwiseMode;
             if (h200Arithmetic && log14H200Shape(rc) && rc.mMods &&
                 rc.mMinModulus > (u64{1} << 52u) - (u64{1} << 24u) &&
                 rc.mMaxModulus < (u64{1} << 52u) && aBase && bBase && out &&
@@ -16988,7 +15754,7 @@ namespace osuCrypto::LogVole::gpu
                             rg, aBase, bBase, aIdx, bIdx, out, rc.mFp52GadgetConstants);
                 };
                 const auto byThreads = [&](auto count, auto mode, auto arithmetic) {
-                    switch (noGoldH200PointwiseThreads())
+                    switch (rc.mKernelOptions.mNoGoldH200PointwiseThreads)
                     {
                     case 128u: launch(count, mode, arithmetic, std::integral_constant<u32, 128u>{}); break;
                     case 512u: launch(count, mode, arithmetic, std::integral_constant<u32, 512u>{}); break;
@@ -17149,12 +15915,12 @@ namespace osuCrypto::LogVole::gpu
         }
         const DeviceRing rg = toDevice(rc);
         constexpr u32 threads = 256;
-        if (expandAccumulatorSpecializedEnabled() && rc.mN == 8192u && rc.mRho == 4u &&
+        if (rc.mKernelOptions.mExpandAccumulatorSpecialized && rc.mN == 8192u && rc.mRho == 4u &&
             mu == 8u && treeTerms == 6u && (outCount % 8u) == 0u)
         {
             const u32 chunks = outCount / 8u;
-            const bool useQ64Complement = expandAccumulatorQ64ComplementEnabled();
-            if (expandAccumulatorTiledEnabled())
+            const bool useQ64Complement = rc.mKernelOptions.mExpandAccumulatorQ64Complement;
+            if (rc.mKernelOptions.mExpandAccumulatorTiled)
             {
                 // Keep about 1024 CTAs at small chunk counts, then let the larger
                 // grids amortize pointer setup over progressively more of the 32
@@ -17172,12 +15938,12 @@ namespace osuCrypto::LogVole::gpu
                     // The pseudo-Mersenne proof additionally needs every limb
                     // to satisfy q=2^55-c with 0<c<2^21. Host metadata guards
                     // the whole table before the device reconstructs q from c.
-                    if (expandAccumulatorPseudo55Enabled() &&
+                    if (rc.mKernelOptions.mExpandAccumulatorPseudo55 &&
                         rc.mMinModulus > kPseudo55Radix - kPseudo55MaxC &&
                         rc.mMaxModulus < kPseudo55Radix)
                     {
                         if (alphaIsTwo &&
-                            expandAccumulatorGoldenPseudo55DualEnabled() &&
+                            rc.mKernelOptions.mExpandAccumulatorGoldenPseudo55Dual &&
                             expandAccumulatorGoldenPseudo55StructuralEligible(
                                 rc, mu, treeTerms, outCount))
                         {
@@ -17304,10 +16070,10 @@ namespace osuCrypto::LogVole::gpu
             u32 parentCount,
             const u64* out)
         {
-            return gadgetHi110SpecializedEnabled() &&
-                gadgetHi110CompactCrtEnabled() &&
-                gadgetHi110Radix55ReduceEnabled() &&
-                !gadgetHi110SparsePairGarnerEnabled() &&
+            return rc.mKernelOptions.mGadgetHi110Specialized &&
+                rc.mKernelOptions.mGadgetHi110CompactCrt &&
+                rc.mKernelOptions.mGadgetHi110Radix55Reduce &&
+                !rc.mKernelOptions.mGadgetGarner &&
                 rc.mN == 8192u && rc.mLogN == 13u && rc.mRho == 4u &&
                 rc.mMinModulus > (u64(1) << 54u) &&
                 rc.mMaxModulus < (u64(1) << 55u) &&
@@ -17324,7 +16090,7 @@ namespace osuCrypto::LogVole::gpu
         u32 parentCount,
         const u64* out)
     {
-        return gadgetHi110SparsePairEnabled() &&
+        return rc.mKernelOptions.mGadgetHi110SparsePair &&
             gadgetDecomposeHi110RecursiveLeafSparsePairEligible(
                 rc, in, parentCount, out);
     }
@@ -17352,7 +16118,7 @@ namespace osuCrypto::LogVole::gpu
         cudaStream_t st = asStream(stream);
 
         const bool pseudo55SecondFold =
-            gadgetHi110Pseudo55SecondFoldEnabled() &&
+            rc.mKernelOptions.mGadgetHi110Pseudo55SecondFold &&
             gadgetHi110Pseudo55SecondFoldEligible(rc);
         if (pseudo55SecondFold)
         {
@@ -17395,11 +16161,25 @@ namespace osuCrypto::LogVole::gpu
 
 
 
+    bool prepareKernelDispatch(RingConstView& rc, const LogVoleGpuKernelOptions& options)
+    {
+        if (!options.valid()) return false;
+        rc.mKernelOptions = options;
+        int device = 0;
+        cudaDeviceProp prop{};
+        if (!check(cudaGetDevice(&device), "kernel dispatch device") ||
+            !check(cudaGetDeviceProperties(&prop, device), "kernel dispatch properties")) return false;
+        rc.mSmCount = prop.multiProcessorCount > 0 ? static_cast<u32>(prop.multiProcessorCount) : 142u;
+        rc.mH200Shared = prop.major == 9 && std::strstr(prop.name, "H200") &&
+            prop.sharedMemPerBlockOptin >= 16384u * sizeof(u64);
+        return true;
+    }
+
     bool prepareH200RootPersistence(RingConstView& rc)
     {
         rc.mH200RootL2MaxWindow = 0u;
 #if CUDART_VERSION >= 11000
-        if (!noGoldH200RootL2Mode() || !nttLog14H200Enabled() ||
+        if (!rc.mKernelOptions.mNoGoldH200RootL2Mode || !rc.mKernelOptions.mNttLog14H200 ||
             rc.mN != 16384u || rc.mLogN != 14u || rc.mRho != 8u) return true;
         int device = 0;
         cudaDeviceProp prop{};
@@ -17407,12 +16187,7 @@ namespace osuCrypto::LogVole::gpu
             !check(cudaGetDeviceProperties(&prop, device), "root L2 properties")) return false;
         if (prop.major != 9 || !std::strstr(prop.name, "H200") ||
             !prop.persistingL2CacheMaxSize || !prop.accessPolicyMaxWindowSize) return true;
-        const char* setting = std::getenv("LV_GPU_NOGOLD_H200_ROOT_L2_MIB");
-        const size_t mib = !setting ? 8u : std::strcmp(setting, "1") == 0 ? 1u :
-            setting && std::strcmp(setting, "2") == 0 ? 2u :
-            setting && std::strcmp(setting, "4") == 0 ? 4u :
-            setting && std::strcmp(setting, "8") == 0 ? 8u :
-            setting && std::strcmp(setting, "12") == 0 ? 12u : 16u;
+        const size_t mib = rc.mKernelOptions.mRootL2MiB;
         const size_t bytes = std::min(mib << 20u, static_cast<size_t>(prop.persistingL2CacheMaxSize));
         const cudaError_t status = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, bytes);
         // Persistence is an optional performance hint. MIG/MPS configurations
@@ -17432,14 +16207,14 @@ namespace osuCrypto::LogVole::gpu
         return true;
     }
 
-    bool h200Fp52GadgetConstantsEnabled()
+    bool h200Fp52GadgetConstantsEnabled(const LogVoleGpuKernelOptions& options)
     {
-        return noGoldH200GadgetGarnerMode() >= 10u;
+        return options.mNoGoldH200GadgetGarnerMode >= 10u;
     }
 
-    bool h200Fp52GadgetPredivEnabled()
+    bool h200Fp52GadgetPredivEnabled(const LogVoleGpuKernelOptions& options)
     {
-        const u32 mode = noGoldH200GadgetGarnerMode();
+        const u32 mode = options.mNoGoldH200GadgetGarnerMode;
         return mode == 12u || mode == 13u;
     }
 
@@ -17473,27 +16248,24 @@ namespace osuCrypto::LogVole::gpu
         // LV_GADGET_GARNER=1 composes the coefficient by mixed radix instead of the
         // punctured-product CRT sum. Both produce the same integer; this exists to
         // measure the two against each other on one build.
-        static const bool garner = [] {
-            const char* v = std::getenv("LV_GADGET_GARNER");
-            return v && v[0] != '\0' && v[0] != '0';
-        }();
+        const bool garner = rc.mKernelOptions.mGadgetGarner;
         const u32 threads = 128;
         const dim3 grid = grid2D(rc.mN, inCount, threads);
         cudaStream_t st = asStream(stream);
-        if (noGoldH200Gadget208Enabled() && log14H200Shape(rc) &&
+        if (rc.mKernelOptions.mNoGoldH200Gadget208 && log14H200Shape(rc) &&
             rc.mGarnerInv && rc.mBaseProd && rc.mBaseProdHalf &&
             digitBits == 208u && startLevel == 1u && levels == 1u &&
             centered)
         {
             constexpr u64 kRadix52 = u64{ 1 } << 52u;
             const bool pseudo52 =
-                noGoldH200Gadget208Pseudo52Enabled() &&
+                rc.mKernelOptions.mNoGoldH200Gadget208Pseudo52 &&
                 rc.mMaxModulus < kRadix52 &&
                 rc.mMinModulus > kRadix52 - (u64{ 1 } << 24u);
-            const u32 requestedGarner = noGoldH200GadgetGarnerMode();
+            const u32 requestedGarner = rc.mKernelOptions.mNoGoldH200GadgetGarnerMode;
             const u32 garnerMode = requestedGarner >= 10u && !rc.mFp52GadgetConstants ? 4u :
                 (requestedGarner == 12u || requestedGarner == 13u) && !rc.mFp52GadgetRatios ? 11u : requestedGarner;
-            const u32 foldMode = noGoldH200GadgetFoldMode();
+            const u32 foldMode = rc.mKernelOptions.mNoGoldH200GadgetFoldMode;
             if (pseudo52 && garnerMode >= 10u)
             {
                 const auto launch = [&](auto mode, auto fold) {
@@ -17520,7 +16292,7 @@ namespace osuCrypto::LogVole::gpu
                 else byFold(std::integral_constant<u32, 11u>{});
                 return check(cudaGetLastError(), "gadgetDecomposeHi208Rho8Constants");
             }
-            const u32 schedule = noGoldH200GadgetSchedule();
+            const u32 schedule = rc.mKernelOptions.mNoGoldH200GadgetSchedule;
             if (pseudo52 && schedule && (garnerMode == 4u || garnerMode == 6u || garnerMode == 7u))
             {
                 const auto launch = [&](auto mode, auto fold, auto threadCount, auto blocks) {
@@ -17615,24 +16387,24 @@ namespace osuCrypto::LogVole::gpu
         // magnitude at most 2^109, so its high word is at most 2^45. Keep this
         // condition in host dispatch rather than adding a cold reduction branch
         // to every thread. LV_GADGET_GARNER retains its general mixed-radix body.
-        if (gadgetHi110SpecializedEnabled() && !garner && rc.mRho == 4u &&
+        if (rc.mKernelOptions.mGadgetHi110Specialized && !garner && rc.mRho == 4u &&
             digitBits == 110u && startLevel == 1u && levels == 1u && centered &&
             rc.mMinModulus > kGadgetHi110HalfHi)
         {
             // Four moduli below 2^55 give Q<2^220 and three-word punctured
             // products. Keep the bound in host dispatch so the compact kernel's
             // arithmetic contains no runtime guard or divergent fallback.
-            if (gadgetHi110CompactCrtEnabled() &&
+            if (rc.mKernelOptions.mGadgetHi110CompactCrt &&
                 rc.mMaxModulus < (u64(1) << 55u))
             {
                 // Radix-55 reduction additionally needs every q to have exactly
                 // 55 bits. The strict lower bound also proves hi55<q for the
                 // balanced 110-bit magnitude consumed by the candidate.
-                if (gadgetHi110Radix55ReduceEnabled() &&
+                if (rc.mKernelOptions.mGadgetHi110Radix55Reduce &&
                     rc.mMinModulus > (u64(1) << 54u))
                 {
                     const bool pseudo55SecondFold =
-                        gadgetHi110Pseudo55SecondFoldEnabled() &&
+                        rc.mKernelOptions.mGadgetHi110Pseudo55SecondFold &&
                         gadgetHi110Pseudo55SecondFoldEligible(rc);
                     if (pseudo55SecondFold)
                     {
@@ -18067,17 +16839,17 @@ namespace osuCrypto::LogVole::gpu
         dn.mInvCrtLiftShoup = static_cast<const ShoupOperand*>(dc.mInvCrtLiftShoup);
         const u32 threads = 256;
         const bool fixedRho4 =
-            denoiseSpecializedEnabled() && rc.mRho == 4u && rc.mN == kDenoiseRho4N;
+            rc.mKernelOptions.mDenoiseSpecialized && rc.mRho == 4u && rc.mN == kDenoiseRho4N;
         const bool nearEqualModuli =
             rc.mMinModulus != 0u && rc.mMaxModulus >= rc.mMinModulus &&
             (rc.mMaxModulus - rc.mMinModulus) < rc.mMinModulus;
-        if (noGoldDenoiseShoupEnabled() && log14H200Shape(rc) &&
+        if (rc.mKernelOptions.mNoGoldDenoiseShoup && log14H200Shape(rc) &&
             nearEqualModuli && rc.mMinModulus > 8u &&
             rc.mMaxModulus < (u64(1) << 62u) && outCount <= 8191u &&
             dn.mCrtInvPuncturedShoup && dn.mScaledPuncturedShoup && dn.mInvCrtLiftShoup)
         {
-            const bool unroll = noGoldDenoiseUnrollEnabled();
-            const u32 block = noGoldDenoiseThreads();
+            const bool unroll = rc.mKernelOptions.mNoGoldDenoiseUnroll;
+            const u32 block = rc.mKernelOptions.mNoGoldDenoiseThreads;
             if (block == 128u)
                 launchNoGoldDenoiseShoup<128u>(unroll, dn, in, out, outCount, asStream(stream));
             else if (block == 512u)
@@ -18087,11 +16859,11 @@ namespace osuCrypto::LogVole::gpu
             return check(cudaGetLastError(), "denoiseNoGoldShoup");
         }
         const bool useShoup =
-            fixedRho4 && denoiseShoupEnabled() && nearEqualModuli &&
+            fixedRho4 && rc.mKernelOptions.mDenoiseShoup && nearEqualModuli &&
             dn.mCrtInvPuncturedShoup && dn.mScaledPuncturedShoup &&
             dn.mInvCrtLiftShoup;
         const bool hotGeometry =
-            fixedRho4 && denoiseHotGeometryEnabled() && outCount <= 16383u;
+            fixedRho4 && rc.mKernelOptions.mDenoiseHotGeometry && outCount <= 16383u;
         if (useShoup && hotGeometry)
         {
             denoiseCombRho4FixedKernel<true, true, false><<<
@@ -18113,14 +16885,14 @@ namespace osuCrypto::LogVole::gpu
                 dn, in, out, outCount, nullptr, nullptr, nullptr);
             return check(cudaGetLastError(), "denoiseCombRho4HotGeometry");
         }
-        if (denoiseSpecializedEnabled() && rc.mRho == 4u)
+        if (rc.mKernelOptions.mDenoiseSpecialized && rc.mRho == 4u)
         {
             denoiseCombSpecializedKernel<4u, false><<<
                 grid2D(4u * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
                 rg, dn, in, out, outCount, nullptr, nullptr, nullptr);
             return check(cudaGetLastError(), "denoiseCombSpecialized4");
         }
-        if (denoiseSpecializedEnabled() && denoiseSpecializedRho8Enabled() && rc.mRho == 8u)
+        if (rc.mKernelOptions.mDenoiseSpecialized && rc.mKernelOptions.mDenoiseSpecializedRho8 && rc.mRho == 8u)
         {
             denoiseCombSpecializedKernel<8u, false><<<
                 grid2D(8u * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
@@ -18164,16 +16936,16 @@ namespace osuCrypto::LogVole::gpu
         dn.mInvCrtLiftShoup = static_cast<const ShoupOperand*>(dc.mInvCrtLiftShoup);
         const u32 threads = 256;
         const bool fixedRho4 =
-            denoiseSpecializedEnabled() && rc.mRho == 4u && rc.mN == kDenoiseRho4N;
+            rc.mKernelOptions.mDenoiseSpecialized && rc.mRho == 4u && rc.mN == kDenoiseRho4N;
         const bool nearEqualModuli =
             rc.mMinModulus != 0u && rc.mMaxModulus >= rc.mMinModulus &&
             (rc.mMaxModulus - rc.mMinModulus) < rc.mMinModulus;
         const bool useShoup =
-            fixedRho4 && denoiseShoupEnabled() && nearEqualModuli &&
+            fixedRho4 && rc.mKernelOptions.mDenoiseShoup && nearEqualModuli &&
             dn.mCrtInvPuncturedShoup && dn.mScaledPuncturedShoup &&
             dn.mInvCrtLiftShoup;
         const bool hotGeometry =
-            fixedRho4 && denoiseHotGeometryEnabled() && outCount <= 16383u;
+            fixedRho4 && rc.mKernelOptions.mDenoiseHotGeometry && outCount <= 16383u;
         if (useShoup && hotGeometry)
         {
             denoiseCombRho4FixedKernel<true, true, true><<<
@@ -18196,14 +16968,14 @@ namespace osuCrypto::LogVole::gpu
                 dn, in, out, outCount, marginLo, marginHi, failFlag);
             return check(cudaGetLastError(), "denoiseCombValidateRho4HotGeometry");
         }
-        if (denoiseSpecializedEnabled() && rc.mRho == 4u)
+        if (rc.mKernelOptions.mDenoiseSpecialized && rc.mRho == 4u)
         {
             denoiseCombSpecializedKernel<4u, true><<<
                 grid2D(4u * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
                 rg, dn, in, out, outCount, marginLo, marginHi, failFlag);
             return check(cudaGetLastError(), "denoiseCombValidateSpecialized4");
         }
-        if (denoiseSpecializedEnabled() && denoiseSpecializedRho8Enabled() && rc.mRho == 8u)
+        if (rc.mKernelOptions.mDenoiseSpecialized && rc.mKernelOptions.mDenoiseSpecializedRho8 && rc.mRho == 8u)
         {
             denoiseCombSpecializedKernel<8u, true><<<
                 grid2D(8u * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
@@ -18246,10 +17018,10 @@ namespace osuCrypto::LogVole::gpu
         dn.mInvCrtLiftShoup = static_cast<const ShoupOperand*>(dc.mInvCrtLiftShoup);
 
         const u32 threads = 256;
-        const bool specialized = denoiseSpecializedEnabled();
+        const bool specialized = rc.mKernelOptions.mDenoiseSpecialized;
         const bool rho4Cycle = rc.mRho == 4u && (mu % 4u) == 0u;
         const bool rho8Cycle = rc.mRho == 8u && (mu % 8u) == 0u;
-        if (specialized && goldenValidateShoupEnabled() && rho4Cycle &&
+        if (specialized && rc.mKernelOptions.mGoldenValidateShoup && rho4Cycle &&
             rc.mN == kDenoiseRho4N && polyCount <= 65535u && dc.mQ &&
             dc.mCrtInvPuncturedShoup && dc.mFracInvLo && dc.mFracInvHi)
         {
@@ -18271,7 +17043,7 @@ namespace osuCrypto::LogVole::gpu
                 rg, dn, tbk, polyCount, marginLo, marginHi, failFlag);
             return check(cudaGetLastError(), "validateGoldenSeedSpecialized4");
         }
-        if (specialized && denoiseSpecializedRho8Enabled() && rho8Cycle)
+        if (specialized && rc.mKernelOptions.mDenoiseSpecializedRho8 && rho8Cycle)
         {
             validateGoldenSeedSpecializedKernel<8u><<<
                 grid2D(rc.mN, polyCount, threads), threads, 0, asStream(stream)>>>(
@@ -18381,10 +17153,10 @@ namespace osuCrypto::LogVole::gpu
         if (inCount == 0) return true;
         const DeviceRing rg = toDevice(rc);
         const u32 threads = 256;
-        if (pShoup && scaleAndRoundShoupEnabled())
+        if (pShoup && rc.mKernelOptions.mScaleAndRoundShoup)
         {
-            const bool fastArithmetic = scaleAndRoundFastArithmeticEnabled();
-            if (fastLimbs && scaleAndRoundHotRho4Enabled() && rc.mN == 8192u &&
+            const bool fastArithmetic = rc.mKernelOptions.mScaleAndRoundFastArithmetic;
+            if (fastLimbs && rc.mKernelOptions.mScaleAndRoundHotRho4 && rc.mN == 8192u &&
                 rc.mRho == 4u && inCount <= 65535u)
             {
                 const dim3 grid(8192u / threads, inCount);
@@ -18392,7 +17164,7 @@ namespace osuCrypto::LogVole::gpu
                 {
                     // The high-word-first path relies on the production RNS
                     // bound as well as the fixed rho/N geometry above.
-                    if (scaleAndRoundHotHiCarryEnabled() &&
+                    if (rc.mKernelOptions.mScaleAndRoundHotHiCarry &&
                         rc.mMaxModulus < (u64(1) << 60))
                     {
                         scaleAndRoundHotRho4HiCarryKernel<<<
@@ -18464,8 +17236,8 @@ namespace osuCrypto::LogVole::gpu
             plainRc.mMaxModulus == plainModulus &&
             plainModulus < ringRc.mMinModulus &&
             ringRc.mMaxModulus < (u64(1) << 63u) &&
-            scaleAndRoundShoupEnabled() && scaleAndRoundHotRho4Enabled() &&
-            nttLog13SpecializedEnabled();
+            ringRc.mKernelOptions.mScaleAndRoundShoup && ringRc.mKernelOptions.mScaleAndRoundHotRho4 &&
+            ringRc.mKernelOptions.mNttLog13Specialized;
     }
 
     bool launchScaleNttForwardGather(
@@ -18520,14 +17292,14 @@ namespace osuCrypto::LogVole::gpu
         args.mPlainModulus = plainModulus;
 
         constexpr size_t shBytes = 8192u * sizeof(u64);
-        const u32 threads = nttForwardThreads();
-        const bool fastArithmetic = scaleAndRoundFastArithmeticEnabled();
-        const bool simpleIndex = nttLog13SimpleIndexEnabled();
+        const u32 threads = ringRc.mKernelOptions.mNttForwardThreads;
+        const bool fastArithmetic = ringRc.mKernelOptions.mScaleAndRoundFastArithmetic;
+        const bool simpleIndex = ringRc.mKernelOptions.mNttLog13SimpleIndex;
         const bool hiCarry =
-            scaleNttForwardGatherHiCarryEnabled() && fastArithmetic &&
+            ringRc.mKernelOptions.mScaleNttForwardGatherHiCarry && fastArithmetic &&
             simpleIndex && threads == 1024u &&
             ringRc.mMaxModulus < (u64(1) << 60u);
-        if (hiCarry && scaleNttForwardGatherSlotOwnedEnabled() && slotMap)
+        if (hiCarry && ringRc.mKernelOptions.mScaleNttForwardGatherSlotOwned && slotMap)
         {
             if (!check(
                     cudaFuncSetAttribute(
@@ -18724,16 +17496,11 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool launchRootDigestHash(
-        const u64* words, u32 count, u64* out, void* stream)
+        const RingConstView& rc, const u64* words, u32 count, u64* out, void* stream)
     {
         if ((!words && count != 0u) || !out) return false;
-        static const bool warp = [] {
-            const char* v = std::getenv("LV_GPU_ROOT_DIGEST_HASH_WARP");
-            // GPU hashing itself remains opt-in. Prefer the exact four-lane
-            // implementation on the measured H200; WARP=0 restores scalar GPU
-            // hashing, and unmeasured devices keep their previous default.
-            return v ? std::strcmp(v, "1") == 0 : deviceSupportsLog14H200Shared();
-        }();
+        const bool warp = rc.mKernelOptions.mRootDigestHashWarp == LogVoleChoice::Enabled ||
+            (rc.mKernelOptions.mRootDigestHashWarp == LogVoleChoice::Automatic && rc.mH200Shared);
         if (warp)
             rootDigestHashWarpKernel<<<1u, 32u, 0u, asStream(stream)>>>(words, count, out);
         else
@@ -18767,7 +17534,7 @@ namespace osuCrypto::LogVole::gpu
             taskSeeds, roundKeys, firstReject, tasks, rangeCoeffs);
         if (!check(cudaGetLastError(), "rootZetaExpandKeys")) return false;
 
-        const u32 sampleThreads = rootZetaSampleThreads();
+        const u32 sampleThreads = rc.mKernelOptions.mRootZetaSampleThreads;
         const dim3 sampleBlocks(
             (rangeCoeffs + sampleThreads - 1u) / sampleThreads, tasks);
         rootZetaSampleRho4Kernel<<<sampleBlocks, sampleThreads, 0, st>>>(
@@ -18785,7 +17552,7 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool launchPolySeeds(
-        const u64* seeds,
+        const LogVoleGpuKernelOptions& options, const u64* seeds,
         u32 seedCount,
         u32 perSeedCount,
         u64 domainTag,
@@ -18797,10 +17564,10 @@ namespace osuCrypto::LogVole::gpu
     {
         if (seedCount == 0 || perSeedCount == 0) return true;
         const u32 total = seedCount * perSeedCount;
-        const u32 threads = ct2PolySeedThreads();
+        const u32 threads = options.mCt2PolySeedThreads;
         const u32 blocks = (total + threads - 1u) / threads;
 
-        if (ct2SplitAesEnabled())
+        if (options.mCt2SplitAes)
         {
             if (!roundKeys) return false;
             ct2PolySeedExpandKernel<<<blocks, threads, 0, asStream(stream)>>>(
@@ -18815,7 +17582,7 @@ namespace osuCrypto::LogVole::gpu
             constexpr u32 encryptThreads = 128;
             const u32 encryptTotal = total * 4u;
             const u32 encryptBlocks = (encryptTotal + encryptThreads - 1u) / encryptThreads;
-            if (ct2AesSharedSboxEnabled() && total >= 32u &&
+            if (options.mCt2AesSharedSbox && total >= 32u &&
                 (total & 31u) == 0u)
             {
                 ct2PolySeedEncryptSharedSboxKernel<<<
@@ -18866,7 +17633,7 @@ namespace osuCrypto::LogVole::gpu
 
 
     bool launchCt2Seeds(
-        const u64* prefix,
+        const LogVoleGpuKernelOptions& options, const u64* prefix,
         u64 instanceBase,
         u32 chunkCount,
         u32 mu,
@@ -18889,7 +17656,7 @@ namespace osuCrypto::LogVole::gpu
             if (!check(cudaGetLastError(), "ct2InstanceSeed")) return false;
         }
         return launchPolySeeds(
-            ct2Scratch, chunkCount, mu, domainTag, polyModulusDegree, modulusCount, outSeeds,
+            options, ct2Scratch, chunkCount, mu, domainTag, polyModulusDegree, modulusCount, outSeeds,
             roundKeyScratch, stream);
     }
 

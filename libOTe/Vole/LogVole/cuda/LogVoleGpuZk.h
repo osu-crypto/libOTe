@@ -16,23 +16,24 @@
 // below return exactly what the host loops in LogVoleZk.cpp return.
 
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
+#include "libOTe/Vole/LogVole/LogVoleZkOptions.h"
 
 namespace osuCrypto::LogVole::gpu
 {
     // Write the fresh mask by value, with no borrowed host-buffer lifetime.
-    bool launchZkSetMask(u64* destination, u64 mask, void* stream);
+    bool launchZkSetMask(u64* destination, u64 mask, void* stream, bool debug = false);
 
     // Exact floor(2^128 / modulus), computed on device for 2 <= modulus < 2^61.
     // out is one device HostModulus; no primality assumption is required.
-    bool launchZkPrepareModulus(u64 modulus, HostModulus* out, void* stream);
+    bool launchZkPrepareModulus(u64 modulus, HostModulus* out, void* stream, bool debug = false);
     // One device word receives the exact acceptance bit. Inputs are not
     // assumed reduced; verifierValue is compared without reducing it.
     bool launchZkAccept(u64 proofU, u64 proofV, u64 verifierValue, u64 delta,
-        const HostModulus& mod, u64* accepted, void* stream);
+        const HostModulus& mod, u64* accepted, void* stream, bool debug = false);
 
     // Pack already reduced AES draws as the layered circuit's absolute indices.
     bool launchZkPackOperands(
-        const u64* residues, u32* operands, u64 count, u64 width, void* stream);
+        const u64* residues, u32* operands, u64 count, u64 width, void* stream, bool debug = false);
     // Stage-1 grid width. Fixed so that callers can size the partial-sum scratch
     // without asking; the kernels use a grid-stride loop, so this is a launch
     // shape rather than a limit on the work.
@@ -56,7 +57,7 @@ namespace osuCrypto::LogVole::gpu
         const HostModulus& mod,
         u64* scratch,
         u64* outUV,
-        void* stream);
+        void* stream, const LogVoleZkOptions& settings = {}, bool debug = false);
 
     // B = sum_g chi^(g+1) * (K[x_g]*K[y_g] + K[z_g]*Delta) + K[r]. `outB` is a
     // device array of 1.
@@ -71,7 +72,7 @@ namespace osuCrypto::LogVole::gpu
         const HostModulus& mod,
         u64* scratch,
         u64* outB,
-        void* stream);
+        void* stream, const LogVoleZkOptions& settings = {}, bool debug = false);
 
     // ---- matrix multiplication -------------------------------------------
     // Check all n^2 length-n inner products directly. Wires and MACs contain
@@ -81,7 +82,7 @@ namespace osuCrypto::LogVole::gpu
     bool launchZkMatMulProver(
         const u64* wires, const u64* macs, const u64* coefficients,
         u32 n, u64 maskIndex, const HostModulus& mod,
-        u64* scratch, u64* outUV, void* stream);
+        u64* scratch, u64* outUV, void* stream, const LogVoleZkOptions& settings = {}, bool debug = false);
 
     // Public C is a separate row-major n^2 array. Per-entry verifier terms are
     // sum_k K[A_ik]*K[B_kj] - C_ij*Delta^2. scratch has n^2 words; outB has one.
@@ -89,13 +90,13 @@ namespace osuCrypto::LogVole::gpu
     bool launchZkMatMulVerifier(
         const u64* keys, const u64* publicProduct, const u64* coefficients,
         u32 n, u64 maskIndex, u64 delta, const HostModulus& mod,
-        u64* scratch, u64* outB, void* stream);
+        u64* scratch, u64* outB, void* stream, const LogVoleZkOptions& settings = {}, bool debug = false);
 
     // c = a * b mod p for row-major n x n matrices. This is the prover's own
     // honest computation, not part of the proof; it lives here so that the
     // public product can be built separately from the authenticated witness.
     bool launchZkMatMulGemm(
-        const u64* a, const u64* b, u64* c, u32 n, const HostModulus& mod, void* stream);
+        const u64* a, const u64* b, u64* c, u32 n, const HostModulus& mod, void* stream, bool debug = false);
 
     // One layer of the circuit's own evaluation:
     //   wires[firstOutWire + firstGate + j] =
@@ -112,7 +113,7 @@ namespace osuCrypto::LogVole::gpu
         u64 width,
         u64 firstOutWire,
         const HostModulus& mod,
-        void* stream);
+        void* stream, bool debug = false);
 
     // out[i] = prng-free uniform-ish fill is *not* provided on purpose: witness
     // values come from the host PRNG so that the CPU and GPU paths prove the same

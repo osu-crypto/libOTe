@@ -1,5 +1,7 @@
 #pragma once
 
+#include "libOTe/config.h"
+
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
 #include "libOTe/Tools/CpuCapabilities.h"
 
@@ -108,6 +110,8 @@ namespace osuCrypto::LogVole
         ~AutoTimer();
     };
 
+    struct HostStepProfiler;
+    struct RootStepProfiler;
     struct RingHostContextCache;
     class ZpContextFactory;
     struct PublicPolynomialCache;
@@ -119,6 +123,7 @@ namespace osuCrypto::LogVole
     {
         struct Impl;
         std::unique_ptr<Impl> mImpl;
+        const LogVoleExecutionOptions mExecutionOptions;
         friend bool makeRingNttContext(const RingParams&, RingNttContext&,
             std::shared_ptr<RingContextFactory>);
         friend bool makeGpuRingNttContext(const RingParams&, RingNttContext&);
@@ -127,7 +132,11 @@ namespace osuCrypto::LogVole
             const std::shared_ptr<RingContextFactory>& owner);
         bool publish(RingNttContext& ready);
     public:
-        RingContextFactory();
+        explicit RingContextFactory(LogVoleExecutionOptions options = {});
+        const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
+        RootStepProfiler* rootProfiler() const noexcept;
+        HostStepProfiler* hostProfiler() const noexcept;
+        const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const noexcept;
         ~RingContextFactory();
         RingContextFactory(const RingContextFactory&) = delete;
         RingContextFactory& operator=(const RingContextFactory&) = delete;
@@ -147,6 +156,8 @@ namespace osuCrypto::LogVole
         // Empty contexts use scalar dispatch. The factory detects capabilities
         // once on construction; retained/context copies reuse that decision.
         CpuCapabilities mCpuCapabilities{CpuCapabilities::Mode::Scalar};
+        LogVoleExecutionOptions mExecutionOptions;
+        std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::shared_ptr<RingContextFactory> mFactory;
         // A CRT-selected ring carries its explicit plaintext factory into leaf
         // rounding helpers. Both factory indices are weak; this adds no cycle.
@@ -172,6 +183,29 @@ namespace osuCrypto::LogVole
         bool mGpuLightweight = false;
         std::shared_ptr<RingHostContextCache> mHostContextCache;
     };
+
+    inline RootStepProfiler* rootProfiler(const RingNttContext& ctx) noexcept
+    {
+        return ctx.mFactory ? ctx.mFactory->rootProfiler() : nullptr;
+    }
+    inline RootStepProfiler* rootProfiler(const std::shared_ptr<const RingNttContext>& ctx) noexcept
+    {
+        return ctx ? rootProfiler(*ctx) : nullptr;
+    }
+
+    inline HostStepProfiler* hostProfiler(const RingNttContext& ctx)
+    {
+        return ctx.mHostProfiler.get();
+    }
+    inline HostStepProfiler* hostProfiler(const std::shared_ptr<const RingNttContext>& ctx)
+    {
+        return ctx ? hostProfiler(*ctx) : nullptr;
+    }
+
+    inline std::shared_ptr<HostStepProfiler> hostProfilerOwner(const std::shared_ptr<const RingNttContext>& ctx)
+    {
+        return ctx ? ctx->mHostProfiler : nullptr;
+    }
 
     bool validateRingParams(const RingParams& params);
     // Metadata access never constructs SEAL objects or touches the GPU.
@@ -485,4 +519,27 @@ namespace osuCrypto::LogVole
     // Reconstruct the same full coefficient polynomial without any PRNG draws.
     bool expandPolyErrorCompact(
         std::span<const u64> limb0, RnsPoly& out, const RingNttContext& ctx);
+}
+
+namespace osuCrypto::LogVole::gpu
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    bool available();
+#endif
+    inline bool enabled(const LogVoleExecutionOptions& options)
+    {
+#if defined(ENABLE_LOGVOLE_CUDA)
+        return options.mUseGpu && available();
+#else
+        return false;
+#endif
+    }
+    inline bool enabled(const RingNttContext& ctx)
+    {
+        return enabled(ctx.mExecutionOptions);
+    }
+    inline bool enabled(const std::shared_ptr<const RingNttContext>& owner)
+    {
+        return owner && enabled(*owner);
+    }
 }

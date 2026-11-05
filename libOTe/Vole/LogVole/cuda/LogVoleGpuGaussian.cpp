@@ -195,18 +195,18 @@ namespace osuCrypto::LogVole::gpu
         GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianSampleBuffer* hostOut,
-        GaussianDeviceSampleBuffer* deviceOut, u32 wordsPerPrefix, std::span<const u8> active)
+        GaussianDeviceSampleBuffer* deviceOut, u32 wordsPerPrefix, std::span<const u8> active, const LogVoleFailureOptions& failures)
     {
-        HostStep totalStep("setup: Gaussian GPU transform");
-        if (!enabled() || !gaussianTransformHostCompatible() || seeds.empty() || seeds.size() > 65535u ||
+        HostStep totalStep(stream.hostProfiler(), "setup: Gaussian GPU transform");
+        if (!available() || !gaussianTransformHostCompatible() || seeds.empty() || seeds.size() > 65535u ||
             !coefficients || modulus < 2 || !std::isfinite(sigma) || sigma < 0 ||
             !std::isfinite(clip) || clip < 0 ||
             static_cast<long double>(clip) >= static_cast<long double>(modulus >> 1u) ||
             (!active.empty() && active.size() != seeds.size()) || (!hostOut && !deviceOut)) return false;
-        const char* decline = std::getenv("LV_GPU_SETUP_GAUSSIAN_TRANSFORM_FORCE_DECLINE");
-        if (decline && decline[0] == '1') return false;
-        const char* residentDecline = std::getenv("LV_GPU_SETUP_GAUSSIAN_RESIDENT_FORCE_DECLINE");
-        if (deviceOut && residentDecline && residentDecline[0] == '1') return false;
+        const bool decline = failures.mGaussianTransform;
+        if (decline) return false;
+        const bool residentDecline = failures.mGaussianResident;
+        if (deviceOut && residentDecline) return false;
         std::vector<std::array<u64, 8>> selectedSeeds;
         std::vector<u32> outputRows;
         std::span<const std::array<u64, 8>> activeSeeds = seeds;
@@ -258,7 +258,7 @@ namespace osuCrypto::LogVole::gpu
                 (!outputRows.empty() && (!deviceRows || !gpuMemcpyH2D(deviceRows.data(), outputRows.data(),
                     outputRows.size() * sizeof(u32), stream.raw()))) ||
                 !gpuMemcpyH2D(deviceSeeds.data(), activeSeeds.data(), activeSeeds.size_bytes(), stream.raw())) return false;
-            HostStep step("setup: Gaussian GPU transform PRG");
+            HostStep step(stream.hostProfiler(), "setup: Gaussian GPU transform PRG");
             if (!launchAesPrngStream(static_cast<const u64*>(deviceSeeds.data()),
                     static_cast<u64*>(prefixes.data()), wordsPerPrefix, static_cast<u32>(activeSeeds.size()),
                     static_cast<unsigned char*>(keys.data()), keys.size(), stream.raw()))
@@ -266,7 +266,7 @@ namespace osuCrypto::LogVole::gpu
         }
         if (!activeSeeds.empty())
         {
-            HostStep step("setup: Gaussian GPU transform launch");
+            HostStep step(stream.hostProfiler(), "setup: Gaussian GPU transform launch");
             if (!launchGaussianTransform(static_cast<const u64*>(prefixes.data()), wordsPerPrefix,
                     static_cast<u32>(activeSeeds.size()), coefficients, sigma, clip, modulus,
                     static_cast<u64*>(candidates.data()), static_cast<u32*>(counts.data()),
@@ -300,31 +300,31 @@ namespace osuCrypto::LogVole::gpu
     bool sampleGaussianCompactDevice(
         GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
-        double sigma, double clip, u64 modulus, GaussianSampleBuffer& out, u32 wordsPerPrefix)
+        double sigma, double clip, u64 modulus, GaussianSampleBuffer& out, u32 wordsPerPrefix, const LogVoleFailureOptions& failures)
     {
-        return sampleGaussianCompactImpl(stream, seeds, coefficients, sigma, clip, modulus, &out, nullptr, wordsPerPrefix, {});
+        return sampleGaussianCompactImpl(stream, seeds, coefficients, sigma, clip, modulus, &out, nullptr, wordsPerPrefix, {}, failures);
     }
 
     bool sampleGaussianCompactResidentDevice(
         GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds, u32 coefficients,
         double sigma, double clip, u64 modulus, GaussianDeviceSampleBuffer& out,
-        u32 wordsPerPrefix, std::span<const u8> active)
+        u32 wordsPerPrefix, std::span<const u8> active, const LogVoleFailureOptions& failures)
     {
-        return sampleGaussianCompactImpl(stream, seeds, coefficients, sigma, clip, modulus, nullptr, &out, wordsPerPrefix, active);
+        return sampleGaussianCompactImpl(stream, seeds, coefficients, sigma, clip, modulus, nullptr, &out, wordsPerPrefix, active, failures);
     }
 
     bool sampleGaussianPrngPrefixesDevice(
         GpuStream& stream,
         std::span<const std::array<u64, 8>> seeds,
         u32 wordsPerPrefix,
-        GaussianPrngPrefixBuffer& out)
+        GaussianPrngPrefixBuffer& out, const LogVoleFailureOptions& failures)
     {
-        HostStep totalStep("setup: Gaussian GPU PRG prefixes");
-        if (!enabled() || seeds.empty() || !wordsPerPrefix || wordsPerPrefix % 512u ||
+        HostStep totalStep(stream.hostProfiler(), "setup: Gaussian GPU PRG prefixes");
+        if (!available() || seeds.empty() || !wordsPerPrefix || wordsPerPrefix % 512u ||
             seeds.size() > std::numeric_limits<u32>::max()) return false;
-        const char* decline = std::getenv("LV_GPU_SETUP_GAUSSIAN_PRG_FORCE_DECLINE");
-        if (decline && decline[0] == '1') return false;
+        const bool decline = failures.mGaussianPrg;
+        if (decline) return false;
         constexpr std::size_t maxPrefixBytes = std::size_t(256) << 20;
         const std::size_t prefixBytes = static_cast<std::size_t>(wordsPerPrefix) * sizeof(u64);
         if (prefixBytes > maxPrefixBytes || seeds.size() > maxPrefixBytes / prefixBytes) return false;

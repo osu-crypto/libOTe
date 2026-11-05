@@ -2,6 +2,7 @@
 
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 #include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include <algorithm>
 #include <span>
@@ -18,7 +19,7 @@ namespace osuCrypto::LogVole
     struct Params;
     namespace detail
     {
-        std::shared_ptr<WireMemoryPool> makeSetupWireMemory(std::size_t bytes);
+        std::shared_ptr<WireMemoryPool> makeSetupWireMemory(std::size_t bytes, LogVoleWireOptions options, bool useGpu);
         void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
             WireMemoryPool* memory, bool cudaOwned, u64 runId);
         void deallocateSetupWireBytes(void* pointer, WireMemoryPool* memory) noexcept;
@@ -71,7 +72,7 @@ namespace osuCrypto::LogVole
 
     // A contiguous owning wire buffer. Large GPU buffers reuse page-aligned
     // host storage whose CUDA registration is retained after the first GPU
-    // transfer; LV_GPU_SETUP_PINNED_WIRE=0 and pool allocation decline retain
+    // transfer; disabling mPinned and pool allocation decline retain
     // ordinary aligned allocation. Copies always own independent storage.
     class Buffer : public std::vector<u8, detail::SetupWireAllocator<u8>>
     {
@@ -80,6 +81,8 @@ namespace osuCrypto::LogVole
         using Base::Base;
         using element_type = u8;
         Buffer() = default;
+        Buffer(std::size_t size, LogVoleWireOptions options, bool useGpu = false, HostStepProfiler* profile = nullptr)
+            : Base() { resize(size, AllocType::Uninitialized, options, useGpu, profile); }
         explicit Buffer(std::size_t size, const Base::allocator_type& allocator = {})
             : Base(allocator) { resize(size); }
         explicit Buffer(std::shared_ptr<WireMemoryPool> memory)
@@ -93,34 +96,39 @@ namespace osuCrypto::LogVole
         WireView wireView() { return {Base::data(), Base::size(), memory().get()}; }
         ConstWireView wireView() const { return {Base::data(), Base::size(), memory().get()}; }
 
-        void reserve(std::size_t capacity)
+        void reserve(std::size_t capacity, const LogVoleWireOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr)
         {
             if (capacity <= Base::capacity()) return;
             if (!memory())
             {
-                if (auto pool = detail::makeSetupWireMemory(capacity))
+                if (auto pool = detail::makeSetupWireMemory(capacity, options, useGpu))
                 {
                     // Select provenance before allocating. Allocator copies
                     // remain interchangeable; small/empty buffers allocate no
                     // pool. Promotion copies only the bytes vector growth
                     // already needs to move.
                     Base next{detail::SetupWireAllocator<u8>(std::move(pool))};
+                    HostStep allocationStep(profile, "setup: reusable wire allocation");
                     next.reserve(capacity);
                     next.insert(next.end(), Base::begin(), Base::end());
                     Base::swap(next);
                     return;
                 }
             }
+            const auto allocator = Base::get_allocator();
+            HostStep allocationStep(allocator.mMemory ? profile : nullptr, allocator.mCudaOwned
+                ? "setup: CUDA-owned Root wire allocation" : "setup: reusable wire allocation");
             Base::reserve(capacity);
         }
 
-        void resize(std::size_t size, AllocType type = AllocType::Uninitialized)
+        void resize(std::size_t size, AllocType type = AllocType::Uninitialized,
+            const LogVoleWireOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr)
         {
             const auto oldSize = Base::size();
             if (size > Base::capacity())
             {
                 const auto capacity = Base::capacity();
-                reserve(std::max(size, capacity <= Base::max_size() / 2 ? 2 * capacity : size));
+                reserve(std::max(size, capacity <= Base::max_size() / 2 ? 2 * capacity : size), options, useGpu, profile);
             }
             Base::resize(size);
             if (type == AllocType::Zeroed && size > oldSize)
@@ -139,7 +147,7 @@ namespace osuCrypto::LogVole
 
     // Optional Linux allocation hint for large GPU protocol wire buffers.
     // Does not initialize, read, or change any payload bytes.
-    void adviseGpuSetupWireBuffer(Buffer& buffer);
+    void adviseGpuSetupWireBuffer(Buffer& buffer, const LogVoleWireOptions& options = {}, bool useGpu = false);
 
     struct PolyMessage
     {
@@ -196,17 +204,17 @@ namespace osuCrypto::LogVole
         AlignedUnVec<u64> mSkPrimeCoeffs;
     };
 
-    Buffer encode(const KeyDeriveRequest& message);
-    Buffer encode(const KeyDeriveResponse& message);
-    Buffer encode(const ShrinkExpandOfflineMessage& message);
-    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers);
+    Buffer encode(const KeyDeriveRequest& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const KeyDeriveResponse& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const ShrinkExpandOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
     // Borrow the completed sender tensors while producing independently owned
     // wire bytes. This avoids constructing a second mutable tensor package.
-    Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers);
-    Buffer encode(const PolyMessage& message);
-    Buffer encode(const SeedMessage& message);
-    Buffer encode(const RootOfflineMessage& message);
-    Buffer encode(const RootOfflineMessage& message, u32 workers);
+    Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const PolyMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const SeedMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const RootOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
     // Internal single-use transport can reserve and pin its exact final wire
     // allocation while an earlier frame is in flight. The ordinary encode API
     // keeps allocating its own independent Buffer.
@@ -217,12 +225,13 @@ namespace osuCrypto::LogVole
     std::size_t forecastRootOfflineWireSize(const Params& params,
         bool leafInputsAreGadget) noexcept;
     Buffer encodeRootOfflineIntoBuffer(const RootOfflineMessage& message,
-        Buffer&& reserved, u32 workers);
+        Buffer&& reserved, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
     // Opt-in final Root wire storage is still an ordinary owning Buffer and
     // can be moved into coproto. Only this one reservation asks the allocator
     // for CUDA page-locked pages; a decline returns the usual Buffer storage.
     Buffer reserveRootCudaWireBuffer(std::size_t bytes, u64 senderRunId,
-        bool& cudaOwned, bool recordSelection = true, std::shared_ptr<WireMemoryPool> memory = {});
+        bool& cudaOwned, bool recordSelection = true, std::shared_ptr<WireMemoryPool> memory = {},
+        LogVoleWireOptions options = {}, HostStepProfiler* profile = nullptr);
     // Shrink the logical wire without reallocating or copying its CUDA-owned
     // pages. The owning pool also contracts the active provenance range.
     bool shrinkRootCudaWireBuffer(Buffer& reserved,
@@ -283,27 +292,27 @@ namespace osuCrypto::LogVole
     // prevents a caller from attributing a previous process-local setup to a
     // different offline run.
     RootWirePinOverlapEvidence rootWirePinOverlapEvidenceSnapshot();
-    Buffer encode(const RootDigestMessage& message);
-    Buffer encode(const RootResponseMessage& message);
+    Buffer encode(const RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
 
-    bool decode(std::span<const u8> payload, KeyDeriveRequest& message);
-    bool decode(std::span<const u8> payload, KeyDeriveResponse& message);
-    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message);
-    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, u32 workers);
+    bool decode(std::span<const u8> payload, KeyDeriveRequest& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    bool decode(std::span<const u8> payload, KeyDeriveResponse& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
     // Internal socket route. Validate dimensions and coefficient spans first,
     // then retain the received bytes without allocating host polynomials.
     bool decodeShrinkExpandOfflineForTransport(Buffer&& payload,
-        ShrinkExpandOfflineMessage& message, u32 workers);
-    bool decode(std::span<const u8> payload, PolyMessage& message);
-    bool decode(std::span<const u8> payload, SeedMessage& message);
-    bool decode(std::span<const u8> payload, RootOfflineMessage& message);
-    bool decode(std::span<const u8> payload, RootOfflineMessage& message, u32 workers);
+        ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {});
+    bool decode(std::span<const u8> payload, PolyMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    bool decode(std::span<const u8> payload, SeedMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    bool decode(std::span<const u8> payload, RootOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    bool decode(std::span<const u8> payload, RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
     // Internal socket route: retain the selected complete Root tensor segments
     // in the independently received Buffer until their first GPU or host consumer.
     bool decodeRootOfflineForTransport(Buffer&& payload,
-        RootOfflineMessage& message, u32 workers);
-    bool decode(std::span<const u8> payload, RootDigestMessage& message);
-    bool decode(std::span<const u8> payload, RootResponseMessage& message);
+        RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {});
+    bool decode(std::span<const u8> payload, RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    bool decode(std::span<const u8> payload, RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
 
     bool keyDerivePayloadSize(const RingParams& params, u32 tau, u64& out);
     bool shrinkExpandOfflinePayloadSize(const ShrinkExpandParams& params, u64& out);

@@ -942,38 +942,17 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 #endif
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    struct FlagScope
-    {
-        const char* name;
-        std::string previous;
-        bool hadPrevious = false;
-        FlagScope(const char* variable, const char* value) : name(variable)
-        {
-            if (const char* old = std::getenv(name)) { hadPrevious = true; previous = old; }
-            ::tests_libOTe::logvole_test::setEnvironment(name, value, 1);
-        }
-        ~FlagScope()
-        {
-            if (hadPrevious) ::tests_libOTe::logvole_test::setEnvironment(name, previous.c_str(), 1);
-            else ::tests_libOTe::logvole_test::unsetEnvironment(name);
-        }
-    };
-    struct GpuScope
-    {
-        bool previous = gpu::enabled();
-        ~GpuScope() { gpu::setEnabled(previous); }
-    } gpuScope;
+
     const bool wantGpu = cmd.getOr("gpu", 0) != 0;
-    gpu::setEnabled(wantGpu);
-    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::available());
+    if (!wantGpu || !gpu::available()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     PRNG pairedProofRoots(sysRandomSeed());
     // Exact raw Barrett generation, including non-primes and both endpoints
     // of the supported interval. CPU SEAL is the independent oracle here.
     for (auto role : {ProtocolCacheRole::Sender, ProtocolCacheRole::Receiver})
     {
         ScopedProtocolCacheScope scope(role, allocateProtocolCacheRunId());
-        if (!gpu::enabled()) continue; // explicit per-role GPU ablation
+        if (!gpu::available()) continue; // explicit per-role GPU ablation
         gpu::GpuExecutionContext constantsExecution;
         auto& constantsStream = constantsExecution.mainStream();
         for (u64 modulus : {2ULL, 4ULL, 257ULL, 1000ULL, 2251799813554177ULL,
@@ -1049,21 +1028,25 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             ScopedProtocolCacheScope senderScope(
                 ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
             // Role ablations may intentionally disable the verifier's GPU.
-            if (gpu::enabled())
+            if (gpu::available())
             for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
             {
                 const u32 bits = setting == CivoleSetting::GoldenSeed ? 55 : 52;
-                ZkMulProver reconfiguredProver;
+                LogVoleOptions sessionOptions;
+                sessionOptions.mPlaintextModulusBits = bits;
+                sessionOptions.mSetting = setting;
+                sessionOptions.mRequestSize = budget;
+                ZkMulProver reconfiguredProver({}, sessionOptions);
                 reconfiguredProver.mDeviceState = gpu::makeZkMulDeviceState(copied, operationExecution.mainStream());
                 LOGVOLE_REQUIRE_TRUE(reconfiguredProver.mDeviceState != nullptr);
-                reconfiguredProver.configure(copied, bits, 1, setting, budget);
+                reconfiguredProver.prepare(copied);
                 LOGVOLE_REQUIRE_TRUE(reconfiguredProver.mDeviceState == nullptr);
                 LOGVOLE_REQUIRE_TRUE(reconfiguredProver.mCircuit.mOperands.empty());
                 LOGVOLE_REQUIRE_TRUE(reconfiguredProver.mCircuit.mOperandsDevice == copied.mOperandsDevice);
-                ZkMulVerifier verifier;
+                ZkMulVerifier verifier({}, sessionOptions);
                 verifier.mUseDevice = true;
                 verifier.mDeviceState = std::make_shared<int>(1);
-                verifier.configure(copied, bits, 1, setting, budget);
+                verifier.prepare(copied);
                 LOGVOLE_REQUIRE_TRUE(verifier.mDeviceState == nullptr);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperands.empty());
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice != nullptr);
@@ -1075,13 +1058,13 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 const auto priorState = std::make_shared<int>(2);
                 verifier.mDeviceState = priorState;
                 bool threw = false;
-                try { verifier.configure(invalid, bits, 1, setting, budget); }
+                try { verifier.prepare(invalid); }
                 catch (const std::runtime_error&) { threw = true; }
                 LOGVOLE_REQUIRE_TRUE(threw);
                 LOGVOLE_REQUIRE_TRUE(verifier.mDeviceState == priorState);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice == firstOwner);
 
-                verifier.configure(copied, bits, 1, setting, budget);
+                verifier.prepare(copied);
                 LOGVOLE_REQUIRE_TRUE(verifier.mDeviceState == nullptr);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice != firstOwner);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice != copied.mOperandsDevice);
@@ -1091,8 +1074,8 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 
                 // CPU configuration retains the public API's eager host access,
                 // while leaving the caller's device-only snapshot unchanged.
-                ZkMulVerifier hostVerifier;
-                hostVerifier.configure(copied, bits, 1, setting, budget);
+                ZkMulVerifier hostVerifier({}, sessionOptions);
+                hostVerifier.prepare(copied);
                 LOGVOLE_REQUIRE_TRUE(hostVerifier.mCircuit.mOperandsDevice == nullptr);
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(hostVerifier.mCircuit.mOperands, reference.mOperands));
                 LOGVOLE_REQUIRE_TRUE(copied.mOperands.empty());
@@ -1101,7 +1084,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 ZkMulCircuit edited = copied;
                 LOGVOLE_REQUIRE_TRUE(gpu::zkMulMaterializeOperands(edited, operationExecution.mainStream()));
                 edited.mOperands[0] = (edited.mOperands[0] + 1) % width;
-                verifier.configure(edited, bits, 1, setting, budget);
+                verifier.prepare(edited);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice == nullptr);
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(verifier.mCircuit.mOperands, edited.mOperands));
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperands.data() != edited.mOperands.data());
@@ -1114,7 +1097,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_EQ(unique.mOperandsDevice.use_count(), 1);
                 const void* uniqueOwner = unique.mOperandsDevice.get();
                 verifier.mDeviceState = std::make_shared<int>(3);
-                verifier.configure(std::move(unique), bits, 1, setting, budget);
+                verifier.prepare(std::move(unique));
                 LOGVOLE_REQUIRE_TRUE(unique.mOperandsDevice == nullptr);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice.get() == uniqueOwner);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperands.empty());
@@ -1128,7 +1111,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_EQ(invalidUnique.mOperandsDevice.use_count(), 1);
                 invalidUnique.mDepth += 1;
                 threw = false;
-                try { verifier.configure(std::move(invalidUnique), bits, 1, setting, budget); }
+                try { verifier.prepare(std::move(invalidUnique)); }
                 catch (const std::runtime_error&) { threw = true; }
                 LOGVOLE_REQUIRE_TRUE(threw);
                 LOGVOLE_REQUIRE_TRUE(verifier.mCircuit.mOperandsDevice.get() == uniqueOwner);
@@ -1137,19 +1120,19 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 {
                     // Configuration can precede a decision to run the proof
                     // on the CPU. Exercise both real protocol fallbacks before
-                    // their first host access, with GPU execution disabled too.
-                    ZkMulVerifier fallbackVerifier;
+                    // their first host access, using a CPU VOLE session.
+                    auto fallbackOptions = sessionOptions;
+                    fallbackOptions.mNumThreads = 2;
+                    ZkMulVerifier fallbackVerifier({}, fallbackOptions);
                     fallbackVerifier.mUseDevice = true;
-                    fallbackVerifier.configure(copied, bits, 2, setting, budget);
+                    fallbackVerifier.prepare(copied);
                     LOGVOLE_REQUIRE_TRUE(fallbackVerifier.mCircuit.mOperands.empty());
                     const auto fallbackOwner = fallbackVerifier.mCircuit.mOperandsDevice;
-                    ZkMulProver fallbackProver;
+                    ZkMulProver fallbackProver({}, fallbackOptions);
                     fallbackProver.mUseDevice = true;
-                    fallbackProver.configure(copied, bits, 2, setting, budget);
+                    fallbackProver.prepare(copied);
                     LOGVOLE_REQUIRE_TRUE(fallbackProver.mCircuit.mOperands.empty());
                     const auto fallbackProverOwner = fallbackProver.mCircuit.mOperandsDevice;
-                    GpuScope hostOnly;
-                    gpu::setEnabled(false);
                     fallbackVerifier.mUseDevice = false;
                     fallbackProver.mUseDevice = false;
                     PRNG witnessPrng(toBlock(0x46414c4c, 1));
@@ -1199,17 +1182,22 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 {
                     ScopedProtocolCacheScope receiverScope(
                         ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-                    receiverGpu = gpu::enabled();
+                    receiverGpu = gpu::available();
                 }
                 if (setting == CivoleSetting::GoldenSeed && receiverGpu)
+                for (bool acceptOnDevice : {true, false})
                 {
                     // The protocol wrapper must use GPU acceptance by default
-                    // and preserve its explicit host rollback on the same pair.
-                    ZkMulVerifier gpuVerifier;
-                    ZkMulProver gpuProver;
+                    // and preserve its explicit host rollback on a separately configured pair.
+                    LogVoleZkOptions proofSettings;
+                    proofSettings.mDeviceAcceptance = acceptOnDevice;
+                    LogVoleOptions voleOptions = sessionOptions;
+                    voleOptions.mUseGpu = true;
+                    ZkMulVerifier gpuVerifier(proofSettings, voleOptions);
+                    ZkMulProver gpuProver(proofSettings, voleOptions);
                     gpuVerifier.mUseDevice = gpuProver.mUseDevice = true;
-                    gpuVerifier.configure(copied, bits, 1, setting, budget);
-                    gpuProver.configure(copied, bits, 1, setting, budget);
+                    gpuVerifier.prepare(copied);
+                    gpuProver.prepare(copied);
                     // Each fixture has fresh party seeds. The host witness and
                     // its GPU token intentionally share one seed for exact parity.
                     const block witnessSeed = pairedProofRoots.get<block>();
@@ -1225,10 +1213,8 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                         gpuVerifier.offline(19, senderPrng, sockets[0]), gpuProver.offline(sockets[1])));
                     std::get<0>(offline).result();
                     std::get<1>(offline).result();
-                    for (const char* mode : {"1", "0"})
                     {
-                        FlagScope acceptance("LV_GPU_ZK_ACCEPT_DEVICE", mode);
-                        const bool deviceOnly = mode[0] == '0';
+                        const bool deviceOnly = !acceptOnDevice;
                         gpuVerifier.mDeviceOnlyHostSpans = deviceOnly;
                         gpuProver.mDeviceOnlyHostSpans = deviceOnly;
                         gpuProver.mVoleDeviceInput = deviceOnly;
@@ -1259,7 +1245,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                         std::get<1>(online).result();
                         LOGVOLE_REQUIRE_TRUE(gpuVerifier.mAccepted);
                         LOGVOLE_REQUIRE_TRUE(gpuVerifier.mCheckOnDevice && gpuProver.mCheckOnDevice);
-                        LOGVOLE_REQUIRE_EQ(gpuVerifier.mAcceptOnDevice, mode[0] == '1');
+                        LOGVOLE_REQUIRE_EQ(gpuVerifier.mAcceptOnDevice, acceptOnDevice);
                         LOGVOLE_REQUIRE_EQ(gpuVerifier.mKeys.empty(), deviceOnly);
                         LOGVOLE_REQUIRE_EQ(gpuProver.mMacs.empty(), deviceOnly);
                         if (deviceOnly)
@@ -1308,7 +1294,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             fetched.resize(expected.size());
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, std::span<u64>(fetched.data(), fetched.size()), readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(expected, fetched));
-            // LV_GPU_ZK_PREPARATION=0 prepares only the input scalars on the
+            // Host witness preparation uploads only the input scalars to the
             // host, then evaluates the same circuit through this GPU overload.
             PRNG hostInputPrng(witnessSeed);
             AlignedUnVec<u64> hostInputs;
@@ -1356,13 +1342,15 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(deviceMacs && deviceKeys && proverState && verifierState);
             for (const char* mode : {"1", "0"})
             {
-                FlagScope constants("LV_GPU_ZK_DEVICE_CONSTANTS", mode);
+                LogVoleZkOptions proofSettings;
+                proofSettings.mDeviceConstants = mode[0] == '1';
+                proofSettings.mGpuPseudoReduce = mode[0] == '1';
                 ZkProof proof;
                 u64 value = 0;
                 LOGVOLE_REQUIRE_TRUE(gpu::zkMulProverResponseDevice(
-                    copied, *device, *deviceMacs, 73, modulus, *proverState, proof, operationExecution.mainStream()));
+                    copied, *device, *deviceMacs, 73, modulus, *proverState, proof, operationExecution.mainStream(), proofSettings));
                 LOGVOLE_REQUIRE_TRUE(gpu::zkMulVerifierValueDevice(
-                    copied, *deviceKeys, 73, 19, modulus, *verifierState, value, operationExecution.mainStream()));
+                    copied, *deviceKeys, 73, 19, modulus, *verifierState, value, operationExecution.mainStream(), proofSettings));
                 LOGVOLE_REQUIRE_EQ(proof.mU, referenceProof.mU);
                 LOGVOLE_REQUIRE_EQ(proof.mV, referenceProof.mV);
                 LOGVOLE_REQUIRE_EQ(value, referenceValue);
@@ -1391,13 +1379,8 @@ void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
 #endif
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    struct RestoreGpu
-    {
-        bool old = gpu::enabled();
-        ~RestoreGpu() { gpu::setEnabled(old); }
-    } restore;
-    gpu::setEnabled(cmd.getOr("gpu", 0) != 0);
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    const bool wantGpu = cmd.getOr("gpu", 0) != 0;
+    if (!wantGpu || !gpu::available()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     std::weak_ptr<gpu::OwnedGpuStream> constantsOwner;
     {
         gpu::GpuExecutionContext execution;
@@ -1532,15 +1515,9 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
 #endif
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    struct GpuScope
-    {
-        bool previous = gpu::enabled();
-        ~GpuScope() { gpu::setEnabled(previous); }
-    } gpuScope;
     const bool wantGpu = cmd.getOr("gpu", 0) != 0;
-    gpu::setEnabled(wantGpu);
-    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled());
-    if (!gpu::enabled()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    if (wantGpu) LOGVOLE_REQUIRE_TRUE(gpu::available());
+    if (!wantGpu || !gpu::available()) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     const u64 largePrime = seal::PlainModulus::Batching(1024, 52).value();
     for (u64 dim : { 1u, 3u, 7u, 16u, 33u, 128u })
     for (u64 modulus : { u64{2}, u64{65537}, largePrime })
@@ -2227,7 +2204,12 @@ void LogVole_Cpu_ZkProofMatchesReference(const oc::CLP&)
             bReference = addMod(bReference, keys[circuit.maskIndex()], mod);
             for (u32 threads : {1, 2, 3, 4, 8, 12, 16})
             {
-                ZkMulCpuWorkspace workspace(circuit, threads);
+                LogVoleZkOptions proofSettings;
+                proofSettings.mCpuPseudoReduce = threads != 1;
+                proofSettings.mCpuVectorGates = threads != 1;
+                proofSettings.mCpuVectorWitness = threads != 1;
+                proofSettings.mCpuVectorMatMul = threads != 1;
+                ZkMulCpuWorkspace workspace(circuit, threads, nullptr, proofSettings);
                 ZkProof proof;
                 u64 b = 0;
                 LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, workspace, proof));
