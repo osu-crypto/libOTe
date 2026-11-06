@@ -1135,13 +1135,12 @@ namespace osuCrypto::LogVole
         return cache.mContext;
     }
 
-    const std::vector<seal::Modulus>& getRingHostModuli(const RingNttContext& ctx)
+    std::span<const seal::Modulus> getRingHostModuli(const RingNttContext& ctx)
     {
         if (!ctx.mGpuLightweight) return ctx.mModuli;
         const auto host = getRingHostContext(ctx);
         if (host && host->key_context_data()) return host->key_context_data()->parms().coeff_modulus();
-        static const std::vector<seal::Modulus> empty;
-        return empty;
+        return {};
     }
 
     namespace
@@ -1477,7 +1476,7 @@ namespace osuCrypto::LogVole
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         seal::util::PolyIter aIter(a.mCoeffs.data(), n, moduli.size());
         seal::util::ConstPolyIter bIter(b.mCoeffs.data(), n, moduli.size());
-        seal::util::add_poly_coeffmod(aIter[0], bIter[0], moduli.size(), moduli, aIter[0]);
+        seal::util::add_poly_coeffmod(aIter[0], bIter[0], moduli.size(), moduli.data(), aIter[0]);
         bumpRingStat(RingOp::Add);
         return true;
     }
@@ -1501,7 +1500,7 @@ namespace osuCrypto::LogVole
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         seal::util::PolyIter aIter(a.mCoeffs.data(), n, moduli.size());
         seal::util::ConstPolyIter bIter(b.mCoeffs.data(), n, moduli.size());
-        seal::util::sub_poly_coeffmod(aIter[0], bIter[0], moduli.size(), moduli, aIter[0]);
+        seal::util::sub_poly_coeffmod(aIter[0], bIter[0], moduli.size(), moduli.data(), aIter[0]);
         bumpRingStat(RingOp::Sub);
         return true;
     }

@@ -225,7 +225,7 @@ namespace osuCrypto::LogVole
     bool validateRingContextMetadata(const RingNttContext& ctx);
     // Stable immutable SEAL storage, constructed only on explicit CPU access.
     // An invalid lightweight context or failed materialization returns empty.
-    const std::vector<seal::Modulus>& getRingHostModuli(const RingNttContext& ctx);
+    std::span<const seal::Modulus> getRingHostModuli(const RingNttContext& ctx);
     bool validateRingPolyShape(const RnsPoly& poly, const RingParams& params);
     bool validateRingBatchShape(const std::vector<RnsPoly>& polys, const RingParams& params);
     bool validateRingBatchShape(std::span<const RnsPoly> polys, const RingParams& params);

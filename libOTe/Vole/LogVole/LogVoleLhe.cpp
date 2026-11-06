@@ -802,7 +802,7 @@ namespace osuCrypto::LogVole
 
     // Shared row arithmetic for the async API and the deprecated entry points.
     static bool decryptLheRow(
-        const RingNttContext& ctx, const std::vector<seal::Modulus>& moduli,
+        const RingNttContext& ctx, std::span<const seal::Modulus> moduli,
         const RnsPoly& publicA, const RnsPoly& skNtt, const RnsPoly& cipher,
         RnsPoly& result, RnsPoly& product, LheDomain domain, bool fused)
     {

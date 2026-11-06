@@ -32,7 +32,6 @@ namespace osuCrypto
 {
     namespace
     {
-        const std::vector<std::string> logvoleTags{ "lv", "logvole", "LogVole" };
 
 #if defined(ENABLE_LOGVOLE)
         // The example exposes the public LogVole wrapper. It chooses the
@@ -263,6 +262,7 @@ namespace osuCrypto
 
     bool LogVole_Examples(const CLP& cmd)
     {
+        const std::vector<std::string> logvoleTags{ "lv", "logvole", "LogVole" };
         if (!cmd.isSet(logvoleTags))
             return false;
 

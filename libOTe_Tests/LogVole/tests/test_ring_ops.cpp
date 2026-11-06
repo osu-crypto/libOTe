@@ -1480,8 +1480,8 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
         LOGVOLE_EXPECT_TRUE(!lightweight[0].mContext && !lightweight[1].mContext);
         LOGVOLE_EXPECT_TRUE(lightweight[0].mModuli.empty() && lightweight[1].mModuli.empty());
         const auto& hostModuli = getRingHostModuli(lightweight[0]);
-        LOGVOLE_REQUIRE_TRUE(hostModuli == eager.mModuli);
-        LOGVOLE_EXPECT_TRUE(&getRingHostModuli(copied) == &hostModuli);
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(hostModuli, eager.mModuli));
+        LOGVOLE_EXPECT_TRUE(getRingHostModuli(copied).data() == hostModuli.data());
         LOGVOLE_REQUIRE_TRUE(senderHost->key_parms_id() == eager.mContext->key_parms_id());
         const auto* tables = senderHost->key_context_data()->small_ntt_tables();
         for (std::size_t limb = 0; limb < preset.roots.size(); ++limb)
@@ -1972,6 +1972,10 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 
 void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
 {
+    RingNttContext missingHost;
+    missingHost.mGpuLightweight = true;
+    LOGVOLE_REQUIRE_TRUE(getRingHostModuli(missingHost).empty());
+
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
