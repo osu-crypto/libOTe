@@ -56,10 +56,11 @@ namespace osuCrypto::LogVole
             KeyDeriveReceiverOutput& output,
             Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
 
-        // Root CPU resources are borrowed exclusively until completion and may
-        // be reused across queries. Prepare buffers for the root level's ring
-        // and both root-left/final-expansion LENC dimensions. Intermediate CPU
-        // loops retain their legacy path.
+        // CPU expansion resources are borrowed exclusively until completion and
+        // may be reused across queries. Recursive levels share one ring shape;
+        // prepare LHE products for it and LENC capacity for the largest level
+        // (including root-left). Buffers bound concurrency, further capped by
+        // each level's nonzero worker limit. Other CPU phases remain legacy.
         // Started operations must finish before destruction. Join the executor
         // outside its workers. The GPU allocation handle is retained by value.
         task<> online(
@@ -70,7 +71,7 @@ namespace osuCrypto::LogVole
             std::shared_ptr<void> firstQueryGpuAllocations = {},
             const void* firstQueryOwner = nullptr);
 
-        [[deprecated("Use online with explicit executor and root CPU buffers")]]
+        [[deprecated("Use online with explicit executor and CPU buffers")]]
         task<> online(
             ReceiverState& state,
             const ReceiverOnlineInput& input,

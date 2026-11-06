@@ -225,7 +225,7 @@ namespace
         LogVoleRingReceiver receiverProtocol;
         SenderOnlineOptions senderOptions{};
         senderOptions.mSid = input.mSid;
-        // Application-owned resources for the root reached by this recursion.
+        // Application-owned resources reused through all recursive levels.
         auto* root = &receiver;
         while (root->mNextLevelState) root = root->mNextLevelState.get();
         const auto& rootState = root->mShrinkExpandState;
@@ -238,8 +238,10 @@ namespace
             executor.create_threads(1);
             for (auto& buffer : lheBuffers)
                 buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(rootState.mParams.mRing));
-            const auto terms = std::size_t{2} * std::max(root->mRootLacctLeft.mLevels,
-                rootState.hostLacct().mLevels) * (rootState.mParams.mTau + 1);
+            auto terms = std::size_t{2} * root->mRootLacctLeft.mLevels * (rootState.mParams.mTau + 1);
+            for (auto* level = &receiver; level; level = level->mNextLevelState.get())
+                terms = std::max(terms, std::size_t{2} * level->mShrinkExpandState.hostLacct().mLevels *
+                    (level->mShrinkExpandState.mParams.mTau + 1));
             for (auto& buffer : lencBuffers)
             {
                 buffer.mCiphertexts.reserve(terms);
@@ -5494,6 +5496,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
         encoding.mEncodedReceive = false;
         encoding.mRootEncodedReceive = false;
     }
+    params.mShrinkExpand.mNumWorkerThreads = 4;
     params.mAllowPartialRootWidth = true;
     params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
@@ -5602,11 +5605,46 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     const auto receiverReceivedBefore = onlineSockets[1].bytesReceived();
     oc::PRNG senderOnlinePrng(oc::block(0x7D54u, 0));
     oc::PRNG receiverOnlinePrng(oc::block(0x7D55u, 0));
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    std::array<LheDecryptBuffer, 3> lheBuffers;
+    std::array<LencEvalBuffer, 3> lencBuffers;
+    std::array<const std::uint64_t*, 3> productAllocations{};
+    std::array<const RnsPoly* const*, 3> ciphertextAllocations{}, nodeAllocations{};
+    if (!advanced.mUseGpu)
+    {
+        // More partitions than executor threads exercises suspension without
+        // nested blocking. Every level reuses the same exclusive buffers.
+        executor.create_threads(cmd.getOr("executor_threads", 1));
+        std::size_t terms = 0;
+        for (auto* level = &receiverState; level; level = level->mNextLevelState.get())
+            terms = std::max(terms, std::size_t{2} *
+                std::max(level->mRootLacctLeft.mLevels, level->mShrinkExpandState.hostLacct().mLevels) *
+                (level->mShrinkExpandState.mParams.mTau + 1));
+        for (std::size_t i = 0; i < lheBuffers.size(); ++i)
+        {
+            lheBuffers[i].mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mShrinkExpand.mRing));
+            lencBuffers[i].mCiphertexts.reserve(terms);
+            lencBuffers[i].mNodes.reserve(terms);
+            productAllocations[i] = lheBuffers[i].mProduct.mCoeffs.data();
+            ciphertextAllocations[i] = lencBuffers[i].mCiphertexts.data();
+            nodeAllocations[i] = lencBuffers[i].mNodes.data();
+        }
+    }
     auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
         sender.online(senderState, senderOptions, senderOnline, senderOnlinePrng, onlineSockets[0]),
-        receiver.online(receiverState, receiverOnlineInput, receiverOnline, receiverOnlinePrng, onlineSockets[1])));
+        receiver.online(executor, lheBuffers, lencBuffers, receiverState, receiverOnlineInput,
+            receiverOnline, receiverOnlinePrng, onlineSockets[1])));
     std::get<0>(onlineResult).result();
     std::get<1>(onlineResult).result();
+    if (!advanced.mUseGpu)
+        for (std::size_t i = 0; i < lheBuffers.size(); ++i)
+        {
+            LOGVOLE_REQUIRE_TRUE(lheBuffers[i].mProduct.mCoeffs.data() == productAllocations[i]);
+            LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mCiphertexts.data() == ciphertextAllocations[i]);
+            LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mNodes.data() == nodeAllocations[i]);
+            LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mCiphertexts.empty() && lencBuffers[i].mNodes.empty());
+        }
     const auto senderBytesSent = onlineSockets[0].bytesSent() - senderSentBefore;
     const auto senderBytesReceived = onlineSockets[0].bytesReceived() - senderReceivedBefore;
     const auto receiverBytesSent = onlineSockets[1].bytesSent() - receiverSentBefore;

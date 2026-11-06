@@ -1,4 +1,5 @@
 #include <optional>
+#include "macoro/when_all_scope.h"
 #include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 
 #include "libOTe/config.h"
@@ -996,41 +997,80 @@ namespace osuCrypto::LogVole
 #endif
         derivePhase.stop();
         HostStep expandPhase(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu receiver: expand", state.mParams.mW, &cpuBenchmark);
-        // Parallelize across chunks; only a single chunk may start row workers.
-        const u32 cpuRowWorkers = wDoublePrime > 1 ? 1 : state.mParams.mShrinkExpand.mNumWorkerThreads;
-        const bool expandOk = detail::runParallelTasks(
-            wDoublePrime,
-            state.mParams.mShrinkExpand.mNumWorkerThreads,
-            [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark) {
-                const auto chunkIdx = static_cast<u32>(taskIdx);
-                const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
-                const std::size_t end = std::min<std::size_t>(start + static_cast<std::size_t>(muHi), receiverInputCount(input));
-
-                ShrinkExpandExpandReceiverInput expandInput{};
-                expandInput.mSeed = childOutput.mSeed;
-                expandInput.mSid = input.mSid;
-                expandInput.mNonce = instanceBase + chunkIdx;
-                expandInput.mDigest = digests[chunkIdx];
-                expandInput.mMaskDigest = *rootMaskDigest;
-                expandInput.mSkX = skX[chunkIdx];
-                expandInput.mTree = trees[chunkIdx];
-
-                ShrinkExpandReceiverExpandOutput expandOutput{};
-                if (!shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput, cpuRowWorkers, cpuBenchmark) ||
-                    expandOutput.mTbm.size() < end - start)
-                {
-                    return false;
-                }
-
-                for (std::size_t itemIdx = 0; itemIdx < end - start; ++itemIdx)
-                {
-                    finalTbm[start + itemIdx] = std::move(expandOutput.mTbm[itemIdx]);
-                }
-                return true;
-            }, false, &cpuBenchmark);
-        if (!expandOk)
+        auto chunkInput = [&](u32 chunkIdx) {
+            ShrinkExpandExpandReceiverInput value;
+            value.mSeed = childOutput.mSeed;
+            value.mSid = input.mSid;
+            value.mNonce = instanceBase + chunkIdx;
+            value.mDigest = digests[chunkIdx];
+            value.mMaskDigest = *rootMaskDigest;
+            value.mSkX = skX[chunkIdx];
+            value.mTree = trees[chunkIdx];
+            return value;
+        };
+        auto storeChunk = [&](u32 chunkIdx, ShrinkExpandReceiverExpandOutput& value) {
+            const auto start = std::size_t(chunkIdx) * muHi;
+            const auto count = std::min<std::size_t>(muHi, receiverInputCount(input) - start);
+            if (value.mTbm.size() < count) return false;
+            for (std::size_t i = 0; i < count; ++i)
+                finalTbm[start + i] = std::move(value.mTbm[i]);
+            return true;
+        };
+        if (executor && !gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
         {
-            throw std::runtime_error("LogVole receiver could not expand recursive chunk");
+            auto allowance = std::min(lheBuffers.size(), lencBuffers.size());
+            if (const auto limit = state.mParams.mShrinkExpand.mNumWorkerThreads)
+                allowance = std::min<std::size_t>(allowance, limit);
+            if (!allowance) throw std::runtime_error("LogVole receiver needs CPU expansion buffers");
+            const auto partitions = std::min<std::size_t>(wDoublePrime, allowance);
+            // These closures and all borrowed inputs live in the parent until
+            // the scope joins every child, including on a child failure.
+            auto expandPartition = [&](std::size_t partition) -> macoro::task<> {
+                if (partitions > 1) co_await executor->schedule();
+                const auto first = std::size_t(wDoublePrime) * partition / partitions;
+                const auto last = std::size_t(wDoublePrime) * (partition + 1) / partitions;
+                auto products = wDoublePrime == 1 ? lheBuffers.first(allowance) : lheBuffers.subspan(partition, 1);
+                auto leaves = wDoublePrime == 1 ? lencBuffers.first(allowance) : lencBuffers.subspan(partition, 1);
+                CpuBenchmarkState worker{cpuBenchmark.mContext, partitions > 1 || cpuBenchmark.mIsWorker};
+                // Multi-partition children have one buffer: both async kernels
+                // run inline, so this thread timer ends on its starting worker.
+                // Single-chunk row parallelism may suspend and has its own timers.
+                CpuBenchmarkWorkerScope timing(partitions > 1 ? worker.mContext : nullptr);
+                for (auto chunk = first; chunk != last; ++chunk)
+                {
+                    auto expandInput = chunkInput(static_cast<u32>(chunk));
+                    ShrinkExpandReceiverExpandOutput expandOutput;
+                    if (!co_await shrinkExpandExpandReceiver(*executor, products, leaves,
+                            state.mShrinkExpandState, expandInput, expandOutput, worker) ||
+                        !storeChunk(static_cast<u32>(chunk), expandOutput))
+                        throw std::runtime_error("LogVole receiver could not expand recursive chunk");
+                }
+            };
+            scopedCache.reset();
+            if (partitions == 1) co_await expandPartition(0);
+            else
+            {
+                auto launch = [&]() -> macoro::when_all_scope {
+                    for (std::size_t i = 0; i < partitions; ++i)
+                        co_await macoro::scoped(expandPartition(i));
+                };
+                co_await launch();
+            }
+            scopedCache.emplace(cacheScope);
+        }
+        else
+        {
+            // Deprecated entry point until its callers supply an executor.
+            const u32 cpuRowWorkers = wDoublePrime > 1 ? 1 : state.mParams.mShrinkExpand.mNumWorkerThreads;
+            if (!detail::runParallelTasks(wDoublePrime, state.mParams.mShrinkExpand.mNumWorkerThreads,
+                [&](std::size_t taskIdx, CpuBenchmarkState& worker) {
+                    const auto chunk = static_cast<u32>(taskIdx);
+                    auto expandInput = chunkInput(chunk);
+                    ShrinkExpandReceiverExpandOutput expandOutput;
+                    return shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput,
+                        expandOutput, cpuRowWorkers, worker) && storeChunk(chunk, expandOutput);
+                }, false, &cpuBenchmark))
+                throw std::runtime_error("LogVole receiver could not expand recursive chunk");
         }
         expandPhase.stop();
 #if defined(ENABLE_LOGVOLE_CUDA)
