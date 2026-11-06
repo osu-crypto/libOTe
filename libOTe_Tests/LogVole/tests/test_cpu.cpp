@@ -774,6 +774,27 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
             LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, consumed, &publicA, inputNtt, outputNtt, workers));
             for (unsigned row = 0; row < rows; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(consumed[row].mCoeffs, reference[row].mCoeffs));
+            if (!inputNtt && !outputNtt)
+            {
+                auto* executor = scratch.executor();
+                for (unsigned repeat = 0; repeat < 2; ++repeat)
+                {
+                    globalRingOpsStats.reset();
+                    LOGVOLE_REQUIRE_TRUE(lheDec(ctx, input, sk, actual, &publicA,
+                        false, false, workers, {}, &scratch));
+                    flushRingOpsThreadLocalStats();
+                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), rows);
+                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mInttCount.load(), rows);
+                    LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
+                    for (unsigned row = 0; row < rows; ++row)
+                        LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
+                }
+                consumed = input;
+                LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, consumed, &publicA,
+                    false, false, workers, {}, &scratch));
+                for (unsigned row = 0; row < rows; ++row)
+                    LOGVOLE_REQUIRE_TRUE(rangesEqual(consumed[row].mCoeffs, reference[row].mCoeffs));
+            }
             if (inputNtt && outputNtt)
             {
                 // A caller may use the ciphertext batch as its public A too.

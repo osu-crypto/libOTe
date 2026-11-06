@@ -280,9 +280,30 @@ namespace
         senderExpandInput.mTbkPrime = tbkPrime;
 
         ShrinkExpandSenderExpandOutput senderExpand{};
-        if (!shrinkExpandExpandSender(senderState, senderExpandInput, senderExpand))
+        if (!shrinkExpandExpandSender(senderState, senderExpandInput, senderExpand, 1))
         {
             return false;
+        }
+        {
+            auto lease = detail::ShrinkExpandScratch::acquire(senderState.mCpuScratch);
+            LOGVOLE_REQUIRE_TRUE(lease.lheDec().executor() == nullptr);
+        }
+        detail::CpuExecutor* senderExecutor = nullptr;
+        for (oc::u32 workers : {3u, 3u, 1u})
+        {
+            benchmark.reset();
+            ShrinkExpandSenderExpandOutput repeated;
+            LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(senderState, senderExpandInput,
+                repeated, workers, {&benchmark}));
+            LOGVOLE_REQUIRE_EQ(benchmark.mActiveTaskThreads.load(), 0u);
+            LOGVOLE_REQUIRE_TRUE(benchmark.mPeakTaskThreads.load() <= workers);
+            LOGVOLE_REQUIRE_EQ(repeated.mTbk.size(), senderExpand.mTbk.size());
+            for (std::size_t row = 0; row < repeated.mTbk.size(); ++row)
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(repeated.mTbk[row].mCoeffs, senderExpand.mTbk[row].mCoeffs));
+            auto lease = detail::ShrinkExpandScratch::acquire(senderState.mCpuScratch);
+            if (!senderExecutor) senderExecutor = lease.lheDec().executor();
+            LOGVOLE_REQUIRE_TRUE(senderExecutor != nullptr);
+            LOGVOLE_REQUIRE_TRUE(lease.lheDec().executor() == senderExecutor);
         }
 
         ShrinkExpandExpandReceiverInput receiverExpandInput{};
@@ -614,7 +635,8 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     senderExpandInput.mTbkPrime = tbkPrime;
 
     ShrinkExpandSenderExpandOutput senderExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(senderState, senderExpandInput, senderExpand));
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(senderState, senderExpandInput, senderExpand,
+        senderState.mParams.mNumWorkerThreads));
 
     ShrinkExpandExpandReceiverInput receiverExpandInput{};
     receiverExpandInput.mSid = senderExpandInput.mSid;

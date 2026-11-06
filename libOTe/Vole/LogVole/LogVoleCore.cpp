@@ -3384,6 +3384,11 @@ namespace osuCrypto::LogVole
             *state.mRootKPrimeRt = std::move(host[0]);
         }
 #endif
+        std::optional<detail::ShrinkExpandScratch::Lease> cpuScratch;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (!gpu::enabled(ctx))
+#endif
+            cpuScratch.emplace(detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch));
         if (
             !buildHashedCt2(
                 ctx,
@@ -3401,7 +3406,8 @@ namespace osuCrypto::LogVole
                 nullptr,
                 false,
                 false,
-                state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark))
+                state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark,
+                cpuScratch ? &cpuScratch->lheDec() : nullptr))
         {
             return false;
         }
@@ -3532,7 +3538,8 @@ namespace osuCrypto::LogVole
                 bool candidateOk = publicSeed;
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: root expand (host)", &cpuBenchmark);
-                    if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput, cpuBenchmark))
+                    if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput,
+                            state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark))
                     {
                         return false;
                     }
@@ -3750,6 +3757,7 @@ namespace osuCrypto::LogVole
                 static_cast<std::size_t>(wDoublePrime) * muHi);
 
             {
+            const u32 cpuLheWorkers = wDoublePrime > 1 ? 1 : state.mShrinkExpandState.mParams.mNumWorkerThreads;
             if (!detail::runParallelTasks(
                     wDoublePrime,
                     state.mShrinkExpandState.mParams.mNumWorkerThreads,
@@ -3769,7 +3777,7 @@ namespace osuCrypto::LogVole
                         expandInput.mTbkPrime = kPrime[chunkIdx];
 
                         ShrinkExpandSenderExpandOutput expandOutput{};
-                        if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput, cpuBenchmark) ||
+                        if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput, cpuLheWorkers, cpuBenchmark) ||
                             expandOutput.mTbk.size() != muHi)
                         {
                             return false;

@@ -120,8 +120,8 @@ namespace osuCrypto::LogVole
         u64 instanceIdx,
         std::vector<RnsPoly>& out);
 
-    // cpuScratch supplies exclusive reusable resources for the CPU NTT-domain
-    // row phase. Other phases/backends retain their existing execution path.
+    // cpuScratch supplies exclusive reusable resources for CPU row phases.
+    // Other phases/backends retain their existing execution path.
     bool lheDec(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& cipher,

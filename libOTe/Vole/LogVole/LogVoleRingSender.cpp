@@ -955,7 +955,7 @@ namespace osuCrypto::LogVole
 
         ShrinkExpandExpandSenderInput expandInput = input;
         expandInput.mDigest = std::move(digest);
-        if (!shrinkExpandExpandSender(state, expandInput, output, cpuBenchmark))
+        if (!shrinkExpandExpandSender(state, expandInput, output, state.mParams.mNumWorkerThreads, cpuBenchmark))
         {
             throw std::runtime_error("LogVole sender could not expand");
         }

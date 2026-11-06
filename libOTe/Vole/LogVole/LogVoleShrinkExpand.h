@@ -149,7 +149,9 @@ namespace osuCrypto::LogVole
     bool shrinkExpandExpandSender(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark = {});
+        ShrinkExpandSenderExpandOutput& out,
+        // CPU LHE allowance: outer chunk workers pass 1 to avoid nested pools.
+        u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark = {});
 
     bool shrinkExpandExpandReceiver(
         const ShrinkExpandReceiverState& state,

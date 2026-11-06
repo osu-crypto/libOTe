@@ -3074,7 +3074,8 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     senderExpandInput.mTbkPrime = senderKey;
 
     ShrinkExpandSenderExpandOutput senderExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(sender.mShrinkExpandState, senderExpandInput, senderExpand));
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(sender.mShrinkExpandState, senderExpandInput, senderExpand,
+        sender.mShrinkExpandState.mParams.mNumWorkerThreads));
 
     ShrinkExpandExpandReceiverInput receiverExpandInput{};
     receiverExpandInput.mSid = params.mSessionId;
@@ -3679,7 +3680,8 @@ void LogVole_Core_RootOnlineLocalRelation(const oc::CLP&)
     senderExpandInput.mTbkPrime = senderKey;
 
     ShrinkExpandSenderExpandOutput senderExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(sender.mShrinkExpandState, senderExpandInput, senderExpand));
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(sender.mShrinkExpandState, senderExpandInput, senderExpand,
+        sender.mShrinkExpandState.mParams.mNumWorkerThreads));
 
     ShrinkExpandExpandReceiverInput receiverExpandInput{};
     receiverExpandInput.mSid = params.mSessionId;

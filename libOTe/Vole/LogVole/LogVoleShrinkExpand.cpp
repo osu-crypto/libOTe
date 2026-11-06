@@ -961,7 +961,7 @@ namespace osuCrypto::LogVole
     bool shrinkExpandExpandSender(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark)
+        ShrinkExpandSenderExpandOutput& out, u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark)
     {
         if (!validateRingPolyShape(input.mTbkPrime, state.mParams.mRing) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -995,6 +995,10 @@ namespace osuCrypto::LogVole
         }
 
         ShrinkExpandSenderExpandOutput next{};
+        auto lheWorkers = cpuLheWorkers;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (gpu::enabled(ctx)) lheWorkers = state.mParams.mNumWorkerThreads;
+#endif
         if (!lheDec(
                 ctx,
                 senderCt2,
@@ -1003,7 +1007,7 @@ namespace osuCrypto::LogVole
                 state.mPublicANtt ? state.mPublicANtt.get() : nullptr,
                 false,
                 false,
-                state.mParams.mNumWorkerThreads, cpuBenchmark))
+                lheWorkers, cpuBenchmark, &scratch.lheDec()))
         {
             return false;
         }

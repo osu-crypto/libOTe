@@ -762,6 +762,80 @@ namespace osuCrypto::LogVole
         return mImpl ? mImpl->mExecutor.get() : nullptr;
     }
 
+    // Synchronous row scheduling shared by both LHE representations. The
+    // caller's lease owns the pool and locals until all partitions have joined.
+    template<typename RowFn>
+    static bool runLheRows(const RingNttContext& ctx, std::size_t rowCount,
+        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
+        detail::LheDecScratch* cpuScratch, std::size_t productWords,
+        bool flushStats, RowFn&& decryptRow)
+    {
+        struct FlushStats
+        {
+            bool mEnabled;
+            ~FlushStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
+        };
+        bool rowsOk = true;
+        bool useCpuScratch = cpuScratch != nullptr;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        useCpuScratch = useCpuScratch && !gpu::enabled(ctx);
+#endif
+        if (!useCpuScratch)
+        {
+            rowsOk = detail::runParallelTasks(rowCount, requestedWorkers,
+                [&](std::size_t row, CpuBenchmarkState&) {
+                    RnsPoly product;
+                    return decryptRow(row, product);
+                }, false, &cpuBenchmark);
+        }
+        else
+        {
+            const auto hardware = requestedWorkers == 1 ? std::size_t{1} :
+                std::max<std::size_t>(1, std::thread::hardware_concurrency());
+            auto capacity = hardware;
+            if (const auto* benchmark = cpuBenchmark.mContext)
+                capacity = std::max<std::size_t>(1, benchmark->mWorkerLimit
+                    ? std::min(benchmark->mWorkerLimit, benchmark->mCpus.size()) : benchmark->mCpus.size());
+            const auto workers = std::min({rowCount, capacity,
+                requestedWorkers ? std::size_t(requestedWorkers) : hardware});
+            if (workers == 1 && productWords == 0)
+            {
+                // No pool, partition metadata, or unused product allocation.
+                CpuBenchmarkTaskScope metrics(cpuBenchmark);
+                FlushStats flush{flushStats};
+                RnsPoly unused;
+                for (std::size_t row = 0; row < rowCount && rowsOk; ++row)
+                    rowsOk = decryptRow(row, unused);
+            }
+            else
+            {
+                auto& scratch = *cpuScratch;
+                auto locals = scratch.prepare(workers, productWords,
+                    cpuBenchmark.mContext);
+                const auto width = rowCount / workers;
+                const auto extra = rowCount % workers;
+                auto runPartition = [&](std::size_t partition, detail::LheDecScratch::Local& local) {
+                    // Persistent workers do not flush ring counters on thread
+                    // exit between queries. Publish once per partition, also
+                    // on failure, before bulk signals completion.
+                    FlushStats flush{flushStats};
+                    const auto begin = partition * width + std::min(partition, extra);
+                    const auto end = begin + width + (partition < extra);
+                    for (auto row = begin; row < end && local.mOk; ++row)
+                        local.mOk = decryptRow(row, local.mProduct);
+                };
+                if (workers == 1)
+                {
+                    CpuBenchmarkTaskScope metrics(cpuBenchmark);
+                    runPartition(0, locals[0]);
+                }
+                else scratch.executor()->runBulk(workers, locals, runPartition);
+                for (const auto& local : locals) rowsOk &= local.mOk;
+            }
+        }
+        return rowsOk;
+    }
+
     static bool lheDecImpl(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& cipher,
@@ -809,8 +883,8 @@ namespace osuCrypto::LogVole
             // saving a forward transform per row. Each task owns its result;
             // the small root also gets parallel inverse transforms here.
             std::vector<RnsPoly> result(cipher.size());
-            if (!detail::runParallelTasks(result.size(), requestedWorkers,
-                [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) {
+            if (!runLheRows(ctx, result.size(), requestedWorkers, cpuBenchmark, cpuScratch, 0, true,
+                [&](std::size_t row, RnsPoly&) {
                     auto& product = result[row];
                     resizeZero(product.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                     if (!dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, product, ctx) ||
@@ -827,7 +901,7 @@ namespace osuCrypto::LogVole
                             product.mCoeffs[i], moduli[j]);
                     }
                     return true;
-                }, false, &cpuBenchmark)) return false;
+                })) return false;
             out = std::move(result);
             return true;
         }
@@ -872,67 +946,8 @@ namespace osuCrypto::LogVole
             return dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, askNtt, ctx) &&
                    ringSubInplace(result[row], askNtt, ctx);
         };
-        bool rowsOk = true;
-        bool useCpuScratch = cpuScratch != nullptr;
-#if defined(ENABLE_LOGVOLE_CUDA)
-        useCpuScratch = useCpuScratch && !gpu::enabled(ctx);
-#endif
-        if (!useCpuScratch)
-        {
-            rowsOk = detail::runParallelTasks(result.size(), requestedWorkers,
-                [&](std::size_t row, CpuBenchmarkState&) {
-                    RnsPoly product;
-                    return decryptRow(row, product);
-                }, false, &cpuBenchmark);
-        }
-        else
-        {
-            const auto hardware = requestedWorkers == 1 ? std::size_t{1} :
-                std::max<std::size_t>(1, std::thread::hardware_concurrency());
-            auto capacity = hardware;
-            if (const auto* benchmark = cpuBenchmark.mContext)
-                capacity = std::max<std::size_t>(1, benchmark->mWorkerLimit
-                    ? std::min(benchmark->mWorkerLimit, benchmark->mCpus.size()) : benchmark->mCpus.size());
-            const auto workers = std::min({result.size(), capacity,
-                requestedWorkers ? std::size_t(requestedWorkers) : hardware});
-            if (workers == 1 && inplace)
-            {
-                // No pool, partition metadata, or unused product allocation.
-                CpuBenchmarkTaskScope metrics(cpuBenchmark);
-                RnsPoly unused;
-                for (std::size_t row = 0; row < result.size() && rowsOk; ++row)
-                    rowsOk = decryptRow(row, unused);
-            }
-            else
-            {
-                auto& scratch = *cpuScratch;
-                auto locals = scratch.prepare(workers, inplace ? 0 : ringPolyCoeffCount(ctx.mParams),
-                    cpuBenchmark.mContext);
-                const auto width = result.size() / workers;
-                const auto extra = result.size() % workers;
-                auto runPartition = [&](std::size_t partition, detail::LheDecScratch::Local& local) {
-                    // Persistent workers do not flush ring counters on thread
-                    // exit between queries. Publish once per partition, also
-                    // on failure, before bulk signals completion.
-                    struct FlushStats
-                    {
-                        bool mEnabled;
-                        ~FlushStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
-                    } flush{!inplace};
-                    const auto begin = partition * width + std::min(partition, extra);
-                    const auto end = begin + width + (partition < extra);
-                    for (auto row = begin; row < end && local.mOk; ++row)
-                        local.mOk = decryptRow(row, local.mProduct);
-                };
-                if (workers == 1)
-                {
-                    CpuBenchmarkTaskScope metrics(cpuBenchmark);
-                    runPartition(0, locals[0]);
-                }
-                else scratch.executor()->runBulk(workers, locals, runPartition);
-                for (const auto& local : locals) rowsOk &= local.mOk;
-            }
-        }
+        const bool rowsOk = runLheRows(ctx, result.size(), requestedWorkers, cpuBenchmark,
+            cpuScratch, inplace ? 0 : ringPolyCoeffCount(ctx.mParams), !inplace, decryptRow);
         if (!rowsOk)
         {
             return false;
