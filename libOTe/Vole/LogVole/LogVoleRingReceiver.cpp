@@ -956,6 +956,8 @@ namespace osuCrypto::LogVole
 #endif
         derivePhase.stop();
         HostStep expandPhase(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu receiver: expand", state.mParams.mW, &cpuBenchmark);
+        // Parallelize across chunks; only a single chunk may start LHE workers.
+        const u32 cpuLheWorkers = wDoublePrime > 1 ? 1 : state.mParams.mShrinkExpand.mNumWorkerThreads;
         const bool expandOk = detail::runParallelTasks(
             wDoublePrime,
             state.mParams.mShrinkExpand.mNumWorkerThreads,
@@ -974,7 +976,7 @@ namespace osuCrypto::LogVole
                 expandInput.mTree = trees[chunkIdx];
 
                 ShrinkExpandReceiverExpandOutput expandOutput{};
-                if (!shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput, cpuBenchmark) ||
+                if (!shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput, cpuLheWorkers, cpuBenchmark) ||
                     expandOutput.mTbm.size() < end - start)
                 {
                     return false;
@@ -1057,7 +1059,7 @@ namespace osuCrypto::LogVole
         coreInput.mSkX = std::move(skX);
         coreInput.mTree = std::move(shrink.mTree);
 
-        if (!shrinkExpandExpandReceiver(state, coreInput, output, cpuBenchmark))
+        if (!shrinkExpandExpandReceiver(state, coreInput, output, state.mParams.mNumWorkerThreads, cpuBenchmark))
         {
             throw std::runtime_error("LogVole receiver could not expand");
         }

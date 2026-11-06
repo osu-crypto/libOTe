@@ -214,6 +214,9 @@ namespace
     bool run_relation(bool trunc)
     {
         const auto params = make_params(trunc);
+        CpuBenchmarkContext benchmark;
+        benchmark.mCpus = {0, 1, 2};
+        benchmark.mWorkerLimit = 3;
         RingNttContext ctx{};
         if (!makeRingNttContext(params.mRing, ctx))
         {
@@ -292,9 +295,32 @@ namespace
         receiverExpandInput.mTree = shrink.mTree;
 
         ShrinkExpandReceiverExpandOutput receiverExpand{};
-        if (!shrinkExpandExpandReceiver(receiverState, receiverExpandInput, receiverExpand))
+        if (!shrinkExpandExpandReceiver(receiverState, receiverExpandInput, receiverExpand, 1))
         {
             return false;
+        }
+        {
+            auto lease = detail::ShrinkExpandScratch::acquire(receiverState.mCpuScratch);
+            LOGVOLE_REQUIRE_TRUE(lease.lheDec().executor() == nullptr);
+        }
+        // Reuse the same operation storage across parallel and serial calls.
+        // A serial allowance must remain serial even with a prepared pool.
+        detail::CpuExecutor* executor = nullptr;
+        for (oc::u32 workers : {3u, 3u, 1u})
+        {
+            benchmark.reset();
+            ShrinkExpandReceiverExpandOutput repeated;
+            LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiverState, receiverExpandInput,
+                repeated, workers, {&benchmark}));
+            LOGVOLE_REQUIRE_EQ(benchmark.mActiveTaskThreads.load(), 0u);
+            LOGVOLE_REQUIRE_TRUE(benchmark.mPeakTaskThreads.load() <= workers);
+            LOGVOLE_REQUIRE_EQ(repeated.mTbm.size(), receiverExpand.mTbm.size());
+            for (std::size_t row = 0; row < repeated.mTbm.size(); ++row)
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(repeated.mTbm[row].mCoeffs, receiverExpand.mTbm[row].mCoeffs));
+            auto lease = detail::ShrinkExpandScratch::acquire(receiverState.mCpuScratch);
+            if (!executor) executor = lease.lheDec().executor();
+            LOGVOLE_REQUIRE_TRUE(executor != nullptr);
+            LOGVOLE_REQUIRE_TRUE(lease.lheDec().executor() == executor);
         }
 
         std::vector<RnsPoly> diff;
@@ -600,7 +626,8 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     receiverExpandInput.mTree = shrink.mTree;
 
     ShrinkExpandReceiverExpandOutput receiverExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiverState, receiverExpandInput, receiverExpand));
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiverState, receiverExpandInput, receiverExpand,
+        receiverState.mParams.mNumWorkerThreads));
 
     std::vector<RnsPoly> tbmMinusTbk;
     LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverExpand.mTbm, senderExpand.mTbk, tbmMinusTbk));

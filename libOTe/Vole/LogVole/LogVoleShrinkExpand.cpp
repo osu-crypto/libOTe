@@ -1015,7 +1015,7 @@ namespace osuCrypto::LogVole
     bool shrinkExpandExpandReceiver(
         const ShrinkExpandReceiverState& state,
         const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark)
+        ShrinkExpandReceiverExpandOutput& out, u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark)
     {
         if ((!input.mTree && input.mX.size() != state.mParams.mMu) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -1096,6 +1096,10 @@ namespace osuCrypto::LogVole
         applyStep.stop();
         HostStep decryptStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt", &cpuBenchmark);
         std::vector<RnsPoly> decPartialNtt;
+        auto lheWorkers = cpuLheWorkers;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (gpu::enabled(ctx)) lheWorkers = state.mParams.mNumWorkerThreads;
+#endif
         if (!lheDec(
                 ctx,
                 std::move(ct1AppliedNtt),
@@ -1104,7 +1108,7 @@ namespace osuCrypto::LogVole
                 publicA.get(),
                 true,
                 true,
-                state.mParams.mNumWorkerThreads, cpuBenchmark))
+                lheWorkers, cpuBenchmark, &scratch.lheDec()))
         {
             return false;
         }

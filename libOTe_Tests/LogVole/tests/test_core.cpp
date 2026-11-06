@@ -3087,7 +3087,8 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     receiverExpandInput.mTree = digestState.mRootTree;
 
     ShrinkExpandReceiverExpandOutput receiverExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiver.mShrinkExpandState, receiverExpandInput, receiverExpand));
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiver.mShrinkExpandState, receiverExpandInput, receiverExpand,
+        receiver.mShrinkExpandState.mParams.mNumWorkerThreads));
     LOGVOLE_REQUIRE_EQ(senderExpand.mTbk.size(), x.size());
     LOGVOLE_REQUIRE_EQ(receiverExpand.mTbm.size(), x.size());
 
@@ -3691,7 +3692,8 @@ void LogVole_Core_RootOnlineLocalRelation(const oc::CLP&)
     receiverExpandInput.mTree = digestState.mRootTree;
 
     ShrinkExpandReceiverExpandOutput receiverExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiver.mShrinkExpandState, receiverExpandInput, receiverExpand));
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiver.mShrinkExpandState, receiverExpandInput, receiverExpand,
+        receiver.mShrinkExpandState.mParams.mNumWorkerThreads));
 
     std::vector<RnsPoly> actual;
     std::vector<RnsPoly> expected;

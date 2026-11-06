@@ -5154,7 +5154,8 @@ namespace osuCrypto::LogVole
         expandInput.mTree = digestState.mRootTree;
 
         ShrinkExpandReceiverExpandOutput expandOutput{};
-        if (!shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput, cpuBenchmark) ||
+        if (!shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput,
+                state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark) ||
             expandOutput.mTbm.size() < input.mX.size())
         {
             return false;
