@@ -1918,34 +1918,24 @@ namespace osuCrypto::LogVole
             leafInputsAreGadget, cpuBenchmark, cpuScratch);
     }
 
-    static bool lencEvalTruncImpl(
-        const RingNttContext& ctx,
-        const LencLacct& lacct,
-        const DigestTree& tree,
-        u32 mu,
-        u32 tauHi,
-        u32 gadgetLogBase,
-        u32 plaintextModulusBits,
-        std::vector<RnsPoly>& out,
-        bool outputNtt,
-        u32 requestedWorkers,
-        bool leafInputsAreGadget,
-        bool subtractFromOutput, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
+    static bool validateLencTruncEvaluation(
+        const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
+        u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
+        bool leafInputsAreGadget, u32& tauLeaf, u32& ctTauMax)
     {
-        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        if (mu == 0 || tauHi == 0 || lacct.mWidthPadded == 0)
+        if (mu == 0 || tauHi == 0 || lacct.mWidthPadded == 0 || mu > lacct.mWidthPadded)
         {
             return false;
         }
 
-        const u32 tauLeaf = computeTruncLeafTau(tauHi, plaintextModulusBits, gadgetLogBase, leafInputsAreGadget);
+        tauLeaf = computeTruncLeafTau(tauHi, plaintextModulusBits, gadgetLogBase, leafInputsAreGadget);
         const u32 fullTau = tauHi + 1u;
         if (tauLeaf == 0 || tauLeaf > fullTau)
         {
             return false;
         }
 
-        const u32 ctTauMax = std::max(tauHi, tauLeaf);
+        ctTauMax = std::max(tauHi, tauLeaf);
         if (lacct.mCt.mRows != lacct.mLevels * lacct.mWidthPadded ||
             lacct.mCt.mCols != 2u * ctTauMax ||
             ringTensorSize(lacct.mCt) != lacct.mCt.mPolys.size() ||
@@ -1976,6 +1966,111 @@ namespace osuCrypto::LogVole
             }
         }
 
+        return true;
+    }
+
+    // Synchronous leaf arithmetic shared by both scheduling interfaces.
+    template<typename Local>
+    static bool evalLencTruncLeaf(
+        const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
+        u32 tauHi, u32 tauLeaf, u32 ctTauMax, std::vector<RnsPoly>& out,
+        bool outputNtt, bool subtractFromOutput, std::size_t leafIdx, Local& local)
+    {
+        const auto leaf = static_cast<u32>(leafIdx);
+        auto& accNtt = out[leaf];
+        if (!subtractFromOutput) resizeFill(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams), u64{0});
+
+        auto& ciphertexts = local.mCiphertexts;
+        auto& nodes = local.mNodes;
+        // Retain capacity, but never retain borrowed tree/ciphertext pointers
+        // after the leaf completes, including on failure or exception.
+        struct ClearPointers
+        {
+            Local& mLocal;
+            ~ClearPointers() { mLocal.mCiphertexts.clear(); mLocal.mNodes.clear(); }
+        } clear{local};
+        ciphertexts.clear();
+        nodes.clear();
+        u32 parent = 0;
+        for (u32 level = 0; level < lacct.mLevels; ++level)
+        {
+            const u32 left = (2u * parent) + 1u;
+            const u32 right = left + 1u;
+            const u32 activeTau = (level == lacct.mLevels - 1u) ? tauLeaf : tauHi;
+            const std::size_t row = ctRowIndex(level, leaf, lacct.mWidthPadded);
+
+            for (u32 c = 0; c < activeTau; ++c)
+            {
+                const auto& ctPolyLNtt =
+                    lacct.mCt.mPolys[ringTensorIndex(lacct.mCt, static_cast<u32>(row), c)];
+                const auto& nodePolyLNtt = tree.mNodeDecompNtt[left][c];
+                ciphertexts.push_back(&ctPolyLNtt);
+                nodes.push_back(&nodePolyLNtt);
+
+                const auto& ctPolyRNtt =
+                    lacct.mCt.mPolys[ringTensorIndex(lacct.mCt, static_cast<u32>(row), ctTauMax + c)];
+                const auto& nodePolyRNtt = tree.mNodeDecompNtt[right][c];
+                ciphertexts.push_back(&ctPolyRNtt);
+                nodes.push_back(&nodePolyRNtt);
+            }
+
+            const u32 bit = (leaf >> (lacct.mLevels - 1u - level)) & 1u;
+            parent = (bit == 0) ? left : right;
+        }
+
+        if (!dyadicInnerProductNttInplace(ciphertexts, nodes, accNtt, ctx)) return false;
+
+        // Eval is the negative path sum. Subtracting it adds the products
+        // directly to the existing NTT row, avoiding a separate zeroed
+        // batch, negation pass and subsequent ring subtraction.
+        if (subtractFromOutput)
+        {
+            globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+
+        if (!outputNtt && !inverseNtt(accNtt, ctx))
+        {
+            return false;
+        }
+
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        for (std::size_t modIdx = 0; modIdx < ringModulusCount(ctx); ++modIdx)
+        {
+            const u64 mod = ringModulusValue(ctx, modIdx);
+            const std::size_t offset = modIdx * n;
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                const std::size_t idx = offset + i;
+                if (accNtt.mCoeffs[idx] != 0)
+                {
+                    accNtt.mCoeffs[idx] = mod - accNtt.mCoeffs[idx];
+                }
+            }
+        }
+
+        return true;
+    }
+
+    static bool lencEvalTruncImpl(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const DigestTree& tree,
+        u32 mu,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out,
+        bool outputNtt,
+        u32 requestedWorkers,
+        bool leafInputsAreGadget,
+        bool subtractFromOutput, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
+    {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        u32 tauLeaf = 0, ctTauMax = 0;
+        if (!validateLencTruncEvaluation(ctx, lacct, tree, mu, tauHi, gadgetLogBase,
+                plaintextModulusBits, leafInputsAreGadget, tauLeaf, ctTauMax)) return false;
+
         // One leaf per task. Leaves are independent - each walks its own root path
         // and writes only out[leaf], with no reduction between them - so the result
         // is bit-identical. This matters because it is the Root recursion level,
@@ -1985,83 +2080,9 @@ namespace osuCrypto::LogVole
             !validateRingBatchShape(out, ctx.mParams))) return false;
         out.resize(mu);
         const auto terms = std::size_t{2} * lacct.mLevels * ctTauMax;
-        auto evalLeaf = [&](std::size_t leafIdx, detail::CpuRowScratch::Local& local) -> bool
-        {
-            const auto leaf = static_cast<u32>(leafIdx);
-            RnsPoly accNtt{};
-            if (subtractFromOutput) accNtt = std::move(out[leaf]);
-            else resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-
-            auto& ciphertexts = local.mCiphertexts;
-            auto& nodes = local.mNodes;
-            // Retain capacity, but never retain borrowed tree/ciphertext pointers
-            // after the leaf completes, including on failure or exception.
-            struct ClearPointers
-            {
-                detail::CpuRowScratch::Local& mLocal;
-                ~ClearPointers() { mLocal.mCiphertexts.clear(); mLocal.mNodes.clear(); }
-            } clear{local};
-            u32 parent = 0;
-            for (u32 level = 0; level < lacct.mLevels; ++level)
-            {
-                const u32 left = (2u * parent) + 1u;
-                const u32 right = left + 1u;
-                const u32 activeTau = (level == lacct.mLevels - 1u) ? tauLeaf : tauHi;
-                const std::size_t row = ctRowIndex(level, leaf, lacct.mWidthPadded);
-
-                for (u32 c = 0; c < activeTau; ++c)
-                {
-                    const auto& ctPolyLNtt =
-                        lacct.mCt.mPolys[ringTensorIndex(lacct.mCt, static_cast<u32>(row), c)];
-                    const auto& nodePolyLNtt = tree.mNodeDecompNtt[left][c];
-                    ciphertexts.push_back(&ctPolyLNtt);
-                    nodes.push_back(&nodePolyLNtt);
-
-                    const auto& ctPolyRNtt =
-                        lacct.mCt.mPolys[ringTensorIndex(lacct.mCt, static_cast<u32>(row), ctTauMax + c)];
-                    const auto& nodePolyRNtt = tree.mNodeDecompNtt[right][c];
-                    ciphertexts.push_back(&ctPolyRNtt);
-                    nodes.push_back(&nodePolyRNtt);
-                }
-
-                const u32 bit = (leaf >> (lacct.mLevels - 1u - level)) & 1u;
-                parent = (bit == 0) ? left : right;
-            }
-
-            if (!dyadicInnerProductNttInplace(ciphertexts, nodes, accNtt, ctx)) return false;
-
-            // Eval is the negative path sum. Subtracting it adds the products
-            // directly to the existing NTT row, avoiding a separate zeroed
-            // batch, negation pass and subsequent ring subtraction.
-            if (subtractFromOutput)
-            {
-                globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
-                out[leaf] = std::move(accNtt);
-                return true;
-            }
-
-            if (!outputNtt && !inverseNtt(accNtt, ctx))
-            {
-                return false;
-            }
-
-            const std::size_t n = ctx.mParams.mPolyModulusDegree;
-            for (std::size_t modIdx = 0; modIdx < ringModulusCount(ctx); ++modIdx)
-            {
-                const u64 mod = ringModulusValue(ctx, modIdx);
-                const std::size_t offset = modIdx * n;
-                for (std::size_t i = 0; i < n; ++i)
-                {
-                    const std::size_t idx = offset + i;
-                    if (accNtt.mCoeffs[idx] != 0)
-                    {
-                        accNtt.mCoeffs[idx] = mod - accNtt.mCoeffs[idx];
-                    }
-                }
-            }
-
-            out[leaf] = std::move(accNtt);
-            return true;
+        auto evalLeaf = [&](std::size_t leafIdx, detail::CpuRowScratch::Local& local) {
+            return evalLencTruncLeaf(ctx, lacct, tree, tauHi, tauLeaf, ctTauMax,
+                out, outputNtt, subtractFromOutput, leafIdx, local);
         };
         bool useCpuScratch = cpuScratch != nullptr;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2101,6 +2122,49 @@ namespace osuCrypto::LogVole
         else cpuScratch->executor()->runBulk(workers, locals, evalPartition);
         for (const auto& local : locals) if (!local.mOk) return false;
         return true;
+    }
+
+    macoro::task<bool> lencEvalTrunc(
+        macoro::thread_pool& executor, std::span<LencEvalBuffer> buffers,
+        const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
+        u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out, LencEvalMode mode,
+        bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark)
+    {
+        u32 tauLeaf = 0, ctTauMax = 0;
+        if (gpu::enabled(ctx) || buffers.empty() ||
+            (mode != LencEvalMode::Coefficient && mode != LencEvalMode::Ntt && mode != LencEvalMode::SubtractNtt) ||
+            !validateLencTruncEvaluation(ctx, lacct, tree, mu, tauHi, gadgetLogBase,
+                plaintextModulusBits, leafInputsAreGadget, tauLeaf, ctTauMax) ||
+            out.size() != mu || !validateRingBatchShape(out, ctx.mParams)) co_return false;
+        const auto terms = std::size_t{2} * lacct.mLevels * ctTauMax;
+        auto chunks = buffers.first(std::min(buffers.size(), std::size_t(mu)));
+        for (const auto& chunk : chunks)
+            if (chunk.mCiphertexts.capacity() < terms || chunk.mNodes.capacity() < terms) co_return false;
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        for (auto& chunk : chunks) chunk.mOk = true;
+        const auto cacheScope = currentProtocolCacheScope();
+        auto evalChunk = [&](std::size_t begin, std::size_t end, LencEvalBuffer& chunk) {
+            ScopedProtocolCacheScope scope(cacheScope);
+            CpuBenchmarkState worker = chunks.size() > 1
+                ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+            CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            struct FlushStats { ~FlushStats() { flushRingOpsThreadLocalStats(); } } flush;
+            for (auto leaf = begin; leaf != end; ++leaf)
+            {
+                if (!evalLencTruncLeaf(ctx, lacct, tree, tauHi, tauLeaf, ctTauMax, out,
+                    mode != LencEvalMode::Coefficient, mode == LencEvalMode::SubtractNtt, leaf, chunk))
+                {
+                    chunk.mOk = false;
+                    break;
+                }
+            }
+        };
+        if (chunks.size() == 1) evalChunk(0, mu, chunks[0]);
+        else co_await macoro::bulk_chunked(executor, mu, chunks, evalChunk);
+        for (const auto& chunk : chunks) if (!chunk.mOk) co_return false;
+        co_return true;
     }
 
     bool lencEvalTrunc(

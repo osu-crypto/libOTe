@@ -6,9 +6,13 @@
 
 #include "cryptoTools/Crypto/PRNG.h"
 
+#include "macoro/task.h"
+
 #include <memory>
 #include <span>
 #include <vector>
+
+namespace macoro { class thread_pool; }
 
 namespace osuCrypto::LogVole
 {
@@ -223,6 +227,34 @@ namespace osuCrypto::LogVole
         u32 widthPadded = 0,
         bool leafInputsAreGadget = false);
 
+    // One caller-owned pointer workspace per chunk. Reserve each vector for
+    // 2 * lacct.mLevels * (tauHi + 1) pointers before use; no pool is retained.
+    struct LencEvalBuffer
+    {
+        std::vector<const RnsPoly*> mCiphertexts, mNodes;
+        bool mOk = true;
+    };
+
+    enum class LencEvalMode { Coefficient, Ntt, SubtractNtt };
+
+    // CPU-only, lazy evaluation using a prepared tree and output batch.
+    // out contains mu correctly sized polynomials; SubtractNtt additionally
+    // requires canonical NTT coefficients. Other modes overwrite the values.
+    // out must not alias ciphertext/tree storage. All referenced objects remain
+    // alive and unchanged until completion, with exclusive output and buffers.
+    // Unstarted tasks may be dropped; started tasks must finish before reuse.
+    // One chunk executes inline. The caller may resume on an executor worker;
+    // destroy/join the executor from outside its workers. Validation leaves out
+    // unchanged; execution failure may leave partial output. Chunk pointer lists
+    // are cleared on leaf exit, including exceptions, and retain their capacity.
+    macoro::task<bool> lencEvalTrunc(
+        macoro::thread_pool& executor, std::span<LencEvalBuffer> buffers,
+        const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
+        u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out, LencEvalMode mode,
+        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {});
+
+    [[deprecated("Use async LENC evaluation with explicit executor and buffers")]]
     bool lencEvalTrunc(
         const RingNttContext& ctx,
         const LencLacct& lacct,
@@ -237,6 +269,7 @@ namespace osuCrypto::LogVole
         bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {},
         detail::CpuRowScratch* cpuScratch = nullptr);
 
+    [[deprecated("Use async LENC evaluation with explicit executor and buffers")]]
     bool lencEvalTrunc(
         const RingNttContext& ctx,
         const LencLacct& lacct,
@@ -254,6 +287,7 @@ namespace osuCrypto::LogVole
     // out -= Eval(tree) in the NTT domain, consuming each existing output row
     // as the path-product accumulator. out must contain mu canonical NTT
     // polynomials and must not alias the ciphertext or tree storage.
+    [[deprecated("Use async lencEvalTrunc with LencEvalMode::SubtractNtt")]]
     bool lencSubtractEvalTruncNttInplace(
         const RingNttContext& ctx,
         const LencLacct& lacct,

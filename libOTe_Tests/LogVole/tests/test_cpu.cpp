@@ -352,6 +352,14 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
 {
     PRNG random(toBlock(0x4556414c, 0x46555345));
     LogVole::detail::CpuRowScratch scratch;
+    macoro::thread_pool pool;
+    auto work = pool.make_work();
+    pool.create_threads(3);
+    std::array<LencEvalBuffer, 3> buffers;
+    auto onWorker = [](macoro::thread_pool& executor, macoro::task<bool> operation) -> macoro::task<bool> {
+        co_await executor.schedule();
+        co_return co_await std::move(operation);
+    };
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
     for (unsigned mu : {3, 9})
@@ -389,6 +397,7 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
             plaintextBits, eval, false, 1, gadget));
         flushRingOpsThreadLocalStats();
         const auto products = globalRingOpsStats.mDyadicMulAddCount.load();
+        const auto evalCoefficient = eval;
         LOGVOLE_REQUIRE_TRUE(forwardNttBatch(eval, ctx));
         auto expected = initial;
         for (unsigned row = 0; row < mu; ++row)
@@ -416,6 +425,81 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
                 LOGVOLE_REQUIRE_TRUE(local.mCiphertexts.empty());
                 LOGVOLE_REQUIRE_TRUE(local.mNodes.empty());
             }
+        }
+        const auto capacity = std::size_t{4} * enc.mLacct.mLevels; // tauHi == 1.
+        for (auto& buffer : buffers)
+        {
+            buffer.mCiphertexts.reserve(capacity);
+            buffer.mNodes.reserve(capacity);
+        }
+        for (const auto mode : {LencEvalMode::Coefficient, LencEvalMode::Ntt, LencEvalMode::SubtractNtt})
+        for (unsigned chunks : {1u, 3u, 1u})
+        {
+            auto actual = initial;
+            auto* batchAllocation = actual.data();
+            std::vector<const u64*> coefficientAllocations;
+            for (const auto& row : actual) coefficientAllocations.push_back(row.mCoeffs.data());
+            std::array<const RnsPoly* const*, 3> ciphertextAllocations{}, nodeAllocations{};
+            for (std::size_t i = 0; i < buffers.size(); ++i)
+            {
+                ciphertextAllocations[i] = buffers[i].mCiphertexts.data();
+                nodeAllocations[i] = buffers[i].mNodes.data();
+                buffers[i].mOk = false;
+            }
+            auto locals = std::span(buffers).first(chunks);
+            auto operation = lencEvalTrunc(pool, locals, ctx, enc.mLacct, tree, mu, 1,
+                digitBits, plaintextBits, actual, mode, gadget);
+            for (const auto& buffer : locals) LOGVOLE_REQUIRE_FALSE(buffer.mOk);
+            for (unsigned row = 0; row < mu; ++row)
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, initial[row].mCoeffs));
+            auto moved = std::move(operation);
+            // Exercise suspension from a worker of the target pool.
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(pool, std::move(moved))));
+            const auto& reference = mode == LencEvalMode::Coefficient ? evalCoefficient :
+                mode == LencEvalMode::Ntt ? eval : expected;
+            LOGVOLE_REQUIRE_TRUE(actual.data() == batchAllocation);
+            for (unsigned row = 0; row < mu; ++row)
+            {
+                LOGVOLE_REQUIRE_TRUE(actual[row].mCoeffs.data() == coefficientAllocations[row]);
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
+            }
+            for (std::size_t i = 0; i < locals.size(); ++i)
+            {
+                LOGVOLE_REQUIRE_TRUE(locals[i].mOk);
+                LOGVOLE_REQUIRE_TRUE(locals[i].mCiphertexts.empty() && locals[i].mNodes.empty());
+                LOGVOLE_REQUIRE_TRUE(locals[i].mCiphertexts.data() == ciphertextAllocations[i]);
+                LOGVOLE_REQUIRE_TRUE(locals[i].mNodes.data() == nodeAllocations[i]);
+            }
+        }
+        if (limbs == 2 && bits == 30 && mu == 3 && !gadget)
+        {
+            auto actual = initial;
+            macoro::thread_pool idle;
+            auto idleWork = idle.make_work();
+            { auto unstarted = lencEvalTrunc(idle, buffers, ctx, enc.mLacct, tree,
+                mu, 1, digitBits, plaintextBits, actual, LencEvalMode::SubtractNtt); }
+            for (unsigned row = 0; row < mu; ++row)
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, initial[row].mCoeffs));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEvalTrunc(idle, std::span(buffers).first(1),
+                ctx, enc.mLacct, tree, mu, 1, digitBits, plaintextBits, actual, LencEvalMode::SubtractNtt)));
+            for (unsigned row = 0; row < mu; ++row)
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, expected[row].mCoeffs));
+            // Multiple chunks must also complete when called from the sole worker.
+            idle.create_threads(1);
+            actual = initial;
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(idle, lencEvalTrunc(idle, buffers,
+                ctx, enc.mLacct, tree, mu, 1, digitBits, plaintextBits, actual, LencEvalMode::SubtractNtt))));
+            for (unsigned row = 0; row < mu; ++row)
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, expected[row].mCoeffs));
+            actual = initial;
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lencEvalTrunc(pool, {}, ctx, enc.mLacct,
+                tree, mu, 1, digitBits, plaintextBits, actual, LencEvalMode::Ntt)));
+            LencEvalBuffer undersized;
+            undersized.mNodes.reserve(capacity);
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lencEvalTrunc(pool, std::span(&undersized, 1),
+                ctx, enc.mLacct, tree, mu, 1, digitBits, plaintextBits, actual, LencEvalMode::Ntt)));
+            for (unsigned row = 0; row < mu; ++row)
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, initial[row].mCoeffs));
         }
         auto invalid = initial;
         invalid.pop_back();
