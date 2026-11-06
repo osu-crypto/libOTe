@@ -731,6 +731,16 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
 {
     PRNG random(toBlock(0x4c4845, 0x444543));
     auto scratchOwner = std::make_shared<LogVole::detail::ShrinkExpandScratch>();
+    // The application owns compute and memory independently. A fixed pool is
+    // reused across shapes, calls, and different chunk counts.
+    macoro::thread_pool lhePool;
+    auto lheWork = lhePool.make_work();
+    lhePool.create_threads(3);
+    std::array<LheDecryptBuffer, 8> lheBuffers;
+    CpuBenchmarkContext lheTelemetry;
+    lheTelemetry.mCpus = {0, 1, 2};
+    lheTelemetry.mWorkerLimit = 1; // Diagnostics must not select execution capacity.
+    CpuBenchmarkState lheBenchmark{&lheTelemetry};
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
     {
@@ -742,6 +752,8 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
         const auto& hostModuli = getRingHostModuli(ctx);
         LOGVOLE_REQUIRE_EQ(hostModuli.size(), static_cast<std::size_t>(limbs));
+        for (auto& buffer : lheBuffers)
+            buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params));
         constexpr unsigned rows = 9;
         auto sk = sampleUniformPoly(ctx, random);
         auto skNtt = sk;
@@ -815,11 +827,110 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
                 for (unsigned row = 0; row < rows; ++row)
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(consumed[row].mCoeffs, reference[row].mCoeffs));
             }
+            if (inputNtt == outputNtt)
+            {
+                const auto domain = inputNtt ? LheDomain::Ntt : LheDomain::Coefficient;
+                for (bool fused : {false, true})
+                {
+                    auto cpu = ctx;
+                    cpu.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe = fused;
+                    auto chunks = std::span(lheBuffers).first(workers);
+                    std::array<const u64*, 8> products{};
+                    for (std::size_t i = 0; i < chunks.size(); ++i)
+                        products[i] = chunks[i].mProduct.mCoeffs.data();
+                    for (unsigned repeat = 0; repeat < 2; ++repeat)
+                    {
+                        actual = input; // Keeping ciphertext is an explicit caller copy.
+                        auto* batchAllocation = actual.data();
+                        std::array<const u64*, rows> coefficients{};
+                        for (unsigned row = 0; row < rows; ++row)
+                            coefficients[row] = actual[row].mCoeffs.data();
+                        lheTelemetry.reset();
+                        globalRingOpsStats.reset();
+                        for (auto& chunk : chunks)
+                        {
+                            std::fill(chunk.mProduct.mCoeffs.begin(), chunk.mProduct.mCoeffs.end(), ~u64{0});
+                            chunk.mOk = false;
+                        }
+                        auto operation = lheDec(lhePool, chunks, cpu, actual, sk, publicA, domain, lheBenchmark);
+                        // Creation is lazy and borrows the caller's unchanged storage.
+                        for (unsigned row = 0; row < rows; ++row)
+                            LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, input[row].mCoeffs));
+                        for (const auto& chunk : chunks) LOGVOLE_REQUIRE_FALSE(chunk.mOk);
+                        auto moved = std::move(operation);
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(std::move(moved)));
+                        LOGVOLE_REQUIRE_TRUE(actual.data() == batchAllocation);
+                        for (unsigned row = 0; row < rows; ++row)
+                        {
+                            LOGVOLE_REQUIRE_TRUE(actual[row].mCoeffs.data() == coefficients[row]);
+                            LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
+                        }
+                        for (std::size_t i = 0; i < chunks.size(); ++i)
+                        {
+                            LOGVOLE_REQUIRE_TRUE(chunks[i].mProduct.mCoeffs.data() == products[i]);
+                            LOGVOLE_REQUIRE_TRUE(chunks[i].mOk);
+                        }
+                        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), rows);
+                        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mSubCount.load(), inputNtt ? rows : 0u);
+                        LOGVOLE_REQUIRE_EQ(lheTelemetry.mActiveTaskThreads.load(), 0u);
+                        LOGVOLE_REQUIRE_TRUE(lheTelemetry.mPeakTaskThreads.load() <= std::min(workers, 3u));
+                        LOGVOLE_REQUIRE_EQ(lheTelemetry.mWorkerSlots.load(), 0u);
+                    }
+                    if (fused && limbs == 2 && bits == 30 && workers == 3)
+                    {
+                        macoro::thread_pool oneWorker;
+                        auto work = oneWorker.make_work();
+                        actual = input;
+                        {
+                            auto unstarted = lheDec(oneWorker, chunks, cpu, actual, sk, publicA, domain);
+                        } // Dropping an unstarted task leaves borrowed storage alone.
+                        for (unsigned row = 0; row < rows; ++row)
+                            LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, input[row].mCoeffs));
+                        // A single chunk needs no executor thread.
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(oneWorker, chunks.first(1), cpu,
+                            actual, sk, publicA, domain, lheBenchmark)));
+                        for (unsigned row = 0; row < rows; ++row)
+                            LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
+                        oneWorker.create_threads(1);
+                        actual = input;
+                        auto onWorker = [](macoro::thread_pool& pool, macoro::task<bool> operation)
+                            -> macoro::task<bool> {
+                            co_await pool.schedule();
+                            co_return co_await std::move(operation);
+                        };
+                        // All borrowed data stays in this scope until the join.
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(oneWorker,
+                            lheDec(oneWorker, chunks, cpu, actual, sk, publicA, domain, lheBenchmark))));
+                        for (unsigned row = 0; row < rows; ++row)
+                            LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
+                        LOGVOLE_REQUIRE_EQ(lheTelemetry.mActiveTaskThreads.load(), 0u);
+                    }
+                    actual = input;
+                    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lheDec(lhePool, {}, cpu,
+                        actual, sk, publicA, domain, lheBenchmark)));
+                    if (!inputNtt || !fused)
+                    {
+                        chunks[0].mProduct.mCoeffs.resize(ringPolyCoeffCount(params) - 1);
+                        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lheDec(lhePool, chunks, cpu,
+                            actual, sk, publicA, domain, lheBenchmark)));
+                        chunks[0].mProduct.mCoeffs.resize(ringPolyCoeffCount(params));
+                    }
+                    for (unsigned row = 0; row < rows; ++row)
+                        LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, input[row].mCoeffs));
+                }
+            }
             if (inputNtt && outputNtt)
             {
                 // A caller may use the ciphertext batch as its public A too.
                 std::vector<RnsPoly> aliasReference;
                 LOGVOLE_REQUIRE_TRUE(lheDec(ctx, input, sk, aliasReference, &input, true, true, workers));
+                auto aliasCpu = ctx;
+                aliasCpu.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe = true;
+                consumed = input;
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, std::span(lheBuffers).first(workers), aliasCpu,
+                    consumed, sk, consumed, LheDomain::Ntt, lheBenchmark)));
+                for (unsigned row = 0; row < rows; ++row)
+                    LOGVOLE_REQUIRE_TRUE(rangesEqual(consumed[row].mCoeffs, aliasReference[row].mCoeffs));
                 consumed = input;
                 LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, consumed, &consumed,
                     true, true, workers, {}, &scratch));

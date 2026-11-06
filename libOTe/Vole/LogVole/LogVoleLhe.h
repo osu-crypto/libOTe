@@ -6,8 +6,12 @@
 
 #include "cryptoTools/Crypto/PRNG.h"
 
+#include "macoro/task.h"
+
 #include <memory>
 #include <vector>
+
+namespace macoro { class thread_pool; }
 
 namespace osuCrypto::LogVole
 {
@@ -99,8 +103,39 @@ namespace osuCrypto::LogVole
         u64 instanceIdx,
         std::vector<RnsPoly>& out);
 
+    // Caller-owned storage for one CPU decryption chunk. No executor or
+    // scheduling policy is retained here. Reused exclusively until lheDec joins.
+    struct LheDecryptBuffer
+    {
+        RnsPoly mProduct;
+        bool mOk = true;
+    };
+
+    enum class LheDomain { Coefficient, Ntt };
+
+    // CPU-only, lazy, in-place decryption. Ciphertext and output use the same
+    // domain; sk is coefficient-domain and public A is always NTT-domain.
+    // NTT ciphertext coefficients must be canonical: [0, q) for each modulus q.
+    // Coefficient-domain ciphertext may contain arbitrary u64 values.
+    // All arguments are borrowed from creation through completion: keep them
+    // alive and unchanged, with exclusive access to ciphertext and buffers.
+    // Await every started operation before destroying it or reusing resources.
+    // One chunk runs inline; parallel chunks require a running executor.
+    // The awaiting caller may resume on an executor worker. Destroy/join that
+    // executor from outside its worker threads, not from that continuation.
+    // Each active product needs ringPolyCoeffCount words for coefficient-domain
+    // or non-fused NTT arithmetic. Batch/coefficient allocations are retained.
+    // Validation failure leaves ciphertext unchanged; execution failure may
+    // leave partially decrypted rows. No work occurs before the task is awaited.
+    macoro::task<bool> lheDec(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const RingNttContext& ctx, std::vector<RnsPoly>& ciphertextAndOutput,
+        const RnsPoly& sk, const std::vector<RnsPoly>& publicANtt,
+        LheDomain domain, CpuBenchmarkState cpuBenchmark = {});
+
     // cpuScratch supplies exclusive reusable resources for CPU row phases.
     // Other phases/backends retain their existing execution path.
+    [[deprecated("Use async in-place lheDec with explicit executor and buffers")]]
     bool lheDec(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& cipher,
@@ -114,6 +149,7 @@ namespace osuCrypto::LogVole
 
     // Consuming overload: reuses the ciphertext allocation for NTT-domain
     // decryption. The coefficient-domain special case keeps its existing path.
+    [[deprecated("Use async in-place lheDec with explicit executor and buffers")]]
     bool lheDec(
         const RingNttContext& ctx,
         std::vector<RnsPoly>&& cipher,
