@@ -142,6 +142,8 @@ namespace osuCrypto::LogVole
             std::span<const u64>, u64, u64, ZkMulCpuWorkspace&, ZkProof&);
         friend bool zkMulVerifierValue(const ZkMulCircuit&, std::span<const u64>,
             u64, u64, u64, ZkMulCpuWorkspace&, u64&);
+        friend bool zkMulWitness(const ZkMulCircuit&, u64, PRNG&, AlignedUnVec<u64>&,
+            u64, ZkMulCpuWorkspace&);
     public:
         ZkMulCpuWorkspace() noexcept;
         ZkMulCpuWorkspace(const ZkMulCircuit& circuit, u32 threads,
@@ -196,6 +198,12 @@ namespace osuCrypto::LogVole
     bool zkMulWitness(
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize, u32 threads, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
+
+    // Reuse the prepared pool, partition ranges and CPU options across witnesses.
+    // Each layer joins before the next layer reads its outputs.
+    bool zkMulWitness(
+        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
+        u64 voleSize, ZkMulCpuWorkspace& workspace);
 
     // U = sum_g chi^(g+1) * M[x_g] * M[y_g]                      + M[r]
     // V = sum_g chi^(g+1) * (M[z_g] - x_g*M[y_g] - y_g*M[x_g])    - r

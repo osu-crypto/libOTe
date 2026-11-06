@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -143,79 +144,9 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool zkMulWitness(
-        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
+    namespace
     {
-        return zkMulWitness(circuit, modulus, prng, wires, voleSize, 1, settings, cpuBenchmark);
-    }
-
-    bool zkMulWitness(
-        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize, u32 threads, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
-    {
-        const auto options = detail::captureCpuZkOptions(settings);
-        if (modulus < 2 || circuit.gateCount() == 0) return false;
-        if (circuit.mOperands.size() != 2 * circuit.gateCount()) return false;
-        if (voleSize && voleSize < circuit.voleCount()) return false;
-
-        const seal::Modulus mod(modulus);
-        const u64 total = voleSize ? voleSize : circuit.voleCount();
-        wires.resize(static_cast<std::size_t>(total));
-        std::fill(wires.data() + circuit.voleCount(), wires.data() + total, u64(0));
-
-        for (u64 i = 0; i < circuit.mWidth; ++i) wires[i] = nextFieldElement(prng, modulus);
-        const auto chunks = std::min<u64>(circuit.mWidth, std::max<u64>(1, threads));
-        for (u64 layer = 0; layer < circuit.mDepth; ++layer)
-        {
-            const u64 firstGate = layer*circuit.mWidth;
-            const u64 firstOutput = circuit.outputWire(firstGate);
-            bool independent = true;
-            for (u64 g = firstGate; g < firstGate+circuit.mWidth; ++g)
-            {
-                const u32 ix = circuit.mOperands[2*g], iy = circuit.mOperands[2*g+1];
-                // Sequential dependencies within a layer retain scalar order.
-                // Inputs beyond the current output are not an evaluated DAG.
-                if (ix >= circuit.outputWire(g) || iy >= circuit.outputWire(g)) return false;
-                independent &= ix < firstOutput && iy < firstOutput;
-            }
-            if (!independent)
-            {
-                detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
-                    for (u64 g = firstGate; g < firstGate+circuit.mWidth; ++g)
-                        wires[circuit.outputWire(g)] = arithmetic.multiply(
-                            wires[circuit.mOperands[2*g]], wires[circuit.mOperands[2*g+1]]);
-                });
-                continue;
-            }
-            if (!detail::runParallelTasks(chunks, threads, [&](std::size_t chunk, CpuBenchmarkState& cpuBenchmark) {
-                const u64 begin = chunk*circuit.mWidth/chunks, end = (chunk+1)*circuit.mWidth/chunks;
-                const auto* operands = circuit.mOperands.data()+2*(firstGate+begin);
-                auto* output = wires.data()+firstOutput+begin;
-                if (!detail::cpuZkWitnessRange(operands, wires.data(), output, end-begin, mod, options))
-                    detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
-                        for (u64 g = begin; g < end; ++g)
-                            wires[firstOutput+g] = arithmetic.multiply(
-                                wires[circuit.mOperands[2*(firstGate+g)]],
-                                wires[circuit.mOperands[2*(firstGate+g)+1]]);
-                    });
-                return true;
-            }, false, &cpuBenchmark)) return false;
-        }
-        wires[static_cast<std::size_t>(circuit.maskIndex())] = nextFieldElement(prng, modulus);
-        return true;
-    }
-
-    struct ZkMulCpuWorkspace::Impl
-    {
-        u64 mWidth, mDepth;
-        std::size_t mProverChunks, mVerifierChunks;
-        std::vector<u64> mPartial;
-        const detail::CpuZkOptions mOptions;
-        detail::CpuExecutor mExecutor;
-        std::vector<std::array<u64, 2>> mProverPartial;
-
-        static std::size_t workerBudget(u32 requested, const CpuBenchmarkContext* benchmark)
+        std::size_t cpuWorkerBudget(u32 requested, const CpuBenchmarkContext* benchmark)
         {
             // Resolve the legacy zero=automatic convention once, while idle.
             // A supplied benchmark partition is also an explicit capacity cap.
@@ -228,15 +159,123 @@ namespace osuCrypto::LogVole
             return std::min(capacity, requested ? std::size_t(requested) : automatic);
         }
 
+        template<typename RunLayer>
+        bool evaluateMulWitness(
+            const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
+            u64 voleSize, const detail::CpuZkOptions& options, RunLayer&& runLayer)
+        {
+            if (modulus < 2 || circuit.gateCount() == 0) return false;
+            if (circuit.mOperands.size() != 2 * circuit.gateCount()) return false;
+            if (voleSize && voleSize < circuit.voleCount()) return false;
+
+            const seal::Modulus mod(modulus);
+            const u64 total = voleSize ? voleSize : circuit.voleCount();
+            wires.resize(static_cast<std::size_t>(total));
+            std::fill(wires.data() + circuit.voleCount(), wires.data() + total, u64(0));
+
+            for (u64 i = 0; i < circuit.mWidth; ++i) wires[i] = nextFieldElement(prng, modulus);
+            for (u64 layer = 0; layer < circuit.mDepth; ++layer)
+            {
+                const u64 firstGate = layer*circuit.mWidth;
+                const u64 firstOutput = circuit.outputWire(firstGate);
+                bool independent = true;
+                for (u64 g = firstGate; g < firstGate+circuit.mWidth; ++g)
+                {
+                    const u32 ix = circuit.mOperands[2*g], iy = circuit.mOperands[2*g+1];
+                    // Sequential dependencies within a layer retain scalar order.
+                    // Inputs beyond the current output are not an evaluated DAG.
+                    if (ix >= circuit.outputWire(g) || iy >= circuit.outputWire(g)) return false;
+                    independent &= ix < firstOutput && iy < firstOutput;
+                }
+                if (!independent)
+                {
+                    detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
+                        for (u64 g = firstGate; g < firstGate+circuit.mWidth; ++g)
+                            wires[circuit.outputWire(g)] = arithmetic.multiply(
+                                wires[circuit.mOperands[2*g]], wires[circuit.mOperands[2*g+1]]);
+                    });
+                    continue;
+                }
+                runLayer([&](u64 begin, u64 end) {
+                    const auto* operands = circuit.mOperands.data()+2*(firstGate+begin);
+                    auto* output = wires.data()+firstOutput+begin;
+                    if (!detail::cpuZkWitnessRange(operands, wires.data(), output, end-begin, mod, options))
+                        detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
+                            for (u64 g = begin; g < end; ++g)
+                                wires[firstOutput+g] = arithmetic.multiply(
+                                    wires[circuit.mOperands[2*(firstGate+g)]],
+                                    wires[circuit.mOperands[2*(firstGate+g)+1]]);
+                        });
+                });
+            }
+            wires[static_cast<std::size_t>(circuit.maskIndex())] = nextFieldElement(prng, modulus);
+            return true;
+        }
+
+    }
+
+    bool zkMulWitness(
+        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
+        u64 voleSize, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
+    {
+        return zkMulWitness(circuit, modulus, prng, wires, voleSize, 1, settings, cpuBenchmark);
+    }
+
+    bool zkMulWitness(
+        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
+        u64 voleSize, u32 threads, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
+    {
+        if (modulus < 2 || circuit.gateCount() == 0) return false;
+        if (circuit.mOperands.size() != 2 * circuit.gateCount()) return false;
+        if (voleSize && voleSize < circuit.voleCount()) return false;
+        const auto chunks = std::min<u64>(circuit.mWidth, std::max<u32>(1, threads));
+        const auto workers = chunks <= 1 ? std::size_t{1} : std::min<std::size_t>(chunks,
+            cpuWorkerBudget(threads, cpuBenchmark.mContext));
+        // Empty owners allocate nothing. Construct only for the first independent
+        // layer needing multiple workers, then reuse them through the final join.
+        std::optional<std::vector<std::array<u64, 2>>> locals;
+        std::optional<detail::CpuExecutor> executor;
+        const auto options = detail::captureCpuZkOptions(settings);
+        return evaluateMulWitness(circuit, modulus, prng, wires, voleSize, options,
+            [&](auto&& evaluateRange) {
+                if (workers == 1)
+                {
+                    CpuBenchmarkTaskScope taskScope(cpuBenchmark);
+                    evaluateRange(0, circuit.mWidth);
+                    return;
+                }
+                if (!executor)
+                {
+                    locals.emplace(workers);
+                    for (std::size_t i = 0; i < workers; ++i)
+                        (*locals)[i] = {i * circuit.mWidth / workers, (i + 1) * circuit.mWidth / workers};
+                    executor.emplace(workers, cpuBenchmark.mContext);
+                }
+                executor->runBulk(workers, std::span(*locals), [&](std::size_t, const auto& range) {
+                    evaluateRange(range[0], range[1]);
+                });
+            });
+    }
+
+    struct ZkMulCpuWorkspace::Impl
+    {
+        u64 mWidth, mDepth;
+        std::size_t mProverChunks, mVerifierChunks;
+        std::vector<u64> mPartial;
+        const detail::CpuZkOptions mOptions;
+        detail::CpuExecutor mExecutor;
+        // Reused exclusively as proof accumulators or witness partition ranges.
+        std::vector<std::array<u64, 2>> mProverLocal;
+
         Impl(const ZkMulCircuit& circuit, u32 threads, CpuBenchmarkContext* benchmark, const LogVoleZkOptions& settings)
             : mWidth(circuit.mWidth), mDepth(circuit.mDepth),
               mProverChunks(static_cast<std::size_t>(std::min<u64>(mWidth, std::max<u32>(1, threads)))),
               mVerifierChunks(chunkCount(mWidth, threads)),
               mPartial(mVerifierChunks * static_cast<std::size_t>(mDepth)),
               mOptions(detail::captureCpuZkOptions(settings)),
-              mExecutor(std::min(workerBudget(threads, benchmark),
+              mExecutor(std::min(cpuWorkerBudget(threads, benchmark),
                   mVerifierChunks * static_cast<std::size_t>(mDepth)), benchmark),
-              mProverPartial(std::min(mProverChunks, mExecutor.workers()))
+              mProverLocal(std::min(mProverChunks, mExecutor.workers()))
         {}
 
         bool matches(const ZkMulCircuit& circuit) const noexcept
@@ -271,6 +310,23 @@ namespace osuCrypto::LogVole
     ZkMulCpuWorkspace::ZkMulCpuWorkspace(ZkMulCpuWorkspace&&) noexcept = default;
     ZkMulCpuWorkspace& ZkMulCpuWorkspace::operator=(ZkMulCpuWorkspace&&) noexcept = default;
 
+    bool zkMulWitness(
+        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
+        u64 voleSize, ZkMulCpuWorkspace& workspace)
+    {
+        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
+        auto& work = *workspace.mImpl;
+        auto ranges = std::span(work.mProverLocal);
+        for (std::size_t i = 0; i < ranges.size(); ++i)
+            ranges[i] = {i * circuit.mWidth / ranges.size(), (i + 1) * circuit.mWidth / ranges.size()};
+        return evaluateMulWitness(circuit, modulus, prng, wires, voleSize, work.mOptions,
+            [&](auto&& evaluateRange) {
+                work.mExecutor.runBulk(ranges.size(), ranges, [&](std::size_t, const auto& range) {
+                    evaluateRange(range[0], range[1]);
+                });
+            });
+    }
+
     bool zkMulProverResponse(
         const ZkMulCircuit& circuit,
         std::span<const u64> wires,
@@ -298,7 +354,7 @@ namespace osuCrypto::LogVole
         const std::size_t chunks = work.mProverChunks;
         seal::util::MultiplyUIntModOperand chiOperand;
         chiOperand.set(chi % modulus, mod);
-        auto partial = std::span(work.mProverPartial);
+        auto partial = std::span(work.mProverLocal);
         std::fill(partial.begin(), partial.end(), std::array<u64, 2>{});
 
         detail::withCpuZkArithmetic(mod, work.mOptions.mPseudoReduce, [&](const auto& arithmetic) {

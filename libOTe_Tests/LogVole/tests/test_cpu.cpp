@@ -296,7 +296,8 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
     std::vector<u64> macs(circuit.voleCount()), keys(circuit.voleCount());
     for (unsigned query = 0; query < 4; ++query)
     {
-        LOGVOLE_REQUIRE_TRUE(zkMulWitness(circuit, q, random, wires));
+        // Alternate witness ranges and proof accumulators in the same workspace.
+        LOGVOLE_REQUIRE_TRUE(zkMulWitness(circuit, q, random, wires, 0, serial));
         for (std::size_t i = 0; i < macs.size(); ++i)
         {
             macs[i] = random.get<u64>() % q;
@@ -334,6 +335,12 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
     LOGVOLE_REQUIRE_FALSE(zkMulProverResponse(wrongGeometry, wires, macs, 1, q, moved, untouched));
     LOGVOLE_REQUIRE_EQ(untouched.mU, 123u);
     LOGVOLE_REQUIRE_EQ(untouched.mV, 456u);
+    PRNG rejectedRandom(toBlock(0x574954, 1)), untouchedRandom(toBlock(0x574954, 1));
+    const std::vector<u64> savedWires(wires.begin(), wires.end());
+    LOGVOLE_REQUIRE_FALSE(zkMulWitness(circuit, q, rejectedRandom, wires, 0, parallel));
+    LOGVOLE_REQUIRE_FALSE(zkMulWitness(wrongGeometry, q, rejectedRandom, wires, 0, moved));
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(wires, savedWires));
+    LOGVOLE_REQUIRE_TRUE(rejectedRandom.get<block>() == untouchedRandom.get<block>());
     LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, 1, q, moved, untouched));
     bool invalidRejected = false;
     try { ZkMulCpuWorkspace invalid(ZkMulCircuit{}, 2); }
@@ -1032,11 +1039,14 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
             LOGVOLE_REQUIRE_EQ(circuit.mOperands[2*g], (g/width)*width+wiring.get<u64>()%width);
             LOGVOLE_REQUIRE_EQ(circuit.mOperands[2*g+1], (g/width)*width+wiring.get<u64>()%width);
         }
-        for (bool sequentialDependency : {false, true})
+        const std::vector<u32> originalOperands(circuit.mOperands.begin(), circuit.mOperands.end());
+        // No dependent layers, a dependent first layer followed by parallel
+        // work, and entirely dependent layers (which must stay serial).
+        for (u64 dependentLayers : {u64{0}, u64{1}, depth})
         {
-            if (sequentialDependency)
-                for (u64 g = 0; g < circuit.gateCount(); ++g)
-                    circuit.mOperands[2*g] = static_cast<u32>(circuit.outputWire(g)-1);
+            std::copy(originalOperands.begin(), originalOperands.end(), circuit.mOperands.begin());
+            for (u64 g = 0; g < width * dependentLayers; ++g)
+                circuit.mOperands[2*g] = static_cast<u32>(circuit.outputWire(g)-1);
             PRNG original(toBlock(0x7878, width));
             std::vector<u64> expected(circuit.voleCount()+13, 0);
             for (u64 i = 0; i < width; ++i) expected[i] = original.get<u64>() % modulus;
@@ -1045,13 +1055,26 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
                     expected[circuit.mOperands[2*g+1]] % modulus;
             expected[circuit.maskIndex()] = original.get<u64>() % modulus;
             const auto next = original.get<block>();
-            for (u32 workers : {1, 2, 4})
+            for (u32 workers : {0, 1, 2, 4})
             {
                 PRNG optimized(toBlock(0x7878, width));
                 AlignedUnVec<u64> actual;
+                actual.resize(expected.size());
+                const auto* storage = actual.data();
                 LOGVOLE_REQUIRE_TRUE(zkMulWitness(circuit, modulus, optimized, actual, expected.size(), workers));
+                LOGVOLE_REQUIRE_TRUE(actual.data() == storage);
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
                 LOGVOLE_REQUIRE_TRUE(optimized.get<block>() == next);
+                ZkMulCpuWorkspace workspace(circuit, workers);
+                for (unsigned repeat = 0; repeat < 2; ++repeat)
+                {
+                    PRNG replay(toBlock(0x7878, width));
+                    std::fill(actual.begin(), actual.end(), ~u64{0});
+                    LOGVOLE_REQUIRE_TRUE(zkMulWitness(circuit, modulus, replay, actual,
+                        expected.size(), workspace));
+                    LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
+                    LOGVOLE_REQUIRE_TRUE(replay.get<block>() == next);
+                }
             }
         }
     }
