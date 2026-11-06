@@ -197,6 +197,99 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ## Refactoring backlog
 
+### Ownership and execution inventory — 2026-11-06
+
+This inventory describes the working tree at `d2266368`, including uncommitted
+changes. A migrated synchronous wrapper is not a completed async migration.
+The original 216-declaration globals snapshot remains in the local review
+artifacts; the current scan finds **28 runtime global/static/TLS declarations**.
+Counts cover source branches on both platforms, not fields within objects or
+template instantiations. Compile-time constants and the five literal CUDA
+tables are excluded. The scanned LogVole library, tests, and frontend example
+contain no environment reads.
+
+| Step | Current status |
+| --- | --- |
+| Explicit CPU capabilities, settings, and context-owned host/root profiling | Committed; residual capability caches are listed below. |
+| Explicit CPU benchmark state; benchmark TLS removed | Committed (`49a1e92e`). |
+| Async in-place LHE, explicit executor and buffers | Committed (`305f7a26`); legacy overloads deprecated. |
+| Standalone sender expansion using async LHE | Committed (`cbe43e90`). |
+| Async truncated LENC, including fused subtraction | Committed (`42e5c113`); legacy overloads deprecated. |
+| Standalone receiver expansion using async LHE/LENC | Reviewed and committed (`d2266368`). Full-digit LENC retains its synchronous arithmetic. Existing state-owned mask storage remains leased across awaits without holding a mutex. |
+| Sender pinning evidence moved onto sender state | Present in working tree, uncommitted; separate CUDA allocation evidence remains global. |
+| Offline setup migration | Uncommitted intermediate `CpuRowScratch::runBulk` implementation; still needs the explicit executor/buffer call-site pattern. |
+| macoro `bulk_chunked` and `bulk` delegation | Uncommitted in the separate `out/macoro` checkout, with regression tests. |
+
+#### Remaining runtime globals
+
+| Group | Count | Exact remaining objects | Intended owner/change |
+| --- | ---: | --- | --- |
+| Protocol run/role | 2 | `gProtocolCacheRunCounter`, `tProtocolCacheScope` in `LogVoleRuntime.h` | Explicit session/cache identity and role passed down the stack. |
+| Worker budget | 2 | `gParallelWorkerSlotsInUse`, `tParallelWorkerCap` in `LogVoleParallel.h` | Caller-supplied compute resource and explicit chunk allowance; remove the ambient scheduler after caller migration. |
+| Statistics | 5 | `RingOpsStats::resetEpoch`, `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats`; `regions()::r` in `cuda/LogVoleGpuProtocol.cpp` | Owned diagnostics and per-chunk pending counters. |
+| CUDA allocation evidence | 2 | `rootCudaWireEvidenceMutex`, `lastRootCudaWireEvidence` in `LogVoleEncoding.cpp` | Caller/actor-owned evidence sink. |
+| Capability/compatibility caches | 4 | `defaultPublicSenderCt2PrefetchLevels()::h200`, `available()::ok`, `gaussianTransformHostCompatible()::{recognized, arithmeticCompatible}` | Capture once in the appropriate CPU/GPU resource owner. |
+| CUDA error/name storage | 4 | `gLastError`, `gLastWhere`, `gpuDeviceName()::name`, `gpuLastErrorOk()::buf` in `cuda/LogVoleGpuKernels.cu` | Execution-owned error state and owned name/message storage. |
+| CUDA attribute initialization | 7 | `gSharedConfigured`, `gPointwisePseudo55TreeSharedConfigured`, `gPointwisePseudo55TreeWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpVectorSharedConfigured`, `gPointwisePseudo55SparseSharedConfigured`, `gNttInversePostWarpStages05SharedConfigured` | Owned device preparation; consider only a justified CUDA initialization guard as an exception. |
+| Empty sentinel/CLI tags | 2 | `getRingHostModuli()::empty`, `logvoleTags` in `frontend/ExampleLogVole.cpp` | Context-owned empty storage/view and local or compile-time CLI tags. |
+
+The declaration-level scan with source locations is in the local artifacts
+`out/review/logvole-globals-inventory-current.{txt,json}`. The older files
+without `-current` are historical, not the remaining-work list.
+
+#### Remaining scheduling migration
+
+There are **20 `detail::runParallelTasks` call sites** in library `.cpp` files:
+`LogVole.cpp` (2), `LogVoleCore.cpp` (4), `LogVoleEncoding.cpp` (2),
+`LogVoleLenc.cpp` (1), `LogVoleLhe.cpp` (1), `LogVoleRingReceiver.cpp` (2),
+`LogVoleShrinkExpand.cpp` (2), `LogVoleZk.cpp` (5), and
+`cuda/LogVoleGpuBackend.cpp` (1). These are call sites, not independent algorithms.
+
+Separately, **22 offline setup sites** use the intermediate
+`setupScratch.runBulk`: Core (7), LENC (6), LHE (5), Ring (4).
+Five additional executor `runBulk` sites remain in ZK (3), legacy LHE (1),
+and legacy LENC (1). They still reach the blocking `CpuExecutor::runBulkChunked`
+adapter. Direct `sync_wait` expressions remain in `LogVoleCpuExecutor.h` and
+`cuda/LogVoleGpuBackend.cpp`; deleting just those expressions is not a migration.
+
+Receiver review validation: the Windows build and four end-to-end tests passed
+in 0.57 seconds, including fused/separate evaluation, one-worker execution,
+exact legacy agreement, and unchanged output on failure. Checks verify reuse
+of LHE/LENC storage and reacquisition of the same mask allocation after both
+success and failure. The preceding five-test run also covered the LENC kernel
+matrix (7.36 seconds). This migration has not been revalidated on WSL or CUDA
+execution.
+
+Next steps, in order:
+
+1. Migrate the root receiver expansion in `finalizeRootOnlineReceiverImpl`
+   (`LogVoleCore.cpp`) and its `LogVoleRingReceiver::onlineImpl` call boundary.
+   Thread the caller's executor and prepared buffers through the online API;
+   await the single expansion, preserving root state publication and GPU paths.
+   Deprecate the synchronous entry point while other callers migrate.
+2. Migrate intermediate receiver expansion (`LogVoleRingReceiver.cpp`, the
+   `wDoublePrime` loop). Its callbacks will await, so synchronous `bulk_chunked`
+   is not the outer algorithm. Discuss a bounded set of partition tasks joined
+   with `when_all_scope`: one exclusive buffer set per partition, sequential
+   chunks within each partition, and no nested worker multiplication. Child
+   inputs and outputs must remain owned until the join completes. Keep row
+   parallelism for the single-chunk case. Sender seed evaluation is a subsequent
+   step; preserve its early-rejection and accepted-cache behavior.
+3. Migrate coherent groups of remaining setup/proof/codec loops using direct
+   `bulk_chunked` where appropriate. Discuss a different algorithm first if a
+   loop does not fit. Retire `CpuRowScratch` scheduling and legacy overloads
+   when their callers are gone.
+4. Remove the remaining global groups above in separate ownership changes.
+   Small independent groups need not wait for all scheduling work to finish.
+
+The object-owned `ShrinkExpandScratch` leases and GPU worker maps are not
+globals. Redesigning them is separate work, not a prerequisite for eliminating
+the remaining ambient state. Socket detached-send semantics remain out of scope.
+Use fast focused tests per coherent step; broader cross-platform/leak checks
+belong at milestones. No benchmarks are needed for this migration.
+
+### Deferred option cleanup
+
 - Prune transport/encoding optionality after the ownership refactor. Audit the
   18 switches under `mAdvanced.mTransport`: retain only controls justified by a
   concrete caller requirement or measured supported-platform tradeoff. Make
