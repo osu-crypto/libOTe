@@ -1,16 +1,55 @@
 #include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
-#include "libOTe/Vole/LogVole/LogVoleLhe.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 
 #include <stdexcept>
 #include <utility>
 
 namespace osuCrypto::LogVole::detail
 {
+    struct CpuRowScratch::Impl
+    {
+        CpuBenchmarkContext* mBenchmark;
+        std::vector<Local> mLocals;
+        // Destroy/join the executor before releasing its borrowed numerical storage.
+        std::unique_ptr<CpuExecutor> mExecutor;
+        Impl(std::size_t workers, std::size_t words, CpuBenchmarkContext* benchmark)
+            : mBenchmark(benchmark), mLocals(workers)
+        {
+            if (words) for (auto& local : mLocals) local.mProduct.mCoeffs.resize(words);
+            if (workers > 1) mExecutor = std::make_unique<CpuExecutor>(workers, benchmark);
+        }
+    };
+
+    CpuRowScratch::CpuRowScratch() noexcept = default;
+    CpuRowScratch::~CpuRowScratch() = default;
+
+    std::span<CpuRowScratch::Local> CpuRowScratch::prepare(
+        std::size_t workers, std::size_t words, CpuBenchmarkContext* benchmark, std::size_t terms)
+    {
+        if (!workers) throw std::invalid_argument("CPU rows require a partition");
+        if (!mImpl || mImpl->mLocals.size() < workers || mImpl->mBenchmark != benchmark)
+            mImpl = std::make_unique<Impl>(workers, words, benchmark);
+        for (auto& local : std::span(mImpl->mLocals).first(workers))
+        {
+            if (words) local.mProduct.mCoeffs.resize(words);
+            local.mCiphertexts.reserve(terms);
+            local.mNodes.reserve(terms);
+            local.mOk = true;
+        }
+        return std::span(mImpl->mLocals).first(workers);
+    }
+
+    CpuExecutor* CpuRowScratch::executor() noexcept
+    {
+        return mImpl ? mImpl->mExecutor.get() : nullptr;
+    }
+
     struct ShrinkExpandScratch::Slot
     {
         std::vector<RnsPoly> mCt2;
-        LheDecScratch mLheDec;
+        CpuRowScratch mCpuRows;
         bool mInUse = false;
     };
 
@@ -34,9 +73,9 @@ namespace osuCrypto::LogVole::detail
         return mSlot->mCt2;
     }
 
-    LheDecScratch& ShrinkExpandScratch::Lease::lheDec() const
+    CpuRowScratch& ShrinkExpandScratch::Lease::cpuRows() const
     {
-        return mSlot->mLheDec;
+        return mSlot->mCpuRows;
     }
 
     ShrinkExpandScratch::Lease ShrinkExpandScratch::acquire(

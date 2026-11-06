@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 #include "libOTe/config.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
@@ -1896,7 +1897,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out,
         bool outputNtt,
         u32 requestedWorkers,
-        bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark)
+        bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (x.size() != mu)
@@ -1914,7 +1915,7 @@ namespace osuCrypto::LogVole
 
         return lencEvalTrunc(
             ctx, lacct, tree, mu, tauHi, gadgetLogBase, plaintextModulusBits, out, outputNtt, requestedWorkers,
-            leafInputsAreGadget, cpuBenchmark);
+            leafInputsAreGadget, cpuBenchmark, cpuScratch);
     }
 
     static bool lencEvalTruncImpl(
@@ -1929,7 +1930,7 @@ namespace osuCrypto::LogVole
         bool outputNtt,
         u32 requestedWorkers,
         bool leafInputsAreGadget,
-        bool subtractFromOutput, CpuBenchmarkState cpuBenchmark = {})
+        bool subtractFromOutput, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (mu == 0 || tauHi == 0 || lacct.mWidthPadded == 0)
@@ -1983,19 +1984,23 @@ namespace osuCrypto::LogVole
         if (subtractFromOutput && (out.size() != mu || !outputNtt ||
             !validateRingBatchShape(out, ctx.mParams))) return false;
         out.resize(mu);
-        const bool leavesOk = detail::runParallelTasks(
-            mu,
-            requestedWorkers,
-            [&](std::size_t leafIdx, CpuBenchmarkState& cpuBenchmark) -> bool
+        const auto terms = std::size_t{2} * lacct.mLevels * ctTauMax;
+        auto evalLeaf = [&](std::size_t leafIdx, detail::CpuRowScratch::Local& local) -> bool
         {
             const auto leaf = static_cast<u32>(leafIdx);
             RnsPoly accNtt{};
             if (subtractFromOutput) accNtt = std::move(out[leaf]);
             else resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
-            std::vector<const RnsPoly*> ciphertexts, nodes;
-            ciphertexts.reserve(2u * lacct.mLevels * ctTauMax);
-            nodes.reserve(2u * lacct.mLevels * ctTauMax);
+            auto& ciphertexts = local.mCiphertexts;
+            auto& nodes = local.mNodes;
+            // Retain capacity, but never retain borrowed tree/ciphertext pointers
+            // after the leaf completes, including on failure or exception.
+            struct ClearPointers
+            {
+                detail::CpuRowScratch::Local& mLocal;
+                ~ClearPointers() { mLocal.mCiphertexts.clear(); mLocal.mNodes.clear(); }
+            } clear{local};
             u32 parent = 0;
             for (u32 level = 0; level < lacct.mLevels; ++level)
             {
@@ -2057,28 +2062,64 @@ namespace osuCrypto::LogVole
 
             out[leaf] = std::move(accNtt);
             return true;
-        }, false, &cpuBenchmark);
+        };
+        bool useCpuScratch = cpuScratch != nullptr;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        useCpuScratch = useCpuScratch && !gpu::enabled(ctx);
+#endif
+        if (!useCpuScratch)
+            return detail::runParallelTasks(mu, requestedWorkers, [&](std::size_t leaf, CpuBenchmarkState&) {
+                detail::CpuRowScratch::Local local;
+                local.mCiphertexts.reserve(terms);
+                local.mNodes.reserve(terms);
+                return evalLeaf(leaf, local);
+            }, false, &cpuBenchmark);
 
-        return leavesOk;
+        const auto hardware = requestedWorkers == 1 ? std::size_t{1} :
+            std::max<std::size_t>(1, std::thread::hardware_concurrency());
+        auto capacity = hardware;
+        if (const auto* benchmark = cpuBenchmark.mContext)
+            capacity = std::max<std::size_t>(1, benchmark->mWorkerLimit
+                ? std::min(benchmark->mWorkerLimit, benchmark->mCpus.size()) : benchmark->mCpus.size());
+        const auto workers = std::min({std::size_t(mu), capacity,
+            requestedWorkers ? std::size_t(requestedWorkers) : hardware});
+        auto locals = cpuScratch->prepare(workers, 0, cpuBenchmark.mContext, terms);
+        const auto width = mu / workers;
+        const auto extra = mu % workers;
+        auto evalPartition = [&](std::size_t partition, detail::CpuRowScratch::Local& local) {
+            struct FlushStats { ~FlushStats() { flushRingOpsThreadLocalStats(); } } flush;
+            const auto begin = partition * width + std::min(partition, extra);
+            const auto end = begin + width + (partition < extra);
+            for (auto leaf = begin; leaf < end && local.mOk; ++leaf)
+                local.mOk = evalLeaf(leaf, local);
+        };
+        if (workers == 1)
+        {
+            CpuBenchmarkTaskScope metrics(cpuBenchmark);
+            evalPartition(0, locals[0]);
+        }
+        else cpuScratch->executor()->runBulk(workers, locals, evalPartition);
+        for (const auto& local : locals) if (!local.mOk) return false;
+        return true;
     }
 
     bool lencEvalTrunc(
         const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
         u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
-        std::vector<RnsPoly>& out, bool outputNtt, u32 requestedWorkers, bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark)
+        std::vector<RnsPoly>& out, bool outputNtt, u32 requestedWorkers, bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lencEvalTruncImpl(ctx, lacct, tree, mu, tauHi, gadgetLogBase, plaintextModulusBits,
-            out, outputNtt, requestedWorkers, leafInputsAreGadget, false, cpuBenchmark);
+            out, outputNtt, requestedWorkers, leafInputsAreGadget, false, cpuBenchmark, cpuScratch);
     }
 
     bool lencSubtractEvalTruncNttInplace(
         const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
         u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
-        std::vector<RnsPoly>& out, u32 requestedWorkers, bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark)
+        std::vector<RnsPoly>& out, u32 requestedWorkers, bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lencEvalTruncImpl(ctx, lacct, tree, mu, tauHi, gadgetLogBase, plaintextModulusBits,
-            out, true, requestedWorkers, leafInputsAreGadget, true, cpuBenchmark);
+            out, true, requestedWorkers, leafInputsAreGadget, true, cpuBenchmark, cpuScratch);
     }
 }

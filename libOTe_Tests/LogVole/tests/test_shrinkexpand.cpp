@@ -286,7 +286,7 @@ namespace
         }
         {
             auto lease = detail::ShrinkExpandScratch::acquire(senderState.mCpuScratch);
-            LOGVOLE_REQUIRE_TRUE(lease.lheDec().executor() == nullptr);
+            LOGVOLE_REQUIRE_TRUE(lease.cpuRows().executor() == nullptr);
         }
         detail::CpuExecutor* senderExecutor = nullptr;
         for (oc::u32 workers : {3u, 3u, 1u})
@@ -301,9 +301,9 @@ namespace
             for (std::size_t row = 0; row < repeated.mTbk.size(); ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(repeated.mTbk[row].mCoeffs, senderExpand.mTbk[row].mCoeffs));
             auto lease = detail::ShrinkExpandScratch::acquire(senderState.mCpuScratch);
-            if (!senderExecutor) senderExecutor = lease.lheDec().executor();
+            if (!senderExecutor) senderExecutor = lease.cpuRows().executor();
             LOGVOLE_REQUIRE_TRUE(senderExecutor != nullptr);
-            LOGVOLE_REQUIRE_TRUE(lease.lheDec().executor() == senderExecutor);
+            LOGVOLE_REQUIRE_TRUE(lease.cpuRows().executor() == senderExecutor);
         }
 
         ShrinkExpandExpandReceiverInput receiverExpandInput{};
@@ -322,7 +322,7 @@ namespace
         }
         {
             auto lease = detail::ShrinkExpandScratch::acquire(receiverState.mCpuScratch);
-            LOGVOLE_REQUIRE_TRUE(lease.lheDec().executor() == nullptr);
+            LOGVOLE_REQUIRE_TRUE(lease.cpuRows().executor() == nullptr);
         }
         // Reuse the same operation storage across parallel and serial calls.
         // A serial allowance must remain serial even with a prepared pool.
@@ -339,9 +339,9 @@ namespace
             for (std::size_t row = 0; row < repeated.mTbm.size(); ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(repeated.mTbm[row].mCoeffs, receiverExpand.mTbm[row].mCoeffs));
             auto lease = detail::ShrinkExpandScratch::acquire(receiverState.mCpuScratch);
-            if (!executor) executor = lease.lheDec().executor();
+            if (!executor) executor = lease.cpuRows().executor();
             LOGVOLE_REQUIRE_TRUE(executor != nullptr);
-            LOGVOLE_REQUIRE_TRUE(lease.lheDec().executor() == executor);
+            LOGVOLE_REQUIRE_TRUE(lease.cpuRows().executor() == executor);
         }
 
         std::vector<RnsPoly> diff;

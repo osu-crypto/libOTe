@@ -157,8 +157,8 @@ namespace osuCrypto::LogVole
         const ShrinkExpandReceiverState& state,
         const ShrinkExpandExpandReceiverInput& input,
         ShrinkExpandReceiverExpandOutput& out,
-        // CPU LHE allowance: outer chunk workers pass 1 to avoid nested pools.
-        u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark = {});
+        // CPU row allowance: outer chunk workers pass 1 to avoid nested pools.
+        u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark = {});
 
     bool shrinkExpandDenoiseComb(
         const RingNttContext& ctx,

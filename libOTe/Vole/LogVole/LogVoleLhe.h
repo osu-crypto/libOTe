@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
@@ -10,28 +11,6 @@
 
 namespace osuCrypto::LogVole
 {
-    namespace detail
-    {
-        class CpuExecutor;
-
-        // Exclusive operation scratch. Empty until a CPU row phase needs it;
-        // the VOLE scratch lease keeps it alive through the synchronous join.
-        class LheDecScratch
-        {
-            struct Impl;
-            std::unique_ptr<Impl> mImpl;
-        public:
-            struct Local { RnsPoly mProduct; bool mOk = true; };
-            LheDecScratch() noexcept;
-            ~LheDecScratch();
-            LheDecScratch(const LheDecScratch&) = delete;
-            LheDecScratch& operator=(const LheDecScratch&) = delete;
-            std::span<Local> prepare(std::size_t workers, std::size_t words,
-                CpuBenchmarkContext* benchmark);
-            CpuExecutor* executor() noexcept;
-        };
-    }
-
     bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out);
 
     // Setup states borrow immutable cached public data. The mutable builder
@@ -131,7 +110,7 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
         u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::LheDecScratch* cpuScratch = nullptr);
+        detail::CpuRowScratch* cpuScratch = nullptr);
 
     // Consuming overload: reuses the ciphertext allocation for NTT-domain
     // decryption. The coefficient-domain special case keeps its existing path.
@@ -144,7 +123,7 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
         u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::LheDecScratch* cpuScratch = nullptr);
+        detail::CpuRowScratch* cpuScratch = nullptr);
 
     bool deriveSkx(
         const RingNttContext& ctx,

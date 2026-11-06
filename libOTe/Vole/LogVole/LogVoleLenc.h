@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
@@ -233,7 +234,8 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
         u32 requestedWorkers = 1,
-        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {});
+        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {},
+        detail::CpuRowScratch* cpuScratch = nullptr);
 
     bool lencEvalTrunc(
         const RingNttContext& ctx,
@@ -246,7 +248,8 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
         u32 requestedWorkers = 1,
-        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {});
+        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {},
+        detail::CpuRowScratch* cpuScratch = nullptr);
 
     // out -= Eval(tree) in the NTT domain, consuming each existing output row
     // as the path-product accumulator. out must contain mu canonical NTT
@@ -261,5 +264,6 @@ namespace osuCrypto::LogVole
         u32 plaintextModulusBits,
         std::vector<RnsPoly>& out,
         u32 requestedWorkers = 1,
-        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {});
+        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {},
+        detail::CpuRowScratch* cpuScratch = nullptr);
 }

@@ -351,6 +351,7 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
 void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
 {
     PRNG random(toBlock(0x4556414c, 0x46555345));
+    LogVole::detail::CpuRowScratch scratch;
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
     for (unsigned mu : {3, 9})
@@ -383,24 +384,43 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
         // Independent composition of the existing coefficient-domain evaluator,
         // forward transform and ring subtraction specifies the fused operation.
         std::vector<RnsPoly> eval;
+        globalRingOpsStats.reset();
         LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(ctx, enc.mLacct, tree, mu, 1, digitBits,
             plaintextBits, eval, false, 1, gadget));
+        flushRingOpsThreadLocalStats();
+        const auto products = globalRingOpsStats.mDyadicMulAddCount.load();
         LOGVOLE_REQUIRE_TRUE(forwardNttBatch(eval, ctx));
         auto expected = initial;
         for (unsigned row = 0; row < mu; ++row)
             LOGVOLE_REQUIRE_TRUE(ringSubInplace(expected[row], eval[row], ctx));
-        for (u32 workers : {1, 2, 4, 8})
+        for (u32 workers : {1, 2, 4, 8, 1})
         {
             auto actual = initial;
+            globalRingOpsStats.reset();
             LOGVOLE_REQUIRE_TRUE(lencSubtractEvalTruncNttInplace(ctx, enc.mLacct, tree,
-                mu, 1, digitBits, plaintextBits, actual, workers, gadget));
+                mu, 1, digitBits, plaintextBits, actual, workers, gadget, {}, &scratch));
+            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), products);
+            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mSubCount.load(), mu);
             for (unsigned row = 0; row < mu; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, expected[row].mCoeffs));
+            auto* executor = scratch.executor();
+            // Reuse the same lists for separate evaluation and coefficient output.
+            LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(ctx, enc.mLacct, tree, mu, 1, digitBits,
+                plaintextBits, actual, false, workers, gadget, {}, &scratch));
+            LOGVOLE_REQUIRE_TRUE(forwardNttBatch(actual, ctx));
+            for (unsigned row = 0; row < mu; ++row)
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, eval[row].mCoeffs));
+            LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
+            for (auto& local : scratch.prepare(1, 0, nullptr))
+            {
+                LOGVOLE_REQUIRE_TRUE(local.mCiphertexts.empty());
+                LOGVOLE_REQUIRE_TRUE(local.mNodes.empty());
+            }
         }
         auto invalid = initial;
         invalid.pop_back();
         LOGVOLE_REQUIRE_FALSE(lencSubtractEvalTruncNttInplace(ctx, enc.mLacct, tree,
-            mu, 1, digitBits, plaintextBits, invalid, 1, gadget));
+            mu, 1, digitBits, plaintextBits, invalid, 1, gadget, {}, &scratch));
         for (unsigned row = 0; row < invalid.size(); ++row)
             LOGVOLE_REQUIRE_TRUE(rangesEqual(invalid[row].mCoeffs, initial[row].mCoeffs));
     }
@@ -764,7 +784,7 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
             for (unsigned row = 0; row < rows; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
             auto lease = LogVole::detail::ShrinkExpandScratch::acquire(scratchOwner);
-            auto& scratch = lease.lheDec();
+            auto& scratch = lease.cpuRows();
             auto consumed = input;
             LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, actual, &publicA,
                 inputNtt, outputNtt, workers, {}, &scratch));
@@ -828,9 +848,9 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
                 }
                 // Another active operation gets an independent owner/partition set.
                 auto second = LogVole::detail::ShrinkExpandScratch::acquire(scratchOwner);
-                LOGVOLE_REQUIRE_TRUE(&second.lheDec() != &scratch);
+                LOGVOLE_REQUIRE_TRUE(&second.cpuRows() != &scratch);
                 LOGVOLE_REQUIRE_TRUE(lheDec(separate, input, sk, actual, &publicA,
-                    true, true, workers, {}, &second.lheDec()));
+                    true, true, workers, {}, &second.cpuRows()));
                 for (unsigned row = 0; row < rows; ++row)
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
             }

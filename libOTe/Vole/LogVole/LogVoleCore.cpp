@@ -3407,7 +3407,7 @@ namespace osuCrypto::LogVole
                 false,
                 false,
                 state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark,
-                cpuScratch ? &cpuScratch->lheDec() : nullptr))
+                cpuScratch ? &cpuScratch->cpuRows() : nullptr))
         {
             return false;
         }
@@ -5449,7 +5449,7 @@ namespace osuCrypto::LogVole
                     true,
                     true,
                     state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark,
-                    cpuScratch ? &cpuScratch->lheDec() : nullptr))
+                    cpuScratch ? &cpuScratch->cpuRows() : nullptr))
             {
                 return false;
             }
@@ -5465,6 +5465,11 @@ namespace osuCrypto::LogVole
         }
         {
             RootStep step("final: lencEvalTrunc", rootProfiler(ctx));
+            std::optional<detail::ShrinkExpandScratch::Lease> cpuScratch;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (!gpu::enabled(ctx))
+#endif
+                cpuScratch.emplace(detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch));
             // Reuse the tree the digest step built over the same hatD, when it kept
             // it. The overload without a tree rebuilds it, which is the single
             // largest host cost in the Root and is pure duplicate work.
@@ -5480,7 +5485,7 @@ namespace osuCrypto::LogVole
                       leftEvalNtt,
                       true,
                       state.mShrinkExpandState.mParams.mNumWorkerThreads,
-                      true, cpuBenchmark)
+                      true, cpuBenchmark, cpuScratch ? &cpuScratch->cpuRows() : nullptr)
                 : lencEvalTrunc(
                       ctx,
                       toLencLacct(state),
@@ -5492,7 +5497,7 @@ namespace osuCrypto::LogVole
                       leftEvalNtt,
                       true,
                       state.mShrinkExpandState.mParams.mNumWorkerThreads,
-                      true, cpuBenchmark);
+                      true, cpuBenchmark, cpuScratch ? &cpuScratch->cpuRows() : nullptr);
             if (!ok)
             {
                 return false;

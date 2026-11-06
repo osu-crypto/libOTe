@@ -726,48 +726,12 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    struct detail::LheDecScratch::Impl
-    {
-        CpuBenchmarkContext* mBenchmark;
-        std::vector<Local> mLocals;
-        // Destroy/join the executor before releasing its borrowed numerical storage.
-        std::unique_ptr<CpuExecutor> mExecutor;
-        Impl(std::size_t workers, std::size_t words, CpuBenchmarkContext* benchmark)
-            : mBenchmark(benchmark), mLocals(workers)
-        {
-            if (words) for (auto& local : mLocals) local.mProduct.mCoeffs.resize(words);
-            if (workers > 1) mExecutor = std::make_unique<CpuExecutor>(workers, benchmark);
-        }
-    };
-
-    detail::LheDecScratch::LheDecScratch() noexcept = default;
-    detail::LheDecScratch::~LheDecScratch() = default;
-
-    std::span<detail::LheDecScratch::Local> detail::LheDecScratch::prepare(
-        std::size_t workers, std::size_t words, CpuBenchmarkContext* benchmark)
-    {
-        if (!workers) throw std::invalid_argument("LHE decryption requires a CPU partition");
-        if (!mImpl || mImpl->mLocals.size() != workers || mImpl->mBenchmark != benchmark)
-            mImpl = std::make_unique<Impl>(workers, words, benchmark);
-        for (auto& local : mImpl->mLocals)
-        {
-            if (words) local.mProduct.mCoeffs.resize(words);
-            local.mOk = true;
-        }
-        return mImpl->mLocals;
-    }
-
-    detail::CpuExecutor* detail::LheDecScratch::executor() noexcept
-    {
-        return mImpl ? mImpl->mExecutor.get() : nullptr;
-    }
-
     // Synchronous row scheduling shared by both LHE representations. The
     // caller's lease owns the pool and locals until all partitions have joined.
     template<typename RowFn>
     static bool runLheRows(const RingNttContext& ctx, std::size_t rowCount,
         u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
-        detail::LheDecScratch* cpuScratch, std::size_t productWords,
+        detail::CpuRowScratch* cpuScratch, std::size_t productWords,
         bool flushStats, RowFn&& decryptRow)
     {
         struct FlushStats
@@ -814,7 +778,7 @@ namespace osuCrypto::LogVole
                     cpuBenchmark.mContext);
                 const auto width = rowCount / workers;
                 const auto extra = rowCount % workers;
-                auto runPartition = [&](std::size_t partition, detail::LheDecScratch::Local& local) {
+                auto runPartition = [&](std::size_t partition, detail::CpuRowScratch::Local& local) {
                     // Persistent workers do not flush ring counters on thread
                     // exit between queries. Publish once per partition, also
                     // on failure, before bulk signals completion.
@@ -845,7 +809,7 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt,
         bool outputNtt,
         u32 requestedWorkers,
-        std::vector<RnsPoly>* ownedCipher, CpuBenchmarkState cpuBenchmark, detail::LheDecScratch* cpuScratch)
+        std::vector<RnsPoly>* ownedCipher, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (cipher.empty() || !validateRingBatchShape(cipher, ctx.mParams) || !validateRingPolyShape(sk, ctx.mParams))
@@ -966,7 +930,7 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, const std::vector<RnsPoly>& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
         bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
-        detail::LheDecScratch* cpuScratch)
+        detail::CpuRowScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, nullptr, cpuBenchmark, cpuScratch);
@@ -976,7 +940,7 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, std::vector<RnsPoly>&& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
         bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
-        detail::LheDecScratch* cpuScratch)
+        detail::CpuRowScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, &cipher, cpuBenchmark, cpuScratch);

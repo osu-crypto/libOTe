@@ -1007,7 +1007,7 @@ namespace osuCrypto::LogVole
                 state.mPublicANtt ? state.mPublicANtt.get() : nullptr,
                 false,
                 false,
-                lheWorkers, cpuBenchmark, &scratch.lheDec()))
+                lheWorkers, cpuBenchmark, &scratch.cpuRows()))
         {
             return false;
         }
@@ -1019,7 +1019,7 @@ namespace osuCrypto::LogVole
     bool shrinkExpandExpandReceiver(
         const ShrinkExpandReceiverState& state,
         const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out, u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark)
+        ShrinkExpandReceiverExpandOutput& out, u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark)
     {
         if ((!input.mTree && input.mX.size() != state.mParams.mMu) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -1100,9 +1100,9 @@ namespace osuCrypto::LogVole
         applyStep.stop();
         HostStep decryptStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt", &cpuBenchmark);
         std::vector<RnsPoly> decPartialNtt;
-        auto lheWorkers = cpuLheWorkers;
+        auto rowWorkers = cpuRowWorkers;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled(ctx)) lheWorkers = state.mParams.mNumWorkerThreads;
+        if (gpu::enabled(ctx)) rowWorkers = state.mParams.mNumWorkerThreads;
 #endif
         if (!lheDec(
                 ctx,
@@ -1112,7 +1112,7 @@ namespace osuCrypto::LogVole
                 publicA.get(),
                 true,
                 true,
-                lheWorkers, cpuBenchmark, &scratch.lheDec()))
+                rowWorkers, cpuBenchmark, &scratch.cpuRows()))
         {
             return false;
         }
@@ -1127,7 +1127,7 @@ namespace osuCrypto::LogVole
             evalOk = lencSubtractEvalTruncNttInplace(
                 ctx, state.hostLacct(), *tree, state.mParams.mMu, state.mParams.mTau,
                 state.mParams.mGadgetLogBase, state.mParams.mPlaintextModulusBits,
-                decPartialNtt, state.mParams.mNumWorkerThreads, state.mParams.mLeafInputsAreGadget, cpuBenchmark);
+                decPartialNtt, rowWorkers, state.mParams.mLeafInputsAreGadget, cpuBenchmark, &scratch.cpuRows());
         }
         else if (state.mParams.mTruncateOneGadgetDigit)
         {
@@ -1141,8 +1141,8 @@ namespace osuCrypto::LogVole
                 state.mParams.mPlaintextModulusBits,
                 evalNtt,
                 true,
-                state.mParams.mNumWorkerThreads,
-                state.mParams.mLeafInputsAreGadget, cpuBenchmark);
+                rowWorkers,
+                state.mParams.mLeafInputsAreGadget, cpuBenchmark, &scratch.cpuRows());
         }
         else
         {
