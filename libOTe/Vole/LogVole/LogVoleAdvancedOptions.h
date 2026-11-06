@@ -5,6 +5,7 @@
 
 namespace osuCrypto
 {
+    namespace LogVole { struct CpuBenchmarkContext; }
     struct LogVoleTransportOptions
     {
         bool mOwnedSetupSend = true;
@@ -249,6 +250,9 @@ namespace osuCrypto
     struct LogVoleExecutionOptions
     {
         bool mUseGpu = false;
+        // Optional borrowed diagnostics. The caller keeps this alive until all
+        // operations (including deferred materialization) using these options finish.
+        LogVole::CpuBenchmarkContext* mCpuBenchmark = nullptr;
         LogVoleAdvancedOptions mAdvanced;
         bool valid() const noexcept { return mAdvanced.valid(); }
         bool operator==(const LogVoleExecutionOptions&) const = default;

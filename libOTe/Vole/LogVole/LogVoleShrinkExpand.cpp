@@ -377,9 +377,9 @@ namespace osuCrypto::LogVole
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
         ShrinkExpandOfflineMessage* message,
-        ShrinkExpandSenderState& senderState)
+        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {})
     {
-        HostStep setupStep(hostProfiler(input.mRingFactoryOwner), "setup sender: shrink expand total");
+        HostStep setupStep(hostProfiler(input.mRingFactoryOwner), "setup sender: shrink expand total", &cpuBenchmark);
         // A direct caller must not promote a receiver scope into a sender
         // capability merely by invoking the sender API with a private token.
         if (input.mFixedSk1Device &&
@@ -448,7 +448,7 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            HostStep sk1Step(hostProfiler(ctx), "setup sender: top sk1 uniform sampling");
+            HostStep sk1Step(hostProfiler(ctx), "setup sender: top sk1 uniform sampling", &cpuBenchmark);
             if (input.mDeferTopSk1Host && !message &&
                 input.mParams.mTruncateOneGadgetDigit)
             {
@@ -464,7 +464,7 @@ namespace osuCrypto::LogVole
             else next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, prng);
         }
 
-        HostStep publicDataStep(hostProfiler(ctx), "setup sender: public data");
+        HostStep publicDataStep(hostProfiler(ctx), "setup sender: public data", &cpuBenchmark);
         const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (input.mDeferHostCiphertexts && !message && gpu::enabled(ctx) &&
@@ -521,7 +521,7 @@ namespace osuCrypto::LogVole
                 input.mParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message,
                 input.mDeferHostCiphertexts && !message,
-                input.mSDevice.get(), input.mLazyS.get(), input.mParams.mGpuSetup);
+                input.mSDevice.get(), input.mLazyS.get(), input.mParams.mGpuSetup, cpuBenchmark);
         }
         else
         {
@@ -573,7 +573,7 @@ namespace osuCrypto::LogVole
                 input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
                 lenc.mLazyRandomizers, nullptr, nullptr,
                 next.mTopSk1Device.get(), next.mLazyTopSk1.get(),
-                next.mTopSk1OwnerRunId, static_cast<bool>(next.mTopSk1Device), input.mParams.mGpuSetup);
+                next.mTopSk1OwnerRunId, static_cast<bool>(next.mTopSk1Device), input.mParams.mGpuSetup, cpuBenchmark);
         }
         else
         {
@@ -590,7 +590,7 @@ namespace osuCrypto::LogVole
                 next.mPublicANtt.get(),
                 input.mParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
-                lenc.mLazyRandomizers, input.mParams.mGpuSetup);
+                lenc.mLazyRandomizers, input.mParams.mGpuSetup, cpuBenchmark);
         }
         if (!ct1Ok)
         {
@@ -608,7 +608,7 @@ namespace osuCrypto::LogVole
 
         ShrinkExpandOfflineMessage nextMessage{};
         nextMessage.mParams = next.mParams;
-        HostStep messageCopyStep(hostProfiler(ctx), "setup sender: offline message copy");
+        HostStep messageCopyStep(hostProfiler(ctx), "setup sender: offline message copy", &cpuBenchmark);
         if (setupParallelMessageCopyEnabled(input.mParams.mGpuSetup, ctx))
         {
             nextMessage.mCt1.mRows = next.mCt1.mRows;
@@ -624,14 +624,14 @@ namespace osuCrypto::LogVole
             // Each worker allocates and copies its own polynomial. Message and
             // state remain independently mutable, exactly as with assignment.
             if (!detail::runParallelTasks(ct1Count + lacctCount,
-                    input.mParams.mNumWorkerThreads, [&](std::size_t index) {
+                    input.mParams.mNumWorkerThreads, [&](std::size_t index, CpuBenchmarkState& cpuBenchmark) {
                         if (index < ct1Count)
                             nextMessage.mCt1.mPolys[index] = next.mCt1.mPolys[index];
                         else
                             nextMessage.mLacct.mCt.mPolys[index - ct1Count] =
                                 next.mLacct.mCt.mPolys[index - ct1Count];
                         return true;
-                    })) return false;
+                    }, false, &cpuBenchmark)) return false;
         }
         else
         {
@@ -649,17 +649,17 @@ namespace osuCrypto::LogVole
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
         ShrinkExpandOfflineMessage& message,
-        ShrinkExpandSenderState& senderState)
+        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark)
     {
-        return prepareShrinkExpandSenderOfflineImpl(input, prng, &message, senderState);
+        return prepareShrinkExpandSenderOfflineImpl(input, prng, &message, senderState, cpuBenchmark);
     }
 
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
-        ShrinkExpandSenderState& senderState)
+        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark)
     {
-        return prepareShrinkExpandSenderOfflineImpl(input, prng, nullptr, senderState);
+        return prepareShrinkExpandSenderOfflineImpl(input, prng, nullptr, senderState, cpuBenchmark);
     }
 
     template <typename Message>
@@ -961,7 +961,7 @@ namespace osuCrypto::LogVole
     bool shrinkExpandExpandSender(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out)
+        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark)
     {
         if (!validateRingPolyShape(input.mTbkPrime, state.mParams.mRing) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -1003,7 +1003,7 @@ namespace osuCrypto::LogVole
                 state.mPublicANtt ? state.mPublicANtt.get() : nullptr,
                 false,
                 false,
-                state.mParams.mNumWorkerThreads))
+                state.mParams.mNumWorkerThreads, cpuBenchmark))
         {
             return false;
         }
@@ -1015,7 +1015,7 @@ namespace osuCrypto::LogVole
     bool shrinkExpandExpandReceiver(
         const ShrinkExpandReceiverState& state,
         const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out)
+        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark)
     {
         if ((!input.mTree && input.mX.size() != state.mParams.mMu) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -1047,7 +1047,7 @@ namespace osuCrypto::LogVole
         auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
         auto& receiverCt2 = scratch.ct2();
         const bool senderRole = currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender;
-        HostStep sampleStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling");
+        HostStep sampleStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling", &cpuBenchmark);
         if (!buildHashedCt2(
                 ctx,
                 state.mParams.mMu,
@@ -1061,7 +1061,7 @@ namespace osuCrypto::LogVole
         }
 
         sampleStep.stop();
-        HostStep applyStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: apply" : "cpu receiver expand detail: apply");
+        HostStep applyStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: apply" : "cpu receiver expand detail: apply", &cpuBenchmark);
         std::vector<RnsPoly> ct1AppliedNtt;
         bool applyOk = false;
         if (state.mParams.mTruncateOneGadgetDigit)
@@ -1094,7 +1094,7 @@ namespace osuCrypto::LogVole
         }
 
         applyStep.stop();
-        HostStep decryptStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt");
+        HostStep decryptStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt", &cpuBenchmark);
         std::vector<RnsPoly> decPartialNtt;
         if (!lheDec(
                 ctx,
@@ -1104,13 +1104,13 @@ namespace osuCrypto::LogVole
                 publicA.get(),
                 true,
                 true,
-                state.mParams.mNumWorkerThreads))
+                state.mParams.mNumWorkerThreads, cpuBenchmark))
         {
             return false;
         }
 
         decryptStep.stop();
-        HostStep evalStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: tree eval" : "cpu receiver expand detail: tree eval");
+        HostStep evalStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: tree eval" : "cpu receiver expand detail: tree eval", &cpuBenchmark);
         std::vector<RnsPoly> evalNtt;
         bool evalOk = false;
         const bool fusedEval = ctx.mExecutionOptions.mAdvanced.mCpu.mFusedExpandEval && state.mParams.mTruncateOneGadgetDigit;
@@ -1119,7 +1119,7 @@ namespace osuCrypto::LogVole
             evalOk = lencSubtractEvalTruncNttInplace(
                 ctx, state.hostLacct(), *tree, state.mParams.mMu, state.mParams.mTau,
                 state.mParams.mGadgetLogBase, state.mParams.mPlaintextModulusBits,
-                decPartialNtt, state.mParams.mNumWorkerThreads, state.mParams.mLeafInputsAreGadget);
+                decPartialNtt, state.mParams.mNumWorkerThreads, state.mParams.mLeafInputsAreGadget, cpuBenchmark);
         }
         else if (state.mParams.mTruncateOneGadgetDigit)
         {
@@ -1134,7 +1134,7 @@ namespace osuCrypto::LogVole
                 evalNtt,
                 true,
                 state.mParams.mNumWorkerThreads,
-                state.mParams.mLeafInputsAreGadget);
+                state.mParams.mLeafInputsAreGadget, cpuBenchmark);
         }
         else
         {
@@ -1158,7 +1158,7 @@ namespace osuCrypto::LogVole
         }
 
         evalStep.stop();
-        HostStep finishStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: finish" : "cpu receiver expand detail: finish");
+        HostStep finishStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: finish" : "cpu receiver expand detail: finish", &cpuBenchmark);
         ShrinkExpandReceiverExpandOutput next{};
         next.mTbm.resize(state.mParams.mMu);
         for (u32 row = 0; row < state.mParams.mMu; ++row)
@@ -1181,8 +1181,9 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& tbaPrime,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers)
+        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (ctx.mParams.mCoeffModulusBits.empty() ||
             tbaPrime.size() % ctx.mParams.mCoeffModulusBits.size() != 0 ||
             !validateRingBatchShape(tbaPrime, ctx.mParams))
@@ -1291,7 +1292,7 @@ namespace osuCrypto::LogVole
         // Each output owns its allocation and reads disjoint input polynomials.
         // Shared recovery constants are immutable. The common worker budget also
         // applies when denoising runs inside a seed-search worker.
-        if (!detail::runParallelTasks(wPrime, requestedWorkers, [&](std::size_t i) {
+        if (!detail::runParallelTasks(wPrime, requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
             RnsPoly polyOut{};
             resizeZero(polyOut.mCoeffs, n * rho);
 
@@ -1387,7 +1388,7 @@ namespace osuCrypto::LogVole
 
             result[i] = std::move(polyOut);
             return true;
-        })) return false;
+        }, false, &cpuBenchmark)) return false;
 
         out = std::move(result);
         return true;

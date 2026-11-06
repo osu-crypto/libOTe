@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
@@ -115,14 +116,14 @@ namespace osuCrypto::LogVole
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
         ShrinkExpandOfflineMessage& message,
-        ShrinkExpandSenderState& senderState);
+        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {});
 
     // State-only preparation keeps one tensor package and avoids a discarded
     // message copy. Explicit internal opt-in can defer its host ciphertexts.
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
-        ShrinkExpandSenderState& senderState);
+        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {});
 
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
@@ -148,16 +149,16 @@ namespace osuCrypto::LogVole
     bool shrinkExpandExpandSender(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out);
+        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
     bool shrinkExpandExpandReceiver(
         const ShrinkExpandReceiverState& state,
         const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out);
+        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
     bool shrinkExpandDenoiseComb(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& tbaPrime,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
 }

@@ -43,6 +43,69 @@ using namespace osuCrypto::LogVole;
 
 void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
 {
+    // Explicit state must preserve same-thread nesting, isolate independent
+    // contexts, and unwind counters when an inner task throws.
+    CpuBenchmarkContext telemetry, other;
+    telemetry.mCpus.resize(2);
+    telemetry.mWorkerLimit = 2;
+    other.mCpus.resize(1);
+    CpuBenchmarkState state{&telemetry};
+    for (bool dynamic : {false, true})
+    {
+        telemetry.reset();
+        LOGVOLE_REQUIRE_TRUE(LogVole::detail::runParallelTasks(4, 2,
+            [&](std::size_t, CpuBenchmarkState& workerState) {
+                LOGVOLE_REQUIRE_TRUE(workerState.mContext == &telemetry);
+                LOGVOLE_REQUIRE_EQ(workerState.mTaskDepth, 1u);
+                return LogVole::detail::runParallelTasks(3, 1,
+                    [&](std::size_t, CpuBenchmarkState& nestedState) {
+                        LOGVOLE_REQUIRE_EQ(nestedState.mTaskDepth, 2u);
+                        LOGVOLE_REQUIRE_EQ(other.mActiveTaskThreads.load(), 0u);
+                        return true;
+                    }, false, &workerState);
+            }, dynamic, &state));
+        LOGVOLE_REQUIRE_EQ(state.mTaskDepth, 0u);
+        LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+        LOGVOLE_REQUIRE_EQ(telemetry.mWorkerSlots.load(), 0u);
+        LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() <= 2u);
+        LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() > 0u);
+    }
+    {
+        CpuBenchmarkTaskScope outer(state);
+        CpuBenchmarkState otherState{&other};
+        LOGVOLE_REQUIRE_TRUE(LogVole::detail::runParallelTasks(1, 1,
+            [&](std::size_t, CpuBenchmarkState& independent) {
+                LOGVOLE_REQUIRE_EQ(independent.mTaskDepth, 1u);
+                LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 1u);
+                LOGVOLE_REQUIRE_EQ(other.mActiveTaskThreads.load(), 1u);
+                return true;
+            }, false, &otherState));
+        bool innerThrew = false;
+        try
+        {
+            LogVole::detail::runParallelTasks(1, 1,
+                [](std::size_t) -> bool { throw std::runtime_error("instrumented task"); },
+                false, &state);
+        }
+        catch (const std::runtime_error&) { innerThrew = true; }
+        LOGVOLE_REQUIRE_TRUE(innerThrew);
+        LOGVOLE_REQUIRE_EQ(state.mTaskDepth, 1u);
+        LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 1u);
+        LOGVOLE_REQUIRE_EQ(other.mActiveTaskThreads.load(), 0u);
+    }
+    LOGVOLE_REQUIRE_EQ(state.mTaskDepth, 0u);
+    LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+
+    // A timer stopped on a different thread must not subtract unrelated CPU clocks.
+    HostStepProfiler profiler;
+    HostStep migrated(&profiler, "thread migration", &state);
+    std::thread finish([&] { migrated.stop(); });
+    finish.join();
+    const auto samples = profiler.snapshot();
+    LOGVOLE_REQUIRE_EQ(samples.size(), 1u);
+    LOGVOLE_REQUIRE_EQ(samples[0].mCount, 1u);
+    LOGVOLE_REQUIRE_EQ(samples[0].mCpuCount, 0u);
+
     struct Failure {};
     bool propagated = false;
     try

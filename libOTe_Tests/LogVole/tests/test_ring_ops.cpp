@@ -1225,14 +1225,34 @@ void LogVole_RingOps_GpuStreamStagingLifetime(const oc::CLP& cmd)
         gpu::GpuPolyBuffer polynomials;
         LOGVOLE_REQUIRE_TRUE(polynomials.resizeWords(4096, 65, stream));
         LOGVOLE_REQUIRE_TRUE(polynomials.zero(stream));
+        CpuBenchmarkContext telemetry;
+        telemetry.mWorkerLimit = 2;
+#if defined(__linux__)
+        cpu_set_t mask;
+        CPU_ZERO(&mask);
+        LOGVOLE_REQUIRE_EQ(sched_getaffinity(0, sizeof(mask), &mask), 0);
+        for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu)
+            if (CPU_ISSET(cpu, &mask)) telemetry.mCpus.push_back(cpu);
+#else
+        telemetry.mCpus.resize(2);
+#endif
+        CpuBenchmarkState cpuBenchmark{&telemetry};
         for (const char* reuse : {"0", "1"})
+        for (bool reuseWorkers : {false, true})
         {
             auto downloadOptions = streamOptions;
             downloadOptions.mReuseDownloadStaging = reuse[0] == '1';
+            downloadOptions.mDownloadReuseWorkers = reuseWorkers;
+            telemetry.reset();
             gpu::GpuStream downloadStream(downloadOptions);
             LOGVOLE_REQUIRE_TRUE(downloadStream.staging(std::size_t(2) << 20));
             std::vector<RnsPoly> host;
-            LOGVOLE_REQUIRE_TRUE(polynomials.downloadPipelined(host, downloadStream, 2));
+            LOGVOLE_REQUIRE_TRUE(polynomials.downloadPipelined(host, downloadStream, 2, 0, 0, cpuBenchmark));
+            LOGVOLE_REQUIRE_EQ(telemetry.mWorkerSlots.load(), 0u);
+            LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+            LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() > 0u);
+            LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() <= 2u);
+            LOGVOLE_REQUIRE_EQ(cpuBenchmark.mTaskDepth, 0u);
             LOGVOLE_REQUIRE_EQ(host.size(), 65u);
             for (const auto& poly : host)
                 LOGVOLE_REQUIRE_TRUE(std::all_of(poly.mCoeffs.begin(), poly.mCoeffs.end(), [](auto x) { return x == 0; }));
@@ -2198,16 +2218,11 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                         context.mCpus.resize(workers);
 #endif
                         context.mWorkerLimit = workers;
-                        struct RestoreContext
-                        {
-                            CpuBenchmarkContext* previous = tCpuBenchmarkContext;
-                            ~RestoreContext() { tCpuBenchmarkContext = previous; }
-                        } restoreContext;
-                        tCpuBenchmarkContext = &context;
+                        CpuBenchmarkState cpuBenchmark{&context};
                         const auto originalScope = currentProtocolCacheScope();
                         const auto originalSlots = detail::gParallelWorkerSlotsInUse.load();
                         std::vector<RnsPoly> downloaded;
-                        LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(downloaded, stream, workers, 1u, count));
+                        LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(downloaded, stream, workers, 1u, count, cpuBenchmark));
                         LOGVOLE_REQUIRE_EQ(downloaded.size(), count);
                         for (std::size_t i = 0; i < count; ++i)
                             LOGVOLE_REQUIRE_TRUE(rangesEqual(downloaded[i].mCoeffs, actual[i + 1u].mCoeffs));

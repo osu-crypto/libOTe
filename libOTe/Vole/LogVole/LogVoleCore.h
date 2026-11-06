@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
@@ -251,11 +252,11 @@ namespace osuCrypto::LogVole
         double sigma,
         double maxDeviation,
         bool outputNtt,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
     bool sampleRootErrorBatch(
         const RingNttContext& ctx, u32 count, PRNG& prng, double sigma,
         double maxDeviation, bool outputNtt, std::vector<RnsPoly>& out, u32 requestedWorkers,
-        const LogVoleGpuSetupOptions& options = {});
+        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {});
 
     bool addScaledNttInplace(
         RnsPoly& accNtt,
@@ -286,7 +287,7 @@ namespace osuCrypto::LogVole
         const gpu::DeviceBatch* rootR1Device = nullptr,
         const LazyRootErrorHostState* rootR1Host = nullptr,
         const gpu::RetainedPublicUniform* retainedBStarNtt = nullptr,
-        const LogVoleGpuSetupOptions& options = {});
+        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // requestedWorkers > 1 splits the coefficients across the worker pool, each
     // range drawing from its own PRNG keyed from `prng`. zeta is the receiver's
@@ -298,7 +299,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         PRNG& prng,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
 
     // Exact replay of sampleRootZeta's parallel path. `taskSeeds` is ordered as
     // [poly][range], with one independent cryptoTools AES-CTR PRNG per range.
@@ -315,7 +316,7 @@ namespace osuCrypto::LogVole
         u32 rangesPerPoly,
         std::vector<RnsPoly>& out,
         u32 requestedWorkers = 1,
-        bool forceFirstReject = false);
+        bool forceFirstReject = false, CpuBenchmarkState cpuBenchmark = {});
 
     // outputNtt leaves the accumulator in the evaluation domain so a caller that
     // sums several inner products pays one inverse transform for the sum instead
@@ -331,7 +332,7 @@ namespace osuCrypto::LogVole
         SenderState& state,
         PRNG& prng,
         RootOfflineMessage& message,
-        bool deferRandomizerHost = false);
+        bool deferRandomizerHost = false, CpuBenchmarkState cpuBenchmark = {});
 
     bool finalizeRootOfflineReceiver(
         ReceiverState& state,
@@ -353,7 +354,7 @@ namespace osuCrypto::LogVole
         RootDigestMessage& message,
         const std::shared_ptr<void>& xDevice = {},
         u64 xDeviceCount = 0,
-        bool deferDPrimeHash = false);
+        bool deferDPrimeHash = false, CpuBenchmarkState cpuBenchmark = {});
 
     // Completes a hash deferred by prepareRootDigestReceiver. Idempotent after
     // success. The state owns mDPrime for the whole Root exchange, so callers can
@@ -394,7 +395,7 @@ namespace osuCrypto::LogVole
         const SenderState* precomputeRoot = nullptr,
         const RnsPoly* preSampledKPrime = nullptr,
         bool deferPrecompute = false,
-        const std::shared_ptr<void>& preSampledKPrimeDevice = {});
+        const std::shared_ptr<void>& preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // Single-use production overload. After validating the wire shape, this
     // moves the decoded d' coefficients into the query state instead of copying
@@ -408,13 +409,13 @@ namespace osuCrypto::LogVole
         const SenderState* precomputeRoot = nullptr,
         const RnsPoly* preSampledKPrime = nullptr,
         bool deferPrecompute = false,
-        const std::shared_ptr<void>& preSampledKPrimeDevice = {});
+        const std::shared_ptr<void>& preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // The half of prepareRootResponseSender that deferPrecompute skipped.
     bool finishRootSenderPrecompute(
         const SenderState& state,
         PRNG& prng,
-        const SenderState* precomputeRoot = nullptr);
+        const SenderState* precomputeRoot = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     // Draws the k'_Rt that prepareRootResponseSender would draw, so it can be
     // moved off the critical path.
@@ -444,7 +445,7 @@ namespace osuCrypto::LogVole
         const RootDigestState& digestState,
         const RootResponseMessage& response,
         RnsPoly& rootKey,
-        std::shared_ptr<void>* rootKeyDevice = nullptr);
+        std::shared_ptr<void>* rootKeyDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     // Single-use production overload matching prepareRootResponseSender's owned
     // path. It validates before moving skPrime out of the decoded response.
@@ -453,17 +454,17 @@ namespace osuCrypto::LogVole
         const RootDigestState& digestState,
         RootResponseMessage&& response,
         RnsPoly& rootKey,
-        std::shared_ptr<void>* rootKeyDevice = nullptr);
+        std::shared_ptr<void>* rootKeyDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     bool computeRootSenderKey(
         const SenderState& state,
         std::span<const u8> seed,
-        RnsPoly& rootKey);
+        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark = {});
 
     bool prepareSenderOffline(
         const SenderOfflineInput& input,
         PRNG& prng,
-        SenderOfflineOutput& out);
+        SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
     // Explicit inspection of a selected internal top-key owner. This fills
     // independent mutable key vectors only after device setup/recursion ends.
     bool materializeSenderTopSk1HostViews(SenderState& state);
@@ -476,26 +477,26 @@ namespace osuCrypto::LogVole
         bool prepareSenderOfflineForTransport(
             const SenderOfflineInput& input,
             PRNG& prng,
-            SenderOfflineOutput& out);
+            SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
     }
 
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         const OfflineMessage& message,
-        ReceiverOfflineOutput& out);
+        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
     // Consumes message storage; recursive failure may leave message partly moved.
     // Output remains unchanged on failure, and reusable internal states are copied.
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         OfflineMessage&& message,
-        ReceiverOfflineOutput& out);
+        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         const ShrinkExpandOfflineMessage& shrinkExpandMessage,
         const RootOfflineMessage& rootMessage,
-        ReceiverOfflineOutput& out);
+        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
     bool ensureSenderPrecompute(
         const SenderState& state);
@@ -540,7 +541,7 @@ namespace osuCrypto::LogVole
     // be reused across the response and the key release within one SID.
     bool senderPrecompute(
         SenderState& state,
-        PRNG& prng);
+        PRNG& prng, CpuBenchmarkState cpuBenchmark = {});
 
     // True when a usable senderPrecompute() result is cached.
     bool senderHasPrecompute(const SenderState& state);
@@ -550,21 +551,21 @@ namespace osuCrypto::LogVole
         const RootDigestMessage& request,
         PRNG& prng,
         RootResponseMessage& response,
-        SenderOnlineOutput& out);
+        SenderOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
     bool finalizeRootOnlineReceiver(
         ReceiverState& state,
         const ReceiverOnlineInput& input,
         const RootDigestState& digestState,
         const RootResponseMessage& response,
-        ReceiverOnlineOutput& out);
+        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
     bool finalizeRootOnlineReceiver(
         ReceiverState& state,
         const ReceiverOnlineInput& input,
         const RootDigestState& digestState,
         RootResponseMessage&& response,
-        ReceiverOnlineOutput& out);
+        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
     bool seedLabelAgg(
         const std::vector<RnsPoly>& inputHat,
@@ -601,7 +602,7 @@ namespace osuCrypto::LogVole
         u32 tau,
         const RingParams& ring,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
 
     bool seedLabelRepOfflineSenderInput(
         const std::vector<RnsPoly>& s,
@@ -648,19 +649,19 @@ namespace osuCrypto::LogVole
     bool validateGoldenSeedCandidate(
         const Params& params,
         const std::vector<RnsPoly>& tbkPerSampledPoly,
-        bool& out, HostStepProfiler* profile = nullptr);
+        bool& out, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     // Leaf validation takes exactly mW logical output polynomials. Intermediate
     // levels continue to validate the entire padded sample with Q/q_j.
     bool validateLeafGoldenSeedCandidate(
         const Params& params,
         const std::vector<RnsPoly>& tbk,
-        bool& out, HostStepProfiler* profile = nullptr);
+        bool& out, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     bool findGoldenSeed(
         const Params& params,
         const std::vector<RnsPoly>& sk2PerInstance,
         const RnsPoly& digest,
         PRNG& prng,
-        GoldenSeedSearchOutput& out);
+        GoldenSeedSearchOutput& out, CpuBenchmarkState cpuBenchmark = {});
 }

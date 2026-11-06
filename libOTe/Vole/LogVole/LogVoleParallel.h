@@ -16,14 +16,15 @@
 #include <exception>
 #include <thread>
 #include <vector>
+#include <type_traits>
 
 namespace osuCrypto::LogVole::detail
 {
-    inline std::size_t hardwareWorkerSlots()
+    inline std::size_t hardwareWorkerSlots(CpuBenchmarkContext* benchmark = nullptr)
     {
-        if (tCpuBenchmarkContext) return tCpuBenchmarkContext->mWorkerLimit
-            ? std::min(tCpuBenchmarkContext->mWorkerLimit, tCpuBenchmarkContext->mCpus.size())
-            : tCpuBenchmarkContext->mCpus.size();
+        if (benchmark) return benchmark->mWorkerLimit
+            ? std::min(benchmark->mWorkerLimit, benchmark->mCpus.size())
+            : benchmark->mCpus.size();
         const auto hw = static_cast<std::size_t>(std::thread::hardware_concurrency());
         return hw == 0 ? 1 : hw;
     }
@@ -34,17 +35,17 @@ namespace osuCrypto::LogVole::detail
     class ParallelWorkerSlotGuard
     {
     public:
-        explicit ParallelWorkerSlotGuard(std::size_t requestedWorkers)
+        explicit ParallelWorkerSlotGuard(std::size_t requestedWorkers, CpuBenchmarkContext* benchmark = nullptr)
         {
-            mCounter = tCpuBenchmarkContext
-                ? &tCpuBenchmarkContext->mWorkerSlots : &gParallelWorkerSlotsInUse;
+            mCounter = benchmark
+                ? &benchmark->mWorkerSlots : &gParallelWorkerSlotsInUse;
             mGrantedWorkers = 1;
             if (requestedWorkers <= 1)
             {
                 return;
             }
 
-            const std::size_t maxSlots = hardwareWorkerSlots();
+            const std::size_t maxSlots = hardwareWorkerSlots(benchmark);
             while (true)
             {
                 std::size_t used = mCounter->load(std::memory_order_acquire);
@@ -158,27 +159,37 @@ namespace osuCrypto::LogVole::detail
         co_await pool.schedule();
         ScopedProtocolCacheScope scopedCache(cacheScope);
         CpuBenchmarkWorkerScope benchmarkScope(benchmarkContext);
-        worker(workerIdx);
+        CpuBenchmarkState state{benchmarkContext, true};
+        worker(workerIdx, state);
     }
 
     template<typename TaskFn>
     bool runParallelTasks(std::size_t taskCount, u32 requestedWorkers, TaskFn&& taskFn,
-        bool dynamic = false)
+        bool dynamic = false, CpuBenchmarkState* benchmarkState = nullptr)
     {
         if (taskCount == 0)
         {
             return true;
         }
 
+        CpuBenchmarkState localState;
+        auto& state = benchmarkState ? *benchmarkState : localState;
+        auto* benchmark = state.mContext;
+        const auto invoke = [&](std::size_t index, CpuBenchmarkState& workerState) {
+            if constexpr (std::is_invocable_v<TaskFn&, std::size_t, CpuBenchmarkState&>)
+                return taskFn(index, workerState);
+            else
+                return taskFn(index);
+        };
         const std::size_t requested = resolveWorkerCount(requestedWorkers, taskCount);
-        ParallelWorkerSlotGuard slotGuard(requested);
+        ParallelWorkerSlotGuard slotGuard(requested, benchmark);
         const std::size_t workerCount = std::min(requested, slotGuard.grantedWorkers());
         if (workerCount <= 1)
         {
-            CpuBenchmarkTaskScope taskScope;
+            CpuBenchmarkTaskScope taskScope(state);
             for (std::size_t taskIdx = 0; taskIdx < taskCount; ++taskIdx)
             {
-                if (!taskFn(taskIdx))
+                if (!invoke(taskIdx, state))
                 {
                     return false;
                 }
@@ -191,8 +202,8 @@ namespace osuCrypto::LogVole::detail
         std::atomic<std::size_t> nextTask{ 0 };
 
         const ProtocolCacheScope cacheScope = currentProtocolCacheScope();
-        auto worker = [&](std::size_t workerIdx) {
-            CpuBenchmarkTaskScope taskScope;
+        auto worker = [&](std::size_t workerIdx, CpuBenchmarkState& workerState) {
+            CpuBenchmarkTaskScope taskScope(workerState);
             ScopedProtocolCacheScope scopedCache(cacheScope);
             if (dynamic)
             {
@@ -204,7 +215,7 @@ namespace osuCrypto::LogVole::detail
                 {
                     const auto taskIdx = nextTask.fetch_add(1, std::memory_order_relaxed);
                     if (taskIdx >= taskCount) break;
-                    if (!taskFn(taskIdx))
+                    if (!invoke(taskIdx, workerState))
                     {
                         failed.store(true, std::memory_order_release);
                         break;
@@ -220,7 +231,7 @@ namespace osuCrypto::LogVole::detail
                 {
                     break;
                 }
-                if (!taskFn(taskIdx))
+                if (!invoke(taskIdx, workerState))
                 {
                     failed.store(true, std::memory_order_release);
                     break;
@@ -238,11 +249,11 @@ namespace osuCrypto::LogVole::detail
             std::vector<macoro::task<>> tasks;
             tasks.reserve(workerCount - 1);
             for (std::size_t i = 1; i < workerCount; ++i)
-                tasks.push_back(runPoolWorker(pool, worker, i, cacheScope, tCpuBenchmarkContext));
+                tasks.push_back(runPoolWorker(pool, worker, i, cacheScope, benchmark));
             auto joined = macoro::make_blocking(macoro::when_all_ready(std::move(tasks)));
 
             std::exception_ptr callerError;
-            try { worker(0); }
+            try { worker(0, state); }
             catch (...)
             {
                 failed.store(true, std::memory_order_release);

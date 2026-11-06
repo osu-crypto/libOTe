@@ -185,6 +185,7 @@ namespace osuCrypto
 
     task<> LogVoleGarbledSender::offline(PRNG& prng, Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!mLayout.mLabelCount) throw std::logic_error("configure the garbled-label sender first");
         auto meta = sock.fork();
         auto header = garbledHeader(mLayout, mModulus);
@@ -211,7 +212,7 @@ namespace osuCrypto
             input.mDeltaSlots = slots;
         }
         CivoleSenderState state;
-        co_await civoleSenderOffline(input, state, prng, sock);
+        co_await civoleSenderOffline(input, state, prng, sock, cpuBenchmark);
         mState = std::move(state);
         mDeltas = deltas;
         mNextSid = 0;
@@ -220,6 +221,7 @@ namespace osuCrypto
 
     task<> LogVoleGarbledSender::send(GarbledLabelBatch& labels, PRNG& prng, Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!mHasOffline || mNextSid == std::numeric_limits<CivoleSid>::max())
             throw std::logic_error("garbled-label sender has no available offline session");
         const auto sid = mNextSid++;
@@ -233,7 +235,7 @@ namespace osuCrypto
             options.mKeysOut = {next.mScalars.data(), next.mScalars.size()};
         }
         CivoleSenderReleaseOutput released;
-        co_await civoleSenderRelease(mState, sid, released, prng, sock, options);
+        co_await civoleSenderRelease(mState, sid, released, prng, sock, options, cpuBenchmark);
         next.mDevice = std::move(released.mKeysDevice);
         next.mComm = released.mComm;
         if (!next.mDevice && mKeepOutputOnDevice) next.mScalars = std::move(mState.mReleasedKeys);
@@ -264,6 +266,7 @@ namespace osuCrypto
 
     task<> LogVoleGarbledReceiver::offline(Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!mLayout.mLabelCount) throw std::logic_error("configure the garbled-label receiver first");
         auto meta = sock.fork();
         std::array<u8, 32> header{};
@@ -276,7 +279,7 @@ namespace osuCrypto
         input.mCrtFactoryOwner = mConfigureFactoryOwner;
         input.mW = mLayout.scalarCount();
         CivoleReceiverState state;
-        co_await civoleReceiverOffline(input, state, sock);
+        co_await civoleReceiverOffline(input, state, sock, cpuBenchmark);
         if (state.mW != mLayout.scalarCount()) throw std::invalid_argument("garbled-label width mismatch");
         mState = std::move(state);
         mNextSid = 0;
@@ -286,6 +289,7 @@ namespace osuCrypto
     task<> LogVoleGarbledReceiver::receive(span<const u64> x, GarbledLabelBatch& labels,
         PRNG& prng, Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!mHasOffline || mNextSid == std::numeric_limits<CivoleSid>::max())
             throw std::logic_error("garbled-label receiver has no available offline session");
         if (mInputDevice ? !x.empty() : x.size() != mLayout.mLabelCount)
@@ -313,7 +317,7 @@ namespace osuCrypto
             options.mMacsOut = {next.mScalars.data(), next.mScalars.size()};
         }
         CivoleReceiverSetXOutput received;
-        co_await civoleReceiverSetX(mState, sid, x, received, prng, sock, options);
+        co_await civoleReceiverSetX(mState, sid, x, received, prng, sock, options, cpuBenchmark);
         next.mDevice = std::move(received.mMacsDevice);
         next.mComm = received.mComm;
         if (!next.mDevice && mKeepOutputOnDevice) next.mScalars = std::move(received.mMacs);

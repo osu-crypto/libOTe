@@ -66,7 +66,8 @@ namespace osuCrypto::LogVole
                         try
                         {
                             CpuBenchmarkWorkerScope benchmarkWorker(benchmarkContext);
-                            CpuBenchmarkTaskScope benchmarkTask;
+                CpuBenchmarkState cpuBenchmark{benchmarkContext, true};
+                            CpuBenchmarkTaskScope benchmarkTask(cpuBenchmark);
                             ScopedProtocolCacheScope senderScope(
                                 ProtocolCacheRole::Sender, runId);
                             HostStep phase(profile, "setup: root wire preregistration");
@@ -118,7 +119,8 @@ namespace osuCrypto::LogVole
                         {
                             CpuBenchmarkWorkerScope benchmarkWorker(
                                 benchmarkContext);
-                            CpuBenchmarkTaskScope benchmarkTask;
+                CpuBenchmarkState cpuBenchmark{benchmarkContext, true};
+                            CpuBenchmarkTaskScope benchmarkTask(cpuBenchmark);
                             ScopedProtocolCacheScope senderScope(
                                 ProtocolCacheRole::Sender, runId);
                             HostStep phase(profile,
@@ -146,9 +148,9 @@ namespace osuCrypto::LogVole
 
 
 
-        task<> sendOfflineFrame(Socket& sock, Buffer payload, bool ownedSend, HostStepProfiler* profile)
+        task<> sendOfflineFrame(Socket& sock, Buffer payload, bool ownedSend, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {})
         {
-            HostStep phase(profile, "setup transport: send offline frame");
+            HostStep phase(profile, "setup transport: send offline frame", &cpuBenchmark);
             // Encoding creates a fresh, single-use buffer. Keep ownership in
             // the coroutine and hand it to coproto, avoiding a second complete
             // copy of the (potentially hundreds of MB) offline message.
@@ -193,6 +195,7 @@ namespace osuCrypto::LogVole
             RootOfflineMessage* mRoot = nullptr;
             const LogVoleWireOptions& mWireOptions;
             HostStepProfiler* const mProfile;
+            CpuBenchmarkState mCpuBenchmark;
             Buffer mReserved;
             bool mCudaRequested = false;
             bool mOwnedSend = true;
@@ -205,8 +208,8 @@ namespace osuCrypto::LogVole
 
             RootWirePinPlan(u64 senderRunId, bool requested,
                 bool cudaRequested,
-                RootOfflineMessage* root, bool ownedSend, const LogVoleWireOptions& options, HostStepProfiler* profile)
-                : mRoot(root), mWireOptions(options), mProfile(profile),
+                RootOfflineMessage* root, bool ownedSend, const LogVoleWireOptions& options, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
+                : mRoot(root), mWireOptions(options), mProfile(profile), mCpuBenchmark(cpuBenchmark),
                   mCudaRequested(cudaRequested), mOwnedSend(ownedSend)
             {
                 mEvidence.mSenderRunId = senderRunId;
@@ -286,6 +289,7 @@ namespace osuCrypto::LogVole
 
             void startBeforeFrame()
             {
+                auto cpuBenchmark = mCpuBenchmark;
                 reserveCudaWireIfRequested();
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (!mEvidence.mRequested || !mRoot || mCudaSelected ||
@@ -313,7 +317,7 @@ namespace osuCrypto::LogVole
                 mEvidence.mPinSucceeded = mEvidence.mAlreadyPinned;
                 if (!mEvidence.mAlreadyPinned)
                     mEvidence.mLaunched = mWorker.start(mReserved,
-                        mEvidence.mSenderRunId, device, tCpuBenchmarkContext, mProfile);
+                        mEvidence.mSenderRunId, device, cpuBenchmark.mContext, mProfile);
 #endif
             }
 
@@ -365,7 +369,7 @@ namespace osuCrypto::LogVole
             bool isTopLevel,
             bool hasReusableState,
             u64 senderRunId,
-            RootWirePinPlan& rootPin, bool useGpu, HostStepProfiler* profile)
+            RootWirePinPlan& rootPin, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {})
         {
             RecursiveMode mode{};
             if (!detail::recursiveMode(params, mode))
@@ -395,11 +399,11 @@ namespace osuCrypto::LogVole
                         ProtocolCacheRole::Sender, senderRunId);
                     payload = message.mEncodedShrinkExpandMessage.empty()
                         ? encode(message.mShrinkExpandMessage,
-                            params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile)
+                            params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile, cpuBenchmark)
                         : std::move(message.mEncodedShrinkExpandMessage);
                 }
                 rootPin.startBeforeFrame();
-                co_await sendOfflineFrame(shrinkExpandSock, std::move(payload), params.mShrinkExpand.mTransport.mOwnedSetupSend, profile);
+                co_await sendOfflineFrame(shrinkExpandSock, std::move(payload), params.mShrinkExpand.mTransport.mOwnedSetupSend, profile, cpuBenchmark);
                 if (!isTopLevel)
                 {
                     childHasReusableState = true;
@@ -423,7 +427,7 @@ namespace osuCrypto::LogVole
                         ProtocolCacheRole::Sender, senderRunId);
                     payload = rootPin.mReserved.empty()
                         ? encode(message.mRootMessage,
-                            params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile)
+                            params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile, cpuBenchmark)
                         : encodeRootOfflineIntoBuffer(message.mRootMessage,
                             std::move(rootPin.mReserved),
                             params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile);
@@ -431,7 +435,7 @@ namespace osuCrypto::LogVole
                 rootPin.mEvidence.mSelected = rootPin.mEvidence.mEligible &&
                     rootPin.mEvidence.mPinSucceeded;
                 publishRootWirePinEvidence(rootPin.mEvidence);
-                co_await sendOfflineFrame(rootSock, std::move(payload), params.mShrinkExpand.mTransport.mOwnedSetupSend, profile);
+                co_await sendOfflineFrame(rootSock, std::move(payload), params.mShrinkExpand.mTransport.mOwnedSetupSend, profile, cpuBenchmark);
                 co_return;
             }
 
@@ -448,7 +452,7 @@ namespace osuCrypto::LogVole
 
             auto childSock = sock.fork();
             co_await sendOfflineMessage(child, *message.mNextLevel,
-                childSock, false, childHasReusableState, senderRunId, rootPin, useGpu, profile);
+                childSock, false, childHasReusableState, senderRunId, rootPin, useGpu, profile, cpuBenchmark);
         }
 
         task<> senderOnlineService(
@@ -457,7 +461,7 @@ namespace osuCrypto::LogVole
             Socket& sock,
             PRNG& prng,
             CommunicationStats& comm,
-            ProtocolCacheScope senderScope)
+            ProtocolCacheScope senderScope, CpuBenchmarkState cpuBenchmark = {})
         {
             RecursiveMode mode{};
             if (!detail::recursiveMode(state.mParams, mode))
@@ -500,7 +504,7 @@ namespace osuCrypto::LogVole
                         }
                     }
                     {
-                        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: recv root digest");
+                        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: recv root digest", &cpuBenchmark);
                         u64 maxPayload = 0;
                         const bool validPayloadSize = rootDigestPayloadSize(state.mParams.mShrinkExpand.mRing, maxPayload);
                         digestPayload = co_await detail::recvFrame<ProtocolCacheRole::Sender>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload), state.mParams.mShrinkExpand.mTransport.mEncoding.mWire, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner));
@@ -514,13 +518,13 @@ namespace osuCrypto::LogVole
                         // the exact captured scope before validating secrets.
                         {
                             AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
-                            if (!decode(digestPayload, digest, state.mParams.mShrinkExpand.mTransport.mEncoding, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner)))
+                            if (!decode(digestPayload, digest, state.mParams.mShrinkExpand.mTransport.mEncoding, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark))
                             {
                                 throw std::runtime_error("LogVole sender could not decode root digest");
                             }
                         }
                         {
-                            HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: root response");
+                            HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: root response", &cpuBenchmark);
                             AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
                             const bool prepared = ownedFastPath
                                 ? prepareRootResponseSender(
@@ -528,13 +532,13 @@ namespace osuCrypto::LogVole
                                       &precomputeRoot,
                                       havePreK ? &preKPrime : nullptr,
                                       /*deferPrecompute=*/true,
-                                      preKPrimeDevice)
+                                      preKPrimeDevice, cpuBenchmark)
                                 : prepareRootResponseSender(
                                       state, digest, prng, response,
                                       &precomputeRoot,
                                       havePreK ? &preKPrime : nullptr,
                                       /*deferPrecompute=*/true,
-                                      preKPrimeDevice);
+                                      preKPrimeDevice, cpuBenchmark);
                             if (!prepared)
                             {
                                 throw std::runtime_error("LogVole sender could not prepare root response");
@@ -544,13 +548,13 @@ namespace osuCrypto::LogVole
                         if (!nonInteractive)
                         {
                             AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
-                            responsePayload = encode(response, state.mParams.mShrinkExpand.mTransport.mEncoding, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner));
+                            responsePayload = encode(response, state.mParams.mShrinkExpand.mTransport.mEncoding, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark);
                         }
                     }
                     if (!nonInteractive)
                     {
                         responseFrameSize = detail::frameBytes(responsePayload);
-                        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: send root response");
+                        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: send root response", &cpuBenchmark);
                         if (ownedFastPath)
                         {
                             co_await detail::sendOwnedFrame(rootSock, std::move(responsePayload));
@@ -566,9 +570,9 @@ namespace osuCrypto::LogVole
                     // runs instead of waiting for it.
                     {
                         ScopedProtocolCacheScope activeSender(senderScope);
-                        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu sender: post-response precompute");
+                        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu sender: post-response precompute", &cpuBenchmark);
                         AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
-                        if (!finishRootSenderPrecompute(state, prng, &precomputeRoot))
+                        if (!finishRootSenderPrecompute(state, prng, &precomputeRoot, cpuBenchmark))
                         {
                             throw std::runtime_error("LogVole sender could not prepare root response");
                         }
@@ -586,7 +590,7 @@ namespace osuCrypto::LogVole
 
             auto childSock = sock.fork();
             co_await senderOnlineService(*state.mNextLevelState,
-                precomputeRoot, childSock, prng, comm, senderScope);
+                precomputeRoot, childSock, prng, comm, senderScope, cpuBenchmark);
             if (!state.mPrecomputedTbk)
             {
                 throw std::runtime_error("LogVole sender could not prepare recursive online cache");
@@ -705,15 +709,16 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
         ScopedProtocolCacheScope roleScope(
             ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
         ShrinkExpandOfflineMessage message{};
-        if (!prepareShrinkExpandSenderOffline(input, prng, message, state))
+        if (!prepareShrinkExpandSenderOffline(input, prng, message, state, cpuBenchmark))
         {
             throw std::runtime_error("LogVole sender could not prepare shrink/expand offline message");
         }
 
-        co_await sendOfflineFrame(sock, encode(message, input.mParams.mNumWorkerThreads, input.mParams.mTransport.mEncoding, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner)), input.mParams.mTransport.mOwnedSetupSend, hostProfiler(input.mRingFactoryOwner));
+        co_await sendOfflineFrame(sock, encode(message, input.mParams.mNumWorkerThreads, input.mParams.mTransport.mEncoding, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark), input.mParams.mTransport.mOwnedSetupSend, hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
     }
 
     task<> LogVoleRingSender::offline(
@@ -722,6 +727,7 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
         const u64 senderRunId = input.mSenderOwnerRunId
             ? input.mSenderOwnerRunId : currentProtocolCacheScope().mRunId;
         RootWirePinOverlapEvidence initialPinEvidence{};
@@ -752,7 +758,7 @@ namespace osuCrypto::LogVole
                 input.mParams.mShrinkExpand.mGpuSetup.mLazyCiphertexts &&
                 input.mParams.mShrinkExpand.mGpuSetup.mDirectWire;
             const bool launched = eligible && earlyWorker.start(forecastBytes,
-                senderRunId, device, tCpuBenchmarkContext, encoding.mWire, hostProfiler(input.mRingFactoryOwner));
+                senderRunId, device, cpuBenchmark.mContext, encoding.mWire, hostProfiler(input.mRingFactoryOwner));
             noteRootWireCudaEarlyPlan(senderRunId, earlyRequested,
                 eligible, forecastBytes, launched);
         }
@@ -764,7 +770,7 @@ namespace osuCrypto::LogVole
         {
             ScopedProtocolCacheScope roleScope(
                 ProtocolCacheRole::Sender, senderRunId);
-            if (!detail::prepareSenderOfflineForTransport(input, prng, output))
+            if (!detail::prepareSenderOfflineForTransport(input, prng, output, cpuBenchmark))
             {
                 throw std::runtime_error(
                     "LogVole sender could not prepare recursive offline state");
@@ -775,13 +781,13 @@ namespace osuCrypto::LogVole
             rootCudaRequested,
             (rootPinRequested || rootCudaRequested)
                 ? terminalRootMessage(input.mParams, output.mMessage) : nullptr,
-            input.mParams.mShrinkExpand.mTransport.mOwnedSetupSend, encoding.mWire, hostProfiler(input.mRingFactoryOwner));
+            input.mParams.mShrinkExpand.mTransport.mOwnedSetupSend, encoding.mWire, hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (earlyRequested)
             rootPin.adoptEarlyCudaWire(earlyWorker, forecastBytes);
 #endif
         co_await sendOfflineMessage(input.mParams, output.mMessage,
-            sock, true, false, senderRunId, rootPin, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner));
+            sock, true, false, senderRunId, rootPin, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
         state = std::move(output.mState);
     }
 
@@ -790,6 +796,7 @@ namespace osuCrypto::LogVole
         KeyDeriveSenderOutput& output,
         Socket& sock, LogVoleEncodingOptions encoding, bool useGpu, HostStepProfiler* profile)
     {
+        CpuBenchmarkState cpuBenchmark{};
         ScopedProtocolCacheScope roleScope(
             ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
 		u64 maxPayload = 0;
@@ -801,7 +808,7 @@ namespace osuCrypto::LogVole
 			co_await detail::recvFrame<ProtocolCacheRole::Sender>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), encoding.mWire, useGpu, profile);
 
         KeyDeriveRequest request{};
-        if (!decode(requestPayload, request, encoding, useGpu, profile))
+        if (!decode(requestPayload, request, encoding, useGpu, profile, cpuBenchmark))
         {
             throw std::runtime_error("LogVole sender could not decode key-derive request");
         }
@@ -812,7 +819,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole sender rejected key-derive request");
         }
 
-        co_await detail::sendFrame(sock, encode(response, encoding, useGpu, profile));
+        co_await detail::sendFrame(sock, encode(response, encoding, useGpu, profile, cpuBenchmark));
     }
 
     task<> LogVoleRingSender::online(
@@ -832,6 +839,7 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mShrinkExpandState.mRingFactoryOwner)};
         ProtocolCacheScope cacheScope = currentProtocolCacheScope();
         if (cacheScope.mRunId == 0)
         {
@@ -839,9 +847,9 @@ namespace osuCrypto::LogVole
         }
         cacheScope.mRole = ProtocolCacheRole::Sender;
         ScopedProtocolCacheScope scopedCache(cacheScope);
-        HostStep onlineTotal(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: online TOTAL");
+        HostStep onlineTotal(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: online TOTAL", &cpuBenchmark);
         {
-            HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: clear cache + sid");
+            HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: clear cache + sid", &cpuBenchmark);
             if (!(options.mUsePrecomputed && senderHasPrecompute(state)))
             {
                 clearSenderOnlineCache(state);
@@ -853,7 +861,7 @@ namespace osuCrypto::LogVole
         CommunicationStats comm{};
         try
         {
-            co_await senderOnlineService(state, state, sock, prng, comm, cacheScope);
+            co_await senderOnlineService(state, state, sock, prng, comm, cacheScope, cpuBenchmark);
         }
         catch (...)
         {
@@ -870,7 +878,7 @@ namespace osuCrypto::LogVole
         }
 
         SenderOnlineOutput next{};
-        HostStep tailStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: online tail (tbk copy)");
+        HostStep tailStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: online tail (tbk copy)", &cpuBenchmark);
         next.mSeed = state.mGoldenSeed;
         if (!options.mSkipTbkOutput)
         {
@@ -888,6 +896,7 @@ namespace osuCrypto::LogVole
         ShrinkExpandSenderExpandOutput& output,
         Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mRingFactoryOwner)};
         ScopedProtocolCacheScope roleScope(
             ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
 		u64 maxPayload = 0;
@@ -896,7 +905,7 @@ namespace osuCrypto::LogVole
 			co_await detail::recvFrame<ProtocolCacheRole::Sender>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), state.mParams.mTransport.mEncoding.mWire, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner));
 
         PolyMessage digestMessage{};
-        if (!decode(digestPayload, digestMessage, state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner)))
+        if (!decode(digestPayload, digestMessage, state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark))
         {
             throw std::runtime_error("LogVole sender received malformed shrink digest");
         }
@@ -942,11 +951,11 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole sender could not derive shrink/expand key");
         }
 
-        co_await detail::sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, skX), state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner)));
+        co_await detail::sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, skX), state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark));
 
         ShrinkExpandExpandSenderInput expandInput = input;
         expandInput.mDigest = std::move(digest);
-        if (!shrinkExpandExpandSender(state, expandInput, output))
+        if (!shrinkExpandExpandSender(state, expandInput, output, cpuBenchmark))
         {
             throw std::runtime_error("LogVole sender could not expand");
         }

@@ -1439,9 +1439,10 @@ namespace osuCrypto::LogVole
         bool deferRandomizerHost,
         const gpu::DeviceBatch* seedLabelDevice,
         const LazySeedLabelHostState* seedLabelHost,
-        const LogVoleGpuSetupOptions& options)
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark)
     {
-        HostStep setupStep(hostProfiler(ctx), "setup: lenc truncated");
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        HostStep setupStep(hostProfiler(ctx), "setup: lenc truncated", &cpuBenchmark);
         const auto sCount = seedLabelHost ? seedLabelHost->count() : s.size();
         if (!sCount || sCount > std::numeric_limits<u32>::max() ||
             tauHi == 0 || noiseStandardDeviation < 0 ||
@@ -1554,14 +1555,14 @@ namespace osuCrypto::LogVole
             if (compactNoiseEnabled)
             {
                 if (!samplePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
-                    noiseStandardDeviation, noiseMaxDeviation, seeds, ctx, requestedWorkers)) return false;
+                    noiseStandardDeviation, noiseMaxDeviation, seeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
             }
-            else if (!detail::runParallelTasks(seeds.size(), requestedWorkers, [&](std::size_t idx) {
+            else if (!detail::runParallelTasks(seeds.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     auto& poly = rLayersNtt[idx / width][idx % width];
                     resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                     return addPolyErrorFromSeed(poly, noiseStandardDeviation,
                         noiseMaxDeviation, seeds[idx], ctx);
-                })) return false;
+                }, false, &cpuBenchmark)) return false;
             if (!deviceAssemblyRequested)
                 for (auto& layer : rLayersNtt)
                     if (!forwardNttBatch(layer, ctx)) return false;
@@ -1623,16 +1624,16 @@ namespace osuCrypto::LogVole
             if (compactNoiseEnabled)
             {
                 if (!samplePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows)) return false;
+                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark)) return false;
             }
-            else if (!detail::runParallelTasks(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx) {
+            else if (!detail::runParallelTasks(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     const bool activeNoise = activeNoiseRows[idx] != 0;
                     auto& poly = ct.mPolys[idx];
                     resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                     return !activeNoise ||
                         addPolyErrorFromSeed(poly, noiseStandardDeviation,
                             noiseMaxDeviation, seeds[idx], ctx);
-                })) return false;
+                }, false, &cpuBenchmark)) return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (deviceAssemblyRequested)
             {
@@ -1649,18 +1650,18 @@ namespace osuCrypto::LogVole
                     deferCiphertextHost ? &lazyCiphertext : nullptr,
                     retainRandomizers ? mu : 0u, retainRandomizers ? &lazyRandomizers : nullptr,
                     retainedPublicBNtt.get(),
-                    devicePadding ? seedLabelDevice : nullptr);
+                    devicePadding ? seedLabelDevice : nullptr, cpuBenchmark);
                 if (!deviceAssembled && (compactStrict || options.mLencDeviceStrict)) return false;
             }
 #endif
             if (compactNoiseEnabled && !deviceAssembled &&
                 !materializePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows)) return false;
+                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark)) return false;
             if (compactNoiseEnabled && !deviceAssembled &&
-                !detail::runParallelTasks(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx) {
+                !detail::runParallelTasks(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     return expandPolyErrorCompact(
                         std::span<const u64>(compactNoise).subspan(idx * n, n), ct.mPolys[idx], ctx);
-                })) return false;
+                }, false, &cpuBenchmark)) return false;
             // The device path keeps randomizer layers and padded input in
             // coefficient form on the host and transforms them only on device.
             // A declined attempt must prepare them before the established path.
@@ -1673,13 +1674,13 @@ namespace osuCrypto::LogVole
                         width, sPadNtt, false))) return false;
                 if (compactNoiseEnabled &&
                     !materializePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
-                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers)) return false;
+                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
                 if (compactNoiseEnabled && !detail::runParallelTasks(
-                    static_cast<std::size_t>(levels) * width, requestedWorkers, [&](std::size_t idx) {
+                    static_cast<std::size_t>(levels) * width, requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                         return expandPolyErrorCompact(
                             std::span<const u64>(compactRandomizers).subspan(idx * n, n),
                             rLayersNtt[idx / width][idx % width], ctx);
-                    })) return false;
+                    }, false, &cpuBenchmark)) return false;
                 for (auto& layer : rLayersNtt)
                     if (!forwardNttBatch(layer, ctx)) return false;
                 if (!forwardNttBatch(sPadNtt, ctx)) return false;
@@ -1804,7 +1805,7 @@ namespace osuCrypto::LogVole
             return true;
         };
         if (!deviceAssembled &&
-            !detail::runParallelTasks(ct.mRows, setupBatch ? requestedWorkers : 1, buildRow)) return false;
+            !detail::runParallelTasks(ct.mRows, setupBatch ? requestedWorkers : 1, buildRow, false, &cpuBenchmark)) return false;
 
         LencEncodeOutput next{};
         next.mLazyRandomizers = std::move(lazyRandomizers);
@@ -1827,24 +1828,24 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (gpu::enabled(ctx) && options.mLencRandomizerOutput)
                 {
-                    HostStep outputStep(hostProfiler(ctx), "setup: lenc randomizer GPU output");
+                    HostStep outputStep(hostProfiler(ctx), "setup: lenc randomizer GPU output", &cpuBenchmark);
                     const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencRandomizerOutput;
                     if (!decline)
                         deviceExpanded = residentRandomizers
-                            ? gpu::expandErrorCompactDevice(ctx, *residentRandomizers, false, next.mR, mu, requestedWorkers)
+                            ? gpu::expandErrorCompactDevice(ctx, *residentRandomizers, false, next.mR, mu, requestedWorkers, cpuBenchmark)
                             : gpu::expandErrorCompactDevice(ctx,
                                 std::span<const u64>(compactRandomizers).first(static_cast<std::size_t>(mu) * n),
-                                false, next.mR, requestedWorkers);
+                                false, next.mR, requestedWorkers, cpuBenchmark);
                     if (!deviceExpanded && options.mLencRandomizerOutputStrict) return false;
                 }
 #endif
                 if (!deviceExpanded &&
                     !materializePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
-                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers)) return false;
-                if (!deviceExpanded && !detail::runParallelTasks(mu, requestedWorkers, [&](std::size_t i) {
+                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
+                if (!deviceExpanded && !detail::runParallelTasks(mu, requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     return expandPolyErrorCompact(
                         std::span<const u64>(compactRandomizers).subspan(i * n, n), next.mR[i], ctx);
-                })) return false;
+                }, false, &cpuBenchmark)) return false;
             }
             else
                 for (u32 i = 0; i < mu; ++i)
@@ -1895,8 +1896,9 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out,
         bool outputNtt,
         u32 requestedWorkers,
-        bool leafInputsAreGadget)
+        bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (x.size() != mu)
         {
             return false;
@@ -1912,7 +1914,7 @@ namespace osuCrypto::LogVole
 
         return lencEvalTrunc(
             ctx, lacct, tree, mu, tauHi, gadgetLogBase, plaintextModulusBits, out, outputNtt, requestedWorkers,
-            leafInputsAreGadget);
+            leafInputsAreGadget, cpuBenchmark);
     }
 
     static bool lencEvalTruncImpl(
@@ -1927,8 +1929,9 @@ namespace osuCrypto::LogVole
         bool outputNtt,
         u32 requestedWorkers,
         bool leafInputsAreGadget,
-        bool subtractFromOutput)
+        bool subtractFromOutput, CpuBenchmarkState cpuBenchmark = {})
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (mu == 0 || tauHi == 0 || lacct.mWidthPadded == 0)
         {
             return false;
@@ -1983,7 +1986,7 @@ namespace osuCrypto::LogVole
         const bool leavesOk = detail::runParallelTasks(
             mu,
             requestedWorkers,
-            [&](std::size_t leafIdx) -> bool
+            [&](std::size_t leafIdx, CpuBenchmarkState& cpuBenchmark) -> bool
         {
             const auto leaf = static_cast<u32>(leafIdx);
             RnsPoly accNtt{};
@@ -2054,7 +2057,7 @@ namespace osuCrypto::LogVole
 
             out[leaf] = std::move(accNtt);
             return true;
-        });
+        }, false, &cpuBenchmark);
 
         return leavesOk;
     }
@@ -2062,18 +2065,20 @@ namespace osuCrypto::LogVole
     bool lencEvalTrunc(
         const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
         u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
-        std::vector<RnsPoly>& out, bool outputNtt, u32 requestedWorkers, bool leafInputsAreGadget)
+        std::vector<RnsPoly>& out, bool outputNtt, u32 requestedWorkers, bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lencEvalTruncImpl(ctx, lacct, tree, mu, tauHi, gadgetLogBase, plaintextModulusBits,
-            out, outputNtt, requestedWorkers, leafInputsAreGadget, false);
+            out, outputNtt, requestedWorkers, leafInputsAreGadget, false, cpuBenchmark);
     }
 
     bool lencSubtractEvalTruncNttInplace(
         const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
         u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
-        std::vector<RnsPoly>& out, u32 requestedWorkers, bool leafInputsAreGadget)
+        std::vector<RnsPoly>& out, u32 requestedWorkers, bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lencEvalTruncImpl(ctx, lacct, tree, mu, tauHi, gadgetLogBase, plaintextModulusBits,
-            out, true, requestedWorkers, leafInputsAreGadget, true);
+            out, true, requestedWorkers, leafInputsAreGadget, true, cpuBenchmark);
     }
 }

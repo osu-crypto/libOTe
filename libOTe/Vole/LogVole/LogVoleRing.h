@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/config.h"
 
@@ -191,6 +192,15 @@ namespace osuCrypto::LogVole
     inline RootStepProfiler* rootProfiler(const std::shared_ptr<const RingNttContext>& ctx) noexcept
     {
         return ctx ? rootProfiler(*ctx) : nullptr;
+    }
+
+    inline CpuBenchmarkContext* cpuBenchmarkContext(const RingNttContext& ctx)
+    {
+        return ctx.mExecutionOptions.mCpuBenchmark;
+    }
+    inline CpuBenchmarkContext* cpuBenchmarkContext(const std::shared_ptr<const RingNttContext>& ctx)
+    {
+        return ctx ? cpuBenchmarkContext(*ctx) : nullptr;
     }
 
     inline HostStepProfiler* hostProfiler(const RingNttContext& ctx)
@@ -502,20 +512,20 @@ namespace osuCrypto::LogVole
     bool samplePolyErrorCompactBatchFromSeeds(
         std::span<u64> limb0, double noiseStandardDeviation, double noiseMaxDeviation,
         std::span<const seal::prng_seed_type> seeds, const RingNttContext& ctx,
-        u32 requestedWorkers = 1, std::span<const u8> active = {});
+        u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {});
     // Owned setup samples: resident selection publishes an empty host vector
     // and a completed device buffer; fallback publishes host data and no device.
     // Inactive rows are zero. Invalid/strict failure preserves both outputs.
     bool samplePolyErrorCompactBatchForSetup(
         std::vector<u64>& host, std::shared_ptr<gpu::DeviceScalars>& device,
         double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
-        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {});
+        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {});
     // Materialize only when a downstream device operation declined. A failed
     // device fetch replays these original seeds on CPU without parent draws.
     bool materializePolyErrorCompactBatchForSetup(
         std::vector<u64>& host, const std::shared_ptr<gpu::DeviceScalars>& device,
         double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
-        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {});
+        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {});
     // Reconstruct the same full coefficient polynomial without any PRNG draws.
     bool expandPolyErrorCompact(
         std::span<const u64> limb0, RnsPoly& out, const RingNttContext& ctx);

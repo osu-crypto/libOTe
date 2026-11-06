@@ -10,6 +10,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace osuCrypto::LogVole
@@ -241,23 +242,23 @@ namespace osuCrypto::LogVole
     class HostStep
     {
     public:
-        HostStep(HostStepProfiler* profiler, const char* name)
+        HostStep(HostStepProfiler* profiler, const char* name, const CpuBenchmarkState* benchmark = nullptr)
         {
             if (!profiler) return;
             mEntry = &profiler->slot(name);
-            startCpu();
+            startCpu(benchmark);
             mStart = std::chrono::steady_clock::now();
         }
 
         // `tag` is appended to the name, so a recursive caller can keep its
         // levels apart (pass the level's width, for instance).
-        HostStep(HostStepProfiler* profiler, const char* name, u64 tag)
+        HostStep(HostStepProfiler* profiler, const char* name, u64 tag, const CpuBenchmarkState* benchmark = nullptr)
         {
             if (!profiler) return;
             char buf[56];
             std::snprintf(buf, sizeof(buf), "%s w=%llu", name, static_cast<unsigned long long>(tag));
             mEntry = &profiler->slot(buf);
-            startCpu();
+            startCpu(benchmark);
             mStart = std::chrono::steady_clock::now();
         }
 
@@ -277,7 +278,7 @@ namespace osuCrypto::LogVole
                                                  std::chrono::steady_clock::now() - mStart)
                                                  .count());
             mEntry->mNs.fetch_add(ns);
-            if (mCpuContext && mCpuContext == tCpuBenchmarkContext)
+            if (mCpuThread == std::this_thread::get_id())
             {
                 // Coordinator regions must join their workers before stopping.
                 // Worker regions measure only their own thread; summing the
@@ -286,14 +287,8 @@ namespace osuCrypto::LogVole
                 mEntry->mCpuNs.fetch_add(cpuBenchmarkThreadNs() - mCpuStart + workerNs);
                 mEntry->mCpuCount.fetch_add(1);
             }
-            else if (!mCpuContext)
-            {
-                // GPU benchmark workers have no CPU benchmark context. Measure
-                // the executing thread so blocking socket wall time can be
-                // separated from the worker's actual CPU service.
-                mEntry->mCpuNs.fetch_add(cpuBenchmarkThreadNs() - mCpuStart);
-                mEntry->mCpuCount.fetch_add(1);
-            }
+            // A coroutine may resume on another thread. Its CPU clocks are
+            // incomparable; keep wall time but omit that CPU sample.
             if (mEntry->mCount.fetch_add(1) == 0) mEntry->mFirstNs.store(ns);
             u64 seen = mEntry->mMaxNs.load();
             while (ns > seen && !mEntry->mMaxNs.compare_exchange_weak(seen, ns))
@@ -303,18 +298,20 @@ namespace osuCrypto::LogVole
         }
 
     private:
-        void startCpu()
+        void startCpu(const CpuBenchmarkState* benchmark)
         {
-            mCpuContext = tCpuBenchmarkContext;
+            mCpuContext = benchmark ? benchmark->mContext : nullptr;
+            mCpuThread = std::this_thread::get_id();
             mCpuStart = cpuBenchmarkThreadNs();
             if (!mCpuContext) return;
             // The coordinating thread also executes task zero. Inside that
             // task, completed siblings belong to the enclosing parallel region,
             // not to this task's local timer.
-            mIncludeWorkers = !tCpuBenchmarkIsWorker && tCpuBenchmarkTaskDepth == 0;
+            mIncludeWorkers = !benchmark->mIsWorker && benchmark->mTaskDepth == 0;
             mWorkerStart = mCpuContext->mWorkerCpuNs.load();
         }
 
+        std::thread::id mCpuThread;
         CpuBenchmarkContext* mCpuContext = nullptr;
         bool mIncludeWorkers = false;
         u64 mCpuStart = 0;

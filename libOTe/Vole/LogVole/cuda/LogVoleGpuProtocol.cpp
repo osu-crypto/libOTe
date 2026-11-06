@@ -765,10 +765,11 @@ namespace osuCrypto::LogVole::gpu
         bool downloadReceiverCt1Snapshot(const OfflineCache& cache,
             std::vector<RnsPoly>& out, GpuStream& stream, u32 workers)
         {
+            CpuBenchmarkState cpuBenchmark{cache.mRing->executionOptions().mCpuBenchmark};
             const auto setting = cache.mRing->executionOptions().mAdvanced.mProtocol.mReceiverPipelinedDownload;
             const bool usePipeline = setting == LogVoleChoice::Enabled ||
                 (setting == LogVoleChoice::Automatic && cache.mCt1.bytes() >= (std::size_t(16) << 20));
-            return (usePipeline ? cache.mCt1.downloadPipelined(out, stream, workers)
+            return (usePipeline ? cache.mCt1.downloadPipelined(out, stream, workers, 0, 0, cpuBenchmark)
                                 : cache.mCt1.download(out, stream)) && stream.sync();
         }
 
@@ -2856,15 +2857,16 @@ namespace osuCrypto::LogVole::gpu
     static bool expandErrorCompactImpl(const RingNttContext& ctx,
         std::span<const u64> compactLimb0, const DeviceScalars* deviceCompact,
         u32 requestedCount, bool outputNtt, std::vector<RnsPoly>* out,
-        DeviceBatchPtr* residentOut, u32 requestedWorkers)
+        DeviceBatchPtr* residentOut, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark = {})
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (!enabled(ctx) || !ringModulusCount(ctx)) return false;
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         const auto words = deviceCompact ? deviceCompact->count() : compactLimb0.size();
         if (!n || !words || words % n || words / n > std::numeric_limits<u32>::max() ||
             (deviceCompact && (!compactLimb0.empty() || deviceCompact->producerStream())) ||
             requestedCount > words / n) return false;
-        HostStep totalStep(hostProfiler(ctx), "setup: compact GPU expansion");
+        HostStep totalStep(hostProfiler(ctx), "setup: compact GPU expansion", &cpuBenchmark);
         const u32 count = requestedCount ? requestedCount : static_cast<u32>(words / n);
         auto ring = GpuRing::get(ctx);
         constexpr std::size_t maxBytes = std::size_t{512} << 20;
@@ -2881,7 +2883,7 @@ namespace osuCrypto::LogVole::gpu
         if (!samples.resize(*ring, count, stream)) return false;
         if (ctx.mExecutionOptions.mAdvanced.mProtocol.mCompactExpandDirect)
         {
-            HostStep directStep(hostProfiler(ctx), "setup: direct compact GPU expansion");
+            HostStep directStep(hostProfiler(ctx), "setup: direct compact GPU expansion", &cpuBenchmark);
             const u64* source = deviceCompact ? deviceCompact->data() : nullptr;
             if (deviceCompact && !source) return false;
             if (!source)
@@ -2932,7 +2934,7 @@ namespace osuCrypto::LogVole::gpu
         }
         const bool pipelineRequested = ctx.mExecutionOptions.mAdvanced.mProtocol.mCompactPipelinedDownload && count >= 4;
         if (!(pipelineRequested
-                ? samples.downloadPipelined(next, stream, requestedWorkers)
+                ? samples.downloadPipelined(next, stream, requestedWorkers, 0, 0, cpuBenchmark)
                 : samples.download(next, stream)) || next.size() != count) return false;
         if (!out) return false;
         *out = std::move(next);
@@ -2940,50 +2942,57 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool expandErrorCompactDevice(const RingNttContext& ctx,
-        std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out)
+        std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark)
     {
-        return expandErrorCompactDevice(ctx, compactLimb0, outputNtt, out, 1);
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        return expandErrorCompactDevice(ctx, compactLimb0, outputNtt, out, 1, cpuBenchmark);
     }
 
     bool expandErrorCompactDevice(const RingNttContext& ctx,
         std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out,
-        u32 requestedWorkers)
+        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
     {
-        return expandErrorCompactImpl(ctx, compactLimb0, nullptr, 0, outputNtt, &out, nullptr, requestedWorkers);
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        return expandErrorCompactImpl(ctx, compactLimb0, nullptr, 0, outputNtt, &out, nullptr, requestedWorkers, cpuBenchmark);
     }
 
     bool expandErrorCompactDevice(const RingNttContext& ctx,
-        const DeviceScalars& compactLimb0, bool outputNtt, std::vector<RnsPoly>& out, u32 polyCount)
+        const DeviceScalars& compactLimb0, bool outputNtt, std::vector<RnsPoly>& out, u32 polyCount, CpuBenchmarkState cpuBenchmark)
     {
-        return expandErrorCompactDevice(ctx, compactLimb0, outputNtt, out, polyCount, 1);
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        return expandErrorCompactDevice(ctx, compactLimb0, outputNtt, out, polyCount, 1, cpuBenchmark);
     }
 
     bool expandErrorCompactDevice(const RingNttContext& ctx,
         const DeviceScalars& compactLimb0, bool outputNtt, std::vector<RnsPoly>& out,
-        u32 polyCount, u32 requestedWorkers)
+        u32 polyCount, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
     {
-        return expandErrorCompactImpl(ctx, {}, &compactLimb0, polyCount, outputNtt, &out, nullptr, requestedWorkers);
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        return expandErrorCompactImpl(ctx, {}, &compactLimb0, polyCount, outputNtt, &out, nullptr, requestedWorkers, cpuBenchmark);
     }
 
     bool expandRootErrorCompactDevice(const RingNttContext& ctx,
-        std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out)
+        std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark)
     {
-        return expandRootErrorCompactDevice(ctx, compactLimb0, outputNtt, out, 1);
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        return expandRootErrorCompactDevice(ctx, compactLimb0, outputNtt, out, 1, cpuBenchmark);
     }
 
     bool expandRootErrorCompactDevice(const RingNttContext& ctx,
         std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out,
-        u32 requestedWorkers)
+        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootCompactNoise;
         if (decline) return false;
-        return expandErrorCompactDevice(ctx, compactLimb0, outputNtt, out, requestedWorkers);
+        return expandErrorCompactDevice(ctx, compactLimb0, outputNtt, out, requestedWorkers, cpuBenchmark);
     }
 
     DeviceBatchPtr expandRootErrorCompactToBatch(const RingNttContext& ctx,
         std::span<const u64> compactLimb0, const DeviceScalars* deviceCompact,
-        u32 polyCount)
+        u32 polyCount, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootR1Device;
         const bool compactDecline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootCompactNoise;
         if ((decline) ||
@@ -2991,7 +3000,7 @@ namespace osuCrypto::LogVole::gpu
             currentProtocolCacheScope().mRole != ProtocolCacheRole::Sender) return {};
         DeviceBatchPtr out;
         if (!expandErrorCompactImpl(ctx, compactLimb0, deviceCompact, polyCount,
-                false, nullptr, &out, 1) ||
+                false, nullptr, &out, 1, cpuBenchmark) ||
             !out || !rootErrorBatchMatches(ctx, *out, polyCount)) return {};
         return out;
     }
@@ -3072,10 +3081,11 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> r2Ntt, std::span<const RnsPoly> publicBRootNtt,
         std::span<const RnsPoly> publicBStarNtt, u32 gadgetLogBase, u32 gadgetPowerOffset,
         std::span<const RnsPoly> noiseCoeffs, std::vector<RnsPoly>& outCtNtt,
-        std::span<const u64> compactNoiseLimb0)
+        std::span<const u64> compactNoiseLimb0, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleRootTopCtDevice(ctx, r1Coeffs, r2Ntt, publicBRootNtt, publicBStarNtt,
-            gadgetLogBase, gadgetPowerOffset, noiseCoeffs, outCtNtt, compactNoiseLimb0, nullptr);
+            gadgetLogBase, gadgetPowerOffset, noiseCoeffs, outCtNtt, compactNoiseLimb0, nullptr, cpuBenchmark);
     }
 
     bool assembleRootTopCtDevice(
@@ -3083,11 +3093,12 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> r2Ntt, std::span<const RnsPoly> publicBRootNtt,
         std::span<const RnsPoly> publicBStarNtt, u32 gadgetLogBase, u32 gadgetPowerOffset,
         std::span<const RnsPoly> noiseCoeffs, std::vector<RnsPoly>& outCtNtt,
-        std::span<const u64> compactNoiseLimb0, const DeviceScalars* compactNoiseDevice)
+        std::span<const u64> compactNoiseLimb0, const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleRootTopCtDevice(ctx, r1Coeffs, r2Ntt, publicBRootNtt, publicBStarNtt,
             gadgetLogBase, gadgetPowerOffset, noiseCoeffs, outCtNtt, compactNoiseLimb0,
-            compactNoiseDevice, 1);
+            compactNoiseDevice, 1, nullptr, nullptr, nullptr, nullptr, nullptr, cpuBenchmark);
     }
 
     bool assembleRootTopCtDevice(
@@ -3106,8 +3117,9 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext,
         const RetainedPublicUniform* retainedPublicBFullNtt,
         const DeviceBatch* rootR1Device,
-        const RetainedPublicUniform* retainedBStarNtt)
+        const RetainedPublicUniform* retainedBStarNtt, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         const auto* retainedR = randomizers ? lencRandomizerDeviceNtt(ctx, randomizers) : nullptr;
         if (randomizers && (!retainedR || !r2Ntt.empty())) return false;
         const bool compactNoise = !compactNoiseLimb0.empty() || compactNoiseDevice;
@@ -3139,7 +3151,7 @@ namespace osuCrypto::LogVole::gpu
                     bStarCount))) ||
             (rootR1Device && (!r1Coeffs.empty() ||
                 !rootErrorBatchMatches(ctx, *rootR1Device, r1Count)))) return false;
-        HostStep totalStep(hostProfiler(ctx), "setup: root device assembly");
+        HostStep totalStep(hostProfiler(ctx), "setup: root device assembly", &cpuBenchmark);
         const u32 rows = static_cast<u32>(r1Count);
         const u32 cols = static_cast<u32>(tauHi + bStarCount);
         const u64 count64 = static_cast<u64>(rows) * cols;
@@ -3200,7 +3212,7 @@ namespace osuCrypto::LogVole::gpu
             ~DrainStream() { stream.sync(); }
         } drainStream{ stream };
         {
-            HostStep uploadStep(hostProfiler(ctx), "setup: root device upload");
+            HostStep uploadStep(hostProfiler(ctx), "setup: root device upload", &cpuBenchmark);
             if (!rBuffer.resize(*ring, 2u * rows, stream) || !bBuffer.resize(*ring, cols, stream) ||
                 !ctBuffer.resize(*ring, count, stream) || !scaledBuffer.resize(*ring, rows, stream) ||
                 !(rootR1Device
@@ -3215,7 +3227,7 @@ namespace osuCrypto::LogVole::gpu
                     : bBuffer.upload(publicBRootNtt, stream)) ||
                 !(retainedBStarNtt
                     ? ([&] {
-                        HostStep copyStep(hostProfiler(ctx), "setup root: BStar retained D2D");
+                        HostStep copyStep(hostProfiler(ctx), "setup root: BStar retained D2D", &cpuBenchmark);
                         std::lock_guard use(retainedBStarNtt->mImpl->mDeviceUseMutex);
                         const std::size_t bytes = bStarCount * polyBytes;
                         const bool queued = gpuMemcpyD2D(
@@ -3240,7 +3252,7 @@ namespace osuCrypto::LogVole::gpu
         }
         const auto* idx = static_cast<const u32*>(deviceIndices.data());
         {
-            HostStep kernelStep(hostProfiler(ctx), "setup: root device launches");
+            HostStep kernelStep(hostProfiler(ctx), "setup: root device launches", &cpuBenchmark);
             if (!launchCanonicalize(ring->view(stream), rBuffer.data(stream), nullptr, 2u * rows, stream.raw()) ||
                 !launchCanonicalize(ring->view(stream), bBuffer.data(stream), nullptr, cols, stream.raw()) ||
                 !launchNttForward(ring->view(stream), rBuffer.data(stream), rows, nullptr, stream.raw())) return false;
@@ -3275,10 +3287,10 @@ namespace osuCrypto::LogVole::gpu
             *deferredCiphertext = std::move(lazy);
             return true;
         }
-        HostStep downloadStep(hostProfiler(ctx), "setup: root device download");
+        HostStep downloadStep(hostProfiler(ctx), "setup: root device download", &cpuBenchmark);
         if ((ctx.mExecutionOptions.mAdvanced.mProtocol.mExtraPipelinedDownload) && count >= 4)
         {
-            if (!ctBuffer.downloadPipelined(next, stream, requestedWorkers) || next.size() != count)
+            if (!ctBuffer.downloadPipelined(next, stream, requestedWorkers, 0, 0, cpuBenchmark) || next.size() != count)
                 return false;
             outCtNtt = std::move(next);
             return true;
@@ -3307,11 +3319,13 @@ namespace osuCrypto::LogVole::gpu
         std::span<const u64> crtLiftModQj, std::span<const RnsPoly> noiseCoeffs,
         std::vector<RnsPoly>& outCtNtt, std::vector<RnsPoly>* outFirstRNtt,
         std::span<const u64> compactNoiseLimb0, std::span<const u64> compactRandomizerLimb0,
-        u32 requestedWorkers, bool devicePadding)
+        u32 requestedWorkers, bool devicePadding, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleLencTruncDevice(ctx, rLayersNtt, sPadNtt, publicBNtt, tauHi, tauLeaf,
             gadgetLogBase, gadgetLeaves, crtLiftModQj, noiseCoeffs, outCtNtt, outFirstRNtt,
-            compactNoiseLimb0, compactRandomizerLimb0, requestedWorkers, devicePadding, nullptr, nullptr);
+            compactNoiseLimb0, compactRandomizerLimb0, requestedWorkers, devicePadding, nullptr, nullptr,
+            nullptr, 0, nullptr, nullptr, nullptr, cpuBenchmark);
     }
 
     bool assembleLencTruncDevice(
@@ -3334,8 +3348,9 @@ namespace osuCrypto::LogVole::gpu
         u32 retainedRandomizerCount,
         std::shared_ptr<const LazyLencRandomizerState>* retainedRandomizers,
         const RetainedPublicUniform* retainedPublicB,
-        const DeviceBatch* seedLabelDevice)
+        const DeviceBatch* seedLabelDevice, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (outFirstRNtt == &outCtNtt) return false;
         if ((compactNoiseDevice && (!compactNoiseLimb0.empty() || compactNoiseDevice->producerStream())) ||
             (compactRandomizerDevice && (!compactRandomizerLimb0.empty() || compactRandomizerDevice->producerStream()))) return false;
@@ -3350,7 +3365,7 @@ namespace osuCrypto::LogVole::gpu
             tauHi == 0 || tauHi == std::numeric_limits<u32>::max() ||
             tauLeaf == 0 || tauLeaf > tauHi + 1u || gadgetLogBase == 0)
             return false;
-        HostStep totalStep(hostProfiler(ctx), "setup: lenc device assembly");
+        HostStep totalStep(hostProfiler(ctx), "setup: lenc device assembly", &cpuBenchmark);
         const u32 levels = static_cast<u32>(rLayersNtt.size());
         const u32 width = u32{1} << levels;
         const u32 rho = static_cast<u32>(ringModulusCount(ctx));
@@ -3520,7 +3535,7 @@ namespace osuCrypto::LogVole::gpu
             ~DrainStream() { stream.sync(); }
         } drainStream{stream};
         {
-            HostStep uploadStep(hostProfiler(ctx), "setup: lenc device upload");
+            HostStep uploadStep(hostProfiler(ctx), "setup: lenc device upload", &cpuBenchmark);
             if (!rBuffer.resize(*ring, static_cast<u32>(rCount64), stream) ||
                 !bBuffer.resize(*ring, static_cast<u32>(bCount64), stream) ||
                 !ctBuffer.resize(*ring, count, stream) || !scaledBuffer.resize(*ring, maxGroup, stream)) return false;
@@ -3536,7 +3551,7 @@ namespace osuCrypto::LogVole::gpu
                     if (!rBuffer.upload(rLayersNtt[level], stream, static_cast<std::size_t>(level) * width)) return false;
             const auto copiedSeedLabels = seedLabelDevice
                 ? ([&] {
-                    HostStep copyStep(hostProfiler(ctx), "setup: LENC seed-label retained D2D");
+                    HostStep copyStep(hostProfiler(ctx), "setup: LENC seed-label retained D2D", &cpuBenchmark);
                     return gpuMemcpyD2D(
                         rBuffer.poly(static_cast<std::size_t>(levels) * width, stream),
                         seedLabelDevice->mImpl->mBuf.data(stream),
@@ -3576,7 +3591,7 @@ namespace osuCrypto::LogVole::gpu
         const auto* idx = static_cast<const u32*>(deviceIndices.data());
         const auto* scalar = retainedRandomizers ? ring->crtLiftFactors() : static_cast<const u64*>(deviceFactors.data());
         {
-            HostStep kernelStep(hostProfiler(ctx), "setup: lenc device launches");
+            HostStep kernelStep(hostProfiler(ctx), "setup: lenc device launches", &cpuBenchmark);
             if (compactRandomizers)
             {
                 // Read q0 from a disjoint source while producing all RNS limbs.
@@ -3628,7 +3643,7 @@ namespace osuCrypto::LogVole::gpu
         }
         if (retainedRandomizers)
         {
-            HostStep retainStep(hostProfiler(ctx), "setup: LENC randomizer retain");
+            HostStep retainStep(hostProfiler(ctx), "setup: LENC randomizer retain", &cpuBenchmark);
             if (!retainedNtt.resize(*ring, retainedRandomizerCount, stream) ||
                 !gpuMemcpyD2D(retainedNtt.data(stream), rBuffer.data(stream), retainedNtt.bytes(), stream.raw()) ||
                 !launchCanonicalize(ring->view(stream), retainedNtt.data(stream), nullptr, retainedRandomizerCount, stream.raw()) ||
@@ -3637,7 +3652,7 @@ namespace osuCrypto::LogVole::gpu
         }
         else if (outFirstRNtt)
         {
-            HostStep downloadStep(hostProfiler(ctx), "setup: LENC randomizer host download");
+            HostStep downloadStep(hostProfiler(ctx), "setup: LENC randomizer host download", &cpuBenchmark);
             if (!rBuffer.download(firstRNtt, stream, 0, width)) return false;
         }
         if (deferredCiphertext)
@@ -3653,10 +3668,10 @@ namespace osuCrypto::LogVole::gpu
             if (retainedRandomizers) *retainedRandomizers = std::move(randomizerOwner);
             return true;
         }
-        HostStep downloadStep(hostProfiler(ctx), "setup: lenc device download");
+        HostStep downloadStep(hostProfiler(ctx), "setup: lenc device download", &cpuBenchmark);
         if (ctx.mExecutionOptions.mAdvanced.mProtocol.mPipelinedDownload)
         {
-            if (!ctBuffer.downloadPipelined(outCtNtt, stream, requestedWorkers)) return false;
+            if (!ctBuffer.downloadPipelined(outCtNtt, stream, requestedWorkers, 0, 0, cpuBenchmark)) return false;
             if (outFirstRNtt) *outFirstRNtt = std::move(firstRNtt);
             if (retainedRandomizers) *retainedRandomizers = std::move(randomizerOwner);
             return true;
@@ -3723,10 +3738,11 @@ namespace osuCrypto::LogVole::gpu
         const RingNttContext& ctx, std::span<const RnsPoly> r,
         std::span<const RnsPoly> sk1, std::span<const RnsPoly> publicANtt,
         u32 gadgetLogBase, bool rInputIsNtt, u32 rPowerOffset,
-        std::vector<RnsPoly>& outCoeffs, std::span<const u64> compactNoiseLimb0)
+        std::vector<RnsPoly>& outCoeffs, std::span<const u64> compactNoiseLimb0, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleLheCiphertextDevice(ctx, r, sk1, publicANtt, gadgetLogBase,
-            rInputIsNtt, rPowerOffset, outCoeffs, compactNoiseLimb0, nullptr);
+            rInputIsNtt, rPowerOffset, outCoeffs, compactNoiseLimb0, nullptr, cpuBenchmark);
     }
 
     bool assembleLheCiphertextDevice(
@@ -3734,10 +3750,12 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> sk1, std::span<const RnsPoly> publicANtt,
         u32 gadgetLogBase, bool rInputIsNtt, u32 rPowerOffset,
         std::vector<RnsPoly>& outCoeffs, std::span<const u64> compactNoiseLimb0,
-        const DeviceScalars* compactNoiseDevice)
+        const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleLheCiphertextDevice(ctx, r, sk1, publicANtt, gadgetLogBase,
-            rInputIsNtt, rPowerOffset, outCoeffs, compactNoiseLimb0, compactNoiseDevice, 1);
+            rInputIsNtt, rPowerOffset, outCoeffs, compactNoiseLimb0, compactNoiseDevice, 1,
+            nullptr, nullptr, nullptr, nullptr, nullptr, 0, false, cpuBenchmark);
     }
 
     bool assembleLheCiphertextDevice(
@@ -3756,8 +3774,9 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch* rootR1Device,
         const DeviceBatch* rootSecretDevice,
         u64 rootSecretOwnerRunId,
-        bool topSecretDomain)
+        bool topSecretDomain, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         const auto* retainedR = randomizers ? lencRandomizerDeviceNtt(ctx, randomizers) : nullptr;
         const auto rCount = retainedR ? retainedR->count()
             : rootR1Device ? rootR1Device->count() : r.size();
@@ -3788,7 +3807,7 @@ namespace osuCrypto::LogVole::gpu
         const bool topDecline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mTopSk1Lhe;
         if ((forceDecline) ||
             (topSecretDomain && topDecline)) return false;
-        HostStep totalStep(hostProfiler(ctx), "setup: lhe device assembly");
+        HostStep totalStep(hostProfiler(ctx), "setup: lhe device assembly", &cpuBenchmark);
         auto ring = GpuRing::get(ctx);
         if (!ring || !ring->rho() || ring->rho() != ringModulusCount(ctx) ||
             ring->polyWords() > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return false;
@@ -3836,7 +3855,7 @@ namespace osuCrypto::LogVole::gpu
             ~DrainStream() { stream.sync(); }
         } drainStream{stream};
         {
-            HostStep uploadStep(hostProfiler(ctx), "setup: lhe device upload");
+            HostStep uploadStep(hostProfiler(ctx), "setup: lhe device upload", &cpuBenchmark);
             if ((!retainedR && !rBuffer.resize(*ring, rows, stream)) || !skBuffer.resize(*ring, cols, stream) ||
                 !aBuffer.resize(*ring, rows, stream) || !ctBuffer.resize(*ring, count, stream) ||
                 (!retainedR && !(rootR1Device
@@ -3863,7 +3882,7 @@ namespace osuCrypto::LogVole::gpu
         const auto* idx = static_cast<const u32*>(deviceIndices.data());
         const auto* rData = retainedR ? retainedR->data(stream) : rBuffer.data(stream);
         {
-            HostStep kernelStep(hostProfiler(ctx), "setup: lhe device launches");
+            HostStep kernelStep(hostProfiler(ctx), "setup: lhe device launches", &cpuBenchmark);
             // CPU scalar/NTT helpers reduce arbitrary u64 input coefficients.
             // Reduce on the device before entering canonical NTT/add kernels.
             if ((!retainedR && !launchCanonicalize(ring->view(stream), rBuffer.data(stream), nullptr, rows, stream.raw())) ||
@@ -3912,10 +3931,10 @@ namespace osuCrypto::LogVole::gpu
             *deferredCiphertext = std::move(lazy);
             return true;
         }
-        HostStep downloadStep(hostProfiler(ctx), "setup: lhe device download");
+        HostStep downloadStep(hostProfiler(ctx), "setup: lhe device download", &cpuBenchmark);
         if ((ctx.mExecutionOptions.mAdvanced.mProtocol.mExtraPipelinedDownload) && count >= 4)
         {
-            if (!ctBuffer.downloadPipelined(next, stream, requestedWorkers) || next.size() != count)
+            if (!ctBuffer.downloadPipelined(next, stream, requestedWorkers, 0, 0, cpuBenchmark) || next.size() != count)
                 return false;
             outCoeffs = std::move(next);
             return true;
@@ -5210,8 +5229,9 @@ namespace osuCrypto::LogVole::gpu
         };
 
         std::shared_ptr<RootDeviceCache> rootCache(
-            const ReceiverState& state, const RingNttContext& ctx)
+            const ReceiverState& state, const RingNttContext& ctx, CpuBenchmarkState cpuBenchmark = {})
         {
+            if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
             if (state.mRootGpuCache)
             {
                 return std::static_pointer_cast<RootDeviceCache>(state.mRootGpuCache);
@@ -5237,10 +5257,10 @@ namespace osuCrypto::LogVole::gpu
             const auto uploadCtR = [&] {
                 if (!state.mRootCtRWire)
                 {
-                    HostStep phase(hostProfiler(ctx), "setup root: CtR upload host NTT");
+                    HostStep phase(hostProfiler(ctx), "setup root: CtR upload host NTT", &cpuBenchmark);
                     return upload(state.mRootCtRRt, cache->mCtR, cache->mCtRCols);
                 }
-                HostStep phase(hostProfiler(ctx), "setup root: CtR upload encoded wire and NTT");
+                HostStep phase(hostProfiler(ctx), "setup root: CtR upload encoded wire and NTT", &cpuBenchmark);
                 cache->mCtRCols = state.mRootCtRRt.mCols;
                 const auto count = ringTensorSize(state.mRootCtRRt);
                 if (!count || count > std::numeric_limits<u32>::max() ||
@@ -5257,10 +5277,10 @@ namespace osuCrypto::LogVole::gpu
             const auto uploadTopCt = [&] {
                 if (!state.mRootTopCtWire)
                 {
-                    HostStep phase(hostProfiler(ctx), "setup root: TopCt upload host scatter");
+                    HostStep phase(hostProfiler(ctx), "setup root: TopCt upload host scatter", &cpuBenchmark);
                     return upload(state.mRootTopCt, cache->mTopCt, cache->mTopCols);
                 }
-                HostStep phase(hostProfiler(ctx), "setup root: TopCt upload encoded wire");
+                HostStep phase(hostProfiler(ctx), "setup root: TopCt upload encoded wire", &cpuBenchmark);
                 cache->mTopCols = state.mRootTopCt.mCols;
                 const auto count = ringTensorSize(state.mRootTopCt);
                 if (count > std::numeric_limits<std::size_t>::max() ||
@@ -5274,10 +5294,10 @@ namespace osuCrypto::LogVole::gpu
             const auto uploadLacct = [&] {
                 if (!state.mRootLacctLeftWire)
                 {
-                    HostStep phase(hostProfiler(ctx), "setup root: Lacct upload host scatter");
+                    HostStep phase(hostProfiler(ctx), "setup root: Lacct upload host scatter", &cpuBenchmark);
                     return upload(state.mRootLacctLeft.mCt, cache->mLacctLeft, cache->mLacctCols);
                 }
-                HostStep phase(hostProfiler(ctx), "setup root: Lacct upload encoded wire");
+                HostStep phase(hostProfiler(ctx), "setup root: Lacct upload encoded wire", &cpuBenchmark);
                 cache->mLacctCols = state.mRootLacctLeft.mCt.mCols;
                 const auto count = ringTensorSize(state.mRootLacctLeft.mCt);
                 if (count > std::numeric_limits<std::size_t>::max() ||
@@ -5291,11 +5311,11 @@ namespace osuCrypto::LogVole::gpu
             const auto uploadPublicBStar = [&] {
                 if (!state.mRootPublicBStarWire)
                 {
-                    HostStep phase(hostProfiler(ctx), "setup root: BStar upload host scatter");
+                    HostStep phase(hostProfiler(ctx), "setup root: BStar upload host scatter", &cpuBenchmark);
                     return cache->mPublicBStar.resize(*ring, state.mRootPublicBStarNtt.size(), stream) &&
                         cache->mPublicBStar.upload(state.mRootPublicBStarNtt, stream);
                 }
-                HostStep phase(hostProfiler(ctx), "setup root: BStar upload encoded wire");
+                HostStep phase(hostProfiler(ctx), "setup root: BStar upload encoded wire", &cpuBenchmark);
                 if (!cache->mPublicBStar.resize(*ring, state.mRootRandomizerWidth, stream))
                     return false;
                 const auto encoded = state.mRootPublicBStarWire->encodedCoefficients();
@@ -5484,8 +5504,9 @@ namespace osuCrypto::LogVole::gpu
         bool forceFirstReject,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice)
+        DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark = {})
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         if (negDPrimeDevice) negDPrimeDevice->reset();
         const bool seededZeta = !zetaTaskSeeds.empty();
@@ -5518,7 +5539,7 @@ namespace osuCrypto::LogVole::gpu
         if (!tree || !tree->mImpl) return bail(ctx, "rootDigest: no device left tree");
         auto& treeImpl = *tree->mImpl;
 
-        auto cache = rootCache(state, ctx);
+        auto cache = rootCache(state, ctx, cpuBenchmark);
         if (!cache || cache->mPublicBStar.count() != randomizerWidth)
             return bail(ctx, "rootDigest: offline tensors");
         auto ring = cache->mRing;
@@ -5688,11 +5709,12 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice)
+        DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return rootDigestReceiverDeviceImpl(
             state, ctx, leftTreeSession, &zeta, {}, 0u, tauHi, false,
-            negDPrime, topInputsNtt, negDPrimeDevice);
+            negDPrime, topInputsNtt, negDPrimeDevice, cpuBenchmark);
     }
 
     bool rootDigestReceiverDeviceFromZetaSeeds(
@@ -5705,12 +5727,13 @@ namespace osuCrypto::LogVole::gpu
         bool forceFirstReject,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice)
+        DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return rootDigestReceiverDeviceImpl(
             state, ctx, leftTreeSession, nullptr, taskSeeds, rangesPerPoly,
             tauHi, forceFirstReject, negDPrime, topInputsNtt,
-            negDPrimeDevice);
+            negDPrimeDevice, cpuBenchmark);
     }
 
     namespace
@@ -5839,8 +5862,9 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         u32 leftWidth,
         PreparedRootFinalizePtr& prepared,
-        const DeviceBatchPtr& dPrimeDevice)
+        const DeviceBatchPtr& dPrimeDevice, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         prepared.reset();
         if (!enabled(ctx) || !rootFinalizePriorityPrefetchEnabledImpl(ctx.mExecutionOptions.mAdvanced.mProtocol))
@@ -5875,7 +5899,7 @@ namespace osuCrypto::LogVole::gpu
         if (!tree || !tree->mImpl || !topInputsNttDev || !topInputsNttDev->mImpl)
             return bail(ctx, "root prefetch: missing device inputs");
 
-        auto cache = rootCache(state, ctx);
+        auto cache = rootCache(state, ctx, cpuBenchmark);
         auto level = receiverCache(state.mShrinkExpandState);
         if (!cache || !level || !cache->mRing)
             return bail(ctx, "root prefetch: device caches");
@@ -5910,8 +5934,9 @@ namespace osuCrypto::LogVole::gpu
         u32 leftWidth,
         DeviceBatchPtr& rootKey,
         PreparedRootFinalize* prepared,
-        const DeviceBatch* dPrimeDevice)
+        const DeviceBatch* dPrimeDevice, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         if (!enabled(ctx) || tauHi == 0 || leftWidth == 0 || seed.empty()) return bail(ctx, "root: sizes");
 
@@ -5919,7 +5944,7 @@ namespace osuCrypto::LogVole::gpu
         if (!tree || !tree->mImpl) return bail(ctx, "root: no device left tree");
         auto& treeImpl = *tree->mImpl;
 
-        auto cache = rootCache(state, ctx);
+        auto cache = rootCache(state, ctx, cpuBenchmark);
         if (!cache) return bail(ctx, "root: offline tensor upload failed");
         auto ring = cache->mRing;
         const u32 rho = ring->rho();

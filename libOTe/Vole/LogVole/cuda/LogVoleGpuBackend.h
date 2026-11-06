@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 // Host-side glue between the LogVole CPU data structures and the CUDA kernels.
 //
@@ -581,7 +582,7 @@ namespace osuCrypto::LogVole::gpu
         // materialization into independently owned host polynomials. Publishes
         // only after the complete batch succeeds; unchanged output on failure.
         bool downloadPipelined(std::vector<RnsPoly>& polys, GpuStream& stream, u32 workers,
-                               std::size_t srcOffset = 0, std::size_t count = 0) const;
+                               std::size_t srcOffset = 0, std::size_t count = 0, CpuBenchmarkState cpuBenchmark = {}) const;
         // Queues the copy without synchronising; the caller must sync.
         bool downloadAsync(RnsPoly& poly, std::size_t srcIdx, GpuStream& stream) const;
         bool zero(GpuStream& stream);

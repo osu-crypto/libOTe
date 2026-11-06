@@ -125,6 +125,7 @@ namespace osuCrypto::LogVole
             bool multiplyByDelta,
             RnsPoly& out)
         {
+            CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(ctx.mRing)};
             const u64 slotCount = zpSlotCount(ctx);
             if (slots.size() != slotCount)
             {
@@ -638,6 +639,7 @@ namespace osuCrypto
 
     task<> LogVoleSender::offline(u64 delta, PRNG& prng, Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!isConfigured())
         {
             throw std::runtime_error("LogVole CI-VOLE sender must be configured before offline");
@@ -650,7 +652,7 @@ namespace osuCrypto
         input.mW = mRequestSize;
 
         CivoleSenderState state{};
-        co_await civoleSenderOffline(input, state, prng, sock);
+        co_await civoleSenderOffline(input, state, prng, sock, cpuBenchmark);
 
         mOfflineState = std::move(state);
         mModulus = mOfflineState.mModulus;
@@ -662,6 +664,7 @@ namespace osuCrypto
 
     task<> LogVoleSender::send(span<u64> b, PRNG& prng, Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!hasOffline())
         {
             throw std::runtime_error("LogVole CI-VOLE sender requires offline state before send");
@@ -681,7 +684,7 @@ namespace osuCrypto
             // allocated, copied into mReleasedKeys, and copied again into b.
             options.mKeysOut = std::span<u64>(b.data(), b.size());
         }
-        co_await civoleSenderRelease(mOfflineState, sid, release, prng, sock, options);
+        co_await civoleSenderRelease(mOfflineState, sid, release, prng, sock, options, cpuBenchmark);
 
         mOutputDevice = release.mKeysDevice;
         mOutputDeviceCount = release.mKeysDeviceCount;
@@ -816,6 +819,7 @@ namespace osuCrypto
 
     task<> LogVoleReceiver::offline(Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!isConfigured())
         {
             throw std::runtime_error("LogVole CI-VOLE receiver must be configured before offline");
@@ -827,7 +831,7 @@ namespace osuCrypto
         input.mW = mRequestSize;
 
         CivoleReceiverState state{};
-        co_await civoleReceiverOffline(input, state, sock);
+        co_await civoleReceiverOffline(input, state, sock, cpuBenchmark);
         if (state.mW != mRequestSize)
         {
             throw std::runtime_error("LogVole CI-VOLE receiver offline size does not match configured size");
@@ -857,6 +861,7 @@ namespace osuCrypto
 
     task<> LogVoleReceiver::receive(span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
     {
+        CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         const bool emptyDeviceInput = x.empty() && mInputDevice != nullptr;
         const bool emptyDeviceOutput = a.empty() && mKeepOutputOnDevice;
         if (!isConfigured() && (emptyDeviceInput || emptyDeviceOutput))
@@ -897,7 +902,7 @@ namespace osuCrypto
         }
         try
         {
-            co_await civoleReceiverSetX(mOfflineState, sid, x, setX, prng, sock, options);
+            co_await civoleReceiverSetX(mOfflineState, sid, x, setX, prng, sock, options, cpuBenchmark);
         }
         catch (...)
         {
@@ -1668,8 +1673,9 @@ namespace osuCrypto::LogVole
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
-        std::vector<RnsPoly>& out)
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx.mRing);
         if (ctx.mGpuLightweight)
         {
             if (!validateZpContext(ctx) ||
@@ -1693,7 +1699,7 @@ namespace osuCrypto::LogVole
 #endif
             const auto host = getZpHostContext(ctx);
             return host && wrapZpLabelsCrt(
-                *host, labels, multiplyByDelta, padValue, requestedWorkers, out);
+                *host, labels, multiplyByDelta, padValue, requestedWorkers, out, cpuBenchmark);
         }
         if (!validateZpContext(ctx) ||
             !validateZpValues(ctx, labels) ||
@@ -1709,7 +1715,7 @@ namespace osuCrypto::LogVole
         return detail::runParallelTasks(
             static_cast<std::size_t>(chunkCount),
             requestedWorkers,
-            [&](std::size_t taskIdx) {
+            [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark) {
                 const u64 chunkIdx = static_cast<u64>(taskIdx);
                 const u64 offset = chunkIdx * slotCount;
                 const u64 chunkSize = std::min<u64>(slotCount, labels.size() - offset);
@@ -1720,7 +1726,7 @@ namespace osuCrypto::LogVole
                     padValue,
                     requestedWorkers,
                     out[chunkIdx]);
-            });
+            }, false, &cpuBenchmark);
     }
 
     bool unwrapRingLabelsCrt(
@@ -1729,8 +1735,9 @@ namespace osuCrypto::LogVole
         u64 zpLabelCount,
         bool scaleAndRound,
         u32 requestedWorkers,
-        AlignedUnVec<u64>& out)
+        AlignedUnVec<u64>& out, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx.mRing);
         if (!validateZpContext(ctx) || !validateRingBatchShape(labels, ctx.mRing.mParams))
         {
             return false;
@@ -1779,7 +1786,7 @@ namespace osuCrypto::LogVole
         {
             const auto host = getZpHostContext(ctx);
             return host && unwrapRingLabelsCrt(
-                *host, labels, zpLabelCount, scaleAndRound, requestedWorkers, out);
+                *host, labels, zpLabelCount, scaleAndRound, requestedWorkers, out, cpuBenchmark);
         }
 
         auto batchingContextData = ctx.mBatchingContext->first_context_data();
@@ -1819,7 +1826,7 @@ namespace osuCrypto::LogVole
         if (!detail::runParallelTasks(
                 static_cast<std::size_t>(chunkCount),
                 requestedWorkers,
-                [&](std::size_t labelIdx) {
+                [&](std::size_t labelIdx, CpuBenchmarkState& cpuBenchmark) {
                     seal::Plaintext plain;
                     plain.resize(slotCount);
 
@@ -1908,7 +1915,7 @@ namespace osuCrypto::LogVole
                     const u64 copyCount = std::min<u64>(remaining, slots.size());
                     std::copy_n(slots.begin(), copyCount, out.data() + offset);
                     return true;
-                }))
+                }, false, &cpuBenchmark))
         {
             return false;
         }
@@ -1920,7 +1927,7 @@ namespace osuCrypto::LogVole
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
         PRNG& prng,
-        Socket& sock)
+        Socket& sock, CpuBenchmarkState cpuBenchmark)
     {
         // The delta producer precedes LogVoleRingSender::offline. Give both
         // stages the same fresh sender run rather than publishing a run-zero
@@ -2004,7 +2011,7 @@ namespace osuCrypto::LogVole
         gpu::DeviceBatchPtr residentDelta{};
 #endif
         {
-            HostStep deltaStep(hostProfiler(ctx.mRing), "setup: delta preparation");
+            HostStep deltaStep(hostProfiler(ctx.mRing), "setup: delta preparation", &cpuBenchmark);
             bool strictDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (gpu::enabled(ctx.mRing) && params.mShrinkExpand.mGpuSetup.mDeltaDevice)
@@ -2031,7 +2038,7 @@ namespace osuCrypto::LogVole
 #endif
             if (!wrapped && !strictDevice)
             {
-                HostStep cpuStep(hostProfiler(ctx.mRing), "setup: delta CPU preparation");
+                HostStep cpuStep(hostProfiler(ctx.mRing), "setup: delta CPU preparation", &cpuBenchmark);
                 wrapped = wrapHost(wrappedDelta);
             }
         }
@@ -2085,7 +2092,7 @@ namespace osuCrypto::LogVole
     task<> civoleReceiverOffline(
         const CivoleReceiverOfflineInput& input,
         CivoleReceiverState& state,
-        Socket& sock)
+        Socket& sock, CpuBenchmarkState cpuBenchmark)
     {
         if (input.mW == 0)
         {
@@ -2172,7 +2179,7 @@ namespace osuCrypto::LogVole
     bool civoleSenderReleaseK(
         CivoleSenderState& state,
         CivoleSid sid,
-        CivoleReleaseKOutput& output)
+        CivoleReleaseKOutput& output, CpuBenchmarkState cpuBenchmark)
     {
         // NI fixes k only after d' arrives; it cannot offer staged key release.
         if (state.mParams.mLogVole.mOnlineMode == OnlineMode::NonInteractive) return false;
@@ -2210,7 +2217,7 @@ namespace osuCrypto::LogVole
                 state.mW,
                 true,
                 state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
-                keys))
+                keys, cpuBenchmark))
         {
             return false;
         }
@@ -2235,7 +2242,7 @@ namespace osuCrypto::LogVole
         CivoleSenderReleaseOutput& output,
         PRNG& prng,
         Socket& sock,
-        CivoleSenderReleaseOptions options)
+        CivoleSenderReleaseOptions options, CpuBenchmarkState cpuBenchmark)
     {
         const auto ctxOwner = stateCrtContext(state);
         if (!ctxOwner)
@@ -2258,7 +2265,7 @@ namespace osuCrypto::LogVole
         onlineOptions.mSkipTbkOutput = true;
         onlineOptions.mUsePrecomputed = senderHasPrecompute(state.mLogVoleState);
         {
-            HostStep step(hostProfiler(ctxOwner->mRing), "send: logvole online");
+            HostStep step(hostProfiler(ctxOwner->mRing), "send: logvole online", &cpuBenchmark);
             co_await sender.online(state.mLogVoleState, onlineOptions, online, prng, sock);
         }
 
@@ -2275,7 +2282,7 @@ namespace osuCrypto::LogVole
         next.mComm = online.mComm;
 
         const bool writeToCaller = options.mKeysOut.size() == static_cast<std::size_t>(state.mW);
-        HostStep unwrapStep(hostProfiler(ctx.mRing), "cpu sender: unwrap keys and copy");
+        HostStep unwrapStep(hostProfiler(ctx.mRing), "cpu sender: unwrap keys and copy", &cpuBenchmark);
         bool haveKeys = false;
         const auto& ringKeys = *state.mLogVoleState.mPrecomputedTbk;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2286,7 +2293,7 @@ namespace osuCrypto::LogVole
             auto dev = std::static_pointer_cast<gpu::DeviceBatch>(ringKeysDevice);
             if (options.mKeepKeysOnDevice)
             {
-                HostStep step(hostProfiler(ctx.mRing), "send: unwrap keys -> device");
+                HostStep step(hostProfiler(ctx.mRing), "send: unwrap keys -> device", &cpuBenchmark);
                 // Nothing crosses PCIe for the sender either: the keys are
                 // unwrapped in place and left for a device-side consumer.
                 if (auto scalars = gpu::unwrapLabelsToDevice(ctx, *dev, ringKeyCount, state.mW))
@@ -2316,7 +2323,7 @@ namespace osuCrypto::LogVole
                 state.mW,
                 true,
                 state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
-                keys))
+                keys, cpuBenchmark))
         {
             throw std::runtime_error("LogVole CI-VOLE sender could not unwrap keys");
         }
@@ -2344,7 +2351,7 @@ namespace osuCrypto::LogVole
         CivoleReceiverSetXOutput& output,
         PRNG& prng,
         Socket& sock,
-        CivoleReceiverSetXOptions options)
+        CivoleReceiverSetXOptions options, CpuBenchmarkState cpuBenchmark)
     {
         // With a device-resident x the caller passes the size in `x` (or in
         // mXDeviceCount) and the values never touch host memory, so the host-side
@@ -2365,7 +2372,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole CI-VOLE receiver has no matching offline CRT owner");
         const auto& ctx = *ctxOwner;
         {
-            HostStep step(hostProfiler(ctx.mRing), "recv: crt ctx + validate + sid");
+            HostStep step(hostProfiler(ctx.mRing), "recv: crt ctx + validate + sid", &cpuBenchmark);
             if ((!xOnDevice && !validateZpValues(ctx, x)) ||
                 !prepareReceiverSidForSetX(state, sid))
             {
@@ -2393,7 +2400,7 @@ namespace osuCrypto::LogVole
         // 256 KiB-per-chunk host representation is never built.
         if (gpu::enabled(ctx.mRing))
         {
-            HostStep step(hostProfiler(ctx.mRing), "recv: wrap x -> device");
+            HostStep step(hostProfiler(ctx.mRing), "recv: wrap x -> device", &cpuBenchmark);
             gpu::DeviceBatchPtr dev{};
             if (xOnDevice)
             {
@@ -2426,7 +2433,7 @@ namespace osuCrypto::LogVole
 #endif
         if (!onlineInput.mXDevice)
         {
-            HostStep wrapStep(hostProfiler(ctx.mRing), "cpu receiver: wrap inputs");
+            HostStep wrapStep(hostProfiler(ctx.mRing), "cpu receiver: wrap inputs", &cpuBenchmark);
             if (xOnDevice)
             {
                 throw std::runtime_error(
@@ -2452,7 +2459,7 @@ namespace osuCrypto::LogVole
                     false,
                     0,
                     state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
-                    wrapped))
+                    wrapped, cpuBenchmark))
             {
                 throw std::runtime_error("LogVole CI-VOLE receiver could not wrap inputs");
             }
@@ -2472,7 +2479,7 @@ namespace osuCrypto::LogVole
         LogVoleRingReceiver receiver{};
         ReceiverOnlineOutput online{};
         {
-            HostStep step(hostProfiler(ctx.mRing), "recv: logvole online");
+            HostStep step(hostProfiler(ctx.mRing), "recv: logvole online", &cpuBenchmark);
             co_await receiver.online(
                 state.mLogVoleState, onlineInput, online, prng, sock,
                 state.mFirstQueryGpuAllocations, &state);
@@ -2485,7 +2492,7 @@ namespace osuCrypto::LogVole
 
         const bool writeToCaller =
             options.mMacsOut.size() == static_cast<std::size_t>(state.mW);
-        HostStep unwrapStep(hostProfiler(ctx.mRing), "cpu receiver: unwrap macs and copy");
+        HostStep unwrapStep(hostProfiler(ctx.mRing), "cpu receiver: unwrap macs and copy", &cpuBenchmark);
 
         AlignedUnVec<u64> macs;
         bool haveMacs = false;
@@ -2498,7 +2505,7 @@ namespace osuCrypto::LogVole
             auto dev = std::static_pointer_cast<gpu::DeviceBatch>(online.mTbmDevice);
             if (options.mKeepMacsOnDevice)
             {
-                HostStep step(hostProfiler(ctx.mRing), "recv: unwrap macs -> device");
+                HostStep step(hostProfiler(ctx.mRing), "recv: unwrap macs -> device", &cpuBenchmark);
                 // Nothing crosses PCIe: the caller consumes the result on the GPU.
                 if (auto scalars = gpu::unwrapLabelsToDevice(
                         ctx, *dev, static_cast<u64>(online.mTbmCount), state.mW))
@@ -2535,7 +2542,7 @@ namespace osuCrypto::LogVole
                 state.mW,
                 true,
                 state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
-                macs))
+                macs, cpuBenchmark))
         {
             throw std::runtime_error("LogVole CI-VOLE receiver could not unwrap MACs");
         }

@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
@@ -504,7 +505,7 @@ namespace osuCrypto::LogVole
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
 
     bool unwrapRingLabelsCrt(
         const ZpCrtContext& ctx,
@@ -512,7 +513,7 @@ namespace osuCrypto::LogVole
         u64 zpLabelCount,
         bool scaleAndRound,
         u32 requestedWorkers,
-        AlignedUnVec<u64>& out);
+        AlignedUnVec<u64>& out, CpuBenchmarkState cpuBenchmark = {});
 
     // Low-level CI-VOLE state-machine API. Applications should normally prefer
     // osuCrypto::LogVoleSender and osuCrypto::LogVoleReceiver above.
@@ -520,17 +521,17 @@ namespace osuCrypto::LogVole
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
         PRNG& prng,
-        Socket& sock);
+        Socket& sock, CpuBenchmarkState cpuBenchmark = {});
 
     task<> civoleReceiverOffline(
         const CivoleReceiverOfflineInput& input,
         CivoleReceiverState& state,
-        Socket& sock);
+        Socket& sock, CpuBenchmarkState cpuBenchmark = {});
 
     bool civoleSenderReleaseK(
         CivoleSenderState& state,
         CivoleSid sid,
-        CivoleReleaseKOutput& output);
+        CivoleReleaseKOutput& output, CpuBenchmarkState cpuBenchmark = {});
 
     task<> civoleSenderRelease(
         CivoleSenderState& state,
@@ -538,7 +539,7 @@ namespace osuCrypto::LogVole
         CivoleSenderReleaseOutput& output,
         PRNG& prng,
         Socket& sock,
-        CivoleSenderReleaseOptions options = {});
+        CivoleSenderReleaseOptions options = {}, CpuBenchmarkState cpuBenchmark = {});
 
 
 
@@ -549,5 +550,5 @@ namespace osuCrypto::LogVole
         CivoleReceiverSetXOutput& output,
         PRNG& prng,
         Socket& sock,
-        CivoleReceiverSetXOptions options = {});
+        CivoleReceiverSetXOptions options = {}, CpuBenchmarkState cpuBenchmark = {});
 }

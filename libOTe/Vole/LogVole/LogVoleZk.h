@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 // VOLE-based zero-knowledge proofs on top of the LogVole chosen-input VOLE.
 //
@@ -188,13 +189,13 @@ namespace osuCrypto::LogVole
     // the slack is zeroed and never read by the check.
     bool zkMulWitness(
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize = 0, const LogVoleZkOptions& settings = {});
+        u64 voleSize = 0, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // Evaluate each independent layer with a bounded worker count. Random
     // input/mask draws retain the sequential API's exact PRNG consumption.
     bool zkMulWitness(
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize, u32 threads, const LogVoleZkOptions& settings = {});
+        u64 voleSize, u32 threads, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // U = sum_g chi^(g+1) * M[x_g] * M[y_g]                      + M[r]
     // V = sum_g chi^(g+1) * (M[z_g] - x_g*M[y_g] - y_g*M[x_g])    - r
@@ -258,12 +259,12 @@ namespace osuCrypto::LogVole
     // witness. Honest statement preparation is excluded from proof timing.
     bool zkMatMulFillProduct(
         const ZkMatMulStatement& st, u64 modulus, u32 threads,
-        std::span<const u64> wires, AlignedUnVec<u64>& publicProduct);
+        std::span<const u64> wires, AlignedUnVec<u64>& publicProduct, CpuBenchmarkState cpuBenchmark = {});
 
     // Both of the above.
     bool zkMatMulWitness(
         const ZkMatMulStatement& st, u64 modulus, u32 threads, PRNG& prng,
-        AlignedUnVec<u64>& wires, AlignedUnVec<u64>& publicProduct, u64 voleSize = 0);
+        AlignedUnVec<u64>& wires, AlignedUnVec<u64>& publicProduct, u64 voleSize = 0, CpuBenchmarkState cpuBenchmark = {});
 
     // Independent, uniform field coefficients for every output entry and
     // repetition, expanded from one 16-byte verifier seed after authentication.
@@ -290,7 +291,7 @@ namespace osuCrypto::LogVole
         const ZkMatMulChallenge& ch,
         u64 modulus,
         u32 threads,
-        ZkProof& out, const LogVoleZkOptions& settings = {});
+        ZkProof& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // Repeated matrix checks retain every equation. The scalar overloads above
     // and below reject statements with more than one repetition.
@@ -301,7 +302,7 @@ namespace osuCrypto::LogVole
         const ZkMatMulChallenge& ch,
         u64 modulus,
         u32 threads,
-        std::vector<ZkProof>& out, const LogVoleZkOptions& settings = {});
+        std::vector<ZkProof>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
     bool zkMatMulVerifierValue(
         const ZkMatMulStatement& st,
@@ -311,7 +312,7 @@ namespace osuCrypto::LogVole
         u64 delta,
         u64 modulus,
         u32 threads,
-        u64& out, const LogVoleZkOptions& settings = {});
+        u64& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
     bool zkMatMulVerifierValue(
         const ZkMatMulStatement& st,
@@ -321,7 +322,7 @@ namespace osuCrypto::LogVole
         u64 delta,
         u64 modulus,
         u32 threads,
-        std::vector<u64>& out, const LogVoleZkOptions& settings = {});
+        std::vector<u64>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
     bool zkMatMulAccept(std::span<const ZkProof> proofs, std::span<const u64> values,
         u64 delta, u64 modulus);

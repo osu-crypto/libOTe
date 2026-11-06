@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 #include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
@@ -204,17 +205,17 @@ namespace osuCrypto::LogVole
         AlignedUnVec<u64> mSkPrimeCoeffs;
     };
 
-    Buffer encode(const KeyDeriveRequest& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    Buffer encode(const KeyDeriveResponse& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    Buffer encode(const ShrinkExpandOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const KeyDeriveRequest& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    Buffer encode(const KeyDeriveResponse& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    Buffer encode(const ShrinkExpandOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     // Borrow the completed sender tensors while producing independently owned
     // wire bytes. This avoids constructing a second mutable tensor package.
-    Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    Buffer encode(const PolyMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    Buffer encode(const SeedMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    Buffer encode(const RootOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    Buffer encode(const RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    Buffer encode(const PolyMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    Buffer encode(const SeedMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    Buffer encode(const RootOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    Buffer encode(const RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     // Internal single-use transport can reserve and pin its exact final wire
     // allocation while an earlier frame is in flight. The ordinary encode API
     // keeps allocating its own independent Buffer.
@@ -292,27 +293,27 @@ namespace osuCrypto::LogVole
     // prevents a caller from attributing a previous process-local setup to a
     // different offline run.
     RootWirePinOverlapEvidence rootWirePinOverlapEvidenceSnapshot();
-    Buffer encode(const RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    Buffer encode(const RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    Buffer encode(const RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    Buffer encode(const RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
-    bool decode(std::span<const u8> payload, KeyDeriveRequest& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    bool decode(std::span<const u8> payload, KeyDeriveResponse& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+    bool decode(std::span<const u8> payload, KeyDeriveRequest& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, KeyDeriveResponse& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     // Internal socket route. Validate dimensions and coefficient spans first,
     // then retain the received bytes without allocating host polynomials.
     bool decodeShrinkExpandOfflineForTransport(Buffer&& payload,
-        ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {});
-    bool decode(std::span<const u8> payload, PolyMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    bool decode(std::span<const u8> payload, SeedMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    bool decode(std::span<const u8> payload, RootOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    bool decode(std::span<const u8> payload, RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+        ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {}, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, PolyMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, SeedMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, RootOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     // Internal socket route: retain the selected complete Root tensor segments
     // in the independently received Buffer until their first GPU or host consumer.
     bool decodeRootOfflineForTransport(Buffer&& payload,
-        RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {});
-    bool decode(std::span<const u8> payload, RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
-    bool decode(std::span<const u8> payload, RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+        RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {}, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     bool keyDerivePayloadSize(const RingParams& params, u32 tau, u64& out);
     bool shrinkExpandOfflinePayloadSize(const ShrinkExpandParams& params, u64& out);

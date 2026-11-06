@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 
@@ -44,7 +45,7 @@ namespace osuCrypto::LogVole
         u32 requestedWorkers = 1,
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext = nullptr,
         std::shared_ptr<const LazyLencRandomizerState> randomizers = {},
-        const LogVoleGpuSetupOptions& options = {});
+        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {});
 
     bool lheEnc1Trunc(
         const RingNttContext& ctx,
@@ -66,7 +67,7 @@ namespace osuCrypto::LogVole
         const LazyRootSecretHostState* rootSecretHost = nullptr,
         u64 rootSecretOwnerRunId = 0,
         bool topSecretDomain = false,
-        const LogVoleGpuSetupOptions& options = {});
+        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {});
 
     bool lheApplyCt1(
         const RingNttContext& ctx,
@@ -105,7 +106,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>* publicANtt = nullptr,
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
 
     // Consuming overload: reuses the ciphertext allocation for NTT-domain
     // decryption. The coefficient-domain special case keeps its existing path.
@@ -117,7 +118,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>* publicANtt = nullptr,
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
 
     bool deriveSkx(
         const RingNttContext& ctx,

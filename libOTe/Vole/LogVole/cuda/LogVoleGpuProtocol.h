@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 // GPU fast paths for the LogVole online phase.
 //
@@ -325,28 +326,28 @@ namespace osuCrypto::LogVole::gpu
     // magnitudes must be smaller than every modulus (validated by the sampler).
     // Required host state is downloaded after optional NTT; out is atomic on failure.
     bool expandErrorCompactDevice(const RingNttContext& ctx,
-        std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out);
+        std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
     bool expandErrorCompactDevice(const RingNttContext& ctx,
         std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out,
-        u32 requestedWorkers);
+        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark = {});
     bool expandErrorCompactDevice(const RingNttContext& ctx,
         const DeviceScalars& compactLimb0, bool outputNtt, std::vector<RnsPoly>& out,
-        u32 polyCount = 0);
+        u32 polyCount = 0, CpuBenchmarkState cpuBenchmark = {});
     bool expandErrorCompactDevice(const RingNttContext& ctx,
         const DeviceScalars& compactLimb0, bool outputNtt, std::vector<RnsPoly>& out,
-        u32 polyCount, u32 requestedWorkers);
+        u32 polyCount, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark = {});
     // Root-specific wrapper retains the root debug-decline control.
     bool expandRootErrorCompactDevice(const RingNttContext& ctx,
-        std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out);
+        std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
     bool expandRootErrorCompactDevice(const RingNttContext& ctx,
         std::span<const u64> compactLimb0, bool outputNtt, std::vector<RnsPoly>& out,
-        u32 requestedWorkers);
+        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark = {});
     // Internal sender Root path: retain completed coefficient-domain r1 rows
     // on the owning party's GPU. Consumers copy the immutable rows before NTT.
     // The owner is bound to ring, Sender role, protocol run and CUDA device.
     DeviceBatchPtr expandRootErrorCompactToBatch(const RingNttContext& ctx,
         std::span<const u64> compactLimb0, const DeviceScalars* deviceCompact,
-        u32 polyCount);
+        u32 polyCount, CpuBenchmarkState cpuBenchmark = {});
     bool rootErrorBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount);
     // Private sender Root uniform secret. This form never enters the public
@@ -385,7 +386,7 @@ namespace osuCrypto::LogVole::gpu
         u32 gadgetLogBase, u32 gadgetPowerOffset,
         std::span<const RnsPoly> noiseCoeffs,
         std::vector<RnsPoly>& outCtNtt,
-        std::span<const u64> compactNoiseLimb0 = {});
+        std::span<const u64> compactNoiseLimb0 = {}, CpuBenchmarkState cpuBenchmark = {});
     // Device compact inputs are completed, borrowed, immutable q0 matrices.
     // A source must be supplied on either host or device, never both.
     bool assembleRootTopCtDevice(
@@ -393,7 +394,7 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> r2Ntt, std::span<const RnsPoly> publicBRootNtt,
         std::span<const RnsPoly> publicBStarNtt, u32 gadgetLogBase, u32 gadgetPowerOffset,
         std::span<const RnsPoly> noiseCoeffs, std::vector<RnsPoly>& outCtNtt,
-        std::span<const u64> compactNoiseLimb0, const DeviceScalars* compactNoiseDevice);
+        std::span<const u64> compactNoiseLimb0, const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark = {});
     bool assembleRootTopCtDevice(
         const RingNttContext& ctx, std::span<const RnsPoly> r1Coeffs,
         std::span<const RnsPoly> r2Ntt, std::span<const RnsPoly> publicBRootNtt,
@@ -405,7 +406,7 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext = nullptr,
         const RetainedPublicUniform* retainedPublicBFullNtt = nullptr,
         const DeviceBatch* rootR1Device = nullptr,
-        const RetainedPublicUniform* retainedBStarNtt = nullptr);
+        const RetainedPublicUniform* retainedBStarNtt = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     // Assemble truncated LENC ciphertexts from exact host-sampled coefficient
     // noise and NTT operands. Host inputs/output are unchanged on failure, and
@@ -432,7 +433,7 @@ namespace osuCrypto::LogVole::gpu
         std::span<const u64> compactNoiseLimb0 = {},
         std::span<const u64> compactRandomizerLimb0 = {},
         u32 requestedWorkers = 1,
-        bool devicePadding = false);
+        bool devicePadding = false, CpuBenchmarkState cpuBenchmark = {});
     // The extended overload may publish a completed device owner instead of
     // host polynomials. On that success outCtNtt is empty; both outputs and the
     // optional owner remain unchanged on failure.
@@ -455,7 +456,7 @@ namespace osuCrypto::LogVole::gpu
         u32 retainedRandomizerCount = 0,
         std::shared_ptr<const LazyLencRandomizerState>* retainedRandomizers = nullptr,
         const RetainedPublicUniform* retainedPublicB = nullptr,
-        const DeviceBatch* seedLabelDevice = nullptr);
+        const DeviceBatch* seedLabelDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     // LHE setup arithmetic, including canonicalization, required forward
     // transforms, gadget scaling and final inverse transforms. Optional compact
@@ -470,13 +471,13 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> publicANtt,
         u32 gadgetLogBase, bool rInputIsNtt, u32 rPowerOffset,
         std::vector<RnsPoly>& outCoeffs,
-        std::span<const u64> compactNoiseLimb0 = {});
+        std::span<const u64> compactNoiseLimb0 = {}, CpuBenchmarkState cpuBenchmark = {});
     bool assembleLheCiphertextDevice(
         const RingNttContext& ctx, std::span<const RnsPoly> r,
         std::span<const RnsPoly> sk1, std::span<const RnsPoly> publicANtt,
         u32 gadgetLogBase, bool rInputIsNtt, u32 rPowerOffset,
         std::vector<RnsPoly>& outCoeffs, std::span<const u64> compactNoiseLimb0,
-        const DeviceScalars* compactNoiseDevice);
+        const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark = {});
     // A requested deferred owner retains the completed coefficient tensor and
     // clears outCoeffs on success. All outputs remain unchanged on failure.
     // randomizers borrows a completed immutable NTT layer in place of an empty
@@ -495,7 +496,7 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch* rootR1Device = nullptr,
         const DeviceBatch* rootSecretDevice = nullptr,
         u64 rootSecretOwnerRunId = 0,
-        bool topSecretDomain = false);
+        bool topSecretDomain = false, CpuBenchmarkState cpuBenchmark = {});
 
     // GPU equivalent of gadgetDecomposeBitsRange{,Centered} for one host input
     // polynomial, producing `levels` host digit polynomials. Bit-identical: the
@@ -649,7 +650,7 @@ namespace osuCrypto::LogVole::gpu
         u32 leftWidth,
         DeviceBatchPtr& rootKey,
         PreparedRootFinalize* prepared = nullptr,
-        const DeviceBatch* dPrimeDevice = nullptr);
+        const DeviceBatch* dPrimeDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     // The default mProtocol.mRootFinalizePriorityPrefetch path uses a pre-created
     // Root cache stream at the device's greatest priority plus retained device
@@ -669,7 +670,7 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         u32 leftWidth,
         PreparedRootFinalizePtr& prepared,
-        const DeviceBatchPtr& dPrimeDevice = {});
+        const DeviceBatchPtr& dPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // The digest step's arithmetic after the tree build, on the device:
     //   yDecomp   = centred gadget digits of the left tree's own digest
@@ -688,7 +689,7 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice = nullptr);
+        DeviceBatchPtr* negDPrimeDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     // Hot equivalent that never materializes zeta on the host. `taskSeeds` is
     // the exact [randomizer][rangesPerPoly] seed array already consumed from the
@@ -704,7 +705,7 @@ namespace osuCrypto::LogVole::gpu
         bool forceFirstReject,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice = nullptr);
+        DeviceBatchPtr* negDPrimeDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     // Device-resident receiver expand. `skX` is one key per chunk on the device
     // and is consumed (transformed in place); the result is returned as a device

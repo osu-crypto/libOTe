@@ -1756,9 +1756,10 @@ namespace osuCrypto::LogVole::gpu
 
     GpuRingSetupPrefetch::GpuRingSetupPrefetch(const RingNttContext& ctx, bool gpuEnabled)
     {
+        CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(ctx)};
         if (!gpuEnabled || !ctx.mResourceScope.mTables ||
             !ctx.mExecutionOptions.mAdvanced.mContexts.mInitOverlap || (!ctx.mContext && !ctx.mGpuLightweight)) return;
-        HostStep startStep(osuCrypto::LogVole::hostProfiler(ctx), "setup GPU ring prefetch start");
+        HostStep startStep(osuCrypto::LogVole::hostProfiler(ctx), "setup GPU ring prefetch start", &cpuBenchmark);
         int device = 0;
         if (cudaGetDevice(&device) != cudaSuccess) return;
         // The existing caching allocator selects device 0's memory pool. Do
@@ -1795,7 +1796,7 @@ namespace osuCrypto::LogVole::gpu
             }
             auto protocolScope = currentProtocolCacheScope();
             protocolScope.mRole = ctx.mResourceScope.mRole;
-            auto* benchmarkContext = tCpuBenchmarkContext;
+            auto* benchmarkContext = cpuBenchmark.mContext;
             auto next = std::make_unique<Impl>();
             next->mWorker = std::thread(
                 [ownedContext = ctx, protocolScope, benchmarkContext, device, state = next.get()]() {
@@ -1803,10 +1804,11 @@ namespace osuCrypto::LogVole::gpu
                     {
                         ScopedProtocolCacheScope scope(protocolScope);
                         CpuBenchmarkWorkerScope workerScope(benchmarkContext);
-                        CpuBenchmarkTaskScope taskScope;
-                        HostStep workerStep(hostProfiler(ownedContext), "setup GPU ring prefetch worker");
+                        CpuBenchmarkState cpuBenchmark{benchmarkContext, true};
+                        CpuBenchmarkTaskScope taskScope(cpuBenchmark);
+                        HostStep workerStep(hostProfiler(ownedContext), "setup GPU ring prefetch worker", &cpuBenchmark);
                         {
-                            HostStep deviceStep(hostProfiler(ownedContext), "setup GPU ring select device");
+                            HostStep deviceStep(hostProfiler(ownedContext), "setup GPU ring select device", &cpuBenchmark);
                             if (cudaSetDevice(device) != cudaSuccess) return false;
                         }
                         // Both table paths use their owned setup domain and
@@ -2447,7 +2449,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPolyBuffer::downloadPipelined(
         std::vector<RnsPoly>& polys, GpuStream& stream, u32 workers,
-        std::size_t srcOffset, std::size_t count) const
+        std::size_t srcOffset, std::size_t count, CpuBenchmarkState cpuBenchmark) const
     {
         if (srcOffset > mCount || count > mCount - srcOffset ||
             !mPolyWords || mPolyWords > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return false;
@@ -2456,7 +2458,7 @@ namespace osuCrypto::LogVole::gpu
         constexpr std::size_t maxSlotBytes = std::size_t(32) << 20;
         if (polyBytes > maxSlotBytes || mCount > std::numeric_limits<std::size_t>::max() / polyBytes ||
             (num && !mData)) return false;
-        HostStep totalStep(stream.hostProfiler(), "setup: pipelined batch download");
+        HostStep totalStep(stream.hostProfiler(), "setup: pipelined batch download", &cpuBenchmark);
         std::vector<RnsPoly> next(num);
         if (!num)
         {
@@ -2470,7 +2472,7 @@ namespace osuCrypto::LogVole::gpu
         StreamDrain drain{stream};
         u8* selected = nullptr;
         {
-            HostStep stagingStep(stream.hostProfiler(), "setup: pipelined download pinned allocation");
+            HostStep stagingStep(stream.hostProfiler(), "setup: pipelined download pinned allocation", &cpuBenchmark);
             if (stream.options().mReuseDownloadStaging) selected = stream.existingStaging(2u * slotBytes);
             if (selected)
             {
@@ -2511,19 +2513,19 @@ namespace osuCrypto::LogVole::gpu
         const auto requested = detail::resolveWorkerCount(workers, runPolys);
         if (stream.options().mDownloadReuseWorkers && num > runPolys && requested > 1)
         {
-            HostStep workersStep(stream.hostProfiler(), "setup: pipelined download worker pool");
+            HostStep workersStep(stream.hostProfiler(), "setup: pipelined download worker pool", &cpuBenchmark);
             // Reserve the same bounded worker budget once for this synchronous
             // download. No pool or reserved worker survives its return.
-            copySlots = std::make_unique<detail::ParallelWorkerSlotGuard>(requested);
+            copySlots = std::make_unique<detail::ParallelWorkerSlotGuard>(requested, cpuBenchmark.mContext);
             copyWorkers = std::min(requested, copySlots->grantedWorkers());
             if (copyWorkers > 1) copyPool = std::make_unique<CopyPool>(copyWorkers - 1);
         }
         auto materialize = [&](std::size_t offset, std::size_t length, u32 slot) {
             {
-                HostStep waitStep(stream.hostProfiler(), "setup: pipelined download DMA wait");
+                HostStep waitStep(stream.hostProfiler(), "setup: pipelined download DMA wait", &cpuBenchmark);
                 if (!gpuEventSync(staging.mEvent[slot])) return false;
             }
-            HostStep copyStep(stream.hostProfiler(), "setup: pipelined download host copy");
+            HostStep copyStep(stream.hostProfiler(), "setup: pipelined download host copy", &cpuBenchmark);
             auto copyOne = [&](std::size_t i) {
                 auto& coefficients = next[offset + i].mCoeffs;
                 coefficients.resize(mPolyWords);
@@ -2531,13 +2533,13 @@ namespace osuCrypto::LogVole::gpu
                 return true;
             };
             if (!copyPool)
-                return detail::runParallelTasks(length, copySlots ? 1 : workers, copyOne);
+                return detail::runParallelTasks(length, copySlots ? 1 : workers, copyOne, false, &cpuBenchmark);
 
             const auto activeWorkers = std::min(copyWorkers, length);
             detail::ParallelWorkerCapScope capScope(activeWorkers);
             const auto cacheScope = currentProtocolCacheScope();
-            auto worker = [&](std::size_t workerIdx) {
-                CpuBenchmarkTaskScope taskScope;
+            auto worker = [&](std::size_t workerIdx, CpuBenchmarkState& cpuBenchmark) {
+                CpuBenchmarkTaskScope taskScope(cpuBenchmark);
                 ScopedProtocolCacheScope scopedCache(cacheScope);
                 const auto begin = workerIdx * length / activeWorkers;
                 const auto end = (workerIdx + 1) * length / activeWorkers;
@@ -2557,8 +2559,8 @@ namespace osuCrypto::LogVole::gpu
             } join{*copyPool};
             for (std::size_t i = 1; i < activeWorkers; ++i)
                 tasks.push_back(detail::runPoolWorker(copyPool->pool, worker, i,
-                    cacheScope, tCpuBenchmarkContext) | macoro::make_eager());
-            worker(0);
+                    cacheScope, cpuBenchmark.mContext) | macoro::make_eager());
+            worker(0, cpuBenchmark);
             for (auto& task : tasks) macoro::sync_wait(task);
             join.completed = true;
             return true;

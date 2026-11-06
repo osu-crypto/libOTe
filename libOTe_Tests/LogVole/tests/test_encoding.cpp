@@ -326,23 +326,24 @@ namespace
     void expect_large_parallel_wire(const Message& message, std::size_t firstTensorOffset,
         CpuBenchmarkContext& telemetry, bool expectParallel, bool useGpu)
     {
+        CpuBenchmarkState cpuBenchmark{&telemetry};
         const auto expected = scalar_wire(message);
         LOGVOLE_REQUIRE_TRUE(expected.size() > (std::size_t(1) << 20));
-        const auto serial = encode(message, 1, {}, useGpu);
+        const auto serial = encode(message, 1, {}, useGpu, nullptr, cpuBenchmark);
         oc::LogVoleEncodingOptions scalarOptions;
         scalarOptions.mSetupMemcpy = false;
         scalarOptions.mParallel = false;
-        expect_bytes_equal(encode(message, 8, scalarOptions, useGpu), as_span(expected));
+        expect_bytes_equal(encode(message, 8, scalarOptions, useGpu, nullptr, cpuBenchmark), as_span(expected));
         Message scalarDecoded{};
-        LOGVOLE_REQUIRE_TRUE(decode(as_span(expected), scalarDecoded, 8, scalarOptions, useGpu));
+        LOGVOLE_REQUIRE_TRUE(decode(as_span(expected), scalarDecoded, 8, scalarOptions, useGpu, nullptr, cpuBenchmark));
         expect_bytes_equal(as_span(scalar_wire(scalarDecoded)), as_span(expected));
         oc::LogVoleEncodingOptions serialOptions;
         serialOptions.mParallel = false;
-        expect_bytes_equal(encode(message, 8, serialOptions, useGpu), as_span(expected));
+        expect_bytes_equal(encode(message, 8, serialOptions, useGpu, nullptr, cpuBenchmark), as_span(expected));
         for (auto workers : { 0u, 1u, 8u })
         {
             telemetry.reset();
-            const auto wire = encode(message, workers, {}, useGpu);
+            const auto wire = encode(message, workers, {}, useGpu, nullptr, cpuBenchmark);
             expect_bytes_equal(wire, as_span(expected));
             expect_bytes_equal(wire, serial);
 #if defined(__linux__)
@@ -355,7 +356,7 @@ namespace
             std::copy(expected.begin(), expected.end(), unaligned.begin() + 1);
             telemetry.reset();
             Message decoded{};
-            LOGVOLE_REQUIRE_TRUE(decode(as_span(unaligned).subspan(1), decoded, workers, {}, useGpu));
+            LOGVOLE_REQUIRE_TRUE(decode(as_span(unaligned).subspan(1), decoded, workers, {}, useGpu, nullptr, cpuBenchmark));
 #if defined(__linux__)
             LOGVOLE_EXPECT_EQ(telemetry.mWorkersChecked.load() != 0, expectParallel && workers > 1);
 #endif
@@ -373,14 +374,14 @@ namespace
                 expected.size() - 1u })
         {
             Message decoded{};
-            LOGVOLE_EXPECT_FALSE(decode(as_span(expected).first(size), decoded, 8, {}, useGpu));
+            LOGVOLE_EXPECT_FALSE(decode(as_span(expected).first(size), decoded, 8, {}, useGpu, nullptr, cpuBenchmark));
         }
         const auto rejectMutation = [&](std::size_t offset, std::uint32_t value) {
             auto bad = expected;
             for (unsigned byte = 0; byte < 4; ++byte)
                 bad[offset + byte] = static_cast<std::uint8_t>(value >> (8u * byte));
             Message decoded{};
-            LOGVOLE_EXPECT_FALSE(decode(as_span(bad), decoded, 8, {}, useGpu));
+            LOGVOLE_EXPECT_FALSE(decode(as_span(bad), decoded, 8, {}, useGpu, nullptr, cpuBenchmark));
         };
         rejectMutation(0, 0);
         rejectMutation(firstTensorOffset, 0);
@@ -389,7 +390,7 @@ namespace
         auto trailing = expected;
         trailing.push_back(0);
         Message decoded{};
-        LOGVOLE_EXPECT_FALSE(decode(as_span(trailing), decoded, 8, {}, useGpu));
+        LOGVOLE_EXPECT_FALSE(decode(as_span(trailing), decoded, 8, {}, useGpu, nullptr, cpuBenchmark));
     }
 
     void expect_parallel_offline_codec(const oc::CLP& cmd)
@@ -410,12 +411,6 @@ namespace
         for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu)
             if (CPU_ISSET(cpu, &cpus)) telemetry.mCpus.push_back(cpu);
 #endif
-        struct RestoreTelemetry
-        {
-            CpuBenchmarkContext* mPrevious;
-            ~RestoreTelemetry() { tCpuBenchmarkContext = mPrevious; }
-        } restoreTelemetry{ tCpuBenchmarkContext };
-        tCpuBenchmarkContext = &telemetry;
         const bool expectParallel = haveGpu && std::endian::native == std::endian::little &&
             telemetry.mCpus.size() > 1u;
 

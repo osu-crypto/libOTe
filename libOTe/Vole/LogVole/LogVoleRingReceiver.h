@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
@@ -25,7 +26,7 @@ namespace osuCrypto::LogVole
             PRNG& prng,
             Socket& sock,
             OnlinePrefetchPlan& prefetchPlan,
-            u32 recursionDepth);
+            u32 recursionDepth, CpuBenchmarkState cpuBenchmark = {});
 
     public:
         task<> offline(

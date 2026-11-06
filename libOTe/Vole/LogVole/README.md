@@ -99,7 +99,13 @@ The context owns the timing table; CPU contexts, GPU resources, and deferred
 message decoders reuse that owner's table. `sender.hostProfiler()` and
 `receiver.hostProfiler()` expose their tables (null when disabled); snapshot or
 reset them between completed queries. Reporting occurs when the last profiler
-owner is released. CPU-benchmark TLS accounting remains a separate cleanup.
+owner is released.
+`options.mCpuBenchmark` optionally borrows caller-owned CPU diagnostic counters
+(default null). Keep them alive through all work, including deferred
+materialization. Worker calls pass their own instrumentation state explicitly;
+nested work reuses its calling worker's state. No benchmark TLS is used.
+Reset counters only after all users have joined. The existing worker-slot
+budget, pools, and worker-cap TLS are unchanged.
 `options.mAdvanced.mStreams.mDebug` enables CUDA decline/error logging and
 synchronized region timing; `mProtocol.mRootProfile` enables root timing;
 `mKernels.mNoGoldH200InverseOpTrace` traces the selected inverse operations.

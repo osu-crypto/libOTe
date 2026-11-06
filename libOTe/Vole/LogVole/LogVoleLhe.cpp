@@ -258,9 +258,10 @@ namespace osuCrypto::LogVole
         const LazyRootSecretHostState* rootSecretHost,
         u64 rootSecretOwnerRunId,
         bool topSecretDomain,
-        const LogVoleGpuSetupOptions& options)
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark = {})
     {
-        HostStep setupStep(hostProfiler(ctx), "setup: lhe ciphertext");
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        HostStep setupStep(hostProfiler(ctx), "setup: lhe ciphertext", &cpuBenchmark);
         const auto rCount = randomizers ? randomizers->count()
             : rootR1Host ? rootR1Host->count() : rInput.size();
         const auto skCount = rootSecretHost ? rootSecretHost->count() : sk1.size();
@@ -359,7 +360,7 @@ namespace osuCrypto::LogVole
                 noiseSeeds.resize(ct1.mPolys.size());
                 for (auto& seed : noiseSeeds) prng->get(seed.data(), seed.size());
                 if (!samplePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers)) return false;
+                    noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
             }
             // A coefficient tensor can stay on device only after its noise is
             // complete. Unsupported compact samplers still add errors below
@@ -373,7 +374,7 @@ namespace osuCrypto::LogVole
                 rPowerOffset, ct1.mPolys, compactNoise, residentNoise.get(), requestedWorkers,
                 deferCompletedCiphertext ? &lazyCiphertext : nullptr, randomizers.get(),
                 retainedPublicANtt.get(), rootR1Device,
-                rootSecretDevice, rootSecretOwnerRunId, topSecretDomain);
+                rootSecretDevice, rootSecretOwnerRunId, topSecretDomain, cpuBenchmark);
             if (assembled)
             {
                 // Keep the exact existing Gaussian sampler and row-major
@@ -383,10 +384,10 @@ namespace osuCrypto::LogVole
                     std::vector<seal::prng_seed_type> noiseSeeds(ct1.mPolys.size());
                     for (auto& seed : noiseSeeds) prng->get(seed.data(), seed.size());
                     if (!detail::runParallelTasks(ct1.mPolys.size(), requestedWorkers,
-                        [&](std::size_t idx) {
+                        [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                             return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
                                 noiseMaxDeviation, noiseSeeds[idx], ctx);
-                        })) return false;
+                        }, false, &cpuBenchmark)) return false;
                 }
                 out = std::move(ct1);
                 if (deferredCiphertext) *deferredCiphertext = std::move(lazyCiphertext);
@@ -397,7 +398,7 @@ namespace osuCrypto::LogVole
         }
 #endif
         if (residentNoise && !materializePolyErrorCompactBatchForSetup(compactNoise, residentNoise,
-                noiseStandardDeviation, noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers)) return false;
+                noiseStandardDeviation, noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
         if (!publicANtt)
         {
             // A device decline keeps PRNG consumption unchanged, then builds
@@ -421,9 +422,9 @@ namespace osuCrypto::LogVole
         {
             shiftedR.resize(r.size());
             const u32 shiftWorkers = parallelLheSetupEnabled(options, ctx) ? requestedWorkers : 1;
-            if (!detail::runParallelTasks(r.size(), shiftWorkers, [&](std::size_t i) {
+            if (!detail::runParallelTasks(r.size(), shiftWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     return multiplyByGPower(ctx, r[i], gadgetLogBase, rPowerOffset, shiftedR[i]);
-                })) return false;
+                }, false, &cpuBenchmark)) return false;
             rSource = &shiftedR;
         }
 
@@ -447,7 +448,7 @@ namespace osuCrypto::LogVole
             // copy; the remaining columns use SEAL's precomputed scalar
             // multiplier instead of a full modular multiply per coefficient.
             if (!detail::runParallelTasks(rNtt.size(), requestedWorkers,
-                    [&](std::size_t row) { return canonicalizePoly(rNtt[row], ctx); }))
+                    [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) { return canonicalizePoly(rNtt[row], ctx); }, false, &cpuBenchmark))
             {
                 return false;
             }
@@ -462,7 +463,7 @@ namespace osuCrypto::LogVole
             }
 
             if (!detail::runParallelTasks(ct1.mPolys.size(), requestedWorkers,
-                [&](std::size_t idx) {
+                [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     const auto row = idx / ct1.mCols;
                     const auto col = idx % ct1.mCols;
                     auto& cNtt = ct1.mPolys[idx];
@@ -478,7 +479,7 @@ namespace osuCrypto::LogVole
                         }
                     }
                     return dyadicMultiplyAddNttInplace((*publicANtt)[row], sk1Ntt[col], cNtt, ctx);
-                }))
+                }, false, &cpuBenchmark))
             {
                 return false;
             }
@@ -499,11 +500,11 @@ namespace osuCrypto::LogVole
                     for (auto& seed : noiseSeeds) prng->get(seed.data(), seed.size());
                 }
                 if (!detail::runParallelTasks(ct1.mPolys.size(), requestedWorkers,
-                    [&](std::size_t idx) {
+                    [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                         if (!compactNoise.empty()) return addCompactNoise(idx, ct1.mPolys[idx]);
                         return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
                             noiseMaxDeviation, noiseSeeds[idx], ctx);
-                    }))
+                    }, false, &cpuBenchmark))
                 {
                     return false;
                 }
@@ -560,12 +561,13 @@ namespace osuCrypto::LogVole
         u32 requestedWorkers,
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext,
         std::shared_ptr<const LazyLencRandomizerState> randomizers,
-        const LogVoleGpuSetupOptions& options)
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lheEnc1Impl(ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
             noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 0u,
             deferredCiphertext, randomizers, nullptr, nullptr,
-            nullptr, nullptr, 0, false, options);
+            nullptr, nullptr, 0, false, options, cpuBenchmark);
     }
 
     bool lheEnc1Trunc(
@@ -588,13 +590,14 @@ namespace osuCrypto::LogVole
         const LazyRootSecretHostState* rootSecretHost,
         u64 rootSecretOwnerRunId,
         bool topSecretDomain,
-        const LogVoleGpuSetupOptions& options)
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark)
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lheEnc1Impl(ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
             noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 1u,
             deferredCiphertext, randomizers, rootR1Device, rootR1Host,
             rootSecretDevice, rootSecretHost, rootSecretOwnerRunId,
-            topSecretDomain, options);
+            topSecretDomain, options, cpuBenchmark);
     }
 
     bool lheApplyCt1(
@@ -731,8 +734,9 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt,
         bool outputNtt,
         u32 requestedWorkers,
-        std::vector<RnsPoly>* ownedCipher)
+        std::vector<RnsPoly>* ownedCipher, CpuBenchmarkState cpuBenchmark = {})
     {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (cipher.empty() || !validateRingBatchShape(cipher, ctx.mParams) || !validateRingPolyShape(sk, ctx.mParams))
         {
             return false;
@@ -769,7 +773,7 @@ namespace osuCrypto::LogVole
             // the small root also gets parallel inverse transforms here.
             std::vector<RnsPoly> result(cipher.size());
             if (!detail::runParallelTasks(result.size(), requestedWorkers,
-                [&](std::size_t row) {
+                [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) {
                     auto& product = result[row];
                     resizeZero(product.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                     if (!dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, product, ctx) ||
@@ -786,7 +790,7 @@ namespace osuCrypto::LogVole
                             product.mCoeffs[i], moduli[j]);
                     }
                     return true;
-                })) return false;
+                }, false, &cpuBenchmark)) return false;
             out = std::move(result);
             return true;
         }
@@ -808,7 +812,7 @@ namespace osuCrypto::LogVole
         const bool rowsOk = detail::runParallelTasks(
             result.size(),
             requestedWorkers,
-            [&](std::size_t row) -> bool
+            [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) -> bool
         {
             if (inplace)
             {
@@ -832,7 +836,7 @@ namespace osuCrypto::LogVole
             resizeZero(askNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             return dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, askNtt, ctx) &&
                    ringSubInplace(result[row], askNtt, ctx);
-        });
+        }, false, &cpuBenchmark);
         if (!rowsOk)
         {
             return false;
@@ -850,17 +854,19 @@ namespace osuCrypto::LogVole
     bool lheDec(
         const RingNttContext& ctx, const std::vector<RnsPoly>& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
-        bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers)
+        bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
     {
-        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, nullptr);
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, nullptr, cpuBenchmark);
     }
 
     bool lheDec(
         const RingNttContext& ctx, std::vector<RnsPoly>&& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
-        bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers)
+        bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
     {
-        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, &cipher);
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, &cipher, cpuBenchmark);
     }
 
     bool deriveSkx(

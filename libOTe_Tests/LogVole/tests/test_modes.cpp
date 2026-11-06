@@ -39,23 +39,43 @@ namespace
         const bool randomInputs = cmd.getOr("lvRandom", 0) != 0;
         LOGVOLE_REQUIRE_TRUE(count && rounds && threads);
         constexpr u64 delta = 19;
+        CpuBenchmarkContext senderTelemetry, receiverTelemetry;
+        const bool instrument = cmd.getOr("lvCpuTelemetry", 0) != 0;
+        for (auto* telemetry : {&senderTelemetry, &receiverTelemetry})
+        {
+            telemetry->mWorkerLimit = threads;
+#if defined(__linux__)
+            cpu_set_t mask;
+            CPU_ZERO(&mask);
+            LOGVOLE_REQUIRE_EQ(sched_getaffinity(0, sizeof(mask), &mask), 0);
+            for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu)
+                if (CPU_ISSET(cpu, &mask)) telemetry->mCpus.push_back(cpu);
+#else
+            telemetry->mCpus.resize(threads);
+#endif
+        }
         LogVoleOptions options;
+        options.mCpuBenchmark = instrument ? &senderTelemetry : nullptr;
         options.mUseGpu = device;
         options.mAdvanced.mProtocol.mRootProfile = cmd.getOr("lvRootProfile", 0) != 0;
         options.mAdvanced.mHostStepProfile = cmd.getOr("lvHostProfile", 0) != 0;
 
         auto senderReuse = std::make_shared<ZpContextFactory>(
             std::make_shared<RingContextFactory>(options));
+        options.mCpuBenchmark = instrument ? &receiverTelemetry : nullptr;
         auto receiverReuse = std::make_shared<ZpContextFactory>(
             std::make_shared<RingContextFactory>(options));
         osuCrypto::LogVoleOptions originalSenderOptions = options;
+        originalSenderOptions.mCpuBenchmark = instrument ? &senderTelemetry : nullptr;
         originalSenderOptions.mRequestSize = count;
         originalSenderOptions.mPlaintextModulusBits = 55;
         originalSenderOptions.mNumThreads = threads;
         originalSenderOptions.mSetting = setting;
         originalSenderOptions.mMode = mode;
         LogVoleSender originalSender(originalSenderOptions, senderReuse);
-        LogVoleReceiver originalReceiver(originalSenderOptions, receiverReuse);
+        auto receiverOptions = originalSenderOptions;
+        receiverOptions.mCpuBenchmark = instrument ? &receiverTelemetry : nullptr;
+        LogVoleReceiver originalReceiver(receiverOptions, receiverReuse);
         auto observeFactory = [](const CivoleParams& params, ProtocolCacheRole role,
             const std::shared_ptr<ZpContextFactory>& factory)
         {
@@ -170,6 +190,15 @@ namespace
             LOGVOLE_REQUIRE_TRUE(profiler != nullptr);
             LOGVOLE_REQUIRE_TRUE(profiler->mUsed.load() != 0);
             LOGVOLE_REQUIRE_TRUE(profiler != senderReuse->ringFactory()->rootProfiler());
+        }
+        if (instrument)
+        {
+            for (const auto* telemetry : {&senderTelemetry, &receiverTelemetry})
+            {
+                LOGVOLE_REQUIRE_EQ(telemetry->mActiveTaskThreads.load(), 0u);
+                LOGVOLE_REQUIRE_EQ(telemetry->mWorkerSlots.load(), 0u);
+                if (!device) LOGVOLE_REQUIRE_TRUE(telemetry->mPeakTaskThreads.load() > 0u);
+            }
         }
         sender.clear();
         receiver.clear();
