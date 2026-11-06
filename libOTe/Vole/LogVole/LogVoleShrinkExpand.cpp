@@ -18,6 +18,8 @@
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
+#include <optional>
+#include "macoro/bulk.h"
 #include <mutex>
 #include <utility>
 
@@ -1285,13 +1287,29 @@ namespace osuCrypto::LogVole
             fusedEval, senderRole, out, cpuBenchmark);
     }
 
-    bool shrinkExpandDenoiseComb(
-        const RingNttContext& ctx,
-        const std::vector<RnsPoly>& tbaPrime,
-        std::vector<RnsPoly>& out,
-        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
+    struct RecoveryConstants
     {
-        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        AlignedUnVec<std::size_t> mSrcLimbIndices;
+        std::vector<seal::util::MultiplyUIntModOperand> mCrtInvPunctured;
+        std::vector<seal::util::MultiplyUIntModOperand> mPuncturedProdModTarget;
+        AlignedUnVec<wideU64> mFracInvModulus;
+        seal::util::MultiplyUIntModOperand mCrtLiftModTarget;
+        seal::util::MultiplyUIntModOperand mInvCrtLiftModTarget;
+    };
+
+    struct DenoiseData
+    {
+        std::optional<seal::util::RNSBase> mBase;
+        AlignedUnVec<u64> mModuli;
+        std::vector<RecoveryConstants> mRecovery;
+    };
+
+    // Only owning containers cross suspension. SIMD work stays in denoiseRow.
+    static_assert(alignof(DenoiseData) <= alignof(std::max_align_t));
+
+    static bool prepareDenoise(const RingNttContext& ctx,
+        const std::vector<RnsPoly>& tbaPrime, DenoiseData& data)
+    {
         if (ctx.mParams.mCoeffModulusBits.empty() ||
             tbaPrime.size() % ctx.mParams.mCoeffModulusBits.size() != 0 ||
             !validateRingBatchShape(tbaPrime, ctx.mParams))
@@ -1309,29 +1327,20 @@ namespace osuCrypto::LogVole
         if (moduli.empty()) return false;
 
         const std::size_t rho = ctx.mParams.mCoeffModulusBits.size();
-        const std::size_t n = ctx.mParams.mPolyModulusDegree;
-        const std::size_t wPrime = tbaPrime.size() / rho;
 
         auto pool = seal::MemoryManager::GetPool();
-        seal::util::RNSBase fullBase(keyContextData->parms().coeff_modulus(), pool);
+        data.mBase.emplace(keyContextData->parms().coeff_modulus(), pool);
+        const auto& fullBase = *data.mBase;
 
-        AlignedUnVec<u64> q(rho);
+        auto& q = data.mModuli;
+        q.resize(rho);
         for (std::size_t i = 0; i < rho; ++i)
         {
             q[i] = fullBase.base()[i].value();
         }
 
-        struct RecoveryConstants
-        {
-            AlignedUnVec<std::size_t> mSrcLimbIndices;
-            std::vector<seal::util::MultiplyUIntModOperand> mCrtInvPunctured;
-            std::vector<seal::util::MultiplyUIntModOperand> mPuncturedProdModTarget;
-            AlignedUnVec<wideU64> mFracInvModulus;
-            seal::util::MultiplyUIntModOperand mCrtLiftModTarget;
-            seal::util::MultiplyUIntModOperand mInvCrtLiftModTarget;
-        };
-
-        std::vector<RecoveryConstants> recovery(rho);
+        auto& recovery = data.mRecovery;
+        recovery.resize(rho);
         for (std::size_t j = 0; j < rho; ++j)
         {
             const auto& modJ = moduli[j];
@@ -1394,111 +1403,157 @@ namespace osuCrypto::LogVole
             }
         }
 
-        std::vector<RnsPoly> result(wPrime);
+        return true;
+    }
+
+    static void denoiseRow(const RingNttContext& ctx, const DenoiseData& data,
+        const std::vector<RnsPoly>& tbaPrime, std::size_t i, RnsPoly& output)
+    {
+        const auto& fullBase = *data.mBase;
+        const auto& q = data.mModuli;
+        const auto& recovery = data.mRecovery;
+        const auto& moduli = getRingHostModuli(ctx);
+        const auto rho = q.size();
+        const auto n = ctx.mParams.mPolyModulusDegree;
         const wideU64 half = wideU64OneShift(127);
+        RnsPoly polyOut{};
+        resizeZero(polyOut.mCoeffs, n * rho);
 
-        // Each output owns its allocation and reads disjoint input polynomials.
-        // Shared recovery constants are immutable. The common worker budget also
-        // applies when denoising runs inside a seed-search worker.
-        if (!detail::runParallelTasks(wPrime, requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
-            RnsPoly polyOut{};
-            resizeZero(polyOut.mCoeffs, n * rho);
+        for (std::size_t j = 0; j < rho; ++j)
+        {
+            const auto& polyIn = tbaPrime[i * rho + j];
+            const u64 qj = q[j];
+            const auto& modJ = moduli[j];
+            const auto& constants = recovery[j];
+            const std::size_t reducedCount = constants.mSrcLimbIndices.size();
 
-            for (std::size_t j = 0; j < rho; ++j)
+            if (cpuDenoiseRns(ctx.mCpuCapabilities, polyIn.mCoeffs.data(), polyOut.mCoeffs.data() + j*n,
+                n, fullBase, j)) continue;
+
+            for (std::size_t k = 0; k < n; ++k)
             {
-                const auto& polyIn = tbaPrime[i * rho + j];
-                const u64 qj = q[j];
-                const auto& modJ = moduli[j];
-                const auto& constants = recovery[j];
-                const std::size_t reducedCount = constants.mSrcLimbIndices.size();
+                wideU64 sumFrac = half;
+                u64 alpha = 0;
+                u64 eModQj = 0;
 
-                if (cpuDenoiseRns(ctx.mCpuCapabilities, polyIn.mCoeffs.data(), polyOut.mCoeffs.data() + j*n,
-                    n, fullBase, j)) continue;
+                auto consumeIdx = [&](std::size_t idx) {
+                    const std::size_t w = constants.mSrcLimbIndices[idx];
+                    const u64 vw = polyIn.mCoeffs[w * n + k];
+                    const u64 xw = seal::util::multiply_uint_mod(vw, constants.mCrtInvPunctured[idx], moduli[w]);
 
-                for (std::size_t k = 0; k < n; ++k)
+                    unsigned char carry = 0;
+                    sumFrac = wideU64Add(
+                        sumFrac,
+                        wideU64MulLow(xw, constants.mFracInvModulus[idx]),
+                        &carry);
+                    if (carry)
+                    {
+                        ++alpha;
+                    }
+
+                    const u64 xwModQj = seal::util::barrett_reduce_64(xw, modJ);
+                    const u64 proj =
+                        seal::util::multiply_uint_mod(xwModQj, constants.mPuncturedProdModTarget[idx], modJ);
+                    eModQj += proj;
+                    if (eModQj >= qj)
+                    {
+                        eModQj -= qj;
+                    }
+                };
+
+                switch (reducedCount)
                 {
-                    wideU64 sumFrac = half;
-                    u64 alpha = 0;
-                    u64 eModQj = 0;
-
-                    auto consumeIdx = [&](std::size_t idx) {
-                        const std::size_t w = constants.mSrcLimbIndices[idx];
-                        const u64 vw = polyIn.mCoeffs[w * n + k];
-                        const u64 xw = seal::util::multiply_uint_mod(vw, constants.mCrtInvPunctured[idx], moduli[w]);
-
-                        unsigned char carry = 0;
-                        sumFrac = wideU64Add(
-                            sumFrac,
-                            wideU64MulLow(xw, constants.mFracInvModulus[idx]),
-                            &carry);
-                        if (carry)
-                        {
-                            ++alpha;
-                        }
-
-                        const u64 xwModQj = seal::util::barrett_reduce_64(xw, modJ);
-                        const u64 proj =
-                            seal::util::multiply_uint_mod(xwModQj, constants.mPuncturedProdModTarget[idx], modJ);
-                        eModQj += proj;
-                        if (eModQj >= qj)
-                        {
-                            eModQj -= qj;
-                        }
-                    };
-
-                    switch (reducedCount)
+                case 0:
+                    break;
+                case 1:
+                    consumeIdx(0);
+                    break;
+                case 2:
+                    consumeIdx(0);
+                    consumeIdx(1);
+                    break;
+                case 3:
+                    consumeIdx(0);
+                    consumeIdx(1);
+                    consumeIdx(2);
+                    break;
+                case 4:
+                    consumeIdx(0);
+                    consumeIdx(1);
+                    consumeIdx(2);
+                    consumeIdx(3);
+                    break;
+                default:
+                    for (std::size_t idx = 0; idx < reducedCount; ++idx)
                     {
-                    case 0:
-                        break;
-                    case 1:
-                        consumeIdx(0);
-                        break;
-                    case 2:
-                        consumeIdx(0);
-                        consumeIdx(1);
-                        break;
-                    case 3:
-                        consumeIdx(0);
-                        consumeIdx(1);
-                        consumeIdx(2);
-                        break;
-                    case 4:
-                        consumeIdx(0);
-                        consumeIdx(1);
-                        consumeIdx(2);
-                        consumeIdx(3);
-                        break;
-                    default:
-                        for (std::size_t idx = 0; idx < reducedCount; ++idx)
-                        {
-                            consumeIdx(idx);
-                        }
-                        break;
+                        consumeIdx(idx);
                     }
-
-                    const u64 alphaTerm =
-                        seal::util::multiply_uint_mod(alpha, constants.mCrtLiftModTarget, modJ);
-                    if (eModQj >= alphaTerm)
-                    {
-                        eModQj -= alphaTerm;
-                    }
-                    else
-                    {
-                        eModQj += qj - alphaTerm;
-                    }
-
-                    const u64 vj = polyIn.mCoeffs[j * n + k];
-                    const u64 diff = (vj >= eModQj) ? (vj - eModQj) : (vj + qj - eModQj);
-                    polyOut.mCoeffs[j * n + k] =
-                        seal::util::multiply_uint_mod(diff, constants.mInvCrtLiftModTarget, modJ);
+                    break;
                 }
+
+                const u64 alphaTerm =
+                    seal::util::multiply_uint_mod(alpha, constants.mCrtLiftModTarget, modJ);
+                if (eModQj >= alphaTerm)
+                {
+                    eModQj -= alphaTerm;
+                }
+                else
+                {
+                    eModQj += qj - alphaTerm;
+                }
+
+                const u64 vj = polyIn.mCoeffs[j * n + k];
+                const u64 diff = (vj >= eModQj) ? (vj - eModQj) : (vj + qj - eModQj);
+                polyOut.mCoeffs[j * n + k] =
+                    seal::util::multiply_uint_mod(diff, constants.mInvCrtLiftModTarget, modJ);
             }
+        }
 
-            result[i] = std::move(polyOut);
-            return true;
-        }, false, &cpuBenchmark)) return false;
+        output = std::move(polyOut);
+    }
 
+    bool shrinkExpandDenoiseComb(
+        const RingNttContext& ctx, const std::vector<RnsPoly>& tbaPrime,
+        std::vector<RnsPoly>& out, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
+    {
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        DenoiseData data;
+        if (!prepareDenoise(ctx, tbaPrime, data)) return false;
+        std::vector<RnsPoly> result(tbaPrime.size() / data.mModuli.size());
+        if (!detail::runParallelTasks(result.size(), requestedWorkers,
+            [&](std::size_t i, CpuBenchmarkState&) {
+                denoiseRow(ctx, data, tbaPrime, i, result[i]);
+                return true;
+            }, false, &cpuBenchmark)) return false;
         out = std::move(result);
         return true;
+    }
+
+    macoro::task<bool> shrinkExpandDenoiseComb(
+        macoro::thread_pool& executor, std::size_t workerAllowance,
+        const RingNttContext& ctx, const std::vector<RnsPoly>& tbaPrime,
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark)
+    {
+        if (!workerAllowance) co_return false;
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        DenoiseData data;
+        if (!prepareDenoise(ctx, tbaPrime, data)) co_return false;
+        std::vector<RnsPoly> result(tbaPrime.size() / data.mModuli.size());
+        const auto partitions = std::min(workerAllowance, result.size());
+        const auto cacheScope = currentProtocolCacheScope();
+        auto denoiseRange = [&](std::size_t first, std::size_t last, CpuBenchmarkState& worker) {
+            ScopedProtocolCacheScope scope(cacheScope);
+            CpuBenchmarkWorkerScope timing(partitions > 1 ? worker.mContext : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            for (auto i = first; i != last; ++i) denoiseRow(ctx, data, tbaPrime, i, result[i]);
+        };
+        if (partitions <= 1) denoiseRange(0, result.size(), cpuBenchmark);
+        else
+        {
+            std::vector<CpuBenchmarkState> workers(partitions, {cpuBenchmark.mContext, true});
+            co_await macoro::bulk_chunked(executor, result.size(), std::span(workers), denoiseRange);
+        }
+        out = std::move(result);
+        co_return true;
     }
 }

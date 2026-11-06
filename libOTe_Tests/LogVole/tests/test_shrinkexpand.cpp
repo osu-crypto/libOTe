@@ -6,6 +6,9 @@
 #include "seal/util/rns.h"
 #include "seal/util/uintarith.h"
 
+#include "macoro/thread_pool.h"
+#include "macoro/sync_wait.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -592,6 +595,30 @@ void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
     std::vector<RnsPoly> outBatch;
     LOGVOLE_REQUIRE_TRUE(shrinkExpandDenoiseComb(ctx, tbaPrime, outBatch));
     expect_batch_equal(outBatch, xBatch);
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(1);
+    auto onPool = [](macoro::thread_pool& pool, macoro::task<bool> operation) -> macoro::task<bool> {
+        co_await pool.schedule();
+        co_return co_await std::move(operation);
+    };
+    for (const auto allowance : {std::size_t{1}, std::size_t{3}})
+    {
+        // Exact expected values, serial and parallel, with the controller on
+        // the only executor thread. The same public API also supports aliasing.
+        auto alias = tbaPrime;
+        auto operation = shrinkExpandDenoiseComb(executor, allowance, ctx, alias, alias);
+        LOGVOLE_REQUIRE_EQ(alias.size(), tbaPrime.size()); // Still lazy.
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(executor, std::move(operation))));
+        expect_batch_equal(alias, xBatch);
+    }
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(shrinkExpandDenoiseComb(executor, 0, ctx, tbaPrime, outBatch)));
+    expect_batch_equal(outBatch, xBatch);
+    auto malformed = tbaPrime;
+    malformed[0].mCoeffs.resize(malformed[0].mCoeffs.size() - 1);
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(shrinkExpandDenoiseComb(executor, 3, ctx, malformed, outBatch)));
+    expect_batch_equal(outBatch, xBatch);
+
 }
 
 void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)

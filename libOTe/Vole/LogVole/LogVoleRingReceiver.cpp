@@ -935,22 +935,29 @@ namespace osuCrypto::LogVole
         }
         else
 #endif
-        if (!seedLabelDenoiseTbm(
-                childOutput.mTbm,
-                wPrime,
-                tauHi,
-                state.mParams.mShrinkExpand.mRing,
-                skXHat,
-                state.mParams.mShrinkExpand.mNumWorkerThreads, cpuBenchmark) ||
-            !seedLabelAgg(
-                std::move(skXHat),
-                wDoublePrime,
-                tauHi,
-                state.mParams.mShrinkExpand.mRing,
-                skX) ||
-            skX.size() != wDoublePrime)
         {
-            throw std::runtime_error("LogVole receiver could not derive recursive expansion keys");
+            bool denoised;
+            if (executor && !gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
+            {
+                RingNttContext ctx;
+                if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx,
+                        state.mShrinkExpandState.mRingFactoryOwner))
+                    throw std::runtime_error("LogVole receiver could not build denoise context");
+                auto allowance = std::min(lheBuffers.size(), lencBuffers.size());
+                if (const auto limit = state.mParams.mShrinkExpand.mNumWorkerThreads)
+                    allowance = std::min<std::size_t>(allowance, limit);
+                scopedCache.reset();
+                denoised = co_await shrinkExpandDenoiseComb(*executor, allowance, ctx,
+                    childOutput.mTbm, skXHat, cpuBenchmark);
+                scopedCache.emplace(cacheScope);
+            }
+            else
+                denoised = seedLabelDenoiseTbm(childOutput.mTbm, wPrime, tauHi,
+                    state.mParams.mShrinkExpand.mRing, skXHat,
+                    state.mParams.mShrinkExpand.mNumWorkerThreads, cpuBenchmark);
+            if (!denoised || !seedLabelAgg(std::move(skXHat), wDoublePrime, tauHi,
+                    state.mParams.mShrinkExpand.mRing, skX) || skX.size() != wDoublePrime)
+                throw std::runtime_error("LogVole receiver could not derive recursive expansion keys");
         }
 
         const u64 instanceBase = countSeedInstances(*state.mNextLevelState);

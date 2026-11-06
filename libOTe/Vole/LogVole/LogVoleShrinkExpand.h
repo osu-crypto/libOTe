@@ -180,6 +180,15 @@ namespace osuCrypto::LogVole
         // CPU row allowance: outer chunk workers pass 1 to avoid nested pools.
         u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark = {});
 
+    // Borrow context/input and exclusive output until completion; input may
+    // alias output. Immutable recovery data is prepared once for all chunks.
+    // workerAllowance bounds concurrency; one worker runs inline.
+    macoro::task<bool> shrinkExpandDenoiseComb(
+        macoro::thread_pool& executor, std::size_t workerAllowance,
+        const RingNttContext& ctx, const std::vector<RnsPoly>& tbaPrime,
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
+
+    [[deprecated("Use async denoise with an explicit executor and worker allowance")]]
     bool shrinkExpandDenoiseComb(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& tbaPrime,
