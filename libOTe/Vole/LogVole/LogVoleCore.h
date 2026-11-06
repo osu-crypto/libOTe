@@ -553,6 +553,21 @@ namespace osuCrypto::LogVole
         RootResponseMessage& response,
         SenderOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
+    // Lazy operation owning its response before it starts. All other arguments
+    // are borrowed through completion; state/output/buffers require exclusive use.
+    // A started task must finish before its resources are reused or destroyed.
+    // Prepare LHE products for the root ring; reserve LENC pointer capacity for
+    // both the root-left ciphertext and the final shrink/expand ciphertext.
+    // Key finalization may update mGoldenSeed as before; root cache and output
+    // are published only after expansion succeeds. GPU execution uses its existing path.
+    macoro::task<bool> finalizeRootOnlineReceiver(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
+        ReceiverState& state, const ReceiverOnlineInput& input,
+        const RootDigestState& digestState, RootResponseMessage response,
+        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
+
+    [[deprecated("Use async root finalization with explicit executor and buffers")]]
     bool finalizeRootOnlineReceiver(
         ReceiverState& state,
         const ReceiverOnlineInput& input,
@@ -560,6 +575,7 @@ namespace osuCrypto::LogVole
         const RootResponseMessage& response,
         ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
+    [[deprecated("Use async root finalization with explicit executor and buffers")]]
     bool finalizeRootOnlineReceiver(
         ReceiverState& state,
         const ReceiverOnlineInput& input,

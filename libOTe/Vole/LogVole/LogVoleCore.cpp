@@ -5054,6 +5054,42 @@ namespace osuCrypto::LogVole
         return true;
     }
 
+    static ShrinkExpandExpandReceiverInput rootReceiverExpansionInput(
+        const ReceiverState& state, const ReceiverOnlineInput& input,
+        const RootDigestState& digestState, RnsPoly receiverKey)
+    {
+        ShrinkExpandExpandReceiverInput expandInput{};
+        expandInput.mSeed = state.mGoldenSeed;
+        expandInput.mSid = input.mSid;
+        expandInput.mNonce = 0;
+        if (!digestState.mRootTree) expandInput.mX = input.mX;
+        expandInput.mDigest = digestState.mDRt;
+        expandInput.mMaskDigest = digestState.mDPrime;
+        expandInput.mSkX = std::move(receiverKey);
+        expandInput.mTree = digestState.mRootTree;
+
+        return expandInput;
+    }
+
+    static bool finishRootReceiverExpansion(
+        ReceiverState& state, const ReceiverOnlineInput& input,
+        const RootDigestState& digestState, ShrinkExpandReceiverExpandOutput& expandOutput,
+        ReceiverOnlineOutput& next, ReceiverOnlineOutput& out)
+    {
+        if (expandOutput.mTbm.size() < input.mX.size()) return false;
+        if (expandOutput.mTbm.size() > input.mX.size())
+        {
+            expandOutput.mTbm.resize(input.mX.size());
+        }
+
+        state.mRootDPrimeRt = std::make_shared<RnsPoly>(digestState.mDPrime);
+        state.mRootDPrimeHash = digestState.mDPrimeHash;
+        state.mRootDPrimeHashValid = true;
+        next.mTbm = std::move(expandOutput.mTbm);
+        out = std::move(next);
+        return true;
+    }
+
     static bool finalizeRootOnlineReceiverImpl(
         ReceiverState& state,
         const ReceiverOnlineInput& input,
@@ -5151,35 +5187,16 @@ namespace osuCrypto::LogVole
         }
 #endif
 
-        ShrinkExpandExpandReceiverInput expandInput{};
-        expandInput.mSeed = state.mGoldenSeed;
-        expandInput.mSid = input.mSid;
-        expandInput.mNonce = 0;
-        expandInput.mX = input.mX;
-        expandInput.mDigest = digestState.mDRt;
-        expandInput.mMaskDigest = digestState.mDPrime;
-        expandInput.mSkX = std::move(receiverKey);
-        expandInput.mTree = digestState.mRootTree;
+        auto expandInput = rootReceiverExpansionInput(state, input, digestState, std::move(receiverKey));
 
         ShrinkExpandReceiverExpandOutput expandOutput{};
         if (!shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput,
-                state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark) ||
-            expandOutput.mTbm.size() < input.mX.size())
+                state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark))
         {
             return false;
         }
 
-        if (expandOutput.mTbm.size() > input.mX.size())
-        {
-            expandOutput.mTbm.resize(input.mX.size());
-        }
-
-        state.mRootDPrimeRt = std::make_shared<RnsPoly>(digestState.mDPrime);
-        state.mRootDPrimeHash = digestState.mDPrimeHash;
-        state.mRootDPrimeHashValid = true;
-        next.mTbm = std::move(expandOutput.mTbm);
-        out = std::move(next);
-        return true;
+        return finishRootReceiverExpansion(state, input, digestState, expandOutput, next, out);
     }
 
     bool finalizeRootOnlineReceiver(
@@ -5204,15 +5221,59 @@ namespace osuCrypto::LogVole
             state, input, digestState, response, &response, out, cpuBenchmark);
     }
 
-    static bool finalizeRootResponseReceiverImpl(
-        ReceiverState& state,
-        const RootDigestState& digestState,
-        const RootResponseMessage& response,
-        RootResponseMessage* ownedResponse,
-        RnsPoly& rootKey,
-        std::shared_ptr<void>* rootKeyDevice, CpuBenchmarkState cpuBenchmark = {})
+    static macoro::task<bool> finalizeRootResponseReceiverAsync(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
+        ReceiverState& state, const RootDigestState& digestState, RootResponseMessage& response,
+        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope);
+
+    static macoro::task<bool> finalizeRootOnlineReceiverAsync(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
+        ReceiverState& state, const ReceiverOnlineInput& input,
+        const RootDigestState& digestState, RootResponseMessage response,
+        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope)
     {
-        u32 tauHi = 0;
+        // Preserve the existing device-resident finalization and synchronization.
+        if (gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
+        {
+            ScopedProtocolCacheScope scope(cacheScope);
+            co_return finalizeRootOnlineReceiverImpl(state, input, digestState,
+                response, &response, out, cpuBenchmark);
+        }
+        ShrinkExpandExpandReceiverInput expandInput;
+        ReceiverOnlineOutput next;
+        RnsPoly receiverKey;
+        if (!co_await finalizeRootResponseReceiverAsync(executor, lheBuffers, lencBuffers,
+                state, digestState, response, receiverKey, cpuBenchmark, cacheScope)) co_return false;
+        next.mSeed = state.mGoldenSeed;
+        expandInput = rootReceiverExpansionInput(state, input, digestState, std::move(receiverKey));
+        ShrinkExpandReceiverExpandOutput expandOutput;
+        if (!co_await shrinkExpandExpandReceiver(executor, lheBuffers, lencBuffers,
+                state.mShrinkExpandState, expandInput, expandOutput, cpuBenchmark)) co_return false;
+        co_return finishRootReceiverExpansion(state, input, digestState, expandOutput, next, out);
+    }
+
+    macoro::task<bool> finalizeRootOnlineReceiver(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
+        ReceiverState& state, const ReceiverOnlineInput& input,
+        const RootDigestState& digestState, RootResponseMessage response,
+        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark)
+    {
+        // Ordinary function: transfer message ownership and capture the current
+        // scope before returning the lazy operation, not after its first resume.
+        auto cacheScope = currentProtocolCacheScope();
+        cacheScope.mRole = ProtocolCacheRole::Receiver;
+        return finalizeRootOnlineReceiverAsync(executor, lheBuffers, lencBuffers,
+            state, input, digestState, std::move(response), out, cpuBenchmark, cacheScope);
+    }
+
+    static bool prepareRootResponseSeed(
+        const ReceiverState& state, const RootDigestState& digestState,
+        const RootResponseMessage& response, RootResponseMessage* ownedResponse,
+        u32& tauHi, AlignedUnVec<u8>& ct2Seed)
+    {
         if (!digestState.mDPrimeHashValid ||
             !computeTauHi(state.mParams, tauHi))
         {
@@ -5236,7 +5297,6 @@ namespace osuCrypto::LogVole
         // sent. A seed arriving in PublicSeed mode, or a missing one in GoldenSeed
         // mode, means the peer is running the other setting; fail rather than
         // silently produce garbage keys.
-        AlignedUnVec<u8> ct2Seed;
         if (state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed)
         {
             if (!response.mSeed.empty())
@@ -5265,6 +5325,176 @@ namespace osuCrypto::LogVole
                 assignRange(ct2Seed, response.mSeed.begin(), response.mSeed.end());
             }
         }
+
+        return true;
+    }
+
+    static bool applyRootResponseCtR(
+        const ReceiverState& state, const RootDigestState& digestState,
+        const RingNttContext& ctx, u32 tauHi, std::vector<RnsPoly>& ctRApplied,
+        CpuBenchmarkState cpuBenchmark)
+    {
+        {
+            RootStep step("final: lheApplyCt1Trunc", rootProfiler(ctx));
+            const RingTensor* ctRView = &state.mRootCtRRt;
+            if (state.mRootCtRWire)
+            {
+                HostStep phase(hostProfiler(ctx), "setup root: CtR host fallback", &cpuBenchmark);
+                ctRView = &state.mRootCtRWire->get();
+            }
+            if (!lheApplyCt1Trunc(
+                    ctx,
+                    *ctRView,
+                    digestState.mDPrime,
+                    state.mParams.mShrinkExpand.mGadgetLogBase,
+                    tauHi,
+                    ctRApplied,
+                    true,
+                    state.mShrinkExpandState.mParams.mNumWorkerThreads))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static bool evalRootResponseTop(
+        const ReceiverState& state, const RootDigestState& digestState,
+        const RingNttContext& ctx, u32 tauHi, u32 replayWorkers,
+        std::vector<RnsPoly>& topEvalNtt,
+        CpuBenchmarkState cpuBenchmark)
+    {
+        std::vector<RnsPoly> replayedZeta;
+        const std::vector<RnsPoly>* hostZeta = &digestState.mZeta;
+        if (hostZeta->empty() && !digestState.mZetaTaskSeeds.empty())
+        {
+            RootStep step("final: replay root zeta fallback", rootProfiler(ctx));
+            auto setupLease = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
+            if (!sampleRootZetaFromTaskSeeds(
+                    ctx,
+                    state.mRootRandomizerWidth,
+                    state.mParams.mShrinkExpand.mGadgetLogBase,
+                    digestState.mZetaTaskSeeds,
+                    digestState.mZetaRangesPerPoly,
+                    replayedZeta,
+                    replayWorkers,
+                    digestState.mZetaForceFirstReject, cpuBenchmark, &setupLease.cpuRows()))
+            {
+                return false;
+            }
+            hostZeta = &replayedZeta;
+        }
+
+        std::vector<RnsPoly> replayedTopInputs;
+        const std::vector<RnsPoly>* hostTopInputs = &digestState.mTopInputsNtt;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (hostTopInputs->empty() && digestState.mTopInputsNttGpu)
+        {
+            const auto topDev =
+                std::static_pointer_cast<gpu::DeviceBatch>(digestState.mTopInputsNttGpu);
+            if (topDev && gpu::download(*topDev, replayedTopInputs, gpu::contextStream(ctx)))
+                hostTopInputs = &replayedTopInputs;
+        }
+#endif
+        {
+            RootStep step("final: evalRootTopCtNtt", rootProfiler(ctx));
+            if (!evalRootTopCtNtt(
+                    state, ctx, digestState.mYLeft, *hostZeta, *hostTopInputs,
+                    topEvalNtt))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static bool finishRootResponseHost(
+        ReceiverState& state, const RootDigestState& digestState,
+        const RingNttContext& ctx, u32 tauHi, u32 leftWidth, AlignedUnVec<u8>& ct2Seed,
+        std::vector<RnsPoly>& decPartialNtt, std::vector<RnsPoly>& topEvalNtt,
+        const std::vector<RnsPoly>& leftEvalNtt, RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark)
+    {
+        std::vector<RnsPoly> ctK;
+        {
+            RootStep step("final: buildHashedCt2", rootProfiler(ctx));
+            if (!buildHashedCt2(
+                    ctx,
+                    leftWidth,
+                    ct2Seed,
+                    state.mParams.mSessionId,
+                    digestState.mDPrime,
+                    0,
+                    ctK))
+            {
+                return false;
+            }
+        }
+
+        if (decPartialNtt.size() != leftWidth ||
+            topEvalNtt.size() != leftWidth ||
+            leftEvalNtt.size() != leftWidth ||
+            ctK.size() != leftWidth)
+        {
+            return false;
+        }
+
+        // All the evaluation-domain arithmetic first, then ONE batched inverse
+        // transform, then the coefficient-domain add. The row loop used to call
+        // inverseNtt per row, which is below the batch threshold and so always ran
+        // on the host; leftWidth is exactly kNttBatchGpuThreshold, so batching
+        // hands these transforms to the GPU instead. Bit-identical: the transform
+        // is the same one, only the dispatch granularity changes.
+        std::vector<RnsPoly> tbmVec(leftWidth);
+        {
+            RootStep step("final: row combine", rootProfiler(ctx));
+            for (u32 row = 0; row < leftWidth; ++row)
+            {
+                RnsPoly phiNtt = std::move(topEvalNtt[row]);
+                RnsPoly tbmNtt = std::move(decPartialNtt[row]);
+                if (!ringAddInplace(phiNtt, leftEvalNtt[row], ctx) ||
+                    !ringSubInplace(tbmNtt, phiNtt, ctx))
+                {
+                    return false;
+                }
+                tbmVec[row] = std::move(tbmNtt);
+            }
+        }
+
+        {
+            RootStep step("final: inverseNttBatch", rootProfiler(ctx));
+            if (!inverseNttBatch(tbmVec, ctx))
+            {
+                return false;
+            }
+        }
+
+        {
+            RootStep step("final: add ctK", rootProfiler(ctx));
+            for (u32 row = 0; row < leftWidth; ++row)
+            {
+                if (!ringAddInplace(tbmVec[row], ctK[row], ctx))
+                {
+                    return false;
+                }
+            }
+        }
+
+        state.mGoldenSeed = std::move(ct2Seed);
+        RootStep step("final: denoiseAndAgg", rootProfiler(ctx));
+        return denoiseAndAggRootKey(ctx, tbmVec, tauHi, rootKey, cpuBenchmark);
+    }
+
+    static bool finalizeRootResponseReceiverImpl(
+        ReceiverState& state,
+        const RootDigestState& digestState,
+        const RootResponseMessage& response,
+        RootResponseMessage* ownedResponse,
+        RnsPoly& rootKey,
+        std::shared_ptr<void>* rootKeyDevice, CpuBenchmarkState cpuBenchmark = {})
+    {
+        u32 tauHi = 0;
+        AlignedUnVec<u8> ct2Seed;
+        if (!prepareRootResponseSeed(state, digestState, response, ownedResponse, tauHi, ct2Seed)) return false;
 
         const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
         const u32 leftWidth = rootLeftWidth(tauHi, rho);
@@ -5372,67 +5602,9 @@ namespace osuCrypto::LogVole
             }
         }
 #endif
-        std::vector<RnsPoly> replayedZeta;
-        const std::vector<RnsPoly>* hostZeta = &digestState.mZeta;
-        if (hostZeta->empty() && !digestState.mZetaTaskSeeds.empty())
-        {
-            RootStep step("final: replay root zeta fallback", rootProfiler(ctx));
-            if (!sampleRootZetaFromTaskSeeds(
-                    ctx,
-                    state.mRootRandomizerWidth,
-                    state.mParams.mShrinkExpand.mGadgetLogBase,
-                    digestState.mZetaTaskSeeds,
-                    digestState.mZetaRangesPerPoly,
-                    replayedZeta,
-                    state.mShrinkExpandState.mParams.mNumWorkerThreads,
-                    digestState.mZetaForceFirstReject, cpuBenchmark))
-            {
-                return false;
-            }
-            hostZeta = &replayedZeta;
-        }
-
-        std::vector<RnsPoly> replayedTopInputs;
-        const std::vector<RnsPoly>* hostTopInputs = &digestState.mTopInputsNtt;
-#if defined(ENABLE_LOGVOLE_CUDA)
-        if (hostTopInputs->empty() && digestState.mTopInputsNttGpu)
-        {
-            const auto topDev =
-                std::static_pointer_cast<gpu::DeviceBatch>(digestState.mTopInputsNttGpu);
-            if (topDev && gpu::download(*topDev, replayedTopInputs, gpu::contextStream(ctx)))
-                hostTopInputs = &replayedTopInputs;
-        }
-#endif
-        std::vector<RnsPoly> ctRApplied;
-        std::vector<RnsPoly> decPartialNtt;
-        std::vector<RnsPoly> topEvalNtt;
-        std::vector<RnsPoly> leftEvalNtt;
-        std::vector<RnsPoly> ctK;
-        if (!prepareSkPrime())
-        {
-            return false;
-        }
-        {
-            RootStep step("final: lheApplyCt1Trunc", rootProfiler(ctx));
-            const RingTensor* ctRView = &state.mRootCtRRt;
-            if (state.mRootCtRWire)
-            {
-                HostStep phase(hostProfiler(ctx), "setup root: CtR host fallback", &cpuBenchmark);
-                ctRView = &state.mRootCtRWire->get();
-            }
-            if (!lheApplyCt1Trunc(
-                    ctx,
-                    *ctRView,
-                    digestState.mDPrime,
-                    state.mParams.mShrinkExpand.mGadgetLogBase,
-                    tauHi,
-                    ctRApplied,
-                    true,
-                    state.mShrinkExpandState.mParams.mNumWorkerThreads))
-            {
-                return false;
-            }
-        }
+        std::vector<RnsPoly> ctRApplied, decPartialNtt, topEvalNtt, leftEvalNtt;
+        if (!prepareSkPrime() || !applyRootResponseCtR(state, digestState, ctx, tauHi,
+                ctRApplied, cpuBenchmark)) return false;
         {
             RootStep step("final: lheDec", rootProfiler(ctx));
             std::optional<detail::ShrinkExpandScratch::Lease> cpuScratch;
@@ -5454,15 +5626,8 @@ namespace osuCrypto::LogVole
                 return false;
             }
         }
-        {
-            RootStep step("final: evalRootTopCtNtt", rootProfiler(ctx));
-            if (!evalRootTopCtNtt(
-                    state, ctx, digestState.mYLeft, *hostZeta, *hostTopInputs,
-                    topEvalNtt))
-            {
-                return false;
-            }
-        }
+        if (!evalRootResponseTop(state, digestState, ctx, tauHi,
+                state.mShrinkExpandState.mParams.mNumWorkerThreads, topEvalNtt, cpuBenchmark)) return false;
         {
             RootStep step("final: lencEvalTrunc", rootProfiler(ctx));
             std::optional<detail::ShrinkExpandScratch::Lease> cpuScratch;
@@ -5503,73 +5668,69 @@ namespace osuCrypto::LogVole
                 return false;
             }
         }
+        return finishRootResponseHost(state, digestState, ctx, tauHi, leftWidth, ct2Seed,
+            decPartialNtt, topEvalNtt, leftEvalNtt, rootKey, cpuBenchmark);
+    }
+
+    static macoro::task<bool> finalizeRootResponseReceiverAsync(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
+        ReceiverState& state, const RootDigestState& digestState, RootResponseMessage& response,
+        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope)
+    {
+        RingNttContext ctx;
+        u32 tauHi = 0, leftWidth = 0;
+        AlignedUnVec<u8> ct2Seed;
+        RnsPoly skPrime;
+        std::vector<RnsPoly> decPartialNtt, topEvalNtt, leftEvalNtt;
+        std::shared_ptr<const std::vector<RnsPoly>> publicA;
+        LencLacct left;
+        auto tree = digestState.mLeftTree;
         {
-            RootStep step("final: buildHashedCt2", rootProfiler(ctx));
-            if (!buildHashedCt2(
-                    ctx,
-                    leftWidth,
-                    ct2Seed,
-                    state.mParams.mSessionId,
-                    digestState.mDPrime,
-                    0,
-                    ctK))
+            ScopedProtocolCacheScope scope(cacheScope);
+            if (!prepareRootResponseSeed(state, digestState, response, &response, tauHi, ct2Seed)) co_return false;
+            const auto rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            leftWidth = rootLeftWidth(tauHi, rho);
+            if (!rho || digestState.mHatDRt.size() != leftWidth ||
+                !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
+                co_return false;
+            skPrime.mCoeffs = std::move(response.mSkPrimeCoeffs);
+            if (!applyRootResponseCtR(state, digestState, ctx, tauHi,
+                    decPartialNtt, cpuBenchmark)) co_return false;
+            publicA = sharedLhePublicANtt(ctx, leftWidth);
+            left = toLencLacct(state);
+            if (!tree)
             {
-                return false;
+                tree = std::make_shared<DigestTree>();
+                if (!buildDigestTreeTrunc(ctx, digestState.mHatDRt, tauHi,
+                        state.mParams.mShrinkExpand.mGadgetLogBase,
+                        state.mParams.mShrinkExpand.mPlaintextModulusBits,
+                        *tree, left.mWidthPadded, true)) co_return false;
             }
+            leftEvalNtt.resize(leftWidth);
+            for (auto& poly : leftEvalNtt) poly.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
         }
-
-        if (decPartialNtt.size() != leftWidth ||
-            topEvalNtt.size() != leftWidth ||
-            leftEvalNtt.size() != leftWidth ||
-            ctK.size() != leftWidth)
         {
-            return false;
+            RootStep step("final: lheDec", rootProfiler(ctx));
+            if (!publicA || !co_await lheDec(executor, lheBuffers, ctx, decPartialNtt,
+                    skPrime, *publicA, LheDomain::Ntt, cpuBenchmark)) co_return false;
         }
-
-        // All the evaluation-domain arithmetic first, then ONE batched inverse
-        // transform, then the coefficient-domain add. The row loop used to call
-        // inverseNtt per row, which is below the batch threshold and so always ran
-        // on the host; leftWidth is exactly kNttBatchGpuThreshold, so batching
-        // hands these transforms to the GPU instead. Bit-identical: the transform
-        // is the same one, only the dispatch granularity changes.
-        std::vector<RnsPoly> tbmVec(leftWidth);
         {
-            RootStep step("final: row combine", rootProfiler(ctx));
-            for (u32 row = 0; row < leftWidth; ++row)
-            {
-                RnsPoly phiNtt = std::move(topEvalNtt[row]);
-                RnsPoly tbmNtt = std::move(decPartialNtt[row]);
-                if (!ringAddInplace(phiNtt, leftEvalNtt[row], ctx) ||
-                    !ringSubInplace(tbmNtt, phiNtt, ctx))
-                {
-                    return false;
-                }
-                tbmVec[row] = std::move(tbmNtt);
-            }
+            ScopedProtocolCacheScope scope(cacheScope);
+            // CPU digests retain zeta. Exceptional seed-only replay uses one
+            // worker synchronously, without a nested blocking scheduler.
+            if (!evalRootResponseTop(state, digestState, ctx, tauHi, 1, topEvalNtt, cpuBenchmark)) co_return false;
         }
-
         {
-            RootStep step("final: inverseNttBatch", rootProfiler(ctx));
-            if (!inverseNttBatch(tbmVec, ctx))
-            {
-                return false;
-            }
+            RootStep step("final: lencEvalTrunc", rootProfiler(ctx));
+            if (!co_await lencEvalTrunc(executor, lencBuffers, ctx, left, *tree, leftWidth,
+                    tauHi, state.mParams.mShrinkExpand.mGadgetLogBase,
+                    state.mParams.mShrinkExpand.mPlaintextModulusBits, leftEvalNtt,
+                    LencEvalMode::Ntt, true, cpuBenchmark)) co_return false;
         }
-
-        {
-            RootStep step("final: add ctK", rootProfiler(ctx));
-            for (u32 row = 0; row < leftWidth; ++row)
-            {
-                if (!ringAddInplace(tbmVec[row], ctK[row], ctx))
-                {
-                    return false;
-                }
-            }
-        }
-
-        state.mGoldenSeed = std::move(ct2Seed);
-        RootStep step("final: denoiseAndAgg", rootProfiler(ctx));
-        return denoiseAndAggRootKey(ctx, tbmVec, tauHi, rootKey, cpuBenchmark);
+        ScopedProtocolCacheScope scope(cacheScope);
+        co_return finishRootResponseHost(state, digestState, ctx, tauHi, leftWidth, ct2Seed,
+            decPartialNtt, topEvalNtt, leftEvalNtt, rootKey, cpuBenchmark);
     }
 
     bool finalizeRootResponseReceiver(

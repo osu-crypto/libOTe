@@ -1,3 +1,4 @@
+#include <optional>
 #include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 
 #include "libOTe/config.h"
@@ -482,12 +483,34 @@ namespace osuCrypto::LogVole
     }
 
     task<> LogVoleRingReceiver::online(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
+        ReceiverState& state, const ReceiverOnlineInput& input,
+        ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
+        std::shared_ptr<void> firstQueryGpuAllocations, const void* firstQueryOwner)
+    {
+        return onlineStart(&executor, lheBuffers, lencBuffers, state, input, output,
+            prng, sock, std::move(firstQueryGpuAllocations), firstQueryOwner);
+    }
+
+    task<> LogVoleRingReceiver::online(
+        ReceiverState& state, const ReceiverOnlineInput& input,
+        ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
+        const std::shared_ptr<void>& firstQueryGpuAllocations, const void* firstQueryOwner)
+    {
+        return onlineStart(nullptr, {}, {}, state, input, output, prng, sock,
+            firstQueryGpuAllocations, firstQueryOwner);
+    }
+
+    task<> LogVoleRingReceiver::onlineStart(
+        macoro::thread_pool* executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
         ReceiverState& state,
         const ReceiverOnlineInput& input,
         ReceiverOnlineOutput& output,
         PRNG& prng,
         Socket& sock,
-        const std::shared_ptr<void>& firstQueryGpuAllocations,
+        std::shared_ptr<void> firstQueryGpuAllocations,
         const void* firstQueryOwner)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mShrinkExpandState.mRingFactoryOwner)};
@@ -499,7 +522,11 @@ namespace osuCrypto::LogVole
         prefetchPlan.mFirstQueryOwner = firstQueryOwner;
 #endif
         prefetchPlan.configure(state, input.mSid);
-        co_await onlineImpl(state, input, output, prng, sock, prefetchPlan, 0u, cpuBenchmark);
+        auto cacheScope = currentProtocolCacheScope();
+        if (!cacheScope.mRunId) cacheScope.mRunId = allocateProtocolCacheRunId();
+        cacheScope.mRole = ProtocolCacheRole::Receiver;
+        co_await onlineImpl(state, input, output, prng, sock, prefetchPlan, 0u,
+            cpuBenchmark, executor, lheBuffers, lencBuffers, cacheScope);
     }
 
     task<> LogVoleRingReceiver::onlineImpl(
@@ -509,15 +536,12 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         Socket& sock,
         OnlinePrefetchPlan& prefetchPlan,
-        u32 recursionDepth, CpuBenchmarkState cpuBenchmark)
+        u32 recursionDepth, CpuBenchmarkState cpuBenchmark,
+        macoro::thread_pool* executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers, ProtocolCacheScope cacheScope)
     {
-        ProtocolCacheScope cacheScope = currentProtocolCacheScope();
-        if (cacheScope.mRunId == 0)
-        {
-            cacheScope.mRunId = allocateProtocolCacheRunId();
-        }
-        cacheScope.mRole = ProtocolCacheRole::Receiver;
-        ScopedProtocolCacheScope scopedCache(cacheScope);
+        // Active only during synchronous regions, never while this frame is suspended.
+        std::optional<ScopedProtocolCacheScope> scopedCache(std::in_place, cacheScope);
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (recursionDepth == 0u && prefetchPlan.mFirstQueryAllocations)
             gpu::bindReceiverFirstQueryOnlineRun(
@@ -591,6 +615,7 @@ namespace osuCrypto::LogVole
                 digestFrameSize = detail::frameBytes(digestPayload);
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: send digest", state.mParams.mW, &cpuBenchmark);
+                    scopedCache.reset();
                     if (ownedFastPath)
                     {
                         co_await detail::sendOwnedFrame(rootSock, std::move(digestPayload));
@@ -599,6 +624,7 @@ namespace osuCrypto::LogVole
                     {
                         co_await detail::sendFrame(rootSock, digestPayload);
                     }
+                    scopedCache.emplace(cacheScope);
                 }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -633,7 +659,9 @@ namespace osuCrypto::LogVole
                         HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: wait for sender response", state.mParams.mW, &cpuBenchmark);
                         u64 maxPayload = 0;
                         const bool validPayloadSize = rootResponsePayloadSize(state.mParams.mShrinkExpand.mRing, maxPayload);
+                        scopedCache.reset();
                         responsePayload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload), state.mParams.mShrinkExpand.mTransport.mEncoding.mWire, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner));
+                        scopedCache.emplace(cacheScope);
                     }
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: decode response", state.mParams.mW, &cpuBenchmark);
                     AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
@@ -644,11 +672,20 @@ namespace osuCrypto::LogVole
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: finalize", state.mParams.mW, &cpuBenchmark);
                     AutoTimer rootTimer(globalTimingStats.mRootReceiverHostUs);
-                    const bool finalized = ownedFastPath
-                        ? finalizeRootOnlineReceiver(
-                              state, input, digestState, std::move(response), output, cpuBenchmark)
-                        : finalizeRootOnlineReceiver(
-                              state, input, digestState, response, output, cpuBenchmark);
+                    bool finalized;
+                    if (executor)
+                    {
+                        auto operation = finalizeRootOnlineReceiver(*executor, lheBuffers, lencBuffers,
+                            state, input, digestState,
+                            ownedFastPath ? std::move(response) : RootResponseMessage(response), output, cpuBenchmark);
+                        scopedCache.reset();
+                        finalized = co_await std::move(operation);
+                        scopedCache.emplace(cacheScope);
+                    }
+                    else
+                        finalized = ownedFastPath
+                            ? finalizeRootOnlineReceiver(state, input, digestState, std::move(response), output, cpuBenchmark)
+                            : finalizeRootOnlineReceiver(state, input, digestState, response, output, cpuBenchmark);
                     if (!finalized)
                     {
                         throw std::runtime_error("LogVole receiver could not finalize root online");
@@ -829,9 +866,12 @@ namespace osuCrypto::LogVole
         shrinkPhase.stop();
         {
             HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "lvl: child online", state.mParams.mW, &cpuBenchmark);
+            scopedCache.reset();
             co_await onlineImpl(
                 *state.mNextLevelState, childInput, childOutput, prng, childSock,
-                prefetchPlan, recursionDepth + 1u, cpuBenchmark);
+                prefetchPlan, recursionDepth + 1u, cpuBenchmark,
+                executor, lheBuffers, lencBuffers, cacheScope);
+            scopedCache.emplace(cacheScope);
         }
 
         HostStep derivePhase(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu receiver: denoise and aggregate", state.mParams.mW, &cpuBenchmark);

@@ -22,6 +22,7 @@
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "coproto/Socket/BufferingSocket.h"
 #include "macoro/sync_wait.h"
+#include "macoro/thread_pool.h"
 #include "macoro/when_all.h"
 
 #include "seal/util/rns.h"
@@ -224,12 +225,33 @@ namespace
         LogVoleRingReceiver receiverProtocol;
         SenderOnlineOptions senderOptions{};
         senderOptions.mSid = input.mSid;
+        // Application-owned resources for the root reached by this recursion.
+        auto* root = &receiver;
+        while (root->mNextLevelState) root = root->mNextLevelState.get();
+        const auto& rootState = root->mShrinkExpandState;
+        macoro::thread_pool executor;
+        auto work = executor.make_work();
+        std::array<LheDecryptBuffer, 3> lheBuffers;
+        std::array<LencEvalBuffer, 3> lencBuffers;
+        if (!rootState.mRingFactoryOwner || !rootState.mRingFactoryOwner->mExecutionOptions.mUseGpu)
+        {
+            executor.create_threads(1);
+            for (auto& buffer : lheBuffers)
+                buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(rootState.mParams.mRing));
+            const auto terms = std::size_t{2} * std::max(root->mRootLacctLeft.mLevels,
+                rootState.hostLacct().mLevels) * (rootState.mParams.mTau + 1);
+            for (auto& buffer : lencBuffers)
+            {
+                buffer.mCiphertexts.reserve(terms);
+                buffer.mNodes.reserve(terms);
+            }
+        }
         auto sockets = coproto::LocalAsyncSocket::makePair();
         try
         {
             auto result = macoro::sync_wait(macoro::when_all_ready(
                 senderProtocol.online(sender, senderOptions, senderOut, senderPrng, sockets[0]),
-                receiverProtocol.online(receiver, input, receiverOut, receiverPrng, sockets[1])));
+                receiverProtocol.online(executor, lheBuffers, lencBuffers, receiver, input, receiverOut, receiverPrng, sockets[1])));
             std::get<0>(result).result();
             std::get<1>(result).result();
             return true;
@@ -3551,7 +3573,37 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         senderOffline.mMessage, receiverOffline));
     auto& sender = senderOffline.mState;
     auto& receiver = receiverOffline.mState;
+    ReceiverOfflineOutput referenceOffline;
+    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, referenceOffline));
+    auto& referenceState = referenceOffline.mState;
 
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(1);
+    std::array<LheDecryptBuffer, 3> lheBuffers;
+    std::array<LencEvalBuffer, 3> lencBuffers;
+    for (auto& buffer : lheBuffers)
+        buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(receiver.mShrinkExpandState.mParams.mRing));
+    const auto terms = std::size_t{2} * std::max(receiver.mRootLacctLeft.mLevels,
+        receiver.mShrinkExpandState.hostLacct().mLevels) *
+        (receiver.mShrinkExpandState.mParams.mTau + 1);
+    for (auto& buffer : lencBuffers)
+    {
+        buffer.mCiphertexts.reserve(terms);
+        buffer.mNodes.reserve(terms);
+    }
+    std::array<const std::uint64_t*, 3> productAllocations;
+    std::array<const RnsPoly* const*, 3> ciphertextAllocations, nodeAllocations;
+    for (std::size_t i = 0; i < lheBuffers.size(); ++i)
+    {
+        productAllocations[i] = lheBuffers[i].mProduct.mCoeffs.data();
+        ciphertextAllocations[i] = lencBuffers[i].mCiphertexts.data();
+        nodeAllocations[i] = lencBuffers[i].mNodes.data();
+    }
+    auto onWorker = [](macoro::thread_pool& pool, macoro::task<bool> operation) -> macoro::task<bool> {
+        co_await pool.schedule();
+        co_return co_await std::move(operation);
+    };
     for (std::uint64_t query = 0; query < 2; ++query)
     {
         sender.mParams.mSessionId = receiver.mParams.mSessionId = query;
@@ -3571,8 +3623,51 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         const auto cachedKeys = sender.mPrecomputedTbk;
         LOGVOLE_REQUIRE_TRUE(senderPrecompute(sender, senderPrng));
         LOGVOLE_EXPECT_TRUE(sender.mPrecomputedTbk == cachedKeys);
-        LOGVOLE_REQUIRE_TRUE(finalizeRootOnlineReceiver(receiver, input,
-            digest, response, receiverOutput));
+        referenceState.mParams.mSessionId = query;
+        ReceiverOnlineOutput reference;
+        LOGVOLE_REQUIRE_TRUE(finalizeRootOnlineReceiver(referenceState, input, digest, response, reference));
+        if (query == 1) digest.mLeftTree.reset(); // Exercise exact tree reconstruction.
+        const auto oldRoot = receiver.mRootDPrimeRt;
+        const auto oldSeed = receiver.mGoldenSeed;
+        // Own the response before starting: its original object is destroyed here.
+        auto operation = [&] {
+            auto owned = response;
+            return finalizeRootOnlineReceiver(executor, lheBuffers, lencBuffers,
+                receiver, input, digest, std::move(owned), receiverOutput);
+        }();
+        LOGVOLE_REQUIRE_TRUE(receiver.mRootDPrimeRt == oldRoot);
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(receiver.mGoldenSeed, oldSeed));
+        auto moved = std::move(operation);
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(executor, std::move(moved))));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(receiverOutput.mSeed, reference.mSeed));
+        LOGVOLE_REQUIRE_EQ(receiverOutput.mTbm.size(), reference.mTbm.size());
+        for (std::size_t i = 0; i < reference.mTbm.size(); ++i)
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(receiverOutput.mTbm[i].mCoeffs, reference.mTbm[i].mCoeffs));
+        for (std::size_t i = 0; i < lheBuffers.size(); ++i)
+        {
+            LOGVOLE_REQUIRE_TRUE(lheBuffers[i].mProduct.mCoeffs.data() == productAllocations[i]);
+            LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mCiphertexts.data() == ciphertextAllocations[i]);
+            LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mNodes.data() == nodeAllocations[i]);
+            LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mCiphertexts.empty() && lencBuffers[i].mNodes.empty());
+        }
+        // Neither a failed key evaluation nor a failed final expansion publishes output.
+        const auto publishedRoot = receiver.mRootDPrimeRt;
+        auto failedOutput = receiverOutput;
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(finalizeRootOnlineReceiver(executor, lheBuffers, {},
+            receiver, input, digest, response, failedOutput)));
+        LOGVOLE_REQUIRE_TRUE(receiver.mRootDPrimeRt == publishedRoot);
+        LencEvalBuffer prefixOnly;
+        const auto prefixTerms = std::size_t{2} * receiver.mRootLacctLeft.mLevels *
+            (params.mShrinkExpand.mTau - 1);
+        prefixOnly.mCiphertexts.reserve(prefixTerms);
+        prefixOnly.mNodes.reserve(prefixTerms);
+        receiver.mGoldenSeed.clear();
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(finalizeRootOnlineReceiver(executor, lheBuffers,
+            std::span(&prefixOnly, 1), receiver, input, digest, response, failedOutput)));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(receiver.mGoldenSeed, response.mSeed));
+        LOGVOLE_REQUIRE_TRUE(receiver.mRootDPrimeRt == publishedRoot);
+        for (std::size_t i = 0; i < reference.mTbm.size(); ++i)
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(failedOutput.mTbm[i].mCoeffs, reference.mTbm[i].mCoeffs));
         AlignedUnVec<std::uint64_t> keys, macs;
         LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(ctx, senderOutput.mTbk,
             x.size(), true, 1, keys));

@@ -7,6 +7,8 @@
 
 namespace osuCrypto::LogVole
 {
+    struct ProtocolCacheScope;
+
     struct ReceiverExpandInput
     {
         u64 mNonce = 0;
@@ -19,6 +21,13 @@ namespace osuCrypto::LogVole
     {
         struct OnlinePrefetchPlan;
 
+        task<> onlineStart(
+            macoro::thread_pool* executor, std::span<LheDecryptBuffer> lheBuffers,
+            std::span<LencEvalBuffer> lencBuffers,
+            ReceiverState& state, const ReceiverOnlineInput& input,
+            ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
+            std::shared_ptr<void> firstQueryGpuAllocations, const void* firstQueryOwner);
+
         task<> onlineImpl(
             ReceiverState& state,
             const ReceiverOnlineInput& input,
@@ -26,7 +35,9 @@ namespace osuCrypto::LogVole
             PRNG& prng,
             Socket& sock,
             OnlinePrefetchPlan& prefetchPlan,
-            u32 recursionDepth, CpuBenchmarkState cpuBenchmark = {});
+            u32 recursionDepth, CpuBenchmarkState cpuBenchmark,
+            macoro::thread_pool* executor, std::span<LheDecryptBuffer> lheBuffers,
+            std::span<LencEvalBuffer> lencBuffers, ProtocolCacheScope cacheScope);
 
     public:
         task<> offline(
@@ -45,6 +56,21 @@ namespace osuCrypto::LogVole
             KeyDeriveReceiverOutput& output,
             Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
 
+        // Root CPU resources are borrowed exclusively until completion and may
+        // be reused across queries. Prepare buffers for the root level's ring
+        // and both root-left/final-expansion LENC dimensions. Intermediate CPU
+        // loops retain their legacy path.
+        // Started operations must finish before destruction. Join the executor
+        // outside its workers. The GPU allocation handle is retained by value.
+        task<> online(
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+            std::span<LencEvalBuffer> lencBuffers,
+            ReceiverState& state, const ReceiverOnlineInput& input,
+            ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
+            std::shared_ptr<void> firstQueryGpuAllocations = {},
+            const void* firstQueryOwner = nullptr);
+
+        [[deprecated("Use online with explicit executor and root CPU buffers")]]
         task<> online(
             ReceiverState& state,
             const ReceiverOnlineInput& input,
