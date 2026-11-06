@@ -151,6 +151,26 @@ namespace osuCrypto::LogVole
         return seal::util::multiply_uint_mod(lhs, rhs, modulus);
     }
 
+    namespace detail
+    {
+        inline u64 pow2Mod(u64 exp, u64 mod)
+        {
+            const seal::Modulus modulus(mod);
+            u64 result = 1;
+            u64 base = 2 % mod;
+            while (exp > 0)
+            {
+                if ((exp & 1u) != 0)
+                {
+                    result = mulMod(result, base, modulus);
+                }
+                base = mulMod(base, base, modulus);
+                exp >>= 1;
+            }
+            return result;
+        }
+    }
+
     inline u64 mulAddMod(u64 lhs, u64 rhs, u64 addend, const seal::Modulus& modulus)
     {
         return seal::util::multiply_add_uint_mod(lhs, rhs, addend, modulus);
@@ -159,6 +179,66 @@ namespace osuCrypto::LogVole
     inline u64 addMod(u64 lhs, u64 rhs, const seal::Modulus& modulus)
     {
         return seal::util::add_uint_mod(lhs, rhs, modulus);
+    }
+
+    // High 128 bits of the 256-bit product of two 128-bit values.
+    inline wideU64 wideU64MulHigh(wideU64 lhs, wideU64 rhs)
+    {
+        const wideU64 t00 = wideU64Mul(lhs.mLo, rhs.mLo);
+        const wideU64 t01 = wideU64Mul(lhs.mLo, rhs.mHi);
+        const wideU64 t10 = wideU64Mul(lhs.mHi, rhs.mLo);
+        const wideU64 t11 = wideU64Mul(lhs.mHi, rhs.mHi);
+
+        // Carry into word2 from t00.hi + t01.lo + t10.lo.
+        unsigned char c1 = 0;
+        unsigned char c2 = 0;
+        {
+            unsigned long long acc = 0;
+            c1 = seal::util::add_uint64(t00.mHi, t01.mLo, &acc);
+            unsigned long long acc2 = 0;
+            c2 = seal::util::add_uint64(static_cast<u64>(acc), t10.mLo, &acc2);
+        }
+        const u64 carry1 = static_cast<u64>(c1) + static_cast<u64>(c2);
+
+        // word2 = t01.hi + t10.hi + t11.lo + carry1
+        u64 word2 = 0;
+        u64 carry2 = 0;
+        {
+            unsigned long long acc = 0;
+            unsigned char d1 = seal::util::add_uint64(t01.mHi, t10.mHi, &acc);
+            unsigned long long acc2 = 0;
+            unsigned char d2 = seal::util::add_uint64(static_cast<u64>(acc), t11.mLo, &acc2);
+            unsigned long long acc3 = 0;
+            unsigned char d3 = seal::util::add_uint64(static_cast<u64>(acc2), carry1, &acc3);
+            word2 = static_cast<u64>(acc3);
+            carry2 = static_cast<u64>(d1) + static_cast<u64>(d2) + static_cast<u64>(d3);
+        }
+
+        const u64 word3 = t11.mHi + carry2;
+        return { word2, word3 };
+    }
+
+    // Exact floor(numerator / divisor) and numerator mod divisor for a 128-bit
+    // numerator, using v = floor(2^128 / divisor) as produced by
+    // reciprocal2Pow128Wide. Replaces a software 128/64 division with a handful
+    // of multiplies. Requires numerator < 2^127 and divisor >= 2.
+    inline void divModWide128(
+        wideU64 numerator, u64 divisor, wideU64 reciprocal, wideU64& quotient, u64& remainder)
+    {
+        wideU64 q = wideU64MulHigh(numerator, reciprocal);
+
+        // q is either the true quotient or one less, so at most two correction
+        // steps are ever needed.
+        wideU64 prod = wideU64MulLow(divisor, q);
+        wideU64 r = wideU64Sub(numerator, prod);
+        for (int i = 0; i < 2 && (r.mHi != 0 || r.mLo >= divisor); ++i)
+        {
+            r = wideU64Sub(r, wideU64{ divisor, 0 });
+            q = wideU64Add(q, wideU64{ 1, 0 });
+        }
+
+        quotient = q;
+        remainder = r.mLo;
     }
 
     inline wideU64 reciprocal2Pow128Wide(u64 modulus)

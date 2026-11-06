@@ -1,6 +1,14 @@
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
+#include "libOTe/Vole/LogVole/LogVoleParallel.h"
+
+#include "libOTe/config.h"
+#if defined(ENABLE_LOGVOLE_CUDA)
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuBackend.h"
+#endif
 
 #include "seal/util/rns.h"
 #include "seal/util/uintarithsmallmod.h"
@@ -8,14 +16,89 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <memory>
+#include <mutex>
+#include <utility>
+
+#if defined(ENABLE_LOGVOLE_CUDA)
+namespace osuCrypto::LogVole::gpu
+{
+    bool setupSeedLabelRepBatchMatches(const RingNttContext&,
+        const DeviceBatch&, std::size_t expectedCount, u64 ownerRunId);
+}
+#endif
 
 namespace osuCrypto::LogVole
 {
+    namespace detail
+    {
+        namespace
+        {
+            class LazyLacctTensor final : public LazyLacctHostState
+            {
+            public:
+                LazyLacctTensor(const ShrinkExpandLacct& metadata,
+                    std::shared_ptr<const LazyRingTensorHostState> tensor)
+                    : mTensor(std::move(tensor))
+                {
+                    mValue.mWidthPadded = metadata.mWidthPadded;
+                    mValue.mLevels = metadata.mLevels;
+                    mValue.mCt.mRows = metadata.mCt.mRows;
+                    mValue.mCt.mCols = metadata.mCt.mCols;
+                }
+                const ShrinkExpandLacct& get() const override
+                {
+                    std::call_once(mOnce, [&] { mValue.mCt = mTensor->get(); });
+                    return mValue;
+                }
+                bool copyCoefficientsTo(std::span<u8> destination) const override
+                {
+                    return mTensor->copyCoefficientsTo(destination);
+                }
+                std::span<const u8> encodedCoefficients() const override
+                {
+                    return mTensor->encodedCoefficients();
+                }
+            private:
+                std::shared_ptr<const LazyRingTensorHostState> mTensor;
+                mutable std::once_flag mOnce;
+                mutable ShrinkExpandLacct mValue;
+            };
+        }
+
+        std::shared_ptr<const LazyLacctHostState> makeLazyLacctHostState(
+            const ShrinkExpandLacct& metadata,
+            std::shared_ptr<const LazyRingTensorHostState> tensor)
+        {
+            return tensor ? std::make_shared<LazyLacctTensor>(metadata, std::move(tensor)) : nullptr;
+        }
+    }
+
     namespace
     {
         constexpr double kNoiseStdS = 3.19;
         constexpr double kNoiseLambda = 128.0;
+
+        bool setupBatchNttEnabled(ExecutionContext& execution)
+        {
+#if defined(ENABLE_LOGVOLE_CUDA)
+            const char* value = std::getenv("LV_GPU_SETUP_BATCH_NTT");
+            return (!value || value[0] != '0') && gpu::enabled(execution);
+#else
+            return false;
+#endif
+        }
+
+        bool setupParallelMessageCopyEnabled(ExecutionContext& execution)
+        {
+#if defined(ENABLE_LOGVOLE_CUDA)
+            const char* value = std::getenv("LV_GPU_SETUP_PARALLEL_MESSAGE_COPY");
+            return (!value || value[0] != '0') && gpu::enabled(execution);
+#else
+            return false;
+#endif
+        }
 
         u32 logQBits(const RingParams& params)
         {
@@ -25,77 +108,6 @@ namespace osuCrypto::LogVole
                 logQ += static_cast<u32>(bits);
             }
             return logQ;
-        }
-
-        struct Ct2CacheEntry
-        {
-            bool mValid = false;
-            RingParams mRing;
-            u32 mMu = 0;
-            u64 mNonce = 0;
-            u64 mSid = 0;
-            u64 mRunId = 0;
-            ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
-            std::vector<RnsPoly> mCt2;
-        };
-
-        bool matchesCt2Cache(
-            const Ct2CacheEntry& cache,
-            const RingParams& ring,
-            u32 mu,
-            u64 nonce,
-            u64 sid,
-            ProtocolCacheScope scope)
-        {
-            (void)cache;
-            (void)ring;
-            (void)mu;
-            (void)nonce;
-            (void)sid;
-            (void)scope;
-            return false;
-#if 0
-            return cache.mValid &&
-                   cache.mRing == ring &&
-                   cache.mMu == mu &&
-                   cache.mNonce == nonce &&
-                   cache.mSid == sid &&
-                   cache.mRunId == scope.mRunId &&
-                   cache.mRole == scope.mRole;
-#endif
-        }
-
-        bool getOrBuildCachedCt2(
-            const RingNttContext& ctx,
-            const ShrinkExpandParams& params,
-            std::span<const u8> seed,
-            u64 sid,
-            const RnsPoly& digest,
-            u64 instanceIdx,
-            u64 nonce,
-            Ct2CacheEntry& cache)
-        {
-            const auto scope = currentProtocolCacheScope();
-            if (matchesCt2Cache(cache, params.mRing, params.mMu, nonce, sid, scope))
-            {
-                return true;
-            }
-
-            std::vector<RnsPoly> ct2;
-            if (!buildHashedCt2(ctx, params.mMu, seed, sid, digest, instanceIdx, ct2))
-            {
-                return false;
-            }
-
-            cache.mValid = true;
-            cache.mRing = params.mRing;
-            cache.mMu = params.mMu;
-            cache.mNonce = nonce;
-            cache.mSid = sid;
-            cache.mRunId = scope.mRunId;
-            cache.mRole = scope.mRole;
-            cache.mCt2 = std::move(ct2);
-            return true;
         }
 
         double computeSigma(double factor)
@@ -129,14 +141,86 @@ namespace osuCrypto::LogVole
 #endif
         }
 
-        LencLacct toLencLacct(const ShrinkExpandLacct& in)
+        bool receiverPublicHosts(const RingNttContext& ctx,
+            const ShrinkExpandReceiverState& state,
+            std::shared_ptr<const std::vector<RnsPoly>>& publicA,
+            std::shared_ptr<const std::vector<RnsPoly>>& publicB)
         {
-            LencLacct out{};
-            out.mWidthPadded = in.mWidthPadded;
-            out.mLevels = in.mLevels;
-            out.mCt = in.mCt;
-            return out;
+            publicA = state.mPublicANtt;
+            publicB = state.mPublicBNtt;
+            if ((!publicA || !publicB) && state.mLazyPublicUniformHosts)
+            {
+                std::shared_ptr<const std::vector<RnsPoly>> cachedA, cachedB;
+                if (!state.mLazyPublicUniformHosts->get(cachedA, cachedB)) return false;
+                if (!publicA) publicA = std::move(cachedA);
+                if (!publicB) publicB = std::move(cachedB);
+            }
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (!publicA && state.mPublicANttDevice &&
+                !gpu::materializeRetainedPublicUniform(ctx, state.mPublicANttDevice, publicA))
+                return false;
+            if (!publicB && state.mPublicBNttDevice &&
+                !gpu::materializeRetainedPublicUniform(ctx, state.mPublicBNttDevice, publicB))
+                return false;
+#endif
+            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu);
+            const u32 publicBTau = state.mParams.mTruncateOneGadgetDigit
+                ? state.mParams.mTau + 1u : state.mParams.mTau;
+            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau);
+            return publicA && publicB && publicA->size() == state.mParams.mMu &&
+                publicB->size() == 2u * static_cast<std::size_t>(publicBTau) &&
+                validateRingBatchShape(*publicA, ctx.mParams) &&
+                validateRingBatchShape(*publicB, ctx.mParams);
         }
+
+#if defined(ENABLE_LOGVOLE_CUDA)
+        class LazyPublicUniformHosts final : public LazyPublicUniformHostState
+        {
+        public:
+            LazyPublicUniformHosts(
+                RingNttContext ctx,
+                gpu::RetainedPublicUniformPtr publicA,
+                gpu::RetainedPublicUniformPtr publicB,
+                ProtocolCacheScope scope)
+                : mCtx(std::move(ctx)),
+                  mPublicADevice(std::move(publicA)),
+                  mPublicBDevice(std::move(publicB)),
+                  mScope(scope)
+            {
+            }
+
+            bool get(
+                std::shared_ptr<const std::vector<RnsPoly>>& publicA,
+                std::shared_ptr<const std::vector<RnsPoly>>& publicB) const override
+            {
+                std::lock_guard<std::mutex> lock(mMutex);
+                if (!mPublicA || !mPublicB)
+                {
+
+                    std::shared_ptr<const std::vector<RnsPoly>> nextA, nextB;
+                    if (!gpu::materializeRetainedPublicUniform(
+                            mCtx, mPublicADevice, nextA) ||
+                        !gpu::materializeRetainedPublicUniform(
+                            mCtx, mPublicBDevice, nextB)) return false;
+                    // Publish the pair only after both exact snapshots exist.
+                    mPublicA = std::move(nextA);
+                    mPublicB = std::move(nextB);
+                }
+                publicA = mPublicA;
+                publicB = mPublicB;
+                return true;
+            }
+
+        private:
+            RingNttContext mCtx;
+            gpu::RetainedPublicUniformPtr mPublicADevice;
+            gpu::RetainedPublicUniformPtr mPublicBDevice;
+            ProtocolCacheScope mScope{};
+            mutable std::mutex mMutex;
+            mutable std::shared_ptr<const std::vector<RnsPoly>> mPublicA;
+            mutable std::shared_ptr<const std::vector<RnsPoly>> mPublicB;
+        };
+#endif
 
         bool buildReceiverDigestTree(
             const RingNttContext& ctx,
@@ -144,7 +228,9 @@ namespace osuCrypto::LogVole
             std::span<const RnsPoly> x,
             DigestTree& out)
         {
-            const std::vector<RnsPoly>* publicBNtt = state.mPublicBNtt ? state.mPublicBNtt.get() : nullptr;
+            std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
+            if (!receiverPublicHosts(ctx, state, publicA, publicB)) return false;
+            const std::vector<RnsPoly>* publicBNtt = publicB.get();
             if (state.mParams.mTruncateOneGadgetDigit)
             {
                 return buildDigestTreeTrunc(
@@ -248,13 +334,27 @@ namespace osuCrypto::LogVole
 
     bool validateShrinkExpandSenderOfflineInput(const ShrinkExpandSenderOfflineInput& input)
     {
+        const bool residentSeedLabels = input.mS.empty() &&
+            input.mSDevice && input.mLazyS &&
+            input.mParams.mTruncateOneGadgetDigit;
         if (!validateShrinkExpandParams(input.mParams) ||
-            input.mS.size() != input.mParams.mMu ||
-            !validateRingBatchShape(input.mS, input.mParams.mRing))
+            (!residentSeedLabels && (input.mS.size() != input.mParams.mMu ||
+                !validateRingBatchShape(input.mS, input.mParams.mRing))) ||
+            (input.mSDevice && !residentSeedLabels) ||
+            (residentSeedLabels && (input.mLazyS->count() != input.mParams.mMu ||
+                !input.mLazyS->matches(input.mParams.mRing))))
         {
             return false;
         }
 
+        const bool residentFixedSk1 = input.mFixedSk1.empty() &&
+            input.mFixedSk1Device && input.mLazyFixedSk1 &&
+            input.mDeferTopSk1Host && input.mParams.mTruncateOneGadgetDigit;
+        if ((input.mFixedSk1Device && !residentFixedSk1) ||
+            (input.mLazyFixedSk1 && !residentFixedSk1) ||
+            (residentFixedSk1 && (input.mLazyFixedSk1->count() !=
+                input.mParams.mTau ||
+                !input.mLazyFixedSk1->matches(input.mParams.mRing)))) return false;
         if (!input.mFixedSk1.empty() &&
             (input.mFixedSk1.size() != input.mParams.mTau ||
              !validateRingBatchShape(input.mFixedSk1, input.mParams.mRing)))
@@ -272,12 +372,276 @@ namespace osuCrypto::LogVole
 
     std::vector<RnsPoly> sampleUniformBatch(const RingNttContext& ctx, u32 count, PRNG& prng)
     {
-        std::vector<RnsPoly> out(count);
-        for (u32 i = 0; i < count; ++i)
+        return sampleUniformPolyBatch(ctx, count, prng);
+    }
+
+    static bool prepareShrinkExpandSenderOfflineImpl(
+        const ShrinkExpandSenderOfflineInput& input,
+        PRNG& prng,
+        ShrinkExpandOfflineMessage* message,
+        ShrinkExpandSenderState& senderState)
+    {
+            auto sessionParams = input.mParams;
+            bindExecutionRole(sessionParams.mRing, ProtocolCacheRole::Sender);
+
+        HostStep setupStep(executionContext(sessionParams), "setup sender: shrink expand total");
+        // A direct caller must not promote a receiver scope into a sender
+        // capability merely by invoking the sender API with a private token.
+        if (input.mFixedSk1Device &&
+            (executionContext(sessionParams).mScope.mRole != ProtocolCacheRole::Sender ||
+             executionContext(sessionParams).mScope.mRunId != input.mFixedSk1OwnerRunId))
+            return false;
+
+        if (!validateShrinkExpandSenderOfflineInput(input))
         {
-            out[i] = sampleUniformPoly(ctx, prng);
+            return false;
         }
-        return out;
+
+        RingNttContext ctx{};
+        if (!makeRingNttContext(sessionParams.mRing, ctx))
+        {
+            return false;
+        }
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (input.mFixedSk1Device &&
+            (!gpu::topSecretUniformBatchMatches(ctx,
+                *input.mFixedSk1Device, sessionParams.mTau,
+                input.mFixedSk1OwnerRunId) ||
+             executionContext(sessionParams).mScope.mRunId != input.mFixedSk1OwnerRunId))
+            return false;
+#else
+        if (input.mFixedSk1Device) return false;
+#endif
+
+        if (input.mSDevice)
+        {
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (message || !gpu::enabled(executionContext(sessionParams)) ||
+                !gpu::setupSeedLabelRepBatchMatches(ctx,
+                    *input.mSDevice, sessionParams.mMu,
+                    executionContext(sessionParams).mScope.mRunId)) return false;
+#else
+            return false;
+#endif
+        }
+
+#if defined(ENABLE_LOGVOLE_CUDA)
+        // Join before leaving this timed setup scope. Independent CPU sampling
+        // can overlap first-use GPU initialization without excluding its cost.
+        gpu::GpuRingSetupPrefetch ringPrefetch(ctx, gpu::enabled(executionContext(sessionParams)));
+#endif
+
+        ShrinkExpandSenderState next{};
+        next.mParams = sessionParams;
+        next.mS = input.mS;
+        next.mLazyS = input.mLazyS;
+        if (input.mFixedSk1Device)
+        {
+            next.mTopSk1Device = input.mFixedSk1Device;
+            next.mLazyTopSk1 = input.mLazyFixedSk1;
+            next.mTopSk1OwnerRunId = input.mFixedSk1OwnerRunId;
+        }
+        else if (!input.mFixedSk1.empty())
+        {
+            next.mSk1 = input.mFixedSk1;
+        }
+        else
+        {
+            HostStep sk1Step(executionContext(sessionParams), "setup sender: top sk1 uniform sampling");
+            if (input.mDeferTopSk1Host && !message &&
+                sessionParams.mTruncateOneGadgetDigit)
+            {
+                std::shared_ptr<gpu::DeviceBatch> resident;
+                std::shared_ptr<const LazyRootSecretHostState> lazy;
+                if (!sampleTopSecretUniformBatch(ctx, sessionParams.mTau,
+                        prng, next.mSk1, resident, lazy)) return false;
+                next.mTopSk1Device = std::move(resident);
+                next.mLazyTopSk1 = std::move(lazy);
+                if (next.mTopSk1Device)
+                    next.mTopSk1OwnerRunId = executionContext(sessionParams).mScope.mRunId;
+            }
+            else next.mSk1 = sampleUniformBatch(ctx, sessionParams.mTau, prng);
+        }
+
+        HostStep publicDataStep(executionContext(sessionParams), "setup sender: public data");
+        const u32 publicBTau = sessionParams.mTruncateOneGadgetDigit ? (sessionParams.mTau + 1u) : sessionParams.mTau;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (input.mDeferHostCiphertexts && !message && gpu::enabled(executionContext(sessionParams)) &&
+            gpu::publicUniformRetentionEnabled(executionContext(sessionParams)))
+        {
+            next.mPublicANttDevice = retainedLhePublicANtt(ctx, sessionParams.mMu);
+            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau);
+            if (!next.mPublicANttDevice || !next.mPublicBNttDevice)
+            {
+                next.mPublicANttDevice.reset();
+                next.mPublicBNttDevice.reset();
+            }
+            else
+            {
+                next.mPublicUniformRunId = executionContext(sessionParams).mScope.mRunId;
+                next.mLazyPublicUniformHosts =
+                    std::make_shared<const LazyPublicUniformHosts>(
+                        ctx, next.mPublicANttDevice, next.mPublicBNttDevice,
+                        executionContext(sessionParams).mScope);
+            }
+        }
+#endif
+        if (!next.mPublicANttDevice)
+        {
+            next.mPublicANtt = sharedLhePublicANtt(ctx, sessionParams.mMu);
+            next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau);
+        }
+        if ((!next.mPublicANtt && !next.mPublicANttDevice) ||
+            (!next.mPublicBNtt && !next.mPublicBNttDevice)) return false;
+        publicDataStep.stop();
+
+        const bool fullNoise = usesFullNoise(sessionParams);
+        const double lencSigma = fullNoise ? computeSigma(std::sqrt(static_cast<double>(sessionParams.mTau))) : 0.0;
+        const double lencMaxDev = fullNoise ? std::sqrt(kNoiseLambda) * lencSigma : 0.0;
+
+        LencEncodeOutput lenc{};
+        bool lencOk = false;
+        if (sessionParams.mTruncateOneGadgetDigit)
+        {
+            lencOk = lencEncTrunc(
+                ctx,
+                input.mS,
+                sessionParams.mTau,
+                sessionParams.mGadgetLogBase,
+                sessionParams.mPlaintextModulusBits,
+                prng,
+                lenc,
+                lencSigma,
+                lencMaxDev,
+                0,
+                true,
+                sessionParams.mLeafInputsAreGadget,
+                next.mPublicBNtt.get(),
+                sessionParams.mNumWorkerThreads,
+                input.mDeferHostCiphertexts && !message,
+                input.mDeferHostCiphertexts && !message,
+                input.mSDevice.get(), input.mLazyS.get());
+        }
+        else
+        {
+            lencOk = lencEnc(
+                ctx,
+                input.mS,
+                sessionParams.mTau,
+                sessionParams.mGadgetLogBase,
+                prng,
+                lenc,
+                lencSigma,
+                lencMaxDev,
+                0,
+                true,
+                next.mPublicBNtt.get(),
+                sessionParams.mNumWorkerThreads,
+                input.mDeferHostCiphertexts && !message);
+        }
+        if (!lencOk)
+        {
+            return false;
+        }
+
+        next.mR = std::move(lenc.mR);
+        next.mLazyRandomizers = lenc.mLazyRandomizers;
+        next.mLacct.mWidthPadded = lenc.mLacct.mWidthPadded;
+        next.mLacct.mLevels = lenc.mLacct.mLevels;
+        next.mLacct.mCt = std::move(lenc.mLacct.mCt);
+        next.mLazyLacct = detail::makeLazyLacctHostState(next.mLacct, std::move(lenc.mLazyCt));
+
+        const double lheSigma = fullNoise ? computeSigma(std::sqrt(static_cast<double>(next.mLacct.mWidthPadded))) : 0.0;
+        const double lheMaxDev = fullNoise ? std::sqrt(kNoiseLambda) * lheSigma : 0.0;
+
+        bool ct1Ok = false;
+        if (sessionParams.mTruncateOneGadgetDigit)
+        {
+            ct1Ok = lheEnc1Trunc(
+                ctx,
+                lenc.mRNtt,
+                next.mSk1,
+                sessionParams.mGadgetLogBase,
+                next.mCt1,
+                lheSigma,
+                lheMaxDev,
+                &prng,
+                true,
+                next.mPublicANtt.get(),
+                sessionParams.mNumWorkerThreads,
+                input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
+                lenc.mLazyRandomizers, nullptr, nullptr,
+                next.mTopSk1Device.get(), next.mLazyTopSk1.get(),
+                next.mTopSk1OwnerRunId, static_cast<bool>(next.mTopSk1Device));
+        }
+        else
+        {
+            ct1Ok = lheEnc1(
+                ctx,
+                lenc.mRNtt,
+                next.mSk1,
+                sessionParams.mGadgetLogBase,
+                next.mCt1,
+                lheSigma,
+                lheMaxDev,
+                &prng,
+                true,
+                next.mPublicANtt.get(),
+                sessionParams.mNumWorkerThreads,
+                input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
+                lenc.mLazyRandomizers);
+        }
+        if (!ct1Ok)
+        {
+            return false;
+        }
+
+        // The state-only/transport path has no independently mutable message
+        // to publish. Keep the one complete state and encode its const tensors
+        // directly when the socket caller needs bytes.
+        if (!message)
+        {
+            senderState = std::move(next);
+            return true;
+        }
+
+        ShrinkExpandOfflineMessage nextMessage{};
+        nextMessage.mParams = next.mParams;
+        HostStep messageCopyStep(executionContext(sessionParams), "setup sender: offline message copy");
+        if (setupParallelMessageCopyEnabled(executionContext(sessionParams)))
+        {
+            nextMessage.mCt1.mRows = next.mCt1.mRows;
+            nextMessage.mCt1.mCols = next.mCt1.mCols;
+            nextMessage.mLacct.mWidthPadded = next.mLacct.mWidthPadded;
+            nextMessage.mLacct.mLevels = next.mLacct.mLevels;
+            nextMessage.mLacct.mCt.mRows = next.mLacct.mCt.mRows;
+            nextMessage.mLacct.mCt.mCols = next.mLacct.mCt.mCols;
+            const std::size_t ct1Count = next.mCt1.mPolys.size();
+            const std::size_t lacctCount = next.mLacct.mCt.mPolys.size();
+            nextMessage.mCt1.mPolys.resize(ct1Count);
+            nextMessage.mLacct.mCt.mPolys.resize(lacctCount);
+            // Each worker allocates and copies its own polynomial. Message and
+            // state remain independently mutable, exactly as with assignment.
+            if (!detail::runParallelTasks(ct1Count + lacctCount,
+                    sessionParams.mNumWorkerThreads, [&](std::size_t index) {
+                        if (index < ct1Count)
+                            nextMessage.mCt1.mPolys[index] = next.mCt1.mPolys[index];
+                        else
+                            nextMessage.mLacct.mCt.mPolys[index - ct1Count] =
+                                next.mLacct.mCt.mPolys[index - ct1Count];
+                        return true;
+                    }, false, &(executionContext(senderState)))) return false;
+        }
+        else
+        {
+            nextMessage.mCt1 = next.mCt1;
+            nextMessage.mLacct = next.mLacct;
+        }
+        messageCopyStep.stop();
+
+        *message = std::move(nextMessage);
+        senderState = std::move(next);
+        return true;
     }
 
     bool prepareShrinkExpandSenderOffline(
@@ -286,136 +650,7 @@ namespace osuCrypto::LogVole
         ShrinkExpandOfflineMessage& message,
         ShrinkExpandSenderState& senderState)
     {
-        if (!validateShrinkExpandSenderOfflineInput(input))
-        {
-            return false;
-        }
-
-        RingNttContext ctx{};
-        if (!makeRingNttContext(input.mParams.mRing, ctx))
-        {
-            return false;
-        }
-
-        ShrinkExpandSenderState next{};
-        next.mParams = input.mParams;
-        next.mS = input.mS;
-        if (!input.mFixedSk1.empty())
-        {
-            next.mSk1 = input.mFixedSk1;
-        }
-        else
-        {
-            next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, prng);
-        }
-
-        std::vector<RnsPoly> publicA;
-        if (!buildLhePublicANtt(ctx, input.mParams.mMu, publicA))
-        {
-            return false;
-        }
-        next.mPublicANtt = std::make_shared<const std::vector<RnsPoly>>(std::move(publicA));
-
-        const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
-        next.mPublicBNtt = std::make_shared<const std::vector<RnsPoly>>(buildLencPublicBNtt(ctx, publicBTau));
-
-        const bool fullNoise = usesFullNoise(input.mParams);
-        const double lencSigma = fullNoise ? computeSigma(std::sqrt(static_cast<double>(input.mParams.mTau))) : 0.0;
-        const double lencMaxDev = fullNoise ? std::sqrt(kNoiseLambda) * lencSigma : 0.0;
-
-        LencEncodeOutput lenc{};
-        bool lencOk = false;
-        if (input.mParams.mTruncateOneGadgetDigit)
-        {
-            lencOk = lencEncTrunc(
-                ctx,
-                input.mS,
-                input.mParams.mTau,
-                input.mParams.mGadgetLogBase,
-                input.mParams.mPlaintextModulusBits,
-                prng,
-                lenc,
-                lencSigma,
-                lencMaxDev,
-                0,
-                true,
-                input.mParams.mLeafInputsAreGadget,
-                next.mPublicBNtt.get(),
-                input.mParams.mNumWorkerThreads);
-        }
-        else
-        {
-            lencOk = lencEnc(
-                ctx,
-                input.mS,
-                input.mParams.mTau,
-                input.mParams.mGadgetLogBase,
-                prng,
-                lenc,
-                lencSigma,
-                lencMaxDev,
-                0,
-                true,
-                next.mPublicBNtt.get(),
-                input.mParams.mNumWorkerThreads);
-        }
-        if (!lencOk)
-        {
-            return false;
-        }
-
-        next.mR = std::move(lenc.mR);
-        next.mLacct.mWidthPadded = lenc.mLacct.mWidthPadded;
-        next.mLacct.mLevels = lenc.mLacct.mLevels;
-        next.mLacct.mCt = std::move(lenc.mLacct.mCt);
-
-        const double lheSigma = fullNoise ? computeSigma(std::sqrt(static_cast<double>(next.mLacct.mWidthPadded))) : 0.0;
-        const double lheMaxDev = fullNoise ? std::sqrt(kNoiseLambda) * lheSigma : 0.0;
-
-        bool ct1Ok = false;
-        if (input.mParams.mTruncateOneGadgetDigit)
-        {
-            ct1Ok = lheEnc1Trunc(
-                ctx,
-                lenc.mRNtt,
-                next.mSk1,
-                input.mParams.mGadgetLogBase,
-                next.mCt1,
-                lheSigma,
-                lheMaxDev,
-                &prng,
-                true,
-                next.mPublicANtt.get(),
-                input.mParams.mNumWorkerThreads);
-        }
-        else
-        {
-            ct1Ok = lheEnc1(
-                ctx,
-                lenc.mRNtt,
-                next.mSk1,
-                input.mParams.mGadgetLogBase,
-                next.mCt1,
-                lheSigma,
-                lheMaxDev,
-                &prng,
-                true,
-                next.mPublicANtt.get(),
-                input.mParams.mNumWorkerThreads);
-        }
-        if (!ct1Ok)
-        {
-            return false;
-        }
-
-        ShrinkExpandOfflineMessage nextMessage{};
-        nextMessage.mParams = next.mParams;
-        nextMessage.mCt1 = next.mCt1;
-        nextMessage.mLacct = next.mLacct;
-
-        message = std::move(nextMessage);
-        senderState = std::move(next);
-        return true;
+        return prepareShrinkExpandSenderOfflineImpl(input, prng, &message, senderState);
     }
 
     bool prepareShrinkExpandSenderOffline(
@@ -423,8 +658,144 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         ShrinkExpandSenderState& senderState)
     {
-        ShrinkExpandOfflineMessage ignored{};
-        return prepareShrinkExpandSenderOffline(input, prng, ignored, senderState);
+        return prepareShrinkExpandSenderOfflineImpl(input, prng, nullptr, senderState);
+    }
+
+    template <typename Message>
+    static bool finalizeShrinkExpandReceiverOfflineImpl(
+        const ShrinkExpandReceiverOfflineInput& input,
+        Message&& message,
+        ShrinkExpandReceiverState& receiverState)
+    {
+            auto sessionParams = input.mParams;
+            bindExecutionRole(sessionParams.mRing, ProtocolCacheRole::Receiver);
+
+        HostStep setupStep(executionContext(sessionParams), "setup receiver: shrink expand total");
+        if (!validateShrinkExpandReceiverOfflineInput(input) ||
+            !validateStateParamsMatch(sessionParams, message.mParams))
+        {
+            return false;
+        }
+
+        // Encoded owners retain validated immutable wire bytes. Their dimensions
+        // are still checked here before any device allocation or consumption.
+        const auto validTensor = [&](const RingTensor& tensor, const auto& lazy) {
+            if (!lazy)
+                return ringTensorSize(tensor) == tensor.mPolys.size() &&
+                    validateRingBatchShape(tensor.mPolys, sessionParams.mRing);
+            const u64 words = ringPolyCoeffCount(sessionParams.mRing);
+            const auto bytes = lazy->encodedCoefficients();
+            return tensor.mPolys.empty() && words && bytes.size() % sizeof(u64) == 0 &&
+                ringTensorSize(tensor) <= (bytes.size() / sizeof(u64)) / words &&
+                ringTensorSize(tensor) * words == bytes.size() / sizeof(u64);
+        };
+        // Validate the complete message before consuming any owned storage.
+        if (message.mCt1.mRows != sessionParams.mMu ||
+            message.mCt1.mCols != sessionParams.mTau ||
+            !validTensor(message.mCt1, message.mLazyCt1) ||
+            message.mLacct.mWidthPadded == 0 ||
+            message.mLacct.mLevels == 0 ||
+            message.mLacct.mCt.mRows != static_cast<u64>(message.mLacct.mLevels) * message.mLacct.mWidthPadded ||
+            !validTensor(message.mLacct.mCt, message.mLazyLacct))
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeRingNttContext(sessionParams.mRing, ctx))
+        {
+            return false;
+        }
+
+        ShrinkExpandReceiverState next{};
+        next.mParams = sessionParams;
+        HostStep publicDataStep(executionContext(sessionParams), "setup receiver: public data");
+        const u32 publicBTau = sessionParams.mTruncateOneGadgetDigit ? (sessionParams.mTau + 1u) : sessionParams.mTau;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (input.mDeferHostSnapshot)
+        {
+
+            next.mPublicANttDevice = retainedLhePublicANtt(ctx, sessionParams.mMu);
+            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau);
+            // Publish retained-only state only as a complete A/B pair. A
+            // partial device attempt falls back to two exact eager owners.
+            if (!next.mPublicANttDevice || !next.mPublicBNttDevice)
+            {
+                next.mPublicANttDevice.reset();
+                next.mPublicBNttDevice.reset();
+            }
+            else
+            {
+                next.mLazyPublicUniformHosts =
+                    std::make_shared<const LazyPublicUniformHosts>(
+                        ctx, next.mPublicANttDevice, next.mPublicBNttDevice,
+                        executionContext(sessionParams).mScope);
+            }
+        }
+#endif
+        if (!next.mPublicANttDevice)
+        {
+            next.mPublicANtt = sharedLhePublicANtt(ctx, sessionParams.mMu);
+            next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau);
+        }
+        if ((!next.mPublicANtt && !next.mPublicANttDevice) ||
+            (!next.mPublicBNtt && !next.mPublicBNttDevice)) return false;
+        publicDataStep.stop();
+
+        next.mCt1 = std::forward<Message>(message).mCt1;
+        next.mLacct = std::forward<Message>(message).mLacct;
+
+#if defined(ENABLE_LOGVOLE_CUDA)
+        const char* residentNtt = std::getenv("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT");
+        if (!residentNtt || residentNtt[0] != '0')
+        {
+
+            if (gpu::enabled(executionContext(sessionParams)))
+            {
+                if (gpu::finalizeReceiverSetupDevice(ctx, next, input.mDeferHostSnapshot,
+                        message.mLazyCt1, message.mLazyLacct))
+                {
+                    receiverState = std::move(next);
+                    return true;
+                }
+                const char* strict = std::getenv("LV_GPU_SETUP_RECEIVER_RESIDENT_NTT_STRICT");
+                if (strict && strict[0] == '1') return false;
+            }
+        }
+#endif
+
+        if (!next.mPublicANtt || !next.mPublicBNtt)
+        {
+
+            std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
+            if (!receiverPublicHosts(ctx, next, publicA, publicB)) return false;
+            // Materialize both local owners completely before publishing either
+            // one to the state consumed by the CPU rollback.
+            next.mPublicANtt = std::move(publicA);
+            next.mPublicBNtt = std::move(publicB);
+            next.mPublicANttDevice.reset();
+            next.mPublicBNttDevice.reset();
+            next.mLazyPublicUniformHosts.reset();
+        }
+
+        if (message.mLazyCt1) next.mCt1 = message.mLazyCt1->get();
+        if (message.mLazyLacct) next.mLacct = message.mLazyLacct->get();
+
+        // These ciphertext transforms are independent. Batching lets setup use
+        // the existing device NTT instead of serial host transforms per cell.
+        if (setupBatchNttEnabled(executionContext(sessionParams)))
+        {
+            if (!forwardNttBatch(next.mCt1.mPolys, ctx)) return false;
+        }
+        else
+        {
+            for (auto& poly : next.mCt1.mPolys)
+            {
+                if (!forwardNtt(poly, ctx)) return false;
+            }
+        }
+        receiverState = std::move(next);
+        return true;
     }
 
     bool finalizeShrinkExpandReceiverOffline(
@@ -432,70 +803,113 @@ namespace osuCrypto::LogVole
         const ShrinkExpandOfflineMessage& message,
         ShrinkExpandReceiverState& receiverState)
     {
-        if (!validateShrinkExpandReceiverOfflineInput(input) ||
-            !validateStateParamsMatch(input.mParams, message.mParams))
-        {
-            return false;
-        }
-
-        RingNttContext ctx{};
-        if (!makeRingNttContext(input.mParams.mRing, ctx))
-        {
-            return false;
-        }
-
-        ShrinkExpandReceiverState next{};
-        next.mParams = input.mParams;
-        std::vector<RnsPoly> publicA;
-        if (!buildLhePublicANtt(ctx, input.mParams.mMu, publicA))
-        {
-            return false;
-        }
-        next.mPublicANtt = std::make_shared<const std::vector<RnsPoly>>(std::move(publicA));
-
-        const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
-        next.mPublicBNtt = std::make_shared<const std::vector<RnsPoly>>(buildLencPublicBNtt(ctx, publicBTau));
-
-        next.mCt1 = message.mCt1;
-        if (next.mCt1.mRows != input.mParams.mMu ||
-            next.mCt1.mCols != input.mParams.mTau ||
-            ringTensorSize(next.mCt1) != next.mCt1.mPolys.size() ||
-            !validateRingBatchShape(next.mCt1.mPolys, input.mParams.mRing))
-        {
-            return false;
-        }
-
-        for (auto& poly : next.mCt1.mPolys)
-        {
-            if (!forwardNtt(poly, ctx))
-            {
-                return false;
-            }
-        }
-        next.mLacct = message.mLacct;
-        if (next.mLacct.mWidthPadded == 0 ||
-            next.mLacct.mLevels == 0 ||
-            next.mLacct.mCt.mRows != next.mLacct.mLevels * next.mLacct.mWidthPadded ||
-            ringTensorSize(next.mLacct.mCt) != next.mLacct.mCt.mPolys.size() ||
-            !validateRingBatchShape(next.mLacct.mCt.mPolys, input.mParams.mRing))
-        {
-            return false;
-        }
-
-        receiverState = std::move(next);
-        return true;
+        return finalizeShrinkExpandReceiverOfflineImpl(input, message, receiverState);
     }
 
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
-        const ShrinkExpandSenderState& senderState,
+        ShrinkExpandOfflineMessage&& message,
         ShrinkExpandReceiverState& receiverState)
     {
-        ShrinkExpandOfflineMessage message{};
-        message.mParams = senderState.mParams;
-        message.mCt1 = senderState.mCt1;
-        message.mLacct = senderState.mLacct;
-        return finalizeShrinkExpandReceiverOffline(input, message, receiverState);
+        return finalizeShrinkExpandReceiverOfflineImpl(input, std::move(message), receiverState);
+    }
+
+    void materializeShrinkExpandHostState(ShrinkExpandSenderState& state)
+    {
+        if (!state.mSharedHostState && !state.mLazyCt1 && !state.mLazyLacct &&
+            !state.mLazyRandomizers && !state.mPublicANttDevice &&
+            !state.mPublicBNttDevice && !state.mLazyPublicUniformHosts &&
+            !state.mTopSk1Device && !state.mLazyTopSk1)
+        {
+            state.mGpuCache.reset();
+            return;
+        }
+        ShrinkExpandSenderState next = state;
+        if ((!next.mPublicANtt || !next.mPublicBNtt) &&
+            (state.mPublicANttDevice || state.mPublicBNttDevice ||
+                state.mLazyPublicUniformHosts))
+        {
+            RingNttContext ctx{};
+            if (!makeRingNttContext(state.mParams.mRing, ctx)) return;
+
+            std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
+            if (state.mLazyPublicUniformHosts)
+            {
+                if (!state.mLazyPublicUniformHosts->get(publicA, publicB)) return;
+            }
+#if defined(ENABLE_LOGVOLE_CUDA)
+            else
+            {
+                if (state.mPublicANttDevice &&
+                    !gpu::materializeRetainedPublicUniform(ctx,
+                        state.mPublicANttDevice, publicA)) return;
+                if (state.mPublicBNttDevice &&
+                    !gpu::materializeRetainedPublicUniform(ctx,
+                        state.mPublicBNttDevice, publicB)) return;
+            }
+#endif
+            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu);
+            const u32 publicBTau = state.mParams.mTruncateOneGadgetDigit
+                ? state.mParams.mTau + 1u : state.mParams.mTau;
+            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau);
+            if (!publicA || !publicB || publicA->size() != state.mParams.mMu ||
+                publicB->size() != 2u * static_cast<std::size_t>(publicBTau) ||
+                !validateRingBatchShape(*publicA, ctx.mParams) ||
+                !validateRingBatchShape(*publicB, ctx.mParams)) return;
+            next.mPublicANtt = std::move(publicA);
+            next.mPublicBNtt = std::move(publicB);
+        }
+        next.mS = state.hostS();
+        next.mSk1 = state.hostSk1();
+        next.mTopSk1Device.reset();
+        next.mLazyTopSk1.reset();
+        next.mTopSk1OwnerRunId = 0;
+        next.mLazyS.reset();
+        next.mR = state.hostR();
+        next.mCt1 = state.hostCt1();
+        next.mLacct = state.hostLacct();
+        next.mSharedHostState.reset();
+        next.mLazyCt1.reset();
+        next.mLazyLacct.reset();
+        next.mLazyRandomizers.reset();
+        next.mPublicANttDevice.reset();
+        next.mPublicBNttDevice.reset();
+        next.mLazyPublicUniformHosts.reset();
+        next.mPublicUniformRunId = 0;
+        next.mGpuCache.reset();
+        state = std::move(next);
+    }
+
+    void materializeShrinkExpandHostState(ShrinkExpandReceiverState& state)
+    {
+        if (!state.mSharedHostState && !state.mLazyCt1Ntt && !state.mLazyLacct &&
+            !state.mPublicANttDevice && !state.mPublicBNttDevice &&
+            !state.mLazyPublicUniformHosts)
+        {
+            state.mGpuCache.reset();
+            return;
+        }
+        ShrinkExpandReceiverState next = state;
+        if (!next.mPublicANtt || !next.mPublicBNtt)
+        {
+            RingNttContext ctx{};
+
+            std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
+            if (!makeRingNttContext(state.mParams.mRing, ctx) ||
+                !receiverPublicHosts(ctx, state, publicA, publicB)) return;
+            next.mPublicANtt = std::move(publicA);
+            next.mPublicBNtt = std::move(publicB);
+        }
+        next.mCt1 = state.hostCt1();
+        next.mLacct = state.hostLacct();
+        next.mSharedHostState.reset();
+        next.mLazyCt1Ntt.reset();
+        next.mLazyLacct.reset();
+        next.mPublicANttDevice.reset();
+        next.mPublicBNttDevice.reset();
+        next.mLazyPublicUniformHosts.reset();
+        next.mGpuCache.reset();
+        state = std::move(next);
     }
 
     bool shrinkExpandShrink(
@@ -556,16 +970,15 @@ namespace osuCrypto::LogVole
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        thread_local Ct2CacheEntry senderCt2Cache{};
-        if (!getOrBuildCachedCt2(
+        std::vector<RnsPoly> senderCt2;
+        if (!buildHashedCt2(
                 ctx,
-                state.mParams,
+                state.mParams.mMu,
                 input.mSeed,
                 input.mSid,
                 maskDigest,
                 input.mNonce,
-                input.mNonce,
-                senderCt2Cache))
+                senderCt2))
         {
             return false;
         }
@@ -573,7 +986,7 @@ namespace osuCrypto::LogVole
         ShrinkExpandSenderExpandOutput next{};
         if (!lheDec(
                 ctx,
-                senderCt2Cache.mCt2,
+                senderCt2,
                 input.mTbkPrime,
                 next.mTbk,
                 state.mPublicANtt ? state.mPublicANtt.get() : nullptr,
@@ -609,6 +1022,9 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
+        if (!receiverPublicHosts(ctx, state, publicA, publicB)) return false;
+
         std::shared_ptr<DigestTree> tree;
         if (!ensureReceiverDigestTree(ctx, state, input, tree))
         {
@@ -616,27 +1032,30 @@ namespace osuCrypto::LogVole
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        thread_local Ct2CacheEntry receiverCt2Cache{};
-        if (!getOrBuildCachedCt2(
+        std::vector<RnsPoly> receiverCt2;
+        const bool senderRole = executionContext(state).mScope.mRole == ProtocolCacheRole::Sender;
+        HostStep sampleStep(executionContext(state), senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling");
+        if (!buildHashedCt2(
                 ctx,
-                state.mParams,
+                state.mParams.mMu,
                 input.mSeed,
                 input.mSid,
                 maskDigest,
                 input.mNonce,
-                input.mNonce,
-                receiverCt2Cache))
+                receiverCt2))
         {
             return false;
         }
 
+        sampleStep.stop();
+        HostStep applyStep(executionContext(state), senderRole ? "cpu sender expand detail: apply" : "cpu receiver expand detail: apply");
         std::vector<RnsPoly> ct1AppliedNtt;
         bool applyOk = false;
         if (state.mParams.mTruncateOneGadgetDigit)
         {
             applyOk = lheApplyCt1Trunc(
                 ctx,
-                state.mCt1,
+                state.hostCt1(),
                 input.mDigest,
                 state.mParams.mGadgetLogBase,
                 state.mParams.mTau,
@@ -648,7 +1067,7 @@ namespace osuCrypto::LogVole
         {
             applyOk = lheApplyCt1(
                 ctx,
-                state.mCt1,
+                state.hostCt1(),
                 input.mDigest,
                 state.mParams.mGadgetLogBase,
                 state.mParams.mTau,
@@ -661,13 +1080,15 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        applyStep.stop();
+        HostStep decryptStep(executionContext(state), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt");
         std::vector<RnsPoly> decPartialNtt;
         if (!lheDec(
                 ctx,
-                ct1AppliedNtt,
+                std::move(ct1AppliedNtt),
                 input.mSkX,
                 decPartialNtt,
-                state.mPublicANtt ? state.mPublicANtt.get() : nullptr,
+                publicA.get(),
                 true,
                 true,
                 state.mParams.mNumWorkerThreads))
@@ -675,13 +1096,27 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        decryptStep.stop();
+        HostStep evalStep(executionContext(state), senderRole ? "cpu sender expand detail: tree eval" : "cpu receiver expand detail: tree eval");
         std::vector<RnsPoly> evalNtt;
         bool evalOk = false;
-        if (state.mParams.mTruncateOneGadgetDigit)
+        const bool fusedEvalEnabled = [] {
+            const char* value = std::getenv("LV_CPU_FUSED_EXPAND_EVAL");
+            return !value || value[0] != '0';
+        }();
+        const bool fusedEval = fusedEvalEnabled && state.mParams.mTruncateOneGadgetDigit;
+        if (fusedEval)
+        {
+            evalOk = lencSubtractEvalTruncNttInplace(
+                ctx, state.hostLacct(), *tree, state.mParams.mMu, state.mParams.mTau,
+                state.mParams.mGadgetLogBase, state.mParams.mPlaintextModulusBits,
+                decPartialNtt, state.mParams.mNumWorkerThreads, state.mParams.mLeafInputsAreGadget);
+        }
+        else if (state.mParams.mTruncateOneGadgetDigit)
         {
             evalOk = lencEvalTrunc(
                 ctx,
-                toLencLacct(state.mLacct),
+                state.hostLacct(),
                 *tree,
                 state.mParams.mMu,
                 state.mParams.mTau,
@@ -696,7 +1131,7 @@ namespace osuCrypto::LogVole
         {
             evalOk = lencEval(
                 ctx,
-                toLencLacct(state.mLacct),
+                state.hostLacct(),
                 *tree,
                 state.mParams.mMu,
                 state.mParams.mTau,
@@ -707,20 +1142,22 @@ namespace osuCrypto::LogVole
         }
         if (!evalOk ||
             decPartialNtt.size() != state.mParams.mMu ||
-            evalNtt.size() != state.mParams.mMu ||
-            receiverCt2Cache.mCt2.size() != state.mParams.mMu)
+            (!fusedEval && evalNtt.size() != state.mParams.mMu) ||
+            receiverCt2.size() != state.mParams.mMu)
         {
             return false;
         }
 
+        evalStep.stop();
+        HostStep finishStep(executionContext(state), senderRole ? "cpu sender expand detail: finish" : "cpu receiver expand detail: finish");
         ShrinkExpandReceiverExpandOutput next{};
         next.mTbm.resize(state.mParams.mMu);
         for (u32 row = 0; row < state.mParams.mMu; ++row)
         {
             RnsPoly tbm = std::move(decPartialNtt[row]);
-            if (!ringSubInplace(tbm, evalNtt[row], ctx) ||
+            if ((!fusedEval && !ringSubInplace(tbm, evalNtt[row], ctx)) ||
                 !inverseNtt(tbm, ctx) ||
-                !ringAddInplace(tbm, receiverCt2Cache.mCt2[row], ctx))
+                !ringAddInplace(tbm, receiverCt2[row], ctx))
             {
                 return false;
             }
@@ -734,7 +1171,8 @@ namespace osuCrypto::LogVole
     bool shrinkExpandDenoiseComb(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& tbaPrime,
-        std::vector<RnsPoly>& out)
+        std::vector<RnsPoly>& out,
+        u32 requestedWorkers)
     {
         if (ctx.mParams.mCoeffModulusBits.empty() ||
             tbaPrime.size() % ctx.mParams.mCoeffModulusBits.size() != 0 ||
@@ -743,11 +1181,14 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        auto keyContextData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
+        const auto hostContext = getRingHostContext(ctx);
+        auto keyContextData = hostContext ? hostContext->key_context_data() : nullptr;
         if (!keyContextData)
         {
             return false;
         }
+        const auto& moduli = getRingHostModuli(ctx);
+        if (moduli.empty()) return false;
 
         const std::size_t rho = ctx.mParams.mCoeffModulusBits.size();
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
@@ -765,17 +1206,17 @@ namespace osuCrypto::LogVole
         struct RecoveryConstants
         {
             AlignedUnVec<std::size_t> mSrcLimbIndices;
-            AlignedUnVec<u64> mCrtInvPunctured;
-            AlignedUnVec<u64> mPuncturedProdModTarget;
+            std::vector<seal::util::MultiplyUIntModOperand> mCrtInvPunctured;
+            std::vector<seal::util::MultiplyUIntModOperand> mPuncturedProdModTarget;
             AlignedUnVec<wideU64> mFracInvModulus;
-            u64 mCrtLiftModTarget = 1;
-            u64 mInvCrtLiftModTarget = 1;
+            seal::util::MultiplyUIntModOperand mCrtLiftModTarget;
+            seal::util::MultiplyUIntModOperand mInvCrtLiftModTarget;
         };
 
         std::vector<RecoveryConstants> recovery(rho);
         for (std::size_t j = 0; j < rho; ++j)
         {
-            const auto& modJ = ctx.mModuli[j];
+            const auto& modJ = moduli[j];
             auto& constants = recovery[j];
             constants.mSrcLimbIndices.resize((rho > 0) ? (rho - 1) : 0);
             std::size_t srcLimbIdx = 0;
@@ -791,17 +1232,17 @@ namespace osuCrypto::LogVole
                     continue;
                 }
                 constants.mSrcLimbIndices[srcLimbIdx++] = w;
-                baseExcludingJ.push_back(ctx.mModuli[w]);
+                baseExcludingJ.push_back(moduli[w]);
                 crtLiftModQj = seal::util::multiply_uint_mod(crtLiftModQj, q[w], modJ);
             }
-            constants.mCrtLiftModTarget = crtLiftModQj;
+            constants.mCrtLiftModTarget.set(crtLiftModQj, modJ);
 
             u64 invCrtLiftModQj = 0;
             if (!seal::util::try_invert_uint_mod(crtLiftModQj, modJ, invCrtLiftModQj))
             {
                 return false;
             }
-            constants.mInvCrtLiftModTarget = invCrtLiftModQj;
+            constants.mInvCrtLiftModTarget.set(invCrtLiftModQj, modJ);
 
             if (baseExcludingJ.empty())
             {
@@ -812,14 +1253,14 @@ namespace osuCrypto::LogVole
             auto reducedInvPunct = reducedBase.inv_punctured_prod_mod_base_array();
 
             const std::size_t reducedCount = constants.mSrcLimbIndices.size();
-            resizeZero(constants.mCrtInvPunctured, reducedCount);
-            resizeZero(constants.mPuncturedProdModTarget, reducedCount);
+            constants.mCrtInvPunctured.resize(reducedCount);
+            constants.mPuncturedProdModTarget.resize(reducedCount);
             resizeZero(constants.mFracInvModulus, reducedCount);
 
             for (std::size_t idx = 0; idx < reducedCount; ++idx)
             {
                 const std::size_t w = constants.mSrcLimbIndices[idx];
-                constants.mCrtInvPunctured[idx] = reducedInvPunct[idx].operand;
+                constants.mCrtInvPunctured[idx] = reducedInvPunct[idx];
                 constants.mFracInvModulus[idx] = reciprocal2Pow128Wide(q[w]);
 
                 u64 puncturedModQj = 1;
@@ -831,15 +1272,17 @@ namespace osuCrypto::LogVole
                     }
                     puncturedModQj = seal::util::multiply_uint_mod(puncturedModQj, q[u], modJ);
                 }
-                constants.mPuncturedProdModTarget[idx] = puncturedModQj;
+                constants.mPuncturedProdModTarget[idx].set(puncturedModQj, modJ);
             }
         }
 
         std::vector<RnsPoly> result(wPrime);
         const wideU64 half = wideU64OneShift(127);
 
-        for (std::size_t i = 0; i < wPrime; ++i)
-        {
+        // Each output owns its allocation and reads disjoint input polynomials.
+        // Shared recovery constants are immutable. The common worker budget also
+        // applies when denoising runs inside a seed-search worker.
+        if (!detail::runParallelTasks(wPrime, requestedWorkers, [&](std::size_t i) {
             RnsPoly polyOut{};
             resizeZero(polyOut.mCoeffs, n * rho);
 
@@ -847,9 +1290,12 @@ namespace osuCrypto::LogVole
             {
                 const auto& polyIn = tbaPrime[i * rho + j];
                 const u64 qj = q[j];
-                const auto& modJ = ctx.mModuli[j];
+                const auto& modJ = moduli[j];
                 const auto& constants = recovery[j];
                 const std::size_t reducedCount = constants.mSrcLimbIndices.size();
+
+                if (detail::cpuDenoiseRns(polyIn.mCoeffs.data(), polyOut.mCoeffs.data() + j*n,
+                    n, fullBase, j)) continue;
 
                 for (std::size_t k = 0; k < n; ++k)
                 {
@@ -860,7 +1306,7 @@ namespace osuCrypto::LogVole
                     auto consumeIdx = [&](std::size_t idx) {
                         const std::size_t w = constants.mSrcLimbIndices[idx];
                         const u64 vw = polyIn.mCoeffs[w * n + k];
-                        const u64 xw = seal::util::multiply_uint_mod(vw, constants.mCrtInvPunctured[idx], ctx.mModuli[w]);
+                        const u64 xw = seal::util::multiply_uint_mod(vw, constants.mCrtInvPunctured[idx], moduli[w]);
 
                         unsigned char carry = 0;
                         sumFrac = wideU64Add(
@@ -931,7 +1377,8 @@ namespace osuCrypto::LogVole
             }
 
             result[i] = std::move(polyOut);
-        }
+            return true;
+        }, false, &(executionContext(ctx)))) return false;
 
         out = std::move(result);
         return true;

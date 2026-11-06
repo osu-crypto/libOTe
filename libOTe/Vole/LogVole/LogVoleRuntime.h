@@ -1,8 +1,24 @@
 #pragma once
 
 #include <cryptoTools/Common/Defines.h>
+#include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
+
+#include "libOTe/Vole/LogVole/LogVoleDiagnostics.h"
 
 #include <atomic>
+#include <memory>
+#include <cstdint>
+#include <utility>
+#include <typeindex>
+#include <unordered_map>
+#include <thread>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <string>
+#include <vector>
 
 namespace osuCrypto::LogVole
 {
@@ -19,49 +35,365 @@ namespace osuCrypto::LogVole
         ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
     };
 
-    inline std::atomic<u64> gProtocolCacheRunCounter{ 1 };
-    inline thread_local ProtocolCacheScope tProtocolCacheScope{};
-
-    inline u64 allocateProtocolCacheRunId()
+    // ---- host step timing -------------------------------------------------
+    //
+    // Wall-clock and current-thread CPU accounting for named regions, enabled with
+    // LV_STEP_PROFILE=1 and reported when its execution owner is released.
+    // Every translation unit receives that same explicit owner.
+    //
+    // The first call is reported apart from the rest because a one-time device
+    // cache upload or NTT-table build inside a step is otherwise
+    // indistinguishable from a steady-state per-query cost in the mean, which is
+    // exactly the mistake this profiler exists to stop.
+    struct HostStepProfiler
     {
-        return gProtocolCacheRunCounter.fetch_add(1, std::memory_order_relaxed);
-    }
+        struct Entry
+        {
+            // Copied, not aliased, so callers can build a name that carries the
+            // recursion level. Without that every level of a recursive protocol
+            // lands in one bucket and the mean is meaningless.
+            char mName[56]{};
+            std::atomic<u64> mNs{ 0 };
+            std::atomic<u64> mCpuNs{ 0 };
+            std::atomic<u64> mCpuCount{ 0 };
+            std::atomic<u64> mCount{ 0 };
+            std::atomic<u64> mFirstNs{ 0 };
+            std::atomic<u64> mMaxNs{ 0 };
+        };
+        static constexpr u32 kMax = 256;
+        std::unique_ptr<Entry[]> mEntries;
+        std::atomic<u32> mUsed{ 0 };
+        std::mutex mMutex;
+        std::once_flag mEnabledOnce;
+        bool mEnabled = false;
 
-    inline ProtocolCacheScope currentProtocolCacheScope()
-    {
-        return tProtocolCacheScope;
-    }
+        bool enabled()
+        {
+            std::call_once(mEnabledOnce, [&] {
+                const char* value = std::getenv("LV_STEP_PROFILE");
+                mEnabled = value && value[0] && value[0] != '0';
+            });
+            return mEnabled;
+        }
 
-    inline void setProtocolCacheScope(ProtocolCacheRole role, u64 runId)
-    {
-        tProtocolCacheScope.mRole = role;
-        tProtocolCacheScope.mRunId = runId;
-    }
+        struct Sample
+        {
+            std::string mName;
+            double mMs = 0;
+            u64 mCount = 0;
+            double mCpuMs = 0;
+            u64 mCpuCount = 0;
+        };
 
-    class ScopedProtocolCacheScope
+        // Call only between complete protocol queries, with workers joined.
+        void reset()
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            for (u32 i = 0; i < mUsed.load(); ++i)
+            {
+                mEntries[i].mNs.store(0);
+                mEntries[i].mCpuNs.store(0);
+                mEntries[i].mCpuCount.store(0);
+                mEntries[i].mCount.store(0);
+                mEntries[i].mFirstNs.store(0);
+                mEntries[i].mMaxNs.store(0);
+            }
+        }
+
+        std::vector<Sample> snapshot()
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            std::vector<Sample> samples;
+            for (u32 i = 0; i < mUsed.load(); ++i)
+            {
+                const auto count = mEntries[i].mCount.load();
+                if (count) samples.push_back({mEntries[i].mName,
+                    double(mEntries[i].mNs.load()) / 1e6, count,
+                    double(mEntries[i].mCpuNs.load()) / 1e6, mEntries[i].mCpuCount.load()});
+            }
+            return samples;
+        }
+
+        ~HostStepProfiler()
+        {
+            const u32 n = mUsed.load();
+            if (!n) return;
+            std::fprintf(stderr, "\n[step] host wall and thread CPU time per named region\n");
+            for (u32 i = 0; i < n; ++i)
+            {
+                const u64 ns = mEntries[i].mNs.load();
+                const u64 cnt = mEntries[i].mCount.load();
+                const u64 first = mEntries[i].mFirstNs.load();
+                std::fprintf(
+                    stderr, "[step] %-44s %9.3f ms x%-5llu first %8.3f  after %8.3f  max %8.3f  cpu %8.3f ms x%-5llu\n",
+                    mEntries[i].mName, double(ns) / 1e6, (unsigned long long)cnt, double(first) / 1e6,
+                    cnt > 1 ? double(ns - first) / double(cnt - 1) / 1e6 : 0.0,
+                    double(mEntries[i].mMaxNs.load()) / 1e6,
+                    double(mEntries[i].mCpuNs.load()) / 1e6,
+                    (unsigned long long)mEntries[i].mCpuCount.load());
+            }
+        }
+
+        Entry& slot(const char* name)
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            if (!mEntries) mEntries = std::make_unique<Entry[]>(kMax);
+            const u32 n = mUsed.load(std::memory_order_relaxed);
+            for (u32 i = 0; i < n; ++i)
+            {
+                if (std::strcmp(mEntries[i].mName, name) == 0) return mEntries[i];
+            }
+            if (n >= kMax) return mEntries[kMax - 1];
+            std::snprintf(mEntries[n].mName, sizeof(mEntries[n].mName), "%s", name);
+            mUsed.store(n + 1, std::memory_order_relaxed);
+            return mEntries[n];
+        }
+    };
+
+    // Explicit owner of execution settings, diagnostics, and reusable resources.
+    // Copies of protocol parameters share this owner; independent sessions get
+    // distinct owners. No state is installed on the executing thread.
+    class ExecutionContext : public std::enable_shared_from_this<ExecutionContext>
     {
+        struct ResourceStorage;
+        struct DeviceResourceStorage;
+        struct SharedResources;
+        struct Diagnostics
+        {
+            RingOpsStats mRingOps;
+            TimingStats mTiming;
+            HostStepProfiler mHostSteps;
+        };
+        std::shared_ptr<Diagnostics> mDiagnostics;
+
+        explicit ExecutionContext(std::shared_ptr<SharedResources> shared)
+            : mDiagnostics(shared, &shared->mDiagnostics), mRingOps(mDiagnostics->mRingOps),
+              mTiming(mDiagnostics->mTiming), mHostSteps(mDiagnostics->mHostSteps),
+              mIdentity(shared, &shared->mIdentity),
+              mWireResources(shared, &shared->mWireResources) {}
+
     public:
-        ScopedProtocolCacheScope(ProtocolCacheRole role, u64 runId)
-            : mPrevious(tProtocolCacheScope)
+        ExecutionContext() : ExecutionContext(std::make_shared<SharedResources>()) {}
+        explicit ExecutionContext(std::shared_ptr<Diagnostics> diagnostics)
+            : mDiagnostics(std::move(diagnostics)), mRingOps(mDiagnostics->mRingOps),
+              mTiming(mDiagnostics->mTiming), mHostSteps(mDiagnostics->mHostSteps) {}
+
+        ExecutionContext(std::shared_ptr<Diagnostics> diagnostics,
+            std::shared_ptr<u8> identity, std::shared_ptr<ResourceStorage> wire,
+            std::shared_ptr<DeviceResourceStorage> device)
+            : mDiagnostics(std::move(diagnostics)), mRingOps(mDiagnostics->mRingOps),
+              mTiming(mDiagnostics->mTiming), mHostSteps(mDiagnostics->mHostSteps),
+              mIdentity(std::move(identity)), mWireResources(std::move(wire)),
+              mDeviceResources(std::move(device)) {}
+
+        bool mUseGpu = false;
+        // Production dispatch uses a stable per-owner option snapshot. Tools
+        // that deliberately vary environment knobs may request live reads.
+        bool mCacheGpuOptions = true;
+        ProtocolCacheScope mScope{};
+        CpuBenchmarkContext* mCpuBenchmark = nullptr;
+        RingOpsStats& mRingOps;
+        TimingStats& mTiming;
+        HostStepProfiler& mHostSteps;
+
+        u64 ownerId() const
         {
-            setProtocolCacheScope(role, runId);
+            return static_cast<u64>(reinterpret_cast<std::uintptr_t>(mIdentity.get()));
         }
 
-        ScopedProtocolCacheScope(ProtocolCacheScope scope)
-            : mPrevious(tProtocolCacheScope)
+        // Tables retain metadata and GPU resources without retaining the cache
+        // that refers to those tables. Streams and scratch never own tables.
+        std::shared_ptr<ExecutionContext> resourceOwner(bool shareDeviceResources = true) const
         {
-            tProtocolCacheScope = scope;
+            // Initialize shared storage directly: constructing fresh registries
+            // only to replace them adds allocations to every device token.
+            auto owner = std::make_shared<ExecutionContext>(mDiagnostics, mIdentity,
+                mWireResources, shareDeviceResources ? mDeviceResources
+                    : std::make_shared<DeviceResourceStorage>());
+            owner->mUseGpu = mUseGpu;
+            owner->mCacheGpuOptions = mCacheGpuOptions;
+            owner->mScope = mScope;
+            owner->mCpuBenchmark = mCpuBenchmark;
+            return owner;
         }
 
-        ScopedProtocolCacheScope(const ScopedProtocolCacheScope&) = delete;
-        ScopedProtocolCacheScope& operator=(const ScopedProtocolCacheScope&) = delete;
-
-        ~ScopedProtocolCacheScope()
+        template<class T, class... Args>
+        T& resources(Args&&... args) const
         {
-            tProtocolCacheScope = mPrevious;
+            return mResources.get<T>(std::forward<Args>(args)...);
+        }
+
+        template<class T, class... Args>
+        T& deviceResources(Args&&... args) const
+        {
+            return mDeviceResources->forThread().get<T>(std::forward<Args>(args)...);
+        }
+
+        template<class T, class... Args>
+        T& wireResources(Args&&... args) const
+        {
+            return mWireResources->get<T>(std::forward<Args>(args)...);
+        }
+
+        // Raw resource owners may share storage across metadata copies without
+        // retaining a protocol cache. Entries must not own execution contexts.
+        template<class T, class... Args>
+        T& sharedResources(Args&&... args) const
+        {
+            return mWireResources->get<T>(std::forward<Args>(args)...);
         }
 
     private:
-        ProtocolCacheScope mPrevious{};
+        struct ResourceStorage
+        {
+            struct Index
+            {
+                std::vector<std::pair<const std::type_info*, void*>> mEntries;
+                void* find(const std::type_info* type) const
+                {
+                    for (const auto& [known, value] : mEntries)
+                        if (known == type) return value;
+                    return nullptr;
+                }
+            };
+            template<class T, class... Args>
+            T& get(Args&&... args)
+            {
+                const auto* type = &typeid(T);
+                auto* index = mIndex.load(std::memory_order_acquire);
+                if (index)
+                    if (auto* value = index->find(type)) return *static_cast<T*>(value);
+                std::lock_guard lock(mMutex);
+                index = mIndex.load(std::memory_order_relaxed);
+                if (index)
+                    if (auto* value = index->find(type)) return *static_cast<T*>(value);
+                // The map resolves equivalent RTTI objects across libraries.
+                auto& entry = mEntries[std::type_index(*type)];
+                if (!entry) entry = std::make_shared<T>(std::forward<Args>(args)...);
+                auto next = std::make_unique<Index>();
+                if (index) next->mEntries = index->mEntries;
+                next->mEntries.emplace_back(type, entry.get());
+                auto* published = next.get();
+                mSnapshots.push_back(std::move(next));
+                // Published indices and resource objects remain alive until
+                // owner teardown. Hot lookups need no mutex or shared_ptr copy.
+                mIndex.store(published, std::memory_order_release);
+                return *static_cast<T*>(entry.get());
+            }
+            std::mutex mMutex;
+            std::unordered_map<std::type_index, std::shared_ptr<void>> mEntries;
+            std::vector<std::unique_ptr<Index>> mSnapshots;
+            std::atomic<const Index*> mIndex{nullptr};
+        };
+        struct DeviceResourceStorage
+        {
+            struct Worker
+            {
+                explicit Worker(std::thread::id id) : mId(id) {}
+                const std::thread::id mId;
+                std::unique_ptr<Worker> mNext;
+                ResourceStorage mResources;
+            };
+            std::mutex mMutex;
+            std::unique_ptr<Worker> mWorkers;
+            std::atomic<Worker*> mFirstWorker{nullptr}, mPublishedWorkers{nullptr};
+
+            ResourceStorage& forThread()
+            {
+                const auto id = std::this_thread::get_id();
+                auto* first = mFirstWorker.load(std::memory_order_acquire);
+                if (first && first->mId == id) return first->mResources;
+                for (auto* worker = mPublishedWorkers.load(std::memory_order_acquire);
+                     worker; worker = worker->mNext.get())
+                    if (worker->mId == id) return worker->mResources;
+                std::lock_guard lock(mMutex);
+                for (auto* worker = mWorkers.get(); worker; worker = worker->mNext.get())
+                    if (worker->mId == id) return worker->mResources;
+                auto next = std::make_unique<Worker>(id);
+                auto* worker = next.get();
+                next->mNext = std::move(mWorkers);
+                mWorkers = std::move(next);
+                // Links and identities are immutable after publication. Every
+                // established worker can look up its storage without writing a
+                // shared cache line or competing for a registry mutex.
+                if (!mFirstWorker.load(std::memory_order_relaxed))
+                    mFirstWorker.store(worker, std::memory_order_release);
+                mPublishedWorkers.store(worker, std::memory_order_release);
+                return worker->mResources;
+            }
+        };
+        // These resources share a lifetime across metadata clones. Keep them
+        // in one allocation; temporary protocol parameter objects otherwise
+        // allocate four control blocks just to replace their default owner.
+        // Worker storage stays separate: stream metadata clones must be able
+        // to retain the wire/diagnostic owner without retaining their registry.
+        struct SharedResources
+        {
+            Diagnostics mDiagnostics;
+            u8 mIdentity = 0;
+            ResourceStorage mWireResources;
+        };
+        std::shared_ptr<u8> mIdentity = std::make_shared<u8>(0);
+        mutable ResourceStorage mResources;
+        std::shared_ptr<ResourceStorage> mWireResources = std::make_shared<ResourceStorage>();
+        std::shared_ptr<DeviceResourceStorage> mDeviceResources = std::make_shared<DeviceResourceStorage>();
+
+    };
+
+    using ExecutionContextPtr = std::shared_ptr<ExecutionContext>;
+
+    class HostStep
+    {
+    public:
+        HostStep(ExecutionContext& execution, const char* name)
+        {
+            if (!execution.mHostSteps.enabled()) return;
+            mEntry = &execution.mHostSteps.slot(name);
+            mStart = std::chrono::steady_clock::now();
+            mCpuStart = cpuBenchmarkThreadNs();
+        }
+
+        HostStep(ExecutionContext& execution, const char* name, u64 tag)
+        {
+            if (!execution.mHostSteps.enabled()) return;
+            char buffer[56];
+            std::snprintf(buffer, sizeof(buffer), "%s w=%llu", name,
+                static_cast<unsigned long long>(tag));
+            mEntry = &execution.mHostSteps.slot(buffer);
+            mStart = std::chrono::steady_clock::now();
+            mCpuStart = cpuBenchmarkThreadNs();
+        }
+
+        HostStep(ExecutionContext* execution, const char* name)
+        {
+            if (!execution) return;
+            if (!execution->mHostSteps.enabled()) return;
+            mEntry = &execution->mHostSteps.slot(name);
+            mStart = std::chrono::steady_clock::now();
+            mCpuStart = cpuBenchmarkThreadNs();
+        }
+
+        HostStep(const HostStep&) = delete;
+        HostStep& operator=(const HostStep&) = delete;
+        ~HostStep() { stop(); }
+
+        void stop()
+        {
+            if (!mEntry) return;
+            const auto ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - mStart).count());
+            mEntry->mNs.fetch_add(ns);
+            mEntry->mCpuNs.fetch_add(cpuBenchmarkThreadNs() - mCpuStart);
+            mEntry->mCpuCount.fetch_add(1);
+            if (mEntry->mCount.fetch_add(1) == 0) mEntry->mFirstNs.store(ns);
+            u64 seen = mEntry->mMaxNs.load();
+            while (ns > seen && !mEntry->mMaxNs.compare_exchange_weak(seen, ns)) {}
+            mEntry = nullptr;
+        }
+
+    private:
+        u64 mCpuStart = 0;
+        HostStepProfiler::Entry* mEntry = nullptr;
+        std::chrono::steady_clock::time_point mStart{};
     };
 }

@@ -60,9 +60,12 @@ namespace
 
     void run_coproto_case(std::uint64_t seed, std::uint32_t tau)
     {
-        const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+        const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+        LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
 
         KeyDeriveSenderInput senderInput{};
         senderInput.mParams = params;
@@ -153,11 +156,15 @@ namespace
 
 void LogVole_KeyDeriveCoproto_HappyPathAndAlgebraicRelation(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     run_coproto_case(0x1110u, 3);
 }
 
 void LogVole_KeyDeriveCoproto_DeterministicRegressionSeeds(const oc::CLP&)
 {
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
     for (const auto seed : { 0x10u, 0x20u, 0x30u, 0x40u })
     {
         run_coproto_case(seed, 2);
@@ -166,9 +173,12 @@ void LogVole_KeyDeriveCoproto_DeterministicRegressionSeeds(const oc::CLP&)
 
 void LogVole_KeyDeriveCoproto_OversizedFramesRejectedBeforeAllocation(const oc::CLP&)
 {
-	const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+	const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
 	RingNttContext ctx{};
-	LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+	::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+	LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params, ctx));
 	constexpr std::uint32_t tau = 3;
 	std::uint64_t expectedSize = 0;
 	LOGVOLE_REQUIRE_TRUE(keyDerivePayloadSize(params, tau, expectedSize));
