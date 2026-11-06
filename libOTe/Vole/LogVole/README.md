@@ -199,10 +199,10 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-This inventory describes the working tree at `d2266368`, including uncommitted
+This inventory describes the working tree at `dd980823`, including uncommitted
 changes. A migrated synchronous wrapper is not a completed async migration.
 The original 216-declaration globals snapshot remains in the local review
-artifacts; the current scan finds **28 runtime global/static/TLS declarations**.
+artifacts; the current scan finds **26 runtime global/static/TLS declarations**.
 Counts cover source branches on both platforms, not fields within objects or
 template instantiations. Compile-time constants and the five literal CUDA
 tables are excluded. The scanned LogVole library, tests, and frontend example
@@ -216,6 +216,11 @@ contain no environment reads.
 | Standalone sender expansion using async LHE | Committed (`cbe43e90`). |
 | Async truncated LENC, including fused subtraction | Committed (`42e5c113`); legacy overloads deprecated. |
 | Standalone receiver expansion using async LHE/LENC | Reviewed and committed (`d2266368`). Full-digit LENC retains its synchronous arithmetic. Existing state-owned mask storage remains leased across awaits without holding a mutex. |
+| Root receiver finalization and key-derivation prefix | Committed in `d9faba17`; async LHE/LENC with caller-owned buffers, owned response before lazy start, and unchanged root/output publication. |
+| Intermediate receiver expansion | Committed in `fce0002d`; bounded partition tasks joined by `when_all_scope`, exclusive LHE/LENC buffers per partition, sequential chunks, and row parallelism for a single chunk. Legacy entry point and GPU fallback remain. |
+| Intermediate receiver shrink | Committed in `b792a035`; direct `bulk_chunked` on the caller executor, unchanged arithmetic/padding, exclusive output ranges, and inline execution for one partition. Per-partition benchmark state is allocated only for parallel work. |
+| Intermediate receiver denoise | Committed in `216ef876`; direct async `bulk_chunked`, one shared recovery-data preparation, unchanged unrolled row kernel, and alias-safe output publication. Legacy synchronous entry point is deprecated. |
+| Empty-moduli sentinel and CLI tags | Removed in `dd980823`; a borrowed modulus span and function-local tags replace the globals. |
 | Sender pinning evidence moved onto sender state | Present in working tree, uncommitted; separate CUDA allocation evidence remains global. |
 | Offline setup migration | Uncommitted intermediate `CpuRowScratch::runBulk` implementation; still needs the explicit executor/buffer call-site pattern. |
 | macoro `bulk_chunked` and `bulk` delegation | Uncommitted in the separate `out/macoro` checkout, with regression tests. |
@@ -231,7 +236,6 @@ contain no environment reads.
 | Capability/compatibility caches | 4 | `defaultPublicSenderCt2PrefetchLevels()::h200`, `available()::ok`, `gaussianTransformHostCompatible()::{recognized, arithmeticCompatible}` | Capture once in the appropriate CPU/GPU resource owner. |
 | CUDA error/name storage | 4 | `gLastError`, `gLastWhere`, `gpuDeviceName()::name`, `gpuLastErrorOk()::buf` in `cuda/LogVoleGpuKernels.cu` | Execution-owned error state and owned name/message storage. |
 | CUDA attribute initialization | 7 | `gSharedConfigured`, `gPointwisePseudo55TreeSharedConfigured`, `gPointwisePseudo55TreeWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpVectorSharedConfigured`, `gPointwisePseudo55SparseSharedConfigured`, `gNttInversePostWarpStages05SharedConfigured` | Owned device preparation; consider only a justified CUDA initialization guard as an exception. |
-| Empty sentinel/CLI tags | 2 | `getRingHostModuli()::empty`, `logvoleTags` in `frontend/ExampleLogVole.cpp` | Context-owned empty storage/view and local or compile-time CLI tags. |
 
 The declaration-level scan with source locations is in the local artifacts
 `out/review/logvole-globals-inventory-current.{txt,json}`. The older files
@@ -260,21 +264,32 @@ success and failure. The preceding five-test run also covered the LENC kernel
 matrix (7.36 seconds). This migration has not been revalidated on WSL or CUDA
 execution.
 
+Root review and intermediate expansion validation: Windows build passed. Root
+reuse/lifetime regressions and the recursive VOLE relation passed in 4.22 seconds;
+a two-thread run with separate arithmetic passed in 0.42 seconds. Recursive tests
+verify unchanged LHE/LENC allocations with three buffers and one/two executor
+threads. GPU execution and WSL were not rerun for this step.
+
+Denoise exactness/aliasing and controller-on-single-worker tests passed in
+0.71 seconds. After the global removals, NTT, denoise, and recursive relation
+checks passed in 0.67 seconds. The LogVole target and changed frontend object
+compile on Windows; the full frontend target encounters unrelated DPF/Waterfall
+test compilation errors in this configuration. No WSL/GPU execution rerun.
+
 Next steps, in order:
 
-1. Migrate the root receiver expansion in `finalizeRootOnlineReceiverImpl`
-   (`LogVoleCore.cpp`) and its `LogVoleRingReceiver::onlineImpl` call boundary.
-   Thread the caller's executor and prepared buffers through the online API;
-   await the single expansion, preserving root state publication and GPU paths.
-   Deprecate the synchronous entry point while other callers migrate.
-2. Migrate intermediate receiver expansion (`LogVoleRingReceiver.cpp`, the
-   `wDoublePrime` loop). Its callbacks will await, so synchronous `bulk_chunked`
-   is not the outer algorithm. Discuss a bounded set of partition tasks joined
-   with `when_all_scope`: one exclusive buffer set per partition, sequential
-   chunks within each partition, and no nested worker multiplication. Child
-   inputs and outputs must remain owned until the join completes. Keep row
-   parallelism for the single-chunk case. Sender seed evaluation is a subsequent
-   step; preserve its early-rejection and accepted-cache behavior.
+1. Resolve the sender seed-evaluation algorithm before migrating it. A candidate
+   is rejected as soon as any expansion chunk fails its rounding predicate;
+   remaining work may be skipped, but all started children must finish. The
+   existing loop uses a local atomic flag. Plain synchronous `bulk_chunked`
+   does not express an async short-circuit predicate, and `when_all_scope`
+   provides joining without this stopping policy. Proposed discussion: a
+   bounded async `all_of` algorithm in macoro, separating predicate rejection
+   from exceptions and retaining exclusive per-partition buffers.
+2. Thread the explicit executor/resources through the higher-level receiver
+   callers, then retire the deprecated online entry point. The recursive
+   receiver shrink, denoise, and expansion phases now use the caller executor;
+   other preparation/codec phases and legacy callers still need migration.
 3. Migrate coherent groups of remaining setup/proof/codec loops using direct
    `bulk_chunked` where appropriate. Discuss a different algorithm first if a
    loop does not fit. Retire `CpuRowScratch` scheduling and legacy overloads
