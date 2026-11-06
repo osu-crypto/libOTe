@@ -286,7 +286,6 @@ namespace osuCrypto
 
 			std::vector<u8> buffer(pprf::checkedSize(
 				pprf::checkedMul(ctx.template byteSize<F>(), numTrees)));
-			span<u8> leafMsgs = buffer;
 			auto shareIter = share.data();
 			auto outIter = output.begin();
 			auto treeSize8 = treeSize / 8 * 8;
@@ -330,6 +329,7 @@ namespace osuCrypto
             }
 
             co_await chl.recv(buffer);
+            span<u8> leafMsgs = buffer;
 
             for (u64 j = 0; j < numTrees; ++j) {
                 span<u8> buff = leafMsgs.subspan(0, ctx.template byteSize<F>());
