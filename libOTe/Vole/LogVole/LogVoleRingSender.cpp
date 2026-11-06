@@ -891,71 +891,86 @@ namespace osuCrypto::LogVole
     }
 
     task<> LogVoleRingSender::expand(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& output,
         Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mRingFactoryOwner)};
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+        const ProtocolCacheScope cacheScope{currentProtocolCacheScope().mRunId, ProtocolCacheRole::Sender};
 		u64 maxPayload = 0;
 		const bool validPayloadSize = polyPayloadSize(state.mParams.mRing, maxPayload);
 		const auto digestPayload =
 			co_await detail::recvFrame<ProtocolCacheRole::Sender>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), state.mParams.mTransport.mEncoding.mWire, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner));
 
-        PolyMessage digestMessage{};
-        if (!decode(digestPayload, digestMessage, state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark))
-        {
-            throw std::runtime_error("LogVole sender received malformed shrink digest");
-        }
-
         RnsPoly digest{};
-        if (!readPolyMessage(state.mParams.mRing, digestMessage, digest))
+        Buffer responsePayload;
         {
-            throw std::runtime_error("LogVole sender rejected shrink digest metadata");
-        }
+            ScopedProtocolCacheScope roleScope(cacheScope);
+            PolyMessage digestMessage{};
+            if (!decode(digestPayload, digestMessage, state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark))
+            {
+                throw std::runtime_error("LogVole sender received malformed shrink digest");
+            }
 
-        RingNttContext ctx{};
-        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
-        {
-            throw std::runtime_error("LogVole sender could not build ring context");
-        }
+            if (!readPolyMessage(state.mParams.mRing, digestMessage, digest))
+            {
+                throw std::runtime_error("LogVole sender rejected shrink digest metadata");
+            }
 
-        RnsPoly skX{};
-        bool skxOk = false;
-        if (state.mParams.mTruncateOneGadgetDigit)
-        {
-            skxOk = deriveSkxTrunc(
-                ctx,
-                state.hostSk1(),
-                digest,
-                input.mTbkPrime,
-                state.mParams.mGadgetLogBase,
-                state.mParams.mTau,
-                skX);
-        }
-        else
-        {
-            skxOk = deriveSkx(
-                ctx,
-                state.hostSk1(),
-                digest,
-                input.mTbkPrime,
-                state.mParams.mGadgetLogBase,
-                state.mParams.mTau,
-                skX);
-        }
-        if (!skxOk)
-        {
-            throw std::runtime_error("LogVole sender could not derive shrink/expand key");
-        }
+            RingNttContext ctx{};
+            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
+            {
+                throw std::runtime_error("LogVole sender could not build ring context");
+            }
 
-        co_await detail::sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, skX), state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark));
+            RnsPoly skX{};
+            bool skxOk = false;
+            if (state.mParams.mTruncateOneGadgetDigit)
+            {
+                skxOk = deriveSkxTrunc(
+                    ctx,
+                    state.hostSk1(),
+                    digest,
+                    input.mTbkPrime,
+                    state.mParams.mGadgetLogBase,
+                    state.mParams.mTau,
+                    skX);
+            }
+            else
+            {
+                skxOk = deriveSkx(
+                    ctx,
+                    state.hostSk1(),
+                    digest,
+                    input.mTbkPrime,
+                    state.mParams.mGadgetLogBase,
+                    state.mParams.mTau,
+                    skX);
+            }
+            if (!skxOk)
+            {
+                throw std::runtime_error("LogVole sender could not derive shrink/expand key");
+            }
+
+            responsePayload = encode(makePolyMessage(state.mParams.mRing, skX), state.mParams.mTransport.mEncoding,
+                gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark);
+        } // No thread-local scope survives a suspension.
+        co_await detail::sendFrame(sock, std::move(responsePayload));
 
         ShrinkExpandExpandSenderInput expandInput = input;
         expandInput.mDigest = std::move(digest);
-        if (!shrinkExpandExpandSender(state, expandInput, output, state.mParams.mNumWorkerThreads, cpuBenchmark))
+        bool expanded;
+        if (gpu::enabled(state.mRingFactoryOwner))
+        {
+            ScopedProtocolCacheScope roleScope(cacheScope);
+            expanded = shrinkExpandExpandSender(state, expandInput, output,
+                state.mParams.mNumWorkerThreads, cpuBenchmark);
+        }
+        else
+            expanded = co_await shrinkExpandExpandSender(executor, buffers, state, expandInput, output, cpuBenchmark);
+        if (!expanded)
         {
             throw std::runtime_error("LogVole sender could not expand");
         }

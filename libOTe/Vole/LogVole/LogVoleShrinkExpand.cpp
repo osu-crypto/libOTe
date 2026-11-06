@@ -958,10 +958,10 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool shrinkExpandExpandSender(
+    static bool prepareSenderExpansion(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out, u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark)
+        RingNttContext& ctx, std::vector<RnsPoly>& ciphertext)
     {
         if (!validateRingPolyShape(input.mTbkPrime, state.mParams.mRing) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -972,16 +972,12 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        RingNttContext ctx{};
         if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
         {
             return false;
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        // Reuse storage only; query-bound coefficients are always rebuilt.
-        auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
-        auto& senderCt2 = scratch.ct2();
         if (!buildHashedCt2(
                 ctx,
                 state.mParams.mMu,
@@ -989,11 +985,42 @@ namespace osuCrypto::LogVole
                 input.mSid,
                 maskDigest,
                 input.mNonce,
-                senderCt2))
+                ciphertext))
         {
             return false;
         }
 
+        return true;
+    }
+
+    macoro::task<bool> shrinkExpandExpandSender(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const ShrinkExpandSenderState& state,
+        const ShrinkExpandExpandSenderInput& input,
+        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark)
+    {
+        RingNttContext ctx{};
+        ShrinkExpandSenderExpandOutput next{};
+        if (!prepareSenderExpansion(state, input, ctx, next.mTbk) || gpu::enabled(ctx))
+            co_return false;
+        auto publicA = state.mPublicANtt ? state.mPublicANtt : sharedLhePublicANtt(ctx, state.mParams.mMu);
+        if (!publicA || !co_await lheDec(executor, buffers, ctx, next.mTbk,
+                input.mTbkPrime, *publicA, LheDomain::Coefficient, cpuBenchmark))
+            co_return false;
+        out = std::move(next);
+        co_return true;
+    }
+
+    bool shrinkExpandExpandSender(
+        const ShrinkExpandSenderState& state,
+        const ShrinkExpandExpandSenderInput& input,
+        ShrinkExpandSenderExpandOutput& out, u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark)
+    {
+        RingNttContext ctx{};
+        // Legacy callers retain their reusable ciphertext storage.
+        auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
+        auto& senderCt2 = scratch.ct2();
+        if (!prepareSenderExpansion(state, input, ctx, senderCt2)) return false;
         ShrinkExpandSenderExpandOutput next{};
         auto lheWorkers = cpuLheWorkers;
 #if defined(ENABLE_LOGVOLE_CUDA)

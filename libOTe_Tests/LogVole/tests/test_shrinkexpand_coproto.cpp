@@ -5,12 +5,14 @@
 
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "macoro/sync_wait.h"
+#include "macoro/thread_pool.h"
 #include "macoro/when_all.h"
 
 #include "seal/util/rns.h"
 #include "seal/util/uintarith.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -207,6 +209,7 @@ namespace
     }
 
     void run_expand(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         LogVoleRingSender& sender,
         LogVoleRingReceiver& receiver,
         const ShrinkExpandSenderState& senderState,
@@ -229,12 +232,23 @@ namespace
         receiverExpandInput.mNonce = nonce;
         receiverExpandInput.mX = x;
 
+        std::vector<const std::uint64_t*> productAllocations;
+        for (const auto& buffer : buffers) productAllocations.push_back(buffer.mProduct.mCoeffs.data());
         auto onlineSockets = coproto::LocalAsyncSocket::makePair();
         auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
-            sender.expand(senderState, senderExpandInput, senderOutput, onlineSockets[0]),
+            sender.expand(executor, buffers, senderState, senderExpandInput, senderOutput, onlineSockets[0]),
             receiver.expand(receiverState, receiverExpandInput, receiverOutput, onlineSockets[1])));
         std::get<0>(onlineResult).result();
         std::get<1>(onlineResult).result();
+        for (std::size_t i = 0; i < buffers.size(); ++i)
+            LOGVOLE_REQUIRE_TRUE(buffers[i].mProduct.mCoeffs.data() == productAllocations[i]);
+        // The migrated production path must preserve the exact legacy result.
+        ShrinkExpandShrinkOutput shrink;
+        LOGVOLE_REQUIRE_TRUE(shrinkExpandShrink(receiverState, x, shrink));
+        senderExpandInput.mDigest = std::move(shrink.mDigest);
+        ShrinkExpandSenderExpandOutput reference;
+        LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(senderState, senderExpandInput, reference, 1));
+        expect_batch_equal(senderOutput.mTbk, reference.mTbk);
     }
 
     void expect_relation(
@@ -279,6 +293,12 @@ void LogVole_ShrinkExpandCoproto_OfflineAndExpandDeterministicRelation(const oc:
 
     const auto s = sample_batch(ctx, params.mMu, 0x2001u);
 
+    // The application owns one executor and prepared buffers across queries.
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(1);
+    std::array<LheDecryptBuffer, 3> buffers;
+    for (auto& buffer : buffers) buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mRing));
     LogVoleRingSender sender{};
     LogVoleRingReceiver receiver{};
     ShrinkExpandSenderState senderState{};
@@ -290,7 +310,7 @@ void LogVole_ShrinkExpandCoproto_OfflineAndExpandDeterministicRelation(const oc:
 
     ShrinkExpandSenderExpandOutput senderOutput{};
     ShrinkExpandReceiverExpandOutput receiverOutput{};
-    run_expand(sender, receiver, senderState, receiverState, 0x999u, tbkPrime, x, senderOutput, receiverOutput);
+    run_expand(executor, buffers, sender, receiver, senderState, receiverState, 0x999u, tbkPrime, x, senderOutput, receiverOutput);
 
     expect_relation(ctx, params, s, x, senderOutput, receiverOutput);
 }
@@ -303,6 +323,12 @@ void LogVole_ShrinkExpandCoproto_TruncOfflineAndExpandBoundedRelation(const oc::
 
     const auto s = sample_batch(ctx, params.mMu, 0x2101u);
 
+    // The application owns one executor and prepared buffers across queries.
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(1);
+    std::array<LheDecryptBuffer, 3> buffers;
+    for (auto& buffer : buffers) buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mRing));
     LogVoleRingSender sender{};
     LogVoleRingReceiver receiver{};
     ShrinkExpandSenderState senderState{};
@@ -314,7 +340,7 @@ void LogVole_ShrinkExpandCoproto_TruncOfflineAndExpandBoundedRelation(const oc::
 
     ShrinkExpandSenderExpandOutput senderOutput{};
     ShrinkExpandReceiverExpandOutput receiverOutput{};
-    run_expand(sender, receiver, senderState, receiverState, 0xA99u, tbkPrime, x, senderOutput, receiverOutput);
+    run_expand(executor, buffers, sender, receiver, senderState, receiverState, 0xA99u, tbkPrime, x, senderOutput, receiverOutput);
 
     expect_relation(ctx, params, s, x, senderOutput, receiverOutput);
 }
@@ -327,6 +353,12 @@ void LogVole_ShrinkExpandCoproto_FullNoiseTolerance(const oc::CLP&)
 
     const auto s = sample_batch(ctx, params.mMu, 0x5001u);
 
+    // The application owns one executor and prepared buffers across queries.
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(1);
+    std::array<LheDecryptBuffer, 3> buffers;
+    for (auto& buffer : buffers) buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mRing));
     LogVoleRingSender sender{};
     LogVoleRingReceiver receiver{};
     ShrinkExpandSenderState senderState{};
@@ -338,7 +370,7 @@ void LogVole_ShrinkExpandCoproto_FullNoiseTolerance(const oc::CLP&)
 
     ShrinkExpandSenderExpandOutput senderOutput{};
     ShrinkExpandReceiverExpandOutput receiverOutput{};
-    run_expand(sender, receiver, senderState, receiverState, 0xAAA1u, tbkPrime, x, senderOutput, receiverOutput);
+    run_expand(executor, buffers, sender, receiver, senderState, receiverState, 0xAAA1u, tbkPrime, x, senderOutput, receiverOutput);
 
     expect_relation(ctx, params, s, x, senderOutput, receiverOutput);
 }
@@ -351,6 +383,12 @@ void LogVole_ShrinkExpandCoproto_OfflineStateReuseAcrossQueries(const oc::CLP&)
 
     const auto s = sample_batch(ctx, params.mMu, 0xA001u);
 
+    // The application owns one executor and prepared buffers across queries.
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(1);
+    std::array<LheDecryptBuffer, 3> buffers;
+    for (auto& buffer : buffers) buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mRing));
     LogVoleRingSender sender{};
     LogVoleRingReceiver receiver{};
     ShrinkExpandSenderState senderState{};
@@ -365,6 +403,7 @@ void LogVole_ShrinkExpandCoproto_OfflineStateReuseAcrossQueries(const oc::CLP&)
         ShrinkExpandSenderExpandOutput senderOutput{};
         ShrinkExpandReceiverExpandOutput receiverOutput{};
         run_expand(
+            executor, buffers,
             sender,
             receiver,
             senderState,

@@ -39,7 +39,10 @@ namespace osuCrypto::LogVole
             PRNG& prng,
             Socket& sock);
 
+        // CPU resources are caller-owned and must outlive completion.
+        // The existing GPU path does not use the executor or buffers.
         task<> expand(
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
             const ShrinkExpandSenderState& state,
             const ShrinkExpandExpandSenderInput& input,
             ShrinkExpandSenderExpandOutput& output,

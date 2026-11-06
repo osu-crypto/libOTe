@@ -146,6 +146,15 @@ namespace osuCrypto::LogVole
         std::span<const RnsPoly> x,
         ShrinkExpandShrinkOutput& out);
 
+    // CPU expansion: executor and exclusive prepared buffers are borrowed
+    // until completion. Output is published only after decryption succeeds.
+    macoro::task<bool> shrinkExpandExpandSender(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const ShrinkExpandSenderState& state,
+        const ShrinkExpandExpandSenderInput& input,
+        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark = {});
+
+    [[deprecated("Use async sender expansion with explicit executor and buffers")]]
     bool shrinkExpandExpandSender(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
