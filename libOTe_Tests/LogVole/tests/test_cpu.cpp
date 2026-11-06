@@ -710,6 +710,7 @@ void LogVole_Cpu_LowDigitMatchesIntegerReference(const oc::CLP&)
 void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
 {
     PRNG random(toBlock(0x4c4845, 0x444543));
+    auto scratchOwner = std::make_shared<LogVole::detail::ShrinkExpandScratch>();
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
     {
@@ -762,8 +763,11 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
             LOGVOLE_REQUIRE_TRUE(lheDec(ctx, input, sk, actual, &publicA, inputNtt, outputNtt, workers));
             for (unsigned row = 0; row < rows; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
+            auto lease = LogVole::detail::ShrinkExpandScratch::acquire(scratchOwner);
+            auto& scratch = lease.lheDec();
             auto consumed = input;
-            LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, actual, &publicA, inputNtt, outputNtt, workers));
+            LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, actual, &publicA,
+                inputNtt, outputNtt, workers, {}, &scratch));
             for (unsigned row = 0; row < rows; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
             consumed = input;
@@ -776,9 +780,38 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
                 std::vector<RnsPoly> aliasReference;
                 LOGVOLE_REQUIRE_TRUE(lheDec(ctx, input, sk, aliasReference, &input, true, true, workers));
                 consumed = input;
-                LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, consumed, &consumed, true, true, workers));
+                LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, consumed, &consumed,
+                    true, true, workers, {}, &scratch));
                 for (unsigned row = 0; row < rows; ++row)
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(consumed[row].mCoeffs, aliasReference[row].mCoeffs));
+                // Reused products must be cleared for every row and query.
+                auto separate = ctx;
+                separate.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe = false;
+                auto* executor = scratch.executor();
+                for (unsigned repeat = 0; repeat < 2; ++repeat)
+                {
+                    globalRingOpsStats.reset();
+                    LOGVOLE_REQUIRE_TRUE(lheDec(separate, input, sk, actual, &publicA,
+                        true, true, workers, {}, &scratch));
+                    // Counts must be published before return, even while the
+                    // pool stays alive and across resets between queries.
+                    flushRingOpsThreadLocalStats();
+                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), rows);
+                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mSubCount.load(), rows);
+                    if (repeat == 0)
+                        executor = scratch.executor();
+                    else
+                        LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
+                    for (unsigned row = 0; row < rows; ++row)
+                        LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
+                }
+                // Another active operation gets an independent owner/partition set.
+                auto second = LogVole::detail::ShrinkExpandScratch::acquire(scratchOwner);
+                LOGVOLE_REQUIRE_TRUE(&second.lheDec() != &scratch);
+                LOGVOLE_REQUIRE_TRUE(lheDec(separate, input, sk, actual, &publicA,
+                    true, true, workers, {}, &second.lheDec()));
+                for (unsigned row = 0; row < rows; ++row)
+                    LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
             }
             // The owning output may alias the input batch.
             LOGVOLE_REQUIRE_TRUE(lheDec(ctx, input, sk, input, &publicA, inputNtt, outputNtt, workers));

@@ -1,5 +1,6 @@
 #include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
+#include "libOTe/Vole/LogVole/LogVoleLhe.h"
 
 #include <stdexcept>
 #include <utility>
@@ -9,6 +10,7 @@ namespace osuCrypto::LogVole::detail
     struct ShrinkExpandScratch::Slot
     {
         std::vector<RnsPoly> mCt2;
+        LheDecScratch mLheDec;
         bool mInUse = false;
     };
 
@@ -30,6 +32,11 @@ namespace osuCrypto::LogVole::detail
     std::vector<RnsPoly>& ShrinkExpandScratch::Lease::ct2() const
     {
         return mSlot->mCt2;
+    }
+
+    LheDecScratch& ShrinkExpandScratch::Lease::lheDec() const
+    {
+        return mSlot->mLheDec;
     }
 
     ShrinkExpandScratch::Lease ShrinkExpandScratch::acquire(

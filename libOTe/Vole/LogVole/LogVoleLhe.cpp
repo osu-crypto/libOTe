@@ -2,6 +2,7 @@
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVolePublicCache.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/config.h"
@@ -725,6 +726,42 @@ namespace osuCrypto::LogVole
         return true;
     }
 
+    struct detail::LheDecScratch::Impl
+    {
+        CpuBenchmarkContext* mBenchmark;
+        std::vector<Local> mLocals;
+        // Destroy/join the executor before releasing its borrowed numerical storage.
+        std::unique_ptr<CpuExecutor> mExecutor;
+        Impl(std::size_t workers, std::size_t words, CpuBenchmarkContext* benchmark)
+            : mBenchmark(benchmark), mLocals(workers)
+        {
+            if (words) for (auto& local : mLocals) local.mProduct.mCoeffs.resize(words);
+            if (workers > 1) mExecutor = std::make_unique<CpuExecutor>(workers, benchmark);
+        }
+    };
+
+    detail::LheDecScratch::LheDecScratch() noexcept = default;
+    detail::LheDecScratch::~LheDecScratch() = default;
+
+    std::span<detail::LheDecScratch::Local> detail::LheDecScratch::prepare(
+        std::size_t workers, std::size_t words, CpuBenchmarkContext* benchmark)
+    {
+        if (!workers) throw std::invalid_argument("LHE decryption requires a CPU partition");
+        if (!mImpl || mImpl->mLocals.size() != workers || mImpl->mBenchmark != benchmark)
+            mImpl = std::make_unique<Impl>(workers, words, benchmark);
+        for (auto& local : mImpl->mLocals)
+        {
+            if (words) local.mProduct.mCoeffs.resize(words);
+            local.mOk = true;
+        }
+        return mImpl->mLocals;
+    }
+
+    detail::CpuExecutor* detail::LheDecScratch::executor() noexcept
+    {
+        return mImpl ? mImpl->mExecutor.get() : nullptr;
+    }
+
     static bool lheDecImpl(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& cipher,
@@ -734,7 +771,7 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt,
         bool outputNtt,
         u32 requestedWorkers,
-        std::vector<RnsPoly>* ownedCipher, CpuBenchmarkState cpuBenchmark = {})
+        std::vector<RnsPoly>* ownedCipher, CpuBenchmarkState cpuBenchmark, detail::LheDecScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (cipher.empty() || !validateRingBatchShape(cipher, ctx.mParams) || !validateRingPolyShape(sk, ctx.mParams))
@@ -809,10 +846,7 @@ namespace osuCrypto::LogVole
 
         // Rows are independent: each reads publicANtt[row] and skNtt and writes
         // only result[row]. Bit-identical, and it was serial.
-        const bool rowsOk = detail::runParallelTasks(
-            result.size(),
-            requestedWorkers,
-            [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) -> bool
+        auto decryptRow = [&](std::size_t row, RnsPoly& askNtt) -> bool
         {
             if (inplace)
             {
@@ -832,11 +866,73 @@ namespace osuCrypto::LogVole
                 globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
-            RnsPoly askNtt{};
-            resizeZero(askNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+            askNtt.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
+            // A partition reuses this product across rows and queries.
+            std::fill(askNtt.mCoeffs.begin(), askNtt.mCoeffs.end(), u64{0});
             return dyadicMultiplyAddNttInplace((*publicANtt)[row], skNtt, askNtt, ctx) &&
                    ringSubInplace(result[row], askNtt, ctx);
-        }, false, &cpuBenchmark);
+        };
+        bool rowsOk = true;
+        bool useCpuScratch = cpuScratch != nullptr;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        useCpuScratch = useCpuScratch && !gpu::enabled(ctx);
+#endif
+        if (!useCpuScratch)
+        {
+            rowsOk = detail::runParallelTasks(result.size(), requestedWorkers,
+                [&](std::size_t row, CpuBenchmarkState&) {
+                    RnsPoly product;
+                    return decryptRow(row, product);
+                }, false, &cpuBenchmark);
+        }
+        else
+        {
+            const auto hardware = requestedWorkers == 1 ? std::size_t{1} :
+                std::max<std::size_t>(1, std::thread::hardware_concurrency());
+            auto capacity = hardware;
+            if (const auto* benchmark = cpuBenchmark.mContext)
+                capacity = std::max<std::size_t>(1, benchmark->mWorkerLimit
+                    ? std::min(benchmark->mWorkerLimit, benchmark->mCpus.size()) : benchmark->mCpus.size());
+            const auto workers = std::min({result.size(), capacity,
+                requestedWorkers ? std::size_t(requestedWorkers) : hardware});
+            if (workers == 1 && inplace)
+            {
+                // No pool, partition metadata, or unused product allocation.
+                CpuBenchmarkTaskScope metrics(cpuBenchmark);
+                RnsPoly unused;
+                for (std::size_t row = 0; row < result.size() && rowsOk; ++row)
+                    rowsOk = decryptRow(row, unused);
+            }
+            else
+            {
+                auto& scratch = *cpuScratch;
+                auto locals = scratch.prepare(workers, inplace ? 0 : ringPolyCoeffCount(ctx.mParams),
+                    cpuBenchmark.mContext);
+                const auto width = result.size() / workers;
+                const auto extra = result.size() % workers;
+                auto runPartition = [&](std::size_t partition, detail::LheDecScratch::Local& local) {
+                    // Persistent workers do not flush ring counters on thread
+                    // exit between queries. Publish once per partition, also
+                    // on failure, before bulk signals completion.
+                    struct FlushStats
+                    {
+                        bool mEnabled;
+                        ~FlushStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
+                    } flush{!inplace};
+                    const auto begin = partition * width + std::min(partition, extra);
+                    const auto end = begin + width + (partition < extra);
+                    for (auto row = begin; row < end && local.mOk; ++row)
+                        local.mOk = decryptRow(row, local.mProduct);
+                };
+                if (workers == 1)
+                {
+                    CpuBenchmarkTaskScope metrics(cpuBenchmark);
+                    runPartition(0, locals[0]);
+                }
+                else scratch.executor()->runBulk(workers, locals, runPartition);
+                for (const auto& local : locals) rowsOk &= local.mOk;
+            }
+        }
         if (!rowsOk)
         {
             return false;
@@ -854,19 +950,21 @@ namespace osuCrypto::LogVole
     bool lheDec(
         const RingNttContext& ctx, const std::vector<RnsPoly>& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
-        bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
+        bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
+        detail::LheDecScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, nullptr, cpuBenchmark);
+        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, nullptr, cpuBenchmark, cpuScratch);
     }
 
     bool lheDec(
         const RingNttContext& ctx, std::vector<RnsPoly>&& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
-        bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
+        bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
+        detail::LheDecScratch* cpuScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, &cipher, cpuBenchmark);
+        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, &cipher, cpuBenchmark, cpuScratch);
     }
 
     bool deriveSkx(

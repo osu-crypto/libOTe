@@ -10,6 +10,28 @@
 
 namespace osuCrypto::LogVole
 {
+    namespace detail
+    {
+        class CpuExecutor;
+
+        // Exclusive operation scratch. Empty until a CPU row phase needs it;
+        // the VOLE scratch lease keeps it alive through the synchronous join.
+        class LheDecScratch
+        {
+            struct Impl;
+            std::unique_ptr<Impl> mImpl;
+        public:
+            struct Local { RnsPoly mProduct; bool mOk = true; };
+            LheDecScratch() noexcept;
+            ~LheDecScratch();
+            LheDecScratch(const LheDecScratch&) = delete;
+            LheDecScratch& operator=(const LheDecScratch&) = delete;
+            std::span<Local> prepare(std::size_t workers, std::size_t words,
+                CpuBenchmarkContext* benchmark);
+            CpuExecutor* executor() noexcept;
+        };
+    }
+
     bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out);
 
     // Setup states borrow immutable cached public data. The mutable builder
@@ -98,6 +120,8 @@ namespace osuCrypto::LogVole
         u64 instanceIdx,
         std::vector<RnsPoly>& out);
 
+    // cpuScratch supplies exclusive reusable resources for the CPU NTT-domain
+    // row phase. Other phases/backends retain their existing execution path.
     bool lheDec(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& cipher,
@@ -106,7 +130,8 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>* publicANtt = nullptr,
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
-        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
+        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
+        detail::LheDecScratch* cpuScratch = nullptr);
 
     // Consuming overload: reuses the ciphertext allocation for NTT-domain
     // decryption. The coefficient-domain special case keeps its existing path.
@@ -118,7 +143,8 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>* publicANtt = nullptr,
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
-        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
+        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
+        detail::LheDecScratch* cpuScratch = nullptr);
 
     bool deriveSkx(
         const RingNttContext& ctx,

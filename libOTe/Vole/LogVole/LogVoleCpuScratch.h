@@ -10,6 +10,7 @@ namespace osuCrypto::LogVole
 
     namespace detail
     {
+        class LheDecScratch;
         // State-owned CPU workspace. Copies of a protocol state may share this
         // owner: overlapping calls lease separate slots, while completed calls
         // leave capacity available to any worker. No thread history is retained.
@@ -38,6 +39,7 @@ namespace osuCrypto::LogVole
                 // Exclusive storage, valid until this lease is released. The
                 // lease retains its owner; no mutex is held during computation.
                 std::vector<RnsPoly>& ct2() const;
+                LheDecScratch& lheDec() const;
             };
 
             ShrinkExpandScratch();

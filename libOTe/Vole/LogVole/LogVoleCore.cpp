@@ -26,6 +26,7 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -5425,6 +5426,11 @@ namespace osuCrypto::LogVole
         }
         {
             RootStep step("final: lheDec", rootProfiler(ctx));
+            std::optional<detail::ShrinkExpandScratch::Lease> cpuScratch;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (!gpu::enabled(ctx))
+#endif
+                cpuScratch.emplace(detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch));
             if (!lheDec(
                     ctx,
                     ctRApplied,
@@ -5433,7 +5439,8 @@ namespace osuCrypto::LogVole
                     nullptr,
                     true,
                     true,
-                    state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark))
+                    state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark,
+                    cpuScratch ? &cpuScratch->lheDec() : nullptr))
             {
                 return false;
             }
