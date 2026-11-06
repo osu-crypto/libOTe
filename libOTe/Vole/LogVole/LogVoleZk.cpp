@@ -213,6 +213,7 @@ namespace osuCrypto::LogVole
         std::vector<u64> mPartial;
         const detail::CpuZkOptions mOptions;
         detail::CpuExecutor mExecutor;
+        std::vector<std::array<u64, 2>> mProverPartial;
 
         static std::size_t workerBudget(u32 requested, const CpuBenchmarkContext* benchmark)
         {
@@ -231,10 +232,11 @@ namespace osuCrypto::LogVole
             : mWidth(circuit.mWidth), mDepth(circuit.mDepth),
               mProverChunks(static_cast<std::size_t>(std::min<u64>(mWidth, std::max<u32>(1, threads)))),
               mVerifierChunks(chunkCount(mWidth, threads)),
-              mPartial(std::max(2 * mProverChunks, mVerifierChunks * static_cast<std::size_t>(mDepth))),
+              mPartial(mVerifierChunks * static_cast<std::size_t>(mDepth)),
               mOptions(detail::captureCpuZkOptions(settings)),
               mExecutor(std::min(workerBudget(threads, benchmark),
-                  mVerifierChunks * static_cast<std::size_t>(mDepth)), benchmark)
+                  mVerifierChunks * static_cast<std::size_t>(mDepth)), benchmark),
+              mProverPartial(std::min(mProverChunks, mExecutor.workers()))
         {}
 
         bool matches(const ZkMulCircuit& circuit) const noexcept
@@ -296,12 +298,13 @@ namespace osuCrypto::LogVole
         const std::size_t chunks = work.mProverChunks;
         seal::util::MultiplyUIntModOperand chiOperand;
         chiOperand.set(chi % modulus, mod);
-        auto partial = std::span(work.mPartial).first(2 * chunks);
+        auto partial = std::span(work.mProverPartial);
+        std::fill(partial.begin(), partial.end(), std::array<u64, 2>{});
 
         detail::withCpuZkArithmetic(mod, work.mOptions.mPseudoReduce, [&](const auto& arithmetic) {
-            work.mExecutor.run(chunks, [&](std::size_t, std::size_t c) {
-                u64 u = 0;
-                u64 v = 0;
+            work.mExecutor.runBulk(chunks, partial, [&](std::size_t c, std::array<u64, 2>& local) {
+                u64 u = local[0];
+                u64 v = local[1];
                 for (u64 layer = 0; layer < circuit.mDepth; ++layer)
                 {
                     const u64 begin = layer * circuit.mWidth + c * circuit.mWidth / chunks;
@@ -333,18 +336,17 @@ namespace osuCrypto::LogVole
                         pw = seal::util::multiply_uint_mod(pw, chiOperand, mod);
                     }
                 }
-                partial[2 * c] = u;
-                partial[2 * c + 1] = v;
-                return true;
+                local[0] = u;
+                local[1] = v;
             });
         });
 
         u64 u = 0;
         u64 v = 0;
-        for (std::size_t c = 0; c < chunks; ++c)
+        for (const auto& local : partial)
         {
-            u = addMod(u, partial[2 * c], mod);
-            v = addMod(v, partial[2 * c + 1], mod);
+            u = addMod(u, local[0], mod);
+            v = addMod(v, local[1], mod);
         }
 
         const auto mask = static_cast<std::size_t>(circuit.maskIndex());

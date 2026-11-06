@@ -216,6 +216,63 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(nestedRejected);
     LOGVOLE_REQUIRE_TRUE(executor.run(0, [](std::size_t, std::size_t) { return false; }));
 
+    // Pilot bulk path: explicit reusable locals, caller participation, exact
+    // coverage, and synchronous cleanup even when either partition throws.
+    std::array<std::size_t, 2> bulkLocals{};
+    const auto caller = std::this_thread::get_id();
+    for (std::size_t count : {0u, 1u, 3u, 19u})
+    {
+        bulkLocals.fill(0);
+        std::array<unsigned, 19> visits{};
+        executor.runBulk(count, std::span{bulkLocals}, [&](std::size_t i, std::size_t& local) {
+            LOGVOLE_REQUIRE_TRUE((std::this_thread::get_id() == caller) == (&local == &bulkLocals[0]));
+            ++local;
+            ++visits[i];
+        });
+        LOGVOLE_REQUIRE_EQ(bulkLocals[0], (count + 1) / 2);
+        LOGVOLE_REQUIRE_EQ(bulkLocals[1], count / 2);
+        for (std::size_t i = 0; i < visits.size(); ++i)
+            LOGVOLE_REQUIRE_EQ(visits[i], i < count ? 1u : 0u);
+    }
+    for (bool callerThrows : {false, true})
+    {
+        std::atomic<bool> childStarted{false}, releaseChild{false}, childFinished{false};
+        bool propagated = false;
+        try
+        {
+            executor.runBulk(2, std::span{bulkLocals}, [&](std::size_t i, std::size_t&) {
+                if (i == 1)
+                {
+                    struct Finish
+                    {
+                        std::atomic<bool>& flag;
+                        ~Finish() { flag.store(true, std::memory_order_release); }
+                    } finish{childFinished};
+                    childStarted.store(true, std::memory_order_release);
+                    childStarted.notify_all();
+                    releaseChild.wait(false, std::memory_order_acquire);
+                    if (!callerThrows) throw Failure{};
+                }
+                else
+                {
+                    childStarted.wait(false, std::memory_order_acquire);
+                    releaseChild.store(true, std::memory_order_release);
+                    releaseChild.notify_all();
+                    if (callerThrows) throw Failure{};
+                }
+            });
+        }
+        catch (const Failure&) { propagated = true; }
+        LOGVOLE_REQUIRE_TRUE(propagated && childFinished.load(std::memory_order_acquire));
+        executor.runBulk(2, std::span{bulkLocals}, [](std::size_t, std::size_t& local) { ++local; });
+    }
+    nestedRejected = false;
+    executor.runBulk(1, std::span{bulkLocals}, [&](std::size_t, std::size_t&) {
+        try { executor.run(1, [](std::size_t, std::size_t) { return true; }); }
+        catch (const std::logic_error&) { nestedRejected = true; }
+    });
+    LOGVOLE_REQUIRE_TRUE(nestedRejected);
+
     ZkMulCircuit circuit;
     LOGVOLE_REQUIRE_TRUE(makeZkMulCircuit(51, 3, toBlock(0x50524550, 1), circuit));
     ZkMulCpuWorkspace serial(circuit, 1), parallel(circuit, 3), automatic(circuit, 0);
@@ -229,6 +286,9 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
     partition.mWorkerLimit = 1;
     ZkMulCpuWorkspace limited(circuit, 0, &partition);
     LOGVOLE_REQUIRE_EQ(limited.workers(), 1u);
+    // Three chunks share one local: exercise accumulation across chunk boundaries.
+    ZkMulCpuWorkspace limitedChunks(circuit, 3, &partition);
+    LOGVOLE_REQUIRE_EQ(limitedChunks.workers(), 1u);
     PRNG random(toBlock(0x50524550, 2));
     constexpr u64 q = 65537, delta = 19;
     const seal::Modulus mod(q);
@@ -246,6 +306,9 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
         ZkProof expected, actual;
         u64 expectedValue = 0, actualValue = 0;
         LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, serial, expected));
+        LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, limitedChunks, actual));
+        LOGVOLE_REQUIRE_EQ(actual.mU, expected.mU);
+        LOGVOLE_REQUIRE_EQ(actual.mV, expected.mV);
         LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, serial, expectedValue));
         LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, parallel, actual));
         LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, parallel, actualValue));

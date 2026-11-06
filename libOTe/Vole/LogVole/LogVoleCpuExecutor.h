@@ -1,6 +1,7 @@
 #pragma once
 
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
+#include "macoro/bulk.h"
 #include "macoro/task.h"
 #include "macoro/sync_wait.h"
 #include "macoro/thread_pool.h"
@@ -9,7 +10,9 @@
 #include <algorithm>
 #include <atomic>
 #include <exception>
+#include <span>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace osuCrypto::LogVole::detail
@@ -25,6 +28,19 @@ namespace osuCrypto::LogVole::detail
         std::size_t mWorkers;
         CpuBenchmarkContext* mBenchmark;
         std::atomic<bool> mRunning{false};
+
+        // Preserve the caller's share of the work and the existing W-1 pool.
+        // Queue insertion is all-or-none; inline execution cannot throw.
+        struct CallerAndPool
+        {
+            macoro::thread_pool& mPool;
+            void post_batch(const macoro::work_item* items, std::size_t count)
+            {
+                if (!count) return;
+                mPool.post_batch(items + 1, count - 1);
+                items[0]();
+            }
+        };
 
         class Phase
         {
@@ -92,6 +108,30 @@ namespace osuCrypto::LogVole::detail
         CpuExecutor& operator=(CpuExecutor&&) = delete;
 
         std::size_t workers() const noexcept { return mWorkers; }
+
+        // One exclusive caller-owned local per partition, reused across its
+        // contiguous range. Numerical storage and executor outlive the join.
+        template<typename Local, std::size_t Extent, typename TaskFn>
+        void runBulk(std::size_t taskCount, std::span<Local, Extent> locals, TaskFn&& taskFn)
+        {
+            static_assert(std::is_same_v<std::invoke_result_t<TaskFn&, std::size_t, Local&>, void>);
+            Phase phase(mRunning);
+            if (!taskCount) return;
+            if (locals.empty()) throw std::invalid_argument("LogVole CPU bulk requires local storage");
+            const auto count = std::min({taskCount, mWorkers, locals.size()});
+            if (count == 1)
+            {
+                TaskMetrics metrics(mBenchmark, false);
+                for (std::size_t i = 0; i < taskCount; ++i) taskFn(i, locals[0]);
+                return;
+            }
+            CallerAndPool executor{mPool};
+            macoro::sync_wait(macoro::bulk(executor, taskCount, locals.first(count),
+                [&](std::size_t i, Local& local) {
+                    TaskMetrics metrics(mBenchmark, &local != locals.data());
+                    taskFn(i, local);
+                }));
+        }
 
         // The callable and everything it borrows remain live until all children
         // join, including when caller/background work throws or returns false.
