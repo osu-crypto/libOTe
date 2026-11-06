@@ -162,6 +162,17 @@ namespace osuCrypto::LogVole
         // CPU LHE allowance: outer chunk workers pass 1 to avoid nested pools.
         u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark = {});
 
+    // CPU expansion. All referenced objects must survive completion; buffers
+    // are exclusive to this operation (not shared with a concurrent sender).
+    // Prepare LHE product storage and LENC pointer capacity as their APIs require.
+    // Output is published only on success. Started tasks must finish before reuse.
+    macoro::task<bool> shrinkExpandExpandReceiver(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
+        const ShrinkExpandReceiverState& state, const ShrinkExpandExpandReceiverInput& input,
+        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark = {});
+
+    [[deprecated("Use async receiver expansion with explicit executor and buffers")]]
     bool shrinkExpandExpandReceiver(
         const ShrinkExpandReceiverState& state,
         const ShrinkExpandExpandReceiverInput& input,

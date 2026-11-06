@@ -54,7 +54,11 @@ namespace osuCrypto::LogVole
             const std::shared_ptr<void>& firstQueryGpuAllocations = {},
             const void* firstQueryOwner = nullptr);
 
+        // Borrow executor and exclusive prepared buffers until completion.
+        // The continuation may run on an executor worker; join it externally.
         task<> expand(
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+            std::span<LencEvalBuffer> lencBuffers,
             const ShrinkExpandReceiverState& state,
             const ReceiverExpandInput& input,
             ShrinkExpandReceiverExpandOutput& output,

@@ -1017,49 +1017,68 @@ namespace osuCrypto::LogVole
     }
 
     task<> LogVoleRingReceiver::expand(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
         const ShrinkExpandReceiverState& state,
         const ReceiverExpandInput& input,
         ShrinkExpandReceiverExpandOutput& output,
         Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mRingFactoryOwner)};
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+        const ProtocolCacheScope cacheScope{currentProtocolCacheScope().mRunId, ProtocolCacheRole::Receiver};
         ShrinkExpandShrinkOutput shrink{};
-        if (!shrinkExpandShrink(state, input.mX, shrink))
+        Buffer digestPayload;
         {
-            throw std::runtime_error("LogVole receiver could not shrink");
-        }
+            ScopedProtocolCacheScope roleScope(cacheScope);
+            if (!shrinkExpandShrink(state, input.mX, shrink))
+            {
+                throw std::runtime_error("LogVole receiver could not shrink");
+            }
 
-        co_await detail::sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, shrink.mDigest), state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark));
+            digestPayload = encode(makePolyMessage(state.mParams.mRing, shrink.mDigest), state.mParams.mTransport.mEncoding,
+                gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark);
+        }
+        co_await detail::sendFrame(sock, std::move(digestPayload));
 
 		u64 maxPayload = 0;
 		const bool validPayloadSize = polyPayloadSize(state.mParams.mRing, maxPayload);
 		const auto skXPayload =
 			co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), state.mParams.mTransport.mEncoding.mWire, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner));
 
-        PolyMessage skXMessage{};
-        if (!decode(skXPayload, skXMessage, state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark))
-        {
-            throw std::runtime_error("LogVole receiver received malformed shrink/expand key");
-        }
-
         RnsPoly skX{};
-        if (!readPolyMessage(state.mParams.mRing, skXMessage, skX))
         {
-            throw std::runtime_error("LogVole receiver rejected shrink/expand key metadata");
-        }
+            ScopedProtocolCacheScope roleScope(cacheScope);
+            PolyMessage skXMessage{};
+            if (!decode(skXPayload, skXMessage, state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark))
+            {
+                throw std::runtime_error("LogVole receiver received malformed shrink/expand key");
+            }
 
+            if (!readPolyMessage(state.mParams.mRing, skXMessage, skX))
+            {
+                throw std::runtime_error("LogVole receiver rejected shrink/expand key metadata");
+            }
+
+        }
         ShrinkExpandExpandReceiverInput coreInput{};
         coreInput.mNonce = input.mNonce;
         coreInput.mSeed = input.mSeed;
         coreInput.mSid = input.mSid;
-        coreInput.mX = input.mX;
         coreInput.mDigest = std::move(shrink.mDigest);
         coreInput.mSkX = std::move(skX);
         coreInput.mTree = std::move(shrink.mTree);
 
-        if (!shrinkExpandExpandReceiver(state, coreInput, output, state.mParams.mNumWorkerThreads, cpuBenchmark))
+        bool expanded;
+        if (gpu::enabled(state.mRingFactoryOwner))
+        {
+            ScopedProtocolCacheScope roleScope(cacheScope);
+            expanded = shrinkExpandExpandReceiver(state, coreInput, output,
+                state.mParams.mNumWorkerThreads, cpuBenchmark);
+        }
+        else
+            expanded = co_await shrinkExpandExpandReceiver(executor, lheBuffers, lencBuffers,
+                state, coreInput, output, cpuBenchmark);
+        if (!expanded)
         {
             throw std::runtime_error("LogVole receiver could not expand");
         }

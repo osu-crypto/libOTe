@@ -1043,10 +1043,11 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool shrinkExpandExpandReceiver(
-        const ShrinkExpandReceiverState& state,
-        const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out, u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark)
+    static bool prepareReceiverExpansion(
+        const ShrinkExpandReceiverState& state, const ShrinkExpandExpandReceiverInput& input,
+        RingNttContext& ctx, std::shared_ptr<const std::vector<RnsPoly>>& publicA,
+        std::shared_ptr<DigestTree>& tree, std::vector<RnsPoly>& receiverCt2,
+        std::vector<RnsPoly>& ct1AppliedNtt, CpuBenchmarkState cpuBenchmark)
     {
         if ((!input.mTree && input.mX.size() != state.mParams.mMu) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -1058,25 +1059,20 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        RingNttContext ctx{};
         if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
         {
             return false;
         }
 
-        std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
+        std::shared_ptr<const std::vector<RnsPoly>> publicB;
         if (!receiverPublicHosts(ctx, state, publicA, publicB)) return false;
 
-        std::shared_ptr<DigestTree> tree;
         if (!ensureReceiverDigestTree(ctx, state, input, tree))
         {
             return false;
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        // Each active operation leases its own reusable coefficient storage.
-        auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
-        auto& receiverCt2 = scratch.ct2();
         const bool senderRole = currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender;
         HostStep sampleStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling", &cpuBenchmark);
         if (!buildHashedCt2(
@@ -1093,7 +1089,6 @@ namespace osuCrypto::LogVole
 
         sampleStep.stop();
         HostStep applyStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: apply" : "cpu receiver expand detail: apply", &cpuBenchmark);
-        std::vector<RnsPoly> ct1AppliedNtt;
         bool applyOk = false;
         if (state.mParams.mTruncateOneGadgetDigit)
         {
@@ -1125,6 +1120,102 @@ namespace osuCrypto::LogVole
         }
 
         applyStep.stop();
+        return true;
+    }
+
+    static bool finishReceiverExpansion(
+        const RingNttContext& ctx, const ShrinkExpandReceiverState& state,
+        std::vector<RnsPoly>& decPartialNtt, const std::vector<RnsPoly>& evalNtt,
+        const std::vector<RnsPoly>& receiverCt2, bool fusedEval, bool senderRole,
+        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark)
+    {
+        if (decPartialNtt.size() != state.mParams.mMu ||
+            (!fusedEval && evalNtt.size() != state.mParams.mMu) ||
+            receiverCt2.size() != state.mParams.mMu) return false;
+        HostStep finishStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: finish" : "cpu receiver expand detail: finish", &cpuBenchmark);
+        ShrinkExpandReceiverExpandOutput next{};
+        next.mTbm.resize(state.mParams.mMu);
+        for (u32 row = 0; row < state.mParams.mMu; ++row)
+        {
+            RnsPoly tbm = std::move(decPartialNtt[row]);
+            if ((!fusedEval && !ringSubInplace(tbm, evalNtt[row], ctx)) ||
+                !inverseNtt(tbm, ctx) ||
+                !ringAddInplace(tbm, receiverCt2[row], ctx))
+            {
+                return false;
+            }
+            next.mTbm[row] = std::move(tbm);
+        }
+
+        out = std::move(next);
+        return true;
+    }
+
+    macoro::task<bool> shrinkExpandExpandReceiver(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
+        const ShrinkExpandReceiverState& state, const ShrinkExpandExpandReceiverInput& input,
+        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark)
+    {
+        if (gpu::enabled(state.mRingFactoryOwner)) co_return false;
+        RingNttContext ctx{};
+        std::shared_ptr<const std::vector<RnsPoly>> publicA;
+        std::shared_ptr<DigestTree> tree;
+        // Retain the existing reusable mask allocation. The lease owns its slot
+        // across suspension and holds no mutex while the kernels execute.
+        auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
+        auto& receiverCt2 = scratch.ct2();
+        std::vector<RnsPoly> decPartialNtt;
+        const ProtocolCacheScope cacheScope{currentProtocolCacheScope().mRunId, ProtocolCacheRole::Receiver};
+        {
+            ScopedProtocolCacheScope scope(cacheScope);
+            if (!prepareReceiverExpansion(state, input, ctx, publicA, tree,
+                    receiverCt2, decPartialNtt, cpuBenchmark)) co_return false;
+        }
+        HostStep decryptStep(hostProfiler(ctx), "cpu receiver expand detail: decrypt", &cpuBenchmark);
+        if (!co_await lheDec(executor, lheBuffers, ctx, decPartialNtt, input.mSkX,
+                *publicA, LheDomain::Ntt, cpuBenchmark)) co_return false;
+        decryptStep.stop();
+
+        HostStep evalStep(hostProfiler(ctx), "cpu receiver expand detail: tree eval", &cpuBenchmark);
+        const bool fusedEval = ctx.mExecutionOptions.mAdvanced.mCpu.mFusedExpandEval && state.mParams.mTruncateOneGadgetDigit;
+        std::vector<RnsPoly> evalNtt;
+        if (state.mParams.mTruncateOneGadgetDigit)
+        {
+            if (!fusedEval)
+            {
+                evalNtt.resize(state.mParams.mMu);
+                for (auto& row : evalNtt) row.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
+            }
+            if (!co_await lencEvalTrunc(executor, lencBuffers, ctx, state.hostLacct(), *tree,
+                    state.mParams.mMu, state.mParams.mTau, state.mParams.mGadgetLogBase,
+                    state.mParams.mPlaintextModulusBits, fusedEval ? decPartialNtt : evalNtt,
+                    fusedEval ? LencEvalMode::SubtractNtt : LencEvalMode::Ntt,
+                    state.mParams.mLeafInputsAreGadget, cpuBenchmark)) co_return false;
+        }
+        else if (!lencEval(ctx, state.hostLacct(), *tree, state.mParams.mMu,
+                state.mParams.mTau, state.mParams.mGadgetLogBase, evalNtt, true,
+                state.mParams.mNumWorkerThreads)) co_return false;
+        evalStep.stop();
+        ScopedProtocolCacheScope scope(cacheScope);
+        co_return finishReceiverExpansion(ctx, state, decPartialNtt, evalNtt, receiverCt2,
+            fusedEval, false, out, cpuBenchmark);
+    }
+
+    bool shrinkExpandExpandReceiver(
+        const ShrinkExpandReceiverState& state,
+        const ShrinkExpandExpandReceiverInput& input,
+        ShrinkExpandReceiverExpandOutput& out, u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark)
+    {
+        RingNttContext ctx{};
+        std::shared_ptr<const std::vector<RnsPoly>> publicA;
+        std::shared_ptr<DigestTree> tree;
+        auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
+        auto& receiverCt2 = scratch.ct2();
+        std::vector<RnsPoly> ct1AppliedNtt;
+        if (!prepareReceiverExpansion(state, input, ctx, publicA, tree,
+                receiverCt2, ct1AppliedNtt, cpuBenchmark)) return false;
+        const bool senderRole = currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender;
         HostStep decryptStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt", &cpuBenchmark);
         std::vector<RnsPoly> decPartialNtt;
         auto rowWorkers = cpuRowWorkers;
@@ -1184,32 +1275,14 @@ namespace osuCrypto::LogVole
                 true,
                 state.mParams.mNumWorkerThreads);
         }
-        if (!evalOk ||
-            decPartialNtt.size() != state.mParams.mMu ||
-            (!fusedEval && evalNtt.size() != state.mParams.mMu) ||
-            receiverCt2.size() != state.mParams.mMu)
+        if (!evalOk)
         {
             return false;
         }
 
         evalStep.stop();
-        HostStep finishStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: finish" : "cpu receiver expand detail: finish", &cpuBenchmark);
-        ShrinkExpandReceiverExpandOutput next{};
-        next.mTbm.resize(state.mParams.mMu);
-        for (u32 row = 0; row < state.mParams.mMu; ++row)
-        {
-            RnsPoly tbm = std::move(decPartialNtt[row]);
-            if ((!fusedEval && !ringSubInplace(tbm, evalNtt[row], ctx)) ||
-                !inverseNtt(tbm, ctx) ||
-                !ringAddInplace(tbm, receiverCt2[row], ctx))
-            {
-                return false;
-            }
-            next.mTbm[row] = std::move(tbm);
-        }
-
-        out = std::move(next);
-        return true;
+        return finishReceiverExpansion(ctx, state, decPartialNtt, evalNtt, receiverCt2,
+            fusedEval, senderRole, out, cpuBenchmark);
     }
 
     bool shrinkExpandDenoiseComb(
