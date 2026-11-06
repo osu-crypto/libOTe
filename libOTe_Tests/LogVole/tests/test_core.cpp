@@ -5631,10 +5631,17 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
             nodeAllocations[i] = lencBuffers[i].mNodes.data();
         }
     }
+    auto receiverOperation = receiver.online(executor, lheBuffers, lencBuffers, receiverState,
+        receiverOnlineInput, receiverOnline, receiverOnlinePrng, onlineSockets[1]);
+    // The controller and its queued workers share the sole thread by default.
+    // Own the lazy operation in this frame before scheduling it.
+    auto onPool = [](macoro::thread_pool& pool, oc::task<> operation, bool cpu) -> oc::task<> {
+        if (cpu) co_await pool.schedule();
+        co_await std::move(operation);
+    };
     auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
         sender.online(senderState, senderOptions, senderOnline, senderOnlinePrng, onlineSockets[0]),
-        receiver.online(executor, lheBuffers, lencBuffers, receiverState, receiverOnlineInput,
-            receiverOnline, receiverOnlinePrng, onlineSockets[1])));
+        onPool(executor, std::move(receiverOperation), !advanced.mUseGpu)));
     std::get<0>(onlineResult).result();
     std::get<1>(onlineResult).result();
     if (!advanced.mUseGpu)

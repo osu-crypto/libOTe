@@ -1,5 +1,6 @@
 #include <optional>
 #include "macoro/when_all_scope.h"
+#include "macoro/bulk.h"
 #include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 
 #include "libOTe/config.h"
@@ -757,68 +758,90 @@ namespace osuCrypto::LogVole
         if (!gpuShrinkDone)
         {
 #endif
-        const bool shrinkOk = detail::runParallelTasks(
-            wDoublePrime,
-            state.mParams.mShrinkExpand.mNumWorkerThreads,
-            [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark) {
-                const auto chunkIdx = static_cast<u32>(taskIdx);
-                const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
-                const std::size_t end = std::min<std::size_t>(start + static_cast<std::size_t>(muHi), receiverInputCount(input));
+        auto shrinkChunk = [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark) {
+            const auto chunkIdx = static_cast<u32>(taskIdx);
+            const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+            const std::size_t end = std::min<std::size_t>(start + static_cast<std::size_t>(muHi), receiverInputCount(input));
 
-                if (start > end)
-                {
-                    return false;
-                }
+            if (start > end)
+            {
+                return false;
+            }
 
-                const std::size_t chunkSize = end - start;
-                std::vector<RnsPoly> paddedChunk;
-                std::span<const RnsPoly> chunk;
-                if (chunkSize == static_cast<std::size_t>(muHi))
+            const std::size_t chunkSize = end - start;
+            std::vector<RnsPoly> paddedChunk;
+            std::span<const RnsPoly> chunk;
+            if (chunkSize == static_cast<std::size_t>(muHi))
+            {
+                chunk = std::span<const RnsPoly>(input.mX.data() + start, chunkSize);
+            }
+            else
+            {
+                paddedChunk.resize(muHi);
+                for (std::size_t i = 0; i < chunkSize; ++i)
                 {
-                    chunk = std::span<const RnsPoly>(input.mX.data() + start, chunkSize);
+                    paddedChunk[i] = input.mX[start + i];
                 }
-                else
+                for (std::size_t i = chunkSize; i < paddedChunk.size(); ++i)
                 {
-                    paddedChunk.resize(muHi);
-                    for (std::size_t i = 0; i < chunkSize; ++i)
-                    {
-                        paddedChunk[i] = input.mX[start + i];
-                    }
-                    for (std::size_t i = chunkSize; i < paddedChunk.size(); ++i)
-                    {
-                        resizeZero(
-                            paddedChunk[i].mCoeffs,
-                            ringPolyCoeffCount(state.mParams.mShrinkExpand.mRing));
-                    }
-                    chunk = std::span<const RnsPoly>(paddedChunk.data(), paddedChunk.size());
+                    resizeZero(
+                        paddedChunk[i].mCoeffs,
+                        ringPolyCoeffCount(state.mParams.mShrinkExpand.mRing));
                 }
+                chunk = std::span<const RnsPoly>(paddedChunk.data(), paddedChunk.size());
+            }
 
-                ShrinkExpandShrinkOutput shrink{};
-                std::vector<RnsPoly> decomposed;
-                HostStep treeStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu shrink worker: digest tree", &cpuBenchmark);
-                if (!shrinkExpandShrink(state.mShrinkExpandState, chunk, shrink)) return false;
-                treeStep.stop();
-                HostStep unbundleStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu shrink worker: unbundle", &cpuBenchmark);
-                if (!seedLabelGadgetDecomposeHiAndUnbundle(
-                        shrink.mDigest,
-                        state.mParams.mShrinkExpand.mGadgetLogBase,
-                        tauHi,
-                        state.mParams.mShrinkExpand.mRing,
-                        decomposed) ||
-                    decomposed.size() != static_cast<std::size_t>(tauHi) * rho)
-                {
-                    return false;
-                }
+            ShrinkExpandShrinkOutput shrink{};
+            std::vector<RnsPoly> decomposed;
+            HostStep treeStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu shrink worker: digest tree", &cpuBenchmark);
+            if (!shrinkExpandShrink(state.mShrinkExpandState, chunk, shrink)) return false;
+            treeStep.stop();
+            HostStep unbundleStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu shrink worker: unbundle", &cpuBenchmark);
+            if (!seedLabelGadgetDecomposeHiAndUnbundle(
+                    shrink.mDigest,
+                    state.mParams.mShrinkExpand.mGadgetLogBase,
+                    tauHi,
+                    state.mParams.mShrinkExpand.mRing,
+                    decomposed) ||
+                decomposed.size() != static_cast<std::size_t>(tauHi) * rho)
+            {
+                return false;
+            }
 
-                digests[chunkIdx] = std::move(shrink.mDigest);
-                trees[chunkIdx] = std::move(shrink.mTree);
-                dHatChunks[chunkIdx] = std::move(decomposed);
-                return true;
-            }, false, &cpuBenchmark);
-        if (!shrinkOk)
+            digests[chunkIdx] = std::move(shrink.mDigest);
+            trees[chunkIdx] = std::move(shrink.mTree);
+            dHatChunks[chunkIdx] = std::move(decomposed);
+            return true;
+        };
+        if (executor && !gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
         {
-            throw std::runtime_error("LogVole receiver could not prepare recursive child input");
+            auto partitions = std::min({std::size_t(wDoublePrime), lheBuffers.size(), lencBuffers.size()});
+            if (const auto limit = state.mParams.mShrinkExpand.mNumWorkerThreads)
+                partitions = std::min<std::size_t>(partitions, limit);
+            if (!partitions) throw std::runtime_error("LogVole receiver needs CPU shrink resources");
+            auto shrinkRange = [&](std::size_t first, std::size_t last, CpuBenchmarkState& worker) {
+                ScopedProtocolCacheScope scope(cacheScope);
+                CpuBenchmarkWorkerScope timing(partitions > 1 ? worker.mContext : nullptr);
+                CpuBenchmarkTaskScope metrics(worker);
+                struct FlushStats { ~FlushStats() { flushRingOpsThreadLocalStats(); } } flush;
+                for (auto chunk = first; chunk != last; ++chunk)
+                    if (!shrinkChunk(chunk, worker))
+                        throw std::runtime_error("LogVole receiver could not prepare recursive child input");
+            };
+            if (partitions == 1) shrinkRange(0, wDoublePrime, cpuBenchmark);
+            else
+            {
+                // Per-phase instrumentation only; numerical outputs are owned
+                // by this frame and every callback finishes before resumption.
+                std::vector<CpuBenchmarkState> workers(partitions, {cpuBenchmark.mContext, true});
+                scopedCache.reset();
+                co_await macoro::bulk_chunked(*executor, wDoublePrime, std::span(workers), shrinkRange);
+                scopedCache.emplace(cacheScope);
+            }
         }
+        else if (!detail::runParallelTasks(wDoublePrime, state.mParams.mShrinkExpand.mNumWorkerThreads,
+                shrinkChunk, false, &cpuBenchmark))
+            throw std::runtime_error("LogVole receiver could not prepare recursive child input");
 #if defined(ENABLE_LOGVOLE_CUDA)
         }
 #endif
