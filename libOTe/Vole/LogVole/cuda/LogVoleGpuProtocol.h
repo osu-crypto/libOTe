@@ -42,14 +42,14 @@ namespace osuCrypto::LogVole::gpu
     // identity, query SID, role, device, ordered ring primes and exact shape;
     // a miss takes the unchanged allocation path.
     ReceiverFirstQueryAllocationsPtr beginReceiverFirstQueryAllocations(const Params& params,
-        const std::shared_ptr<const RingNttContext>& ringOwner = {});
+        const std::shared_ptr<const RingNttContext>& ringOwner = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     void finishReceiverFirstQueryAllocations(const ReceiverFirstQueryAllocationsPtr& plan);
     bool sealReceiverFirstQueryAllocationOwner(
-        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner);
+        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool bindReceiverFirstQueryAllocations(
-        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid);
+        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     void bindReceiverFirstQueryOnlineRun(
-        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid, ProtocolCacheRunId runId);
+        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid, ProtocolCacheRunId runId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Narrow correctness-test observation only; never exposes owned pointers.
     bool receiverFirstQueryAllocationStatus(
         const ReceiverFirstQueryAllocationsPtr& plan,
@@ -186,11 +186,11 @@ namespace osuCrypto::LogVole::gpu
     // producers may publish either owner; ordinary uploads cannot impersonate
     // them, and every consumer checks role/run/device/ordered ring/count.
     bool setupDeltaBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     DeviceBatchPtr seedLabelRepResident(const RingNttContext& ctx,
-        const DeviceBatch& delta, u32 gamma, u32 alpha, u32 tau);
+        const DeviceBatch& delta, u32 gamma, u32 alpha, u32 tau, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool setupSeedLabelRepBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     bool rootKPrimeSamplingEnabled(const LogVoleExecutionOptions& options);
     // Direct SEAL-seed replay. Publishes a coefficient-domain, synchronized
@@ -348,32 +348,32 @@ namespace osuCrypto::LogVole::gpu
     // The owner is bound to ring, Sender role, protocol run and CUDA device.
     DeviceBatchPtr expandRootErrorCompactToBatch(const RingNttContext& ctx,
         std::span<const u64> compactLimb0, const DeviceScalars* deviceCompact,
-        u32 polyCount, CpuBenchmarkState cpuBenchmark = {});
+        u32 polyCount, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool rootErrorBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount);
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Private sender Root uniform secret. This form never enters the public
     // uniform retention registry and is completed before it crosses streams.
     DeviceBatchPtr sampleRootSecretUniformToDevice(
         const RingNttContext& ctx,
-        std::span<const std::array<u64, 8>> rowSeeds);
+        std::span<const std::array<u64, 8>> rowSeeds, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool rootSecretUniformBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        ProtocolCacheRunId ownerRunId, bool outputNtt = false);
+        ProtocolCacheRunId ownerRunId, bool outputNtt = false, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Separate private top HE key provenance; no public-uniform registry entry.
     DeviceBatchPtr sampleTopSecretUniformToDevice(
         const RingNttContext& ctx,
-        std::span<const std::array<u64, 8>> rowSeeds);
+        std::span<const std::array<u64, 8>> rowSeeds, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool topSecretUniformBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        ProtocolCacheRunId ownerRunId);
+        ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     DeviceBatchPtr topSecretSeedLabelRepResident(const RingNttContext& ctx,
-        const DeviceBatch& topSecret, u32 alpha, u32 tau);
+        const DeviceBatch& topSecret, u32 alpha, u32 tau, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     DeviceBatchPtr rootHiReplicateResident(const RingNttContext& ctx,
-        const DeviceBatch& topSecret, u32 tauHi);
+        const DeviceBatch& topSecret, u32 tauHi, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool rootHiRepBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool setupLencInputBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Root top ciphertexts: NTT(noise) - NTT(r1[row])*B[col], with
     // -2^(gadgetLogBase*(gadgetPowerOffset+col))*r2[row] on root B columns.
@@ -1061,7 +1061,7 @@ namespace osuCrypto::LogVole::gpu
     // host RnsPoly returned by wrapSetupDeltaDevice.
     DeviceBatchPtr wrapSetupDeltaResident(const ZpCrtContext& ctx, u64 delta,
         std::span<const u64> deltaSlots,
-        const std::array<u64, 3>* garbledDeltas);
+        const std::array<u64, 3>* garbledDeltas, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Copies a host scalar array to the device. Exists so a caller can place its
     // input where wrapDeviceLabels wants it; the protocol itself never calls it.

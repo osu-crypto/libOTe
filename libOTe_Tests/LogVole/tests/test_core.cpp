@@ -2020,6 +2020,54 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
     checkDeviceParity(production, 208);
 }
 
+void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (!cmd.getOr("gpu", 0)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    const auto service = ProtocolCacheService::create();
+    const ProtocolCacheScope sender(service->allocate(), ProtocolCacheRole::Sender);
+    const ProtocolCacheScope otherRun(service->allocate(), ProtocolCacheRole::Sender);
+    const auto foreign = ProtocolCacheService::create();
+    const ProtocolCacheScope receiver(foreign->allocate(), ProtocolCacheRole::Receiver);
+    osuCrypto::LogVoleExecutionOptions options;
+    options.mUseGpu = true;
+    options.mAdvanced.mContexts.mLightweightRing = false;
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_params(), ctx,
+        std::make_shared<RingContextFactory>(options, service), sender));
+    // The explicit caller identity wins even under unrelated receiver ambience.
+    ScopedProtocolCacheScope ambient(receiver);
+    std::array<std::array<std::uint64_t, 8>, 2> seeds{};
+    seeds[0][0] = 719; seeds[1][0] = 720;
+    auto root = gpu::sampleRootSecretUniformToDevice(ctx, seeds, sender);
+    auto top = gpu::sampleTopSecretUniformToDevice(ctx, seeds, sender);
+    LOGVOLE_REQUIRE_TRUE(root && top);
+    LOGVOLE_REQUIRE_TRUE(gpu::rootSecretUniformBatchMatches(ctx, *root, 2, sender.mRunId, false, sender));
+    // Root secrets intentionally survive a different online run of the same caller role.
+    LOGVOLE_REQUIRE_TRUE(gpu::rootSecretUniformBatchMatches(ctx, *root, 2, sender.mRunId, false, otherRun));
+    LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(ctx, *root, 2, sender.mRunId, false, receiver));
+    LOGVOLE_REQUIRE_TRUE(gpu::topSecretUniformBatchMatches(ctx, *top, 2, sender.mRunId, sender));
+    LOGVOLE_REQUIRE_FALSE(gpu::topSecretUniformBatchMatches(ctx, *top, 2, sender.mRunId, otherRun));
+    LOGVOLE_REQUIRE_FALSE(gpu::sampleTopSecretUniformToDevice(ctx, seeds, receiver));
+    auto repeated = gpu::rootHiReplicateResident(ctx, *top, 2, sender);
+    LOGVOLE_REQUIRE_TRUE(repeated);
+    LOGVOLE_REQUIRE_TRUE(gpu::rootHiRepBatchMatches(ctx, *repeated,
+        2 * ringModulusCount(ctx), sender.mRunId, sender));
+    LOGVOLE_REQUIRE_FALSE(gpu::rootHiRepBatchMatches(ctx, *repeated,
+        2 * ringModulusCount(ctx), sender.mRunId, receiver));
+    std::vector<std::uint64_t> compact(2 * ctx.mParams.mPolyModulusDegree, 0);
+    auto error = gpu::expandRootErrorCompactToBatch(ctx, compact, nullptr, 2, {}, sender);
+    LOGVOLE_REQUIRE_TRUE(error);
+    LOGVOLE_REQUIRE_TRUE(gpu::rootErrorBatchMatches(ctx, *error, 2, sender));
+    LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(ctx, *error, 2, otherRun));
+    LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(ctx, *error, 2, receiver));
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
 void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;

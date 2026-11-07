@@ -2189,13 +2189,13 @@ namespace osuCrypto::LogVole
     bool sampleTopSecretUniformBatch(const RingNttContext& ctx, u32 count,
         PRNG& prng, std::vector<RnsPoly>& eager,
         std::shared_ptr<gpu::DeviceBatch>& resident,
-        std::shared_ptr<const LazyRootSecretHostState>& lazy)
+        std::shared_ptr<const LazyRootSecretHostState>& lazy, ProtocolCacheScopeView scope)
     {
         if (!count) return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         const bool requested = gpu::enabled(ctx) &&
-            currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender &&
-            currentProtocolCacheScope().mRunId &&
+            scope.mRole == ProtocolCacheRole::Sender &&
+            scope.mRunId &&
             ctx.mExecutionOptions.mAdvanced.mProtocol.mTopSecretDevice;
         const bool strict = requested && ctx.mExecutionOptions.mAdvanced.mProtocol.mTopSecretDeviceStrict;
         if (requested && useDeviceUniformSetup(ctx))
@@ -2204,10 +2204,10 @@ namespace osuCrypto::LogVole
             // Scalar-sized, row-ordered SEAL draws match sampleUniformPolyBatch,
             // including callers with small parent PRNG buffers.
             for (auto& seed : seeds) seed = sealSeedFromPrng(prng);
-            auto next = gpu::sampleTopSecretUniformToDevice(ctx, seeds);
+            auto next = gpu::sampleTopSecretUniformToDevice(ctx, seeds, scope);
             auto host = std::make_shared<SeededTopSecretHostState>(ctx, std::move(seeds));
             if (next && gpu::topSecretUniformBatchMatches(ctx, *next, count,
-                    currentProtocolCacheScope().mRunId))
+                    scope.mRunId, scope))
             {
                 for (u32 row = 0; row < count; ++row)
                     bumpRingStat(RingOp::PrngPoly);

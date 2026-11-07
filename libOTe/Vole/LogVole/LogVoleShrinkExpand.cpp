@@ -23,14 +23,6 @@
 #include <mutex>
 #include <utility>
 
-#if defined(ENABLE_LOGVOLE_CUDA)
-namespace osuCrypto::LogVole::gpu
-{
-    bool setupSeedLabelRepBatchMatches(const RingNttContext&,
-        const DeviceBatch&, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
-}
-#endif
-
 namespace osuCrypto::LogVole
 {
     namespace detail

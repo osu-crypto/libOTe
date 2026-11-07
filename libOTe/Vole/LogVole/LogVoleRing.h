@@ -384,7 +384,7 @@ namespace osuCrypto::LogVole
     bool sampleTopSecretUniformBatch(const RingNttContext& ctx, u32 count,
         PRNG& prng, std::vector<RnsPoly>& eager,
         std::shared_ptr<gpu::DeviceBatch>& resident,
-        std::shared_ptr<const LazyRootSecretHostState>& lazy);
+        std::shared_ptr<const LazyRootSecretHostState>& lazy, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index);
     RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index);
     std::vector<RnsPoly> deriveUniformPolyBatchFromSeed(
