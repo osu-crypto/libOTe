@@ -1861,7 +1861,15 @@ namespace osuCrypto::LogVole::gpu
         plan->mRingWidth = params.mW;
         plan->mDevice = currentDeviceOrdinal();
         plan->mOfflineRunId = scope.mRunId;
-        plan->mIdentityService = plan->mOfflineRunId.serviceOwner();
+        if (plan->mOfflineRunId)
+            plan->mIdentityService = plan->mOfflineRunId.serviceOwner();
+        else if (ctx.mFactory)
+            plan->mIdentityService = ctx.mFactory->protocolService();
+        else if (ctx.mGpuSetup)
+            plan->mIdentityService = ctx.mGpuSetup->protocolService();
+        else if (ctx.mGpuExecution)
+            plan->mIdentityService = ctx.mGpuExecution->protocolService();
+        if (!plan->mIdentityService) return {};
         try { plan->mWorker = std::thread([raw = plan.get()] {
             try { raw->reserve(); } catch (...) { raw->mReady = false; }
         }); }

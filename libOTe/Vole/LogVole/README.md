@@ -534,6 +534,11 @@ PRNG, cache partition, query-SID numeric binding or scheduling changes were made
 The first-query allocation worker retains its plan/service through its existing
 joined lifetime without installing identity TLS. Its online run must belong to
 the plan's retained service, preventing an unowned foreign-service ID escaping.
+Canonical-zero offline IDs remain zero. Because that sentinel carries no service,
+the plan retains the selected context's factory service, or its explicit GPU
+setup/execution service when no factory exists; missing ownership rejects the
+plan before its worker starts. This preserves same-service online admission
+without allocating a replacement run ID or changing cache keys/numeric SID checks.
 
 Remaining compatibility boundary: GPUProtocol.cpp has 14 current-scope reads
 (including four transitional helper defaults), down from 38, and six guards,
