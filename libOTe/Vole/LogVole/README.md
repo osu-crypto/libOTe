@@ -223,7 +223,8 @@ contain no environment reads.
 | Empty-moduli sentinel and CLI tags | Removed in `dd980823`; a borrowed modulus span and function-local tags replace the globals. |
 | Sender pinning evidence moved onto sender state | Present in working tree, uncommitted; separate CUDA allocation evidence remains global. |
 | Offline setup migration | Uncommitted intermediate `CpuRowScratch::runBulk` implementation; still needs the explicit executor/buffer call-site pattern. |
-| macoro `bulk_chunked` and `bulk` delegation | Uncommitted in the separate `out/macoro` checkout, with regression tests. |
+| macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
+| macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 
 #### Remaining runtime globals
 
@@ -278,14 +279,17 @@ test compilation errors in this configuration. No WSL/GPU execution rerun.
 
 Next steps, in order:
 
-1. Resolve the sender seed-evaluation algorithm before migrating it. A candidate
-   is rejected as soon as any expansion chunk fails its rounding predicate;
-   remaining work may be skipped, but all started children must finish. The
-   existing loop uses a local atomic flag. Plain synchronous `bulk_chunked`
-   does not express an async short-circuit predicate, and `when_all_scope`
-   provides joining without this stopping policy. Proposed discussion: a
-   bounded async `all_of` algorithm in macoro, separating predicate rejection
-   from exceptions and retaining exclusive per-partition buffers.
+1. Migrate sender seed evaluation using the reviewed macoro `all_of`. The live
+   call chain is `senderOnlineService` -> `finishRootSenderPrecompute` ->
+   `ensureSenderPrecomputeImpl` -> candidate search/evaluation -> recursive
+   expansion. Carry the explicit executor and LHE buffers through this chain;
+   do not insert a blocking wait into the current synchronous boundary. Preserve
+   sequential seed draws/retries, distinguish candidate rejection from execution
+   failure, and publish the accepted cache only after all started chunks join.
+   Give each parallel chunk partition exclusive buffers and one inner worker;
+   preserve row parallelism when there is only one chunk. Keep the legacy/GPU
+   entry points explicit while migrating the CPU path, and do not hold TLS or
+   thread-bound profiling guards across the new suspension points.
 2. Thread the explicit executor/resources through the higher-level receiver
    callers, then retire the deprecated online entry point. The recursive
    receiver shrink, denoise, and expansion phases now use the caller executor;
