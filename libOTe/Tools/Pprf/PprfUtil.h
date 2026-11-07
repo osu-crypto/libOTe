@@ -245,11 +245,8 @@ namespace osuCrypto
             u64 numTrees,
             bool programPuncturedPoint,
             std::vector<u8>& buff,
-            span<std::array<block, 2>>& sums,
-            span<u8>& leaf,
             CoeffCtx& ctx)
         {
-
             u64 elementSize = ctx.template byteSize<F>();
 
             // num of bytes they will take up.
@@ -259,8 +256,31 @@ namespace osuCrypto
             auto leafBytes = checkedMul(checkedMul(elementSize, numTrees), leafFactor);
             auto numBytes = checkedAdd(sumBytes, leafBytes);
 
-            // allocate the buffer and partition them.
             buff.resize(checkedSize(numBytes));
+        }
+
+        template<typename F, typename CoeffCtx>
+        void partitionExpandBuffer(
+            u64 depth,
+            u64 numTrees,
+            bool programPuncturedPoint,
+            std::vector<u8>& buff,
+            span<std::array<block, 2>>& sums,
+            span<u8>& leaf,
+            CoeffCtx& ctx)
+        {
+            u64 elementSize = ctx.template byteSize<F>();
+
+            // num of bytes they will take up.
+            auto sumCount = checkedMul(depth, numTrees);
+            auto sumBytes = checkedMul(sumCount, sizeof(std::array<block, 2>));
+            auto leafFactor = 2 + 2 * static_cast<u64>(programPuncturedPoint);
+            auto leafBytes = checkedMul(checkedMul(elementSize, numTrees), leafFactor);
+            auto numBytes = checkedAdd(sumBytes, leafBytes);
+
+            if (buff.size() != checkedSize(numBytes))
+                throw RTE_LOC;
+
             sums = span<std::array<block, 2>>((std::array<block, 2>*)buff.data(), sumCount);
             leaf = span<u8>((u8*)(sums.data() + sums.size()),
                 leafBytes
@@ -271,6 +291,25 @@ namespace osuCrypto
             void* end = buff.data() + buff.size();
             if (sEnd > end || lEnd != end)
                 throw RTE_LOC;
+        }
+
+        template<typename F, typename CoeffCtx>
+        void allocateExpandBuffer(
+            u64 depth,
+            u64 numTrees,
+            bool programPuncturedPoint,
+            std::vector<u8>& buff,
+            span<std::array<block, 2>>& sums,
+            span<u8>& leaf,
+            CoeffCtx& ctx)
+        {
+            // allocate the buffer and partition them.
+            allocateExpandBuffer<F>(
+                depth, numTrees, programPuncturedPoint,
+                buff, ctx);
+            partitionExpandBuffer<F>(
+                depth, numTrees, programPuncturedPoint,
+                buff, sums, leaf, ctx);
         }
 
         template<typename VecF>
