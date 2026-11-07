@@ -866,7 +866,7 @@ namespace osuCrypto
     }
 
     task<> LogVoleReceiver::receive(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         const bool emptyDeviceInput = x.empty() && mInputDevice != nullptr;
@@ -909,7 +909,7 @@ namespace osuCrypto
         }
         try
         {
-            co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, mOfflineState, sid, x, setX, prng, sock, options, cpuBenchmark);
+            co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, zetaBuffers, mOfflineState, sid, x, setX, prng, sock, options, cpuBenchmark);
         }
         catch (...)
         {
@@ -2351,7 +2351,7 @@ namespace osuCrypto::LogVole
 
     task<> civoleReceiverSetX(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers,
         CivoleReceiverState& state,
         CivoleSid sid,
         std::span<const u64> x,
@@ -2487,7 +2487,7 @@ namespace osuCrypto::LogVole
         ReceiverOnlineOutput online{};
         {
             HostStep step(hostProfiler(ctx.mRing), "recv: logvole online", &cpuBenchmark);
-            auto operation = receiver.online(executor, lheBuffers, lencBuffers,
+            auto operation = receiver.online(executor, lheBuffers, lencBuffers, zetaBuffers,
                 state.mLogVoleState, onlineInput, online, prng, sock,
                 state.mFirstQueryGpuAllocations, &state);
             scopedCache.reset();

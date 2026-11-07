@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **73%** of the agreed ownership/globals refactor,
+Estimated overall completion: **74%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -240,7 +240,8 @@ contain no environment reads.
 | Intermediate receiver denoise | Committed in `216ef876`; direct async `bulk_chunked`, one shared recovery-data preparation, unchanged unrolled row kernel, and alias-safe output publication. Legacy synchronous entry point is deprecated. |
 | Empty-moduli sentinel and CLI tags | Removed in `dd980823`; a borrowed modulus span and function-local tags replace the globals. |
 | Sender pinning evidence moved onto sender state | Reviewed and committed. `LogVoleSender::mRootWirePin` owns the result; low-level callers pass an exclusive reference. Shared evidence/mutex and snapshot API removed. Separate CUDA allocation evidence remains global. |
-| Offline setup migration | Twenty former setup sites now await direct `bulk_chunked` with caller executor and exclusive status storage, wired through public sender/verifier APIs. Sequential phases reuse the storage; one chunk runs inline. Sampling order and arithmetic batching are preserved. Online zeta and synchronous GPU lazy materialization retain the legacy adapter for separate follow-up. |
+| Offline setup migration | Twenty former setup sites now await direct `bulk_chunked` with caller executor and exclusive status storage, wired through public sender/verifier APIs. Sequential phases reuse the storage; one chunk runs inline. Sampling order and arithmetic batching are preserved. Synchronous GPU lazy materialization retains the legacy adapter. |
+| Online receiver zeta | CPU digest preparation awaits direct `bulk_chunked` with caller executor and exclusive `RootZetaBuffer` storage, threaded through public receiver/garbled/prover APIs. Each chunk reuses multiprecision scratch and an AES PRNG buffer. Protocol range count still determines seed layout; buffer count only bounds execution. GPU sampling/fallback remains synchronous and unchanged. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -271,11 +272,12 @@ There are **20 `detail::runParallelTasks` call sites** in library `.cpp` files:
 `cuda/LogVoleGpuBackend.cpp` (1). These are call sites, not independent algorithms.
 
 Of the original **22 `setupScratch.runBulk` sites**, 20 offline sampling and
-assembly sites now use direct async `bulk_chunked`. The original inventory
-also included online receiver zeta sampling, which is explicitly deferred to
-the next batch, and synchronous GPU lazy root-error expansion. Three calls to
-`setupScratch.runBulk` remain: those two sites and a named legacy seed-replay
-helper used only by the GPU lazy getter. The getter uses `std::call_once` and
+assembly sites now use direct async `bulk_chunked`; CPU online receiver zeta
+also uses it. Three calls to `setupScratch.runBulk` remain: legacy zeta sampling
+for GPU/fallback callers, synchronous GPU lazy root-error expansion, and a named
+legacy seed-replay helper used only by that GPU lazy getter. CPU finalization's
+exceptional seed-only replay retains its existing inline, one-worker fallback.
+The getter uses `std::call_once` and
 cannot await; changing that boundary is separate from CPU offline setup.
 Five additional executor `runBulk` sites remain in ZK (3), legacy LHE (1),
 and legacy LENC (1). They still reach the blocking `CpuExecutor::runBulkChunked`
@@ -368,10 +370,18 @@ execution; borrowed operands and status storage live until completion. No TLS
 scope guard crosses an added await. This batch changes scheduling ownership,
 so the remaining runtime-global declaration count is still 26.
 
+Online zeta validation: CUDA-enabled Windows compilation and the public example
+pass. Four focused CPU tests pass in 7.66 seconds, including two public queries
+with stable scratch/PRNG allocations and controller/worker execution on one pool
+thread. The sampler regression checks exact legacy agreement at 1, 63, 65, 127
+and 208 bits, forced rejection, serial/seeded parent-PRNG progression, allowances
+1/2/3, a worker cap, lazy start, and unchanged output on invalid seed shape.
+A two-thread recursive protocol run also passes in 0.45 seconds.
+No GPU runtime, WSL, leak checks, or benchmarks were run for this CPU-only step.
+
 Next steps, in order:
 
-1. Migrate online receiver zeta sampling with explicit executor and storage,
-   as agreed for the next batch. Then migrate remaining setup/proof/codec loops using direct
+1. Migrate remaining CPU setup/proof/codec loops using direct
    `bulk_chunked` where appropriate. Discuss a different algorithm first if a
    loop does not fit. Retire `CpuRowScratch` scheduling and legacy overloads
    when their callers are gone.

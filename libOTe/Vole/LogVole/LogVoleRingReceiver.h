@@ -23,7 +23,7 @@ namespace osuCrypto::LogVole
 
         task<> onlineStart(
             macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-            std::span<LencEvalBuffer> lencBuffers,
+            std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers,
             ReceiverState& state, const ReceiverOnlineInput& input,
             ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
             std::shared_ptr<void> firstQueryGpuAllocations, const void* firstQueryOwner,
@@ -38,7 +38,7 @@ namespace osuCrypto::LogVole
             OnlinePrefetchPlan& prefetchPlan,
             u32 recursionDepth, CpuBenchmarkState cpuBenchmark,
             macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-            std::span<LencEvalBuffer> lencBuffers, ProtocolCacheScope cacheScope);
+            std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, ProtocolCacheScope cacheScope);
 
     public:
         task<> offline(
@@ -61,12 +61,13 @@ namespace osuCrypto::LogVole
         // may be reused across queries. Recursive levels share one ring shape;
         // prepare LHE products for it and LENC capacity for the largest level
         // (including root-left). Buffers bound concurrency, further capped by
-        // each level's nonzero worker limit. Other CPU phases remain legacy.
+        // each level's nonzero worker limit. Zeta buffers are reused at the root;
+        // see RootZetaBuffer for preparation sizes. Other CPU phases remain legacy.
         // Started operations must finish before destruction. Join the executor
         // outside its workers. The GPU allocation handle is retained by value.
         task<> online(
             macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-            std::span<LencEvalBuffer> lencBuffers,
+            std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers,
             ReceiverState& state, const ReceiverOnlineInput& input,
             ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
             std::shared_ptr<void> firstQueryGpuAllocations = {},

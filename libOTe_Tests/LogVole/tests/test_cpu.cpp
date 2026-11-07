@@ -340,6 +340,72 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
         setupResources.executor, {}, ctx, 2, rejected, 3.2, 19.2, false, unpublished)));
     LOGVOLE_REQUIRE_TRUE(unpublished.empty());
     LOGVOLE_REQUIRE_TRUE(untouched.get<block>() == rejected.get<block>());
+
+    // Zeta ranges keep their seed layout when the execution allowance changes.
+    // Run the controller and every chunk on one thread; storage is reused across
+    // widths, rejection, and queries rather than allocated for each range.
+    std::array<RootZetaBuffer, 3> zetaBuffers;
+    std::array<const u64*, 3> wordStorage;
+    std::array<const block*, 3> prngStorage;
+    for (std::size_t i = 0; i != zetaBuffers.size(); ++i)
+    {
+        zetaBuffers[i].mWords.resize(16);
+        zetaBuffers[i].mPrng.SetSeed(ZeroBlock);
+        wordStorage[i] = zetaBuffers[i].mWords.data();
+        prngStorage[i] = zetaBuffers[i].mPrng.mBuffer.data();
+    }
+    telemetry.mWorkerLimit = 3;
+    for (u32 bits : {1u, 63u, 65u, 127u, 208u})
+    for (bool forceReject : {false, true})
+    {
+        std::vector<RnsPoly> expected, actual;
+        LOGVOLE_REQUIRE_TRUE(sampleRootZetaFromTaskSeeds(ctx, 2, bits,
+            zetaSeeds, 3, expected, 1, forceReject));
+        for (std::size_t allowance : {1u, 3u, 2u})
+        {
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootZetaFromTaskSeeds(
+                setupResources.executor, std::span(zetaBuffers).first(allowance), ctx,
+                2, bits, zetaSeeds, 3, actual, 3, forceReject, benchmark))));
+            equalBatch(actual, expected);
+        }
+        for (std::size_t i = 0; i != zetaBuffers.size(); ++i)
+        {
+            LOGVOLE_REQUIRE_TRUE(zetaBuffers[i].mWords.data() == wordStorage[i]);
+            LOGVOLE_REQUIRE_TRUE(zetaBuffers[i].mPrng.mBuffer.data() == prngStorage[i]);
+        }
+    }
+    for (u32 ranges : {1u, 3u})
+    {
+        PRNG expectedPrng(toBlock(723, 101)), actualPrng(toBlock(723, 101));
+        std::vector<RnsPoly> expected, actual;
+        LOGVOLE_REQUIRE_TRUE(sampleRootZeta(ctx, 2, 208, expectedPrng, expected, ranges));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootZeta(
+            setupResources.executor, std::span(zetaBuffers).first(1), ctx,
+            2, 208, actualPrng, actual, ranges, benchmark))));
+        equalBatch(actual, expected);
+        LOGVOLE_REQUIRE_TRUE(expectedPrng.get<block>() == actualPrng.get<block>());
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(sampleRootZetaFromTaskSeeds(
+            setupResources.executor, zetaBuffers, ctx, 2, 208,
+            std::span(zetaSeeds).first(1), 3, actual, 3)));
+        equalBatch(actual, expected);
+    }
+    PRNG lazyZetaPrng(toBlock(723, 102)), lazyZetaReference(toBlock(723, 102));
+    std::vector<RnsPoly> lazyZeta;
+    auto zetaOperation = sampleRootZeta(setupResources.executor, zetaBuffers,
+        ctx, 2, 208, lazyZetaPrng, lazyZeta, 3);
+    LOGVOLE_REQUIRE_TRUE(lazyZeta.empty());
+    LOGVOLE_REQUIRE_TRUE(lazyZetaPrng.get<block>() == lazyZetaReference.get<block>());
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(zetaOperation))));
+    PRNG emptyActual(toBlock(723, 103)), emptyExpected(toBlock(723, 103));
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(sampleRootZeta(setupResources.executor,
+        {}, ctx, 2, 208, emptyActual, lazyZeta, 3)));
+    LOGVOLE_REQUIRE_TRUE(emptyActual.get<block>() == emptyExpected.get<block>());
+    telemetry.mWorkerLimit = 1;
+    telemetry.reset();
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootZetaFromTaskSeeds(
+        setupResources.executor, zetaBuffers, ctx, 2, 208,
+        zetaSeeds, 3, lazyZeta, 3, false, benchmark))));
+    LOGVOLE_REQUIRE_EQ(telemetry.mPeakTaskThreads.load(), 1u);
 }
 
 void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
@@ -1765,7 +1831,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     LOGVOLE_REQUIRE_TRUE(fallbackProver.mCircuit.mOperands.empty());
                     auto online = macoro::sync_wait(macoro::when_all_ready(
                         fallbackVerifier.verify(fallbackVerifierResources.executor, fallbackVerifierResources.buffers, senderPrng, sockets[0]),
-                        fallbackProver.prove(fallbackVerifierResources.executor, fallbackVerifierResourcesReceiverBuffers.lhe, fallbackVerifierResourcesReceiverBuffers.lenc, witness, receiverPrng, sockets[1])));
+                        fallbackProver.prove(fallbackVerifierResources.executor, fallbackVerifierResourcesReceiverBuffers.lhe, fallbackVerifierResourcesReceiverBuffers.lenc, fallbackVerifierResourcesReceiverBuffers.zeta, witness, receiverPrng, sockets[1])));
                     std::get<0>(online).result();
                     std::get<1>(online).result();
                     LOGVOLE_REQUIRE_TRUE(fallbackVerifier.mAccepted);
@@ -1845,7 +1911,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                             bool rejected = false;
                             try
                             {
-                                macoro::sync_wait(gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc,
+                                macoro::sync_wait(gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc, gpuVerifierResourcesReceiverBuffers.zeta,
                                     std::span<u64>{}, receiverPrng, sockets[1]));
                             }
                             catch (const std::runtime_error&) { rejected = true; }
@@ -1854,7 +1920,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                         }
                         auto online = macoro::sync_wait(macoro::when_all_ready(
                             gpuVerifier.verify(gpuVerifierResources.executor, gpuVerifierResources.buffers, senderPrng, sockets[0]),
-                            gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc, deviceOnly ? std::span<u64>{}
+                            gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc, gpuVerifierResourcesReceiverBuffers.zeta, deviceOnly ? std::span<u64>{}
                                 : std::span<u64>(witness.data(), witness.size()),
                                 receiverPrng, sockets[1])));
                         std::get<0>(online).result();

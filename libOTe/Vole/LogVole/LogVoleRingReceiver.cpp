@@ -486,19 +486,19 @@ namespace osuCrypto::LogVole
 
     task<> LogVoleRingReceiver::online(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers,
         ReceiverState& state, const ReceiverOnlineInput& input,
         ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
         std::shared_ptr<void> firstQueryGpuAllocations, const void* firstQueryOwner)
     {
-        return onlineStart(executor, lheBuffers, lencBuffers, state, input, output,
+        return onlineStart(executor, lheBuffers, lencBuffers, zetaBuffers, state, input, output,
             prng, sock, std::move(firstQueryGpuAllocations), firstQueryOwner,
             currentProtocolCacheScope());
     }
 
     task<> LogVoleRingReceiver::onlineStart(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers,
         ReceiverState& state,
         const ReceiverOnlineInput& input,
         ReceiverOnlineOutput& output,
@@ -519,7 +519,7 @@ namespace osuCrypto::LogVole
         if (!cacheScope.mRunId) cacheScope.mRunId = allocateProtocolCacheRunId();
         cacheScope.mRole = ProtocolCacheRole::Receiver;
         co_await onlineImpl(state, input, output, prng, sock, prefetchPlan, 0u,
-            cpuBenchmark, executor, lheBuffers, lencBuffers, cacheScope);
+            cpuBenchmark, executor, lheBuffers, lencBuffers, zetaBuffers, cacheScope);
     }
 
     task<> LogVoleRingReceiver::onlineImpl(
@@ -531,7 +531,7 @@ namespace osuCrypto::LogVole
         OnlinePrefetchPlan& prefetchPlan,
         u32 recursionDepth, CpuBenchmarkState cpuBenchmark,
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, ProtocolCacheScope cacheScope)
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, ProtocolCacheScope cacheScope)
     {
         // Active only during synchronous regions, never while this frame is suspended.
         std::optional<ScopedProtocolCacheScope> scopedCache(std::in_place, cacheScope);
@@ -592,9 +592,12 @@ namespace osuCrypto::LogVole
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: prepare digest", state.mParams.mW, &cpuBenchmark);
                     AutoTimer rootTimer(globalTimingStats.mRootReceiverHostUs);
-                    if (!prepareRootDigestReceiver(
-                            state, input.mX, prng, digestState, digest,
-                            input.mXDevice, input.mXCount, deferDigestHash, cpuBenchmark))
+                    scopedCache.reset();
+                    const bool prepared = co_await prepareRootDigestReceiver(executor, zetaBuffers,
+                        state, input.mX, prng, digestState, digest,
+                        input.mXDevice, input.mXCount, deferDigestHash, cpuBenchmark, cacheScope);
+                    scopedCache.emplace(cacheScope);
+                    if (!prepared)
                     {
                         throw std::runtime_error("LogVole receiver could not prepare root digest");
                     }
@@ -877,7 +880,7 @@ namespace osuCrypto::LogVole
             co_await onlineImpl(
                 *state.mNextLevelState, childInput, childOutput, prng, childSock,
                 prefetchPlan, recursionDepth + 1u, cpuBenchmark,
-                executor, lheBuffers, lencBuffers, cacheScope);
+                executor, lheBuffers, lencBuffers, zetaBuffers, cacheScope);
             scopedCache.emplace(cacheScope);
         }
 

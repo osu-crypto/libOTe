@@ -108,7 +108,7 @@ namespace osuCrypto
         // For Boolean garbling each x[i] is a bit; field-valued inputs are also
         // supported. Host inputs are range-checked before a SID is consumed.
         task<> receive(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
-            std::span<LogVole::LencEvalBuffer> lencBuffers, span<const u64> x, LogVole::GarbledLabelBatch& labels,
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, span<const u64> x, LogVole::GarbledLabelBatch& labels,
             PRNG& prng, Socket& sock);
         u64 modulus() const { return mModulus; }
         u64 configureCacheRunId() const { return mConfigureCacheRunId; }

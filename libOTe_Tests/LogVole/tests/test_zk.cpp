@@ -265,7 +265,7 @@ namespace
                     return verifier.verify(senderResources.executor, senderResources.buffers, publicProduct, senderPrng, sockets[0]);
             };
             auto online = macoro::sync_wait(macoro::when_all_ready(
-                verification(), prover.prove(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, hostInput, receiverPrng, sockets[1])));
+                verification(), prover.prove(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, hostInput, receiverPrng, sockets[1])));
             std::get<0>(online).result();
             std::get<1>(online).result();
             LOGVOLE_REQUIRE_TRUE(verifier.mAccepted);
@@ -680,7 +680,7 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
             if (corrupt) expectedProduct[0] = (expectedProduct[0] + 1) % prover.modulus();
             auto online = macoro::sync_wait(macoro::when_all_ready(
                 verifier.verify(senderResources.executor, senderResources.buffers, expectedProduct, senderPrng, sockets[0]),
-                prover.prove(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, wires, receiverPrng, sockets[1])));
+                prover.prove(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, wires, receiverPrng, sockets[1])));
             std::get<0>(online).result();
             std::get<1>(online).result();
             LOGVOLE_REQUIRE_TRUE(verifier.mAccepted != corrupt);

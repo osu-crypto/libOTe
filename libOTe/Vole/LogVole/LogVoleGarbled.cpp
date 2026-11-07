@@ -291,7 +291,7 @@ namespace osuCrypto
     }
 
     task<> LogVoleGarbledReceiver::receive(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, span<const u64> x, GarbledLabelBatch& labels,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, span<const u64> x, GarbledLabelBatch& labels,
         PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
@@ -322,7 +322,7 @@ namespace osuCrypto
             options.mMacsOut = {next.mScalars.data(), next.mScalars.size()};
         }
         CivoleReceiverSetXOutput received;
-        co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, mState, sid, x, received, prng, sock, options, cpuBenchmark);
+        co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, zetaBuffers, mState, sid, x, received, prng, sock, options, cpuBenchmark);
         next.mDevice = std::move(received.mMacsDevice);
         next.mComm = received.mComm;
         if (!next.mDevice && mKeepOutputOnDevice) next.mScalars = std::move(received.mMacs);

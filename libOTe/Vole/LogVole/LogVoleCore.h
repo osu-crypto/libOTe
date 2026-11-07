@@ -292,6 +292,33 @@ namespace osuCrypto::LogVole
         const gpu::RetainedPublicUniform* retainedBStarNtt = nullptr,
         LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
+    // Exclusive per-chunk CPU sampling storage. Reuse across awaited queries.
+    // mWords holds eta, mask, raw candidate and magnitude; mPrng retains its AES buffer.
+    struct RootZetaBuffer
+    {
+        std::vector<u64> mWords;
+        PRNG mPrng;
+    };
+
+    // Lazy CPU sampling. All references/spans are borrowed until completion.
+    // Await started work before destroying it or reusing these buffers.
+    // Buffers bound execution concurrency, not seed layout; one chunk runs inline.
+    // Pre-size mWords to 4 * ceil((gadgetLogBase + 1) / 64) and seed mPrng once
+    // to prepare storage ahead of the first query. Later calls reuse both allocations.
+    macoro::task<bool> sampleRootZeta(
+        macoro::thread_pool& executor, std::span<RootZetaBuffer> buffers,
+        const RingNttContext& ctx, u32 randomizerWidth, u32 gadgetLogBase,
+        PRNG& prng, std::vector<RnsPoly>& out, u32 requestedWorkers = 1,
+        CpuBenchmarkState cpuBenchmark = {});
+
+    macoro::task<bool> sampleRootZetaFromTaskSeeds(
+        macoro::thread_pool& executor, std::span<RootZetaBuffer> buffers,
+        const RingNttContext& ctx, u32 randomizerWidth, u32 gadgetLogBase,
+        std::span<const block> taskSeeds, u32 rangesPerPoly, std::vector<RnsPoly>& out,
+        u32 requestedWorkers = 1, bool forceFirstReject = false,
+        CpuBenchmarkState cpuBenchmark = {});
+
+    // Legacy synchronous sampling retained for GPU paths and seed-only fallback.
     // requestedWorkers > 1 splits the coefficients across the worker pool, each
     // range drawing from its own PRNG keyed from `prng`. zeta is the receiver's
     // local randomizer, so only its distribution matters; requestedWorkers = 1
@@ -350,15 +377,20 @@ namespace osuCrypto::LogVole
     // `xDevice` is an optional opaque gpu::DeviceBatch holding the same input as
     // `x`. When present the device shrink reads it directly, so the Root's input
     // never makes a device -> host -> device round trip; `x` may then be empty.
-    bool prepareRootDigestReceiver(
+    // Borrow state, inputs, outputs, PRNG and exclusive CPU buffers through completion.
+    // The device handle and legacy cache identity are captured by value at creation.
+    // GPU execution retains its synchronous sampling/fallback and accepts no CPU buffers.
+    macoro::task<bool> prepareRootDigestReceiver(
+        macoro::thread_pool& executor, std::span<RootZetaBuffer> zetaBuffers,
         const ReceiverState& state,
         const std::vector<RnsPoly>& x,
         PRNG& prng,
         RootDigestState& digestState,
         RootDigestMessage& message,
-        const std::shared_ptr<void>& xDevice = {},
+        std::shared_ptr<void> xDevice = {},
         u64 xDeviceCount = 0,
-        bool deferDPrimeHash = false, CpuBenchmarkState cpuBenchmark = {});
+        bool deferDPrimeHash = false, CpuBenchmarkState cpuBenchmark = {},
+        ProtocolCacheScope cacheScope = currentProtocolCacheScope());
 
     // Completes a hash deferred by prepareRootDigestReceiver. Idempotent after
     // success. The state owns mDPrime for the whole Root exchange, so callers can

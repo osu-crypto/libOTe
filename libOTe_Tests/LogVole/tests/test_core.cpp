@@ -188,8 +188,13 @@ namespace
         bool deferDPrimeHash = false)
     {
         oc::PRNG prng(oc::block(0x5400, 0x5401));
-        return osuCrypto::LogVole::prepareRootDigestReceiver(
-            state, x, prng, digestState, message, {}, 0, deferDPrimeHash);
+        return [&] {
+            tests_libOTe::logvole_test::SetupResources resources;
+            tests_libOTe::logvole_test::ReceiverBuffers buffers(state.mParams.mShrinkExpand);
+            return macoro::sync_wait(osuCrypto::LogVole::prepareRootDigestReceiver(
+                resources.executor, buffers.zeta,
+            state, x, prng, digestState, message, {}, 0, deferDPrimeHash));
+        }();
     }
 
     bool prepare_root_response_sender_for_test(
@@ -254,12 +259,13 @@ namespace
                 buffer.mNodes.reserve(terms);
             }
         }
+        std::array<RootZetaBuffer, 3> zetaBuffers;
         auto sockets = coproto::LocalAsyncSocket::makePair();
         try
         {
             auto result = macoro::sync_wait(macoro::when_all_ready(
                 senderProtocol.online(executor, senderBuffers, sender, senderOptions, senderOut, senderPrng, sockets[0]),
-                receiverProtocol.online(executor, lheBuffers, lencBuffers, receiver, input, receiverOut, receiverPrng, sockets[1])));
+                receiverProtocol.online(executor, lheBuffers, lencBuffers, zetaBuffers, receiver, input, receiverOut, receiverPrng, sockets[1])));
             std::get<0>(result).result();
             std::get<1>(result).result();
             {
@@ -3547,9 +3553,14 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
         RootDigestState digestState{};
         RootDigestMessage digestMessage{};
         oc::PRNG receiverPrng(oc::block(0x7D8203u, query));
-        LOGVOLE_REQUIRE_TRUE(prepareRootDigestReceiver(
+        LOGVOLE_REQUIRE_TRUE([&] {
+            tests_libOTe::logvole_test::SetupResources resources;
+            tests_libOTe::logvole_test::ReceiverBuffers buffers(receiver.mParams.mShrinkExpand);
+            return macoro::sync_wait(osuCrypto::LogVole::prepareRootDigestReceiver(
+                resources.executor, buffers.zeta,
             receiver, x, receiverPrng, digestState, digestMessage,
             {}, 0, true));
+        }());
         LOGVOLE_REQUIRE_TRUE(!digestState.mDPrimeHashValid);
         LOGVOLE_REQUIRE_TRUE(digestState.mLeftTreeGpu != nullptr);
         LOGVOLE_REQUIRE_TRUE(digestState.mTopInputsNttGpu != nullptr);
@@ -3684,8 +3695,13 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(ctx, x, false, 0, 1, input.mX));
         RootDigestState digest;
         RootDigestMessage request;
-        LOGVOLE_REQUIRE_TRUE(prepareRootDigestReceiver(receiver, input.mX,
+        LOGVOLE_REQUIRE_TRUE([&] {
+            tests_libOTe::logvole_test::SetupResources resources;
+            tests_libOTe::logvole_test::ReceiverBuffers buffers(receiver.mParams.mShrinkExpand);
+            return macoro::sync_wait(osuCrypto::LogVole::prepareRootDigestReceiver(
+                resources.executor, buffers.zeta, receiver, input.mX,
             receiverPrng, digest, request));
+        }());
         RootResponseMessage response;
         SenderOnlineOutput senderOutput;
         ReceiverOnlineOutput receiverOutput;
@@ -5736,7 +5752,8 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
             nodeAllocations[i] = lencBuffers[i].mNodes.data();
         }
     }
-    auto receiverOperation = receiver.online(executor, lheBuffers, lencBuffers, receiverState,
+    std::array<RootZetaBuffer, 3> zetaBuffers;
+    auto receiverOperation = receiver.online(executor, lheBuffers, lencBuffers, zetaBuffers, receiverState,
         receiverOnlineInput, receiverOnline, receiverOnlinePrng, onlineSockets[1]);
     // The controller and its queued workers share the sole thread by default.
     // Own the lazy operation in this frame before scheduling it.
@@ -5882,7 +5899,7 @@ void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
     oc::PRNG receiverOnlinePrng(oc::block(0x7D75u, 0));
     auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
         sender.online(senderResources.executor, senderResources.buffers, senderState, options, senderOnline, senderOnlinePrng, onlineSockets[0]),
-        receiver.online(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverState, receiverOnlineInput, receiverOnline, receiverOnlinePrng, onlineSockets[1])));
+        receiver.online(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverState, receiverOnlineInput, receiverOnline, receiverOnlinePrng, onlineSockets[1])));
     std::get<0>(onlineResult).result();
     std::get<1>(onlineResult).result();
 

@@ -503,7 +503,7 @@ namespace osuCrypto
         // VOLE commitment, on both host and device when present. The remaining
         // witness can be reused. The mutable span avoids copying the witness.
         task<> prove(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
-            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;
@@ -599,7 +599,7 @@ namespace osuCrypto
         // Refreshes the independent trailing mask slots on host and device before
         // VOLE commitment; A, B and request padding remain unchanged.
         task<> prove(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
-            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;

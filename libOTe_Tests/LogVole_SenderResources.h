@@ -51,6 +51,7 @@ namespace tests_libOTe::logvole_test
     {
         std::vector<osuCrypto::LogVole::LheDecryptBuffer> lhe;
         std::vector<osuCrypto::LogVole::LencEvalBuffer> lenc;
+        std::vector<osuCrypto::LogVole::RootZetaBuffer> zeta;
 
         ReceiverBuffers(const osuCrypto::LogVole::ShrinkExpandParams& params,
             bool gpu = false, std::size_t workers = 3)
@@ -58,6 +59,12 @@ namespace tests_libOTe::logvole_test
             if (gpu) return;
             lhe.resize(workers);
             lenc.resize(workers);
+            zeta.resize(workers);
+            for (auto& b : zeta)
+            {
+                b.mWords.resize(4 * ((std::size_t(params.mGadgetLogBase) + 64) / 64));
+                b.mPrng.SetSeed(osuCrypto::ZeroBlock);
+            }
             // Recursion only reduces tau/mu. Include root-left and full-width
             // ciphertexts; ceil(log2(width)) accounts for tree padding.
             const auto width = std::max<std::size_t>(params.mMu,

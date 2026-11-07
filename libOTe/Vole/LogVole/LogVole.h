@@ -447,13 +447,14 @@ namespace osuCrypto
 
         // Online phase. x must have the configured size and each x[i] must be
         // in Z_p. Writes receiver MACs a, unless mKeepOutputOnDevice is set.
-        // Borrow the executor and exclusive LHE/LENC buffers through completion;
+        // Borrow the executor and exclusive LHE/LENC/zeta buffers through completion;
         // reuse them for sequential calls. Products must be ring-sized and LENC
         // pointer capacity must cover every level, including root-left.
+        // Zeta requires a nonempty span; see RootZetaBuffer for preparation sizes.
         // GPU execution accepts empty CPU buffer spans.
         task<> receive(
             macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
-            std::span<LogVole::LencEvalBuffer> lencBuffers,
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers,
             span<const u64> x,
             span<u64> a,
             PRNG& prng,
@@ -563,7 +564,7 @@ namespace osuCrypto::LogVole
 
     task<> civoleReceiverSetX(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers,
         CivoleReceiverState& state,
         CivoleSid sid,
         std::span<const u64> x,

@@ -1899,6 +1899,60 @@ namespace osuCrypto::LogVole
 
     namespace
     {
+        // Synchronous arithmetic only: no scratch or PRNG lives in a coroutine frame.
+        void fillRootZetaRange(PRNG& source, RnsPoly& output,
+            std::span<const seal::Modulus> hostModuli, std::size_t n,
+            u32 gadgetLogBase, std::size_t coeffBegin, std::size_t coeffEnd,
+            bool forceFirstCandidate, u64* eta, u64* sampleMask, u64* raw, u64* magnitude)
+        {
+            const auto sampleBits = gadgetLogBase + 1;
+            const std::size_t wordCount = (std::size_t(sampleBits) + 63) / 64;
+            const auto rho = hostModuli.size();
+            // eta = 2^gadgetLogBase - 1, sampleMask = 2^(gadgetLogBase+1) - 1.
+            setLowBitMask(eta, wordCount, gadgetLogBase);
+            setLowBitMask(sampleMask, wordCount, sampleBits);
+
+            u64* coeffs = output.mCoeffs.data();
+            for (std::size_t coeffIdx = coeffBegin; coeffIdx < coeffEnd; ++coeffIdx)
+            {
+                bool rejected = false;
+                do
+                {
+                    for (std::size_t w = 0; w < wordCount; ++w)
+                    {
+                        raw[w] = source.get<u64>();
+                    }
+                    maskLowBitsInplace(raw, wordCount, sampleBits);
+                    rejected = forceFirstCandidate ||
+                        seal::util::is_equal_uint(
+                            raw, sampleMask, wordCount);
+                    forceFirstCandidate = false;
+                } while (rejected);
+
+                // Uniform on [-eta, eta]: one of the 2^(g+1) draws is rejected so
+                // that the remaining 2^(g+1)-1 map onto the interval bijectively.
+                const bool negative =
+                    !seal::util::is_greater_than_uint(raw, eta, wordCount);
+                if (negative)
+                {
+                    seal::util::sub_uint(eta, raw, wordCount, magnitude);
+                }
+                else
+                {
+                    seal::util::sub_uint(raw, eta, wordCount, magnitude);
+                }
+
+                for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+                {
+                    const u64 mod = hostModuli[modIdx].value();
+                    const u64 reduced =
+                        seal::util::modulo_uint(magnitude, wordCount, hostModuli[modIdx]);
+                    coeffs[modIdx * n + coeffIdx] =
+                        (negative && reduced != 0) ? (mod - reduced) : reduced;
+                }
+            }
+        }
+
         bool sampleRootZetaImpl(
             const RingNttContext& ctx,
             u32 randomizerWidth,
@@ -1960,49 +2014,9 @@ namespace osuCrypto::LogVole
                 auto sampleMask = seal::util::allocate_zero_uint(wordCount, pool);
                 auto raw = seal::util::allocate_zero_uint(wordCount, pool);
                 auto magnitude = seal::util::allocate_zero_uint(wordCount, pool);
-                // eta = 2^gadgetLogBase - 1, sampleMask = 2^(gadgetLogBase+1) - 1.
-                setLowBitMask(eta.get(), wordCount, gadgetLogBase);
-                setLowBitMask(sampleMask.get(), wordCount, sampleBits);
-
-                u64* coeffs = zeta[polyIdx].mCoeffs.data();
-                for (std::size_t coeffIdx = coeffBegin; coeffIdx < coeffEnd; ++coeffIdx)
-                {
-                    bool rejected = false;
-                    do
-                    {
-                        for (std::size_t w = 0; w < wordCount; ++w)
-                        {
-                            raw[w] = source.get<u64>();
-                        }
-                        maskLowBitsInplace(raw.get(), wordCount, sampleBits);
-                        rejected = forceFirstCandidate ||
-                            seal::util::is_equal_uint(
-                                raw.get(), sampleMask.get(), wordCount);
-                        forceFirstCandidate = false;
-                    } while (rejected);
-
-                    // Uniform on [-eta, eta]: one of the 2^(g+1) draws is rejected so
-                    // that the remaining 2^(g+1)-1 map onto the interval bijectively.
-                    const bool negative =
-                        !seal::util::is_greater_than_uint(raw.get(), eta.get(), wordCount);
-                    if (negative)
-                    {
-                        seal::util::sub_uint(eta.get(), raw.get(), wordCount, magnitude.get());
-                    }
-                    else
-                    {
-                        seal::util::sub_uint(raw.get(), eta.get(), wordCount, magnitude.get());
-                    }
-
-                    for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
-                    {
-                        const u64 mod = hostModuli[modIdx].value();
-                        const u64 reduced =
-                            seal::util::modulo_uint(magnitude.get(), wordCount, hostModuli[modIdx]);
-                        coeffs[modIdx * n + coeffIdx] =
-                            (negative && reduced != 0) ? (mod - reduced) : reduced;
-                    }
-                }
+                fillRootZetaRange(source, zeta[polyIdx], hostModuli, n, gadgetLogBase,
+                    coeffBegin, coeffEnd, forceFirstCandidate,
+                    eta.get(), sampleMask.get(), raw.get(), magnitude.get());
             };
 
             if (serialSource)
@@ -2084,6 +2098,90 @@ namespace osuCrypto::LogVole
         return sampleRootZetaFromTaskSeeds(
             ctx, randomizerWidth, gadgetLogBase, taskSeeds, workers, out,
             workers, false, cpuBenchmark, cpuSetupScratch);
+    }
+
+    static macoro::task<bool> sampleRootZetaAsync(
+        macoro::thread_pool& executor, std::span<RootZetaBuffer> buffers,
+        const RingNttContext& ctx, u32 randomizerWidth, u32 gadgetLogBase,
+        PRNG* serialSource, std::span<const block> taskSeeds, u32 rangesPerPoly,
+        std::vector<RnsPoly>& out, u32 requestedWorkers, bool forceFirstReject,
+        CpuBenchmarkState cpuBenchmark)
+    {
+        if (buffers.empty() || !randomizerWidth || !gadgetLogBase ||
+            gadgetLogBase == std::numeric_limits<u32>::max() || !rangesPerPoly)
+            co_return false;
+        if (serialSource ? (rangesPerPoly != 1 || !taskSeeds.empty() || forceFirstReject)
+                         : taskSeeds.size() != std::size_t(randomizerWidth) * rangesPerPoly)
+            co_return false;
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        const auto& moduli = getRingHostModuli(ctx);
+        if (moduli.size() != ringModulusCount(ctx)) co_return false;
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        auto allowance = buffers.size();
+        if (requestedWorkers) allowance = std::min(allowance, std::size_t(requestedWorkers));
+        if (cpuBenchmark.mContext)
+        {
+            const auto& limits = *cpuBenchmark.mContext;
+            allowance = std::min(allowance, std::max<std::size_t>(1, limits.mWorkerLimit
+                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size()));
+        }
+        const auto count = serialSource ? std::size_t(randomizerWidth) : taskSeeds.size();
+        auto chunks = buffers.first(serialSource ? 1 : std::min(allowance, count));
+        const auto words = (std::size_t(gadgetLogBase) + 1 + 63) / 64;
+        for (auto& buffer : chunks) buffer.mWords.resize(4 * words);
+        std::vector<RnsPoly> zeta(randomizerWidth);
+        for (auto& poly : zeta) resizeZero(poly.mCoeffs, n * moduli.size());
+        const auto rangeSize = (n + rangesPerPoly - 1) / rangesPerPoly;
+        auto runChunk = [&](std::size_t begin, std::size_t end, RootZetaBuffer& buffer) {
+            CpuBenchmarkState worker = chunks.size() > 1
+                ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+            CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            auto* scratch = buffer.mWords.data();
+            for (auto i = begin; i != end; ++i)
+            {
+                const auto poly = i / rangesPerPoly;
+                const auto first = (i % rangesPerPoly) * rangeSize;
+                if (first >= n) continue;
+                if (!serialSource) buffer.mPrng.SetSeed(taskSeeds[i]);
+                fillRootZetaRange(serialSource ? *serialSource : buffer.mPrng, zeta[poly],
+                    moduli, n, gadgetLogBase, first, std::min(first + rangeSize, std::size_t(n)),
+                    forceFirstReject && i == 0, scratch, scratch + words,
+                    scratch + 2 * words, scratch + 3 * words);
+            }
+        };
+        if (chunks.size() == 1) runChunk(0, count, chunks[0]);
+        else co_await macoro::bulk_chunked(executor, count, chunks, runChunk);
+        out = std::move(zeta);
+        co_return true;
+    }
+
+    macoro::task<bool> sampleRootZetaFromTaskSeeds(
+        macoro::thread_pool& executor, std::span<RootZetaBuffer> buffers,
+        const RingNttContext& ctx, u32 randomizerWidth, u32 gadgetLogBase,
+        std::span<const block> taskSeeds, u32 rangesPerPoly, std::vector<RnsPoly>& out,
+        u32 requestedWorkers, bool forceFirstReject, CpuBenchmarkState cpuBenchmark)
+    {
+        return sampleRootZetaAsync(executor, buffers, ctx, randomizerWidth, gadgetLogBase,
+            nullptr, taskSeeds, rangesPerPoly, out, requestedWorkers, forceFirstReject, cpuBenchmark);
+    }
+
+    macoro::task<bool> sampleRootZeta(
+        macoro::thread_pool& executor, std::span<RootZetaBuffer> buffers,
+        const RingNttContext& ctx, u32 randomizerWidth, u32 gadgetLogBase,
+        PRNG& prng, std::vector<RnsPoly>& out, u32 requestedWorkers,
+        CpuBenchmarkState cpuBenchmark)
+    {
+        if (buffers.empty() || !randomizerWidth || !gadgetLogBase ||
+            gadgetLogBase == std::numeric_limits<u32>::max()) co_return false;
+        if (requestedWorkers <= 1)
+            co_return co_await sampleRootZetaAsync(executor, buffers, ctx, randomizerWidth,
+                gadgetLogBase, &prng, {}, 1, out, 1, false, cpuBenchmark);
+        // Seed layout depends on protocol workers, never the execution allowance.
+        std::vector<block> seeds(std::size_t(randomizerWidth) * requestedWorkers);
+        prng.get(seeds.data(), seeds.size());
+        co_return co_await sampleRootZetaFromTaskSeeds(executor, buffers, ctx, randomizerWidth,
+            gadgetLogBase, seeds, requestedWorkers, out, requestedWorkers, false, cpuBenchmark);
     }
 
     bool rootInnerProductNtt(
@@ -2676,20 +2774,24 @@ namespace osuCrypto::LogVole
         return finalizeRootOfflineReceiverImpl(state, std::move(message));
     }
 
-    bool prepareRootDigestReceiver(
+    macoro::task<bool> prepareRootDigestReceiver(
+        macoro::thread_pool& executor, std::span<RootZetaBuffer> zetaBuffers,
         const ReceiverState& state,
         const std::vector<RnsPoly>& x,
         PRNG& prng,
         RootDigestState& digestState,
         RootDigestMessage& message,
-        const std::shared_ptr<void>& xDevice,
+        std::shared_ptr<void> xDevice,
         u64 xDeviceCount,
-        bool deferDPrimeHash, CpuBenchmarkState cpuBenchmark)
+        bool deferDPrimeHash, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope)
     {
+        std::optional<ScopedProtocolCacheScope> scopedCache(std::in_place, cacheScope);
+        if (!gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner) && zetaBuffers.empty())
+            co_return false;
         u32 tauHi = 0;
         if (!computeTauHi(state.mParams, tauHi))
         {
-            return false;
+            co_return false;
         }
 
         const u32 tauFull = tauHi + 1;
@@ -2701,13 +2803,13 @@ namespace osuCrypto::LogVole
                      : x.size() > state.mParams.mW) ||
             state.mRootRandomizerWidth != rootRandomizerWidth(state.mParams.mShrinkExpand))
         {
-            return false;
+            co_return false;
         }
 
         RingNttContext ctx{};
         if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
         {
-            return false;
+            co_return false;
         }
 
         // Zero-padded host copy of the level's input. Only the host path and the
@@ -2786,7 +2888,7 @@ namespace osuCrypto::LogVole
             ShrinkExpandShrinkOutput shrink{};
             if (!shrinkExpandShrink(state.mShrinkExpandState, xRoot, shrink))
             {
-                return false;
+                co_return false;
             }
 
             if (!seedLabelGadgetDecomposeHiAndUnbundle(
@@ -2796,7 +2898,7 @@ namespace osuCrypto::LogVole
                     state.mParams.mShrinkExpand.mRing,
                     hatD))
             {
-                return false;
+                co_return false;
             }
             rootDigest = std::move(shrink.mDigest);
             rootTree = std::move(shrink.mTree);
@@ -2809,7 +2911,7 @@ namespace osuCrypto::LogVole
 #endif
         if (!hatDOnDevice && hatD.size() != leftWidth)
         {
-            return false;
+            co_return false;
         }
 
         // Build the tree, not just its root. lencDigestTrunc returns only the
@@ -2901,7 +3003,7 @@ namespace osuCrypto::LogVole
                     nullptr,
                     state.mShrinkExpandState.mParams.mNumWorkerThreads))
             {
-                return false;
+                co_return false;
             }
         }
         // Only the host digest path below reads yLeft, and it is a full ring element,
@@ -2934,22 +3036,27 @@ namespace osuCrypto::LogVole
                     zetaWorkers);
                 prng.get(zetaTaskSeeds.data(), zetaTaskSeeds.size());
             }
-            else if (!sampleRootZeta(
-                         ctx,
-                         state.mRootRandomizerWidth,
-                         state.mParams.mShrinkExpand.mGadgetLogBase,
-                         prng,
-                         zeta,
-                         1u, cpuBenchmark))
+            else if (gpu::enabled(ctx))
             {
-                return false;
+                if (!sampleRootZeta(ctx, state.mRootRandomizerWidth,
+                        state.mParams.mShrinkExpand.mGadgetLogBase, prng, zeta, 1u, cpuBenchmark))
+                    co_return false;
+            }
+            else
+            {
+                scopedCache.reset();
+                const bool ok = co_await sampleRootZeta(executor, zetaBuffers, ctx,
+                    state.mRootRandomizerWidth, state.mParams.mShrinkExpand.mGadgetLogBase,
+                    prng, zeta, 1u, cpuBenchmark);
+                scopedCache.emplace(cacheScope);
+                if (!ok) co_return false;
             }
         }
 
         if (state.mRootPublicBStarWire
                 ? state.mRootPublicBStarWire->encodedCoefficients().empty()
                 : state.mRootPublicBStarNtt.size() != state.mRootRandomizerWidth)
-            return false;
+            co_return false;
 
         RnsPoly negDPrime{};
         std::vector<RnsPoly> topInputsNtt;
@@ -2989,18 +3096,30 @@ namespace osuCrypto::LogVole
         if (!digestDone && zeta.empty() && seededZeta)
         {
             RootStep step("prep: sampleRootZeta seeded fallback", rootProfiler(ctx));
-            auto setupLease = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
-            if (!sampleRootZetaFromTaskSeeds(
-                    ctx,
-                    state.mRootRandomizerWidth,
-                    state.mParams.mShrinkExpand.mGadgetLogBase,
-                    zetaTaskSeeds,
-                    zetaWorkers,
-                    zeta,
-                    zetaWorkers,
-                    forceFirstZetaReject, cpuBenchmark, &setupLease.cpuRows()))
+            if (gpu::enabled(ctx))
             {
-                return false;
+                auto setupLease = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
+                if (!sampleRootZetaFromTaskSeeds(
+                        ctx,
+                        state.mRootRandomizerWidth,
+                        state.mParams.mShrinkExpand.mGadgetLogBase,
+                        zetaTaskSeeds,
+                        zetaWorkers,
+                        zeta,
+                        zetaWorkers,
+                        forceFirstZetaReject, cpuBenchmark, &setupLease.cpuRows()))
+                {
+                    co_return false;
+                }
+            }
+            else
+            {
+                scopedCache.reset();
+                const bool ok = co_await sampleRootZetaFromTaskSeeds(executor, zetaBuffers, ctx,
+                    state.mRootRandomizerWidth, state.mParams.mShrinkExpand.mGadgetLogBase,
+                    zetaTaskSeeds, zetaWorkers, zeta, zetaWorkers, forceFirstZetaReject, cpuBenchmark);
+                scopedCache.emplace(cacheScope);
+                if (!ok) co_return false;
             }
         }
 
@@ -3047,13 +3166,13 @@ namespace osuCrypto::LogVole
                     yDecomp,
                     state.mShrinkExpandState.mParams.mNumWorkerThreads))
             {
-                return false;
+                co_return false;
             }
 
             const auto publicBFullNtt = buildLencPublicBNtt(ctx, tauFull);
             if (publicBFullNtt.size() < static_cast<std::size_t>(2) * tauFull)
             {
-                return false;
+                co_return false;
             }
             publicBRootNtt.resize(tauHi);
             for (u32 idx = 0; idx < tauHi; ++idx)
@@ -3072,7 +3191,7 @@ namespace osuCrypto::LogVole
                 topInputsNtt[yDecomp.size() + idx] = zeta[idx];
             if (!forwardNttBatch(topInputsNtt, ctx))
             {
-                return false;
+                co_return false;
             }
         }
 
@@ -3083,7 +3202,7 @@ namespace osuCrypto::LogVole
             const auto& publicBStarNtt = state.mRootPublicBStarWire
                 ? state.mRootPublicBStarWire->get().mPolys
                 : state.mRootPublicBStarNtt;
-            if (publicBStarNtt.size() != zeta.size()) return false;
+            if (publicBStarNtt.size() != zeta.size()) co_return false;
             // Both inner products stay in the evaluation domain and are summed
             // there, so the pair costs one inverse transform instead of two. The sum
             // is linear, so INTT(a + b) == INTT(a) + INTT(b) exactly. Accumulating
@@ -3097,7 +3216,7 @@ namespace osuCrypto::LogVole
             {
                 if (!dyadicMultiplyAddNttInplace(publicBRootNtt[idx], topInputsNtt[idx], accNtt, ctx))
                 {
-                    return false;
+                    co_return false;
                 }
             }
             for (std::size_t idx = 0; idx < zeta.size(); ++idx)
@@ -3105,7 +3224,7 @@ namespace osuCrypto::LogVole
                 if (!dyadicMultiplyAddNttInplace(
                         publicBStarNtt[idx], topInputsNtt[tauHi + idx], accNtt, ctx))
                 {
-                    return false;
+                    co_return false;
                 }
             }
 
@@ -3113,7 +3232,7 @@ namespace osuCrypto::LogVole
             dPrime = std::move(accNtt);
             if (!inverseNtt(dPrime, ctx) || !ringSub(zero, dPrime, ctx, negDPrime))
             {
-                return false;
+                co_return false;
             }
         }
 
@@ -3134,7 +3253,7 @@ namespace osuCrypto::LogVole
         if (!deferDPrimeHash)
         {
             RootStep step("prep: hash dPrime", rootProfiler(ctx));
-            if (!finishRootDigestHash(nextState, rootProfiler(ctx))) return false;
+            if (!finishRootDigestHash(nextState, rootProfiler(ctx))) co_return false;
         }
         nextState.mLeftTree = std::move(leftTree);
         nextState.mTopInputsNtt = std::move(topInputsNtt);
@@ -3146,7 +3265,7 @@ namespace osuCrypto::LogVole
 
         digestState = std::move(nextState);
         message = std::move(nextMessage);
-        return true;
+        co_return true;
     }
 
     bool finishRootDigestHash(RootDigestState& digestState, RootStepProfiler* profiler)
