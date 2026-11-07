@@ -3016,6 +3016,144 @@ void LogVole_Cpu_ZkVectorMatchesReference(const oc::CLP&)
     }
 }
 
+void LogVole_Cpu_AsyncMatMulProof(const oc::CLP& cmd)
+{
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(cmd.getOr("executor_threads", 1));
+    auto onPool = [&](macoro::task<bool> operation) -> macoro::task<bool> {
+        co_await executor.schedule();
+        co_return co_await std::move(operation);
+    };
+    ZkMatMulStatement st;
+    st.mDim = 9;
+    st.mReps = 3;
+    constexpr u64 delta = 19;
+    for (bool optimized : {false, true})
+    for (u32 limit : {1u, 3u})
+    {
+        LogVoleZkOptions settings;
+        settings.mCpuPseudoReduce = optimized;
+        settings.mCpuVectorMatMul = optimized;
+        CpuBenchmarkContext budget;
+        budget.mCpus = {0, 1, 2};
+        budget.mWorkerLimit = limit;
+        ZkMatMulProverWorkspace prover(st, 3, &budget, settings);
+        ZkMatMulVerifierWorkspace verifier(st, 3, &budget, settings);
+        LOGVOLE_REQUIRE_EQ(prover.workers(), limit);
+        LOGVOLE_REQUIRE_EQ(verifier.workers(), limit);
+        std::vector<ZkProof> proofs(st.repetitions());
+        std::vector<u64> values(st.repetitions());
+        const auto proofStorage = proofs.data();
+        const auto valueStorage = values.data();
+        for (u64 q : {257ULL, 2251799813554177ULL})
+        for (u64 query = 0; query != 2; ++query)
+        {
+            const seal::Modulus mod(q);
+            PRNG random(toBlock(0x4d4154, query)), oracleRandom(toBlock(0x4d4154, query));
+            AlignedUnVec<u64> wires, product;
+            std::array<u8, 3> results{};
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(zkMatMulWitness(executor,
+                results, st, q, 3, random, wires, product, st.voleCount() + 7))));
+            std::vector<u64> expectedWires(wires.size(), 0);
+            for (std::size_t i = 0; i != st.voleCount(); ++i) expectedWires[i] = oracleRandom.get<u64>() % q;
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(wires, expectedWires));
+            LOGVOLE_REQUIRE_TRUE(random.get<block>() == oracleRandom.get<block>());
+            std::vector<u64> expectedProduct(st.entries(), 0);
+            for (u64 i = 0; i != st.mDim; ++i)
+                for (u64 j = 0; j != st.mDim; ++j)
+                    for (u64 k = 0; k != st.mDim; ++k)
+                        expectedProduct[i*st.mDim+j] = mulAddMod(wires[i*st.mDim+k],
+                            wires[st.offsetB()+k*st.mDim+j], expectedProduct[i*st.mDim+j], mod);
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(product, expectedProduct));
+            std::vector<u64> macs(st.voleCount()), keys(st.voleCount());
+            for (std::size_t i = 0; i != macs.size(); ++i)
+            {
+                macs[i] = random.get<u64>() % q;
+                keys[i] = (macs[i] + q - mulMod(wires[i], delta, mod)) % q;
+                // Repeated noncanonical calls reuse the workspace's lazy copies.
+                wires[i] += q;
+                macs[i] += q;
+                keys[i] += q;
+            }
+            ZkMatMulChallenge challenge;
+            zkMatMulChallenge(st, toBlock(0x4348, query), q, challenge);
+            std::vector<ZkProof> expected(st.repetitions());
+            std::vector<u64> expectedValues(st.repetitions());
+            for (u32 rep = 0; rep != st.repetitions(); ++rep)
+            {
+                for (u64 i = 0; i != st.mDim; ++i)
+                    for (u64 j = 0; j != st.mDim; ++j)
+                    {
+                        u64 a0 = 0, cross = 0, keyProduct = 0;
+                        for (u64 k = 0; k != st.mDim; ++k)
+                        {
+                            const auto a = i*st.mDim+k, b = st.offsetB()+k*st.mDim+j;
+                            a0 = mulAddMod(macs[a]%q, macs[b]%q, a0, mod);
+                            cross = mulAddMod(wires[a]%q, macs[b]%q, cross, mod);
+                            cross = mulAddMod(wires[b]%q, macs[a]%q, cross, mod);
+                            keyProduct = mulAddMod(keys[a]%q, keys[b]%q, keyProduct, mod);
+                        }
+                        const auto entry = i*st.mDim+j;
+                        const auto coefficient = challenge.mCoefficients[rep*st.entries()+entry];
+                        expected[rep].mU = mulAddMod(coefficient, a0, expected[rep].mU, mod);
+                        expected[rep].mV = (expected[rep].mV + q - mulMod(coefficient, cross, mod)) % q;
+                        const auto residual = (keyProduct + q - mulMod(product[entry], mulMod(delta, delta, mod), mod)) % q;
+                        expectedValues[rep] = mulAddMod(coefficient, residual, expectedValues[rep], mod);
+                    }
+                expected[rep].mU = addMod(expected[rep].mU, macs[st.maskIndex(rep)]%q, mod);
+                expected[rep].mV = (expected[rep].mV + q - wires[st.maskIndex(rep)]%q) % q;
+                expectedValues[rep] = addMod(expectedValues[rep], keys[st.maskIndex(rep)]%q, mod);
+            }
+            // Controller and workers share one pool thread in the default run.
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(zkMatMulProverResponse(executor,
+                st, wires, macs, challenge, q, prover, proofs))));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(zkMatMulVerifierValue(executor,
+                st, keys, product, challenge, delta, q, verifier, values))));
+            for (u32 rep = 0; rep != st.repetitions(); ++rep)
+            {
+                LOGVOLE_REQUIRE_EQ(proofs[rep].mU, expected[rep].mU);
+                LOGVOLE_REQUIRE_EQ(proofs[rep].mV, expected[rep].mV);
+                LOGVOLE_REQUIRE_EQ(values[rep], expectedValues[rep]);
+            }
+            LOGVOLE_REQUIRE_TRUE(zkMatMulAccept(proofs, values, delta, q));
+            LOGVOLE_REQUIRE_TRUE(proofs.data() == proofStorage && values.data() == valueStorage);
+            auto badChallenge = challenge;
+            badChallenge.mCoefficients[0] = q;
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulProverResponse(executor,
+                st, wires, macs, badChallenge, q, prover, proofs)));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulVerifierValue(executor,
+                st, keys, product, badChallenge, delta, q, verifier, values)));
+            auto wrongShape = st;
+            ++wrongShape.mDim;
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulProverResponse(executor,
+                wrongShape, wires, macs, challenge, q, prover, proofs)));
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(values, expectedValues));
+            for (u32 rep = 0; rep != st.repetitions(); ++rep)
+            {
+                LOGVOLE_REQUIRE_EQ(proofs[rep].mU, expected[rep].mU);
+                LOGVOLE_REQUIRE_EQ(proofs[rep].mV, expected[rep].mV);
+            }
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulFillProduct(executor, {},
+                st, q, 3, wires, product)));
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(product, expectedProduct));
+            if (limit == 1)
+            {
+                macoro::thread_pool idle;
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulProverResponse(idle,
+                    st, wires, macs, challenge, q, prover, proofs)));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(idle,
+                    st, keys, product, challenge, delta, q, verifier, values)));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulFillProduct(idle,
+                    std::span(results).first(1), st, q, 3, expectedWires, product)));
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(product, expectedProduct));
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(values, expectedValues));
+            }
+        }
+        LOGVOLE_REQUIRE_TRUE(budget.mPeakTaskThreads.load() <= limit);
+    }
+}
+
 void LogVole_Cpu_AsyncMulProof(const oc::CLP& cmd)
 {
     macoro::thread_pool executor;

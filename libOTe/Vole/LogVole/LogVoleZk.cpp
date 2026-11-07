@@ -742,6 +742,137 @@ namespace osuCrypto::LogVole
         }
     }
 
+    namespace
+    {
+        void matMulProductRow(const u64* a, const u64* b, u64* product,
+            u64 n, std::size_t row, const seal::Modulus& mod)
+        {
+            u64* out = product + row * n;
+            std::fill(out, out + n, u64(0));
+            for (u64 k = 0; k < n; ++k)
+            {
+                const u64 av = a[row * n + k];
+                if (!av) continue;
+                const u64* brow = b + k * n;
+                for (u64 j = 0; j < n; ++j) out[j] = mulAddMod(av, brow[j], out[j], mod);
+            }
+        }
+        void matMulProverRows(const u64* a, const u64* ma, const u64* bt, const u64* mbt,
+            u64* a0, u64* cross, std::size_t n, std::size_t begin, std::size_t end,
+            const seal::Modulus& mod, const detail::CpuZkOptions& options)
+        {
+            if (detail::cpuZkMatMulProverTerms(a, ma, bt, mbt, a0, cross,
+                    n, begin, end, mod, options)) return;
+            detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
+                for (std::size_t i = begin; i < end; ++i)
+                    for (std::size_t j = 0; j < n; ++j)
+                    {
+                        u64 sum = 0, mixed = 0;
+                        for (std::size_t k = 0; k < n; ++k)
+                        {
+                            sum = arithmetic.multiplyAdd(ma[i * n + k], mbt[j * n + k], sum);
+                            mixed = arithmetic.multiplyAdd(a[i * n + k], mbt[j * n + k], mixed);
+                            mixed = arithmetic.multiplyAdd(bt[j * n + k], ma[i * n + k], mixed);
+                        }
+                        a0[i * n + j] = sum;
+                        cross[i * n + j] = mixed;
+                    }
+            });
+            return;
+        }
+        void matMulVerifierRows(const u64* a, const u64* bt, u64* products,
+            std::span<const u64> publicProduct, u64 deltaSquared,
+            std::size_t n, std::size_t begin, std::size_t end,
+            const seal::Modulus& mod, const detail::CpuZkOptions& options)
+        {
+            const bool fast = detail::cpuZkMatMulVerifierTerms(a, bt, products, n, begin, end, mod, options);
+            detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
+                for (std::size_t i = begin; i < end; ++i)
+                    for (std::size_t j = 0; j < n; ++j)
+                    {
+                        if (!fast)
+                        {
+                            u64 sum = 0;
+                            for (std::size_t k = 0; k < n; ++k)
+                                sum = arithmetic.multiplyAdd(a[i * n + k], bt[j * n + k], sum);
+                            products[i * n + j] = sum;
+                        }
+                        products[i * n + j] = subMod(products[i * n + j],
+                            arithmetic.multiply(publicProduct[i * n + j], deltaSquared), mod);
+                    }
+            });
+            return;
+        }
+    }
+
+    struct ZkMatMulProverWorkspace::Impl
+    {
+        const ZkMatMulStatement mStatement;
+        const detail::CpuZkOptions mOptions;
+        CpuBenchmarkContext* mBenchmark;
+        const std::size_t mChunks, mWorkers;
+        std::vector<std::array<u64, 2>> mPartial;
+        std::vector<u8> mLocals;
+        AlignedUnVec<u64> mOwnedA, mOwnedMa, mBt, mMbt, mA0, mCross;
+        std::vector<ZkProof> mProofs;
+        Impl(const ZkMatMulStatement& st, u32 threads, CpuBenchmarkContext* benchmark,
+            const LogVoleZkOptions& settings)
+            : mStatement(st), mOptions(detail::captureCpuZkOptions(settings)), mBenchmark(benchmark),
+              mChunks(std::min<std::size_t>(st.mDim, std::max(1u, threads))),
+              mWorkers(std::min(mChunks, cpuWorkerBudget(threads, benchmark))),
+              mPartial(mChunks), mLocals(mWorkers), mBt(st.entries()), mMbt(st.entries()), mA0(st.entries()), mCross(st.entries()), mProofs(st.repetitions())
+        {}
+        bool matches(const ZkMatMulStatement& st) const noexcept
+        { return st.mDim == mStatement.mDim && st.repetitions() == mStatement.repetitions(); }
+    };
+    ZkMatMulProverWorkspace::ZkMatMulProverWorkspace() noexcept = default;
+    ZkMatMulProverWorkspace::ZkMatMulProverWorkspace(const ZkMatMulStatement& st,
+        u32 threads, CpuBenchmarkContext* benchmark, const LogVoleZkOptions& settings)
+    {
+        if (!validateZkMatMulStatement(st))
+            throw std::invalid_argument("LogVole CPU matrix workspace has invalid geometry");
+        mImpl = std::make_unique<Impl>(st, threads, benchmark, settings);
+    }
+    ZkMatMulProverWorkspace::~ZkMatMulProverWorkspace() = default;
+    ZkMatMulProverWorkspace::ZkMatMulProverWorkspace(ZkMatMulProverWorkspace&&) noexcept = default;
+    ZkMatMulProverWorkspace& ZkMatMulProverWorkspace::operator=(ZkMatMulProverWorkspace&&) noexcept = default;
+    bool ZkMatMulProverWorkspace::prepared() const noexcept { return bool(mImpl); }
+    std::size_t ZkMatMulProverWorkspace::workers() const noexcept { return mImpl ? mImpl->mWorkers : 0; }
+
+    struct ZkMatMulVerifierWorkspace::Impl
+    {
+        const ZkMatMulStatement mStatement;
+        const detail::CpuZkOptions mOptions;
+        CpuBenchmarkContext* mBenchmark;
+        const std::size_t mChunks, mWorkers;
+        std::vector<std::array<u64, 2>> mPartial;
+        std::vector<u8> mLocals;
+        AlignedUnVec<u64> mOwnedA, mBt, mProducts;
+        std::vector<u64> mValues;
+        Impl(const ZkMatMulStatement& st, u32 threads, CpuBenchmarkContext* benchmark,
+            const LogVoleZkOptions& settings)
+            : mStatement(st), mOptions(detail::captureCpuZkOptions(settings)), mBenchmark(benchmark),
+              mChunks(std::min<std::size_t>(st.mDim, std::max(1u, threads))),
+              mWorkers(std::min(mChunks, cpuWorkerBudget(threads, benchmark))),
+              mPartial(mChunks), mLocals(mWorkers), mBt(st.entries()), mProducts(st.entries()), mValues(st.repetitions())
+        {}
+        bool matches(const ZkMatMulStatement& st) const noexcept
+        { return st.mDim == mStatement.mDim && st.repetitions() == mStatement.repetitions(); }
+    };
+    ZkMatMulVerifierWorkspace::ZkMatMulVerifierWorkspace() noexcept = default;
+    ZkMatMulVerifierWorkspace::ZkMatMulVerifierWorkspace(const ZkMatMulStatement& st,
+        u32 threads, CpuBenchmarkContext* benchmark, const LogVoleZkOptions& settings)
+    {
+        if (!validateZkMatMulStatement(st))
+            throw std::invalid_argument("LogVole CPU matrix workspace has invalid geometry");
+        mImpl = std::make_unique<Impl>(st, threads, benchmark, settings);
+    }
+    ZkMatMulVerifierWorkspace::~ZkMatMulVerifierWorkspace() = default;
+    ZkMatMulVerifierWorkspace::ZkMatMulVerifierWorkspace(ZkMatMulVerifierWorkspace&&) noexcept = default;
+    ZkMatMulVerifierWorkspace& ZkMatMulVerifierWorkspace::operator=(ZkMatMulVerifierWorkspace&&) noexcept = default;
+    bool ZkMatMulVerifierWorkspace::prepared() const noexcept { return bool(mImpl); }
+    std::size_t ZkMatMulVerifierWorkspace::workers() const noexcept { return mImpl ? mImpl->mWorkers : 0; }
+
     bool zkMatMulWitnessInputs(
         const ZkMatMulStatement& st, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize)
@@ -769,15 +900,7 @@ namespace osuCrypto::LogVole
         const u64* a = wires.data() + st.offsetA();
         const u64* b = wires.data() + st.offsetB();
         const bool ok = detail::runParallelTasks(static_cast<std::size_t>(n), threads, [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) {
-            u64* out = product.data() + row * n;
-            std::fill(out, out + n, u64(0));
-            for (u64 k = 0; k < n; ++k)
-            {
-                const u64 av = a[row * n + k];
-                if (!av) continue;
-                const u64* brow = b + k * n;
-                for (u64 j = 0; j < n; ++j) out[j] = mulAddMod(av, brow[j], out[j], mod);
-            }
+            matMulProductRow(a, b, product.data(), n, row, mod);
             return true;
         }, false, &cpuBenchmark);
         if (ok) publicProduct = std::move(product);
@@ -790,6 +913,43 @@ namespace osuCrypto::LogVole
     {
         return zkMatMulWitnessInputs(st, modulus, prng, wires, voleSize) &&
                zkMatMulFillProduct(st, modulus, threads, wires, publicProduct, cpuBenchmark);
+    }
+
+    macoro::task<bool> zkMatMulFillProduct(macoro::thread_pool& executor, std::span<u8> results,
+        const ZkMatMulStatement& st, u64 modulus, u32 threads,
+        std::span<const u64> wires, AlignedUnVec<u64>& publicProduct, CpuBenchmarkState cpuBenchmark)
+    {
+        if (results.empty() || !validateZkMatMulStatement(st) || modulus < 2 ||
+            wires.size() < st.voleCount()) co_return false;
+        const seal::Modulus mod(modulus);
+        auto allowance = std::min<std::size_t>(results.size(), cpuWorkerBudget(threads, cpuBenchmark.mContext));
+        auto chunks = results.first(std::min<std::size_t>(allowance, st.mDim));
+        AlignedUnVec<u64> product(st.entries());
+        const auto* a = wires.data() + st.offsetA();
+        const auto* b = wires.data() + st.offsetB();
+        auto evaluate = [&](std::size_t begin, std::size_t end, u8& result) {
+            CpuBenchmarkState worker{cpuBenchmark.mContext, chunks.size() > 1};
+            CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            for (auto row = begin; row != end; ++row)
+                matMulProductRow(a, b, product.data(), st.mDim, row, mod);
+            result = 1;
+        };
+        if (chunks.size() == 1) evaluate(0, st.mDim, chunks[0]);
+        else co_await macoro::bulk_chunked(executor, st.mDim, chunks, evaluate);
+        publicProduct = std::move(product);
+        co_return true;
+    }
+
+    macoro::task<bool> zkMatMulWitness(macoro::thread_pool& executor, std::span<u8> results,
+        const ZkMatMulStatement& st, u64 modulus, u32 threads, PRNG& prng,
+        AlignedUnVec<u64>& wires, AlignedUnVec<u64>& publicProduct, u64 voleSize,
+        CpuBenchmarkState cpuBenchmark)
+    {
+        if (results.empty()) co_return false;
+        if (!zkMatMulWitnessInputs(st, modulus, prng, wires, voleSize)) co_return false;
+        co_return co_await zkMatMulFillProduct(executor, results, st, modulus, threads,
+            wires, publicProduct, cpuBenchmark);
     }
 
     void zkMatMulChallenge(
@@ -832,23 +992,8 @@ namespace osuCrypto::LogVole
         transposeMatMulInput(macs.data() + st.offsetB(), n, modulus, mbt);
         const bool ok = detail::runParallelTasks(chunks, threads, [&](std::size_t chunk, CpuBenchmarkState& cpuBenchmark) {
             const auto begin = chunk * n / chunks, end = (chunk + 1) * n / chunks;
-            if (detail::cpuZkMatMulProverTerms(a, ma, bt.data(), mbt.data(), a0.data(), cross.data(),
-                    n, begin, end, mod, options)) return true;
-            detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
-                for (std::size_t i = begin; i < end; ++i)
-                    for (std::size_t j = 0; j < n; ++j)
-                    {
-                        u64 sum = 0, mixed = 0;
-                        for (std::size_t k = 0; k < n; ++k)
-                        {
-                            sum = arithmetic.multiplyAdd(ma[i * n + k], mbt[j * n + k], sum);
-                            mixed = arithmetic.multiplyAdd(a[i * n + k], mbt[j * n + k], mixed);
-                            mixed = arithmetic.multiplyAdd(bt[j * n + k], ma[i * n + k], mixed);
-                        }
-                        a0[i * n + j] = sum;
-                        cross[i * n + j] = mixed;
-                    }
-            });
+            matMulProverRows(a, ma, bt.data(), mbt.data(), a0.data(), cross.data(),
+                n, begin, end, mod, options);
             return true;
         }, false, &cpuBenchmark);
         if (!ok) return false;
@@ -911,22 +1056,8 @@ namespace osuCrypto::LogVole
         transposeMatMulInput(keys.data() + st.offsetB(), n, modulus, bt);
         if (!detail::runParallelTasks(chunks, threads, [&](std::size_t chunk, CpuBenchmarkState& cpuBenchmark) {
             const auto begin = chunk * n / chunks, end = (chunk + 1) * n / chunks;
-            const bool fast = detail::cpuZkMatMulVerifierTerms(a, bt.data(), products.data(), n, begin, end, mod, options);
-            detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
-                for (std::size_t i = begin; i < end; ++i)
-                    for (std::size_t j = 0; j < n; ++j)
-                    {
-                        if (!fast)
-                        {
-                            u64 sum = 0;
-                            for (std::size_t k = 0; k < n; ++k)
-                                sum = arithmetic.multiplyAdd(a[i * n + k], bt[j * n + k], sum);
-                            products[i * n + j] = sum;
-                        }
-                        products[i * n + j] = subMod(products[i * n + j],
-                            arithmetic.multiply(publicProduct[i * n + j], deltaSquared), mod);
-                    }
-            });
+            matMulVerifierRows(a, bt.data(), products.data(), publicProduct, deltaSquared,
+                n, begin, end, mod, options);
             return true;
         }, false, &cpuBenchmark)) return false;
         std::vector<u64> values(st.repetitions());
@@ -958,6 +1089,146 @@ namespace osuCrypto::LogVole
         out = values.front();
         return true;
     }
+
+    macoro::task<bool> zkMatMulProverResponse(
+        macoro::thread_pool& executor,
+        const ZkMatMulStatement& st,
+        std::span<const u64> wires,
+        std::span<const u64> macs,
+        const ZkMatMulChallenge& ch,
+        u64 modulus,
+        ZkMatMulProverWorkspace& workspace,
+        std::vector<ZkProof>& out)
+    {
+        if (!workspace.mImpl || !workspace.mImpl->matches(st)) co_return false;
+        auto& work = *workspace.mImpl;
+        const auto& options = work.mOptions;
+        if (!validMatMulChallenge(st, ch, modulus) ||
+            wires.size() < st.voleCount() || macs.size() < st.voleCount()) co_return false;
+        const seal::Modulus mod(modulus);
+        const auto n = static_cast<std::size_t>(st.mDim), entries = static_cast<std::size_t>(st.entries());
+        const auto chunks = work.mChunks;
+        auto locals = std::span(work.mLocals);
+        auto& ownedA = work.mOwnedA;
+        auto& ownedMa = work.mOwnedMa;
+        auto& bt = work.mBt;
+        auto& mbt = work.mMbt;
+        auto& a0 = work.mA0;
+        auto& cross = work.mCross;
+        const u64* a = canonicalMatMulInput(wires.data(), entries, modulus, ownedA);
+        const u64* ma = canonicalMatMulInput(macs.data(), entries, modulus, ownedMa);
+        transposeMatMulInput(wires.data() + st.offsetB(), n, modulus, bt);
+        transposeMatMulInput(macs.data() + st.offsetB(), n, modulus, mbt);
+        auto terms = [&](std::size_t first, std::size_t last, u8&) {
+            CpuBenchmarkState worker{work.mBenchmark, locals.size() > 1};
+            CpuBenchmarkWorkerScope timing(locals.size() > 1 ? work.mBenchmark : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            for (auto chunk = first; chunk != last; ++chunk)
+            {
+                const auto begin = chunk * n / chunks, end = (chunk + 1) * n / chunks;
+                matMulProverRows(a, ma, bt.data(), mbt.data(), a0.data(), cross.data(),
+                    n, begin, end, mod, options);
+            }
+        };
+        if (locals.size() == 1) terms(0, chunks, locals[0]);
+        else co_await macoro::bulk_chunked(executor, chunks, locals, terms);
+
+        // The n^2 unweighted inner products are identical for every repetition.
+        // Reuse them; only the independent coefficients and masks change.
+        auto& proofs = work.mProofs;
+        for (u32 rep = 0; rep < st.repetitions(); ++rep)
+        {
+            auto partial = std::span(work.mPartial);
+            auto reduce = [&](std::size_t first, std::size_t last, u8&) {
+                CpuBenchmarkState worker{work.mBenchmark, locals.size() > 1};
+                CpuBenchmarkWorkerScope timing(locals.size() > 1 ? work.mBenchmark : nullptr);
+                CpuBenchmarkTaskScope metrics(worker);
+                for (auto chunk = first; chunk != last; ++chunk)
+                {
+                    partial[chunk] = batchMatMulTerms<true>(a0.data(), cross.data(),
+                        ch.mCoefficients.data() + rep * entries, chunk * entries / chunks,
+                        (chunk + 1) * entries / chunks, mod);
+                }
+            };
+            if (locals.size() == 1) reduce(0, chunks, locals[0]);
+            else co_await macoro::bulk_chunked(executor, chunks, locals, reduce);
+            u64 u = 0, mixed = 0;
+            for (const auto& sums : partial)
+            {
+                u = addMod(u, sums[0], mod);
+                mixed = addMod(mixed, sums[1], mod);
+            }
+            proofs[rep].mU = addMod(u, macs[st.maskIndex(rep)] % modulus, mod);
+            proofs[rep].mV = subMod(subMod(0, mixed, mod), wires[st.maskIndex(rep)] % modulus, mod);
+        }
+        out.assign(proofs.begin(), proofs.end());
+        co_return true;
+    }
+
+    macoro::task<bool> zkMatMulVerifierValue(
+        macoro::thread_pool& executor,
+        const ZkMatMulStatement& st,
+        std::span<const u64> keys,
+        std::span<const u64> publicProduct,
+        const ZkMatMulChallenge& ch,
+        u64 delta,
+        u64 modulus,
+        ZkMatMulVerifierWorkspace& workspace,
+        std::vector<u64>& out)
+    {
+        if (!workspace.mImpl || !workspace.mImpl->matches(st)) co_return false;
+        auto& work = *workspace.mImpl;
+        const auto& options = work.mOptions;
+        if (!validMatMulChallenge(st, ch, modulus) ||
+            !validMatMulPublicProduct(st, publicProduct, modulus) || keys.size() < st.voleCount()) co_return false;
+        const seal::Modulus mod(modulus);
+        const auto n = static_cast<std::size_t>(st.mDim), entries = static_cast<std::size_t>(st.entries());
+        const auto chunks = work.mChunks;
+        auto locals = std::span(work.mLocals);
+        const u64 deltaSquared = mulMod(delta % modulus, delta % modulus, mod);
+        auto& ownedA = work.mOwnedA;
+        auto& bt = work.mBt;
+        auto& products = work.mProducts;
+        const u64* a = canonicalMatMulInput(keys.data(), entries, modulus, ownedA);
+        transposeMatMulInput(keys.data() + st.offsetB(), n, modulus, bt);
+        auto terms = [&](std::size_t first, std::size_t last, u8&) {
+            CpuBenchmarkState worker{work.mBenchmark, locals.size() > 1};
+            CpuBenchmarkWorkerScope timing(locals.size() > 1 ? work.mBenchmark : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            for (auto chunk = first; chunk != last; ++chunk)
+            {
+                const auto begin = chunk * n / chunks, end = (chunk + 1) * n / chunks;
+                matMulVerifierRows(a, bt.data(), products.data(), publicProduct, deltaSquared,
+                    n, begin, end, mod, options);
+            }
+        };
+        if (locals.size() == 1) terms(0, chunks, locals[0]);
+        else co_await macoro::bulk_chunked(executor, chunks, locals, terms);
+        auto& values = work.mValues;
+        for (u32 rep = 0; rep < st.repetitions(); ++rep)
+        {
+            auto partial = std::span(work.mPartial);
+            auto reduce = [&](std::size_t first, std::size_t last, u8&) {
+                CpuBenchmarkState worker{work.mBenchmark, locals.size() > 1};
+                CpuBenchmarkWorkerScope timing(locals.size() > 1 ? work.mBenchmark : nullptr);
+                CpuBenchmarkTaskScope metrics(worker);
+                for (auto chunk = first; chunk != last; ++chunk)
+                {
+                    partial[chunk] = batchMatMulTerms<false>(products.data(), nullptr,
+                        ch.mCoefficients.data() + rep * entries, chunk * entries / chunks,
+                        (chunk + 1) * entries / chunks, mod);
+                }
+            };
+            if (locals.size() == 1) reduce(0, chunks, locals[0]);
+            else co_await macoro::bulk_chunked(executor, chunks, locals, reduce);
+            u64 b = 0;
+            for (const auto& sums : partial) b = addMod(b, sums[0], mod);
+            values[rep] = addMod(b, keys[st.maskIndex(rep)] % modulus, mod);
+        }
+        out.assign(values.begin(), values.end());
+        co_return true;
+    }
+
 
     bool zkMatMulAccept(std::span<const ZkProof> proofs, std::span<const u64> values,
         u64 delta, u64 modulus)
@@ -2137,6 +2408,9 @@ namespace osuCrypto
             std::make_shared<ZpContextFactory>(factory));
         mMacs.resize(0);
         mDeviceState.reset();
+        mCpuWorkspace = !mVoleOptions.mUseGpu
+            ? ZkMatMulProverWorkspace(mStatement, mVoleOptions.mNumThreads,
+                mVoleOptions.mCpuBenchmark, mSettings) : ZkMatMulProverWorkspace{};
         mLastProofs.clear();
         mLastProof = {};
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2221,9 +2495,14 @@ namespace osuCrypto
                 throw std::runtime_error("LogVole ZK could not run its device check");
             }
 #endif
-            ok = zkMatMulProverResponse(
-                mStatement, wires, std::span<const u64>(mMacs.data(), mMacs.size()), ch,
-                mVole.modulus(), mVole.numThreads(), mLastProofs, mSettings, cpuBenchmark);
+            if (mVoleOptions.mUseGpu)
+                ok = zkMatMulProverResponse(
+                    mStatement, wires, std::span<const u64>(mMacs.data(), mMacs.size()), ch,
+                    mVole.modulus(), mVole.numThreads(), mLastProofs, mSettings, cpuBenchmark);
+            else
+                ok = co_await zkMatMulProverResponse(executor,
+                    mStatement, wires, std::span<const u64>(mMacs.data(), mMacs.size()), ch,
+                    mVole.modulus(), mCpuWorkspace, mLastProofs);
         }
         if (!ok) throw std::runtime_error("LogVole ZK matmul prover could not build its response");
         mLastProof = mLastProofs.front();
@@ -2252,6 +2531,9 @@ namespace osuCrypto
             std::make_shared<ZpContextFactory>(factory));
         mKeys.resize(0);
         mDeviceState.reset();
+        mCpuWorkspace = !mVoleOptions.mUseGpu
+            ? ZkMatMulVerifierWorkspace(mStatement, mVoleOptions.mNumThreads,
+                mVoleOptions.mCpuBenchmark, mSettings) : ZkMatMulVerifierWorkspace{};
         mLastValues.clear();
         mLastValue = 0;
         mAccepted = false;
@@ -2335,9 +2617,14 @@ namespace osuCrypto
                 throw std::runtime_error("LogVole ZK could not run its device check");
             }
 #endif
-            ok = zkMatMulVerifierValue(
-                mStatement, std::span<const u64>(mKeys.data(), mKeys.size()), product, ch, mVole.mDelta,
-                mVole.modulus(), mVole.numThreads(), values, mSettings, cpuBenchmark);
+            if (mVoleOptions.mUseGpu)
+                ok = zkMatMulVerifierValue(
+                    mStatement, std::span<const u64>(mKeys.data(), mKeys.size()), product, ch, mVole.mDelta,
+                    mVole.modulus(), mVole.numThreads(), values, mSettings, cpuBenchmark);
+            else
+                ok = co_await zkMatMulVerifierValue(executor,
+                    mStatement, std::span<const u64>(mKeys.data(), mKeys.size()), product, ch, mVole.mDelta,
+                    mVole.modulus(), mCpuWorkspace, values);
         }
         if (!ok) throw std::runtime_error("LogVole ZK matmul verifier could not evaluate the check");
         mCheckMs = msSinceCheck(tCheck);

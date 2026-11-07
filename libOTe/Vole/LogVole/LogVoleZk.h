@@ -280,11 +280,59 @@ namespace osuCrypto::LogVole
 
     bool validateZkMatMulStatement(const ZkMatMulStatement& st);
 
+    struct ZkMatMulChallenge;
+    // Exclusive numerical storage/options/budget for repeated CPU matrix checks.
+    // Prepare before the first proof. Prover: four n^2-word arrays; verifier:
+    // two n^2-word arrays, plus O(chunks + repetitions) small arrays in each.
+    // Noncanonical low-level inputs lazily need up to two/one additional n^2
+    // canonical copies. GPU sessions leave these owners empty until needed.
+    // Borrow the workspace, its benchmark context and executor through awaited
+    // completion; calls, moves and destruction require exclusive use.
+    class ZkMatMulProverWorkspace
+    {
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+        friend macoro::task<bool> zkMatMulProverResponse(macoro::thread_pool&,
+            const ZkMatMulStatement&, std::span<const u64>, std::span<const u64>, const ZkMatMulChallenge&, u64, ZkMatMulProverWorkspace&, std::vector<ZkProof>&);
+    public:
+        ZkMatMulProverWorkspace() noexcept;
+        ZkMatMulProverWorkspace(const ZkMatMulStatement& statement, u32 threads,
+            CpuBenchmarkContext* benchmark = nullptr, const LogVoleZkOptions& settings = {});
+        ~ZkMatMulProverWorkspace();
+        ZkMatMulProverWorkspace(const ZkMatMulProverWorkspace&) = delete;
+        ZkMatMulProverWorkspace& operator=(const ZkMatMulProverWorkspace&) = delete;
+        ZkMatMulProverWorkspace(ZkMatMulProverWorkspace&&) noexcept;
+        ZkMatMulProverWorkspace& operator=(ZkMatMulProverWorkspace&&) noexcept;
+        bool prepared() const noexcept;
+        std::size_t workers() const noexcept;
+    };
+
+    class ZkMatMulVerifierWorkspace
+    {
+        struct Impl;
+        std::unique_ptr<Impl> mImpl;
+        friend macoro::task<bool> zkMatMulVerifierValue(macoro::thread_pool&,
+            const ZkMatMulStatement&, std::span<const u64>, std::span<const u64>, const ZkMatMulChallenge&, u64, u64, ZkMatMulVerifierWorkspace&, std::vector<u64>&);
+    public:
+        ZkMatMulVerifierWorkspace() noexcept;
+        ZkMatMulVerifierWorkspace(const ZkMatMulStatement& statement, u32 threads,
+            CpuBenchmarkContext* benchmark = nullptr, const LogVoleZkOptions& settings = {});
+        ~ZkMatMulVerifierWorkspace();
+        ZkMatMulVerifierWorkspace(const ZkMatMulVerifierWorkspace&) = delete;
+        ZkMatMulVerifierWorkspace& operator=(const ZkMatMulVerifierWorkspace&) = delete;
+        ZkMatMulVerifierWorkspace(ZkMatMulVerifierWorkspace&&) noexcept;
+        ZkMatMulVerifierWorkspace& operator=(ZkMatMulVerifierWorkspace&&) noexcept;
+        bool prepared() const noexcept;
+        std::size_t workers() const noexcept;
+    };
+
     // Random A and B plus independent ZK masks.
     bool zkMatMulWitnessInputs(
         const ZkMatMulStatement& st, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize = 0);
 
+    // Legacy synchronous diagnostics/GPU fallback; CPU applications can use
+    // the explicit-executor overloads below.
     // Construct the public product C = A*B mod p separately from the private
     // witness. Honest statement preparation is excluded from proof timing.
     bool zkMatMulFillProduct(
@@ -314,6 +362,7 @@ namespace osuCrypto::LogVole
     // and the device check paths need the same challenge powers.
     u64 zkPowMod(u64 base, u64 exp, u64 modulus);
 
+    // Legacy synchronous diagnostics/GPU fallback.
     bool zkMatMulProverResponse(
         const ZkMatMulStatement& st,
         std::span<const u64> wires,
@@ -325,6 +374,7 @@ namespace osuCrypto::LogVole
 
     // Repeated matrix checks retain every equation. The scalar overloads above
     // and below reject statements with more than one repetition.
+    // Legacy synchronous diagnostics/GPU fallback.
     bool zkMatMulProverResponse(
         const ZkMatMulStatement& st,
         std::span<const u64> wires,
@@ -334,6 +384,7 @@ namespace osuCrypto::LogVole
         u32 threads,
         std::vector<ZkProof>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
+    // Legacy synchronous diagnostics/GPU fallback.
     bool zkMatMulVerifierValue(
         const ZkMatMulStatement& st,
         std::span<const u64> keys,
@@ -344,6 +395,7 @@ namespace osuCrypto::LogVole
         u32 threads,
         u64& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
+    // Legacy synchronous diagnostics/GPU fallback.
     bool zkMatMulVerifierValue(
         const ZkMatMulStatement& st,
         std::span<const u64> keys,
@@ -353,6 +405,24 @@ namespace osuCrypto::LogVole
         u64 modulus,
         u32 threads,
         std::vector<u64>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
+
+    // Explicit CPU execution; all borrowed inputs/resources live until joined.
+    // A nonempty status span bounds product/witness chunks; one runs inline.
+    macoro::task<bool> zkMatMulFillProduct(macoro::thread_pool& executor, std::span<u8> results,
+        const ZkMatMulStatement& st, u64 modulus, u32 threads,
+        std::span<const u64> wires, AlignedUnVec<u64>& publicProduct, CpuBenchmarkState cpuBenchmark = {});
+    macoro::task<bool> zkMatMulWitness(macoro::thread_pool& executor, std::span<u8> results,
+        const ZkMatMulStatement& st, u64 modulus, u32 threads, PRNG& prng,
+        AlignedUnVec<u64>& wires, AlignedUnVec<u64>& publicProduct, u64 voleSize = 0,
+        CpuBenchmarkState cpuBenchmark = {});
+    macoro::task<bool> zkMatMulProverResponse(macoro::thread_pool& executor,
+        const ZkMatMulStatement& st, std::span<const u64> wires, std::span<const u64> macs,
+        const ZkMatMulChallenge& ch, u64 modulus, ZkMatMulProverWorkspace& workspace,
+        std::vector<ZkProof>& out);
+    macoro::task<bool> zkMatMulVerifierValue(macoro::thread_pool& executor,
+        const ZkMatMulStatement& st, std::span<const u64> keys, std::span<const u64> publicProduct,
+        const ZkMatMulChallenge& ch, u64 delta, u64 modulus, ZkMatMulVerifierWorkspace& workspace,
+        std::vector<u64>& out);
 
     bool zkMatMulAccept(std::span<const ZkProof> proofs, std::span<const u64> values,
         u64 delta, u64 modulus);
@@ -592,6 +662,7 @@ namespace osuCrypto
         explicit ZkMatMulProver(LogVoleZkOptions settings = {}, LogVoleOptions voleOptions = {})
             : mSettings(std::move(settings)), mVoleOptions(std::move(voleOptions)) {}
 
+        LogVole::ZkMatMulProverWorkspace mCpuWorkspace;
         LogVole::ZkMatMulStatement mStatement;
         LogVoleReceiver mVole;
         bool mUseDevice = false;
@@ -638,6 +709,7 @@ namespace osuCrypto
         explicit ZkMatMulVerifier(LogVoleZkOptions settings = {}, LogVoleOptions voleOptions = {})
             : mSettings(std::move(settings)), mVoleOptions(std::move(voleOptions)) {}
 
+        LogVole::ZkMatMulVerifierWorkspace mCpuWorkspace;
         LogVole::ZkMatMulStatement mStatement;
         LogVoleSender mVole;
         bool mUseDevice = false;

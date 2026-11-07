@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **80%** of the agreed ownership/globals refactor,
+Estimated overall completion: **83%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -245,6 +245,7 @@ contain no environment reads.
 | Receiver input wrapping | CPU CI-VOLE input wrapping awaits direct `bulk_chunked` using caller-owned `ZpEncodeBuffer` storage. Each chunk reuses slots and SEAL plaintext storage; the encoding/lifting arithmetic is shared with the legacy entry point. Public receiver, garbled receiver, and prover APIs pass the buffers through. GPU wrapping/fallback remains unchanged. |
 | CPU output unwrapping | Sender key release and receiver MAC output await direct `bulk_chunked` using caller-owned `ZpDecodeBuffer` storage. Each chunk reuses plaintext, slots, canonical residues and composition storage; one shared synchronous numerical kernel preserves the legacy arithmetic. Public sender/receiver, garbled and proof wrappers pass resources through. GPU/fallback and staged diagnostic release retain the synchronous API. |
 | Multiplication proof CPU execution | Public CPU prover response/verifier checks await direct `bulk_chunked` on the caller executor. `ZkMulCpuWorkspace` preallocates numerical locals/task outputs and captures its worker budget without creating a pool. The async witness API joins each independent layer, retaining scalar dependent-layer order. Shared synchronous kernels preserve arithmetic, original prover partitions, verifier task slots, reduction order and PRNG draws. Legacy diagnostics/GPU fallback lazily construct their private executor; matrix proof loops are separate remaining work. |
+| Matrix proof CPU execution | CPU prover/verifier paths await direct `bulk_chunked` with role-specific numerical workspaces prepared before proofs. Prover stores four n^2-word arrays; verifier stores two, plus O(chunks + repetitions) locals/output staging. Noncanonical copies remain lazy. Transpose tiling, unweighted inner products, original row/weighted-sum partitions and ordered reductions are unchanged. GPU-selected public objects keep CPU workspaces empty; legacy GPU host fallback remains synchronous. Standalone async product/witness APIs use exclusive caller byte-status storage. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -276,6 +277,8 @@ There are **20 `detail::runParallelTasks` call sites** in library `.cpp` files:
 The synchronous input-wrapping and output-unwrapping sites now serve
 GPU/fallback and diagnostic callers; production CPU paths use explicit-resource
 async overloads. The staged synchronous `civoleSenderReleaseK` API remains legacy.
+The five synchronous matrix sites now serve diagnostic/GPU-fallback APIs;
+production CPU matrix proof phases use prepared workspaces and direct awaits.
 Setup message/state copying and codec parallelism are GPU-gated; leave those
 alone while GPU migration is deferred. Their CPU paths already copy inline.
 
@@ -427,12 +430,38 @@ execution without pool threads. The bundled `FreshMaskCpu` test exceeded a
 six multiplication/matrix configurations and was not counted as completed
 coverage. No GPU runtime, WSL, leak checks, or benchmarks were run.
 
+Matrix-proof validation: CUDA-enabled Windows library/tests and public example
+object build pass (27.96 seconds). The independent arithmetic regression and
+focused two-query, three-repetition GoldenSeed matrix protocol pass in 4.64
+seconds; the regression also passes with two executor threads in 0.04 seconds.
+Checks cover scalar/vector settings, reused workspaces across two moduli and
+challenges, noncanonical lazy-copy paths, requested three chunks under one/three
+worker caps, independent scalar witness/product/proof oracles, PRNG progression,
+output allocation reuse, invalid shape/challenge/buffer rejection without
+publication, and an idle executor's inline path. GPU-selected public-object
+preparation confirms both CPU workspaces remain empty, without GPU computation.
+No broad matrix suite, GPU computation, WSL, leak checks, or benchmarks were run.
+
+CPU callsite audit after matrix migration: the frontend has no multiplication or
+matrix witness-generation or staged-key-release calls. These standalone
+synchronous APIs remain legacy diagnostics/GPU fallback, alongside their async
+alternatives. The synchronous rounding validators and `findGoldenSeed` are used
+by GPU-gated legacy sender evaluation or exposed as diagnostic helpers; normal
+CPU candidate evaluation calls its polynomial predicates directly under async
+execution. One ordinary CPU root-key path still calls synchronous
+`shrinkExpandDenoiseComb` with a forced allowance of one; its legacy scheduling
+adapter executes inline and creates no worker pool. This is inline numerical
+cleanup, not another async scheduling design. Remaining asynchronous scheduling
+migration is at the deferred GPU/fallback boundary. Remaining CPU ambient
+protocol run/role identity and statistics require explicit session/diagnostics
+ownership decisions; worker-budget globals still support the legacy adapter.
+
 Next steps, in order:
 
-1. Migrate remaining CPU matrix-proof loops using direct
-   `bulk_chunked` where appropriate. Discuss a different algorithm first if a
-   loop does not fit. Retire `CpuRowScratch` scheduling and legacy overloads
-   when their callers are gone.
+1. Resolve explicit session/cache identity and diagnostics ownership before
+   changing the remaining CPU ambient state. Retire `CpuRowScratch` scheduling
+   and legacy overloads when their GPU/fallback/diagnostic callers are gone;
+   do not treat physical legacy sites as unmigrated production CPU phases.
 2. Remove the remaining global groups above in separate ownership changes.
    Small independent groups need not wait for all scheduling work to finish.
 

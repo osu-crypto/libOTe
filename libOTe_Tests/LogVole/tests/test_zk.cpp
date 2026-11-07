@@ -357,6 +357,25 @@ void LogVole_Zk_AsyncMulProtocol(const CLP&)
         CivoleSetting::GoldenSeed, false, 2, true);
 }
 
+void LogVole_Zk_AsyncMatMulProtocol(const CLP&)
+{
+    ZkMatMulStatement statement;
+    statement.mDim = 2;
+    statement.mReps = 3;
+    checkFreshMasks<ZkMatMulProver, ZkMatMulVerifier>(statement,
+        CivoleSetting::GoldenSeed, false, 2, true);
+    // Optimistic GPU preparation must not reserve CPU matrix scratch.
+    LogVoleOptions options;
+    options.mUseGpu = true;
+    options.mRequestSize = 16;
+    ZkMatMulProver prover({}, options);
+    ZkMatMulVerifier verifier({}, options);
+    prover.prepare(statement);
+    verifier.prepare(statement);
+    LOGVOLE_REQUIRE_FALSE(prover.mCpuWorkspace.prepared());
+    LOGVOLE_REQUIRE_FALSE(verifier.mCpuWorkspace.prepared());
+}
+
 void LogVole_Zk_FreshMaskCpu(const CLP&)
 {
     checkBothStatements(CivoleSetting::GoldenSeed, false);
