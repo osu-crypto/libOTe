@@ -50,7 +50,7 @@ namespace osuCrypto::LogVole
         u32 requestedWorkers = 1,
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext = nullptr,
         std::shared_ptr<const LazyLencRandomizerState> randomizers = {},
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {});
+        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
 
     bool lheEnc1Trunc(
         const RingNttContext& ctx,
@@ -72,7 +72,7 @@ namespace osuCrypto::LogVole
         const LazyRootSecretHostState* rootSecretHost = nullptr,
         u64 rootSecretOwnerRunId = 0,
         bool topSecretDomain = false,
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {});
+        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
 
     bool lheApplyCt1(
         const RingNttContext& ctx,

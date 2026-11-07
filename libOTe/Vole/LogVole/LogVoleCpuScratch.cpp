@@ -46,6 +46,18 @@ namespace osuCrypto::LogVole::detail
         return mImpl ? mImpl->mExecutor.get() : nullptr;
     }
 
+    std::size_t CpuRowScratch::setupWorkers(std::size_t tasks, u32 allowance,
+        const CpuBenchmarkContext* benchmark)
+    {
+        const auto hardware = allowance == 1 ? std::size_t{1} :
+            std::max<std::size_t>(1, std::thread::hardware_concurrency());
+        auto capacity = hardware;
+        if (benchmark)
+            capacity = std::max<std::size_t>(1, benchmark->mWorkerLimit
+                ? std::min(benchmark->mWorkerLimit, benchmark->mCpus.size()) : benchmark->mCpus.size());
+        return std::min({tasks, capacity, allowance ? std::size_t(allowance) : hardware});
+    }
+
     struct ShrinkExpandScratch::Slot
     {
         std::vector<RnsPoly> mCt2;

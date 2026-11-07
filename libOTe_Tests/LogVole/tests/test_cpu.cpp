@@ -8,6 +8,7 @@
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleZk.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
@@ -148,6 +149,148 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
         }
         LOGVOLE_REQUIRE_TRUE(propagated);
         LOGVOLE_REQUIRE_TRUE(joinedBeforeThrow);
+    }
+}
+
+
+void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
+{
+    LogVole::detail::CpuRowScratch scratch;
+    CpuBenchmarkContext telemetry;
+    telemetry.mCpus = {0, 1, 2};
+    telemetry.mWorkerLimit = 3;
+    CpuBenchmarkState benchmark{&telemetry};
+    LogVole::detail::CpuExecutor* executor = nullptr;
+    for (u32 allowance : {1u, 3u, 2u, 1u})
+    {
+        telemetry.reset();
+        std::array<unsigned, 7> visits{};
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, 731);
+        LOGVOLE_REQUIRE_TRUE(scratch.runBulk(visits.size(), allowance, [&](std::size_t i, CpuBenchmarkState& worker) {
+                LOGVOLE_REQUIRE_EQ(currentProtocolCacheScope().mRunId, 731u);
+                LOGVOLE_REQUIRE_TRUE(worker.mContext == &telemetry);
+                // Serial children borrow the partition, without another pool
+                // or double-counting the active worker.
+                return scratch.runBulk(1, 1, [&](std::size_t) { ++visits[i]; return true; }, worker);
+            }, benchmark));
+        for (auto count : visits) LOGVOLE_REQUIRE_EQ(count, 1u);
+        LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+        LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() <= allowance);
+        if (!executor && allowance == 1) LOGVOLE_REQUIRE_TRUE(scratch.executor() == nullptr);
+        else if (!executor) { executor = scratch.executor(); LOGVOLE_REQUIRE_TRUE(executor); }
+        else LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
+    }
+    telemetry.mWorkerLimit = 1;
+    telemetry.reset();
+    LOGVOLE_REQUIRE_TRUE(scratch.runBulk(7, 8, [](std::size_t) { return true; }, benchmark));
+    LOGVOLE_REQUIRE_EQ(telemetry.mPeakTaskThreads.load(), 1u);
+    LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
+    telemetry.mWorkerLimit = 3;
+    struct Failure {};
+    for (unsigned failure : {0u, 1u, 2u, 3u}) // caller/child throw, caller/child false
+    {
+        std::atomic<bool> childStarted{false}, releaseChild{false}, childCleaned{false};
+        bool propagated = false, ok = true;
+        try
+        {
+            ok = scratch.runBulk(2, 2, [&](std::size_t i) -> bool {
+                if (i == 1)
+                {
+                    struct Cleanup {
+                        std::atomic<bool>& flag;
+                        ~Cleanup() { flag.store(true, std::memory_order_release); }
+                    } cleanup{childCleaned};
+                    childStarted.store(true, std::memory_order_release);
+                    childStarted.notify_all();
+                    releaseChild.wait(false, std::memory_order_acquire);
+                    if (failure == 1) throw Failure{};
+                    return failure != 3;
+                }
+                childStarted.wait(false, std::memory_order_acquire);
+                releaseChild.store(true, std::memory_order_release);
+                releaseChild.notify_all();
+                if (failure == 0) throw Failure{};
+                return failure != 2;
+            }, benchmark);
+        }
+        catch (const Failure&) { propagated = true; }
+        LOGVOLE_REQUIRE_TRUE(childCleaned.load(std::memory_order_acquire));
+        LOGVOLE_REQUIRE_EQ(propagated, failure < 2);
+        if (failure >= 2) LOGVOLE_REQUIRE_FALSE(ok);
+        LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+        LOGVOLE_REQUIRE_TRUE(scratch.runBulk(2, 2, [](std::size_t) { return true; }, benchmark));
+    }
+
+    RingParams params{};
+    params.mPolyModulusDegree = 1024;
+    assignValues<int>(params.mCoeffModulusBits, {30, 30});
+    RingNttContext ctx;
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    const auto equalBatch = [](const auto& a, const auto& b) {
+        LOGVOLE_REQUIRE_EQ(a.size(), b.size());
+        for (std::size_t i = 0; i < a.size(); ++i)
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(a[i].mCoeffs, b[i].mCoeffs));
+    };
+    PRNG random(toBlock(723, 1));
+    std::array<seal::prng_seed_type, 5> seeds;
+    for (auto& seed : seeds) random.get(seed.data(), seed.size());
+    std::array<u8, 5> active{1, 0, 1, 1, 1};
+    std::vector<u64> expectedNoise(5 * 1024, 0);
+    for (std::size_t i = 0; i < seeds.size(); ++i)
+        if (active[i]) LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactFromSeed(
+            std::span<u64>(expectedNoise).subspan(i * 1024, 1024), 3.2, 19.2, seeds[i], ctx));
+    std::vector<RnsPoly> inputs{sampleUniformPoly(ctx, random), sampleUniformPoly(ctx, random)};
+    LogVoleGpuSetupOptions serialOptions, parallelOptions;
+    serialOptions.mParallelLenc = serialOptions.mParallelLhe = LogVoleChoice::Disabled;
+    parallelOptions.mParallelLenc = parallelOptions.mParallelLhe = LogVoleChoice::Enabled;
+    serialOptions.mLencDevice = serialOptions.mLheDevice = false;
+    parallelOptions.mLencDevice = parallelOptions.mLheDevice = false;
+    PRNG referencePrng(toBlock(723, 2), 3);
+    LencEncodeOutput reference;
+    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, inputs, 1, 30, 29, referencePrng,
+        reference, 3.2, 19.2, 2, true, false, nullptr, 1, false, false,
+        nullptr, nullptr, serialOptions));
+    RingTensor referenceLhe;
+    LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, reference.mRNtt, inputs, 30, referenceLhe,
+        3.2, 19.2, &referencePrng, true, nullptr, 1, nullptr, {}, nullptr, nullptr,
+        nullptr, nullptr, 0, false, serialOptions));
+    const auto expectedNext = referencePrng.get<block>();
+    std::array<block, 6> zetaSeeds;
+    random.get(zetaSeeds.data(), zetaSeeds.size());
+    std::vector<RnsPoly> referenceZeta;
+    LOGVOLE_REQUIRE_TRUE(sampleRootZetaFromTaskSeeds(ctx, 2, 65, zetaSeeds, 3,
+        referenceZeta, 1, true));
+    for (u32 allowance : {1u, 3u, 2u, 1u})
+    {
+        std::vector<RnsPoly> zeta;
+        LOGVOLE_REQUIRE_TRUE(sampleRootZetaFromTaskSeeds(ctx, 2, 65, zetaSeeds, 3,
+            zeta, allowance, true, benchmark, &scratch));
+        equalBatch(zeta, referenceZeta);
+        std::vector<u64> noise;
+        std::shared_ptr<gpu::DeviceScalars> device;
+        LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(noise, device,
+            3.2, 19.2, seeds, ctx, allowance, active, benchmark, &scratch));
+        LOGVOLE_REQUIRE_TRUE(noise == expectedNoise && !device);
+        // Force the independent seed-replay path by supplying no host data.
+        noise.clear();
+        LOGVOLE_REQUIRE_TRUE(materializePolyErrorCompactBatchForSetup(noise, device,
+            3.2, 19.2, seeds, ctx, allowance, active, benchmark, &scratch));
+        LOGVOLE_REQUIRE_TRUE(noise == expectedNoise);
+        PRNG actualPrng(toBlock(723, 2), 3);
+        LencEncodeOutput actual;
+        LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, inputs, 1, 30, 29, actualPrng,
+            actual, 3.2, 19.2, 2, true, false, nullptr, allowance, false, false,
+            nullptr, nullptr, parallelOptions, benchmark, &scratch));
+        equalBatch(actual.mRNtt, reference.mRNtt);
+        equalBatch(actual.mR, reference.mR);
+        equalBatch(actual.mLacct.mCt.mPolys, reference.mLacct.mCt.mPolys);
+        RingTensor actualLhe;
+        LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, actual.mRNtt, inputs, 30, actualLhe,
+            3.2, 19.2, &actualPrng, true, nullptr, allowance, nullptr, {}, nullptr, nullptr,
+            nullptr, nullptr, 0, false, parallelOptions, benchmark, &scratch));
+        equalBatch(actualLhe.mPolys, referenceLhe.mPolys);
+        LOGVOLE_REQUIRE_TRUE(actualPrng.get<block>() == expectedNext);
+        LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
     }
 }
 

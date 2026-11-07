@@ -434,6 +434,7 @@ namespace osuCrypto::LogVole
         ShrinkExpandSenderState next{};
         next.mCpuScratch = input.mCpuScratch ? input.mCpuScratch :
             std::make_shared<detail::ShrinkExpandScratch>();
+        auto setupLease = detail::ShrinkExpandScratch::acquire(next.mCpuScratch);
         next.mParams = input.mParams;
         next.mRingFactoryOwner = ctx.mFactoryOwner;
         next.mS = input.mS;
@@ -523,7 +524,7 @@ namespace osuCrypto::LogVole
                 input.mParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message,
                 input.mDeferHostCiphertexts && !message,
-                input.mSDevice.get(), input.mLazyS.get(), input.mParams.mGpuSetup, cpuBenchmark);
+                input.mSDevice.get(), input.mLazyS.get(), input.mParams.mGpuSetup, cpuBenchmark, &setupLease.cpuRows());
         }
         else
         {
@@ -575,7 +576,7 @@ namespace osuCrypto::LogVole
                 input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
                 lenc.mLazyRandomizers, nullptr, nullptr,
                 next.mTopSk1Device.get(), next.mLazyTopSk1.get(),
-                next.mTopSk1OwnerRunId, static_cast<bool>(next.mTopSk1Device), input.mParams.mGpuSetup, cpuBenchmark);
+                next.mTopSk1OwnerRunId, static_cast<bool>(next.mTopSk1Device), input.mParams.mGpuSetup, cpuBenchmark, &setupLease.cpuRows());
         }
         else
         {
@@ -592,7 +593,7 @@ namespace osuCrypto::LogVole
                 next.mPublicANtt.get(),
                 input.mParams.mNumWorkerThreads,
                 input.mDeferHostCiphertexts && !message ? &next.mLazyCt1 : nullptr,
-                lenc.mLazyRandomizers, input.mParams.mGpuSetup, cpuBenchmark);
+                lenc.mLazyRandomizers, input.mParams.mGpuSetup, cpuBenchmark, &setupLease.cpuRows());
         }
         if (!ct1Ok)
         {

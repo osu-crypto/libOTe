@@ -109,12 +109,12 @@ namespace osuCrypto::LogVole::detail
 
         std::size_t workers() const noexcept { return mWorkers; }
 
-        // One exclusive caller-owned local per partition, reused across its
-        // contiguous range. Numerical storage and executor outlive the join.
+        // One exclusive caller-owned local per chunk. Macoro chooses the
+        // ranges; this owner supplies caller participation and diagnostics.
         template<typename Local, std::size_t Extent, typename TaskFn>
-        void runBulk(std::size_t taskCount, std::span<Local, Extent> locals, TaskFn&& taskFn)
+        void runBulkChunked(std::size_t taskCount, std::span<Local, Extent> locals, TaskFn&& taskFn)
         {
-            static_assert(std::is_same_v<std::invoke_result_t<TaskFn&, std::size_t, Local&>, void>);
+            static_assert(std::is_same_v<std::invoke_result_t<TaskFn&, std::size_t, std::size_t, Local&>, void>);
             Phase phase(mRunning);
             if (!taskCount) return;
             if (locals.empty()) throw std::invalid_argument("LogVole CPU bulk requires local storage");
@@ -122,15 +122,25 @@ namespace osuCrypto::LogVole::detail
             if (count == 1)
             {
                 TaskMetrics metrics(mBenchmark, false);
-                for (std::size_t i = 0; i < taskCount; ++i) taskFn(i, locals[0]);
+                taskFn(0, taskCount, locals[0]);
                 return;
             }
             CallerAndPool executor{mPool};
-            macoro::sync_wait(macoro::bulk(executor, taskCount, locals.first(count),
-                [&](std::size_t i, Local& local) {
+            macoro::sync_wait(macoro::bulk_chunked(executor, taskCount, locals.first(count),
+                [&](std::size_t begin, std::size_t end, Local& local) {
                     TaskMetrics metrics(mBenchmark, &local != locals.data());
-                    taskFn(i, local);
+                    taskFn(begin, end, local);
                 }));
+        }
+
+        template<typename Local, std::size_t Extent, typename TaskFn>
+        void runBulk(std::size_t taskCount, std::span<Local, Extent> locals, TaskFn&& taskFn)
+        {
+            static_assert(std::is_same_v<std::invoke_result_t<TaskFn&, std::size_t, Local&>, void>);
+            runBulkChunked(taskCount, locals,
+                [&](std::size_t begin, std::size_t end, Local& local) {
+                    for (auto i = begin; i != end; ++i) taskFn(i, local);
+                });
         }
 
         // The callable and everything it borrows remain live until all children

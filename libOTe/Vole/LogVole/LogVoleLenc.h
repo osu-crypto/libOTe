@@ -215,7 +215,7 @@ namespace osuCrypto::LogVole
         bool deferRandomizerHost = false,
         const gpu::DeviceBatch* seedLabelDevice = nullptr,
         const LazySeedLabelHostState* seedLabelHost = nullptr,
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {});
+        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
 
     bool lencDigestTrunc(
         const RingNttContext& ctx,

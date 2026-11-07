@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 #include "libOTe/config.h"
@@ -1440,8 +1441,10 @@ namespace osuCrypto::LogVole
         bool deferRandomizerHost,
         const gpu::DeviceBatch* seedLabelDevice,
         const LazySeedLabelHostState* seedLabelHost,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark)
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
     {
+        detail::CpuRowScratch localSetupScratch;
+        auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         HostStep setupStep(hostProfiler(ctx), "setup: lenc truncated", &cpuBenchmark);
         const auto sCount = seedLabelHost ? seedLabelHost->count() : s.size();
@@ -1556,14 +1559,14 @@ namespace osuCrypto::LogVole
             if (compactNoiseEnabled)
             {
                 if (!samplePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
-                    noiseStandardDeviation, noiseMaxDeviation, seeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
+                    noiseStandardDeviation, noiseMaxDeviation, seeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
             }
-            else if (!detail::runParallelTasks(seeds.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            else if (!setupScratch.runBulk(seeds.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     auto& poly = rLayersNtt[idx / width][idx % width];
                     resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                     return addPolyErrorFromSeed(poly, noiseStandardDeviation,
                         noiseMaxDeviation, seeds[idx], ctx);
-                }, false, &cpuBenchmark)) return false;
+                }, cpuBenchmark)) return false;
             if (!deviceAssemblyRequested)
                 for (auto& layer : rLayersNtt)
                     if (!forwardNttBatch(layer, ctx)) return false;
@@ -1625,16 +1628,16 @@ namespace osuCrypto::LogVole
             if (compactNoiseEnabled)
             {
                 if (!samplePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark)) return false;
+                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark, &setupScratch)) return false;
             }
-            else if (!detail::runParallelTasks(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            else if (!setupScratch.runBulk(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     const bool activeNoise = activeNoiseRows[idx] != 0;
                     auto& poly = ct.mPolys[idx];
                     resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                     return !activeNoise ||
                         addPolyErrorFromSeed(poly, noiseStandardDeviation,
                             noiseMaxDeviation, seeds[idx], ctx);
-                }, false, &cpuBenchmark)) return false;
+                }, cpuBenchmark)) return false;
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (deviceAssemblyRequested)
             {
@@ -1657,12 +1660,12 @@ namespace osuCrypto::LogVole
 #endif
             if (compactNoiseEnabled && !deviceAssembled &&
                 !materializePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark)) return false;
+                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark, &setupScratch)) return false;
             if (compactNoiseEnabled && !deviceAssembled &&
-                !detail::runParallelTasks(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+                !setupScratch.runBulk(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     return expandPolyErrorCompact(
                         std::span<const u64>(compactNoise).subspan(idx * n, n), ct.mPolys[idx], ctx);
-                }, false, &cpuBenchmark)) return false;
+                }, cpuBenchmark)) return false;
             // The device path keeps randomizer layers and padded input in
             // coefficient form on the host and transforms them only on device.
             // A declined attempt must prepare them before the established path.
@@ -1675,13 +1678,13 @@ namespace osuCrypto::LogVole
                         width, sPadNtt, false))) return false;
                 if (compactNoiseEnabled &&
                     !materializePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
-                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
-                if (compactNoiseEnabled && !detail::runParallelTasks(
+                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
+                if (compactNoiseEnabled && !setupScratch.runBulk(
                     static_cast<std::size_t>(levels) * width, requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                         return expandPolyErrorCompact(
                             std::span<const u64>(compactRandomizers).subspan(idx * n, n),
                             rLayersNtt[idx / width][idx % width], ctx);
-                    }, false, &cpuBenchmark)) return false;
+                    }, cpuBenchmark)) return false;
                 for (auto& layer : rLayersNtt)
                     if (!forwardNttBatch(layer, ctx)) return false;
                 if (!forwardNttBatch(sPadNtt, ctx)) return false;
@@ -1806,7 +1809,7 @@ namespace osuCrypto::LogVole
             return true;
         };
         if (!deviceAssembled &&
-            !detail::runParallelTasks(ct.mRows, setupBatch ? requestedWorkers : 1, buildRow, false, &cpuBenchmark)) return false;
+            !setupScratch.runBulk(ct.mRows, setupBatch ? requestedWorkers : 1, buildRow, cpuBenchmark)) return false;
 
         LencEncodeOutput next{};
         next.mLazyRandomizers = std::move(lazyRandomizers);
@@ -1842,11 +1845,11 @@ namespace osuCrypto::LogVole
 #endif
                 if (!deviceExpanded &&
                     !materializePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
-                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
-                if (!deviceExpanded && !detail::runParallelTasks(mu, requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
+                if (!deviceExpanded && !setupScratch.runBulk(mu, requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     return expandPolyErrorCompact(
                         std::span<const u64>(compactRandomizers).subspan(i * n, n), next.mR[i], ctx);
-                }, false, &cpuBenchmark)) return false;
+                }, cpuBenchmark)) return false;
             }
             else
                 for (u32 i = 0; i < mu; ++i)

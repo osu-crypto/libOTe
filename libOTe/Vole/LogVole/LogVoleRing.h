@@ -19,6 +19,7 @@
 
 namespace osuCrypto::LogVole
 {
+    namespace detail { class CpuRowScratch; }
     namespace gpu { class GpuTableCache; }
     enum class ProtocolCacheRole : u8;
     struct RingResourceScope
@@ -509,23 +510,25 @@ namespace osuCrypto::LogVole
     // Batched exact Gaussian draws. The GPU may expand matching AES prefixes;
     // the unchanged CPU normal transform consumes them, with exact continuation
     // from the original seed if a prefix runs out. Inactive rows are untouched.
+    // Optional exclusive CPU workspace is borrowed only until the call returns.
+    // Setup owners pass it through successive sampling/arithmetic phases.
     bool samplePolyErrorCompactBatchFromSeeds(
         std::span<u64> limb0, double noiseStandardDeviation, double noiseMaxDeviation,
         std::span<const seal::prng_seed_type> seeds, const RingNttContext& ctx,
-        u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {});
+        u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
     // Owned setup samples: resident selection publishes an empty host vector
     // and a completed device buffer; fallback publishes host data and no device.
     // Inactive rows are zero. Invalid/strict failure preserves both outputs.
     bool samplePolyErrorCompactBatchForSetup(
         std::vector<u64>& host, std::shared_ptr<gpu::DeviceScalars>& device,
         double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
-        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {});
+        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
     // Materialize only when a downstream device operation declined. A failed
     // device fetch replays these original seeds on CPU without parent draws.
     bool materializePolyErrorCompactBatchForSetup(
         std::vector<u64>& host, const std::shared_ptr<gpu::DeviceScalars>& device,
         double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
-        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {});
+        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
     // Reconstruct the same full coefficient polynomial without any PRNG draws.
     bool expandPolyErrorCompact(
         std::span<const u64> limb0, RnsPoly& out, const RingNttContext& ctx);

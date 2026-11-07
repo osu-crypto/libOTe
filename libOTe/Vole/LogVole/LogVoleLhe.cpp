@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVolePublicCache.h"
@@ -259,8 +260,10 @@ namespace osuCrypto::LogVole
         const LazyRootSecretHostState* rootSecretHost,
         u64 rootSecretOwnerRunId,
         bool topSecretDomain,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark = {})
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr)
     {
+        detail::CpuRowScratch localSetupScratch;
+        auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         HostStep setupStep(hostProfiler(ctx), "setup: lhe ciphertext", &cpuBenchmark);
         const auto rCount = randomizers ? randomizers->count()
@@ -361,7 +364,7 @@ namespace osuCrypto::LogVole
                 noiseSeeds.resize(ct1.mPolys.size());
                 for (auto& seed : noiseSeeds) prng->get(seed.data(), seed.size());
                 if (!samplePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
+                    noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
             }
             // A coefficient tensor can stay on device only after its noise is
             // complete. Unsupported compact samplers still add errors below
@@ -384,11 +387,10 @@ namespace osuCrypto::LogVole
                 {
                     std::vector<seal::prng_seed_type> noiseSeeds(ct1.mPolys.size());
                     for (auto& seed : noiseSeeds) prng->get(seed.data(), seed.size());
-                    if (!detail::runParallelTasks(ct1.mPolys.size(), requestedWorkers,
-                        [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+                    if (!setupScratch.runBulk(ct1.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                             return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
                                 noiseMaxDeviation, noiseSeeds[idx], ctx);
-                        }, false, &cpuBenchmark)) return false;
+                        }, cpuBenchmark)) return false;
                 }
                 out = std::move(ct1);
                 if (deferredCiphertext) *deferredCiphertext = std::move(lazyCiphertext);
@@ -399,7 +401,7 @@ namespace osuCrypto::LogVole
         }
 #endif
         if (residentNoise && !materializePolyErrorCompactBatchForSetup(compactNoise, residentNoise,
-                noiseStandardDeviation, noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
+                noiseStandardDeviation, noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
         if (!publicANtt)
         {
             // A device decline keeps PRNG consumption unchanged, then builds
@@ -423,9 +425,9 @@ namespace osuCrypto::LogVole
         {
             shiftedR.resize(r.size());
             const u32 shiftWorkers = parallelLheSetupEnabled(options, ctx) ? requestedWorkers : 1;
-            if (!detail::runParallelTasks(r.size(), shiftWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+            if (!setupScratch.runBulk(r.size(), shiftWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     return multiplyByGPower(ctx, r[i], gadgetLogBase, rPowerOffset, shiftedR[i]);
-                }, false, &cpuBenchmark)) return false;
+                }, cpuBenchmark)) return false;
             rSource = &shiftedR;
         }
 
@@ -448,8 +450,7 @@ namespace osuCrypto::LogVole
             // Canonicalize each source once. Column zero then needs only a
             // copy; the remaining columns use SEAL's precomputed scalar
             // multiplier instead of a full modular multiply per coefficient.
-            if (!detail::runParallelTasks(rNtt.size(), requestedWorkers,
-                    [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) { return canonicalizePoly(rNtt[row], ctx); }, false, &cpuBenchmark))
+            if (!setupScratch.runBulk(rNtt.size(), requestedWorkers, [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) { return canonicalizePoly(rNtt[row], ctx); }, cpuBenchmark))
             {
                 return false;
             }
@@ -463,8 +464,7 @@ namespace osuCrypto::LogVole
                     factors[col][j].set(detail::pow2Mod(shift, moduli[j].value()), moduli[j]);
             }
 
-            if (!detail::runParallelTasks(ct1.mPolys.size(), requestedWorkers,
-                [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            if (!setupScratch.runBulk(ct1.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     const auto row = idx / ct1.mCols;
                     const auto col = idx % ct1.mCols;
                     auto& cNtt = ct1.mPolys[idx];
@@ -480,7 +480,7 @@ namespace osuCrypto::LogVole
                         }
                     }
                     return dyadicMultiplyAddNttInplace((*publicANtt)[row], sk1Ntt[col], cNtt, ctx);
-                }, false, &cpuBenchmark))
+                }, cpuBenchmark))
             {
                 return false;
             }
@@ -500,12 +500,11 @@ namespace osuCrypto::LogVole
                     noiseSeeds.resize(ct1.mPolys.size());
                     for (auto& seed : noiseSeeds) prng->get(seed.data(), seed.size());
                 }
-                if (!detail::runParallelTasks(ct1.mPolys.size(), requestedWorkers,
-                    [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+                if (!setupScratch.runBulk(ct1.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                         if (!compactNoise.empty()) return addCompactNoise(idx, ct1.mPolys[idx]);
                         return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
                             noiseMaxDeviation, noiseSeeds[idx], ctx);
-                    }, false, &cpuBenchmark))
+                    }, cpuBenchmark))
                 {
                     return false;
                 }
@@ -562,13 +561,13 @@ namespace osuCrypto::LogVole
         u32 requestedWorkers,
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext,
         std::shared_ptr<const LazyLencRandomizerState> randomizers,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark)
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lheEnc1Impl(ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
             noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 0u,
             deferredCiphertext, randomizers, nullptr, nullptr,
-            nullptr, nullptr, 0, false, options, cpuBenchmark);
+            nullptr, nullptr, 0, false, options, cpuBenchmark, cpuSetupScratch);
     }
 
     bool lheEnc1Trunc(
@@ -591,14 +590,14 @@ namespace osuCrypto::LogVole
         const LazyRootSecretHostState* rootSecretHost,
         u64 rootSecretOwnerRunId,
         bool topSecretDomain,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark)
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return lheEnc1Impl(ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
             noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 1u,
             deferredCiphertext, randomizers, rootR1Device, rootR1Host,
             rootSecretDevice, rootSecretHost, rootSecretOwnerRunId,
-            topSecretDomain, options, cpuBenchmark);
+            topSecretDomain, options, cpuBenchmark, cpuSetupScratch);
     }
 
     bool lheApplyCt1(

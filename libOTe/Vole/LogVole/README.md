@@ -217,8 +217,8 @@ Estimated overall completion: **71%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
-This inventory includes both committed steps and the remaining working-tree
-changes. A migrated synchronous wrapper is not a completed async migration.
+This inventory describes the committed tree. A migrated synchronous wrapper
+is not a completed async migration.
 The original 216-declaration globals snapshot remains in the local review
 artifacts; the current scan finds **26 runtime global/static/TLS declarations**.
 Counts cover source branches on both platforms, not fields within objects or
@@ -240,7 +240,7 @@ contain no environment reads.
 | Intermediate receiver denoise | Committed in `216ef876`; direct async `bulk_chunked`, one shared recovery-data preparation, unchanged unrolled row kernel, and alias-safe output publication. Legacy synchronous entry point is deprecated. |
 | Empty-moduli sentinel and CLI tags | Removed in `dd980823`; a borrowed modulus span and function-local tags replace the globals. |
 | Sender pinning evidence moved onto sender state | Reviewed and committed. `LogVoleSender::mRootWirePin` owns the result; low-level callers pass an exclusive reference. Shared evidence/mutex and snapshot API removed. Separate CUDA allocation evidence remains global. |
-| Offline setup migration | Uncommitted intermediate `CpuRowScratch::runBulk` implementation; still needs the explicit executor/buffer call-site pattern. |
+| Offline setup migration | Committed intermediate `CpuRowScratch::runBulk` implementation: setup owners reuse an exclusive workspace across sampling and arithmetic, and serial calls create no pool. Still needs the explicit executor/buffer call-site pattern and removal of the synchronous adapter. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -339,6 +339,15 @@ CPU checks for lazy start, failure reset, independent evidence, move and clear p
 in 3.33 seconds. GPU registration execution and WSL were not rerun. This finalizes
 an existing working-tree change; the working-tree inventory still has 26 runtime
 declarations because it already excluded these two globals.
+
+Working-tree reconciliation: the remaining offline setup changes and their
+regressions are committed together. Restored the already-committed sender
+expansion scope capture before lazy task start. CUDA-enabled Windows compilation
+and the example object pass; four focused tests pass in 3.60 seconds, covering
+serial/parallel setup agreement, exact PRNG progression, reusable executor,
+worker allowances, failure cleanup, recursive VOLE and early/full seed checking.
+No WSL or GPU runtime rerun. Overall completion remains 71% because this closes
+commit debt for work already counted rather than completing another migration.
 
 Next steps, in order:
 

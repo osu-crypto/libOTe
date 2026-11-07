@@ -252,11 +252,11 @@ namespace osuCrypto::LogVole
         double sigma,
         double maxDeviation,
         bool outputNtt,
-        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
     bool sampleRootErrorBatch(
         const RingNttContext& ctx, u32 count, PRNG& prng, double sigma,
         double maxDeviation, bool outputNtt, std::vector<RnsPoly>& out, u32 requestedWorkers,
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {});
+        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
 
     bool addScaledNttInplace(
         RnsPoly& accNtt,
@@ -287,7 +287,7 @@ namespace osuCrypto::LogVole
         const gpu::DeviceBatch* rootR1Device = nullptr,
         const LazyRootErrorHostState* rootR1Host = nullptr,
         const gpu::RetainedPublicUniform* retainedBStarNtt = nullptr,
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {});
+        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
 
     // requestedWorkers > 1 splits the coefficients across the worker pool, each
     // range drawing from its own PRNG keyed from `prng`. zeta is the receiver's
@@ -299,7 +299,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         PRNG& prng,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
+        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
 
     // Exact replay of sampleRootZeta's parallel path. `taskSeeds` is ordered as
     // [poly][range], with one independent cryptoTools AES-CTR PRNG per range.
@@ -316,7 +316,7 @@ namespace osuCrypto::LogVole
         u32 rangesPerPoly,
         std::vector<RnsPoly>& out,
         u32 requestedWorkers = 1,
-        bool forceFirstReject = false, CpuBenchmarkState cpuBenchmark = {});
+        bool forceFirstReject = false, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
 
     // outputNtt leaves the accumulator in the evaluation domain so a caller that
     // sums several inner products pays one inverse transform for the sum instead

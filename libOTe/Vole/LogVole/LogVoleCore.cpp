@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 
 #include "libOTe/config.h"
@@ -1130,8 +1131,10 @@ namespace osuCrypto::LogVole
         bool outputNtt,
         std::vector<RnsPoly>& out,
         u32 requestedWorkers,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark)
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
     {
+        detail::CpuRowScratch localSetupScratch;
+        auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (count == 0 || sigma < 0.0 || maxDeviation < 0.0)
         {
@@ -1155,7 +1158,7 @@ namespace osuCrypto::LogVole
             if (sigma > 0.0)
             {
                 if (!samplePolyErrorCompactBatchForSetup(compact, residentNoise, sigma, maxDeviation,
-                        seeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
+                        seeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
             }
             else compact.resize(static_cast<std::size_t>(count) * n, 0);
             if (compactRequested)
@@ -1171,10 +1174,10 @@ namespace osuCrypto::LogVole
                 if (compactStrict) return false;
             }
             if (residentNoise && !materializePolyErrorCompactBatchForSetup(compact, residentNoise,
-                    sigma, maxDeviation, seeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
-            if (!detail::runParallelTasks(count, requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+                    sigma, maxDeviation, seeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
+            if (!setupScratch.runBulk(count, requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     return expandPolyErrorCompact(std::span<const u64>(compact).subspan(i * n, n), next[i], ctx);
-                }, false, &cpuBenchmark) || (outputNtt && !forwardNttBatch(next, ctx))) return false;
+                }, cpuBenchmark) || (outputNtt && !forwardNttBatch(next, ctx))) return false;
             out = std::move(next);
             return true;
         }
@@ -1206,10 +1209,10 @@ namespace osuCrypto::LogVole
 
     bool sampleRootErrorBatch(
         const RingNttContext& ctx, u32 count, PRNG& prng, double sigma,
-        double maxDeviation, bool outputNtt, std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark)
+        double maxDeviation, bool outputNtt, std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        return sampleRootErrorBatch(ctx, count, prng, sigma, maxDeviation, outputNtt, out, 1, {}, cpuBenchmark);
+        return sampleRootErrorBatch(ctx, count, prng, sigma, maxDeviation, outputNtt, out, 1, {}, cpuBenchmark, cpuSetupScratch);
     }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1235,22 +1238,23 @@ namespace osuCrypto::LogVole
             {
                 CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(mCtx)};
                 std::call_once(mOnce, [&] {
+                    detail::CpuRowScratch setupScratch;
                     HostStep hostStep(hostProfiler(mCtx), "setup: root r1 explicit host fallback", &cpuBenchmark);
                     const std::size_t n = mCtx.mParams.mPolyModulusDegree;
                     if (!n || mCount > std::numeric_limits<std::size_t>::max() / n)
                         throw std::runtime_error("invalid Root r1 shape");
                     if (mSigma > 0.0 &&
                         !materializePolyErrorCompactBatchForSetup(mCompact,
-                            mResident, mSigma, mClip, mSeeds, mCtx, mWorkers, {}, cpuBenchmark))
+                            mResident, mSigma, mClip, mSeeds, mCtx, mWorkers, {}, cpuBenchmark, &setupScratch))
                         throw std::runtime_error("Root r1 compact host fallback failed");
                     if (mCompact.size() != mCount * n)
                         throw std::runtime_error("invalid Root r1 compact size");
                     std::vector<RnsPoly> next(mCount);
-                    if (!detail::runParallelTasks(mCount, mWorkers, [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) {
+                    if (!setupScratch.runBulk(mCount, mWorkers, [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) {
                             return expandPolyErrorCompact(
                                 std::span<const u64>(mCompact).subspan(row * n, n),
                                 next[row], mCtx);
-                        }, false, &cpuBenchmark)) throw std::runtime_error("Root r1 host expansion failed");
+                        }, cpuBenchmark)) throw std::runtime_error("Root r1 host expansion failed");
                     mHost = std::move(next);
                 });
                 return mHost;
@@ -1306,8 +1310,10 @@ namespace osuCrypto::LogVole
             const RingNttContext& ctx, u32 count, PRNG& prng, double sigma,
             double clip, u32 workers,
             std::shared_ptr<const LazyRootErrorHostState>& hostState,
-            gpu::DeviceBatchPtr& device, CpuBenchmarkState cpuBenchmark = {})
+            gpu::DeviceBatchPtr& device, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr)
         {
+            detail::CpuRowScratch localSetupScratch;
+            auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
             if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
             if (!count || !canSamplePolyErrorCompact(ctx, sigma, clip) ||
                 !ctx.mParams.mPolyModulusDegree ||
@@ -1322,7 +1328,7 @@ namespace osuCrypto::LogVole
             if (sigma > 0.0)
             {
                 if (!samplePolyErrorCompactBatchForSetup(compact, resident, sigma,
-                        clip, seeds, ctx, workers, {}, cpuBenchmark)) return false;
+                        clip, seeds, ctx, workers, {}, cpuBenchmark, &setupScratch)) return false;
             }
             else compact.resize(static_cast<std::size_t>(count) *
                 ctx.mParams.mPolyModulusDegree, 0);
@@ -1436,8 +1442,10 @@ namespace osuCrypto::LogVole
         const gpu::DeviceBatch* rootR1Device,
         const LazyRootErrorHostState* rootR1Host,
         const gpu::RetainedPublicUniform* retainedBStarNtt,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark)
+        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
     {
+        detail::CpuRowScratch localSetupScratch;
+        auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         HostStep setupStep(hostProfiler(ctx), "setup: root ciphertext", &cpuBenchmark);
         const auto r1Count = rootR1Host ? rootR1Host->count() : r1.size();
@@ -1564,7 +1572,7 @@ namespace osuCrypto::LogVole
                 noiseSeeds.resize(next.mPolys.size());
                 for (auto& seed : noiseSeeds) prng.get(seed.data(), seed.size());
                 if (!samplePolyErrorCompactBatchForSetup(compact, residentNoise, noiseStandardDeviation,
-                        noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
+                        noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
             }
             else compact.resize(next.mPolys.size() * n, 0);
         }
@@ -1572,13 +1580,12 @@ namespace osuCrypto::LogVole
         {
             std::vector<seal::prng_seed_type> noiseSeeds(next.mPolys.size());
             for (auto& seed : noiseSeeds) prng.get(seed.data(), seed.size());
-            if (!detail::runParallelTasks(next.mPolys.size(), requestedWorkers,
-                    [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            if (!setupScratch.runBulk(next.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                         auto& noise = next.mPolys[idx];
                         resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                         return addPolyErrorFromSeed(noise, noiseStandardDeviation,
                             noiseMaxDeviation, noiseSeeds[idx], ctx);
-                    }, false, &cpuBenchmark)) return false;
+                    }, cpuBenchmark)) return false;
             if (!deviceRequested && !forwardNttBatch(next.mPolys, ctx)) return false;
         }
 
@@ -1587,11 +1594,10 @@ namespace osuCrypto::LogVole
         {
             if (rootR1Host && !rootR1Device)
                 r1Host = &rootR1Host->hostCoefficients();
-            if (!batchNoise && !compactNoise && !detail::runParallelTasks(next.mPolys.size(), requestedWorkers,
-                    [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            if (!batchNoise && !compactNoise && !setupScratch.runBulk(next.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                         resizeZero(next.mPolys[idx].mCoeffs, ringPolyCoeffCount(ctx.mParams));
                         return true;
-                    }, false, &cpuBenchmark)) return false;
+                    }, cpuBenchmark)) return false;
             if (gpu::assembleRootTopCtDevice(ctx, *r1Host, r2NttInput, publicBRootNtt,
                     publicBStarNtt, gadgetLogBase, gadgetPowerOffset, next.mPolys, next.mPolys,
                     compact, residentNoise.get(), requestedWorkers, randomizers.get(),
@@ -1603,14 +1609,14 @@ namespace osuCrypto::LogVole
             }
             if (options.mRootDeviceStrict || compactStrict) return false;
             if (residentNoise && !materializePolyErrorCompactBatchForSetup(compact, residentNoise,
-                    noiseStandardDeviation, noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark)) return false;
+                    noiseStandardDeviation, noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
             // A declined device attempt preserves the exact sampled noise in
             // coefficient form. Transform it without drawing any new seeds.
             if (compactNoise && batchNoise &&
-                !detail::runParallelTasks(next.mPolys.size(), requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+                !setupScratch.runBulk(next.mPolys.size(), requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     const std::size_t n = ctx.mParams.mPolyModulusDegree;
                     return expandPolyErrorCompact(std::span<const u64>(compact).subspan(i * n, n), next.mPolys[i], ctx);
-                }, false, &cpuBenchmark)) return false;
+                }, cpuBenchmark)) return false;
             if (batchNoise && !forwardNttBatch(next.mPolys, ctx)) return false;
             if (rootR1Host) r1Host = &rootR1Host->hostCoefficients();
             r1Ntt = *r1Host;
@@ -1625,8 +1631,7 @@ namespace osuCrypto::LogVole
             ? publicBStarFallback : publicBStarNtt;
         const auto& r2Ntt = randomizers ? randomizers->hostNtt() : r2NttInput;
         if (r2Ntt.size() != leftWidth || !validateRingBatchShape(r2Ntt, ctx.mParams)) return false;
-        if (!detail::runParallelTasks(next.mPolys.size(), batchSetup ? requestedWorkers : 1,
-            [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+        if (!setupScratch.runBulk(next.mPolys.size(), batchSetup ? requestedWorkers : 1, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                 const u32 row = static_cast<u32>(idx / next.mCols);
                 const u32 col = static_cast<u32>(idx % next.mCols);
                 const RnsPoly& bNtt = (col < tauHi) ? publicBRootHost[col] : publicBStarHost[col - tauHi];
@@ -1663,7 +1668,7 @@ namespace osuCrypto::LogVole
 
                 next.mPolys[idx] = std::move(cellNtt);
                 return true;
-            }, false, &cpuBenchmark)) return false;
+            }, cpuBenchmark)) return false;
 
         out = std::move(next);
         return true;
@@ -1680,8 +1685,10 @@ namespace osuCrypto::LogVole
             u32 rangesPerPoly,
             std::vector<RnsPoly>& out,
             u32 requestedWorkers,
-            bool forceFirstReject, CpuBenchmarkState cpuBenchmark = {})
+            bool forceFirstReject, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr)
         {
+            detail::CpuRowScratch localSetupScratch;
+            auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
             if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
             if (randomizerWidth == 0 || gadgetLogBase == 0 || rangesPerPoly == 0)
             {
@@ -1787,10 +1794,9 @@ namespace osuCrypto::LogVole
 
             const std::size_t taskCount = taskSeeds.size();
             const std::size_t chunk = (n + rangesPerPoly - 1) / rangesPerPoly;
-            const bool ran = detail::runParallelTasks(
+            const bool ran = setupScratch.runBulk(
                 taskCount,
-                requestedWorkers,
-                [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark) {
+                requestedWorkers, [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark) {
                     const u32 polyIdx =
                         static_cast<u32>(taskIdx / rangesPerPoly);
                     const std::size_t rangeIdx = taskIdx % rangesPerPoly;
@@ -1802,7 +1808,7 @@ namespace osuCrypto::LogVole
                         local, polyIdx, begin, end,
                         forceFirstReject && taskIdx == 0u);
                     return true;
-                }, false, &cpuBenchmark);
+                }, cpuBenchmark);
             if (!ran)
             {
                 return false;
@@ -1821,12 +1827,12 @@ namespace osuCrypto::LogVole
         u32 rangesPerPoly,
         std::vector<RnsPoly>& out,
         u32 requestedWorkers,
-        bool forceFirstReject, CpuBenchmarkState cpuBenchmark)
+        bool forceFirstReject, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return sampleRootZetaImpl(
             ctx, randomizerWidth, gadgetLogBase, nullptr, taskSeeds,
-            rangesPerPoly, out, requestedWorkers, forceFirstReject, cpuBenchmark);
+            rangesPerPoly, out, requestedWorkers, forceFirstReject, cpuBenchmark, cpuSetupScratch);
     }
 
     bool sampleRootZeta(
@@ -1835,7 +1841,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         PRNG& prng,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
+        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         const u32 workers = (requestedWorkers > 1u) ? requestedWorkers : 1u;
@@ -1843,7 +1849,7 @@ namespace osuCrypto::LogVole
         {
             return sampleRootZetaImpl(
                 ctx, randomizerWidth, gadgetLogBase, &prng, {}, 1u, out,
-                1u, false, cpuBenchmark);
+                1u, false, cpuBenchmark, cpuSetupScratch);
         }
 
         // Draw every task key from the parent before any parallel work. This is
@@ -1854,7 +1860,7 @@ namespace osuCrypto::LogVole
         prng.get(taskSeeds.data(), taskSeeds.size());
         return sampleRootZetaFromTaskSeeds(
             ctx, randomizerWidth, gadgetLogBase, taskSeeds, workers, out,
-            workers, false, cpuBenchmark);
+            workers, false, cpuBenchmark, cpuSetupScratch);
     }
 
     bool rootInnerProductNtt(
@@ -1975,6 +1981,7 @@ namespace osuCrypto::LogVole
         RootOfflineMessage& message,
         bool deferRandomizerHost, CpuBenchmarkState cpuBenchmark)
     {
+        auto setupLease = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
         HostStep setupStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "setup sender: root total", &cpuBenchmark);
         u32 tauHi = 0;
         if (!computeTauHi(state.mParams, tauHi))
@@ -2084,7 +2091,7 @@ namespace osuCrypto::LogVole
                 true,
                 sharedPublicBFullNtt.get(),
                 workerThreads, deferRandomizerHost, deferRandomizerHost,
-                residentRootSkHi.get(), lazyRootSkHi.get(), se.mGpuSetup, cpuBenchmark))
+                residentRootSkHi.get(), lazyRootSkHi.get(), se.mGpuSetup, cpuBenchmark, &setupLease.cpuRows()))
         {
             return false;
         }
@@ -2143,13 +2150,13 @@ namespace osuCrypto::LogVole
         if (r1Eligible)
         {
             if (!sampleRootErrorBatchResident(ctx, leftWidth, prng, lencSigma,
-                    lencMaxDev, workerThreads, lazyR1, residentR1, cpuBenchmark) ||
+                    lencMaxDev, workerThreads, lazyR1, residentR1, cpuBenchmark, &setupLease.cpuRows()) ||
                 (r1Strict && !residentR1)) return false;
         }
         else
 #endif
         if (!sampleRootErrorBatch(ctx, leftWidth, prng, lencSigma,
-                lencMaxDev, false, r1, workerThreads, state.mParams.mShrinkExpand.mGpuSetup, cpuBenchmark)) return false;
+                lencMaxDev, false, r1, workerThreads, state.mParams.mShrinkExpand.mGpuSetup, cpuBenchmark, &setupLease.cpuRows())) return false;
 
         std::vector<RnsPoly> skRRt;
         std::shared_ptr<const LazyRootSecretHostState> lazySkRRt;
@@ -2212,7 +2219,7 @@ namespace osuCrypto::LogVole
                 deferRandomizerHost ? &lazyCtR : nullptr, {},
                 residentR1.get(), lazyR1.get(),
                 residentSkRRt.get(), residentSkRRt ? lazySkRRt.get() : nullptr,
-                skRRtOwnerRunId, false, se.mGpuSetup, cpuBenchmark))
+                skRRtOwnerRunId, false, se.mGpuSetup, cpuBenchmark, &setupLease.cpuRows()))
         {
             return false;
         }
@@ -2234,7 +2241,7 @@ namespace osuCrypto::LogVole
                 workerThreads, leftLenc.mLazyRandomizers,
                 deferRandomizerHost ? &lazyTopCt : nullptr,
                 retainedPublicBFullNtt.get(), residentR1.get(), lazyR1.get(),
-                retainedBStarNtt.get(), state.mParams.mShrinkExpand.mGpuSetup, cpuBenchmark))
+                retainedBStarNtt.get(), state.mParams.mShrinkExpand.mGpuSetup, cpuBenchmark, &setupLease.cpuRows()))
         {
             return false;
         }
@@ -2767,6 +2774,7 @@ namespace osuCrypto::LogVole
         if (!digestDone && zeta.empty() && seededZeta)
         {
             RootStep step("prep: sampleRootZeta seeded fallback", rootProfiler(ctx));
+            auto setupLease = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
             if (!sampleRootZetaFromTaskSeeds(
                     ctx,
                     state.mRootRandomizerWidth,
@@ -2775,7 +2783,7 @@ namespace osuCrypto::LogVole
                     zetaWorkers,
                     zeta,
                     zetaWorkers,
-                    forceFirstZetaReject, cpuBenchmark))
+                    forceFirstZetaReject, cpuBenchmark, &setupLease.cpuRows()))
             {
                 return false;
             }
