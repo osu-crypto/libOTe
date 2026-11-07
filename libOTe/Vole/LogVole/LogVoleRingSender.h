@@ -9,9 +9,9 @@ namespace osuCrypto::LogVole
     class LogVoleRingSender
     {
         task<> onlineStart(
-            macoro::thread_pool* executor, std::span<LheDecryptBuffer> buffers,
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
             SenderState& state, const SenderOnlineOptions& options,
-            SenderOnlineOutput& output, PRNG& prng, Socket& sock);
+            SenderOnlineOutput& output, PRNG& prng, Socket& sock, ProtocolCacheScope cacheScope);
 
     public:
         task<> offline(
@@ -38,21 +38,6 @@ namespace osuCrypto::LogVole
             macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
             SenderState& state, const SenderOnlineOptions& options,
             SenderOnlineOutput& output, PRNG& prng, Socket& sock);
-
-        [[deprecated("Use online with explicit executor and CPU buffers")]]
-        task<> online(
-            SenderState& state,
-            SenderOnlineOutput& output,
-            PRNG& prng,
-            Socket& sock);
-
-        [[deprecated("Use online with explicit executor and CPU buffers")]]
-        task<> online(
-            SenderState& state,
-            const SenderOnlineOptions& options,
-            SenderOnlineOutput& output,
-            PRNG& prng,
-            Socket& sock);
 
         // CPU resources are caller-owned and must outlive completion.
         // The existing GPU path does not use the executor or buffers.

@@ -662,7 +662,7 @@ namespace osuCrypto
         mState = State::Offline;
     }
 
-    task<> LogVoleSender::send(span<u64> b, PRNG& prng, Socket& sock)
+    task<> LogVoleSender::send(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, span<u64> b, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!hasOffline())
@@ -684,7 +684,7 @@ namespace osuCrypto
             // allocated, copied into mReleasedKeys, and copied again into b.
             options.mKeysOut = std::span<u64>(b.data(), b.size());
         }
-        co_await civoleSenderRelease(mOfflineState, sid, release, prng, sock, options, cpuBenchmark);
+        co_await civoleSenderRelease(executor, buffers, mOfflineState, sid, release, prng, sock, options, cpuBenchmark);
 
         mOutputDevice = release.mKeysDevice;
         mOutputDeviceCount = release.mKeysDeviceCount;
@@ -703,7 +703,7 @@ namespace osuCrypto
         mLastOnlineComm = release.mComm;
     }
 
-    task<> LogVoleSender::send(u64 delta, span<u64> b, PRNG& prng, Socket& sock)
+    task<> LogVoleSender::send(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, u64 delta, span<u64> b, PRNG& prng, Socket& sock)
     {
         if (!isConfigured())
         {
@@ -722,7 +722,7 @@ namespace osuCrypto
             throw std::runtime_error("LogVole CI-VOLE sender offline delta does not match requested delta");
         }
 
-        co_await send(b, prng, sock);
+        co_await send(executor, buffers, b, prng, sock);
     }
 
     void LogVoleSender::clear()
@@ -2237,6 +2237,7 @@ namespace osuCrypto::LogVole
     }
 
     task<> civoleSenderRelease(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         CivoleSenderState& state,
         CivoleSid sid,
         CivoleSenderReleaseOutput& output,
@@ -2254,8 +2255,6 @@ namespace osuCrypto::LogVole
         }
         state.mReleaseIntUsed = true;
 
-        ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Sender, sid);
-
         LogVoleRingSender sender{};
         SenderOnlineOutput online{};
         SenderOnlineOptions onlineOptions{};
@@ -2266,9 +2265,15 @@ namespace osuCrypto::LogVole
         onlineOptions.mUsePrecomputed = senderHasPrecompute(state.mLogVoleState);
         {
             HostStep step(hostProfiler(ctxOwner->mRing), "send: logvole online", &cpuBenchmark);
-            co_await sender.online(state.mLogVoleState, onlineOptions, online, prng, sock);
+            auto operation = [&] {
+                ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, sid);
+                return sender.online(executor, buffers, state.mLogVoleState,
+                    onlineOptions, online, prng, sock);
+            }();
+            co_await std::move(operation);
         }
 
+        ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Sender, sid);
         const auto& ctx = *ctxOwner;
         AlignedUnVec<u64> keys;
 

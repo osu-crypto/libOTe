@@ -462,7 +462,7 @@ namespace osuCrypto::LogVole
             PRNG& prng,
             CommunicationStats& comm,
             ProtocolCacheScope senderScope, CpuBenchmarkState cpuBenchmark,
-            macoro::thread_pool* executor, std::span<LheDecryptBuffer> buffers)
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers)
         {
             RecursiveMode mode{};
             if (!detail::recursiveMode(state.mParams, mode))
@@ -524,28 +524,25 @@ namespace osuCrypto::LogVole
                                 throw std::runtime_error("LogVole sender could not decode root digest");
                             }
                         }
-                        {
-                            HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: root response", &cpuBenchmark);
-                            AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
-                            const bool prepared = ownedFastPath
-                                ? prepareRootResponseSender(
-                                      state, std::move(digest), prng, response,
-                                      &precomputeRoot,
-                                      havePreK ? &preKPrime : nullptr,
-                                      /*deferPrecompute=*/true,
-                                      preKPrimeDevice, cpuBenchmark)
-                                : prepareRootResponseSender(
-                                      state, digest, prng, response,
-                                      &precomputeRoot,
-                                      havePreK ? &preKPrime : nullptr,
-                                      /*deferPrecompute=*/true,
-                                      preKPrimeDevice, cpuBenchmark);
-                            if (!prepared)
-                            {
-                                throw std::runtime_error("LogVole sender could not prepare root response");
-                            }
-                        }
-
+                    }
+                    {
+                        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: root response", &cpuBenchmark);
+                        AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
+                        auto preparation = [&] {
+                            ScopedProtocolCacheScope activeSender(senderScope);
+                            return ownedFastPath
+                                ? prepareRootResponseSender(executor, buffers, state, std::move(digest),
+                                    prng, response, &precomputeRoot, havePreK ? &preKPrime : nullptr,
+                                    true, preKPrimeDevice, cpuBenchmark)
+                                : prepareRootResponseSender(executor, buffers, state, digest,
+                                    prng, response, &precomputeRoot, havePreK ? &preKPrime : nullptr,
+                                    true, preKPrimeDevice, cpuBenchmark);
+                        }();
+                        if (!co_await std::move(preparation))
+                            throw std::runtime_error("LogVole sender could not prepare root response");
+                    }
+                    {
+                        ScopedProtocolCacheScope activeSender(senderScope);
                         if (!nonInteractive)
                         {
                             AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
@@ -569,24 +566,16 @@ namespace osuCrypto::LogVole
                     // Deferred by prepareRootResponseSender: the reply is already
                     // on the wire, so the receiver runs its finalize while this
                     // runs instead of waiting for it.
-                    if (executor && !gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
+                    if (state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed)
                     {
+                        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu sender: post-response precompute", &cpuBenchmark);
+                        AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
                         auto precompute = [&] {
                             ScopedProtocolCacheScope activeSender(senderScope);
-                            return senderPrecompute(*executor, buffers, precomputeRoot, prng, cpuBenchmark);
+                            return senderPrecompute(executor, buffers, precomputeRoot, prng, cpuBenchmark);
                         }();
                         if (!co_await std::move(precompute) || state.mGoldenSeed.empty())
                             throw std::runtime_error("LogVole sender could not prepare root response");
-                    }
-                    else
-                    {
-                        ScopedProtocolCacheScope activeSender(senderScope);
-                        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu sender: post-response precompute", &cpuBenchmark);
-                        AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
-                        if (!finishRootSenderPrecompute(state, prng, &precomputeRoot, cpuBenchmark))
-                        {
-                            throw std::runtime_error("LogVole sender could not prepare root response");
-                        }
                     }
                 }
                 comm.mBytesSent += responseFrameSize;
@@ -834,37 +823,20 @@ namespace osuCrypto::LogVole
     }
 
     task<> LogVoleRingSender::online(
-        SenderState& state,
-        SenderOnlineOutput& output,
-        PRNG& prng,
-        Socket& sock)
-    {
-        SenderOnlineOptions options{};
-        co_await online(state, options, output, prng, sock);
-    }
-
-    task<> LogVoleRingSender::online(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         SenderState& state, const SenderOnlineOptions& options,
         SenderOnlineOutput& output, PRNG& prng, Socket& sock)
     {
-        return onlineStart(&executor, buffers, state, options, output, prng, sock);
-    }
-
-    task<> LogVoleRingSender::online(
-        SenderState& state, const SenderOnlineOptions& options,
-        SenderOnlineOutput& output, PRNG& prng, Socket& sock)
-    {
-        return onlineStart(nullptr, {}, state, options, output, prng, sock);
+        return onlineStart(executor, buffers, state, options, output, prng, sock,
+            currentProtocolCacheScope());
     }
 
     task<> LogVoleRingSender::onlineStart(
-        macoro::thread_pool* executor, std::span<LheDecryptBuffer> buffers,
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         SenderState& state, const SenderOnlineOptions& options,
-        SenderOnlineOutput& output, PRNG& prng, Socket& sock)
+        SenderOnlineOutput& output, PRNG& prng, Socket& sock, ProtocolCacheScope cacheScope)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mShrinkExpandState.mRingFactoryOwner)};
-        ProtocolCacheScope cacheScope = currentProtocolCacheScope();
         if (cacheScope.mRunId == 0)
         {
             cacheScope.mRunId = allocateProtocolCacheRunId();

@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe_Tests/LogVole_TestOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
@@ -195,7 +196,7 @@ namespace
         bool deferPrecompute = false)
     {
         oc::PRNG prng(oc::block(0x5500, 0x5501));
-        return osuCrypto::LogVole::prepareRootResponseSender(
+        return tests_libOTe::logvole_test::prepareRootResponse(
             state, request, prng, response, nullptr, nullptr,
             deferPrecompute);
     }
@@ -207,7 +208,7 @@ namespace
         bool deferPrecompute = false)
     {
         oc::PRNG prng(oc::block(0x5500, 0x5501));
-        return osuCrypto::LogVole::prepareRootResponseSender(
+        return tests_libOTe::logvole_test::prepareRootResponse(
             state, std::move(request), prng, response, nullptr, nullptr,
             deferPrecompute);
     }
@@ -219,7 +220,7 @@ namespace
         oc::PRNG& senderPrng,
         oc::PRNG& receiverPrng,
         SenderOnlineOutput& senderOut,
-        ReceiverOnlineOutput& receiverOut, bool asyncSender = false)
+        ReceiverOnlineOutput& receiverOut)
     {
         LogVoleRingSender senderProtocol;
         LogVoleRingReceiver receiverProtocol;
@@ -254,12 +255,10 @@ namespace
         try
         {
             auto result = macoro::sync_wait(macoro::when_all_ready(
-                asyncSender ? senderProtocol.online(executor, senderBuffers, sender, senderOptions, senderOut, senderPrng, sockets[0]) :
-                    senderProtocol.online(sender, senderOptions, senderOut, senderPrng, sockets[0]),
+                senderProtocol.online(executor, senderBuffers, sender, senderOptions, senderOut, senderPrng, sockets[0]),
                 receiverProtocol.online(executor, lheBuffers, lencBuffers, receiver, input, receiverOut, receiverPrng, sockets[1])));
             std::get<0>(result).result();
             std::get<1>(result).result();
-            if (asyncSender)
             {
                 const auto cache = sender.mPrecomputedTbk;
                 const auto seed = sender.mGoldenSeed;
@@ -2559,7 +2558,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                     oc::PRNG badPrng(oc::block(0x76B0E1u, 0x76B0E2u));
                     oc::PRNG referencePrng(oc::block(0x76B0E1u, 0x76B0E2u));
                     RootResponseMessage unchangedResponse{};
-                    LOGVOLE_REQUIRE_FALSE(prepareRootResponseSender(
+                    LOGVOLE_REQUIRE_FALSE(tests_libOTe::logvole_test::prepareRootResponse(
                         wrongRun, badRequest, badPrng, unchangedResponse,
                         nullptr, nullptr, true));
                     LOGVOLE_EXPECT_TRUE(unchangedResponse.mSkPrimeCoeffs.empty());
@@ -2623,7 +2622,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 sample_batch(ctx, 1u, 0x76B0D1u)[0].mCoeffs;
             oc::PRNG responsePrng(oc::block(0x76B0D2u, 0x76B0D3u));
             RootResponseMessage onlineResponse{};
-            LOGVOLE_REQUIRE_TRUE(prepareRootResponseSender(
+            LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::prepareRootResponse(
                 nextSender, onlineRequest, responsePrng, onlineResponse,
                 nullptr, nullptr, true));
             result.mResponseWire = encode(onlineResponse);
@@ -3543,7 +3542,7 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
             ScopedProtocolCacheScope senderScope(
                 ProtocolCacheRole::Sender, runId);
             oc::PRNG senderPrng(oc::block(0x7D8204u, query));
-            LOGVOLE_REQUIRE_TRUE(prepareRootResponseSender(
+            LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::prepareRootResponse(
                 sender, digestMessage, senderPrng, response));
         }
         LOGVOLE_REQUIRE_TRUE(response.mSeed.empty());
@@ -3657,10 +3656,10 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         RootResponseMessage response;
         SenderOnlineOutput senderOutput;
         ReceiverOnlineOutput receiverOutput;
-        LOGVOLE_REQUIRE_TRUE(prepareRootOnlineSender(sender, request,
-            senderPrng, response, senderOutput));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(executor, prepareRootOnlineSender(executor, lheBuffers, sender, request,
+            senderPrng, response, senderOutput))));
         const auto cachedKeys = sender.mPrecomputedTbk;
-        LOGVOLE_REQUIRE_TRUE(senderPrecompute(sender, senderPrng));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(senderPrecompute(executor, lheBuffers, sender, senderPrng)));
         LOGVOLE_EXPECT_TRUE(sender.mPrecomputedTbk == cachedKeys);
         referenceState.mParams.mSessionId = query;
         ReceiverOnlineOutput reference;
@@ -5809,10 +5808,11 @@ void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
     options.mSkipTbkOutput = true;
 
     auto onlineSockets = coproto::LocalAsyncSocket::makePair();
+    tests_libOTe::logvole_test::SenderResources senderResources(params.mShrinkExpand.mRing);
     oc::PRNG senderOnlinePrng(oc::block(0x7D74u, 0));
     oc::PRNG receiverOnlinePrng(oc::block(0x7D75u, 0));
     auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.online(senderState, options, senderOnline, senderOnlinePrng, onlineSockets[0]),
+        sender.online(senderResources.executor, senderResources.buffers, senderState, options, senderOnline, senderOnlinePrng, onlineSockets[0]),
         receiver.online(receiverState, receiverOnlineInput, receiverOnline, receiverOnlinePrng, onlineSockets[1])));
     std::get<0>(onlineResult).result();
     std::get<1>(onlineResult).result();
@@ -5838,7 +5838,6 @@ void LogVole_Core_EarlyGoldenMatchesFullEvaluation(const oc::CLP&)
         SenderOnlineOutput referenceSender;
         ReceiverOnlineOutput referenceReceiver;
         std::array<oc::block, 2> referenceNext{};
-        for (const bool asyncSender : {false, true})
         for (const bool early : {false, true})
         {
             params.mEarlyGoldenCheck = early;
@@ -5864,9 +5863,9 @@ void LogVole_Core_EarlyGoldenMatchesFullEvaluation(const oc::CLP&)
             ReceiverOnlineOutput actualReceiver;
             LOGVOLE_REQUIRE_TRUE(run_socket_online_for_test(
                 sender.mState, receiver.mState, onlineInput,
-                senderPrng, receiverPrng, actualSender, actualReceiver, asyncSender));
+                senderPrng, receiverPrng, actualSender, actualReceiver));
             const std::array<oc::block, 2> next{senderPrng.get<oc::block>(), receiverPrng.get<oc::block>()};
-            if (!asyncSender && !early)
+            if (!early)
             {
                 referenceSender = std::move(actualSender);
                 referenceReceiver = std::move(actualReceiver);

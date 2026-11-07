@@ -75,8 +75,14 @@ plaintext prime. GoldenSeed with non-interactive mode is rejected.
 
 For interactive use, run `sender.offline(delta, senderPrng, senderSocket)` with
 `receiver.offline(receiverSocket)`, then run
-`sender.send(keys, senderPrng, senderSocket)` with
+`sender.send(executor, buffers, keys, senderPrng, senderSocket)` with
 `receiver.receive(x, macs, receiverPrng, receiverSocket)`.
+For CPU execution, keep an application-owned `macoro::thread_pool` running and
+prepare one `LheDecryptBuffer` per allowed partition. Size each
+`buffer.mProduct.mCoeffs` to `ringPolyCoeffCount(sender.mParams.mLogVole.mShrinkExpand.mRing)`.
+Pass the same pool and buffers to sequential sends; both must outlive the awaited
+operation. GPU execution accepts an idle pool and empty buffers. The garbled
+sender and ZK verifier APIs take these same explicit resources.
 Offline setup is reusable; sequential online calls consume distinct session IDs.
 Wrappers are move-only to prevent accidental copying of live session state.
 
@@ -225,7 +231,7 @@ contain no environment reads.
 | Offline setup migration | Uncommitted intermediate `CpuRowScratch::runBulk` implementation; still needs the explicit executor/buffer call-site pattern. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
-| Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; accepted seeds/caches and PRNG order match the legacy path. Synchronous entry points are deprecated; GPU execution retains its existing path. |
+| Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
 
 #### Remaining runtime globals
 
@@ -278,7 +284,7 @@ checks passed in 0.67 seconds. The LogVole target and changed frontend object
 compile on Windows; the full frontend target encounters unrelated DPF/Waterfall
 test compilation errors in this configuration. No WSL/GPU execution rerun.
 
-Sender migration validation: Windows CPU tests compare async and legacy output,
+Previous sender migration validation: Windows CPU tests compared the two entry points,
 seed/PRNG progression, cache reuse and malformed-root failure with early checking
 on/off and worker allowances 1, 2 and 4. Both protocol controllers and their workers
 share a single executor thread with disjoint reusable buffers. These checks passed
@@ -288,21 +294,34 @@ The local build needs `-DMACORO_GIT_TAG=codex/macoro-scope-lifetime` (or the
 corresponding published revision): coproto's dependency fetch otherwise checks out
 its older macoro revision, which lacks these algorithms.
 
+Higher-level sender migration also closes the GoldenSeed response boundary: it
+now awaits seed evaluation before encoding the response; PublicSeed still defers
+expansion until after sending. The earlier socket tests did not expose this gap
+because GoldenSeed preparation still took the synchronous path. There is now one
+CPU seed-evaluation implementation, reached through the explicit-resource API.
+The synchronous evaluator remains private to GPU sessions for their existing
+backend/fallback behavior. Other legacy setup, receiver and codec scheduling is
+outside this step.
+
+Validation for this step: the CUDA-enabled Windows test target and the public
+example compile. Three focused core tests pass in 11.83 seconds (early/full
+rejection and PRNG parity, cache/failure behavior, root reuse and single-thread
+execution). Two-query public GoldenSeed and NoGoldenSeed runs pass in 5.1 and
+41.3 seconds with stable caller buffer storage. The combined 60-second budget
+expired during the non-interactive case; its one-query rerun passes in 29.4
+seconds. No GPU runtime or WSL rerun, and no benchmarks.
+
 Next steps, in order:
 
-1. Wire caller-owned executor/buffers through higher-level sender users, then
-   retire the deprecated synchronous sender path. CPU seed evaluation itself
-   uses no internal blocking wait. Preserve the separate GPU path while its
-   completion model is migrated later.
-2. Thread the explicit executor/resources through the higher-level receiver
+1. Thread the explicit executor/resources through the higher-level receiver
    callers, then retire the deprecated online entry point. The recursive
    receiver shrink, denoise, and expansion phases now use the caller executor;
    other preparation/codec phases and legacy callers still need migration.
-3. Migrate coherent groups of remaining setup/proof/codec loops using direct
+2. Migrate coherent groups of remaining setup/proof/codec loops using direct
    `bulk_chunked` where appropriate. Discuss a different algorithm first if a
    loop does not fit. Retire `CpuRowScratch` scheduling and legacy overloads
    when their callers are gone.
-4. Remove the remaining global groups above in separate ownership changes.
+3. Remove the remaining global groups above in separate ownership changes.
    Small independent groups need not wait for all scheduling work to finish.
 
 The object-owned `ShrinkExpandScratch` leases and GPU worker maps are not

@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe_Tests/LogVole_TestOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleGarbled.h"
 #include "libOTe_Tests/LogVole_TestUtil.h"
@@ -63,6 +64,7 @@ void LogVole_Garbled_LayoutAndValidation(const oc::CLP&)
     osuCrypto::LogVoleOptions senderOptions;
     senderOptions.mRequestSize = 1;
     LogVoleGarbledSender sender(senderOptions);
+    tests_libOTe::logvole_test::SenderResources senderResources(sender.options());
     rejects([&] { sender.deltas(); });
 
     osuCrypto::LogVoleOptions receiverOptions;
@@ -105,6 +107,7 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
         senderOptions.mNumThreads = 2;
         senderOptions.mSetting = setting;
         LogVoleGarbledSender sender(senderOptions);
+        tests_libOTe::logvole_test::SenderResources senderResources(sender.options());
         LogVoleGarbledReceiver receiver(senderOptions);
         PRNG sp(block(871, 12)), rp(block(913, 65));
         auto setup = coproto::LocalAsyncSocket::makePair();
@@ -152,7 +155,7 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 #endif
             auto query = coproto::LocalAsyncSocket::makePair();
             const auto oldA = a.mScalars.data(), oldB = b.mScalars.data();
-            together(sender.send(b, sp, query[0]), receiver.receive(input, a, rp, query[1]));
+            together(sender.send(senderResources.executor, senderResources.buffers, b, sp, query[0]), receiver.receive(input, a, rp, query[1]));
             if (oldA && !receiver.mKeepOutputOnDevice) LOGVOLE_REQUIRE_TRUE(a.mScalars.data() == oldA);
             if (oldB && !sender.mKeepOutputOnDevice) LOGVOLE_REQUIRE_TRUE(b.mScalars.data() == oldB);
             a.wait(); b.wait();

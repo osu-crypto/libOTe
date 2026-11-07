@@ -63,7 +63,8 @@ namespace osuCrypto
         // Samples three independent uniform nonzero deltas from this private
         // PRNG and CRT-encodes their repeating triple into the leaf key.
         task<> offline(PRNG& prng, Socket& sock);
-        task<> send(LogVole::GarbledLabelBatch& zeroLabels, PRNG& prng, Socket& sock);
+        task<> send(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers,
+            LogVole::GarbledLabelBatch& zeroLabels, PRNG& prng, Socket& sock);
 
         u64 modulus() const { return mModulus; }
         u64 configureCacheRunId() const { return mConfigureCacheRunId; }

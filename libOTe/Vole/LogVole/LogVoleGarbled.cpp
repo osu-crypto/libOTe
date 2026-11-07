@@ -219,7 +219,7 @@ namespace osuCrypto
         mHasOffline = true;
     }
 
-    task<> LogVoleGarbledSender::send(GarbledLabelBatch& labels, PRNG& prng, Socket& sock)
+    task<> LogVoleGarbledSender::send(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, GarbledLabelBatch& labels, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!mHasOffline || mNextSid == std::numeric_limits<CivoleSid>::max())
@@ -235,7 +235,7 @@ namespace osuCrypto
             options.mKeysOut = {next.mScalars.data(), next.mScalars.size()};
         }
         CivoleSenderReleaseOutput released;
-        co_await civoleSenderRelease(mState, sid, released, prng, sock, options, cpuBenchmark);
+        co_await civoleSenderRelease(executor, buffers, mState, sid, released, prng, sock, options, cpuBenchmark);
         next.mDevice = std::move(released.mKeysDevice);
         next.mComm = released.mComm;
         if (!next.mDevice && mKeepOutputOnDevice) next.mScalars = std::move(mState.mReleasedKeys);

@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe/Vole/LogVole/LogVoleZk.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuZk.h"
@@ -198,6 +199,7 @@ namespace
         prover.mUseDevice = verifier.mUseDevice = device;
         prover.prepare(statement);
         verifier.prepare(statement);
+        tests_libOTe::logvole_test::SenderResources senderResources(verifier.mVole.options());
         const u64 p = prover.modulus(), delta = 19, maskIndex = statement.maskIndex();
         u32 maskCount = 1;
         if constexpr (!multiplication) maskCount = statement.repetitions();
@@ -256,9 +258,9 @@ namespace
                 : std::span<u64>(wires.data(), wires.size());
             auto verification = [&] {
                 if constexpr (multiplication)
-                    return verifier.verify(senderPrng, sockets[0]);
+                    return verifier.verify(senderResources.executor, senderResources.buffers, senderPrng, sockets[0]);
                 else
-                    return verifier.verify(publicProduct, senderPrng, sockets[0]);
+                    return verifier.verify(senderResources.executor, senderResources.buffers, publicProduct, senderPrng, sockets[0]);
             };
             auto online = macoro::sync_wait(macoro::when_all_ready(
                 verification(), prover.prove(hostInput, receiverPrng, sockets[1])));
@@ -648,6 +650,7 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
     {
         prover.prepare(statement);
         verifier.prepare(statement);
+        tests_libOTe::logvole_test::SenderResources senderResources(verifier.mVole.options());
         const auto request = prover.mVole.requestSize();
         LOGVOLE_REQUIRE_TRUE(!prover.mDeviceState && !verifier.mDeviceState);
         AlignedUnVec<u64> wires, publicProduct;
@@ -672,7 +675,7 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
             auto expectedProduct = publicProduct;
             if (corrupt) expectedProduct[0] = (expectedProduct[0] + 1) % prover.modulus();
             auto online = macoro::sync_wait(macoro::when_all_ready(
-                verifier.verify(expectedProduct, senderPrng, sockets[0]),
+                verifier.verify(senderResources.executor, senderResources.buffers, expectedProduct, senderPrng, sockets[0]),
                 prover.prove(wires, receiverPrng, sockets[1])));
             std::get<0>(online).result();
             std::get<1>(online).result();

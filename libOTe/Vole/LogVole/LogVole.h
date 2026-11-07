@@ -326,7 +326,11 @@ namespace osuCrypto
             Socket& sock);
 
         // Online phase after offline(). Writes sender keys b.
+        // Caller supplies an executor and exclusive ring-sized LHE products;
+        // reuse them across sequential queries. Keep them alive until completion.
+        // GPU execution does not use these CPU resources.
         task<> send(
+            macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers,
             span<u64> b,
             PRNG& prng,
             Socket& sock);
@@ -334,6 +338,7 @@ namespace osuCrypto
         // One-shot convenience entrypoint. Runs offline if needed, using the
         // size and protocol options supplied at construction.
         task<> send(
+            macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers,
             u64 delta,
             span<u64> b,
             PRNG& prng,
@@ -534,6 +539,7 @@ namespace osuCrypto::LogVole
         CivoleReleaseKOutput& output, CpuBenchmarkState cpuBenchmark = {});
 
     task<> civoleSenderRelease(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         CivoleSenderState& state,
         CivoleSid sid,
         CivoleSenderReleaseOutput& output,

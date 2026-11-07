@@ -383,11 +383,13 @@ namespace osuCrypto::LogVole
     // independent, and either missing operand takes its exact upload fallback.
     //
     // With `deferPrecompute` the recursive sender expansion is *not* run here, so
-    // the reply can go on the wire before it starts. Only legal in
+    // the reply can go on the wire before it starts. Honored only in
     // Ct2SeedMode::PublicSeed, where the reply carries no seed and therefore does
-    // not depend on the expansion; the caller must then call
-    // finishRootSenderPrecompute.
-    bool prepareRootResponseSender(
+    // not depend on the expansion; the caller must then await senderPrecompute.
+    // All referenced inputs and resources must remain
+    // alive through completion, including the consumed rvalue request below.
+    macoro::task<bool> prepareRootResponseSender(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         const SenderState& state,
         const RootDigestMessage& request,
         PRNG& prng,
@@ -395,13 +397,14 @@ namespace osuCrypto::LogVole
         const SenderState* precomputeRoot = nullptr,
         const RnsPoly* preSampledKPrime = nullptr,
         bool deferPrecompute = false,
-        const std::shared_ptr<void>& preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
+        std::shared_ptr<void> preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // Single-use production overload. After validating the wire shape, this
     // moves the decoded d' coefficients into the query state instead of copying
     // the full ring polynomial. The const overload above remains the public
     // retry/test path and never consumes its input.
-    bool prepareRootResponseSender(
+    macoro::task<bool> prepareRootResponseSender(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         const SenderState& state,
         RootDigestMessage&& request,
         PRNG& prng,
@@ -409,13 +412,7 @@ namespace osuCrypto::LogVole
         const SenderState* precomputeRoot = nullptr,
         const RnsPoly* preSampledKPrime = nullptr,
         bool deferPrecompute = false,
-        const std::shared_ptr<void>& preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
-
-    // The half of prepareRootResponseSender that deferPrecompute skipped.
-    bool finishRootSenderPrecompute(
-        const SenderState& state,
-        PRNG& prng,
-        const SenderState* precomputeRoot = nullptr, CpuBenchmarkState cpuBenchmark = {});
+        std::shared_ptr<void> preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // Draws the k'_Rt that prepareRootResponseSender would draw, so it can be
     // moved off the critical path.
@@ -547,15 +544,11 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         const SenderState& state, PRNG& prng, CpuBenchmarkState cpuBenchmark = {});
 
-    [[deprecated("Use senderPrecompute with explicit executor and buffers")]]
-    bool senderPrecompute(
-        SenderState& state,
-        PRNG& prng, CpuBenchmarkState cpuBenchmark = {});
-
     // True when a usable senderPrecompute() result is cached.
     bool senderHasPrecompute(const SenderState& state);
 
-    bool prepareRootOnlineSender(
+    macoro::task<bool> prepareRootOnlineSender(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         SenderState& state,
         const RootDigestMessage& request,
         PRNG& prng,

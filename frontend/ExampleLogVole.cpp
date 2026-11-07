@@ -16,6 +16,7 @@
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "macoro/sync_wait.h"
 #include "macoro/when_all.h"
+#include "macoro/thread_pool.h"
 
 #include <algorithm>
 #include <chrono>
@@ -119,6 +120,16 @@ namespace osuCrypto
             options.mSetting = logVoleExampleSetting(cmd);
             options.mMode = logVoleExampleMode(cmd);
             LogVoleSender sender(options);
+            macoro::thread_pool executor;
+            auto work = executor.make_work();
+            std::vector<LheDecryptBuffer> buffers;
+            if (!options.mUseGpu)
+            {
+                buffers.resize(workerThreads);
+                for (auto& buffer : buffers)
+                    buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(sender.mParams.mLogVole.mShrinkExpand.mRing));
+                executor.create_threads(workerThreads);
+            }
             LogVoleReceiver receiver(options);
             const u64 modulus = sender.modulus();
             const auto w = static_cast<u64>(numVole);
@@ -147,7 +158,7 @@ namespace osuCrypto
             // The online phase sends the receiver's digest and returns the
             // matching sender key. The parties then locally expand to w labels.
             auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
-                sender.send(b, senderPrng, onlineSockets[0]),
+                sender.send(executor, buffers, b, senderPrng, onlineSockets[0]),
                 receiver.receive(x, a, receiverPrng, onlineSockets[1])));
             std::get<0>(onlineResult).result();
             std::get<1>(onlineResult).result();
@@ -210,12 +221,22 @@ namespace osuCrypto
 
         if (role == Role::Sender)
         {
+            macoro::thread_pool executor;
+            auto work = executor.make_work();
+            std::vector<LheDecryptBuffer> buffers;
+            if (!options.mUseGpu)
+            {
+                buffers.resize(workerThreads);
+                for (auto& buffer : buffers)
+                    buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(sender.mParams.mLogVole.mShrinkExpand.mRing));
+                executor.create_threads(workerThreads);
+            }
             LogVole::AlignedUnVec<u64> b(w);
             PRNG prng(sysRandomSeed());
             // Split-role mode mirrors the local example over an asio socket.
             // The receiver must use the same n, plaintext bit count and port.
             cp::sync_wait(sender.offline(delta, prng, chl));
-            cp::sync_wait(sender.send(b, prng, chl));
+            cp::sync_wait(sender.send(executor, buffers, b, prng, chl));
 
             const auto end = timer.setTimePoint("logvole.end");
             const auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();

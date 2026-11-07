@@ -920,7 +920,7 @@ namespace osuCrypto::LogVole
 #endif
         };
 
-        bool ensureSenderPrecomputeImpl(
+        bool ensureSenderGpuPrecompute(
             const SenderState& state,
             PRNG& prng, CpuBenchmarkState cpuBenchmark = {});
 
@@ -3016,7 +3016,6 @@ namespace osuCrypto::LogVole
         RootResponseMessage& response,
         const SenderState* precomputeRoot,
         const RnsPoly* preSampledKPrime,
-        bool deferPrecompute,
         const std::shared_ptr<void>& preSampledKPrimeDevice, CpuBenchmarkState cpuBenchmark = {})
     {
         // Never let a failed new response attempt retain ownership of an older
@@ -3176,16 +3175,10 @@ namespace osuCrypto::LogVole
             }
         }
 
-        // GoldenSeed's reply carries the seed the search settled on, so the
-        // expansion has to finish first. PublicSeed's does not.
-        const bool defer =
-            deferPrecompute &&
-            state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed;
-
         // Every response fixes a new root key and digest. Any expansion kept
         // from the preceding query, including intermediate recursion levels,
         // belongs to those old inputs even if the caller reused the same SID.
-        // A deferred response clears once here; finishRootSenderPrecompute can
+        // A deferred response clears once here; senderPrecompute can
         // then reuse its completed result while releasing this query's keys.
         clearSenderExpansionCaches(precomputeRoot ? *precomputeRoot : state);
 
@@ -3202,19 +3195,8 @@ namespace osuCrypto::LogVole
         state.mRootDPrimeHash = haveDeviceDigestHash ? deviceDigestHash : hashSeedDigest(dPrime);
         state.mRootDPrimeHashValid = true;
         state.mRootDPrimeRt = std::make_shared<RnsPoly>(std::move(dPrime));
-        if (!defer && !finishRootSenderPrecompute(state, prng, precomputeRoot, cpuBenchmark))
-        {
-            return false;
-        }
 
         RootResponseMessage next{};
-        // PublicSeed sends no seed: the receiver derives the same bytes from the
-        // transcript. This is the "zero ct2 communication" the setting is named
-        // for; GoldenSeed has to ship the seed it settled on.
-        if (state.mParams.mCt2SeedMode != Ct2SeedMode::PublicSeed)
-        {
-            assignRange(next.mSeed, state.mGoldenSeed.begin(), state.mGoldenSeed.end());
-        }
         {
             HostStep step(hostProfiler(ctx), "send: root pack skPrime", &cpuBenchmark);
             if (ownedRequest)
@@ -3233,48 +3215,60 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool prepareRootResponseSender(
-        const SenderState& state,
-        const RootDigestMessage& request,
-        PRNG& prng,
-        RootResponseMessage& response,
-        const SenderState* precomputeRoot,
-        const RnsPoly* preSampledKPrime,
-        bool deferPrecompute,
-        const std::shared_ptr<void>& preSampledKPrimeDevice, CpuBenchmarkState cpuBenchmark)
+    static macoro::task<bool> prepareRootResponseAsync(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const SenderState& state, const RootDigestMessage& request,
+        RootDigestMessage* ownedRequest, PRNG& prng, RootResponseMessage& response,
+        const SenderState* precomputeRoot, const RnsPoly* preSampledKPrime,
+        bool deferPrecompute, std::shared_ptr<void> preSampledKPrimeDevice,
+        CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope)
     {
-        return prepareRootResponseSenderImpl(
-            state,
-            request,
-            nullptr,
-            prng,
-            response,
-            precomputeRoot,
-            preSampledKPrime,
-            deferPrecompute,
-            preSampledKPrimeDevice, cpuBenchmark);
+        RootResponseMessage next;
+        {
+            ScopedProtocolCacheScope scope(cacheScope);
+            if (!prepareRootResponseSenderImpl(state, request, ownedRequest, prng,
+                    next, precomputeRoot, preSampledKPrime,
+                    preSampledKPrimeDevice, cpuBenchmark)) co_return false;
+        }
+        // GoldenSeed must finish before the reply can carry its accepted seed.
+        // PublicSeed can send its seed-independent reply before expansion.
+        if (!deferPrecompute || state.mParams.mCt2SeedMode != Ct2SeedMode::PublicSeed)
+        {
+            auto expansion = [&] {
+                ScopedProtocolCacheScope scope(cacheScope);
+                return senderPrecompute(executor, buffers,
+                    precomputeRoot ? *precomputeRoot : state, prng, cpuBenchmark);
+            }();
+            if (!co_await std::move(expansion) || state.mGoldenSeed.empty()) co_return false;
+        }
+        if (state.mParams.mCt2SeedMode != Ct2SeedMode::PublicSeed)
+            assignRange(next.mSeed, state.mGoldenSeed.begin(), state.mGoldenSeed.end());
+        response = std::move(next);
+        co_return true;
     }
 
-    bool prepareRootResponseSender(
-        const SenderState& state,
-        RootDigestMessage&& request,
-        PRNG& prng,
-        RootResponseMessage& response,
-        const SenderState* precomputeRoot,
-        const RnsPoly* preSampledKPrime,
-        bool deferPrecompute,
-        const std::shared_ptr<void>& preSampledKPrimeDevice, CpuBenchmarkState cpuBenchmark)
+    macoro::task<bool> prepareRootResponseSender(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const SenderState& state, const RootDigestMessage& request, PRNG& prng,
+        RootResponseMessage& response, const SenderState* precomputeRoot,
+        const RnsPoly* preSampledKPrime, bool deferPrecompute,
+        std::shared_ptr<void> preSampledKPrimeDevice, CpuBenchmarkState cpuBenchmark)
     {
-        return prepareRootResponseSenderImpl(
-            state,
-            request,
-            &request,
-            prng,
-            response,
-            precomputeRoot,
-            preSampledKPrime,
-            deferPrecompute,
-            preSampledKPrimeDevice, cpuBenchmark);
+        return prepareRootResponseAsync(executor, buffers, state, request, nullptr,
+            prng, response, precomputeRoot, preSampledKPrime, deferPrecompute,
+            std::move(preSampledKPrimeDevice), cpuBenchmark, currentProtocolCacheScope());
+    }
+
+    macoro::task<bool> prepareRootResponseSender(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const SenderState& state, RootDigestMessage&& request, PRNG& prng,
+        RootResponseMessage& response, const SenderState* precomputeRoot,
+        const RnsPoly* preSampledKPrime, bool deferPrecompute,
+        std::shared_ptr<void> preSampledKPrimeDevice, CpuBenchmarkState cpuBenchmark)
+    {
+        return prepareRootResponseAsync(executor, buffers, state, request, &request,
+            prng, response, precomputeRoot, preSampledKPrime, deferPrecompute,
+            std::move(preSampledKPrimeDevice), cpuBenchmark, currentProtocolCacheScope());
     }
 
     bool sampleRootResponseKPrime(const SenderState& state, PRNG& prng, RnsPoly& out,
@@ -3338,15 +3332,6 @@ namespace osuCrypto::LogVole
         return false;
     }
 
-    bool finishRootSenderPrecompute(
-        const SenderState& state,
-        PRNG& prng,
-        const SenderState* precomputeRoot, CpuBenchmarkState cpuBenchmark)
-    {
-        HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: ensurePrecompute", &cpuBenchmark);
-        const SenderState& precomputeState = precomputeRoot ? *precomputeRoot : state;
-        return ensureSenderPrecomputeImpl(precomputeState, prng, cpuBenchmark) && !state.mGoldenSeed.empty();
-    }
 
     bool computeRootSenderKey(
         const SenderState& state,
@@ -3710,7 +3695,7 @@ namespace osuCrypto::LogVole
                     next.mValidationPending = deferThisValidation;
                     // mPrecomputedTbk only has to be non-null for the levels
                     // below the top; the top level's host copy is materialised by
-                    // ensureSenderPrecomputeImpl.
+                    // ensureSenderGpuPrecompute.
                     if (!deferThisValidation)
                         state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>();
                     out = std::move(next);
@@ -3832,7 +3817,7 @@ namespace osuCrypto::LogVole
             next.mValid = true;
             finalTbk.resize(state.mParams.mW);
             // Child caches support the recursive precompute API. At the top,
-            // ensureSenderPrecomputeImpl immediately takes ownership of mTbk;
+            // ensureSenderGpuPrecompute immediately takes ownership of mTbk;
             // making another copy here only to overwrite it was redundant.
             if (retainHostCache)
                 state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(finalTbk);
@@ -3987,10 +3972,13 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        bool ensureSenderPrecomputeImpl(
+        bool ensureSenderGpuPrecompute(
             const SenderState& state,
             PRNG& prng, CpuBenchmarkState cpuBenchmark)
         {
+            // This legacy implementation includes the existing GPU host fallback.
+            // CPU sessions use only the explicit-executor async implementation.
+            if (!gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner)) return false;
             if (state.mPrecomputedTbk &&
                 (!state.mPrecomputedTbk->empty() || state.mPrecomputedTbkDevice))
             {
@@ -5209,7 +5197,7 @@ namespace osuCrypto::LogVole
             if (gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
             {
                 ScopedProtocolCacheScope scope(cacheScope);
-                co_return ensureSenderPrecomputeImpl(state, prng, cpuBenchmark);
+                co_return ensureSenderGpuPrecompute(state, prng, cpuBenchmark);
             }
             if (buffers.empty()) co_return false;
             RecursiveSeedEvalOutput eval;
@@ -5251,17 +5239,13 @@ namespace osuCrypto::LogVole
             currentProtocolCacheScope(), cpuBenchmark);
     }
 
-    bool senderPrecompute(SenderState& state, PRNG& prng, CpuBenchmarkState cpuBenchmark)
-    {
-        return ensureSenderPrecomputeImpl(state, prng, cpuBenchmark);
-    }
-
     bool senderHasPrecompute(const SenderState& state)
     {
         return static_cast<bool>(state.mPrecomputedTbk) && !state.mGoldenSeed.empty();
     }
 
-    bool prepareRootOnlineSender(
+    macoro::task<bool> prepareRootOnlineSender(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         SenderState& state,
         const RootDigestMessage& request,
         PRNG& prng,
@@ -5269,10 +5253,10 @@ namespace osuCrypto::LogVole
         SenderOnlineOutput& out, CpuBenchmarkState cpuBenchmark)
     {
         if (!ensureRootSenderPrecompute(state) ||
-            !prepareRootResponseSender(state, request, prng, response, nullptr, nullptr, false, {}, cpuBenchmark) ||
+            !co_await prepareRootResponseSender(executor, buffers, state, request, prng, response, nullptr, nullptr, false, {}, cpuBenchmark) ||
             !state.mPrecomputedTbk)
         {
-            return false;
+            co_return false;
         }
 
         SenderOnlineOutput next{};
@@ -5284,7 +5268,7 @@ namespace osuCrypto::LogVole
         next.mTbkDevice = state.mPrecomputedTbkDevice;
         next.mTbkCount = state.mPrecomputedTbkCount;
         out = std::move(next);
-        return true;
+        co_return true;
     }
 
     static ShrinkExpandExpandReceiverInput rootReceiverExpansionInput(

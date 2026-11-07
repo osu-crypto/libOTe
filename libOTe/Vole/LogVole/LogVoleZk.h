@@ -552,7 +552,7 @@ namespace osuCrypto
         u64 voleRequest() const { return mVoleRequest; }
 
         task<> offline(u64 delta, PRNG& prng, Socket& sock);
-        task<> verify(PRNG& prng, Socket& sock);
+        task<> verify(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;
@@ -639,7 +639,7 @@ namespace osuCrypto
         task<> offline(u64 delta, PRNG& prng, Socket& sock);
         // Snapshot the application's public C before authentication/challenge.
         // C must contain exactly mDim*mDim canonical field elements.
-        task<> verify(std::span<const u64> publicProduct, PRNG& prng, Socket& sock);
+        task<> verify(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, std::span<const u64> publicProduct, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;
