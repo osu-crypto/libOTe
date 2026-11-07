@@ -245,18 +245,20 @@ namespace osuCrypto::LogVole
         const RingParams& ring,
         std::vector<RnsPoly>& out);
 
-    bool sampleRootErrorBatch(
+    macoro::task<bool> sampleRootErrorBatch(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const RingNttContext& ctx,
         u32 count,
         PRNG& prng,
         double sigma,
         double maxDeviation,
         bool outputNtt,
-        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
-    bool sampleRootErrorBatch(
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+    macoro::task<bool> sampleRootErrorBatch(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const RingNttContext& ctx, u32 count, PRNG& prng, double sigma,
         double maxDeviation, bool outputNtt, std::vector<RnsPoly>& out, u32 requestedWorkers,
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
     bool addScaledNttInplace(
         RnsPoly& accNtt,
@@ -268,7 +270,8 @@ namespace osuCrypto::LogVole
 
     bool negateNttInplace(RnsPoly& polyNtt, const RingNttContext& ctx);
 
-    bool buildRootTopCt(
+    macoro::task<bool> buildRootTopCt(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& r1,
         const std::vector<RnsPoly>& r2Ntt,
@@ -287,7 +290,7 @@ namespace osuCrypto::LogVole
         const gpu::DeviceBatch* rootR1Device = nullptr,
         const LazyRootErrorHostState* rootR1Host = nullptr,
         const gpu::RetainedPublicUniform* retainedBStarNtt = nullptr,
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
     // requestedWorkers > 1 splits the coefficients across the worker pool, each
     // range drawing from its own PRNG keyed from `prng`. zeta is the receiver's
@@ -328,11 +331,12 @@ namespace osuCrypto::LogVole
         RnsPoly& out,
         bool outputNtt = false);
 
-    bool prepareRootOfflineSender(
+    macoro::task<bool> prepareRootOfflineSender(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         SenderState& state,
         PRNG& prng,
         RootOfflineMessage& message,
-        bool deferRandomizerHost = false, CpuBenchmarkState cpuBenchmark = {});
+        bool deferRandomizerHost = false, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
     bool finalizeRootOfflineReceiver(
         ReceiverState& state,
@@ -458,10 +462,11 @@ namespace osuCrypto::LogVole
         std::span<const u8> seed,
         RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark = {});
 
-    bool prepareSenderOffline(
+    macoro::task<bool> prepareSenderOffline(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const SenderOfflineInput& input,
         PRNG& prng,
-        SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
+        SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
     // Explicit inspection of a selected internal top-key owner. This fills
     // independent mutable key vectors only after device setup/recursion ends.
     bool materializeSenderTopSk1HostViews(SenderState& state);
@@ -471,10 +476,11 @@ namespace osuCrypto::LogVole
         // Socket-only preparation: explicit internal GPU inputs may return
         // encoded shrink/expand messages for ownership transfer to transport.
         // Public prepareSenderOffline always returns mutable message tensors.
-        bool prepareSenderOfflineForTransport(
+        macoro::task<bool> prepareSenderOfflineForTransport(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
             const SenderOfflineInput& input,
             PRNG& prng,
-            SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
+            SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
     }
 
     bool finalizeReceiverOffline(

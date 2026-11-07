@@ -1802,9 +1802,10 @@ namespace osuCrypto
 #endif
     }
 
-    task<> ZkMulVerifier::offline(u64 delta, PRNG& prng, Socket& sock)
+    task<> ZkMulVerifier::offline(macoro::thread_pool &executor, std::span<u8> setupResults, u64 delta,
+                                  PRNG &prng, Socket &sock)
     {
-        co_await mVole.offline(delta, prng, sock);
+        co_await mVole.offline(executor, setupResults, delta, prng, sock);
     }
 
     task<> ZkMulVerifier::verify(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, PRNG& prng, Socket& sock)
@@ -2066,9 +2067,10 @@ namespace osuCrypto
 #endif
     }
 
-    task<> ZkMatMulVerifier::offline(u64 delta, PRNG& prng, Socket& sock)
+    task<> ZkMatMulVerifier::offline(macoro::thread_pool &executor, std::span<u8> setupResults, u64 delta,
+                                     PRNG &prng, Socket &sock)
     {
-        co_await mVole.offline(delta, prng, sock);
+        co_await mVole.offline(executor, setupResults, delta, prng, sock);
     }
 
     task<> ZkMatMulVerifier::verify(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, std::span<const u64> publicProduct, PRNG& prng, Socket& sock)

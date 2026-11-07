@@ -322,7 +322,10 @@ namespace osuCrypto
         LogVole::OnlineMode mode() const { return mParams.mLogVole.mOnlineMode; }
 
         // Run reusable offline setup for this sender's Delta.
-        task<> offline(
+        // Borrow the executor and nonempty exclusive status storage until joined.
+        // One byte bounds one CPU chunk; a single byte executes inline. Reuse
+        // this storage across sequential setups, and await every started task.
+        task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults,
             u64 delta,
             PRNG& prng,
             Socket& sock);
@@ -340,7 +343,7 @@ namespace osuCrypto
         // One-shot convenience entrypoint. Runs offline if needed, using the
         // size and protocol options supplied at construction.
         task<> send(
-            macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers,
+            macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, std::span<u8> setupResults,
             u64 delta,
             span<u64> b,
             PRNG& prng,
@@ -531,6 +534,7 @@ namespace osuCrypto::LogVole
     // Low-level CI-VOLE state-machine API. Applications should normally prefer
     // osuCrypto::LogVoleSender and osuCrypto::LogVoleReceiver above.
     task<> civoleSenderOffline(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
         PRNG& prng,

@@ -58,6 +58,11 @@ namespace
         LogVoleOptions options;
         options.mCpuBenchmark = instrument ? &senderTelemetry : nullptr;
         options.mUseGpu = device;
+        if (cmd.getOr("setup_parallel", false))
+        {
+            options.mAdvanced.mGpuSetup.mParallelLhe = LogVoleChoice::Enabled;
+            options.mAdvanced.mGpuSetup.mParallelLenc = LogVoleChoice::Enabled;
+        }
         options.mAdvanced.mProtocol.mRootProfile = cmd.getOr("lvRootProfile", 0) != 0;
         options.mAdvanced.mHostStepProfile = cmd.getOr("lvHostProfile", 0) != 0;
 
@@ -92,13 +97,18 @@ namespace
         LOGVOLE_REQUIRE_FALSE(receiverFactory.expired());
         originalSender.mKeepOutputOnDevice = device;
         originalReceiver.mKeepOutputOnDevice = device;
+        tests_libOTe::logvole_test::SenderResources senderResources(originalSenderOptions);
+        auto onPool = [&](macoro::task<> operation) -> macoro::task<> {
+            if (!device) co_await senderResources.executor.schedule();
+            co_await std::move(operation);
+        };
         PRNG senderPrng(toBlock(100 ^ seed, 200)), receiverPrng(toBlock(300 ^ seed, 400));
         PRNG inputPrng(toBlock(500 ^ seed, 600));
         auto offline = coproto::LocalAsyncSocket::makePair();
         {
             auto setup = macoro::sync_wait(macoro::when_all_ready(
-                originalSender.offline(delta, senderPrng, offline[0]),
-                originalReceiver.offline(offline[1])));
+                onPool(originalSender.offline(senderResources.executor, senderResources.setupResults, delta, senderPrng, offline[0])),
+                onPool(originalReceiver.offline(offline[1]))));
             std::get<0>(setup).result();
             std::get<1>(setup).result();
         }
@@ -138,7 +148,6 @@ namespace
         LOGVOLE_REQUIRE_TRUE(pinRun != 0);
         // Moving an established session must retain the new backend/mode state.
         LogVoleSender sender(std::move(originalSender));
-        tests_libOTe::logvole_test::SenderResources senderResources(sender.options());
         tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(sender.options());
         LogVoleReceiver receiver;
         receiver = std::move(originalReceiver);
@@ -164,10 +173,6 @@ namespace
             ciphertextStorage.push_back(buffer.mCiphertexts.data());
             nodeStorage.push_back(buffer.mNodes.data());
         }
-        auto onPool = [&](macoro::task<> operation) -> macoro::task<> {
-            if (!device) co_await senderResources.executor.schedule();
-            co_await std::move(operation);
-        };
         for (u64 round = 0; round != rounds; ++round)
         {
             for (u64 i = 0; i != count; ++i)
@@ -406,7 +411,7 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         try
         {
             if constexpr (std::is_same_v<Party, LogVoleSender>)
-                macoro::sync_wait(original.send(senderResources.executor, senderResources.buffers, 1, wrongSize, prng, sockets[0]));
+                macoro::sync_wait(original.send(senderResources.executor, senderResources.buffers, senderResources.setupResults, 1, wrongSize, prng, sockets[0]));
             else
                 macoro::sync_wait(original.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, wrongSize, wrongSize, prng, sockets[0]));
         }

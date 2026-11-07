@@ -2,6 +2,7 @@
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/config.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
 #include "libOTe/Tools/CpuCapabilities.h"
@@ -9,6 +10,8 @@
 #include "cryptoTools/Crypto/PRNG.h"
 
 #include "seal/seal.h"
+#include "macoro/task.h"
+#include "macoro/thread_pool.h"
 
 #include <atomic>
 #include <array>
@@ -510,25 +513,39 @@ namespace osuCrypto::LogVole
     // Batched exact Gaussian draws. The GPU may expand matching AES prefixes;
     // the unchanged CPU normal transform consumes them, with exact continuation
     // from the original seed if a prefix runs out. Inactive rows are untouched.
-    // Optional exclusive CPU workspace is borrowed only until the call returns.
-    // Setup owners pass it through successive sampling/arithmetic phases.
-    bool samplePolyErrorCompactBatchFromSeeds(
+    // Lazy async setup: borrow executor, status bytes and all operands until joined.
+    // Each chunk exclusively writes one status byte. A single chunk runs inline.
+    // Await started work before destroying it or reusing the borrowed storage.
+    // setupResults must be nonempty and may be reused by sequential phases.
+    // requestedWorkers and the optional benchmark cap further bound its size.
+    // setupScope captures the legacy cache identity before lazy execution;
+    // its temporary TLS guard is never retained across a suspension.
+    macoro::task<bool> samplePolyErrorCompactBatchFromSeeds(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         std::span<u64> limb0, double noiseStandardDeviation, double noiseMaxDeviation,
         std::span<const seal::prng_seed_type> seeds, const RingNttContext& ctx,
-        u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+        u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
     // Owned setup samples: resident selection publishes an empty host vector
     // and a completed device buffer; fallback publishes host data and no device.
     // Inactive rows are zero. Invalid/strict failure preserves both outputs.
-    bool samplePolyErrorCompactBatchForSetup(
+    macoro::task<bool> samplePolyErrorCompactBatchForSetup(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         std::vector<u64>& host, std::shared_ptr<gpu::DeviceScalars>& device,
         double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
-        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
     // Materialize only when a downstream device operation declined. A failed
     // device fetch replays these original seeds on CPU without parent draws.
-    bool materializePolyErrorCompactBatchForSetup(
+    macoro::task<bool> materializePolyErrorCompactBatchForSetup(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         std::vector<u64>& host, const std::shared_ptr<gpu::DeviceScalars>& device,
         double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
-        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+    // Legacy GPU lazy materialization only; normal setup awaits the overload above.
+    bool materializePolyErrorCompactBatchForSetupLegacy(
+        std::vector<u64>& host, const std::shared_ptr<gpu::DeviceScalars>& device,
+        double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
+        const RingNttContext& ctx, u32 requestedWorkers, std::span<const u8> active,
+        CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch);
     // Reconstruct the same full coefficient polynomial without any PRNG draws.
     bool expandPolyErrorCompact(
         std::span<const u64> limb0, RnsPoly& out, const RingNttContext& ctx);

@@ -8,19 +8,28 @@ namespace osuCrypto::LogVole
 {
     class LogVoleRingSender
     {
+        task<> offlineStart(
+            macoro::thread_pool& executor, std::span<u8> setupResults,
+            const ShrinkExpandSenderOfflineInput& input, ShrinkExpandSenderState& state,
+            PRNG& prng, Socket& sock, ProtocolCacheScope cacheScope);
+        task<> offlineStart(
+            macoro::thread_pool& executor, std::span<u8> setupResults,
+            const SenderOfflineInput& input, SenderState& state,
+            PRNG& prng, Socket& sock, RootWirePinOverlapEvidence& rootWirePin,
+            ProtocolCacheScope cacheScope);
         task<> onlineStart(
             macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
             SenderState& state, const SenderOnlineOptions& options,
             SenderOnlineOutput& output, PRNG& prng, Socket& sock, ProtocolCacheScope cacheScope);
 
     public:
-        task<> offline(
+        task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults,
             const ShrinkExpandSenderOfflineInput& input,
             ShrinkExpandSenderState& state,
             PRNG& prng,
             Socket& sock);
 
-        task<> offline(
+        task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults,
             const SenderOfflineInput& input,
             SenderState& state,
             PRNG& prng,

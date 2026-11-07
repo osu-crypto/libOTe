@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 
@@ -216,6 +217,7 @@ namespace
 
     bool run_relation(bool trunc)
     {
+    tests_libOTe::logvole_test::SetupResources setupResources;
         const auto params = make_params(trunc);
         CpuBenchmarkContext benchmark;
         benchmark.mCpus = {0, 1, 2};
@@ -238,7 +240,7 @@ namespace
 
         ShrinkExpandSenderState senderState{};
         oc::PRNG offlinePrng(oc::block(trunc ? 0xA101u : 0xA100u, 0));
-        if (!prepareShrinkExpandSenderOffline(senderInput, offlinePrng, senderState))
+        if (!macoro::sync_wait(prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results, senderInput, offlinePrng, senderState)))
         {
             return false;
         }
@@ -454,6 +456,7 @@ void LogVole_ShrinkExpandCore_ParamsValidation(const oc::CLP&)
 
 void LogVole_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     const auto params = make_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
@@ -465,7 +468,7 @@ void LogVole_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
 
     ShrinkExpandSenderState senderState{};
     oc::PRNG prng(oc::block(0x7701u, 0));
-    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, prng, senderState));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results, senderInput, prng, senderState)));
 
     LOGVOLE_EXPECT_EQ(senderState.mS.size(), params.mMu);
     LOGVOLE_EXPECT_EQ(senderState.mR.size(), params.mMu);
@@ -497,6 +500,7 @@ void LogVole_ShrinkExpandCore_TruncDeterministicRelationBounded(const oc::CLP&)
 
 void LogVole_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     auto params = make_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
@@ -508,7 +512,7 @@ void LogVole_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
 
     ShrinkExpandSenderState senderState{};
     oc::PRNG prng(oc::block(0x9901u, 0));
-    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, prng, senderState));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results, senderInput, prng, senderState)));
 
     ShrinkExpandReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;
@@ -623,6 +627,7 @@ void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
 
 void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     auto params = make_full_noise_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
@@ -633,7 +638,7 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
 
     ShrinkExpandSenderState senderState{};
     oc::PRNG offlinePrng(oc::block(0x5002u, 0));
-    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, offlinePrng, senderState));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results, senderInput, offlinePrng, senderState)));
 
     ShrinkExpandReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;

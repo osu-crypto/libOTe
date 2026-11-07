@@ -147,16 +147,18 @@ namespace
         const ShrinkExpandSenderOfflineInput& input,
         ShrinkExpandSenderState& state)
     {
+    tests_libOTe::logvole_test::SetupResources setupResources;
         oc::PRNG prng(oc::block(0x5100, 0x5101));
-        return osuCrypto::LogVole::prepareShrinkExpandSenderOffline(input, prng, state);
+        return macoro::sync_wait(osuCrypto::LogVole::prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results, input, prng, state));
     }
 
     bool prepare_sender_offline_for_test(
         const SenderOfflineInput& input,
         SenderOfflineOutput& out)
     {
+    tests_libOTe::logvole_test::SetupResources setupResources;
         oc::PRNG prng(oc::block(0x5200, 0x5201));
-        return osuCrypto::LogVole::prepareSenderOffline(input, prng, out);
+        return macoro::sync_wait(osuCrypto::LogVole::prepareSenderOffline(setupResources.executor, setupResources.results, input, prng, out));
     }
 
     bool finalize_receiver_from_sender_wire(
@@ -173,8 +175,9 @@ namespace
 
     bool prepare_root_offline_sender_for_test(SenderState& state, RootOfflineMessage& message)
     {
+    tests_libOTe::logvole_test::SetupResources setupResources;
         oc::PRNG prng(oc::block(0x5300, 0x5301));
-        return osuCrypto::LogVole::prepareRootOfflineSender(state, prng, message);
+        return macoro::sync_wait(osuCrypto::LogVole::prepareRootOfflineSender(setupResources.executor, setupResources.results, state, prng, message));
     }
 
     bool prepare_root_digest_receiver_for_test(
@@ -752,6 +755,7 @@ namespace
 
 void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = true;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
@@ -897,7 +901,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             Snapshot out;
             auto configured = tests_libOTe::logvole_test::withAdvancedOptions(
                 in, selectedOptions, ProtocolCacheRole::Sender);
-            macoro::sync_wait(sender.offline(configured, out.mState, prng, socket, out.mRootWirePin));
+            macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, configured, out.mState, prng, socket, out.mRootWirePin));
             out.mRootCudaWire = rootWireCudaAllocEvidenceSnapshot();
             macoro::sync_wait(socket.flush());
             auto bytes = socket.getOutbound();
@@ -936,7 +940,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             coproto::BufferingSocket retrySocket;
             LogVoleRingSender sender;
             bool rejected = false;
-            try { macoro::sync_wait(sender.offline(invalid, selected.mState, retryPrng, retrySocket, selected.mRootWirePin)); }
+            try { macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, invalid, selected.mState, retryPrng, retrySocket, selected.mRootWirePin)); }
             catch (const std::runtime_error&) { rejected = true; }
             LOGVOLE_REQUIRE_TRUE(rejected);
             LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mSenderRunId, invalid.mSenderOwnerRunId);
@@ -1150,8 +1154,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         {
             oc::PRNG publicPrng(seed, 3);
             SenderOfflineOutput publicOutput{};
-            LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(
-                tests_libOTe::logvole_test::withSetupOptions(hostInput, setupOptions), publicPrng, publicOutput));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(setupResources.executor, setupResources.results,
+                tests_libOTe::logvole_test::withSetupOptions(hostInput, setupOptions), publicPrng, publicOutput)));
             LOGVOLE_REQUIRE_TRUE(publicOutput.mState.mShrinkExpandState.mLazyS == nullptr);
             LOGVOLE_REQUIRE_TRUE(!publicOutput.mState.mShrinkExpandState.mS.empty());
             LOGVOLE_REQUIRE_TRUE(publicOutput.mState.mShrinkExpandState.mTopSk1Device == nullptr);
@@ -1339,8 +1343,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                 fixedKeyInput.mFixedSk1OwnerRunId);
             oc::PRNG impostorPrng(seed, 3);
             ShrinkExpandSenderState rejected{};
-            LOGVOLE_REQUIRE_FALSE(prepareShrinkExpandSenderOffline(
-                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results,
+                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected)));
         }
         {
             ScopedProtocolCacheScope wrongOfflineRun(
@@ -1348,8 +1352,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                 fixedKeyInput.mFixedSk1OwnerRunId + 1u);
             oc::PRNG impostorPrng(seed, 3);
             ShrinkExpandSenderState rejected{};
-            LOGVOLE_REQUIRE_FALSE(prepareShrinkExpandSenderOffline(
-                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results,
+                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected)));
         }
         {
             ScopedProtocolCacheScope wrongRole(
@@ -1812,6 +1816,7 @@ void LogVole_Core_RootScaledNttAddMatchesCoeffDomain(const oc::CLP&)
 
 void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
     const auto params = make_params();
     RingNttContext ctx{};
@@ -1843,7 +1848,7 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
 
     RingTensor topCt{};
     oc::PRNG prng(oc::block(0x7305u, 0));
-    LOGVOLE_REQUIRE_TRUE(buildRootTopCt(
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results,
         ctx,
         r1,
         r2Ntt,
@@ -1854,7 +1859,7 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
         prng,
         0.0,
         0.0,
-        topCt, 1,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
+        topCt, 1,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions)));
     LOGVOLE_EXPECT_EQ(topCt.mRows, leftWidth);
     LOGVOLE_EXPECT_EQ(topCt.mCols, tauHi + randomizer);
     LOGVOLE_REQUIRE_EQ(topCt.mPolys.size(), static_cast<std::size_t>(leftWidth) * (tauHi + randomizer));
@@ -1919,8 +1924,8 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
                 tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mRootDevice, false);
                 tests_libOTe::logvole_test::ScopedOptionValue batchOption(setupOptions.mBatchNtt, false);
                 auto cpuContext = cpuReferenceContext(parityContext);
-                LOGVOLE_REQUIRE_TRUE(buildRootTopCt(cpuContext, left, rightNtt, rootB, starB,
-                    gadgetBits, 1, referencePrng, sigma, 6 * sigma, expected, 1,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, cpuContext, left, rightNtt, rootB, starB,
+                    gadgetBits, 1, referencePrng, sigma, 6 * sigma, expected, 1,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions)));
             }
             const auto nextReference = referencePrng.get<oc::block>();
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1957,8 +1962,8 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
 #endif
                 oc::PRNG actualPrng(oc::block(0x7355u, 0), 3);
                 RingTensor actual{};
-                LOGVOLE_REQUIRE_TRUE(buildRootTopCt(parityContext, left, rightNtt, rootB, starB,
-                    gadgetBits, 1, actualPrng, sigma, 6 * sigma, actual, workers,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, parityContext, left, rightNtt, rootB, starB,
+                    gadgetBits, 1, actualPrng, sigma, 6 * sigma, actual, workers,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions)));
                 LOGVOLE_REQUIRE_EQ(actual.mRows, expected.mRows);
                 LOGVOLE_REQUIRE_EQ(actual.mCols, expected.mCols);
                 LOGVOLE_REQUIRE_EQ(actual.mPolys.size(), expected.mPolys.size());
@@ -1981,16 +1986,16 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
                 tests_libOTe::logvole_test::ScopedOptionValue decline(parityContext.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootCompactNoise, true);
                 oc::PRNG replayPrng(oc::block(0x7355u, 0), 3);
                 RingTensor replay{};
-                LOGVOLE_REQUIRE_TRUE(buildRootTopCt(parityContext, left, rightNtt, rootB, starB,
-                    gadgetBits, 1, replayPrng, sigma, 6 * sigma, replay, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, parityContext, left, rightNtt, rootB, starB,
+                    gadgetBits, 1, replayPrng, sigma, 6 * sigma, replay, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions)));
                 expect_batch_equal(replay.mPolys, expected.mPolys);
                 LOGVOLE_EXPECT_EQ(replayPrng.get<oc::block>(), nextReference);
                 tests_libOTe::logvole_test::ScopedOptionValue requireCompact(setupOptions.mRootCompactNoiseStrict, true);
                 oc::PRNG rejectedPrng(oc::block(0x7355u, 0), 3);
                 RingTensor rejected = expected;
                 const auto* storage = rejected.mPolys.data();
-                LOGVOLE_REQUIRE_TRUE(!buildRootTopCt(parityContext, left, rightNtt, rootB, starB,
-                    gadgetBits, 1, rejectedPrng, sigma, 6 * sigma, rejected, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
+                LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, parityContext, left, rightNtt, rootB, starB,
+                    gadgetBits, 1, rejectedPrng, sigma, 6 * sigma, rejected, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions)));
                 LOGVOLE_REQUIRE_TRUE(rejected.mPolys.data() == storage);
                 expect_batch_equal(rejected.mPolys, expected.mPolys);
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
@@ -2009,6 +2014,7 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
 
 void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
@@ -2034,16 +2040,16 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
             {
                 auto cpuContext = cpuReferenceContext(ctx);
                 // Exercise the original seven-argument public API as well.
-                LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(cpuContext, count, referencePrng,
-                    sigma, 6 * sigma, outputNtt, expected, 1, setupOptions));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(sampleRootErrorBatch(setupResources.executor, setupResources.results, cpuContext, count, referencePrng,
+                    sigma, 6 * sigma, outputNtt, expected, 1, setupOptions)));
             }
             const auto nextReference = referencePrng.get<oc::block>();
             for (const std::uint32_t workers : { 1u, 4u })
             {
                 oc::PRNG actualPrng(seed, 3);
                 std::vector<RnsPoly> actual;
-                LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(ctx, count, actualPrng,
-                    sigma, 6 * sigma, outputNtt, actual, workers, setupOptions));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(sampleRootErrorBatch(setupResources.executor, setupResources.results, ctx, count, actualPrng,
+                    sigma, 6 * sigma, outputNtt, actual, workers, setupOptions)));
                 expect_batch_equal(actual, expected);
                 LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), nextReference);
             }
@@ -2059,8 +2065,8 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
                     tests_libOTe::logvole_test::ScopedOptionValue prefix(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformPrefixBlocks, static_cast<std::uint64_t>(std::strtoull(blocks, nullptr, 10)));
                     oc::PRNG actualPrng(seed, 3);
                     std::vector<RnsPoly> actual;
-                    LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(ctx, count, actualPrng,
-                        sigma, 6 * sigma, outputNtt, actual, 4, setupOptions));
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(sampleRootErrorBatch(setupResources.executor, setupResources.results, ctx, count, actualPrng,
+                        sigma, 6 * sigma, outputNtt, actual, 4, setupOptions)));
                     expect_batch_equal(actual, expected);
                     LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), nextReference);
                 }
@@ -2071,8 +2077,8 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
                         tests_libOTe::logvole_test::ScopedOptionValue replay(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResidentStrict, false);
                         oc::PRNG replayPrng(seed, 3);
                         std::vector<RnsPoly> replayOutput;
-                        LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(ctx, count, replayPrng,
-                            sigma, 6 * sigma, outputNtt, replayOutput, 4, setupOptions));
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(sampleRootErrorBatch(setupResources.executor, setupResources.results, ctx, count, replayPrng,
+                            sigma, 6 * sigma, outputNtt, replayOutput, 4, setupOptions)));
                         expect_batch_equal(replayOutput, expected);
                         LOGVOLE_EXPECT_EQ(replayPrng.get<oc::block>(), nextReference);
                     }
@@ -2080,8 +2086,8 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
                     oc::PRNG rejectedPrng(seed, 3);
                     auto rejected = expected;
                     const auto* storage = rejected.data();
-                    LOGVOLE_REQUIRE_FALSE(sampleRootErrorBatch(ctx, count, rejectedPrng,
-                        sigma, 6 * sigma, outputNtt, rejected, 4, setupOptions));
+                    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(sampleRootErrorBatch(setupResources.executor, setupResources.results, ctx, count, rejectedPrng,
+                        sigma, 6 * sigma, outputNtt, rejected, 4, setupOptions)));
                     LOGVOLE_REQUIRE_TRUE(rejected.data() == storage);
                     expect_batch_equal(rejected, expected);
                     LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
@@ -2092,16 +2098,16 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
                 tests_libOTe::logvole_test::ScopedOptionValue fallback(setupOptions.mRootCompactNoiseStrict, false);
                 oc::PRNG replayPrng(seed, 3);
                 std::vector<RnsPoly> replay;
-                LOGVOLE_REQUIRE_TRUE(sampleRootErrorBatch(ctx, count, replayPrng,
-                    sigma, 6 * sigma, outputNtt, replay, 4, setupOptions));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(sampleRootErrorBatch(setupResources.executor, setupResources.results, ctx, count, replayPrng,
+                    sigma, 6 * sigma, outputNtt, replay, 4, setupOptions)));
                 expect_batch_equal(replay, expected);
                 LOGVOLE_EXPECT_EQ(replayPrng.get<oc::block>(), nextReference);
             }
             oc::PRNG rejectedPrng(seed, 3);
             auto rejected = expected;
             const auto* storage = rejected.data();
-            LOGVOLE_REQUIRE_TRUE(!sampleRootErrorBatch(ctx, count, rejectedPrng,
-                sigma, 6 * sigma, outputNtt, rejected, 4, setupOptions));
+            LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(sampleRootErrorBatch(setupResources.executor, setupResources.results, ctx, count, rejectedPrng,
+                sigma, 6 * sigma, outputNtt, rejected, 4, setupOptions)));
             LOGVOLE_REQUIRE_TRUE(rejected.data() == storage);
             expect_batch_equal(rejected, expected);
             LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
@@ -2130,6 +2136,7 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
 
 void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = true;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
@@ -2187,7 +2194,7 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
         SenderOfflineOutput expected;
         {
             tests_libOTe::logvole_test::ScopedOptionValue cpuReference(advanced.mUseGpu, false);
-            LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Sender), referencePrng, expected));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Sender), referencePrng, expected)));
         }
         std::array<std::uint64_t, 16> nextReference;
         referencePrng.get(nextReference.data(), nextReference.size());
@@ -2204,7 +2211,7 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
             RetentionBaseline retentionBefore;
             retentionBefore.capture(ctx);
             retentionBefore.captureTree(expected.mState);
-            LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Sender), actualPrng, actual));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Sender), actualPrng, actual)));
             const auto retentionAfter = retentionBefore.deltaTree(actual.mState);
             if (forcedReplay)
                 LOGVOLE_REQUIRE_EQ(retentionAfter.mCopies, 0u);
@@ -2304,6 +2311,7 @@ void LogVole_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)
 
 void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions advanced;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2384,7 +2392,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
         replaySender = tests_libOTe::logvole_test::withAdvancedOptions(std::move(replaySender), advanced, ProtocolCacheRole::Sender);
         oc::PRNG replayPrng(oc::block(0x7502u, 0x7503u));
         RootOfflineMessage replayMessage{};
-        LOGVOLE_REQUIRE_TRUE(prepareRootOfflineSender(tests_libOTe::logvole_test::withSetupOptions(replaySender, setupOptions), replayPrng, replayMessage));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareRootOfflineSender(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withSetupOptions(replaySender, setupOptions), replayPrng, replayMessage)));
         const auto nextRandom = replayPrng.get<std::uint64_t>();
         const auto encoded = encode(replayMessage);
 
@@ -2522,8 +2530,8 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 std::move(nextSender), advanced, ProtocolCacheRole::Sender);
             oc::PRNG nextPrng(oc::block(0x76B0u, 0x76B1u));
             RootOfflineMessage nextMessage{};
-            LOGVOLE_REQUIRE_TRUE(prepareRootOfflineSender(
-                tests_libOTe::logvole_test::withSetupOptions(nextSender, setupOptions), nextPrng, nextMessage, deferHost));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareRootOfflineSender(setupResources.executor, setupResources.results,
+                tests_libOTe::logvole_test::withSetupOptions(nextSender, setupOptions), nextPrng, nextMessage, deferHost)));
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (replayGpuEnabled && runId == 0x76B002u)
             {
@@ -2613,11 +2621,11 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                         *rootOwner, leftWidth));
                     LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(ctx,
                         *secretOwner, tauHi, runId));
-                    LOGVOLE_REQUIRE_FALSE(buildRootTopCt(ctx, {}, otherR,
+                    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, ctx, {}, otherR,
                         otherB, nextMessage.mPublicBStarNtt,
                         seSender.mParams.mGadgetLogBase, 1, rejectedPrng,
                         0.0, 0.0, unchanged, 4, {}, nullptr, nullptr,
-                        rootOwner.get(), nextSender.mLazyRootR1Rt.get(), nullptr, setupOptions));
+                        rootOwner.get(), nextSender.mLazyRootR1Rt.get(), nullptr, setupOptions)));
                 }
                 LOGVOLE_EXPECT_TRUE(unchanged.mPolys.empty());
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(),
@@ -2723,9 +2731,9 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
             oc::PRNG rejectedPrng(oc::block(0x76B0u, 0x76B2u));
             oc::PRNG referencePrng(oc::block(0x76B0u, 0x76B2u));
             RingTensor unchanged = message.mTopCt;
-            LOGVOLE_REQUIRE_FALSE(buildRootTopCt(ctx, sender.mRootR1Rt,
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, ctx, sender.mRootR1Rt,
                 otherR, {}, message.mPublicBStarNtt, seSender.mParams.mGadgetLogBase,
-                1, rejectedPrng, 0.0, 0.0, unchanged, 4, {}, nullptr, otherB.get(), nullptr, nullptr, nullptr, setupOptions));
+                1, rejectedPrng, 0.0, 0.0, unchanged, 4, {}, nullptr, otherB.get(), nullptr, nullptr, nullptr, setupOptions)));
             expect_batch_equal(unchanged.mPolys, message.mTopCt.mPolys);
             LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), referencePrng.get<oc::block>());
         }
@@ -2800,15 +2808,15 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 oc::PRNG eagerPrng(oc::block(0xB57A5600u, 0xB57A5601u));
                 oc::PRNG retainedPrng(oc::block(0xB57A5600u, 0xB57A5601u));
                 RingTensor eagerTop{}, retainedTop{};
-                LOGVOLE_REQUIRE_TRUE(buildRootTopCt(productionCtx,
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, productionCtx,
                     r1, r2Ntt, publicBRootNtt, eagerBStar,
                     gadgetLogBase, 1, eagerPrng, 0.0, 0.0,
-                    eagerTop, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
+                    eagerTop, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions)));
                 const auto before = gpu::publicUniformRetentionStats(productionCtx);
-                LOGVOLE_REQUIRE_TRUE(buildRootTopCt(productionCtx,
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, productionCtx,
                     r1, r2Ntt, publicBRootNtt, {}, gadgetLogBase, 1,
                     retainedPrng, 0.0, 0.0, retainedTop, 4,
-                    {}, nullptr, nullptr, nullptr, nullptr, owner.get(), setupOptions));
+                    {}, nullptr, nullptr, nullptr, nullptr, owner.get(), setupOptions)));
                 const auto after = gpu::publicUniformRetentionStats(productionCtx);
                 LOGVOLE_EXPECT_EQ(after.mHostMaterializations,
                     before.mHostMaterializations);
@@ -2823,11 +2831,11 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 oc::PRNG rejectedPrng(oc::block(0xB57A5602u, 0xB57A5603u));
                 oc::PRNG referencePrng(oc::block(0xB57A5602u, 0xB57A5603u));
                 RingTensor unchanged = retainedTop;
-                LOGVOLE_REQUIRE_FALSE(buildRootTopCt(productionCtx,
+                LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, productionCtx,
                     r1, r2Ntt, publicBRootNtt, {}, gadgetLogBase, 1,
                     rejectedPrng, 0.0, 0.0, unchanged, 4,
                     {}, nullptr, nullptr, nullptr, nullptr,
-                    wrongNonce.get(), setupOptions));
+                    wrongNonce.get(), setupOptions)));
                 expect_batch_equal(unchanged.mPolys, retainedTop.mPolys);
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(),
                     referencePrng.get<oc::block>());
@@ -3609,6 +3617,7 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
 
 void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
     // Check the public host outputs directly, including their final Z_p relation.
 #endif
@@ -3627,7 +3636,7 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
     senderInput.mSk1.resize(1);
     LOGVOLE_REQUIRE_TRUE(wrapZpConstantCrt(ctx, delta, true, 1, senderInput.mSk1[0]));
     SenderOfflineOutput senderOffline;
-    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, senderPrng, senderOffline));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(setupResources.executor, setupResources.results, senderInput, senderPrng, senderOffline)));
     ReceiverOfflineInput receiverInput;
     receiverInput.mParams = params;
     ReceiverOfflineOutput receiverOffline;
@@ -3946,6 +3955,7 @@ void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
 
 void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0)) LOGVOLE_REQUIRE_TRUE(gpu::available());
     if (!cmd.getOr("gpu", 0)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
@@ -3971,7 +3981,7 @@ void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
         LogVoleRingSender sender;
         SenderState state;
         RootWirePinOverlapEvidence rootWirePin;
-        macoro::sync_wait(sender.offline(selected, state, prng, socket, rootWirePin));
+        macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, selected, state, prng, socket, rootWirePin));
         macoro::sync_wait(socket.flush());
         auto bytes = socket.getOutbound();
         LOGVOLE_REQUIRE_TRUE(bytes && !bytes->empty());
@@ -4053,6 +4063,7 @@ void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
 
 void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
@@ -4177,20 +4188,20 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     oc::PRNG baselinePrng(seed, 3), residentPrng(seed, 3), wirePrng(seed, 3), legacyWirePrng(seed, 3);
     SenderOfflineOutput baselineSender{}, residentSender{};
     ReceiverOfflineOutput baselineReceiver{}, residentReceiver{};
-    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), baselinePrng, baselineSender));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), baselinePrng, baselineSender)));
     LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), baselineSender.mMessage, baselineReceiver));
     senderInput.mUseGpuResidentInternalState = true;
     receiverInput.mUseGpuResidentInternalState = true;
-    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), residentPrng, residentSender));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), residentPrng, residentSender)));
     LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), residentSender.mMessage, residentReceiver));
     SenderOfflineOutput wireSender{}, legacyWireSender{};
     {
         senderInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = true;
-        LOGVOLE_REQUIRE_TRUE(detail::prepareSenderOfflineForTransport(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), wirePrng, wireSender));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(detail::prepareSenderOfflineForTransport(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), wirePrng, wireSender)));
     }
     {
         senderInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = false;
-        LOGVOLE_REQUIRE_TRUE(detail::prepareSenderOfflineForTransport(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), legacyWirePrng, legacyWireSender));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(detail::prepareSenderOfflineForTransport(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), legacyWirePrng, legacyWireSender)));
     }
     senderInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = true;
     for (unsigned i = 0; i < 16; ++i)
@@ -5541,6 +5552,7 @@ void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
 
 void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     RootWirePinOverlapEvidence rootWirePin;
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0)) LOGVOLE_REQUIRE_TRUE(gpu::available());
@@ -5632,7 +5644,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     auto offlineSockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG senderOfflinePrng(oc::block(0x7D53u, 0));
     auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
+        sender.offline(setupResources.executor, setupResources.results, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();
@@ -5650,7 +5662,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     unchanged.mParams.mW = 777;
     oc::PRNG invalidPrng(oc::block(0x7D54u, 0));
     coproto::BufferingSocket invalidSocket;
-    auto failedAttempt = sender.offline(invalid, unchanged, invalidPrng, invalidSocket, failedPin);
+    auto failedAttempt = sender.offline(setupResources.executor, setupResources.results, invalid, unchanged, invalidPrng, invalidSocket, failedPin);
     LOGVOLE_REQUIRE_TRUE(failedPin.mSelected); // The returned task is still lazy.
     bool rejected = false;
     try { macoro::sync_wait(std::move(failedAttempt)); }
@@ -5823,6 +5835,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
 
 void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     RootWirePinOverlapEvidence rootWirePin;
     Params params = make_recursive_params(2);
     params.mShrinkExpand.mNumWorkerThreads = 4;
@@ -5845,7 +5858,7 @@ void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
     auto offlineSockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG senderOfflinePrng(oc::block(0x7D73u, 0));
     auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
+        sender.offline(setupResources.executor, setupResources.results, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();

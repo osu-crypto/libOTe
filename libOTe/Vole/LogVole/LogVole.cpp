@@ -638,7 +638,8 @@ namespace osuCrypto
         mState = State::Configured;
     }
 
-    task<> LogVoleSender::offline(u64 delta, PRNG& prng, Socket& sock)
+    task<> LogVoleSender::offline(macoro::thread_pool &executor, std::span<u8> setupResults, u64 delta,
+                                  PRNG &prng, Socket &sock)
     {
         mRootWirePin = {};
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
@@ -654,7 +655,8 @@ namespace osuCrypto
         input.mW = mRequestSize;
 
         CivoleSenderState state{};
-        co_await civoleSenderOffline(input, state, prng, sock, mRootWirePin, cpuBenchmark);
+        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock, mRootWirePin,
+                                     cpuBenchmark);
 
         mOfflineState = std::move(state);
         mModulus = mOfflineState.mModulus;
@@ -705,7 +707,8 @@ namespace osuCrypto
         mLastOnlineComm = release.mComm;
     }
 
-    task<> LogVoleSender::send(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, u64 delta, span<u64> b, PRNG& prng, Socket& sock)
+    task<> LogVoleSender::send(macoro::thread_pool &executor, std::span<LheDecryptBuffer> buffers,
+                               std::span<u8> setupResults, u64 delta, span<u64> b, PRNG &prng, Socket &sock)
     {
         if (!isConfigured())
         {
@@ -717,7 +720,7 @@ namespace osuCrypto
         }
         if (!hasOffline())
         {
-            co_await offline(delta, prng, sock);
+            co_await offline(executor, setupResults, delta, prng, sock);
         }
         else if (delta != mDelta)
         {
@@ -1927,46 +1930,43 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    task<> civoleSenderOffline(
-        const CivoleSenderOfflineInput& input,
-        CivoleSenderState& state,
-        PRNG& prng,
-        Socket& sock, RootWirePinOverlapEvidence& rootWirePin, CpuBenchmarkState cpuBenchmark)
+    task<> civoleSenderOffline(macoro::thread_pool &executor, std::span<u8> setupResults,
+                               const CivoleSenderOfflineInput &input, CivoleSenderState &state, PRNG &prng,
+                               Socket &sock, RootWirePinOverlapEvidence &rootWirePin,
+                               CpuBenchmarkState cpuBenchmark)
     {
         rootWirePin = {};
         // The delta producer precedes LogVoleRingSender::offline. Give both
         // stages the same fresh sender run rather than publishing a run-zero
         // device owner that a later party could accidentally reuse.
         const u64 incomingRun = currentProtocolCacheScope().mRunId;
-        const u64 offlineRunId = incomingRun
-            ? incomingRun : allocateProtocolCacheRunId();
+        const u64 offlineRunId = incomingRun ? incomingRun : allocateProtocolCacheRunId();
         rootWirePin.mSenderRunId = offlineRunId;
-        std::optional<ScopedProtocolCacheScope> senderScope(std::in_place,
-            ProtocolCacheRole::Sender, offlineRunId);
+        std::optional<ScopedProtocolCacheScope> senderScope(std::in_place, ProtocolCacheRole::Sender,
+                                                            offlineRunId);
         CivoleParams sessionParams = input.mParams;
 
         ZpCrtContext ctx{};
-        if (!makeZpCrtContext(
-                sessionParams.mLogVole.mShrinkExpand.mRing,
-                sessionParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
-                ctx, input.mCrtFactoryOwner ? input.mCrtFactoryOwner->mFactory : nullptr) ||
+        if (!makeZpCrtContext(sessionParams.mLogVole.mShrinkExpand.mRing,
+                              sessionParams.mLogVole.mShrinkExpand.mPlaintextModulusBits, ctx,
+                              input.mCrtFactoryOwner ? input.mCrtFactoryOwner->mFactory : nullptr) ||
             (input.mGarbledDeltaPattern
-                ? (input.mDelta != 0 || !input.mDeltaSlots.empty() || zpSlotCount(ctx) < 3 ||
-                   std::any_of(input.mGarbledDeltaPattern->begin(), input.mGarbledDeltaPattern->end(),
-                       [&](u64 value) { return value == 0 || value >= ctx.mPlaintextModulus; }))
-                : input.mDeltaSlots.empty()
-                ? (input.mDelta == 0 || input.mDelta >= ctx.mPlaintextModulus)
-                : (input.mDelta != 0 || input.mDeltaSlots.size() != zpSlotCount(ctx) ||
-                   !validateZpValues(ctx, input.mDeltaSlots) ||
-                   std::all_of(input.mDeltaSlots.begin(), input.mDeltaSlots.end(),
-                       [](u64 v) { return v == 0; }))))
+                 ? (input.mDelta != 0 || !input.mDeltaSlots.empty() || zpSlotCount(ctx) < 3 ||
+                    std::any_of(input.mGarbledDeltaPattern->begin(), input.mGarbledDeltaPattern->end(),
+                                [&](u64 value) { return value == 0 || value >= ctx.mPlaintextModulus; }))
+             : input.mDeltaSlots.empty()
+                 ? (input.mDelta == 0 || input.mDelta >= ctx.mPlaintextModulus)
+                 : (input.mDelta != 0 || input.mDeltaSlots.size() != zpSlotCount(ctx) ||
+                    !validateZpValues(ctx, input.mDeltaSlots) ||
+                    std::all_of(input.mDeltaSlots.begin(), input.mDeltaSlots.end(),
+                                [](u64 v) { return v == 0; }))))
         {
             throw std::runtime_error("LogVole CI-VOLE sender offline input is invalid");
         }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (!gpu::bindContextExecution(ctx.mRing,
-                std::make_shared<gpu::GpuExecutionContext>(ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler)))
+        if (!gpu::bindContextExecution(ctx.mRing, std::make_shared<gpu::GpuExecutionContext>(
+                                                      ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler)))
             throw std::runtime_error("LogVole CI-VOLE sender execution context is invalid");
         // Retain this session's selected ring in its CRT record as well. The
         // parent is an immutable math record, never a reference to this copy.
@@ -1994,11 +1994,10 @@ namespace osuCrypto::LogVole
         }
 
         const auto workers = sessionParams.mLogVole.mShrinkExpand.mNumWorkerThreads;
-        const auto slotsForFallback =
-            std::vector<u64>(input.mDeltaSlots.begin(), input.mDeltaSlots.end());
+        const auto slotsForFallback = std::vector<u64>(input.mDeltaSlots.begin(), input.mDeltaSlots.end());
         const auto patternForFallback = input.mGarbledDeltaPattern;
-        auto wrapHost = [ctx, delta = input.mDelta, slotsForFallback,
-            patternForFallback, workers](RnsPoly& out) -> bool {
+        auto wrapHost = [ctx, delta = input.mDelta, slotsForFallback, patternForFallback,
+                         workers](RnsPoly &out) -> bool {
             if (patternForFallback)
             {
                 std::vector<u64> slots(zpSlotCount(ctx), 0);
@@ -2006,9 +2005,8 @@ namespace osuCrypto::LogVole
                     slots[i] = (*patternForFallback)[i % 3];
                 return wrapZpBatchCrt(ctx, slots, true, 0, workers, out);
             }
-            return slotsForFallback.empty()
-                ? wrapZpConstantCrt(ctx, delta, true, workers, out)
-                : wrapZpBatchCrt(ctx, slotsForFallback, true, 0, workers, out);
+            return slotsForFallback.empty() ? wrapZpConstantCrt(ctx, delta, true, workers, out)
+                                            : wrapZpBatchCrt(ctx, slotsForFallback, true, 0, workers, out);
         };
 
         RnsPoly wrappedDelta{};
@@ -2026,20 +2024,17 @@ namespace osuCrypto::LogVole
                 if (params.mShrinkExpand.mGpuSetup.mDeltaChainDevice && params.mGamma == 1u &&
                     ctx.mGpuLightweight)
                 {
-                    residentDelta = gpu::wrapSetupDeltaResident(ctx, input.mDelta,
-                        input.mDeltaSlots,
+                    residentDelta = gpu::wrapSetupDeltaResident(
+                        ctx, input.mDelta, input.mDeltaSlots,
                         input.mGarbledDeltaPattern ? &*input.mGarbledDeltaPattern : nullptr);
-                    if (residentDelta)
-                        wrapped = true;
+                    if (residentDelta) wrapped = true;
                     else if (params.mShrinkExpand.mGpuSetup.mDeltaChainStrict)
-                        throw std::runtime_error(
-                            "LogVole CI-VOLE sender resident delta capture declined");
+                        throw std::runtime_error("LogVole CI-VOLE sender resident delta capture declined");
                 }
                 if (!wrapped)
-                    wrapped = gpu::wrapSetupDeltaDevice(ctx, input.mDelta,
-                        input.mDeltaSlots,
-                        input.mGarbledDeltaPattern ? &*input.mGarbledDeltaPattern : nullptr,
-                        wrappedDelta);
+                    wrapped = gpu::wrapSetupDeltaDevice(
+                        ctx, input.mDelta, input.mDeltaSlots,
+                        input.mGarbledDeltaPattern ? &*input.mGarbledDeltaPattern : nullptr, wrappedDelta);
             }
 #endif
             if (!wrapped && !strictDevice)
@@ -2071,10 +2066,8 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         offlineInput.mUseGpuResidentInternalState = gpu::enabled(ctx.mRing);
         offlineInput.mWrappedDeltaDevice = std::move(residentDelta);
-        if (offlineInput.mWrappedDeltaDevice)
-            offlineInput.mWrappedDeltaHostFallback = std::move(wrapHost);
-        else
-            offlineInput.mSk1.resize(params.mGamma, std::move(wrappedDelta));
+        if (offlineInput.mWrappedDeltaDevice) offlineInput.mWrappedDeltaHostFallback = std::move(wrapHost);
+        else offlineInput.mSk1.resize(params.mGamma, std::move(wrappedDelta));
 #else
         offlineInput.mSk1.resize(params.mGamma, std::move(wrappedDelta));
 #endif
@@ -2082,7 +2075,8 @@ namespace osuCrypto::LogVole
         LogVoleRingSender sender{};
         SenderState logVoleState{};
         auto logVoleSock = sock.fork();
-        co_await sender.offline(offlineInput, logVoleState, prng, logVoleSock, rootWirePin);
+        co_await sender.offline(executor, setupResults, offlineInput, logVoleState, prng, logVoleSock,
+                                rootWirePin);
 
         CivoleSenderState next{};
         next.mParams = sessionParams;

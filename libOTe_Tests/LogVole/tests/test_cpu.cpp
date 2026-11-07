@@ -155,6 +155,7 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
 
 void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     LogVole::detail::CpuRowScratch scratch;
     CpuBenchmarkContext telemetry;
     telemetry.mCpus = {0, 1, 2};
@@ -247,13 +248,13 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     parallelOptions.mLencDevice = parallelOptions.mLheDevice = false;
     PRNG referencePrng(toBlock(723, 2), 3);
     LencEncodeOutput reference;
-    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, inputs, 1, 30, 29, referencePrng,
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, inputs, 1, 30, 29, referencePrng,
         reference, 3.2, 19.2, 2, true, false, nullptr, 1, false, false,
-        nullptr, nullptr, serialOptions));
+        nullptr, nullptr, serialOptions)));
     RingTensor referenceLhe;
-    LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, reference.mRNtt, inputs, 30, referenceLhe,
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, reference.mRNtt, inputs, 30, referenceLhe,
         3.2, 19.2, &referencePrng, true, nullptr, 1, nullptr, {}, nullptr, nullptr,
-        nullptr, nullptr, 0, false, serialOptions));
+        nullptr, nullptr, 0, false, serialOptions)));
     const auto expectedNext = referencePrng.get<block>();
     std::array<block, 6> zetaSeeds;
     random.get(zetaSeeds.data(), zetaSeeds.size());
@@ -268,30 +269,77 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
         equalBatch(zeta, referenceZeta);
         std::vector<u64> noise;
         std::shared_ptr<gpu::DeviceScalars> device;
-        LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(noise, device,
-            3.2, 19.2, seeds, ctx, allowance, active, benchmark, &scratch));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results, noise, device,
+            3.2, 19.2, seeds, ctx, allowance, active, benchmark)));
         LOGVOLE_REQUIRE_TRUE(noise == expectedNoise && !device);
         // Force the independent seed-replay path by supplying no host data.
         noise.clear();
-        LOGVOLE_REQUIRE_TRUE(materializePolyErrorCompactBatchForSetup(noise, device,
-            3.2, 19.2, seeds, ctx, allowance, active, benchmark, &scratch));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(materializePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results, noise, device,
+            3.2, 19.2, seeds, ctx, allowance, active, benchmark)));
         LOGVOLE_REQUIRE_TRUE(noise == expectedNoise);
         PRNG actualPrng(toBlock(723, 2), 3);
         LencEncodeOutput actual;
-        LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, inputs, 1, 30, 29, actualPrng,
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, inputs, 1, 30, 29, actualPrng,
             actual, 3.2, 19.2, 2, true, false, nullptr, allowance, false, false,
-            nullptr, nullptr, parallelOptions, benchmark, &scratch));
+            nullptr, nullptr, parallelOptions, benchmark)));
         equalBatch(actual.mRNtt, reference.mRNtt);
         equalBatch(actual.mR, reference.mR);
         equalBatch(actual.mLacct.mCt.mPolys, reference.mLacct.mCt.mPolys);
         RingTensor actualLhe;
-        LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, actual.mRNtt, inputs, 30, actualLhe,
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, actual.mRNtt, inputs, 30, actualLhe,
             3.2, 19.2, &actualPrng, true, nullptr, allowance, nullptr, {}, nullptr, nullptr,
-            nullptr, nullptr, 0, false, parallelOptions, benchmark, &scratch));
+            nullptr, nullptr, 0, false, parallelOptions, benchmark)));
         equalBatch(actualLhe.mPolys, referenceLhe.mPolys);
         LOGVOLE_REQUIRE_TRUE(actualPrng.get<block>() == expectedNext);
         LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
     }
+
+    // Start the controller on the same single worker that executes its chunks.
+    // Task creation is lazy and neither changes outputs nor borrows TLS state
+    // from the thread that eventually resumes it.
+    std::vector<u64> lazyNoise{123};
+    std::shared_ptr<gpu::DeviceScalars> lazyDevice;
+    std::fill(setupResources.results.begin(), setupResources.results.end(), u8{0xA5});
+    macoro::task<bool> pending;
+    {
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, 812);
+        pending = samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+            lazyNoise, lazyDevice, 3.2, 19.2, seeds, ctx, 3, active, benchmark);
+    }
+    LOGVOLE_REQUIRE_TRUE(lazyNoise == std::vector<u64>{123});
+    for (auto status : setupResources.results) LOGVOLE_REQUIRE_EQ(status, u8{0xA5});
+    auto onPool = [&](macoro::task<bool> operation) -> macoro::task<bool> {
+        co_await setupResources.executor.schedule();
+        const auto before = currentProtocolCacheScope();
+        const bool ok = co_await std::move(operation);
+        LOGVOLE_REQUIRE_EQ(currentProtocolCacheScope().mRunId, before.mRunId);
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == before.mRole);
+        co_return ok;
+    };
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(pending))));
+    LOGVOLE_REQUIRE_TRUE(lazyNoise == expectedNoise && !lazyDevice);
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(onPool(samplePolyErrorCompactBatchForSetup(
+        setupResources.executor, setupResources.results, lazyNoise, lazyDevice,
+        3.2, 19.2, seeds, ctx, 3, std::span<const u8>(active).first(1), benchmark))));
+    LOGVOLE_REQUIRE_TRUE(lazyNoise == expectedNoise && !lazyDevice);
+
+    telemetry.mWorkerLimit = 1;
+    telemetry.reset();
+    std::fill(setupResources.results.begin(), setupResources.results.end(), u8{0xA5});
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(
+        setupResources.executor, setupResources.results, lazyNoise,
+        3.2, 19.2, seeds, ctx, 3, active, benchmark)));
+    LOGVOLE_REQUIRE_TRUE(lazyNoise == expectedNoise);
+    LOGVOLE_REQUIRE_EQ(telemetry.mPeakTaskThreads.load(), 1u);
+    LOGVOLE_REQUIRE_EQ(setupResources.results[1], u8{0xA5});
+    LOGVOLE_REQUIRE_EQ(setupResources.results[2], u8{0xA5});
+
+    PRNG untouched(toBlock(723, 99)), rejected(toBlock(723, 99));
+    std::vector<RnsPoly> unpublished;
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(sampleRootErrorBatch(
+        setupResources.executor, {}, ctx, 2, rejected, 3.2, 19.2, false, unpublished)));
+    LOGVOLE_REQUIRE_TRUE(unpublished.empty());
+    LOGVOLE_REQUIRE_TRUE(untouched.get<block>() == rejected.get<block>());
 }
 
 void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
@@ -494,6 +542,7 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
 
 void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     PRNG random(toBlock(0x4556414c, 0x46555345));
     LogVole::detail::CpuRowScratch scratch;
     macoro::thread_pool pool;
@@ -528,8 +577,8 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
                         std::fill_n(inputs[row].mCoeffs.data()+j*1024, 1024, u64{0});
         }
         LencEncodeOutput enc{};
-        LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, keys, 1, digitBits, plaintextBits,
-            random, enc, 0, 0, 0, false, gadget));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, keys, 1, digitBits, plaintextBits,
+            random, enc, 0, 0, 0, false, gadget)));
         DigestTree tree{};
         LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(ctx, inputs, 1, digitBits, plaintextBits,
             tree, enc.mLacct.mWidthPadded, gadget));
@@ -1495,6 +1544,7 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
 
 void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
@@ -1707,7 +1757,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     PRNG receiverPrng(toBlock(0x46414c4c, 3));
                     auto sockets = coproto::LocalAsyncSocket::makePair();
                     auto offline = macoro::sync_wait(macoro::when_all_ready(
-                        fallbackVerifier.offline(19, senderPrng, sockets[0]),
+                        fallbackVerifier.offline(setupResources.executor, setupResources.results, 19, senderPrng, sockets[0]),
                         fallbackProver.offline(sockets[1])));
                     std::get<0>(offline).result();
                     std::get<1>(offline).result();
@@ -1776,7 +1826,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     LOGVOLE_REQUIRE_TRUE(gpuProver.mWiresDevice != nullptr);
                     auto sockets = coproto::LocalAsyncSocket::makePair();
                     auto offline = macoro::sync_wait(macoro::when_all_ready(
-                        gpuVerifier.offline(19, senderPrng, sockets[0]), gpuProver.offline(sockets[1])));
+                        gpuVerifier.offline(setupResources.executor, setupResources.results, 19, senderPrng, sockets[0]), gpuProver.offline(sockets[1])));
                     std::get<0>(offline).result();
                     std::get<1>(offline).result();
                     {
@@ -2369,6 +2419,7 @@ void LogVole_Cpu_RecursiveLeafMatchesIntegerReference(const oc::CLP&)
 
 void LogVole_Cpu_ErrorSamplingMatchesSeal(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     for (unsigned limbs : {2, 4, 8})
     for (double deviation : {0.0, 3.2, 64.0})
     {
@@ -2431,8 +2482,8 @@ void LogVole_Cpu_ErrorSamplingMatchesSeal(const oc::CLP&)
         }
         LOGVOLE_REQUIRE_EQ(noncanonical, wideNoise);
         LencEncodeOutput actual{};
-        LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, inputs, 1, 30, 29, actualPrng, actual,
-            deviation, 4*deviation, 2, false, false));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, inputs, 1, 30, 29, actualPrng, actual,
+            deviation, 4*deviation, 2, false, false)));
         LOGVOLE_REQUIRE_EQ(actual.mRNtt.size(), expected.size());
         for (unsigned i = 0; i < 2; ++i)
             LOGVOLE_REQUIRE_TRUE(rangesEqual(actual.mRNtt[i].mCoeffs, expected[i].mCoeffs));

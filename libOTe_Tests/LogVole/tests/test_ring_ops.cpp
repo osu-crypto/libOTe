@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe_Tests/LogVole_TestOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
@@ -2822,6 +2823,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP& cmd)
 
 void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
@@ -3096,12 +3098,12 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             RingTensor expected, actual;
             {
                 auto cpuContext = cpuReferenceContext(ctx);
-                LOGVOLE_REQUIRE_TRUE(lheEnc1(cpuContext, r, sk, 8, expected, 3.2, 19.2,
-                    &referencePrng, false, a, 4, nullptr,  {}, setupOptions));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1(setupResources.executor, setupResources.results, cpuContext, r, sk, 8, expected, 3.2, 19.2,
+                    &referencePrng, false, a, 4, nullptr,  {}, setupOptions)));
             }
             const auto before = gpu::publicUniformRetentionStats(ctx);
-            LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk, 8, actual, 3.2, 19.2,
-                &actualPrng, false, a, 4, nullptr,  {}, setupOptions));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1(setupResources.executor, setupResources.results, ctx, r, sk, 8, actual, 3.2, 19.2,
+                &actualPrng, false, a, 4, nullptr,  {}, setupOptions)));
             const auto after = gpu::publicUniformRetentionStats(ctx);
             LOGVOLE_REQUIRE_EQ(expected.mRows, actual.mRows);
             LOGVOLE_REQUIRE_EQ(expected.mCols, actual.mCols);
@@ -3151,6 +3153,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
 
 void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions testAdvanced;
     tests_libOTe::logvole_test::ScopedOptionValue originalTransform(testAdvanced.mAdvanced.mProtocol.mGaussianTransform, false);
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -3244,9 +3247,9 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP& cmd)
                 if (!device && prefix[0] == '1') continue;
                 tests_libOTe::logvole_test::ScopedOptionValue blocks(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianPrgPrefixBlocks, static_cast<std::uint64_t>(std::strtoull(prefix, nullptr, 10)));
                 std::vector<std::uint64_t> actual(expected.size(), sentinel);
-                LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchFromSeeds(
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results,
                     std::span<std::uint64_t>(actual).subspan(1, count * n),
-                    sigma, clip, seeds, ctx, 3, active));
+                    sigma, clip, seeds, ctx, 3, active)));
                 LOGVOLE_REQUIRE_TRUE(actual == expected)
                     << " N=" << n << " count=" << count << " sigma=" << sigma
                     << " GPU=" << device << " prefix=" << prefix;
@@ -3261,15 +3264,15 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP& cmd)
             tests_libOTe::logvole_test::ScopedOptionValue decline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mGaussianPrg, true);
             tests_libOTe::logvole_test::ScopedOptionValue strict(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianPrgStrict, false);
             std::vector<std::uint64_t> replay(expected.size(), sentinel);
-            LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchFromSeeds(
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results,
                 std::span<std::uint64_t>(replay).subspan(1, count * n),
-                sigma, clip, seeds, ctx, 3, active));
+                sigma, clip, seeds, ctx, 3, active)));
             LOGVOLE_REQUIRE_TRUE(replay == expected);
             tests_libOTe::logvole_test::ScopedOptionValue reject(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianPrgStrict, true);
             std::vector<std::uint64_t> rejected(expected.size(), sentinel);
-            LOGVOLE_REQUIRE_TRUE(!samplePolyErrorCompactBatchFromSeeds(
+            LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results,
                 std::span<std::uint64_t>(rejected).subspan(1, count * n),
-                sigma, clip, seeds, ctx, 3, active));
+                sigma, clip, seeds, ctx, 3, active)));
             LOGVOLE_REQUIRE_TRUE(std::all_of(rejected.begin(), rejected.end(),
                 [&](std::uint64_t value) { return value == sentinel; }));
         }
@@ -3302,7 +3305,7 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP& cmd)
             for (std::size_t i = 0; i < seeds.size(); ++i)
                 LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactFromSeed(
                     std::span<std::uint64_t>(expected).subspan(i * n, n), 3.2, 19.2, seeds[i], cpuContext));
-            LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchFromSeeds(actual, 3.2, 19.2, seeds, cpuContext, 2));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results, actual, 3.2, 19.2, seeds, cpuContext, 2)));
             LOGVOLE_REQUIRE_TRUE(actual == expected);
         }
 
@@ -3310,21 +3313,22 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP& cmd)
         std::vector<std::uint64_t> untouched(4 * n, sentinel);
         const auto initial = untouched;
         const std::array<std::uint8_t, 4> inactive{ 0, 0, 0, 0 };
-        LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchFromSeeds(untouched, 3.2, 19.2, seeds, ctx, 3, inactive));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results, untouched, 3.2, 19.2, seeds, ctx, 3, inactive)));
         LOGVOLE_REQUIRE_TRUE(untouched == initial);
-        LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchFromSeeds({}, 3.2, 19.2, {}, ctx));
-        LOGVOLE_REQUIRE_TRUE(!samplePolyErrorCompactBatchFromSeeds(
-            std::span<std::uint64_t>(untouched).subspan(1), 3.2, 19.2, seeds, ctx));
-        LOGVOLE_REQUIRE_TRUE(!samplePolyErrorCompactBatchFromSeeds(
-            untouched, 3.2, 19.2, seeds, ctx, 3, std::span<const std::uint8_t>(inactive).first(3)));
-        LOGVOLE_REQUIRE_TRUE(!samplePolyErrorCompactBatchFromSeeds(
-            untouched, 3.2, std::numeric_limits<double>::infinity(), seeds, ctx));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results, {}, 3.2, 19.2, {}, ctx)));
+        LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results,
+            std::span<std::uint64_t>(untouched).subspan(1), 3.2, 19.2, seeds, ctx)));
+        LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results,
+            untouched, 3.2, 19.2, seeds, ctx, 3, std::span<const std::uint8_t>(inactive).first(3))));
+        LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results,
+            untouched, 3.2, std::numeric_limits<double>::infinity(), seeds, ctx)));
         LOGVOLE_REQUIRE_TRUE(untouched == initial);
     }
 }
 
 void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions testAdvanced;
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
@@ -3384,9 +3388,9 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
             {
                 tests_libOTe::logvole_test::ScopedOptionValue finitePrefix(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformPrefixBlocks, static_cast<std::uint64_t>(std::strtoull(blocks, nullptr, 10)));
                 std::vector<std::uint64_t> actual(expected.size(), marker);
-                LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchFromSeeds(
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results,
                     std::span<std::uint64_t>(actual).subspan(1, count * n),
-                    sigma, 19.2, seeds, ctx, 4, active));
+                    sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(actual == expected)
                     << "N=" << n << " count=" << count << " sigma=" << sigma << " prefix=" << blocks;
             }
@@ -3420,12 +3424,12 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
                     sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures));
                 LOGVOLE_REQUIRE_TRUE(direct.mValues.mData == retained && direct.mComplete == flags);
                 std::vector<std::uint64_t> fallback(expected.size(), marker);
-                LOGVOLE_REQUIRE_TRUE(!samplePolyErrorCompactBatchFromSeeds(
-                    std::span<std::uint64_t>(fallback).subspan(1, count * n), sigma, 19.2, seeds, ctx, 4, active));
+                LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results,
+                    std::span<std::uint64_t>(fallback).subspan(1, count * n), sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(std::all_of(fallback.begin(), fallback.end(), [](auto x) { return x == marker; }));
                 tests_libOTe::logvole_test::ScopedOptionValue allowReplay(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformStrict, false);
-                LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchFromSeeds(
-                    std::span<std::uint64_t>(fallback).subspan(1, count * n), sigma, 19.2, seeds, ctx, 4, active));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(setupResources.executor, setupResources.results,
+                    std::span<std::uint64_t>(fallback).subspan(1, count * n), sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(fallback == expected);
             }
         }
@@ -3442,6 +3446,7 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
 
 void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions testAdvanced;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
@@ -3604,16 +3609,16 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 tests_libOTe::logvole_test::ScopedOptionValue finitePrefix(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransformPrefixBlocks, static_cast<std::uint64_t>(std::strtoull(blocks, nullptr, 10)));
                 std::vector<std::uint64_t> host{marker};
                 gpu::DeviceScalarsPtr device;
-                LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(
-                    host, device, sigma, 19.2, seeds, ctx, 4, active));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    host, device, sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(host.empty() && device != nullptr);
                 LOGVOLE_REQUIRE_EQ(device->count(), words);
                 LOGVOLE_REQUIRE_TRUE(device != retained);
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched, readbackExecution.readbackStream()));
                 LOGVOLE_REQUIRE_TRUE(fetched == expected);
                 const auto materializedOwner = device;
-                LOGVOLE_REQUIRE_TRUE(materializePolyErrorCompactBatchForSetup(
-                    host, device, sigma, 19.2, seeds, ctx, 4, active));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(materializePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    host, device, sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(host == expected && device == materializedOwner);
             }
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, fetched, readbackExecution.readbackStream()));
@@ -3636,12 +3641,12 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 tests_libOTe::logvole_test::ScopedOptionValue decline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mGaussianResident, true);
                 LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active, ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures));
                 LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
-                LOGVOLE_REQUIRE_FALSE(samplePolyErrorCompactBatchForSetup(
-                    host, device, sigma, 19.2, seeds, ctx, 4, active));
+                LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    host, device, sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(host == std::vector<std::uint64_t>{marker} && device == retained);
                 tests_libOTe::logvole_test::ScopedOptionValue allowReplay(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResidentStrict, false);
-                LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(
-                    host, device, sigma, 19.2, seeds, ctx, 4, active));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    host, device, sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(host == expected && device == nullptr);
             }
             {
@@ -3650,42 +3655,42 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 tests_libOTe::logvole_test::ScopedOptionValue rollback(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResident, false);
                 host.assign(1, marker);
                 device = retained;
-                LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(
-                    host, device, sigma, 19.2, seeds, ctx, 1, active));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    host, device, sigma, 19.2, seeds, ctx, 1, active)));
                 LOGVOLE_REQUIRE_TRUE(host == expected && device == nullptr);
             }
             {
                 auto cpuContext = cpuReferenceContext(ctx);
                 host.assign(1, marker);
                 device = retained;
-                LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(
-                    host, device, sigma, 19.2, seeds, cpuContext, 1, active));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    host, device, sigma, 19.2, seeds, cpuContext, 1, active)));
                 LOGVOLE_REQUIRE_TRUE(host == expected && device == nullptr);
             }
             host.assign(1, marker);
             device = retained;
-            LOGVOLE_REQUIRE_FALSE(samplePolyErrorCompactBatchForSetup(host, device, sigma, 19.2,
-                seeds, ctx, 4, std::span<const std::uint8_t>(active).first(3)));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results, host, device, sigma, 19.2,
+                seeds, ctx, 4, std::span<const std::uint8_t>(active).first(3))));
             LOGVOLE_REQUIRE_TRUE(host == std::vector<std::uint64_t>{marker} && device == retained);
-            LOGVOLE_REQUIRE_FALSE(samplePolyErrorCompactBatchForSetup(
-                host, device, sigma, std::numeric_limits<double>::infinity(), seeds, ctx, 4, active));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                host, device, sigma, std::numeric_limits<double>::infinity(), seeds, ctx, 4, active)));
             LOGVOLE_REQUIRE_TRUE(host == std::vector<std::uint64_t>{marker} && device == retained);
             {
                 tests_libOTe::logvole_test::ScopedOptionValue incompatibleSelection(ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransform, false);
-                LOGVOLE_REQUIRE_FALSE(samplePolyErrorCompactBatchForSetup(
-                    host, device, sigma, 19.2, seeds, ctx, 4, active));
+                LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    host, device, sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(host == std::vector<std::uint64_t>{marker} && device == retained);
             }
-            LOGVOLE_REQUIRE_FALSE(materializePolyErrorCompactBatchForSetup(host, device,
-                sigma, 19.2, std::span<const seal::prng_seed_type>(seeds).first(3), ctx));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(materializePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results, host, device,
+                sigma, 19.2, std::span<const seal::prng_seed_type>(seeds).first(3), ctx)));
             LOGVOLE_REQUIRE_TRUE(host == std::vector<std::uint64_t>{marker} && device == retained);
             {
                 // An absent device result can be materialized by exact seeded
                 // CPU replay without changing any retained device owner.
                 gpu::DeviceScalarsPtr absent;
                 std::vector<std::uint64_t> replayHost{marker};
-                LOGVOLE_REQUIRE_TRUE(materializePolyErrorCompactBatchForSetup(
-                    replayHost, absent, sigma, 19.2, seeds, ctx, 4, active));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(materializePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    replayHost, absent, sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(replayHost == expected && absent == nullptr);
             }
             {
@@ -3695,8 +3700,8 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 auto cpuContext = cpuReferenceContext(ctx);
                 const auto retainedOwner = device;
                 std::vector<std::uint64_t> replayHost{marker};
-                LOGVOLE_REQUIRE_TRUE(materializePolyErrorCompactBatchForSetup(
-                    replayHost, device, sigma, 19.2, seeds, cpuContext, 4, active));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(materializePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    replayHost, device, sigma, 19.2, seeds, cpuContext, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(replayHost == expected && device == retainedOwner);
             }
             LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, 0u, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, {}, ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures));
@@ -3715,18 +3720,18 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_EQ(std::fesetround(FE_UPWARD), 0);
                 LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, degree, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, active, ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures));
                 LOGVOLE_REQUIRE_TRUE(direct.mValues == retained && direct.mComplete == retainedFlags);
-                LOGVOLE_REQUIRE_FALSE(samplePolyErrorCompactBatchForSetup(
-                    host, device, sigma, 19.2, seeds, ctx, 4, active));
+                LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                    host, device, sigma, 19.2, seeds, ctx, 4, active)));
                 LOGVOLE_REQUIRE_TRUE(host == std::vector<std::uint64_t>{marker} && device == retained);
             }
 
             const std::vector<std::uint8_t> inactive(count, 0);
-            LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(
-                host, device, sigma, 19.2, seeds, ctx, 4, inactive));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
+                host, device, sigma, 19.2, seeds, ctx, 4, inactive)));
             LOGVOLE_REQUIRE_TRUE(host.empty() && device != nullptr && device->count() == words);
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*device, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(std::all_of(fetched.begin(), fetched.end(), [](auto x) { return x == 0u; }));
-            LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactBatchForSetup(host, device, sigma, 19.2, {}, ctx));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results, host, device, sigma, 19.2, {}, ctx)));
             LOGVOLE_REQUIRE_TRUE(host.empty() && device == nullptr);
             LOGVOLE_REQUIRE_TRUE(gpu::fetchScalars(*retained, fetched, readbackExecution.readbackStream()));
             LOGVOLE_REQUIRE_TRUE(fetched == expected);

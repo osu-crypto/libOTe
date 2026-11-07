@@ -180,6 +180,7 @@ namespace
     template<typename Prover, typename Verifier, typename Statement>
     void checkFreshMasks(const Statement& statement, CivoleSetting setting, bool device)
     {
+    tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
         osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
@@ -226,7 +227,7 @@ namespace
         PRNG senderPrng(toBlock(0x53454e444552, 1));
         auto sockets = coproto::LocalAsyncSocket::makePair();
         auto offline = macoro::sync_wait(macoro::when_all_ready(
-            verifier.offline(delta, senderPrng, sockets[0]), prover.offline(sockets[1])));
+            verifier.offline(setupResources.executor, setupResources.results, delta, senderPrng, sockets[0]), prover.offline(sockets[1])));
         std::get<0>(offline).result();
         std::get<1>(offline).result();
 
@@ -615,6 +616,7 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
 
 void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
@@ -667,7 +669,7 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
 #endif
         auto sockets = coproto::LocalAsyncSocket::makePair();
         auto offline = macoro::sync_wait(macoro::when_all_ready(
-            verifier.offline(19, senderPrng, sockets[0]), prover.offline(sockets[1])));
+            verifier.offline(setupResources.executor, setupResources.results, 19, senderPrng, sockets[0]), prover.offline(sockets[1])));
         std::get<0>(offline).result();
         std::get<1>(offline).result();
         // Changing public C in either direction must update device verifier

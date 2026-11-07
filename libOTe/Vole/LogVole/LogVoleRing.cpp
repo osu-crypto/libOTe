@@ -1,3 +1,4 @@
+#include <optional>
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 #include "libOTe/Vole/LogVole/LogVolePublicCache.h"
@@ -2555,24 +2556,32 @@ namespace osuCrypto::LogVole
         };
     }
 
-    bool samplePolyErrorCompactBatchFromSeeds(
-        std::span<u64> limb0, double noiseStandardDeviation, double noiseMaxDeviation,
-        std::span<const seal::prng_seed_type> seeds, const RingNttContext& ctx,
-        u32 requestedWorkers, std::span<const u8> active, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
+    macoro::task<bool> samplePolyErrorCompactBatchFromSeeds(
+        macoro::thread_pool &executor, std::span<u8> setupResults, std::span<u64> limb0,
+        double noiseStandardDeviation, double noiseMaxDeviation, std::span<const seal::prng_seed_type> seeds,
+        const RingNttContext &ctx, u32 requestedWorkers, std::span<const u8> active,
+        CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
-        detail::CpuRowScratch localSetupScratch;
-        auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
+        if (setupResults.empty()) co_return false;
+        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        if (cpuBenchmark.mContext)
+        {
+            const auto& limits = *cpuBenchmark.mContext;
+            const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
+                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size());
+            setupResults = setupResults.first(std::min(setupResults.size(), capacity));
+        }
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
-        if (!canSamplePolyErrorCompact(ctx, noiseStandardDeviation, noiseMaxDeviation) ||
-            !n || seeds.size() > std::numeric_limits<std::size_t>::max() / n ||
-            limb0.size() != seeds.size() * n || (!active.empty() && active.size() != seeds.size()))
-            return false;
+        if (!canSamplePolyErrorCompact(ctx, noiseStandardDeviation, noiseMaxDeviation) || !n ||
+            seeds.size() > std::numeric_limits<std::size_t>::max() / n || limb0.size() != seeds.size() * n ||
+            (!active.empty() && active.size() != seeds.size()))
+            co_return false;
         std::vector<std::size_t> activeRows;
         activeRows.reserve(seeds.size());
         for (std::size_t i = 0; i < seeds.size(); ++i)
             if (active.empty() || active[i]) activeRows.push_back(i);
-        if (activeRows.empty()) return true;
+        if (activeRows.empty()) co_return true;
 
         std::shared_ptr<const u64> prefixOwner;
         std::span<const u64> prefixes;
@@ -2600,22 +2609,60 @@ namespace osuCrypto::LogVole
             // A declined strict transform must not publish any destination
             // samples. Successful finite prefixes may still require exact
             // replay of individual rows from the unchanged original seed.
-            if (!transformed && strict) return false;
+            if (!transformed && strict) co_return false;
             if (transformed)
-                return setupScratch.runBulk(activeRows.size(), requestedWorkers, [&](std::size_t task, CpuBenchmarkState& cpuBenchmark) {
+            {
+                const auto taskCount = activeRows.size();
+                auto chunks = setupResults.first(
+                    std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                              static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                          : setupResults.size())}));
+                if (taskCount && chunks.empty()) co_return false;
+                std::fill(chunks.begin(), chunks.end(), u8{1});
+                auto item = [&](std::size_t task, CpuBenchmarkState& cpuBenchmark) {
                     const auto row = activeRows[task];
                     auto destination = limb0.subspan(row * n, n);
                     if (!sampled.mComplete[task])
                     {
                         HostStep replayStep(hostProfiler(ctx), "setup: Gaussian CPU replay", &cpuBenchmark);
                         return samplePolyErrorCompactFromSeed(destination, noiseStandardDeviation,
-                            noiseMaxDeviation, seeds[row], ctx);
+                                                              noiseMaxDeviation, seeds[row], ctx);
                     }
                     std::memcpy(destination.data(), sampled.mValues.mData.get() + task * n,
-                        destination.size_bytes());
+                                destination.size_bytes());
                     bumpRingStat(RingOp::ErrorAdd);
                     return true;
-                }, cpuBenchmark);
+                };
+                auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    ScopedProtocolCacheScope scope(setupScope);
+                    CpuBenchmarkState worker =
+                        chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                    CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                    CpuBenchmarkTaskScope metrics(worker);
+                    struct FlushStats
+                    {
+                        ~FlushStats()
+                        {
+                            flushRingOpsThreadLocalStats();
+                        }
+                    } flush;
+                    for (auto i = begin; i != end; ++i)
+                        if (!item(i, worker))
+                        {
+                            ok = 0;
+                            break;
+                        }
+                };
+                if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                else if (taskCount)
+                {
+                    setupScopeGuard.reset();
+                    co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                    setupScopeGuard.emplace(setupScope);
+                }
+                const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                co_return phaseOk;
+            }
         }
         const bool requested = gpu::enabled(ctx) && ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianPrg;
         if (requested)
@@ -2641,39 +2688,90 @@ namespace osuCrypto::LogVole
                     prefixes = std::span<const u64>(prefixOwner.get(), downloaded.mWords);
                 }
             }
-            if (!devicePrefixes && strict) return false;
+            if (!devicePrefixes && strict) co_return false;
         }
 #endif
-        return setupScratch.runBulk(activeRows.size(), requestedWorkers, [&](std::size_t task, CpuBenchmarkState& cpuBenchmark) {
-            const auto row = activeRows[task];
-            auto destination = limb0.subspan(row * n, n);
-            if (!devicePrefixes)
-                return samplePolyErrorCompactFromSeed(destination, noiseStandardDeviation,
-                    noiseMaxDeviation, seeds[row], ctx);
-            PRNG prng(detail::aesPrngKey(seeds[row]));
-            GaussianPrefixEngine source(prng, prefixes.subspan(task * wordsPerPrefix, wordsPerPrefix));
-            const auto hostContext = getRingHostContext(ctx);
-            if (!hostContext || !hostContext->key_context_data()) return false;
-            samplePolyNormal(source, hostContext->key_context_data()->parms(),
-                destination.data(), noiseStandardDeviation, noiseMaxDeviation, true);
-            bumpRingStat(RingOp::ErrorAdd);
-            return true;
-        }, cpuBenchmark);
+        {
+            const auto taskCount = activeRows.size();
+            auto chunks = setupResults.first(std::min(
+                {setupResults.size(), static_cast<std::size_t>(taskCount),
+                 static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers) : setupResults.size())}));
+            if (taskCount && chunks.empty()) co_return false;
+            std::fill(chunks.begin(), chunks.end(), u8{1});
+            auto item = [&](std::size_t task, CpuBenchmarkState& cpuBenchmark) {
+                const auto row = activeRows[task];
+                auto destination = limb0.subspan(row * n, n);
+                if (!devicePrefixes)
+                    return samplePolyErrorCompactFromSeed(destination, noiseStandardDeviation,
+                                                          noiseMaxDeviation, seeds[row], ctx);
+                PRNG prng(detail::aesPrngKey(seeds[row]));
+                GaussianPrefixEngine source(prng, prefixes.subspan(task * wordsPerPrefix, wordsPerPrefix));
+                const auto hostContext = getRingHostContext(ctx);
+                if (!hostContext || !hostContext->key_context_data()) return false;
+                samplePolyNormal(source, hostContext->key_context_data()->parms(), destination.data(),
+                                 noiseStandardDeviation, noiseMaxDeviation, true);
+                bumpRingStat(RingOp::ErrorAdd);
+                return true;
+            };
+            auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                ScopedProtocolCacheScope scope(setupScope);
+                CpuBenchmarkState worker =
+                    chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                CpuBenchmarkTaskScope metrics(worker);
+                struct FlushStats
+                {
+                    ~FlushStats()
+                    {
+                        flushRingOpsThreadLocalStats();
+                    }
+                } flush;
+                for (auto i = begin; i != end; ++i)
+                    if (!item(i, worker))
+                    {
+                        ok = 0;
+                        break;
+                    }
+            };
+            if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+            else if (taskCount)
+            {
+                setupScopeGuard.reset();
+                co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                setupScopeGuard.emplace(setupScope);
+            }
+            const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+            co_return phaseOk;
+        }
     }
 
-    bool samplePolyErrorCompactBatchForSetup(
-        std::vector<u64>& host, std::shared_ptr<gpu::DeviceScalars>& device,
-        double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
-        const RingNttContext& ctx, u32 requestedWorkers, std::span<const u8> active, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
+    macoro::task<bool> samplePolyErrorCompactBatchForSetup(
+        macoro::thread_pool &executor, std::span<u8> setupResults, std::vector<u64> &host,
+        std::shared_ptr<gpu::DeviceScalars> &device, double sigma, double clip,
+        std::span<const seal::prng_seed_type> seeds, const RingNttContext &ctx, u32 requestedWorkers,
+        std::span<const u8> active, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
-        detail::CpuRowScratch localSetupScratch;
-        auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
+        if (setupResults.empty()) co_return false;
+        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        if (cpuBenchmark.mContext)
+        {
+            const auto& limits = *cpuBenchmark.mContext;
+            const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
+                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size());
+            setupResults = setupResults.first(std::min(setupResults.size(), capacity));
+        }
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         if (!canSamplePolyErrorCompact(ctx, sigma, clip) || !n ||
             seeds.size() > std::numeric_limits<std::size_t>::max() / n ||
-            (!active.empty() && active.size() != seeds.size())) return false;
-        if (seeds.empty()) { host.clear(); device.reset(); return true; }
+            (!active.empty() && active.size() != seeds.size()))
+            co_return false;
+        if (seeds.empty())
+        {
+            host.clear();
+            device.reset();
+            co_return true;
+        }
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (gpu::enabled(ctx) && ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResident)
         {
@@ -2694,10 +2792,8 @@ namespace osuCrypto::LogVole
                 // A finite first prefix can exhaust on only a few rows. Retry
                 // those original seeds on the owning GPU before considering
                 // exact host replay and an H2D repair of whole coefficient rows.
-                const u64 defaultWords =
-                    ((static_cast<u64>(n) * 3u + 1023u) / 1024u) * 512u;
-                u64 retryWords = std::max<u64>(defaultWords,
-                    blocks ? blocks * 1024u : defaultWords * 2u);
+                const u64 defaultWords = ((static_cast<u64>(n) * 3u + 1023u) / 1024u) * 512u;
+                u64 retryWords = std::max<u64>(defaultWords, blocks ? blocks * 1024u : defaultWords * 2u);
                 for (u32 attempt = 0; ready && !incomplete.empty() &&
                         attempt < 8u && retryWords <= std::numeric_limits<u32>::max();
                         ++attempt)
@@ -2739,11 +2835,53 @@ namespace osuCrypto::LogVole
                     retryWords *= 2u;
                 }
                 std::vector<std::vector<u64>> repaired(incomplete.size());
-                ready = ready && setupScratch.runBulk(incomplete.size(), requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
-                    HostStep repairStep(hostProfiler(ctx), "setup: Gaussian resident CPU repair", &cpuBenchmark);
-                    repaired[i].resize(n);
-                    return samplePolyErrorCompactFromSeed(repaired[i], sigma, clip, seeds[incomplete[i]], ctx);
-                }, cpuBenchmark);
+                if (ready)
+                {
+                    const auto taskCount = incomplete.size();
+                    auto chunks = setupResults.first(
+                        std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                                  static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                              : setupResults.size())}));
+                    if (taskCount && chunks.empty()) co_return false;
+                    std::fill(chunks.begin(), chunks.end(), u8{1});
+                    auto item = [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+                        HostStep repairStep(hostProfiler(ctx), "setup: Gaussian resident CPU repair",
+                                            &cpuBenchmark);
+                        repaired[i].resize(n);
+                        return samplePolyErrorCompactFromSeed(repaired[i], sigma, clip, seeds[incomplete[i]],
+                                                              ctx);
+                    };
+                    auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                        ScopedProtocolCacheScope scope(setupScope);
+                        CpuBenchmarkState worker =
+                            chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                        CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                        CpuBenchmarkTaskScope metrics(worker);
+                        struct FlushStats
+                        {
+                            ~FlushStats()
+                            {
+                                flushRingOpsThreadLocalStats();
+                            }
+                        } flush;
+                        for (auto i = begin; i != end; ++i)
+                            if (!item(i, worker))
+                            {
+                                ok = 0;
+                                break;
+                            }
+                    };
+                    if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                    else if (taskCount)
+                    {
+                        setupScopeGuard.reset();
+                        co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                        setupScopeGuard.emplace(setupScope);
+                    }
+                    const bool phaseOk =
+                        std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                    ready = phaseOk;
+                }
                 if (ready && !incomplete.empty())
                 {
                     auto& stream = gpu::contextSampleStream(ctx);
@@ -2760,20 +2898,114 @@ namespace osuCrypto::LogVole
                             bumpRingStat(RingOp::ErrorAdd);
                     host.clear();
                     device = std::move(sampled.mValues);
-                    return true;
+                    co_return true;
                 }
             }
-            if (strict) return false;
+            if (strict) co_return false;
         }
 #endif
         std::vector<u64> next(seeds.size() * n, 0);
-        if (!samplePolyErrorCompactBatchFromSeeds(next, sigma, clip, seeds, ctx, requestedWorkers, active, cpuBenchmark, &setupScratch)) return false;
+        {
+            setupScopeGuard.reset();
+            const bool setupOk = co_await samplePolyErrorCompactBatchFromSeeds(executor, setupResults, next, sigma, clip, seeds, ctx,
+                                                     requestedWorkers, active, cpuBenchmark, setupScope);
+            setupScopeGuard.emplace(setupScope);
+            if (!setupOk) co_return false;
+        }
         host = std::move(next);
         device.reset();
-        return true;
+        co_return true;
     }
 
-    bool materializePolyErrorCompactBatchForSetup(
+    macoro::task<bool> materializePolyErrorCompactBatchForSetup(
+        macoro::thread_pool &executor, std::span<u8> setupResults, std::vector<u64> &host,
+        const std::shared_ptr<gpu::DeviceScalars> &device, double sigma, double clip,
+        std::span<const seal::prng_seed_type> seeds, const RingNttContext &ctx, u32 requestedWorkers,
+        std::span<const u8> active, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
+    {
+        if (setupResults.empty()) co_return false;
+        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        if (cpuBenchmark.mContext)
+        {
+            const auto& limits = *cpuBenchmark.mContext;
+            const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
+                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size());
+            setupResults = setupResults.first(std::min(setupResults.size(), capacity));
+        }
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        if (!canSamplePolyErrorCompact(ctx, sigma, clip) || !n ||
+            seeds.size() > std::numeric_limits<std::size_t>::max() / n ||
+            (!active.empty() && active.size() != seeds.size()))
+            co_return false;
+        const auto words = seeds.size() * n;
+        if (!device && host.size() == words) co_return true;
+        std::vector<u64> next(words, 0);
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (device)
+        {
+            if (device->count() != words) co_return false;
+            if (gpu::enabled(ctx) && gpu::fetchScalars(*device, next, gpu::contextStream(ctx)))
+            {
+                host = std::move(next);
+                co_return true;
+            }
+            // A declined asynchronous fetch must drain before CPU replay can
+            // reuse its destination, including copy/sync error exits.
+            if (gpu::enabled(ctx)) gpu::contextStream(ctx).sync();
+            std::fill(next.begin(), next.end(), 0);
+        }
+#else
+        if (device) co_return false;
+#endif
+        {
+            const auto taskCount = seeds.size();
+            auto chunks = setupResults.first(std::min(
+                {setupResults.size(), static_cast<std::size_t>(taskCount),
+                 static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers) : setupResults.size())}));
+            if (taskCount && chunks.empty()) co_return false;
+            std::fill(chunks.begin(), chunks.end(), u8{1});
+            auto item = [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) {
+                return (!active.empty() && !active[row]) ||
+                       samplePolyErrorCompactFromSeed(std::span<u64>(next).subspan(row * n, n), sigma, clip,
+                                                      seeds[row], ctx);
+            };
+            auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                ScopedProtocolCacheScope scope(setupScope);
+                CpuBenchmarkState worker =
+                    chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                CpuBenchmarkTaskScope metrics(worker);
+                struct FlushStats
+                {
+                    ~FlushStats()
+                    {
+                        flushRingOpsThreadLocalStats();
+                    }
+                } flush;
+                for (auto i = begin; i != end; ++i)
+                    if (!item(i, worker))
+                    {
+                        ok = 0;
+                        break;
+                    }
+            };
+            if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+            else if (taskCount)
+            {
+                setupScopeGuard.reset();
+                co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                setupScopeGuard.emplace(setupScope);
+            }
+            const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+            if (!phaseOk) co_return false;
+        }
+        host = std::move(next);
+        co_return true;
+    }
+
+    // Legacy synchronous replay for lazy GPU host getters. No async caller uses this boundary.
+    bool materializePolyErrorCompactBatchForSetupLegacy(
         std::vector<u64>& host, const std::shared_ptr<gpu::DeviceScalars>& device,
         double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
         const RingNttContext& ctx, u32 requestedWorkers, std::span<const u8> active, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)

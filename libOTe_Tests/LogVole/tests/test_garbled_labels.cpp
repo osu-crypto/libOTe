@@ -42,6 +42,7 @@ namespace
 
 void LogVole_Garbled_LayoutAndValidation(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     for (u32 slots : {8192u, 16384u})
     {
         const u64 perRing = slots / 3;
@@ -74,13 +75,14 @@ void LogVole_Garbled_LayoutAndValidation(const oc::CLP&)
     PRNG prng(block(91, 17));
     auto sockets = coproto::LocalAsyncSocket::makePair();
     auto result = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(prng, sockets[0]), receiver.offline(sockets[1])));
+        sender.offline(setupResources.executor, setupResources.results, prng, sockets[0]), receiver.offline(sockets[1])));
     rejects([&] { std::get<0>(result).result(); });
     rejects([&] { std::get<1>(result).result(); });
 }
 
 void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
@@ -113,7 +115,7 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
         LogVoleGarbledReceiver receiver(senderOptions);
         PRNG sp(block(871, 12)), rp(block(913, 65));
         auto setup = coproto::LocalAsyncSocket::makePair();
-        together(sender.offline(sp, setup[0]), receiver.offline(setup[1]));
+        together(sender.offline(setupResources.executor, setupResources.results, sp, setup[0]), receiver.offline(setup[1]));
         const u64 p = sender.modulus();
         const auto otherSetting = setting == CivoleSetting::GoldenSeed
             ? CivoleSetting::NoGoldenSeed : CivoleSetting::GoldenSeed;

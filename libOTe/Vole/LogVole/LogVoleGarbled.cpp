@@ -183,7 +183,8 @@ namespace osuCrypto
         return mDeltas;
     }
 
-    task<> LogVoleGarbledSender::offline(PRNG& prng, Socket& sock)
+    task<> LogVoleGarbledSender::offline(macoro::thread_pool &executor, std::span<u8> setupResults,
+                                         PRNG &prng, Socket &sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!mLayout.mLabelCount) throw std::logic_error("configure the garbled-label sender first");
@@ -194,7 +195,7 @@ namespace osuCrypto
         co_await meta.recv(ack);
         if (ack[0] != 1) throw std::invalid_argument("garbled-label configurations do not match");
         GarbledLabel deltas;
-        for (auto& delta : deltas) delta = sampleNonzero(prng, mModulus);
+        for (auto &delta : deltas) delta = sampleNonzero(prng, mModulus);
         std::vector<u64> slots;
         CivoleSenderOfflineInput input;
         input.mParams = mParams;
@@ -202,7 +203,8 @@ namespace osuCrypto
         input.mW = mLayout.scalarCount();
         bool prepareDeltaOnDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        prepareDeltaOnDevice = gpu::enabled(mOptions) && mParams.mLogVole.mShrinkExpand.mGpuSetup.mDeltaDevice;
+        prepareDeltaOnDevice =
+            gpu::enabled(mOptions) && mParams.mLogVole.mShrinkExpand.mGpuSetup.mDeltaDevice;
 #endif
         if (prepareDeltaOnDevice) input.mGarbledDeltaPattern = deltas;
         else
@@ -213,7 +215,8 @@ namespace osuCrypto
         }
         CivoleSenderState state;
         RootWirePinOverlapEvidence rootWirePin;
-        co_await civoleSenderOffline(input, state, prng, sock, rootWirePin, cpuBenchmark);
+        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock, rootWirePin,
+                                     cpuBenchmark);
         mState = std::move(state);
         mDeltas = deltas;
         mNextSid = 0;

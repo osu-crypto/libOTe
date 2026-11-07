@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 #include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
@@ -193,6 +194,7 @@ namespace
         ShrinkExpandReceiverState& receiverState,
         osuCrypto::LogVoleExecutionOptions execution = {})
     {
+    tests_libOTe::logvole_test::SetupResources setupResources;
         RingNttContext ctx;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx,
             std::make_shared<RingContextFactory>(execution)));
@@ -208,7 +210,7 @@ namespace
         auto offlineSockets = coproto::LocalAsyncSocket::makePair();
         oc::PRNG offlinePrng(oc::block(0x515EEDu, 0));
         auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-            sender.offline(senderOfflineInput, senderState, offlinePrng, offlineSockets[0]),
+            sender.offline(setupResources.executor, setupResources.results, senderOfflineInput, senderState, offlinePrng, offlineSockets[0]),
             receiver.offline(receiverOfflineInput, receiverState, offlineSockets[1])));
         std::get<0>(offlineResult).result();
         std::get<1>(offlineResult).result();

@@ -123,6 +123,7 @@ namespace osuCrypto
             macoro::thread_pool executor;
             auto work = executor.make_work();
             std::vector<LheDecryptBuffer> buffers;
+            std::vector<u8> setupResults(options.mUseGpu ? 1u : workerThreads);
             if (!options.mUseGpu)
             {
                 buffers.resize(workerThreads);
@@ -147,7 +148,7 @@ namespace osuCrypto
             // The offline phase fixes Delta and prepares reusable state for
             // sequential online calls with auto-incremented SIDs.
             auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-                sender.offline(delta, senderPrng, offlineSockets[0]),
+                sender.offline(executor, setupResults, delta, senderPrng, offlineSockets[0]),
                 receiver.offline(offlineSockets[1])));
             std::get<0>(offlineResult).result();
             std::get<1>(offlineResult).result();
@@ -243,6 +244,7 @@ namespace osuCrypto
             macoro::thread_pool executor;
             auto work = executor.make_work();
             std::vector<LheDecryptBuffer> buffers;
+            std::vector<u8> setupResults(options.mUseGpu ? 1u : workerThreads);
             if (!options.mUseGpu)
             {
                 buffers.resize(workerThreads);
@@ -254,7 +256,7 @@ namespace osuCrypto
             PRNG prng(sysRandomSeed());
             // Split-role mode mirrors the local example over an asio socket.
             // The receiver must use the same n, plaintext bit count and port.
-            cp::sync_wait(sender.offline(delta, prng, chl));
+            cp::sync_wait(sender.offline(executor, setupResults, delta, prng, chl));
             cp::sync_wait(sender.send(executor, buffers, b, prng, chl));
 
             const auto end = timer.setTimePoint("logvole.end");

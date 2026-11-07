@@ -196,7 +196,8 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>* publicBNtt = nullptr,
         u32 requestedWorkers = 1);
 
-    bool lencEncTrunc(
+    macoro::task<bool> lencEncTrunc(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& s,
         u32 tauHi,
@@ -215,7 +216,7 @@ namespace osuCrypto::LogVole
         bool deferRandomizerHost = false,
         const gpu::DeviceBatch* seedLabelDevice = nullptr,
         const LazySeedLabelHostState* seedLabelHost = nullptr,
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
     bool lencDigestTrunc(
         const RingNttContext& ctx,

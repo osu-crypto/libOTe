@@ -1,3 +1,4 @@
+#include <optional>
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
@@ -1422,50 +1423,47 @@ namespace osuCrypto::LogVole
             out);
     }
 
-    bool lencEncTrunc(
-        const RingNttContext& ctx,
-        const std::vector<RnsPoly>& s,
-        u32 tauHi,
-        u32 gadgetLogBase,
-        u32 plaintextModulusBits,
-        PRNG& prng,
-        LencEncodeOutput& out,
-        double noiseStandardDeviation,
-        double noiseMaxDeviation,
-        u32 requestedWidthPadded,
-        bool emitRCoeffDomain,
-        bool leafInputsAreGadget,
-        const std::vector<RnsPoly>* publicBNtt,
-        u32 requestedWorkers,
-        bool deferCiphertextHost,
-        bool deferRandomizerHost,
-        const gpu::DeviceBatch* seedLabelDevice,
-        const LazySeedLabelHostState* seedLabelHost,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
+
+
+    macoro::task<bool> lencEncTrunc(macoro::thread_pool &executor, std::span<u8> setupResults,
+                                    const RingNttContext &ctx, const std::vector<RnsPoly> &s, u32 tauHi,
+                                    u32 gadgetLogBase, u32 plaintextModulusBits, PRNG &prng,
+                                    LencEncodeOutput &out, double noiseStandardDeviation,
+                                    double noiseMaxDeviation, u32 requestedWidthPadded, bool emitRCoeffDomain,
+                                    bool leafInputsAreGadget, const std::vector<RnsPoly> *publicBNtt,
+                                    u32 requestedWorkers, bool deferCiphertextHost, bool deferRandomizerHost,
+                                    const gpu::DeviceBatch *seedLabelDevice,
+                                    const LazySeedLabelHostState *seedLabelHost,
+                                    LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark,
+                                    ProtocolCacheScope setupScope)
     {
-        detail::CpuRowScratch localSetupScratch;
-        auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
+        if (setupResults.empty()) co_return false;
+        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        if (cpuBenchmark.mContext)
+        {
+            const auto& limits = *cpuBenchmark.mContext;
+            const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
+                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size());
+            setupResults = setupResults.first(std::min(setupResults.size(), capacity));
+        }
         HostStep setupStep(hostProfiler(ctx), "setup: lenc truncated", &cpuBenchmark);
         const auto sCount = seedLabelHost ? seedLabelHost->count() : s.size();
-        if (!sCount || sCount > std::numeric_limits<u32>::max() ||
-            tauHi == 0 || noiseStandardDeviation < 0 ||
-            (seedLabelDevice
-                ? (!s.empty() || !seedLabelHost ||
-                   !seedLabelHost->matches(ctx.mParams))
-                : !validateRingBatchShape(s, ctx.mParams)))
+        if (!sCount || sCount > std::numeric_limits<u32>::max() || tauHi == 0 || noiseStandardDeviation < 0 ||
+            (seedLabelDevice ? (!s.empty() || !seedLabelHost || !seedLabelHost->matches(ctx.mParams))
+                             : !validateRingBatchShape(s, ctx.mParams)))
         {
-            return false;
+            co_return false;
         }
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (seedLabelDevice &&
-            !gpu::setupLencInputBatchMatches(ctx, *seedLabelDevice,
-                sCount, currentProtocolCacheScope().mRunId)) return false;
+        if (seedLabelDevice && !gpu::setupLencInputBatchMatches(ctx, *seedLabelDevice, sCount,
+                                                                currentProtocolCacheScope().mRunId))
+            co_return false;
 #else
-        if (seedLabelDevice) return false;
+        if (seedLabelDevice) co_return false;
 #endif
 
-        const std::vector<RnsPoly>* sHost = &s;
+        const std::vector<RnsPoly> *sHost = &s;
         const auto materializeS = [&] {
             if (!seedLabelDevice) return true;
             try
@@ -1481,16 +1479,17 @@ namespace osuCrypto::LogVole
             return true;
         };
 
-        const u32 tauLeaf = computeTruncLeafTau(tauHi, plaintextModulusBits, gadgetLogBase, leafInputsAreGadget);
+        const u32 tauLeaf =
+            computeTruncLeafTau(tauHi, plaintextModulusBits, gadgetLogBase, leafInputsAreGadget);
         const u32 fullTau = tauHi + 1u;
         if (tauLeaf == 0 || tauLeaf > fullTau)
         {
-            return false;
+            co_return false;
         }
 
         const u32 mu = static_cast<u32>(sCount);
         u32 width = 0;
-        if (!lencTreeWidth(sCount, requestedWidthPadded, width)) return false;
+        if (!lencTreeWidth(sCount, requestedWidthPadded, width)) co_return false;
 
         const bool deviceAssemblyRequested = gpuSetupLencDeviceEnabled(options, ctx);
         std::shared_ptr<const std::vector<RnsPoly>> cachedPublicBNtt;
@@ -1499,32 +1498,32 @@ namespace osuCrypto::LogVole
         {
             if (!validatePublicBNtt(ctx, *publicBNtt, fullTau))
             {
-                return false;
+                co_return false;
             }
         }
         else
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (deviceAssemblyRequested)
-                retainedPublicBNtt = retainedLencPublicBNtt(ctx, fullTau);
+            if (deviceAssemblyRequested) retainedPublicBNtt = retainedLencPublicBNtt(ctx, fullTau);
 #endif
             if (!retainedPublicBNtt)
             {
                 cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau);
                 publicBNtt = cachedPublicBNtt.get();
-                if (!publicBNtt || !validatePublicBNtt(ctx, *publicBNtt, fullTau)) return false;
+                if (!publicBNtt || !validatePublicBNtt(ctx, *publicBNtt, fullTau)) co_return false;
             }
         }
 
-        std::vector<const RnsPoly*> publicBInternalHi, publicBLeaf;
+        std::vector<const RnsPoly *> publicBInternalHi, publicBLeaf;
         bool retainRandomizers = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        retainRandomizers = deferRandomizerHost && gpuSetupLencDeviceEnabled(options, ctx) && gpu::lencRandomizerResidencyEnabled(ctx.mExecutionOptions);
+        retainRandomizers = deferRandomizerHost && gpuSetupLencDeviceEnabled(options, ctx) &&
+                            gpu::lencRandomizerResidencyEnabled(ctx.mExecutionOptions);
 #endif
         RecursiveLeafScaling leafScaling{};
         if (leafInputsAreGadget && !retainRandomizers && !buildRecursiveLeafScaling(ctx, leafScaling))
         {
-            return false;
+            co_return false;
         }
 
         const u32 levels = ilog2Exact(width);
@@ -1539,7 +1538,7 @@ namespace osuCrypto::LogVole
         const bool compactStrict = compactRequested && options.mCompactNoiseStrict;
         const bool compactNoiseEnabled = compactRequested &&
             canSamplePolyErrorCompact(ctx, noiseStandardDeviation, noiseMaxDeviation);
-        if (compactStrict && !compactNoiseEnabled) return false;
+        if (compactStrict && !compactNoiseEnabled) co_return false;
         const std::size_t randomizerN = ctx.mParams.mPolyModulusDegree;
         std::vector<u64> compactRandomizers;
         std::shared_ptr<gpu::DeviceScalars> residentRandomizers;
@@ -1547,29 +1546,76 @@ namespace osuCrypto::LogVole
         if (compactNoiseEnabled)
         {
             const std::size_t count = static_cast<std::size_t>(levels) * width;
-            if (!randomizerN || count > std::numeric_limits<std::size_t>::max() / randomizerN) return false;
+            if (!randomizerN || count > std::numeric_limits<std::size_t>::max() / randomizerN)
+                co_return false;
         }
         if (setupBatch)
         {
             // Draw the identical parent seeds in level/leaf order before any
             // worker runs. Each local error sampler then owns its PRNG stream.
-            auto& seeds = randomizerSeeds;
+            auto &seeds = randomizerSeeds;
             seeds.resize(static_cast<std::size_t>(levels) * width);
-            for (auto& seed : seeds) prng.get(seed.data(), seed.size());
+            for (auto &seed : seeds) prng.get(seed.data(), seed.size());
             if (compactNoiseEnabled)
             {
-                if (!samplePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
-                    noiseStandardDeviation, noiseMaxDeviation, seeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
+                {
+                    setupScopeGuard.reset();
+                    const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
+                        executor, setupResults, compactRandomizers, residentRandomizers,
+                        noiseStandardDeviation, noiseMaxDeviation, seeds, ctx, requestedWorkers, {},
+                        cpuBenchmark, setupScope);
+                    setupScopeGuard.emplace(setupScope);
+                    if (!setupOk) co_return false;
+                }
             }
-            else if (!setupScratch.runBulk(seeds.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            else
+            {
+                const auto taskCount = seeds.size();
+                auto chunks = setupResults.first(
+                    std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                              static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                          : setupResults.size())}));
+                if (taskCount && chunks.empty()) co_return false;
+                std::fill(chunks.begin(), chunks.end(), u8{1});
+                auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     auto& poly = rLayersNtt[idx / width][idx % width];
                     resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-                    return addPolyErrorFromSeed(poly, noiseStandardDeviation,
-                        noiseMaxDeviation, seeds[idx], ctx);
-                }, cpuBenchmark)) return false;
+                    return addPolyErrorFromSeed(poly, noiseStandardDeviation, noiseMaxDeviation, seeds[idx],
+                                                ctx);
+                };
+                auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    ScopedProtocolCacheScope scope(setupScope);
+                    CpuBenchmarkState worker = chunks.size() > 1
+                        ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                    CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                    CpuBenchmarkTaskScope metrics(worker);
+                    struct FlushStats
+                    {
+                        ~FlushStats()
+                        {
+                            flushRingOpsThreadLocalStats();
+                        }
+                    } flush;
+                    for (auto i = begin; i != end; ++i)
+                        if (!item(i, worker))
+                        {
+                            ok = 0;
+                            break;
+                        }
+                };
+                if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                else if (taskCount)
+                {
+                    setupScopeGuard.reset();
+                    co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                    setupScopeGuard.emplace(setupScope);
+                }
+                const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                if (!phaseOk) co_return false;
+            }
             if (!deviceAssemblyRequested)
-                for (auto& layer : rLayersNtt)
-                    if (!forwardNttBatch(layer, ctx)) return false;
+                for (auto &layer : rLayersNtt)
+                    if (!forwardNttBatch(layer, ctx)) co_return false;
         }
         else
         {
@@ -1577,9 +1623,10 @@ namespace osuCrypto::LogVole
             {
                 for (u32 leaf = 0; leaf < width; ++leaf)
                 {
-                    if (!sampleErrorPolyNtt(ctx, prng, noiseStandardDeviation, noiseMaxDeviation, rLayersNtt[level][leaf]))
+                    if (!sampleErrorPolyNtt(ctx, prng, noiseStandardDeviation, noiseMaxDeviation,
+                                            rLayersNtt[level][leaf]))
                     {
-                        return false;
+                        co_return false;
                     }
                 }
             }
@@ -1587,10 +1634,9 @@ namespace osuCrypto::LogVole
 
         std::vector<RnsPoly> sPadNtt;
         if (!devicePadding &&
-            (!materializeS() || !buildPaddedNttBatch(ctx, *sHost,
-                width, sPadNtt, !deviceAssemblyRequested)))
+            (!materializeS() || !buildPaddedNttBatch(ctx, *sHost, width, sPadNtt, !deviceAssemblyRequested)))
         {
-            return false;
+            co_return false;
         }
 
         std::vector<RnsPoly> deviceFirstRNtt;
@@ -1611,7 +1657,7 @@ namespace osuCrypto::LogVole
             std::shared_ptr<gpu::DeviceScalars> residentNoise;
             if (compactNoiseEnabled)
             {
-                if (!n || ct.mPolys.size() > std::numeric_limits<std::size_t>::max() / n) return false;
+                if (!n || ct.mPolys.size() > std::numeric_limits<std::size_t>::max() / n) co_return false;
             }
             std::vector<std::array<u64, 8>> seeds(ct.mPolys.size());
             std::vector<u8> activeNoiseRows(seeds.size(), 0u);
@@ -1627,17 +1673,61 @@ namespace osuCrypto::LogVole
             }
             if (compactNoiseEnabled)
             {
-                if (!samplePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark, &setupScratch)) return false;
+                {
+                    setupScopeGuard.reset();
+                    const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
+                        executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
+                        noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark, setupScope);
+                    setupScopeGuard.emplace(setupScope);
+                    if (!setupOk) co_return false;
+                }
             }
-            else if (!setupScratch.runBulk(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            else
+            {
+                const auto taskCount = ct.mPolys.size();
+                auto chunks = setupResults.first(
+                    std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                              static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                          : setupResults.size())}));
+                if (taskCount && chunks.empty()) co_return false;
+                std::fill(chunks.begin(), chunks.end(), u8{1});
+                auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     const bool activeNoise = activeNoiseRows[idx] != 0;
                     auto& poly = ct.mPolys[idx];
                     resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-                    return !activeNoise ||
-                        addPolyErrorFromSeed(poly, noiseStandardDeviation,
-                            noiseMaxDeviation, seeds[idx], ctx);
-                }, cpuBenchmark)) return false;
+                    return !activeNoise || addPolyErrorFromSeed(poly, noiseStandardDeviation,
+                                                                noiseMaxDeviation, seeds[idx], ctx);
+                };
+                auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    ScopedProtocolCacheScope scope(setupScope);
+                    CpuBenchmarkState worker = chunks.size() > 1
+                        ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                    CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                    CpuBenchmarkTaskScope metrics(worker);
+                    struct FlushStats
+                    {
+                        ~FlushStats()
+                        {
+                            flushRingOpsThreadLocalStats();
+                        }
+                    } flush;
+                    for (auto i = begin; i != end; ++i)
+                        if (!item(i, worker))
+                        {
+                            ok = 0;
+                            break;
+                        }
+                };
+                if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                else if (taskCount)
+                {
+                    setupScopeGuard.reset();
+                    co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                    setupScopeGuard.emplace(setupScope);
+                }
+                const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                if (!phaseOk) co_return false;
+            }
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (deviceAssemblyRequested)
             {
@@ -1655,17 +1745,61 @@ namespace osuCrypto::LogVole
                     retainRandomizers ? mu : 0u, retainRandomizers ? &lazyRandomizers : nullptr,
                     retainedPublicBNtt.get(),
                     devicePadding ? seedLabelDevice : nullptr, cpuBenchmark);
-                if (!deviceAssembled && (compactStrict || options.mLencDeviceStrict)) return false;
+                if (!deviceAssembled && (compactStrict || options.mLencDeviceStrict)) co_return false;
             }
 #endif
-            if (compactNoiseEnabled && !deviceAssembled &&
-                !materializePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark, &setupScratch)) return false;
-            if (compactNoiseEnabled && !deviceAssembled &&
-                !setupScratch.runBulk(ct.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
-                    return expandPolyErrorCompact(
-                        std::span<const u64>(compactNoise).subspan(idx * n, n), ct.mPolys[idx], ctx);
-                }, cpuBenchmark)) return false;
+            if (compactNoiseEnabled && !deviceAssembled)
+            {
+                setupScopeGuard.reset();
+                const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
+                    executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
+                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark, setupScope);
+                setupScopeGuard.emplace(setupScope);
+                if (!setupOk) co_return false;
+            }
+            if (compactNoiseEnabled && !deviceAssembled)
+            {
+                const auto taskCount = ct.mPolys.size();
+                auto chunks = setupResults.first(
+                    std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                              static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                          : setupResults.size())}));
+                if (taskCount && chunks.empty()) co_return false;
+                std::fill(chunks.begin(), chunks.end(), u8{1});
+                auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+                    return expandPolyErrorCompact(std::span<const u64>(compactNoise).subspan(idx * n, n),
+                                                  ct.mPolys[idx], ctx);
+                };
+                auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    ScopedProtocolCacheScope scope(setupScope);
+                    CpuBenchmarkState worker = chunks.size() > 1
+                        ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                    CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                    CpuBenchmarkTaskScope metrics(worker);
+                    struct FlushStats
+                    {
+                        ~FlushStats()
+                        {
+                            flushRingOpsThreadLocalStats();
+                        }
+                    } flush;
+                    for (auto i = begin; i != end; ++i)
+                        if (!item(i, worker))
+                        {
+                            ok = 0;
+                            break;
+                        }
+                };
+                if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                else if (taskCount)
+                {
+                    setupScopeGuard.reset();
+                    co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                    setupScopeGuard.emplace(setupScope);
+                }
+                const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                if (!phaseOk) co_return false;
+            }
             // The device path keeps randomizer layers and padded input in
             // coefficient form on the host and transforms them only on device.
             // A declined attempt must prepare them before the established path.
@@ -1674,25 +1808,71 @@ namespace osuCrypto::LogVole
                 // Device padding borrows the original input. Materialize the
                 // host coefficient copy only when an exact fallback needs it.
                 if (devicePadding &&
-                    (!materializeS() || !buildPaddedNttBatch(ctx, *sHost,
-                        width, sPadNtt, false))) return false;
-                if (compactNoiseEnabled &&
-                    !materializePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
-                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
-                if (compactNoiseEnabled && !setupScratch.runBulk(
-                    static_cast<std::size_t>(levels) * width, requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+                    (!materializeS() || !buildPaddedNttBatch(ctx, *sHost, width, sPadNtt, false)))
+                    co_return false;
+                if (compactNoiseEnabled)
+                {
+                    setupScopeGuard.reset();
+                    const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
+                        executor, setupResults, compactRandomizers, residentRandomizers,
+                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {},
+                        cpuBenchmark, setupScope);
+                    setupScopeGuard.emplace(setupScope);
+                    if (!setupOk) co_return false;
+                }
+                if (compactNoiseEnabled)
+                {
+                    const auto taskCount = static_cast<std::size_t>(levels) * width;
+                    auto chunks = setupResults.first(
+                        std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                                  static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                              : setupResults.size())}));
+                    if (taskCount && chunks.empty()) co_return false;
+                    std::fill(chunks.begin(), chunks.end(), u8{1});
+                    auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                         return expandPolyErrorCompact(
                             std::span<const u64>(compactRandomizers).subspan(idx * n, n),
                             rLayersNtt[idx / width][idx % width], ctx);
-                    }, cpuBenchmark)) return false;
-                for (auto& layer : rLayersNtt)
-                    if (!forwardNttBatch(layer, ctx)) return false;
-                if (!forwardNttBatch(sPadNtt, ctx)) return false;
+                    };
+                    auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                        ScopedProtocolCacheScope scope(setupScope);
+                        CpuBenchmarkState worker = chunks.size() > 1
+                            ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                        CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                        CpuBenchmarkTaskScope metrics(worker);
+                        struct FlushStats
+                        {
+                            ~FlushStats()
+                            {
+                                flushRingOpsThreadLocalStats();
+                            }
+                        } flush;
+                        for (auto i = begin; i != end; ++i)
+                            if (!item(i, worker))
+                            {
+                                ok = 0;
+                                break;
+                            }
+                    };
+                    if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                    else if (taskCount)
+                    {
+                        setupScopeGuard.reset();
+                        co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                        setupScopeGuard.emplace(setupScope);
+                    }
+                    const bool phaseOk =
+                        std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                    if (!phaseOk) co_return false;
+                }
+                for (auto &layer : rLayersNtt)
+                    if (!forwardNttBatch(layer, ctx)) co_return false;
+                if (!forwardNttBatch(sPadNtt, ctx)) co_return false;
             }
             // Noise also remains in coefficient form on failure; replay uses
             // the same sampled values without consuming any more PRNG seeds.
-            if (!deviceAssembled && noiseStandardDeviation > 0 &&
-                !forwardNttBatch(ct.mPolys, ctx)) return false;
+            if (!deviceAssembled && noiseStandardDeviation > 0 && !forwardNttBatch(ct.mPolys, ctx))
+                co_return false;
         }
 
         if (!deviceAssembled)
@@ -1704,12 +1884,13 @@ namespace osuCrypto::LogVole
                 cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau);
                 publicBNtt = cachedPublicBNtt.get();
             }
-            if (!publicBNtt || !validatePublicBNtt(ctx, *publicBNtt, fullTau)) return false;
+            if (!publicBNtt || !validatePublicBNtt(ctx, *publicBNtt, fullTau)) co_return false;
             publicBInternalHi = makePublicBInternalHi(*publicBNtt, tauHi);
             publicBLeaf = makePublicBLeaf(*publicBNtt, tauHi, tauLeaf);
         }
         if (!deviceAssembled && retainRandomizers && leafInputsAreGadget &&
-            !buildRecursiveLeafScaling(ctx, leafScaling)) return false;
+            !buildRecursiveLeafScaling(ctx, leafScaling))
+            co_return false;
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         auto buildRow = [&](std::size_t row) {
             const auto& moduli = getRingHostModuli(ctx);
@@ -1808,8 +1989,47 @@ namespace osuCrypto::LogVole
             }
             return true;
         };
-        if (!deviceAssembled &&
-            !setupScratch.runBulk(ct.mRows, setupBatch ? requestedWorkers : 1, buildRow, cpuBenchmark)) return false;
+        if (!deviceAssembled)
+        {
+            const auto taskCount = ct.mRows;
+            auto chunks = setupResults.first(
+                std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                          static_cast<std::size_t>((setupBatch ? requestedWorkers : 1)
+                                                       ? (setupBatch ? requestedWorkers : 1)
+                                                       : setupResults.size())}));
+            if (taskCount && chunks.empty()) co_return false;
+            std::fill(chunks.begin(), chunks.end(), u8{1});
+            auto item = [&](std::size_t row, CpuBenchmarkState &) { return buildRow(row); };
+            auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                ScopedProtocolCacheScope scope(setupScope);
+                CpuBenchmarkState worker = chunks.size() > 1
+                    ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                CpuBenchmarkTaskScope metrics(worker);
+                struct FlushStats
+                {
+                    ~FlushStats()
+                    {
+                        flushRingOpsThreadLocalStats();
+                    }
+                } flush;
+                for (auto i = begin; i != end; ++i)
+                    if (!item(i, worker))
+                    {
+                        ok = 0;
+                        break;
+                    }
+            };
+            if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+            else if (taskCount)
+            {
+                setupScopeGuard.reset();
+                co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                setupScopeGuard.emplace(setupScope);
+            }
+            const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+            if (!phaseOk) co_return false;
+        }
 
         LencEncodeOutput next{};
         next.mLazyRandomizers = std::move(lazyRandomizers);
@@ -1832,24 +2052,73 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (gpu::enabled(ctx) && options.mLencRandomizerOutput)
                 {
-                    HostStep outputStep(hostProfiler(ctx), "setup: lenc randomizer GPU output", &cpuBenchmark);
-                    const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencRandomizerOutput;
+                    HostStep outputStep(hostProfiler(ctx), "setup: lenc randomizer GPU output",
+                                        &cpuBenchmark);
+                    const bool decline =
+                        ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencRandomizerOutput;
                     if (!decline)
                         deviceExpanded = residentRandomizers
                             ? gpu::expandErrorCompactDevice(ctx, *residentRandomizers, false, next.mR, mu, requestedWorkers, cpuBenchmark)
                             : gpu::expandErrorCompactDevice(ctx,
                                 std::span<const u64>(compactRandomizers).first(static_cast<std::size_t>(mu) * n),
                                 false, next.mR, requestedWorkers, cpuBenchmark);
-                    if (!deviceExpanded && options.mLencRandomizerOutputStrict) return false;
+                    if (!deviceExpanded && options.mLencRandomizerOutputStrict) co_return false;
                 }
 #endif
-                if (!deviceExpanded &&
-                    !materializePolyErrorCompactBatchForSetup(compactRandomizers, residentRandomizers,
-                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
-                if (!deviceExpanded && !setupScratch.runBulk(mu, requestedWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
-                    return expandPolyErrorCompact(
-                        std::span<const u64>(compactRandomizers).subspan(i * n, n), next.mR[i], ctx);
-                }, cpuBenchmark)) return false;
+                if (!deviceExpanded)
+                {
+                    setupScopeGuard.reset();
+                    const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
+                        executor, setupResults, compactRandomizers, residentRandomizers,
+                        noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {},
+                        cpuBenchmark, setupScope);
+                    setupScopeGuard.emplace(setupScope);
+                    if (!setupOk) co_return false;
+                }
+                if (!deviceExpanded)
+                {
+                    const auto taskCount = mu;
+                    auto chunks = setupResults.first(
+                        std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                                  static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                              : setupResults.size())}));
+                    if (taskCount && chunks.empty()) co_return false;
+                    std::fill(chunks.begin(), chunks.end(), u8{1});
+                    auto item = [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+                        return expandPolyErrorCompact(
+                            std::span<const u64>(compactRandomizers).subspan(i * n, n), next.mR[i], ctx);
+                    };
+                    auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                        ScopedProtocolCacheScope scope(setupScope);
+                        CpuBenchmarkState worker = chunks.size() > 1
+                            ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                        CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                        CpuBenchmarkTaskScope metrics(worker);
+                        struct FlushStats
+                        {
+                            ~FlushStats()
+                            {
+                                flushRingOpsThreadLocalStats();
+                            }
+                        } flush;
+                        for (auto i = begin; i != end; ++i)
+                            if (!item(i, worker))
+                            {
+                                ok = 0;
+                                break;
+                            }
+                    };
+                    if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                    else if (taskCount)
+                    {
+                        setupScopeGuard.reset();
+                        co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                        setupScopeGuard.emplace(setupScope);
+                    }
+                    const bool phaseOk =
+                        std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                    if (!phaseOk) co_return false;
+                }
             }
             else
                 for (u32 i = 0; i < mu; ++i)
@@ -1857,7 +2126,7 @@ namespace osuCrypto::LogVole
                         ? std::move(rLayersNtt[0][i]) : next.mRNtt[i];
             if (!deviceAssembled && !inverseNttBatch(next.mR, ctx))
             {
-                return false;
+                co_return false;
             }
         }
 
@@ -1866,7 +2135,7 @@ namespace osuCrypto::LogVole
         next.mLacct.mCt = std::move(ct);
         next.mLazyCt = std::move(lazyCiphertext);
         out = std::move(next);
-        return true;
+        co_return true;
     }
 
     bool lencDigestTrunc(

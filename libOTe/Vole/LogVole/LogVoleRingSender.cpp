@@ -686,36 +686,54 @@ namespace osuCrypto::LogVole
         return static_cast<std::size_t>(totalBytes);
     }
 
-    task<> LogVoleRingSender::offline(
-        const ShrinkExpandSenderOfflineInput& input,
-        ShrinkExpandSenderState& state,
-        PRNG& prng,
-        Socket& sock)
+    task<> LogVoleRingSender::offline(macoro::thread_pool &executor, std::span<u8> setupResults,
+                                      const ShrinkExpandSenderOfflineInput &input,
+                                      ShrinkExpandSenderState &state, PRNG &prng, Socket &sock)
+    {
+        return offlineStart(executor, setupResults, input, state, prng, sock, currentProtocolCacheScope());
+    }
+
+    task<> LogVoleRingSender::offlineStart(macoro::thread_pool &executor, std::span<u8> setupResults,
+                                           const ShrinkExpandSenderOfflineInput &input,
+                                           ShrinkExpandSenderState &state, PRNG &prng, Socket &sock,
+                                           ProtocolCacheScope cacheScope)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+        cacheScope.mRole = ProtocolCacheRole::Sender;
         ShrinkExpandOfflineMessage message{};
-        if (!prepareShrinkExpandSenderOffline(input, prng, message, state, cpuBenchmark))
+        if (!co_await prepareShrinkExpandSenderOffline(executor, setupResults, input, prng, message, state,
+                                                       cpuBenchmark, cacheScope))
         {
             throw std::runtime_error("LogVole sender could not prepare shrink/expand offline message");
         }
 
-        co_await sendOfflineFrame(sock, encode(message, input.mParams.mNumWorkerThreads, input.mParams.mTransport.mEncoding, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark), input.mParams.mTransport.mOwnedSetupSend, hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
+        auto payload = [&] {
+            ScopedProtocolCacheScope scope(cacheScope);
+            return encode(message, input.mParams.mNumWorkerThreads, input.mParams.mTransport.mEncoding,
+                gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
+        }();
+        co_await sendOfflineFrame(sock, std::move(payload),
+            input.mParams.mTransport.mOwnedSetupSend, hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
     }
 
-    task<> LogVoleRingSender::offline(
-        const SenderOfflineInput& input,
-        SenderState& state,
-        PRNG& prng,
-        Socket& sock, RootWirePinOverlapEvidence& rootWirePin)
+    task<> LogVoleRingSender::offline(macoro::thread_pool &executor, std::span<u8> setupResults,
+                                      const SenderOfflineInput &input, SenderState &state, PRNG &prng,
+                                      Socket &sock, RootWirePinOverlapEvidence &rootWirePin)
+    {
+        return offlineStart(executor, setupResults, input, state, prng, sock, rootWirePin,
+                            currentProtocolCacheScope());
+    }
+
+    task<> LogVoleRingSender::offlineStart(macoro::thread_pool &executor, std::span<u8> setupResults,
+                                           const SenderOfflineInput &input, SenderState &state, PRNG &prng,
+                                           Socket &sock, RootWirePinOverlapEvidence &rootWirePin,
+                                           ProtocolCacheScope cacheScope)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
-        const u64 senderRunId = input.mSenderOwnerRunId
-            ? input.mSenderOwnerRunId : currentProtocolCacheScope().mRunId;
+        const u64 senderRunId = input.mSenderOwnerRunId ? input.mSenderOwnerRunId : cacheScope.mRunId;
         rootWirePin = {};
         rootWirePin.mSenderRunId = senderRunId;
-        const auto& encoding = input.mParams.mShrinkExpand.mTransport.mEncoding;
+        const auto &encoding = input.mParams.mShrinkExpand.mTransport.mEncoding;
         const bool rootPinRequested = encoding.mRootWirePinOverlap;
         const bool rootCudaRequested = encoding.mRootWireCudaAlloc;
         const bool earlyRequested = rootCudaRequested && encoding.mRootWireCudaAllocEarly;
@@ -725,51 +743,46 @@ namespace osuCrypto::LogVole
         RootWireEarlyCudaWorker earlyWorker;
         if (earlyRequested)
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Sender, senderRunId);
-            forecastBytes = forecastRootOfflineWireSize(
-                input.mParams, input.mLeafInputsAreGadget);
+            ScopedProtocolCacheScope roleScope(ProtocolCacheRole::Sender, senderRunId);
+            forecastBytes = forecastRootOfflineWireSize(input.mParams, input.mLeafInputsAreGadget);
             const int device = gpu::currentDeviceOrdinal();
-            const bool eligible = senderRunId != 0 &&
-                input.mUseGpuResidentInternalState &&
-                forecastBytes >= (std::size_t{1} << 20) &&
-                gpu::enabled(input.mRingFactoryOwner) && device >= 0 &&
-                input.mParams.mShrinkExpand.mTransport.mOwnedSetupSend &&
-                encoding.mWire.mPinned &&
-                encoding.mWire.mDirectDownload &&
-                input.mParams.mShrinkExpand.mGpuSetup.mLazyCiphertexts &&
-                input.mParams.mShrinkExpand.mGpuSetup.mDirectWire;
-            const bool launched = eligible && earlyWorker.start(forecastBytes,
-                senderRunId, device, cpuBenchmark.mContext, encoding.mWire, hostProfiler(input.mRingFactoryOwner));
-            noteRootWireCudaEarlyPlan(senderRunId, earlyRequested,
-                eligible, forecastBytes, launched);
+            const bool eligible = senderRunId != 0 && input.mUseGpuResidentInternalState &&
+                                  forecastBytes >= (std::size_t{1} << 20) &&
+                                  gpu::enabled(input.mRingFactoryOwner) && device >= 0 &&
+                                  input.mParams.mShrinkExpand.mTransport.mOwnedSetupSend &&
+                                  encoding.mWire.mPinned && encoding.mWire.mDirectDownload &&
+                                  input.mParams.mShrinkExpand.mGpuSetup.mLazyCiphertexts &&
+                                  input.mParams.mShrinkExpand.mGpuSetup.mDirectWire;
+            const bool launched =
+                eligible && earlyWorker.start(forecastBytes, senderRunId, device, cpuBenchmark.mContext,
+                                              encoding.mWire, hostProfiler(input.mRingFactoryOwner));
+            noteRootWireCudaEarlyPlan(senderRunId, earlyRequested, eligible, forecastBytes, launched);
         }
 #else
-        noteRootWireCudaEarlyPlan(senderRunId, earlyRequested,
-            false, 0, false);
+        noteRootWireCudaEarlyPlan(senderRunId, earlyRequested, false, 0, false);
 #endif
         SenderOfflineOutput output{};
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Sender, senderRunId);
-            if (!detail::prepareSenderOfflineForTransport(input, prng, output, cpuBenchmark))
+            if (!co_await detail::prepareSenderOfflineForTransport(
+                    executor, setupResults, input, prng, output, cpuBenchmark,
+                    ProtocolCacheScope{senderRunId, ProtocolCacheRole::Sender}))
             {
-                throw std::runtime_error(
-                    "LogVole sender could not prepare recursive offline state");
+                throw std::runtime_error("LogVole sender could not prepare recursive offline state");
             }
         }
 
-        RootWirePinPlan rootPin(senderRunId, rootPinRequested,
-            rootCudaRequested,
-            (rootPinRequested || rootCudaRequested)
-                ? terminalRootMessage(input.mParams, output.mMessage) : nullptr,
-            input.mParams.mShrinkExpand.mTransport.mOwnedSetupSend, encoding.mWire, hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
+        RootWirePinPlan rootPin(senderRunId, rootPinRequested, rootCudaRequested,
+                                (rootPinRequested || rootCudaRequested)
+                                    ? terminalRootMessage(input.mParams, output.mMessage)
+                                    : nullptr,
+                                input.mParams.mShrinkExpand.mTransport.mOwnedSetupSend, encoding.mWire,
+                                hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (earlyRequested)
-            rootPin.adoptEarlyCudaWire(earlyWorker, forecastBytes);
+        if (earlyRequested) rootPin.adoptEarlyCudaWire(earlyWorker, forecastBytes);
 #endif
-        co_await sendOfflineMessage(input.mParams, output.mMessage,
-            sock, true, false, senderRunId, rootPin, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
+        co_await sendOfflineMessage(input.mParams, output.mMessage, sock, true, false, senderRunId, rootPin,
+                                    gpu::enabled(input.mRingFactoryOwner),
+                                    hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
         // sendOfflineMessage joins the pinning worker before encoding the root.
         rootWirePin = rootPin.mEvidence;
         state = std::move(output.mState);

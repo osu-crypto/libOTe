@@ -112,18 +112,20 @@ namespace osuCrypto::LogVole
         u32 count,
         PRNG& prng);
 
-    bool prepareShrinkExpandSenderOffline(
+    macoro::task<bool> prepareShrinkExpandSenderOffline(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
         ShrinkExpandOfflineMessage& message,
-        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {});
+        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
     // State-only preparation keeps one tensor package and avoids a discarded
     // message copy. Explicit internal opt-in can defer its host ciphertexts.
-    bool prepareShrinkExpandSenderOffline(
+    macoro::task<bool> prepareShrinkExpandSenderOffline(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
-        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {});
+        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,

@@ -1,3 +1,4 @@
+#include <optional>
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
@@ -239,32 +240,28 @@ namespace osuCrypto::LogVole
         return scaleByGPowerInplace(ctx, out, gadgetLogBase, power);
     }
 
-    static bool lheEnc1Impl(
-        const RingNttContext& ctx,
-        const std::vector<RnsPoly>& rInput,
-        const std::vector<RnsPoly>& sk1,
-        u32 gadgetLogBase,
-        RingTensor& out,
-        double noiseStandardDeviation,
-        double noiseMaxDeviation,
-        PRNG* prng,
-        bool rInputIsNtt,
-        const std::vector<RnsPoly>* publicANtt,
-        u32 requestedWorkers,
-        u32 rPowerOffset,
-        std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext,
-        const std::shared_ptr<const LazyLencRandomizerState>& randomizers,
-        const gpu::DeviceBatch* rootR1Device,
-        const LazyRootErrorHostState* rootR1Host,
-        const gpu::DeviceBatch* rootSecretDevice,
-        const LazyRootSecretHostState* rootSecretHost,
-        u64 rootSecretOwnerRunId,
-        bool topSecretDomain,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr)
+    static macoro::task<bool> lheEnc1Impl(
+        macoro::thread_pool &executor, std::span<u8> setupResults, const RingNttContext &ctx,
+        const std::vector<RnsPoly> &rInput, const std::vector<RnsPoly> &sk1, u32 gadgetLogBase,
+        RingTensor &out, double noiseStandardDeviation, double noiseMaxDeviation, PRNG *prng,
+        bool rInputIsNtt, const std::vector<RnsPoly> *publicANtt, u32 requestedWorkers, u32 rPowerOffset,
+        std::shared_ptr<const LazyRingTensorHostState> *deferredCiphertext,
+        std::shared_ptr<const LazyLencRandomizerState> randomizers, const gpu::DeviceBatch *rootR1Device,
+        const LazyRootErrorHostState *rootR1Host, const gpu::DeviceBatch *rootSecretDevice,
+        const LazyRootSecretHostState *rootSecretHost, u64 rootSecretOwnerRunId, bool topSecretDomain,
+        LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark = {},
+        ProtocolCacheScope setupScope = currentProtocolCacheScope())
     {
-        detail::CpuRowScratch localSetupScratch;
-        auto& setupScratch = cpuSetupScratch ? *cpuSetupScratch : localSetupScratch;
+        if (setupResults.empty()) co_return false;
+        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
+        if (cpuBenchmark.mContext)
+        {
+            const auto& limits = *cpuBenchmark.mContext;
+            const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
+                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size());
+            setupResults = setupResults.first(std::min(setupResults.size(), capacity));
+        }
         HostStep setupStep(hostProfiler(ctx), "setup: lhe ciphertext", &cpuBenchmark);
         const auto rCount = randomizers ? randomizers->count()
             : rootR1Host ? rootR1Host->count() : rInput.size();
@@ -282,22 +279,18 @@ namespace osuCrypto::LogVole
         const bool rootBatchValid = !rootR1Device;
         const bool rootSecretValid = !rootSecretDevice;
 #endif
-        if (!rCount || rCount > std::numeric_limits<u32>::max() ||
-            !skCount || skCount > std::numeric_limits<u32>::max() ||
-            noiseStandardDeviation < 0 ||
-            (noiseStandardDeviation > 0 && !prng) ||
-            !rootBatchValid || !rootSecretValid ||
-            (rootSecretHost ? (!sk1.empty() ||
-                    !rootSecretHost->matches(ctx.mParams))
+        if (!rCount || rCount > std::numeric_limits<u32>::max() || !skCount ||
+            skCount > std::numeric_limits<u32>::max() || noiseStandardDeviation < 0 ||
+            (noiseStandardDeviation > 0 && !prng) || !rootBatchValid || !rootSecretValid ||
+            (rootSecretHost ? (!sk1.empty() || !rootSecretHost->matches(ctx.mParams))
                             : !validateRingBatchShape(sk1, ctx.mParams)) ||
-            (randomizers ? (rootR1Host || !rInput.empty() || !rInputIsNtt ||
-                    !randomizers->matches(ctx.mParams))
-                         : rootR1Host ? (!rInput.empty() || rInputIsNtt ||
-                                !rootR1Host->matches(ctx.mParams))
-                         : !validateRingBatchShape(rInput, ctx.mParams)) ||
+            (randomizers
+                 ? (rootR1Host || !rInput.empty() || !rInputIsNtt || !randomizers->matches(ctx.mParams))
+             : rootR1Host ? (!rInput.empty() || rInputIsNtt || !rootR1Host->matches(ctx.mParams))
+                          : !validateRingBatchShape(rInput, ctx.mParams)) ||
             (rootSecretDevice && !rootSecretHost))
         {
-            return false;
+            co_return false;
         }
 
         std::shared_ptr<const std::vector<RnsPoly>> cachedPublicANtt;
@@ -307,7 +300,7 @@ namespace osuCrypto::LogVole
         {
             if (!validatePublicANtt(ctx, *publicANtt, publicCount))
             {
-                return false;
+                co_return false;
             }
         }
         else
@@ -320,7 +313,7 @@ namespace osuCrypto::LogVole
             {
                 cachedPublicANtt = getOrCreateCachedPublicANtt(ctx, publicCount);
                 publicANtt = cachedPublicANtt.get();
-                if (!publicANtt || !validatePublicANtt(ctx, *publicANtt, publicCount)) return false;
+                if (!publicANtt || !validatePublicANtt(ctx, *publicANtt, publicCount)) co_return false;
             }
         }
 
@@ -345,8 +338,7 @@ namespace osuCrypto::LogVole
             // An initial r1 residency decline still keeps the already-drawn
             // row seeds. Only that decline materializes host rows for the
             // ordinary GPU upload; successful token consumers see no host r1.
-            const auto& deviceR = rootR1Host && !rootR1Device
-                ? rootR1Host->hostCoefficients() : rInput;
+            const auto &deviceR = rootR1Host && !rootR1Device ? rootR1Host->hostCoefficients() : rInput;
             const auto& deviceSk = rootSecretHost && !rootSecretDevice
                 ? rootSecretHost->hostCoefficients() : sk1;
             // Keep compact errors through GPU expansion and addition. Exact
@@ -355,16 +347,22 @@ namespace osuCrypto::LogVole
             const bool compactStrict = compactRequested && options.mCompactNoiseStrict;
             const bool compactEnabled = compactRequested &&
                 canSamplePolyErrorCompact(ctx, noiseStandardDeviation, noiseMaxDeviation);
-            if (compactStrict && !compactEnabled) return false;
+            if (compactStrict && !compactEnabled) co_return false;
             if (compactEnabled && noiseStandardDeviation > 0)
             {
-                if (!noiseDegree || ct1.mPolys.size() >
-                        std::numeric_limits<std::size_t>::max() / noiseDegree) return false;
-                auto& noiseSeeds = compactNoiseSeeds;
+                if (!noiseDegree || ct1.mPolys.size() > std::numeric_limits<std::size_t>::max() / noiseDegree)
+                    co_return false;
+                auto &noiseSeeds = compactNoiseSeeds;
                 noiseSeeds.resize(ct1.mPolys.size());
-                for (auto& seed : noiseSeeds) prng->get(seed.data(), seed.size());
-                if (!samplePolyErrorCompactBatchForSetup(compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
+                for (auto &seed : noiseSeeds) prng->get(seed.data(), seed.size());
+                {
+                    setupScopeGuard.reset();
+                    const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
+                        executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
+                        noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
+                    setupScopeGuard.emplace(setupScope);
+                    if (!setupOk) co_return false;
+                }
             }
             // A coefficient tensor can stay on device only after its noise is
             // complete. Unsupported compact samplers still add errors below
@@ -386,22 +384,69 @@ namespace osuCrypto::LogVole
                 if (noiseStandardDeviation > 0 && compactNoise.empty() && !residentNoise)
                 {
                     std::vector<seal::prng_seed_type> noiseSeeds(ct1.mPolys.size());
-                    for (auto& seed : noiseSeeds) prng->get(seed.data(), seed.size());
-                    if (!setupScratch.runBulk(ct1.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+                    for (auto &seed : noiseSeeds) prng->get(seed.data(), seed.size());
+                    {
+                        const auto taskCount = ct1.mPolys.size();
+                        auto chunks = setupResults.first(
+                            std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                                      static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                                  : setupResults.size())}));
+                        if (taskCount && chunks.empty()) co_return false;
+                        std::fill(chunks.begin(), chunks.end(), u8{1});
+                        auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                             return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
-                                noiseMaxDeviation, noiseSeeds[idx], ctx);
-                        }, cpuBenchmark)) return false;
+                                                        noiseMaxDeviation, noiseSeeds[idx], ctx);
+                        };
+                        auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                            ScopedProtocolCacheScope scope(setupScope);
+                            CpuBenchmarkState worker = chunks.size() > 1
+                                ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                            CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                            CpuBenchmarkTaskScope metrics(worker);
+                            struct FlushStats
+                            {
+                                ~FlushStats()
+                                {
+                                    flushRingOpsThreadLocalStats();
+                                }
+                            } flush;
+                            for (auto i = begin; i != end; ++i)
+                                if (!item(i, worker))
+                                {
+                                    ok = 0;
+                                    break;
+                                }
+                        };
+                        if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                        else if (taskCount)
+                        {
+                            setupScopeGuard.reset();
+                            co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                            setupScopeGuard.emplace(setupScope);
+                        }
+                        const bool phaseOk =
+                            std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                        if (!phaseOk) co_return false;
+                    }
                 }
                 out = std::move(ct1);
                 if (deferredCiphertext) *deferredCiphertext = std::move(lazyCiphertext);
-                return true;
+                co_return true;
             }
             if (compactStrict || options.mLheDeviceStrict ||
-                (topSecretDomain && options.mTopSecretConsumerStrict)) return false;
+                (topSecretDomain && options.mTopSecretConsumerStrict))
+                co_return false;
         }
 #endif
-        if (residentNoise && !materializePolyErrorCompactBatchForSetup(compactNoise, residentNoise,
-                noiseStandardDeviation, noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, &setupScratch)) return false;
+        if (residentNoise)
+        {
+            setupScopeGuard.reset();
+            const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
+                executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
+                noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
+            setupScopeGuard.emplace(setupScope);
+            if (!setupOk) co_return false;
+        }
         if (!publicANtt)
         {
             // A device decline keeps PRNG consumption unchanged, then builds
@@ -409,25 +454,62 @@ namespace osuCrypto::LogVole
             cachedPublicANtt = getOrCreateCachedPublicANtt(ctx, publicCount);
             publicANtt = cachedPublicANtt.get();
         }
-        if (!publicANtt || !validatePublicANtt(ctx, *publicANtt, publicCount)) return false;
+        if (!publicANtt || !validatePublicANtt(ctx, *publicANtt, publicCount)) co_return false;
         // Device decline preserves r/sk and any sampled compact noise. Replay
         // those exact errors without drawing any additional parent seeds.
         const auto& r = randomizers ? randomizers->hostNtt()
             : rootR1Host ? rootR1Host->hostCoefficients() : rInput;
-        const auto& sk = rootSecretHost ? rootSecretHost->hostCoefficients() : sk1;
-        if (r.size() != rCount || !validateRingBatchShape(r, ctx.mParams)) return false;
-        if (sk.size() != skCount || !validateRingBatchShape(sk, ctx.mParams)) return false;
-        const auto& moduli = getRingHostModuli(ctx);
-        if (moduli.empty()) return false;
+        const auto &sk = rootSecretHost ? rootSecretHost->hostCoefficients() : sk1;
+        if (r.size() != rCount || !validateRingBatchShape(r, ctx.mParams)) co_return false;
+        if (sk.size() != skCount || !validateRingBatchShape(sk, ctx.mParams)) co_return false;
+        const auto &moduli = getRingHostModuli(ctx);
+        if (moduli.empty()) co_return false;
         std::vector<RnsPoly> shiftedR;
-        const std::vector<RnsPoly>* rSource = &r;
+        const std::vector<RnsPoly> *rSource = &r;
         if (rPowerOffset)
         {
             shiftedR.resize(r.size());
             const u32 shiftWorkers = parallelLheSetupEnabled(options, ctx) ? requestedWorkers : 1;
-            if (!setupScratch.runBulk(r.size(), shiftWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+            {
+                const auto taskCount = r.size();
+                auto chunks = setupResults.first(std::min(
+                    {setupResults.size(), static_cast<std::size_t>(taskCount),
+                     static_cast<std::size_t>((shiftWorkers) ? (shiftWorkers) : setupResults.size())}));
+                if (taskCount && chunks.empty()) co_return false;
+                std::fill(chunks.begin(), chunks.end(), u8{1});
+                auto item = [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     return multiplyByGPower(ctx, r[i], gadgetLogBase, rPowerOffset, shiftedR[i]);
-                }, cpuBenchmark)) return false;
+                };
+                auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    ScopedProtocolCacheScope scope(setupScope);
+                    CpuBenchmarkState worker = chunks.size() > 1
+                        ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                    CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                    CpuBenchmarkTaskScope metrics(worker);
+                    struct FlushStats
+                    {
+                        ~FlushStats()
+                        {
+                            flushRingOpsThreadLocalStats();
+                        }
+                    } flush;
+                    for (auto i = begin; i != end; ++i)
+                        if (!item(i, worker))
+                        {
+                            ok = 0;
+                            break;
+                        }
+                };
+                if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                else if (taskCount)
+                {
+                    setupScopeGuard.reset();
+                    co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                    setupScopeGuard.emplace(setupScope);
+                }
+                const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                if (!phaseOk) co_return false;
+            }
             rSource = &shiftedR;
         }
 
@@ -435,36 +517,83 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> sk1Ntt = sk;
         if (!forwardNttBatch(sk1Ntt, ctx))
         {
-            return false;
+            co_return false;
         }
 
         std::vector<RnsPoly> rNtt = *rSource;
         if (!rInputIsNtt && !forwardNttBatch(rNtt, ctx))
         {
-            return false;
+            co_return false;
         }
-
 
         if (parallelLheSetupEnabled(options, ctx))
         {
             // Canonicalize each source once. Column zero then needs only a
             // copy; the remaining columns use SEAL's precomputed scalar
             // multiplier instead of a full modular multiply per coefficient.
-            if (!setupScratch.runBulk(rNtt.size(), requestedWorkers, [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) { return canonicalizePoly(rNtt[row], ctx); }, cpuBenchmark))
             {
-                return false;
+                const auto taskCount = rNtt.size();
+                auto chunks = setupResults.first(
+                    std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                              static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                          : setupResults.size())}));
+                if (taskCount && chunks.empty()) co_return false;
+                std::fill(chunks.begin(), chunks.end(), u8{1});
+                auto item = [&](std::size_t row, CpuBenchmarkState &cpuBenchmark) {
+                    return canonicalizePoly(rNtt[row], ctx);
+                };
+                auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    ScopedProtocolCacheScope scope(setupScope);
+                    CpuBenchmarkState worker = chunks.size() > 1
+                        ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                    CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                    CpuBenchmarkTaskScope metrics(worker);
+                    struct FlushStats
+                    {
+                        ~FlushStats()
+                        {
+                            flushRingOpsThreadLocalStats();
+                        }
+                    } flush;
+                    for (auto i = begin; i != end; ++i)
+                        if (!item(i, worker))
+                        {
+                            ok = 0;
+                            break;
+                        }
+                };
+                if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                else if (taskCount)
+                {
+                    setupScopeGuard.reset();
+                    co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                    setupScopeGuard.emplace(setupScope);
+                }
+                const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                if (!phaseOk)
+                {
+                    co_return false;
+                }
             }
             std::vector<std::vector<seal::util::MultiplyUIntModOperand>> factors(ct1.mCols);
             for (u32 col = 1; col < ct1.mCols; ++col)
             {
                 const u64 shift = static_cast<u64>(gadgetLogBase) * col;
-                if (shift > std::numeric_limits<u32>::max()) return false;
+                if (shift > std::numeric_limits<u32>::max()) co_return false;
                 factors[col].resize(moduli.size());
                 for (std::size_t j = 0; j < moduli.size(); ++j)
                     factors[col][j].set(detail::pow2Mod(shift, moduli[j].value()), moduli[j]);
             }
 
-            if (!setupScratch.runBulk(ct1.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            {
+                const auto taskCount = ct1.mPolys.size();
+                auto chunks = setupResults.first(
+                    std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                              static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                          : setupResults.size())}));
+                if (taskCount && chunks.empty()) co_return false;
+                std::fill(chunks.begin(), chunks.end(), u8{1});
+                auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                     const auto row = idx / ct1.mCols;
                     const auto col = idx % ct1.mCols;
                     auto& cNtt = ct1.mPolys[idx];
@@ -475,19 +604,49 @@ namespace osuCrypto::LogVole
                         for (std::size_t j = 0; j < moduli.size(); ++j)
                         {
                             auto* coeffs = cNtt.mCoeffs.data() + j * n;
-                            seal::util::multiply_poly_scalar_coeffmod(
-                                coeffs, n, factors[col][j], moduli[j], coeffs);
+                            seal::util::multiply_poly_scalar_coeffmod(coeffs, n, factors[col][j], moduli[j],
+                                                                      coeffs);
                         }
                     }
                     return dyadicMultiplyAddNttInplace((*publicANtt)[row], sk1Ntt[col], cNtt, ctx);
-                }, cpuBenchmark))
-            {
-                return false;
+                };
+                auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    ScopedProtocolCacheScope scope(setupScope);
+                    CpuBenchmarkState worker = chunks.size() > 1
+                        ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                    CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                    CpuBenchmarkTaskScope metrics(worker);
+                    struct FlushStats
+                    {
+                        ~FlushStats()
+                        {
+                            flushRingOpsThreadLocalStats();
+                        }
+                    } flush;
+                    for (auto i = begin; i != end; ++i)
+                        if (!item(i, worker))
+                        {
+                            ok = 0;
+                            break;
+                        }
+                };
+                if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                else if (taskCount)
+                {
+                    setupScopeGuard.reset();
+                    co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                    setupScopeGuard.emplace(setupScope);
+                }
+                const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                if (!phaseOk)
+                {
+                    co_return false;
+                }
             }
 
             // The old inner loop ran one CPU inverse transform per ciphertext.
             // A batch amortizes the GPU transfer and launches over the matrix.
-            if (!inverseNttBatch(ct1.mPolys, ctx)) return false;
+            if (!inverseNttBatch(ct1.mPolys, ctx)) co_return false;
 
             if (noiseStandardDeviation > 0)
             {
@@ -500,41 +659,79 @@ namespace osuCrypto::LogVole
                     noiseSeeds.resize(ct1.mPolys.size());
                     for (auto& seed : noiseSeeds) prng->get(seed.data(), seed.size());
                 }
-                if (!setupScratch.runBulk(ct1.mPolys.size(), requestedWorkers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+                {
+                    const auto taskCount = ct1.mPolys.size();
+                    auto chunks = setupResults.first(
+                        std::min({setupResults.size(), static_cast<std::size_t>(taskCount),
+                                  static_cast<std::size_t>((requestedWorkers) ? (requestedWorkers)
+                                                                              : setupResults.size())}));
+                    if (taskCount && chunks.empty()) co_return false;
+                    std::fill(chunks.begin(), chunks.end(), u8{1});
+                    auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                         if (!compactNoise.empty()) return addCompactNoise(idx, ct1.mPolys[idx]);
                         return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
-                            noiseMaxDeviation, noiseSeeds[idx], ctx);
-                    }, cpuBenchmark))
-                {
-                    return false;
+                                                    noiseMaxDeviation, noiseSeeds[idx], ctx);
+                    };
+                    auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                        ScopedProtocolCacheScope scope(setupScope);
+                        CpuBenchmarkState worker = chunks.size() > 1
+                            ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+                        CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+                        CpuBenchmarkTaskScope metrics(worker);
+                        struct FlushStats
+                        {
+                            ~FlushStats()
+                            {
+                                flushRingOpsThreadLocalStats();
+                            }
+                        } flush;
+                        for (auto i = begin; i != end; ++i)
+                            if (!item(i, worker))
+                            {
+                                ok = 0;
+                                break;
+                            }
+                    };
+                    if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
+                    else if (taskCount)
+                    {
+                        setupScopeGuard.reset();
+                        co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
+                        setupScopeGuard.emplace(setupScope);
+                    }
+                    const bool phaseOk =
+                        std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
+                    if (!phaseOk)
+                    {
+                        co_return false;
+                    }
                 }
             }
             out = std::move(ct1);
             if (deferredCiphertext) *deferredCiphertext = std::move(lazyCiphertext);
-            return true;
+            co_return true;
         }
 
         for (u32 row = 0; row < ct1.mRows; ++row)
         {
-            const RnsPoly& aNtt = (*publicANtt)[row];
+            const RnsPoly &aNtt = (*publicANtt)[row];
             for (u32 col = 0; col < ct1.mCols; ++col)
             {
                 RnsPoly cNtt = rNtt[row];
                 if (!scaleByGPowerInplace(ctx, cNtt, gadgetLogBase, col) ||
-                    !dyadicMultiplyAddNttInplace(aNtt, sk1Ntt[col], cNtt, ctx) ||
-                    !inverseNtt(cNtt, ctx))
+                    !dyadicMultiplyAddNttInplace(aNtt, sk1Ntt[col], cNtt, ctx) || !inverseNtt(cNtt, ctx))
                 {
-                    return false;
+                    co_return false;
                 }
 
                 if (noiseStandardDeviation > 0)
                 {
                     const auto idx = ringTensorIndex(ct1, row, col);
                     if (!(compactNoise.empty()
-                            ? addPolyError(cNtt, noiseStandardDeviation, noiseMaxDeviation, *prng, ctx)
-                            : addCompactNoise(idx, cNtt)))
+                              ? addPolyError(cNtt, noiseStandardDeviation, noiseMaxDeviation, *prng, ctx)
+                              : addCompactNoise(idx, cNtt)))
                     {
-                        return false;
+                        co_return false;
                     }
                 }
 
@@ -544,60 +741,52 @@ namespace osuCrypto::LogVole
 
         out = std::move(ct1);
         if (deferredCiphertext) *deferredCiphertext = std::move(lazyCiphertext);
-        return true;
+        co_return true;
     }
 
-    bool lheEnc1(
-        const RingNttContext& ctx,
-        const std::vector<RnsPoly>& r,
-        const std::vector<RnsPoly>& sk1,
-        u32 gadgetLogBase,
-        RingTensor& out,
-        double noiseStandardDeviation,
-        double noiseMaxDeviation,
-        PRNG* prng,
-        bool rInputIsNtt,
-        const std::vector<RnsPoly>* publicANtt,
-        u32 requestedWorkers,
-        std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext,
-        std::shared_ptr<const LazyLencRandomizerState> randomizers,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
+    macoro::task<bool> lheEnc1(macoro::thread_pool &executor, std::span<u8> setupResults,
+                               const RingNttContext &ctx, const std::vector<RnsPoly> &r,
+                               const std::vector<RnsPoly> &sk1, u32 gadgetLogBase, RingTensor &out,
+                               double noiseStandardDeviation, double noiseMaxDeviation, PRNG *prng,
+                               bool rInputIsNtt, const std::vector<RnsPoly> *publicANtt, u32 requestedWorkers,
+                               std::shared_ptr<const LazyRingTensorHostState> *deferredCiphertext,
+                               std::shared_ptr<const LazyLencRandomizerState> randomizers,
+                               LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark,
+                               ProtocolCacheScope setupScope)
     {
+        if (setupResults.empty()) co_return false;
+        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        return lheEnc1Impl(ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
-            noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 0u,
-            deferredCiphertext, randomizers, nullptr, nullptr,
-            nullptr, nullptr, 0, false, options, cpuBenchmark, cpuSetupScratch);
+        {
+            setupScopeGuard.reset();
+            co_return co_await lheEnc1Impl(
+                executor, setupResults, ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
+                noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 0u, deferredCiphertext,
+                randomizers, nullptr, nullptr, nullptr, nullptr, 0, false, options, cpuBenchmark, setupScope);
+        }
     }
 
-    bool lheEnc1Trunc(
-        const RingNttContext& ctx,
-        const std::vector<RnsPoly>& r,
-        const std::vector<RnsPoly>& sk1,
-        u32 gadgetLogBase,
-        RingTensor& out,
-        double noiseStandardDeviation,
-        double noiseMaxDeviation,
-        PRNG* prng,
-        bool rInputIsNtt,
-        const std::vector<RnsPoly>* publicANtt,
-        u32 requestedWorkers,
-        std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext,
-        std::shared_ptr<const LazyLencRandomizerState> randomizers,
-        const gpu::DeviceBatch* rootR1Device,
-        const LazyRootErrorHostState* rootR1Host,
-        const gpu::DeviceBatch* rootSecretDevice,
-        const LazyRootSecretHostState* rootSecretHost,
-        u64 rootSecretOwnerRunId,
-        bool topSecretDomain,
-        const LogVoleGpuSetupOptions& options, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuSetupScratch)
+    macoro::task<bool> lheEnc1Trunc(
+        macoro::thread_pool &executor, std::span<u8> setupResults, const RingNttContext &ctx,
+        const std::vector<RnsPoly> &r, const std::vector<RnsPoly> &sk1, u32 gadgetLogBase, RingTensor &out,
+        double noiseStandardDeviation, double noiseMaxDeviation, PRNG *prng, bool rInputIsNtt,
+        const std::vector<RnsPoly> *publicANtt, u32 requestedWorkers,
+        std::shared_ptr<const LazyRingTensorHostState> *deferredCiphertext,
+        std::shared_ptr<const LazyLencRandomizerState> randomizers, const gpu::DeviceBatch *rootR1Device,
+        const LazyRootErrorHostState *rootR1Host, const gpu::DeviceBatch *rootSecretDevice,
+        const LazyRootSecretHostState *rootSecretHost, u64 rootSecretOwnerRunId, bool topSecretDomain,
+        LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
+        if (setupResults.empty()) co_return false;
+        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        return lheEnc1Impl(ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
-            noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 1u,
-            deferredCiphertext, randomizers, rootR1Device, rootR1Host,
-            rootSecretDevice, rootSecretHost, rootSecretOwnerRunId,
-            topSecretDomain, options, cpuBenchmark, cpuSetupScratch);
+        {
+            setupScopeGuard.reset();
+            co_return co_await lheEnc1Impl(executor, setupResults, ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
+                            noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 1u,
+                            deferredCiphertext, randomizers, rootR1Device, rootR1Host, rootSecretDevice,
+                            rootSecretHost, rootSecretOwnerRunId, topSecretDomain, options, cpuBenchmark, setupScope);
+        }
     }
 
     bool lheApplyCt1(
@@ -870,6 +1059,8 @@ namespace osuCrypto::LogVole
         }
         else
         {
+            // A device decline keeps PRNG consumption unchanged, then builds
+            // the exact host fallback operand only when it is consumed.
             cachedPublicANtt = getOrCreateCachedPublicANtt(ctx, publicCount);
             publicANtt = cachedPublicANtt.get();
         }

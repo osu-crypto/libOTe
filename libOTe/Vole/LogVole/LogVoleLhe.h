@@ -36,7 +36,8 @@ namespace osuCrypto::LogVole
     // Then out retains rows/columns with no host polynomials; eager fallback
     // instead returns the ordinary tensor and resets the owner. Failure leaves
     // both caller outputs unchanged. Default/public calls remain eager.
-    bool lheEnc1(
+    macoro::task<bool> lheEnc1(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& r,
         const std::vector<RnsPoly>& sk1,
@@ -50,9 +51,10 @@ namespace osuCrypto::LogVole
         u32 requestedWorkers = 1,
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext = nullptr,
         std::shared_ptr<const LazyLencRandomizerState> randomizers = {},
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
-    bool lheEnc1Trunc(
+    macoro::task<bool> lheEnc1Trunc(
+        macoro::thread_pool& executor, std::span<u8> setupResults,
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& r,
         const std::vector<RnsPoly>& sk1,
@@ -72,7 +74,7 @@ namespace osuCrypto::LogVole
         const LazyRootSecretHostState* rootSecretHost = nullptr,
         u64 rootSecretOwnerRunId = 0,
         bool topSecretDomain = false,
-        const LogVoleGpuSetupOptions& options = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
     bool lheApplyCt1(
         const RingNttContext& ctx,

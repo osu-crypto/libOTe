@@ -6,17 +6,28 @@
 
 namespace tests_libOTe::logvole_test
 {
+    struct SetupResources
+    {
+        macoro::thread_pool executor;
+        macoro::thread_pool::work work = executor.make_work();
+        std::array<osuCrypto::u8, 3> results{};
+
+        SetupResources() { executor.create_threads(1); }
+    };
+
     // Test/application boundary only. Resources are reused for sequential queries.
     struct SenderResources
     {
         macoro::thread_pool executor;
         macoro::thread_pool::work work = executor.make_work();
         std::vector<osuCrypto::LogVole::LheDecryptBuffer> buffers;
+        std::vector<osuCrypto::u8> setupResults{1};
 
         SenderResources(const osuCrypto::LogVole::RingParams& ring, bool gpu = false,
             std::size_t workers = 3)
         {
             if (gpu) return;
+            setupResults.resize(workers);
             buffers.resize(workers);
             for (auto& b : buffers)
                 b.mProduct.mCoeffs.resize(osuCrypto::LogVole::ringPolyCoeffCount(ring));
@@ -29,6 +40,7 @@ namespace tests_libOTe::logvole_test
             if (!osuCrypto::LogVole::makeCivoleParams(options.mSetting, params, options.mNumThreads))
                 throw std::runtime_error("invalid sender test parameters");
             buffers.resize(std::max(1u, options.mNumThreads));
+            setupResults.resize(buffers.size());
             for (auto& b : buffers)
                 b.mProduct.mCoeffs.resize(osuCrypto::LogVole::ringPolyCoeffCount(params.mLogVole.mShrinkExpand.mRing));
             executor.create_threads(1);

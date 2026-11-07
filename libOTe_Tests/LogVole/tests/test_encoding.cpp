@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
@@ -456,6 +457,7 @@ namespace
 
 void LogVole_Encoding_SingletonOfflinePayloadBound(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     ShrinkExpandSenderOfflineInput input;
     input.mParams.mRing.mPolyModulusDegree = 1024;
     assignValues<int>(input.mParams.mRing.mCoeffModulusBits, {30, 30});
@@ -472,7 +474,7 @@ void LogVole_Encoding_SingletonOfflinePayloadBound(const oc::CLP&)
         oc::PRNG prng(oc::block(0x53494e474c4553ull, truncated));
         ShrinkExpandOfflineMessage message;
         ShrinkExpandSenderState sender;
-        LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(input, prng, message, sender));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results, input, prng, message, sender)));
         LOGVOLE_REQUIRE_EQ(message.mLacct.mWidthPadded, 2u);
         LOGVOLE_REQUIRE_EQ(message.mLacct.mLevels, 1u);
         std::uint64_t bound = 0;

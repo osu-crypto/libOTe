@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **71%** of the agreed ownership/globals refactor,
+Estimated overall completion: **73%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -240,7 +240,7 @@ contain no environment reads.
 | Intermediate receiver denoise | Committed in `216ef876`; direct async `bulk_chunked`, one shared recovery-data preparation, unchanged unrolled row kernel, and alias-safe output publication. Legacy synchronous entry point is deprecated. |
 | Empty-moduli sentinel and CLI tags | Removed in `dd980823`; a borrowed modulus span and function-local tags replace the globals. |
 | Sender pinning evidence moved onto sender state | Reviewed and committed. `LogVoleSender::mRootWirePin` owns the result; low-level callers pass an exclusive reference. Shared evidence/mutex and snapshot API removed. Separate CUDA allocation evidence remains global. |
-| Offline setup migration | Committed intermediate `CpuRowScratch::runBulk` implementation: setup owners reuse an exclusive workspace across sampling and arithmetic, and serial calls create no pool. Still needs the explicit executor/buffer call-site pattern and removal of the synchronous adapter. |
+| Offline setup migration | Twenty former setup sites now await direct `bulk_chunked` with caller executor and exclusive status storage, wired through public sender/verifier APIs. Sequential phases reuse the storage; one chunk runs inline. Sampling order and arithmetic batching are preserved. Online zeta and synchronous GPU lazy materialization retain the legacy adapter for separate follow-up. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -270,8 +270,13 @@ There are **20 `detail::runParallelTasks` call sites** in library `.cpp` files:
 `LogVoleShrinkExpand.cpp` (2), `LogVoleZk.cpp` (5), and
 `cuda/LogVoleGpuBackend.cpp` (1). These are call sites, not independent algorithms.
 
-Separately, **22 offline setup sites** use the intermediate
-`setupScratch.runBulk`: Core (7), LENC (6), LHE (5), Ring (4).
+Of the original **22 `setupScratch.runBulk` sites**, 20 offline sampling and
+assembly sites now use direct async `bulk_chunked`. The original inventory
+also included online receiver zeta sampling, which is explicitly deferred to
+the next batch, and synchronous GPU lazy root-error expansion. Three calls to
+`setupScratch.runBulk` remain: those two sites and a named legacy seed-replay
+helper used only by the GPU lazy getter. The getter uses `std::call_once` and
+cannot await; changing that boundary is separate from CPU offline setup.
 Five additional executor `runBulk` sites remain in ZK (3), legacy LHE (1),
 and legacy LENC (1). They still reach the blocking `CpuExecutor::runBulkChunked`
 adapter. Direct `sync_wait` expressions remain in `LogVoleCpuExecutor.h` and
@@ -349,9 +354,24 @@ worker allowances, failure cleanup, recursive VOLE and early/full seed checking.
 No WSL or GPU runtime rerun. Overall completion remains 71% because this closes
 commit debt for work already counted rather than completing another migration.
 
+Offline async setup validation: the CUDA-enabled Windows test target and
+example object compile. Four CPU tests pass in 33.94 seconds, covering exact
+serial/parallel sampling and PRNG progression, lazy start, worker allowances,
+failure/output preservation, workspace reuse, recursive VOLE, and both public
+controllers sharing one executor thread with their workers. The full LENC
+parameter matrix accounts for 30 seconds; use `-lvFactoryFast 1` for subsequent
+focused runs. The small CUDA LENC smoke passes in 12.13 seconds; the resident
+Gaussian parity test skips because this compiler/libm combination is not
+recognized for exact transformation. WSL and leak validation were not rerun.
+Setup options and legacy cache identity are captured by value before lazy
+execution; borrowed operands and status storage live until completion. No TLS
+scope guard crosses an added await. This batch changes scheduling ownership,
+so the remaining runtime-global declaration count is still 26.
+
 Next steps, in order:
 
-1. Migrate coherent groups of remaining setup/proof/codec loops using direct
+1. Migrate online receiver zeta sampling with explicit executor and storage,
+   as agreed for the next batch. Then migrate remaining setup/proof/codec loops using direct
    `bulk_chunked` where appropriate. Discuss a different algorithm first if a
    loop does not fit. Retire `CpuRowScratch` scheduling and legacy overloads
    when their callers are gone.

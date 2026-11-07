@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_SenderResources.h"
 #include "cryptoTools/Common/CLP.h"
 #include "libOTe_Tests/LogVole_TestOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
@@ -191,6 +192,7 @@ namespace
 
     void check_trunc_setup_parity(const LencParams& params, bool useGpu, std::uint32_t width = 0)
     {
+    tests_libOTe::logvole_test::SetupResources setupResources;
         osuCrypto::LogVoleGpuSetupOptions setupOptions;
         osuCrypto::LogVoleExecutionOptions advanced;
         advanced.mUseGpu = useGpu;
@@ -232,9 +234,9 @@ namespace
                 tests_libOTe::logvole_test::ScopedOptionValue deviceOption(setupOptions.mLencDevice, false);
                 // Keep every transform in the reference on the CPU.
                 const auto& ctx = cpuCtx;
-                LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, referencePrng,
-                    expected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 1, false, false, nullptr, nullptr, setupOptions));
+                    expected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 1, false, false, nullptr, nullptr, setupOptions)));
             }
             const auto nextReference = referencePrng.get<oc::block>();
             if (haveGpu)
@@ -256,9 +258,9 @@ namespace
                 tests_libOTe::logvole_test::ScopedOptionValue randomizerStrict(setupOptions.mLencRandomizerOutputStrict, true);
                 tests_libOTe::logvole_test::ScopedOptionValue randomizerDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencRandomizerOutput, false);
                 auto invoke = [&](oc::PRNG& prng, LencEncodeOutput& out, bool emitR) {
-                    return lencEncTrunc(ctx, s, params.mTauHi, params.mGadgetLogBase,
+                    return macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi, params.mGadgetLogBase,
                         params.mPlaintextModulusBits, prng, out, sigma, 6 * sigma,
-                        width, emitR, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions);
+                        width, emitR, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
                 };
                 // Focus on resident R/ciphertext sampling and finite-prefix
                 // repair without multiplying the complete option matrix below.
@@ -275,9 +277,9 @@ namespace
                 {
                     oc::PRNG retainedPrng(oc::block(0x1E2C5EEDu, 0), 3);
                     LencEncodeOutput retained;
-                    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi,
                         params.mGadgetLogBase, params.mPlaintextModulusBits, retainedPrng,
-                        retained, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, true, nullptr, nullptr, setupOptions));
+                        retained, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, true, nullptr, nullptr, setupOptions)));
                     LOGVOLE_REQUIRE_TRUE(retained.mLazyRandomizers != nullptr);
                     LOGVOLE_REQUIRE_EQ(retained.mLazyRandomizers->count(), s.size());
                     LOGVOLE_REQUIRE_TRUE(retained.mR.empty() && retained.mRNtt.empty());
@@ -293,12 +295,12 @@ namespace
                     oc::PRNG lheReferencePrng(oc::block(0xC7, 1), 3), rootReferencePrng(oc::block(0xC7, 2), 3);
                     {
                         const auto& ctx = cpuCtx;
-                        LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, expected.mRNtt, sk,
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, expected.mRNtt, sk,
                             params.mGadgetLogBase, referenceLhe, sigma, 6 * sigma, &lheReferencePrng,
-                            true, publicA.get(), 1, nullptr,  {}, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions));
-                        LOGVOLE_REQUIRE_TRUE(buildRootTopCt(ctx, expected.mR, expected.mRNtt,
+                            true, publicA.get(), 1, nullptr,  {}, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions)));
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, ctx, expected.mR, expected.mRNtt,
                             rootB, starB, params.mGadgetLogBase, 1, rootReferencePrng, sigma,
-                            6 * sigma, referenceRoot, 1,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
+                            6 * sigma, referenceRoot, 1,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions)));
                     }
                     const auto nextLhe = lheReferencePrng.get<oc::block>();
                     const auto nextRoot = rootReferencePrng.get<oc::block>();
@@ -317,10 +319,10 @@ namespace
                         tests_libOTe::logvole_test::ScopedOptionValue rootCompactStrict(setupOptions.mRootCompactNoiseStrict, false);
                         RingTensor actualLhe, actualRoot;
                         oc::PRNG lhePrng(oc::block(0xC7, 1), 3), rootPrng(oc::block(0xC7, 2), 3);
-                        LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, {}, sk, params.mGadgetLogBase,
-                            actualLhe, sigma, 6 * sigma, &lhePrng, true, publicA.get(), 4, nullptr, owner, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions));
-                        LOGVOLE_REQUIRE_TRUE(buildRootTopCt(ctx, expected.mR, {}, rootB, starB,
-                            params.mGadgetLogBase, 1, rootPrng, sigma, 6 * sigma, actualRoot, 4, owner, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions));
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, {}, sk, params.mGadgetLogBase,
+                            actualLhe, sigma, 6 * sigma, &lhePrng, true, publicA.get(), 4, nullptr, owner, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions)));
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, ctx, expected.mR, {}, rootB, starB,
+                            params.mGadgetLogBase, 1, rootPrng, sigma, 6 * sigma, actualRoot, 4, owner, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions)));
                         expect_tensor_equal(referenceLhe, actualLhe);
                         expect_tensor_equal(referenceRoot, actualRoot);
                         LOGVOLE_EXPECT_EQ(lhePrng.get<oc::block>(), nextLhe);
@@ -342,8 +344,8 @@ namespace
                     RingTensor rejected = referenceLhe;
                     const auto* rejectedData = rejected.mPolys.data();
                     oc::PRNG invalidPrng(oc::block(0xC7, 1), 3), untouchedPrng(oc::block(0xC7, 1), 3);
-                    LOGVOLE_REQUIRE_FALSE(lheEnc1Trunc(ctx, expected.mRNtt, sk, params.mGadgetLogBase,
-                        rejected, sigma, 6 * sigma, &invalidPrng, true, publicA.get(), 4, nullptr, owner, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions));
+                    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, expected.mRNtt, sk, params.mGadgetLogBase,
+                        rejected, sigma, 6 * sigma, &invalidPrng, true, publicA.get(), 4, nullptr, owner, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions)));
                     LOGVOLE_REQUIRE_TRUE(rejected.mPolys.data() == rejectedData);
                     LOGVOLE_EXPECT_EQ(invalidPrng.get<oc::block>(), untouchedPrng.get<oc::block>());
                     {
@@ -353,9 +355,9 @@ namespace
                         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, eagerCtx,
                             std::make_shared<RingContextFactory>(eagerOptions)));
                         oc::PRNG eagerPrng(oc::block(0x1E2C5EEDu, 0), 3);
-                        LOGVOLE_REQUIRE_TRUE(lencEncTrunc(eagerCtx, s, params.mTauHi,
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, eagerCtx, s, params.mTauHi,
                             params.mGadgetLogBase, params.mPlaintextModulusBits, eagerPrng,
-                            retained, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, true, nullptr, nullptr, setupOptions));
+                            retained, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, true, nullptr, nullptr, setupOptions)));
                         LOGVOLE_REQUIRE_FALSE(retained.mLazyRandomizers);
                         expect_encoding_equal(expected, retained);
                         LOGVOLE_EXPECT_EQ(eagerPrng.get<oc::block>(), nextReference);
@@ -364,9 +366,9 @@ namespace
                 {
                     oc::PRNG deferredPrng(oc::block(0x1E2C5EEDu, 0), 3);
                     LencEncodeOutput deferred;
-                    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi,
                         params.mGadgetLogBase, params.mPlaintextModulusBits, deferredPrng,
-                        deferred, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, false, nullptr, nullptr, setupOptions));
+                        deferred, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, false, nullptr, nullptr, setupOptions)));
                     expect_deferred_tensor_equal(deferred.mLazyCt, deferred.mLacct.mCt, expected.mLacct.mCt);
                     LOGVOLE_EXPECT_EQ(deferredPrng.get<oc::block>(), nextReference);
                     auto materialized = deferred;
@@ -382,9 +384,9 @@ namespace
                         const auto* storage = rejected.mLacct.mCt.mPolys.data();
                         oc::PRNG rejectedPrng(oc::block(0x1E2C5EEDu, 0), 3);
                         oc::PRNG untouchedPrng(oc::block(0x1E2C5EEDu, 0), 3);
-                        LOGVOLE_REQUIRE_FALSE(lencEncTrunc(ctx, s, 0,
+                        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, 0,
                             params.mGadgetLogBase, params.mPlaintextModulusBits, rejectedPrng,
-                            rejected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, false, nullptr, nullptr, setupOptions));
+                            rejected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, true, false, nullptr, nullptr, setupOptions)));
                         LOGVOLE_REQUIRE_TRUE(rejected.mLazyCt == retained);
                         LOGVOLE_REQUIRE_TRUE(rejected.mLacct.mCt.mPolys.data() == storage);
                         expect_encoding_equal(expected, rejected);
@@ -474,9 +476,9 @@ namespace
 #endif
                 oc::PRNG actualPrng(oc::block(0x1E2C5EEDu, 0), 3);
                 LencEncodeOutput actual{};
-                LOGVOLE_REQUIRE_TRUE(lencEncTrunc(selected, s, params.mTauHi,
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, selected, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, actualPrng,
-                    actual, sigma, 6 * sigma, width, emitRCoeffDomain, gadgetLeaves, &publicB, workers, false, false, nullptr, nullptr, setupOptions));
+                    actual, sigma, 6 * sigma, width, emitRCoeffDomain, gadgetLeaves, &publicB, workers, false, false, nullptr, nullptr, setupOptions)));
                 expect_encoding_equal(expected, actual, emitRCoeffDomain);
                 LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), nextReference);
             }
@@ -493,9 +495,9 @@ namespace
                 {
                     oc::PRNG fallbackPrng(oc::block(0x1E2C5EEDu, 0), 3);
                     LencEncodeOutput actual;
-                    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi,
                         params.mGadgetLogBase, params.mPlaintextModulusBits, fallbackPrng,
-                        actual, sigma, 6 * sigma, width, emitRCoeffDomain, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
+                        actual, sigma, 6 * sigma, width, emitRCoeffDomain, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions)));
                     expect_encoding_equal(expected, actual, emitRCoeffDomain);
                     LOGVOLE_EXPECT_EQ(fallbackPrng.get<oc::block>(), nextReference);
                 }
@@ -505,9 +507,9 @@ namespace
                 oc::PRNG failedPrng(oc::block(0x1E2C5EEDu, 0), 3);
                 LencEncodeOutput failed;
                 failed.mLacct.mWidthPadded = 0xBADu;
-                LOGVOLE_EXPECT_FALSE(lencEncTrunc(ctx, s, params.mTauHi,
+                LOGVOLE_EXPECT_FALSE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, failedPrng,
-                    failed, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
+                    failed, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions)));
                 LOGVOLE_EXPECT_EQ(failed.mLacct.mWidthPadded, 0xBADu);
             }
             if (haveGpu)
@@ -523,9 +525,9 @@ namespace
                     tests_libOTe::logvole_test::ScopedOptionValue allowReplay(setupOptions.mLencRandomizerOutputStrict, false);
                     oc::PRNG fallbackPrng(oc::block(0x1E2C5EEDu, 0), 3);
                     LencEncodeOutput actual;
-                    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi,
                         params.mGadgetLogBase, params.mPlaintextModulusBits, fallbackPrng,
-                        actual, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
+                        actual, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions)));
                     expect_encoding_equal(expected, actual);
                     LOGVOLE_EXPECT_EQ(fallbackPrng.get<oc::block>(), nextReference);
                 }
@@ -533,9 +535,9 @@ namespace
                 oc::PRNG rejectedPrng(oc::block(0x1E2C5EEDu, 0), 3);
                 LencEncodeOutput rejected = expected;
                 const auto* storage = rejected.mR.data();
-                LOGVOLE_REQUIRE_TRUE(!lencEncTrunc(ctx, s, params.mTauHi,
+                LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, rejectedPrng,
-                    rejected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
+                    rejected, sigma, 6 * sigma, width, true, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions)));
                 LOGVOLE_REQUIRE_TRUE(rejected.mR.data() == storage);
                 expect_encoding_equal(expected, rejected);
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), nextReference);
@@ -543,9 +545,9 @@ namespace
                 // and strict requirement do not introduce work or a failure.
                 oc::PRNG nttOnlyPrng(oc::block(0x1E2C5EEDu, 0), 3);
                 LencEncodeOutput nttOnly;
-                LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, s, params.mTauHi,
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, nttOnlyPrng,
-                    nttOnly, sigma, 6 * sigma, width, false, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
+                    nttOnly, sigma, 6 * sigma, width, false, gadgetLeaves, &publicB, 4, false, false, nullptr, nullptr, setupOptions)));
                 expect_encoding_equal(expected, nttOnly, false);
                 LOGVOLE_EXPECT_EQ(nttOnlyPrng.get<oc::block>(), nextReference);
             }
@@ -567,15 +569,15 @@ namespace
             LencEncodeOutput expected;
             {
                 const auto& ctx = cpuCtx;
-                LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, exactWidthInput, params.mTauHi,
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, exactWidthInput, params.mTauHi,
                     params.mGadgetLogBase, params.mPlaintextModulusBits, referencePrng,
-                    expected, 3.2, 19.2, 0, true, true, &publicB, 1, false, false, nullptr, nullptr, setupOptions));
+                    expected, 3.2, 19.2, 0, true, true, &publicB, 1, false, false, nullptr, nullptr, setupOptions)));
             }
             oc::PRNG actualPrng(oc::block(0x1E2C4ADu, 0), 3);
             LencEncodeOutput actual;
-            LOGVOLE_REQUIRE_TRUE(lencEncTrunc(ctx, exactWidthInput, params.mTauHi,
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, exactWidthInput, params.mTauHi,
                 params.mGadgetLogBase, params.mPlaintextModulusBits, actualPrng,
-                actual, 3.2, 19.2, 0, true, true, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
+                actual, 3.2, 19.2, 0, true, true, &publicB, 4, false, false, nullptr, nullptr, setupOptions)));
             expect_encoding_equal(expected, actual);
             expect_batch_equal(exactWidthInput, unchangedInput);
             LOGVOLE_EXPECT_EQ(actualPrng.get<oc::block>(), referencePrng.get<oc::block>());
@@ -585,9 +587,9 @@ namespace
             oc::PRNG invalidPrng(oc::block(0x1E2CBADu, 0), 3);
             oc::PRNG untouchedPrng(oc::block(0x1E2CBADu, 0), 3);
             const auto* storage = actual.mR.data();
-            LOGVOLE_REQUIRE_TRUE(!lencEncTrunc(ctx, invalidInput, params.mTauHi,
+            LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, invalidInput, params.mTauHi,
                 params.mGadgetLogBase, params.mPlaintextModulusBits, invalidPrng,
-                actual, 3.2, 19.2, 0, true, true, &publicB, 4, false, false, nullptr, nullptr, setupOptions));
+                actual, 3.2, 19.2, 0, true, true, &publicB, 4, false, false, nullptr, nullptr, setupOptions)));
             LOGVOLE_REQUIRE_TRUE(actual.mR.data() == storage);
             expect_encoding_equal(expected, actual);
             LOGVOLE_EXPECT_EQ(invalidPrng.get<oc::block>(), untouchedPrng.get<oc::block>());
@@ -597,6 +599,7 @@ namespace
 
 void LogVole_LencOps_SingletonPaddingAndRelation(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     const auto params = make_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
@@ -612,8 +615,8 @@ void LogVole_LencOps_SingletonPaddingAndRelation(const oc::CLP&)
         LencEncodeOutput enc;
         oc::PRNG prng(oc::block(0x53494e474c4553ull, truncated));
         LOGVOLE_REQUIRE_TRUE(truncated
-            ? lencEncTrunc(ctx, s, params.mTauHi, params.mGadgetLogBase,
-                params.mPlaintextModulusBits, prng, enc)
+            ? macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi, params.mGadgetLogBase,
+                params.mPlaintextModulusBits, prng, enc))
             : lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, prng, enc));
         LOGVOLE_REQUIRE_EQ(enc.mLacct.mWidthPadded, 2u);
         LOGVOLE_REQUIRE_EQ(enc.mLacct.mLevels, 1u);
@@ -646,8 +649,8 @@ void LogVole_LencOps_SingletonPaddingAndRelation(const oc::CLP&)
             : buildDigestTree(ctx, x, params.mTau, params.mGadgetLogBase, tree, 1));
         LencEncodeOutput rejected;
         LOGVOLE_REQUIRE_FALSE(truncated
-            ? lencEncTrunc(ctx, s, params.mTauHi, params.mGadgetLogBase,
-                params.mPlaintextModulusBits, prng, rejected, 0, 0, 1)
+            ? macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, s, params.mTauHi, params.mGadgetLogBase,
+                params.mPlaintextModulusBits, prng, rejected, 0, 0, 1))
             : lencEnc(ctx, s, params.mTau, params.mGadgetLogBase,
                 prng, rejected, 0, 0, 1));
     }
@@ -794,6 +797,7 @@ void LogVole_LencOps_EvalRejectsMuMismatch(const oc::CLP&)
 
 void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
     const auto params = make_params();
     RingNttContext ctx{};
@@ -802,25 +806,25 @@ void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP& cmd)
     auto s = sample_batch(ctx, params.mMu, 0x110011u);
     LencEncodeOutput enc1{};
     oc::PRNG prng1(oc::block(0x221122u, 0));
-    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results,
         ctx,
         s,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
         prng1,
-        enc1));
+        enc1)));
 
     LencEncodeOutput enc2{};
     oc::PRNG prng2(oc::block(0x221122u, 0));
-    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results,
         ctx,
         s,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
         prng2,
-        enc2));
+        enc2)));
 
     LOGVOLE_EXPECT_EQ(enc1.mR.size(), params.mMu);
     LOGVOLE_EXPECT_EQ(enc1.mRNtt.size(), params.mMu);
@@ -910,6 +914,7 @@ void LogVole_LencOps_TruncDigestTreeDeterministic(const oc::CLP&)
 
 void LogVole_LencOps_TruncEvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     const auto params = make_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
@@ -919,14 +924,14 @@ void LogVole_LencOps_TruncEvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
 
     LencEncodeOutput enc{};
     oc::PRNG prng(oc::block(0x660066u, 0));
-    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results,
         ctx,
         s,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
         prng,
-        enc));
+        enc)));
 
     std::vector<RnsPoly> evalFromX;
     LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(
@@ -965,6 +970,7 @@ void LogVole_LencOps_TruncEvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
 
 void LogVole_LencOps_TruncEvalRejectsMuMismatch(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     const auto params = make_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
@@ -974,14 +980,14 @@ void LogVole_LencOps_TruncEvalRejectsMuMismatch(const oc::CLP&)
 
     LencEncodeOutput enc{};
     oc::PRNG prng(oc::block(0x990099u, 0));
-    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results,
         ctx,
         s,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
         prng,
-        enc));
+        enc)));
 
     std::vector<RnsPoly> eval;
     LOGVOLE_REQUIRE_FALSE(lencEvalTrunc(
@@ -997,6 +1003,7 @@ void LogVole_LencOps_TruncEvalRejectsMuMismatch(const oc::CLP&)
 
 void LogVole_LencOps_TruncLeafInputsAreGadgetPath(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources setupResources;
     auto params = make_params();
     params.mMu = 4;
     RingNttContext ctx{};
@@ -1007,7 +1014,7 @@ void LogVole_LencOps_TruncLeafInputsAreGadgetPath(const oc::CLP&)
 
     LencEncodeOutput enc{};
     oc::PRNG prng(oc::block(0xCC00CCu, 0));
-    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results,
         ctx,
         s,
         params.mTauHi,
@@ -1019,7 +1026,7 @@ void LogVole_LencOps_TruncLeafInputsAreGadgetPath(const oc::CLP&)
         0.0,
         0,
         true,
-        true));
+        true)));
 
     DigestTree tree{};
     LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(
