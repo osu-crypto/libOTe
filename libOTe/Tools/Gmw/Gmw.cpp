@@ -670,8 +670,8 @@ namespace osuCrypto
 					{
 						buff.resize(roundUpTo(std::min<u64>(batchSize, roundRem), mN128 * 2));
 						roundRem -= buff.size();
-						buffIter = buff.data();
 						co_await chl.recv(buff);
+						buffIter = buff.data();
 					}
 
 

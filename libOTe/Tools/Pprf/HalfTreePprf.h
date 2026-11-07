@@ -925,8 +925,11 @@ namespace osuCrypto
 						mPntCount;
 					pprf::allocateExpandBuffer<F>(
 						sumsPerTree, count, programPuncturedPoint,
-						buff, theirSums, leafMsgs, ctx);
+						buff, ctx);
 					co_await chl.recv(buff);
+					pprf::partitionExpandBuffer<F>(
+						sumsPerTree, count, programPuncturedPoint,
+						buff, theirSums, leafMsgs, ctx);
 
 					for (u64 j = 0; j < count; ++j)
 					{
