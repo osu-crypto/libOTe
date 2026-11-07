@@ -3016,6 +3016,151 @@ void LogVole_Cpu_ZkVectorMatchesReference(const oc::CLP&)
     }
 }
 
+void LogVole_Cpu_AsyncMulProof(const oc::CLP& cmd)
+{
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(cmd.getOr("executor_threads", 1));
+    auto onPool = [&](macoro::task<bool> operation) -> macoro::task<bool> {
+        co_await executor.schedule();
+        co_return co_await std::move(operation);
+    };
+    for (u64 q : {257ULL, 2251799813554177ULL})
+    for (bool optimized : {false, true})
+    for (bool dependent : {false, true})
+    {
+        const seal::Modulus mod(q);
+        ZkMulCircuit circuit;
+        LOGVOLE_REQUIRE_TRUE(makeZkMulCircuit(51, 3, toBlock(0x4153594e43, 1), circuit));
+        if (dependent) circuit.mOperands[4] = static_cast<u32>(circuit.outputWire(1));
+        LogVoleZkOptions settings;
+        settings.mCpuPseudoReduce = optimized;
+        settings.mCpuVectorGates = optimized;
+        settings.mCpuVectorWitness = optimized;
+        for (u32 workers : {1u, 3u})
+        {
+            ZkMulCpuWorkspace workspace(circuit, workers, nullptr, settings);
+            AlignedUnVec<u64> wires;
+            wires.resize(circuit.voleCount() + 7);
+            const auto storage = wires.data();
+            for (u64 query = 0; query != 2; ++query)
+            {
+                PRNG random(toBlock(0x574954, query)), referenceRandom(toBlock(0x574954, query));
+                std::vector<u64> expected(wires.size(), 0);
+                for (u64 i = 0; i != circuit.mWidth; ++i) expected[i] = referenceRandom.get<u64>() % q;
+                for (u64 g = 0; g != circuit.gateCount(); ++g)
+                    expected[circuit.outputWire(g)] = mulMod(expected[circuit.mOperands[2*g]],
+                        expected[circuit.mOperands[2*g+1]], mod);
+                expected[circuit.maskIndex()] = referenceRandom.get<u64>() % q;
+                auto operation = zkMulWitness(executor, circuit, q, random, wires, wires.size(), workspace);
+                LOGVOLE_REQUIRE_TRUE(wires.data() == storage);
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(operation))));
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(wires, expected));
+                LOGVOLE_REQUIRE_TRUE(random.get<block>() == referenceRandom.get<block>());
+                LOGVOLE_REQUIRE_TRUE(wires.data() == storage);
+                std::vector<u64> macs(circuit.voleCount()), keys(circuit.voleCount());
+                constexpr u64 delta = 19;
+                for (std::size_t i = 0; i != macs.size(); ++i)
+                {
+                    macs[i] = random.get<u64>() % q;
+                    keys[i] = (macs[i] + q - mulMod(wires[i], delta, mod)) % q;
+                }
+                ZkProof reference73{};
+                u64 referenceValue73 = 0;
+                for (u64 chi : {u64{0}, u64{73}, ~u64{0}})
+                {
+                    ZkProof reference{}, actual{};
+                    u64 expectedValue = 0, actualValue = 0, pw = chi % q;
+                    for (u64 g = 0; g != circuit.gateCount(); ++g)
+                    {
+                        const auto x = circuit.mOperands[2*g], y = circuit.mOperands[2*g+1];
+                        const auto z = circuit.outputWire(g);
+                        const auto a0 = mulMod(macs[x], macs[y], mod);
+                        const auto a1 = (macs[z] + 2*q - mulMod(wires[x], macs[y], mod)
+                            - mulMod(wires[y], macs[x], mod)) % q;
+                        reference.mU = mulAddMod(pw, a0, reference.mU, mod);
+                        reference.mV = mulAddMod(pw, a1, reference.mV, mod);
+                        expectedValue = mulAddMod(pw, mulAddMod(keys[z], delta,
+                            mulMod(keys[x], keys[y], mod), mod), expectedValue, mod);
+                        pw = mulMod(pw, chi, mod);
+                    }
+                    reference.mU = addMod(reference.mU, macs[circuit.maskIndex()], mod);
+                    reference.mV = (reference.mV + q - wires[circuit.maskIndex()]) % q;
+                    expectedValue = addMod(expectedValue, keys[circuit.maskIndex()], mod);
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(zkMulProverResponse(executor,
+                        circuit, wires, macs, chi, q, workspace, actual))));
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(zkMulVerifierValue(executor,
+                        circuit, keys, chi, delta, q, workspace, actualValue))));
+                    LOGVOLE_REQUIRE_EQ(actual.mU, reference.mU);
+                    LOGVOLE_REQUIRE_EQ(actual.mV, reference.mV);
+                    LOGVOLE_REQUIRE_EQ(actualValue, expectedValue);
+                    LOGVOLE_REQUIRE_TRUE(zkAccept(actual, actualValue, delta, q));
+                    if (chi == 73) { reference73 = reference; referenceValue73 = expectedValue; }
+                }
+                ZkProof untouched{123, 456};
+                u64 untouchedValue = 789;
+                LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulProverResponse(executor,
+                    circuit, wires, {}, 1, q, workspace, untouched)));
+                LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulVerifierValue(executor,
+                    circuit, {}, 1, delta, q, workspace, untouchedValue)));
+                LOGVOLE_REQUIRE_EQ(untouched.mU, 123u);
+                LOGVOLE_REQUIRE_EQ(untouched.mV, 456u);
+                LOGVOLE_REQUIRE_EQ(untouchedValue, 789u);
+                auto invalid = circuit;
+                invalid.mOperands.resize(1);
+                PRNG rejected(toBlock(123)), saved(toBlock(123));
+                LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulWitness(executor,
+                    invalid, q, rejected, wires, wires.size(), workspace)));
+                LOGVOLE_REQUIRE_TRUE(rejected.get<block>() == saved.get<block>());
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(wires, expected));
+                // An explicit one-worker partition executes inline with no pool threads.
+                if (workers == 1 && query == 0)
+                {
+                    macoro::thread_pool idle;
+                    CpuBenchmarkContext budget;
+                    budget.mCpus = {0, 1, 2};
+                    budget.mWorkerLimit = 1;
+                    ZkMulCpuWorkspace capped(circuit, 3, &budget, settings);
+                    LOGVOLE_REQUIRE_EQ(capped.workers(), 1u);
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(idle,
+                        circuit, wires, macs, 73, q, capped, untouched)));
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulVerifierValue(idle,
+                        circuit, keys, 73, delta, q, capped, untouchedValue)));
+                    LOGVOLE_REQUIRE_EQ(untouched.mU, reference73.mU);
+                    LOGVOLE_REQUIRE_EQ(untouched.mV, reference73.mV);
+                    LOGVOLE_REQUIRE_EQ(untouchedValue, referenceValue73);
+                    PRNG replay(toBlock(0x574954, query));
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulWitness(idle,
+                        circuit, q, replay, wires, wires.size(), capped)));
+                    LOGVOLE_REQUIRE_TRUE(rangesEqual(wires, expected));
+                    LOGVOLE_REQUIRE_EQ(budget.mPeakTaskThreads.load(), 1u);
+                }
+            }
+            // Reject an unevaluated forward edge only after the same preceding
+            // layers and input draws as the legacy evaluator.
+            auto invalidLayer = circuit;
+            invalidLayer.mOperands[2 * circuit.mWidth] =
+                static_cast<u32>(invalidLayer.outputWire(circuit.mWidth));
+            PRNG rejected(toBlock(0x424144)), referenceRejected(toBlock(0x424144));
+            AlignedUnVec<u64> expectedPartial, actualPartial;
+            expectedPartial.resize(wires.size());
+            actualPartial.resize(wires.size());
+            std::fill(expectedPartial.begin(), expectedPartial.end(), 777);
+            std::fill(actualPartial.begin(), actualPartial.end(), 777);
+            LOGVOLE_REQUIRE_FALSE(zkMulWitness(invalidLayer, q, referenceRejected,
+                expectedPartial, expectedPartial.size(), 1, settings));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(onPool(zkMulWitness(executor,
+                invalidLayer, q, rejected, actualPartial, actualPartial.size(), workspace))));
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(actualPartial, expectedPartial));
+            LOGVOLE_REQUIRE_TRUE(rejected.get<block>() == referenceRejected.get<block>());
+            ZkMulCpuWorkspace empty;
+            PRNG random(toBlock(123));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulWitness(executor,
+                circuit, q, random, wires, 0, empty)));
+        }
+    }
+}
+
 void LogVole_Cpu_ZkProofMatchesReference(const oc::CLP&)
 {
     PRNG random(toBlock(0x819, 0x514));

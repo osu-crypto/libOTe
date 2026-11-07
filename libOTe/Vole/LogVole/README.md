@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **77%** of the agreed ownership/globals refactor,
+Estimated overall completion: **80%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -244,6 +244,7 @@ contain no environment reads.
 | Online receiver zeta | CPU digest preparation awaits direct `bulk_chunked` with caller executor and exclusive `RootZetaBuffer` storage, threaded through public receiver/garbled/prover APIs. Each chunk reuses multiprecision scratch and an AES PRNG buffer. Protocol range count still determines seed layout; buffer count only bounds execution. GPU sampling/fallback remains synchronous and unchanged. |
 | Receiver input wrapping | CPU CI-VOLE input wrapping awaits direct `bulk_chunked` using caller-owned `ZpEncodeBuffer` storage. Each chunk reuses slots and SEAL plaintext storage; the encoding/lifting arithmetic is shared with the legacy entry point. Public receiver, garbled receiver, and prover APIs pass the buffers through. GPU wrapping/fallback remains unchanged. |
 | CPU output unwrapping | Sender key release and receiver MAC output await direct `bulk_chunked` using caller-owned `ZpDecodeBuffer` storage. Each chunk reuses plaintext, slots, canonical residues and composition storage; one shared synchronous numerical kernel preserves the legacy arithmetic. Public sender/receiver, garbled and proof wrappers pass resources through. GPU/fallback and staged diagnostic release retain the synchronous API. |
+| Multiplication proof CPU execution | Public CPU prover response/verifier checks await direct `bulk_chunked` on the caller executor. `ZkMulCpuWorkspace` preallocates numerical locals/task outputs and captures its worker budget without creating a pool. The async witness API joins each independent layer, retaining scalar dependent-layer order. Shared synchronous kernels preserve arithmetic, original prover partitions, verifier task slots, reduction order and PRNG draws. Legacy diagnostics/GPU fallback lazily construct their private executor; matrix proof loops are separate remaining work. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -286,9 +287,11 @@ legacy seed-replay helper used only by that GPU lazy getter. CPU finalization's
 exceptional seed-only replay retains its existing inline, one-worker fallback.
 The getter uses `std::call_once` and
 cannot await; changing that boundary is separate from CPU offline setup.
-Five additional executor `runBulk` sites remain in ZK (3), legacy LHE (1),
-and legacy LENC (1). They still reach the blocking `CpuExecutor::runBulkChunked`
-adapter. Direct `sync_wait` expressions remain in `LogVoleCpuExecutor.h` and
+Five physical executor `runBulk` sites remain in ZK (3), legacy LHE (1),
+and legacy LENC (1). ZK's three sites and its verifier `run` now serve only
+legacy synchronous diagnostic/GPU-fallback APIs; multiplication CPU production
+uses the explicit-executor async overloads. They still reach the blocking
+`CpuExecutor::runBulkChunked` adapter when a legacy caller requests them. Direct `sync_wait` expressions remain in `LogVoleCpuExecutor.h` and
 `cuda/LogVoleGpuBackend.cpp`; deleting just those expressions is not a migration.
 
 Receiver review validation: the Windows build and four end-to-end tests passed
@@ -409,9 +412,24 @@ pool thread and verify stable pre-sized sender/receiver plaintext and slot
 allocations across both queries. No GPU runtime, WSL, leak checks, or benchmarks
 were run.
 
+Multiplication-proof validation: CUDA-enabled Windows library/tests and public
+example object build pass (initial code build 26.99 seconds, final test-only
+incremental build 9.00 seconds). The async arithmetic/witness regression,
+prepared execution lifetime regression and focused two-query GoldenSeed
+multiplication protocol pass in 3.84 seconds; the async regression also passes
+with two executor threads in 0.06 seconds. Checks use independent scalar witness
+and proof-polynomial oracles; optimized/scalar settings; dependent/independent
+layers; exact PRNG progression and invalid-layer failure state; repeated
+workspace/output reuse; one/three requested workers; a one-worker cap accumulating
+three original prover partitions; invalid shape/span rejection; and inline
+execution without pool threads. The bundled `FreshMaskCpu` test exceeded a
+60-second limit after the two arithmetic/lifetime tests had passed; it includes
+six multiplication/matrix configurations and was not counted as completed
+coverage. No GPU runtime, WSL, leak checks, or benchmarks were run.
+
 Next steps, in order:
 
-1. Migrate remaining CPU proof loops using direct
+1. Migrate remaining CPU matrix-proof loops using direct
    `bulk_chunked` where appropriate. Discuss a different algorithm first if a
    loop does not fit. Retire `CpuRowScratch` scheduling and legacy overloads
    when their callers are gone.

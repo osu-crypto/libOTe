@@ -128,12 +128,13 @@ namespace osuCrypto::LogVole
     // gate picks two uniform wires from the layer below.
     bool makeZkMulCircuit(u64 gateCount, u64 depth, block seed, ZkMulCircuit& out);
 
-    // Prepared CPU check storage and an exclusive, reusable worker pool.
-    // Construct before the first proof. A workspace is bound to width/depth;
-    // fresh witness, labels and challenges reuse the same numerical storage.
-    // Calls are synchronous and join every child before returning or throwing.
-    // Calls/moves/destruction require exclusive use. Optional benchmark storage
-    // is borrowed explicitly and must outlive the workspace.
+    // Prepared exclusive CPU numerical storage, options and concurrency budget.
+    // Construct before the first proof. Width/depth and the captured benchmark
+    // partition remain fixed; borrowed benchmark storage must outlive the owner.
+    // Async calls borrow a caller executor and join all children before returning.
+    // Calls/moves/destruction require exclusive use through awaited completion.
+    // Legacy synchronous calls lazily prepare a private pool for diagnostics and
+    // GPU fallback; production CPU async calls never construct or use that pool.
     class ZkMulCpuWorkspace
     {
         struct Impl;
@@ -144,6 +145,12 @@ namespace osuCrypto::LogVole
             u64, u64, u64, ZkMulCpuWorkspace&, u64&);
         friend bool zkMulWitness(const ZkMulCircuit&, u64, PRNG&, AlignedUnVec<u64>&,
             u64, ZkMulCpuWorkspace&);
+        friend macoro::task<bool> zkMulProverResponse(macoro::thread_pool&, const ZkMulCircuit&,
+            std::span<const u64>, std::span<const u64>, u64, u64, ZkMulCpuWorkspace&, ZkProof&);
+        friend macoro::task<bool> zkMulVerifierValue(macoro::thread_pool&, const ZkMulCircuit&,
+            std::span<const u64>, u64, u64, u64, ZkMulCpuWorkspace&, u64&);
+        friend macoro::task<bool> zkMulWitness(macoro::thread_pool&, const ZkMulCircuit&,
+            u64, PRNG&, AlignedUnVec<u64>&, u64, ZkMulCpuWorkspace&);
     public:
         ZkMulCpuWorkspace() noexcept;
         ZkMulCpuWorkspace(const ZkMulCircuit& circuit, u32 threads,
@@ -199,7 +206,8 @@ namespace osuCrypto::LogVole
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize, u32 threads, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
-    // Reuse the prepared pool, partition ranges and CPU options across witnesses.
+    // Legacy synchronous diagnostics/GPU fallback: lazily prepare the private
+    // pool and reuse partition ranges and CPU options across witnesses.
     // Each layer joins before the next layer reads its outputs.
     bool zkMulWitness(
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
@@ -225,6 +233,20 @@ namespace osuCrypto::LogVole
         u64 modulus,
         ZkMulCpuWorkspace& workspace,
         u64& out);
+
+    // Explicit-executor CPU APIs. Borrow circuit, inputs, outputs, workspace and
+    // executor through awaited completion. Workspace buffers bound concurrency;
+    // one chunk runs inline without a pool. Witness layers join before reads
+    // from the next layer, preserving dependent layers and exact PRNG draws.
+    macoro::task<bool> zkMulWitness(macoro::thread_pool& executor,
+        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
+        u64 voleSize, ZkMulCpuWorkspace& workspace);
+    macoro::task<bool> zkMulProverResponse(macoro::thread_pool& executor,
+        const ZkMulCircuit& circuit, std::span<const u64> wires, std::span<const u64> macs,
+        u64 chi, u64 modulus, ZkMulCpuWorkspace& workspace, ZkProof& out);
+    macoro::task<bool> zkMulVerifierValue(macoro::thread_pool& executor,
+        const ZkMulCircuit& circuit, std::span<const u64> keys, u64 chi, u64 delta,
+        u64 modulus, ZkMulCpuWorkspace& workspace, u64& out);
 
     // ---- matrix multiplication ------------------------------------------
     //

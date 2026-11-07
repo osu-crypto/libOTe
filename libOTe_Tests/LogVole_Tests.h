@@ -39,7 +39,9 @@
     X(Cpu, GpuZkMatMulSeededInputsMatchReference) \
     X(Cpu, GpuZkBufferOwnership) \
     X(Cpu, ZkVectorMatchesReference) \
+    X(Cpu, AsyncMulProof) \
     X(Cpu, ZkProofMatchesReference) \
+    X(Zk, AsyncMulProtocol) \
     X(Zk, FreshMaskCpu) \
     X(Zk, RequestSizeBounds) \
     X(Zk, FreshMaskGpu) \

@@ -178,7 +178,8 @@ namespace
     }
 
     template<typename Prover, typename Verifier, typename Statement>
-    void checkFreshMasks(const Statement& statement, CivoleSetting setting, bool device)
+    void checkFreshMasks(const Statement& statement, CivoleSetting setting, bool device,
+        u64 instances = 3, bool fastCpu = false)
     {
     tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -195,6 +196,12 @@ namespace
         const u64 request = device ? 65536 : 16;
         voleOptions.mRequestSize = request;
         voleOptions.mSetting = setting;
+        if (fastCpu)
+        {
+            voleOptions.mNumThreads = 2;
+            voleOptions.mAdvanced.mGpuSetup.mParallelLhe = LogVoleChoice::Enabled;
+            voleOptions.mAdvanced.mGpuSetup.mParallelLenc = LogVoleChoice::Enabled;
+        }
         Prover prover({}, voleOptions);
         Verifier verifier({}, voleOptions);
         prover.mUseDevice = verifier.mUseDevice = device;
@@ -232,7 +239,7 @@ namespace
         std::get<1>(offline).result();
 
         u64 previousMask = original[maskIndex];
-        for (u64 instance = 0; instance != 3; ++instance)
+        for (u64 instance = 0; instance != instances; ++instance)
         {
             // Replay only the mask draw from a distinct private query seed.
             // These fixed seeds have distinct masks; independence in general
@@ -340,6 +347,14 @@ namespace
         checkFreshMasks<ZkMatMulProver, ZkMatMulVerifier>(matrix, setting, device);
     }
 
+}
+
+void LogVole_Zk_AsyncMulProtocol(const CLP&)
+{
+    ZkMulCircuit circuit;
+    LOGVOLE_REQUIRE_TRUE(makeZkMulCircuit(6, 2, toBlock(0x4153594e43, 2), circuit));
+    checkFreshMasks<ZkMulProver, ZkMulVerifier>(circuit,
+        CivoleSetting::GoldenSeed, false, 2, true);
 }
 
 void LogVole_Zk_FreshMaskCpu(const CLP&)

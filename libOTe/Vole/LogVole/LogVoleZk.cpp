@@ -159,6 +159,45 @@ namespace osuCrypto::LogVole
             return std::min(capacity, requested ? std::size_t(requested) : automatic);
         }
 
+        void mulWitnessRange(const ZkMulCircuit& circuit, AlignedUnVec<u64>& wires,
+            u64 firstGate, u64 firstOutput, u64 begin, u64 end,
+            const seal::Modulus& mod, const detail::CpuZkOptions& options)
+        {
+            const auto* operands = circuit.mOperands.data()+2*(firstGate+begin);
+            auto* output = wires.data()+firstOutput+begin;
+            if (!detail::cpuZkWitnessRange(operands, wires.data(), output, end-begin, mod, options))
+                detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
+                    for (u64 g = begin; g < end; ++g)
+                        wires[firstOutput+g] = arithmetic.multiply(
+                            wires[circuit.mOperands[2*(firstGate+g)]],
+                            wires[circuit.mOperands[2*(firstGate+g)+1]]);
+                });
+        }
+
+        // -1 rejects a forward dependency; 0 preserves scalar order within
+        // a layer; 1 permits independent parallel evaluation of that layer.
+        int mulWitnessLayerKind(const ZkMulCircuit& circuit, u64 firstGate, u64 firstOutput)
+        {
+            bool independent = true;
+            for (u64 g = firstGate; g < firstGate + circuit.mWidth; ++g)
+            {
+                const u32 ix = circuit.mOperands[2*g], iy = circuit.mOperands[2*g+1];
+                if (ix >= circuit.outputWire(g) || iy >= circuit.outputWire(g)) return -1;
+                independent &= ix < firstOutput && iy < firstOutput;
+            }
+            return independent ? 1 : 0;
+        }
+
+        void mulWitnessDependentLayer(const ZkMulCircuit& circuit, AlignedUnVec<u64>& wires,
+            u64 firstGate, const seal::Modulus& mod, const detail::CpuZkOptions& options)
+        {
+            detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
+                for (u64 g = firstGate; g < firstGate+circuit.mWidth; ++g)
+                    wires[circuit.outputWire(g)] = arithmetic.multiply(
+                        wires[circuit.mOperands[2*g]], wires[circuit.mOperands[2*g+1]]);
+            });
+        }
+
         template<typename RunLayer>
         bool evaluateMulWitness(
             const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
@@ -178,34 +217,15 @@ namespace osuCrypto::LogVole
             {
                 const u64 firstGate = layer*circuit.mWidth;
                 const u64 firstOutput = circuit.outputWire(firstGate);
-                bool independent = true;
-                for (u64 g = firstGate; g < firstGate+circuit.mWidth; ++g)
+                const auto kind = mulWitnessLayerKind(circuit, firstGate, firstOutput);
+                if (kind < 0) return false;
+                if (!kind)
                 {
-                    const u32 ix = circuit.mOperands[2*g], iy = circuit.mOperands[2*g+1];
-                    // Sequential dependencies within a layer retain scalar order.
-                    // Inputs beyond the current output are not an evaluated DAG.
-                    if (ix >= circuit.outputWire(g) || iy >= circuit.outputWire(g)) return false;
-                    independent &= ix < firstOutput && iy < firstOutput;
-                }
-                if (!independent)
-                {
-                    detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
-                        for (u64 g = firstGate; g < firstGate+circuit.mWidth; ++g)
-                            wires[circuit.outputWire(g)] = arithmetic.multiply(
-                                wires[circuit.mOperands[2*g]], wires[circuit.mOperands[2*g+1]]);
-                    });
+                    mulWitnessDependentLayer(circuit, wires, firstGate, mod, options);
                     continue;
                 }
                 runLayer([&](u64 begin, u64 end) {
-                    const auto* operands = circuit.mOperands.data()+2*(firstGate+begin);
-                    auto* output = wires.data()+firstOutput+begin;
-                    if (!detail::cpuZkWitnessRange(operands, wires.data(), output, end-begin, mod, options))
-                        detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
-                            for (u64 g = begin; g < end; ++g)
-                                wires[firstOutput+g] = arithmetic.multiply(
-                                    wires[circuit.mOperands[2*(firstGate+g)]],
-                                    wires[circuit.mOperands[2*(firstGate+g)+1]]);
-                        });
+                    mulWitnessRange(circuit, wires, firstGate, firstOutput, begin, end, mod, options);
                 });
             }
             wires[static_cast<std::size_t>(circuit.maskIndex())] = nextFieldElement(prng, modulus);
@@ -263,9 +283,17 @@ namespace osuCrypto::LogVole
         std::size_t mProverChunks, mVerifierChunks;
         std::vector<u64> mPartial;
         const detail::CpuZkOptions mOptions;
-        detail::CpuExecutor mExecutor;
+        std::size_t mWorkers;
+        CpuBenchmarkContext* mBenchmark;
+        std::optional<detail::CpuExecutor> mLegacyExecutor;
+        detail::CpuExecutor& legacyExecutor()
+        {
+            if (!mLegacyExecutor) mLegacyExecutor.emplace(mWorkers, mBenchmark);
+            return *mLegacyExecutor;
+        }
         // Reused exclusively as proof accumulators or witness partition ranges.
         std::vector<std::array<u64, 2>> mProverLocal;
+        std::vector<u8> mVerifierLocal;
 
         Impl(const ZkMulCircuit& circuit, u32 threads, CpuBenchmarkContext* benchmark, const LogVoleZkOptions& settings)
             : mWidth(circuit.mWidth), mDepth(circuit.mDepth),
@@ -273,9 +301,11 @@ namespace osuCrypto::LogVole
               mVerifierChunks(chunkCount(mWidth, threads)),
               mPartial(mVerifierChunks * static_cast<std::size_t>(mDepth)),
               mOptions(detail::captureCpuZkOptions(settings)),
-              mExecutor(std::min(cpuWorkerBudget(threads, benchmark),
-                  mVerifierChunks * static_cast<std::size_t>(mDepth)), benchmark),
-              mProverLocal(std::min(mProverChunks, mExecutor.workers()))
+              mWorkers(std::min(cpuWorkerBudget(threads, benchmark),
+                  mVerifierChunks * static_cast<std::size_t>(mDepth))),
+              mBenchmark(benchmark),
+              mProverLocal(std::min(mProverChunks, mWorkers)),
+              mVerifierLocal(mWorkers)
         {}
 
         bool matches(const ZkMulCircuit& circuit) const noexcept
@@ -304,7 +334,7 @@ namespace osuCrypto::LogVole
     bool ZkMulCpuWorkspace::prepared() const noexcept { return bool(mImpl); }
     std::size_t ZkMulCpuWorkspace::workers() const noexcept
     {
-        return mImpl ? mImpl->mExecutor.workers() : 0;
+        return mImpl ? mImpl->mWorkers : 0;
     }
     ZkMulCpuWorkspace::~ZkMulCpuWorkspace() = default;
     ZkMulCpuWorkspace::ZkMulCpuWorkspace(ZkMulCpuWorkspace&&) noexcept = default;
@@ -321,44 +351,61 @@ namespace osuCrypto::LogVole
             ranges[i] = {i * circuit.mWidth / ranges.size(), (i + 1) * circuit.mWidth / ranges.size()};
         return evaluateMulWitness(circuit, modulus, prng, wires, voleSize, work.mOptions,
             [&](auto&& evaluateRange) {
-                work.mExecutor.runBulk(ranges.size(), ranges, [&](std::size_t, const auto& range) {
+                work.legacyExecutor().runBulk(ranges.size(), ranges, [&](std::size_t, const auto& range) {
                     evaluateRange(range[0], range[1]);
                 });
             });
     }
 
-    bool zkMulProverResponse(
-        const ZkMulCircuit& circuit,
-        std::span<const u64> wires,
-        std::span<const u64> macs,
-        u64 chi,
-        u64 modulus,
-        ZkMulCpuWorkspace& workspace,
-        ZkProof& out)
+    macoro::task<bool> zkMulWitness(macoro::thread_pool& executor,
+        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
+        u64 voleSize, ZkMulCpuWorkspace& workspace)
     {
-        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
+        if (!workspace.mImpl || !workspace.mImpl->matches(circuit) || modulus < 2 ||
+            circuit.gateCount() == 0 || circuit.mOperands.size() != 2 * circuit.gateCount() ||
+            (voleSize && voleSize < circuit.voleCount())) co_return false;
         auto& work = *workspace.mImpl;
-        const u64 gates = circuit.gateCount();
-        if (gates == 0 || modulus < 2) return false;
-        if (wires.size() < circuit.voleCount() || macs.size() < circuit.voleCount()) return false;
-        if (circuit.mOperands.size() != 2 * gates) return false;
-
         const seal::Modulus mod(modulus);
-        const u64 firstOut = circuit.mWidth;
-        const u32* ops = circuit.mOperands.data();
+        const auto total = voleSize ? voleSize : circuit.voleCount();
+        wires.resize(static_cast<std::size_t>(total));
+        std::fill(wires.data() + circuit.voleCount(), wires.data() + total, u64(0));
+        for (u64 i = 0; i != circuit.mWidth; ++i) wires[i] = nextFieldElement(prng, modulus);
+        auto locals = std::span(work.mProverLocal);
+        for (u64 layer = 0; layer != circuit.mDepth; ++layer)
+        {
+            const auto firstGate = layer * circuit.mWidth;
+            const auto firstOutput = circuit.outputWire(firstGate);
+            const auto kind = mulWitnessLayerKind(circuit, firstGate, firstOutput);
+            if (kind < 0) co_return false;
+            if (!kind)
+            {
+                mulWitnessDependentLayer(circuit, wires, firstGate, mod, work.mOptions);
+                continue;
+            }
+            auto evaluate = [&](std::size_t begin, std::size_t end, std::array<u64, 2>&) {
+                CpuBenchmarkState worker{work.mBenchmark, locals.size() > 1};
+                CpuBenchmarkWorkerScope timing(locals.size() > 1 ? work.mBenchmark : nullptr);
+                CpuBenchmarkTaskScope metrics(worker);
+                mulWitnessRange(circuit, wires, firstGate, firstOutput, begin, end, mod, work.mOptions);
+            };
+            if (locals.size() == 1) evaluate(0, circuit.mWidth, locals[0]);
+            else co_await macoro::bulk_chunked(executor, circuit.mWidth, locals, evaluate);
+        }
+        wires[static_cast<std::size_t>(circuit.maskIndex())] = nextFieldElement(prng, modulus);
+        co_return true;
+    }
 
-        // Workers traverse circuit layers in the same order to encourage
-        // shared-cache reuse of random label/witness reads. There is no layer
-        // barrier. Fixed ranges previously outperformed finer dynamic blocks
-        // across the two settings.
-        const std::size_t chunks = work.mProverChunks;
-        seal::util::MultiplyUIntModOperand chiOperand;
-        chiOperand.set(chi % modulus, mod);
-        auto partial = std::span(work.mProverLocal);
-        std::fill(partial.begin(), partial.end(), std::array<u64, 2>{});
-
-        detail::withCpuZkArithmetic(mod, work.mOptions.mPseudoReduce, [&](const auto& arithmetic) {
-            work.mExecutor.runBulk(chunks, partial, [&](std::size_t c, std::array<u64, 2>& local) {
+    namespace
+    {
+        void mulProverChunk(const ZkMulCircuit& circuit, std::span<const u64> wires,
+            std::span<const u64> macs, u64 chi, const seal::Modulus& mod,
+            const seal::util::MultiplyUIntModOperand& chiOperand,
+            const detail::CpuZkOptions& options, std::size_t chunks, std::size_t c,
+            std::array<u64, 2>& local)
+        {
+            const auto* ops = circuit.mOperands.data();
+            const auto firstOut = circuit.mWidth;
+            detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
                 u64 u = local[0];
                 u64 v = local[1];
                 for (u64 layer = 0; layer < circuit.mDepth; ++layer)
@@ -368,7 +415,7 @@ namespace osuCrypto::LogVole
                     u64 pw = powMod(chi, begin + 1, mod);
                     std::array<u64, 2> sums;
                     if (detail::cpuZkProverRange(ops + 2 * begin, wires.data(), macs.data(),
-                        macs.data() + firstOut + begin, end - begin, pw, chi, mod, sums, work.mOptions))
+                        macs.data() + firstOut + begin, end - begin, pw, chi, mod, sums, options))
                     {
                         u = addMod(u, sums[0], mod);
                         v = addMod(v, sums[1], mod);
@@ -395,6 +442,72 @@ namespace osuCrypto::LogVole
                 local[0] = u;
                 local[1] = v;
             });
+        }
+        u64 mulVerifierTask(const ZkMulCircuit& circuit, std::span<const u64> keys,
+            u64 chi, u64 delta, const seal::Modulus& mod,
+            const seal::util::MultiplyUIntModOperand& chiOperand,
+            const detail::CpuZkOptions& options, std::size_t chunks, std::size_t task)
+        {
+            const auto* ops = circuit.mOperands.data();
+            const auto firstOut = circuit.mWidth;
+            return detail::withCpuZkArithmetic(mod, options.mPseudoReduce, [&](const auto& arithmetic) {
+                u64 acc = 0;
+                const u64 layer = task / chunks, c = task % chunks;
+                {
+                    const u64 begin = layer * circuit.mWidth + c * circuit.mWidth / chunks;
+                    const u64 end = layer * circuit.mWidth + (c + 1) * circuit.mWidth / chunks;
+                    u64 pw = powMod(chi, begin + 1, mod);
+                    if (detail::cpuZkVerifierRange(ops + 2 * begin, keys.data(),
+                        keys.data() + firstOut + begin, end - begin, pw, chi, delta, mod, acc, options))
+                    {
+                        return acc;
+                    }
+                    for (u64 g = begin; g < end; ++g)
+                    {
+                        const u32 ix = ops[2 * g];
+                        const u32 iy = ops[2 * g + 1];
+                        const u64 b = arithmetic.multiplyAdd(
+                            keys[static_cast<std::size_t>(firstOut + g)], delta,
+                            arithmetic.multiply(keys[ix], keys[iy]));
+                        acc = arithmetic.multiplyAdd(pw, b, acc);
+                        pw = seal::util::multiply_uint_mod(pw, chiOperand, mod);
+                    }
+                }
+                return acc;
+            });
+        }
+    }
+
+    bool zkMulProverResponse(
+        const ZkMulCircuit& circuit,
+        std::span<const u64> wires,
+        std::span<const u64> macs,
+        u64 chi,
+        u64 modulus,
+        ZkMulCpuWorkspace& workspace,
+        ZkProof& out)
+    {
+        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
+        auto& work = *workspace.mImpl;
+        const u64 gates = circuit.gateCount();
+        if (gates == 0 || modulus < 2) return false;
+        if (wires.size() < circuit.voleCount() || macs.size() < circuit.voleCount()) return false;
+        if (circuit.mOperands.size() != 2 * gates) return false;
+
+        const seal::Modulus mod(modulus);
+
+        // Workers traverse circuit layers in the same order to encourage
+        // shared-cache reuse of random label/witness reads. There is no layer
+        // barrier. Fixed ranges previously outperformed finer dynamic blocks
+        // across the two settings.
+        const std::size_t chunks = work.mProverChunks;
+        seal::util::MultiplyUIntModOperand chiOperand;
+        chiOperand.set(chi % modulus, mod);
+        auto partial = std::span(work.mProverLocal);
+        std::fill(partial.begin(), partial.end(), std::array<u64, 2>{});
+
+        work.legacyExecutor().runBulk(chunks, partial, [&](std::size_t c, std::array<u64, 2>& local) {
+            mulProverChunk(circuit, wires, macs, chi, mod, chiOperand, work.mOptions, chunks, c, local);
         });
 
         u64 u = 0;
@@ -428,8 +541,6 @@ namespace osuCrypto::LogVole
         if (circuit.mOperands.size() != 2 * gates) return false;
 
         const seal::Modulus mod(modulus);
-        const u64 firstOut = circuit.mWidth;
-        const u32* ops = circuit.mOperands.data();
 
         const std::size_t chunks = work.mVerifierChunks;
         const std::size_t tasks = chunks * circuit.mDepth;
@@ -437,40 +548,112 @@ namespace osuCrypto::LogVole
         chiOperand.set(chi % modulus, mod);
         auto partial = std::span(work.mPartial).first(tasks);
 
-        detail::withCpuZkArithmetic(mod, work.mOptions.mPseudoReduce, [&](const auto& arithmetic) {
-            work.mExecutor.run(tasks, [&](std::size_t, std::size_t task) {
-                u64 acc = 0;
-                const u64 layer = task / chunks, c = task % chunks;
-                {
-                    const u64 begin = layer * circuit.mWidth + c * circuit.mWidth / chunks;
-                    const u64 end = layer * circuit.mWidth + (c + 1) * circuit.mWidth / chunks;
-                    u64 pw = powMod(chi, begin + 1, mod);
-                    if (detail::cpuZkVerifierRange(ops + 2 * begin, keys.data(),
-                        keys.data() + firstOut + begin, end - begin, pw, chi, delta, mod, acc, work.mOptions))
-                    {
-                        partial[task] = acc;
-                        return true;
-                    }
-                    for (u64 g = begin; g < end; ++g)
-                    {
-                        const u32 ix = ops[2 * g];
-                        const u32 iy = ops[2 * g + 1];
-                        const u64 b = arithmetic.multiplyAdd(
-                            keys[static_cast<std::size_t>(firstOut + g)], delta,
-                            arithmetic.multiply(keys[ix], keys[iy]));
-                        acc = arithmetic.multiplyAdd(pw, b, acc);
-                        pw = seal::util::multiply_uint_mod(pw, chiOperand, mod);
-                    }
-                }
-                partial[task] = acc;
-                return true;
-            }, true);
-        });
+        work.legacyExecutor().run(tasks, [&](std::size_t, std::size_t task) {
+            partial[task] = mulVerifierTask(circuit, keys, chi, delta, mod, chiOperand,
+                work.mOptions, chunks, task);
+            return true;
+        }, true);
 
         u64 acc = 0;
         for (u64 p : partial) acc = addMod(acc, p, mod);
         out = addMod(acc, keys[static_cast<std::size_t>(circuit.maskIndex())], mod);
         return true;
+    }
+
+    macoro::task<bool> zkMulProverResponse(
+        macoro::thread_pool& executor,
+        const ZkMulCircuit& circuit,
+        std::span<const u64> wires,
+        std::span<const u64> macs,
+        u64 chi,
+        u64 modulus,
+        ZkMulCpuWorkspace& workspace,
+        ZkProof& out)
+    {
+        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) co_return false;
+        auto& work = *workspace.mImpl;
+        const u64 gates = circuit.gateCount();
+        if (gates == 0 || modulus < 2) co_return false;
+        if (wires.size() < circuit.voleCount() || macs.size() < circuit.voleCount()) co_return false;
+        if (circuit.mOperands.size() != 2 * gates) co_return false;
+
+        const seal::Modulus mod(modulus);
+
+        // Workers traverse circuit layers in the same order to encourage
+        // shared-cache reuse of random label/witness reads. There is no layer
+        // barrier. Fixed ranges previously outperformed finer dynamic blocks
+        // across the two settings.
+        const std::size_t chunks = work.mProverChunks;
+        seal::util::MultiplyUIntModOperand chiOperand;
+        chiOperand.set(chi % modulus, mod);
+        auto partial = std::span(work.mProverLocal);
+        std::fill(partial.begin(), partial.end(), std::array<u64, 2>{});
+
+        auto evaluate = [&](std::size_t begin, std::size_t end, std::array<u64, 2>& local) {
+            CpuBenchmarkState worker{work.mBenchmark, partial.size() > 1};
+            CpuBenchmarkWorkerScope timing(partial.size() > 1 ? work.mBenchmark : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            for (auto c = begin; c != end; ++c)
+                mulProverChunk(circuit, wires, macs, chi, mod, chiOperand, work.mOptions, chunks, c, local);
+        };
+        if (partial.size() == 1) evaluate(0, chunks, partial[0]);
+        else co_await macoro::bulk_chunked(executor, chunks, partial, evaluate);
+
+        u64 u = 0;
+        u64 v = 0;
+        for (const auto& local : partial)
+        {
+            u = addMod(u, local[0], mod);
+            v = addMod(v, local[1], mod);
+        }
+
+        const auto mask = static_cast<std::size_t>(circuit.maskIndex());
+        out.mU = addMod(u, macs[mask], mod);
+        out.mV = subMod(v, wires[mask] % modulus, mod);
+        co_return true;
+    }
+
+    macoro::task<bool> zkMulVerifierValue(
+        macoro::thread_pool& executor,
+        const ZkMulCircuit& circuit,
+        std::span<const u64> keys,
+        u64 chi,
+        u64 delta,
+        u64 modulus,
+        ZkMulCpuWorkspace& workspace,
+        u64& out)
+    {
+        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) co_return false;
+        auto& work = *workspace.mImpl;
+        const u64 gates = circuit.gateCount();
+        if (gates == 0 || modulus < 2) co_return false;
+        if (keys.size() < circuit.voleCount()) co_return false;
+        if (circuit.mOperands.size() != 2 * gates) co_return false;
+
+        const seal::Modulus mod(modulus);
+
+        const std::size_t chunks = work.mVerifierChunks;
+        const std::size_t tasks = chunks * circuit.mDepth;
+        seal::util::MultiplyUIntModOperand chiOperand;
+        chiOperand.set(chi % modulus, mod);
+        auto partial = std::span(work.mPartial).first(tasks);
+
+        auto locals = std::span(work.mVerifierLocal);
+        auto evaluate = [&](std::size_t begin, std::size_t end, u8&) {
+            CpuBenchmarkState worker{work.mBenchmark, locals.size() > 1};
+            CpuBenchmarkWorkerScope timing(locals.size() > 1 ? work.mBenchmark : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            for (auto task = begin; task != end; ++task)
+                partial[task] = mulVerifierTask(circuit, keys, chi, delta, mod, chiOperand,
+                    work.mOptions, chunks, task);
+        };
+        if (locals.size() == 1) evaluate(0, tasks, locals[0]);
+        else co_await macoro::bulk_chunked(executor, tasks, locals, evaluate);
+
+        u64 acc = 0;
+        for (u64 p : partial) acc = addMod(acc, p, mod);
+        out = addMod(acc, keys[static_cast<std::size_t>(circuit.maskIndex())], mod);
+        co_return true;
     }
 
     // ---- matrix multiplication -------------------------------------------
@@ -1736,9 +1919,14 @@ namespace osuCrypto
                 fallback = ZkMulCpuWorkspace(mCircuit, mVole.numThreads(), mCpuBenchmark, mSettings);
                 workspace = &fallback;
             }
-            ok = zkMulProverResponse(
-                mCircuit, wires, std::span<const u64>(mMacs.data(), mMacs.size()), mLastChallenge,
-                mVole.modulus(), *workspace, mLastProof);
+            if (mVoleOptions.mUseGpu)
+                ok = zkMulProverResponse(
+                    mCircuit, wires, std::span<const u64>(mMacs.data(), mMacs.size()), mLastChallenge,
+                    mVole.modulus(), *workspace, mLastProof);
+            else
+                ok = co_await zkMulProverResponse(executor,
+                    mCircuit, wires, std::span<const u64>(mMacs.data(), mMacs.size()), mLastChallenge,
+                    mVole.modulus(), *workspace, mLastProof);
         }
         if (!ok) throw std::runtime_error("LogVole ZK prover could not build its response");
         mCheckMs = msSinceCheck(tCheck);
@@ -1896,9 +2084,14 @@ namespace osuCrypto
                 fallback = ZkMulCpuWorkspace(mCircuit, mVole.numThreads(), mCpuBenchmark, mSettings);
                 workspace = &fallback;
             }
-            ok = zkMulVerifierValue(
-                mCircuit, std::span<const u64>(mKeys.data(), mKeys.size()), mLastChallenge,
-                mVole.mDelta, mVole.modulus(), *workspace, value);
+            if (mVoleOptions.mUseGpu)
+                ok = zkMulVerifierValue(
+                    mCircuit, std::span<const u64>(mKeys.data(), mKeys.size()), mLastChallenge,
+                    mVole.mDelta, mVole.modulus(), *workspace, value);
+            else
+                ok = co_await zkMulVerifierValue(executor,
+                    mCircuit, std::span<const u64>(mKeys.data(), mKeys.size()), mLastChallenge,
+                    mVole.mDelta, mVole.modulus(), *workspace, value);
         }
         if (!ok) throw std::runtime_error("LogVole ZK verifier could not evaluate the check");
         mCheckMs = msSinceCheck(tCheck);
