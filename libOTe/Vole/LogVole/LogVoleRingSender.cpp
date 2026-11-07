@@ -461,7 +461,8 @@ namespace osuCrypto::LogVole
             Socket& sock,
             PRNG& prng,
             CommunicationStats& comm,
-            ProtocolCacheScope senderScope, CpuBenchmarkState cpuBenchmark = {})
+            ProtocolCacheScope senderScope, CpuBenchmarkState cpuBenchmark,
+            macoro::thread_pool* executor, std::span<LheDecryptBuffer> buffers)
         {
             RecursiveMode mode{};
             if (!detail::recursiveMode(state.mParams, mode))
@@ -568,6 +569,16 @@ namespace osuCrypto::LogVole
                     // Deferred by prepareRootResponseSender: the reply is already
                     // on the wire, so the receiver runs its finalize while this
                     // runs instead of waiting for it.
+                    if (executor && !gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
+                    {
+                        auto precompute = [&] {
+                            ScopedProtocolCacheScope activeSender(senderScope);
+                            return senderPrecompute(*executor, buffers, precomputeRoot, prng, cpuBenchmark);
+                        }();
+                        if (!co_await std::move(precompute) || state.mGoldenSeed.empty())
+                            throw std::runtime_error("LogVole sender could not prepare root response");
+                    }
+                    else
                     {
                         ScopedProtocolCacheScope activeSender(senderScope);
                         HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu sender: post-response precompute", &cpuBenchmark);
@@ -590,7 +601,7 @@ namespace osuCrypto::LogVole
 
             auto childSock = sock.fork();
             co_await senderOnlineService(*state.mNextLevelState,
-                precomputeRoot, childSock, prng, comm, senderScope, cpuBenchmark);
+                precomputeRoot, childSock, prng, comm, senderScope, cpuBenchmark, executor, buffers);
             if (!state.mPrecomputedTbk)
             {
                 throw std::runtime_error("LogVole sender could not prepare recursive online cache");
@@ -833,11 +844,24 @@ namespace osuCrypto::LogVole
     }
 
     task<> LogVoleRingSender::online(
-        SenderState& state,
-        const SenderOnlineOptions& options,
-        SenderOnlineOutput& output,
-        PRNG& prng,
-        Socket& sock)
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        SenderState& state, const SenderOnlineOptions& options,
+        SenderOnlineOutput& output, PRNG& prng, Socket& sock)
+    {
+        return onlineStart(&executor, buffers, state, options, output, prng, sock);
+    }
+
+    task<> LogVoleRingSender::online(
+        SenderState& state, const SenderOnlineOptions& options,
+        SenderOnlineOutput& output, PRNG& prng, Socket& sock)
+    {
+        return onlineStart(nullptr, {}, state, options, output, prng, sock);
+    }
+
+    task<> LogVoleRingSender::onlineStart(
+        macoro::thread_pool* executor, std::span<LheDecryptBuffer> buffers,
+        SenderState& state, const SenderOnlineOptions& options,
+        SenderOnlineOutput& output, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mShrinkExpandState.mRingFactoryOwner)};
         ProtocolCacheScope cacheScope = currentProtocolCacheScope();
@@ -846,9 +870,9 @@ namespace osuCrypto::LogVole
             cacheScope.mRunId = allocateProtocolCacheRunId();
         }
         cacheScope.mRole = ProtocolCacheRole::Sender;
-        ScopedProtocolCacheScope scopedCache(cacheScope);
         HostStep onlineTotal(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: online TOTAL", &cpuBenchmark);
         {
+            ScopedProtocolCacheScope scopedCache(cacheScope);
             HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: clear cache + sid", &cpuBenchmark);
             if (!(options.mUsePrecomputed && senderHasPrecompute(state)))
             {
@@ -861,7 +885,7 @@ namespace osuCrypto::LogVole
         CommunicationStats comm{};
         try
         {
-            co_await senderOnlineService(state, state, sock, prng, comm, cacheScope, cpuBenchmark);
+            co_await senderOnlineService(state, state, sock, prng, comm, cacheScope, cpuBenchmark, executor, buffers);
         }
         catch (...)
         {

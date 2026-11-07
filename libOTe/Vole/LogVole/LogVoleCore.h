@@ -539,6 +539,15 @@ namespace osuCrypto::LogVole
     // so state.mRootDPrimeRt must already be populated (i.e. the root digest
     // message must have been received). It exists so that a cached result can
     // be reused across the response and the key release within one SID.
+    // Lazy operation borrowing state, PRNG, executor and exclusive LHE buffers
+    // through completion. Each level caps concurrency by its worker allowance.
+    // Await before reuse/destruction; join the executor outside its own workers.
+    // Captures the protocol scope at creation. GPU execution keeps its legacy path.
+    macoro::task<bool> senderPrecompute(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const SenderState& state, PRNG& prng, CpuBenchmarkState cpuBenchmark = {});
+
+    [[deprecated("Use senderPrecompute with explicit executor and buffers")]]
     bool senderPrecompute(
         SenderState& state,
         PRNG& prng, CpuBenchmarkState cpuBenchmark = {});

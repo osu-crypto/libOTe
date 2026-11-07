@@ -225,6 +225,7 @@ contain no environment reads.
 | Offline setup migration | Uncommitted intermediate `CpuRowScratch::runBulk` implementation; still needs the explicit executor/buffer call-site pattern. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
+| Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; accepted seeds/caches and PRNG order match the legacy path. Synchronous entry points are deprecated; GPU execution retains its existing path. |
 
 #### Remaining runtime globals
 
@@ -277,19 +278,22 @@ checks passed in 0.67 seconds. The LogVole target and changed frontend object
 compile on Windows; the full frontend target encounters unrelated DPF/Waterfall
 test compilation errors in this configuration. No WSL/GPU execution rerun.
 
+Sender migration validation: Windows CPU tests compare async and legacy output,
+seed/PRNG progression, cache reuse and malformed-root failure with early checking
+on/off and worker allowances 1, 2 and 4. Both protocol controllers and their workers
+share a single executor thread with disjoint reusable buffers. These checks passed
+in 7.48 seconds; a two-thread separate-arithmetic run passed in 0.45 seconds.
+CUDA-enabled compilation passed; GPU execution and WSL were not rerun.
+The local build needs `-DMACORO_GIT_TAG=codex/macoro-scope-lifetime` (or the
+corresponding published revision): coproto's dependency fetch otherwise checks out
+its older macoro revision, which lacks these algorithms.
+
 Next steps, in order:
 
-1. Migrate sender seed evaluation using the reviewed macoro `all_of`. The live
-   call chain is `senderOnlineService` -> `finishRootSenderPrecompute` ->
-   `ensureSenderPrecomputeImpl` -> candidate search/evaluation -> recursive
-   expansion. Carry the explicit executor and LHE buffers through this chain;
-   do not insert a blocking wait into the current synchronous boundary. Preserve
-   sequential seed draws/retries, distinguish candidate rejection from execution
-   failure, and publish the accepted cache only after all started chunks join.
-   Give each parallel chunk partition exclusive buffers and one inner worker;
-   preserve row parallelism when there is only one chunk. Keep the legacy/GPU
-   entry points explicit while migrating the CPU path, and do not hold TLS or
-   thread-bound profiling guards across the new suspension points.
+1. Wire caller-owned executor/buffers through higher-level sender users, then
+   retire the deprecated synchronous sender path. CPU seed evaluation itself
+   uses no internal blocking wait. Preserve the separate GPU path while its
+   completion model is migrated later.
 2. Thread the explicit executor/resources through the higher-level receiver
    callers, then retire the deprecated online entry point. The recursive
    receiver shrink, denoise, and expansion phases now use the caller executor;

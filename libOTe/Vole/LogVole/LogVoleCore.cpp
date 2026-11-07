@@ -7,6 +7,7 @@
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "macoro/all_of.h"
 
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
@@ -5016,6 +5017,238 @@ namespace osuCrypto::LogVole
             marginHi[constants.mTargetLimbIndex] = constants.mMargin.mHi;
         }
         return true;
+    }
+
+    namespace
+    {
+        // A failed expansion/check is not a rejected seed. all_of joins started
+        // children before this error is translated back to the bool API.
+        struct SenderSeedEvaluationFailure {};
+
+        macoro::task<bool> validateSenderSeedAsync(
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+            const Params& params, const RingNttContext& ctx,
+            const std::vector<RnsPoly>& values, bool isLeaf, bool& accepted)
+        {
+            if (!params.mW || !params.mShrinkExpand.mMu) co_return false;
+            const auto expected = isLeaf ? std::size_t(params.mW) :
+                ((std::size_t(params.mW) + params.mShrinkExpand.mMu - 1) /
+                    params.mShrinkExpand.mMu) * params.mShrinkExpand.mMu;
+            if (values.size() != expected || !validateRingBatchShape(values, ctx.mParams))
+                co_return false;
+            std::vector<RoundingCheckConstants> rounding;
+            RoundingCheckConstants leafRounding;
+            if (!(isLeaf ? buildLeafRoundingCheckConstants(params, ctx, leafRounding) :
+                    buildRoundingCheckConstants(params, ctx, rounding))) co_return false;
+            try
+            {
+                accepted = co_await macoro::all_of(executor, values.size(), buffers,
+                    [&](std::size_t i, LheDecryptBuffer&) {
+                        bool ok = false;
+                        if (!(isLeaf ? checkRoundingPolynomial(ctx, leafRounding, values[i], ok) :
+                                checkGoldenPolynomial(params, ctx, rounding, values[i], i, ok)))
+                            throw SenderSeedEvaluationFailure{};
+                        return ok;
+                    });
+            }
+            catch (const SenderSeedEvaluationFailure&) { co_return false; }
+            co_return true;
+        }
+
+        macoro::task<bool> evaluateSenderSeedAsync(
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+            const SenderState& state, std::span<const u8> seed,
+            RecursiveSeedEvalOutput& out, bool isLeaf, bool retainHostCache,
+            ProtocolCacheScope cacheScope, CpuBenchmarkState cpuBenchmark)
+        {
+            u32 tauHi = 0, muHi = 0;
+            if (!computeTauHi(state.mParams, tauHi) || !computeMuHi(state.mParams, muHi) ||
+                seed.empty()) co_return false;
+            const auto rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            if (!rho) co_return false;
+            auto allowance = buffers.size();
+            if (const auto limit = state.mShrinkExpandState.mParams.mNumWorkerThreads)
+                allowance = std::min<std::size_t>(allowance, limit);
+            if (!allowance) co_return false;
+            buffers = buffers.first(allowance);
+            RingNttContext ctx;
+            {
+                ScopedProtocolCacheScope scope(cacheScope);
+                if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx,
+                        state.mShrinkExpandState.mRingFactoryOwner) || gpu::enabled(ctx)) co_return false;
+            }
+            const auto seedParams = makeSeedParams(state.mParams, state.mShrinkExpandState.mParams);
+            const bool publicSeed = state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed;
+            if (evalRecursiveMode(state.mParams.mW, state.mParams.mShrinkExpand.mAlpha,
+                    tauHi, rho) == RecursiveMode::Root)
+            {
+                if (!validRootWidth(state.mParams, muHi) || !state.mRootKPrimeRt ||
+                    !state.mRootDPrimeRt || !state.mRootDPrimeHashValid) co_return false;
+                const auto leftWidth = rootLeftWidth(tauHi, rho);
+                std::vector<RnsPoly> rootCiphertext;
+                std::shared_ptr<const std::vector<RnsPoly>> publicA;
+                {
+                    ScopedProtocolCacheScope scope(cacheScope);
+                    if (!buildHashedCt2(ctx, leftWidth, seed, state.mParams.mSessionId,
+                            *state.mRootDPrimeRt, 0, rootCiphertext)) co_return false;
+                    publicA = sharedLhePublicANtt(ctx, leftWidth);
+                }
+                if (!publicA || !co_await lheDec(executor, buffers, ctx, rootCiphertext,
+                        *state.mRootKPrimeRt, *publicA, LheDomain::Coefficient, cpuBenchmark))
+                    co_return false;
+                RnsPoly rootKey;
+                if (!denoiseAndAggRootKey(ctx, rootCiphertext, tauHi, rootKey, cpuBenchmark))
+                    co_return false;
+                ShrinkExpandExpandSenderInput input;
+                assignRange(input.mSeed, seed.begin(), seed.end());
+                input.mSid = state.mParams.mSessionId;
+                input.mDigest = *state.mRootDPrimeRt;
+                input.mMaskDigest = *state.mRootDPrimeRt;
+                input.mTbkPrime = std::move(rootKey);
+                ShrinkExpandSenderExpandOutput expanded;
+                auto expansion = [&] {
+                    ScopedProtocolCacheScope scope(cacheScope);
+                    return shrinkExpandExpandSender(executor, buffers,
+                        state.mShrinkExpandState, input, expanded, cpuBenchmark);
+                }();
+                if (!co_await std::move(expansion)) co_return false;
+                if (isLeaf && expanded.mTbk.size() > state.mParams.mW)
+                    expanded.mTbk.resize(state.mParams.mW);
+                bool accepted = publicSeed;
+                if (!publicSeed && !co_await validateSenderSeedAsync(executor, buffers,
+                        seedParams, ctx, expanded.mTbk, isLeaf, accepted)) co_return false;
+                if (!accepted) { out = {}; co_return true; }
+                state.mGoldenSeed = input.mSeed;
+                if (expanded.mTbk.size() > state.mParams.mW) expanded.mTbk.resize(state.mParams.mW);
+                out = {};
+                out.mValid = true;
+                out.mTbk = std::move(expanded.mTbk);
+                co_return true;
+            }
+
+            if (!state.mNextLevelState) co_return false;
+            RecursiveSeedEvalOutput child;
+            if (!co_await evaluateSenderSeedAsync(executor, buffers, *state.mNextLevelState,
+                    seed, child, false, true, cacheScope, cpuBenchmark)) co_return false;
+            if (!child.mValid) { out = {}; co_return true; }
+            const u32 chunks = computeWDoublePrime(state.mParams, muHi);
+            const auto* digest = resolveRootMaskDigest(state);
+            if (!chunks || !digest || !resolveRootMaskDigestHash(state)) co_return false;
+            std::vector<RnsPoly> denoised, keys;
+            if (!co_await shrinkExpandDenoiseComb(executor, allowance, ctx, child.mTbk,
+                    denoised, cpuBenchmark) ||
+                !seedLabelAgg(std::move(denoised), chunks, tauHi, ctx.mParams, keys) ||
+                keys.size() != chunks) co_return false;
+            const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
+            const auto workers = state.mShrinkExpandState.mParams.mNumWorkerThreads;
+            const bool early = !publicSeed && state.mParams.mEarlyGoldenCheck && workers >= 1 && workers <= 4;
+            std::vector<RoundingCheckConstants> rounding;
+            RoundingCheckConstants leafRounding;
+            if (early && !(isLeaf ? buildLeafRoundingCheckConstants(seedParams, ctx, leafRounding) :
+                    buildRoundingCheckConstants(seedParams, ctx, rounding))) co_return false;
+            std::vector<RnsPoly> finalTbk((publicSeed || isLeaf) ? state.mParams.mW :
+                std::size_t(chunks) * muHi);
+
+            // One exclusive product per outer partition. Only a single-chunk
+            // level passes the full allowance down for inner row parallelism.
+            auto expandChunk = [&](std::size_t chunk, LheDecryptBuffer& local) -> macoro::task<bool> {
+                auto products = chunks == 1 ? buffers : std::span<LheDecryptBuffer>(&local, 1);
+                CpuBenchmarkState worker{cpuBenchmark.mContext, chunks > 1 || cpuBenchmark.mIsWorker};
+                const auto begin = chunk * muHi;
+                const auto end = std::min(begin + muHi, finalTbk.size());
+                ShrinkExpandExpandSenderInput input;
+                assignRange(input.mSeed, seed.begin(), seed.end());
+                input.mSid = state.mParams.mSessionId;
+                input.mNonce = instanceBase + chunk;
+                input.mDigest = *digest;
+                input.mMaskDigest = *digest;
+                input.mTbkPrime = keys[chunk];
+                ShrinkExpandSenderExpandOutput expanded;
+                auto expansion = [&] {
+                    ScopedProtocolCacheScope scope(cacheScope);
+                    return shrinkExpandExpandSender(executor, products,
+                        state.mShrinkExpandState, input, expanded, worker);
+                }();
+                if (!co_await std::move(expansion) || expanded.mTbk.size() != muHi)
+                    throw SenderSeedEvaluationFailure{};
+                if (early)
+                    for (std::size_t i = 0; i < end - begin; ++i)
+                    {
+                        bool accepted = false;
+                        if (!(isLeaf ? checkRoundingPolynomial(ctx, leafRounding, expanded.mTbk[i], accepted) :
+                                checkGoldenPolynomial(seedParams, ctx, rounding, expanded.mTbk[i], begin + i, accepted)))
+                            throw SenderSeedEvaluationFailure{};
+                        if (!accepted) co_return false;
+                    }
+                for (std::size_t i = 0; i < end - begin; ++i)
+                    finalTbk[begin + i] = std::move(expanded.mTbk[i]);
+                co_return true;
+            };
+            bool accepted = false;
+            try { accepted = co_await macoro::all_of(executor, chunks, buffers, expandChunk); }
+            catch (const SenderSeedEvaluationFailure&) { co_return false; }
+            if (!publicSeed && !early && !co_await validateSenderSeedAsync(executor, buffers,
+                    seedParams, ctx, finalTbk, isLeaf, accepted)) co_return false;
+            if (!accepted) { out = {}; co_return true; }
+            finalTbk.resize(state.mParams.mW);
+            if (retainHostCache)
+                state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(finalTbk);
+            out = {};
+            out.mValid = true;
+            out.mTbk = std::move(finalTbk);
+            co_return true;
+        }
+
+        macoro::task<bool> senderPrecomputeAsync(
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+            const SenderState& state, PRNG& prng, ProtocolCacheScope cacheScope,
+            CpuBenchmarkState cpuBenchmark)
+        {
+            if (state.mPrecomputedTbk && (!state.mPrecomputedTbk->empty() || state.mPrecomputedTbkDevice))
+                co_return true;
+            if (gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
+            {
+                ScopedProtocolCacheScope scope(cacheScope);
+                co_return ensureSenderPrecomputeImpl(state, prng, cpuBenchmark);
+            }
+            if (buffers.empty()) co_return false;
+            RecursiveSeedEvalOutput eval;
+            const bool publicSeed = state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed;
+            const bool search = !publicSeed && state.mGoldenSeed.empty();
+            AutoTimer timer(globalTimingStats.mSeedAttemptTimeUs);
+            for (unsigned attempt = 0; attempt < (search ? 100u : 1u); ++attempt)
+            {
+                AlignedUnVec<u8> seed;
+                if (search)
+                {
+                    seed.resize(16);
+                    prng.get(seed.data(), seed.size());
+                    globalTimingStats.mSeedAttemptCount.fetch_add(1, std::memory_order_relaxed);
+                }
+                else if (!state.mGoldenSeed.empty()) seed = state.mGoldenSeed;
+                else if (!derivePublicCt2SeedForState(state, seed)) co_return false;
+                if (!co_await evaluateSenderSeedAsync(executor, buffers, state, seed, eval,
+                        true, false, cacheScope, cpuBenchmark)) co_return false;
+                if (!eval.mValid) continue;
+                if (eval.mTbk.size() < state.mParams.mW) co_return false;
+                eval.mTbk.resize(state.mParams.mW);
+                auto cache = std::make_shared<std::vector<RnsPoly>>(std::move(eval.mTbk));
+                state.mGoldenSeed = std::move(seed);
+                state.mPrecomputedTbk = std::move(cache);
+                state.mPrecomputedTbkDevice.reset();
+                state.mPrecomputedTbkCount = 0;
+                co_return true;
+            }
+            co_return false;
+        }
+    }
+
+    macoro::task<bool> senderPrecompute(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const SenderState& state, PRNG& prng, CpuBenchmarkState cpuBenchmark)
+    {
+        return senderPrecomputeAsync(executor, buffers, state, prng,
+            currentProtocolCacheScope(), cpuBenchmark);
     }
 
     bool senderPrecompute(SenderState& state, PRNG& prng, CpuBenchmarkState cpuBenchmark)

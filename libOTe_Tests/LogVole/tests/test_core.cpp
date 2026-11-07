@@ -219,7 +219,7 @@ namespace
         oc::PRNG& senderPrng,
         oc::PRNG& receiverPrng,
         SenderOnlineOutput& senderOut,
-        ReceiverOnlineOutput& receiverOut)
+        ReceiverOnlineOutput& receiverOut, bool asyncSender = false)
     {
         LogVoleRingSender senderProtocol;
         LogVoleRingReceiver receiverProtocol;
@@ -231,12 +231,14 @@ namespace
         const auto& rootState = root->mShrinkExpandState;
         macoro::thread_pool executor;
         auto work = executor.make_work();
-        std::array<LheDecryptBuffer, 3> lheBuffers;
+        std::array<LheDecryptBuffer, 3> lheBuffers, senderBuffers;
         std::array<LencEvalBuffer, 3> lencBuffers;
         if (!rootState.mRingFactoryOwner || !rootState.mRingFactoryOwner->mExecutionOptions.mUseGpu)
         {
             executor.create_threads(1);
             for (auto& buffer : lheBuffers)
+                buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(rootState.mParams.mRing));
+            for (auto& buffer : senderBuffers)
                 buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(rootState.mParams.mRing));
             auto terms = std::size_t{2} * root->mRootLacctLeft.mLevels * (rootState.mParams.mTau + 1);
             for (auto* level = &receiver; level; level = level->mNextLevelState.get())
@@ -252,10 +254,45 @@ namespace
         try
         {
             auto result = macoro::sync_wait(macoro::when_all_ready(
-                senderProtocol.online(sender, senderOptions, senderOut, senderPrng, sockets[0]),
+                asyncSender ? senderProtocol.online(executor, senderBuffers, sender, senderOptions, senderOut, senderPrng, sockets[0]) :
+                    senderProtocol.online(sender, senderOptions, senderOut, senderPrng, sockets[0]),
                 receiverProtocol.online(executor, lheBuffers, lencBuffers, receiver, input, receiverOut, receiverPrng, sockets[1])));
             std::get<0>(result).result();
             std::get<1>(result).result();
+            if (asyncSender)
+            {
+                const auto cache = sender.mPrecomputedTbk;
+                const auto seed = sender.mGoldenSeed;
+                oc::PRNG cachedPrng(oc::block(0x9911, 0x9922));
+                oc::PRNG untouchedPrng(oc::block(0x9911, 0x9922));
+                auto cached = senderPrecompute(executor, senderBuffers, sender, cachedPrng);
+                LOGVOLE_REQUIRE_TRUE(sender.mPrecomputedTbk == cache);
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(std::move(cached)));
+                LOGVOLE_REQUIRE_TRUE(sender.mPrecomputedTbk == cache);
+                LOGVOLE_REQUIRE_TRUE(rangesEqual(sender.mGoldenSeed, seed));
+                LOGVOLE_REQUIRE_TRUE(cachedPrng.get<oc::block>() == untouchedPrng.get<oc::block>());
+
+                // A malformed root key must fail without publishing a new cache
+                // or changing the supplied seed. The lazy operation owns no work
+                // until it is awaited and can be moved before starting.
+                auto* terminal = &sender;
+                while (terminal->mNextLevelState) terminal = terminal->mNextLevelState.get();
+                SenderState invalid;
+                invalid.mParams = terminal->mParams;
+                invalid.mShrinkExpandState.mParams = terminal->mShrinkExpandState.mParams;
+                invalid.mShrinkExpandState.mRingFactoryOwner = terminal->mShrinkExpandState.mRingFactoryOwner;
+                invalid.mGoldenSeed = terminal->mGoldenSeed;
+                invalid.mRootDPrimeRt = terminal->mRootDPrimeRt;
+                invalid.mRootDPrimeHash = terminal->mRootDPrimeHash;
+                invalid.mRootDPrimeHashValid = terminal->mRootDPrimeHashValid;
+                invalid.mRootKPrimeRt = std::make_shared<RnsPoly>();
+                const auto oldSeed = invalid.mGoldenSeed;
+                auto failed = senderPrecompute(executor, senderBuffers, invalid, cachedPrng);
+                LOGVOLE_REQUIRE_TRUE(!invalid.mPrecomputedTbk);
+                auto moved = std::move(failed);
+                LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(std::move(moved)));
+                LOGVOLE_REQUIRE_TRUE(!invalid.mPrecomputedTbk && rangesEqual(invalid.mGoldenSeed, oldSeed));
+            }
             return true;
         }
         catch (...)
@@ -5607,7 +5644,8 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     oc::PRNG receiverOnlinePrng(oc::block(0x7D55u, 0));
     macoro::thread_pool executor;
     auto work = executor.make_work();
-    std::array<LheDecryptBuffer, 3> lheBuffers;
+    std::array<LheDecryptBuffer, 3> lheBuffers, senderBuffers;
+    std::array<const std::uint64_t*, 3> senderAllocations{};
     std::array<LencEvalBuffer, 3> lencBuffers;
     std::array<const std::uint64_t*, 3> productAllocations{};
     std::array<const RnsPoly* const*, 3> ciphertextAllocations{}, nodeAllocations{};
@@ -5624,6 +5662,8 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
         for (std::size_t i = 0; i < lheBuffers.size(); ++i)
         {
             lheBuffers[i].mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mShrinkExpand.mRing));
+            senderBuffers[i].mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mShrinkExpand.mRing));
+            senderAllocations[i] = senderBuffers[i].mProduct.mCoeffs.data();
             lencBuffers[i].mCiphertexts.reserve(terms);
             lencBuffers[i].mNodes.reserve(terms);
             productAllocations[i] = lheBuffers[i].mProduct.mCoeffs.data();
@@ -5640,7 +5680,8 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
         co_await std::move(operation);
     };
     auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.online(senderState, senderOptions, senderOnline, senderOnlinePrng, onlineSockets[0]),
+        onPool(executor, sender.online(executor, senderBuffers, senderState, senderOptions,
+            senderOnline, senderOnlinePrng, onlineSockets[0]), !advanced.mUseGpu),
         onPool(executor, std::move(receiverOperation), !advanced.mUseGpu)));
     std::get<0>(onlineResult).result();
     std::get<1>(onlineResult).result();
@@ -5648,6 +5689,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
         for (std::size_t i = 0; i < lheBuffers.size(); ++i)
         {
             LOGVOLE_REQUIRE_TRUE(lheBuffers[i].mProduct.mCoeffs.data() == productAllocations[i]);
+            LOGVOLE_REQUIRE_TRUE(senderBuffers[i].mProduct.mCoeffs.data() == senderAllocations[i]);
             LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mCiphertexts.data() == ciphertextAllocations[i]);
             LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mNodes.data() == nodeAllocations[i]);
             LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mCiphertexts.empty() && lencBuffers[i].mNodes.empty());
@@ -5796,6 +5838,7 @@ void LogVole_Core_EarlyGoldenMatchesFullEvaluation(const oc::CLP&)
         SenderOnlineOutput referenceSender;
         ReceiverOnlineOutput referenceReceiver;
         std::array<oc::block, 2> referenceNext{};
+        for (const bool asyncSender : {false, true})
         for (const bool early : {false, true})
         {
             params.mEarlyGoldenCheck = early;
@@ -5821,9 +5864,9 @@ void LogVole_Core_EarlyGoldenMatchesFullEvaluation(const oc::CLP&)
             ReceiverOnlineOutput actualReceiver;
             LOGVOLE_REQUIRE_TRUE(run_socket_online_for_test(
                 sender.mState, receiver.mState, onlineInput,
-                senderPrng, receiverPrng, actualSender, actualReceiver));
+                senderPrng, receiverPrng, actualSender, actualReceiver, asyncSender));
             const std::array<oc::block, 2> next{senderPrng.get<oc::block>(), receiverPrng.get<oc::block>()};
-            if (!early)
+            if (!asyncSender && !early)
             {
                 referenceSender = std::move(actualSender);
                 referenceReceiver = std::move(actualReceiver);

@@ -995,22 +995,37 @@ namespace osuCrypto::LogVole
         return true;
     }
 
+    static macoro::task<bool> expandSenderAsync(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const ShrinkExpandSenderState& state,
+        const ShrinkExpandExpandSenderInput& input,
+        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark,
+        ProtocolCacheScope cacheScope)
+    {
+        RingNttContext ctx{};
+        ShrinkExpandSenderExpandOutput next{};
+        std::shared_ptr<const std::vector<RnsPoly>> publicA;
+        {
+            ScopedProtocolCacheScope scope(cacheScope);
+            if (!prepareSenderExpansion(state, input, ctx, next.mTbk) || gpu::enabled(ctx))
+                co_return false;
+            publicA = state.mPublicANtt ? state.mPublicANtt : sharedLhePublicANtt(ctx, state.mParams.mMu);
+        }
+        if (!publicA || !co_await lheDec(executor, buffers, ctx, next.mTbk,
+                input.mTbkPrime, *publicA, LheDomain::Coefficient, cpuBenchmark))
+            co_return false;
+        out = std::move(next);
+        co_return true;
+    }
+
     macoro::task<bool> shrinkExpandExpandSender(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark)
     {
-        RingNttContext ctx{};
-        ShrinkExpandSenderExpandOutput next{};
-        if (!prepareSenderExpansion(state, input, ctx, next.mTbk) || gpu::enabled(ctx))
-            co_return false;
-        auto publicA = state.mPublicANtt ? state.mPublicANtt : sharedLhePublicANtt(ctx, state.mParams.mMu);
-        if (!publicA || !co_await lheDec(executor, buffers, ctx, next.mTbk,
-                input.mTbkPrime, *publicA, LheDomain::Coefficient, cpuBenchmark))
-            co_return false;
-        out = std::move(next);
-        co_return true;
+        return expandSenderAsync(executor, buffers, state, input, out,
+            cpuBenchmark, currentProtocolCacheScope());
     }
 
     bool shrinkExpandExpandSender(

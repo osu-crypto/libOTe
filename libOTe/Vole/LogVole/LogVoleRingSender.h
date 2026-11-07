@@ -8,6 +8,11 @@ namespace osuCrypto::LogVole
 {
     class LogVoleRingSender
     {
+        task<> onlineStart(
+            macoro::thread_pool* executor, std::span<LheDecryptBuffer> buffers,
+            SenderState& state, const SenderOnlineOptions& options,
+            SenderOnlineOutput& output, PRNG& prng, Socket& sock);
+
     public:
         task<> offline(
             const ShrinkExpandSenderOfflineInput& input,
@@ -26,12 +31,22 @@ namespace osuCrypto::LogVole
             KeyDeriveSenderOutput& output,
             Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
 
+        // Borrow the executor and exclusive buffers until completion. Recursive
+        // levels reuse the same ring-sized products; buffers bound CPU workers.
+        // A started operation must finish before its resources are reused.
+        task<> online(
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+            SenderState& state, const SenderOnlineOptions& options,
+            SenderOnlineOutput& output, PRNG& prng, Socket& sock);
+
+        [[deprecated("Use online with explicit executor and CPU buffers")]]
         task<> online(
             SenderState& state,
             SenderOnlineOutput& output,
             PRNG& prng,
             Socket& sock);
 
+        [[deprecated("Use online with explicit executor and CPU buffers")]]
         task<> online(
             SenderState& state,
             const SenderOnlineOptions& options,
