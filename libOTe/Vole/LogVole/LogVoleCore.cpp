@@ -5307,7 +5307,7 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    static bool finalizeRootOnlineReceiverImpl(
+    static bool finalizeRootOnlineReceiverGpu(
         ReceiverState& state,
         const ReceiverOnlineInput& input,
         const RootDigestState& digestState,
@@ -5315,6 +5315,8 @@ namespace osuCrypto::LogVole
         RootResponseMessage* ownedResponse,
         ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {})
     {
+        // Retain the existing GPU path and its host fallback only.
+        if (!gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner)) return false;
         RnsPoly receiverKey{};
         std::shared_ptr<void> receiverKeyDevice;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -5416,28 +5418,6 @@ namespace osuCrypto::LogVole
         return finishRootReceiverExpansion(state, input, digestState, expandOutput, next, out);
     }
 
-    bool finalizeRootOnlineReceiver(
-        ReceiverState& state,
-        const ReceiverOnlineInput& input,
-        const RootDigestState& digestState,
-        const RootResponseMessage& response,
-        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark)
-    {
-        return finalizeRootOnlineReceiverImpl(
-            state, input, digestState, response, nullptr, out, cpuBenchmark);
-    }
-
-    bool finalizeRootOnlineReceiver(
-        ReceiverState& state,
-        const ReceiverOnlineInput& input,
-        const RootDigestState& digestState,
-        RootResponseMessage&& response,
-        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark)
-    {
-        return finalizeRootOnlineReceiverImpl(
-            state, input, digestState, response, &response, out, cpuBenchmark);
-    }
-
     static macoro::task<bool> finalizeRootResponseReceiverAsync(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
         std::span<LencEvalBuffer> lencBuffers,
@@ -5455,7 +5435,7 @@ namespace osuCrypto::LogVole
         if (gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
         {
             ScopedProtocolCacheScope scope(cacheScope);
-            co_return finalizeRootOnlineReceiverImpl(state, input, digestState,
+            co_return finalizeRootOnlineReceiverGpu(state, input, digestState,
                 response, &response, out, cpuBenchmark);
         }
         ShrinkExpandExpandReceiverInput expandInput;

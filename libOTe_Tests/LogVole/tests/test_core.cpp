@@ -3663,7 +3663,7 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         LOGVOLE_EXPECT_TRUE(sender.mPrecomputedTbk == cachedKeys);
         referenceState.mParams.mSessionId = query;
         ReceiverOnlineOutput reference;
-        LOGVOLE_REQUIRE_TRUE(finalizeRootOnlineReceiver(referenceState, input, digest, response, reference));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootOnlineReceiver(executor, lheBuffers, lencBuffers, referenceState, input, digest, response, reference)));
         if (query == 1) digest.mLeftTree.reset(); // Exercise exact tree reconstruction.
         const auto oldRoot = receiver.mRootDPrimeRt;
         const auto oldSeed = receiver.mGoldenSeed;
@@ -5809,11 +5809,12 @@ void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
 
     auto onlineSockets = coproto::LocalAsyncSocket::makePair();
     tests_libOTe::logvole_test::SenderResources senderResources(params.mShrinkExpand.mRing);
+    tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(params.mShrinkExpand);
     oc::PRNG senderOnlinePrng(oc::block(0x7D74u, 0));
     oc::PRNG receiverOnlinePrng(oc::block(0x7D75u, 0));
     auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
         sender.online(senderResources.executor, senderResources.buffers, senderState, options, senderOnline, senderOnlinePrng, onlineSockets[0]),
-        receiver.online(receiverState, receiverOnlineInput, receiverOnline, receiverOnlinePrng, onlineSockets[1])));
+        receiver.online(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverState, receiverOnlineInput, receiverOnline, receiverOnlinePrng, onlineSockets[1])));
     std::get<0>(onlineResult).result();
     std::get<1>(onlineResult).result();
 

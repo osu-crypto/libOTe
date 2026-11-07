@@ -491,21 +491,13 @@ namespace osuCrypto::LogVole
         ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
         std::shared_ptr<void> firstQueryGpuAllocations, const void* firstQueryOwner)
     {
-        return onlineStart(&executor, lheBuffers, lencBuffers, state, input, output,
-            prng, sock, std::move(firstQueryGpuAllocations), firstQueryOwner);
-    }
-
-    task<> LogVoleRingReceiver::online(
-        ReceiverState& state, const ReceiverOnlineInput& input,
-        ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
-        const std::shared_ptr<void>& firstQueryGpuAllocations, const void* firstQueryOwner)
-    {
-        return onlineStart(nullptr, {}, {}, state, input, output, prng, sock,
-            firstQueryGpuAllocations, firstQueryOwner);
+        return onlineStart(executor, lheBuffers, lencBuffers, state, input, output,
+            prng, sock, std::move(firstQueryGpuAllocations), firstQueryOwner,
+            currentProtocolCacheScope());
     }
 
     task<> LogVoleRingReceiver::onlineStart(
-        macoro::thread_pool* executor, std::span<LheDecryptBuffer> lheBuffers,
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
         std::span<LencEvalBuffer> lencBuffers,
         ReceiverState& state,
         const ReceiverOnlineInput& input,
@@ -513,7 +505,7 @@ namespace osuCrypto::LogVole
         PRNG& prng,
         Socket& sock,
         std::shared_ptr<void> firstQueryGpuAllocations,
-        const void* firstQueryOwner)
+        const void* firstQueryOwner, ProtocolCacheScope cacheScope)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mShrinkExpandState.mRingFactoryOwner)};
         OnlinePrefetchPlan prefetchPlan;
@@ -524,7 +516,6 @@ namespace osuCrypto::LogVole
         prefetchPlan.mFirstQueryOwner = firstQueryOwner;
 #endif
         prefetchPlan.configure(state, input.mSid);
-        auto cacheScope = currentProtocolCacheScope();
         if (!cacheScope.mRunId) cacheScope.mRunId = allocateProtocolCacheRunId();
         cacheScope.mRole = ProtocolCacheRole::Receiver;
         co_await onlineImpl(state, input, output, prng, sock, prefetchPlan, 0u,
@@ -539,7 +530,7 @@ namespace osuCrypto::LogVole
         Socket& sock,
         OnlinePrefetchPlan& prefetchPlan,
         u32 recursionDepth, CpuBenchmarkState cpuBenchmark,
-        macoro::thread_pool* executor, std::span<LheDecryptBuffer> lheBuffers,
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
         std::span<LencEvalBuffer> lencBuffers, ProtocolCacheScope cacheScope)
     {
         // Active only during synchronous regions, never while this frame is suspended.
@@ -674,20 +665,12 @@ namespace osuCrypto::LogVole
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: finalize", state.mParams.mW, &cpuBenchmark);
                     AutoTimer rootTimer(globalTimingStats.mRootReceiverHostUs);
-                    bool finalized;
-                    if (executor)
-                    {
-                        auto operation = finalizeRootOnlineReceiver(*executor, lheBuffers, lencBuffers,
-                            state, input, digestState,
-                            ownedFastPath ? std::move(response) : RootResponseMessage(response), output, cpuBenchmark);
-                        scopedCache.reset();
-                        finalized = co_await std::move(operation);
-                        scopedCache.emplace(cacheScope);
-                    }
-                    else
-                        finalized = ownedFastPath
-                            ? finalizeRootOnlineReceiver(state, input, digestState, std::move(response), output, cpuBenchmark)
-                            : finalizeRootOnlineReceiver(state, input, digestState, response, output, cpuBenchmark);
+                    auto operation = finalizeRootOnlineReceiver(executor, lheBuffers, lencBuffers,
+                        state, input, digestState,
+                        ownedFastPath ? std::move(response) : RootResponseMessage(response), output, cpuBenchmark);
+                    scopedCache.reset();
+                    const bool finalized = co_await std::move(operation);
+                    scopedCache.emplace(cacheScope);
                     if (!finalized)
                     {
                         throw std::runtime_error("LogVole receiver could not finalize root online");
@@ -813,7 +796,7 @@ namespace osuCrypto::LogVole
             dHatChunks[chunkIdx] = std::move(decomposed);
             return true;
         };
-        if (executor && !gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
+        if (!gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
         {
             auto partitions = std::min({std::size_t(wDoublePrime), lheBuffers.size(), lencBuffers.size()});
             if (const auto limit = state.mParams.mShrinkExpand.mNumWorkerThreads)
@@ -835,7 +818,7 @@ namespace osuCrypto::LogVole
                 // by this frame and every callback finishes before resumption.
                 std::vector<CpuBenchmarkState> workers(partitions, {cpuBenchmark.mContext, true});
                 scopedCache.reset();
-                co_await macoro::bulk_chunked(*executor, wDoublePrime, std::span(workers), shrinkRange);
+                co_await macoro::bulk_chunked(executor, wDoublePrime, std::span(workers), shrinkRange);
                 scopedCache.emplace(cacheScope);
             }
         }
@@ -937,7 +920,7 @@ namespace osuCrypto::LogVole
 #endif
         {
             bool denoised;
-            if (executor && !gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
+            if (!gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
             {
                 RingNttContext ctx;
                 if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx,
@@ -947,7 +930,7 @@ namespace osuCrypto::LogVole
                 if (const auto limit = state.mParams.mShrinkExpand.mNumWorkerThreads)
                     allowance = std::min<std::size_t>(allowance, limit);
                 scopedCache.reset();
-                denoised = co_await shrinkExpandDenoiseComb(*executor, allowance, ctx,
+                denoised = co_await shrinkExpandDenoiseComb(executor, allowance, ctx,
                     childOutput.mTbm, skXHat, cpuBenchmark);
                 scopedCache.emplace(cacheScope);
             }
@@ -1046,7 +1029,7 @@ namespace osuCrypto::LogVole
                 finalTbm[start + i] = std::move(value.mTbm[i]);
             return true;
         };
-        if (executor && !gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
+        if (!gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner))
         {
             auto allowance = std::min(lheBuffers.size(), lencBuffers.size());
             if (const auto limit = state.mParams.mShrinkExpand.mNumWorkerThreads)
@@ -1056,7 +1039,7 @@ namespace osuCrypto::LogVole
             // These closures and all borrowed inputs live in the parent until
             // the scope joins every child, including on a child failure.
             auto expandPartition = [&](std::size_t partition) -> macoro::task<> {
-                if (partitions > 1) co_await executor->schedule();
+                if (partitions > 1) co_await executor.schedule();
                 const auto first = std::size_t(wDoublePrime) * partition / partitions;
                 const auto last = std::size_t(wDoublePrime) * (partition + 1) / partitions;
                 auto products = wDoublePrime == 1 ? lheBuffers.first(allowance) : lheBuffers.subspan(partition, 1);
@@ -1070,7 +1053,7 @@ namespace osuCrypto::LogVole
                 {
                     auto expandInput = chunkInput(static_cast<u32>(chunk));
                     ShrinkExpandReceiverExpandOutput expandOutput;
-                    if (!co_await shrinkExpandExpandReceiver(*executor, products, leaves,
+                    if (!co_await shrinkExpandExpandReceiver(executor, products, leaves,
                             state.mShrinkExpandState, expandInput, expandOutput, worker) ||
                         !storeChunk(static_cast<u32>(chunk), expandOutput))
                         throw std::runtime_error("LogVole receiver could not expand recursive chunk");
@@ -1090,7 +1073,7 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            // Deprecated entry point until its callers supply an executor.
+            // Existing host fallback for GPU sessions; CPU sessions use the async branch.
             const u32 cpuRowWorkers = wDoublePrime > 1 ? 1 : state.mParams.mShrinkExpand.mNumWorkerThreads;
             if (!detail::runParallelTasks(wDoublePrime, state.mParams.mShrinkExpand.mNumWorkerThreads,
                 [&](std::size_t taskIdx, CpuBenchmarkState& worker) {

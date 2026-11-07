@@ -152,6 +152,25 @@ namespace osuCrypto
             std::get<0>(offlineResult).result();
             std::get<1>(offlineResult).result();
 
+            std::vector<LheDecryptBuffer> receiverLheBuffers;
+            std::vector<LencEvalBuffer> receiverLencBuffers;
+            if (!options.mUseGpu)
+            {
+                receiverLheBuffers.resize(workerThreads);
+                receiverLencBuffers.resize(workerThreads);
+                std::size_t terms = 0;
+                for (auto* level = &receiver.mOfflineState.mLogVoleState; level; level = level->mNextLevelState.get())
+                    terms = std::max(terms, std::size_t{2} *
+                        std::max(level->mRootLacctLeft.mLevels, level->mShrinkExpandState.hostLacct().mLevels) *
+                        (level->mShrinkExpandState.mParams.mTau + 1));
+                for (auto& buffer : receiverLheBuffers)
+                    buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(receiver.mParams.mLogVole.mShrinkExpand.mRing));
+                for (auto& buffer : receiverLencBuffers)
+                {
+                    buffer.mCiphertexts.reserve(terms);
+                    buffer.mNodes.reserve(terms);
+                }
+            }
             auto onlineSockets = coproto::LocalAsyncSocket::makePair();
             LogVole::AlignedUnVec<u64> b(w);
             LogVole::AlignedUnVec<u64> a(w);
@@ -159,7 +178,7 @@ namespace osuCrypto
             // matching sender key. The parties then locally expand to w labels.
             auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
                 sender.send(executor, buffers, b, senderPrng, onlineSockets[0]),
-                receiver.receive(x, a, receiverPrng, onlineSockets[1])));
+                receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, x, a, receiverPrng, onlineSockets[1])));
             std::get<0>(onlineResult).result();
             std::get<1>(onlineResult).result();
 
@@ -256,7 +275,29 @@ namespace osuCrypto
             // The receiver chooses x locally; the sender receives only the
             // corresponding keys for its Delta.
             cp::sync_wait(receiver.offline(chl));
-            cp::sync_wait(receiver.receive(x, a, prng, chl));
+            macoro::thread_pool executor;
+            auto work = executor.make_work();
+            if (!options.mUseGpu) executor.create_threads(workerThreads);
+            std::vector<LheDecryptBuffer> receiverLheBuffers;
+            std::vector<LencEvalBuffer> receiverLencBuffers;
+            if (!options.mUseGpu)
+            {
+                receiverLheBuffers.resize(workerThreads);
+                receiverLencBuffers.resize(workerThreads);
+                std::size_t terms = 0;
+                for (auto* level = &receiver.mOfflineState.mLogVoleState; level; level = level->mNextLevelState.get())
+                    terms = std::max(terms, std::size_t{2} *
+                        std::max(level->mRootLacctLeft.mLevels, level->mShrinkExpandState.hostLacct().mLevels) *
+                        (level->mShrinkExpandState.mParams.mTau + 1));
+                for (auto& buffer : receiverLheBuffers)
+                    buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(receiver.mParams.mLogVole.mShrinkExpand.mRing));
+                for (auto& buffer : receiverLencBuffers)
+                {
+                    buffer.mCiphertexts.reserve(terms);
+                    buffer.mNodes.reserve(terms);
+                }
+            }
+            cp::sync_wait(receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, x, a, prng, chl));
 
             const auto end = timer.setTimePoint("logvole.end");
             const auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();

@@ -22,11 +22,12 @@ namespace osuCrypto::LogVole
         struct OnlinePrefetchPlan;
 
         task<> onlineStart(
-            macoro::thread_pool* executor, std::span<LheDecryptBuffer> lheBuffers,
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
             std::span<LencEvalBuffer> lencBuffers,
             ReceiverState& state, const ReceiverOnlineInput& input,
             ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
-            std::shared_ptr<void> firstQueryGpuAllocations, const void* firstQueryOwner);
+            std::shared_ptr<void> firstQueryGpuAllocations, const void* firstQueryOwner,
+            ProtocolCacheScope cacheScope);
 
         task<> onlineImpl(
             ReceiverState& state,
@@ -36,7 +37,7 @@ namespace osuCrypto::LogVole
             Socket& sock,
             OnlinePrefetchPlan& prefetchPlan,
             u32 recursionDepth, CpuBenchmarkState cpuBenchmark,
-            macoro::thread_pool* executor, std::span<LheDecryptBuffer> lheBuffers,
+            macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
             std::span<LencEvalBuffer> lencBuffers, ProtocolCacheScope cacheScope);
 
     public:
@@ -69,16 +70,6 @@ namespace osuCrypto::LogVole
             ReceiverState& state, const ReceiverOnlineInput& input,
             ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
             std::shared_ptr<void> firstQueryGpuAllocations = {},
-            const void* firstQueryOwner = nullptr);
-
-        [[deprecated("Use online with explicit executor and CPU buffers")]]
-        task<> online(
-            ReceiverState& state,
-            const ReceiverOnlineInput& input,
-            ReceiverOnlineOutput& output,
-            PRNG& prng,
-            Socket& sock,
-            const std::shared_ptr<void>& firstQueryGpuAllocations = {},
             const void* firstQueryOwner = nullptr);
 
         // Borrow executor and exclusive prepared buffers until completion.

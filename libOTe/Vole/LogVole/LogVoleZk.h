@@ -502,7 +502,8 @@ namespace osuCrypto
         // Refreshes only the trailing mask slot from the private PRNG before
         // VOLE commitment, on both host and device when present. The remaining
         // witness can be reused. The mutable span avoids copying the witness.
-        task<> prove(std::span<u64> wires, PRNG& prng, Socket& sock);
+        task<> prove(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;
@@ -597,7 +598,8 @@ namespace osuCrypto
         task<> offline(Socket& sock);
         // Refreshes the independent trailing mask slots on host and device before
         // VOLE commitment; A, B and request padding remain unchanged.
-        task<> prove(std::span<u64> wires, PRNG& prng, Socket& sock);
+        task<> prove(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;

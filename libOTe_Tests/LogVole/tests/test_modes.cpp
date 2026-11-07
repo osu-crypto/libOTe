@@ -137,6 +137,7 @@ namespace
         // Moving an established session must retain the new backend/mode state.
         LogVoleSender sender(std::move(originalSender));
         tests_libOTe::logvole_test::SenderResources senderResources(sender.options());
+        tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(sender.options());
         LogVoleReceiver receiver;
         receiver = std::move(originalReceiver);
         LOGVOLE_REQUIRE_FALSE(originalSender.isConfigured());
@@ -150,6 +151,15 @@ namespace
         std::vector<const std::uint64_t*> productStorage;
         for (auto& buffer : senderResources.buffers)
             productStorage.push_back(buffer.mProduct.mCoeffs.data());
+        std::vector<const std::uint64_t*> receiverProducts;
+        std::vector<const void*> ciphertextStorage, nodeStorage;
+        for (auto& buffer : receiverBuffers.lhe)
+            receiverProducts.push_back(buffer.mProduct.mCoeffs.data());
+        for (auto& buffer : receiverBuffers.lenc)
+        {
+            ciphertextStorage.push_back(buffer.mCiphertexts.data());
+            nodeStorage.push_back(buffer.mNodes.data());
+        }
         auto onPool = [&](macoro::task<> operation) -> macoro::task<> {
             if (!device) co_await senderResources.executor.schedule();
             co_await std::move(operation);
@@ -163,11 +173,19 @@ namespace
             auto query = macoro::sync_wait(macoro::when_all_ready(
                 onPool(sender.send(senderResources.executor, senderResources.buffers,
                     device ? span<u64>{} : span<u64>(keys), senderPrng, online[0])),
-                receiver.receive(x, device ? span<u64>{} : span<u64>(macs), receiverPrng, online[1])));
+                onPool(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc,
+                    x, device ? span<u64>{} : span<u64>(macs), receiverPrng, online[1]))));
             std::get<0>(query).result();
             std::get<1>(query).result();
             for (std::size_t i = 0; i < productStorage.size(); ++i)
                 LOGVOLE_REQUIRE_TRUE(senderResources.buffers[i].mProduct.mCoeffs.data() == productStorage[i]);
+            for (std::size_t i = 0; i < receiverProducts.size(); ++i)
+            {
+                LOGVOLE_REQUIRE_TRUE(receiverBuffers.lhe[i].mProduct.mCoeffs.data() == receiverProducts[i]);
+                LOGVOLE_REQUIRE_TRUE(receiverBuffers.lenc[i].mCiphertexts.data() == ciphertextStorage[i]);
+                LOGVOLE_REQUIRE_TRUE(receiverBuffers.lenc[i].mNodes.data() == nodeStorage[i]);
+                LOGVOLE_REQUIRE_TRUE(receiverBuffers.lenc[i].mCiphertexts.empty() && receiverBuffers.lenc[i].mNodes.empty());
+            }
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (device)
             {
@@ -358,6 +376,7 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
             std::make_shared<RingContextFactory>(options));
         Party original(options, factory);
         tests_libOTe::logvole_test::SenderResources senderResources(options);
+        tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(options);
         LOGVOLE_REQUIRE_EQ(original.requestSize(), 7ull);
         LOGVOLE_REQUIRE_EQ(original.numThreads(), 2u);
         options.mRequestSize = 1;
@@ -383,7 +402,7 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
             if constexpr (std::is_same_v<Party, LogVoleSender>)
                 macoro::sync_wait(original.send(senderResources.executor, senderResources.buffers, 1, wrongSize, prng, sockets[0]));
             else
-                macoro::sync_wait(original.receive(wrongSize, wrongSize, prng, sockets[0]));
+                macoro::sync_wait(original.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, wrongSize, wrongSize, prng, sockets[0]));
         }
         catch (const std::runtime_error&) { sizeRejected = true; }
         LOGVOLE_REQUIRE_TRUE(sizeRejected);

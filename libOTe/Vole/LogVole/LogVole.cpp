@@ -859,7 +859,8 @@ namespace osuCrypto
         mState = State::Offline;
     }
 
-    task<> LogVoleReceiver::receive(span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
+    task<> LogVoleReceiver::receive(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers, span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         const bool emptyDeviceInput = x.empty() && mInputDevice != nullptr;
@@ -902,7 +903,7 @@ namespace osuCrypto
         }
         try
         {
-            co_await civoleReceiverSetX(mOfflineState, sid, x, setX, prng, sock, options, cpuBenchmark);
+            co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, mOfflineState, sid, x, setX, prng, sock, options, cpuBenchmark);
         }
         catch (...)
         {
@@ -2350,6 +2351,8 @@ namespace osuCrypto::LogVole
     }
 
     task<> civoleReceiverSetX(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
         CivoleReceiverState& state,
         CivoleSid sid,
         std::span<const u64> x,
@@ -2387,7 +2390,7 @@ namespace osuCrypto::LogVole
 
         const auto paddedSize = static_cast<std::size_t>(state.mLogVoleState.mParams.mW);
 
-        ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Receiver, sid);
+        std::optional<ScopedProtocolCacheScope> scopedCache(std::in_place, ProtocolCacheRole::Receiver, sid);
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto firstQueryGpuAllocations =
@@ -2485,9 +2488,12 @@ namespace osuCrypto::LogVole
         ReceiverOnlineOutput online{};
         {
             HostStep step(hostProfiler(ctx.mRing), "recv: logvole online", &cpuBenchmark);
-            co_await receiver.online(
+            auto operation = receiver.online(executor, lheBuffers, lencBuffers,
                 state.mLogVoleState, onlineInput, online, prng, sock,
                 state.mFirstQueryGpuAllocations, &state);
+            scopedCache.reset();
+            co_await std::move(operation);
+            scopedCache.emplace(ProtocolCacheRole::Receiver, sid);
         }
 
         CivoleReceiverSetXOutput next{};

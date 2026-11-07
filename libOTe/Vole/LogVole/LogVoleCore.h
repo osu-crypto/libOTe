@@ -569,22 +569,6 @@ namespace osuCrypto::LogVole
         const RootDigestState& digestState, RootResponseMessage response,
         ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
 
-    [[deprecated("Use async root finalization with explicit executor and buffers")]]
-    bool finalizeRootOnlineReceiver(
-        ReceiverState& state,
-        const ReceiverOnlineInput& input,
-        const RootDigestState& digestState,
-        const RootResponseMessage& response,
-        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
-
-    [[deprecated("Use async root finalization with explicit executor and buffers")]]
-    bool finalizeRootOnlineReceiver(
-        ReceiverState& state,
-        const ReceiverOnlineInput& input,
-        const RootDigestState& digestState,
-        RootResponseMessage&& response,
-        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
-
     bool seedLabelAgg(
         const std::vector<RnsPoly>& inputHat,
         u32 outCount,

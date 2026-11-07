@@ -1628,7 +1628,8 @@ namespace osuCrypto
         co_await mVole.offline(sock);
     }
 
-    task<> ZkMulProver::prove(std::span<u64> wires, PRNG& prng, Socket& sock)
+    task<> ZkMulProver::prove(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<u64> wires, PRNG& prng, Socket& sock)
     {
         const auto execution = mGpuExecution;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1666,7 +1667,7 @@ namespace osuCrypto
         else mMacs.resize(static_cast<std::size_t>(mVoleRequest));
         {
             LogVole::HostStep phase(mVole.hostProfiler(), "zk prover: label generation");
-            co_await mVole.receive(wires, std::span<u64>(mMacs.data(), mMacs.size()), prng, sock);
+            co_await mVole.receive(executor, lheBuffers, lencBuffers, wires, std::span<u64>(mMacs.data(), mMacs.size()), prng, sock);
         }
 
         // The challenge has to arrive after the VOLE has bound the witness, so
@@ -1954,7 +1955,8 @@ namespace osuCrypto
         co_await mVole.offline(sock);
     }
 
-    task<> ZkMatMulProver::prove(std::span<u64> wires, PRNG& prng, Socket& sock)
+    task<> ZkMatMulProver::prove(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<u64> wires, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mVoleOptions.mCpuBenchmark};
         const auto execution = mGpuExecution;
@@ -1976,7 +1978,7 @@ namespace osuCrypto
             (device && mVoleDeviceInput) ? mWiresDevice : std::shared_ptr<void>{};
 
         mMacs.resize(static_cast<std::size_t>(mVoleRequest));
-        co_await mVole.receive(wires, std::span<u64>(mMacs.data(), mMacs.size()), prng, sock);
+        co_await mVole.receive(executor, lheBuffers, lencBuffers, wires, std::span<u64>(mMacs.data(), mMacs.size()), prng, sock);
 
         const block seed = co_await recvBlock(sock);
         mLastSeed = seed;

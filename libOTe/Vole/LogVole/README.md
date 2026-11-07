@@ -76,13 +76,21 @@ plaintext prime. GoldenSeed with non-interactive mode is rejected.
 For interactive use, run `sender.offline(delta, senderPrng, senderSocket)` with
 `receiver.offline(receiverSocket)`, then run
 `sender.send(executor, buffers, keys, senderPrng, senderSocket)` with
-`receiver.receive(x, macs, receiverPrng, receiverSocket)`.
+`receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, x, macs, receiverPrng, receiverSocket)`.
 For CPU execution, keep an application-owned `macoro::thread_pool` running and
 prepare one `LheDecryptBuffer` per allowed partition. Size each
 `buffer.mProduct.mCoeffs` to `ringPolyCoeffCount(sender.mParams.mLogVole.mShrinkExpand.mRing)`.
 Pass the same pool and buffers to sequential sends; both must outlive the awaited
 operation. GPU execution accepts an idle pool and empty buffers. The garbled
 sender and ZK verifier APIs take these same explicit resources.
+The receiver uses separate LHE products and LENC pointer buffers. After offline,
+reserve both `mCiphertexts` and `mNodes` to the maximum of
+`2 * max(rootLeftLevels, shrinkExpandLevels) * (tau + 1)` across its recursion
+levels, and size each LHE product for the common ring. The example prepares these
+buffers once. Sender and receiver may share an executor, including a single
+worker, but concurrent operations must have disjoint buffers. No pool or buffer
+owner is installed inside the protocol; each started operation must finish before
+the caller reuses or destroys its resources.
 Offline setup is reusable; sequential online calls consume distinct session IDs.
 Wrappers are move-only to prevent accidental copying of live session state.
 
@@ -223,7 +231,7 @@ contain no environment reads.
 | Async truncated LENC, including fused subtraction | Committed (`42e5c113`); legacy overloads deprecated. |
 | Standalone receiver expansion using async LHE/LENC | Reviewed and committed (`d2266368`). Full-digit LENC retains its synchronous arithmetic. Existing state-owned mask storage remains leased across awaits without holding a mutex. |
 | Root receiver finalization and key-derivation prefix | Committed in `d9faba17`; async LHE/LENC with caller-owned buffers, owned response before lazy start, and unchanged root/output publication. |
-| Intermediate receiver expansion | Committed in `fce0002d`; bounded partition tasks joined by `when_all_scope`, exclusive LHE/LENC buffers per partition, sequential chunks, and row parallelism for a single chunk. Legacy entry point and GPU fallback remain. |
+| Intermediate receiver expansion | Committed in `fce0002d`; bounded partition tasks joined by `when_all_scope`, exclusive LHE/LENC buffers per partition, sequential chunks, and row parallelism for a single chunk. The legacy CPU entry point is removed; the GPU fallback remains. |
 | Intermediate receiver shrink | Committed in `b792a035`; direct `bulk_chunked` on the caller executor, unchanged arithmetic/padding, exclusive output ranges, and inline execution for one partition. Per-partition benchmark state is allocated only for parallel work. |
 | Intermediate receiver denoise | Committed in `216ef876`; direct async `bulk_chunked`, one shared recovery-data preparation, unchanged unrolled row kernel, and alias-safe output publication. Legacy synchronous entry point is deprecated. |
 | Empty-moduli sentinel and CLI tags | Removed in `dd980823`; a borrowed modulus span and function-local tags replace the globals. |
@@ -232,6 +240,7 @@ contain no environment reads.
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
+| Higher-level receiver resource wiring | Public receiver, garbled receiver, CI-VOLE and ZK prover APIs pass executor/LHE/LENC buffers through. Deprecated synchronous CPU online/finalization entry points are removed. Ring scopes are captured before lazy start and no TLS guard crosses the added await. GPU finalization/fallback remains private. |
 
 #### Remaining runtime globals
 
@@ -311,17 +320,22 @@ execution). Two-query public GoldenSeed and NoGoldenSeed runs pass in 5.1 and
 expired during the non-interactive case; its one-query rerun passes in 29.4
 seconds. No GPU runtime or WSL rerun, and no benchmarks.
 
+Receiver wiring validation: the CUDA-enabled Windows test target and example
+compile. Recursive VOLE, root reuse/failure handling, and two public GoldenSeed
+queries pass in 25.59 seconds combined. Both public controllers and their workers
+share one executor thread; LHE and LENC storage stays stable, and LENC pointer
+lists are empty after each query. One 16-value non-interactive PublicSeed query
+passes in 33.16 seconds. No GPU runtime, WSL rerun, or benchmarks in this step.
+The working-tree reversion of the previously committed async receiver shrink and
+denoise blocks was removed so the mandatory-executor path retains those phases.
+
 Next steps, in order:
 
-1. Thread the explicit executor/resources through the higher-level receiver
-   callers, then retire the deprecated online entry point. The recursive
-   receiver shrink, denoise, and expansion phases now use the caller executor;
-   other preparation/codec phases and legacy callers still need migration.
-2. Migrate coherent groups of remaining setup/proof/codec loops using direct
+1. Migrate coherent groups of remaining setup/proof/codec loops using direct
    `bulk_chunked` where appropriate. Discuss a different algorithm first if a
    loop does not fit. Retire `CpuRowScratch` scheduling and legacy overloads
    when their callers are gone.
-3. Remove the remaining global groups above in separate ownership changes.
+2. Remove the remaining global groups above in separate ownership changes.
    Small independent groups need not wait for all scheduling work to finish.
 
 The object-owned `ShrinkExpandScratch` leases and GPU worker maps are not

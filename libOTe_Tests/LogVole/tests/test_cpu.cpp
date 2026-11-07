@@ -1546,6 +1546,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     fallbackVerifier.mUseDevice = true;
                     fallbackVerifier.prepare(copied);
                     tests_libOTe::logvole_test::SenderResources fallbackVerifierResources(fallbackVerifier.mVole.options());
+                    tests_libOTe::logvole_test::ReceiverBuffers fallbackVerifierResourcesReceiverBuffers(fallbackVerifier.mVole.options());
                     LOGVOLE_REQUIRE_TRUE(fallbackVerifier.mCircuit.mOperands.empty());
                     const auto fallbackOwner = fallbackVerifier.mCircuit.mOperandsDevice;
                     ZkMulProver fallbackProver({}, fallbackOptions);
@@ -1571,7 +1572,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     LOGVOLE_REQUIRE_TRUE(fallbackProver.mCircuit.mOperands.empty());
                     auto online = macoro::sync_wait(macoro::when_all_ready(
                         fallbackVerifier.verify(fallbackVerifierResources.executor, fallbackVerifierResources.buffers, senderPrng, sockets[0]),
-                        fallbackProver.prove(witness, receiverPrng, sockets[1])));
+                        fallbackProver.prove(fallbackVerifierResources.executor, fallbackVerifierResourcesReceiverBuffers.lhe, fallbackVerifierResourcesReceiverBuffers.lenc, witness, receiverPrng, sockets[1])));
                     std::get<0>(online).result();
                     std::get<1>(online).result();
                     LOGVOLE_REQUIRE_TRUE(fallbackVerifier.mAccepted);
@@ -1618,6 +1619,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     gpuVerifier.mUseDevice = gpuProver.mUseDevice = true;
                     gpuVerifier.prepare(copied);
                     tests_libOTe::logvole_test::SenderResources gpuVerifierResources(gpuVerifier.mVole.options());
+                    tests_libOTe::logvole_test::ReceiverBuffers gpuVerifierResourcesReceiverBuffers(gpuVerifier.mVole.options());
                     gpuProver.prepare(copied);
                     // Each fixture has fresh party seeds. The host witness and
                     // its GPU token intentionally share one seed for exact parity.
@@ -1650,7 +1652,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                             bool rejected = false;
                             try
                             {
-                                macoro::sync_wait(gpuProver.prove(
+                                macoro::sync_wait(gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc,
                                     std::span<u64>{}, receiverPrng, sockets[1]));
                             }
                             catch (const std::runtime_error&) { rejected = true; }
@@ -1659,7 +1661,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                         }
                         auto online = macoro::sync_wait(macoro::when_all_ready(
                             gpuVerifier.verify(gpuVerifierResources.executor, gpuVerifierResources.buffers, senderPrng, sockets[0]),
-                            gpuProver.prove(deviceOnly ? std::span<u64>{}
+                            gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc, deviceOnly ? std::span<u64>{}
                                 : std::span<u64>(witness.data(), witness.size()),
                                 receiverPrng, sockets[1])));
                         std::get<0>(online).result();

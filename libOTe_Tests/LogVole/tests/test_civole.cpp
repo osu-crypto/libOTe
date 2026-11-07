@@ -89,12 +89,13 @@ namespace
         CivoleReceiverSetXOutput& receiverSetX)
     {
         tests_libOTe::logvole_test::SenderResources senderResources(senderState.mParams.mLogVole.mShrinkExpand.mRing);
+        tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(receiverState.mParams.mLogVole.mShrinkExpand);
         oc::PRNG senderPrng(oc::block(33, sid));
         oc::PRNG receiverPrng(oc::block(44, sid));
         auto sockets = coproto::LocalAsyncSocket::makePair();
         auto result = macoro::sync_wait(macoro::when_all_ready(
             civoleSenderRelease(senderResources.executor, senderResources.buffers, senderState, sid, senderRelease, senderPrng, sockets[0]),
-            civoleReceiverSetX(receiverState, sid, x, receiverSetX, receiverPrng, sockets[1])));
+            civoleReceiverSetX(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverState, sid, x, receiverSetX, receiverPrng, sockets[1])));
         std::get<0>(result).result();
         std::get<1>(result).result();
 
@@ -420,6 +421,8 @@ void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(senderState.mModulus, modulus);
     LOGVOLE_EXPECT_EQ(receiverState.mModulus, modulus);
 
+    tests_libOTe::logvole_test::SenderResources senderResources(receiverState.mParams.mLogVole.mShrinkExpand.mRing);
+    tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(receiverState.mParams.mLogVole.mShrinkExpand);
     std::vector<u64> invalidX(7, 1);
     auto invalidSockets = coproto::LocalAsyncSocket::makePair();
     bool invalidXThrew = false;
@@ -427,7 +430,7 @@ void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
     {
         CivoleReceiverSetXOutput receiverSetX{};
         oc::PRNG receiverPrng(oc::block(77, 88));
-        macoro::sync_wait(civoleReceiverSetX(receiverState, 900, invalidX, receiverSetX, receiverPrng, invalidSockets[1]));
+        macoro::sync_wait(civoleReceiverSetX(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverState, 900, invalidX, receiverSetX, receiverPrng, invalidSockets[1]));
     }
     catch (const std::runtime_error&)
     {
@@ -450,6 +453,7 @@ void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
     try
     {
         tests_libOTe::logvole_test::SenderResources senderResources(senderState.mParams.mLogVole.mShrinkExpand.mRing);
+        tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(receiverState.mParams.mLogVole.mShrinkExpand);
         CivoleSenderReleaseOutput releaseAgain{};
         oc::PRNG senderPrng(oc::block(99, 100));
         macoro::sync_wait(civoleSenderRelease(senderResources.executor, senderResources.buffers, senderState, sid, releaseAgain, senderPrng, senderSockets[0]));
@@ -467,7 +471,7 @@ void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
         const std::vector<u64> x2{ 21, 13, 8, 5, 3, 2, 1, 1 };
         CivoleReceiverSetXOutput setXAgain{};
         oc::PRNG receiverPrng(oc::block(101, 102));
-        macoro::sync_wait(civoleReceiverSetX(receiverState, sid, x2, setXAgain, receiverPrng, receiverSockets[1]));
+        macoro::sync_wait(civoleReceiverSetX(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverState, sid, x2, setXAgain, receiverPrng, receiverSockets[1]));
     }
     catch (const std::runtime_error&)
     {
@@ -489,6 +493,7 @@ void LogVole_Civole_RejectedHostInputPreservesSid(const oc::CLP&)
         senderOptions.mSetting = setting;
         LogVoleSender sender(senderOptions);
         tests_libOTe::logvole_test::SenderResources senderResources(sender.options());
+        tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(sender.options());
         LogVoleReceiver receiver(senderOptions);
         oc::PRNG senderPrng(oc::block(1, 2)), receiverPrng(oc::block(3, 4));
         auto sockets = coproto::LocalAsyncSocket::makePair();
@@ -502,7 +507,7 @@ void LogVole_Civole_RejectedHostInputPreservesSid(const oc::CLP&)
         bool rejected = false;
         try
         {
-            macoro::sync_wait(receiver.receive(x, macs, receiverPrng, invalidSockets[1]));
+            macoro::sync_wait(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, x, macs, receiverPrng, invalidSockets[1]));
         }
         catch (const std::runtime_error&)
         {
@@ -518,7 +523,7 @@ void LogVole_Civole_RejectedHostInputPreservesSid(const oc::CLP&)
             auto online = coproto::LocalAsyncSocket::makePair();
             auto result = macoro::sync_wait(macoro::when_all_ready(
                 sender.send(senderResources.executor, senderResources.buffers, keys, senderPrng, online[0]),
-                receiver.receive(x, macs, receiverPrng, online[1])));
+                receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, x, macs, receiverPrng, online[1])));
             std::get<0>(result).result();
             std::get<1>(result).result();
             expect_vole_relation(x, delta, keys, macs, sender.modulus());
@@ -534,7 +539,7 @@ void LogVole_Civole_RejectedHostInputPreservesSid(const oc::CLP&)
         bool transportFailed = false;
         try
         {
-            macoro::sync_wait(receiver.receive(x, macs, receiverPrng, failedSockets[1]));
+            macoro::sync_wait(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, x, macs, receiverPrng, failedSockets[1]));
         }
         catch (const std::exception&)
         {
@@ -554,6 +559,7 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
     options.mRequestSize = 8;
     LogVoleSender sender(options);
     tests_libOTe::logvole_test::SenderResources senderResources(sender.options());
+    tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(sender.options());
     LogVoleReceiver receiver(options);
 
     const std::vector<u64> x1{ 1, 2, 3, 4, 5, 6, 7, 8 };
@@ -565,7 +571,7 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
     auto onlineSockets1 = coproto::LocalAsyncSocket::makePair();
     auto onlineResult1 = macoro::sync_wait(macoro::when_all_ready(
         sender.send(senderResources.executor, senderResources.buffers, delta, b1, senderPrng, onlineSockets1[0]),
-        receiver.receive(x1, a1, receiverPrng, onlineSockets1[1])));
+        receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, x1, a1, receiverPrng, onlineSockets1[1])));
     std::get<0>(onlineResult1).result();
     std::get<1>(onlineResult1).result();
 
@@ -582,7 +588,7 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
     auto onlineSockets2 = coproto::LocalAsyncSocket::makePair();
     auto onlineResult2 = macoro::sync_wait(macoro::when_all_ready(
         sender.send(senderResources.executor, senderResources.buffers, b2, senderPrng, onlineSockets2[0]),
-        receiver.receive(x2, a2, receiverPrng, onlineSockets2[1])));
+        receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, x2, a2, receiverPrng, onlineSockets2[1])));
     std::get<0>(onlineResult2).result();
     std::get<1>(onlineResult2).result();
 
@@ -626,7 +632,7 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
     auto onlineSockets3 = coproto::LocalAsyncSocket::makePair();
     auto onlineResult3 = macoro::sync_wait(macoro::when_all_ready(
         movedSender.send(senderResources.executor, senderResources.buffers, b3, senderPrng, onlineSockets3[0]),
-        movedReceiver.receive(x3, a3, receiverPrng, onlineSockets3[1])));
+        movedReceiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, x3, a3, receiverPrng, onlineSockets3[1])));
     std::get<0>(onlineResult3).result();
     std::get<1>(onlineResult3).result();
 
@@ -752,6 +758,7 @@ void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& c
     senderOptions.mMode = OnlineMode::NonInteractive;
     LogVoleSender sender(senderOptions);
     tests_libOTe::logvole_test::SenderResources senderResources(sender.options());
+    tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(sender.options());
     oc::PRNG senderPrng(oc::block(411, 522));
     coproto::BufferingSocket publish;
     // This must complete before any receiver exists.
@@ -786,7 +793,7 @@ void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& c
                 x[i] = i % 3 == 0 ? 0 : (i % 3 == 1 ? sender.modulus() - 1 : i + round);
             coproto::BufferingSocket query;
             // No sender coroutine is running, and no inbound message is supplied.
-            macoro::sync_wait(receiver.receive(x, a, receiverPrng, query));
+            macoro::sync_wait(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, x, a, receiverPrng, query));
             macoro::sync_wait(query.flush());
             LOGVOLE_EXPECT_EQ(query.bytesReceived(), 0ull);
             LOGVOLE_EXPECT_EQ(receiver.mLastOnlineComm.mBytesReceived, 0ull);
@@ -874,6 +881,7 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
         senderOptions.mSetting = CivoleSetting::NoGoldenSeed;
         LogVoleSender sender(senderOptions);
         tests_libOTe::logvole_test::SenderResources senderResources(sender.options());
+        tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(sender.options());
         LogVoleReceiver receiver(senderOptions);
         sender.mKeepOutputOnDevice = true;
         receiver.mKeepOutputOnDevice = true;
@@ -926,7 +934,7 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
             auto online = macoro::sync_wait(macoro::when_all_ready(
                 sender.send(senderResources.executor, senderResources.buffers, query == 0u ? std::span<u64>{} : std::span<u64>(b),
                     senderPrng, onlineSockets[0]),
-                receiver.receive(
+                receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc,
                     query == 0u ? std::span<const u64>{} : std::span<const u64>(x),
                     query == 0u ? std::span<u64>{} : std::span<u64>(a),
                     receiverPrng, onlineSockets[1])));
