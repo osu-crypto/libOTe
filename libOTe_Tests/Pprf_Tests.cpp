@@ -210,6 +210,61 @@ void Pprf_Audit_Test(const oc::CLP&)
 			throw UnitTestFail("PPRF receiver retained used base OTs after failure");
 	}
 
+	// Post-recv expand buffer partitioning must match the computed layout and
+	// reject buffers whose post-recv size does not match.
+	{
+		CoeffCtxGF128 ctx;
+		constexpr u64 depth = 3;
+		constexpr u64 numTrees = 2;
+
+		for (bool programPunctured : { false, true })
+		{
+			std::vector<u8> buff;
+			auto layout = pprf::allocateExpandBuffer<block>(
+				depth, numTrees, programPunctured, buff, ctx);
+			const auto expectedSums = depth * numTrees;
+			const auto expectedLeafBytes =
+				sizeof(block) * numTrees * (programPunctured ? 4 : 2);
+			if (layout.sumCount != expectedSums ||
+				layout.leafBytes != expectedLeafBytes ||
+				buff.size() != expectedSums * sizeof(std::array<block, 2>) + expectedLeafBytes)
+			{
+				throw UnitTestFail("PPRF expand buffer layout size mismatch");
+			}
+
+			span<std::array<block, 2>> sums;
+			span<u8> leaf;
+			pprf::partitionExpandBuffer(buff, layout, sums, leaf);
+			if (sums.size() != expectedSums ||
+				leaf.size() != expectedLeafBytes ||
+				reinterpret_cast<const u8*>(sums.data()) != buff.data() ||
+				leaf.data() != buff.data() + buff.size() - expectedLeafBytes)
+			{
+				throw UnitTestFail("PPRF expand buffer partition span mismatch");
+			}
+
+			std::vector<u8> undersized(buff.size() - 1, 0);
+			expectThrow([&] { pprf::partitionExpandBuffer(undersized, layout, sums, leaf); },
+				"PPRF partitionExpandBuffer accepted an undersized buffer");
+			std::vector<u8> oversized(buff.size() + 1, 0);
+			expectThrow([&] { pprf::partitionExpandBuffer(oversized, layout, sums, leaf); },
+				"PPRF partitionExpandBuffer accepted an oversized buffer");
+
+			std::vector<u8> combinedBuff;
+			span<std::array<block, 2>> combinedSums;
+			span<u8> combinedLeaf;
+			pprf::allocateExpandBuffer<block>(
+				depth, numTrees, programPunctured, combinedBuff,
+				combinedSums, combinedLeaf, ctx);
+			if (combinedBuff.size() != buff.size() ||
+				combinedSums.size() != sums.size() ||
+				combinedLeaf.size() != leaf.size())
+			{
+				throw UnitTestFail("PPRF 7-arg allocateExpandBuffer mismatch");
+			}
+		}
+	}
+
 	// Stationary expansion validates both public vectors before it writes or
 	// initializes retained protocol state.
 	{
