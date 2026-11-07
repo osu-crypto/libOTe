@@ -156,11 +156,18 @@ namespace osuCrypto
             std::vector<LheDecryptBuffer> receiverLheBuffers;
             std::vector<LencEvalBuffer> receiverLencBuffers;
             std::vector<RootZetaBuffer> receiverZetaBuffers;
+            std::vector<ZpEncodeBuffer> receiverWrapBuffers;
             if (!options.mUseGpu)
             {
                 receiverLheBuffers.resize(workerThreads);
                 receiverLencBuffers.resize(workerThreads);
                 receiverZetaBuffers.resize(workerThreads);
+                receiverWrapBuffers.resize(workerThreads);
+                for (auto& buffer : receiverWrapBuffers)
+                {
+                    buffer.mSlots.resize(receiver.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                    buffer.mPlain.resize(buffer.mSlots.size());
+                }
                 for (auto& buffer : receiverZetaBuffers)
                 {
                     buffer.mWords.resize(4 * ((std::size_t(receiver.mParams.mLogVole.mShrinkExpand.mGadgetLogBase) + 64) / 64));
@@ -186,7 +193,7 @@ namespace osuCrypto
             // matching sender key. The parties then locally expand to w labels.
             auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
                 sender.send(executor, buffers, b, senderPrng, onlineSockets[0]),
-                receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, receiverZetaBuffers, x, a, receiverPrng, onlineSockets[1])));
+                receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, receiverZetaBuffers, receiverWrapBuffers, x, a, receiverPrng, onlineSockets[1])));
             std::get<0>(onlineResult).result();
             std::get<1>(onlineResult).result();
 
@@ -290,11 +297,18 @@ namespace osuCrypto
             std::vector<LheDecryptBuffer> receiverLheBuffers;
             std::vector<LencEvalBuffer> receiverLencBuffers;
             std::vector<RootZetaBuffer> receiverZetaBuffers;
+            std::vector<ZpEncodeBuffer> receiverWrapBuffers;
             if (!options.mUseGpu)
             {
                 receiverLheBuffers.resize(workerThreads);
                 receiverLencBuffers.resize(workerThreads);
                 receiverZetaBuffers.resize(workerThreads);
+                receiverWrapBuffers.resize(workerThreads);
+                for (auto& buffer : receiverWrapBuffers)
+                {
+                    buffer.mSlots.resize(receiver.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                    buffer.mPlain.resize(buffer.mSlots.size());
+                }
                 for (auto& buffer : receiverZetaBuffers)
                 {
                     buffer.mWords.resize(4 * ((std::size_t(receiver.mParams.mLogVole.mShrinkExpand.mGadgetLogBase) + 64) / 64));
@@ -313,7 +327,7 @@ namespace osuCrypto
                     buffer.mNodes.reserve(terms);
                 }
             }
-            cp::sync_wait(receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, receiverZetaBuffers, x, a, prng, chl));
+            cp::sync_wait(receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, receiverZetaBuffers, receiverWrapBuffers, x, a, prng, chl));
 
             const auto end = timer.setTimePoint("logvole.end");
             const auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();

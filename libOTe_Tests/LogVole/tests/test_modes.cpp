@@ -167,6 +167,7 @@ namespace
         std::vector<const std::uint64_t*> receiverProducts;
         std::vector<const void*> ciphertextStorage, nodeStorage;
         std::vector<const void*> zetaStorage, zetaPrngStorage;
+        std::vector<const void*> wrapStorage, plainStorage;
         for (auto& buffer : receiverBuffers.lhe)
             receiverProducts.push_back(buffer.mProduct.mCoeffs.data());
         for (auto& buffer : receiverBuffers.lenc)
@@ -179,6 +180,11 @@ namespace
             zetaStorage.push_back(buffer.mWords.data());
             zetaPrngStorage.push_back(buffer.mPrng.mBuffer.data());
         }
+        for (auto& buffer : receiverBuffers.wrap)
+        {
+            wrapStorage.push_back(buffer.mSlots.data());
+            plainStorage.push_back(buffer.mPlain.data());
+        }
         for (u64 round = 0; round != rounds; ++round)
         {
             for (u64 i = 0; i != count; ++i)
@@ -188,7 +194,7 @@ namespace
             auto query = macoro::sync_wait(macoro::when_all_ready(
                 onPool(sender.send(senderResources.executor, senderResources.buffers,
                     device ? span<u64>{} : span<u64>(keys), senderPrng, online[0])),
-                onPool(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta,
+                onPool(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap,
                     x, device ? span<u64>{} : span<u64>(macs), receiverPrng, online[1]))));
             std::get<0>(query).result();
             std::get<1>(query).result();
@@ -202,6 +208,8 @@ namespace
                 LOGVOLE_REQUIRE_TRUE(receiverBuffers.lenc[i].mCiphertexts.empty() && receiverBuffers.lenc[i].mNodes.empty());
                 LOGVOLE_REQUIRE_TRUE(receiverBuffers.zeta[i].mWords.data() == zetaStorage[i]);
                 LOGVOLE_REQUIRE_TRUE(receiverBuffers.zeta[i].mPrng.mBuffer.data() == zetaPrngStorage[i]);
+                LOGVOLE_REQUIRE_TRUE(receiverBuffers.wrap[i].mSlots.data() == wrapStorage[i]);
+                LOGVOLE_REQUIRE_TRUE(receiverBuffers.wrap[i].mPlain.data() == plainStorage[i]);
             }
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (device)
@@ -421,7 +429,7 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
             if constexpr (std::is_same_v<Party, LogVoleSender>)
                 macoro::sync_wait(original.send(senderResources.executor, senderResources.buffers, senderResources.setupResults, 1, wrongSize, prng, sockets[0]));
             else
-                macoro::sync_wait(original.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, wrongSize, wrongSize, prng, sockets[0]));
+                macoro::sync_wait(original.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap, wrongSize, wrongSize, prng, sockets[0]));
         }
         catch (const std::runtime_error&) { sizeRejected = true; }
         LOGVOLE_REQUIRE_TRUE(sizeRejected);

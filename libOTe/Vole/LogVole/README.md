@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **74%** of the agreed ownership/globals refactor,
+Estimated overall completion: **75%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -242,6 +242,7 @@ contain no environment reads.
 | Sender pinning evidence moved onto sender state | Reviewed and committed. `LogVoleSender::mRootWirePin` owns the result; low-level callers pass an exclusive reference. Shared evidence/mutex and snapshot API removed. Separate CUDA allocation evidence remains global. |
 | Offline setup migration | Twenty former setup sites now await direct `bulk_chunked` with caller executor and exclusive status storage, wired through public sender/verifier APIs. Sequential phases reuse the storage; one chunk runs inline. Sampling order and arithmetic batching are preserved. Synchronous GPU lazy materialization retains the legacy adapter. |
 | Online receiver zeta | CPU digest preparation awaits direct `bulk_chunked` with caller executor and exclusive `RootZetaBuffer` storage, threaded through public receiver/garbled/prover APIs. Each chunk reuses multiprecision scratch and an AES PRNG buffer. Protocol range count still determines seed layout; buffer count only bounds execution. GPU sampling/fallback remains synchronous and unchanged. |
+| Receiver input wrapping | CPU CI-VOLE input wrapping awaits direct `bulk_chunked` using caller-owned `ZpEncodeBuffer` storage. Each chunk reuses slots and SEAL plaintext storage; the encoding/lifting arithmetic is shared with the legacy entry point. Public receiver, garbled receiver, and prover APIs pass the buffers through. GPU wrapping/fallback remains unchanged. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -270,6 +271,10 @@ There are **20 `detail::runParallelTasks` call sites** in library `.cpp` files:
 `LogVoleLenc.cpp` (1), `LogVoleLhe.cpp` (1), `LogVoleRingReceiver.cpp` (2),
 `LogVoleShrinkExpand.cpp` (2), `LogVoleZk.cpp` (5), and
 `cuda/LogVoleGpuBackend.cpp` (1). These are call sites, not independent algorithms.
+The synchronous input-wrapping site now serves GPU/fallback and diagnostic
+callers; production CPU wrapping uses the explicit-resource async overload.
+Setup message/state copying and codec parallelism are GPU-gated; leave those
+alone while GPU migration is deferred. Their CPU paths already copy inline.
 
 Of the original **22 `setupScratch.runBulk` sites**, 20 offline sampling and
 assembly sites now use direct async `bulk_chunked`; CPU online receiver zeta
@@ -379,9 +384,19 @@ and 208 bits, forced rejection, serial/seeded parent-PRNG progression, allowance
 A two-thread recursive protocol run also passes in 0.45 seconds.
 No GPU runtime, WSL, leak checks, or benchmarks were run for this CPU-only step.
 
+Input-wrapping validation: CUDA-enabled Windows compilation and the public
+example pass. The focused encoder regression and two public GoldenSeed queries
+pass in 4.14 seconds; the encoder also passes on two workers in 0.05 seconds.
+Checks cover exact legacy agreement, both lifting modes, partial-batch padding,
+empty input, invalid padding/buffer rejection, lazy start, worker limits, and
+stable slot/plaintext/output allocations. One chunk completes on an executor
+with no threads. The public query test verifies scratch reuse across queries
+while both controllers and their workers share one pool thread. No GPU runtime,
+WSL, leak checks, or benchmarks were run for this step.
+
 Next steps, in order:
 
-1. Migrate remaining CPU setup/proof/codec loops using direct
+1. Migrate CPU output unwrapping, then remaining CPU proof loops using direct
    `bulk_chunked` where appropriate. Discuss a different algorithm first if a
    loop does not fit. Retire `CpuRowScratch` scheduling and legacy overloads
    when their callers are gone.

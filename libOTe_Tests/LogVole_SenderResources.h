@@ -52,6 +52,7 @@ namespace tests_libOTe::logvole_test
         std::vector<osuCrypto::LogVole::LheDecryptBuffer> lhe;
         std::vector<osuCrypto::LogVole::LencEvalBuffer> lenc;
         std::vector<osuCrypto::LogVole::RootZetaBuffer> zeta;
+        std::vector<osuCrypto::LogVole::ZpEncodeBuffer> wrap;
 
         ReceiverBuffers(const osuCrypto::LogVole::ShrinkExpandParams& params,
             bool gpu = false, std::size_t workers = 3)
@@ -60,6 +61,12 @@ namespace tests_libOTe::logvole_test
             lhe.resize(workers);
             lenc.resize(workers);
             zeta.resize(workers);
+            wrap.resize(workers);
+            for (auto& b : wrap)
+            {
+                b.mSlots.resize(params.mRing.mPolyModulusDegree);
+                b.mPlain.resize(params.mRing.mPolyModulusDegree);
+            }
             for (auto& b : zeta)
             {
                 b.mWords.resize(4 * ((std::size_t(params.mGadgetLogBase) + 64) / 64));

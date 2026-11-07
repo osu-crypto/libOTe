@@ -21,6 +21,7 @@
     X(Cpu, DenoiseMatchesIntegerRounding) \
     X(Cpu, NttMatchesReference) \
     X(Cpu, CrtMatchesSeal) \
+    X(Cpu, AsyncInputWrapping) \
     X(Cpu, CrtMixedWidthsMatchSeal) \
     X(Cpu, DyadicMatchesReference) \
     X(Cpu, FusedDotMatchesReference) \

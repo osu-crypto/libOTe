@@ -20,6 +20,15 @@ namespace osuCrypto::LogVole
 {
     struct ZpHostContextCache;
     struct ZpCrtContext;
+    // Exclusive per-chunk CPU encoding storage, reusable across awaited queries.
+    // Prepare both buffers to the ring degree to avoid per-batch allocation.
+    struct ZpEncodeBuffer
+    {
+        std::vector<u64> mSlots;
+        seal::Plaintext mPlain;
+        bool mOk = true;
+    };
+
     class ZpContextFactory
     {
         struct Impl;
@@ -447,14 +456,14 @@ namespace osuCrypto
 
         // Online phase. x must have the configured size and each x[i] must be
         // in Z_p. Writes receiver MACs a, unless mKeepOutputOnDevice is set.
-        // Borrow the executor and exclusive LHE/LENC/zeta buffers through completion;
+        // Borrow the executor and exclusive LHE/LENC/zeta/wrapping buffers through completion;
         // reuse them for sequential calls. Products must be ring-sized and LENC
         // pointer capacity must cover every level, including root-left.
         // Zeta requires a nonempty span; see RootZetaBuffer for preparation sizes.
         // GPU execution accepts empty CPU buffer spans.
         task<> receive(
             macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
-            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers,
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers,
             span<const u64> x,
             span<u64> a,
             PRNG& prng,
@@ -516,6 +525,17 @@ namespace osuCrypto::LogVole
         u32 requestedWorkers,
         RnsPoly& out);
 
+    // CPU-only, lazy encoding. Borrow all operands and exclusive buffers until
+    // completion; await started work before destruction/reuse. Output may be
+    // partially updated on an execution failure, but validation leaves it intact.
+    // Buffer count bounds concurrency; one chunk runs inline without a pool.
+    macoro::task<bool> wrapZpLabelsCrt(
+        macoro::thread_pool& executor, std::span<ZpEncodeBuffer> buffers,
+        const ZpCrtContext& ctx, std::span<const u64> labels, bool multiplyByDelta,
+        u64 padValue, u32 requestedWorkers, std::vector<RnsPoly>& out,
+        CpuBenchmarkState cpuBenchmark = {});
+
+    // Legacy synchronous entry point for GPU/fallback and diagnostic callers.
     bool wrapZpLabelsCrt(
         const ZpCrtContext& ctx,
         std::span<const u64> labels,
@@ -564,7 +584,7 @@ namespace osuCrypto::LogVole
 
     task<> civoleReceiverSetX(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers,
         CivoleReceiverState& state,
         CivoleSid sid,
         std::span<const u64> x,

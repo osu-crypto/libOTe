@@ -1,3 +1,4 @@
+#include "macoro/bulk.h"
 #include "libOTe/Vole/LogVole/LogVole.h"
 
 #include "libOTe/config.h"
@@ -121,7 +122,7 @@ namespace osuCrypto::LogVole
         bool encodeSlotsToRingCrt(
             const ZpCrtContext& ctx,
             const std::vector<u64>& slots,
-            seal::BatchEncoder& encoder,
+            seal::BatchEncoder& encoder, seal::Plaintext& plain,
             bool multiplyByDelta,
             RnsPoly& out)
         {
@@ -132,7 +133,6 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
-            seal::Plaintext plain;
             try
             {
                 encoder.encode(slots, plain);
@@ -866,7 +866,7 @@ namespace osuCrypto
     }
 
     task<> LogVoleReceiver::receive(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         const bool emptyDeviceInput = x.empty() && mInputDevice != nullptr;
@@ -909,7 +909,7 @@ namespace osuCrypto
         }
         try
         {
-            co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, zetaBuffers, mOfflineState, sid, x, setX, prng, sock, options, cpuBenchmark);
+            co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, zetaBuffers, wrapBuffers, mOfflineState, sid, x, setX, prng, sock, options, cpuBenchmark);
         }
         catch (...)
         {
@@ -1629,7 +1629,8 @@ namespace osuCrypto::LogVole
         std::copy(labels.begin(), labels.end(), slots.begin());
 
         seal::BatchEncoder& encoder = *ctx.mBatchEncoder;
-        return encodeSlotsToRingCrt(ctx, slots, encoder, multiplyByDelta, out);
+        seal::Plaintext plain;
+        return encodeSlotsToRingCrt(ctx, slots, encoder, plain, multiplyByDelta, out);
     }
 
     bool wrapZpConstantCrt(
@@ -1671,7 +1672,8 @@ namespace osuCrypto::LogVole
         std::vector<u64> slots(zpSlotCount(ctx), value);
         seal::BatchEncoder& encoder = *ctx.mBatchEncoder;
         (void)requestedWorkers;
-        return encodeSlotsToRingCrt(ctx, slots, encoder, multiplyByDelta, out);
+        seal::Plaintext plain;
+        return encodeSlotsToRingCrt(ctx, slots, encoder, plain, multiplyByDelta, out);
     }
 
     bool wrapZpLabelsCrt(
@@ -1734,6 +1736,59 @@ namespace osuCrypto::LogVole
                     requestedWorkers,
                     out[chunkIdx]);
             }, false, &cpuBenchmark);
+    }
+
+    macoro::task<bool> wrapZpLabelsCrt(
+        macoro::thread_pool& executor, std::span<ZpEncodeBuffer> buffers,
+        const ZpCrtContext& ctx, std::span<const u64> labels, bool multiplyByDelta,
+        u64 padValue, u32 requestedWorkers, std::vector<RnsPoly>& out,
+        CpuBenchmarkState cpuBenchmark)
+    {
+        if (buffers.empty() || ctx.mGpuLightweight || !validateZpContext(ctx) ||
+            !validateZpValues(ctx, labels) || !validateZpValue(ctx, padValue))
+            co_return false;
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx.mRing);
+        const auto slots = zpSlotCount(ctx);
+        const auto count = static_cast<std::size_t>(zpRingLabelCount(ctx, labels.size()));
+        auto allowance = buffers.size();
+        if (requestedWorkers) allowance = std::min(allowance, std::size_t(requestedWorkers));
+        if (cpuBenchmark.mContext)
+        {
+            const auto& limits = *cpuBenchmark.mContext;
+            allowance = std::min(allowance, std::max<std::size_t>(1, limits.mWorkerLimit
+                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size()));
+        }
+        auto chunks = buffers.first(std::min(allowance, count));
+        for (auto& buffer : chunks)
+        {
+            buffer.mSlots.resize(slots);
+            buffer.mPlain.resize(slots);
+            buffer.mOk = true;
+        }
+        AutoTimer wrapTimer(globalTimingStats.mWrapTimeUs);
+        out.resize(count);
+        auto encodeChunk = [&](std::size_t begin, std::size_t end, ZpEncodeBuffer& buffer) {
+            CpuBenchmarkState worker = chunks.size() > 1
+                ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+            CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            for (auto i = begin; i != end; ++i)
+            {
+                const auto offset = i * slots;
+                const auto size = std::min<std::size_t>(slots, labels.size() - offset);
+                std::copy_n(labels.data() + offset, size, buffer.mSlots.data());
+                std::fill(buffer.mSlots.begin() + size, buffer.mSlots.end(), padValue);
+                if (!encodeSlotsToRingCrt(ctx, buffer.mSlots, *ctx.mBatchEncoder,
+                        buffer.mPlain, multiplyByDelta, out[i]))
+                {
+                    buffer.mOk = false;
+                    break;
+                }
+            }
+        };
+        if (chunks.size() == 1) encodeChunk(0, count, chunks[0]);
+        else if (count) co_await macoro::bulk_chunked(executor, count, chunks, encodeChunk);
+        co_return std::all_of(chunks.begin(), chunks.end(), [](const auto& b) { return b.mOk; });
     }
 
     bool unwrapRingLabelsCrt(
@@ -2351,7 +2406,7 @@ namespace osuCrypto::LogVole
 
     task<> civoleReceiverSetX(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers,
         CivoleReceiverState& state,
         CivoleSid sid,
         std::span<const u64> x,
@@ -2460,13 +2515,18 @@ namespace osuCrypto::LogVole
                 }
                 packedX = {repeated.data(), repeated.size()};
             }
-            if (!wrapZpLabelsCrt(
-                    ctx,
-                    packedX,
-                    false,
-                    0,
-                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
-                    wrapped, cpuBenchmark))
+            bool wrappedOk;
+            if (gpu::enabled(ctx.mRing))
+                wrappedOk = wrapZpLabelsCrt(ctx, packedX, false, 0,
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, wrapped, cpuBenchmark);
+            else
+            {
+                scopedCache.reset();
+                wrappedOk = co_await wrapZpLabelsCrt(executor, wrapBuffers, ctx, packedX, false, 0,
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, wrapped, cpuBenchmark);
+                scopedCache.emplace(ProtocolCacheRole::Receiver, sid);
+            }
+            if (!wrappedOk)
             {
                 throw std::runtime_error("LogVole CI-VOLE receiver could not wrap inputs");
             }

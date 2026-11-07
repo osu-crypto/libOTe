@@ -135,8 +135,8 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
                 auto invalid = x;
                 invalid[0] = p;
                 auto sockets = coproto::LocalAsyncSocket::makePair();
-                rejects([&] { macoro::sync_wait(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, invalid, a, rp, sockets[1])); });
-                rejects([&] { macoro::sync_wait(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, {}, a, rp, sockets[1])); });
+                rejects([&] { macoro::sync_wait(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap, invalid, a, rp, sockets[1])); });
+                rejects([&] { macoro::sync_wait(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap, {}, a, rp, sockets[1])); });
             }
             span<const u64> input(x.data(), x.size());
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -146,7 +146,7 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
                 auto invalid = gpu::uploadScalars({x.data(), x.size() - 1}, operationExecution.mainStream());
                 receiver.mInputDevice = invalid;
                 auto invalidQuery = coproto::LocalAsyncSocket::makePair();
-                rejects([&] { macoro::sync_wait(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, {}, a, rp, invalidQuery[1])); });
+                rejects([&] { macoro::sync_wait(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap, {}, a, rp, invalidQuery[1])); });
                 receiver.mInputDevice = gpu::uploadScalars(input, operationExecution.mainStream());
                 LOGVOLE_REQUIRE_TRUE(receiver.mInputDevice);
                 input = {};
@@ -159,7 +159,7 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 #endif
             auto query = coproto::LocalAsyncSocket::makePair();
             const auto oldA = a.mScalars.data(), oldB = b.mScalars.data();
-            together(sender.send(senderResources.executor, senderResources.buffers, b, sp, query[0]), receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, input, a, rp, query[1]));
+            together(sender.send(senderResources.executor, senderResources.buffers, b, sp, query[0]), receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap, input, a, rp, query[1]));
             if (oldA && !receiver.mKeepOutputOnDevice) LOGVOLE_REQUIRE_TRUE(a.mScalars.data() == oldA);
             if (oldB && !sender.mKeepOutputOnDevice) LOGVOLE_REQUIRE_TRUE(b.mScalars.data() == oldB);
             a.wait(); b.wait();
