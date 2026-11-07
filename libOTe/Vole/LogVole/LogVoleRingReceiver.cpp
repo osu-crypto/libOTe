@@ -507,6 +507,9 @@ namespace osuCrypto::LogVole
         std::shared_ptr<void> firstQueryGpuAllocations,
         const void* firstQueryOwner, ProtocolCacheScope cacheScope)
     {
+        if (!state.mShrinkExpandState.mRingFactoryOwner ||
+            !state.mShrinkExpandState.mRingFactoryOwner->mFactory)
+            throw std::runtime_error("LogVole online state has no identity resource owner");
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mShrinkExpandState.mRingFactoryOwner)};
         OnlinePrefetchPlan prefetchPlan;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -516,7 +519,9 @@ namespace osuCrypto::LogVole
         prefetchPlan.mFirstQueryOwner = firstQueryOwner;
 #endif
         prefetchPlan.configure(state, input.mSid);
-        if (!cacheScope.mRunId) cacheScope.mRunId = allocateProtocolCacheRunId();
+        if (!cacheScope.mRunId)
+            cacheScope = ProtocolCacheScope(state.mShrinkExpandState.mRingFactoryOwner->mFactory->protocolService()->allocate(),
+                ProtocolCacheRole::Receiver);
         cacheScope.mRole = ProtocolCacheRole::Receiver;
         co_await onlineImpl(state, input, output, prng, sock, prefetchPlan, 0u,
             cpuBenchmark, executor, lheBuffers, lencBuffers, zetaBuffers, cacheScope);

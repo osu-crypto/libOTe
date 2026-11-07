@@ -572,9 +572,13 @@ namespace osuCrypto
         auto numThreads = mOptions.mNumThreads;
         const auto setting = mOptions.mSetting;
         const auto mode = mOptions.mMode;
+        if (!factory) factory = std::make_shared<ZpContextFactory>(
+            std::make_shared<RingContextFactory>(mOptions));
+        const auto identityService = factory->ringFactory()->protocolService();
         const auto inheritedRun = LogVole::currentProtocolCacheScope().mRunId;
-        const auto configureRun = inheritedRun ? inheritedRun :
-            LogVole::allocateProtocolCacheRunId();
+        if (inheritedRun && inheritedRun.mService != identityService.get())
+            throw std::invalid_argument("LogVole factory belongs to another identity service");
+        const auto configureRun = inheritedRun ? inheritedRun : identityService->allocate();
         LogVole::ScopedProtocolCacheScope roleScope(
             LogVole::ProtocolCacheRole::Sender, configureRun);
         if ((mode != OnlineMode::Interactive && mode != OnlineMode::NonInteractive) ||
@@ -760,9 +764,13 @@ namespace osuCrypto
         auto numThreads = mOptions.mNumThreads;
         const auto setting = mOptions.mSetting;
         const auto mode = mOptions.mMode;
+        if (!factory) factory = std::make_shared<ZpContextFactory>(
+            std::make_shared<RingContextFactory>(mOptions));
+        const auto identityService = factory->ringFactory()->protocolService();
         const auto inheritedRun = LogVole::currentProtocolCacheScope().mRunId;
-        const auto configureRun = inheritedRun ? inheritedRun :
-            LogVole::allocateProtocolCacheRunId();
+        if (inheritedRun && inheritedRun.mService != identityService.get())
+            throw std::invalid_argument("LogVole factory belongs to another identity service");
+        const auto configureRun = inheritedRun ? inheritedRun : identityService->allocate();
         LogVole::ScopedProtocolCacheScope roleScope(
             LogVole::ProtocolCacheRole::Receiver, configureRun);
         if ((mode != OnlineMode::Interactive && mode != OnlineMode::NonInteractive) ||
@@ -1223,7 +1231,7 @@ namespace osuCrypto::LogVole
         gpu::NativeSealSetupBundle prepared{};
         if (gpu::buildNativeSealSetupBundleDevice(
                 ring, plaintextModulusBits, prepared,
-                std::make_shared<gpu::GpuSetupContext>(ringFactory->executionOptions(), ringFactory->hostProfilerOwner())))
+                std::make_shared<gpu::GpuSetupContext>(ringFactory->executionOptions(), ringFactory->hostProfilerOwner(), ringFactory->protocolService())))
         {
             if (prepared.mOwnerRole != currentProtocolCacheScope().mRole ||
                 prepared.mOwnerRunId != currentProtocolCacheScope().mRunId ||
@@ -2063,9 +2071,17 @@ namespace osuCrypto::LogVole
         // The delta producer precedes LogVoleRingSender::offline. Give both
         // stages the same fresh sender run rather than publishing a run-zero
         // device owner that a later party could accidentally reuse.
-        const u64 incomingRun = currentProtocolCacheScope().mRunId;
-        const u64 offlineRunId = incomingRun ? incomingRun : allocateProtocolCacheRunId();
+        const ProtocolCacheRunId incomingRun = currentProtocolCacheScope().mRunId;
+        if (input.mCrtFactoryOwner && !input.mCrtFactoryOwner->mFactory)
+            throw std::runtime_error("LogVole offline CRT context has no identity resource owner");
+        const auto identityService = input.mCrtFactoryOwner
+            ? input.mCrtFactoryOwner->mFactory->ringFactory()->protocolService()
+            : incomingRun ? incomingRun.serviceOwner() : ProtocolCacheService::create();
+        if (incomingRun && incomingRun.mService != identityService.get())
+            throw std::invalid_argument("LogVole offline owner belongs to another identity service");
+        const ProtocolCacheRunId offlineRunId = incomingRun ? incomingRun : identityService->allocate();
         rootWirePin.mSenderRunId = offlineRunId;
+        rootWirePin.mIdentityService = offlineRunId.serviceOwner();
         std::optional<ScopedProtocolCacheScope> senderScope(std::in_place, ProtocolCacheRole::Sender,
                                                             offlineRunId);
         CivoleParams sessionParams = input.mParams;
@@ -2090,7 +2106,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx.mRing, std::make_shared<gpu::GpuExecutionContext>(
-                                                      ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler)))
+                                                      ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler, ctx.mRing.mFactory->protocolService())))
             throw std::runtime_error("LogVole CI-VOLE sender execution context is invalid");
         // Retain this session's selected ring in its CRT record as well. The
         // parent is an immutable math record, never a reference to this copy.
@@ -2253,7 +2269,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx.mRing,
-                std::make_shared<gpu::GpuExecutionContext>(ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler)))
+                std::make_shared<gpu::GpuExecutionContext>(ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler, ctx.mRing.mFactory->protocolService())))
             throw std::runtime_error("LogVole CI-VOLE receiver execution context is invalid");
         ctx.mFactoryOwner = std::make_shared<const ZpCrtContext>(ctx);
 #endif
@@ -2309,7 +2325,7 @@ namespace osuCrypto::LogVole
         if (state.mParams.mLogVole.mOnlineMode == OnlineMode::NonInteractive) return false;
         const auto ctxOwner = stateCrtContext(state);
         if (!ctxOwner) return false;
-        ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Sender, sid);
+        ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Sender, ctxOwner->mFactory->ringFactory()->protocolService()->qualify(sid));
 
         if (!prepareSenderSidForReleaseK(state, sid) ||
             !ensureSenderPrecompute(state.mLogVoleState) ||
@@ -2390,14 +2406,14 @@ namespace osuCrypto::LogVole
         {
             HostStep step(hostProfiler(ctxOwner->mRing), "send: logvole online", &cpuBenchmark);
             auto operation = [&] {
-                ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, sid);
+                ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, ctxOwner->mFactory->ringFactory()->protocolService()->qualify(sid));
                 return sender.online(executor, buffers, state.mLogVoleState,
                     onlineOptions, online, prng, sock);
             }();
             co_await std::move(operation);
         }
 
-        std::optional<ScopedProtocolCacheScope> scopedCache(std::in_place, ProtocolCacheRole::Sender, sid);
+        std::optional<ScopedProtocolCacheScope> scopedCache(std::in_place, ProtocolCacheRole::Sender, ctxOwner->mFactory->ringFactory()->protocolService()->qualify(sid));
         const auto& ctx = *ctxOwner;
         AlignedUnVec<u64> keys;
 
@@ -2459,7 +2475,7 @@ namespace osuCrypto::LogVole
                 unwrapped = co_await unwrapRingLabelsCrt(executor, unwrapBuffers,
                     ctx, ringKeys, state.mW, true,
                     state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, cpuBenchmark);
-                scopedCache.emplace(ProtocolCacheRole::Sender, sid);
+                scopedCache.emplace(ProtocolCacheRole::Sender, ctxOwner->mFactory->ringFactory()->protocolService()->qualify(sid));
             }
         }
         if (!unwrapped)
@@ -2523,7 +2539,7 @@ namespace osuCrypto::LogVole
 
         const auto paddedSize = static_cast<std::size_t>(state.mLogVoleState.mParams.mW);
 
-        std::optional<ScopedProtocolCacheScope> scopedCache(std::in_place, ProtocolCacheRole::Receiver, sid);
+        std::optional<ScopedProtocolCacheScope> scopedCache(std::in_place, ProtocolCacheRole::Receiver, ctxOwner->mFactory->ringFactory()->protocolService()->qualify(sid));
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto firstQueryGpuAllocations =
@@ -2603,7 +2619,7 @@ namespace osuCrypto::LogVole
                 scopedCache.reset();
                 wrappedOk = co_await wrapZpLabelsCrt(executor, wrapBuffers, ctx, packedX, false, 0,
                     state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, wrapped, cpuBenchmark);
-                scopedCache.emplace(ProtocolCacheRole::Receiver, sid);
+                scopedCache.emplace(ProtocolCacheRole::Receiver, ctxOwner->mFactory->ringFactory()->protocolService()->qualify(sid));
             }
             if (!wrappedOk)
             {
@@ -2631,7 +2647,7 @@ namespace osuCrypto::LogVole
                 state.mFirstQueryGpuAllocations, &state);
             scopedCache.reset();
             co_await std::move(operation);
-            scopedCache.emplace(ProtocolCacheRole::Receiver, sid);
+            scopedCache.emplace(ProtocolCacheRole::Receiver, ctxOwner->mFactory->ringFactory()->protocolService()->qualify(sid));
         }
 
         CivoleReceiverSetXOutput next{};
@@ -2699,7 +2715,7 @@ namespace osuCrypto::LogVole
                 unwrapped = co_await unwrapRingLabelsCrt(executor, unwrapBuffers,
                     ctx, online.mTbm, state.mW, true,
                     state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, macs, cpuBenchmark);
-                scopedCache.emplace(ProtocolCacheRole::Receiver, sid);
+                scopedCache.emplace(ProtocolCacheRole::Receiver, ctxOwner->mFactory->ringFactory()->protocolService()->qualify(sid));
             }
         }
         if (!unwrapped)

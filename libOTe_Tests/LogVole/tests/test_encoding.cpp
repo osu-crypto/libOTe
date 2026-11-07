@@ -533,6 +533,7 @@ void LogVole_Encoding_SeedMessageRoundTrip(const oc::CLP&)
 
 void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
 {
+    const auto identityService = ProtocolCacheService::create();
     const RingParams ring = make_ring();
 
     RootOfflineMessage message{};
@@ -565,7 +566,7 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
     expect_bytes_equal(reservedEncoded, encoded);
     bool cudaOwned = false;
     Buffer requestedRootWire = reserveRootCudaWireBuffer(
-        encoded.size(), 987u, cudaOwned);
+        encoded.size(), identityService->qualify(987u), cudaOwned);
     const auto* const requestedPointer = requestedRootWire.data();
     LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(requestedRootWire.wireView()), cudaOwned);
     const auto requestedEncoded = encodeRootOfflineIntoBuffer(
@@ -629,6 +630,7 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
 
 void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0) == 0 || std::endian::native != std::endian::little) return;
     LOGVOLE_REQUIRE_TRUE(gpu::available());
@@ -672,7 +674,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
         expect_tensor_equal(decoded.mLacctLeft.mCt, eager.mLacctLeft.mCt);
         expect_tensor_equal(decoded.mTopCt, eager.mTopCt);
     }
-    constexpr oc::u64 cudaWireTestRunId = 987u;
+    const auto cudaWireTestRunId = identityService->qualify(987u);
     resetRootWireCudaAllocEvidence(cudaWireTestRunId, true);
     noteRootWireCudaAllocEligibility(cudaWireTestRunId,
         rootOfflineWireSize(resident), true);

@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 #include "libOTe/Vole/LogVole/LogVoleAdvancedOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
 #include "libOTe/Vole/LogVole/LogVoleEncodingOptions.h"
@@ -268,7 +269,7 @@ namespace osuCrypto::LogVole
         // independent mutable mSk1 vectors. Ordinary public setup is eager.
         std::shared_ptr<const gpu::DeviceBatch> mTopSk1Device;
         std::shared_ptr<const LazyRootSecretHostState> mLazyTopSk1;
-        u64 mTopSk1OwnerRunId = 0;
+        ProtocolCacheRunId mTopSk1OwnerRunId = 0;
         std::shared_ptr<const std::vector<RnsPoly>> mPublicANtt;
         std::shared_ptr<const std::vector<RnsPoly>> mPublicBNtt;
         // The default GPU sender owns immutable public operands on its own
@@ -279,7 +280,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<const LazyPublicUniformHostState> mLazyPublicUniformHosts;
         // Retained tokens were sampled during this sender's offline run;
         // online query scopes may use a different sid/run ID.
-        u64 mPublicUniformRunId = 0;
+        ProtocolCacheRunId mPublicUniformRunId = 0;
         RingTensor mCt1;
         ShrinkExpandLacct mLacct;
 
@@ -381,7 +382,8 @@ namespace osuCrypto::LogVole
 
     struct RootWirePinOverlapEvidence
     {
-        u64 mSenderRunId = 0;
+        ProtocolCacheRunId mSenderRunId = 0;
+        std::shared_ptr<const ProtocolCacheService> mIdentityService;
         u64 mWireBytes = 0;
         u64 mPinBeginNs = 0;
         u64 mPinEndNs = 0;
@@ -410,7 +412,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<void> mRootSkRRtDevice;
         std::shared_ptr<const LazyRootSecretHostState> mLazyRootSkRRt;
         // Offline producer run, which can differ from a later online query SID.
-        u64 mRootSkRRtOwnerRunId = 0;
+        ProtocolCacheRunId mRootSkRRtOwnerRunId = 0;
         // Optional immutable NTT-domain device mirror of mRootSkRRt. The Root
         // response reads the same offline secret every query, so the operand
         // residency experiment can upload and transform it once. Typed as void

@@ -51,6 +51,7 @@ namespace
 
 void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (!gpu::available()) return;
     osuCrypto::LogVoleOptions options;
@@ -74,7 +75,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
     {
         if (cmd.getOr("lvFactoryFast", 0) && degree == 65536u) continue;
         const auto params = makeParams(degree, widths);
-        const auto run = allocateProtocolCacheRunId();
+        const auto run = identityService->allocate();
         std::array<RingNttContext, 2> bundledRing{};
         std::array<ZpCrtContext, 2> bundledZp{};
         for (std::size_t party = 0; party < 2; ++party)
@@ -187,7 +188,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_FALSE(optOutZp.mNativeSealBundleCommitted);
             expectSameMetadata(bundledRing[party], bundledZp[party],
                 optOutRing, optOutZp);
-            const auto laterRun = allocateProtocolCacheRunId();
+            const auto laterRun = identityService->allocate();
             {
                 ScopedProtocolCacheScope sameRole(role, laterRun);
                 RingNttContext reusedRing{};
@@ -215,7 +216,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             bundledZp[1].mNativePlainNtt);
         {
             ScopedProtocolCacheScope receiver(
-                ProtocolCacheRole::Receiver, allocateProtocolCacheRunId());
+                ProtocolCacheRole::Receiver, identityService->allocate());
             // A worker's ambient role cannot replace a retained context's
             // explicit owner. Contradictory stored provenance is rejected.
             LOGVOLE_REQUIRE_TRUE(
@@ -227,24 +228,24 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
         }
         {
             ScopedProtocolCacheScope sender(
-                ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+                ProtocolCacheRole::Sender, identityService->allocate());
             auto failedQ = params;
             failedQ.mCoeffModulusBits[0] = 2;
             gpu::NativeSealSetupBundle untouched{};
             untouched.mPlaintextPrime = 0xdecafbadULL;
-            untouched.mOwnerRunId = 91u;
+            untouched.mOwnerRunId = identityService->qualify(91u);
             LOGVOLE_REQUIRE_FALSE(
                 gpu::buildNativeSealSetupBundleDevice(
                     failedQ, plaintextBits, untouched, std::make_shared<gpu::GpuSetupContext>(options)));
             LOGVOLE_EXPECT_EQ(untouched.mPlaintextPrime,
                 0xdecafbadULL);
-            LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, 91u);
+            LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, identityService->qualify(91u));
             LOGVOLE_REQUIRE_FALSE(
                 gpu::buildNativeSealSetupBundleDevice(
                     params, 2u, untouched, std::make_shared<gpu::GpuSetupContext>(options)));
             LOGVOLE_EXPECT_EQ(untouched.mPlaintextPrime,
                 0xdecafbadULL);
-            LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, 91u);
+            LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, identityService->qualify(91u));
         }
     }
 #endif
@@ -253,6 +254,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
 void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
     const oc::CLP&)
 {
+    const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (!gpu::available()) return;
     osuCrypto::LogVoleOptions options;
@@ -287,9 +289,9 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
 
         osuCrypto::LogVoleReceiver receiverA(sessionOptions, factory);
         osuCrypto::LogVoleReceiver receiverB(sessionOptions, factory);
-        const std::array<std::uint64_t, 4> runs{{
-            senderA.configureCacheRunId(), senderB.configureCacheRunId(),
-            receiverA.configureCacheRunId(), receiverB.configureCacheRunId()
+        const std::array<ProtocolCacheRunId, 4> runs{{
+            senderA.configureCacheIdentity(), senderB.configureCacheIdentity(),
+            receiverA.configureCacheIdentity(), receiverB.configureCacheIdentity()
         }};
         for (std::size_t i = 0; i < runs.size(); ++i)
         {
@@ -428,11 +430,11 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
 
         osuCrypto::LogVoleGarbledReceiver garbledReceiverA(garbledOptions);
         osuCrypto::LogVoleGarbledReceiver garbledReceiverB(garbledOptions);
-        const std::array<std::uint64_t, 4> garbledRuns{{
-            garbledSenderA.configureCacheRunId(),
-            garbledSenderB.configureCacheRunId(),
-            garbledReceiverA.configureCacheRunId(),
-            garbledReceiverB.configureCacheRunId()
+        const std::array<ProtocolCacheRunId, 4> garbledRuns{{
+            garbledSenderA.configureCacheIdentity(),
+            garbledSenderB.configureCacheIdentity(),
+            garbledReceiverA.configureCacheIdentity(),
+            garbledReceiverB.configureCacheIdentity()
         }};
         for (std::size_t i = 0; i < garbledRuns.size(); ++i)
         {
@@ -451,7 +453,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                  garbledReceiverB.modulus()})
             LOGVOLE_EXPECT_EQ(modulus, exactPrime);
 
-        const auto suppliedRun = allocateProtocolCacheRunId();
+        const auto suppliedRun = identityService->allocate();
         {
             ScopedProtocolCacheScope explicitOwner(
                 ProtocolCacheRole::Unspecified, suppliedRun);
@@ -460,11 +462,11 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
 
             osuCrypto::LogVoleGarbledSender garbledScopedSender(garbledOptions);
             osuCrypto::LogVoleGarbledReceiver garbledScopedReceiver(garbledOptions);
-            LOGVOLE_EXPECT_EQ(explicitlyScoped.configureCacheRunId(),
+            LOGVOLE_EXPECT_EQ(explicitlyScoped.configureCacheIdentity(),
                 suppliedRun);
-            LOGVOLE_EXPECT_EQ(garbledScopedSender.configureCacheRunId(),
+            LOGVOLE_EXPECT_EQ(garbledScopedSender.configureCacheIdentity(),
                 suppliedRun);
-            LOGVOLE_EXPECT_EQ(garbledScopedReceiver.configureCacheRunId(),
+            LOGVOLE_EXPECT_EQ(garbledScopedReceiver.configureCacheIdentity(),
                 suppliedRun);
             LOGVOLE_REQUIRE_TRUE(
                 explicitlyScoped.nativeSealBundleAtConfigure());
@@ -500,13 +502,13 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
             LOGVOLE_EXPECT_EQ(sequentialReceiver.modulus(), exactPrime);
             LOGVOLE_EXPECT_EQ(sequentialGarbledSender.modulus(), exactPrime);
             LOGVOLE_EXPECT_EQ(sequentialGarbledReceiver.modulus(), exactPrime);
-            LOGVOLE_REQUIRE_TRUE(sequentialSender.configureCacheRunId() !=
-                sequentialReceiver.configureCacheRunId());
+            LOGVOLE_REQUIRE_TRUE(sequentialSender.configureCacheIdentity() !=
+                sequentialReceiver.configureCacheIdentity());
         }
         senderA.clear();
         receiverA.clear();
-        LOGVOLE_EXPECT_EQ(senderA.configureCacheRunId(), 0u);
-        LOGVOLE_EXPECT_EQ(receiverA.configureCacheRunId(), 0u);
+        LOGVOLE_EXPECT_EQ(senderA.configureCacheIdentity(), ProtocolCacheRunId{});
+        LOGVOLE_EXPECT_EQ(receiverA.configureCacheIdentity(), ProtocolCacheRunId{});
         LOGVOLE_REQUIRE_FALSE(senderA.nativeSealBundleAtConfigure());
         LOGVOLE_REQUIRE_FALSE(receiverA.nativeSealBundleAtConfigure());
     }

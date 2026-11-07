@@ -54,7 +54,7 @@ namespace osuCrypto::LogVole
         }
 
         void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
-            WireMemoryPool* memory, bool cudaOwned, u64 runId)
+            WireMemoryPool* memory, bool cudaOwned, ProtocolCacheRunId runId)
         {
             if (!bytes) return nullptr;
             if (alignment < alignof(void*) || (alignment & (alignment - 1u)) ||
@@ -99,7 +99,7 @@ namespace osuCrypto::LogVole
         }
     }
 
-    void resetRootWireCudaAllocEvidence(u64 senderRunId,
+    void resetRootWireCudaAllocEvidence(ProtocolCacheRunId senderRunId,
         bool requested) noexcept
     {
         try
@@ -107,12 +107,13 @@ namespace osuCrypto::LogVole
             std::lock_guard lock(rootCudaWireEvidenceMutex);
             lastRootCudaWireEvidence = {};
             lastRootCudaWireEvidence.mSenderRunId = senderRunId;
+            lastRootCudaWireEvidence.mIdentityService = senderRunId.serviceOwner();
             lastRootCudaWireEvidence.mRequested = requested;
         }
         catch (...) {}
     }
 
-    void noteRootWireCudaAllocEligibility(u64 senderRunId,
+    void noteRootWireCudaAllocEligibility(ProtocolCacheRunId senderRunId,
         std::size_t wireBytes, bool eligible) noexcept
     {
         try
@@ -125,7 +126,7 @@ namespace osuCrypto::LogVole
         catch (...) {}
     }
 
-    void noteRootWireCudaEarlyPlan(u64 senderRunId, bool requested,
+    void noteRootWireCudaEarlyPlan(ProtocolCacheRunId senderRunId, bool requested,
         bool eligible, std::size_t forecastBytes, bool launched) noexcept
     {
         try
@@ -141,7 +142,7 @@ namespace osuCrypto::LogVole
         catch (...) {}
     }
 
-    void noteRootWireCudaEarlyJoin(u64 senderRunId, u64 joinWaitNs,
+    void noteRootWireCudaEarlyJoin(ProtocolCacheRunId senderRunId, u64 joinWaitNs,
         bool adopted) noexcept
     {
         try
@@ -179,7 +180,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto bytes = wire.size();
         if (!completed || !bytes || !wire.mMemory) return;
-        const u64 ownerRunId = wire.mMemory->ownerRunId(wire.data(), bytes);
+        const ProtocolCacheRunId ownerRunId = wire.mMemory->ownerRunId(wire.data(), bytes);
         if (!ownerRunId) return;
         try
         {
@@ -199,7 +200,7 @@ namespace osuCrypto::LogVole
 #endif
     }
 
-    Buffer reserveRootCudaWireBuffer(std::size_t bytes, u64 senderRunId,
+    Buffer reserveRootCudaWireBuffer(std::size_t bytes, ProtocolCacheRunId senderRunId,
         bool& cudaOwned, bool recordSelection, std::shared_ptr<WireMemoryPool> memory, LogVoleWireOptions options, HostStepProfiler* profile)
     {
         cudaOwned = false;
@@ -1197,7 +1198,7 @@ namespace osuCrypto::LogVole
         return rootWireLayout(message).mBytes;
     }
 
-    void noteRootWireCudaExpectedDownloads(u64 senderRunId,
+    void noteRootWireCudaExpectedDownloads(ProtocolCacheRunId senderRunId,
         const RootOfflineMessage& message)
     {
         const auto layout = rootWireLayout(message);

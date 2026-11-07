@@ -24,7 +24,8 @@ namespace osuCrypto::LogVole
         {
             void* pointer = nullptr;
             std::size_t capacity = 0, activeBytes = 0;
-            std::uint64_t runId = 0;
+            ProtocolCacheRunId runId = 0;
+            std::shared_ptr<const ProtocolCacheService> identityService;
             bool cudaOwned = false;
             PinState pinState = PinState::Unregistered;
             ~Block()
@@ -68,7 +69,7 @@ namespace osuCrypto::LogVole
     WireMemoryPool::~WireMemoryPool() = default;
 
     void* WireMemoryPool::allocate(std::size_t bytes, std::size_t alignment,
-        bool cudaOwned, std::uint64_t runId) noexcept
+        bool cudaOwned, ProtocolCacheRunId runId) noexcept
     {
         constexpr auto page = Impl::pageAlignment;
         if (!bytes || !alignment || (alignment & (alignment - 1)) || alignment > page ||
@@ -88,6 +89,7 @@ namespace osuCrypto::LogVole
                     return nullptr;
                 block->activeBytes = bytes;
                 block->runId = runId;
+                block->identityService = runId.serviceOwner();
                 it->second.pop_back();
                 return block->pointer;
             }
@@ -95,6 +97,7 @@ namespace osuCrypto::LogVole
             block->capacity = capacity;
             block->activeBytes = bytes;
             block->runId = runId;
+            block->identityService = runId.serviceOwner();
             block->cudaOwned = cudaOwned;
             if (cudaOwned)
             {
@@ -168,7 +171,7 @@ namespace osuCrypto::LogVole
         const auto* block = mImpl->find(pointer, bytes);
         return block && block->cudaOwned;
     }
-    std::uint64_t WireMemoryPool::ownerRunId(const void* pointer, std::size_t bytes) const noexcept
+    ProtocolCacheRunId WireMemoryPool::ownerRunId(const void* pointer, std::size_t bytes) const noexcept
     {
         std::lock_guard lock(mImpl->mutex);
         const auto* block = mImpl->find(pointer, bytes);

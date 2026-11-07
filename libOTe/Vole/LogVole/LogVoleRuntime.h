@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 
 #include <cryptoTools/Common/Defines.h>
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
@@ -22,56 +23,44 @@ namespace osuCrypto::LogVole
         Receiver = 2
     };
 
-    struct ProtocolCacheScope
+    struct ProtocolCacheScopeView
     {
-        u64 mRunId = 0;
+        ProtocolCacheRunId mRunId;
         ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
     };
 
-    inline std::atomic<u64> gProtocolCacheRunCounter{ 1 };
-    inline thread_local ProtocolCacheScope tProtocolCacheScope{};
-
-    inline u64 allocateProtocolCacheRunId()
+    // Owned operation context. Copy only at operation/chunk boundaries; hot
+    // current-scope reads and ID/hash comparisons use the cheap view above.
+    struct ProtocolCacheScope : ProtocolCacheScopeView
     {
-        return gProtocolCacheRunCounter.fetch_add(1, std::memory_order_relaxed);
-    }
+        std::shared_ptr<const ProtocolCacheService> mServiceOwner;
+        ProtocolCacheScope() = default;
+        ProtocolCacheScope(ProtocolCacheRunId id, ProtocolCacheRole role)
+            : ProtocolCacheScopeView{id, role}, mServiceOwner(id.serviceOwner()) {}
+        ProtocolCacheScope(ProtocolCacheScopeView view)
+            : ProtocolCacheScope(view.mRunId, view.mRole) {}
+    };
 
-    inline ProtocolCacheScope currentProtocolCacheScope()
-    {
-        return tProtocolCacheScope;
-    }
-
-    inline void setProtocolCacheScope(ProtocolCacheRole role, u64 runId)
-    {
-        tProtocolCacheScope.mRole = role;
-        tProtocolCacheScope.mRunId = runId;
-    }
+    // Temporary compatibility transport during explicit-context migration.
+    // Service allocation is instance-owned; this TLS stores no allocator or
+    // mutable service/session state and is removed in the next stage.
+    inline thread_local ProtocolCacheScopeView tProtocolCacheScope{};
+    inline ProtocolCacheScopeView currentProtocolCacheScope() { return tProtocolCacheScope; }
+    inline void setProtocolCacheScope(ProtocolCacheRole role, ProtocolCacheRunId runId)
+    { tProtocolCacheScope = {runId, role}; }
 
     class ScopedProtocolCacheScope
     {
     public:
-        ScopedProtocolCacheScope(ProtocolCacheRole role, u64 runId)
-            : mPrevious(tProtocolCacheScope)
-        {
-            setProtocolCacheScope(role, runId);
-        }
-
-        ScopedProtocolCacheScope(ProtocolCacheScope scope)
-            : mPrevious(tProtocolCacheScope)
-        {
-            tProtocolCacheScope = scope;
-        }
-
+        ScopedProtocolCacheScope(ProtocolCacheRole role, ProtocolCacheRunId runId)
+            : mPrevious(tProtocolCacheScope) { setProtocolCacheScope(role, runId); }
+        ScopedProtocolCacheScope(ProtocolCacheScopeView scope)
+            : mPrevious(tProtocolCacheScope) { tProtocolCacheScope = scope; }
         ScopedProtocolCacheScope(const ScopedProtocolCacheScope&) = delete;
         ScopedProtocolCacheScope& operator=(const ScopedProtocolCacheScope&) = delete;
-
-        ~ScopedProtocolCacheScope()
-        {
-            tProtocolCacheScope = mPrevious;
-        }
-
+        ~ScopedProtocolCacheScope() { tProtocolCacheScope = mPrevious; }
     private:
-        ProtocolCacheScope mPrevious{};
+        ProtocolCacheScopeView mPrevious;
     };
 
     // Root diagnostics belong to the ring factory reuse domain.

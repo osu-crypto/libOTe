@@ -153,7 +153,7 @@ namespace
         receiver = std::move(originalReceiver);
         LOGVOLE_REQUIRE_FALSE(originalSender.isConfigured());
         LOGVOLE_REQUIRE_EQ(sender.mRootWirePin.mSenderRunId, pinRun);
-        LOGVOLE_REQUIRE_EQ(originalSender.mRootWirePin.mSenderRunId, 0u);
+        LOGVOLE_REQUIRE_EQ(originalSender.mRootWirePin.mSenderRunId, ProtocolCacheRunId{});
         LOGVOLE_REQUIRE_FALSE(originalReceiver.isConfigured());
         LOGVOLE_REQUIRE_EQ(sender.setting(), setting);
         LOGVOLE_REQUIRE_EQ(receiver.setting(), setting);
@@ -272,7 +272,7 @@ namespace
         }
         sender.clear();
         receiver.clear();
-        LOGVOLE_REQUIRE_EQ(sender.mRootWirePin.mSenderRunId, 0u);
+        LOGVOLE_REQUIRE_EQ(sender.mRootWirePin.mSenderRunId, ProtocolCacheRunId{});
         LOGVOLE_REQUIRE_FALSE(sender.mRootWirePin.mRequested);
         LOGVOLE_REQUIRE_FALSE(sender.outputDevice());
         LOGVOLE_REQUIRE_FALSE(receiver.outputDevice());

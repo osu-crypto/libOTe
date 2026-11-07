@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/config.h"
@@ -127,6 +128,7 @@ namespace osuCrypto::LogVole
     class RingContextFactory
     {
         struct Impl;
+        const std::shared_ptr<const ProtocolCacheService> mProtocolService;
         std::unique_ptr<Impl> mImpl;
         const LogVoleExecutionOptions mExecutionOptions;
         friend bool makeRingNttContext(const RingParams&, RingNttContext&,
@@ -137,7 +139,9 @@ namespace osuCrypto::LogVole
             const std::shared_ptr<RingContextFactory>& owner);
         bool publish(RingNttContext& ready);
     public:
-        explicit RingContextFactory(LogVoleExecutionOptions options = {});
+        explicit RingContextFactory(LogVoleExecutionOptions options = {},
+            std::shared_ptr<const ProtocolCacheService> service = {});
+        const std::shared_ptr<const ProtocolCacheService>& protocolService() const noexcept { return mProtocolService; }
         const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
         RootStepProfiler* rootProfiler() const noexcept;
         HostStepProfiler* hostProfiler() const noexcept;

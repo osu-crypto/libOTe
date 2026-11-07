@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
@@ -22,7 +23,7 @@ namespace osuCrypto::LogVole
     {
         std::shared_ptr<WireMemoryPool> makeSetupWireMemory(std::size_t bytes, LogVoleWireOptions options, bool useGpu);
         void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
-            WireMemoryPool* memory, bool cudaOwned, u64 runId);
+            WireMemoryPool* memory, bool cudaOwned, ProtocolCacheRunId runId);
         void deallocateSetupWireBytes(void* pointer, WireMemoryPool* memory) noexcept;
 
         template<typename T> struct SetupWireAllocator
@@ -34,16 +35,17 @@ namespace osuCrypto::LogVole
             using is_always_equal = std::false_type;
             template<typename U> struct rebind { using other = SetupWireAllocator<U>; };
 
+            std::shared_ptr<const ProtocolCacheService> mIdentityService;
             std::shared_ptr<WireMemoryPool> mMemory;
             bool mCudaOwned = false;
-            u64 mRunId = 0;
+            ProtocolCacheRunId mRunId = 0;
 
             SetupWireAllocator() = default;
             explicit SetupWireAllocator(std::shared_ptr<WireMemoryPool> memory,
-                bool cudaOwned = false, u64 runId = 0)
-                : mMemory(std::move(memory)), mCudaOwned(cudaOwned), mRunId(runId) {}
+                bool cudaOwned = false, ProtocolCacheRunId runId = 0)
+                : mIdentityService(runId.serviceOwner()), mMemory(std::move(memory)), mCudaOwned(cudaOwned), mRunId(runId) {}
             template<typename U> SetupWireAllocator(const SetupWireAllocator<U>& other) noexcept
-                : mMemory(other.mMemory), mCudaOwned(other.mCudaOwned), mRunId(other.mRunId) {}
+                : mIdentityService(other.mIdentityService), mMemory(other.mMemory), mCudaOwned(other.mCudaOwned), mRunId(other.mRunId) {}
             SetupWireAllocator select_on_container_copy_construction() const
             { return SetupWireAllocator(mMemory); }
 
@@ -230,7 +232,7 @@ namespace osuCrypto::LogVole
     // Opt-in final Root wire storage is still an ordinary owning Buffer and
     // can be moved into coproto. Only this one reservation asks the allocator
     // for CUDA page-locked pages; a decline returns the usual Buffer storage.
-    Buffer reserveRootCudaWireBuffer(std::size_t bytes, u64 senderRunId,
+    Buffer reserveRootCudaWireBuffer(std::size_t bytes, ProtocolCacheRunId senderRunId,
         bool& cudaOwned, bool recordSelection = true, std::shared_ptr<WireMemoryPool> memory = {},
         LogVoleWireOptions options = {}, HostStepProfiler* profile = nullptr);
     // Shrink the logical wire without reallocating or copying its CUDA-owned
@@ -242,7 +244,8 @@ namespace osuCrypto::LogVole
 
     struct RootWireCudaAllocEvidence
     {
-        u64 mSenderRunId = 0;
+        ProtocolCacheRunId mSenderRunId = 0;
+        std::shared_ptr<const ProtocolCacheService> mIdentityService;
         u64 mWireBytes = 0;
         u64 mAllocationBeginNs = 0;
         u64 mAllocationEndNs = 0;
@@ -262,15 +265,15 @@ namespace osuCrypto::LogVole
         bool mEarlyLaunched = false;
         bool mEarlyAdopted = false;
     };
-    void resetRootWireCudaAllocEvidence(u64 senderRunId,
+    void resetRootWireCudaAllocEvidence(ProtocolCacheRunId senderRunId,
         bool requested) noexcept;
-    void noteRootWireCudaAllocEligibility(u64 senderRunId,
+    void noteRootWireCudaAllocEligibility(ProtocolCacheRunId senderRunId,
         std::size_t wireBytes, bool eligible) noexcept;
-    void noteRootWireCudaEarlyPlan(u64 senderRunId, bool requested,
+    void noteRootWireCudaEarlyPlan(ProtocolCacheRunId senderRunId, bool requested,
         bool eligible, std::size_t forecastBytes, bool launched) noexcept;
-    void noteRootWireCudaEarlyJoin(u64 senderRunId, u64 joinWaitNs,
+    void noteRootWireCudaEarlyJoin(ProtocolCacheRunId senderRunId, u64 joinWaitNs,
         bool adopted) noexcept;
-    void noteRootWireCudaExpectedDownloads(u64 senderRunId,
+    void noteRootWireCudaExpectedDownloads(ProtocolCacheRunId senderRunId,
         const RootOfflineMessage& message);
     RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot() noexcept;
 

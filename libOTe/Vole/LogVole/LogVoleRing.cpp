@@ -787,8 +787,12 @@ namespace osuCrypto::LogVole
         std::shared_ptr<HostStepProfiler> mHostProfiler;
     };
 
-    RingContextFactory::RingContextFactory(LogVoleExecutionOptions options)
-        : mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
+    RingContextFactory::RingContextFactory(LogVoleExecutionOptions options,
+        std::shared_ptr<const ProtocolCacheService> service)
+        : mProtocolService(service ? std::move(service) :
+              currentProtocolCacheScope().mRunId ? currentProtocolCacheScope().mRunId.serviceOwner() :
+              ProtocolCacheService::create()),
+          mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
     {
         if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
         if (mExecutionOptions.mAdvanced.mHostStepProfile)
@@ -813,6 +817,9 @@ namespace osuCrypto::LogVole
     bool RingContextFactory::make(const RingParams& params, RingNttContext& out,
         bool lightweight, const std::shared_ptr<RingContextFactory>& owner)
     {
+        const auto operationId = currentProtocolCacheScope().mRunId;
+        if (operationId.mService && operationId.mService != mProtocolService.get()) return false;
+
         if (!validateRingParams(params))
         {
             return false;
@@ -856,7 +863,7 @@ namespace osuCrypto::LogVole
             const auto primes = productionRingModuli(params);
             built.mParams = params;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner());
+            built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner(), mProtocolService);
 #endif
             auto metadata = std::make_shared<RingModulusMetadata>();
             if (!primes.empty()) metadata->mValues.assign(primes.begin(), primes.end());
@@ -894,8 +901,8 @@ namespace osuCrypto::LogVole
         built.mResourceScope = std::move(resources);
         built.mPublicCache = std::make_shared<PublicPolynomialCache>();
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (!built.mGpuSetup) built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner());
-        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(mExecutionOptions, hostProfilerOwner());
+        if (!built.mGpuSetup) built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner(), mProtocolService);
+        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(mExecutionOptions, hostProfilerOwner(), mProtocolService);
 #endif
         auto shared = std::make_shared<const RingNttContext>(built);
         {
@@ -998,7 +1005,7 @@ namespace osuCrypto::LogVole
         built.mGpuSetup = certificate->setupContext();
         built.mExecutionOptions = built.mGpuSetup->executionOptions();
         built.mHostProfiler = built.mGpuSetup->hostProfilerOwner();
-        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(built.mExecutionOptions, built.mHostProfiler);
+        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(built.mExecutionOptions, built.mHostProfiler, built.mFactory ? built.mFactory->protocolService() : certificate->setupContext()->protocolService());
         built.mResourceScope = {certificate->rawOwnerRole(), certificate->nativeSealBundleOwner(),
             std::make_shared<gpu::GpuTableCache>(built.mExecutionOptions, built.mHostProfiler)};
         metadata->mDynamicGpuCertificate = std::move(certificate);

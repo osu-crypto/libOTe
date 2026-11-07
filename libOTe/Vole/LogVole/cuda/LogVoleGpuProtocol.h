@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 // GPU fast paths for the LogVole online phase.
@@ -48,7 +49,7 @@ namespace osuCrypto::LogVole::gpu
     bool bindReceiverFirstQueryAllocations(
         const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid);
     void bindReceiverFirstQueryOnlineRun(
-        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid, u64 runId);
+        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid, ProtocolCacheRunId runId);
     // Narrow correctness-test observation only; never exposes owned pointers.
     bool receiverFirstQueryAllocationStatus(
         const ReceiverFirstQueryAllocationsPtr& plan,
@@ -185,11 +186,11 @@ namespace osuCrypto::LogVole::gpu
     // producers may publish either owner; ordinary uploads cannot impersonate
     // them, and every consumer checks role/run/device/ordered ring/count.
     bool setupDeltaBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, u64 ownerRunId);
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
     DeviceBatchPtr seedLabelRepResident(const RingNttContext& ctx,
         const DeviceBatch& delta, u32 gamma, u32 alpha, u32 tau);
     bool setupSeedLabelRepBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, u64 ownerRunId);
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
 
     bool rootKPrimeSamplingEnabled(const LogVoleExecutionOptions& options);
     // Direct SEAL-seed replay. Publishes a coefficient-domain, synchronized
@@ -357,22 +358,22 @@ namespace osuCrypto::LogVole::gpu
         std::span<const std::array<u64, 8>> rowSeeds);
     bool rootSecretUniformBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        u64 ownerRunId, bool outputNtt = false);
+        ProtocolCacheRunId ownerRunId, bool outputNtt = false);
     // Separate private top HE key provenance; no public-uniform registry entry.
     DeviceBatchPtr sampleTopSecretUniformToDevice(
         const RingNttContext& ctx,
         std::span<const std::array<u64, 8>> rowSeeds);
     bool topSecretUniformBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        u64 ownerRunId);
+        ProtocolCacheRunId ownerRunId);
     DeviceBatchPtr topSecretSeedLabelRepResident(const RingNttContext& ctx,
         const DeviceBatch& topSecret, u32 alpha, u32 tau);
     DeviceBatchPtr rootHiReplicateResident(const RingNttContext& ctx,
         const DeviceBatch& topSecret, u32 tauHi);
     bool rootHiRepBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, u64 ownerRunId);
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
     bool setupLencInputBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, u64 ownerRunId);
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
 
     // Root top ciphertexts: NTT(noise) - NTT(r1[row])*B[col], with
     // -2^(gadgetLogBase*(gadgetPowerOffset+col))*r2[row] on root B columns.
@@ -495,7 +496,7 @@ namespace osuCrypto::LogVole::gpu
         const RetainedPublicUniform* retainedPublicA = nullptr,
         const DeviceBatch* rootR1Device = nullptr,
         const DeviceBatch* rootSecretDevice = nullptr,
-        u64 rootSecretOwnerRunId = 0,
+        ProtocolCacheRunId rootSecretOwnerRunId = 0,
         bool topSecretDomain = false, CpuBenchmarkState cpuBenchmark = {});
 
     // GPU equivalent of gadgetDecomposeBitsRange{,Centered} for one host input
@@ -829,7 +830,7 @@ namespace osuCrypto::LogVole::gpu
         block* digestHash = nullptr,
         bool recoverNonInteractiveMask = false,
         const DeviceBatchPtr& rootSecretCoeffs = {},
-        u64 rootSecretOwnerRunId = 0);
+        ProtocolCacheRunId rootSecretOwnerRunId = 0);
 
     // Root response preparation. Immutable skRRt caching is on by default; fresh
     // kPrime preupload remains independently opt-in. A false return is a soft miss.

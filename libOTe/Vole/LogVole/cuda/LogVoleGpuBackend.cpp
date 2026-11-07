@@ -318,8 +318,12 @@ namespace osuCrypto::LogVole::gpu
         std::unordered_map<std::thread::id, std::shared_ptr<OwnedGpuStream>> workers;
     };
 
-    GpuSetupContext::GpuSetupContext(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler)
-        : mHostProfiler(options.mAdvanced.mHostStepProfile ? std::move(profiler) : nullptr),
+    GpuSetupContext::GpuSetupContext(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler,
+        std::shared_ptr<const ProtocolCacheService> service)
+        : mProtocolService(service ? std::move(service) :
+              currentProtocolCacheScope().mRunId.serviceOwner() ? currentProtocolCacheScope().mRunId.serviceOwner() :
+              ProtocolCacheService::create()),
+          mHostProfiler(options.mAdvanced.mHostStepProfile ? std::move(profiler) : nullptr),
           mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
     {
         if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
@@ -661,6 +665,7 @@ namespace osuCrypto::LogVole::gpu
             next.mPlainNtt = std::move(plain);
             next.mOwnerRole = ownerScope.mRole;
             next.mOwnerRunId = ownerScope.mRunId;
+            next.mIdentityService = ownerScope.mRunId.serviceOwner();
             out = std::move(next);
             return true;
         }
@@ -939,8 +944,12 @@ namespace osuCrypto::LogVole::gpu
         std::map<Record, Record, std::owner_less<Record>> contexts;
     };
 
-    GpuExecutionContext::GpuExecutionContext(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler)
-        : mHostProfiler(options.mAdvanced.mHostStepProfile ? std::move(profiler) : nullptr),
+    GpuExecutionContext::GpuExecutionContext(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler,
+        std::shared_ptr<const ProtocolCacheService> service)
+        : mProtocolService(service ? std::move(service) :
+              currentProtocolCacheScope().mRunId.serviceOwner() ? currentProtocolCacheScope().mRunId.serviceOwner() :
+              ProtocolCacheService::create()),
+          mHostProfiler(options.mAdvanced.mHostStepProfile ? std::move(profiler) : nullptr),
           mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
     {
         if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
@@ -972,7 +981,9 @@ namespace osuCrypto::LogVole::gpu
     bool bindContextExecution(RingNttContext& ctx,
         const std::shared_ptr<GpuExecutionContext>& execution)
     {
-        if (!execution || execution->executionOptions() != ctx.mExecutionOptions ||
+        if (!execution || !ctx.mFactory ||
+            execution->protocolService() != ctx.mFactory->protocolService() ||
+            execution->executionOptions() != ctx.mExecutionOptions ||
             !validateRingContextMetadata(ctx)) return false;
         if (ctx.mFactoryOwner && ctx.mFactoryOwner->mGpuExecution == execution &&
             ctx.mGpuExecution == execution) return true;

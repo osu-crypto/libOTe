@@ -27,7 +27,7 @@
 namespace osuCrypto::LogVole::gpu
 {
     bool setupSeedLabelRepBatchMatches(const RingNttContext&,
-        const DeviceBatch&, std::size_t expectedCount, u64 ownerRunId);
+        const DeviceBatch&, std::size_t expectedCount, ProtocolCacheRunId ownerRunId);
 }
 #endif
 
@@ -407,7 +407,7 @@ namespace osuCrypto::LogVole
         if (!gpu::bindContextExecution(ctx, input.mGpuExecution
                                                 ? input.mGpuExecution
                                                 : std::make_shared<gpu::GpuExecutionContext>(
-                                                      ctx.mExecutionOptions, ctx.mHostProfiler)))
+                                                      ctx.mExecutionOptions, ctx.mHostProfiler, ctx.mFactory->protocolService())))
             co_return false;
         if (input.mFixedSk1Device &&
             (!gpu::topSecretUniformBatchMatches(ctx, *input.mFixedSk1Device, input.mParams.mTau,
@@ -717,7 +717,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx, input.mGpuExecution ? input.mGpuExecution :
-                std::make_shared<gpu::GpuExecutionContext>(ctx.mExecutionOptions, ctx.mHostProfiler))) return false;
+                std::make_shared<gpu::GpuExecutionContext>(ctx.mExecutionOptions, ctx.mHostProfiler, ctx.mFactory->protocolService()))) return false;
 #endif
 
         ShrinkExpandReceiverState next{};

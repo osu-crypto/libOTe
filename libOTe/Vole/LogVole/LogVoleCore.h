@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
@@ -123,7 +124,7 @@ namespace osuCrypto::LogVole
         // Internal CI-VOLE offline run for a retained delta. RingSender uses
         // this only around synchronous setup/encoding; zero keeps direct
         // callers' existing scope behavior.
-        u64 mSenderOwnerRunId = 0;
+        ProtocolCacheRunId mSenderOwnerRunId = 0;
         bool mLeafInputsAreGadget = false;
         // Opt in to immutable shared host backing for internal recursive GPU
         // states after their device cache is complete. The default preserves

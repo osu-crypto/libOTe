@@ -98,6 +98,7 @@ namespace osuCrypto::LogVole
             }
 
             auto candidate = std::make_shared<PublicACacheEntry>();
+            candidate->mIdentityService = key.mRunId.serviceOwner();
 #if defined(ENABLE_LOGVOLE_CUDA)
             (void)retainUniformPolyBatchFromNonce(ctx, 0xA11ACE5Eull,
                 0xA110CA7Aull, mu, false, candidate->mDevice);
@@ -248,7 +249,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<const LazyRingTensorHostState> *deferredCiphertext,
         std::shared_ptr<const LazyLencRandomizerState> randomizers, const gpu::DeviceBatch *rootR1Device,
         const LazyRootErrorHostState *rootR1Host, const gpu::DeviceBatch *rootSecretDevice,
-        const LazyRootSecretHostState *rootSecretHost, u64 rootSecretOwnerRunId, bool topSecretDomain,
+        const LazyRootSecretHostState *rootSecretHost, ProtocolCacheRunId rootSecretOwnerRunId, bool topSecretDomain,
         LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark = {},
         ProtocolCacheScope setupScope = currentProtocolCacheScope())
     {
@@ -774,7 +775,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<const LazyRingTensorHostState> *deferredCiphertext,
         std::shared_ptr<const LazyLencRandomizerState> randomizers, const gpu::DeviceBatch *rootR1Device,
         const LazyRootErrorHostState *rootR1Host, const gpu::DeviceBatch *rootSecretDevice,
-        const LazyRootSecretHostState *rootSecretHost, u64 rootSecretOwnerRunId, bool topSecretDomain,
+        const LazyRootSecretHostState *rootSecretHost, ProtocolCacheRunId rootSecretOwnerRunId, bool topSecretDomain,
         LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;

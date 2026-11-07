@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -20,12 +21,12 @@ namespace osuCrypto::LogVole
         WireMemoryPool(const WireMemoryPool&) = delete;
         WireMemoryPool& operator=(const WireMemoryPool&) = delete;
         void* allocate(std::size_t bytes, std::size_t alignment,
-            bool cudaOwned = false, std::uint64_t runId = 0) noexcept;
+            bool cudaOwned = false, ProtocolCacheRunId runId = 0) noexcept;
         bool release(void* pointer) noexcept;
         bool contains(const void* pointer, std::size_t bytes) const noexcept;
         bool isPinned(const void* pointer, std::size_t bytes) const noexcept;
         bool isCudaOwned(const void* pointer, std::size_t bytes) const noexcept;
-        std::uint64_t ownerRunId(const void* pointer, std::size_t bytes) const noexcept;
+        ProtocolCacheRunId ownerRunId(const void* pointer, std::size_t bytes) const noexcept;
         // An unknown range or a benign registration decline succeeds with
         // pinned=false, so the caller can use bounded transfer staging.
         bool pin(const void* pointer, std::size_t bytes, bool& pinned) noexcept;

@@ -2054,7 +2054,7 @@ namespace osuCrypto
     {
         auto factory = std::make_shared<RingContextFactory>(mVoleOptions);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner());
+        auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
 
         mCircuit = std::move(circuit);
@@ -2214,7 +2214,7 @@ namespace osuCrypto
     {
         auto factory = std::make_shared<RingContextFactory>(mVoleOptions);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner());
+        auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
 
         LogVole::ScopedProtocolCacheScope cacheScope(
@@ -2395,7 +2395,7 @@ namespace osuCrypto
     {
         auto factory = std::make_shared<RingContextFactory>(mVoleOptions);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner());
+        auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
 
         if (!validateZkMatMulStatement(statement))
@@ -2518,7 +2518,7 @@ namespace osuCrypto
     {
         auto factory = std::make_shared<RingContextFactory>(mVoleOptions);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner());
+        auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
 
         if (!validateZkMatMulStatement(statement))

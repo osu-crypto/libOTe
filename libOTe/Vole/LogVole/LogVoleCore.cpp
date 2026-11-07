@@ -2233,10 +2233,10 @@ namespace osuCrypto::LogVole
         ReplicatedTopSecretHostState(RingNttContext ctx,
             gpu::DeviceBatchPtr device,
             std::shared_ptr<const LazyRootSecretHostState> keyHost,
-            u32 alpha, u32 tau, u64 ownerRunId, bool rootHi)
+            u32 alpha, u32 tau, ProtocolCacheRunId ownerRunId, bool rootHi)
             : mCtx(std::move(ctx)), mDevice(std::move(device)),
               mKeyHost(std::move(keyHost)), mAlpha(alpha), mTau(tau),
-              mOwnerRunId(ownerRunId), mRootHi(rootHi) {}
+              mOwnerRunId(ownerRunId), mIdentityService(ownerRunId.serviceOwner()), mRootHi(rootHi) {}
         std::size_t count() const override
         {
             return static_cast<std::size_t>(mRootHi ? 1u : mAlpha) *
@@ -2289,7 +2289,8 @@ namespace osuCrypto::LogVole
         std::shared_ptr<const LazyRootSecretHostState> mKeyHost;
         u32 mAlpha;
         u32 mTau;
-        u64 mOwnerRunId;
+        ProtocolCacheRunId mOwnerRunId;
+        std::shared_ptr<const ProtocolCacheService> mIdentityService;
         bool mRootHi;
         mutable std::once_flag mOnce;
         mutable std::vector<RnsPoly> mHost;
@@ -2341,7 +2342,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<gpu::DeviceBatch> residentRootSkHi;
         std::shared_ptr<const LazySeedLabelHostState> lazyRootSkHi;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const u64 topOwnerRunId = state.mShrinkExpandState.mTopSk1OwnerRunId;
+        const ProtocolCacheRunId topOwnerRunId = state.mShrinkExpandState.mTopSk1OwnerRunId;
         if (residentTopSk1)
         {
             if (!gpu::topSecretUniformBatchMatches(ctx, *state.mShrinkExpandState.mTopSk1Device, tauHi,
@@ -2489,7 +2490,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> skRRt;
         std::shared_ptr<const LazyRootSecretHostState> lazySkRRt;
         std::shared_ptr<gpu::DeviceBatch> residentSkRRt;
-        const u64 skRRtOwnerRunId = currentProtocolCacheScope().mRunId;
+        const ProtocolCacheRunId skRRtOwnerRunId = currentProtocolCacheScope().mRunId;
         {
             HostStep step(hostProfiler(ctx), "setup sender: root skRRt sampling", &cpuBenchmark);
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -4627,10 +4628,10 @@ namespace osuCrypto::LogVole
         public:
             ResidentSeedLabelHostState(RingNttContext ctx,
                 gpu::DeviceBatchPtr device, u32 gamma, u32 alpha, u32 tau,
-                u64 ownerRunId, std::function<bool(RnsPoly&)> deltaFallback)
+                ProtocolCacheRunId ownerRunId, std::function<bool(RnsPoly&)> deltaFallback)
                 : mCtx(std::move(ctx)), mDevice(std::move(device)),
                   mGamma(gamma), mAlpha(alpha), mTau(tau),
-                  mOwnerRunId(ownerRunId),
+                  mOwnerRunId(ownerRunId), mIdentityService(ownerRunId.serviceOwner()),
                   mDeltaFallback(std::move(deltaFallback)) {}
 
             std::size_t count() const override
@@ -4685,7 +4686,8 @@ namespace osuCrypto::LogVole
             u32 mGamma;
             u32 mAlpha;
             u32 mTau;
-            u64 mOwnerRunId;
+            ProtocolCacheRunId mOwnerRunId;
+            std::shared_ptr<const ProtocolCacheService> mIdentityService;
             std::function<bool(RnsPoly&)> mDeltaFallback;
             mutable std::once_flag mOnce;
             mutable std::vector<RnsPoly> mHost;
@@ -4782,12 +4784,12 @@ namespace osuCrypto::LogVole
     #if defined(ENABLE_LOGVOLE_CUDA)
             if (!execution)
                 execution = std::make_shared<gpu::GpuExecutionContext>(ringOwner->mExecutionOptions,
-                                                                       ringOwner->mHostProfiler);
+                                                                       ringOwner->mHostProfiler, ringOwner->mFactory->protocolService());
     #endif
             std::vector<RnsPoly> eagerSk1 = input.mSk1;
             std::shared_ptr<gpu::DeviceBatch> residentS;
             std::shared_ptr<const LazySeedLabelHostState> lazyS;
-            const u64 deltaOwnerRunId = currentProtocolCacheScope().mRunId;
+            const ProtocolCacheRunId deltaOwnerRunId = currentProtocolCacheScope().mRunId;
     #if defined(ENABLE_LOGVOLE_CUDA)
             RingNttContext deltaCtx{};
             const bool chainDecline = ringOwner->mExecutionOptions.mAdvanced.mProtocol.mFailures.mDeltaChain;
@@ -5069,7 +5071,7 @@ namespace osuCrypto::LogVole
             auto cpuScratch = input.mCpuScratch ? input.mCpuScratch :
                 std::make_shared<detail::ShrinkExpandScratch>();
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (!execution) execution = std::make_shared<gpu::GpuExecutionContext>(ringOwner->mExecutionOptions, ringOwner->mHostProfiler);
+            if (!execution) execution = std::make_shared<gpu::GpuExecutionContext>(ringOwner->mExecutionOptions, ringOwner->mHostProfiler, ringOwner->mFactory->protocolService());
 #endif
             u32 tauHi = 0;
             u32 muHi = 0;
@@ -5209,7 +5211,7 @@ namespace osuCrypto::LogVole
         if (currentProtocolCacheScope().mRole == ProtocolCacheRole::Receiver)
             return false;
         if (!state.mShrinkExpandState.mTopSk1Device) return true;
-        const u64 runId = state.mShrinkExpandState.mTopSk1OwnerRunId;
+        const ProtocolCacheRunId runId = state.mShrinkExpandState.mTopSk1OwnerRunId;
         if (!runId) return false;
         ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, runId);
         return materializeTopSk1HostViewsImpl(state);

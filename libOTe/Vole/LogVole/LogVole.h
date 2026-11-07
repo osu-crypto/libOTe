@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Tools/Coproto.h"
@@ -337,7 +338,9 @@ namespace osuCrypto
         u64 requestSize() const { return mRequestSize; }
         u32 numThreads() const { return mNumThreads; }
         // Diagnostic evidence for the SEAL context selected at construction.
-        u64 configureCacheRunId() const { return mConfigureCacheRunId; }
+        // Numeric projection is diagnostic only, not globally unique.
+        u64 configureCacheRunId() const { return mConfigureCacheRunId.mValue; }
+        LogVole::ProtocolCacheRunId configureCacheIdentity() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }
         LogVole::CivoleSetting setting() const { return mSetting; }
         LogVole::OnlineMode mode() const { return mParams.mLogVole.mOnlineMode; }
@@ -382,7 +385,7 @@ namespace osuCrypto
 
         // Keep construction-time tables reusable until clear().
         std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
-        u64 mConfigureCacheRunId = 0;
+        LogVole::ProtocolCacheRunId mConfigureCacheRunId = 0;
         bool mNativeSealBundleAtConfigure = false;
     };
 
@@ -454,7 +457,9 @@ namespace osuCrypto
         u64 requestSize() const { return mRequestSize; }
         u32 numThreads() const { return mNumThreads; }
         // Diagnostic evidence for the SEAL context selected at construction.
-        u64 configureCacheRunId() const { return mConfigureCacheRunId; }
+        // Numeric projection is diagnostic only, not globally unique.
+        u64 configureCacheRunId() const { return mConfigureCacheRunId.mValue; }
+        LogVole::ProtocolCacheRunId configureCacheIdentity() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }
         LogVole::CivoleSetting setting() const { return mSetting; }
         LogVole::OnlineMode mode() const { return mParams.mLogVole.mOnlineMode; }
@@ -493,7 +498,7 @@ namespace osuCrypto
 
         // Keep construction-time tables reusable until clear().
         std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
-        u64 mConfigureCacheRunId = 0;
+        LogVole::ProtocolCacheRunId mConfigureCacheRunId = 0;
         bool mNativeSealBundleAtConfigure = false;
     };
 }

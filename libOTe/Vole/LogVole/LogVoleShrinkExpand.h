@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
@@ -26,7 +27,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> mFixedSk1;
         std::shared_ptr<const gpu::DeviceBatch> mFixedSk1Device;
         std::shared_ptr<const LazyRootSecretHostState> mLazyFixedSk1;
-        u64 mFixedSk1OwnerRunId = 0;
+        ProtocolCacheRunId mFixedSk1OwnerRunId = 0;
         // Only selected internal transport may defer its private top key.
         bool mDeferTopSk1Host = false;
         // Explicit internal transport opt-in; ordinary public setup stays eager.

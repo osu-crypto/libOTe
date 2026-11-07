@@ -162,8 +162,9 @@ namespace osuCrypto
         const auto threads = mOptions.mNumThreads;
         const auto setting = mOptions.mSetting;
         const auto inheritedRun = currentProtocolCacheScope().mRunId;
-        const auto configureRun = inheritedRun ? inheritedRun :
-            allocateProtocolCacheRunId();
+        const auto identityService = inheritedRun ? inheritedRun.serviceOwner() :
+            ProtocolCacheService::create();
+        const auto configureRun = inheritedRun ? inheritedRun : identityService->allocate();
         ScopedProtocolCacheScope roleScope(
             ProtocolCacheRole::Sender, configureRun);
         bool nativeBundleCommitted = false;
@@ -253,8 +254,9 @@ namespace osuCrypto
         const auto threads = mOptions.mNumThreads;
         const auto setting = mOptions.mSetting;
         const auto inheritedRun = currentProtocolCacheScope().mRunId;
-        const auto configureRun = inheritedRun ? inheritedRun :
-            allocateProtocolCacheRunId();
+        const auto identityService = inheritedRun ? inheritedRun.serviceOwner() :
+            ProtocolCacheService::create();
+        const auto configureRun = inheritedRun ? inheritedRun : identityService->allocate();
         ScopedProtocolCacheScope roleScope(
             ProtocolCacheRole::Receiver, configureRun);
         bool nativeBundleCommitted = false;

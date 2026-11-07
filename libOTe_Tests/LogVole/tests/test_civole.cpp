@@ -853,6 +853,7 @@ void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& c
 
 void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
     tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
@@ -985,7 +986,7 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
                 LOGVOLE_REQUIRE_TRUE(gpu::receiverFirstQueryAllocationStatus(
                     plan, ready, wrapSelected, nodesSelected));
                 LOGVOLE_REQUIRE_TRUE(ready && wrapSelected && nodesSelected);
-                ScopedProtocolCacheScope receiverRole(ProtocolCacheRole::Receiver, query);
+                ScopedProtocolCacheScope receiverRole(ProtocolCacheRole::Receiver, receiver.mOfflineState.mCrtFactoryOwner->mFactory->ringFactory()->protocolService()->qualify(query));
                 LOGVOLE_EXPECT_FALSE(gpu::bindReceiverFirstQueryAllocations(
                     plan, &sender.mOfflineState, query));
             }

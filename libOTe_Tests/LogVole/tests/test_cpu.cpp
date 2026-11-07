@@ -6,6 +6,7 @@
 #include "libOTe/Vole/LogVole/LogVoleCpuZk.h"
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
+#include "libOTe/Vole/LogVole/LogVolePublicCache.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
@@ -155,6 +156,7 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
 
 void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
 {
+    const auto identityService = ProtocolCacheService::create();
     tests_libOTe::logvole_test::SetupResources setupResources;
     LogVole::detail::CpuRowScratch scratch;
     CpuBenchmarkContext telemetry;
@@ -166,9 +168,9 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     {
         telemetry.reset();
         std::array<unsigned, 7> visits{};
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, 731);
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, identityService->qualify(731));
         LOGVOLE_REQUIRE_TRUE(scratch.runBulk(visits.size(), allowance, [&](std::size_t i, CpuBenchmarkState& worker) {
-                LOGVOLE_REQUIRE_EQ(currentProtocolCacheScope().mRunId, 731u);
+                LOGVOLE_REQUIRE_EQ(currentProtocolCacheScope().mRunId, identityService->qualify(731u));
                 LOGVOLE_REQUIRE_TRUE(worker.mContext == &telemetry);
                 // Serial children borrow the partition, without another pool
                 // or double-counting the active worker.
@@ -302,7 +304,7 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     std::fill(setupResources.results.begin(), setupResources.results.end(), u8{0xA5});
     macoro::task<bool> pending;
     {
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, 812);
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, identityService->qualify(812));
         pending = samplePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
             lazyNoise, lazyDevice, 3.2, 19.2, seeds, ctx, 3, active, benchmark);
     }
@@ -1779,6 +1781,7 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
 
 void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
     tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
@@ -1798,7 +1801,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
     // of the supported interval. CPU SEAL is the independent oracle here.
     for (auto role : {ProtocolCacheRole::Sender, ProtocolCacheRole::Receiver})
     {
-        ScopedProtocolCacheScope scope(role, allocateProtocolCacheRunId());
+        ScopedProtocolCacheScope scope(role, identityService->allocate());
         if (!gpu::available()) continue; // explicit per-role GPU ablation
         gpu::GpuExecutionContext constantsExecution;
         auto& constantsStream = constantsExecution.mainStream();
@@ -1873,7 +1876,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
         if (width == 7 && depth == 3)
         {
             ScopedProtocolCacheScope senderScope(
-                ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+                ProtocolCacheRole::Sender, identityService->allocate());
             // Role ablations may intentionally disable the verifier's GPU.
             if (gpu::available())
             for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
@@ -2225,6 +2228,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 
 void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
@@ -3014,6 +3018,112 @@ void LogVole_Cpu_ZkVectorMatchesReference(const oc::CLP&)
             }
         }
     }
+}
+
+void LogVole_Cpu_ProtocolIdentityService(const oc::CLP&)
+{
+    const auto first = ProtocolCacheService::create(), second = ProtocolCacheService::create();
+    const auto a = first->allocate(), b = second->allocate(), next = first->allocate();
+    LOGVOLE_REQUIRE_EQ(a.mValue, 1u);
+    LOGVOLE_REQUIRE_EQ(b.mValue, 1u);
+    LOGVOLE_REQUIRE_FALSE(a == b);
+    LOGVOLE_REQUIRE_FALSE(a == next);
+    LOGVOLE_REQUIRE_TRUE(first->qualify(0) == ProtocolCacheRunId{});
+    LOGVOLE_REQUIRE_EQ(first->qualify(0).hash(), ProtocolCacheRunId{}.hash());
+    ProtocolCacheScope sender(a, ProtocolCacheRole::Sender), receiver(next, ProtocolCacheRole::Receiver);
+    LOGVOLE_REQUIRE_TRUE(sender.mServiceOwner == receiver.mServiceOwner);
+    PublicPolynomialCache::Key ka{}, kb{};
+    ka.mRunId = a; kb.mRunId = b;
+    ka.mRole = kb.mRole = ProtocolCacheRole::Sender;
+    LOGVOLE_REQUIRE_FALSE(ka == kb);
+    auto otherRole = ka;
+    otherRole.mRole = ProtocolCacheRole::Receiver;
+    LOGVOLE_REQUIRE_FALSE(ka == otherRole);
+    std::unordered_map<PublicPolynomialCache::Key, int, PublicPolynomialCache::Hash> keys;
+    keys.emplace(ka, 1); keys.emplace(kb, 2); keys.emplace(otherRole, 3);
+    LOGVOLE_REQUIRE_EQ(keys.size(), 3u);
+    std::weak_ptr<const ProtocolCacheService> retainedWeak;
+    auto retained = std::make_shared<PublicPolynomialCache::Entry>();
+    {
+        const auto service = ProtocolCacheService::create();
+        retainedWeak = service;
+        retained->mIdentityService = service->allocate().serviceOwner();
+    }
+    LOGVOLE_REQUIRE_FALSE(retainedWeak.expired());
+    auto moved = std::move(retained);
+    LOGVOLE_REQUIRE_FALSE(retainedWeak.expired());
+    moved.reset();
+    LOGVOLE_REQUIRE_TRUE(retainedWeak.expired());
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(1);
+    auto operation = [&](ProtocolCacheScope context) -> macoro::task<bool> {
+        co_await executor.schedule();
+        ScopedProtocolCacheScope scope(context);
+        const auto observed = currentProtocolCacheScope();
+        co_return observed.mRunId == context.mRunId &&
+            observed.mRole == ProtocolCacheRole::Receiver && context.mServiceOwner != nullptr;
+    };
+    macoro::task<bool> pending;
+    std::weak_ptr<const ProtocolCacheService> pendingWeak;
+    {
+        const auto service = ProtocolCacheService::create();
+        pendingWeak = service;
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, service->allocate());
+        pending = operation(currentProtocolCacheScope());
+    }
+    // Context is captured before lazy start and independently retains the
+    // service after both the originating scope and caller owner disappear.
+    LOGVOLE_REQUIRE_FALSE(pendingWeak.expired());
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(std::move(pending)));
+    pending = {}; // Completed task frames retain their parameters until destruction.
+    LOGVOLE_REQUIRE_TRUE(pendingWeak.expired());
+    RingParams params;
+    params.mPolyModulusDegree = 1024;
+    assignValues<int>(params.mCoeffModulusBits, {30, 30});
+    auto factory = std::make_shared<RingContextFactory>(LogVoleExecutionOptions{}, first);
+    RingNttContext ring;
+    {
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, a);
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ring, factory));
+    }
+    {
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, b);
+        RingNttContext rejected;
+        LOGVOLE_REQUIRE_FALSE(makeRingNttContext(params, rejected, factory));
+    }
+    PRNG samplingRandom(toBlock(0x1d, 1));
+    std::vector<RnsPoly> sampled;
+    std::array<u8, 2> results{};
+    macoro::task<bool> sampling;
+    std::weak_ptr<const ProtocolCacheService> samplingWeak;
+    {
+        const auto samplingService = ProtocolCacheService::create();
+        samplingWeak = samplingService;
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, samplingService->allocate());
+        sampling = sampleRootErrorBatch(executor, results, ring, 2, samplingRandom,
+            3.2, 16, false, sampled);
+    }
+    LOGVOLE_REQUIRE_TRUE(sampled.empty());
+    LOGVOLE_REQUIRE_FALSE(samplingWeak.expired());
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(std::move(sampling)));
+    LOGVOLE_REQUIRE_EQ(sampled.size(), 2u);
+    sampling = {};
+    LOGVOLE_REQUIRE_TRUE(samplingWeak.expired());
+#if defined(ENABLE_LOGVOLE_CUDA)
+    auto same = std::make_shared<gpu::GpuExecutionContext>(LogVoleExecutionOptions{}, nullptr, first);
+    auto foreign = std::make_shared<gpu::GpuExecutionContext>(LogVoleExecutionOptions{}, nullptr, second);
+    LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(ring, same));
+    LOGVOLE_REQUIRE_FALSE(gpu::bindContextExecution(ring, foreign));
+#endif
+    std::array<ProtocolCacheRunId, 128> allocated;
+    std::thread left([&] { for (std::size_t i = 0; i != 64; ++i) allocated[i] = first->allocate(); });
+    std::thread right([&] { for (std::size_t i = 64; i != 128; ++i) allocated[i] = first->allocate(); });
+    left.join(); right.join();
+    std::vector<u64> numbers;
+    for (auto id : allocated) { LOGVOLE_REQUIRE_TRUE(id.mService == first.get()); numbers.push_back(id.mValue); }
+    std::sort(numbers.begin(), numbers.end());
+    LOGVOLE_REQUIRE_TRUE(std::adjacent_find(numbers.begin(), numbers.end()) == numbers.end());
 }
 
 void LogVole_Cpu_AsyncMatMulProof(const oc::CLP& cmd)

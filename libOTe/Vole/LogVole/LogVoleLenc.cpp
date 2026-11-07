@@ -201,6 +201,7 @@ namespace osuCrypto::LogVole
             }
 
             auto candidate = std::make_shared<PublicBCacheEntry>();
+            candidate->mIdentityService = key.mRunId.serviceOwner();
 #if defined(ENABLE_LOGVOLE_CUDA)
             (void)retainUniformPolyBatchFromNonce(ctx, 0xC0DEC0DEull,
                 0x1EEC0DEu, 2u * tau, true, candidate->mDevice);

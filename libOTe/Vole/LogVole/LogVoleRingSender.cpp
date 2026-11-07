@@ -45,13 +45,13 @@ namespace osuCrypto::LogVole
             u64 mCpuNs = 0;
             bool mPinned = false;
 
-            bool start(const Buffer& wire, u64 runId, int device,
+            bool start(const Buffer& wire, ProtocolCacheRunId runId, int device,
                 CpuBenchmarkContext* benchmarkContext, HostStepProfiler* profile)
             {
                 const auto view = wire.wireView();
                 try
                 {
-                    mThread = std::thread([this, view, runId, device,
+                    mThread = std::thread([this, view, runId, identityService = runId.serviceOwner(), device,
                         benchmarkContext, profile] {
                         try
                         {
@@ -98,12 +98,12 @@ namespace osuCrypto::LogVole
             Buffer mReserved;
             bool mCudaOwned = false;
 
-            bool start(std::size_t forecastBytes, u64 runId, int device,
+            bool start(std::size_t forecastBytes, ProtocolCacheRunId runId, int device,
                 CpuBenchmarkContext* benchmarkContext, const LogVoleWireOptions& options, HostStepProfiler* profile)
             {
                 try
                 {
-                    mThread = std::thread([this, forecastBytes, runId, device,
+                    mThread = std::thread([this, forecastBytes, runId, identityService = runId.serviceOwner(), device,
                         benchmarkContext, &options, profile] {
                         try
                         {
@@ -196,13 +196,14 @@ namespace osuCrypto::LogVole
             RootWirePinWorker mWorker;
 #endif
 
-            RootWirePinPlan(u64 senderRunId, bool requested,
+            RootWirePinPlan(ProtocolCacheRunId senderRunId, bool requested,
                 bool cudaRequested,
                 RootOfflineMessage* root, bool ownedSend, const LogVoleWireOptions& options, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
                 : mRoot(root), mWireOptions(options), mProfile(profile), mCpuBenchmark(cpuBenchmark),
                   mCudaRequested(cudaRequested), mOwnedSend(ownedSend)
             {
                 mEvidence.mSenderRunId = senderRunId;
+                mEvidence.mIdentityService = senderRunId.serviceOwner();
                 mEvidence.mRequested = requested;
             }
 
@@ -358,7 +359,7 @@ namespace osuCrypto::LogVole
             Socket& sock,
             bool isTopLevel,
             bool hasReusableState,
-            u64 senderRunId,
+            ProtocolCacheRunId senderRunId,
             RootWirePinPlan& rootPin, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {})
         {
             RecursiveMode mode{};
@@ -730,9 +731,10 @@ namespace osuCrypto::LogVole
                                            ProtocolCacheScope cacheScope)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
-        const u64 senderRunId = input.mSenderOwnerRunId ? input.mSenderOwnerRunId : cacheScope.mRunId;
+        const ProtocolCacheRunId senderRunId = input.mSenderOwnerRunId ? input.mSenderOwnerRunId : cacheScope.mRunId;
         rootWirePin = {};
         rootWirePin.mSenderRunId = senderRunId;
+        rootWirePin.mIdentityService = senderRunId.serviceOwner();
         const auto &encoding = input.mParams.mShrinkExpand.mTransport.mEncoding;
         const bool rootPinRequested = encoding.mRootWirePinOverlap;
         const bool rootCudaRequested = encoding.mRootWireCudaAlloc;
@@ -833,10 +835,14 @@ namespace osuCrypto::LogVole
         SenderState& state, const SenderOnlineOptions& options,
         SenderOnlineOutput& output, PRNG& prng, Socket& sock, ProtocolCacheScope cacheScope)
     {
+        if (!state.mShrinkExpandState.mRingFactoryOwner ||
+            !state.mShrinkExpandState.mRingFactoryOwner->mFactory)
+            throw std::runtime_error("LogVole online state has no identity resource owner");
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mShrinkExpandState.mRingFactoryOwner)};
         if (cacheScope.mRunId == 0)
         {
-            cacheScope.mRunId = allocateProtocolCacheRunId();
+            cacheScope = ProtocolCacheScope(state.mShrinkExpandState.mRingFactoryOwner->mFactory->protocolService()->allocate(),
+                ProtocolCacheRole::Sender);
         }
         cacheScope.mRole = ProtocolCacheRole::Sender;
         HostStep onlineTotal(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: online TOTAL", &cpuBenchmark);

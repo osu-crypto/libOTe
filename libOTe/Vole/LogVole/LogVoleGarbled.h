@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 
 #include "libOTe/Vole/LogVole/LogVole.h"
 
@@ -67,7 +68,9 @@ namespace osuCrypto
             LogVole::GarbledLabelBatch& zeroLabels, PRNG& prng, Socket& sock);
 
         u64 modulus() const { return mModulus; }
-        u64 configureCacheRunId() const { return mConfigureCacheRunId; }
+        // Numeric projection is diagnostic only, not globally unique.
+        u64 configureCacheRunId() const { return mConfigureCacheRunId.mValue; }
+        LogVole::ProtocolCacheRunId configureCacheIdentity() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }
         const LogVole::GarbledLabel& deltas() const;
         const LogVole::GarbledLabelLayout& layout() const { return mLayout; }
@@ -84,7 +87,7 @@ namespace osuCrypto
         LogVole::GarbledLabelLayout mLayout;
         LogVole::GarbledLabel mDeltas{};
         u64 mModulus = 0;
-        u64 mConfigureCacheRunId = 0;
+        LogVole::ProtocolCacheRunId mConfigureCacheRunId = 0;
         bool mNativeSealBundleAtConfigure = false;
         LogVole::CivoleSid mNextSid = 0;
         bool mHasOffline = false;
@@ -111,7 +114,9 @@ namespace osuCrypto
             std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers, span<const u64> x, LogVole::GarbledLabelBatch& labels,
             PRNG& prng, Socket& sock);
         u64 modulus() const { return mModulus; }
-        u64 configureCacheRunId() const { return mConfigureCacheRunId; }
+        // Numeric projection is diagnostic only, not globally unique.
+        u64 configureCacheRunId() const { return mConfigureCacheRunId.mValue; }
+        LogVole::ProtocolCacheRunId configureCacheIdentity() const { return mConfigureCacheRunId; }
         bool nativeSealBundleAtConfigure() const { return mNativeSealBundleAtConfigure; }
         const LogVole::GarbledLabelLayout& layout() const { return mLayout; }
 
@@ -122,7 +127,7 @@ namespace osuCrypto
         LogVole::CivoleReceiverState mState;
         LogVole::GarbledLabelLayout mLayout;
         u64 mModulus = 0;
-        u64 mConfigureCacheRunId = 0;
+        LogVole::ProtocolCacheRunId mConfigureCacheRunId = 0;
         bool mNativeSealBundleAtConfigure = false;
         LogVole::CivoleSid mNextSid = 0;
         bool mHasOffline = false;

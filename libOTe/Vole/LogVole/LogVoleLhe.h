@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
@@ -72,7 +73,7 @@ namespace osuCrypto::LogVole
         const LazyRootErrorHostState* rootR1Host = nullptr,
         const gpu::DeviceBatch* rootSecretDevice = nullptr,
         const LazyRootSecretHostState* rootSecretHost = nullptr,
-        u64 rootSecretOwnerRunId = 0,
+        ProtocolCacheRunId rootSecretOwnerRunId = 0,
         bool topSecretDomain = false,
         LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 

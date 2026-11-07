@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 // Host-side glue between the LogVole CPU data structures and the CUDA kernels.
@@ -56,16 +57,19 @@ namespace osuCrypto::LogVole::gpu
     {
     public:
         explicit GpuSetupContext(LogVoleExecutionOptions options = {},
-            std::shared_ptr<HostStepProfiler> profiler = {});
+            std::shared_ptr<HostStepProfiler> profiler = {},
+            std::shared_ptr<const ProtocolCacheService> service = {});
         const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
         HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
         const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
+        const std::shared_ptr<const ProtocolCacheService>& protocolService() const noexcept { return mProtocolService; }
         ~GpuSetupContext();
         GpuSetupContext(const GpuSetupContext&) = delete;
         GpuSetupContext& operator=(const GpuSetupContext&) = delete;
         std::shared_ptr<OwnedGpuStream> stream();
     private:
         struct Impl;
+        const std::shared_ptr<const ProtocolCacheService> mProtocolService;
         std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::unique_ptr<Impl> mImpl;
         const LogVoleExecutionOptions mExecutionOptions;
@@ -209,10 +213,12 @@ namespace osuCrypto::LogVole::gpu
     {
     public:
         explicit GpuExecutionContext(LogVoleExecutionOptions options = {},
-            std::shared_ptr<HostStepProfiler> profiler = {});
+            std::shared_ptr<HostStepProfiler> profiler = {},
+            std::shared_ptr<const ProtocolCacheService> service = {});
         const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
         HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
         const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
+        const std::shared_ptr<const ProtocolCacheService>& protocolService() const noexcept { return mProtocolService; }
         ~GpuExecutionContext();
         GpuExecutionContext(const GpuExecutionContext&) = delete;
         GpuExecutionContext& operator=(const GpuExecutionContext&) = delete;
@@ -226,6 +232,7 @@ namespace osuCrypto::LogVole::gpu
         enum class Lane { Main, Sample, Readback };
         GpuStream& stream(Lane lane);
         struct Impl;
+        const std::shared_ptr<const ProtocolCacheService> mProtocolService;
         std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::unique_ptr<Impl> mImpl;
         const LogVoleExecutionOptions mExecutionOptions;
@@ -528,7 +535,8 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<GpuRing> mRing;
         std::shared_ptr<GpuPlainNtt> mPlainNtt;
         ProtocolCacheRole mOwnerRole = ProtocolCacheRole::Unspecified;
-        u64 mOwnerRunId = 0;
+        ProtocolCacheRunId mOwnerRunId = 0;
+        std::shared_ptr<const ProtocolCacheService> mIdentityService;
     };
 
     // Device array of `count` polynomials laid out exactly like a

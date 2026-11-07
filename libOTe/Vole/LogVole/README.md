@@ -213,14 +213,14 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **83%** of the agreed ownership/globals refactor,
+Estimated overall completion: **84%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
 This inventory describes the committed tree. A migrated synchronous wrapper
 is not a completed async migration.
 The original 216-declaration globals snapshot remains in the local review
-artifacts; the current scan finds **26 runtime global/static/TLS declarations**.
+artifacts; the current scan finds **25 runtime global/static/TLS declarations**.
 Counts cover source branches on both platforms, not fields within objects or
 template instantiations. Compile-time constants and the five literal CUDA
 tables are excluded. The scanned LogVole library, tests, and frontend example
@@ -246,6 +246,7 @@ contain no environment reads.
 | CPU output unwrapping | Sender key release and receiver MAC output await direct `bulk_chunked` using caller-owned `ZpDecodeBuffer` storage. Each chunk reuses plaintext, slots, canonical residues and composition storage; one shared synchronous numerical kernel preserves the legacy arithmetic. Public sender/receiver, garbled and proof wrappers pass resources through. GPU/fallback and staged diagnostic release retain the synchronous API. |
 | Multiplication proof CPU execution | Public CPU prover response/verifier checks await direct `bulk_chunked` on the caller executor. `ZkMulCpuWorkspace` preallocates numerical locals/task outputs and captures its worker budget without creating a pool. The async witness API joins each independent layer, retaining scalar dependent-layer order. Shared synchronous kernels preserve arithmetic, original prover partitions, verifier task slots, reduction order and PRNG draws. Legacy diagnostics/GPU fallback lazily construct their private executor; matrix proof loops are separate remaining work. |
 | Matrix proof CPU execution | CPU prover/verifier paths await direct `bulk_chunked` with role-specific numerical workspaces prepared before proofs. Prover stores four n^2-word arrays; verifier stores two, plus O(chunks + repetitions) locals/output staging. Noncanonical copies remain lazy. Transpose tiling, unweighted inner products, original row/weighted-sum partitions and ordered reductions are unchanged. GPU-selected public objects keep CPU workspaces empty; legacy GPU host fallback remains synchronous. Standalone async product/witness APIs use exclusive caller byte-status storage. |
+| Identity service, stage one | `ProtocolCacheService` owns the atomic allocator; shared factories and GPU execution/setup owners retain/inject it. Cheap host-only IDs contain service identity plus numeric value, and cache/retained comparisons preserve affinity. Owned operation contexts and retained records keep service lifetime; lookups/copies of ID views do not increment shared ownership. The global allocator is removed. Identity TLS/default resource inheritance remains a temporary compatibility transport pending explicit-context stage two; query-SID numeric bindings are unchanged. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -255,7 +256,7 @@ contain no environment reads.
 
 | Group | Count | Exact remaining objects | Intended owner/change |
 | --- | ---: | --- | --- |
-| Protocol run/role | 2 | `gProtocolCacheRunCounter`, `tProtocolCacheScope` in `LogVoleRuntime.h` | Explicit session/cache identity and role passed down the stack. |
+| Protocol run/role | 1 | Temporary `tProtocolCacheScope` compatibility view in `LogVoleRuntime.h` | Instance-owned `ProtocolCacheService` now allocates qualified IDs. Replace remaining ambient transport with explicit owned operation contexts in stage two. |
 | Worker budget | 2 | `gParallelWorkerSlotsInUse`, `tParallelWorkerCap` in `LogVoleParallel.h` | Caller-supplied compute resource and explicit chunk allowance; remove the ambient scheduler after caller migration. |
 | Statistics | 5 | `RingOpsStats::resetEpoch`, `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats`; `regions()::r` in `cuda/LogVoleGpuProtocol.cpp` | Owned diagnostics and per-chunk pending counters. |
 | CUDA allocation evidence | 2 | `rootCudaWireEvidenceMutex`, `lastRootCudaWireEvidence` in `LogVoleEncoding.cpp` | Caller/actor-owned evidence sink. |
@@ -464,6 +465,34 @@ had no separate statistics flush, so no flush semantics change. Globals remain
 26 declarations and physical `runParallelTasks` sites remain 20; the normal
 CPU root-key path now bypasses that adapter. No further ownership redesign was
 implemented at this boundary.
+
+Identity service stage one retains allocator lifetime explicitly in factories,
+GPU setup/execution owners, public-cache entries, GPU retained public operands,
+DeviceBatch provenance, native setup bundles, first-query plans, lazy host
+materializers, setup-wire allocators/blocks/evidence and preregistration worker
+captures. Borrowed ID views require one of these owners (or an owned operation
+context) through use; numeric `configureCacheRunId()` is diagnostic projection,
+while `configureCacheIdentity()` preserves service affinity. IDs are host-only;
+no wire formats, CUDA kernel arguments or numerical kernels changed.
+
+Identity-service validation: CUDA-enabled Windows library/test/example-object
+build passes (66.91 seconds; final test-only incremental build 19.69 seconds).
+The new service identity regression and existing two-query GoldenSeed CPU
+protocol pass in 4.03 seconds. Coverage includes equal numeric IDs from separate
+services with distinct cache keys, role separation, shared-service allocation,
+concurrent allocation, retained/moved owner lifetime, canonical zero, cross-service
+factory/execution admission rejection, and both synthetic and real sampling
+lazy-task ownership after the caller's service/scope disappear. Completed task
+frames intentionally retain their context until destroyed. No GPU computation,
+WSL, broad suite or benchmarks were run for this stage.
+
+Stage two must remove `currentProtocolCacheScope`/scope guards/TLS and implicit
+service inheritance by passing the already owned context explicitly. Existing
+config/offline run identity and online query-SID binding must remain distinct:
+stage one qualifies existing query SID values at CI-VOLE scope construction and
+explicitly projects numeric values only in the two first-query SID checks.
+It does not broaden cache reuse or redesign session/query keys. Statistics and
+worker-budget TLS remain separate work.
 
 Next steps, in order:
 

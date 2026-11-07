@@ -191,6 +191,7 @@ namespace
 
 void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
@@ -279,7 +280,7 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(foreignWriter.expired());
     LOGVOLE_REQUIRE_TRUE(readerOwner.expired());
 
-    const auto runId = allocateProtocolCacheRunId();
+    const auto runId = identityService->allocate();
     // Each party owns its execution and pool, including when both parties
     // submit work from the same host worker.
     gpu::GpuExecutionContext senderExecution, receiverExecution;
@@ -404,6 +405,7 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
 
 void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
@@ -421,8 +423,8 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
     {
         RingNttContext math;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), math));
-        auto firstExecution = std::make_shared<gpu::GpuExecutionContext>();
-        auto secondExecution = std::make_shared<gpu::GpuExecutionContext>();
+        auto firstExecution = std::make_shared<gpu::GpuExecutionContext>(math.mExecutionOptions, nullptr, math.mFactory->protocolService());
+        auto secondExecution = std::make_shared<gpu::GpuExecutionContext>(math.mExecutionOptions, nullptr, math.mFactory->protocolService());
         std::weak_ptr<gpu::GpuExecutionContext> firstLifetime = firstExecution;
         auto first = math, second = math, again = math;
         LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(first, firstExecution));
@@ -437,7 +439,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(gpu::contextStream(first).raw() != gpu::contextStream(second).raw());
         // A live bound record is reused across workers and role changes.
         std::packaged_task<void()> task([&] {
-            ScopedProtocolCacheScope other(ProtocolCacheRole::Receiver, 77);
+            ScopedProtocolCacheScope other(ProtocolCacheRole::Receiver, math.mFactory->protocolService()->qualify(77));
             auto workerContext = math;
             LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(workerContext, firstExecution));
             LOGVOLE_REQUIRE_TRUE(workerContext.mFactoryOwner == first.mFactoryOwner);
@@ -480,7 +482,8 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
             std::weak_ptr<gpu::OwnedGpuStream> reader;
             std::weak_ptr<gpu::GpuMemoryPool> memory;
             {
-                auto execution = std::make_shared<gpu::GpuExecutionContext>();
+                auto execution = std::make_shared<gpu::GpuExecutionContext>(
+                    math.mExecutionOptions, nullptr, math.mFactory->protocolService());
                 auto selected = math;
                 LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(selected, execution));
                 auto& compute = gpu::contextStream(selected);
@@ -535,7 +538,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         original = {};
         std::weak_ptr<gpu::OwnedGpuStream> workerOwner;
         std::packaged_task<void()> task([&] {
-            ScopedProtocolCacheScope receiver(ProtocolCacheRole::Receiver, 1);
+            ScopedProtocolCacheScope receiver(ProtocolCacheRole::Receiver, identityService->qualify(1));
             auto otherOptions = deviceOptions;
             otherOptions.mAdvanced.mContexts.mNativeSealBundle = true;
             otherOptions.mAdvanced.mContexts.mLightweightRing = false;
@@ -806,7 +809,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         std::weak_ptr<gpu::GpuExecutionContext> validationLifetime;
         std::packaged_task<void()> validation([&] {
             auto ownedContext = context;
-            ownedContext.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(ownedContext.mExecutionOptions);
+            ownedContext.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(ownedContext.mExecutionOptions, nullptr, ownedContext.mFactory->protocolService());
             validationLifetime = ownedContext.mGpuExecution;
             gpu::GoldenValidationAttempt attempt, competing;
             LOGVOLE_REQUIRE_TRUE(attempt.abort());
@@ -841,7 +844,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         std::weak_ptr<gpu::OwnedGpuStream> producer;
         std::weak_ptr<gpu::GpuMemoryPool> pool;
         std::packaged_task<gpu::DeviceBatchPtr()> task([&] {
-            ScopedProtocolCacheScope scope(role, allocateProtocolCacheRunId());
+            ScopedProtocolCacheScope scope(role, identityService->allocate());
             auto wrapOptions = deviceOptions;
             wrapOptions.mAdvanced.mContexts.mLightweightRing = false;
             wrapOptions.mAdvanced.mContexts.mLightweightCrt = false;
@@ -851,7 +854,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
                     std::make_shared<RingContextFactory>(wrapOptions))));
             ownedContext.mFactoryOwner.reset();
             ownedContext.mRing.mFactoryOwner.reset();
-            ownedContext.mRing.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(wrapOptions);
+            ownedContext.mRing.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(wrapOptions, nullptr, ownedContext.mRing.mFactory->protocolService());
             ownedContext.mRing.mResourceScope.mTables = std::make_shared<gpu::GpuTableCache>();
             auto& stream = gpu::contextStream(ownedContext.mRing);
             producer = stream.allocationOwner();
@@ -919,6 +922,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
 
 void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext readbackExecution;
 #endif
@@ -1033,8 +1037,8 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
         const auto scope = currentProtocolCacheScope();
         {
             auto first = base, second = base;
-            first.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(advanced);
-            second.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(advanced);
+            first.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(advanced, nullptr, first.mFactory->protocolService());
+            second.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(advanced, nullptr, second.mFactory->protocolService());
             firstLifetime = first.mGpuExecution;
             secondLifetime = second.mGpuExecution;
             const auto firstStream = gpu::contextSampleStream(first).raw();
@@ -1155,7 +1159,7 @@ void LogVole_RingOps_GpuStreamStagingLifetime(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(configured.mExecutionOptions == advanced);
     LOGVOLE_REQUIRE_TRUE(configured.mGpuSetup->executionOptions() == advanced);
     LOGVOLE_REQUIRE_TRUE(configured.mResourceScope.mTables->executionOptions() == advanced);
-    auto execution = std::make_shared<gpu::GpuExecutionContext>(advanced);
+    auto execution = std::make_shared<gpu::GpuExecutionContext>(advanced, nullptr, factory->protocolService());
     advanced.mAdvanced.mStreams = {}; // The factory and execution own independent copies.
     LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(configured, execution));
     for (auto* stream : {&execution->mainStream(), &execution->sampleStream(), &execution->readbackStream()})
@@ -1272,11 +1276,12 @@ void LogVole_RingOps_GpuStreamStagingLifetime(const oc::CLP& cmd)
 
 void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
     RingNttContext senderCtx{}, receiverCtx{};
     constexpr std::uint32_t count = 4;
-    const std::uint64_t runId = allocateProtocolCacheRunId();
+    const auto runId = identityService->allocate();
 
     std::shared_ptr<const std::vector<RnsPoly>> senderA, senderB;
     std::shared_ptr<const std::vector<RnsPoly>> receiverA, receiverB;
@@ -1321,6 +1326,7 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
 
 void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
@@ -1360,7 +1366,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
         params.mPolyModulusDegree = preset.degree;
         params.mCoeffModulusBits.resize(preset.primes.size());
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), preset.bits);
-        const auto run = allocateProtocolCacheRunId();
+        const auto run = identityService->allocate();
         std::array<RingNttContext, 2> lightweight;
         std::array<ZpCrtContext, 2> crt;
         std::array<bool, 2> roleGpu{};
@@ -1669,7 +1675,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
             params.mCoeffModulusBits.resize(widths.size());
             std::copy(widths.begin(), widths.end(), params.mCoeffModulusBits.begin());
             const auto expectedPrimes = seal::CoeffModulus::Create(degree, widths);
-            const auto run = allocateProtocolCacheRunId();
+            const auto run = identityService->allocate();
             std::array<RingNttContext, 2> dynamicRing;
             std::array<ZpCrtContext, 2> dynamicCrt;
             std::array<std::shared_ptr<gpu::GpuPlainNtt>, 2> plainOwners;
@@ -2823,6 +2829,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP& cmd)
 
 void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
 {
+    const auto identityService = ProtocolCacheService::create();
     tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2864,7 +2871,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
     // Context copies share public operands. Exported host/device results keep
     // their own backing alive without retaining the cache or a context.
     {
-        ScopedProtocolCacheScope role(ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+        ScopedProtocolCacheScope role(ProtocolCacheRole::Sender, identityService->allocate());
         std::weak_ptr<PublicPolynomialCache> lifetime;
         gpu::RetainedPublicUniformPtr deviceA, deviceB;
         std::shared_ptr<const std::vector<RnsPoly>> hostA, hostB;
@@ -2912,7 +2919,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         params.mCoeffModulusBits.resize(shape.second);
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(),
             shape.first == 1024u ? 30 : shape.first == 8192u ? 55 : 52);
-        const auto run = allocateProtocolCacheRunId();
+        const auto run = identityService->allocate();
         ScopedProtocolCacheScope cacheScope(ProtocolCacheRole::Sender, run);
         // Dynamic GPU contexts carry a party-local certificate. Construct the
         // context in the same role that will sample from it.
@@ -2984,7 +2991,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, owner, token));
             }
             {
-                ScopedProtocolCacheScope anotherRun(ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+                ScopedProtocolCacheScope anotherRun(ProtocolCacheRole::Sender, identityService->allocate());
                 LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == nullptr);
                 LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, owner, token));
             }
@@ -3124,7 +3131,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         {
             std::weak_ptr<const std::vector<RnsPoly>> oldA, oldB;
             {
-                ScopedProtocolCacheScope secondRun(ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+                ScopedProtocolCacheScope secondRun(ProtocolCacheRole::Sender, identityService->allocate());
                 const auto temporaryA = sharedLhePublicANtt(ctx, count);
                 const auto temporaryB = sharedLencPublicBNtt(ctx, count / 2);
                 oldA = temporaryA;
@@ -3136,7 +3143,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicA) == retainedA);
             LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicB) == retainedB);
             {
-                ScopedProtocolCacheScope thirdRun(ProtocolCacheRole::Sender, allocateProtocolCacheRunId());
+                ScopedProtocolCacheScope thirdRun(ProtocolCacheRole::Sender, identityService->allocate());
                 LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(ctx, count) != nullptr);
                 LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(ctx, count / 2) != nullptr);
             }

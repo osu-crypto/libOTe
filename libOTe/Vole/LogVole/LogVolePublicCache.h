@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
 
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
 #include <atomic>
@@ -21,7 +22,7 @@ namespace osuCrypto::LogVole
         {
             RingParams mRing;
             u32 mCount = 0;
-            u64 mRunId = 0;
+            ProtocolCacheRunId mRunId = 0;
             ProtocolCacheRole mRole{};
             int mDevice = -1;
 
@@ -38,7 +39,7 @@ namespace osuCrypto::LogVole
             {
                 std::size_t h = std::hash<u32>{}(key.mRing.mPolyModulusDegree);
                 h ^= std::hash<u32>{}(key.mCount) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
-                h ^= std::hash<u64>{}(key.mRunId) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+                h ^= key.mRunId.hash() + 0x9e3779b9u + (h << 6u) + (h >> 2u);
                 h ^= std::hash<u8>{}(static_cast<u8>(key.mRole)) +
                     0x9e3779b9u + (h << 6u) + (h >> 2u);
                 h ^= std::hash<int>{}(key.mDevice) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
@@ -49,6 +50,7 @@ namespace osuCrypto::LogVole
         };
         struct Entry
         {
+            std::shared_ptr<const ProtocolCacheService> mIdentityService;
             std::mutex mMutex;
             std::shared_ptr<const std::vector<RnsPoly>> mHost;
             std::shared_ptr<const gpu::RetainedPublicUniform> mDevice;

@@ -42,7 +42,8 @@ namespace osuCrypto::LogVole::gpu
         mutable std::mutex mDeviceUseMutex;
         mutable std::weak_ptr<const std::vector<RnsPoly>> mHostSnapshot;
         ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
-        u64 mRunId = 0;
+        ProtocolCacheRunId mRunId = 0;
+        std::shared_ptr<const ProtocolCacheService> mIdentityService;
         int mDevice = -1;
         // Set once, before a Root BStar owner is published. Generic public
         // uniform tokens cannot substitute for this exact wire operand.
@@ -782,10 +783,10 @@ namespace osuCrypto::LogVole::gpu
         public:
             ReceiverCt1HostState(const RingNttContext& ctx,
                 std::shared_ptr<OfflineCache> cache, u32 rows, u32 cols,
-                u32 workers, int device, u64 runId,
+                u32 workers, int device, ProtocolCacheRunId runId,
                 std::shared_ptr<const LazyRingTensorHostState> encoded)
                 : mContext(ctx), mCache(std::move(cache)), mWorkers(workers),
-                  mDevice(device), mRunId(runId), mEncoded(std::move(encoded))
+                  mDevice(device), mRunId(runId), mIdentityService(runId.serviceOwner()), mEncoded(std::move(encoded))
             {
                 mCoefficients.mRows = rows;
                 mCoefficients.mCols = cols;
@@ -842,7 +843,8 @@ namespace osuCrypto::LogVole::gpu
             std::shared_ptr<OfflineCache> mCache;
             u32 mWorkers;
             int mDevice;
-            u64 mRunId;
+            ProtocolCacheRunId mRunId;
+            std::shared_ptr<const ProtocolCacheService> mIdentityService;
             mutable std::shared_ptr<const LazyRingTensorHostState> mEncoded;
             mutable RingTensor mCoefficients;
             mutable RingTensor mNtt;
@@ -1724,7 +1726,8 @@ namespace osuCrypto::LogVole::gpu
         // borrows its bytes: ordinary DeviceBatch uploads have no such scope.
         bool mRootErrorCoefficients = false;
         ProtocolCacheRole mRootErrorRole = ProtocolCacheRole::Unspecified;
-        u64 mRootErrorRunId = 0;
+        ProtocolCacheRunId mRootErrorRunId = 0;
+        std::shared_ptr<const ProtocolCacheService> mIdentityService;
         int mRootErrorDevice = -1;
         // Private, immutable sender Root skRRt. A transformed copy retains the
         // same offline provenance and sets mRootSecretNtt; it is never a public
@@ -1733,7 +1736,7 @@ namespace osuCrypto::LogVole::gpu
         bool mTopSecretUniform = false;
         bool mRootSecretNtt = false;
         ProtocolCacheRole mRootSecretRole = ProtocolCacheRole::Unspecified;
-        u64 mRootSecretRunId = 0;
+        ProtocolCacheRunId mRootSecretRunId = 0;
         int mRootSecretDevice = -1;
         // CI-VOLE's private wrapped delta and its exact seed-label repetition
         // remain coefficient-domain sender operands until the first LENC
@@ -1743,7 +1746,7 @@ namespace osuCrypto::LogVole::gpu
         bool mTopSeedLabelRepCoefficients = false;
         bool mRootHiRepCoefficients = false;
         ProtocolCacheRole mSetupSenderRole = ProtocolCacheRole::Unspecified;
-        u64 mSetupSenderRunId = 0;
+        ProtocolCacheRunId mSetupSenderRunId = 0;
         int mSetupSenderDevice = -1;
     };
 
@@ -1763,7 +1766,8 @@ namespace osuCrypto::LogVole::gpu
         u64 mLabelCount = 0;
         u32 mRingWidth = 0;
         int mDevice = -1;
-        u64 mOfflineRunId = 0;
+        ProtocolCacheRunId mOfflineRunId = 0;
+        std::shared_ptr<const ProtocolCacheService> mIdentityService;
         std::thread mWorker;
         GpuPolyBuffer mWrap;
         GpuPolyBuffer mNodes;
@@ -1775,7 +1779,7 @@ namespace osuCrypto::LogVole::gpu
         bool mNodesUsed = false;
         const void* mOwner = nullptr;
         u64 mSid = 0;
-        u64 mOnlineRunId = 0;
+        ProtocolCacheRunId mOnlineRunId = 0;
         std::mutex mMutex;
         std::mutex mJoinMutex;
 
@@ -1860,6 +1864,7 @@ namespace osuCrypto::LogVole::gpu
         plan->mRingWidth = params.mW;
         plan->mDevice = currentDeviceOrdinal();
         plan->mOfflineRunId = currentProtocolCacheScope().mRunId;
+        plan->mIdentityService = plan->mOfflineRunId.serviceOwner();
         try { plan->mWorker = std::thread([raw = plan.get()] {
             try { raw->reserve(); } catch (...) { raw->mReady = false; }
         }); }
@@ -1896,7 +1901,7 @@ namespace osuCrypto::LogVole::gpu
         plan->finish();
         std::lock_guard<std::mutex> lock(plan->mMutex);
         if (!plan->mReady || plan->mBound || plan->mOfflineOwner != owner ||
-            currentProtocolCacheScope().mRunId != sid) return false;
+            currentProtocolCacheScope().mRunId.mValue != sid) return false;
         plan->mBound = true;
         plan->mOwner = owner;
         plan->mSid = sid;
@@ -1905,7 +1910,7 @@ namespace osuCrypto::LogVole::gpu
 
     void bindReceiverFirstQueryOnlineRun(
         const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid,
-        u64 runId)
+        ProtocolCacheRunId runId)
     {
         if (!plan || !owner || !runId ||
             currentProtocolCacheScope().mRole != ProtocolCacheRole::Receiver ||
@@ -1954,7 +1959,7 @@ namespace osuCrypto::LogVole::gpu
         {
             if (!plan || !owner || garbledInput ||
                 currentProtocolCacheScope().mRole != ProtocolCacheRole::Receiver ||
-                currentProtocolCacheScope().mRunId != sid ||
+                currentProtocolCacheScope().mRunId.mValue != sid ||
                 currentDeviceOrdinal() != plan->mDevice ||
                 labelCount != plan->mLabelCount || total != plan->mRingWidth ||
                 !receiverFirstQueryRingMatches(*plan, ring, params)) return false;
@@ -2392,6 +2397,7 @@ namespace osuCrypto::LogVole::gpu
             value.mOutputNtt = outputNtt;
             value.mRole = currentProtocolCacheScope().mRole;
             value.mRunId = currentProtocolCacheScope().mRunId;
+            value.mIdentityService = value.mRunId.serviceOwner();
             value.mDevice = currentDeviceOrdinal();
             value.mValues = std::move(sampled);
             out = std::move(next);
@@ -2441,6 +2447,7 @@ namespace osuCrypto::LogVole::gpu
         next->mImpl->mRootSecretNtt = false;
         next->mImpl->mRootSecretRole = scope.mRole;
         next->mImpl->mRootSecretRunId = scope.mRunId;
+        next->mImpl->mIdentityService = (scope.mRunId).serviceOwner();
         next->mImpl->mRootSecretDevice = currentDeviceOrdinal();
         return next;
     }
@@ -2463,6 +2470,7 @@ namespace osuCrypto::LogVole::gpu
         next->mImpl->mRootSecretNtt = false;
         next->mImpl->mRootSecretRole = scope.mRole;
         next->mImpl->mRootSecretRunId = scope.mRunId;
+        next->mImpl->mIdentityService = (scope.mRunId).serviceOwner();
         next->mImpl->mRootSecretDevice = currentDeviceOrdinal();
         return next;
     }
@@ -2593,7 +2601,7 @@ namespace osuCrypto::LogVole::gpu
     {
         bool setupCoefficientBatchMatches(const RingNttContext& ctx,
             const DeviceBatch& source, std::size_t expectedCount,
-            u64 ownerRunId, bool delta, bool rootHi = false)
+            ProtocolCacheRunId ownerRunId, bool delta, bool rootHi = false)
         {
             const auto scope = currentProtocolCacheScope();
             if (!enabled(ctx) || !source.mImpl || !source.mImpl->mRing ||
@@ -2624,7 +2632,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool setupDeltaBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        u64 ownerRunId)
+        ProtocolCacheRunId ownerRunId)
     {
         return setupCoefficientBatchMatches(ctx, source, expectedCount,
             ownerRunId, true);
@@ -2632,21 +2640,21 @@ namespace osuCrypto::LogVole::gpu
 
     bool setupSeedLabelRepBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        u64 ownerRunId)
+        ProtocolCacheRunId ownerRunId)
     {
         return setupCoefficientBatchMatches(ctx, source, expectedCount,
             ownerRunId, false);
     }
 
     bool rootHiRepBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, u64 ownerRunId)
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId)
     {
         return setupCoefficientBatchMatches(ctx, source, expectedCount,
             ownerRunId, false, true);
     }
 
     bool setupLencInputBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, u64 ownerRunId)
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId)
     {
         return setupSeedLabelRepBatchMatches(ctx, source, expectedCount,
             ownerRunId) || rootHiRepBatchMatches(ctx, source, expectedCount,
@@ -2682,6 +2690,7 @@ namespace osuCrypto::LogVole::gpu
         owner->mImpl->mSetupSeedLabelRepCoefficients = true;
         owner->mImpl->mSetupSenderRole = ProtocolCacheRole::Sender;
         owner->mImpl->mSetupSenderRunId = ownerRunId;
+        owner->mImpl->mIdentityService = (ownerRunId).serviceOwner();
         owner->mImpl->mSetupSenderDevice = currentDeviceOrdinal();
         return owner;
     }
@@ -2689,7 +2698,7 @@ namespace osuCrypto::LogVole::gpu
     DeviceBatchPtr topSecretSeedLabelRepResident(const RingNttContext& ctx,
         const DeviceBatch& topSecret, u32 alpha, u32 tau)
     {
-        const u64 runId = currentProtocolCacheScope().mRunId;
+        const ProtocolCacheRunId runId = currentProtocolCacheScope().mRunId;
         const auto rho = ringModulusCount(ctx);
         const u64 count = static_cast<u64>(alpha) * tau * rho;
         if (!alpha || !tau || !rho || !runId ||
@@ -2720,6 +2729,7 @@ namespace osuCrypto::LogVole::gpu
         owner->mImpl->mTopSeedLabelRepCoefficients = true;
         owner->mImpl->mSetupSenderRole = ProtocolCacheRole::Sender;
         owner->mImpl->mSetupSenderRunId = runId;
+        owner->mImpl->mIdentityService = (runId).serviceOwner();
         owner->mImpl->mSetupSenderDevice = currentDeviceOrdinal();
         return owner;
     }
@@ -2727,7 +2737,7 @@ namespace osuCrypto::LogVole::gpu
     DeviceBatchPtr rootHiReplicateResident(const RingNttContext& ctx,
         const DeviceBatch& topSecret, u32 tauHi)
     {
-        const u64 runId = currentProtocolCacheScope().mRunId;
+        const ProtocolCacheRunId runId = currentProtocolCacheScope().mRunId;
         const auto rho = ringModulusCount(ctx);
         const u64 count = static_cast<u64>(tauHi) * rho;
         if (!tauHi || !rho || !runId ||
@@ -2764,6 +2774,7 @@ namespace osuCrypto::LogVole::gpu
         owner->mImpl->mRootHiRepCoefficients = true;
         owner->mImpl->mSetupSenderRole = ProtocolCacheRole::Sender;
         owner->mImpl->mSetupSenderRunId = runId;
+        owner->mImpl->mIdentityService = (runId).serviceOwner();
         owner->mImpl->mSetupSenderDevice = currentDeviceOrdinal();
         return owner;
     }
@@ -2928,6 +2939,7 @@ namespace osuCrypto::LogVole::gpu
             batch->mImpl->mRootErrorCoefficients = true;
             batch->mImpl->mRootErrorRole = currentProtocolCacheScope().mRole;
             batch->mImpl->mRootErrorRunId = currentProtocolCacheScope().mRunId;
+        batch->mImpl->mIdentityService = (currentProtocolCacheScope().mRunId).serviceOwner();
             batch->mImpl->mRootErrorDevice = currentDeviceOrdinal();
             *residentOut = std::move(batch);
             return true;
@@ -3035,7 +3047,7 @@ namespace osuCrypto::LogVole::gpu
 
     static bool privateSecretUniformBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        u64 ownerRunId, bool outputNtt, bool topSecret)
+        ProtocolCacheRunId ownerRunId, bool outputNtt, bool topSecret)
     {
         const auto scope = currentProtocolCacheScope();
         if (!enabled(ctx) || !source.mImpl || !source.mImpl->mRing || !expectedCount ||
@@ -3063,14 +3075,14 @@ namespace osuCrypto::LogVole::gpu
 
     bool rootSecretUniformBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        u64 ownerRunId, bool outputNtt)
+        ProtocolCacheRunId ownerRunId, bool outputNtt)
     {
         return privateSecretUniformBatchMatches(ctx, source, expectedCount,
             ownerRunId, outputNtt, false);
     }
 
     bool topSecretUniformBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, u64 ownerRunId)
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId)
     {
         return privateSecretUniformBatchMatches(ctx, source, expectedCount,
             ownerRunId, false, true);
@@ -3773,7 +3785,7 @@ namespace osuCrypto::LogVole::gpu
         const RetainedPublicUniform* retainedPublicA,
         const DeviceBatch* rootR1Device,
         const DeviceBatch* rootSecretDevice,
-        u64 rootSecretOwnerRunId,
+        ProtocolCacheRunId rootSecretOwnerRunId,
         bool topSecretDomain, CpuBenchmarkState cpuBenchmark)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
@@ -7360,6 +7372,7 @@ namespace osuCrypto::LogVole::gpu
                     skNtt->mImpl->mRootSecretNtt = true;
                     skNtt->mImpl->mRootSecretRole = ProtocolCacheRole::Sender;
                     skNtt->mImpl->mRootSecretRunId = state.mRootSkRRtOwnerRunId;
+        skNtt->mImpl->mIdentityService = (state.mRootSkRRtOwnerRunId).serviceOwner();
                     skNtt->mImpl->mRootSecretDevice = currentDeviceOrdinal();
                 }
                 if (!skNtt->mImpl->mBuf.resize(*ring, tauHi, stream))
@@ -7426,7 +7439,7 @@ namespace osuCrypto::LogVole::gpu
         block* digestHash,
         bool recoverNonInteractiveMask,
         const DeviceBatchPtr& rootSecretCoeffs,
-        u64 rootSecretOwnerRunId)
+        ProtocolCacheRunId rootSecretOwnerRunId)
     {
         AutoTimer timer(globalTimingStats.mGpuSenderTimeUs);
         if (residentKPrime) residentKPrime->reset();
@@ -8794,6 +8807,7 @@ namespace osuCrypto::LogVole::gpu
         owner->mImpl->mSetupDeltaCoefficients = true;
         owner->mImpl->mSetupSenderRole = ProtocolCacheRole::Sender;
         owner->mImpl->mSetupSenderRunId = scope.mRunId;
+        owner->mImpl->mIdentityService = (scope.mRunId).serviceOwner();
         owner->mImpl->mSetupSenderDevice = currentDeviceOrdinal();
         return owner;
     }
