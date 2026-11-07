@@ -1,5 +1,5 @@
 #pragma once
-#include "libOTe/Vole/LogVole/LogVoleIdentity.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/LogVoleAdvancedOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
 #include "libOTe/Vole/LogVole/LogVoleEncodingOptions.h"
@@ -248,7 +248,7 @@ namespace osuCrypto::LogVole
         virtual ~LazySeedLabelHostState() = default;
         virtual std::size_t count() const = 0;
         virtual bool matches(const RingParams& params) const = 0;
-        virtual const std::vector<RnsPoly>& hostCoefficients() const = 0;
+        virtual const std::vector<RnsPoly>& hostCoefficients(ProtocolCacheScopeView scope = currentProtocolCacheScope()) const = 0;
     };
 
     struct ShrinkExpandSenderState
@@ -301,7 +301,7 @@ namespace osuCrypto::LogVole
 
         std::shared_ptr<const LazyLencRandomizerState> mLazyRandomizers;
 
-        const std::vector<RnsPoly>& hostS() const { return mSharedHostState ? mSharedHostState->hostS() : mLazyS ? mLazyS->hostCoefficients() : mS; }
+        const std::vector<RnsPoly>& hostS(ProtocolCacheScopeView scope = currentProtocolCacheScope()) const { return mSharedHostState ? mSharedHostState->hostS(scope) : mLazyS ? mLazyS->hostCoefficients(scope) : mS; }
         const std::vector<RnsPoly>& hostSk1() const { return !mSk1.empty() ? mSk1 : mSharedHostState ? mSharedHostState->hostSk1() : mLazyTopSk1 ? mLazyTopSk1->hostCoefficients() : mSk1; }
         const std::vector<RnsPoly>& hostR() const { return mSharedHostState ? mSharedHostState->hostR() : mLazyRandomizers ? mLazyRandomizers->hostCoefficients() : mR; }
         const RingTensor& hostCt1() const { return mSharedHostState ? mSharedHostState->hostCt1() : mLazyCt1 ? mLazyCt1->get() : mCt1; }

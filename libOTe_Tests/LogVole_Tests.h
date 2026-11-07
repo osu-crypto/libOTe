@@ -125,6 +125,7 @@
     X(Core, RootTruncParamsAndKeyReplication) \
     X(Core, RootScaledNttAddMatchesCoeffDomain) \
     X(Core, RootTopCtNoiselessRelation) \
+    X(Core, LazyIdentityContext) \
     X(Core, PrivateIdentityMetadata) \
     X(Core, RootErrorCompactGpuParity) \
     X(Core, GaussianResidentPublicWireParity) \

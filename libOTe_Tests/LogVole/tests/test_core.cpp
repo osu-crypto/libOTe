@@ -884,8 +884,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         selectedInput.mUseGpuResidentInternalState = true;
         selectedInput.mWrappedDeltaDevice = delta;
         selectedInput.mWrappedDeltaHostFallback =
-            [zp, scalar](RnsPoly& out) {
-                return wrapZpConstantCrt(zp, scalar, true, 2u, out);
+            [zp, scalar](RnsPoly& out, ProtocolCacheScopeView scope) {
+                return wrapZpConstantCrt(zp, scalar, true, 2u, out, scope);
             };
         const oc::block seed(0x534554555044454cULL,
             setting == CivoleSetting::GoldenSeed ? 1u : 2u);
@@ -2062,6 +2062,70 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(gpu::rootErrorBatchMatches(ctx, *error, 2, sender));
     LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(ctx, *error, 2, otherRun));
     LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(ctx, *error, 2, receiver));
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (!cmd.getOr("gpu", 0)) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    tests_libOTe::logvole_test::SetupResources resources;
+    const auto service = ProtocolCacheService::create();
+    const ProtocolCacheScope sender(service->allocate(), ProtocolCacheRole::Sender);
+    const ProtocolCacheScope receiver(service->allocate(), ProtocolCacheRole::Receiver);
+    auto params = make_golden_params();
+    params.mShrinkExpand.mGpuSetup.mDeltaChainDevice = true;
+    params.mShrinkExpand.mGpuSetup.mLencDevice = true;
+    params.mShrinkExpand.mGpuSetup.mLencDevicePadding = true;
+    params.mShrinkExpand.mGpuSetup.mDirectWire = true;
+    osuCrypto::LogVoleExecutionOptions options;
+    options.mUseGpu = true;
+    ZpCrtContext zp{};
+    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mShrinkExpand.mRing,
+        params.mShrinkExpand.mPlaintextModulusBits, zp,
+        std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, service)), sender));
+    auto delta = gpu::wrapSetupDeltaResident(zp, 7, {}, nullptr, sender);
+    LOGVOLE_REQUIRE_TRUE(delta);
+    SenderOfflineInput input{};
+    input.mParams = params;
+    input.mUseGpuResidentInternalState = true;
+    input.mSenderOwnerRunId = sender.mRunId;
+    input.mRingFactoryOwner = zp.mRing.mFactoryOwner;
+    input.mWrappedDeltaDevice = delta;
+    input.mWrappedDeltaHostFallback = [zp](RnsPoly& out, ProtocolCacheScopeView scope) {
+        return wrapZpConstantCrt(zp, 7, true, 1, out, scope);
+    };
+    SenderOfflineOutput output{};
+    oc::PRNG prng(oc::block(712, 71));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(osuCrypto::LogVole::detail::prepareSenderOfflineForTransport(
+        resources.executor, resources.results, input, prng, output, {}, sender)));
+    auto& state = output.mState.mShrinkExpandState;
+    LOGVOLE_REQUIRE_TRUE(state.mLazyS);
+    {
+        ScopedProtocolCacheScope ambient(sender);
+        bool rejected = false;
+        try { (void)state.hostS(receiver); }
+        catch (const std::runtime_error&) { rejected = true; }
+        LOGVOLE_REQUIRE_TRUE(rejected);
+    }
+    {
+        ScopedProtocolCacheScope ambient(receiver);
+        const auto& actual = state.hostS(sender);
+        auto cpuZp = zp;
+        cpuZp.mRing.mExecutionOptions.mUseGpu = false;
+        RnsPoly hostDelta;
+        LOGVOLE_REQUIRE_TRUE(wrapZpConstantCrt(cpuZp, 7, true, 1, hostDelta, sender));
+        std::vector<RnsPoly> expected;
+        LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput({hostDelta}, 1,
+            params.mShrinkExpand.mAlpha, params.mShrinkExpand.mTau - 1,
+            params.mShrinkExpand.mRing, expected, zp.mRing.mFactoryOwner, sender));
+        expect_batch_equal(actual, expected);
+        LOGVOLE_REQUIRE_TRUE(&state.hostS(sender) == &actual);
+    }
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
@@ -4271,11 +4335,11 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     SenderOfflineOutput wireSender{}, legacyWireSender{};
     {
         senderInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = true;
-        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(detail::prepareSenderOfflineForTransport(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), wirePrng, wireSender)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(osuCrypto::LogVole::detail::prepareSenderOfflineForTransport(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), wirePrng, wireSender)));
     }
     {
         senderInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = false;
-        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(detail::prepareSenderOfflineForTransport(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), legacyWirePrng, legacyWireSender)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(osuCrypto::LogVole::detail::prepareSenderOfflineForTransport(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(senderInput, setupOptions), advanced, ProtocolCacheRole::Sender), legacyWirePrng, legacyWireSender)));
     }
     senderInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = true;
     for (unsigned i = 0; i < 16; ++i)

@@ -536,14 +536,14 @@ namespace osuCrypto::LogVole
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
-        RnsPoly& out);
+        RnsPoly& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     bool wrapZpConstantCrt(
         const ZpCrtContext& ctx,
         u64 value,
         bool multiplyByDelta,
         u32 requestedWorkers,
-        RnsPoly& out);
+        RnsPoly& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // CPU-only, lazy encoding. Borrow all operands and exclusive buffers until
     // completion; await started work before destruction/reuse. Output may be

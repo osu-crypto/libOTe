@@ -116,7 +116,7 @@ namespace osuCrypto::LogVole
         // The callback is exact CPU replay for a declined device consumer;
         // direct/public SenderOfflineInput keeps using eager mSk1.
         std::shared_ptr<const gpu::DeviceBatch> mWrappedDeltaDevice;
-        std::function<bool(RnsPoly&)> mWrappedDeltaHostFallback;
+        std::function<bool(RnsPoly&, ProtocolCacheScopeView)> mWrappedDeltaHostFallback;
         // Selected recursive child borrows only the sender-owned top HE key.
         // A CPU decline uses its already-drawn SEAL seeds through the lazy owner.
         std::shared_ptr<const gpu::DeviceBatch> mTopSk1Device;
@@ -502,7 +502,7 @@ namespace osuCrypto::LogVole
         SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
     // Explicit inspection of a selected internal top-key owner. This fills
     // independent mutable key vectors only after device setup/recursion ends.
-    bool materializeSenderTopSk1HostViews(SenderState& state);
+    bool materializeSenderTopSk1HostViews(SenderState& state, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     namespace detail
     {
@@ -651,7 +651,7 @@ namespace osuCrypto::LogVole
         u32 alpha,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out, const std::shared_ptr<const RingNttContext>& ringOwner = {});
+        std::vector<RnsPoly>& out, const std::shared_ptr<const RingNttContext>& ringOwner = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     bool seedLabelSampleCt2FromSeed(
         std::span<const u8> seed,

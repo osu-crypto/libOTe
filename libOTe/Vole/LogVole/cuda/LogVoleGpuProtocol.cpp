@@ -1953,7 +1953,7 @@ namespace osuCrypto::LogVole::gpu
             ReceiverFirstQueryAllocations* plan, const GpuRing& ring,
             const RingParams& params, std::size_t labelCount,
             std::size_t total, bool garbledInput, const void* owner,
-            u64 sid, GpuPolyBuffer& out, GpuStream& stream, ProtocolCacheScopeView scope = currentProtocolCacheScope())
+            u64 sid, GpuPolyBuffer& out, GpuStream& stream, ProtocolCacheScopeView scope)
         {
             if (!plan || !owner || garbledInput ||
                 scope.mRole != ProtocolCacheRole::Receiver ||
@@ -8249,14 +8249,14 @@ namespace osuCrypto::LogVole::gpu
 
     namespace
     {
-        std::shared_ptr<GpuPlainNtt> gpuPlainTables(const ZpCrtContext& zp)
+        std::shared_ptr<GpuPlainNtt> gpuPlainTables(const ZpCrtContext& zp, ProtocolCacheScopeView scope = currentProtocolCacheScope())
         {
             if (zp.mGpuLightweight)
                 return GpuPlainNtt::getRaw(
                     zp.mRing.mParams.mPolyModulusDegree, zp.mPlaintextModulus,
-                    zp.mRing.mResourceScope, zp.mRing.mGpuSetup);
+                    zp.mRing.mResourceScope, zp.mRing.mGpuSetup, scope);
             if (!zp.mBatchingContext || !zp.mBatchEncoder) return nullptr;
-            return GpuPlainNtt::get(*zp.mBatchingContext, *zp.mBatchEncoder, zp.mRing.mResourceScope);
+            return GpuPlainNtt::get(*zp.mBatchingContext, *zp.mBatchEncoder, zp.mRing.mResourceScope, scope);
         }
     }
 
@@ -8518,12 +8518,12 @@ namespace osuCrypto::LogVole::gpu
             u64 padChunks,
             bool garbledInput,
             ReceiverFirstQueryAllocations* firstQueryAllocations,
-            const void* firstQueryOwner = nullptr, u64 firstQuerySid = 0)
+            const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope)
     {
         if (!enabled(zp.mRing) || !scalars || labelCount == 0) return nullptr;
         auto ring = GpuRing::get(zp.mRing);
         if (!ring) return nullptr;
-        auto plain = gpuPlainTables(zp);
+        auto plain = gpuPlainTables(zp, scope);
         if (!plain || plain->n() != ring->n()) return nullptr;
 
         const u32 n = ring->n();
@@ -8547,7 +8547,7 @@ namespace osuCrypto::LogVole::gpu
                     static_cast<u32>(chunkCount), repeated->data(), repeatStream.raw()))
                 return nullptr;
             return wrapScalarsOnDevice(zp, repeated->data(), chunkCount * slots,
-                false, 0, padChunks, false, nullptr);
+                false, 0, padChunks, false, nullptr, nullptr, 0, scope);
         }
 
         auto& stream = contextStream(zp.mRing);
@@ -8587,7 +8587,7 @@ namespace osuCrypto::LogVole::gpu
             takeReceiverFirstQueryWrap(
                 firstQueryAllocations, *ring, zp.mRing.mParams,
                 labelCount, static_cast<std::size_t>(total), garbledInput,
-                firstQueryOwner, firstQuerySid, out->mImpl->mBuf, stream);
+                firstQueryOwner, firstQuerySid, out->mImpl->mBuf, stream, scope);
         if (!reservedWrap && !out->mImpl->mBuf.resize(
                 *ring, static_cast<std::size_t>(total), stream)) return nullptr;
         // Chunks past the real input are all-zero ring elements, matching the
@@ -8654,7 +8654,7 @@ namespace osuCrypto::LogVole::gpu
         bool multiplyByDelta,
         u64 padValue,
         u64 padChunks,
-        bool garbledInput)
+        bool garbledInput, ProtocolCacheScopeView scope)
     {
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         if (!enabled(zp.mRing) || labels.empty()) return nullptr;
@@ -8672,7 +8672,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr out = ok
             ? wrapScalarsOnDevice(
                   zp, scalars, labels.size(), multiplyByDelta, padValue, padChunks,
-                  garbledInput, nullptr)
+                  garbledInput, nullptr, nullptr, 0, scope)
             : nullptr;
         // Stream ordered, like the scratch frees inside the helper.
         return out;
@@ -8687,7 +8687,7 @@ namespace osuCrypto::LogVole::gpu
         u64 padChunks,
         bool garbledInput,
         ReceiverFirstQueryAllocations* firstQueryAllocations,
-        const void* firstQueryOwner, u64 firstQuerySid)
+        const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope)
     {
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         if (!enabled(zp.mRing) || labels.empty()) return nullptr;
@@ -8700,7 +8700,7 @@ namespace osuCrypto::LogVole::gpu
         return wrapScalarsOnDevice(
             zp, labels.data(), count, multiplyByDelta, padValue, padChunks,
             garbledInput, firstQueryAllocations,
-            firstQueryOwner, firstQuerySid);
+            firstQueryOwner, firstQuerySid, scope);
     }
 
     DeviceBatchPtr wrapSetupDeltaResident(const ZpCrtContext& ctx, u64 delta,
@@ -8766,7 +8766,7 @@ namespace osuCrypto::LogVole::gpu
         }
         else
         {
-            plain = gpuPlainTables(ctx);
+            plain = gpuPlainTables(ctx, scope);
             if (!plain || plain->n() != slots ||
                 plain->metadata().mMinModulus != ctx.mPlaintextModulus) return {};
             values = tryAllocateGpuBuffer(stream, slots * sizeof(u64));

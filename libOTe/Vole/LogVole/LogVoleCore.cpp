@@ -2246,23 +2246,21 @@ namespace osuCrypto::LogVole
         {
             return mCtx.mParams == params;
         }
-        const std::vector<RnsPoly>& hostCoefficients() const override
+        const std::vector<RnsPoly>& hostCoefficients(ProtocolCacheScopeView scope) const override
         {
             std::call_once(mOnce, [&] {
-                if (currentProtocolCacheScope().mRole == ProtocolCacheRole::Receiver)
+                if (scope.mRole == ProtocolCacheRole::Receiver)
                     throw std::runtime_error("receiver cannot inspect sender top key");
                 HostStep step(hostProfiler(mCtx), mRootHi ? "setup sender: Root high-key explicit host view"
                                       : "setup sender: top seed-label explicit host view");
                 if (mDevice && gpu::enabled(mCtx))
                 {
-                    ScopedProtocolCacheScope ownerScope(
-                        ProtocolCacheRole::Sender, mOwnerRunId);
                     std::vector<RnsPoly> exact;
                     const bool matches = mRootHi
                         ? gpu::rootHiRepBatchMatches(mCtx, *mDevice,
-                            count(), mOwnerRunId)
+                            count(), mOwnerRunId, {mOwnerRunId, ProtocolCacheRole::Sender})
                         : gpu::setupSeedLabelRepBatchMatches(mCtx, *mDevice,
-                            count(), mOwnerRunId);
+                            count(), mOwnerRunId, {mOwnerRunId, ProtocolCacheRole::Sender});
                     if (matches && gpu::download(*mDevice, exact, gpu::contextStream(mCtx), count()) &&
                         validateRingBatchShape(exact, mCtx.mParams))
                     {
@@ -2277,7 +2275,7 @@ namespace osuCrypto::LogVole
                 const bool ok = mRootHi
                     ? replicateRootHiKeyByLimb(key, mTau, mCtx.mParams, mHost)
                     : seedLabelRepOfflineSenderInput(key, mTau, mAlpha,
-                        mTau, mCtx.mParams, mHost, mCtx.mFactoryOwner);
+                        mTau, mCtx.mParams, mHost, mCtx.mFactoryOwner, scope);
                 if (!ok || mHost.size() != count())
                     throw std::runtime_error("top-key repetition fallback failed");
             });
@@ -4628,7 +4626,7 @@ namespace osuCrypto::LogVole
         public:
             ResidentSeedLabelHostState(RingNttContext ctx,
                 gpu::DeviceBatchPtr device, u32 gamma, u32 alpha, u32 tau,
-                ProtocolCacheRunId ownerRunId, std::function<bool(RnsPoly&)> deltaFallback)
+                ProtocolCacheRunId ownerRunId, std::function<bool(RnsPoly&, ProtocolCacheScopeView)> deltaFallback)
                 : mCtx(std::move(ctx)), mDevice(std::move(device)),
                   mGamma(gamma), mAlpha(alpha), mTau(tau),
                   mOwnerRunId(ownerRunId), mIdentityService(ownerRunId.serviceOwner()),
@@ -4643,21 +4641,19 @@ namespace osuCrypto::LogVole
             {
                 return mCtx.mParams == ring;
             }
-            const std::vector<RnsPoly>& hostCoefficients() const override
+            const std::vector<RnsPoly>& hostCoefficients(ProtocolCacheScopeView scope) const override
             {
                 std::call_once(mOnce, [&] {
-                    if (currentProtocolCacheScope().mRole ==
+                    if (scope.mRole ==
                             ProtocolCacheRole::Receiver)
                         throw std::runtime_error(
                             "receiver cannot materialize sender seed-label state");
                     HostStep step(hostProfiler(mCtx), "setup sender: seed-label explicit host view");
                     if (mDevice && gpu::enabled(mCtx))
                     {
-                        ScopedProtocolCacheScope ownerScope(
-                            ProtocolCacheRole::Sender, mOwnerRunId);
                         std::vector<RnsPoly> exact;
                         if (gpu::setupSeedLabelRepBatchMatches(mCtx,
-                                *mDevice, count(), mOwnerRunId) &&
+                                *mDevice, count(), mOwnerRunId, {mOwnerRunId, ProtocolCacheRole::Sender}) &&
                             gpu::download(*mDevice, exact, gpu::contextStream(mCtx), count()) &&
                             validateRingBatchShape(exact, mCtx.mParams))
                         {
@@ -4669,10 +4665,10 @@ namespace osuCrypto::LogVole
                     // delta inputs. Replaying them never consumes the parent
                     // protocol PRNG or borrows another party's device state.
                     RnsPoly delta{};
-                    if (!mDeltaFallback || !mDeltaFallback(delta) ||
+                    if (!mDeltaFallback || !mDeltaFallback(delta, scope) ||
                         !validateRingPolyShape(delta, mCtx.mParams) ||
                         !seedLabelRepOfflineSenderInput(std::vector<RnsPoly>{delta}, mGamma,
-                            mAlpha, mTau, mCtx.mParams, mHost, mCtx.mFactoryOwner) ||
+                            mAlpha, mTau, mCtx.mParams, mHost, mCtx.mFactoryOwner, scope) ||
                         mHost.size() != count())
                         throw std::runtime_error(
                             "sender seed-label host fallback failed");
@@ -4688,13 +4684,13 @@ namespace osuCrypto::LogVole
             u32 mTau;
             ProtocolCacheRunId mOwnerRunId;
             std::shared_ptr<const ProtocolCacheService> mIdentityService;
-            std::function<bool(RnsPoly&)> mDeltaFallback;
+            std::function<bool(RnsPoly&, ProtocolCacheScopeView)> mDeltaFallback;
             mutable std::once_flag mOnce;
             mutable std::vector<RnsPoly> mHost;
         };
 #endif
 
-        bool materializeTopSk1HostViewsImpl(SenderState& state)
+        bool materializeTopSk1HostViewsImpl(SenderState& state, ProtocolCacheScopeView scope)
         {
             const auto& top = state.mShrinkExpandState;
             if (!top.mTopSk1Device) return true;
@@ -4703,9 +4699,9 @@ namespace osuCrypto::LogVole
             std::vector<RnsPoly> exact;
 #if defined(ENABLE_LOGVOLE_CUDA)
             RingNttContext ctx{};
-            if (!makeRingNttContext(top.mParams.mRing, ctx, top.mRingFactoryOwner) ||
+            if (!makeRingNttContext(top.mParams.mRing, ctx, top.mRingFactoryOwner, scope) ||
                 !gpu::topSecretUniformBatchMatches(ctx, *top.mTopSk1Device,
-                    top.mParams.mTau, top.mTopSk1OwnerRunId)) return false;
+                    top.mParams.mTau, top.mTopSk1OwnerRunId, scope)) return false;
             HostStep step(hostProfiler(ctx), "setup sender: top sk1 final public host view");
             if (!gpu::download(*top.mTopSk1Device, exact, gpu::contextStream(ctx), top.mParams.mTau) ||
                 !validateRingBatchShape(exact, ctx.mParams))
@@ -4886,14 +4882,14 @@ namespace osuCrypto::LogVole
                     if (eagerSk1.empty())
                     {
                         RnsPoly replay{};
-                        if (!input.mWrappedDeltaHostFallback || !input.mWrappedDeltaHostFallback(replay) ||
+                        if (!input.mWrappedDeltaHostFallback || !input.mWrappedDeltaHostFallback(replay, setupScope) ||
                             !validateRingPolyShape(replay, input.mParams.mShrinkExpand.mRing))
                             co_return false;
                         eagerSk1.push_back(std::move(replay));
                     }
                     if (!seedLabelRepOfflineSenderInput(eagerSk1, input.mParams.mGamma,
                                                         input.mParams.mShrinkExpand.mAlpha, tauHi,
-                                                        input.mParams.mShrinkExpand.mRing, sRep, ringOwner))
+                                                        input.mParams.mShrinkExpand.mRing, sRep, ringOwner, setupScope))
                         co_return false;
                 }
 
@@ -4962,7 +4958,7 @@ namespace osuCrypto::LogVole
                 {
                     if (chainStrict) co_return false;
                     RnsPoly replay{};
-                    if (!input.mWrappedDeltaHostFallback || !input.mWrappedDeltaHostFallback(replay) ||
+                    if (!input.mWrappedDeltaHostFallback || !input.mWrappedDeltaHostFallback(replay, setupScope) ||
                         !validateRingPolyShape(replay, deltaCtx.mParams))
                         co_return false;
                     eagerSk1.push_back(std::move(replay));
@@ -5206,15 +5202,14 @@ namespace osuCrypto::LogVole
         co_return true;
     }
 
-    bool materializeSenderTopSk1HostViews(SenderState& state)
+    bool materializeSenderTopSk1HostViews(SenderState& state, ProtocolCacheScopeView scope)
     {
-        if (currentProtocolCacheScope().mRole == ProtocolCacheRole::Receiver)
+        if (scope.mRole == ProtocolCacheRole::Receiver)
             return false;
         if (!state.mShrinkExpandState.mTopSk1Device) return true;
         const ProtocolCacheRunId runId = state.mShrinkExpandState.mTopSk1OwnerRunId;
         if (!runId) return false;
-        ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, runId);
-        return materializeTopSk1HostViewsImpl(state);
+        return materializeTopSk1HostViewsImpl(state, {runId, ProtocolCacheRole::Sender});
     }
 
     macoro::task<bool> detail::prepareSenderOfflineForTransport(
@@ -5243,7 +5238,7 @@ namespace osuCrypto::LogVole
                 co_return false;
             SenderOfflineInput eager = input;
             RnsPoly replay{};
-            if (!eager.mWrappedDeltaHostFallback(replay) ||
+            if (!eager.mWrappedDeltaHostFallback(replay, setupScope) ||
                 !validateRingPolyShape(replay, eager.mParams.mShrinkExpand.mRing))
                 co_return false;
             eager.mSk1.push_back(std::move(replay));
@@ -6509,7 +6504,7 @@ namespace osuCrypto::LogVole
         u32 alpha,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out, const std::shared_ptr<const RingNttContext>& ringOwner)
+        std::vector<RnsPoly>& out, const std::shared_ptr<const RingNttContext>& ringOwner, ProtocolCacheScopeView scope)
     {
         const u32 rho = static_cast<u32>(ring.mCoeffModulusBits.size());
         if (alpha == 0 || tau == 0 || rho == 0)
@@ -6525,7 +6520,7 @@ namespace osuCrypto::LogVole
         if (options.mSeedLabelRep && gpu::enabled(ringOwner))
         {
             RingNttContext ctx{};
-            if (makeRingNttContext(ring, ctx, ringOwner) &&
+            if (makeRingNttContext(ring, ctx, ringOwner, scope) &&
                 gpu::seedLabelRepDevice(ctx, s, gamma, alpha, tau, out)) return true;
             if (options.mSeedLabelRepStrict) return false;
         }

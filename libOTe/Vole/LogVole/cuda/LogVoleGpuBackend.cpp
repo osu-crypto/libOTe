@@ -2053,7 +2053,7 @@ namespace osuCrypto::LogVole::gpu
 
     std::shared_ptr<GpuPlainNtt> GpuPlainNtt::get(
         const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder,
-        const RingResourceScope& owner)
+        const RingResourceScope& owner, ProtocolCacheScopeView scope)
     {
         if (!owner.mTables || !available()) return nullptr;
 
@@ -2071,14 +2071,14 @@ namespace osuCrypto::LogVole::gpu
         }
 
         std::shared_ptr<GpuPlainNtt> tables(new GpuPlainNtt());
-        tables->mSetup = std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), currentProtocolCacheScope().mRunId.serviceOwner());
+        tables->mSetup = std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), scope.mRunId.serviceOwner());
         if (!tables->init(batchingContext, encoder)) return nullptr;
         cache.plains.emplace_back(key, tables);
         return tables;
     }
 
     std::shared_ptr<GpuPlainNtt> GpuPlainNtt::getRaw(u32 n, u64 p,
-        const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution)
+        const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution, ProtocolCacheScopeView scope)
     {
         if (!owner.mTables ||
             !validRawPrimes(n, std::span<const u64>(&p, 1)) ||
@@ -2098,7 +2098,7 @@ namespace osuCrypto::LogVole::gpu
             if (execution && execution->executionOptions() != owner.mTables->executionOptions()) return nullptr;
             std::shared_ptr<GpuPlainNtt> tables(new GpuPlainNtt());
             tables->mSetup = execution ? std::move(execution) :
-                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), currentProtocolCacheScope().mRunId.serviceOwner());
+                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), scope.mRunId.serviceOwner());
             if (!tables->initRaw(n, p)) return nullptr;
             cache.rawPlains.emplace_back(key, tables);
             return tables;

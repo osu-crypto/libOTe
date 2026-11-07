@@ -1576,10 +1576,10 @@ namespace osuCrypto::LogVole
             bool multiplyByDelta,
             u64 padValue,
             u64 expectedChunks,
-            std::vector<RnsPoly>& out)
+            std::vector<RnsPoly>& out, ProtocolCacheScopeView scope)
         {
             auto batch = gpu::wrapLabelsDevice(
-                ctx, labels, multiplyByDelta, padValue, expectedChunks);
+                ctx, labels, multiplyByDelta, padValue, expectedChunks, false, scope);
             if (!batch || batch->count() != expectedChunks)
                 return false;
             std::vector<RnsPoly> completed;
@@ -1598,7 +1598,7 @@ namespace osuCrypto::LogVole
         bool multiplyByDelta,
         u64 padValue,
         u32,
-        RnsPoly& out)
+        RnsPoly& out, ProtocolCacheScopeView scope)
     {
         if (ctx.mGpuLightweight)
         {
@@ -1619,15 +1619,15 @@ namespace osuCrypto::LogVole
                     ? std::span<const u64>(emptyInput) : labels;
                 std::vector<RnsPoly> completed;
                 if (!wrapLightweightZpLabelsOnGpu(
-                        ctx, input, multiplyByDelta, padValue, 1u, completed))
+                        ctx, input, multiplyByDelta, padValue, 1u, completed, scope))
                     return false;
                 out = std::move(completed.front());
                 return true;
             }
 #endif
-            const auto host = getZpHostContext(ctx, currentProtocolCacheScope());
+            const auto host = getZpHostContext(ctx, scope);
             return host && wrapZpBatchCrt(
-                *host, labels, multiplyByDelta, padValue, 1, out);
+                *host, labels, multiplyByDelta, padValue, 1, out, scope);
         }
         if (!validateZpContext(ctx) ||
             labels.size() > zpSlotCount(ctx) ||
@@ -1650,7 +1650,7 @@ namespace osuCrypto::LogVole
         u64 value,
         bool multiplyByDelta,
         u32 requestedWorkers,
-        RnsPoly& out)
+        RnsPoly& out, ProtocolCacheScopeView scope)
     {
         if (ctx.mGpuLightweight)
         {
@@ -1666,15 +1666,15 @@ namespace osuCrypto::LogVole
                 const std::array<u64, 1> input{value};
                 std::vector<RnsPoly> completed;
                 if (!wrapLightweightZpLabelsOnGpu(
-                        ctx, input, multiplyByDelta, value, 1u, completed))
+                        ctx, input, multiplyByDelta, value, 1u, completed, scope))
                     return false;
                 out = std::move(completed.front());
                 return true;
             }
 #endif
-            const auto host = getZpHostContext(ctx, currentProtocolCacheScope());
+            const auto host = getZpHostContext(ctx, scope);
             return host && wrapZpConstantCrt(
-                *host, value, multiplyByDelta, requestedWorkers, out);
+                *host, value, multiplyByDelta, requestedWorkers, out, scope);
         }
         if (!validateZpContext(ctx) || !validateZpValue(ctx, value))
         {
@@ -1715,7 +1715,7 @@ namespace osuCrypto::LogVole
                     return true;
                 }
                 return wrapLightweightZpLabelsOnGpu(
-                    ctx, labels, multiplyByDelta, padValue, expectedChunks, out);
+                    ctx, labels, multiplyByDelta, padValue, expectedChunks, out, currentProtocolCacheScope());
             }
 #endif
             const auto host = getZpHostContext(ctx, currentProtocolCacheScope());
@@ -2141,16 +2141,16 @@ namespace osuCrypto::LogVole
         const auto slotsForFallback = std::vector<u64>(input.mDeltaSlots.begin(), input.mDeltaSlots.end());
         const auto patternForFallback = input.mGarbledDeltaPattern;
         auto wrapHost = [ctx, delta = input.mDelta, slotsForFallback, patternForFallback,
-                         workers](RnsPoly &out) -> bool {
+                         workers](RnsPoly &out, ProtocolCacheScopeView scope) -> bool {
             if (patternForFallback)
             {
                 std::vector<u64> slots(zpSlotCount(ctx), 0);
                 for (std::size_t i = 0; i < (slots.size() / 3) * 3; ++i)
                     slots[i] = (*patternForFallback)[i % 3];
-                return wrapZpBatchCrt(ctx, slots, true, 0, workers, out);
+                return wrapZpBatchCrt(ctx, slots, true, 0, workers, out, scope);
             }
-            return slotsForFallback.empty() ? wrapZpConstantCrt(ctx, delta, true, workers, out)
-                                            : wrapZpBatchCrt(ctx, slotsForFallback, true, 0, workers, out);
+            return slotsForFallback.empty() ? wrapZpConstantCrt(ctx, delta, true, workers, out, scope)
+                                            : wrapZpBatchCrt(ctx, slotsForFallback, true, 0, workers, out, scope);
         };
 
         RnsPoly wrappedDelta{};
@@ -2184,7 +2184,7 @@ namespace osuCrypto::LogVole
             if (!wrapped && !strictDevice)
             {
                 HostStep cpuStep(hostProfiler(ctx.mRing), "setup: delta CPU preparation", &cpuBenchmark);
-                wrapped = wrapHost(wrappedDelta);
+                wrapped = wrapHost(wrappedDelta, {offlineRunId, ProtocolCacheRole::Sender});
             }
         }
         if (!wrapped)

@@ -472,10 +472,10 @@ namespace osuCrypto::LogVole::gpu
         // Cached per (N, plaintext modulus). Returns null on failure.
         static std::shared_ptr<GpuPlainNtt> get(
             const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder,
-            const RingResourceScope& owner);
+            const RingResourceScope& owner, ProtocolCacheScopeView scope = currentProtocolCacheScope());
         // Builds the plaintext NTT and SEAL batching permutation on the device.
         static std::shared_ptr<GpuPlainNtt> getRaw(u32 degree, u64 plaintextPrime,
-            const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution = {});
+            const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
         // Admit a fully sealed private native-bundle owner into the immutable
         // role-keyed raw table cache. Call only at the host context commit
         // boundary; no table construction or D2H occurs here.

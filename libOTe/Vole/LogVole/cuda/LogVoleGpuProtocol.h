@@ -1033,7 +1033,7 @@ namespace osuCrypto::LogVole::gpu
         bool multiplyByDelta,
         u64 padValue,
         u64 padChunks,
-        bool garbledInput = false);
+        bool garbledInput = false, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Same, for a caller whose scalars are already in device memory - the case a
     // GPU pipeline is in, where the previous stage produced x on the device.
@@ -1047,7 +1047,7 @@ namespace osuCrypto::LogVole::gpu
         u64 padChunks,
         bool garbledInput = false,
         ReceiverFirstQueryAllocations* firstQueryAllocations = nullptr,
-        const void* firstQueryOwner = nullptr, u64 firstQuerySid = 0);
+        const void* firstQueryOwner = nullptr, u64 firstQuerySid = 0, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Prepare one setup key polynomial with the ordinary plaintext encoder and
     // CRT-lift arithmetic on GPU. Exactly one of a nonzero scalar, a full slot
