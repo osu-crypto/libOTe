@@ -3148,6 +3148,36 @@ void LogVole_Cpu_ProtocolIdentityService(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(again.mFactoryOwner == explicitReceiverRing.mFactoryOwner);
         LOGVOLE_REQUIRE_TRUE(againCrt.mFactoryOwner == explicitReceiverCrt.mFactoryOwner);
     }
+    std::shared_ptr<const std::vector<RnsPoly>> cachedA, cachedB;
+    {
+        ScopedProtocolCacheScope ambient(ProtocolCacheRole::Sender, b);
+        cachedA = sharedLhePublicANtt(ring, 2, receiver);
+        cachedB = sharedLencPublicBNtt(ring, 1, receiver);
+        LOGVOLE_REQUIRE_TRUE(cachedA && cachedB);
+        LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(ring, 2, receiver) == cachedA);
+        LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(ring, 1, receiver) == cachedB);
+        const ProtocolCacheScope anotherRun(first->allocate(), ProtocolCacheRole::Receiver);
+        const auto otherA = sharedLhePublicANtt(ring, 2, anotherRun);
+        const auto otherB = sharedLencPublicBNtt(ring, 1, anotherRun);
+        // Existing A keys include the run even on CPU; host-only B deliberately
+        // shares run-zero entries across same-role runs when retention is off.
+        LOGVOLE_REQUIRE_TRUE(otherA != cachedA);
+        LOGVOLE_REQUIRE_TRUE(otherB == cachedB);
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(otherA->front().mCoeffs, cachedA->front().mCoeffs));
+        const auto senderA = sharedLhePublicANtt(ring, 2, sender);
+        const auto senderB = sharedLencPublicBNtt(ring, 1, sender);
+        LOGVOLE_REQUIRE_TRUE(senderA != cachedA && senderB != cachedB);
+    }
+    {
+        ScopedProtocolCacheScope ambient(ProtocolCacheRole::Sender, a);
+        LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(ring, 2, receiver) == cachedA);
+        LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(ring, 1, receiver) == cachedB);
+        std::vector<RnsPoly> copiedA;
+        LOGVOLE_REQUIRE_TRUE(buildLhePublicANtt(ring, 2, copiedA, receiver));
+        const auto copiedB = buildLencPublicBNtt(ring, 1, receiver);
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(copiedA.front().mCoeffs, cachedA->front().mCoeffs));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(copiedB.front().mCoeffs, cachedB->front().mCoeffs));
+    }
     PRNG samplingRandom(toBlock(0x1d, 1));
     std::vector<RnsPoly> sampled;
     std::array<u8, 2> results{};

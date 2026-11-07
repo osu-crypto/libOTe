@@ -396,26 +396,26 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx,
         u64 nonce,
         u64 domainTag,
-        u32 count);
+        u32 count, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Explicit actual transform; legacy BatchFromNonceNtt returns raw samples.
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx,
         u64 nonce,
         u64 domainTag,
         u32 count,
-        bool actualNtt);
+        bool actualNtt, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Optional immutable device capture; the host result is unchanged. Move
     // it directly into a const owner before registering it for public reuse.
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count,
-        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>* captured);
+        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Internal setup form which consumes no protocol PRNG and keeps the exact
     // deterministic batch exclusively on the current CUDA device. Returns
     // false without changing out when the retained path is unavailable.
     bool retainUniformPolyBatchFromNonce(
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count,
-        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>& out);
+        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     std::vector<RnsPoly> deriveUniformPolyBatchFromSeedNtt(
         const RingNttContext& ctx,
         block seed,

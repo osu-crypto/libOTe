@@ -249,6 +249,7 @@ contain no environment reads.
 | Identity service, stage one | `ProtocolCacheService` owns the atomic allocator; shared factories and GPU execution/setup owners retain/inject it. Cheap host-only IDs contain service identity plus numeric value, and cache/retained comparisons preserve affinity. Owned operation contexts and retained records keep service lifetime; lookups/copies of ID views do not increment shared ownership. The global allocator is removed. Identity TLS remains temporary compatibility transport pending explicit-context forwarding; resource constructors now use only an explicitly supplied service or a fresh instance; query-SID numeric bindings are unchanged. |
 | Resource construction boundary | Ring/CRT factory and GPU setup/execution constructors no longer inherit identity service from ambient scope. Existing phase/default-factory entry callers explicitly forward their compatibility service; supplied owners remain unchanged. Nullable raw setup creation receives its fallback service explicitly, with no extra service ownership work when execution already exists. Factory core role/run selection is now explicit; compatibility defaults at unmigrated caller boundaries and remaining operation transport still use identity TLS. |
 | Factory context forwarding | Ring/CRT factory make, native combined setup/certificate admission, and CRT host materialization receive explicit cheap scope views. Factory cache role/service selection and native bundle owner checks use that view; no current-scope read or guard remains in these cores. Existing public entry signatures have a trailing compatibility default evaluated at unmigrated caller boundaries. No operation identity is stored on shared math/context records; exact retained-record selection keeps its fixed-owner contract. |
+| Public operands and retention context | LHE/LENC public-cache creation, lookup and host materialization forward explicit views through nonce-derived uniform batches and GPU retained-owner registration/validation/materialization. Existing owned setup contexts supply these views before suspension; service ownership is retained once per entry/owner. CPU-only decryption/evaluation workers use supplied operands only, so their two unnecessary identity capture/guard pairs are removed. A remains run-keyed; CPU B retains its same-role run-zero sharing convention. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -507,6 +508,26 @@ setup forwarding, and rejects foreign explicit services without changing output.
 CRT affinity is checked before cache lookup, including cache hits. No GPU
 computation, numerical/kernel changes, broad suite or benchmarks were needed.
 Remaining runtime-global count is 25; identity TLS is still present at callers.
+
+Public-cache validation: CUDA-enabled Windows library/tests/example-object build
+passes in 88.98 seconds; final regression-TU rebuild passes in 19.18 seconds.
+Identity/cache/lifetime, existing offline-setup execution, and two-query
+GoldenSeed CPU protocol tests pass in 4.02 seconds. Explicit Receiver cache
+access ignores contradictory ambient Sender services, reuses identical snapshots
+for the same context, preserves A run partitioning and B host-only run-zero
+sharing, and preserves exact sampled coefficients and role partitions. Existing
+lazy sampler ownership checks continue to pass. No numerical/CUDA kernel,
+PRNG-order, cache eviction/partitioning or exact retained-record behavior changed.
+No GPU computation, broad suite, benchmarks, statistics or worker-TLS migration
+was performed. Estimate stays 84%; runtime-global count stays 25.
+
+Remaining compatibility boundary after public-operand migration: upper protocol
+configuration/offline/online scopes, private GPU setup/provenance consumers,
+legacy synchronous LHE decryption and LENC tree/digest callers, and transitional
+public defaults still acquire or transport identity through TLS. Existing setup
+guards remain where those unmigrated descendants still need them; the numerical
+CPU decryption/evaluation kernels no longer do. The service and shared math
+records still contain no mutable current-session state.
 
 Resource-constructor inheritance is removed. The next stage-two sub-batch must
 remove `currentProtocolCacheScope`/scope guards/TLS by passing the already owned

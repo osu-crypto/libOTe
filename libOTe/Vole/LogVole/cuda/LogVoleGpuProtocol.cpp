@@ -60,11 +60,11 @@ namespace osuCrypto::LogVole::gpu
     {
         constexpr std::size_t publicRetentionByteLimit = std::size_t(256) << 20;
         bool retentionContextMatches(const RingNttContext& ctx,
-            const RetainedPublicUniform::Impl& value)
+            const RetainedPublicUniform::Impl& value, ProtocolCacheScopeView scope)
         {
             if (!value.mRing || value.mDevice < 0 || currentDeviceOrdinal() != value.mDevice ||
-                value.mRole != currentProtocolCacheScope().mRole ||
-                value.mRunId != currentProtocolCacheScope().mRunId ||
+                value.mRole != scope.mRole ||
+                value.mRunId != scope.mRunId ||
                 !(value.mParams == ctx.mParams) || value.mRing->rho() != ringModulusCount(ctx)) return false;
             const auto& moduli = value.mRing->hostModuli();
             for (std::size_t limb = 0; limb < moduli.size(); ++limb)
@@ -84,9 +84,9 @@ namespace osuCrypto::LogVole::gpu
         }
 
         bool uploadPublicUniformOrHost(const RingNttContext& ctx, GpuPolyBuffer& destination,
-            std::span<const RnsPoly> host, GpuStream& stream)
+            std::span<const RnsPoly> host, GpuStream& stream, ProtocolCacheScopeView scope = currentProtocolCacheScope())
         {
-            auto retained = findPublicUniformRetention(ctx, host);
+            auto retained = findPublicUniformRetention(ctx, host, scope);
             if (!retained) return destination.upload(host, stream);
             const auto& values = retained->mImpl->mValues;
             if (destination.count() < values.count() ||
@@ -110,11 +110,11 @@ namespace osuCrypto::LogVole::gpu
         bool copyRetainedPublicUniform(const RingNttContext& ctx,
             GpuPolyBuffer& destination, const RetainedPublicUniform& source,
             std::size_t sourceOffset, std::size_t count, bool outputNtt,
-            GpuStream& stream)
+            GpuStream& stream, ProtocolCacheScopeView scope = currentProtocolCacheScope())
         {
             if (!count || sourceOffset > source.count() ||
                 count > source.count() - sourceOffset ||
-                !retainedPublicUniformMatches(ctx, source, source.count(), outputNtt) ||
+                !retainedPublicUniformMatches(ctx, source, source.count(), outputNtt, scope) ||
                 destination.count() < count ||
                 destination.polyWords() != source.mImpl->mValues.polyWords()) return false;
             const std::size_t words = count * destination.polyWords();
@@ -144,10 +144,10 @@ namespace osuCrypto::LogVole::gpu
 
     bool registerPublicUniformRetention(const RingNttContext& ctx,
         const std::shared_ptr<const std::vector<RnsPoly>>& host,
-        const RetainedPublicUniformPtr& captured)
+        const RetainedPublicUniformPtr& captured, ProtocolCacheScopeView scope)
     {
         if (!ctx.mPublicCache || !publicUniformRetentionEnabled(ctx.mExecutionOptions) || !host || !captured || captured->count() == 0 ||
-            !retentionContextMatches(ctx, *captured->mImpl) ||
+            !retentionContextMatches(ctx, *captured->mImpl, scope) ||
             !retentionHostMatches(*host, *captured->mImpl)) return false;
         const auto bytes = captured->mImpl->mValues.bytes();
         if (bytes > publicRetentionByteLimit) return false;
@@ -175,7 +175,7 @@ namespace osuCrypto::LogVole::gpu
     }
 
     RetainedPublicUniformPtr findPublicUniformRetention(
-        const RingNttContext& ctx, std::span<const RnsPoly> host)
+        const RingNttContext& ctx, std::span<const RnsPoly> host, ProtocolCacheScopeView scope)
     {
         if (!ctx.mPublicCache || !publicUniformRetentionEnabled(ctx.mExecutionOptions) || host.empty()) return {};
         auto& retention = ctx.mPublicCache->mRetention;
@@ -197,7 +197,7 @@ namespace osuCrypto::LogVole::gpu
             }
         }
         // Do not inspect a borrowed span until its registered owner is locked.
-        if (candidate && retentionContextMatches(ctx, *candidate->mImpl) &&
+        if (candidate && retentionContextMatches(ctx, *candidate->mImpl, scope) &&
             retentionHostMatches(*owner, *candidate->mImpl)) return candidate;
         if (ctx.mPublicCache)
         {
@@ -208,9 +208,8 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool fetchRetainedPublicUniform(const RetainedPublicUniform& source,
-        std::vector<RnsPoly>& out, GpuStream& stream)
+        std::vector<RnsPoly>& out, GpuStream& stream, ProtocolCacheScopeView scope)
     {
-        const auto scope = currentProtocolCacheScope();
         if (!available() || source.count() == 0 ||
             source.mImpl->mDevice != currentDeviceOrdinal() ||
             source.mImpl->mRole != scope.mRole || source.mImpl->mRunId != scope.mRunId)
@@ -221,25 +220,25 @@ namespace osuCrypto::LogVole::gpu
 
     bool retainedPublicUniformMatches(const RingNttContext& ctx,
         const RetainedPublicUniform& source, std::size_t expectedCount,
-        bool outputNtt)
+        bool outputNtt, ProtocolCacheScopeView scope)
     {
         return expectedCount != 0 && source.count() == expectedCount &&
             source.mImpl->mSeeds.size() == expectedCount &&
             source.mImpl->mOutputNtt == outputNtt &&
-            retentionContextMatches(ctx, *source.mImpl);
+            retentionContextMatches(ctx, *source.mImpl, scope);
     }
 
     RetainedPublicUniformPtr retainRootBStarNttDevice(
-        const RingNttContext& ctx, u32 count)
+        const RingNttContext& ctx, u32 count, ProtocolCacheScopeView scope)
     {
-        if (currentProtocolCacheScope().mRole != ProtocolCacheRole::Sender ||
+        if (scope.mRole != ProtocolCacheRole::Sender ||
             count == 0) return {};
         const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootBStarDevice;
         if (decline) return {};
         RetainedPublicUniformPtr next;
         if (!retainUniformPolyBatchFromNonce(ctx, kRootBStarNonce,
-                kRootBStarDomain, count, true, next) || !next ||
-            !retainedPublicUniformMatches(ctx, *next, count, true) ||
+                kRootBStarDomain, count, true, next, scope) || !next ||
+            !retainedPublicUniformMatches(ctx, *next, count, true, scope) ||
             next.use_count() != 1) return {};
         auto producer = std::const_pointer_cast<RetainedPublicUniform>(next);
         producer->mImpl->mRootBStarNtt = true;
@@ -249,21 +248,21 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool retainedRootBStarNttMatches(const RingNttContext& ctx,
-        const RetainedPublicUniform& source, std::size_t expectedCount)
+        const RetainedPublicUniform& source, std::size_t expectedCount, ProtocolCacheScopeView scope)
     {
         return source.mImpl->mRootBStarNtt &&
             source.mImpl->mRootBStarNonce == kRootBStarNonce &&
             source.mImpl->mRootBStarDomain == kRootBStarDomain &&
             source.mImpl->mRole == ProtocolCacheRole::Sender &&
-            retainedPublicUniformMatches(ctx, source, expectedCount, true);
+            retainedPublicUniformMatches(ctx, source, expectedCount, true, scope);
     }
 
     bool materializeRetainedPublicUniform(const RingNttContext& ctx,
         const RetainedPublicUniformPtr& source,
-        std::shared_ptr<const std::vector<RnsPoly>>& out)
+        std::shared_ptr<const std::vector<RnsPoly>>& out, ProtocolCacheScopeView scope)
     {
         if (!source || !retainedPublicUniformMatches(
-                ctx, *source, source->count(), source->mImpl->mOutputNtt)) return false;
+                ctx, *source, source->count(), source->mImpl->mOutputNtt, scope)) return false;
         auto& value = *source->mImpl;
         std::lock_guard<std::mutex> lock(value.mHostMutex);
         if (auto snapshot = value.mHostSnapshot.lock())
@@ -2342,7 +2341,7 @@ namespace osuCrypto::LogVole::gpu
     {
         bool sampleUniformBatchOwner(const RingNttContext& ctx,
             std::span<const std::array<u64, 8>> seeds, bool outputNtt,
-            bool synchronize, std::shared_ptr<RetainedPublicUniform>& out)
+            bool synchronize, std::shared_ptr<RetainedPublicUniform>& out, ProtocolCacheScopeView scope)
         {
             HostStep totalStep(hostProfiler(ctx), "setup: uniform device total");
             if (!setupUniformSamplingEnabled(ctx.mExecutionOptions) || seeds.empty() ||
@@ -2395,8 +2394,8 @@ namespace osuCrypto::LogVole::gpu
             value.mParams = ctx.mParams;
             value.mSeeds.assign(seeds.begin(), seeds.end());
             value.mOutputNtt = outputNtt;
-            value.mRole = currentProtocolCacheScope().mRole;
-            value.mRunId = currentProtocolCacheScope().mRunId;
+            value.mRole = scope.mRole;
+            value.mRunId = scope.mRunId;
             value.mIdentityService = value.mRunId.serviceOwner();
             value.mDevice = currentDeviceOrdinal();
             value.mValues = std::move(sampled);
@@ -2411,14 +2410,14 @@ namespace osuCrypto::LogVole::gpu
 
     bool retainUniformBatchFromSeedsDevice(
         const RingNttContext& ctx, std::span<const std::array<u64, 8>> seeds,
-        bool outputNtt, RetainedPublicUniformPtr& out)
+        bool outputNtt, RetainedPublicUniformPtr& out, ProtocolCacheScopeView scope)
     {
         if (!publicUniformRetentionEnabled(ctx.mExecutionOptions)) return false;
         const std::size_t polyWords = ringPolyCoeffCount(ctx.mParams);
         if (!polyWords || seeds.size() > publicRetentionByteLimit / sizeof(u64) / polyWords)
             return false;
         std::shared_ptr<RetainedPublicUniform> next;
-        if (!sampleUniformBatchOwner(ctx, seeds, outputNtt, true, next) ||
+        if (!sampleUniformBatchOwner(ctx, seeds, outputNtt, true, next, scope) ||
             next->mImpl->mValues.bytes() > publicRetentionByteLimit) return false;
         if (ctx.mPublicCache)
         {
@@ -2438,7 +2437,7 @@ namespace osuCrypto::LogVole::gpu
         if (scope.mRole != ProtocolCacheRole::Sender ||
             (decline)) return {};
         std::shared_ptr<RetainedPublicUniform> privateSample;
-        if (!sampleUniformBatchOwner(ctx, rowSeeds, false, true, privateSample) ||
+        if (!sampleUniformBatchOwner(ctx, rowSeeds, false, true, privateSample, scope) ||
             !privateSample || privateSample->count() != rowSeeds.size()) return {};
         auto next = std::make_shared<DeviceBatch>();
         next->mImpl->mRing = privateSample->mImpl->mRing;
@@ -2461,7 +2460,7 @@ namespace osuCrypto::LogVole::gpu
         if (scope.mRole != ProtocolCacheRole::Sender || !scope.mRunId ||
             (decline)) return {};
         std::shared_ptr<RetainedPublicUniform> privateSample;
-        if (!sampleUniformBatchOwner(ctx, rowSeeds, false, true, privateSample) ||
+        if (!sampleUniformBatchOwner(ctx, rowSeeds, false, true, privateSample, scope) ||
             !privateSample || privateSample->count() != rowSeeds.size()) return {};
         auto next = std::make_shared<DeviceBatch>();
         next->mImpl->mRing = privateSample->mImpl->mRing;
@@ -2479,17 +2478,17 @@ namespace osuCrypto::LogVole::gpu
         const RingNttContext& ctx,
         std::span<const std::array<u64, 8>> seeds,
         bool outputNtt,
-        std::vector<RnsPoly>& out)
+        std::vector<RnsPoly>& out, ProtocolCacheScopeView scope)
     {
-        return sampleUniformBatchFromSeedsDevice(ctx, seeds, outputNtt, out, nullptr);
+        return sampleUniformBatchFromSeedsDevice(ctx, seeds, outputNtt, out, nullptr, scope);
     }
 
     bool sampleUniformBatchFromSeedsDevice(
         const RingNttContext& ctx, std::span<const std::array<u64, 8>> seeds,
-        bool outputNtt, std::vector<RnsPoly>& out, RetainedPublicUniformPtr* captured)
+        bool outputNtt, std::vector<RnsPoly>& out, RetainedPublicUniformPtr* captured, ProtocolCacheScopeView scope)
     {
         std::shared_ptr<RetainedPublicUniform> retained;
-        if (!sampleUniformBatchOwner(ctx, seeds, outputNtt, false, retained)) return false;
+        if (!sampleUniformBatchOwner(ctx, seeds, outputNtt, false, retained, scope)) return false;
         std::vector<RnsPoly> next;
         {
             HostStep downloadStep(hostProfiler(ctx), "setup: uniform device download");

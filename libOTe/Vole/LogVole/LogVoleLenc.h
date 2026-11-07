@@ -79,15 +79,15 @@ namespace osuCrypto::LogVole
         std::vector<std::vector<RnsPoly>> mNodeDecompNtt;
     };
 
-    std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau);
+    std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     std::shared_ptr<const std::vector<RnsPoly>> sharedLencPublicBNtt(
-        const RingNttContext& ctx, u32 tau);
+        const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Internal device-resident view of the same deterministic cached batch.
     // It is exact-role/run/device scoped and does not create a host snapshot.
     std::shared_ptr<const gpu::RetainedPublicUniform> retainedLencPublicBNtt(
-        const RingNttContext& ctx, u32 tau);
+        const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     bool prepareKeyDeriveRequest(
         const KeyDeriveReceiverInput& input,

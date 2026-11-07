@@ -138,32 +138,32 @@ namespace osuCrypto::LogVole::gpu
     // occur after that owner expires. Missing entries use normal host uploads.
     bool registerPublicUniformRetention(const RingNttContext& ctx,
         const std::shared_ptr<const std::vector<RnsPoly>>& host,
-        const RetainedPublicUniformPtr& captured);
+        const RetainedPublicUniformPtr& captured, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     RetainedPublicUniformPtr findPublicUniformRetention(
-        const RingNttContext& ctx, std::span<const RnsPoly> host);
+        const RingNttContext& ctx, std::span<const RnsPoly> host, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool fetchRetainedPublicUniform(
-        const RetainedPublicUniform& source, std::vector<RnsPoly>& out, GpuStream& stream);
+        const RetainedPublicUniform& source, std::vector<RnsPoly>& out, GpuStream& stream, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Validate a retained operand without touching host polynomial storage.
     // The token is scoped to its exact ring, protocol role/run and CUDA device;
     // outputNtt distinguishes legacy raw public A from transformed public B.
     bool retainedPublicUniformMatches(const RingNttContext& ctx,
         const RetainedPublicUniform& source, std::size_t expectedCount,
-        bool outputNtt);
+        bool outputNtt, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // The sender's Root BStar is the nonce-derived, actual NTT batch sent on
     // the public Root wire. Its producer attaches the fixed nonce/domain before
     // publishing an immutable owner; consumers reject another public token.
     inline constexpr u64 kRootBStarNonce = 0x52544E43524F4F54ull;
     inline constexpr u64 kRootBStarDomain = 0xB57A52u;
     RetainedPublicUniformPtr retainRootBStarNttDevice(
-        const RingNttContext& ctx, u32 count);
+        const RingNttContext& ctx, u32 count, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool retainedRootBStarNttMatches(const RingNttContext& ctx,
-        const RetainedPublicUniform& source, std::size_t expectedCount);
+        const RetainedPublicUniform& source, std::size_t expectedCount, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Publish one immutable complete host snapshot. The first caller downloads
     // the synchronized device owner, or replays the already-consumed SEAL seeds
     // exactly if CUDA is unavailable. Failure leaves out unchanged.
     bool materializeRetainedPublicUniform(const RingNttContext& ctx,
         const RetainedPublicUniformPtr& source,
-        std::shared_ptr<const std::vector<RnsPoly>>& out);
+        std::shared_ptr<const std::vector<RnsPoly>>& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     struct PublicUniformRetentionStats
     {
         u64 mCaptures = 0;
@@ -523,17 +523,17 @@ namespace osuCrypto::LogVole::gpu
         const RingNttContext& ctx,
         std::span<const std::array<u64, 8>> seeds,
         bool outputNtt,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool sampleUniformBatchFromSeedsDevice(
         const RingNttContext& ctx, std::span<const std::array<u64, 8>> seeds,
         bool outputNtt, std::vector<RnsPoly>& out,
-        RetainedPublicUniformPtr* captured);
+        RetainedPublicUniformPtr* captured, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Retained-only form: completes sampling/optional NTT and publishes a
     // device owner without a device-to-host copy. Seeds are copied into the
     // owner so an exact CPU fallback can be materialized later.
     bool retainUniformBatchFromSeedsDevice(
         const RingNttContext& ctx, std::span<const std::array<u64, 8>> seeds,
-        bool outputNtt, RetainedPublicUniformPtr& out);
+        bool outputNtt, RetainedPublicUniformPtr& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // GPU equivalent of
     //   for i in [0, count): out[i] = deriveUniformPolyFromSeed(ctx, seed, tag, i)

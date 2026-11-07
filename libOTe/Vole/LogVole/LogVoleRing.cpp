@@ -2103,10 +2103,11 @@ namespace osuCrypto::LogVole
 
     static std::vector<RnsPoly> sampleUniformSetupSeeds(
         const RingNttContext& ctx, std::span<const std::array<u64, 8>> seeds, bool actualNtt,
-        std::shared_ptr<const gpu::RetainedPublicUniform>* captured = nullptr)
+        std::shared_ptr<const gpu::RetainedPublicUniform>* captured = nullptr,
+        ProtocolCacheScopeView scope = currentProtocolCacheScope())
     {
         std::vector<RnsPoly> out;
-        if (gpu::sampleUniformBatchFromSeedsDevice(ctx, seeds, actualNtt, out, captured) &&
+        if (gpu::sampleUniformBatchFromSeedsDevice(ctx, seeds, actualNtt, out, captured, scope) &&
             out.size() == seeds.size())
         {
             for (std::size_t i = 0; i < seeds.size(); ++i)
@@ -2294,20 +2295,20 @@ namespace osuCrypto::LogVole
         return out;
     }
 
-    std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count)
+    std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count, ProtocolCacheScopeView scope)
     {
-        return deriveUniformPolyBatchFromNonce(ctx, nonce, domainTag, count, false);
+        return deriveUniformPolyBatchFromNonce(ctx, nonce, domainTag, count, false, scope);
     }
 
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
-        const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count, bool actualNtt)
+        const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count, bool actualNtt, ProtocolCacheScopeView scope)
     {
-        return deriveUniformPolyBatchFromNonce(ctx, nonce, domainTag, count, actualNtt, nullptr);
+        return deriveUniformPolyBatchFromNonce(ctx, nonce, domainTag, count, actualNtt, nullptr, scope);
     }
 
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count, bool actualNtt,
-        std::shared_ptr<const gpu::RetainedPublicUniform>* captured)
+        std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope)
     {
         AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
         AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
@@ -2327,7 +2328,7 @@ namespace osuCrypto::LogVole
                     static_cast<u64>(ctx.mParams.mCoeffModulusBits.size()));
                 seeds[i] = sealSeedFromBlock(deriveUniformPolySeed(ctx, publicSeed, domainTag, i));
             }
-            return sampleUniformSetupSeeds(ctx, seeds, actualNtt, captured);
+            return sampleUniformSetupSeeds(ctx, seeds, actualNtt, captured, scope);
         }
 #endif
         if (captured) captured->reset();
@@ -2342,7 +2343,7 @@ namespace osuCrypto::LogVole
 
     bool retainUniformPolyBatchFromNonce(
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count,
-        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>& out)
+        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>& out, ProtocolCacheScopeView scope)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!count || !useDeviceUniformSetup(ctx)) return false;
@@ -2357,7 +2358,7 @@ namespace osuCrypto::LogVole
             seeds[i] = sealSeedFromBlock(deriveUniformPolySeed(ctx, publicSeed, domainTag, i));
         }
         std::shared_ptr<const gpu::RetainedPublicUniform> next;
-        if (!gpu::retainUniformBatchFromSeedsDevice(ctx, seeds, actualNtt, next) ||
+        if (!gpu::retainUniformBatchFromSeedsDevice(ctx, seeds, actualNtt, next, scope) ||
             !next || next->count() != count) return false;
         for (u32 i = 0; i < count; ++i)
         {

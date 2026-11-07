@@ -149,30 +149,30 @@ namespace osuCrypto::LogVole
         }
 
         std::vector<RnsPoly> buildLencPublicBNttImpl(const RingNttContext& ctx, u32 tau,
-            std::shared_ptr<const gpu::RetainedPublicUniform>* captured = nullptr)
+            std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope)
         {
             return deriveUniformPolyBatchFromNonce(
-                ctx, 0xC0DEC0DEull, 0x1EEC0DEu, 2u * tau, true, captured);
+                ctx, 0xC0DEC0DEull, 0x1EEC0DEu, 2u * tau, true, captured, scope);
         }
 
         using PublicBCacheKey = PublicPolynomialCache::Key;
         using PublicBCacheEntry = PublicPolynomialCache::Entry;
 
         std::shared_ptr<PublicBCacheEntry> getOrCreateCachedPublicBEntry(
-            const RingNttContext& ctx, u32 tau)
+            const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope)
         {
             if (!ctx.mPublicCache) return {};
             auto& cache = ctx.mPublicCache->mLenc;
             PublicBCacheKey key{};
             key.mRing = ctx.mParams;
             key.mCount = tau;
-            key.mRole = currentProtocolCacheScope().mRole;
+            key.mRole = scope.mRole;
 #if defined(ENABLE_LOGVOLE_CUDA)
             // Retained device operands belong to one cold protocol run. Keep
             // the old host-only cache scope when this feature is disabled.
             if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions))
             {
-                key.mRunId = currentProtocolCacheScope().mRunId;
+                key.mRunId = scope.mRunId;
                 key.mDevice = gpu::currentDeviceOrdinal();
             }
 #endif
@@ -204,17 +204,17 @@ namespace osuCrypto::LogVole
             candidate->mIdentityService = key.mRunId.serviceOwner();
 #if defined(ENABLE_LOGVOLE_CUDA)
             (void)retainUniformPolyBatchFromNonce(ctx, 0xC0DEC0DEull,
-                0x1EEC0DEu, 2u * tau, true, candidate->mDevice);
+                0x1EEC0DEu, 2u * tau, true, candidate->mDevice, scope);
 #endif
             if (!candidate->mDevice)
             {
                 std::shared_ptr<const gpu::RetainedPublicUniform> captured;
                 candidate->mHost = std::make_shared<const std::vector<RnsPoly>>(
-                    buildLencPublicBNttImpl(ctx, tau, &captured));
+                    buildLencPublicBNttImpl(ctx, tau, &captured, scope));
                 candidate->mDevice = std::move(captured);
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (candidate->mDevice)
-                    (void)gpu::registerPublicUniformRetention(ctx, candidate->mHost, candidate->mDevice);
+                    (void)gpu::registerPublicUniformRetention(ctx, candidate->mHost, candidate->mDevice, scope);
 #endif
             }
 
@@ -225,26 +225,26 @@ namespace osuCrypto::LogVole
         }
 
         std::shared_ptr<const std::vector<RnsPoly>> getOrCreateCachedPublicBNtt(
-            const RingNttContext& ctx, u32 tau)
+            const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope)
         {
-            auto entry = getOrCreateCachedPublicBEntry(ctx, tau);
+            auto entry = getOrCreateCachedPublicBEntry(ctx, tau, scope);
             if (!entry) return {};
             std::lock_guard<std::mutex> lock(entry->mMutex);
             if (entry->mHost) return entry->mHost;
             std::shared_ptr<const std::vector<RnsPoly>> materialized;
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (entry->mDevice)
-                (void)gpu::materializeRetainedPublicUniform(ctx, entry->mDevice, materialized);
+                (void)gpu::materializeRetainedPublicUniform(ctx, entry->mDevice, materialized, scope);
 #endif
             if (!materialized)
                 materialized = std::make_shared<const std::vector<RnsPoly>>(
-                    buildLencPublicBNttImpl(ctx, tau));
+                    buildLencPublicBNttImpl(ctx, tau, nullptr, scope));
             if (!materialized || materialized->size() != 2u * tau ||
                 !validateRingBatchShape(*materialized, ctx.mParams)) return {};
             entry->mHost = std::move(materialized);
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (entry->mDevice)
-                (void)gpu::registerPublicUniformRetention(ctx, entry->mHost, entry->mDevice);
+                (void)gpu::registerPublicUniformRetention(ctx, entry->mHost, entry->mDevice, scope);
 #endif
             return entry->mHost;
         }
@@ -624,7 +624,7 @@ namespace osuCrypto::LogVole
             }
             else
             {
-                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau);
+                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau, currentProtocolCacheScope());
                 publicBNtt = cachedPublicBNtt.get();
             }
 
@@ -905,18 +905,18 @@ namespace osuCrypto::LogVole
     }
 
     std::shared_ptr<const std::vector<RnsPoly>> sharedLencPublicBNtt(
-        const RingNttContext& ctx, u32 tau)
+        const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope)
     {
-        return getOrCreateCachedPublicBNtt(ctx, tau);
+        return getOrCreateCachedPublicBNtt(ctx, tau, scope);
     }
 
     std::shared_ptr<const gpu::RetainedPublicUniform> retainedLencPublicBNtt(
-        const RingNttContext& ctx, u32 tau)
+        const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
-        auto entry = getOrCreateCachedPublicBEntry(ctx, tau);
+        auto entry = getOrCreateCachedPublicBEntry(ctx, tau, scope);
         if (entry && entry->mDevice && gpu::retainedPublicUniformMatches(
-                ctx, *entry->mDevice, 2u * tau, true)) return entry->mDevice;
+                ctx, *entry->mDevice, 2u * tau, true, scope)) return entry->mDevice;
 #else
         (void)ctx;
         (void)tau;
@@ -924,9 +924,9 @@ namespace osuCrypto::LogVole
         return {};
     }
 
-    std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau)
+    std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope)
     {
-        auto cached = getOrCreateCachedPublicBNtt(ctx, tau);
+        auto cached = getOrCreateCachedPublicBNtt(ctx, tau, scope);
         return *cached;
     }
 
@@ -979,7 +979,7 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, tau);
+            cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, tau, currentProtocolCacheScope());
             publicBNtt = cachedPublicBNtt.get();
         }
 
@@ -1105,7 +1105,7 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, tau);
+            cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, tau, currentProtocolCacheScope());
             publicBNtt = cachedPublicBNtt.get();
         }
 
@@ -1505,11 +1505,11 @@ namespace osuCrypto::LogVole
         else
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (deviceAssemblyRequested) retainedPublicBNtt = retainedLencPublicBNtt(ctx, fullTau);
+            if (deviceAssemblyRequested) retainedPublicBNtt = retainedLencPublicBNtt(ctx, fullTau, setupScope);
 #endif
             if (!retainedPublicBNtt)
             {
-                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau);
+                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau, setupScope);
                 publicBNtt = cachedPublicBNtt.get();
                 if (!publicBNtt || !validatePublicBNtt(ctx, *publicBNtt, fullTau)) co_return false;
             }
@@ -1882,7 +1882,7 @@ namespace osuCrypto::LogVole
             // operands. Successful retained-only assembly never downloads B.
             if (!publicBNtt)
             {
-                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau);
+                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau, setupScope);
                 publicBNtt = cachedPublicBNtt.get();
             }
             if (!publicBNtt || !validatePublicBNtt(ctx, *publicBNtt, fullTau)) co_return false;
@@ -2416,9 +2416,7 @@ namespace osuCrypto::LogVole
             if (chunk.mCiphertexts.capacity() < terms || chunk.mNodes.capacity() < terms) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         for (auto& chunk : chunks) chunk.mOk = true;
-        const auto cacheScope = currentProtocolCacheScope();
         auto evalChunk = [&](std::size_t begin, std::size_t end, LencEvalBuffer& chunk) {
-            ScopedProtocolCacheScope scope(cacheScope);
             CpuBenchmarkState worker = chunks.size() > 1
                 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
             CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
