@@ -19,7 +19,6 @@
 #include <exception>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <stdexcept>
 #include <thread>
@@ -29,15 +28,6 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        std::mutex rootWirePinEvidenceMutex;
-        RootWirePinOverlapEvidence lastRootWirePinEvidence{};
-
-        void publishRootWirePinEvidence(const RootWirePinOverlapEvidence& evidence)
-        {
-            std::lock_guard lock(rootWirePinEvidenceMutex);
-            lastRootWirePinEvidence = evidence;
-        }
-
 #if defined(ENABLE_LOGVOLE_CUDA)
         u64 steadyClockNs()
         {
@@ -434,7 +424,6 @@ namespace osuCrypto::LogVole
                 }
                 rootPin.mEvidence.mSelected = rootPin.mEvidence.mEligible &&
                     rootPin.mEvidence.mPinSucceeded;
-                publishRootWirePinEvidence(rootPin.mEvidence);
                 co_await sendOfflineFrame(rootSock, std::move(payload), params.mShrinkExpand.mTransport.mOwnedSetupSend, profile, cpuBenchmark);
                 co_return;
             }
@@ -598,12 +587,6 @@ namespace osuCrypto::LogVole
         }
     }
 
-    RootWirePinOverlapEvidence rootWirePinOverlapEvidenceSnapshot()
-    {
-        std::lock_guard lock(rootWirePinEvidenceMutex);
-        return lastRootWirePinEvidence;
-    }
-
     std::size_t forecastRootOfflineWireSize(const Params& params,
         bool leafInputsAreGadget) noexcept
     {
@@ -725,14 +708,13 @@ namespace osuCrypto::LogVole
         const SenderOfflineInput& input,
         SenderState& state,
         PRNG& prng,
-        Socket& sock)
+        Socket& sock, RootWirePinOverlapEvidence& rootWirePin)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
         const u64 senderRunId = input.mSenderOwnerRunId
             ? input.mSenderOwnerRunId : currentProtocolCacheScope().mRunId;
-        RootWirePinOverlapEvidence initialPinEvidence{};
-        initialPinEvidence.mSenderRunId = senderRunId;
-        publishRootWirePinEvidence(initialPinEvidence);
+        rootWirePin = {};
+        rootWirePin.mSenderRunId = senderRunId;
         const auto& encoding = input.mParams.mShrinkExpand.mTransport.mEncoding;
         const bool rootPinRequested = encoding.mRootWirePinOverlap;
         const bool rootCudaRequested = encoding.mRootWireCudaAlloc;
@@ -788,6 +770,8 @@ namespace osuCrypto::LogVole
 #endif
         co_await sendOfflineMessage(input.mParams, output.mMessage,
             sock, true, false, senderRunId, rootPin, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
+        // sendOfflineMessage joins the pinning worker before encoding the root.
+        rootWirePin = rootPin.mEvidence;
         state = std::move(output.mState);
     }
 

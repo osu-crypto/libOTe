@@ -379,6 +379,21 @@ namespace osuCrypto::LogVole
         bool mEarlyGoldenCheck = true;
     };
 
+    struct RootWirePinOverlapEvidence
+    {
+        u64 mSenderRunId = 0;
+        u64 mWireBytes = 0;
+        u64 mPinBeginNs = 0;
+        u64 mPinEndNs = 0;
+        u64 mPinCpuNs = 0;
+        u64 mJoinWaitNs = 0;
+        bool mRequested = false;
+        bool mEligible = false;
+        bool mLaunched = false;
+        bool mAlreadyPinned = false;
+        bool mPinSucceeded = false;
+        bool mSelected = false;
+    };
     struct SenderState
     {
         Params mParams;

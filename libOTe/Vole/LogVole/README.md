@@ -213,7 +213,11 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-This inventory describes the working tree at `dd980823`, including uncommitted
+Estimated overall completion: **71%** of the agreed ownership/globals refactor,
+including remaining scheduling, cleanup and cross-platform/leak validation.
+This is a rough work estimate, not a declaration count.
+
+This inventory includes both committed steps and the remaining working-tree
 changes. A migrated synchronous wrapper is not a completed async migration.
 The original 216-declaration globals snapshot remains in the local review
 artifacts; the current scan finds **26 runtime global/static/TLS declarations**.
@@ -235,7 +239,7 @@ contain no environment reads.
 | Intermediate receiver shrink | Committed in `b792a035`; direct `bulk_chunked` on the caller executor, unchanged arithmetic/padding, exclusive output ranges, and inline execution for one partition. Per-partition benchmark state is allocated only for parallel work. |
 | Intermediate receiver denoise | Committed in `216ef876`; direct async `bulk_chunked`, one shared recovery-data preparation, unchanged unrolled row kernel, and alias-safe output publication. Legacy synchronous entry point is deprecated. |
 | Empty-moduli sentinel and CLI tags | Removed in `dd980823`; a borrowed modulus span and function-local tags replace the globals. |
-| Sender pinning evidence moved onto sender state | Present in working tree, uncommitted; separate CUDA allocation evidence remains global. |
+| Sender pinning evidence moved onto sender state | Reviewed and committed. `LogVoleSender::mRootWirePin` owns the result; low-level callers pass an exclusive reference. Shared evidence/mutex and snapshot API removed. Separate CUDA allocation evidence remains global. |
 | Offline setup migration | Uncommitted intermediate `CpuRowScratch::runBulk` implementation; still needs the explicit executor/buffer call-site pattern. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
@@ -328,6 +332,13 @@ lists are empty after each query. One 16-value non-interactive PublicSeed query
 passes in 33.16 seconds. No GPU runtime, WSL rerun, or benchmarks in this step.
 The working-tree reversion of the previously committed async receiver shrink and
 denoise blocks was removed so the mandatory-executor path retains those phases.
+
+Sender pinning evidence review: the worker joins before its evidence is published
+and before reserved storage is destroyed. Windows CUDA-enabled compilation passes;
+CPU checks for lazy start, failure reset, independent evidence, move and clear pass
+in 3.33 seconds. GPU registration execution and WSL were not rerun. This finalizes
+an existing working-tree change; the working-tree inventory still has 26 runtime
+declarations because it already excluded these two globals.
 
 Next steps, in order:
 

@@ -134,6 +134,8 @@ namespace
             LOGVOLE_REQUIRE_FALSE(originalSender.mOfflineState.mHasActiveSid);
         }
 
+        const auto pinRun = originalSender.mRootWirePin.mSenderRunId;
+        LOGVOLE_REQUIRE_TRUE(pinRun != 0);
         // Moving an established session must retain the new backend/mode state.
         LogVoleSender sender(std::move(originalSender));
         tests_libOTe::logvole_test::SenderResources senderResources(sender.options());
@@ -141,6 +143,8 @@ namespace
         LogVoleReceiver receiver;
         receiver = std::move(originalReceiver);
         LOGVOLE_REQUIRE_FALSE(originalSender.isConfigured());
+        LOGVOLE_REQUIRE_EQ(sender.mRootWirePin.mSenderRunId, pinRun);
+        LOGVOLE_REQUIRE_EQ(originalSender.mRootWirePin.mSenderRunId, 0u);
         LOGVOLE_REQUIRE_FALSE(originalReceiver.isConfigured());
         LOGVOLE_REQUIRE_EQ(sender.setting(), setting);
         LOGVOLE_REQUIRE_EQ(receiver.setting(), setting);
@@ -232,6 +236,8 @@ namespace
         }
         sender.clear();
         receiver.clear();
+        LOGVOLE_REQUIRE_EQ(sender.mRootWirePin.mSenderRunId, 0u);
+        LOGVOLE_REQUIRE_FALSE(sender.mRootWirePin.mRequested);
         LOGVOLE_REQUIRE_FALSE(sender.outputDevice());
         LOGVOLE_REQUIRE_FALSE(receiver.outputDevice());
         LOGVOLE_REQUIRE_TRUE(senderFactory.expired());

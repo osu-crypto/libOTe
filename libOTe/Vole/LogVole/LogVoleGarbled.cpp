@@ -212,7 +212,8 @@ namespace osuCrypto
             input.mDeltaSlots = slots;
         }
         CivoleSenderState state;
-        co_await civoleSenderOffline(input, state, prng, sock, cpuBenchmark);
+        RootWirePinOverlapEvidence rootWirePin;
+        co_await civoleSenderOffline(input, state, prng, sock, rootWirePin, cpuBenchmark);
         mState = std::move(state);
         mDeltas = deltas;
         mNextSid = 0;

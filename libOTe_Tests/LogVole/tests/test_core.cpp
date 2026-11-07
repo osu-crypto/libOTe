@@ -881,9 +881,9 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         struct Snapshot
         {
             SenderState mState;
+            RootWirePinOverlapEvidence mRootWirePin;
             std::vector<oc::u8> mWire;
             std::array<oc::u64, 16> mNextRandom{};
-            RootWirePinOverlapEvidence mRootWirePin;
             RootWireCudaAllocEvidence mRootCudaWire;
         };
         const auto runOffline = [&](const SenderOfflineInput& in,
@@ -897,8 +897,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             Snapshot out;
             auto configured = tests_libOTe::logvole_test::withAdvancedOptions(
                 in, selectedOptions, ProtocolCacheRole::Sender);
-            macoro::sync_wait(sender.offline(configured, out.mState, prng, socket));
-            out.mRootWirePin = rootWirePinOverlapEvidenceSnapshot();
+            macoro::sync_wait(sender.offline(configured, out.mState, prng, socket, out.mRootWirePin));
             out.mRootCudaWire = rootWireCudaAllocEvidenceSnapshot();
             macoro::sync_wait(socket.flush());
             auto bytes = socket.getOutbound();
@@ -907,8 +906,9 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             prng.get(out.mNextRandom.data(), out.mNextRandom.size());
             return out;
         };
+        const auto baselineRunId = allocateProtocolCacheRunId();
         const auto baseline = runOffline(tests_libOTe::logvole_test::withSetupOptions(hostInput, setupOptions),
-            allocateProtocolCacheRunId(), false);
+            baselineRunId, false);
         auto selected = [&] {
             auto pinInput = selectedInput;
             pinInput.mParams.mShrinkExpand.mTransport.mEncoding.mRootWirePinOverlap = true;
@@ -918,14 +918,38 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(baseline.mNextRandom == selected.mNextRandom);
         LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mRequested);
         LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mSenderRunId, runId);
-        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mEligible);
-        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mPinSucceeded);
-        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mSelected);
         LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mWireBytes >=
             (std::size_t{1} << 20));
         if (selected.mRootWirePin.mLaunched)
             LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mPinEndNs >=
                 selected.mRootWirePin.mPinBeginNs);
+        // A later sender cannot overwrite the earlier sender's diagnostics.
+        LOGVOLE_REQUIRE_FALSE(baseline.mRootWirePin.mRequested);
+        LOGVOLE_REQUIRE_FALSE(baseline.mRootWirePin.mSelected);
+        LOGVOLE_REQUIRE_EQ(baseline.mRootWirePin.mSenderRunId, baselineRunId);
+        if (cmd.getOr("pin_result_only", 0) != 0)
+        {
+            // A failed new attempt must clear the previous attempt's diagnostics.
+            SenderOfflineInput invalid;
+            invalid.mSenderOwnerRunId = allocateProtocolCacheRunId();
+            oc::PRNG retryPrng(seed, 3);
+            coproto::BufferingSocket retrySocket;
+            LogVoleRingSender sender;
+            bool rejected = false;
+            try { macoro::sync_wait(sender.offline(invalid, selected.mState, retryPrng, retrySocket, selected.mRootWirePin)); }
+            catch (const std::runtime_error&) { rejected = true; }
+            LOGVOLE_REQUIRE_TRUE(rejected);
+            LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mSenderRunId, invalid.mSenderOwnerRunId);
+            LOGVOLE_REQUIRE_FALSE(selected.mRootWirePin.mRequested);
+            LOGVOLE_REQUIRE_FALSE(selected.mRootWirePin.mSelected);
+            LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mPinBeginNs, 0u);
+            LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mWireBytes, 0u);
+            LOGVOLE_REQUIRE_FALSE(baseline.mRootWirePin.mSelected);
+            return;
+        }
+        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mEligible);
+        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mPinSucceeded);
+        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mSelected);
         const bool earlyCudaWire = cmd.getOr("root_cuda_wire_early", 0) != 0;
         if (cmd.getOr("root_cuda_wire", 0) != 0 || earlyCudaWire)
         {
@@ -3946,7 +3970,8 @@ void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
         coproto::BufferingSocket socket;
         LogVoleRingSender sender;
         SenderState state;
-        macoro::sync_wait(sender.offline(selected, state, prng, socket));
+        RootWirePinOverlapEvidence rootWirePin;
+        macoro::sync_wait(sender.offline(selected, state, prng, socket, rootWirePin));
         macoro::sync_wait(socket.flush());
         auto bytes = socket.getOutbound();
         LOGVOLE_REQUIRE_TRUE(bytes && !bytes->empty());
@@ -5516,6 +5541,7 @@ void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
 
 void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
 {
+    RootWirePinOverlapEvidence rootWirePin;
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0)) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #endif
@@ -5606,10 +5632,38 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     auto offlineSockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG senderOfflinePrng(oc::block(0x7D53u, 0));
     auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(senderInput, senderState, senderOfflinePrng, offlineSockets[0]),
+        sender.offline(senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();
+
+    // Evidence belongs to its caller and is reset only when a new attempt starts.
+    // An unrelated failed sender must not change this completed sender's result.
+    const auto completedRun = rootWirePin.mSenderRunId;
+    const auto completedBytes = rootWirePin.mWireBytes;
+    RootWirePinOverlapEvidence failedPin;
+    failedPin.mSelected = failedPin.mRequested = true;
+    failedPin.mPinBeginNs = failedPin.mWireBytes = 99;
+    SenderOfflineInput invalid;
+    invalid.mSenderOwnerRunId = 0x7D54;
+    SenderState unchanged;
+    unchanged.mParams.mW = 777;
+    oc::PRNG invalidPrng(oc::block(0x7D54u, 0));
+    coproto::BufferingSocket invalidSocket;
+    auto failedAttempt = sender.offline(invalid, unchanged, invalidPrng, invalidSocket, failedPin);
+    LOGVOLE_REQUIRE_TRUE(failedPin.mSelected); // The returned task is still lazy.
+    bool rejected = false;
+    try { macoro::sync_wait(std::move(failedAttempt)); }
+    catch (const std::runtime_error&) { rejected = true; }
+    LOGVOLE_REQUIRE_TRUE(rejected);
+    LOGVOLE_REQUIRE_EQ(unchanged.mParams.mW, 777u);
+    LOGVOLE_REQUIRE_EQ(failedPin.mSenderRunId, invalid.mSenderOwnerRunId);
+    LOGVOLE_REQUIRE_FALSE(failedPin.mRequested || failedPin.mSelected);
+    LOGVOLE_REQUIRE_EQ(failedPin.mPinBeginNs, 0u);
+    LOGVOLE_REQUIRE_EQ(failedPin.mWireBytes, 0u);
+    LOGVOLE_REQUIRE_EQ(rootWirePin.mSenderRunId, completedRun);
+    LOGVOLE_REQUIRE_EQ(rootWirePin.mWireBytes, completedBytes);
+
     LOGVOLE_REQUIRE_TRUE(senderState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiverState.mNextLevelState != nullptr);
     for (auto* level = &senderState; level; level = level->mNextLevelState.get())
@@ -5769,6 +5823,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
 
 void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
 {
+    RootWirePinOverlapEvidence rootWirePin;
     Params params = make_recursive_params(2);
     params.mShrinkExpand.mNumWorkerThreads = 4;
 
@@ -5790,7 +5845,7 @@ void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
     auto offlineSockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG senderOfflinePrng(oc::block(0x7D73u, 0));
     auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(senderInput, senderState, senderOfflinePrng, offlineSockets[0]),
+        sender.offline(senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();

@@ -24,7 +24,7 @@ namespace osuCrypto::LogVole
             const SenderOfflineInput& input,
             SenderState& state,
             PRNG& prng,
-            Socket& sock);
+            Socket& sock, RootWirePinOverlapEvidence& rootWirePin);
 
         task<> keyDerive(
             const KeyDeriveSenderInput& input,

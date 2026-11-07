@@ -274,25 +274,6 @@ namespace osuCrypto::LogVole
         const RootOfflineMessage& message);
     RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot() noexcept;
 
-    struct RootWirePinOverlapEvidence
-    {
-        u64 mSenderRunId = 0;
-        u64 mWireBytes = 0;
-        u64 mPinBeginNs = 0;
-        u64 mPinEndNs = 0;
-        u64 mPinCpuNs = 0;
-        u64 mJoinWaitNs = 0;
-        bool mRequested = false;
-        bool mEligible = false;
-        bool mLaunched = false;
-        bool mAlreadyPinned = false;
-        bool mPinSucceeded = false;
-        bool mSelected = false;
-    };
-    // Snapshot is stable after LogVoleRingSender::offline completes. The run ID
-    // prevents a caller from attributing a previous process-local setup to a
-    // different offline run.
-    RootWirePinOverlapEvidence rootWirePinOverlapEvidenceSnapshot();
     Buffer encode(const RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     Buffer encode(const RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 

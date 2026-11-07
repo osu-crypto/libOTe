@@ -511,6 +511,7 @@ namespace osuCrypto
             mNumThreads = other.mNumThreads;
             mNextSid = other.mNextSid;
             mLastOnlineComm = other.mLastOnlineComm;
+            mRootWirePin = other.mRootWirePin;
             mState = other.mState;
             mSetting = other.mSetting;
             mConfigureCacheRunId = other.mConfigureCacheRunId;
@@ -639,6 +640,7 @@ namespace osuCrypto
 
     task<> LogVoleSender::offline(u64 delta, PRNG& prng, Socket& sock)
     {
+        mRootWirePin = {};
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!isConfigured())
         {
@@ -652,7 +654,7 @@ namespace osuCrypto
         input.mW = mRequestSize;
 
         CivoleSenderState state{};
-        co_await civoleSenderOffline(input, state, prng, sock, cpuBenchmark);
+        co_await civoleSenderOffline(input, state, prng, sock, mRootWirePin, cpuBenchmark);
 
         mOfflineState = std::move(state);
         mModulus = mOfflineState.mModulus;
@@ -733,6 +735,7 @@ namespace osuCrypto
         mNumThreads = 1;
         mNextSid = 0;
         mLastOnlineComm = {};
+        mRootWirePin = {};
         mSetting = LogVole::CivoleSetting::GoldenSeed;
         mParams = {};
         mOfflineState = {};
@@ -1928,14 +1931,16 @@ namespace osuCrypto::LogVole
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
         PRNG& prng,
-        Socket& sock, CpuBenchmarkState cpuBenchmark)
+        Socket& sock, RootWirePinOverlapEvidence& rootWirePin, CpuBenchmarkState cpuBenchmark)
     {
+        rootWirePin = {};
         // The delta producer precedes LogVoleRingSender::offline. Give both
         // stages the same fresh sender run rather than publishing a run-zero
         // device owner that a later party could accidentally reuse.
         const u64 incomingRun = currentProtocolCacheScope().mRunId;
         const u64 offlineRunId = incomingRun
             ? incomingRun : allocateProtocolCacheRunId();
+        rootWirePin.mSenderRunId = offlineRunId;
         std::optional<ScopedProtocolCacheScope> senderScope(std::in_place,
             ProtocolCacheRole::Sender, offlineRunId);
         CivoleParams sessionParams = input.mParams;
@@ -2077,7 +2082,7 @@ namespace osuCrypto::LogVole
         LogVoleRingSender sender{};
         SenderState logVoleState{};
         auto logVoleSock = sock.fork();
-        co_await sender.offline(offlineInput, logVoleState, prng, logVoleSock);
+        co_await sender.offline(offlineInput, logVoleState, prng, logVoleSock, rootWirePin);
 
         CivoleSenderState next{};
         next.mParams = sessionParams;

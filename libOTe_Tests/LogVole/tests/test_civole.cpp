@@ -61,6 +61,7 @@ namespace
         CivoleSenderState& senderState,
         CivoleReceiverState& receiverState)
     {
+        RootWirePinOverlapEvidence rootWirePin;
         oc::PRNG senderPrng(oc::block(11, 22));
         CivoleSenderOfflineInput senderInput{};
         senderInput.mParams = params;
@@ -73,7 +74,7 @@ namespace
 
         auto sockets = coproto::LocalAsyncSocket::makePair();
         auto result = macoro::sync_wait(macoro::when_all_ready(
-            civoleSenderOffline(senderInput, senderState, senderPrng, sockets[0]),
+            civoleSenderOffline(senderInput, senderState, senderPrng, sockets[0], rootWirePin),
             civoleReceiverOffline(receiverInput, receiverState, sockets[1])));
         std::get<0>(result).result();
         std::get<1>(result).result();
@@ -144,6 +145,7 @@ static_assert(std::is_move_constructible_v<LogVoleReceiver>);
 static_assert(std::is_move_assignable_v<LogVoleReceiver>);
 void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
 {
+    RootWirePinOverlapEvidence rootWirePin;
     osuCrypto::LogVoleExecutionOptions advanced;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -283,7 +285,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             CivoleSenderState expected;
             coproto::BufferingSocket referenceSocket;
             {
-                macoro::sync_wait(civoleSenderOffline(tests_libOTe::logvole_test::withSetupOptions(referenceInput, setupOptions), expected, referencePrng, referenceSocket));
+                macoro::sync_wait(civoleSenderOffline(tests_libOTe::logvole_test::withSetupOptions(referenceInput, setupOptions), expected, referencePrng, referenceSocket, rootWirePin));
                 macoro::sync_wait(referenceSocket.flush());
             }
             auto expectedWire = referenceSocket.getOutbound();
@@ -296,7 +298,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
                 oc::PRNG actualPrng(seed, 3);
                 CivoleSenderState actual;
                 coproto::BufferingSocket actualSocket;
-                macoro::sync_wait(civoleSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(actualInput, setupOptions), advanced, ProtocolCacheRole::Sender), actual, actualPrng, actualSocket));
+                macoro::sync_wait(civoleSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(actualInput, setupOptions), advanced, ProtocolCacheRole::Sender), actual, actualPrng, actualSocket, rootWirePin));
                 macoro::sync_wait(actualSocket.flush());
                 auto actualWire = actualSocket.getOutbound();
                 LOGVOLE_REQUIRE_TRUE(actualWire && rangesEqual(*expectedWire, *actualWire));
@@ -341,7 +343,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             unchanged.mW = 777u;
             coproto::BufferingSocket socket;
             bool threw = false;
-            try { macoro::sync_wait(civoleSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(candidate, setupOptions), advanced, ProtocolCacheRole::Sender), unchanged, prng, socket)); }
+            try { macoro::sync_wait(civoleSenderOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(candidate, setupOptions), advanced, ProtocolCacheRole::Sender), unchanged, prng, socket, rootWirePin)); }
             catch (const std::runtime_error&) { threw = true; }
             LOGVOLE_REQUIRE_TRUE(threw);
             LOGVOLE_REQUIRE_EQ(socket.bytesSent(), 0u);
@@ -357,6 +359,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
 
 void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
 {
+    RootWirePinOverlapEvidence rootWirePin;
     const auto params = make_params();
 
     CivoleSenderOfflineInput senderInput{};
@@ -370,7 +373,7 @@ void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
     bool threw = false;
     try
     {
-        macoro::sync_wait(civoleSenderOffline(senderInput, senderState, prng, sockets[0]));
+        macoro::sync_wait(civoleSenderOffline(senderInput, senderState, prng, sockets[0], rootWirePin));
     }
     catch (const std::runtime_error&)
     {
