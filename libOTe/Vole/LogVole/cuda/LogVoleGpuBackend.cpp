@@ -459,7 +459,8 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool buildNativeSealSetupBundleDevice(const RingParams& params,
-        u32 requestedPlaintextBits, NativeSealSetupBundle& out, std::shared_ptr<GpuSetupContext> execution)
+        u32 requestedPlaintextBits, NativeSealSetupBundle& out, std::shared_ptr<GpuSetupContext> execution,
+        ProtocolCacheScopeView scope)
     {
         HostStep step(execution ? execution->hostProfiler() : nullptr, "setup: bundled native GPU SEAL factories");
         const LogVoleGpuContextOptions defaults;
@@ -469,10 +470,11 @@ namespace osuCrypto::LogVole::gpu
             !dynamicSealSetupSupported(params) ||
             requestedPlaintextBits < 2u || !available() ||
             currentDeviceOrdinal() != 0) return false;
-        const auto ownerScope = currentProtocolCacheScope();
+        const auto ownerScope = scope;
         if ((ownerScope.mRole != ProtocolCacheRole::Sender &&
              ownerScope.mRole != ProtocolCacheRole::Receiver) ||
             !ownerScope.mRunId) return false;
+        if (execution && execution->protocolService().get() != ownerScope.mRunId.mService) return false;
         const u32 n = params.mPolyModulusDegree;
         const u32 rho = static_cast<u32>(params.mCoeffModulusBits.size());
         const std::size_t words = static_cast<std::size_t>(n) * rho;
@@ -491,7 +493,7 @@ namespace osuCrypto::LogVole::gpu
             constexpr std::size_t maxRecordBytes =
                 16u * 2u * sizeof(u64) + sizeof(u64) + 6u * sizeof(u32);
             std::array<u8, maxRecordBytes> hostRecord{};
-            RawSetupStream stream(execution, execution ? nullptr : currentProtocolCacheScope().mRunId.serviceOwner());
+            RawSetupStream stream(execution, execution ? nullptr : ownerScope.mRunId.serviceOwner());
             if (!stream.mStream) return false;
             RawConstantArena arena(capacity, stream);
             if (!arena) return false;
@@ -613,9 +615,8 @@ namespace osuCrypto::LogVole::gpu
             }
             u32 actualPlainBits = 0;
             for (u64 value = hostP; value; value >>= 1) ++actualPlainBits;
-            if (actualPlainBits != hostBits ||
-                currentProtocolCacheScope().mRole != ownerScope.mRole ||
-                currentProtocolCacheScope().mRunId != ownerScope.mRunId)
+            // The supplied view is immutable throughout this synchronous call.
+            if (actualPlainBits != hostBits)
                 return false;
 
             ring->mView.mMinModulus =

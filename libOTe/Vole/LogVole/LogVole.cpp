@@ -1042,11 +1042,11 @@ namespace osuCrypto::LogVole
         bool makeZpCrtContextUncached(
             const RingParams& ring, u32 plaintextModulusBits, bool expandModChain,
             bool singleBatchLimb, ZpCrtContext& out,
-            const std::shared_ptr<RingContextFactory>& ringFactory);
+            const std::shared_ptr<RingContextFactory>& ringFactory, ProtocolCacheScopeView scope);
 
         bool makeGpuZpCrtContextUncached(
             const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out,
-            const std::shared_ptr<RingContextFactory>& ringFactory);
+            const std::shared_ptr<RingContextFactory>& ringFactory, ProtocolCacheScopeView scope);
 
         bool productionGpuZpTuple(const RingParams& ring, u32 plaintextModulusBits)
         {
@@ -1091,17 +1091,19 @@ namespace osuCrypto::LogVole
     }
 
     bool makeZpCrtContext(const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out,
-        std::shared_ptr<ZpContextFactory> factory)
+        std::shared_ptr<ZpContextFactory> factory, ProtocolCacheScopeView scope)
     {
         if (!factory) factory = out.mFactory;
         if (!factory) factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(
-            osuCrypto::LogVoleExecutionOptions{}, currentProtocolCacheScope().mRunId.serviceOwner()));
-        return factory->make(ring, plaintextModulusBits, out, factory);
+            osuCrypto::LogVoleExecutionOptions{}, scope.mRunId.serviceOwner()));
+        return factory->make(ring, plaintextModulusBits, out, factory, scope);
     }
 
     bool ZpContextFactory::make(const RingParams& ring, u32 plaintextModulusBits,
-        ZpCrtContext& out, const std::shared_ptr<ZpContextFactory>& owner)
+        ZpCrtContext& out, const std::shared_ptr<ZpContextFactory>& owner, ProtocolCacheScopeView scope)
     {
+        if (scope.mRunId.mService && scope.mRunId.mService != ringFactory()->protocolService().get())
+            return false;
         if (plaintextModulusBits == 0)
         {
             return false;
@@ -1111,7 +1113,7 @@ namespace osuCrypto::LogVole
         key.mDegree = ring.mPolyModulusDegree;
         key.mPlaintextBits = plaintextModulusBits;
         key.mBits.assign(ring.mCoeffModulusBits.begin(), ring.mCoeffModulusBits.end());
-        const auto ownerScope = currentProtocolCacheScope();
+        const auto ownerScope = scope;
         key.mRole = ownerScope.mRole;
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto& options = ringFactory()->executionOptions().mAdvanced.mContexts;
@@ -1144,10 +1146,10 @@ namespace osuCrypto::LogVole
 
         ZpCrtContext built{};
         const bool builtOk = key.mGpuLightweight
-            ? makeGpuZpCrtContextUncached(ring, plaintextModulusBits, built, ringFactory())
+            ? makeGpuZpCrtContextUncached(ring, plaintextModulusBits, built, ringFactory(), scope)
             : makeZpCrtContextUncached(
                   ring, plaintextModulusBits, key.mExpandModChain, key.mSingleBatchLimb, built,
-                  ringFactory());
+                  ringFactory(), scope);
         if (!builtOk)
         {
             return false;
@@ -1181,14 +1183,14 @@ namespace osuCrypto::LogVole
 
     bool makeNativeSealSetupContexts(const RingParams& ring,
         u32 plaintextModulusBits, RingNttContext& ringOut,
-        ZpCrtContext& zpOut, std::shared_ptr<ZpContextFactory> factory)
+        ZpCrtContext& zpOut, std::shared_ptr<ZpContextFactory> factory, ProtocolCacheScopeView scope)
     {
         if (!factory) factory = zpOut.mFactory;
         if (!factory) factory = std::make_shared<ZpContextFactory>(ringOut.mFactory ? ringOut.mFactory :
-            std::make_shared<RingContextFactory>(osuCrypto::LogVoleExecutionOptions{}, currentProtocolCacheScope().mRunId.serviceOwner()));
+            std::make_shared<RingContextFactory>(osuCrypto::LogVoleExecutionOptions{}, scope.mRunId.serviceOwner()));
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto& options = factory->ringFactory()->executionOptions().mAdvanced.mContexts;
-        const auto ownerScope = currentProtocolCacheScope();
+        const auto ownerScope = scope;
         const bool requested = gpu::enabled(factory->ringFactory()->executionOptions()) &&
             gpu::dynamicSealSetupSupported(ring) &&
             (ownerScope.mRole == ProtocolCacheRole::Sender ||
@@ -1202,7 +1204,7 @@ namespace osuCrypto::LogVole
             // standalone Ring call would force an early q download and defeat
             // the private one-record producer.
             ZpCrtContext next{};
-            if (!makeZpCrtContext(ring, plaintextModulusBits, next, factory))
+            if (!makeZpCrtContext(ring, plaintextModulusBits, next, factory, scope))
                 return false;
             RingNttContext nextRing = next.mRing;
             ringOut = std::move(nextRing);
@@ -1212,8 +1214,8 @@ namespace osuCrypto::LogVole
 #endif
         RingNttContext nextRing{};
         ZpCrtContext nextZp{};
-        if (!makeRingNttContext(ring, nextRing, factory->ringFactory()) ||
-            !makeZpCrtContext(ring, plaintextModulusBits, nextZp, factory))
+        if (!makeRingNttContext(ring, nextRing, factory->ringFactory(), scope) ||
+            !makeZpCrtContext(ring, plaintextModulusBits, nextZp, factory, scope))
             return false;
         ringOut = std::move(nextRing);
         zpOut = std::move(nextZp);
@@ -1224,7 +1226,7 @@ namespace osuCrypto::LogVole
     {
     bool makeGpuZpCrtContextUncached(
         const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out,
-        const std::shared_ptr<RingContextFactory>& ringFactory)
+        const std::shared_ptr<RingContextFactory>& ringFactory, ProtocolCacheScopeView scope)
     {
         HostStep contextStep(ringFactory ? ringFactory->hostProfiler() : nullptr, "setup: GPU CRT context build");
         if (!gpuZpTupleSupported(ring, plaintextModulusBits)) return false;
@@ -1233,15 +1235,15 @@ namespace osuCrypto::LogVole
         gpu::NativeSealSetupBundle prepared{};
         if (gpu::buildNativeSealSetupBundleDevice(
                 ring, plaintextModulusBits, prepared,
-                std::make_shared<gpu::GpuSetupContext>(ringFactory->executionOptions(), ringFactory->hostProfilerOwner(), ringFactory->protocolService())))
+                std::make_shared<gpu::GpuSetupContext>(ringFactory->executionOptions(), ringFactory->hostProfilerOwner(), ringFactory->protocolService()), scope))
         {
-            if (prepared.mOwnerRole != currentProtocolCacheScope().mRole ||
-                prepared.mOwnerRunId != currentProtocolCacheScope().mRunId ||
+            if (prepared.mOwnerRole != scope.mRole ||
+                prepared.mOwnerRunId != scope.mRunId ||
                 !prepared.mRing || !prepared.mPlainNtt)
                 return false;
             RingNttContext ringCtx{};
             if (!makeNativeGpuRingNttContextFromCertificate(
-                    ring, prepared.mOrderedPrimes, prepared.mRing, ringCtx))
+                    ring, prepared.mOrderedPrimes, prepared.mRing, ringCtx, scope))
                 return false;
             ringCtx.mFactory = ringFactory;
             ZpCrtContext next{};
@@ -1261,7 +1263,7 @@ namespace osuCrypto::LogVole
             cache.mRequestedPlaintextBits = plaintextModulusBits;
             cache.mSelectedPlaintextBits = next.mPlaintextModulusBits;
             cache.mPlaintextModulus = next.mPlaintextModulus;
-            cache.mRole = currentProtocolCacheScope().mRole;
+            cache.mRole = scope.mRole;
             if (!validateZpContext(next) ||
                 !gpu::GpuPlainNtt::publishRaw(
                     ring.mPolyModulusDegree, next.mPlaintextModulus,
@@ -1285,7 +1287,7 @@ namespace osuCrypto::LogVole
             // Explicit opt-out, unsupported owner scope, and a clean native
             // decline retain the previously accepted sequential GPU path.
             RingNttContext ringCtx{};
-            if (!makeRingNttContext(ring, ringCtx, ringFactory) || !ringCtx.mGpuLightweight) return false;
+            if (!makeRingNttContext(ring, ringCtx, ringFactory, scope) || !ringCtx.mGpuLightweight) return false;
             const auto deviceRing = gpu::GpuRing::get(ringCtx);
             if (!deviceRing || !ringCtx.mRawModuli ||
                 (ringCtx.mRawModuli->mDynamicGpuCertificate &&
@@ -1317,7 +1319,7 @@ namespace osuCrypto::LogVole
             cache.mRequestedPlaintextBits = plaintextModulusBits;
             cache.mSelectedPlaintextBits = selectedBits;
             cache.mPlaintextModulus = plaintextPrime;
-            cache.mRole = currentProtocolCacheScope().mRole;
+            cache.mRole = scope.mRole;
             out = std::move(next);
             return true;
         }
@@ -1351,7 +1353,7 @@ namespace osuCrypto::LogVole
         };
 
         RingNttContext ringCtx{};
-        if (!makeRingNttContext(ring, ringCtx, ringFactory) || !ringCtx.mGpuLightweight) return false;
+        if (!makeRingNttContext(ring, ringCtx, ringFactory, scope) || !ringCtx.mGpuLightweight) return false;
 
         const bool golden = ring.mPolyModulusDegree == 8192u;
         const auto expectedQ = golden
@@ -1380,7 +1382,7 @@ namespace osuCrypto::LogVole
         cache.mRequestedPlaintextBits = plaintextModulusBits;
         cache.mSelectedPlaintextBits = next.mPlaintextModulusBits;
         cache.mPlaintextModulus = next.mPlaintextModulus;
-        cache.mRole = currentProtocolCacheScope().mRole;
+        cache.mRole = scope.mRole;
         out = std::move(next);
         return true;
     }
@@ -1388,7 +1390,7 @@ namespace osuCrypto::LogVole
     bool makeZpCrtContextUncached(
         const RingParams& ring, u32 plaintextModulusBits, bool expandModChain,
         bool singleBatchLimb, ZpCrtContext& out,
-        const std::shared_ptr<RingContextFactory>& ringFactory)
+        const std::shared_ptr<RingContextFactory>& ringFactory, ProtocolCacheScopeView scope)
     {
         HostStep contextStep(ringFactory ? ringFactory->hostProfiler() : nullptr, "setup: CRT context build");
         if (plaintextModulusBits == 0)
@@ -1397,7 +1399,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ringCtx{};
-        if (!makeRingNttContext(ring, ringCtx, ringFactory))
+        if (!makeRingNttContext(ring, ringCtx, ringFactory, scope))
         {
             return false;
         }
@@ -1534,7 +1536,7 @@ namespace osuCrypto::LogVole
         }
     }
 
-    std::shared_ptr<const ZpCrtContext> getZpHostContext(const ZpCrtContext& ctx)
+    std::shared_ptr<const ZpCrtContext> getZpHostContext(const ZpCrtContext& ctx, ProtocolCacheScopeView scope)
     {
         if (!ctx.mGpuLightweight)
             return std::make_shared<const ZpCrtContext>(ctx);
@@ -1545,13 +1547,13 @@ namespace osuCrypto::LogVole
         if (ctx.mHostContextCache->mContext) return ctx.mHostContextCache->mContext;
 
         HostStep fallbackStep(hostProfiler(ctx.mRing), "setup: CRT host fallback materialization");
-        const auto runId = currentProtocolCacheScope().mRunId;
-        ScopedProtocolCacheScope ownerScope(cache.mRole, runId);
+        const auto runId = scope.mRunId;
+        const ProtocolCacheScopeView ownerScope{runId, cache.mRole};
         ZpCrtContext host{};
         if (!makeZpCrtContextUncached(
                 cache.mRingParams,
                 cache.mRequestedPlaintextBits,
-                false, true, host, ctx.mRing.mFactory) || host.mGpuLightweight ||
+                false, true, host, ctx.mRing.mFactory, ownerScope) || host.mGpuLightweight ||
             host.mPlaintextModulusBits != cache.mSelectedPlaintextBits ||
             host.mPlaintextModulus != cache.mPlaintextModulus ||
             host.mPlaintextLiftModQj.size() != cache.mPlaintextLiftModQj.size() ||
@@ -1623,7 +1625,7 @@ namespace osuCrypto::LogVole
                 return true;
             }
 #endif
-            const auto host = getZpHostContext(ctx);
+            const auto host = getZpHostContext(ctx, currentProtocolCacheScope());
             return host && wrapZpBatchCrt(
                 *host, labels, multiplyByDelta, padValue, 1, out);
         }
@@ -1670,7 +1672,7 @@ namespace osuCrypto::LogVole
                 return true;
             }
 #endif
-            const auto host = getZpHostContext(ctx);
+            const auto host = getZpHostContext(ctx, currentProtocolCacheScope());
             return host && wrapZpConstantCrt(
                 *host, value, multiplyByDelta, requestedWorkers, out);
         }
@@ -1716,7 +1718,7 @@ namespace osuCrypto::LogVole
                     ctx, labels, multiplyByDelta, padValue, expectedChunks, out);
             }
 #endif
-            const auto host = getZpHostContext(ctx);
+            const auto host = getZpHostContext(ctx, currentProtocolCacheScope());
             return host && wrapZpLabelsCrt(
                 *host, labels, multiplyByDelta, padValue, requestedWorkers, out, cpuBenchmark);
         }
@@ -2047,7 +2049,7 @@ namespace osuCrypto::LogVole
 #endif
         if (ctx.mGpuLightweight)
         {
-            const auto host = getZpHostContext(ctx);
+            const auto host = getZpHostContext(ctx, currentProtocolCacheScope());
             return host && unwrapRingLabelsCrt(
                 *host, labels, zpLabelCount, scaleAndRound, requestedWorkers, out, cpuBenchmark);
         }

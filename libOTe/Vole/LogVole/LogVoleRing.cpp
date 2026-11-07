@@ -813,9 +813,9 @@ namespace osuCrypto::LogVole
     RingContextFactory::~RingContextFactory() = default;
 
     bool RingContextFactory::make(const RingParams& params, RingNttContext& out,
-        bool lightweight, const std::shared_ptr<RingContextFactory>& owner)
+        bool lightweight, const std::shared_ptr<RingContextFactory>& owner, ProtocolCacheScopeView scope)
     {
-        const auto operationId = currentProtocolCacheScope().mRunId;
+        const auto operationId = scope.mRunId;
         if (operationId.mService && operationId.mService != mProtocolService.get()) return false;
 
         if (!validateRingParams(params))
@@ -826,7 +826,7 @@ namespace osuCrypto::LogVole
         RingContextCacheKey key{};
         key.mDegree = params.mPolyModulusDegree;
         key.mBits.assign(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end());
-        key.mRole = currentProtocolCacheScope().mRole;
+        key.mRole = scope.mRole;
         key.mGpuLightweight = lightweight;
 #if defined(ENABLE_LOGVOLE_CUDA)
         key.mExpandModChain = !gpu::enabled(mExecutionOptions) || mExecutionOptions.mAdvanced.mContexts.mFullModChain;
@@ -916,10 +916,10 @@ namespace osuCrypto::LogVole
     }
 
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
-        std::shared_ptr<RingContextFactory> factory)
+        std::shared_ptr<RingContextFactory> factory, ProtocolCacheScopeView scope)
     {
         if (!factory) factory = out.mFactory;
-        if (!factory) factory = std::make_shared<RingContextFactory>(osuCrypto::LogVoleExecutionOptions{}, currentProtocolCacheScope().mRunId.serviceOwner());
+        if (!factory) factory = std::make_shared<RingContextFactory>(osuCrypto::LogVoleExecutionOptions{}, scope.mRunId.serviceOwner());
         bool lightweight = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto& options = factory->executionOptions().mAdvanced.mContexts;
@@ -929,11 +929,11 @@ namespace osuCrypto::LogVole
                 (gpu::dynamicSealSetupSupported(params) && gpu::currentDeviceOrdinal() == 0));
 #endif
 
-        return factory->make(params, out, lightweight, factory);
+        return factory->make(params, out, lightweight, factory, scope);
     }
 
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
-        const std::shared_ptr<const RingNttContext>& retained)
+        const std::shared_ptr<const RingNttContext>& retained, ProtocolCacheScopeView scope)
     {
         if (retained && retained->mParams == params)
         {
@@ -957,10 +957,10 @@ namespace osuCrypto::LogVole
             return true;
         }
         return makeRingNttContext(params, out,
-            retained ? retained->mFactory : std::shared_ptr<RingContextFactory>{});
+            retained ? retained->mFactory : std::shared_ptr<RingContextFactory>{}, scope);
     }
 
-    bool makeGpuRingNttContext(const RingParams& params, RingNttContext& out)
+    bool makeGpuRingNttContext(const RingParams& params, RingNttContext& out, ProtocolCacheScopeView scope)
     {
         if (productionRingModuli(params).empty())
         {
@@ -973,19 +973,19 @@ namespace osuCrypto::LogVole
         }
         LogVoleExecutionOptions options;
         options.mUseGpu = true;
-        auto factory = out.mFactory ? out.mFactory : std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner());
-        return factory->make(params, out, true, factory);
+        auto factory = out.mFactory ? out.mFactory : std::make_shared<RingContextFactory>(options, scope.mRunId.serviceOwner());
+        return factory->make(params, out, true, factory, scope);
     }
 
     bool makeNativeGpuRingNttContextFromCertificate(
         const RingParams& params, std::span<const u64> orderedPrimes,
-        std::shared_ptr<gpu::GpuRing> certificate, RingNttContext& out)
+        std::shared_ptr<gpu::GpuRing> certificate, RingNttContext& out, ProtocolCacheScopeView scope)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!validateRingParams(params) ||
             !gpu::dynamicSealSetupSupported(params) ||
             !certificate ||
-            certificate->rawOwnerRole() != currentProtocolCacheScope().mRole ||
+            certificate->rawOwnerRole() != scope.mRole ||
             certificate->n() != params.mPolyModulusDegree ||
             certificate->rho() != orderedPrimes.size() ||
             certificate->hostModuli().size() != orderedPrimes.size() ||

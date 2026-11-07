@@ -3115,6 +3115,39 @@ void LogVole_Cpu_ProtocolIdentityService(const oc::CLP&)
         RingNttContext rejected;
         LOGVOLE_REQUIRE_FALSE(makeRingNttContext(params, rejected, factory));
     }
+    auto crtFactory = std::make_shared<ZpContextFactory>(factory);
+    RingNttContext explicitReceiverRing;
+    ZpCrtContext explicitReceiverCrt;
+    {
+        ScopedProtocolCacheScope ambient(ProtocolCacheRole::Sender, a);
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, explicitReceiverRing, factory, receiver));
+        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 20, explicitReceiverCrt, crtFactory, receiver));
+        LOGVOLE_REQUIRE_EQ(explicitReceiverRing.mResourceScope.mRole, ProtocolCacheRole::Receiver);
+        LOGVOLE_REQUIRE_EQ(explicitReceiverCrt.mRing.mResourceScope.mRole, ProtocolCacheRole::Receiver);
+        LOGVOLE_REQUIRE_TRUE(explicitReceiverRing.mFactoryOwner != ring.mFactoryOwner);
+    }
+    {
+        // Neither role selection nor cache hits may consult this unrelated
+        // ambient sender service when an explicit receiver context is supplied.
+        ScopedProtocolCacheScope ambient(ProtocolCacheRole::Sender, b);
+        RingNttContext again;
+        ZpCrtContext againCrt;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, again, factory, receiver));
+        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 20, againCrt, crtFactory, receiver));
+        LOGVOLE_REQUIRE_TRUE(again.mFactoryOwner == explicitReceiverRing.mFactoryOwner);
+        LOGVOLE_REQUIRE_TRUE(againCrt.mFactoryOwner == explicitReceiverCrt.mFactoryOwner);
+        RingNttContext combinedRing;
+        ZpCrtContext combinedCrt;
+        LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(params, 20, combinedRing,
+            combinedCrt, crtFactory, receiver));
+        LOGVOLE_REQUIRE_TRUE(combinedCrt.mFactoryOwner == explicitReceiverCrt.mFactoryOwner);
+        LOGVOLE_REQUIRE_EQ(combinedRing.mResourceScope.mRole, ProtocolCacheRole::Receiver);
+        const ProtocolCacheScopeView foreignReceiver{b, ProtocolCacheRole::Receiver};
+        LOGVOLE_REQUIRE_FALSE(makeRingNttContext(params, again, factory, foreignReceiver));
+        LOGVOLE_REQUIRE_FALSE(makeZpCrtContext(params, 20, againCrt, crtFactory, foreignReceiver));
+        LOGVOLE_REQUIRE_TRUE(again.mFactoryOwner == explicitReceiverRing.mFactoryOwner);
+        LOGVOLE_REQUIRE_TRUE(againCrt.mFactoryOwner == explicitReceiverCrt.mFactoryOwner);
+    }
     PRNG samplingRandom(toBlock(0x1d, 1));
     std::vector<RnsPoly> sampled;
     std::array<u8, 2> results{};

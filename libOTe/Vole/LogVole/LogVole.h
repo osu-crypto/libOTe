@@ -47,9 +47,9 @@ namespace osuCrypto::LogVole
         struct Impl;
         std::unique_ptr<Impl> mImpl;
         friend bool makeZpCrtContext(const RingParams&, u32, ZpCrtContext&,
-            std::shared_ptr<ZpContextFactory>);
+            std::shared_ptr<ZpContextFactory>, ProtocolCacheScopeView);
         bool make(const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out,
-            const std::shared_ptr<ZpContextFactory>& owner);
+            const std::shared_ptr<ZpContextFactory>& owner, ProtocolCacheScopeView scope);
     public:
         explicit ZpContextFactory(std::shared_ptr<RingContextFactory> ringFactory = {});
         ~ZpContextFactory();
@@ -103,7 +103,8 @@ namespace osuCrypto::LogVole
     // independent factories.
     bool makeNativeSealSetupContexts(const RingParams& ring,
         u32 plaintextModulusBits, RingNttContext& ringOut,
-        ZpCrtContext& zpOut, std::shared_ptr<ZpContextFactory> factory = {});
+        ZpCrtContext& zpOut, std::shared_ptr<ZpContextFactory> factory = {},
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     struct CivoleParams
     {
@@ -526,7 +527,8 @@ namespace osuCrypto::LogVole
     u64 zpSlotCount(const ZpCrtContext& ctx);
     u64 zpRingLabelCount(const ZpCrtContext& ctx, u64 zpLabelCount);
     bool makeZpCrtContext(const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out,
-        std::shared_ptr<ZpContextFactory> factory = {});
+        std::shared_ptr<ZpContextFactory> factory = {},
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     bool wrapZpBatchCrt(
         const ZpCrtContext& ctx,

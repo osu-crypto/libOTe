@@ -247,7 +247,8 @@ contain no environment reads.
 | Multiplication proof CPU execution | Public CPU prover response/verifier checks await direct `bulk_chunked` on the caller executor. `ZkMulCpuWorkspace` preallocates numerical locals/task outputs and captures its worker budget without creating a pool. The async witness API joins each independent layer, retaining scalar dependent-layer order. Shared synchronous kernels preserve arithmetic, original prover partitions, verifier task slots, reduction order and PRNG draws. Legacy diagnostics/GPU fallback lazily construct their private executor; matrix proof loops are separate remaining work. |
 | Matrix proof CPU execution | CPU prover/verifier paths await direct `bulk_chunked` with role-specific numerical workspaces prepared before proofs. Prover stores four n^2-word arrays; verifier stores two, plus O(chunks + repetitions) locals/output staging. Noncanonical copies remain lazy. Transpose tiling, unweighted inner products, original row/weighted-sum partitions and ordered reductions are unchanged. GPU-selected public objects keep CPU workspaces empty; legacy GPU host fallback remains synchronous. Standalone async product/witness APIs use exclusive caller byte-status storage. |
 | Identity service, stage one | `ProtocolCacheService` owns the atomic allocator; shared factories and GPU execution/setup owners retain/inject it. Cheap host-only IDs contain service identity plus numeric value, and cache/retained comparisons preserve affinity. Owned operation contexts and retained records keep service lifetime; lookups/copies of ID views do not increment shared ownership. The global allocator is removed. Identity TLS remains temporary compatibility transport pending explicit-context forwarding; resource constructors now use only an explicitly supplied service or a fresh instance; query-SID numeric bindings are unchanged. |
-| Resource construction boundary | Ring/CRT factory and GPU setup/execution constructors no longer inherit identity service from ambient scope. Existing phase/default-factory entry callers explicitly forward their compatibility service; supplied owners remain unchanged. Nullable raw setup creation receives its fallback service explicitly, with no extra service ownership work when execution already exists. Factory role/run selection and remaining operation scope transport still use compatibility TLS pending the next sub-batch. |
+| Resource construction boundary | Ring/CRT factory and GPU setup/execution constructors no longer inherit identity service from ambient scope. Existing phase/default-factory entry callers explicitly forward their compatibility service; supplied owners remain unchanged. Nullable raw setup creation receives its fallback service explicitly, with no extra service ownership work when execution already exists. Factory core role/run selection is now explicit; compatibility defaults at unmigrated caller boundaries and remaining operation transport still use identity TLS. |
+| Factory context forwarding | Ring/CRT factory make, native combined setup/certificate admission, and CRT host materialization receive explicit cheap scope views. Factory cache role/service selection and native bundle owner checks use that view; no current-scope read or guard remains in these cores. Existing public entry signatures have a trailing compatibility default evaluated at unmigrated caller boundaries. No operation identity is stored on shared math/context records; exact retained-record selection keeps its fixed-owner contract. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -497,9 +498,20 @@ service by explicitly forwarding compatibility data. No GPU computation,
 benchmarks, broad suite or statistics/worker-TLS changes were made. Remaining
 runtime-global count stays 25; identity compatibility TLS is not yet removed.
 
+Factory-forwarding validation: CUDA-enabled Windows library/tests and public
+example object build pass in 60.92 seconds. Identity/lifetime, host backend-owner
+metadata, and two-query GoldenSeed CPU protocol tests pass in 4.99 seconds. The
+identity test selects explicit Receiver records under ambient Sender, reuses the
+same ring/CRT cached records under an unrelated ambient service, checks combined
+setup forwarding, and rejects foreign explicit services without changing output.
+CRT affinity is checked before cache lookup, including cache hits. No GPU
+computation, numerical/kernel changes, broad suite or benchmarks were needed.
+Remaining runtime-global count is 25; identity TLS is still present at callers.
+
 Resource-constructor inheritance is removed. The next stage-two sub-batch must
 remove `currentProtocolCacheScope`/scope guards/TLS by passing the already owned
-context explicitly through phase/factory selection and retained checks. Existing
+context explicitly through the remaining phase callers, sampling/cache operations
+and retained checks. Factory cores now accept the view without consulting TLS. Existing
 config/offline run identity and online query-SID binding must remain distinct:
 stage one qualifies existing query SID values at CI-VOLE scope construction and
 explicitly projects numeric values only in the two first-query SID checks.

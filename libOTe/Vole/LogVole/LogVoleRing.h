@@ -132,11 +132,11 @@ namespace osuCrypto::LogVole
         std::unique_ptr<Impl> mImpl;
         const LogVoleExecutionOptions mExecutionOptions;
         friend bool makeRingNttContext(const RingParams&, RingNttContext&,
-            std::shared_ptr<RingContextFactory>);
-        friend bool makeGpuRingNttContext(const RingParams&, RingNttContext&);
+            std::shared_ptr<RingContextFactory>, ProtocolCacheScopeView);
+        friend bool makeGpuRingNttContext(const RingParams&, RingNttContext&, ProtocolCacheScopeView);
         friend bool publishNativeGpuRingNttContext(RingNttContext&);
         bool make(const RingParams& params, RingNttContext& out, bool lightweight,
-            const std::shared_ptr<RingContextFactory>& owner);
+            const std::shared_ptr<RingContextFactory>& owner, ProtocolCacheScopeView scope);
         bool publish(RingNttContext& ready);
     public:
         explicit RingContextFactory(LogVoleExecutionOptions options = {},
@@ -238,21 +238,25 @@ namespace osuCrypto::LogVole
     bool validateRingBatchShape(const std::vector<RnsPoly>& polys, const RingParams& params);
     bool validateRingBatchShape(std::span<const RnsPoly> polys, const RingParams& params);
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
-        std::shared_ptr<RingContextFactory> factory = {});
+        std::shared_ptr<RingContextFactory> factory = {},
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // A retained record fixes table and execution ownership across worker/role
     // changes. CPU access materializes its exact host view when necessary.
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
-        const std::shared_ptr<const RingNttContext>& retained);
+        const std::shared_ptr<const RingNttContext>& retained,
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Production tuples use audited metadata without device work. Other raw
     // GPU-supported tuples construct and certify metadata on the device before
     // publication. Unsupported parameters leave out unchanged.
-    bool makeGpuRingNttContext(const RingParams& params, RingNttContext& out);
+    bool makeGpuRingNttContext(const RingParams& params, RingNttContext& out,
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Constructs a private lightweight context from a fully sealed dynamic
     // GPU ring certificate. The caller owns the larger ring/CRT publication
     // transaction; this helper does not insert a partial ring cache entry.
     bool makeNativeGpuRingNttContextFromCertificate(
         const RingParams& params, std::span<const u64> orderedPrimes,
-        std::shared_ptr<gpu::GpuRing> certificate, RingNttContext& out);
+        std::shared_ptr<gpu::GpuRing> certificate, RingNttContext& out,
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Admit a validated native certificate into the standalone role-local
     // Ring factory after its combined CRT setup has fully committed.
     bool publishNativeGpuRingNttContext(RingNttContext& ready);

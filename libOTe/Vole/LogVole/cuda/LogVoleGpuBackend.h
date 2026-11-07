@@ -96,7 +96,8 @@ namespace osuCrypto::LogVole::gpu
     // owners and downloads one q/p/lift/status record. No cache or caller
     // output changes on decline; the caller publishes contexts after success.
     bool buildNativeSealSetupBundleDevice(const RingParams& params,
-        u32 requestedPlaintextBits, NativeSealSetupBundle& out, std::shared_ptr<GpuSetupContext> execution = {});
+        u32 requestedPlaintextBits, NativeSealSetupBundle& out, std::shared_ptr<GpuSetupContext> execution = {},
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool preparePlaintextLiftDevice(const GpuRing& ring, u64 plaintextPrime,
         AlignedUnVec<u64>& residues);
 
@@ -413,7 +414,7 @@ namespace osuCrypto::LogVole::gpu
         GpuRing() = default;
         GpuTableReads mReads;
         friend bool buildNativeSealSetupBundleDevice(const RingParams&,
-            u32, NativeSealSetupBundle&, std::shared_ptr<GpuSetupContext>);
+            u32, NativeSealSetupBundle&, std::shared_ptr<GpuSetupContext>, ProtocolCacheScopeView);
         bool init(const RingNttContext& ctx);
         bool initRaw(const RingParams& params, std::span<const u64> orderedPrimes);
         bool initDenoise(const RingNttContext& ctx);
@@ -512,7 +513,7 @@ namespace osuCrypto::LogVole::gpu
         GpuPlainNtt() = default;
         GpuTableReads mReads;
         friend bool buildNativeSealSetupBundleDevice(const RingParams&,
-            u32, NativeSealSetupBundle&, std::shared_ptr<GpuSetupContext>);
+            u32, NativeSealSetupBundle&, std::shared_ptr<GpuSetupContext>, ProtocolCacheScopeView);
         bool init(const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder);
         bool initRaw(u32 degree, u64 plaintextPrime);
 
