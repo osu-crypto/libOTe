@@ -29,6 +29,18 @@ namespace osuCrypto::LogVole
         bool mOk = true;
     };
 
+    // Exclusive chunk storage; reuse across awaited queries. Plain/slots need
+    // the ring degree; canonical/composed need ringPolyCoeffCount coefficients.
+    // The helper prepares missing storage; pre-size to avoid first-use allocation.
+    struct ZpDecodeBuffer
+    {
+        seal::Plaintext mPlain;
+        std::vector<u64> mSlots;
+        RnsPoly mCanonical;
+        AlignedUnVec<u64> mComposed;
+        bool mOk = true;
+    };
+
     class ZpContextFactory
     {
         struct Impl;
@@ -340,11 +352,12 @@ namespace osuCrypto
             Socket& sock);
 
         // Online phase after offline(). Writes sender keys b.
-        // Caller supplies an executor and exclusive ring-sized LHE products;
+        // Caller supplies an executor, exclusive ring-sized LHE products, and
+        // nonempty exclusive output-decoding buffers;
         // reuse them across sequential queries. Keep them alive until completion.
         // GPU execution does not use these CPU resources.
         task<> send(
-            macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers,
+            macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers,
             span<u64> b,
             PRNG& prng,
             Socket& sock);
@@ -352,7 +365,7 @@ namespace osuCrypto
         // One-shot convenience entrypoint. Runs offline if needed, using the
         // size and protocol options supplied at construction.
         task<> send(
-            macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, std::span<u8> setupResults,
+            macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers, std::span<u8> setupResults,
             u64 delta,
             span<u64> b,
             PRNG& prng,
@@ -456,14 +469,14 @@ namespace osuCrypto
 
         // Online phase. x must have the configured size and each x[i] must be
         // in Z_p. Writes receiver MACs a, unless mKeepOutputOnDevice is set.
-        // Borrow the executor and exclusive LHE/LENC/zeta/wrapping buffers through completion;
+        // Borrow the executor and exclusive LHE/LENC/zeta/wrapping/decoding buffers through completion;
         // reuse them for sequential calls. Products must be ring-sized and LENC
         // pointer capacity must cover every level, including root-left.
         // Zeta requires a nonempty span; see RootZetaBuffer for preparation sizes.
         // GPU execution accepts empty CPU buffer spans.
         task<> receive(
             macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
-            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers,
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers,
             span<const u64> x,
             span<u64> a,
             PRNG& prng,
@@ -544,6 +557,15 @@ namespace osuCrypto::LogVole
         u32 requestedWorkers,
         std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
 
+    // Borrow all inputs, output, executor and exclusive buffers until completion.
+    // Buffer count bounds concurrency; one chunk executes inline.
+    macoro::task<bool> unwrapRingLabelsCrt(
+        macoro::thread_pool& executor, std::span<ZpDecodeBuffer> buffers,
+        const ZpCrtContext& ctx, const std::vector<RnsPoly>& labels, u64 zpLabelCount,
+        bool scaleAndRound, u32 requestedWorkers, AlignedUnVec<u64>& out,
+        CpuBenchmarkState cpuBenchmark = {});
+
+    // Legacy synchronous GPU/fallback and diagnostic entry point.
     bool unwrapRingLabelsCrt(
         const ZpCrtContext& ctx,
         const std::vector<RnsPoly>& labels,
@@ -566,13 +588,14 @@ namespace osuCrypto::LogVole
         CivoleReceiverState& state,
         Socket& sock, CpuBenchmarkState cpuBenchmark = {});
 
+    // Legacy staged release; production CPU output uses the awaited release API.
     bool civoleSenderReleaseK(
         CivoleSenderState& state,
         CivoleSid sid,
         CivoleReleaseKOutput& output, CpuBenchmarkState cpuBenchmark = {});
 
     task<> civoleSenderRelease(
-        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, std::span<ZpDecodeBuffer> unwrapBuffers,
         CivoleSenderState& state,
         CivoleSid sid,
         CivoleSenderReleaseOutput& output,
@@ -584,7 +607,7 @@ namespace osuCrypto::LogVole
 
     task<> civoleReceiverSetX(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, std::span<ZpDecodeBuffer> unwrapBuffers,
         CivoleReceiverState& state,
         CivoleSid sid,
         std::span<const u64> x,

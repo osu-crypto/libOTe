@@ -503,7 +503,7 @@ namespace osuCrypto
         // VOLE commitment, on both host and device when present. The remaining
         // witness can be reused. The mutable span avoids copying the witness.
         task<> prove(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
-            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;
@@ -553,7 +553,7 @@ namespace osuCrypto
         u64 voleRequest() const { return mVoleRequest; }
 
         task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults, u64 delta, PRNG& prng, Socket& sock);
-        task<> verify(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, PRNG& prng, Socket& sock);
+        task<> verify(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;
@@ -599,7 +599,7 @@ namespace osuCrypto
         // Refreshes the independent trailing mask slots on host and device before
         // VOLE commitment; A, B and request padding remain unchanged.
         task<> prove(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
-            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers, std::span<u64> wires, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;
@@ -641,7 +641,7 @@ namespace osuCrypto
         task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults, u64 delta, PRNG& prng, Socket& sock);
         // Snapshot the application's public C before authentication/challenge.
         // C must contain exactly mDim*mDim canonical field elements.
-        task<> verify(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, std::span<const u64> publicProduct, PRNG& prng, Socket& sock);
+        task<> verify(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers, std::span<const u64> publicProduct, PRNG& prng, Socket& sock);
 
     private:
         u64 mVoleRequest = 0;

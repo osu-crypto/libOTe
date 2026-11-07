@@ -666,7 +666,7 @@ namespace osuCrypto
         mState = State::Offline;
     }
 
-    task<> LogVoleSender::send(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, span<u64> b, PRNG& prng, Socket& sock)
+    task<> LogVoleSender::send(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, std::span<ZpDecodeBuffer> unwrapBuffers, span<u64> b, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!hasOffline())
@@ -688,7 +688,7 @@ namespace osuCrypto
             // allocated, copied into mReleasedKeys, and copied again into b.
             options.mKeysOut = std::span<u64>(b.data(), b.size());
         }
-        co_await civoleSenderRelease(executor, buffers, mOfflineState, sid, release, prng, sock, options, cpuBenchmark);
+        co_await civoleSenderRelease(executor, buffers, unwrapBuffers, mOfflineState, sid, release, prng, sock, options, cpuBenchmark);
 
         mOutputDevice = release.mKeysDevice;
         mOutputDeviceCount = release.mKeysDeviceCount;
@@ -707,7 +707,7 @@ namespace osuCrypto
         mLastOnlineComm = release.mComm;
     }
 
-    task<> LogVoleSender::send(macoro::thread_pool &executor, std::span<LheDecryptBuffer> buffers,
+    task<> LogVoleSender::send(macoro::thread_pool &executor, std::span<LheDecryptBuffer> buffers, std::span<ZpDecodeBuffer> unwrapBuffers,
                                std::span<u8> setupResults, u64 delta, span<u64> b, PRNG &prng, Socket &sock)
     {
         if (!isConfigured())
@@ -727,7 +727,7 @@ namespace osuCrypto
             throw std::runtime_error("LogVole CI-VOLE sender offline delta does not match requested delta");
         }
 
-        co_await send(executor, buffers, b, prng, sock);
+        co_await send(executor, buffers, unwrapBuffers, b, prng, sock);
     }
 
     void LogVoleSender::clear()
@@ -866,7 +866,7 @@ namespace osuCrypto
     }
 
     task<> LogVoleReceiver::receive(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, std::span<ZpDecodeBuffer> unwrapBuffers, span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         const bool emptyDeviceInput = x.empty() && mInputDevice != nullptr;
@@ -909,7 +909,7 @@ namespace osuCrypto
         }
         try
         {
-            co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, zetaBuffers, wrapBuffers, mOfflineState, sid, x, setX, prng, sock, options, cpuBenchmark);
+            co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, zetaBuffers, wrapBuffers, unwrapBuffers, mOfflineState, sid, x, setX, prng, sock, options, cpuBenchmark);
         }
         catch (...)
         {
@@ -1791,6 +1791,197 @@ namespace osuCrypto::LogVole
         co_return std::all_of(chunks.begin(), chunks.end(), [](const auto& b) { return b.mOk; });
     }
 
+    namespace
+    {
+        struct ZpDecodeState
+        {
+            const ZpCrtContext& ctx;
+            std::shared_ptr<const seal::SEALContext::ContextData> batchingContextData, ringContextData;
+            seal::MemoryPoolHandle pool;
+            seal::util::RNSBase fullBase;
+            std::vector<seal::util::MultiplyUIntModOperand> crtInvPunctured;
+            AlignedUnVec<u64> qI;
+            AlignedUnVec<wideU64> fracInvModulus;
+            const seal::Modulus& plainModulus;
+            u64 plainModulusValue, slotCount;
+            std::size_t n, rho;
+            wideU64 half = wideU64OneShift(127);
+
+            explicit ZpDecodeState(const ZpCrtContext& c)
+                : ctx(c), batchingContextData(c.mBatchingContext->first_context_data()),
+                  ringContextData(c.mRing.mContext->key_context_data()),
+                  pool(seal::MemoryManager::GetPool()),
+                  fullBase(ringContextData->parms().coeff_modulus(), pool),
+                  plainModulus(batchingContextData->parms().plain_modulus()),
+                  plainModulusValue(plainModulus.value()), slotCount(zpSlotCount(c)),
+                  n(c.mRing.mParams.mPolyModulusDegree), rho(c.mRing.mModuli.size())
+            {
+                crtInvPunctured.resize(rho);
+                resizeZero(qI, rho);
+                resizeZero(fracInvModulus, rho);
+                const auto inv = fullBase.inv_punctured_prod_mod_base_array();
+                for (std::size_t i = 0; i != rho; ++i)
+                {
+                    qI[i] = fullBase.base()[i].value();
+                    crtInvPunctured[i] = inv[i];
+                    fracInvModulus[i] = reciprocal2Pow128Wide(qI[i]);
+                }
+            }
+
+            bool decode(const std::vector<RnsPoly>& labels, u64 zpLabelCount,
+                bool scaleAndRound, std::size_t labelIdx, ZpDecodeBuffer& buffer,
+                AlignedUnVec<u64>& out) const
+            {
+                auto& plain = buffer.mPlain;
+                const bool vectorRounded = scaleAndRound && cpuScaleAndRoundRns(ctx.mRing.mCpuCapabilities,
+                    labels[labelIdx].mCoeffs.data(), plain.data(), n, fullBase, plainModulusValue);
+                auto& canonical = buffer.mCanonical;
+                if (!vectorRounded)
+                {
+                    canonical = labels[labelIdx];
+                    if (!canonicalizePoly(canonical, ctx.mRing)) return false;
+                }
+
+                if (scaleAndRound && !vectorRounded)
+                {
+                    for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
+                    {
+                        u64 scaledCoeff = 0;
+                        wideU64 fracSum = half;
+                        for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+                        {
+                            const u64 vI = canonical.mCoeffs[modIdx * n + coeffIdx];
+                            const u64 xI = seal::util::multiply_uint_mod(
+                                vI,
+                                crtInvPunctured[modIdx],
+                                ctx.mRing.mModuli[modIdx]);
+
+                            // floor(xI * p / q_i) and the matching remainder.
+                            // divModWide128 is exact and replaces a software
+                            // 128/64 division, which dominated this loop.
+                            const wideU64 scaledNumerator = wideU64Mul(xI, plainModulusValue);
+                            wideU64 quotient{};
+                            u64 rem = 0;
+                            divModWide128(
+                                scaledNumerator, qI[modIdx], fracInvModulus[modIdx], quotient, rem);
+
+                            scaledCoeff += quotient.mLo;
+                            if (scaledCoeff >= plainModulusValue)
+                            {
+                                scaledCoeff -= plainModulusValue;
+                            }
+
+                            unsigned char carry = 0;
+                            fracSum = wideU64Add(
+                                fracSum,
+                                wideU64MulLow(rem, fracInvModulus[modIdx]),
+                                &carry);
+                            if (carry)
+                            {
+                                ++scaledCoeff;
+                                if (scaledCoeff == plainModulusValue)
+                                {
+                                    scaledCoeff = 0;
+                                }
+                            }
+                        }
+                        plain[coeffIdx] = scaledCoeff;
+                    }
+                }
+                else if (!scaleAndRound)
+                {
+                    auto localPool = seal::MemoryManager::GetPool();
+                    auto& composedLocal = buffer.mComposed;
+                    composedLocal.resize(n * rho);
+                    std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedLocal.data());
+                    ringContextData->rns_tool()->base_q()->compose_array(composedLocal.data(), n, localPool);
+
+                    for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
+                    {
+                        plain[coeffIdx] =
+                            seal::util::modulo_uint(composedLocal.data() + coeffIdx * rho, rho, plainModulus);
+                    }
+                }
+
+                auto& slots = buffer.mSlots;
+                try
+                {
+                    seal::BatchEncoder& encoder = *ctx.mBatchEncoder;
+                    encoder.decode(plain, slots);
+                }
+                catch (const std::exception&)
+                {
+                    return false;
+                }
+
+                const u64 offset = static_cast<u64>(labelIdx) * slotCount;
+                const u64 remaining = zpLabelCount - offset;
+                const u64 copyCount = std::min<u64>(remaining, slots.size());
+                std::copy_n(slots.begin(), copyCount, out.data() + offset);
+                return true;
+            }
+        };
+
+        bool validateDecodeContexts(const ZpCrtContext& ctx)
+        {
+            auto batching = ctx.mBatchingContext->first_context_data();
+            auto ring = ctx.mRing.mContext ? ctx.mRing.mContext->key_context_data() : nullptr;
+            return batching && batching->rns_tool() && ring && ring->rns_tool() && ring->rns_tool()->base_q();
+        }
+
+        void prepareDecodeBuffer(ZpDecodeBuffer& buffer, const ZpCrtContext& ctx)
+        {
+            buffer.mPlain.resize(zpSlotCount(ctx));
+            buffer.mSlots.resize(zpSlotCount(ctx));
+            buffer.mOk = true;
+        }
+    }
+
+    macoro::task<bool> unwrapRingLabelsCrt(
+        macoro::thread_pool& executor, std::span<ZpDecodeBuffer> buffers,
+        const ZpCrtContext& ctx, const std::vector<RnsPoly>& labels, u64 zpLabelCount,
+        bool scaleAndRound, u32 requestedWorkers, AlignedUnVec<u64>& out,
+        CpuBenchmarkState cpuBenchmark)
+    {
+        if (buffers.empty() || ctx.mGpuLightweight || !validateZpContext(ctx) ||
+            !validateRingBatchShape(labels, ctx.mRing.mParams) ||
+            zpLabelCount > labels.size() * zpSlotCount(ctx) || !validateDecodeContexts(ctx))
+            co_return false;
+        if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx.mRing);
+        const auto count = static_cast<std::size_t>(zpRingLabelCount(ctx, zpLabelCount));
+        auto allowance = buffers.size();
+        if (requestedWorkers) allowance = std::min(allowance, std::size_t(requestedWorkers));
+        if (cpuBenchmark.mContext)
+        {
+            const auto& limits = *cpuBenchmark.mContext;
+            allowance = std::min(allowance, std::max<std::size_t>(1, limits.mWorkerLimit
+                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size()));
+        }
+        auto chunks = buffers.first(std::min(allowance, count));
+        for (auto& buffer : chunks) prepareDecodeBuffer(buffer, ctx);
+        // Ordinary metadata owns aligned payloads; SIMD arithmetic and scratch
+        // remain in the synchronous kernel, never in the coroutine frame.
+        static_assert(alignof(ZpDecodeState) <= alignof(std::max_align_t));
+        ZpDecodeState decode(ctx);
+        AutoTimer unwrapTimer(globalTimingStats.mUnwrapTimeUs);
+        out.resize(static_cast<std::size_t>(zpLabelCount));
+        auto decodeChunk = [&](std::size_t begin, std::size_t end, ZpDecodeBuffer& buffer) {
+            CpuBenchmarkState worker = chunks.size() > 1
+                ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
+            CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
+            CpuBenchmarkTaskScope metrics(worker);
+            for (auto i = begin; i != end; ++i)
+                if (!decode.decode(labels, zpLabelCount, scaleAndRound, i, buffer, out))
+                {
+                    buffer.mOk = false;
+                    break;
+                }
+        };
+        if (chunks.size() == 1) decodeChunk(0, count, chunks[0]);
+        else if (count) co_await macoro::bulk_chunked(executor, count, chunks, decodeChunk);
+        co_return std::all_of(chunks.begin(), chunks.end(), [](const auto& b) { return b.mOk; });
+    }
+
     bool unwrapRingLabelsCrt(
         const ZpCrtContext& ctx,
         const std::vector<RnsPoly>& labels,
@@ -1851,138 +2042,16 @@ namespace osuCrypto::LogVole
                 *host, labels, zpLabelCount, scaleAndRound, requestedWorkers, out, cpuBenchmark);
         }
 
-        auto batchingContextData = ctx.mBatchingContext->first_context_data();
-        auto ringContextData = ctx.mRing.mContext ? ctx.mRing.mContext->key_context_data() : nullptr;
-        if (!batchingContextData ||
-            !batchingContextData->rns_tool() ||
-            !ringContextData ||
-            !ringContextData->rns_tool() ||
-            !ringContextData->rns_tool()->base_q())
-        {
-            return false;
-        }
-
-        auto pool = seal::MemoryManager::GetPool();
-        const auto& plainModulus = batchingContextData->parms().plain_modulus();
-        const u64 plainModulusValue = plainModulus.value();
-        const std::size_t n = ctx.mRing.mParams.mPolyModulusDegree;
-        const std::size_t rho = ctx.mRing.mModuli.size();
-        seal::util::RNSBase fullBase(ringContextData->parms().coeff_modulus(), pool);
-        auto invPunctProd = fullBase.inv_punctured_prod_mod_base_array();
-        std::vector<seal::util::MultiplyUIntModOperand> crtInvPunctured(rho);
-        AlignedUnVec<u64> qI;
-        AlignedUnVec<wideU64> fracInvModulus;
-        resizeZero(qI, rho);
-        resizeZero(fracInvModulus, rho);
-        for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
-        {
-            qI[modIdx] = fullBase.base()[modIdx].value();
-            crtInvPunctured[modIdx] = invPunctProd[modIdx];
-            fracInvModulus[modIdx] = reciprocal2Pow128Wide(qI[modIdx]);
-        }
-        const wideU64 half = wideU64OneShift(127);
-
+        if (!validateDecodeContexts(ctx)) return false;
+        ZpDecodeState decode(ctx);
         AutoTimer unwrapTimer(globalTimingStats.mUnwrapTimeUs);
-
         out.resize(static_cast<std::size_t>(zpLabelCount));
-        if (!detail::runParallelTasks(
-                static_cast<std::size_t>(chunkCount),
-                requestedWorkers,
-                [&](std::size_t labelIdx, CpuBenchmarkState& cpuBenchmark) {
-                    seal::Plaintext plain;
-                    plain.resize(slotCount);
-
-                    const bool vectorRounded = scaleAndRound && cpuScaleAndRoundRns(ctx.mRing.mCpuCapabilities,
-                        labels[labelIdx].mCoeffs.data(), plain.data(), n, fullBase, plainModulusValue);
-                    RnsPoly canonical;
-                    if (!vectorRounded)
-                    {
-                        canonical = labels[labelIdx];
-                        if (!canonicalizePoly(canonical, ctx.mRing)) return false;
-                    }
-
-                    if (scaleAndRound && !vectorRounded)
-                    {
-                        for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
-                        {
-                            u64 scaledCoeff = 0;
-                            wideU64 fracSum = half;
-                            for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
-                            {
-                                const u64 vI = canonical.mCoeffs[modIdx * n + coeffIdx];
-                                const u64 xI = seal::util::multiply_uint_mod(
-                                    vI,
-                                    crtInvPunctured[modIdx],
-                                    ctx.mRing.mModuli[modIdx]);
-
-                                // floor(xI * p / q_i) and the matching remainder.
-                                // divModWide128 is exact and replaces a software
-                                // 128/64 division, which dominated this loop.
-                                const wideU64 scaledNumerator = wideU64Mul(xI, plainModulusValue);
-                                wideU64 quotient{};
-                                u64 rem = 0;
-                                divModWide128(
-                                    scaledNumerator, qI[modIdx], fracInvModulus[modIdx], quotient, rem);
-
-                                scaledCoeff += quotient.mLo;
-                                if (scaledCoeff >= plainModulusValue)
-                                {
-                                    scaledCoeff -= plainModulusValue;
-                                }
-
-                                unsigned char carry = 0;
-                                fracSum = wideU64Add(
-                                    fracSum,
-                                    wideU64MulLow(rem, fracInvModulus[modIdx]),
-                                    &carry);
-                                if (carry)
-                                {
-                                    ++scaledCoeff;
-                                    if (scaledCoeff == plainModulusValue)
-                                    {
-                                        scaledCoeff = 0;
-                                    }
-                                }
-                            }
-                            plain[coeffIdx] = scaledCoeff;
-                        }
-                    }
-                    else if (!scaleAndRound)
-                    {
-                        auto localPool = seal::MemoryManager::GetPool();
-                        auto composedLocal = seal::util::allocate_poly(n, rho, localPool);
-                        std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedLocal.get());
-                        ringContextData->rns_tool()->base_q()->compose_array(composedLocal.get(), n, localPool);
-
-                        for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
-                        {
-                            plain[coeffIdx] =
-                                seal::util::modulo_uint(composedLocal.get() + coeffIdx * rho, rho, plainModulus);
-                        }
-                    }
-
-                    std::vector<u64> slots;
-                    try
-                    {
-                        seal::BatchEncoder& encoder = *ctx.mBatchEncoder;
-                        encoder.decode(plain, slots);
-                    }
-                    catch (const std::exception&)
-                    {
-                        return false;
-                    }
-
-                    const u64 offset = static_cast<u64>(labelIdx) * slotCount;
-                    const u64 remaining = zpLabelCount - offset;
-                    const u64 copyCount = std::min<u64>(remaining, slots.size());
-                    std::copy_n(slots.begin(), copyCount, out.data() + offset);
-                    return true;
-                }, false, &cpuBenchmark))
-        {
-            return false;
-        }
-
-        return true;
+        return detail::runParallelTasks(static_cast<std::size_t>(chunkCount), requestedWorkers,
+            [&](std::size_t labelIdx, CpuBenchmarkState&) {
+                ZpDecodeBuffer buffer;
+                prepareDecodeBuffer(buffer, ctx);
+                return decode.decode(labels, zpLabelCount, scaleAndRound, labelIdx, buffer, out);
+            }, false, &cpuBenchmark);
     }
 
     task<> civoleSenderOffline(macoro::thread_pool &executor, std::span<u8> setupResults,
@@ -2292,7 +2361,7 @@ namespace osuCrypto::LogVole
     }
 
     task<> civoleSenderRelease(
-        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, std::span<ZpDecodeBuffer> unwrapBuffers,
         CivoleSenderState& state,
         CivoleSid sid,
         CivoleSenderReleaseOutput& output,
@@ -2328,7 +2397,7 @@ namespace osuCrypto::LogVole
             co_await std::move(operation);
         }
 
-        ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Sender, sid);
+        std::optional<ScopedProtocolCacheScope> scopedCache(std::in_place, ProtocolCacheRole::Sender, sid);
         const auto& ctx = *ctxOwner;
         AlignedUnVec<u64> keys;
 
@@ -2376,14 +2445,24 @@ namespace osuCrypto::LogVole
             if (!haveKeys) keys.resize(0);
         }
 #endif
-        if (!haveKeys &&
-            !unwrapRingLabelsCrt(
-                ctx,
-                ringKeys,
-                state.mW,
-                true,
-                state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
-                keys, cpuBenchmark))
+        bool unwrapped = haveKeys;
+        if (!unwrapped)
+        {
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (gpu::enabled(ctx.mRing))
+                unwrapped = unwrapRingLabelsCrt(ctx, ringKeys, state.mW, true,
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, cpuBenchmark);
+            else
+#endif
+            {
+                scopedCache.reset();
+                unwrapped = co_await unwrapRingLabelsCrt(executor, unwrapBuffers,
+                    ctx, ringKeys, state.mW, true,
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, cpuBenchmark);
+                scopedCache.emplace(ProtocolCacheRole::Sender, sid);
+            }
+        }
+        if (!unwrapped)
         {
             throw std::runtime_error("LogVole CI-VOLE sender could not unwrap keys");
         }
@@ -2406,7 +2485,7 @@ namespace osuCrypto::LogVole
 
     task<> civoleReceiverSetX(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, std::span<ZpDecodeBuffer> unwrapBuffers,
         CivoleReceiverState& state,
         CivoleSid sid,
         std::span<const u64> x,
@@ -2606,13 +2685,24 @@ namespace osuCrypto::LogVole
             }
         }
 #endif
-        if (!haveMacs && !unwrapRingLabelsCrt(
-                ctx,
-                online.mTbm,
-                state.mW,
-                true,
-                state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
-                macs, cpuBenchmark))
+        bool unwrapped = haveMacs;
+        if (!unwrapped)
+        {
+#if defined(ENABLE_LOGVOLE_CUDA)
+            if (gpu::enabled(ctx.mRing))
+                unwrapped = unwrapRingLabelsCrt(ctx, online.mTbm, state.mW, true,
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, macs, cpuBenchmark);
+            else
+#endif
+            {
+                scopedCache.reset();
+                unwrapped = co_await unwrapRingLabelsCrt(executor, unwrapBuffers,
+                    ctx, online.mTbm, state.mW, true,
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, macs, cpuBenchmark);
+                scopedCache.emplace(ProtocolCacheRole::Receiver, sid);
+            }
+        }
+        if (!unwrapped)
         {
             throw std::runtime_error("LogVole CI-VOLE receiver could not unwrap MACs");
         }

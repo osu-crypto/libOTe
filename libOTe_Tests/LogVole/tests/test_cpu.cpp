@@ -1534,6 +1534,100 @@ void LogVole_Cpu_AsyncInputWrapping(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_EQ(telemetry.mPeakTaskThreads.load(), 1u);
 }
 
+void LogVole_Cpu_AsyncOutputUnwrapping(const oc::CLP& cmd)
+{
+    RingParams params;
+    params.mPolyModulusDegree = 1024;
+    assignValues<int>(params.mCoeffModulusBits, {52, 52, 52, 52});
+    ZpCrtContext ctx;
+    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 20, ctx));
+    auto scalar = ctx;
+    scalar.mRing.mCpuCapabilities = osuCrypto::CpuCapabilities(osuCrypto::CpuCapabilities::Mode::Scalar);
+    const auto slots = zpSlotCount(ctx);
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(cmd.getOr("executor_threads", 1));
+    std::array<ZpDecodeBuffer, 3> buffers;
+    std::array<std::array<const u64*, 4>, 3> storage;
+    for (std::size_t i = 0; i != buffers.size(); ++i)
+    {
+        auto& b = buffers[i];
+        b.mPlain.resize(slots);
+        b.mSlots.resize(slots);
+        b.mCanonical.mCoeffs.resize(ringPolyCoeffCount(params));
+        b.mComposed.resize(ringPolyCoeffCount(params));
+        storage[i] = {b.mPlain.data(), b.mSlots.data(), b.mCanonical.mCoeffs.data(), b.mComposed.data()};
+    }
+    auto onPool = [&](macoro::task<bool> operation) -> macoro::task<bool> {
+        co_await executor.schedule();
+        co_return co_await std::move(operation);
+    };
+    for (std::size_t count : {std::size_t(0), std::size_t(1), std::size_t(slots), std::size_t(2 * slots + 7)})
+    for (bool rounded : {false, true})
+    {
+        std::vector<u64> labels(count);
+        for (std::size_t i = 0; i != count; ++i) labels[i] = (i * 137) % ctx.mPlaintextModulus;
+        std::vector<RnsPoly> ring;
+        LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(ctx, labels, rounded, 0, 1, ring));
+        // Noncanonical residues exercise the existing canonical fallback as well
+        // as SIMD dispatch; both must retain exactly the same scalar outputs.
+        for (auto& poly : ring)
+            for (std::size_t j = 0; j != ctx.mRing.mModuli.size(); ++j)
+                for (std::size_t i = 0; i != slots; ++i)
+                    poly.mCoeffs[j * slots + i] += ringModulusValue(ctx.mRing, j);
+        AlignedUnVec<u64> expected, actual;
+        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(scalar, ring, count, rounded, 1, expected));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(expected, labels));
+        for (const auto* selected : {&ctx, &scalar})
+        for (std::size_t allowance : {1u, 2u, 3u})
+        {
+            auto operation = unwrapRingLabelsCrt(executor, std::span(buffers).first(allowance),
+                *selected, ring, count, rounded, 3, actual);
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(operation))));
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
+            const auto outputStorage = actual.data();
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(unwrapRingLabelsCrt(executor,
+                std::span(buffers).first(allowance), *selected, ring, count, rounded, 3, actual))));
+            LOGVOLE_REQUIRE_TRUE(actual.data() == outputStorage);
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
+        }
+        for (std::size_t i = 0; i != buffers.size(); ++i)
+        {
+            const auto& b = buffers[i];
+            LOGVOLE_REQUIRE_TRUE(storage[i] == (std::array<const u64*, 4>{b.mPlain.data(),
+                b.mSlots.data(), b.mCanonical.mCoeffs.data(), b.mComposed.data()}));
+        }
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(unwrapRingLabelsCrt(executor, {},
+            ctx, ring, count, rounded, 3, actual)));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(unwrapRingLabelsCrt(executor, buffers,
+            ctx, ring, ring.size() * slots + 1, rounded, 3, actual)));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
+        if (!ring.empty())
+        {
+            ring[0].mCoeffs.resize(1);
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(unwrapRingLabelsCrt(executor, buffers,
+                ctx, ring, count, rounded, 3, actual)));
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
+        }
+    }
+    // Explicit budget of one runs inline even with several available buffers.
+    macoro::thread_pool idle;
+    std::vector<u64> labels(2 * slots + 7, 1);
+    std::vector<RnsPoly> ring;
+    LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(ctx, labels, false, 0, 1, ring));
+    AlignedUnVec<u64> actual;
+    CpuBenchmarkContext telemetry;
+    telemetry.mCpus = {0, 1, 2};
+    telemetry.mWorkerLimit = 1;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(idle, buffers, ctx,
+        ring, labels.size(), false, 3, actual, CpuBenchmarkState{&telemetry})));
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, labels));
+    LOGVOLE_REQUIRE_EQ(telemetry.mPeakTaskThreads.load(), 1u);
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(idle,
+        std::span(buffers).first(1), ctx, ring, labels.size(), false, 0, actual)));
+}
+
 void LogVole_Cpu_CrtMatchesSeal(const oc::CLP&)
 {
     PRNG random(toBlock(0xA18, 0x671));
@@ -1905,8 +1999,8 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     LOGVOLE_REQUIRE_TRUE(fallbackVerifier.mCircuit.mOperands.empty());
                     LOGVOLE_REQUIRE_TRUE(fallbackProver.mCircuit.mOperands.empty());
                     auto online = macoro::sync_wait(macoro::when_all_ready(
-                        fallbackVerifier.verify(fallbackVerifierResources.executor, fallbackVerifierResources.buffers, senderPrng, sockets[0]),
-                        fallbackProver.prove(fallbackVerifierResources.executor, fallbackVerifierResourcesReceiverBuffers.lhe, fallbackVerifierResourcesReceiverBuffers.lenc, fallbackVerifierResourcesReceiverBuffers.zeta, fallbackVerifierResourcesReceiverBuffers.wrap, witness, receiverPrng, sockets[1])));
+                        fallbackVerifier.verify(fallbackVerifierResources.executor, fallbackVerifierResources.buffers, fallbackVerifierResources.unwrap, senderPrng, sockets[0]),
+                        fallbackProver.prove(fallbackVerifierResources.executor, fallbackVerifierResourcesReceiverBuffers.lhe, fallbackVerifierResourcesReceiverBuffers.lenc, fallbackVerifierResourcesReceiverBuffers.zeta, fallbackVerifierResourcesReceiverBuffers.wrap, fallbackVerifierResourcesReceiverBuffers.unwrap, witness, receiverPrng, sockets[1])));
                     std::get<0>(online).result();
                     std::get<1>(online).result();
                     LOGVOLE_REQUIRE_TRUE(fallbackVerifier.mAccepted);
@@ -1986,7 +2080,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                             bool rejected = false;
                             try
                             {
-                                macoro::sync_wait(gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc, gpuVerifierResourcesReceiverBuffers.zeta, gpuVerifierResourcesReceiverBuffers.wrap,
+                                macoro::sync_wait(gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc, gpuVerifierResourcesReceiverBuffers.zeta, gpuVerifierResourcesReceiverBuffers.wrap, gpuVerifierResourcesReceiverBuffers.unwrap,
                                     std::span<u64>{}, receiverPrng, sockets[1]));
                             }
                             catch (const std::runtime_error&) { rejected = true; }
@@ -1994,8 +2088,8 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                             LOGVOLE_REQUIRE_TRUE(rejected);
                         }
                         auto online = macoro::sync_wait(macoro::when_all_ready(
-                            gpuVerifier.verify(gpuVerifierResources.executor, gpuVerifierResources.buffers, senderPrng, sockets[0]),
-                            gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc, gpuVerifierResourcesReceiverBuffers.zeta, gpuVerifierResourcesReceiverBuffers.wrap, deviceOnly ? std::span<u64>{}
+                            gpuVerifier.verify(gpuVerifierResources.executor, gpuVerifierResources.buffers, gpuVerifierResources.unwrap, senderPrng, sockets[0]),
+                            gpuProver.prove(gpuVerifierResources.executor, gpuVerifierResourcesReceiverBuffers.lhe, gpuVerifierResourcesReceiverBuffers.lenc, gpuVerifierResourcesReceiverBuffers.zeta, gpuVerifierResourcesReceiverBuffers.wrap, gpuVerifierResourcesReceiverBuffers.unwrap, deviceOnly ? std::span<u64>{}
                                 : std::span<u64>(witness.data(), witness.size()),
                                 receiverPrng, sockets[1])));
                         std::get<0>(online).result();

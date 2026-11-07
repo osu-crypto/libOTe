@@ -22,6 +22,7 @@ namespace tests_libOTe::logvole_test
         macoro::thread_pool::work work = executor.make_work();
         std::vector<osuCrypto::LogVole::LheDecryptBuffer> buffers;
         std::vector<osuCrypto::u8> setupResults{1};
+        std::vector<osuCrypto::LogVole::ZpDecodeBuffer> unwrap;
 
         SenderResources(const osuCrypto::LogVole::RingParams& ring, bool gpu = false,
             std::size_t workers = 3)
@@ -29,6 +30,12 @@ namespace tests_libOTe::logvole_test
             if (gpu) return;
             setupResults.resize(workers);
             buffers.resize(workers);
+            unwrap.resize(workers);
+            for (auto& b : unwrap)
+            {
+                b.mPlain.resize(ring.mPolyModulusDegree);
+                b.mSlots.resize(ring.mPolyModulusDegree);
+            }
             for (auto& b : buffers)
                 b.mProduct.mCoeffs.resize(osuCrypto::LogVole::ringPolyCoeffCount(ring));
             executor.create_threads(1);
@@ -41,6 +48,12 @@ namespace tests_libOTe::logvole_test
                 throw std::runtime_error("invalid sender test parameters");
             buffers.resize(std::max(1u, options.mNumThreads));
             setupResults.resize(buffers.size());
+            unwrap.resize(buffers.size());
+            for (auto& b : unwrap)
+            {
+                b.mPlain.resize(params.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                b.mSlots.resize(params.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+            }
             for (auto& b : buffers)
                 b.mProduct.mCoeffs.resize(osuCrypto::LogVole::ringPolyCoeffCount(params.mLogVole.mShrinkExpand.mRing));
             executor.create_threads(1);
@@ -53,6 +66,7 @@ namespace tests_libOTe::logvole_test
         std::vector<osuCrypto::LogVole::LencEvalBuffer> lenc;
         std::vector<osuCrypto::LogVole::RootZetaBuffer> zeta;
         std::vector<osuCrypto::LogVole::ZpEncodeBuffer> wrap;
+        std::vector<osuCrypto::LogVole::ZpDecodeBuffer> unwrap;
 
         ReceiverBuffers(const osuCrypto::LogVole::ShrinkExpandParams& params,
             bool gpu = false, std::size_t workers = 3)
@@ -62,6 +76,12 @@ namespace tests_libOTe::logvole_test
             lenc.resize(workers);
             zeta.resize(workers);
             wrap.resize(workers);
+            unwrap.resize(workers);
+            for (auto& b : unwrap)
+            {
+                b.mPlain.resize(params.mRing.mPolyModulusDegree);
+                b.mSlots.resize(params.mRing.mPolyModulusDegree);
+            }
             for (auto& b : wrap)
             {
                 b.mSlots.resize(params.mRing.mPolyModulusDegree);

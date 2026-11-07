@@ -63,7 +63,7 @@ namespace osuCrypto
         // Samples three independent uniform nonzero deltas from this private
         // PRNG and CRT-encodes their repeating triple into the leaf key.
         task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults, PRNG& prng, Socket& sock);
-        task<> send(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers,
+        task<> send(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> buffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers,
             LogVole::GarbledLabelBatch& zeroLabels, PRNG& prng, Socket& sock);
 
         u64 modulus() const { return mModulus; }
@@ -108,7 +108,7 @@ namespace osuCrypto
         // For Boolean garbling each x[i] is a bit; field-valued inputs are also
         // supported. Host inputs are range-checked before a SID is consumed.
         task<> receive(macoro::thread_pool& executor, std::span<LogVole::LheDecryptBuffer> lheBuffers,
-            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers, span<const u64> x, LogVole::GarbledLabelBatch& labels,
+            std::span<LogVole::LencEvalBuffer> lencBuffers, std::span<LogVole::RootZetaBuffer> zetaBuffers, std::span<LogVole::ZpEncodeBuffer> wrapBuffers, std::span<LogVole::ZpDecodeBuffer> unwrapBuffers, span<const u64> x, LogVole::GarbledLabelBatch& labels,
             PRNG& prng, Socket& sock);
         u64 modulus() const { return mModulus; }
         u64 configureCacheRunId() const { return mConfigureCacheRunId; }

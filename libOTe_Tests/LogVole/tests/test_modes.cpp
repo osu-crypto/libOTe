@@ -185,6 +185,11 @@ namespace
             wrapStorage.push_back(buffer.mSlots.data());
             plainStorage.push_back(buffer.mPlain.data());
         }
+        std::vector<std::array<const void*, 2>> senderDecodeStorage, receiverDecodeStorage;
+        for (auto& buffer : senderResources.unwrap)
+            senderDecodeStorage.push_back({buffer.mPlain.data(), buffer.mSlots.data()});
+        for (auto& buffer : receiverBuffers.unwrap)
+            receiverDecodeStorage.push_back({buffer.mPlain.data(), buffer.mSlots.data()});
         for (u64 round = 0; round != rounds; ++round)
         {
             for (u64 i = 0; i != count; ++i)
@@ -192,12 +197,22 @@ namespace
                     (randomInputs ? inputPrng.get<u64>() % p.value() : i + round));
             auto online = coproto::LocalAsyncSocket::makePair();
             auto query = macoro::sync_wait(macoro::when_all_ready(
-                onPool(sender.send(senderResources.executor, senderResources.buffers,
+                onPool(sender.send(senderResources.executor, senderResources.buffers, senderResources.unwrap,
                     device ? span<u64>{} : span<u64>(keys), senderPrng, online[0])),
-                onPool(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap,
+                onPool(receiver.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap, receiverBuffers.unwrap,
                     x, device ? span<u64>{} : span<u64>(macs), receiverPrng, online[1]))));
             std::get<0>(query).result();
             std::get<1>(query).result();
+            for (std::size_t i = 0; i != senderDecodeStorage.size(); ++i)
+            {
+                LOGVOLE_REQUIRE_TRUE(senderResources.unwrap[i].mPlain.data() == senderDecodeStorage[i][0]);
+                LOGVOLE_REQUIRE_TRUE(senderResources.unwrap[i].mSlots.data() == senderDecodeStorage[i][1]);
+            }
+            for (std::size_t i = 0; i != receiverDecodeStorage.size(); ++i)
+            {
+                LOGVOLE_REQUIRE_TRUE(receiverBuffers.unwrap[i].mPlain.data() == receiverDecodeStorage[i][0]);
+                LOGVOLE_REQUIRE_TRUE(receiverBuffers.unwrap[i].mSlots.data() == receiverDecodeStorage[i][1]);
+            }
             for (std::size_t i = 0; i < productStorage.size(); ++i)
                 LOGVOLE_REQUIRE_TRUE(senderResources.buffers[i].mProduct.mCoeffs.data() == productStorage[i]);
             for (std::size_t i = 0; i < receiverProducts.size(); ++i)
@@ -427,9 +442,9 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         try
         {
             if constexpr (std::is_same_v<Party, LogVoleSender>)
-                macoro::sync_wait(original.send(senderResources.executor, senderResources.buffers, senderResources.setupResults, 1, wrongSize, prng, sockets[0]));
+                macoro::sync_wait(original.send(senderResources.executor, senderResources.buffers, senderResources.unwrap, senderResources.setupResults, 1, wrongSize, prng, sockets[0]));
             else
-                macoro::sync_wait(original.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap, wrongSize, wrongSize, prng, sockets[0]));
+                macoro::sync_wait(original.receive(senderResources.executor, receiverBuffers.lhe, receiverBuffers.lenc, receiverBuffers.zeta, receiverBuffers.wrap, receiverBuffers.unwrap, wrongSize, wrongSize, prng, sockets[0]));
         }
         catch (const std::runtime_error&) { sizeRejected = true; }
         LOGVOLE_REQUIRE_TRUE(sizeRejected);

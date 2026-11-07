@@ -123,10 +123,17 @@ namespace osuCrypto
             macoro::thread_pool executor;
             auto work = executor.make_work();
             std::vector<LheDecryptBuffer> buffers;
+            std::vector<ZpDecodeBuffer> senderUnwrapBuffers;
             std::vector<u8> setupResults(options.mUseGpu ? 1u : workerThreads);
             if (!options.mUseGpu)
             {
                 buffers.resize(workerThreads);
+                senderUnwrapBuffers.resize(workerThreads);
+                for (auto& buffer : senderUnwrapBuffers)
+                {
+                    buffer.mPlain.resize(sender.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                    buffer.mSlots.resize(sender.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                }
                 for (auto& buffer : buffers)
                     buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(sender.mParams.mLogVole.mShrinkExpand.mRing));
                 executor.create_threads(workerThreads);
@@ -157,12 +164,19 @@ namespace osuCrypto
             std::vector<LencEvalBuffer> receiverLencBuffers;
             std::vector<RootZetaBuffer> receiverZetaBuffers;
             std::vector<ZpEncodeBuffer> receiverWrapBuffers;
+            std::vector<ZpDecodeBuffer> unwrapBuffers;
             if (!options.mUseGpu)
             {
                 receiverLheBuffers.resize(workerThreads);
                 receiverLencBuffers.resize(workerThreads);
                 receiverZetaBuffers.resize(workerThreads);
                 receiverWrapBuffers.resize(workerThreads);
+                unwrapBuffers.resize(workerThreads);
+                for (auto& buffer : unwrapBuffers)
+                {
+                    buffer.mPlain.resize(receiver.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                    buffer.mSlots.resize(receiver.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                }
                 for (auto& buffer : receiverWrapBuffers)
                 {
                     buffer.mSlots.resize(receiver.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
@@ -192,8 +206,8 @@ namespace osuCrypto
             // The online phase sends the receiver's digest and returns the
             // matching sender key. The parties then locally expand to w labels.
             auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
-                sender.send(executor, buffers, b, senderPrng, onlineSockets[0]),
-                receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, receiverZetaBuffers, receiverWrapBuffers, x, a, receiverPrng, onlineSockets[1])));
+                sender.send(executor, buffers, senderUnwrapBuffers, b, senderPrng, onlineSockets[0]),
+                receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, receiverZetaBuffers, receiverWrapBuffers, unwrapBuffers, x, a, receiverPrng, onlineSockets[1])));
             std::get<0>(onlineResult).result();
             std::get<1>(onlineResult).result();
 
@@ -258,10 +272,17 @@ namespace osuCrypto
             macoro::thread_pool executor;
             auto work = executor.make_work();
             std::vector<LheDecryptBuffer> buffers;
+            std::vector<ZpDecodeBuffer> unwrapBuffers;
             std::vector<u8> setupResults(options.mUseGpu ? 1u : workerThreads);
             if (!options.mUseGpu)
             {
                 buffers.resize(workerThreads);
+                unwrapBuffers.resize(workerThreads);
+                for (auto& buffer : unwrapBuffers)
+                {
+                    buffer.mPlain.resize(sender.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                    buffer.mSlots.resize(sender.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                }
                 for (auto& buffer : buffers)
                     buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(sender.mParams.mLogVole.mShrinkExpand.mRing));
                 executor.create_threads(workerThreads);
@@ -271,7 +292,7 @@ namespace osuCrypto
             // Split-role mode mirrors the local example over an asio socket.
             // The receiver must use the same n, plaintext bit count and port.
             cp::sync_wait(sender.offline(executor, setupResults, delta, prng, chl));
-            cp::sync_wait(sender.send(executor, buffers, b, prng, chl));
+            cp::sync_wait(sender.send(executor, buffers, unwrapBuffers, b, prng, chl));
 
             const auto end = timer.setTimePoint("logvole.end");
             const auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
@@ -298,12 +319,19 @@ namespace osuCrypto
             std::vector<LencEvalBuffer> receiverLencBuffers;
             std::vector<RootZetaBuffer> receiverZetaBuffers;
             std::vector<ZpEncodeBuffer> receiverWrapBuffers;
+            std::vector<ZpDecodeBuffer> unwrapBuffers;
             if (!options.mUseGpu)
             {
                 receiverLheBuffers.resize(workerThreads);
                 receiverLencBuffers.resize(workerThreads);
                 receiverZetaBuffers.resize(workerThreads);
                 receiverWrapBuffers.resize(workerThreads);
+                unwrapBuffers.resize(workerThreads);
+                for (auto& buffer : unwrapBuffers)
+                {
+                    buffer.mPlain.resize(receiver.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                    buffer.mSlots.resize(receiver.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
+                }
                 for (auto& buffer : receiverWrapBuffers)
                 {
                     buffer.mSlots.resize(receiver.mParams.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
@@ -327,7 +355,7 @@ namespace osuCrypto
                     buffer.mNodes.reserve(terms);
                 }
             }
-            cp::sync_wait(receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, receiverZetaBuffers, receiverWrapBuffers, x, a, prng, chl));
+            cp::sync_wait(receiver.receive(executor, receiverLheBuffers, receiverLencBuffers, receiverZetaBuffers, receiverWrapBuffers, unwrapBuffers, x, a, prng, chl));
 
             const auto end = timer.setTimePoint("logvole.end");
             const auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();

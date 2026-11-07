@@ -223,7 +223,7 @@ namespace osuCrypto
         mHasOffline = true;
     }
 
-    task<> LogVoleGarbledSender::send(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, GarbledLabelBatch& labels, PRNG& prng, Socket& sock)
+    task<> LogVoleGarbledSender::send(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, std::span<ZpDecodeBuffer> unwrapBuffers, GarbledLabelBatch& labels, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!mHasOffline || mNextSid == std::numeric_limits<CivoleSid>::max())
@@ -239,7 +239,7 @@ namespace osuCrypto
             options.mKeysOut = {next.mScalars.data(), next.mScalars.size()};
         }
         CivoleSenderReleaseOutput released;
-        co_await civoleSenderRelease(executor, buffers, mState, sid, released, prng, sock, options, cpuBenchmark);
+        co_await civoleSenderRelease(executor, buffers, unwrapBuffers, mState, sid, released, prng, sock, options, cpuBenchmark);
         next.mDevice = std::move(released.mKeysDevice);
         next.mComm = released.mComm;
         if (!next.mDevice && mKeepOutputOnDevice) next.mScalars = std::move(mState.mReleasedKeys);
@@ -291,7 +291,7 @@ namespace osuCrypto
     }
 
     task<> LogVoleGarbledReceiver::receive(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, span<const u64> x, GarbledLabelBatch& labels,
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, std::span<ZpDecodeBuffer> unwrapBuffers, span<const u64> x, GarbledLabelBatch& labels,
         PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
@@ -322,7 +322,7 @@ namespace osuCrypto
             options.mMacsOut = {next.mScalars.data(), next.mScalars.size()};
         }
         CivoleReceiverSetXOutput received;
-        co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, zetaBuffers, wrapBuffers, mState, sid, x, received, prng, sock, options, cpuBenchmark);
+        co_await civoleReceiverSetX(executor, lheBuffers, lencBuffers, zetaBuffers, wrapBuffers, unwrapBuffers, mState, sid, x, received, prng, sock, options, cpuBenchmark);
         next.mDevice = std::move(received.mMacsDevice);
         next.mComm = received.mComm;
         if (!next.mDevice && mKeepOutputOnDevice) next.mScalars = std::move(received.mMacs);

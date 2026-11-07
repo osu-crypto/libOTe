@@ -1629,7 +1629,7 @@ namespace osuCrypto
     }
 
     task<> ZkMulProver::prove(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, std::span<u64> wires, PRNG& prng, Socket& sock)
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, std::span<ZpDecodeBuffer> unwrapBuffers, std::span<u64> wires, PRNG& prng, Socket& sock)
     {
         const auto execution = mGpuExecution;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1667,7 +1667,7 @@ namespace osuCrypto
         else mMacs.resize(static_cast<std::size_t>(mVoleRequest));
         {
             LogVole::HostStep phase(mVole.hostProfiler(), "zk prover: label generation");
-            co_await mVole.receive(executor, lheBuffers, lencBuffers, zetaBuffers, wrapBuffers, wires, std::span<u64>(mMacs.data(), mMacs.size()), prng, sock);
+            co_await mVole.receive(executor, lheBuffers, lencBuffers, zetaBuffers, wrapBuffers, unwrapBuffers, wires, std::span<u64>(mMacs.data(), mMacs.size()), prng, sock);
         }
 
         // The challenge has to arrive after the VOLE has bound the witness, so
@@ -1808,7 +1808,7 @@ namespace osuCrypto
         co_await mVole.offline(executor, setupResults, delta, prng, sock);
     }
 
-    task<> ZkMulVerifier::verify(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, PRNG& prng, Socket& sock)
+    task<> ZkMulVerifier::verify(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, std::span<ZpDecodeBuffer> unwrapBuffers, PRNG& prng, Socket& sock)
     {
         const auto execution = mGpuExecution;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1831,7 +1831,7 @@ namespace osuCrypto
         else mKeys.resize(static_cast<std::size_t>(mVoleRequest));
         {
             LogVole::HostStep phase(mVole.hostProfiler(), "zk verifier: label generation");
-            co_await mVole.send(executor, buffers, std::span<u64>(mKeys.data(), mKeys.size()), prng, sock);
+            co_await mVole.send(executor, buffers, unwrapBuffers, std::span<u64>(mKeys.data(), mKeys.size()), prng, sock);
         }
 
         LogVole::HostStep challengePhase(mVole.hostProfiler(), "zk verifier: send challenge");
@@ -1957,7 +1957,7 @@ namespace osuCrypto
     }
 
     task<> ZkMatMulProver::prove(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, std::span<u64> wires, PRNG& prng, Socket& sock)
+        std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, std::span<ZpDecodeBuffer> unwrapBuffers, std::span<u64> wires, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mVoleOptions.mCpuBenchmark};
         const auto execution = mGpuExecution;
@@ -1979,7 +1979,7 @@ namespace osuCrypto
             (device && mVoleDeviceInput) ? mWiresDevice : std::shared_ptr<void>{};
 
         mMacs.resize(static_cast<std::size_t>(mVoleRequest));
-        co_await mVole.receive(executor, lheBuffers, lencBuffers, zetaBuffers, wrapBuffers, wires, std::span<u64>(mMacs.data(), mMacs.size()), prng, sock);
+        co_await mVole.receive(executor, lheBuffers, lencBuffers, zetaBuffers, wrapBuffers, unwrapBuffers, wires, std::span<u64>(mMacs.data(), mMacs.size()), prng, sock);
 
         const block seed = co_await recvBlock(sock);
         mLastSeed = seed;
@@ -2073,7 +2073,7 @@ namespace osuCrypto
         co_await mVole.offline(executor, setupResults, delta, prng, sock);
     }
 
-    task<> ZkMatMulVerifier::verify(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, std::span<const u64> publicProduct, PRNG& prng, Socket& sock)
+    task<> ZkMatMulVerifier::verify(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, std::span<ZpDecodeBuffer> unwrapBuffers, std::span<const u64> publicProduct, PRNG& prng, Socket& sock)
     {
         CpuBenchmarkState cpuBenchmark{mVoleOptions.mCpuBenchmark};
         const auto execution = mGpuExecution;
@@ -2092,7 +2092,7 @@ namespace osuCrypto
         mVole.mKeepOutputOnDevice = device;
 
         mKeys.resize(static_cast<std::size_t>(mVoleRequest));
-        co_await mVole.send(executor, buffers, std::span<u64>(mKeys.data(), mKeys.size()), prng, sock);
+        co_await mVole.send(executor, buffers, unwrapBuffers, std::span<u64>(mKeys.data(), mKeys.size()), prng, sock);
 
         const block seed = prng.get<block>();
         mLastSeed = seed;
