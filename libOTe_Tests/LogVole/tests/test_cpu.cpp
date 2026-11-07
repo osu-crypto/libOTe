@@ -3081,6 +3081,29 @@ void LogVole_Cpu_ProtocolIdentityService(const oc::CLP&)
     RingParams params;
     params.mPolyModulusDegree = 1024;
     assignValues<int>(params.mCoeffModulusBits, {30, 30});
+    {
+        ScopedProtocolCacheScope ambient(ProtocolCacheRole::Sender, a);
+        RingContextFactory isolated;
+        ZpContextFactory isolatedCrt;
+        LOGVOLE_REQUIRE_TRUE(isolated.protocolService() != first);
+        LOGVOLE_REQUIRE_TRUE(isolatedCrt.ringFactory()->protocolService() != first);
+#if defined(ENABLE_LOGVOLE_CUDA)
+        gpu::GpuSetupContext isolatedSetup;
+        gpu::GpuExecutionContext isolatedExecution;
+        LOGVOLE_REQUIRE_TRUE(isolatedSetup.protocolService() != first);
+        LOGVOLE_REQUIRE_TRUE(isolatedExecution.protocolService() != first);
+#endif
+        // Compatibility phase entrypoints still forward their captured scope
+        // explicitly; the resource constructors themselves never inspect it.
+        RingNttContext selected;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, selected));
+        LOGVOLE_REQUIRE_TRUE(selected.mFactory->protocolService() == first);
+        LOGVOLE_REQUIRE_EQ(selected.mResourceScope.mRole, ProtocolCacheRole::Sender);
+        ZpCrtContext selectedCrt;
+        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 20, selectedCrt));
+        LOGVOLE_REQUIRE_TRUE(selectedCrt.mFactory->ringFactory()->protocolService() == first);
+        LOGVOLE_REQUIRE_EQ(selectedCrt.mRing.mResourceScope.mRole, ProtocolCacheRole::Sender);
+    }
     auto factory = std::make_shared<RingContextFactory>(LogVoleExecutionOptions{}, first);
     RingNttContext ring;
     {

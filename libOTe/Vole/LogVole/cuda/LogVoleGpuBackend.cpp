@@ -150,11 +150,12 @@ namespace osuCrypto::LogVole::gpu
             std::shared_ptr<OwnedGpuStream> mOwner;
             void* mStream = nullptr;
             const std::shared_ptr<OwnedGpuStream>& allocationOwner() { return mOwner; }
-            explicit RawSetupStream(std::shared_ptr<GpuSetupContext> execution)
+            explicit RawSetupStream(std::shared_ptr<GpuSetupContext> execution,
+                std::shared_ptr<const ProtocolCacheService> service = {})
             {
                 try
                 {
-                    mExecution = execution ? std::move(execution) : std::make_shared<GpuSetupContext>();
+                    mExecution = execution ? std::move(execution) : std::make_shared<GpuSetupContext>(osuCrypto::LogVoleExecutionOptions{}, nullptr, std::move(service));
                     mOwner = mExecution->stream();
                     mStream = mOwner->raw();
                 }
@@ -320,9 +321,7 @@ namespace osuCrypto::LogVole::gpu
 
     GpuSetupContext::GpuSetupContext(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler,
         std::shared_ptr<const ProtocolCacheService> service)
-        : mProtocolService(service ? std::move(service) :
-              currentProtocolCacheScope().mRunId.serviceOwner() ? currentProtocolCacheScope().mRunId.serviceOwner() :
-              ProtocolCacheService::create()),
+        : mProtocolService(service ? std::move(service) : ProtocolCacheService::create()),
           mHostProfiler(options.mAdvanced.mHostStepProfile ? std::move(profiler) : nullptr),
           mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
     {
@@ -374,7 +373,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
         const u32 rho = static_cast<u32>(params.mCoeffModulusBits.size());
         std::array<u8, 16u * sizeof(u64) + sizeof(u32)> hostRecord{};
-        RawSetupStream stream(execution);
+        RawSetupStream stream(execution, execution ? nullptr : currentProtocolCacheScope().mRunId.serviceOwner());
         if (!stream.mStream) return false;
         RawScratchArena arena(256u, stream);
         auto* bits = arena.take<int>(rho);
@@ -405,7 +404,7 @@ namespace osuCrypto::LogVole::gpu
             minimumQ <= 2u * n || !available() || currentDeviceOrdinal() != 0)
             return false;
         std::array<u8, sizeof(u64) + 2u * sizeof(u32)> hostRecord{};
-        RawSetupStream stream(execution);
+        RawSetupStream stream(execution, execution ? nullptr : currentProtocolCacheScope().mRunId.serviceOwner());
         if (!stream.mStream) return false;
         RawScratchArena arena(128u, stream);
         auto* record = arena.take<u8>(sizeof(u64) + 2u * sizeof(u32));
@@ -492,7 +491,7 @@ namespace osuCrypto::LogVole::gpu
             constexpr std::size_t maxRecordBytes =
                 16u * 2u * sizeof(u64) + sizeof(u64) + 6u * sizeof(u32);
             std::array<u8, maxRecordBytes> hostRecord{};
-            RawSetupStream stream(execution);
+            RawSetupStream stream(execution, execution ? nullptr : currentProtocolCacheScope().mRunId.serviceOwner());
             if (!stream.mStream) return false;
             RawConstantArena arena(capacity, stream);
             if (!arena) return false;
@@ -946,9 +945,7 @@ namespace osuCrypto::LogVole::gpu
 
     GpuExecutionContext::GpuExecutionContext(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler,
         std::shared_ptr<const ProtocolCacheService> service)
-        : mProtocolService(service ? std::move(service) :
-              currentProtocolCacheScope().mRunId.serviceOwner() ? currentProtocolCacheScope().mRunId.serviceOwner() :
-              ProtocolCacheService::create()),
+        : mProtocolService(service ? std::move(service) : ProtocolCacheService::create()),
           mHostProfiler(options.mAdvanced.mHostStepProfile ? std::move(profiler) : nullptr),
           mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
     {
@@ -1411,7 +1408,7 @@ namespace osuCrypto::LogVole::gpu
             if (execution && execution->executionOptions() != owner.mTables->executionOptions()) return nullptr;
             std::shared_ptr<GpuRing> ring(new GpuRing());
             ring->mSetup = execution ? std::move(execution) :
-                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner());
+                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), currentProtocolCacheScope().mRunId.serviceOwner());
             ring->mRawOwnerRole = owner.mRole;
             if (!ring->initRaw(params, primes)) return nullptr;
             cache.rawRings.emplace(std::move(key), ring);
@@ -2073,7 +2070,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         std::shared_ptr<GpuPlainNtt> tables(new GpuPlainNtt());
-        tables->mSetup = std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner());
+        tables->mSetup = std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), currentProtocolCacheScope().mRunId.serviceOwner());
         if (!tables->init(batchingContext, encoder)) return nullptr;
         cache.plains.emplace_back(key, tables);
         return tables;
@@ -2100,7 +2097,7 @@ namespace osuCrypto::LogVole::gpu
             if (execution && execution->executionOptions() != owner.mTables->executionOptions()) return nullptr;
             std::shared_ptr<GpuPlainNtt> tables(new GpuPlainNtt());
             tables->mSetup = execution ? std::move(execution) :
-                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner());
+                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), currentProtocolCacheScope().mRunId.serviceOwner());
             if (!tables->initRaw(n, p)) return nullptr;
             cache.rawPlains.emplace_back(key, tables);
             return tables;

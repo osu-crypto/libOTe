@@ -197,7 +197,7 @@ namespace
     tests_libOTe::logvole_test::SetupResources setupResources;
         RingNttContext ctx;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx,
-            std::make_shared<RingContextFactory>(execution)));
+            std::make_shared<RingContextFactory>(execution, currentProtocolCacheScope().mRunId.serviceOwner())));
         ShrinkExpandSenderOfflineInput senderOfflineInput{};
         senderOfflineInput.mRingFactoryOwner = ctx.mFactoryOwner;
         senderOfflineInput.mParams = params;

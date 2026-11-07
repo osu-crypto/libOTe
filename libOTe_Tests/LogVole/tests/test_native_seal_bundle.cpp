@@ -84,11 +84,11 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
                 ProtocolCacheRole::Sender;
             ScopedProtocolCacheScope owner(role, run);
             auto factory = std::make_shared<ZpContextFactory>(
-                std::make_shared<RingContextFactory>(options));
+                std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
             auto sequentialOptions = options;
             sequentialOptions.mAdvanced.mContexts.mNativeSealBundle = false;
             auto sequentialFactory = std::make_shared<ZpContextFactory>(
-                std::make_shared<RingContextFactory>(sequentialOptions));
+                std::make_shared<RingContextFactory>(sequentialOptions, currentProtocolCacheScope().mRunId.serviceOwner()));
             std::shared_ptr<gpu::GpuPlainNtt> priorPlain;
             std::shared_ptr<gpu::GpuRing> priorDeviceRing;
             RingNttContext priorRing{};
@@ -172,7 +172,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
                 eagerOptions.mAdvanced.mContexts.mLightweightRing = false;
                 eagerOptions.mAdvanced.mContexts.mLightweightCrt = false;
                 auto eagerFactory = std::make_shared<ZpContextFactory>(
-                    std::make_shared<RingContextFactory>(eagerOptions));
+                    std::make_shared<RingContextFactory>(eagerOptions, currentProtocolCacheScope().mRunId.serviceOwner()));
                 LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
                     params, plaintextBits, eagerRing, eagerZp, eagerFactory));
             }
@@ -236,13 +236,13 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             untouched.mOwnerRunId = identityService->qualify(91u);
             LOGVOLE_REQUIRE_FALSE(
                 gpu::buildNativeSealSetupBundleDevice(
-                    failedQ, plaintextBits, untouched, std::make_shared<gpu::GpuSetupContext>(options)));
+                    failedQ, plaintextBits, untouched, std::make_shared<gpu::GpuSetupContext>(options, nullptr, currentProtocolCacheScope().mRunId.serviceOwner())));
             LOGVOLE_EXPECT_EQ(untouched.mPlaintextPrime,
                 0xdecafbadULL);
             LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, identityService->qualify(91u));
             LOGVOLE_REQUIRE_FALSE(
                 gpu::buildNativeSealSetupBundleDevice(
-                    params, 2u, untouched, std::make_shared<gpu::GpuSetupContext>(options)));
+                    params, 2u, untouched, std::make_shared<gpu::GpuSetupContext>(options, nullptr, currentProtocolCacheScope().mRunId.serviceOwner())));
             LOGVOLE_EXPECT_EQ(untouched.mPlaintextPrime,
                 0xdecafbadULL);
             LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, identityService->qualify(91u));
@@ -277,7 +277,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
     {
 
         auto factory = std::make_shared<ZpContextFactory>(
-                std::make_shared<RingContextFactory>(options));
+                std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
         osuCrypto::LogVoleOptions sessionOptions = options;
         sessionOptions.mRequestSize = 8u;
         sessionOptions.mPlaintextModulusBits = requestedBits;
@@ -404,7 +404,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                 fallbackOptions.mAdvanced.mContexts.mNativeSealBundle = false;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(
                     params.mLogVole.mShrinkExpand.mRing, fallback,
-                    std::make_shared<RingContextFactory>(fallbackOptions)));
+                    std::make_shared<RingContextFactory>(fallbackOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
                 LOGVOLE_REQUIRE_TRUE(fallback.mRawModuli &&
                     !fallback.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(fallback) !=

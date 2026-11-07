@@ -90,7 +90,7 @@ namespace osuCrypto::LogVole
             CivoleParams next;
             ZpCrtContext selected{};
             auto factory = factoryOwner ? factoryOwner->mFactory :
-                std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options));
+                std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
             if (factory->ringFactory()->executionOptions() != static_cast<const LogVoleExecutionOptions&>(options))
                 throw std::invalid_argument("LogVole factory options do not match constructor options");
             if (!makeCivoleParams(setting, next, std::max(threads, 1u)) ||

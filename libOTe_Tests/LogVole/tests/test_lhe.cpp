@@ -187,12 +187,12 @@ namespace
 #endif
         RingNttContext ctx{};
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, ctx,
-            std::make_shared<RingContextFactory>(advanced)));
+            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
         RingNttContext cpuCtx;
         auto cpuOptions = advanced;
         cpuOptions.mUseGpu = false;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, cpuCtx,
-            std::make_shared<RingContextFactory>(cpuOptions)));
+            std::make_shared<RingContextFactory>(cpuOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
         constexpr std::uint32_t rows = 5;
         auto r = sample_batch(ctx, rows, 0x123456u);
         auto sk = sample_batch(ctx, cols, 0x234567u);

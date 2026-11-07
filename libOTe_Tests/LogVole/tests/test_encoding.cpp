@@ -729,7 +729,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     {
         osuCrypto::LogVoleExecutionOptions options;
         options.mAdvanced.mHostStepProfile = true;
-        auto factory = std::make_shared<RingContextFactory>(options);
+        auto factory = std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner());
         std::weak_ptr<HostStepProfiler> lifetime = factory->hostProfilerOwner();
         std::weak_ptr<RingContextFactory> factoryLifetime = factory;
         RootOfflineMessage profiled;

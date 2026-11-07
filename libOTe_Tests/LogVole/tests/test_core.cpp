@@ -61,7 +61,7 @@ namespace
         options.mUseGpu = false;
         RingNttContext result;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(source.mParams, result,
-            std::make_shared<RingContextFactory>(options)));
+            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner())));
         return result;
     }
 
@@ -806,7 +806,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         ZpCrtContext zp{};
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mShrinkExpand.mRing,
             params.mShrinkExpand.mPlaintextModulusBits, zp,
-            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced))));
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
         LOGVOLE_REQUIRE_TRUE(zp.mGpuLightweight);
         const oc::u64 scalar = zp.mPlaintextModulus - 1u;
         auto delta = gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr);
@@ -1568,7 +1568,7 @@ void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP& cmd)
 #endif
     const auto params = make_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced)));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
 
     const auto s = sample_batch(ctx, 1, 0x3003u);
     std::vector<RnsPoly> actual;
@@ -1609,7 +1609,7 @@ void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesResidues(const oc::CLP& 
 #endif
     const auto params = make_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced)));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
 
     const std::uint32_t alpha = 2;
     const std::uint32_t tau = 3;
@@ -1654,7 +1654,7 @@ void LogVole_Core_RecursiveLiftOracleKeepsSenderResiduesUnscaled(const oc::CLP& 
 #endif
     const auto params = make_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced)));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
 
     const std::uint32_t alpha = 2;
     const std::uint32_t tauHi = 2;
@@ -1916,7 +1916,7 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
         osuCrypto::LogVoleExecutionOptions advanced;
         advanced.mUseGpu = haveGpu;
         RingNttContext parityContext{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, parityContext, std::make_shared<RingContextFactory>(advanced)));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, parityContext, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
         const auto left = sample_batch(parityContext, 5, 0x7351u);
         auto rightNtt = sample_batch(parityContext, 5, 0x7352u);
         auto rootB = sample_batch(parityContext, 2, 0x7353u);
@@ -2037,7 +2037,7 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
         advanced.mUseGpu = true;
         advanced.mAdvanced.mProtocol.mGaussianResident = false;
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced)));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
         for (const std::uint32_t count : { 1u, 5u })
         for (const double sigma : { 0.0, 3.2 })
         for (const bool outputNtt : { false, true })
@@ -2192,7 +2192,7 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
         }
         params.mShrinkExpand.mNumWorkerThreads = 4;
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
         SenderOfflineInput input;
         input.mParams = params;
         input.mSk1 = sample_batch(ctx, params.mGamma, 0x475257495245u);
@@ -2387,7 +2387,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
     if (advanced.mUseGpu) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #endif
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
     Buffer serialMessage;
     std::vector<RnsPoly> serialRootCt;
     std::vector<RnsPoly> serialShrinkCt;
@@ -2566,7 +2566,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 RingParams widerParams = trunc.mRing;
                 widerParams.mPolyModulusDegree *= 2;
                 RingNttContext widerCtx{};
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(widerParams, widerCtx, std::make_shared<RingContextFactory>(advanced)));
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(widerParams, widerCtx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
                 LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(widerCtx,
                     *rootOwner, leftWidth));
                 const auto secretOwner = std::static_pointer_cast<gpu::DeviceBatch>(
@@ -2760,7 +2760,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 resizeFill<int>(ring.mCoeffModulusBits, rho,
                     noGoldenSeed ? 52 : 55);
                 RingNttContext productionCtx{};
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, productionCtx, std::make_shared<RingContextFactory>(advanced)));
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, productionCtx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
                 const auto runId = identityService->qualify(noGoldenSeed ? 0xB57A5202u : 0xB57A5201u);
                 ScopedProtocolCacheScope senderScope(
                     ProtocolCacheRole::Sender, runId);
@@ -3234,7 +3234,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = true;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
 
     ShrinkExpandSenderOfflineInput seInput{};
     seInput.mParams = trunc;
@@ -3504,7 +3504,7 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = true;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
 
     ShrinkExpandSenderOfflineInput seInput{};
     seInput.mParams = trunc;
@@ -3999,7 +3999,7 @@ void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
         selected.mParams.mShrinkExpand.mGpuSetup = options;
         RingNttContext configured;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, configured,
-            std::make_shared<RingContextFactory>(advanced)));
+            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
         selected.mRingFactoryOwner = configured.mFactoryOwner;
         oc::PRNG prng(oc::block(0x5092u, 0));
         coproto::BufferingSocket socket;
@@ -4203,7 +4203,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     if (cmd.getOr("lvFactoryFast", 0)) params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
     params.mShrinkExpand.mNumWorkerThreads = 4;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
     SenderOfflineInput senderInput{};
     senderInput.mParams = params;
     senderInput.mSk1 = sample_batch(ctx, params.mGamma, 0x781234u);
@@ -4612,7 +4612,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 std::fill(ring.mCoeffModulusBits.begin(), ring.mCoeffModulusBits.end(), shape == 1 ? 55 : 52);
             }
             RingNttContext ringCtx{};
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, ringCtx, std::make_shared<RingContextFactory>(advanced)));
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, ringCtx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
             for (bool truncated : {false, true})
             {
                 ShrinkExpandReceiverOfflineInput input{};
@@ -4869,7 +4869,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
     params.mShrinkExpand.mNumWorkerThreads = 4;
 
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced)));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
 
     SenderOfflineInput senderInput{};
     senderInput.mParams = params;
@@ -5215,7 +5215,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_LT(rejectedParams.mW, muHi);
 
     RingNttContext rejectedCtx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(rejectedParams.mShrinkExpand.mRing, rejectedCtx, std::make_shared<RingContextFactory>(advanced)));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(rejectedParams.mShrinkExpand.mRing, rejectedCtx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
 
     SenderOfflineInput rejectedSenderInput{};
     rejectedSenderInput.mParams = rejectedParams;
@@ -5513,7 +5513,7 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
         auto advanced = paddedCtx.mExecutionOptions;
         advanced.mUseGpu = true;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(paddedCtx.mParams, paddedCtx,
-            std::make_shared<RingContextFactory>(advanced)));
+            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
         auto candidateDev = gpu::upload(
             paddedCtx,
             std::span<const RnsPoly>(
@@ -5658,7 +5658,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
         ScopedProtocolCacheScope scope(role, identityService->allocate());
         RingNttContext selected;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, selected,
-            std::make_shared<RingContextFactory>(advanced)));
+            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
         return selected.mFactoryOwner;
     };
     senderInput.mRingFactoryOwner = makeOwner(ProtocolCacheRole::Sender);
@@ -6427,7 +6427,7 @@ void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
             osuCrypto::LogVoleExecutionOptions advanced;
             advanced.mUseGpu = true;
             RingNttContext deviceContext;
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(se.mRing, deviceContext, std::make_shared<RingContextFactory>(advanced)));
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(se.mRing, deviceContext, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
             for (std::size_t i = 0; i < rho; ++i)
                 LOGVOLE_REQUIRE_EQ(ringModulusValue(deviceContext, i), zp.mRing.mModuli[i].value());
             auto safeDevice = gpu::upload(deviceContext, safe);
@@ -6473,7 +6473,7 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
         ZpCrtContext zp;
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mShrinkExpand.mRing,
             params.mShrinkExpand.mPlaintextModulusBits, zp,
-            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced))));
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
         const auto n = params.mShrinkExpand.mRing.mPolyModulusDegree;
         auto boundary = makeZeroPolys(params, 1).front();
         for (std::size_t i = 0; i < rho; ++i)

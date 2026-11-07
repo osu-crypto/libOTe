@@ -67,10 +67,10 @@ namespace
         options.mAdvanced.mHostStepProfile = cmd.getOr("lvHostProfile", 0) != 0;
 
         auto senderReuse = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(options));
+            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
         options.mCpuBenchmark = instrument ? &receiverTelemetry : nullptr;
         auto receiverReuse = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(options));
+            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
         osuCrypto::LogVoleOptions originalSenderOptions = options;
         originalSenderOptions.mCpuBenchmark = instrument ? &senderTelemetry : nullptr;
         originalSenderOptions.mRequestSize = count;
@@ -415,7 +415,7 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         options.mAdvanced.mProtocol.mCt2PrefixCache = true;
         const auto selectedOptions = options;
         auto factory = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(options));
+            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
         Party original(options, factory);
         tests_libOTe::logvole_test::SenderResources senderResources(options);
         tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(options);
@@ -496,7 +496,7 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         advanced.mAdvanced.mProtocol.mShareCache = false;
         RingNttContext first, second;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, first,
-            std::make_shared<RingContextFactory>(advanced)));
+            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
         ring.mPolyModulusDegree = 2048;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, second, first.mFactoryOwner));
         LOGVOLE_REQUIRE_TRUE(second.mExecutionOptions == advanced);

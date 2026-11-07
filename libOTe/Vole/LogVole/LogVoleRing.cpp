@@ -789,9 +789,7 @@ namespace osuCrypto::LogVole
 
     RingContextFactory::RingContextFactory(LogVoleExecutionOptions options,
         std::shared_ptr<const ProtocolCacheService> service)
-        : mProtocolService(service ? std::move(service) :
-              currentProtocolCacheScope().mRunId ? currentProtocolCacheScope().mRunId.serviceOwner() :
-              ProtocolCacheService::create()),
+        : mProtocolService(service ? std::move(service) : ProtocolCacheService::create()),
           mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
     {
         if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
@@ -921,7 +919,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<RingContextFactory> factory)
     {
         if (!factory) factory = out.mFactory;
-        if (!factory) factory = std::make_shared<RingContextFactory>();
+        if (!factory) factory = std::make_shared<RingContextFactory>(osuCrypto::LogVoleExecutionOptions{}, currentProtocolCacheScope().mRunId.serviceOwner());
         bool lightweight = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto& options = factory->executionOptions().mAdvanced.mContexts;
@@ -975,7 +973,7 @@ namespace osuCrypto::LogVole
         }
         LogVoleExecutionOptions options;
         options.mUseGpu = true;
-        auto factory = out.mFactory ? out.mFactory : std::make_shared<RingContextFactory>(options);
+        auto factory = out.mFactory ? out.mFactory : std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner());
         return factory->make(params, out, true, factory);
     }
 

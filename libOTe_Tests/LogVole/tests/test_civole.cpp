@@ -170,7 +170,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             ZpCrtContext selected;
             LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ctx.mRing.mParams,
                 ctx.mPlaintextModulusBits, selected, std::make_shared<ZpContextFactory>(
-                    std::make_shared<RingContextFactory>(advanced))));
+                    std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
             return selected;
         };
         const u64 p = ctx.mPlaintextModulus;
@@ -254,7 +254,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
     assignValues<int>(small.mCoeffModulusBits, {30, 30});
     ZpCrtContext smallContext;
     LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(small, 20u, smallContext,
-        std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced))));
+        std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
     checkRing(smallContext);
     if (cmd.getOr("settings_only", 0)) return;
     for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
@@ -264,7 +264,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
         ZpCrtContext ctx;
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mLogVole.mShrinkExpand.mRing,
             params.mLogVole.mShrinkExpand.mPlaintextModulusBits, ctx,
-            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced))));
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
         checkRing(ctx);
         const std::array<u64, 3> pattern{1u, ctx.mPlaintextModulus - 1u, 13u};
         std::vector<u64> slots(zpSlotCount(ctx), 0);

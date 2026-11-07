@@ -2052,7 +2052,7 @@ namespace osuCrypto
     void ZkMulProver::prepare(
         LogVole::ZkMulCircuit circuit, LogVole::CpuBenchmarkContext* benchmark)
     {
-        auto factory = std::make_shared<RingContextFactory>(mVoleOptions);
+        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, currentProtocolCacheScope().mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
@@ -2212,7 +2212,7 @@ namespace osuCrypto
     void ZkMulVerifier::prepare(
         LogVole::ZkMulCircuit circuit, LogVole::CpuBenchmarkContext* benchmark)
     {
-        auto factory = std::make_shared<RingContextFactory>(mVoleOptions);
+        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, currentProtocolCacheScope().mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
@@ -2393,7 +2393,7 @@ namespace osuCrypto
     void ZkMatMulProver::prepare(
         LogVole::ZkMatMulStatement statement)
     {
-        auto factory = std::make_shared<RingContextFactory>(mVoleOptions);
+        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, currentProtocolCacheScope().mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
@@ -2516,7 +2516,7 @@ namespace osuCrypto
     void ZkMatMulVerifier::prepare(
         LogVole::ZkMatMulStatement statement)
     {
-        auto factory = std::make_shared<RingContextFactory>(mVoleOptions);
+        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, currentProtocolCacheScope().mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif

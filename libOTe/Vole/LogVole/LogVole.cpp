@@ -573,7 +573,7 @@ namespace osuCrypto
         const auto setting = mOptions.mSetting;
         const auto mode = mOptions.mMode;
         if (!factory) factory = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(mOptions));
+            std::make_shared<RingContextFactory>(mOptions, currentProtocolCacheScope().mRunId.serviceOwner()));
         const auto identityService = factory->ringFactory()->protocolService();
         const auto inheritedRun = LogVole::currentProtocolCacheScope().mRunId;
         if (inheritedRun && inheritedRun.mService != identityService.get())
@@ -618,7 +618,7 @@ namespace osuCrypto
         params.mLogVole.mShrinkExpand.mGpuSetup = mOptions.mAdvanced.mGpuSetup;
         params.mLogVole.mShrinkExpand.mTransport = mOptions.mAdvanced.mTransport;
         if (!factory) factory = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(mOptions));
+            std::make_shared<RingContextFactory>(mOptions, currentProtocolCacheScope().mRunId.serviceOwner()));
         if (factory->ringFactory()->executionOptions() != static_cast<const LogVoleExecutionOptions&>(mOptions))
             throw std::invalid_argument("LogVole factory options do not match constructor options");
         if (!resolveCivoleModulusWithEvidence(
@@ -765,7 +765,7 @@ namespace osuCrypto
         const auto setting = mOptions.mSetting;
         const auto mode = mOptions.mMode;
         if (!factory) factory = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(mOptions));
+            std::make_shared<RingContextFactory>(mOptions, currentProtocolCacheScope().mRunId.serviceOwner()));
         const auto identityService = factory->ringFactory()->protocolService();
         const auto inheritedRun = LogVole::currentProtocolCacheScope().mRunId;
         if (inheritedRun && inheritedRun.mService != identityService.get())
@@ -808,7 +808,7 @@ namespace osuCrypto
         params.mLogVole.mShrinkExpand.mGpuSetup = mOptions.mAdvanced.mGpuSetup;
         params.mLogVole.mShrinkExpand.mTransport = mOptions.mAdvanced.mTransport;
         if (!factory) factory = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(mOptions));
+            std::make_shared<RingContextFactory>(mOptions, currentProtocolCacheScope().mRunId.serviceOwner()));
         if (factory->ringFactory()->executionOptions() != static_cast<const LogVoleExecutionOptions&>(mOptions))
             throw std::invalid_argument("LogVole factory options do not match constructor options");
         if (!resolveCivoleModulusWithEvidence(
@@ -1094,7 +1094,8 @@ namespace osuCrypto::LogVole
         std::shared_ptr<ZpContextFactory> factory)
     {
         if (!factory) factory = out.mFactory;
-        if (!factory) factory = std::make_shared<ZpContextFactory>();
+        if (!factory) factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(
+            osuCrypto::LogVoleExecutionOptions{}, currentProtocolCacheScope().mRunId.serviceOwner()));
         return factory->make(ring, plaintextModulusBits, out, factory);
     }
 
@@ -1183,7 +1184,8 @@ namespace osuCrypto::LogVole
         ZpCrtContext& zpOut, std::shared_ptr<ZpContextFactory> factory)
     {
         if (!factory) factory = zpOut.mFactory;
-        if (!factory) factory = std::make_shared<ZpContextFactory>(ringOut.mFactory);
+        if (!factory) factory = std::make_shared<ZpContextFactory>(ringOut.mFactory ? ringOut.mFactory :
+            std::make_shared<RingContextFactory>(osuCrypto::LogVoleExecutionOptions{}, currentProtocolCacheScope().mRunId.serviceOwner()));
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto& options = factory->ringFactory()->executionOptions().mAdvanced.mContexts;
         const auto ownerScope = currentProtocolCacheScope();

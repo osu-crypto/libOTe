@@ -221,7 +221,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
         ZpCrtContext ctx;
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mLogVole.mShrinkExpand.mRing,
             params.mLogVole.mShrinkExpand.mPlaintextModulusBits, ctx,
-            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced))));
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
         const u32 slots = zpSlotCount(ctx);
         for (u64 count : {u64{1}, u64(slots / 3), u64(slots / 3 + 1), u64(2 * (slots / 3) + 7)})
         {
