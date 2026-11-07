@@ -1543,7 +1543,18 @@ namespace osuCrypto::LogVole
         DenoiseData data;
         if (!prepareDenoise(ctx, tbaPrime, data)) return false;
         std::vector<RnsPoly> result(tbaPrime.size() / data.mModuli.size());
-        if (!detail::runParallelTasks(result.size(), requestedWorkers,
+        if (requestedWorkers == 1)
+        {
+            // Root-key recovery is deliberately sequential; preserve the task
+            // metrics scope without entering the legacy scheduling adapter.
+            if (!result.empty())
+            {
+                CpuBenchmarkTaskScope metrics(cpuBenchmark);
+                for (std::size_t i = 0; i != result.size(); ++i)
+                    denoiseRow(ctx, data, tbaPrime, i, result[i]);
+            }
+        }
+        else if (!detail::runParallelTasks(result.size(), requestedWorkers,
             [&](std::size_t i, CpuBenchmarkState&) {
                 denoiseRow(ctx, data, tbaPrime, i, result[i]);
                 return true;

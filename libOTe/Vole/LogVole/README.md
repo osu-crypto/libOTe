@@ -448,13 +448,22 @@ synchronous APIs remain legacy diagnostics/GPU fallback, alongside their async
 alternatives. The synchronous rounding validators and `findGoldenSeed` are used
 by GPU-gated legacy sender evaluation or exposed as diagnostic helpers; normal
 CPU candidate evaluation calls its polynomial predicates directly under async
-execution. One ordinary CPU root-key path still calls synchronous
-`shrinkExpandDenoiseComb` with a forced allowance of one; its legacy scheduling
-adapter executes inline and creates no worker pool. This is inline numerical
-cleanup, not another async scheduling design. Remaining asynchronous scheduling
+execution. Ordinary CPU root-key recovery calls synchronous `shrinkExpandDenoiseComb`
+with a forced allowance of one; that branch now runs the numerical loop directly
+with the same nonempty task-metrics scope, bypassing the legacy scheduling
+adapter. Its parallel branch remains for legacy diagnostic/GPU fallback. Remaining asynchronous scheduling
 migration is at the deferred GPU/fallback boundary. Remaining CPU ambient
 protocol run/role identity and statistics require explicit session/diagnostics
 ownership decisions; worker-budget globals still support the legacy adapter.
+
+Final inline denoise cleanup: CUDA-enabled Windows library/tests/example-object
+build passes in 27.13 seconds. Existing integer-rounding denoise and root-online
+local-relation tests pass in 2.97 seconds. The direct requested-worker-one branch
+preserves numerical order, publication and task metrics; the old serial adapter
+had no separate statistics flush, so no flush semantics change. Globals remain
+26 declarations and physical `runParallelTasks` sites remain 20; the normal
+CPU root-key path now bypasses that adapter. No further ownership redesign was
+implemented at this boundary.
 
 Next steps, in order:
 
