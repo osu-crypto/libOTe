@@ -140,7 +140,7 @@ namespace osuCrypto::LogVole
         bool emitRCoeffDomain = true,
         const std::vector<RnsPoly>* publicBNtt = nullptr,
         u32 requestedWorkers = 1,
-        bool deferCiphertextHost = false);
+        bool deferCiphertextHost = false, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     bool lencDigest(
         const RingNttContext& ctx,

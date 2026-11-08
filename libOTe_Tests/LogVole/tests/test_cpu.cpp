@@ -359,6 +359,42 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == foreign.mRunId);
     }
     equalBatch(phaseActualLhe.mPolys, phaseReferenceLhe.mPolys);
+    ShrinkExpandSenderOfflineInput shrinkInput;
+    shrinkInput.mRingFactoryOwner = ctx.mFactoryOwner;
+    shrinkInput.mS = inputs;
+    shrinkInput.mParams.mRing = params;
+    shrinkInput.mParams.mAlpha = 1;
+    shrinkInput.mParams.mMu = 2;
+    shrinkInput.mParams.mTau = 1;
+    shrinkInput.mParams.mGadgetLogBase = 30;
+    shrinkInput.mParams.mPlaintextModulusBits = 29;
+    shrinkInput.mParams.mTruncateOneGadgetDigit = true;
+    shrinkInput.mParams.mNumWorkerThreads = 3;
+    shrinkInput.mParams.mGpuSetup = parallelOptions;
+    PRNG shrinkReferencePrng(toBlock(814, 1)), shrinkActualPrng(toBlock(814, 1));
+    ShrinkExpandSenderState shrinkReference, shrinkActual;
+    ShrinkExpandOfflineMessage shrinkMessage;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareShrinkExpandSenderOffline(
+        setupResources.executor, setupResources.results, shrinkInput, shrinkReferencePrng,
+        shrinkMessage, shrinkReference, benchmark, phase)));
+    macoro::task<bool> pendingShrink;
+    shrinkActual.mCt1.mRows = 777;
+    {
+        ScopedProtocolCacheScope creation(phase);
+        pendingShrink = prepareShrinkExpandSenderOffline(setupResources.executor,
+            setupResources.results, shrinkInput, shrinkActualPrng, shrinkActual, benchmark);
+    }
+    LOGVOLE_REQUIRE_EQ(shrinkActual.mCt1.mRows, 777u);
+    {
+        ScopedProtocolCacheScope ambient(foreign);
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(pendingShrink))));
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == foreign.mRunId);
+    }
+    equalBatch(shrinkActual.mSk1, shrinkReference.mSk1);
+    equalBatch(shrinkActual.mR, shrinkReference.mR);
+    equalBatch(shrinkActual.mCt1.mPolys, shrinkReference.mCt1.mPolys);
+    equalBatch(shrinkActual.mLacct.mCt.mPolys, shrinkReference.mLacct.mCt.mPolys);
+    LOGVOLE_REQUIRE_TRUE(shrinkActualPrng.get<block>() == shrinkReferencePrng.get<block>());
     LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(pending))));
     LOGVOLE_REQUIRE_TRUE(lazyNoise == expectedNoise && !lazyDevice);
     LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(onPool(samplePolyErrorCompactBatchForSetup(

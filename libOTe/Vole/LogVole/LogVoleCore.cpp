@@ -5182,14 +5182,11 @@ namespace osuCrypto::LogVole
                                             ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;
-        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         SenderState state{};
         OfflineMessage message{};
         {
-            setupScopeGuard.reset();
             const bool setupOk = co_await prepareSenderOfflineImpl(executor, setupResults, input, prng, state,
                                                            message, true, nullptr, false, cpuBenchmark, setupScope);
-            setupScopeGuard.emplace(setupScope);
             if (!setupOk)
             {
                 co_return false;
@@ -5218,12 +5215,9 @@ namespace osuCrypto::LogVole
         PRNG &prng, SenderOfflineOutput &out, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;
-        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         bool directEncoding = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         {
-            ScopedProtocolCacheScope senderScope(
-                ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
             directEncoding = input.mUseGpuResidentInternalState && gpu::enabled(input.mRingFactoryOwner) &&
                 input.mParams.mShrinkExpand.mGpuSetup.mDirectWire;
         }
@@ -5232,7 +5226,6 @@ namespace osuCrypto::LogVole
         {
             if (!input.mWrappedDeltaDevice)
             {
-                setupScopeGuard.reset();
                 co_return co_await prepareSenderOffline(executor, setupResults, input, prng, out, cpuBenchmark, setupScope);
             }
             if (!input.mSk1.empty() || !input.mWrappedDeltaHostFallback || input.mParams.mGamma != 1u)
@@ -5246,17 +5239,14 @@ namespace osuCrypto::LogVole
             eager.mWrappedDeltaDevice.reset();
             eager.mWrappedDeltaHostFallback = {};
             {
-                setupScopeGuard.reset();
                 co_return co_await prepareSenderOffline(executor, setupResults, eager, prng, out, cpuBenchmark, setupScope);
             }
         }
 
         SenderOfflineOutput next{};
         {
-            setupScopeGuard.reset();
             const bool setupOk = co_await prepareSenderOfflineImpl(executor, setupResults, input, prng, next.mState,
                                                            next.mMessage, true, nullptr, true, cpuBenchmark, setupScope);
-            setupScopeGuard.emplace(setupScope);
             if (!setupOk) co_return false;
         }
         out = std::move(next);

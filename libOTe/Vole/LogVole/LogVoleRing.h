@@ -378,7 +378,8 @@ namespace osuCrypto::LogVole
     RnsPoly sampleUniformPoly(const RingNttContext& ctx, PRNG& prng);
     RnsPoly sampleUniformPolyNtt(const RingNttContext& ctx, PRNG& prng);
     // Exactly the scalar sampler's seed order, including a device fallback.
-    std::vector<RnsPoly> sampleUniformPolyBatch(const RingNttContext& ctx, u32 count, PRNG& prng);
+    std::vector<RnsPoly> sampleUniformPolyBatch(const RingNttContext& ctx, u32 count, PRNG& prng,
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Selected private top HE key; same ordered SEAL draws as ordinary setup.
     // A device decline replays these rows exactly on the host.
     bool sampleTopSecretUniformBatch(const RingNttContext& ctx, u32 count,

@@ -259,6 +259,7 @@ contain no environment reads.
 | Receiver offline transport context | Both receiver offline coroutines own the captured operation scope before lazy start and pass explicit views through recursive, shrink/expand and root finalization. Four direct guards are removed, including the two that previously spanned socket awaits; transport frame allocation and byte decoders remain identity-free. Existing wire/lazy allocation owners are retained. Sender offline setup and remaining online caller capture remain separate work. |
 | Key derivation and configured receiver setup | Sender/receiver key-derive coroutines capture owned scope before lazy start; only response processing/finalization receive views for fallback ring construction. Request packing and transport remain identity-free. Public receiver offline captures and forwards the exact caller run through CI-VOLE metadata/context, Ring setup and first-query owner sealing; canonical zero is preserved, never replaced by the configure ID. Four guards are removed. |
 | Async LHE/LENC sender setup kernels | Existing owned setup scopes now feed private-token admission and lazy seed-label fallback explicitly. Fifteen entry/worker guards and their suspend/resume transport are removed; arithmetic chunks remain identity-free. Public A/B, sampler and GPU assembly calls keep explicit context; numeric lazy producer owners retain existing ownership. Core/ShrinkExpand phase closure remains separate. |
+| ShrinkExpand sender orchestration | Owned phase scopes replace six guards in ShrinkExpand setup and Core public setup forwarders. Fixed private-key admission still checks the original caller role before Sender normalization. Context/public-token creation, full-digit nullable-B fallback, top-key sampling and temporary GPU sampler owners receive explicit views; scalar arithmetic samplers remain identity-free. Core recursive/root phase guards remain separate work. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -316,6 +317,13 @@ compile (23.72 seconds). Three CPU checks pass in 3.32 seconds, including lazy
 LHE/LENC setup under unrelated ambience with exact outputs/PRNG progression and
 unchanged executor TLS. GPU identity/lazy-context and two-query GoldenSeed smoke
 pass in 3.34 seconds. No benchmarks or WSL run.
+
+Sender-orchestration validation: Windows CUDA-enabled target and frontend
+example verification pass (final incremental build 7.92 seconds). Four CPU
+checks pass in 3.31 seconds, including standalone lazy ShrinkExpand state/message
+agreement, exact PRNG progression and full-digit LENC shape/determinism. GPU
+identity/lazy-context and two-query GoldenSeed smoke pass in 3.25 seconds. No
+benchmarks or WSL run.
 
 #### Remaining runtime globals
 

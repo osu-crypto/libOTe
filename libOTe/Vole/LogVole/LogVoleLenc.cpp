@@ -1081,7 +1081,7 @@ namespace osuCrypto::LogVole
         bool emitRCoeffDomain,
         const std::vector<RnsPoly>* publicBNtt,
         u32,
-        bool /*deferCiphertextHost*/)
+        bool /*deferCiphertextHost*/, ProtocolCacheScopeView scope)
     {
         if (s.empty() || tau == 0 || noiseStandardDeviation < 0 || !validateRingBatchShape(s, ctx.mParams))
         {
@@ -1104,7 +1104,7 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, tau, currentProtocolCacheScope());
+            cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, tau, scope);
             publicBNtt = cachedPublicBNtt.get();
         }
 

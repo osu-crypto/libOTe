@@ -111,7 +111,7 @@ namespace osuCrypto::LogVole
     std::vector<RnsPoly> sampleUniformBatch(
         const RingNttContext& ctx,
         u32 count,
-        PRNG& prng);
+        PRNG& prng, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     macoro::task<bool> prepareShrinkExpandSenderOffline(
         macoro::thread_pool& executor, std::span<u8> setupResults,

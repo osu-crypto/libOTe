@@ -2103,8 +2103,8 @@ namespace osuCrypto::LogVole
 
     static std::vector<RnsPoly> sampleUniformSetupSeeds(
         const RingNttContext& ctx, std::span<const std::array<u64, 8>> seeds, bool actualNtt,
-        std::shared_ptr<const gpu::RetainedPublicUniform>* captured = nullptr,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope())
+        std::shared_ptr<const gpu::RetainedPublicUniform>* captured,
+        ProtocolCacheScopeView scope)
     {
         std::vector<RnsPoly> out;
         if (gpu::sampleUniformBatchFromSeedsDevice(ctx, seeds, actualNtt, out, captured, scope) &&
@@ -2168,7 +2168,7 @@ namespace osuCrypto::LogVole
         return out;
     }
 
-    std::vector<RnsPoly> sampleUniformPolyBatch(const RingNttContext& ctx, u32 count, PRNG& prng)
+    std::vector<RnsPoly> sampleUniformPolyBatch(const RingNttContext& ctx, u32 count, PRNG& prng, ProtocolCacheScopeView scope)
     {
         if (count == 0) return {};
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2178,7 +2178,7 @@ namespace osuCrypto::LogVole
             // Separate scalar-sized draws preserve PRNG refill behavior even
             // when a caller uses a non-default, very small AES buffer.
             for (u32 i = 0; i < count; ++i) seeds[i] = sealSeedFromPrng(prng);
-            return sampleUniformSetupSeeds(ctx, seeds, false);
+            return sampleUniformSetupSeeds(ctx, seeds, false, nullptr, scope);
         }
 #endif
         std::vector<RnsPoly> out(count);
@@ -2224,7 +2224,7 @@ namespace osuCrypto::LogVole
         }
         if (strict) return false;
 #endif
-        eager = sampleUniformPolyBatch(ctx, count, prng);
+        eager = sampleUniformPolyBatch(ctx, count, prng, scope);
         resident.reset();
         lazy.reset();
         return eager.size() == count;
