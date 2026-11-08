@@ -1180,13 +1180,38 @@ void LogVole_Cpu_LowDigitMatchesIntegerReference(const oc::CLP&)
 
 void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
 {
+    // Independent reset epochs invalidate pending work, including at destruction.
+    RingOpsStats firstStats, secondStats;
+    {
+        PendingRingOpsStats first(&firstStats), second(&secondStats), disabled(nullptr);
+        for (unsigned i = 0; i != 255; ++i) first.bump(RingOp::Ntt);
+        LOGVOLE_REQUIRE_EQ(firstStats.mNttCount.load(), 0u);
+        first.bump(RingOp::Ntt);
+        LOGVOLE_REQUIRE_EQ(firstStats.mNttCount.load(), 256u);
+        first.bump(RingOp::Ntt);
+        second.bump(RingOp::Sub);
+        firstStats.reset();
+        first.flush();
+        LOGVOLE_REQUIRE_EQ(firstStats.mNttCount.load(), 0u);
+        second.flush();
+        LOGVOLE_REQUIRE_EQ(secondStats.mSubCount.load(), 1u);
+        first.bump(RingOp::Intt);
+        disabled.bump(RingOp::Ntt);
+    }
+    LOGVOLE_REQUIRE_EQ(firstStats.mInttCount.load(), 1u);
+    {
+        PendingRingOpsStats stale(&firstStats);
+        stale.bump(RingOp::Ntt);
+        firstStats.reset();
+    }
+    LOGVOLE_REQUIRE_EQ(firstStats.mNttCount.load(), 0u);
     PRNG random(toBlock(0x4c4845, 0x444543));
     auto scratchOwner = std::make_shared<LogVole::detail::ShrinkExpandScratch>();
     // The application owns compute and memory independently. A fixed pool is
     // reused across shapes, calls, and different chunk counts.
     macoro::thread_pool lhePool;
     auto lheWork = lhePool.make_work();
-    lhePool.create_threads(3);
+    lhePool.create_threads(1);
     std::array<LheDecryptBuffer, 8> lheBuffers;
     CpuBenchmarkContext lheTelemetry;
     lheTelemetry.mCpus = {0, 1, 2};
@@ -1285,6 +1310,7 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
                 {
                     auto cpu = ctx;
                     cpu.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe = fused;
+                    RingOpsStats owners[2];
                     auto chunks = std::span(lheBuffers).first(workers);
                     std::array<const u64*, 8> products{};
                     for (std::size_t i = 0; i < chunks.size(); ++i)
@@ -1297,7 +1323,10 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
                         for (unsigned row = 0; row < rows; ++row)
                             coefficients[row] = actual[row].mCoeffs.data();
                         lheTelemetry.reset();
+                        flushRingOpsThreadLocalStats();
                         globalRingOpsStats.reset();
+                        cpu.mExecutionOptions.mRingOpsStats = &owners[repeat];
+                        owners[repeat].reset();
                         for (auto& chunk : chunks)
                         {
                             std::fill(chunk.mProduct.mCoeffs.begin(), chunk.mProduct.mCoeffs.end(), ~u64{0});
@@ -1321,12 +1350,27 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
                             LOGVOLE_REQUIRE_TRUE(chunks[i].mProduct.mCoeffs.data() == products[i]);
                             LOGVOLE_REQUIRE_TRUE(chunks[i].mOk);
                         }
-                        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), rows);
-                        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mSubCount.load(), inputNtt ? rows : 0u);
+                        LOGVOLE_REQUIRE_EQ(owners[repeat].mNttCount.load(), 1u);
+                        LOGVOLE_REQUIRE_EQ(owners[repeat].mDyadicMulAddCount.load(), rows);
+                        LOGVOLE_REQUIRE_EQ(owners[repeat].mSubCount.load(), inputNtt ? rows : 0u);
+                        LOGVOLE_REQUIRE_EQ(owners[repeat].mInttCount.load(), inputNtt ? 0u : rows);
+                        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mNttCount.load(), 0u);
+                        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), 0u);
+                        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mSubCount.load(), 0u);
                         LOGVOLE_REQUIRE_EQ(lheTelemetry.mActiveTaskThreads.load(), 0u);
                         LOGVOLE_REQUIRE_TRUE(lheTelemetry.mPeakTaskThreads.load() <= std::min(workers, 3u));
                         LOGVOLE_REQUIRE_EQ(lheTelemetry.mWorkerSlots.load(), 0u);
                     }
+                    LOGVOLE_REQUIRE_EQ(owners[0].mDyadicMulAddCount.load(), rows);
+                    cpu.mExecutionOptions.mRingOpsStats = nullptr;
+                    actual = input;
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, cpu,
+                        actual, sk, publicA, domain, lheBenchmark)));
+                    flushRingOpsThreadLocalStats();
+                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mNttCount.load(), 0u);
+                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mInttCount.load(), 0u);
+                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), 0u);
+                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mSubCount.load(), 0u);
                     if (fused && limbs == 2 && bits == 30 && workers == 3)
                     {
                         macoro::thread_pool oneWorker;

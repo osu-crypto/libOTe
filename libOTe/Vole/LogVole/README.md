@@ -220,7 +220,7 @@ This is a rough work estimate, not a declaration count.
 This inventory describes the committed tree. A migrated synchronous wrapper
 is not a completed async migration.
 The original 216-declaration globals snapshot remains in the local review
-artifacts; the current scan finds **24 runtime global/static/TLS declarations**.
+artifacts; the current scan finds **23 runtime global/static/TLS declarations**.
 Counts cover source branches on both platforms, not fields within objects or
 template instantiations. Compile-time constants and the five literal CUDA
 tables are excluded. The scanned LogVole library, tests, and frontend example
@@ -386,7 +386,7 @@ validation entries above and below record historical migration checkpoints.
 | --- | ---: | --- | --- |
 | Protocol run/role | 0 | None | Instance-owned services allocate qualified IDs; explicit operation contexts carry role/run identity and retain service lifetime. |
 | Worker budget | 2 | `gParallelWorkerSlotsInUse`, `tParallelWorkerCap` in `LogVoleParallel.h` | Caller-supplied compute resource and explicit chunk allowance; remove the ambient scheduler after caller migration. |
-| Statistics | 5 | `RingOpsStats::resetEpoch`, `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats`; `regions()::r` in `cuda/LogVoleGpuProtocol.cpp` | Owned diagnostics and per-chunk pending counters. |
+| Statistics | 4 | `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats`; `regions()::r` in `cuda/LogVoleGpuProtocol.cpp` | Owned diagnostics and per-chunk pending counters. |
 | CUDA allocation evidence | 2 | `rootCudaWireEvidenceMutex`, `lastRootCudaWireEvidence` in `LogVoleEncoding.cpp` | Caller/actor-owned evidence sink. |
 | Capability/compatibility caches | 4 | `defaultPublicSenderCt2PrefetchLevels()::h200`, `available()::ok`, `gaussianTransformHostCompatible()::{recognized, arithmeticCompatible}` | Capture once in the appropriate CPU/GPU resource owner. |
 | CUDA error/name storage | 4 | `gLastError`, `gLastWhere`, `gpuDeviceName()::name`, `gpuLastErrorOk()::buf` in `cuda/LogVoleGpuKernels.cu` | Execution-owned error state and owned name/message storage. |
@@ -752,6 +752,24 @@ witness/lifetime/proof checks pass in 0.31 seconds on one executor thread with u
 to four logical tasks, including dependent layers, integer/PRNG oracles and
 rejection parity. The small CPU asynchronous multiplication protocol passes in
 5.57 seconds. No benchmarks or GPU execution checks were run.
+
+The asynchronous CPU LHE statistics pilot accepts optional borrowed totals in
+`LogVoleExecutionOptions::mRingOpsStats`; null disables ring-operation counting
+for that path. Synchronous transform/chunk scopes own fixed pending counters and
+flush before suspension or completion, including exceptional exits. No pending
+sink remains in reusable arithmetic buffers. The same concrete collector backs
+the legacy TLS compatibility path with the existing 256-count threshold. Reset
+epochs now belong to each totals instance, so reset invalidates stale pending
+counts independently, including destructor flush. Totals must outlive pending
+collectors; reset/read follow joined producers. Context options copy the borrowed
+selection; no numerical cache keys depend on it. GPU sources and timing remain
+unchanged. Only the static reset epoch is retired: 23 runtime declarations remain
+and the completion estimate stays 89%.
+The single targeted Windows build/frontend target passes in 112.93 seconds.
+Two focused LHE/fused regressions pass in 5.97 seconds, covering exact owned/null
+counts, independent reset epochs, threshold/destructor flushing and compatibility
+totals. Small CPU interactive golden passes in 3.92 seconds. No benchmarks or GPU
+execution checks were run.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their

@@ -972,7 +972,8 @@ namespace osuCrypto::LogVole
     static bool decryptLheRow(
         const RingNttContext& ctx, std::span<const seal::Modulus> moduli,
         const RnsPoly& publicA, const RnsPoly& skNtt, const RnsPoly& cipher,
-        RnsPoly& result, RnsPoly& product, LheDomain domain, bool fused)
+        RnsPoly& result, RnsPoly& product, LheDomain domain, bool fused,
+        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
     {
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         if (domain == LheDomain::Ntt && fused)
@@ -988,16 +989,15 @@ namespace osuCrypto::LogVole
                         c[i] = seal::util::sub_uint_mod(seal::util::barrett_reduce_64(c[i], modulus),
                             mulMod(seal::util::barrett_reduce_64(a[i], modulus), b[i], modulus), modulus);
             }
-            globalRingOpsStats.mDyadicMulAddCount.fetch_add(1, std::memory_order_relaxed);
-            globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
+            if (stats) { stats->bump(RingOp::DyadicMulAdd); stats->bump(RingOp::Sub); }
             return true;
         }
         product.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
         std::fill(product.mCoeffs.begin(), product.mCoeffs.end(), u64{0});
-        if (!dyadicMultiplyAddNttInplace(publicA, skNtt, product, ctx)) return false;
-        if (domain == LheDomain::Ntt) return ringSubInplace(result, product, ctx);
+        if (!dyadicMultiplyAddNttInplace(publicA, skNtt, product, ctx, stats)) return false;
+        if (domain == LheDomain::Ntt) return ringSubInplace(result, product, ctx, stats);
         // cipher - INTT(A * NTT(sk)): retain the coefficient-domain shortcut.
-        if (!inverseNtt(product, ctx)) return false;
+        if (!inverseNtt(product, ctx, stats)) return false;
         for (std::size_t j = 0; j < moduli.size(); ++j)
         for (std::size_t k = 0; k < n; ++k)
         {
@@ -1084,7 +1084,7 @@ namespace osuCrypto::LogVole
                 result[row], product, LheDomain::Ntt, inplace);
         };
         if (!runLheRows(ctx, result.size(), requestedWorkers, cpuBenchmark,
-            cpuScratch, inplace ? 0 : ringPolyCoeffCount(ctx.mParams), !inplace, decryptRow))
+            cpuScratch, inplace ? 0 : ringPolyCoeffCount(ctx.mParams), true, decryptRow))
         {
             return false;
         }
@@ -1119,19 +1119,23 @@ namespace osuCrypto::LogVole
                 if (chunk.mProduct.mCoeffs.size() != ringPolyCoeffCount(ctx.mParams)) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         RnsPoly skNtt = sk;
-        if (!forwardNtt(skNtt, ctx)) co_return false;
+        {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            if (!forwardNtt(skNtt, ctx, ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr)) co_return false;
+        }
         for (auto& chunk : chunks) chunk.mOk = true;
         auto decryptChunk = [&](std::size_t begin, std::size_t end, LheDecryptBuffer& chunk) {
             CpuBenchmarkState worker = chunks.size() > 1
                 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
             CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
             CpuBenchmarkTaskScope metrics(worker);
-            struct FlushStats { ~FlushStats() { flushRingOpsThreadLocalStats(); } } flush;
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
             for (auto row = begin; row != end; ++row)
             {
                 auto& value = ciphertextAndOutput[row];
                 if (!decryptLheRow(ctx, moduli, publicANtt[row], skNtt, value,
-                    value, chunk.mProduct, domain, fused))
+                    value, chunk.mProduct, domain, fused, stats))
                 {
                     chunk.mOk = false;
                     break;

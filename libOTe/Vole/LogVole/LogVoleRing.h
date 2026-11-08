@@ -36,7 +36,7 @@ namespace osuCrypto::LogVole
     namespace gpu { class DeviceScalars; class RetainedPublicUniform; class GpuRing; class GpuSetupContext; class GpuExecutionContext; }
     struct RingOpsStats
     {
-        static inline std::atomic<u64> resetEpoch{ 0u };
+        std::atomic<u64> mResetEpoch{ 0u };
 
         std::atomic<u64> mNttCount{ 0 };
         std::atomic<u64> mInttCount{ 0 };
@@ -50,10 +50,38 @@ namespace osuCrypto::LogVole
         std::atomic<u64> mPrngPolyCount{ 0 };
         std::atomic<u64> mErrorAddCount{ 0 };
 
+        // Reset/read totals only after producers join; no concurrent snapshot.
         void reset();
     };
 
     inline RingOpsStats globalRingOpsStats;
+
+    enum class RingOp : std::size_t
+    {
+        Ntt, Intt, Add, Sub, Mul, MulScalar, DyadicMulAdd,
+        GadgetDecompose, GadgetRecompose, PrngPoly, ErrorAdd, Count
+    };
+
+    // Exclusive pending counters borrowing totals through destruction. A null
+    // sink disables collection. The sink must outlive this value. Reset
+    // invalidates old pending work at flush; producers must join before reset.
+    class PendingRingOpsStats
+    {
+        RingOpsStats* mSink;
+        u64 mEpoch;
+        std::array<u64, static_cast<std::size_t>(RingOp::Count)> mCounts{};
+        void syncEpoch() noexcept;
+    public:
+        explicit PendingRingOpsStats(RingOpsStats* sink) noexcept;
+        ~PendingRingOpsStats() noexcept;
+        PendingRingOpsStats(const PendingRingOpsStats&) = delete;
+        PendingRingOpsStats& operator=(const PendingRingOpsStats&) = delete;
+        void bump(RingOp operation) noexcept;
+        void flush() noexcept;
+    };
+
+    // Compatibility only: unmigrated synchronous/GPU callers use the old sink.
+    PendingRingOpsStats* legacyRingOpsThreadLocalStats() noexcept;
 
     void flushRingOpsThreadLocalStats();
 
@@ -265,11 +293,11 @@ namespace osuCrypto::LogVole
     std::shared_ptr<seal::SEALContext> getRingHostContext(const RingNttContext& ctx);
 
     bool canonicalizePoly(RnsPoly& poly, const RingNttContext& ctx);
-    bool forwardNtt(RnsPoly& poly, const RingNttContext& ctx);
+    bool forwardNtt(RnsPoly& poly, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     // Internal fast path for coefficients already proven to be in [0,q_j).
     // Call forwardNtt for arbitrary-u64 input that still needs normalization.
-    bool forwardNttCanonical(RnsPoly& poly, const RingNttContext& ctx);
-    bool inverseNtt(RnsPoly& poly, const RingNttContext& ctx);
+    bool forwardNttCanonical(RnsPoly& poly, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool inverseNtt(RnsPoly& poly, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     // Batched equivalents. Prefer these wherever several independent transforms
     // are done back to back: with the CUDA backend they amortise one device round
@@ -294,12 +322,12 @@ namespace osuCrypto::LogVole
         const RnsPoly& aNtt,
         const RnsPoly& bNtt,
         RnsPoly& cNtt,
-        const RingNttContext& ctx);
+        const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool ringAdd(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out);
     bool ringAddInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx);
     bool ringSub(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out);
-    bool ringSubInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx);
+    bool ringSubInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     bool ringMultiply(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out);
     bool ringMultiplyInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx);
     bool ringMultiplyScalar(const RnsPoly& a, u64 scalar, const RingNttContext& ctx, RnsPoly& out);

@@ -5,7 +5,7 @@
 
 namespace osuCrypto
 {
-    namespace LogVole { struct CpuBenchmarkContext; }
+    namespace LogVole { struct CpuBenchmarkContext; struct RingOpsStats; }
     struct LogVoleTransportOptions
     {
         bool mOwnedSetupSend = true;
@@ -253,6 +253,9 @@ namespace osuCrypto
         // Optional borrowed diagnostics. The caller keeps this alive until all
         // operations (including deferred materialization) using these options finish.
         LogVole::CpuBenchmarkContext* mCpuBenchmark = nullptr;
+        // Optional borrowed CPU arithmetic totals, retained by the caller
+        // through all operations using this immutable selection.
+        LogVole::RingOpsStats* mRingOpsStats = nullptr;
         LogVoleAdvancedOptions mAdvanced;
         bool valid() const noexcept { return mAdvanced.valid(); }
         bool operator==(const LogVoleExecutionOptions&) const = default;
