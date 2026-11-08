@@ -1,4 +1,3 @@
-#include <optional>
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
@@ -249,11 +248,9 @@ namespace osuCrypto::LogVole
         std::shared_ptr<const LazyLencRandomizerState> randomizers, const gpu::DeviceBatch *rootR1Device,
         const LazyRootErrorHostState *rootR1Host, const gpu::DeviceBatch *rootSecretDevice,
         const LazyRootSecretHostState *rootSecretHost, ProtocolCacheRunId rootSecretOwnerRunId, bool topSecretDomain,
-        LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScope setupScope = currentProtocolCacheScope())
+        LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;
-        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (cpuBenchmark.mContext)
         {
@@ -268,13 +265,13 @@ namespace osuCrypto::LogVole
         const auto skCount = rootSecretHost ? rootSecretHost->count() : sk1.size();
 #if defined(ENABLE_LOGVOLE_CUDA)
         const bool rootBatchValid = !rootR1Device || !gpu::enabled(ctx) ||
-            (rootR1Host && gpu::rootErrorBatchMatches(ctx, *rootR1Device, rCount));
+            (rootR1Host && gpu::rootErrorBatchMatches(ctx, *rootR1Device, rCount, setupScope));
         const bool rootSecretValid = !rootSecretDevice || !gpu::enabled(ctx) ||
             (rootSecretHost && (topSecretDomain
                 ? gpu::topSecretUniformBatchMatches(ctx, *rootSecretDevice,
-                    skCount, rootSecretOwnerRunId)
+                    skCount, rootSecretOwnerRunId, setupScope)
                 : gpu::rootSecretUniformBatchMatches(ctx, *rootSecretDevice,
-                    skCount, rootSecretOwnerRunId)));
+                    skCount, rootSecretOwnerRunId, false, setupScope)));
 #else
         const bool rootBatchValid = !rootR1Device;
         const bool rootSecretValid = !rootSecretDevice;
@@ -356,11 +353,9 @@ namespace osuCrypto::LogVole
                 noiseSeeds.resize(ct1.mPolys.size());
                 for (auto &seed : noiseSeeds) prng->get(seed.data(), seed.size());
                 {
-                    setupScopeGuard.reset();
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
                         executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
                         noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
-                    setupScopeGuard.emplace(setupScope);
                     if (!setupOk) co_return false;
                 }
             }
@@ -398,7 +393,6 @@ namespace osuCrypto::LogVole
                                                         noiseMaxDeviation, noiseSeeds[idx], ctx);
                         };
                         auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                            ScopedProtocolCacheScope scope(setupScope);
                             CpuBenchmarkState worker = chunks.size() > 1
                                 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                             CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -420,9 +414,7 @@ namespace osuCrypto::LogVole
                         if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
                         else if (taskCount)
                         {
-                            setupScopeGuard.reset();
                             co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                            setupScopeGuard.emplace(setupScope);
                         }
                         const bool phaseOk =
                             std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
@@ -440,11 +432,9 @@ namespace osuCrypto::LogVole
 #endif
         if (residentNoise)
         {
-            setupScopeGuard.reset();
             const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
                 executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
                 noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
-            setupScopeGuard.emplace(setupScope);
             if (!setupOk) co_return false;
         }
         if (!publicANtt)
@@ -481,7 +471,6 @@ namespace osuCrypto::LogVole
                     return multiplyByGPower(ctx, r[i], gadgetLogBase, rPowerOffset, shiftedR[i]);
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                    ScopedProtocolCacheScope scope(setupScope);
                     CpuBenchmarkState worker = chunks.size() > 1
                         ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -503,9 +492,7 @@ namespace osuCrypto::LogVole
                 if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
                 else if (taskCount)
                 {
-                    setupScopeGuard.reset();
                     co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                    setupScopeGuard.emplace(setupScope);
                 }
                 const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
                 if (!phaseOk) co_return false;
@@ -543,7 +530,6 @@ namespace osuCrypto::LogVole
                     return canonicalizePoly(rNtt[row], ctx);
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                    ScopedProtocolCacheScope scope(setupScope);
                     CpuBenchmarkState worker = chunks.size() > 1
                         ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -565,9 +551,7 @@ namespace osuCrypto::LogVole
                 if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
                 else if (taskCount)
                 {
-                    setupScopeGuard.reset();
                     co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                    setupScopeGuard.emplace(setupScope);
                 }
                 const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
                 if (!phaseOk)
@@ -611,7 +595,6 @@ namespace osuCrypto::LogVole
                     return dyadicMultiplyAddNttInplace((*publicANtt)[row], sk1Ntt[col], cNtt, ctx);
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                    ScopedProtocolCacheScope scope(setupScope);
                     CpuBenchmarkState worker = chunks.size() > 1
                         ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -633,9 +616,7 @@ namespace osuCrypto::LogVole
                 if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
                 else if (taskCount)
                 {
-                    setupScopeGuard.reset();
                     co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                    setupScopeGuard.emplace(setupScope);
                 }
                 const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
                 if (!phaseOk)
@@ -673,7 +654,6 @@ namespace osuCrypto::LogVole
                                                     noiseMaxDeviation, noiseSeeds[idx], ctx);
                     };
                     auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                        ScopedProtocolCacheScope scope(setupScope);
                         CpuBenchmarkState worker = chunks.size() > 1
                             ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                         CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -695,9 +675,7 @@ namespace osuCrypto::LogVole
                     if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
                     else if (taskCount)
                     {
-                        setupScopeGuard.reset();
                         co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                        setupScopeGuard.emplace(setupScope);
                     }
                     const bool phaseOk =
                         std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
@@ -755,10 +733,8 @@ namespace osuCrypto::LogVole
                                ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;
-        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         {
-            setupScopeGuard.reset();
             co_return co_await lheEnc1Impl(
                 executor, setupResults, ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
                 noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 0u, deferredCiphertext,
@@ -778,10 +754,8 @@ namespace osuCrypto::LogVole
         LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;
-        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         {
-            setupScopeGuard.reset();
             co_return co_await lheEnc1Impl(executor, setupResults, ctx, r, sk1, gadgetLogBase, out, noiseStandardDeviation,
                             noiseMaxDeviation, prng, rInputIsNtt, publicANtt, requestedWorkers, 1u,
                             deferredCiphertext, randomizers, rootR1Device, rootR1Host, rootSecretDevice,

@@ -318,6 +318,47 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == before.mRole);
         co_return ok;
     };
+    // Setup kernels capture their explicit phase before lazy start. Cache
+    // selection and arithmetic must agree when another role resumes the task.
+    const ProtocolCacheScope phase(ctx.mFactory->protocolService()->allocate(), ProtocolCacheRole::Sender);
+    const ProtocolCacheScope foreign(identityService->allocate(), ProtocolCacheRole::Receiver);
+    PRNG phaseReferencePrng(toBlock(813, 1)), phaseActualPrng(toBlock(813, 1));
+    LencEncodeOutput phaseReference, phaseActual;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results,
+        ctx, inputs, 1, 30, 29, phaseReferencePrng, phaseReference, 0, 0, 2, true, false,
+        nullptr, 3, false, false, nullptr, nullptr, parallelOptions, benchmark, phase)));
+    macoro::task<bool> pendingLenc;
+    {
+        ScopedProtocolCacheScope creation(phase);
+        pendingLenc = lencEncTrunc(setupResources.executor, setupResources.results,
+            ctx, inputs, 1, 30, 29, phaseActualPrng, phaseActual, 0, 0, 2, true, false,
+            nullptr, 3, false, false, nullptr, nullptr, parallelOptions, benchmark);
+    }
+    {
+        ScopedProtocolCacheScope ambient(foreign);
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(pendingLenc))));
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == foreign.mRunId);
+    }
+    equalBatch(phaseActual.mRNtt, phaseReference.mRNtt);
+    equalBatch(phaseActual.mLacct.mCt.mPolys, phaseReference.mLacct.mCt.mPolys);
+    LOGVOLE_REQUIRE_TRUE(phaseActualPrng.get<block>() == phaseReferencePrng.get<block>());
+    RingTensor phaseReferenceLhe, phaseActualLhe;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results,
+        ctx, phaseReference.mRNtt, inputs, 30, phaseReferenceLhe, 0, 0, nullptr, true, nullptr,
+        3, nullptr, {}, nullptr, nullptr, nullptr, nullptr, 0, false, parallelOptions, benchmark, phase)));
+    macoro::task<bool> pendingLhe;
+    {
+        ScopedProtocolCacheScope creation(phase);
+        pendingLhe = lheEnc1Trunc(setupResources.executor, setupResources.results,
+            ctx, phaseActual.mRNtt, inputs, 30, phaseActualLhe, 0, 0, nullptr, true, nullptr,
+            3, nullptr, {}, nullptr, nullptr, nullptr, nullptr, 0, false, parallelOptions, benchmark);
+    }
+    {
+        ScopedProtocolCacheScope ambient(foreign);
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(pendingLhe))));
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == foreign.mRunId);
+    }
+    equalBatch(phaseActualLhe.mPolys, phaseReferenceLhe.mPolys);
     LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(pending))));
     LOGVOLE_REQUIRE_TRUE(lazyNoise == expectedNoise && !lazyDevice);
     LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(onPool(samplePolyErrorCompactBatchForSetup(
