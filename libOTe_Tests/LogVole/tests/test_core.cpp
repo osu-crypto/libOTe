@@ -2158,6 +2158,60 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         expect_batch_equal(actual, expected);
         LOGVOLE_REQUIRE_TRUE(&state.hostS(sender) == &actual);
     }
+    // Exercise the production wire -> receiver resident NTT -> lazy snapshot
+    // path with a foreign service installed throughout setup and first get().
+    const auto receiverService = ProtocolCacheService::create();
+    const ProtocolCacheScope receiverSetup(receiverService->allocate(), ProtocolCacheRole::Receiver);
+    const auto unrelatedService = ProtocolCacheService::create();
+    const ProtocolCacheScope unrelated(unrelatedService->allocate(), ProtocolCacheRole::Sender);
+    auto receiverOptions = options;
+    receiverOptions.mAdvanced.mProtocol.mReceiverPipelinedDownload = osuCrypto::LogVoleChoice::Enabled;
+    receiverOptions.mAdvanced.mStreams.mDownloadSlotMiB = 1;
+    RingNttContext receiverCtx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, receiverCtx,
+        std::make_shared<RingContextFactory>(receiverOptions, receiverService), receiverSetup));
+    Buffer bytes;
+    {
+        ScopedProtocolCacheScope ambient(sender);
+        bytes = encodeShrinkExpandOfflineState(state, 2, {}, true);
+    }
+    ShrinkExpandOfflineMessage eagerWire{}, lazyWire{};
+    auto eagerBytes = bytes;
+    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(eagerBytes), eagerWire, 2));
+    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(bytes), lazyWire, 2, {}, true));
+    auto expectedCt1 = eagerWire.mCt1.mPolys;
+    auto cpuReceiverCtx = receiverCtx;
+    cpuReceiverCtx.mExecutionOptions.mUseGpu = false;
+    for (auto& poly : expectedCt1) LOGVOLE_REQUIRE_TRUE(forwardNtt(poly, cpuReceiverCtx));
+    ShrinkExpandReceiverOfflineInput receiverInput{};
+    receiverInput.mParams = state.mParams;
+    receiverInput.mParams.mNumWorkerThreads = 2;
+    receiverInput.mRingFactoryOwner = receiverCtx.mFactoryOwner;
+    receiverInput.mDeferHostSnapshot = true;
+    receiverInput.mParams.mGpuSetup.mReceiverResidentNtt = true;
+    receiverInput.mParams.mGpuSetup.mReceiverResidentNttStrict = true;
+    // Setup controls are part of message parameter equality.
+    lazyWire.mParams = receiverInput.mParams;
+    ShrinkExpandReceiverState receiverState{};
+    {
+        ScopedProtocolCacheScope ambient(unrelated);
+        LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(
+            receiverInput, std::move(lazyWire), receiverState, receiverSetup));
+        LOGVOLE_REQUIRE_TRUE(receiverState.mLazyCt1Ntt && receiverState.mGpuCache);
+        LOGVOLE_REQUIRE_TRUE(receiverState.mCt1.mPolys.empty());
+        LOGVOLE_REQUIRE_TRUE(gpu::retainedPublicUniformMatches(receiverCtx,
+            *receiverState.mPublicANttDevice, state.mParams.mMu, false, receiverSetup));
+        const auto& actual = receiverState.hostCt1();
+        expect_batch_equal(actual.mPolys, expectedCt1);
+        LOGVOLE_REQUIRE_TRUE(&receiverState.hostCt1() == &actual);
+        std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB, againA, againB;
+        LOGVOLE_REQUIRE_TRUE(receiverState.mLazyPublicUniformHosts->get(publicA, publicB));
+        LOGVOLE_REQUIRE_TRUE(receiverState.mLazyPublicUniformHosts->get(againA, againB));
+        LOGVOLE_REQUIRE_TRUE(publicA == againA && publicB == againB);
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
+    }
+
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";

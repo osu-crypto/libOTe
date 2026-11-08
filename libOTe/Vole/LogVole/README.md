@@ -253,6 +253,7 @@ contain no environment reads.
 | Private GPU provenance context | Root/top private uniform sampling, compact root-error ownership, delta/seed-label/repetition validation, and first-query ownership checks take cheap explicit caller views. Retained owners keep their service once; online first-query admission stays in that retained service domain. The identity-free allocation worker no longer installs a scope guard. Transitional defaults remain at unmigrated callers; lazy host materializer caller-role checks still require explicit-interface plumbing. |
 | Lazy sender host context | Seed-label lazy host access and `hostS` accept explicit caller views. Sender materializers preserve first-materialization Receiver rejection inside `call_once`; retained-device checks use the original producer identity, while fallback callbacks, CRT host/wrap helpers and repetition construction forward caller context. Top-sk1 explicit materialization also separates caller admission from producer validation. Three owner guards are removed; identity-free root/error replay interfaces remain unchanged. |
 | Reusable GPU offline mirrors | Sender/receiver cache preparation forwards an explicit borrowed identity through context creation, retained-public validation, copies and host-retention lookup. Recursive Core setup forwards its captured scope. Sender retained operands preserve their original offline run. Three TLS guards are removed; compatibility defaults and receiver Ct1 lazy materialization remain. No kernel or numerical changes. |
+| Receiver resident Ct1 and lazy snapshots | Explicit receiver finalization scope reaches context/public-operand acquisition, retained validation, cache construction and producer owners. Original caller-role context/eager-cache selection and Receiver-only retained regions are preserved. Lazy public owners pass their owned scope directly. Ct1 snapshot/NTT and pipelined copy are identity-free, so their redundant guards are removed without new parameters. Generic legacy parallel helpers still carry compatibility scope; copy workers use an empty owned context. No scheduling or numerical changes. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -265,6 +266,17 @@ including explicit context under unrelated ambience, sender offline-run reuse,
 and receiver foreign-run rejection before cache publication. No benchmarks or
 WSL validation in this step.
 
+
+Receiver-Ct1 validation: CUDA-enabled Windows test target and frontend example
+object compile (68.46 seconds; test-only correction rebuild 15.37 seconds).
+Three focused CPU tests pass in 3.28 seconds; private metadata and lazy-context
+GPU tests pass in 2.36 seconds. The receiver regression encodes actual sender
+state, imports its derived parameters, and checks first resident Ct1 snapshot
+against CPU NTT under a foreign service/role, forced pipelined copying and
+repeated snapshot/public-owner reuse. An initial test used original rather than
+derived truncated parameters and correctly failed validation; corrected before
+the passing run. Seven direct guards are removed; generic parallel helper
+transport remains. No benchmarks or WSL validation in this step.
 
 #### Remaining runtime globals
 

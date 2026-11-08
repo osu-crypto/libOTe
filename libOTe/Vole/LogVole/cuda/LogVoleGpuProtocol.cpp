@@ -805,7 +805,6 @@ namespace osuCrypto::LogVole::gpu
                     next.mCols = mCoefficients.mCols;
                     bool downloaded = false;
                     {
-                        ScopedProtocolCacheScope roleScope(ProtocolCacheRole::Receiver, mRunId);
                         if (available() && currentDeviceOrdinal() == mDevice)
                         {
                             auto& stream = contextStream(mContext);
@@ -1442,10 +1441,9 @@ namespace osuCrypto::LogVole::gpu
         const RingNttContext& ctx, ShrinkExpandReceiverState& state,
         bool deferHostSnapshot,
         std::shared_ptr<const LazyRingTensorHostState> encodedCt1,
-        std::shared_ptr<const LazyLacctHostState> encodedLacct)
+        std::shared_ptr<const LazyLacctHostState> encodedLacct, ProtocolCacheScopeView scope)
     {
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+        scope.mRole = ProtocolCacheRole::Receiver;
         const bool hostA = static_cast<bool>(state.mPublicANtt);
         const bool hostB = static_cast<bool>(state.mPublicBNtt);
         const bool deviceA = static_cast<bool>(state.mPublicANttDevice);
@@ -1481,12 +1479,12 @@ namespace osuCrypto::LogVole::gpu
             ? state.mPublicANtt->size() == state.mParams.mMu &&
                 validateRingBatchShape(*state.mPublicANtt, ctx.mParams)
             : retainedPublicUniformMatches(ctx, *state.mPublicANttDevice,
-                state.mParams.mMu, false);
+                state.mParams.mMu, false, scope);
         const bool publicBValid = hostB
             ? state.mPublicBNtt->size() == expectedBCount &&
                 validateRingBatchShape(*state.mPublicBNtt, ctx.mParams)
             : retainedPublicUniformMatches(ctx, *state.mPublicBNttDevice,
-                expectedBCount, true);
+                expectedBCount, true, scope);
         if (!ct1.mRows || !ct1.mCols || ct1.mRows != state.mParams.mMu ||
             ct1.mCols != state.mParams.mTau ||
             !lacct.mWidthPadded || !lacct.mLevels || !lacct.mCt.mCols ||
@@ -1501,7 +1499,7 @@ namespace osuCrypto::LogVole::gpu
         auto cache = buildOfflineCache(ctx, state.mPublicANtt.get(), state.mPublicBNtt.get(),
             state.mPublicANttDevice.get(), state.mPublicBNttDevice.get(),
             ct1, lacct, false, state.mParams.mTransport.mEncoding.mWire,
-            currentProtocolCacheScope(), ct1Bytes, lacctBytes);
+            scope, ct1Bytes, lacctBytes);
         if (!cache) return false;
         // Regression hook: decline after the complete device transform, before
         // either host state or the synchronized cache has been published.
@@ -1511,7 +1509,7 @@ namespace osuCrypto::LogVole::gpu
         {
             auto owner = std::make_shared<ReceiverCt1HostState>(ctx, cache,
                 ct1.mRows, ct1.mCols, state.mParams.mNumWorkerThreads,
-                currentDeviceOrdinal(), currentProtocolCacheScope().mRunId, encodedCt1);
+                currentDeviceOrdinal(), scope.mRunId, encodedCt1);
             // Every allocation completed before consuming the only mutable
             // coefficient backing. Metadata remains available without get().
             owner->takeCoefficients(std::move(state.mCt1.mPolys));

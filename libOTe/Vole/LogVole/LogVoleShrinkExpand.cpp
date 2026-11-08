@@ -136,7 +136,8 @@ namespace osuCrypto::LogVole
         bool receiverPublicHosts(const RingNttContext& ctx,
             const ShrinkExpandReceiverState& state,
             std::shared_ptr<const std::vector<RnsPoly>>& publicA,
-            std::shared_ptr<const std::vector<RnsPoly>>& publicB)
+            std::shared_ptr<const std::vector<RnsPoly>>& publicB,
+            ProtocolCacheScopeView scope = currentProtocolCacheScope())
         {
             publicA = state.mPublicANtt;
             publicB = state.mPublicBNtt;
@@ -149,16 +150,16 @@ namespace osuCrypto::LogVole
             }
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (!publicA && state.mPublicANttDevice &&
-                !gpu::materializeRetainedPublicUniform(ctx, state.mPublicANttDevice, publicA))
+                !gpu::materializeRetainedPublicUniform(ctx, state.mPublicANttDevice, publicA, scope))
                 return false;
             if (!publicB && state.mPublicBNttDevice &&
-                !gpu::materializeRetainedPublicUniform(ctx, state.mPublicBNttDevice, publicB))
+                !gpu::materializeRetainedPublicUniform(ctx, state.mPublicBNttDevice, publicB, scope))
                 return false;
 #endif
-            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu);
+            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu, scope);
             const u32 publicBTau = state.mParams.mTruncateOneGadgetDigit
                 ? state.mParams.mTau + 1u : state.mParams.mTau;
-            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau);
+            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau, scope);
             return publicA && publicB && publicA->size() == state.mParams.mMu &&
                 publicB->size() == 2u * static_cast<std::size_t>(publicBTau) &&
                 validateRingBatchShape(*publicA, ctx.mParams) &&
@@ -188,12 +189,11 @@ namespace osuCrypto::LogVole
                 std::lock_guard<std::mutex> lock(mMutex);
                 if (!mPublicA || !mPublicB)
                 {
-                    ScopedProtocolCacheScope roleScope(mScope);
                     std::shared_ptr<const std::vector<RnsPoly>> nextA, nextB;
                     if (!gpu::materializeRetainedPublicUniform(
-                            mCtx, mPublicADevice, nextA) ||
+                            mCtx, mPublicADevice, nextA, mScope) ||
                         !gpu::materializeRetainedPublicUniform(
-                            mCtx, mPublicBDevice, nextB)) return false;
+                            mCtx, mPublicBDevice, nextB, mScope)) return false;
                     // Publish the pair only after both exact snapshots exist.
                     mPublicA = std::move(nextA);
                     mPublicB = std::move(nextB);
@@ -668,8 +668,9 @@ namespace osuCrypto::LogVole
     static bool finalizeShrinkExpandReceiverOfflineImpl(
         const ShrinkExpandReceiverOfflineInput& input,
         Message&& message,
-        ShrinkExpandReceiverState& receiverState)
+        ShrinkExpandReceiverState& receiverState, ProtocolCacheScopeView scope)
     {
+        const ProtocolCacheScopeView receiverScope{scope.mRunId, ProtocolCacheRole::Receiver};
         HostStep setupStep(hostProfiler(input.mRingFactoryOwner), "setup receiver: shrink expand total");
         if (!validateShrinkExpandReceiverOfflineInput(input) ||
             !validateStateParamsMatch(input.mParams, message.mParams))
@@ -702,7 +703,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(input.mParams.mRing, ctx, input.mRingFactoryOwner))
+        if (!makeRingNttContext(input.mParams.mRing, ctx, input.mRingFactoryOwner, scope))
         {
             return false;
         }
@@ -722,10 +723,8 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (input.mDeferHostSnapshot)
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
-            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu);
-            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau);
+            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu, receiverScope);
+            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau, receiverScope);
             // Publish retained-only state only as a complete A/B pair. A
             // partial device attempt falls back to two exact eager owners.
             if (!next.mPublicANttDevice || !next.mPublicBNttDevice)
@@ -738,14 +737,14 @@ namespace osuCrypto::LogVole
                 next.mLazyPublicUniformHosts =
                     std::make_shared<const LazyPublicUniformHosts>(
                         ctx, next.mPublicANttDevice, next.mPublicBNttDevice,
-                        currentProtocolCacheScope());
+                        receiverScope);
             }
         }
 #endif
         if (!next.mPublicANttDevice)
         {
-            next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu);
-            next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau);
+            next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu, scope);
+            next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau, scope);
         }
         if ((!next.mPublicANtt && !next.mPublicANttDevice) ||
             (!next.mPublicBNtt && !next.mPublicBNttDevice)) return false;
@@ -757,12 +756,10 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (input.mParams.mGpuSetup.mReceiverResidentNtt)
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
             if (gpu::enabled(ctx))
             {
                 if (gpu::finalizeReceiverSetupDevice(ctx, next, input.mDeferHostSnapshot,
-                        message.mLazyCt1, message.mLazyLacct))
+                        message.mLazyCt1, message.mLazyLacct, receiverScope))
                 {
                     receiverState = std::move(next);
                     return true;
@@ -774,10 +771,8 @@ namespace osuCrypto::LogVole
 
         if (!next.mPublicANtt || !next.mPublicBNtt)
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
-            if (!receiverPublicHosts(ctx, next, publicA, publicB)) return false;
+            if (!receiverPublicHosts(ctx, next, publicA, publicB, receiverScope)) return false;
             // Materialize both local owners completely before publishing either
             // one to the state consumed by the CPU rollback.
             next.mPublicANtt = std::move(publicA);
@@ -810,17 +805,17 @@ namespace osuCrypto::LogVole
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
         const ShrinkExpandOfflineMessage& message,
-        ShrinkExpandReceiverState& receiverState)
+        ShrinkExpandReceiverState& receiverState, ProtocolCacheScopeView scope)
     {
-        return finalizeShrinkExpandReceiverOfflineImpl(input, message, receiverState);
+        return finalizeShrinkExpandReceiverOfflineImpl(input, message, receiverState, scope);
     }
 
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
         ShrinkExpandOfflineMessage&& message,
-        ShrinkExpandReceiverState& receiverState)
+        ShrinkExpandReceiverState& receiverState, ProtocolCacheScopeView scope)
     {
-        return finalizeShrinkExpandReceiverOfflineImpl(input, std::move(message), receiverState);
+        return finalizeShrinkExpandReceiverOfflineImpl(input, std::move(message), receiverState, scope);
     }
 
     void materializeShrinkExpandHostState(ShrinkExpandSenderState& state)

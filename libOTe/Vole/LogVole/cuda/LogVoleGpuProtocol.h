@@ -74,7 +74,8 @@ namespace osuCrypto::LogVole::gpu
         const RingNttContext& ctx, ShrinkExpandReceiverState& state,
         bool deferHostSnapshot = false,
         std::shared_ptr<const LazyRingTensorHostState> encodedCt1 = {},
-        std::shared_ptr<const LazyLacctHostState> encodedLacct = {});
+        std::shared_ptr<const LazyLacctHostState> encodedLacct = {},
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Sender counterpart: share only within one sender's exact setup copies,
     // before concurrent online use.
     bool prepareReusableSenderCache(ShrinkExpandSenderState& state,

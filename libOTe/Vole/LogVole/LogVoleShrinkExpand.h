@@ -131,13 +131,15 @@ namespace osuCrypto::LogVole
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
         const ShrinkExpandOfflineMessage& message,
-        ShrinkExpandReceiverState& receiverState);
+        ShrinkExpandReceiverState& receiverState,
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Consumes ciphertext storage after validation; state is unchanged on failure.
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
         ShrinkExpandOfflineMessage&& message,
-        ShrinkExpandReceiverState& receiverState);
+        ShrinkExpandReceiverState& receiverState,
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,

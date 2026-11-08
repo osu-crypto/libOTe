@@ -2546,10 +2546,8 @@ namespace osuCrypto::LogVole::gpu
 
             const auto activeWorkers = std::min(copyWorkers, length);
             detail::ParallelWorkerCapScope capScope(activeWorkers);
-            const auto cacheScope = currentProtocolCacheScope();
             auto worker = [&](std::size_t workerIdx, CpuBenchmarkState& cpuBenchmark) {
                 CpuBenchmarkTaskScope taskScope(cpuBenchmark);
-                ScopedProtocolCacheScope scopedCache(cacheScope);
                 const auto begin = workerIdx * length / activeWorkers;
                 const auto end = (workerIdx + 1) * length / activeWorkers;
                 for (auto i = begin; i < end; ++i) (void)copyOne(i);
@@ -2566,9 +2564,11 @@ namespace osuCrypto::LogVole::gpu
                 bool completed = false;
                 ~JoinOnFailure() { if (!completed) pool.stop(); }
             } join{*copyPool};
+            // Copies use only disjoint host ranges and diagnostics; they need
+            // no protocol identity. The generic worker still owns its context.
             for (std::size_t i = 1; i < activeWorkers; ++i)
                 tasks.push_back(detail::runPoolWorker(copyPool->pool, worker, i,
-                    cacheScope, cpuBenchmark.mContext) | macoro::make_eager());
+                    {}, cpuBenchmark.mContext) | macoro::make_eager());
             worker(0, cpuBenchmark);
             for (auto& task : tasks) macoro::sync_wait(task);
             join.completed = true;

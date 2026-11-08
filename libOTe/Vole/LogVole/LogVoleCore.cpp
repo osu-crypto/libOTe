@@ -5113,7 +5113,7 @@ namespace osuCrypto::LogVole
                 seInput.mRingFactoryOwner = ringOwner;
                 seInput.mDeferHostSnapshot = input.mUseGpuResidentInternalState;
 
-                if (!finalizeShrinkExpandReceiverOffline(seInput, std::forward<Message>(message).mShrinkExpandMessage, seState))
+                if (!finalizeShrinkExpandReceiverOffline(seInput, std::forward<Message>(message).mShrinkExpandMessage, seState, setupScope))
                 {
                     return false;
                 }
