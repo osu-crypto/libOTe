@@ -84,10 +84,14 @@ namespace osuCrypto::LogVole::gpu
     // The device performs prime search/primality and multiprecision lift
     // arithmetic; only the small immutable API metadata is copied to host.
     bool dynamicSealSetupSupported(const RingParams& params);
+    // Explicit execution owns its service. Only null-execution callers use
+    // fallbackService; defaults temporarily support unmigrated direct callers.
     bool selectSealCoeffModuliDevice(const RingParams& params,
-        std::vector<u64>& orderedPrimes, std::shared_ptr<GpuSetupContext> execution = {});
+        std::vector<u64>& orderedPrimes, std::shared_ptr<GpuSetupContext> execution = {},
+        const std::shared_ptr<const ProtocolCacheService>& fallbackService = currentProtocolCacheScope().mRunId.serviceOwner());
     bool selectSealPlainModulusDevice(u32 n, u32 requestedBits, u64 minimumQ,
-        u64& selectedPrime, u32& selectedBits, std::shared_ptr<GpuSetupContext> execution = {});
+        u64& selectedPrime, u32& selectedBits, std::shared_ptr<GpuSetupContext> execution = {},
+        const std::shared_ptr<const ProtocolCacheService>& fallbackService = currentProtocolCacheScope().mRunId.serviceOwner());
     class GpuRing;
     class GpuPlainNtt;
     struct NativeSealSetupBundle;
@@ -361,7 +365,8 @@ namespace osuCrypto::LogVole::gpu
         // Returns null for unsupported/malformed parameters or CUDA failure.
         static std::shared_ptr<GpuRing> getRaw(
             const RingParams& params, std::span<const u64> orderedPrimes,
-            const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution = {});
+            const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution = {},
+            const std::shared_ptr<const ProtocolCacheService>& fallbackService = currentProtocolCacheScope().mRunId.serviceOwner());
         // Publish an already certified native ring into the matching raw
         // role/mode lane. Existing sequential owners stay alive for borrowers.
         static bool publishRaw(const RingParams& params,

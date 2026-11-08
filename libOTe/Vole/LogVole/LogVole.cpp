@@ -1297,7 +1297,7 @@ namespace osuCrypto::LogVole
             u32 selectedBits = 0;
             if (!gpu::selectSealPlainModulusDevice(ring.mPolyModulusDegree,
                     plaintextModulusBits, deviceRing->metadata().mMinModulus,
-                    plaintextPrime, selectedBits, deviceRing->setupContext()) ||
+                    plaintextPrime, selectedBits, deviceRing->setupContext(), {}) ||
                 !gpu::GpuPlainNtt::getRaw(ring.mPolyModulusDegree, plaintextPrime,
                     ringCtx.mResourceScope, deviceRing->setupContext()))
                 return false;

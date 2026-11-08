@@ -868,10 +868,10 @@ namespace osuCrypto::LogVole
             else
             {
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (!gpu::selectSealCoeffModuliDevice(params, metadata->mValues, built.mGpuSetup)) return false;
+                if (!gpu::selectSealCoeffModuliDevice(params, metadata->mValues, built.mGpuSetup, {})) return false;
                 metadata->mDynamicGpuCertificate =
                     gpu::GpuRing::getRaw(params, metadata->mValues,
-                        resources, built.mGpuSetup);
+                        resources, built.mGpuSetup, {});
                 if (!metadata->mDynamicGpuCertificate) return false;
                 built.mGpuSetup = metadata->mDynamicGpuCertificate->setupContext();
 #else

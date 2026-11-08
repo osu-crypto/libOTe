@@ -2094,6 +2094,40 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(receiverState.mGpuCache);
         LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == sender.mRunId);
     }
+    // Null-execution cold setup takes its explicit service, including while
+    // the caller has a foreign receiver installed. Cache keys remain role-local.
+    std::vector<std::uint64_t> selectedPrimes;
+    LOGVOLE_REQUIRE_TRUE(gpu::selectSealCoeffModuliDevice(ctx.mParams, selectedPrimes, {}, service));
+    LOGVOLE_REQUIRE_EQ(selectedPrimes.size(), ringModulusCount(ctx));
+    for (std::size_t i = 0; i < selectedPrimes.size(); ++i)
+        LOGVOLE_REQUIRE_EQ(selectedPrimes[i], ringModulusValue(ctx, i));
+    std::uint64_t plainPrime = 0;
+    std::uint32_t plainBits = 0;
+    LOGVOLE_REQUIRE_TRUE(gpu::selectSealPlainModulusDevice(ctx.mParams.mPolyModulusDegree,
+        20, *std::min_element(selectedPrimes.begin(), selectedPrimes.end()),
+        plainPrime, plainBits, {}, service));
+    LOGVOLE_REQUIRE_TRUE(plainPrime && plainBits == 20);
+    RingResourceScope rawScope{ProtocolCacheRole::Sender, false};
+    rawScope.mTables = std::make_shared<gpu::GpuTableCache>(options);
+    auto raw = gpu::GpuRing::getRaw(ctx.mParams, selectedPrimes, rawScope, {}, service);
+    LOGVOLE_REQUIRE_TRUE(raw);
+    LOGVOLE_REQUIRE_TRUE(raw->setupContext()->protocolService() == service);
+    LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::getRaw(ctx.mParams, selectedPrimes, rawScope, {}, foreign) == raw);
+    LOGVOLE_REQUIRE_TRUE(raw->setupContext()->protocolService() == service);
+
+    // The prefetch worker uses the copied context's setup owner, independent
+    // of the caller's role/service. Its ordinary get boundary reuses the result.
+    RingNttContext coldCtx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ctx.mParams, coldCtx,
+        std::make_shared<RingContextFactory>(options, service), sender));
+    gpu::GpuRingSetupPrefetch prefetch(coldCtx, true);
+    LOGVOLE_REQUIRE_TRUE(prefetch.wait());
+    auto prefetched = gpu::GpuRing::get(coldCtx);
+    LOGVOLE_REQUIRE_TRUE(prefetched);
+    LOGVOLE_REQUIRE_TRUE(prefetched->setupContext()->protocolService() == service);
+    LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == receiver.mRunId);
+    LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == receiver.mRole);
+
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";

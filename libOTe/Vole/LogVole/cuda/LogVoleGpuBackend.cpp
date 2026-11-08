@@ -366,14 +366,15 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool selectSealCoeffModuliDevice(const RingParams& params,
-        std::vector<u64>& orderedPrimes, std::shared_ptr<GpuSetupContext> execution)
+        std::vector<u64>& orderedPrimes, std::shared_ptr<GpuSetupContext> execution,
+        const std::shared_ptr<const ProtocolCacheService>& fallbackService)
     {
         HostStep step(execution ? execution->hostProfiler() : nullptr, "setup: dynamic GPU ring prime selection");
         if (!dynamicSealSetupSupported(params) || !available() || currentDeviceOrdinal() != 0)
             return false;
         const u32 rho = static_cast<u32>(params.mCoeffModulusBits.size());
         std::array<u8, 16u * sizeof(u64) + sizeof(u32)> hostRecord{};
-        RawSetupStream stream(execution, execution ? nullptr : currentProtocolCacheScope().mRunId.serviceOwner());
+        RawSetupStream stream(execution, execution ? nullptr : fallbackService);
         if (!stream.mStream) return false;
         RawScratchArena arena(256u, stream);
         auto* bits = arena.take<int>(rho);
@@ -397,14 +398,15 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool selectSealPlainModulusDevice(u32 n, u32 requestedBits, u64 minimumQ,
-        u64& selectedPrime, u32& selectedBits, std::shared_ptr<GpuSetupContext> execution)
+        u64& selectedPrime, u32& selectedBits, std::shared_ptr<GpuSetupContext> execution,
+        const std::shared_ptr<const ProtocolCacheService>& fallbackService)
     {
         HostStep step(execution ? execution->hostProfiler() : nullptr, "setup: dynamic GPU plaintext prime selection");
         if (n < 1024u || n > 131072u || (n & (n - 1u)) || !requestedBits ||
             minimumQ <= 2u * n || !available() || currentDeviceOrdinal() != 0)
             return false;
         std::array<u8, sizeof(u64) + 2u * sizeof(u32)> hostRecord{};
-        RawSetupStream stream(execution, execution ? nullptr : currentProtocolCacheScope().mRunId.serviceOwner());
+        RawSetupStream stream(execution, execution ? nullptr : fallbackService);
         if (!stream.mStream) return false;
         RawScratchArena arena(128u, stream);
         auto* record = arena.take<u8>(sizeof(u64) + 2u * sizeof(u32));
@@ -1357,7 +1359,8 @@ namespace osuCrypto::LogVole::gpu
                     certificate->rawOwnerRole() == ctx.mResourceScope.mRole
                     ? certificate : nullptr;
             }
-            return getRaw(ctx.mParams, ctx.mRawModuli->mValues, ctx.mResourceScope, ctx.mGpuSetup);
+            return getRaw(ctx.mParams, ctx.mRawModuli->mValues, ctx.mResourceScope, ctx.mGpuSetup,
+                ctx.mGpuSetup || !ctx.mFactory ? nullptr : ctx.mFactory->protocolService());
         }
         if (!available()) return nullptr;
 
@@ -1379,7 +1382,8 @@ namespace osuCrypto::LogVole::gpu
     }
 
     std::shared_ptr<GpuRing> GpuRing::getRaw(const RingParams& params, std::span<const u64> primes,
-        const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution)
+        const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution,
+        const std::shared_ptr<const ProtocolCacheService>& fallbackService)
     {
         HostStep getStep(owner.mTables ? owner.mTables->hostProfiler() : nullptr, "setup GPU raw ring get");
         if (!owner.mTables ||
@@ -1409,7 +1413,7 @@ namespace osuCrypto::LogVole::gpu
             if (execution && execution->executionOptions() != owner.mTables->executionOptions()) return nullptr;
             std::shared_ptr<GpuRing> ring(new GpuRing());
             ring->mSetup = execution ? std::move(execution) :
-                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), currentProtocolCacheScope().mRunId.serviceOwner());
+                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), fallbackService);
             ring->mRawOwnerRole = owner.mRole;
             if (!ring->initRaw(params, primes)) return nullptr;
             cache.rawRings.emplace(std::move(key), ring);
@@ -1803,15 +1807,12 @@ namespace osuCrypto::LogVole::gpu
                 std::unique_lock<std::mutex> lock(cache.ringMutex, std::try_to_lock);
                 if (!lock.owns_lock() || cache.rings.find(key) != cache.rings.end()) return;
             }
-            auto protocolScope = currentProtocolCacheScope();
-            protocolScope.mRole = ctx.mResourceScope.mRole;
             auto* benchmarkContext = cpuBenchmark.mContext;
             auto next = std::make_unique<Impl>();
             next->mWorker = std::thread(
-                [ownedContext = ctx, protocolScope, benchmarkContext, device, state = next.get()]() {
+                [ownedContext = ctx, benchmarkContext, device, state = next.get()]() {
                     try
                     {
-                        ScopedProtocolCacheScope scope(protocolScope);
                         CpuBenchmarkWorkerScope workerScope(benchmarkContext);
                         CpuBenchmarkState cpuBenchmark{benchmarkContext, true};
                         CpuBenchmarkTaskScope taskScope(cpuBenchmark);
