@@ -742,7 +742,7 @@ namespace osuCrypto::LogVole
                 recursionDepth < 3u,
                 recursionDepth == 0u ? prefetchPlan.mFirstQueryAllocations.get() : nullptr,
                 recursionDepth == 0u ? prefetchPlan.mFirstQueryOwner : nullptr,
-                recursionDepth == 0u ? input.mSid : 0);
+                recursionDepth == 0u ? input.mSid : 0, cacheScope);
         }
         prefetchPlan.markShrinkReady(
             state.mShrinkExpandState, wDoublePrime, gpuShrinkDone);
@@ -988,7 +988,7 @@ namespace osuCrypto::LogVole
                 muHi,
                 state.mParams.mW,
                 gpuTbm,
-                preparedReceiverCt2);
+                preparedReceiverCt2, cacheScope);
             if (!gpuExpandDone)
             {
                 throw std::runtime_error("LogVole receiver GPU expand failed");
@@ -1007,7 +1007,7 @@ namespace osuCrypto::LogVole
                 muHi,
                 state.mParams.mW,
                 finalTbm,
-                preparedReceiverCt2);
+                preparedReceiverCt2, cacheScope);
             if (!gpuExpandDone)
             {
                 throw std::runtime_error("LogVole receiver GPU expand failed");

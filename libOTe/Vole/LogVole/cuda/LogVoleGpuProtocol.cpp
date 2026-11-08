@@ -709,10 +709,10 @@ namespace osuCrypto::LogVole::gpu
         // FNV-1a over the geometry values, with a per-site tag so two sites that
         // happen to share a shape cannot collide.
         template<typename... Vals>
-        u64 idxKey(u64 siteTag, Vals... vals)
+        u64 idxKey(ProtocolCacheRole role, u64 siteTag, Vals... vals)
         {
             u64 h = 1469598103934665603ull ^ siteTag;
-            h ^= static_cast<u64>(currentProtocolCacheScope().mRole);
+            h ^= static_cast<u64>(role);
             h *= 1099511628211ull;
             const u64 parts[] = { static_cast<u64>(vals)... };
             for (u64 v : parts)
@@ -1554,16 +1554,16 @@ namespace osuCrypto::LogVole::gpu
         {
         public:
             GpuLencRandomizers(const RingNttContext& ctx, std::shared_ptr<GpuRing> ring,
-                GpuPolyBuffer&& ntt)
+                GpuPolyBuffer&& ntt, ProtocolCacheRole role)
                 : mContext(ctx), mRing(std::move(ring)), mNtt(std::move(ntt)),
-                  mDevice(currentDeviceOrdinal()), mRole(currentProtocolCacheScope().mRole) {}
+                  mDevice(currentDeviceOrdinal()), mRole(role) {}
 
             std::size_t count() const override { return mNtt.count(); }
             bool matches(const RingParams& params) const override { return params == mContext.mParams; }
-            const GpuPolyBuffer* deviceNtt(const RingNttContext& ctx) const
+            const GpuPolyBuffer* deviceNtt(const RingNttContext& ctx, ProtocolCacheRole role) const
             {
                 if (!matches(ctx.mParams) || currentDeviceOrdinal() != mDevice ||
-                    currentProtocolCacheScope().mRole != mRole ||
+                    role != mRole ||
                     ringModulusCount(ctx) != ringModulusCount(mContext)) return nullptr;
                 for (std::size_t i = 0; i < ringModulusCount(ctx); ++i)
                     if (ringModulusValue(ctx, i) != ringModulusValue(mContext, i)) return nullptr;
@@ -1620,10 +1620,10 @@ namespace osuCrypto::LogVole::gpu
         };
 
         const GpuPolyBuffer* lencRandomizerDeviceNtt(
-            const RingNttContext& ctx, const LazyLencRandomizerState* state)
+            const RingNttContext& ctx, const LazyLencRandomizerState* state, ProtocolCacheScopeView scope)
         {
             const auto* owner = dynamic_cast<const GpuLencRandomizers*>(state);
-            return owner ? owner->deviceNtt(ctx) : nullptr;
+            return owner ? owner->deviceNtt(ctx, scope.mRole) : nullptr;
         }
 
         // A completed ciphertext remains in its producer's allocation. Wire
@@ -3092,11 +3092,11 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> r2Ntt, std::span<const RnsPoly> publicBRootNtt,
         std::span<const RnsPoly> publicBStarNtt, u32 gadgetLogBase, u32 gadgetPowerOffset,
         std::span<const RnsPoly> noiseCoeffs, std::vector<RnsPoly>& outCtNtt,
-        std::span<const u64> compactNoiseLimb0, CpuBenchmarkState cpuBenchmark)
+        std::span<const u64> compactNoiseLimb0, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleRootTopCtDevice(ctx, r1Coeffs, r2Ntt, publicBRootNtt, publicBStarNtt,
-            gadgetLogBase, gadgetPowerOffset, noiseCoeffs, outCtNtt, compactNoiseLimb0, nullptr, cpuBenchmark);
+            gadgetLogBase, gadgetPowerOffset, noiseCoeffs, outCtNtt, compactNoiseLimb0, nullptr, cpuBenchmark, scope);
     }
 
     bool assembleRootTopCtDevice(
@@ -3104,12 +3104,12 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> r2Ntt, std::span<const RnsPoly> publicBRootNtt,
         std::span<const RnsPoly> publicBStarNtt, u32 gadgetLogBase, u32 gadgetPowerOffset,
         std::span<const RnsPoly> noiseCoeffs, std::vector<RnsPoly>& outCtNtt,
-        std::span<const u64> compactNoiseLimb0, const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark)
+        std::span<const u64> compactNoiseLimb0, const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleRootTopCtDevice(ctx, r1Coeffs, r2Ntt, publicBRootNtt, publicBStarNtt,
             gadgetLogBase, gadgetPowerOffset, noiseCoeffs, outCtNtt, compactNoiseLimb0,
-            compactNoiseDevice, 1, nullptr, nullptr, nullptr, nullptr, nullptr, cpuBenchmark);
+            compactNoiseDevice, 1, nullptr, nullptr, nullptr, nullptr, nullptr, cpuBenchmark, scope);
     }
 
     bool assembleRootTopCtDevice(
@@ -3128,10 +3128,10 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext,
         const RetainedPublicUniform* retainedPublicBFullNtt,
         const DeviceBatch* rootR1Device,
-        const RetainedPublicUniform* retainedBStarNtt, CpuBenchmarkState cpuBenchmark)
+        const RetainedPublicUniform* retainedBStarNtt, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        const auto* retainedR = randomizers ? lencRandomizerDeviceNtt(ctx, randomizers) : nullptr;
+        const auto* retainedR = randomizers ? lencRandomizerDeviceNtt(ctx, randomizers, scope) : nullptr;
         if (randomizers && (!retainedR || !r2Ntt.empty())) return false;
         const bool compactNoise = !compactNoiseLimb0.empty() || compactNoiseDevice;
         if (compactNoiseDevice && (!compactNoiseLimb0.empty() || compactNoiseDevice->producerStream())) return false;
@@ -3147,7 +3147,7 @@ namespace osuCrypto::LogVole::gpu
             if (!publicBRootNtt.empty() || fullCount < 4u || (fullCount & 1u) != 0 ||
                 fullCount / 2u - 1u >= std::numeric_limits<u32>::max() ||
                 !retainedPublicUniformMatches(ctx, *retainedPublicBFullNtt,
-                    fullCount, true)) return false;
+                    fullCount, true, scope)) return false;
             tauHi = static_cast<u32>(fullCount / 2u - 1u);
         }
         const auto r1Count = rootR1Device ? rootR1Device->count() : r1Coeffs.size();
@@ -3159,9 +3159,9 @@ namespace osuCrypto::LogVole::gpu
             (retainedR ? retainedR->count() : r2Ntt.size()) != r1Count ||
             (retainedBStarNtt && (!publicBStarNtt.empty() ||
                 !retainedRootBStarNttMatches(ctx, *retainedBStarNtt,
-                    bStarCount))) ||
+                    bStarCount, scope))) ||
             (rootR1Device && (!r1Coeffs.empty() ||
-                !rootErrorBatchMatches(ctx, *rootR1Device, r1Count)))) return false;
+                !rootErrorBatchMatches(ctx, *rootR1Device, r1Count, scope)))) return false;
         HostStep totalStep(hostProfiler(ctx), "setup: root device assembly", &cpuBenchmark);
         const u32 rows = static_cast<u32>(r1Count);
         const u32 cols = static_cast<u32>(tauHi + bStarCount);
@@ -3234,7 +3234,7 @@ namespace osuCrypto::LogVole::gpu
                             : rBuffer.upload(r2Ntt, stream, rows)) ||
                 !(retainedPublicBFullNtt
                     ? copyRetainedPublicUniform(ctx, bBuffer, *retainedPublicBFullNtt,
-                        1u, tauHi, true, stream)
+                        1u, tauHi, true, stream, scope)
                     : bBuffer.upload(publicBRootNtt, stream)) ||
                 !(retainedBStarNtt
                     ? ([&] {
@@ -3330,13 +3330,13 @@ namespace osuCrypto::LogVole::gpu
         std::span<const u64> crtLiftModQj, std::span<const RnsPoly> noiseCoeffs,
         std::vector<RnsPoly>& outCtNtt, std::vector<RnsPoly>* outFirstRNtt,
         std::span<const u64> compactNoiseLimb0, std::span<const u64> compactRandomizerLimb0,
-        u32 requestedWorkers, bool devicePadding, CpuBenchmarkState cpuBenchmark)
+        u32 requestedWorkers, bool devicePadding, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleLencTruncDevice(ctx, rLayersNtt, sPadNtt, publicBNtt, tauHi, tauLeaf,
             gadgetLogBase, gadgetLeaves, crtLiftModQj, noiseCoeffs, outCtNtt, outFirstRNtt,
             compactNoiseLimb0, compactRandomizerLimb0, requestedWorkers, devicePadding, nullptr, nullptr,
-            nullptr, 0, nullptr, nullptr, nullptr, cpuBenchmark);
+            nullptr, 0, nullptr, nullptr, nullptr, cpuBenchmark, scope);
     }
 
     bool assembleLencTruncDevice(
@@ -3359,7 +3359,7 @@ namespace osuCrypto::LogVole::gpu
         u32 retainedRandomizerCount,
         std::shared_ptr<const LazyLencRandomizerState>* retainedRandomizers,
         const RetainedPublicUniform* retainedPublicB,
-        const DeviceBatch* seedLabelDevice, CpuBenchmarkState cpuBenchmark)
+        const DeviceBatch* seedLabelDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (outFirstRNtt == &outCtNtt) return false;
@@ -3404,10 +3404,10 @@ namespace osuCrypto::LogVole::gpu
                            : sPadNtt.size() != width) ||
             (seedLabelDevice && (!devicePadding || !sPadNtt.empty() ||
                 !setupLencInputBatchMatches(ctx, *seedLabelDevice,
-                    seedLabelCount, currentProtocolCacheScope().mRunId))) ||
+                    seedLabelCount, scope.mRunId, scope))) ||
             (retainedPublicB ? (!publicBNtt.empty() ||
                 !retainedPublicUniformMatches(ctx, *retainedPublicB,
-                    static_cast<std::size_t>(baseBCount64), true))
+                    static_cast<std::size_t>(baseBCount64), true, scope))
                 : publicBNtt.size() != baseBCount64) ||
             (compactNoiseLimb0.empty() && !compactNoiseDevice && noiseCoeffs.size() != count64) ||
             (gadgetLeaves && (retainedRandomizers ? !crtLiftModQj.empty() : crtLiftModQj.size() != rho))) return false;
@@ -3573,8 +3573,8 @@ namespace osuCrypto::LogVole::gpu
             if (!copiedSeedLabels ||
                 !(retainedPublicB
                     ? copyRetainedPublicUniform(ctx, bBuffer, *retainedPublicB,
-                        0, baseBCount, true, stream)
-                    : uploadPublicUniformOrHost(ctx, bBuffer, publicBNtt, stream))) return false;
+                        0, baseBCount, true, stream, scope)
+                    : uploadPublicUniformOrHost(ctx, bBuffer, publicBNtt, stream, scope))) return false;
             if (devicePadding && seedLabelCount < width &&
                 !gpuMemsetZero(rBuffer.poly(
                         static_cast<std::size_t>(levels) * width + seedLabelCount, stream),
@@ -3659,7 +3659,7 @@ namespace osuCrypto::LogVole::gpu
                 !gpuMemcpyD2D(retainedNtt.data(stream), rBuffer.data(stream), retainedNtt.bytes(), stream.raw()) ||
                 !launchCanonicalize(ring->view(stream), retainedNtt.data(stream), nullptr, retainedRandomizerCount, stream.raw()) ||
                 !stream.sync()) return false;
-            randomizerOwner = std::make_shared<GpuLencRandomizers>(ctx, ring, std::move(retainedNtt));
+            randomizerOwner = std::make_shared<GpuLencRandomizers>(ctx, ring, std::move(retainedNtt), scope.mRole);
         }
         else if (outFirstRNtt)
         {
@@ -3749,11 +3749,11 @@ namespace osuCrypto::LogVole::gpu
         const RingNttContext& ctx, std::span<const RnsPoly> r,
         std::span<const RnsPoly> sk1, std::span<const RnsPoly> publicANtt,
         u32 gadgetLogBase, bool rInputIsNtt, u32 rPowerOffset,
-        std::vector<RnsPoly>& outCoeffs, std::span<const u64> compactNoiseLimb0, CpuBenchmarkState cpuBenchmark)
+        std::vector<RnsPoly>& outCoeffs, std::span<const u64> compactNoiseLimb0, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleLheCiphertextDevice(ctx, r, sk1, publicANtt, gadgetLogBase,
-            rInputIsNtt, rPowerOffset, outCoeffs, compactNoiseLimb0, nullptr, cpuBenchmark);
+            rInputIsNtt, rPowerOffset, outCoeffs, compactNoiseLimb0, nullptr, cpuBenchmark, scope);
     }
 
     bool assembleLheCiphertextDevice(
@@ -3761,12 +3761,12 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> sk1, std::span<const RnsPoly> publicANtt,
         u32 gadgetLogBase, bool rInputIsNtt, u32 rPowerOffset,
         std::vector<RnsPoly>& outCoeffs, std::span<const u64> compactNoiseLimb0,
-        const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark)
+        const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return assembleLheCiphertextDevice(ctx, r, sk1, publicANtt, gadgetLogBase,
             rInputIsNtt, rPowerOffset, outCoeffs, compactNoiseLimb0, compactNoiseDevice, 1,
-            nullptr, nullptr, nullptr, nullptr, nullptr, 0, false, cpuBenchmark);
+            nullptr, nullptr, nullptr, nullptr, nullptr, 0, false, cpuBenchmark, scope);
     }
 
     bool assembleLheCiphertextDevice(
@@ -3785,27 +3785,27 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch* rootR1Device,
         const DeviceBatch* rootSecretDevice,
         ProtocolCacheRunId rootSecretOwnerRunId,
-        bool topSecretDomain, CpuBenchmarkState cpuBenchmark)
+        bool topSecretDomain, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        const auto* retainedR = randomizers ? lencRandomizerDeviceNtt(ctx, randomizers) : nullptr;
+        const auto* retainedR = randomizers ? lencRandomizerDeviceNtt(ctx, randomizers, scope) : nullptr;
         const auto rCount = retainedR ? retainedR->count()
             : rootR1Device ? rootR1Device->count() : r.size();
         const auto skCount = rootSecretDevice ? rootSecretDevice->count() : sk1.size();
         if (!enabled(ctx) || !rCount || !skCount || rPowerOffset > 1u ||
             (randomizers && (!retainedR || !r.empty() || !rInputIsNtt)) ||
             (rootR1Device && (randomizers || !r.empty() || rInputIsNtt ||
-                !rootErrorBatchMatches(ctx, *rootR1Device, rCount))) ||
+                !rootErrorBatchMatches(ctx, *rootR1Device, rCount, scope))) ||
             (rootSecretDevice && (!sk1.empty() ||
                 !(topSecretDomain
                     ? topSecretUniformBatchMatches(ctx, *rootSecretDevice,
-                        skCount, rootSecretOwnerRunId)
+                        skCount, rootSecretOwnerRunId, scope)
                     : rootSecretUniformBatchMatches(ctx, *rootSecretDevice,
-                        skCount, rootSecretOwnerRunId)))) ||
+                        skCount, rootSecretOwnerRunId, false, scope)))) ||
             rCount > std::numeric_limits<u32>::max() ||
             skCount > std::numeric_limits<u32>::max() ||
             (retainedPublicA ? (!publicANtt.empty() ||
-                !retainedPublicUniformMatches(ctx, *retainedPublicA, rCount, false))
+                !retainedPublicUniformMatches(ctx, *retainedPublicA, rCount, false, scope))
                 : publicANtt.size() != rCount) ||
             (!retainedR && !rootR1Device && !validateRingBatchShape(r, ctx.mParams)) ||
             (!rootSecretDevice && !validateRingBatchShape(sk1, ctx.mParams)) ||
@@ -3880,8 +3880,8 @@ namespace osuCrypto::LogVole::gpu
                     : skBuffer.upload(sk1, stream)) ||
                 !(retainedPublicA
                     ? copyRetainedPublicUniform(ctx, aBuffer, *retainedPublicA,
-                        0, rows, false, stream)
-                    : uploadPublicUniformOrHost(ctx, aBuffer, publicANtt, stream))) return false;
+                        0, rows, false, stream, scope)
+                    : uploadPublicUniformOrHost(ctx, aBuffer, publicANtt, stream, scope))) return false;
             if (compactNoise && (!noiseBuffer.resize(*ring, count, stream) ||
                     !(compactNoiseDevice
                         ? copyRowsFromDevice(noiseBuffer.data(stream), polyBytes, compactNoiseDevice->data(), noiseDegree * sizeof(u64), count, stream)
@@ -4180,8 +4180,8 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr& dHatDev,
         bool allowTilePipeline,
         ReceiverFirstQueryAllocations* firstQueryAllocations,
-        const void* firstQueryOwner = nullptr, u64 firstQuerySid = 0,
-        const ShrinkOverride& ov = ShrinkOverride{})
+        const void* firstQueryOwner, u64 firstQuerySid,
+        const ShrinkOverride& ov, ProtocolCacheScopeView scope)
     {
         AutoTimer timer(globalTimingStats.mGpuShrinkTimeUs);
         const std::span<const RnsPoly> x = xHost;
@@ -4189,7 +4189,7 @@ namespace osuCrypto::LogVole::gpu
         if (state.mParams.mTau != tauHi) return bail(state.mRingFactoryOwner, "tau mismatch");
         if (!state.mParams.mTruncateOneGadgetDigit) return bail(state.mRingFactoryOwner, "non-truncated parameters");
 
-        auto cache = receiverCache(state);
+        auto cache = receiverCache(state, scope);
         if (!cache) return bail(state.mRingFactoryOwner, "offline cache upload failed");
         auto ring = cache->mRing;
         const u32 rho = ring->rho();
@@ -4290,7 +4290,7 @@ namespace osuCrypto::LogVole::gpu
             impl->mXSrc = impl->mX.data(stream);
 
             const std::size_t idxCount = xCount;
-            const u64 geo = idxKey(0xD4A8u, xCount, muHi, width, rho, chunkCount);
+            const u64 geo = idxKey(scope.mRole, 0xD4A8u, xCount, muHi, width, rho, chunkCount);
             const u32* dAll = cachedIdx(geo, 3 * idxCount, stream, [&](std::vector<u32>& v)
             {
                 u32* srcIdx = v.data();
@@ -4355,7 +4355,7 @@ namespace osuCrypto::LogVole::gpu
         const bool reservedNodes = takeReceiverFirstQueryNodes(
             firstQueryAllocations, *ring, state.mParams.mRing, xCount,
             muHi, tauHi, width, maxTau, totalNodes,
-            firstQueryOwner, firstQuerySid, impl->mNodes, stream);
+            firstQueryOwner, firstQuerySid, impl->mNodes, stream, scope);
         if (!reservedNodes && !impl->mNodes.resize(*ring, totalNodes, stream))
             return false;
         // Every real node slot is overwritten before use. Only padding terms need
@@ -4405,7 +4405,7 @@ namespace osuCrypto::LogVole::gpu
                 // centred representative. Fuse that exact reconstruction into
                 // the out-of-place transform load and materialize every raw leaf
                 // slot, including padded zeros.
-                const u64 geo = idxKey(
+                const u64 geo = idxKey(scope.mRole,
                     0xD1ECu, xCount, muHi, chunkCount, width, rho,
                     impl->mNodeCount, impl->mMaxTau);
                 const u32* dAll = cachedIdx(geo, 3 * srcCount, stream, [&](std::vector<u32>& v)
@@ -4505,7 +4505,7 @@ namespace osuCrypto::LogVole::gpu
                     }
                     else
                     {
-                        const u64 diagGeo = idxKey(
+                        const u64 diagGeo = idxKey(scope.mRole,
                             0xD1A6u, xCount, muHi, chunkCount, width, rho,
                             impl->mNodeCount, impl->mMaxTau);
                         const u32* dDiag = cachedIdx(
@@ -4543,7 +4543,7 @@ namespace osuCrypto::LogVole::gpu
             else
             {
             const std::size_t dstCount = srcCount * tauLeafCount;
-            const u64 geo = idxKey(
+            const u64 geo = idxKey(scope.mRole,
                 0x1EAFull, chunkCount, width, tauLeafCount, rho, nodeCount, maxTau);
             const u32* dAll = cachedIdx(
                 geo, 2 * srcCount + dstCount, stream, [&](std::vector<u32>& v)
@@ -4652,7 +4652,7 @@ namespace osuCrypto::LogVole::gpu
                 // The recursive-leaf pairing scales each side by the CRT lift of
                 // its own limb; see recursiveLeafPairInnerProductNttToStd.
                 const std::size_t idxCount = outCount;
-                const u64 geo = idxKey(
+                const u64 geo = idxKey(scope.mRole,
                     0x1EA2u, chunkCount, nodesAtDepth, firstNode, width, rho,
                     impl->mNodeCount, impl->mMaxTau);
                 const u32* dAll = cachedIdx(geo, 4 * idxCount, stream, [&](std::vector<u32>& v)
@@ -4710,7 +4710,7 @@ namespace osuCrypto::LogVole::gpu
                 {
                 const u32 terms = 2u * activeTau;
                 const std::size_t idxCount = static_cast<std::size_t>(outCount) * terms;
-                const u64 geo = idxKey(
+                const u64 geo = idxKey(scope.mRole,
                     0x1A11u, chunkCount, nodesAtDepth, firstNode, activeTau, terms,
                     impl->mNodeCount, impl->mMaxTau, tauHi, tauLeafCount, fullTau,
                     static_cast<u32>(leafLevel));
@@ -4789,7 +4789,7 @@ namespace osuCrypto::LogVole::gpu
 
             // decomposeHiNtt: centred high digits, then forward NTT.
             const std::size_t dstCount = static_cast<std::size_t>(outCount) * tauHi;
-            const u64 dstGeo = idxKey(
+            const u64 dstGeo = idxKey(scope.mRole,
                 0xD37Au, chunkCount, nodesAtDepth, firstNode, tauHi,
                 impl->mNodeCount, impl->mMaxTau);
             const u32* dDst = cachedIdx(dstGeo, dstCount, stream, [&](std::vector<u32>& dstIdx)
@@ -4900,7 +4900,7 @@ namespace osuCrypto::LogVole::gpu
                 GpuPolyBuffer unbundled;
                 if (!unbundled.resize(*ring, outCount, stream)) return false;
 
-                const u64 geo = idxKey(0xD4A7u, chunkCount, tauHi, rho);
+                const u64 geo = idxKey(scope.mRole, 0xD4A7u, chunkCount, tauHi, rho);
                 const u32* dPair = cachedIdx(geo, 2 * outCount, stream, [&](std::vector<u32>& v)
                 {
                     u32* srcIdx = v.data();
@@ -4980,12 +4980,12 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         LevelSession& session,
         std::vector<RnsPoly>& digests,
-        std::vector<std::vector<RnsPoly>>& dHatChunks)
+        std::vector<std::vector<RnsPoly>>& dHatChunks, ProtocolCacheScopeView scope)
     {
         DeviceBatchPtr unused;
         return shrinkChunksImpl(
             state, x, nullptr, static_cast<u32>(x.size()), muHi, tauHi, session, true, digests, dHatChunks,
-            unused, false, nullptr);
+            unused, false, nullptr, nullptr, 0, ShrinkOverride{}, scope);
     }
 
     bool shrinkChunksDevice(
@@ -4999,14 +4999,14 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr& dHat,
         bool allowTilePipeline,
         ReceiverFirstQueryAllocations* firstQueryAllocations,
-        const void* firstQueryOwner, u64 firstQuerySid)
+        const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope)
     {
         std::vector<RnsPoly> digests;
         std::vector<std::vector<RnsPoly>> dHatChunks;
         return shrinkChunksImpl(
             state, xHost, xDev, xCount, muHi, tauHi, session, false, digests,
             dHatChunks, dHat, allowTilePipeline, firstQueryAllocations,
-            firstQueryOwner, firstQuerySid);
+            firstQueryOwner, firstQuerySid, ShrinkOverride{}, scope);
     }
 
     bool buildDigestTreeChunkDevice(
@@ -5020,7 +5020,7 @@ namespace osuCrypto::LogVole::gpu
         u32& maxTauOut,
         RnsPoly& digest,
         std::vector<RnsPoly>& nodesFlat,
-        std::shared_ptr<void>& sessionOut)
+        std::shared_ptr<void>& sessionOut, ProtocolCacheScopeView scope)
     {
         const u32 xCount = xDev ? static_cast<u32>(xDev->count()) : static_cast<u32>(x.size());
         if (!enabled(state.mRingFactoryOwner) || xCount == 0 || widthPadded == 0 || tauHi == 0) return false;
@@ -5041,7 +5041,7 @@ namespace osuCrypto::LogVole::gpu
         if (!shrinkChunksImpl(
                 state, xDev ? std::span<const RnsPoly>() : x, xDev, xCount, xCount, tauHi,
                 *session, false, digests, dHatChunks, unused, false,
-                nullptr, nullptr, 0, ov) ||
+                nullptr, nullptr, 0, ov, scope) ||
             !session->mImpl)
         {
             return false;
@@ -6682,7 +6682,7 @@ namespace osuCrypto::LogVole::gpu
         bool wantHostOutput,
         std::vector<RnsPoly>& tbm,
         DeviceBatchPtr& tbmDev,
-        PreparedReceiverCt2* preparedCt2)
+        PreparedReceiverCt2* preparedCt2, ProtocolCacheScopeView scope)
     {
         AutoTimer timer(globalTimingStats.mGpuExpandTimeUs);
         const std::span<const RnsPoly> skX = skXHost;
@@ -6825,7 +6825,7 @@ namespace osuCrypto::LogVole::gpu
         if (!combineExpandAccumulator)
         {
             const std::size_t idxCount = rowsTotal * tauHi;
-            const u64 geo = idxKey(0xC711u, chunkCount, mu, tauHi, cache->mCt1Cols);
+            const u64 geo = idxKey(scope.mRole, 0xC711u, chunkCount, mu, tauHi, cache->mCt1Cols);
             const u32* dPair = cachedIdx(geo, 2 * idxCount, stream, [&](std::vector<u32>& v)
             {
                 u32* aIdx = v.data();
@@ -6859,7 +6859,7 @@ namespace osuCrypto::LogVole::gpu
         if (!combineExpandAccumulator)
         {
             const std::size_t idxCount = rowsTotal;
-            const u64 geo = idxKey(0xA5C1u, chunkCount, mu);
+            const u64 geo = idxKey(scope.mRole, 0xA5C1u, chunkCount, mu);
             const u32* dPair = cachedIdx(geo, 2 * idxCount, stream, [&](std::vector<u32>& v)
             {
                 u32* aIdx = v.data();
@@ -6903,7 +6903,7 @@ namespace osuCrypto::LogVole::gpu
                 // One cached allocation holding both arrays back to back, so the tree
                 // walk runs once and there is a single device buffer per geometry.
                 const std::size_t idxCount = static_cast<std::size_t>(rowsTotal) * terms;
-                const u64 geo = idxKey(
+                const u64 geo = idxKey(scope.mRole,
                     0xE7A1u, chunkCount, mu, levels, width, ctTauMax, impl.mTauHi, impl.mTauLeaf,
                     cache->mLacctCols, impl.mNodeCount, impl.mMaxTau);
                 const u32* dPair = cachedIdx(geo, 2 * idxCount, stream, [&](std::vector<u32>& v)
@@ -7037,12 +7037,12 @@ namespace osuCrypto::LogVole::gpu
         u32 outPerChunk,
         u32 totalOut,
         std::vector<RnsPoly>& tbm,
-        PreparedReceiverCt2* preparedCt2)
+        PreparedReceiverCt2* preparedCt2, ProtocolCacheScopeView scope)
     {
         DeviceBatchPtr unused;
         return expandReceiverChunksImpl(
             state, session, skX, nullptr, seed, sid, instanceBase, maskDigestHash, outPerChunk,
-            totalOut, true, tbm, unused, preparedCt2);
+            totalOut, true, tbm, unused, preparedCt2, scope);
     }
 
     bool expandReceiverChunksDevice(
@@ -7056,12 +7056,12 @@ namespace osuCrypto::LogVole::gpu
         u32 outPerChunk,
         u32 totalOut,
         DeviceBatchPtr& tbm,
-        PreparedReceiverCt2* preparedCt2)
+        PreparedReceiverCt2* preparedCt2, ProtocolCacheScopeView scope)
     {
         std::vector<RnsPoly> unused;
         return expandReceiverChunksImpl(
             state, session, std::span<const RnsPoly>(), &skX, seed, sid, instanceBase,
-            maskDigestHash, outPerChunk, totalOut, false, unused, tbm, preparedCt2);
+            maskDigestHash, outPerChunk, totalOut, false, unused, tbm, preparedCt2, scope);
     }
 
     // ---- sender expand ----------------------------------------------------

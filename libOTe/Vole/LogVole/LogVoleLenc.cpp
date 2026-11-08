@@ -1745,7 +1745,7 @@ namespace osuCrypto::LogVole
                     deferCiphertextHost ? &lazyCiphertext : nullptr,
                     retainRandomizers ? mu : 0u, retainRandomizers ? &lazyRandomizers : nullptr,
                     retainedPublicBNtt.get(),
-                    devicePadding ? seedLabelDevice : nullptr, cpuBenchmark);
+                    devicePadding ? seedLabelDevice : nullptr, cpuBenchmark, setupScope);
                 if (!deviceAssembled && (compactStrict || options.mLencDeviceStrict)) co_return false;
             }
 #endif

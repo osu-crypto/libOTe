@@ -376,7 +376,7 @@ namespace osuCrypto::LogVole
                 rPowerOffset, ct1.mPolys, compactNoise, residentNoise.get(), requestedWorkers,
                 deferCompletedCiphertext ? &lazyCiphertext : nullptr, randomizers.get(),
                 retainedPublicANtt.get(), rootR1Device,
-                rootSecretDevice, rootSecretOwnerRunId, topSecretDomain, cpuBenchmark);
+                rootSecretDevice, rootSecretOwnerRunId, topSecretDomain, cpuBenchmark, setupScope);
             if (assembled)
             {
                 // Keep the exact existing Gaussian sampler and row-major

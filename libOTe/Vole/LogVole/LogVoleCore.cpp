@@ -1743,7 +1743,7 @@ namespace osuCrypto::LogVole
                                              gadgetLogBase, gadgetPowerOffset, next.mPolys, next.mPolys,
                                              compact, residentNoise.get(), requestedWorkers,
                                              randomizers.get(), deferredCiphertext, retainedPublicBFullNtt,
-                                             rootR1Device, retainedBStarNtt, cpuBenchmark))
+                                             rootR1Device, retainedBStarNtt, cpuBenchmark, setupScope))
             {
                 out = std::move(next);
                 co_return true;
@@ -2869,7 +2869,7 @@ namespace osuCrypto::LogVole
                     muHi,
                     tauHi,
                     *session,
-                    dHatDev) &&
+                    dHatDev, false, nullptr, nullptr, 0, cacheScope) &&
                 dHatDev && dHatDev->count() >= leftWidth)
             {
                 // hatD stays on the device. It used to be downloaded here and handed
@@ -2944,7 +2944,7 @@ namespace osuCrypto::LogVole
                     maxTau,
                     deviceDigest,
                     nodesFlat,
-                    leftTreeSession) &&
+                    leftTreeSession, cacheScope) &&
                 maxTau != 0 && !wantHostTree)
             {
                 // Device session only; nothing below reads mLeftTree or yLeft,

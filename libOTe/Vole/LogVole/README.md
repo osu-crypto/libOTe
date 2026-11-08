@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **84%** of the agreed ownership/globals refactor,
+Estimated overall completion: **85%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -255,6 +255,7 @@ contain no environment reads.
 | Reusable GPU offline mirrors | Sender/receiver cache preparation forwards an explicit borrowed identity through context creation, retained-public validation, copies and host-retention lookup. Recursive Core setup forwards its captured scope. Sender retained operands preserve their original offline run. Three TLS guards are removed; compatibility defaults and receiver Ct1 lazy materialization remain. No kernel or numerical changes. |
 | Receiver resident Ct1 and lazy snapshots | Explicit receiver finalization scope reaches context/public-operand acquisition, retained validation, cache construction and producer owners. Original caller-role context/eager-cache selection and Receiver-only retained regions are preserved. Lazy public owners pass their owned scope directly. Ct1 snapshot/NTT and pipelined copy are identity-free, so their redundant guards are removed without new parameters. Generic legacy parallel helpers still carry compatibility scope; copy workers use an empty owned context. No scheduling or numerical changes. |
 | GPU backend cold setup ownership | Dynamic coefficient/plaintext selectors and nullable raw-ring setup accept an explicit fallback service; production execution owners bypass compatibility defaults. `GpuRing::get(ctx)` obtains a missing setup service from its owned factory, and prefetch workers use their copied context without identity capture. Backend implementation has no direct ambient identity reads/guards; temporary external defaults and the retained-record bind boundary remain. Role/raw cache keys and warm reuse are unchanged. |
+| GPU geometry and retained randomizer identity | Geometry keys hash the explicit operation role; shrink/expand and setup assembler entry points forward borrowed views through cache/token admission and retained copies. LENC randomizers preserve producer-role admission across runs, and seed-label/private metadata keeps its exact existing run rules. Existing owned setup/online callers forward their contexts; public compatibility defaults remain for other callers. No numerical, kernel or scheduling changes. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -284,6 +285,14 @@ example compile (65.21 seconds). Three CPU checks pass in 3.16 seconds; two
 GPU identity/lazy-context checks pass in 2.51 seconds, including explicit
 null-execution selector/raw owners and cold prefetch/get reuse under unrelated
 ambience. No benchmarks or WSL run.
+
+Geometry/randomizer validation: Windows CUDA-enabled test target and frontend
+example compile (69.84 seconds). Two GPU identity checks pass in 2.56 seconds,
+including explicit randomizer role admission across runs and a real shrink
+mirror rebuild under foreign ambience. Two-query 16-value GoldenSeed GPU online
+smoke passes in 0.80 seconds; three CPU checks pass in 3.20 seconds. No
+benchmarks or WSL run. Compatibility transport still keeps the runtime global
+count at 25; the 85% headline is an approximate overall work estimate.
 
 #### Remaining runtime globals
 

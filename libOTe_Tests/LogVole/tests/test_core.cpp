@@ -2128,6 +2128,34 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == receiver.mRunId);
     LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == receiver.mRole);
 
+    RnsPoly zero;
+    zero.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
+    std::fill(zero.mCoeffs.begin(), zero.mCoeffs.end(), 0);
+    const std::vector<std::vector<RnsPoly>> layers{std::vector<RnsPoly>(2, zero)};
+    const std::vector<RnsPoly> padded(2, zero), publicB(4, zero), noise(4, zero);
+    std::vector<RnsPoly> ciphertext, firstR;
+    std::shared_ptr<const LazyLencRandomizerState> randomizers;
+    // The producer's explicit role wins over receiver ambience. Randomizers
+    // intentionally admit another run of the same role, but reject Receiver.
+    LOGVOLE_REQUIRE_TRUE(gpu::assembleLencTruncDevice(ctx, layers, padded, publicB,
+        1, 1, 30, false, {}, noise, ciphertext, &firstR, {}, {}, 1, false,
+        nullptr, nullptr, nullptr, 2, &randomizers, nullptr, nullptr, {}, sender));
+    LOGVOLE_REQUIRE_TRUE(randomizers && firstR.empty());
+    const std::vector<RnsPoly> secret(1, zero), publicA(2, zero);
+    std::vector<RnsPoly> lhe;
+    LOGVOLE_REQUIRE_TRUE(gpu::assembleLheCiphertextDevice(ctx, {}, secret, publicA,
+        30, true, 0, lhe, {}, nullptr, 1, nullptr, randomizers.get(), nullptr,
+        nullptr, nullptr, 0, false, {}, otherRun));
+    LOGVOLE_REQUIRE_EQ(lhe.size(), 2u);
+    const auto beforeLhe = lhe;
+    {
+        ScopedProtocolCacheScope unrelated(sender);
+        LOGVOLE_REQUIRE_FALSE(gpu::assembleLheCiphertextDevice(ctx, {}, secret, publicA,
+            30, true, 0, lhe, {}, nullptr, 1, nullptr, randomizers.get(), nullptr,
+            nullptr, nullptr, 0, false, {}, receiver));
+    }
+    expect_batch_equal(lhe, beforeLhe);
+
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
@@ -2242,6 +2270,19 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(receiverState.mLazyPublicUniformHosts->get(publicA, publicB));
         LOGVOLE_REQUIRE_TRUE(receiverState.mLazyPublicUniformHosts->get(againA, againB));
         LOGVOLE_REQUIRE_TRUE(publicA == againA && publicB == againB);
+        // Rebuild a real shrink mirror from receiver-owned retained operands;
+        // this traverses cache admission and geometry under foreign ambience.
+        auto shrinkState = receiverState;
+        shrinkState.mGpuCache.reset();
+        RnsPoly zeroInput;
+        zeroInput.mCoeffs.resize(ringPolyCoeffCount(receiverCtx.mParams));
+        std::fill(zeroInput.mCoeffs.begin(), zeroInput.mCoeffs.end(), 0);
+        std::vector<RnsPoly> x(shrinkState.mParams.mMu, zeroInput), digests;
+        std::vector<std::vector<RnsPoly>> dHat;
+        gpu::LevelSession session;
+        LOGVOLE_REQUIRE_TRUE(gpu::shrinkChunks(shrinkState, x,
+            shrinkState.mParams.mMu, shrinkState.mParams.mTau, session, digests, dHat, receiverSetup));
+        LOGVOLE_REQUIRE_TRUE(session.valid() && !digests.empty() && !dHat.empty());
         LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
         LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
     }
