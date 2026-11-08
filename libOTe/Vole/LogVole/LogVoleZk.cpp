@@ -146,7 +146,9 @@ namespace osuCrypto::LogVole
 
     namespace
     {
-        std::size_t cpuWorkerBudget(u32 requested, const CpuBenchmarkContext* benchmark)
+        // Compatibility policy for the synchronous witness overload only.
+        // Caller-executor operations use explicit prepared task counts instead.
+        std::size_t legacyWitnessWorkerCount(u32 requested, const CpuBenchmarkContext* benchmark)
         {
             // Resolve the legacy zero=automatic convention once, while idle.
             // A supplied benchmark partition is also an explicit capacity cap.
@@ -250,7 +252,7 @@ namespace osuCrypto::LogVole
         if (voleSize && voleSize < circuit.voleCount()) return false;
         const auto chunks = std::min<u64>(circuit.mWidth, std::max<u32>(1, threads));
         const auto workers = chunks <= 1 ? std::size_t{1} : std::min<std::size_t>(chunks,
-            cpuWorkerBudget(threads, cpuBenchmark.mContext));
+            legacyWitnessWorkerCount(threads, cpuBenchmark.mContext));
         // Empty owners allocate nothing. Construct only for the first independent
         // layer needing multiple workers, then reuse them through the final join.
         std::optional<std::vector<std::array<u64, 2>>> locals;
@@ -301,7 +303,7 @@ namespace osuCrypto::LogVole
               mVerifierChunks(chunkCount(mWidth, threads)),
               mPartial(mVerifierChunks * static_cast<std::size_t>(mDepth)),
               mOptions(detail::captureCpuZkOptions(settings)),
-              mWorkers(std::min(cpuWorkerBudget(threads, benchmark),
+              mWorkers(std::min(std::size_t(std::max(1u, threads)),
                   mVerifierChunks * static_cast<std::size_t>(mDepth))),
               mBenchmark(benchmark),
               mProverLocal(std::min(mProverChunks, mWorkers)),
@@ -819,7 +821,7 @@ namespace osuCrypto::LogVole
             const LogVoleZkOptions& settings)
             : mStatement(st), mOptions(detail::captureCpuZkOptions(settings)), mBenchmark(benchmark),
               mChunks(std::min<std::size_t>(st.mDim, std::max(1u, threads))),
-              mWorkers(std::min(mChunks, cpuWorkerBudget(threads, benchmark))),
+              mWorkers(mChunks),
               mPartial(mChunks), mLocals(mWorkers), mBt(st.entries()), mMbt(st.entries()), mA0(st.entries()), mCross(st.entries()), mProofs(st.repetitions())
         {}
         bool matches(const ZkMatMulStatement& st) const noexcept
@@ -853,7 +855,7 @@ namespace osuCrypto::LogVole
             const LogVoleZkOptions& settings)
             : mStatement(st), mOptions(detail::captureCpuZkOptions(settings)), mBenchmark(benchmark),
               mChunks(std::min<std::size_t>(st.mDim, std::max(1u, threads))),
-              mWorkers(std::min(mChunks, cpuWorkerBudget(threads, benchmark))),
+              mWorkers(mChunks),
               mPartial(mChunks), mLocals(mWorkers), mBt(st.entries()), mProducts(st.entries()), mValues(st.repetitions())
         {}
         bool matches(const ZkMatMulStatement& st) const noexcept
@@ -922,8 +924,9 @@ namespace osuCrypto::LogVole
         if (results.empty() || !validateZkMatMulStatement(st) || modulus < 2 ||
             wires.size() < st.voleCount()) co_return false;
         const seal::Modulus mod(modulus);
-        auto allowance = std::min<std::size_t>(results.size(), cpuWorkerBudget(threads, cpuBenchmark.mContext));
-        auto chunks = results.first(std::min<std::size_t>(allowance, st.mDim));
+        const auto taskCount = std::min<std::size_t>(std::max(1u, threads), st.mDim);
+        if (results.size() < taskCount) co_return false;
+        auto chunks = results.first(taskCount);
         AlignedUnVec<u64> product(st.entries());
         const auto* a = wires.data() + st.offsetA();
         const auto* b = wires.data() + st.offsetB();
@@ -946,7 +949,8 @@ namespace osuCrypto::LogVole
         AlignedUnVec<u64>& wires, AlignedUnVec<u64>& publicProduct, u64 voleSize,
         CpuBenchmarkState cpuBenchmark)
     {
-        if (results.empty()) co_return false;
+        if (results.empty() || results.size() <
+            std::min<std::size_t>(std::max(1u, threads), st.mDim)) co_return false;
         if (!zkMatMulWitnessInputs(st, modulus, prng, wires, voleSize)) co_return false;
         co_return co_await zkMatMulFillProduct(executor, results, st, modulus, threads,
             wires, publicProduct, cpuBenchmark);

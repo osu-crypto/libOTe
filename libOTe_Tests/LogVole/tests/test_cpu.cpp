@@ -599,16 +599,15 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(serial.prepared() && parallel.prepared());
     LOGVOLE_REQUIRE_EQ(serial.workers(), 1u);
     LOGVOLE_REQUIRE_TRUE(automatic.workers() >= 1);
-    if (std::thread::hardware_concurrency() > 1)
-        LOGVOLE_REQUIRE_TRUE(automatic.workers() > 1);
+    LOGVOLE_REQUIRE_EQ(automatic.workers(), 1u);
     CpuBenchmarkContext partition;
     partition.mCpus = {0};
     partition.mWorkerLimit = 1;
     ZkMulCpuWorkspace limited(circuit, 0, &partition);
     LOGVOLE_REQUIRE_EQ(limited.workers(), 1u);
-    // Three chunks share one local: exercise accumulation across chunk boundaries.
+    // Diagnostics do not reduce the explicit logical task count.
     ZkMulCpuWorkspace limitedChunks(circuit, 3, &partition);
-    LOGVOLE_REQUIRE_EQ(limitedChunks.workers(), 1u);
+    LOGVOLE_REQUIRE_EQ(limitedChunks.workers(), 3u);
     PRNG random(toBlock(0x50524550, 2));
     constexpr u64 q = 65537, delta = 19;
     const seal::Modulus mod(q);
@@ -3286,8 +3285,8 @@ void LogVole_Cpu_AsyncMatMulProof(const oc::CLP& cmd)
         budget.mWorkerLimit = limit;
         ZkMatMulProverWorkspace prover(st, 3, &budget, settings);
         ZkMatMulVerifierWorkspace verifier(st, 3, &budget, settings);
-        LOGVOLE_REQUIRE_EQ(prover.workers(), limit);
-        LOGVOLE_REQUIRE_EQ(verifier.workers(), limit);
+        LOGVOLE_REQUIRE_EQ(prover.workers(), 3u);
+        LOGVOLE_REQUIRE_EQ(verifier.workers(), 3u);
         std::vector<ZkProof> proofs(st.repetitions());
         std::vector<u64> values(st.repetitions());
         const auto proofStorage = proofs.data();
@@ -3382,21 +3381,32 @@ void LogVole_Cpu_AsyncMatMulProof(const oc::CLP& cmd)
             }
             LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulFillProduct(executor, {},
                 st, q, 3, wires, product)));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulFillProduct(executor,
+                std::span(results).first(1), st, q, 3, wires, product)));
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(product, expectedProduct));
+            PRNG rejected(toBlock(0x52454a)), saved(toBlock(0x52454a));
+            const auto savedWires = wires;
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulWitness(executor,
+                std::span(results).first(1), st, q, 3, rejected, wires, product)));
+            LOGVOLE_REQUIRE_TRUE(rejected.get<block>() == saved.get<block>());
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(wires, savedWires));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(product, expectedProduct));
             if (limit == 1)
             {
                 macoro::thread_pool idle;
+                ZkMatMulProverWorkspace serialProver(st, 1, &budget, settings);
+                ZkMatMulVerifierWorkspace serialVerifier(st, 1, &budget, settings);
                 LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulProverResponse(idle,
-                    st, wires, macs, challenge, q, prover, proofs)));
+                    st, wires, macs, challenge, q, serialProver, proofs)));
                 LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(idle,
-                    st, keys, product, challenge, delta, q, verifier, values)));
+                    st, keys, product, challenge, delta, q, serialVerifier, values)));
                 LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulFillProduct(idle,
-                    std::span(results).first(1), st, q, 3, expectedWires, product)));
+                    std::span(results).first(1), st, q, 1, expectedWires, product)));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(product, expectedProduct));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(values, expectedValues));
             }
         }
-        LOGVOLE_REQUIRE_TRUE(budget.mPeakTaskThreads.load() <= limit);
+        LOGVOLE_REQUIRE_TRUE(budget.mPeakTaskThreads.load() <= 3u);
     }
 }
 
@@ -3504,7 +3514,7 @@ void LogVole_Cpu_AsyncMulProof(const oc::CLP& cmd)
                     CpuBenchmarkContext budget;
                     budget.mCpus = {0, 1, 2};
                     budget.mWorkerLimit = 1;
-                    ZkMulCpuWorkspace capped(circuit, 3, &budget, settings);
+                    ZkMulCpuWorkspace capped(circuit, 1, &budget, settings);
                     LOGVOLE_REQUIRE_EQ(capped.workers(), 1u);
                     LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(idle,
                         circuit, wires, macs, 73, q, capped, untouched)));

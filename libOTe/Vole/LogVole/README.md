@@ -707,8 +707,23 @@ distinct. Statistics and worker-budget TLS remain separate work.
 
 Next steps, in order:
 
-1. Replace the remaining CPU worker-budget ambient state with owned compute
-   resources and explicit allowances, then move pending diagnostics into their
+The caller-executor ZK witness/proof workspaces now prepare the explicitly
+requested number of logical task slots, independent of hardware concurrency and
+optional benchmark limits. Zero selects one task. Matrix-product calls reject
+insufficient caller result slots before changing the output; they no longer
+silently reduce the task count. The fixed caller executor may have fewer threads
+than logical tasks. Reused arithmetic buffers and serial inline execution are
+preserved. This is the first explicit-task-count scheduling step: the synchronous
+witness compatibility overload still owns its legacy executor, and the shared
+legacy/GPU scheduler still retains worker globals/TLS. No GPU scheduling changed.
+The inventory remains 24 runtime declarations and the estimate remains 89%.
+The Windows targeted build and frontend object compile pass in 81.96 seconds.
+Five focused CPU checks pass in 0.23 seconds with one executor thread, including
+three logical tasks, rejection, joins and reuse; CPU interactive golden passes
+in 4.11 seconds. No benchmarks or GPU execution checks were run for this step.
+
+1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
+   explicit task counts and matching buffers, then move pending diagnostics into their
    operation/resource owners. Retire `CpuRowScratch` scheduling and legacy
    overloads when their GPU/fallback/diagnostic callers are gone; do not treat
    physical legacy sites as unmigrated production CPU phases.

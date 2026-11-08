@@ -153,6 +153,8 @@ namespace osuCrypto::LogVole
             u64, PRNG&, AlignedUnVec<u64>&, u64, ZkMulCpuWorkspace&);
     public:
         ZkMulCpuWorkspace() noexcept;
+        // threads is the logical task count (zero selects one), independent of
+        // executor thread count and optional diagnostics. Storage is reused.
         ZkMulCpuWorkspace(const ZkMulCircuit& circuit, u32 threads,
             CpuBenchmarkContext* benchmark = nullptr, const LogVoleZkOptions& settings = {});
         ~ZkMulCpuWorkspace();
@@ -296,6 +298,7 @@ namespace osuCrypto::LogVole
             const ZkMatMulStatement&, std::span<const u64>, std::span<const u64>, const ZkMatMulChallenge&, u64, ZkMatMulProverWorkspace&, std::vector<ZkProof>&);
     public:
         ZkMatMulProverWorkspace() noexcept;
+        // Explicit logical task count; zero selects one. Diagnostics never cap it.
         ZkMatMulProverWorkspace(const ZkMatMulStatement& statement, u32 threads,
             CpuBenchmarkContext* benchmark = nullptr, const LogVoleZkOptions& settings = {});
         ~ZkMatMulProverWorkspace();
@@ -315,6 +318,7 @@ namespace osuCrypto::LogVole
             const ZkMatMulStatement&, std::span<const u64>, std::span<const u64>, const ZkMatMulChallenge&, u64, u64, ZkMatMulVerifierWorkspace&, std::vector<u64>&);
     public:
         ZkMatMulVerifierWorkspace() noexcept;
+        // Explicit logical task count; zero selects one. Diagnostics never cap it.
         ZkMatMulVerifierWorkspace(const ZkMatMulStatement& statement, u32 threads,
             CpuBenchmarkContext* benchmark = nullptr, const LogVoleZkOptions& settings = {});
         ~ZkMatMulVerifierWorkspace();
@@ -407,7 +411,8 @@ namespace osuCrypto::LogVole
         std::vector<u64>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
     // Explicit CPU execution; all borrowed inputs/resources live until joined.
-    // A nonempty status span bounds product/witness chunks; one runs inline.
+    // threads requests logical tasks (zero selects one), bounded by matrix rows.
+    // The status span must hold every task; one task runs inline.
     macoro::task<bool> zkMatMulFillProduct(macoro::thread_pool& executor, std::span<u8> results,
         const ZkMatMulStatement& st, u64 modulus, u32 threads,
         std::span<const u64> wires, AlignedUnVec<u64>& publicProduct, CpuBenchmarkState cpuBenchmark = {});
