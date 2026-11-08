@@ -53,11 +53,13 @@ namespace osuCrypto::LogVole
             std::shared_ptr<void>* firstQueryGpuAllocations = nullptr,
             ProtocolCacheScope setupScope = {});
 
+        // CPU timing is borrowed through completion; null disables collection.
+        // GPU execution retains the legacy timing selection.
         task<> keyDerive(
             const KeyDeriveReceiverInput& input,
             KeyDeriveReceiverOutput& output,
             Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr,
-            ProtocolCacheScope scope = {});
+            ProtocolCacheScope scope = {}, TimingStats* timing = nullptr);
 
         // CPU expansion resources are borrowed exclusively until completion and
         // may be reused across queries. Recursive levels share one ring shape;

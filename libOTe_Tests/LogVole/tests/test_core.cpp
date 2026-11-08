@@ -17,6 +17,7 @@
 #endif
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
+#include "libOTe_Tests/LogVole_TimingTestUtil.h"
 #include "cryptoTools/Common/CLP.h"
 
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
@@ -3936,6 +3937,70 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& c
 #endif
 }
 
+void LogVole_Core_TimingOwnership(const oc::CLP&)
+{
+    using tests_libOTe::logvole_test::timingSnapshot;
+    TimingStats first, second;
+    globalTimingStats.reset();
+    const auto globalBefore = timingSnapshot(globalTimingStats);
+    {
+        AutoTimer disabled(static_cast<std::atomic<oc::u64>*>(nullptr));
+        LOGVOLE_REQUIRE_TRUE(disabled.mStart == std::chrono::steady_clock::time_point{});
+    }
+    for (auto* owner : {&first, &second})
+    {
+        AutoTimer timer(&owner->mWrapTimeUs);
+        timer.mStart -= std::chrono::milliseconds(1);
+    }
+    LOGVOLE_REQUIRE_TRUE(first.mWrapTimeUs.load() >= 1000u);
+    LOGVOLE_REQUIRE_TRUE(second.mWrapTimeUs.load() >= 1000u);
+    first.reset();
+    LOGVOLE_REQUIRE_EQ(first.mWrapTimeUs.load(), 0u);
+    LOGVOLE_REQUIRE_TRUE(second.mWrapTimeUs.load() >= 1000u);
+
+    const auto receive = []<ProtocolCacheRole Role>(TimingStats* owner) {
+        auto sockets = coproto::LocalAsyncSocket::makePair();
+        const osuCrypto::LogVoleWireOptions options;
+        auto pending = osuCrypto::LogVole::detail::recvFrame<Role>(
+            sockets[1], 3, options, false, nullptr, owner) | macoro::make_eager();
+        // Eager start has suspended in the header receive before this wait.
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        std::array<oc::u8, sizeof(oc::u64)> header{};
+        osuCrypto::LogVole::detail::writeU64(header, 3);
+        macoro::sync_wait(sockets[0].send(coproto::copy(header)));
+        const auto wait = owner ? (Role == ProtocolCacheRole::Sender
+            ? owner->mSenderWaitUs.load() : owner->mReceiverWaitUs.load()) : 0;
+        // Payload delay must not extend the header wait statistic.
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        std::array<oc::u8, 3> payload{1, 2, 3};
+        macoro::sync_wait(sockets[0].send(coproto::copy(payload)));
+        const auto received = macoro::sync_wait(std::move(pending));
+        LOGVOLE_REQUIRE_EQ(received.size(), payload.size());
+        LOGVOLE_REQUIRE_TRUE(std::equal(payload.begin(), payload.end(), received.data()));
+        if (owner)
+        {
+            LOGVOLE_REQUIRE_TRUE(wait > 0u);
+            LOGVOLE_REQUIRE_EQ((Role == ProtocolCacheRole::Sender
+                ? owner->mSenderWaitUs.load() : owner->mReceiverWaitUs.load()), wait);
+        }
+    };
+    first.reset();
+    second.reset();
+    receive.template operator()<ProtocolCacheRole::Sender>(&first);
+    LOGVOLE_REQUIRE_EQ(first.mReceiverWaitUs.load(), 0u);
+    LOGVOLE_REQUIRE_EQ(second.mSenderWaitUs.load(), 0u);
+    const auto firstAfter = timingSnapshot(first);
+    receive.template operator()<ProtocolCacheRole::Receiver>(&second);
+    LOGVOLE_REQUIRE_EQ(second.mSenderWaitUs.load(), 0u);
+    LOGVOLE_REQUIRE_TRUE(timingSnapshot(first) == firstAfter);
+    const auto secondAfter = timingSnapshot(second);
+    receive.template operator()<ProtocolCacheRole::Sender>(nullptr);
+    receive.template operator()<ProtocolCacheRole::Receiver>(nullptr);
+    LOGVOLE_REQUIRE_TRUE(timingSnapshot(first) == firstAfter);
+    LOGVOLE_REQUIRE_TRUE(timingSnapshot(second) == secondAfter);
+    LOGVOLE_REQUIRE_TRUE(timingSnapshot(globalTimingStats) == globalBefore);
+}
+
 void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;
@@ -3969,15 +4034,17 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, referenceOffline));
     auto& referenceState = referenceOffline.mState;
     RingOpsStats senderStats, receiverStats;
+    TimingStats senderTiming, receiverTiming;
     const std::array<std::uint64_t, 11> zeroCounts{};
-    const auto selectStats = [](auto& state, RingOpsStats* sink) {
+    const auto selectStats = [](auto& state, RingOpsStats* sink, TimingStats* timing) {
         auto context = std::make_shared<RingNttContext>(*state.mShrinkExpandState.mRingFactoryOwner);
         context->mExecutionOptions.mRingOpsStats = sink;
+        context->mExecutionOptions.mTimingStats = timing;
         state.mShrinkExpandState.mRingFactoryOwner = std::move(context);
     };
-    selectStats(sender, &senderStats);
-    selectStats(receiver, &receiverStats);
-    selectStats(referenceState, nullptr);
+    selectStats(sender, &senderStats, &senderTiming);
+    selectStats(receiver, &receiverStats, &receiverTiming);
+    selectStats(referenceState, nullptr, nullptr);
     const auto counts = [](const RingOpsStats& stats) {
         return std::array<std::uint64_t, 11>{stats.mNttCount.load(), stats.mInttCount.load(),
             stats.mAddCount.load(), stats.mSubCount.load(), stats.mMulCount.load(),
@@ -4034,6 +4101,9 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
                 resources.executor, buffers.zeta, receiver, input.mX,
             receiverPrng, digest, request));
         }());
+        globalTimingStats.reset();
+        const auto receiverTimingBefore = tests_libOTe::logvole_test::timingSnapshot(receiverTiming);
+        const auto senderAttemptsBefore = senderTiming.mSeedAttemptCount.load();
         const auto senderBefore = counts(senderStats);
         const auto receiverBefore = counts(receiverStats);
         RootResponseMessage response;
@@ -4044,6 +4114,9 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(counts(senderStats) != senderBefore);
         LOGVOLE_REQUIRE_TRUE(counts(receiverStats) == receiverBefore);
         LOGVOLE_REQUIRE_TRUE(counts(globalRingOpsStats) == zeroCounts);
+        LOGVOLE_REQUIRE_TRUE(senderTiming.mSeedAttemptCount.load() > senderAttemptsBefore);
+        LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(receiverTiming) == receiverTimingBefore);
+        const auto senderTimingAfter = tests_libOTe::logvole_test::timingSnapshot(senderTiming);
         const auto senderAfter = counts(senderStats);
         const auto cachedKeys = sender.mPrecomputedTbk;
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(senderPrecompute(executor, lheBuffers, sender, senderPrng)));
@@ -4054,6 +4127,8 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(counts(senderStats) == senderAfter);
         LOGVOLE_REQUIRE_TRUE(counts(receiverStats) == receiverBefore);
         LOGVOLE_REQUIRE_TRUE(counts(globalRingOpsStats) == zeroCounts);
+        LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(senderTiming) == senderTimingAfter);
+        LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(receiverTiming) == receiverTimingBefore);
         if (query == 1) digest.mLeftTree.reset(); // Exercise exact tree reconstruction.
         const auto oldRoot = receiver.mRootDPrimeRt;
         const auto oldSeed = receiver.mGoldenSeed;
@@ -4070,6 +4145,10 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(counts(receiverStats) != receiverBefore);
         LOGVOLE_REQUIRE_TRUE(counts(senderStats) == senderAfter);
         LOGVOLE_REQUIRE_TRUE(counts(globalRingOpsStats) == zeroCounts);
+        LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(senderTiming) == senderTimingAfter);
+        const TimingStats emptyTiming;
+        LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(globalTimingStats) ==
+            tests_libOTe::logvole_test::timingSnapshot(emptyTiming));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(receiverOutput.mSeed, reference.mSeed));
         LOGVOLE_REQUIRE_EQ(receiverOutput.mTbm.size(), reference.mTbm.size());
         for (std::size_t i = 0; i < reference.mTbm.size(); ++i)

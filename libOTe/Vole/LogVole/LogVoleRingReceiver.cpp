@@ -172,7 +172,8 @@ namespace osuCrypto::LogVole
             OfflineMessage& message,
             Socket& sock,
             bool isTopLevel,
-            bool hasReusableState, bool useGpu, std::shared_ptr<HostStepProfiler> profileOwner, CpuBenchmarkState cpuBenchmark = {})
+            bool hasReusableState, bool useGpu, std::shared_ptr<HostStepProfiler> profileOwner,
+            TimingStats* timing, CpuBenchmarkState cpuBenchmark = {})
         {
             auto* profile = profileOwner.get();
             RecursiveMode mode{};
@@ -193,7 +194,7 @@ namespace osuCrypto::LogVole
 				const bool validPayloadSize =
 					shrinkExpandOfflinePayloadSize(params.mShrinkExpand, maxPayload);
 				auto shrinkExpandPayload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(
-					shrinkExpandSock, detail::requirePayloadSize(validPayloadSize, maxPayload), params.mShrinkExpand.mTransport.mEncoding.mWire, useGpu, profile);
+					shrinkExpandSock, detail::requirePayloadSize(validPayloadSize, maxPayload), params.mShrinkExpand.mTransport.mEncoding.mWire, useGpu, profile, timing);
                 if (!decodeShrinkExpandOfflineForTransport(std::move(shrinkExpandPayload), message.mShrinkExpandMessage,
                         params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profileOwner, cpuBenchmark))
                 {
@@ -216,7 +217,7 @@ namespace osuCrypto::LogVole
 				const bool validPayloadSize =
 					rootOfflinePayloadSize(params.mShrinkExpand, tauHi, maxPayload);
 				auto rootPayload =
-					co_await detail::recvFrame<ProtocolCacheRole::Receiver>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload), params.mShrinkExpand.mTransport.mEncoding.mWire, useGpu, profile);
+					co_await detail::recvFrame<ProtocolCacheRole::Receiver>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload), params.mShrinkExpand.mTransport.mEncoding.mWire, useGpu, profile, timing);
                 if (!decodeRootOfflineForTransport(std::move(rootPayload),
                         message.mRootMessage, params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profileOwner, cpuBenchmark))
                 {
@@ -233,7 +234,7 @@ namespace osuCrypto::LogVole
 
             message.mNextLevel = std::make_unique<OfflineMessage>();
             auto childSock = sock.fork();
-            co_await recvOfflineMessage(child, *message.mNextLevel, childSock, false, childHasReusableState, useGpu, profileOwner, cpuBenchmark);
+            co_await recvOfflineMessage(child, *message.mNextLevel, childSock, false, childHasReusableState, useGpu, profileOwner, timing, cpuBenchmark);
         }
     }
 
@@ -394,7 +395,7 @@ namespace osuCrypto::LogVole
         setupScope.mRole = ProtocolCacheRole::Receiver;
 		u64 maxPayload = 0;
 		const bool validPayloadSize = shrinkExpandOfflinePayloadSize(input.mParams, maxPayload);
-		const auto payload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), input.mParams.mTransport.mEncoding.mWire, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner));
+		const auto payload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), input.mParams.mTransport.mEncoding.mWire, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), timingStats(input.mRingFactoryOwner));
 
         ShrinkExpandOfflineMessage message{};
         if (!decode(payload, message, input.mParams.mNumWorkerThreads, input.mParams.mTransport.mEncoding, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark))
@@ -428,7 +429,7 @@ namespace osuCrypto::LogVole
             : gpu::ReceiverFirstQueryAllocationsPtr{};
 #endif
         OfflineMessage message{};
-        co_await recvOfflineMessage(input.mParams, message, sock, true, false, gpu::enabled(input.mRingFactoryOwner), hostProfilerOwner(input.mRingFactoryOwner), cpuBenchmark);
+        co_await recvOfflineMessage(input.mParams, message, sock, true, false, gpu::enabled(input.mRingFactoryOwner), hostProfilerOwner(input.mRingFactoryOwner), timingStats(input.mRingFactoryOwner), cpuBenchmark);
 
         ReceiverOfflineOutput output{};
         const bool finalized = setupMoveStateEnabled(input.mParams.mShrinkExpand.mTransport.mMoveReceivedState, input.mRingFactoryOwner)
@@ -452,9 +453,11 @@ namespace osuCrypto::LogVole
     task<> LogVoleRingReceiver::keyDerive(
         const KeyDeriveReceiverInput& input,
         KeyDeriveReceiverOutput& output,
-        Socket& sock, LogVoleEncodingOptions encoding, bool useGpu, HostStepProfiler* profile, ProtocolCacheScope scope)
+        Socket& sock, LogVoleEncodingOptions encoding, bool useGpu, HostStepProfiler* profile, ProtocolCacheScope scope,
+        TimingStats* timing)
     {
         CpuBenchmarkState cpuBenchmark{};
+        if (useGpu) timing = &globalTimingStats;
         scope.mRole = ProtocolCacheRole::Receiver;
         KeyDeriveRequest request{};
         if (!prepareKeyDeriveRequest(input, request))
@@ -467,7 +470,7 @@ namespace osuCrypto::LogVole
 		u64 maxPayload = 0;
 		const bool validPayloadSize = keyDerivePayloadSize(input.mParams, request.mTau, maxPayload);
 		const auto responsePayload =
-			co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), encoding.mWire, useGpu, profile);
+			co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), encoding.mWire, useGpu, profile, timing);
 
         KeyDeriveResponse response{};
         if (!decode(responsePayload, response, encoding, useGpu, profile, cpuBenchmark))
@@ -592,7 +595,8 @@ namespace osuCrypto::LogVole
                 const bool deferDigestHash = state.mParams.mShrinkExpand.mTransport.mDeferRootDigestHash;
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: prepare digest", state.mParams.mW, &cpuBenchmark);
-                    AutoTimer rootTimer(globalTimingStats.mRootReceiverHostUs);
+                    auto* timing = timingStats(state.mShrinkExpandState.mRingFactoryOwner);
+                    AutoTimer rootTimer(timing ? &timing->mRootReceiverHostUs : nullptr);
                     const bool prepared = co_await prepareRootDigestReceiver(executor, zetaBuffers,
                         state, input.mX, prng, digestState, digest,
                         input.mXDevice, input.mXCount, deferDigestHash, cpuBenchmark, cacheScope);
@@ -604,7 +608,8 @@ namespace osuCrypto::LogVole
 
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: encode digest", state.mParams.mW, &cpuBenchmark);
-                    AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
+                    auto* timing = timingStats(state.mShrinkExpandState.mRingFactoryOwner);
+                    AutoTimer serTimer(timing ? &timing->mRootSerializeUs : nullptr);
                     digestPayload = encode(digest, state.mParams.mShrinkExpand.mTransport.mEncoding, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark);
                 }
                 digestFrameSize = detail::frameBytes(digestPayload);
@@ -652,17 +657,19 @@ namespace osuCrypto::LogVole
                         HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: wait for sender response", state.mParams.mW, &cpuBenchmark);
                         u64 maxPayload = 0;
                         const bool validPayloadSize = rootResponsePayloadSize(state.mParams.mShrinkExpand.mRing, maxPayload);
-                        responsePayload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload), state.mParams.mShrinkExpand.mTransport.mEncoding.mWire, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner));
+                        responsePayload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload), state.mParams.mShrinkExpand.mTransport.mEncoding.mWire, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), timingStats(state.mShrinkExpandState.mRingFactoryOwner));
                     }
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: decode response", state.mParams.mW, &cpuBenchmark);
-                    AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
+                    auto* timing = timingStats(state.mShrinkExpandState.mRingFactoryOwner);
+                    AutoTimer serTimer(timing ? &timing->mRootSerializeUs : nullptr);
                     if (!decode(responsePayload, response, state.mParams.mShrinkExpand.mTransport.mEncoding, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark))
                         throw std::runtime_error("LogVole receiver could not decode root response");
                 }
 
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: finalize", state.mParams.mW, &cpuBenchmark);
-                    AutoTimer rootTimer(globalTimingStats.mRootReceiverHostUs);
+                    auto* timing = timingStats(state.mShrinkExpandState.mRingFactoryOwner);
+                    AutoTimer rootTimer(timing ? &timing->mRootReceiverHostUs : nullptr);
                     auto operation = finalizeRootOnlineReceiver(executor, lheBuffers, lencBuffers,
                         state, input, digestState,
                         ownedFastPath ? std::move(response) : RootResponseMessage(response), output, cpuBenchmark, cacheScope);
@@ -1131,7 +1138,7 @@ namespace osuCrypto::LogVole
 		u64 maxPayload = 0;
 		const bool validPayloadSize = polyPayloadSize(state.mParams.mRing, maxPayload);
 		const auto skXPayload =
-			co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), state.mParams.mTransport.mEncoding.mWire, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner));
+			co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), state.mParams.mTransport.mEncoding.mWire, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), timingStats(state.mRingFactoryOwner));
 
         RnsPoly skX{};
         {

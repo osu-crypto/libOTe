@@ -3653,6 +3653,7 @@ namespace osuCrypto::LogVole
     {
         preparedKPrimeDevice.reset();
 #if defined(ENABLE_LOGVOLE_CUDA)
+        if (!gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner)) return false;
         gpu::DeviceBatchPtr prepared;
         const bool preparedAny =
             gpu::prepareRootSenderOperandsDevice(state, kPrime, prepared, cacheScope);
@@ -5557,7 +5558,8 @@ namespace osuCrypto::LogVole
             RecursiveSeedEvalOutput eval;
             const bool publicSeed = state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed;
             const bool search = !publicSeed && state.mGoldenSeed.empty();
-            AutoTimer timer(globalTimingStats.mSeedAttemptTimeUs);
+            auto* timing = timingStats(state.mShrinkExpandState.mRingFactoryOwner);
+            AutoTimer timer(timing ? &timing->mSeedAttemptTimeUs : nullptr);
             for (unsigned attempt = 0; attempt < (search ? 100u : 1u); ++attempt)
             {
                 AlignedUnVec<u8> seed;
@@ -5565,7 +5567,7 @@ namespace osuCrypto::LogVole
                 {
                     seed.resize(16);
                     prng.get(seed.data(), seed.size());
-                    globalTimingStats.mSeedAttemptCount.fetch_add(1, std::memory_order_relaxed);
+                    if (timing) timing->mSeedAttemptCount.fetch_add(1, std::memory_order_relaxed);
                 }
                 else if (!state.mGoldenSeed.empty()) seed = state.mGoldenSeed;
                 else if (!derivePublicCt2SeedForState(state, seed)) co_return false;

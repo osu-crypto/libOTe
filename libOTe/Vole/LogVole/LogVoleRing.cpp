@@ -464,15 +464,25 @@ namespace osuCrypto::LogVole
         mGpuMiscTimeUs.store(0, std::memory_order_relaxed);
     }
 
-    AutoTimer::AutoTimer(std::atomic<u64>& stat)
+    TimingStats* timingStats(const RingNttContext& ctx) noexcept
+    {
+        return gpu::enabled(ctx) ? &globalTimingStats : ctx.mExecutionOptions.mTimingStats;
+    }
+
+    AutoTimer::AutoTimer(std::atomic<u64>* stat)
         : mStat(stat),
-          mStart(std::chrono::steady_clock::now())
+          mStart(stat ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{})
+    {}
+
+    AutoTimer::AutoTimer(std::atomic<u64>& stat)
+        : AutoTimer(&stat)
     {}
 
     AutoTimer::~AutoTimer()
     {
+        if (!mStat) return;
         const auto end = std::chrono::steady_clock::now();
-        mStat.fetch_add(
+        mStat->fetch_add(
             static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(end - mStart).count()),
             std::memory_order_relaxed);
     }
@@ -1959,8 +1969,9 @@ namespace osuCrypto::LogVole
     static void deriveUniformPolyFromSeedInplace(
         const RingNttContext& ctx, block seed, u64 domainTag, u32 index, RnsPoly& out, PRNG& prng, PendingRingOpsStats* stats)
     {
-        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
-        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+        auto* timing = timingStats(ctx);
+        AutoTimer totalSamplingTimer(timing ? &timing->mSeedSamplingTimeUs : nullptr);
+        AutoTimer polySamplingTimer(timing ? &timing->mPolySamplingTimeUs : nullptr);
 
         // Every coefficient is overwritten by the sampler. Retain the backing
         // allocation when resampling an existing polynomial.
@@ -2232,8 +2243,9 @@ namespace osuCrypto::LogVole
         u32 count,
         std::vector<RnsPoly>& out, PendingRingOpsStats* stats)
     {
-        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
-        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+        auto* timing = timingStats(ctx);
+        AutoTimer totalSamplingTimer(timing ? &timing->mSeedSamplingTimeUs : nullptr);
+        AutoTimer polySamplingTimer(timing ? &timing->mPolySamplingTimeUs : nullptr);
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         // Batched sampling amortises the device round trip. CPU and CUDA use
@@ -2284,8 +2296,9 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count, bool actualNtt,
         std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
-        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
-        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+        auto* timing = timingStats(ctx);
+        AutoTimer totalSamplingTimer(timing ? &timing->mSeedSamplingTimeUs : nullptr);
+        AutoTimer polySamplingTimer(timing ? &timing->mPolySamplingTimeUs : nullptr);
         if (count == 0)
         {
             if (captured) captured->reset();

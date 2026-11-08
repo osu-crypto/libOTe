@@ -35,11 +35,13 @@ namespace osuCrypto::LogVole
             PRNG& prng,
             Socket& sock, RootWirePinOverlapEvidence& rootWirePin, ProtocolCacheScope cacheScope = {});
 
+        // CPU timing is borrowed through completion; null disables collection.
+        // GPU execution retains the legacy timing selection.
         task<> keyDerive(
             const KeyDeriveSenderInput& input,
             KeyDeriveSenderOutput& output,
             Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr,
-            ProtocolCacheScope scope = {});
+            ProtocolCacheScope scope = {}, TimingStats* timing = nullptr);
 
         // Borrow the executor and exclusive buffers until completion. Recursive
         // levels reuse the same ring-sized products; buffers bound CPU workers.

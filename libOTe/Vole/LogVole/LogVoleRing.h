@@ -137,9 +137,10 @@ namespace osuCrypto::LogVole
 
     struct AutoTimer
     {
-        std::atomic<u64>& mStat;
+        std::atomic<u64>* mStat;
         std::chrono::steady_clock::time_point mStart;
 
+        AutoTimer(std::atomic<u64>* stat);
         AutoTimer(std::atomic<u64>& stat);
         ~AutoTimer();
     };
@@ -237,6 +238,12 @@ namespace osuCrypto::LogVole
     inline CpuBenchmarkContext* cpuBenchmarkContext(const std::shared_ptr<const RingNttContext>& ctx)
     {
         return ctx ? cpuBenchmarkContext(*ctx) : nullptr;
+    }
+
+    TimingStats* timingStats(const RingNttContext& ctx) noexcept;
+    inline TimingStats* timingStats(const std::shared_ptr<const RingNttContext>& ctx) noexcept
+    {
+        return ctx ? timingStats(*ctx) : nullptr;
     }
 
     inline HostStepProfiler* hostProfiler(const RingNttContext& ctx)

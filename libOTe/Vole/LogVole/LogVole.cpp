@@ -1724,7 +1724,8 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        AutoTimer wrapTimer(globalTimingStats.mWrapTimeUs);
+        auto* timing = timingStats(ctx.mRing);
+        AutoTimer wrapTimer(timing ? &timing->mWrapTimeUs : nullptr);
         const u64 slotCount = zpSlotCount(ctx);
         const u64 chunkCount = zpRingLabelCount(ctx, labels.size());
         out.resize(chunkCount);
@@ -1766,7 +1767,8 @@ namespace osuCrypto::LogVole
             buffer.mPlain.resize(slots);
             buffer.mOk = true;
         }
-        AutoTimer wrapTimer(globalTimingStats.mWrapTimeUs);
+        auto* timing = timingStats(ctx.mRing);
+        AutoTimer wrapTimer(timing ? &timing->mWrapTimeUs : nullptr);
         out.resize(count);
         auto encodeChunk = [&](std::size_t begin, std::size_t end, ZpEncodeBuffer& buffer) {
             CpuBenchmarkState worker = chunks.size() > 1
@@ -1958,7 +1960,8 @@ namespace osuCrypto::LogVole
         // remain in the synchronous kernel, never in the coroutine frame.
         static_assert(alignof(ZpDecodeState) <= alignof(std::max_align_t));
         ZpDecodeState decode(ctx);
-        AutoTimer unwrapTimer(globalTimingStats.mUnwrapTimeUs);
+        auto* timing = timingStats(ctx.mRing);
+        AutoTimer unwrapTimer(timing ? &timing->mUnwrapTimeUs : nullptr);
         out.resize(static_cast<std::size_t>(zpLabelCount));
         auto decodeChunk = [&](std::size_t begin, std::size_t end, ZpDecodeBuffer& buffer) {
             CpuBenchmarkState worker = chunks.size() > 1
@@ -2039,7 +2042,8 @@ namespace osuCrypto::LogVole
 
         if (!validateDecodeContexts(ctx)) return false;
         ZpDecodeState decode(ctx);
-        AutoTimer unwrapTimer(globalTimingStats.mUnwrapTimeUs);
+        auto* timing = timingStats(ctx.mRing);
+        AutoTimer unwrapTimer(timing ? &timing->mUnwrapTimeUs : nullptr);
         out.resize(static_cast<std::size_t>(zpLabelCount));
         return detail::runParallelTasks(static_cast<std::size_t>(chunkCount), requestedWorkers,
             [&](std::size_t labelIdx, CpuBenchmarkState&) {

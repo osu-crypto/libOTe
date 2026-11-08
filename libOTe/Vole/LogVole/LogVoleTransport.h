@@ -59,18 +59,23 @@ namespace osuCrypto::LogVole::detail
         }
     }
 
+    // Legacy default is for unmigrated callers; CPU protocol callers pass their
+    // borrowed timing owner or null explicitly through operation completion.
     template<ProtocolCacheRole Role>
-    inline task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize, const LogVoleWireOptions& options, bool useGpu = false, HostStepProfiler* profile = nullptr)
+    inline task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize, const LogVoleWireOptions& options, bool useGpu = false, HostStepProfiler* profile = nullptr,
+        TimingStats* timing = &globalTimingStats)
     {
         std::array<u8, kFrameHeaderSize> header{};
-        const auto waitStart = std::chrono::steady_clock::now();
+        // Preserve the header-only wait region and successful-receive accounting.
+        const auto waitStart = timing ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
         co_await sock.recv(header);
-        (Role == ProtocolCacheRole::Sender ? globalTimingStats.mSenderWaitUs
-            : globalTimingStats.mReceiverWaitUs).fetch_add(
-            static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
-                                 std::chrono::steady_clock::now() - waitStart)
-                                 .count()),
-            std::memory_order_relaxed);
+        if (timing)
+            (Role == ProtocolCacheRole::Sender ? timing->mSenderWaitUs
+                : timing->mReceiverWaitUs).fetch_add(
+                static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - waitStart).count()),
+                std::memory_order_relaxed);
 
         const auto size = readU64(header);
         if (size > maxPayloadSize ||

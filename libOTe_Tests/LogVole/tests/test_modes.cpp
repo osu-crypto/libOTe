@@ -4,6 +4,7 @@
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe_Tests/LogVole_TestUtil.h"
+#include "libOTe_Tests/LogVole_TimingTestUtil.h"
 #include "cryptoTools/Common/CLP.h"
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "coproto/Socket/BufferingSocket.h"
@@ -28,6 +29,9 @@ namespace
 #endif
 
         const bool device = cmd.getOr("gpu", 0) != 0;
+        TimingStats senderTiming, receiverTiming;
+        const auto globalTimingBefore = tests_libOTe::logvole_test::timingSnapshot(globalTimingStats);
+        const bool collectTiming = !device && cmd.getOr("lvTiming", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (device) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #else
@@ -58,6 +62,7 @@ namespace
         }
         LogVoleOptions options;
         options.mCpuBenchmark = instrument ? &senderTelemetry : nullptr;
+        options.mTimingStats = collectTiming ? &senderTiming : nullptr;
         options.mUseGpu = device;
         if (cmd.getOr("setup_parallel", false))
         {
@@ -70,10 +75,12 @@ namespace
         auto senderReuse = std::make_shared<ZpContextFactory>(
             std::make_shared<RingContextFactory>(options));
         options.mCpuBenchmark = instrument ? &receiverTelemetry : nullptr;
+        options.mTimingStats = collectTiming ? &receiverTiming : nullptr;
         auto receiverReuse = std::make_shared<ZpContextFactory>(
             std::make_shared<RingContextFactory>(options));
         osuCrypto::LogVoleOptions originalSenderOptions = options;
         originalSenderOptions.mCpuBenchmark = instrument ? &senderTelemetry : nullptr;
+        originalSenderOptions.mTimingStats = collectTiming ? &senderTiming : nullptr;
         originalSenderOptions.mRequestSize = count;
         originalSenderOptions.mPlaintextModulusBits = 55;
         originalSenderOptions.mNumThreads = threads;
@@ -82,6 +89,7 @@ namespace
         LogVoleSender originalSender(originalSenderOptions, senderReuse);
         auto receiverOptions = originalSenderOptions;
         receiverOptions.mCpuBenchmark = instrument ? &receiverTelemetry : nullptr;
+        receiverOptions.mTimingStats = collectTiming ? &receiverTiming : nullptr;
         LogVoleReceiver originalReceiver(receiverOptions, receiverReuse);
         auto observeFactory = [](const CivoleParams& params, ProtocolCacheRole role,
             const std::shared_ptr<ZpContextFactory>& factory)
@@ -305,6 +313,26 @@ namespace
         LOGVOLE_REQUIRE_FALSE(receiver.outputDevice());
         LOGVOLE_REQUIRE_TRUE(senderFactory.expired());
         LOGVOLE_REQUIRE_TRUE(receiverFactory.expired());
+        if (!device)
+        {
+            const auto globalTimingAfter = tests_libOTe::logvole_test::timingSnapshot(globalTimingStats);
+            for (std::size_t i = 0; i < globalTimingAfter.size(); ++i)
+                LOGVOLE_REQUIRE_EQ(globalTimingAfter[i], globalTimingBefore[i]) << "timing field " << i;
+            LOGVOLE_REQUIRE_EQ(senderTiming.mReceiverWaitUs.load(), 0u);
+            LOGVOLE_REQUIRE_EQ(receiverTiming.mSenderWaitUs.load(), 0u);
+            LOGVOLE_REQUIRE_EQ(senderTiming.mRootReceiverHostUs.load(), 0u);
+            LOGVOLE_REQUIRE_EQ(receiverTiming.mRootSenderHostUs.load(), 0u);
+            LOGVOLE_REQUIRE_EQ(receiverTiming.mSeedAttemptCount.load(), 0u);
+            if (collectTiming && setting == CivoleSetting::GoldenSeed)
+                LOGVOLE_REQUIRE_TRUE(senderTiming.mSeedAttemptCount.load() > 0u);
+            if (!collectTiming)
+            {
+                const TimingStats empty;
+                const auto zeros = tests_libOTe::logvole_test::timingSnapshot(empty);
+                LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(senderTiming) == zeros);
+                LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(receiverTiming) == zeros);
+            }
+        }
     }
 }
 

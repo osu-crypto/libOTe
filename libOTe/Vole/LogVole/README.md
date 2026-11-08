@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **91%** of the agreed ownership/globals refactor,
+Estimated overall completion: **92%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -830,6 +830,35 @@ recursive relation and buffer reuse pass with one physical worker (0.51 seconds)
 and two workers with alternate CPU options (0.40 seconds). No benchmarks or GPU
 execution checks were run. Timing ownership, legacy public surfaces and final
 cross-platform validation remain separate work.
+
+CPU timing now accepts optional borrowed `TimingStats*` totals in
+`LogVoleExecutionOptions::mTimingStats`. Null disables collection without clock
+reads. CPU uniform samplers, wrap/unwrap, sender seed search and attempt counts,
+root serialization/host phases, and sender/receiver transport waits select those
+totals explicitly. Frame receive timing still covers only a successfully
+received header; payload reception and decode remain outside that interval.
+Bare key-derive APIs accept an optional borrowed timing pointer. Totals must
+outlive their operations, including deferred work, and reads/reset follow joins.
+GPU-selected contexts and legacy defaults retain global timing; CUDA sources,
+arithmetic, PRNG order, batching and scheduling are unchanged.
+The end-to-end check exposed a CPU root-operand preparation probe entering a
+CUDA helper whose legacy timer started before its disabled-backend rejection.
+The Core wrapper now rejects CPU execution before that helper, preserving its
+false result and empty device output while avoiding those clock reads and
+possible global writes. No declarations are removed: 23 remain and the overall
+estimate advances to 92%. Active CPU timing paths are explicit; legacy public
+statistics/default surfaces and GPU diagnostics still need their separate audit.
+The combined Windows library/test/frontend targets pass after a serialized
+incremental retry (39.78 seconds) following an MSVC compiler heap resource error
+in an unchanged test translation unit. The final Core guard rebuild/link passes
+in 17.22 seconds. Timer/transport ownership, two-query root reuse and N1024
+recursive socket checks pass together in 4.40 seconds. The timer test verifies
+independent/reset owners, disabled timers, role-specific waits and exclusion of
+a controlled payload delay. Small two-query CPU interactive golden passes with
+owned totals (4.24 seconds) and null totals (4.43 seconds); both preserve all 31
+global timing fields, arithmetic and reusable storage. Sender seed-attempt
+counts provide deterministic ownership evidence without duration thresholds in
+the protocol checks. No benchmarks, GPU execution or WSL checks were run.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their

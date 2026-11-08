@@ -63,6 +63,7 @@
     X(Core, ZpRingLabelCountCeilNoOverflow) \
     X(Core, RootOnlineLocalRelation) \
     X(Core, RootOnlineStateReuseAcrossQueries) \
+    X(Core, TimingOwnership) \
     X(Core, TwoLevelCoprotoRelation) \
     X(Core, ThreeLevelOfflineReuseAndInvalidWidth) \
     X(Core, GpuSetupOptions) \
