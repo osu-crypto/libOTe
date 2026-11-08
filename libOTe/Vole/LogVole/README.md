@@ -261,6 +261,7 @@ contain no environment reads.
 | Async LHE/LENC sender setup kernels | Existing owned setup scopes now feed private-token admission and lazy seed-label fallback explicitly. Fifteen entry/worker guards and their suspend/resume transport are removed; arithmetic chunks remain identity-free. Public A/B, sampler and GPU assembly calls keep explicit context; numeric lazy producer owners retain existing ownership. Core/ShrinkExpand phase closure remains separate. |
 | ShrinkExpand sender orchestration | Owned phase scopes replace six guards in ShrinkExpand setup and Core public setup forwarders. Fixed private-key admission still checks the original caller role before Sender normalization. Context/public-token creation, full-digit nullable-B fallback, top-key sampling and temporary GPU sampler owners receive explicit views; scalar arithmetic samplers remain identity-free. Sender entry/wire and online phase closure remain separate work. |
 | Core recursive/root sender setup | Root error sampling, TopCt assembly, root offline preparation and recursive sender setup use their existing owned phase scope explicitly. Eleven entry/chunk guards are removed; private delta/top/root metadata, B/BStar caches/fetches and uncaptured batch samplers preserve original role/run admission and ownership. Internal defaults are required at migrated helpers; encoder tensor access remains identity-free. |
+| Identity-free compact and host Root samplers | Seven Ring entry/chunk guards are removed. Three compact sampler APIs and both host-only Root sampler overloads no longer accept unused protocol scope; they borrow numeric context, buffers and executor until joined. Resident Root metadata creation still receives owned identity. Service-lifetime regression now exercises actual LHE public-A cache ownership. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -334,10 +335,16 @@ under Receiver ambience and verifies unchanged TLS plus existing exact-output
 checks. No benchmarks or WSL run. The approximate overall estimate is 86%;
 25 runtime declarations remain while the compatibility bridge is present.
 
-Remaining identity transport includes Ring compact-setup sampler guards,
-sender entry/delta preparation and wire-owner scopes, and online Core/sender/
+Remaining identity transport includes sender entry/delta preparation and
+wire-owner scopes, and online Core/sender/
 receiver/materialization callers. These are separate from the completed Core
 setup phase; public compatibility defaults still support unmigrated callers.
+
+Numeric-sampler validation: Windows CUDA-enabled target and frontend example
+verification pass (78.51 seconds). Three CPU checks pass in 3.35 seconds,
+including exact sampling/PRNG/failure behavior and the LHE task-to-cache service
+lifetime regression. GPU identity/lazy-context, two-query GoldenSeed smoke and
+Gaussian prefix parity pass in 4.03 seconds (four tests). No benchmarks or WSL run.
 
 #### Remaining runtime globals
 

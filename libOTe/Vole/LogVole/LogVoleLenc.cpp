@@ -1561,7 +1561,7 @@ namespace osuCrypto::LogVole
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
                         executor, setupResults, compactRandomizers, residentRandomizers,
                         noiseStandardDeviation, noiseMaxDeviation, seeds, ctx, requestedWorkers, {},
-                        cpuBenchmark, setupScope);
+                        cpuBenchmark);
                     if (!setupOk) co_return false;
                 }
             }
@@ -1670,7 +1670,7 @@ namespace osuCrypto::LogVole
                 {
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
                         executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
-                        noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark, setupScope);
+                        noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark);
                     if (!setupOk) co_return false;
                 }
             }
@@ -1741,7 +1741,7 @@ namespace osuCrypto::LogVole
             {
                 const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
                     executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
-                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark, setupScope);
+                    noiseMaxDeviation, seeds, ctx, requestedWorkers, activeNoiseRows, cpuBenchmark);
                 if (!setupOk) co_return false;
             }
             if (compactNoiseEnabled && !deviceAssembled)
@@ -1799,7 +1799,7 @@ namespace osuCrypto::LogVole
                     const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
                         executor, setupResults, compactRandomizers, residentRandomizers,
                         noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {},
-                        cpuBenchmark, setupScope);
+                        cpuBenchmark);
                     if (!setupOk) co_return false;
                 }
                 if (compactNoiseEnabled)
@@ -2046,7 +2046,7 @@ namespace osuCrypto::LogVole
                     const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
                         executor, setupResults, compactRandomizers, residentRandomizers,
                         noiseStandardDeviation, noiseMaxDeviation, randomizerSeeds, ctx, requestedWorkers, {},
-                        cpuBenchmark, setupScope);
+                        cpuBenchmark);
                     if (!setupOk) co_return false;
                 }
                 if (!deviceExpanded)

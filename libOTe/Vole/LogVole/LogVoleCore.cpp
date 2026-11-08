@@ -1126,7 +1126,7 @@ namespace osuCrypto::LogVole
                                             const RingNttContext &ctx, u32 count, PRNG &prng, double sigma,
                                             double maxDeviation, bool outputNtt, std::vector<RnsPoly> &out,
                                             u32 requestedWorkers, LogVoleGpuSetupOptions options,
-                                            CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
+                                            CpuBenchmarkState cpuBenchmark)
     {
         if (setupResults.empty()) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
@@ -1162,7 +1162,7 @@ namespace osuCrypto::LogVole
                 {
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
                         executor, setupResults, compact, residentNoise, sigma, maxDeviation, seeds, ctx,
-                        requestedWorkers, {}, cpuBenchmark, setupScope);
+                        requestedWorkers, {}, cpuBenchmark);
                     if (!setupOk) co_return false;
                 }
             }
@@ -1185,7 +1185,7 @@ namespace osuCrypto::LogVole
             {
                 const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
                     executor, setupResults, compact, residentNoise, sigma, maxDeviation, seeds, ctx,
-                    requestedWorkers, {}, cpuBenchmark, setupScope);
+                    requestedWorkers, {}, cpuBenchmark);
                 if (!setupOk) co_return false;
             }
             {
@@ -1259,13 +1259,13 @@ namespace osuCrypto::LogVole
     macoro::task<bool> sampleRootErrorBatch(macoro::thread_pool &executor, std::span<u8> setupResults,
                                             const RingNttContext &ctx, u32 count, PRNG &prng, double sigma,
                                             double maxDeviation, bool outputNtt, std::vector<RnsPoly> &out,
-                                            CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
+                                            CpuBenchmarkState cpuBenchmark)
     {
         if (setupResults.empty()) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         {
             co_return co_await sampleRootErrorBatch(executor, setupResults, ctx, count, prng, sigma,
-                                                       maxDeviation, outputNtt, out, 1, {}, cpuBenchmark, setupScope);
+                                                       maxDeviation, outputNtt, out, 1, {}, cpuBenchmark);
         }
     }
 
@@ -1381,7 +1381,7 @@ namespace osuCrypto::LogVole
             {
                 {
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(executor, setupResults, compact, resident, sigma,
-                                                            clip, seeds, ctx, workers, {}, cpuBenchmark, setupScope);
+                                                            clip, seeds, ctx, workers, {}, cpuBenchmark);
                     if (!setupOk) co_return false;
                 }
             }
@@ -1619,7 +1619,7 @@ namespace osuCrypto::LogVole
                 {
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
                         executor, setupResults, compact, residentNoise, noiseStandardDeviation,
-                        noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
+                        noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark);
                     if (!setupOk) co_return false;
                 }
             }
@@ -1731,7 +1731,7 @@ namespace osuCrypto::LogVole
             {
                 const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
                     executor, setupResults, compact, residentNoise, noiseStandardDeviation, noiseMaxDeviation,
-                    compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
+                    compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark);
                 if (!setupOk) co_return false;
             }
             // A declined device attempt preserves the exact sampled noise in
@@ -2444,7 +2444,7 @@ namespace osuCrypto::LogVole
         {
             const bool setupOk = co_await sampleRootErrorBatch(executor, setupResults, ctx, leftWidth, prng,
                                                        lencSigma, lencMaxDev, false, r1, workerThreads,
-                                                       state.mParams.mShrinkExpand.mGpuSetup, cpuBenchmark, setupScope);
+                                                       state.mParams.mShrinkExpand.mGpuSetup, cpuBenchmark);
             if (!setupOk) co_return false;
         }
 

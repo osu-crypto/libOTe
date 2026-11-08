@@ -254,12 +254,12 @@ namespace osuCrypto::LogVole
         double sigma,
         double maxDeviation,
         bool outputNtt,
-        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
     macoro::task<bool> sampleRootErrorBatch(
         macoro::thread_pool& executor, std::span<u8> setupResults,
         const RingNttContext& ctx, u32 count, PRNG& prng, double sigma,
         double maxDeviation, bool outputNtt, std::vector<RnsPoly>& out, u32 requestedWorkers,
-        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {});
 
     bool addScaledNttInplace(
         RnsPoly& accNtt,

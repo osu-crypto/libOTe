@@ -3255,24 +3255,32 @@ void LogVole_Cpu_ProtocolIdentityService(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(rangesEqual(copiedA.front().mCoeffs, cachedA->front().mCoeffs));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(copiedB.front().mCoeffs, cachedB->front().mCoeffs));
     }
+    // LHE consumes protocol identity for public-A cache selection. Its lazy
+    // task must retain the phase service even when the borrowed math context
+    // belongs to another service; the resulting cache entry then owns it.
     PRNG samplingRandom(toBlock(0x1d, 1));
-    std::vector<RnsPoly> sampled;
+    const std::vector<RnsPoly> identityR{sampleUniformPoly(ring, samplingRandom), sampleUniformPoly(ring, samplingRandom)};
+    const std::vector<RnsPoly> identitySk{sampleUniformPoly(ring, samplingRandom)};
+    auto encodingRing = ring;
+    encodingRing.mPublicCache = std::make_shared<PublicPolynomialCache>();
+    RingTensor encoded;
     std::array<u8, 2> results{};
-    macoro::task<bool> sampling;
-    std::weak_ptr<const ProtocolCacheService> samplingWeak;
+    macoro::task<bool> encoding;
+    std::weak_ptr<const ProtocolCacheService> encodingWeak;
     {
-        const auto samplingService = ProtocolCacheService::create();
-        samplingWeak = samplingService;
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, samplingService->allocate());
-        sampling = sampleRootErrorBatch(executor, results, ring, 2, samplingRandom,
-            3.2, 16, false, sampled);
+        const auto encodingService = ProtocolCacheService::create();
+        encodingWeak = encodingService;
+        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, encodingService->allocate());
+        encoding = lheEnc1(executor, results, encodingRing, identityR, identitySk, 30, encoded);
     }
-    LOGVOLE_REQUIRE_TRUE(sampled.empty());
-    LOGVOLE_REQUIRE_FALSE(samplingWeak.expired());
-    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(std::move(sampling)));
-    LOGVOLE_REQUIRE_EQ(sampled.size(), 2u);
-    sampling = {};
-    LOGVOLE_REQUIRE_TRUE(samplingWeak.expired());
+    LOGVOLE_REQUIRE_TRUE(encoded.mPolys.empty());
+    LOGVOLE_REQUIRE_FALSE(encodingWeak.expired());
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(std::move(encoding)));
+    LOGVOLE_REQUIRE_EQ(encoded.mPolys.size(), 2u);
+    encoding = {};
+    LOGVOLE_REQUIRE_FALSE(encodingWeak.expired());
+    encodingRing.mPublicCache.reset();
+    LOGVOLE_REQUIRE_TRUE(encodingWeak.expired());
 #if defined(ENABLE_LOGVOLE_CUDA)
     auto same = std::make_shared<gpu::GpuExecutionContext>(LogVoleExecutionOptions{}, nullptr, first);
     auto foreign = std::make_shared<gpu::GpuExecutionContext>(LogVoleExecutionOptions{}, nullptr, second);

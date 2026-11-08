@@ -355,7 +355,7 @@ namespace osuCrypto::LogVole
                 {
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
                         executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
-                        noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
+                        noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark);
                     if (!setupOk) co_return false;
                 }
             }
@@ -434,7 +434,7 @@ namespace osuCrypto::LogVole
         {
             const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
                 executor, setupResults, compactNoise, residentNoise, noiseStandardDeviation,
-                noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
+                noiseMaxDeviation, compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark);
             if (!setupOk) co_return false;
         }
         if (!publicANtt)

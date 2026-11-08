@@ -527,13 +527,12 @@ namespace osuCrypto::LogVole
     // Await started work before destroying it or reusing the borrowed storage.
     // setupResults must be nonempty and may be reused by sequential phases.
     // requestedWorkers and the optional benchmark cap further bound its size.
-    // setupScope captures the legacy cache identity before lazy execution;
-    // its temporary TLS guard is never retained across a suspension.
+    // Sampling and replay use only borrowed numeric resources, without protocol identity.
     macoro::task<bool> samplePolyErrorCompactBatchFromSeeds(
         macoro::thread_pool& executor, std::span<u8> setupResults,
         std::span<u64> limb0, double noiseStandardDeviation, double noiseMaxDeviation,
         std::span<const seal::prng_seed_type> seeds, const RingNttContext& ctx,
-        u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {});
     // Owned setup samples: resident selection publishes an empty host vector
     // and a completed device buffer; fallback publishes host data and no device.
     // Inactive rows are zero. Invalid/strict failure preserves both outputs.
@@ -541,14 +540,14 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<u8> setupResults,
         std::vector<u64>& host, std::shared_ptr<gpu::DeviceScalars>& device,
         double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
-        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {});
     // Materialize only when a downstream device operation declined. A failed
     // device fetch replays these original seeds on CPU without parent draws.
     macoro::task<bool> materializePolyErrorCompactBatchForSetup(
         macoro::thread_pool& executor, std::span<u8> setupResults,
         std::vector<u64>& host, const std::shared_ptr<gpu::DeviceScalars>& device,
         double sigma, double clip, std::span<const seal::prng_seed_type> seeds,
-        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        const RingNttContext& ctx, u32 requestedWorkers = 1, std::span<const u8> active = {}, CpuBenchmarkState cpuBenchmark = {});
     // Legacy GPU lazy materialization only; normal setup awaits the overload above.
     bool materializePolyErrorCompactBatchForSetupLegacy(
         std::vector<u64>& host, const std::shared_ptr<gpu::DeviceScalars>& device,
