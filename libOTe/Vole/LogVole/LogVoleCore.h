@@ -368,12 +368,12 @@ namespace osuCrypto::LogVole
 
     bool finalizeRootOfflineReceiver(
         ReceiverState& state,
-        const RootOfflineMessage& message);
+        const RootOfflineMessage& message, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Consumes ciphertext storage after validation; state is unchanged on failure.
     bool finalizeRootOfflineReceiver(
         ReceiverState& state,
-        RootOfflineMessage&& message);
+        RootOfflineMessage&& message, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // `xDevice` is an optional opaque gpu::DeviceBatch holding the same input as
     // `x`. When present the device shrink reads it directly, so the Root's input
@@ -519,20 +519,23 @@ namespace osuCrypto::LogVole
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         const OfflineMessage& message,
-        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
+        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {},
+        ProtocolCacheScopeView setupScope = currentProtocolCacheScope());
 
     // Consumes message storage; recursive failure may leave message partly moved.
     // Output remains unchanged on failure, and reusable internal states are copied.
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         OfflineMessage&& message,
-        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
+        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {},
+        ProtocolCacheScopeView setupScope = currentProtocolCacheScope());
 
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         const ShrinkExpandOfflineMessage& shrinkExpandMessage,
         const RootOfflineMessage& rootMessage,
-        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {});
+        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {},
+        ProtocolCacheScopeView setupScope = currentProtocolCacheScope());
 
     bool ensureSenderPrecompute(
         const SenderState& state);

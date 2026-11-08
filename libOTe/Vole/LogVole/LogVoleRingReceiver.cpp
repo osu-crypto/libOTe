@@ -388,11 +388,10 @@ namespace osuCrypto::LogVole
     task<> LogVoleRingReceiver::offline(
         const ShrinkExpandReceiverOfflineInput& input,
         ShrinkExpandReceiverState& state,
-        Socket& sock)
+        Socket& sock, ProtocolCacheScope setupScope)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+        setupScope.mRole = ProtocolCacheRole::Receiver;
 		u64 maxPayload = 0;
 		const bool validPayloadSize = shrinkExpandOfflinePayloadSize(input.mParams, maxPayload);
 		const auto payload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), input.mParams.mTransport.mEncoding.mWire, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner));
@@ -404,8 +403,8 @@ namespace osuCrypto::LogVole
         }
 
         const bool finalized = setupMoveStateEnabled(input.mParams.mTransport.mMoveReceivedState, input.mRingFactoryOwner)
-            ? finalizeShrinkExpandReceiverOffline(input, std::move(message), state)
-            : finalizeShrinkExpandReceiverOffline(input, message, state);
+            ? finalizeShrinkExpandReceiverOffline(input, std::move(message), state, setupScope)
+            : finalizeShrinkExpandReceiverOffline(input, message, state, setupScope);
         if (!finalized)
         {
             throw std::runtime_error("LogVole receiver rejected shrink/expand offline message");
@@ -416,17 +415,16 @@ namespace osuCrypto::LogVole
         const ReceiverOfflineInput& input,
         ReceiverState& state,
         Socket& sock,
-        std::shared_ptr<void>* firstQueryGpuAllocations)
+        std::shared_ptr<void>* firstQueryGpuAllocations, ProtocolCacheScope setupScope)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+        setupScope.mRole = ProtocolCacheRole::Receiver;
 #if defined(ENABLE_LOGVOLE_CUDA)
         // The application total timer is already running when offline begins.
         // Reserve receiver-only first-query storage while the copied TCP setup
         // is still in flight; publication waits for the worker before online.
         auto firstQueryPlan = firstQueryGpuAllocations && gpu::enabled(input.mRingFactoryOwner)
-            ? gpu::beginReceiverFirstQueryAllocations(input.mParams, input.mRingFactoryOwner)
+            ? gpu::beginReceiverFirstQueryAllocations(input.mParams, input.mRingFactoryOwner, setupScope)
             : gpu::ReceiverFirstQueryAllocationsPtr{};
 #endif
         OfflineMessage message{};
@@ -434,8 +432,8 @@ namespace osuCrypto::LogVole
 
         ReceiverOfflineOutput output{};
         const bool finalized = setupMoveStateEnabled(input.mParams.mShrinkExpand.mTransport.mMoveReceivedState, input.mRingFactoryOwner)
-            ? finalizeReceiverOffline(input, std::move(message), output, cpuBenchmark)
-            : finalizeReceiverOffline(input, message, output, cpuBenchmark);
+            ? finalizeReceiverOffline(input, std::move(message), output, cpuBenchmark, setupScope)
+            : finalizeReceiverOffline(input, message, output, cpuBenchmark, setupScope);
         if (!finalized)
         {
             throw std::runtime_error("LogVole receiver rejected recursive offline message");

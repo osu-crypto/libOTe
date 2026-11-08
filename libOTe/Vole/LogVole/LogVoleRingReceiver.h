@@ -44,13 +44,14 @@ namespace osuCrypto::LogVole
         task<> offline(
             const ShrinkExpandReceiverOfflineInput& input,
             ShrinkExpandReceiverState& state,
-            Socket& sock);
+            Socket& sock, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
         task<> offline(
             const ReceiverOfflineInput& input,
             ReceiverState& state,
             Socket& sock,
-            std::shared_ptr<void>* firstQueryGpuAllocations = nullptr);
+            std::shared_ptr<void>* firstQueryGpuAllocations = nullptr,
+            ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
         task<> keyDerive(
             const KeyDeriveReceiverInput& input,

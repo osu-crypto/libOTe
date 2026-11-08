@@ -256,6 +256,7 @@ contain no environment reads.
 | Receiver resident Ct1 and lazy snapshots | Explicit receiver finalization scope reaches context/public-operand acquisition, retained validation, cache construction and producer owners. Original caller-role context/eager-cache selection and Receiver-only retained regions are preserved. Lazy public owners pass their owned scope directly. Ct1 snapshot/NTT and pipelined copy are identity-free, so their redundant guards are removed without new parameters. Generic legacy parallel helpers still carry compatibility scope; copy workers use an empty owned context. No scheduling or numerical changes. |
 | GPU backend cold setup ownership | Dynamic coefficient/plaintext selectors and nullable raw-ring setup accept an explicit fallback service; production execution owners bypass compatibility defaults. `GpuRing::get(ctx)` obtains a missing setup service from its owned factory, and prefetch workers use their copied context without identity capture. Backend implementation has no direct ambient identity reads/guards; temporary external defaults and the retained-record bind boundary remain. Role/raw cache keys and warm reuse are unchanged. |
 | GPU geometry and retained randomizer identity | Geometry keys hash the explicit operation role; shrink/expand and setup assembler entry points forward borrowed views through cache/token admission and retained copies. LENC randomizers preserve producer-role admission across runs, and seed-label/private metadata keeps its exact existing run rules. Existing owned setup/online callers forward their contexts; public compatibility defaults remain for other callers. No numerical, kernel or scheduling changes. |
+| Receiver offline transport context | Both receiver offline coroutines own the captured operation scope before lazy start and pass explicit views through recursive, shrink/expand and root finalization. Four direct guards are removed, including the two that previously spanned socket awaits; transport frame allocation and byte decoders remain identity-free. Existing wire/lazy allocation owners are retained. Key derivation and upper CI-VOLE caller capture remain separate work. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -293,6 +294,13 @@ mirror rebuild under foreign ambience. Two-query 16-value GoldenSeed GPU online
 smoke passes in 0.80 seconds; three CPU checks pass in 3.20 seconds. No
 benchmarks or WSL run. Compatibility transport still keeps the runtime global
 count at 25; the 85% headline is an approximate overall work estimate.
+
+Receiver-offline validation: Windows CUDA-enabled target and frontend example
+compile (66.82 seconds); three CPU checks pass in 3.20 seconds, two GPU identity
+checks in 3.12 seconds, and the two-query GoldenSeed GPU smoke in 2.35 seconds.
+The lazy-start regression drops external service owners, suspends before frame
+arrival under unrelated ambience, and verifies unchanged TLS, retained exact
+service, Receiver state role and exact Ct1 output. No benchmarks or WSL run.
 
 #### Remaining runtime globals
 

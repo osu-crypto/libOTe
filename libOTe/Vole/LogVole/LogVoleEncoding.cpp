@@ -1441,8 +1441,6 @@ namespace osuCrypto::LogVole
         auto* profile = profileOwner.get();
         bool enabled = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
         enabled = (useGpu && gpu::available()) && options.mEncodedReceive;
 #endif
         if (!enabled || std::endian::native != std::endian::little)
@@ -1562,8 +1560,6 @@ namespace osuCrypto::LogVole
         bool retainLacct = false;
         bool retainPublicBStar = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
         enabled = (useGpu && gpu::available()) && options.mRootEncodedReceive;
         retainCtR = options.mRootCtREncodedReceive;
         retainLacct = options.mRootLacctEncodedReceive;

@@ -2617,7 +2617,7 @@ namespace osuCrypto::LogVole
     template <typename Message>
     static bool finalizeRootOfflineReceiverImpl(
         ReceiverState& state,
-        Message&& message)
+        Message&& message, ProtocolCacheScopeView scope)
     {
         HostStep setupStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "setup receiver: root total");
         u32 tauHi = 0;
@@ -2710,7 +2710,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(message.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
+        if (!makeRingNttContext(message.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner, scope))
         {
             return false;
         }
@@ -2761,16 +2761,16 @@ namespace osuCrypto::LogVole
 
     bool finalizeRootOfflineReceiver(
         ReceiverState& state,
-        const RootOfflineMessage& message)
+        const RootOfflineMessage& message, ProtocolCacheScopeView scope)
     {
-        return finalizeRootOfflineReceiverImpl(state, message);
+        return finalizeRootOfflineReceiverImpl(state, message, scope);
     }
 
     bool finalizeRootOfflineReceiver(
         ReceiverState& state,
-        RootOfflineMessage&& message)
+        RootOfflineMessage&& message, ProtocolCacheScopeView scope)
     {
-        return finalizeRootOfflineReceiverImpl(state, std::move(message));
+        return finalizeRootOfflineReceiverImpl(state, std::move(message), scope);
     }
 
     macoro::task<bool> prepareRootDigestReceiver(
@@ -5054,14 +5054,14 @@ namespace osuCrypto::LogVole
             Message&& message,
             ReceiverState& state,
             bool isTopLevel,
-            const ShrinkExpandReceiverState* reusableInternalState, CpuBenchmarkState cpuBenchmark = {},
-            ProtocolCacheScopeView setupScope = currentProtocolCacheScope())
+            const ShrinkExpandReceiverState* reusableInternalState, CpuBenchmarkState cpuBenchmark,
+            ProtocolCacheScopeView setupScope)
         {
             auto ringOwner = input.mRingFactoryOwner;
             if (!ringOwner)
             {
                 RingNttContext math;
-                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, math)) return false;
+                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, math, std::shared_ptr<RingContextFactory>{}, setupScope)) return false;
                 ringOwner = std::move(math.mFactoryOwner);
             }
             auto execution = input.mGpuExecution;
@@ -5141,7 +5141,7 @@ namespace osuCrypto::LogVole
             if (mode == RecursiveMode::Root)
             {
                 if (!validRootWidth(input.mParams, muHi) ||
-                    !finalizeRootOfflineReceiver(nextState, std::forward<Message>(message).mRootMessage))
+                    !finalizeRootOfflineReceiver(nextState, std::forward<Message>(message).mRootMessage, setupScope))
                 {
                     return false;
                 }
@@ -5266,10 +5266,10 @@ namespace osuCrypto::LogVole
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         const OfflineMessage& message,
-        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark)
+        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView setupScope)
     {
         ReceiverState state{};
-        if (!finalizeReceiverOfflineImpl(input, message, state, true, nullptr, cpuBenchmark))
+        if (!finalizeReceiverOfflineImpl(input, message, state, true, nullptr, cpuBenchmark, setupScope))
         {
             return false;
         }
@@ -5283,10 +5283,10 @@ namespace osuCrypto::LogVole
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         OfflineMessage&& message,
-        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark)
+        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView setupScope)
     {
         ReceiverState state{};
-        if (!finalizeReceiverOfflineImpl(input, std::move(message), state, true, nullptr, cpuBenchmark))
+        if (!finalizeReceiverOfflineImpl(input, std::move(message), state, true, nullptr, cpuBenchmark, setupScope))
         {
             return false;
         }
@@ -5301,12 +5301,12 @@ namespace osuCrypto::LogVole
         const ReceiverOfflineInput& input,
         const ShrinkExpandOfflineMessage& shrinkExpandMessage,
         const RootOfflineMessage& rootMessage,
-        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark)
+        ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView setupScope)
     {
         OfflineMessage message{};
         message.mShrinkExpandMessage = shrinkExpandMessage;
         message.mRootMessage = rootMessage;
-        return finalizeReceiverOffline(input, message, out, cpuBenchmark);
+        return finalizeReceiverOffline(input, message, out, cpuBenchmark, setupScope);
     }
 
     bool ensureSenderPrecompute(

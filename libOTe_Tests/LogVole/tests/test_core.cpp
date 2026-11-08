@@ -6,6 +6,7 @@
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
+#include "libOTe/Vole/LogVole/LogVoleTransport.h"
 #include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
 #include "libOTe/config.h"
@@ -2286,6 +2287,48 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
         LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
     }
+
+    // Capture the operation at lazy task construction, before its first receive.
+    // No input factory keeps this fresh service alive; the task must own it.
+    auto lazyInput = receiverInput;
+    lazyInput.mRingFactoryOwner.reset();
+    lazyInput.mGpuExecution.reset();
+    lazyInput.mDeferHostSnapshot = false;
+    ShrinkExpandReceiverState lazyOfflineState;
+    auto sockets = coproto::LocalAsyncSocket::makePair();
+    LogVoleRingReceiver ringReceiver;
+    std::weak_ptr<const ProtocolCacheService> retainedService;
+    ProtocolCacheRunId capturedRun;
+    macoro::task<> pendingOffline;
+    {
+        auto serviceOwner = ProtocolCacheService::create();
+        retainedService = serviceOwner;
+        capturedRun = serviceOwner->allocate();
+        ScopedProtocolCacheScope creation(ProtocolCacheRole::Receiver, capturedRun);
+        pendingOffline = ringReceiver.offline(lazyInput, lazyOfflineState, sockets[1]);
+    }
+    LOGVOLE_REQUIRE_FALSE(retainedService.expired());
+    Buffer offlinePayload;
+    {
+        ScopedProtocolCacheScope ambient(sender);
+        offlinePayload = encodeShrinkExpandOfflineState(state, 2);
+    }
+    {
+        ScopedProtocolCacheScope ambient(unrelated);
+        auto receiving = std::move(pendingOffline) | macoro::make_eager();
+        // It has suspended waiting for a frame; no Receiver scope may remain.
+        LOGVOLE_REQUIRE_TRUE(!lazyOfflineState.mRingFactoryOwner);
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
+        macoro::sync_wait(osuCrypto::LogVole::detail::sendFrame(sockets[0], offlinePayload));
+        macoro::sync_wait(std::move(receiving));
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
+    }
+    LOGVOLE_REQUIRE_TRUE(lazyOfflineState.mRingFactoryOwner);
+    LOGVOLE_REQUIRE_TRUE(lazyOfflineState.mRingFactoryOwner->mFactory->protocolService() == retainedService.lock());
+    LOGVOLE_REQUIRE_TRUE(lazyOfflineState.mRingFactoryOwner->mResourceScope.mRole == ProtocolCacheRole::Receiver);
+    expect_batch_equal(lazyOfflineState.hostCt1().mPolys, expectedCt1);
 
 #else
     (void)cmd;
