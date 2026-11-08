@@ -782,7 +782,7 @@ namespace osuCrypto::LogVole
         const KeyDeriveSenderInput& input,
         const KeyDeriveRequest& request,
         KeyDeriveResponse& response,
-        KeyDeriveSenderOutput& output)
+        KeyDeriveSenderOutput& output, ProtocolCacheScopeView scope)
     {
         if (!validateKeyDeriveSenderInput(input))
         {
@@ -809,7 +809,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(input.mParams, ctx))
+        if (!makeRingNttContext(input.mParams, ctx, std::shared_ptr<RingContextFactory>{}, scope))
         {
             return false;
         }
@@ -854,7 +854,7 @@ namespace osuCrypto::LogVole
     bool finalizeKeyDeriveResponse(
         const KeyDeriveReceiverInput& input,
         const KeyDeriveResponse& response,
-        KeyDeriveReceiverOutput& output)
+        KeyDeriveReceiverOutput& output, ProtocolCacheScopeView scope)
     {
         if (!validateKeyDeriveReceiverInput(input))
         {
@@ -881,7 +881,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(input.mParams, ctx))
+        if (!makeRingNttContext(input.mParams, ctx, std::shared_ptr<RingContextFactory>{}, scope))
         {
             return false;
         }

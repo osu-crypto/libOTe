@@ -452,11 +452,10 @@ namespace osuCrypto::LogVole
     task<> LogVoleRingReceiver::keyDerive(
         const KeyDeriveReceiverInput& input,
         KeyDeriveReceiverOutput& output,
-        Socket& sock, LogVoleEncodingOptions encoding, bool useGpu, HostStepProfiler* profile)
+        Socket& sock, LogVoleEncodingOptions encoding, bool useGpu, HostStepProfiler* profile, ProtocolCacheScope scope)
     {
         CpuBenchmarkState cpuBenchmark{};
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+        scope.mRole = ProtocolCacheRole::Receiver;
         KeyDeriveRequest request{};
         if (!prepareKeyDeriveRequest(input, request))
         {
@@ -476,7 +475,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole receiver could not decode key-derive response");
         }
 
-        if (!finalizeKeyDeriveResponse(input, response, output))
+        if (!finalizeKeyDeriveResponse(input, response, output, scope))
         {
             throw std::runtime_error("LogVole receiver rejected key-derive response");
         }

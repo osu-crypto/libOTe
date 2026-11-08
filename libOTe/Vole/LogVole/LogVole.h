@@ -471,7 +471,7 @@ namespace osuCrypto
         u64 outputDeviceCount() const { return mOutputDeviceCount; }
 
         // Run reusable offline setup matching the sender's offline phase.
-        task<> offline(Socket& sock);
+        task<> offline(Socket& sock, LogVole::ProtocolCacheScope setupScope = LogVole::currentProtocolCacheScope());
 
         // Online phase. x must have the configured size and each x[i] must be
         // in Z_p. Writes receiver MACs a, unless mKeepOutputOnDevice is set.
@@ -593,7 +593,8 @@ namespace osuCrypto::LogVole
     task<> civoleReceiverOffline(
         const CivoleReceiverOfflineInput& input,
         CivoleReceiverState& state,
-        Socket& sock, CpuBenchmarkState cpuBenchmark = {});
+        Socket& sock, CpuBenchmarkState cpuBenchmark = {},
+        ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
     // Legacy staged release; production CPU output uses the awaited release API.
     bool civoleSenderReleaseK(

@@ -831,8 +831,9 @@ namespace osuCrypto
         mState = State::Configured;
     }
 
-    task<> LogVoleReceiver::offline(Socket& sock)
+    task<> LogVoleReceiver::offline(Socket& sock, ProtocolCacheScope setupScope)
     {
+        setupScope.mRole = ProtocolCacheRole::Receiver;
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!isConfigured())
         {
@@ -845,7 +846,7 @@ namespace osuCrypto
         input.mW = mRequestSize;
 
         CivoleReceiverState state{};
-        co_await civoleReceiverOffline(input, state, sock, cpuBenchmark);
+        co_await civoleReceiverOffline(input, state, sock, cpuBenchmark, setupScope);
         if (state.mW != mRequestSize)
         {
             throw std::runtime_error("LogVole CI-VOLE receiver offline size does not match configured size");
@@ -855,15 +856,13 @@ namespace osuCrypto
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (mOfflineState.mFirstQueryGpuAllocations)
         {
-            ScopedProtocolCacheScope receiverRole(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
             auto plan = std::static_pointer_cast<gpu::ReceiverFirstQueryAllocations>(
                 mOfflineState.mFirstQueryGpuAllocations);
             // The offline helper's temporary state has been moved into this
             // receiver's final storage. Seal that address before any query can
             // bind the reservation; a copied handle in another state declines.
             if (!gpu::sealReceiverFirstQueryAllocationOwner(
-                    plan, &mOfflineState))
+                    plan, &mOfflineState, setupScope))
                 mOfflineState.mFirstQueryGpuAllocations.reset();
         }
 #endif
@@ -2236,8 +2235,9 @@ namespace osuCrypto::LogVole
     task<> civoleReceiverOffline(
         const CivoleReceiverOfflineInput& input,
         CivoleReceiverState& state,
-        Socket& sock, CpuBenchmarkState cpuBenchmark)
+        Socket& sock, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
+        setupScope.mRole = ProtocolCacheRole::Receiver;
         if (input.mW == 0)
         {
             throw std::runtime_error("LogVole CI-VOLE receiver requires a nonzero output length");
@@ -2254,19 +2254,10 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole CI-VOLE offline modes do not match");
 
         ZpCrtContext ctx{};
-        bool haveContext = false;
-        {
-            // A peer coroutine may have suspended with its legacy role scope
-            // active. Select the receiver's factory lane without carrying a
-            // thread-local scope across this coroutine's next suspension.
-            ScopedProtocolCacheScope role(ProtocolCacheRole::Receiver,
-                currentProtocolCacheScope().mRunId);
-            haveContext = makeZpCrtContext(
+        if (!makeZpCrtContext(
                 sessionParams.mLogVole.mShrinkExpand.mRing,
                 sessionParams.mLogVole.mShrinkExpand.mPlaintextModulusBits, ctx,
-                input.mCrtFactoryOwner ? input.mCrtFactoryOwner->mFactory : nullptr);
-        }
-        if (!haveContext)
+                input.mCrtFactoryOwner ? input.mCrtFactoryOwner->mFactory : nullptr, setupScope))
         {
             throw std::runtime_error("LogVole CI-VOLE receiver could not build CRT context");
         }
@@ -2307,7 +2298,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<void> firstQueryGpuAllocations;
         auto logVoleSock = sock.fork();
         co_await receiver.offline(
-            offlineInput, logVoleState, logVoleSock, &firstQueryGpuAllocations);
+            offlineInput, logVoleState, logVoleSock, &firstQueryGpuAllocations, setupScope);
 
         CivoleReceiverState next{};
         next.mParams = sessionParams;

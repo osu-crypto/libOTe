@@ -38,7 +38,8 @@ namespace osuCrypto::LogVole
         task<> keyDerive(
             const KeyDeriveSenderInput& input,
             KeyDeriveSenderOutput& output,
-            Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+            Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr,
+            ProtocolCacheScope scope = currentProtocolCacheScope());
 
         // Borrow the executor and exclusive buffers until completion. Recursive
         // levels reuse the same ring-sized products; buffers bound CPU workers.

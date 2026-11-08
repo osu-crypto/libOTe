@@ -793,11 +793,10 @@ namespace osuCrypto::LogVole
     task<> LogVoleRingSender::keyDerive(
         const KeyDeriveSenderInput& input,
         KeyDeriveSenderOutput& output,
-        Socket& sock, LogVoleEncodingOptions encoding, bool useGpu, HostStepProfiler* profile)
+        Socket& sock, LogVoleEncodingOptions encoding, bool useGpu, HostStepProfiler* profile, ProtocolCacheScope scope)
     {
         CpuBenchmarkState cpuBenchmark{};
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+        scope.mRole = ProtocolCacheRole::Sender;
 		u64 maxPayload = 0;
 		if (input.mSk1.size() > std::numeric_limits<u32>::max())
 			throw std::length_error("LogVole key-derive dimension is too large");
@@ -813,7 +812,7 @@ namespace osuCrypto::LogVole
         }
 
         KeyDeriveResponse response{};
-        if (!processKeyDeriveRequest(input, request, response, output))
+        if (!processKeyDeriveRequest(input, request, response, output, scope))
         {
             throw std::runtime_error("LogVole sender rejected key-derive request");
         }
