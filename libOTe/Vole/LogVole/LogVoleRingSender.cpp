@@ -950,12 +950,11 @@ namespace osuCrypto::LogVole
         bool expanded;
         if (gpu::enabled(state.mRingFactoryOwner))
         {
-            ScopedProtocolCacheScope roleScope(cacheScope);
             expanded = shrinkExpandExpandSender(state, expandInput, output,
-                state.mParams.mNumWorkerThreads, cpuBenchmark);
+                state.mParams.mNumWorkerThreads, cpuBenchmark, cacheScope);
         }
         else
-            expanded = co_await shrinkExpandExpandSender(executor, buffers, state, expandInput, output, cpuBenchmark);
+            expanded = co_await shrinkExpandExpandSender(executor, buffers, state, expandInput, output, cpuBenchmark, cacheScope);
         if (!expanded)
         {
             throw std::runtime_error("LogVole sender could not expand");

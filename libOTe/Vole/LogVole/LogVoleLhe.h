@@ -148,7 +148,7 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
         u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr);
+        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Consuming overload: reuses the ciphertext allocation for NTT-domain
     // decryption. The coefficient-domain special case keeps its existing path.
@@ -162,7 +162,7 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
         u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr);
+        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     bool deriveSkx(
         const RingNttContext& ctx,

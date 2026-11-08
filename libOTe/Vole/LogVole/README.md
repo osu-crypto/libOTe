@@ -263,6 +263,7 @@ contain no environment reads.
 | Core recursive/root sender setup | Root error sampling, TopCt assembly, root offline preparation and recursive sender setup use their existing owned phase scope explicitly. Eleven entry/chunk guards are removed; private delta/top/root metadata, B/BStar caches/fetches and uncaptured batch samplers preserve original role/run admission and ownership. Internal defaults are required at migrated helpers; encoder tensor access remains identity-free. |
 | Identity-free compact and host Root samplers | Seven Ring entry/chunk guards are removed. Three compact sampler APIs and both host-only Root sampler overloads no longer accept unused protocol scope; they borrow numeric context, buffers and executor until joined. Resident Root metadata creation still receives owned identity. Service-lifetime regression now exercises actual LHE public-A cache ownership. |
 | Sender entry, delta and offline wire ownership | Public/CI-VOLE/Ring sender entry points capture owned caller context before lazy start. A zero incoming sender run still allocates fresh from its resource service; qualified service affinity and explicit sender-owner override are preserved. Delta wrapping forwards views into cold plaintext tables. Eight guards are removed from setup/wire workers and encoders; explicit run IDs, wire allocators, RootWirePin and joined workers retain exact services. Send ownership/order is unchanged. |
+| Online ShrinkExpand leaves and host materialization | Sender/receiver expansion and tree preparation forward explicit caller views; async expansion owns context before lazy start, preserving Receiver-only normalization. Host materialization keeps its original role subregions and caller admission. Nullable-A synchronous LHE receives a view; in-place async LHE remains identity-free. Ten guards are removed, including numeric denoise transport. Parent online orchestration remains next. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
@@ -355,6 +356,11 @@ capture allocates the sender run from its configured service, and GPU execution
 under third-service Receiver ambience leaves TLS unchanged. CPU mode operations
 also run on the shared executor. No benchmarks, large reservation tests or WSL
 run. The approximate overall estimate is 87%; 25 runtime declarations remain.
+
+Online-leaf validation: Windows CUDA-enabled target and frontend example pass
+(79.14 seconds). Four CPU checks pass in 6.39 seconds, including fused/separate
+expansion equality; GPU identity, explicit materialization admission/output and
+two-query GoldenSeed checks pass in 3.42 seconds. No benchmarks or WSL run.
 
 #### Remaining runtime globals
 

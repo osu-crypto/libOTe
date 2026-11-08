@@ -105,8 +105,8 @@ namespace osuCrypto::LogVole
     // GPU view. Also invalidate its device mirror before caller mutation. For
     // an ordinary state only the mirror is invalidated; allocation failures
     // leave an existing view unchanged.
-    void materializeShrinkExpandHostState(ShrinkExpandSenderState& state);
-    void materializeShrinkExpandHostState(ShrinkExpandReceiverState& state);
+    void materializeShrinkExpandHostState(ShrinkExpandSenderState& state, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+    void materializeShrinkExpandHostState(ShrinkExpandReceiverState& state, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     std::vector<RnsPoly> sampleUniformBatch(
         const RingNttContext& ctx,
@@ -144,12 +144,12 @@ namespace osuCrypto::LogVole
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         const std::vector<RnsPoly>& x,
-        ShrinkExpandShrinkOutput& out);
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         std::span<const RnsPoly> x,
-        ShrinkExpandShrinkOutput& out);
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // CPU expansion: executor and exclusive prepared buffers are borrowed
     // until completion. Output is published only after decryption succeeds.
@@ -157,7 +157,7 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark = {});
+        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = currentProtocolCacheScope());
 
     [[deprecated("Use async sender expansion with explicit executor and buffers")]]
     bool shrinkExpandExpandSender(
@@ -165,7 +165,7 @@ namespace osuCrypto::LogVole
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& out,
         // CPU LHE allowance: outer chunk workers pass 1 to avoid nested pools.
-        u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark = {});
+        u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // CPU expansion. All referenced objects must survive completion; buffers
     // are exclusive to this operation (not shared with a concurrent sender).
@@ -175,7 +175,7 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
         std::span<LencEvalBuffer> lencBuffers,
         const ShrinkExpandReceiverState& state, const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark = {});
+        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = currentProtocolCacheScope());
 
     [[deprecated("Use async receiver expansion with explicit executor and buffers")]]
     bool shrinkExpandExpandReceiver(
@@ -183,7 +183,7 @@ namespace osuCrypto::LogVole
         const ShrinkExpandExpandReceiverInput& input,
         ShrinkExpandReceiverExpandOutput& out,
         // CPU row allowance: outer chunk workers pass 1 to avoid nested pools.
-        u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark = {});
+        u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
 
     // Borrow context/input and exclusive output until completion; input may
     // alias output. Immutable recovery data is prepared once for all chunks.

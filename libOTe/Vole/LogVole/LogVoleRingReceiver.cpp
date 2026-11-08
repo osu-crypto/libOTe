@@ -782,7 +782,7 @@ namespace osuCrypto::LogVole
             ShrinkExpandShrinkOutput shrink{};
             std::vector<RnsPoly> decomposed;
             HostStep treeStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu shrink worker: digest tree", &cpuBenchmark);
-            if (!shrinkExpandShrink(state.mShrinkExpandState, chunk, shrink)) return false;
+            if (!shrinkExpandShrink(state.mShrinkExpandState, chunk, shrink, cacheScope)) return false;
             treeStep.stop();
             HostStep unbundleStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu shrink worker: unbundle", &cpuBenchmark);
             if (!seedLabelGadgetDecomposeHiAndUnbundle(
@@ -1059,7 +1059,7 @@ namespace osuCrypto::LogVole
                     auto expandInput = chunkInput(static_cast<u32>(chunk));
                     ShrinkExpandReceiverExpandOutput expandOutput;
                     if (!co_await shrinkExpandExpandReceiver(executor, products, leaves,
-                            state.mShrinkExpandState, expandInput, expandOutput, worker) ||
+                            state.mShrinkExpandState, expandInput, expandOutput, worker, cacheScope) ||
                         !storeChunk(static_cast<u32>(chunk), expandOutput))
                         throw std::runtime_error("LogVole receiver could not expand recursive chunk");
                 }
@@ -1086,7 +1086,7 @@ namespace osuCrypto::LogVole
                     auto expandInput = chunkInput(chunk);
                     ShrinkExpandReceiverExpandOutput expandOutput;
                     return shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput,
-                        expandOutput, cpuRowWorkers, worker) && storeChunk(chunk, expandOutput);
+                        expandOutput, cpuRowWorkers, worker, cacheScope) && storeChunk(chunk, expandOutput);
                 }, false, &cpuBenchmark))
                 throw std::runtime_error("LogVole receiver could not expand recursive chunk");
         }
@@ -1128,7 +1128,7 @@ namespace osuCrypto::LogVole
         Buffer digestPayload;
         {
             ScopedProtocolCacheScope roleScope(cacheScope);
-            if (!shrinkExpandShrink(state, input.mX, shrink))
+            if (!shrinkExpandShrink(state, input.mX, shrink, cacheScope))
             {
                 throw std::runtime_error("LogVole receiver could not shrink");
             }
@@ -1169,13 +1169,12 @@ namespace osuCrypto::LogVole
         bool expanded;
         if (gpu::enabled(state.mRingFactoryOwner))
         {
-            ScopedProtocolCacheScope roleScope(cacheScope);
             expanded = shrinkExpandExpandReceiver(state, coreInput, output,
-                state.mParams.mNumWorkerThreads, cpuBenchmark);
+                state.mParams.mNumWorkerThreads, cpuBenchmark, cacheScope);
         }
         else
             expanded = co_await shrinkExpandExpandReceiver(executor, lheBuffers, lencBuffers,
-                state, coreInput, output, cpuBenchmark);
+                state, coreInput, output, cpuBenchmark, cacheScope);
         if (!expanded)
         {
             throw std::runtime_error("LogVole receiver could not expand");

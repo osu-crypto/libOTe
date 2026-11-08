@@ -1012,7 +1012,7 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt,
         bool outputNtt,
         u32 requestedWorkers,
-        std::vector<RnsPoly>* ownedCipher, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
+        std::vector<RnsPoly>* ownedCipher, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (cipher.empty() || !validateRingBatchShape(cipher, ctx.mParams) || !validateRingPolyShape(sk, ctx.mParams))
@@ -1035,7 +1035,7 @@ namespace osuCrypto::LogVole
         {
             // A device decline keeps PRNG consumption unchanged, then builds
             // the exact host fallback operand only when it is consumed.
-            cachedPublicANtt = getOrCreateCachedPublicANtt(ctx, publicCount, currentProtocolCacheScope());
+            cachedPublicANtt = getOrCreateCachedPublicANtt(ctx, publicCount, scope);
             publicANtt = cachedPublicANtt.get();
         }
 
@@ -1142,20 +1142,20 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, const std::vector<RnsPoly>& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
         bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
-        detail::CpuRowScratch* cpuScratch)
+        detail::CpuRowScratch* cpuScratch, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, nullptr, cpuBenchmark, cpuScratch);
+        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, nullptr, cpuBenchmark, cpuScratch, scope);
     }
 
     bool lheDec(
         const RingNttContext& ctx, std::vector<RnsPoly>&& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
         bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
-        detail::CpuRowScratch* cpuScratch)
+        detail::CpuRowScratch* cpuScratch, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, &cipher, cpuBenchmark, cpuScratch);
+        return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, &cipher, cpuBenchmark, cpuScratch, scope);
     }
 
     bool deriveSkx(

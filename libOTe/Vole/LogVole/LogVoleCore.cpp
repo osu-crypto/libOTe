@@ -2844,7 +2844,7 @@ namespace osuCrypto::LogVole
         {
             buildXRoot();
             ShrinkExpandShrinkOutput shrink{};
-            if (!shrinkExpandShrink(state.mShrinkExpandState, xRoot, shrink))
+            if (!shrinkExpandShrink(state.mShrinkExpandState, xRoot, shrink, cacheScope))
             {
                 co_return false;
             }
@@ -5410,9 +5410,8 @@ namespace osuCrypto::LogVole
                 input.mTbkPrime = std::move(rootKey);
                 ShrinkExpandSenderExpandOutput expanded;
                 auto expansion = [&] {
-                    ScopedProtocolCacheScope scope(cacheScope);
                     return shrinkExpandExpandSender(executor, buffers,
-                        state.mShrinkExpandState, input, expanded, cpuBenchmark);
+                        state.mShrinkExpandState, input, expanded, cpuBenchmark, cacheScope);
                 }();
                 if (!co_await std::move(expansion)) co_return false;
                 if (isLeaf && expanded.mTbk.size() > state.mParams.mW)
@@ -5468,9 +5467,8 @@ namespace osuCrypto::LogVole
                 input.mTbkPrime = keys[chunk];
                 ShrinkExpandSenderExpandOutput expanded;
                 auto expansion = [&] {
-                    ScopedProtocolCacheScope scope(cacheScope);
                     return shrinkExpandExpandSender(executor, products,
-                        state.mShrinkExpandState, input, expanded, worker);
+                        state.mShrinkExpandState, input, expanded, worker, cacheScope);
                 }();
                 if (!co_await std::move(expansion) || expanded.mTbk.size() != muHi)
                     throw SenderSeedEvaluationFailure{};
@@ -5762,7 +5760,7 @@ namespace osuCrypto::LogVole
         expandInput = rootReceiverExpansionInput(state, input, digestState, std::move(receiverKey));
         ShrinkExpandReceiverExpandOutput expandOutput;
         if (!co_await shrinkExpandExpandReceiver(executor, lheBuffers, lencBuffers,
-                state.mShrinkExpandState, expandInput, expandOutput, cpuBenchmark)) co_return false;
+                state.mShrinkExpandState, expandInput, expandOutput, cpuBenchmark, cacheScope)) co_return false;
         co_return finishRootReceiverExpansion(state, input, digestState, expandOutput, next, out);
     }
 

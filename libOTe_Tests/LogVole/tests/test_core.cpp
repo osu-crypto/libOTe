@@ -2217,6 +2217,11 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         try { (void)state.hostS(receiver); }
         catch (const std::runtime_error&) { rejected = true; }
         LOGVOLE_REQUIRE_TRUE(rejected);
+        auto copy = state;
+        bool rejectedMaterialization = false;
+        try { materializeShrinkExpandHostState(copy, receiver); }
+        catch (const std::runtime_error&) { rejectedMaterialization = true; }
+        LOGVOLE_REQUIRE_TRUE(rejectedMaterialization && copy.mLazyS);
     }
     {
         ScopedProtocolCacheScope ambient(receiver);
@@ -2231,6 +2236,11 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
             params.mShrinkExpand.mRing, expected, zp.mRing.mFactoryOwner, sender));
         expect_batch_equal(actual, expected);
         LOGVOLE_REQUIRE_TRUE(&state.hostS(sender) == &actual);
+        auto materialized = state;
+        materializeShrinkExpandHostState(materialized, sender);
+        expect_batch_equal(materialized.mS, expected);
+        LOGVOLE_REQUIRE_TRUE(!materialized.mLazyS && !materialized.mGpuCache);
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == receiver.mRole);
     }
     // Exercise the production wire -> receiver resident NTT -> lazy snapshot
     // path with a foreign service installed throughout setup and first get().
@@ -2282,6 +2292,10 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(receiverState.mLazyPublicUniformHosts->get(publicA, publicB));
         LOGVOLE_REQUIRE_TRUE(receiverState.mLazyPublicUniformHosts->get(againA, againB));
         LOGVOLE_REQUIRE_TRUE(publicA == againA && publicB == againB);
+        auto materialized = receiverState;
+        materializeShrinkExpandHostState(materialized, receiverSetup);
+        expect_batch_equal(materialized.mCt1.mPolys, expectedCt1);
+        LOGVOLE_REQUIRE_TRUE(!materialized.mLazyCt1Ntt && !materialized.mGpuCache);
         // Rebuild a real shrink mirror from receiver-owned retained operands;
         // this traverses cache admission and geometry under foreign ambience.
         auto shrinkState = receiverState;

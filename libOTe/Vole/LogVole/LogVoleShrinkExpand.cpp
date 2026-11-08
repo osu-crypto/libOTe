@@ -218,10 +218,10 @@ namespace osuCrypto::LogVole
             const RingNttContext& ctx,
             const ShrinkExpandReceiverState& state,
             std::span<const RnsPoly> x,
-            DigestTree& out)
+            DigestTree& out, ProtocolCacheScopeView scope)
         {
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
-            if (!receiverPublicHosts(ctx, state, publicA, publicB)) return false;
+            if (!receiverPublicHosts(ctx, state, publicA, publicB, scope)) return false;
             const std::vector<RnsPoly>* publicBNtt = publicB.get();
             if (state.mParams.mTruncateOneGadgetDigit)
             {
@@ -253,7 +253,7 @@ namespace osuCrypto::LogVole
             const RingNttContext& ctx,
             const ShrinkExpandReceiverState& state,
             const ShrinkExpandExpandReceiverInput& input,
-            std::shared_ptr<DigestTree>& out)
+            std::shared_ptr<DigestTree>& out, ProtocolCacheScopeView scope)
         {
             if (input.mTree)
             {
@@ -267,7 +267,7 @@ namespace osuCrypto::LogVole
             }
 
             DigestTree tree{};
-            if (!buildReceiverDigestTree(ctx, state, input.mX, tree) ||
+            if (!buildReceiverDigestTree(ctx, state, input.mX, tree, scope) ||
                 !rangesEqual(tree.mDigest.mCoeffs, input.mDigest.mCoeffs))
             {
                 return false;
@@ -804,7 +804,7 @@ namespace osuCrypto::LogVole
         return finalizeShrinkExpandReceiverOfflineImpl(input, std::move(message), receiverState, scope);
     }
 
-    void materializeShrinkExpandHostState(ShrinkExpandSenderState& state)
+    void materializeShrinkExpandHostState(ShrinkExpandSenderState& state, ProtocolCacheScopeView scope)
     {
         if (!state.mSharedHostState && !state.mLazyCt1 && !state.mLazyLacct &&
             !state.mLazyRandomizers && !state.mPublicANttDevice &&
@@ -820,9 +820,8 @@ namespace osuCrypto::LogVole
                 state.mLazyPublicUniformHosts))
         {
             RingNttContext ctx{};
-            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner)) return;
-            ScopedProtocolCacheScope senderScope(
-                ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, scope)) return;
+            const ProtocolCacheScopeView senderScope{scope.mRunId, ProtocolCacheRole::Sender};
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
             if (state.mLazyPublicUniformHosts)
             {
@@ -833,16 +832,16 @@ namespace osuCrypto::LogVole
             {
                 if (state.mPublicANttDevice &&
                     !gpu::materializeRetainedPublicUniform(ctx,
-                        state.mPublicANttDevice, publicA)) return;
+                        state.mPublicANttDevice, publicA, senderScope)) return;
                 if (state.mPublicBNttDevice &&
                     !gpu::materializeRetainedPublicUniform(ctx,
-                        state.mPublicBNttDevice, publicB)) return;
+                        state.mPublicBNttDevice, publicB, senderScope)) return;
             }
 #endif
-            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu);
+            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu, senderScope);
             const u32 publicBTau = state.mParams.mTruncateOneGadgetDigit
                 ? state.mParams.mTau + 1u : state.mParams.mTau;
-            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau);
+            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau, senderScope);
             if (!publicA || !publicB || publicA->size() != state.mParams.mMu ||
                 publicB->size() != 2u * static_cast<std::size_t>(publicBTau) ||
                 !validateRingBatchShape(*publicA, ctx.mParams) ||
@@ -850,7 +849,7 @@ namespace osuCrypto::LogVole
             next.mPublicANtt = std::move(publicA);
             next.mPublicBNtt = std::move(publicB);
         }
-        next.mS = state.hostS();
+        next.mS = state.hostS(scope);
         next.mSk1 = state.hostSk1();
         next.mTopSk1Device.reset();
         next.mLazyTopSk1.reset();
@@ -871,7 +870,7 @@ namespace osuCrypto::LogVole
         state = std::move(next);
     }
 
-    void materializeShrinkExpandHostState(ShrinkExpandReceiverState& state)
+    void materializeShrinkExpandHostState(ShrinkExpandReceiverState& state, ProtocolCacheScopeView scope)
     {
         if (!state.mSharedHostState && !state.mLazyCt1Ntt && !state.mLazyLacct &&
             !state.mPublicANttDevice && !state.mPublicBNttDevice &&
@@ -884,11 +883,10 @@ namespace osuCrypto::LogVole
         if (!next.mPublicANtt || !next.mPublicBNtt)
         {
             RingNttContext ctx{};
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+            const ProtocolCacheScopeView receiverScope{scope.mRunId, ProtocolCacheRole::Receiver};
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
-            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner) ||
-                !receiverPublicHosts(ctx, state, publicA, publicB)) return;
+            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, receiverScope) ||
+                !receiverPublicHosts(ctx, state, publicA, publicB, receiverScope)) return;
             next.mPublicANtt = std::move(publicA);
             next.mPublicBNtt = std::move(publicB);
         }
@@ -907,15 +905,15 @@ namespace osuCrypto::LogVole
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         const std::vector<RnsPoly>& x,
-        ShrinkExpandShrinkOutput& out)
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope)
     {
-        return shrinkExpandShrink(state, std::span<const RnsPoly>(x.data(), x.size()), out);
+        return shrinkExpandShrink(state, std::span<const RnsPoly>(x.data(), x.size()), out, scope);
     }
 
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         std::span<const RnsPoly> x,
-        ShrinkExpandShrinkOutput& out)
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope)
     {
         if (x.size() != state.mParams.mMu || !validateRingBatchShape(x, state.mParams.mRing))
         {
@@ -923,13 +921,13 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
+        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, scope))
         {
             return false;
         }
 
         DigestTree tree{};
-        if (!buildReceiverDigestTree(ctx, state, x, tree))
+        if (!buildReceiverDigestTree(ctx, state, x, tree, scope))
         {
             return false;
         }
@@ -944,7 +942,7 @@ namespace osuCrypto::LogVole
     static bool prepareSenderExpansion(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        RingNttContext& ctx, std::vector<RnsPoly>& ciphertext)
+        RingNttContext& ctx, std::vector<RnsPoly>& ciphertext, ProtocolCacheScopeView scope)
     {
         if (!validateRingPolyShape(input.mTbkPrime, state.mParams.mRing) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -955,7 +953,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
+        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, scope))
         {
             return false;
         }
@@ -987,10 +985,9 @@ namespace osuCrypto::LogVole
         ShrinkExpandSenderExpandOutput next{};
         std::shared_ptr<const std::vector<RnsPoly>> publicA;
         {
-            ScopedProtocolCacheScope scope(cacheScope);
-            if (!prepareSenderExpansion(state, input, ctx, next.mTbk) || gpu::enabled(ctx))
+            if (!prepareSenderExpansion(state, input, ctx, next.mTbk, cacheScope) || gpu::enabled(ctx))
                 co_return false;
-            publicA = state.mPublicANtt ? state.mPublicANtt : sharedLhePublicANtt(ctx, state.mParams.mMu);
+            publicA = state.mPublicANtt ? state.mPublicANtt : sharedLhePublicANtt(ctx, state.mParams.mMu, cacheScope);
         }
         if (!publicA || !co_await lheDec(executor, buffers, ctx, next.mTbk,
                 input.mTbkPrime, *publicA, LheDomain::Coefficient, cpuBenchmark))
@@ -1003,22 +1000,22 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark)
+        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope)
     {
         return expandSenderAsync(executor, buffers, state, input, out,
-            cpuBenchmark, currentProtocolCacheScope());
+            cpuBenchmark, std::move(cacheScope));
     }
 
     bool shrinkExpandExpandSender(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out, u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark)
+        ShrinkExpandSenderExpandOutput& out, u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         RingNttContext ctx{};
         // Legacy callers retain their reusable ciphertext storage.
         auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
         auto& senderCt2 = scratch.ct2();
-        if (!prepareSenderExpansion(state, input, ctx, senderCt2)) return false;
+        if (!prepareSenderExpansion(state, input, ctx, senderCt2, scope)) return false;
         ShrinkExpandSenderExpandOutput next{};
         auto lheWorkers = cpuLheWorkers;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1032,7 +1029,7 @@ namespace osuCrypto::LogVole
                 state.mPublicANtt ? state.mPublicANtt.get() : nullptr,
                 false,
                 false,
-                lheWorkers, cpuBenchmark, &scratch.cpuRows()))
+                lheWorkers, cpuBenchmark, &scratch.cpuRows(), scope))
         {
             return false;
         }
@@ -1045,7 +1042,7 @@ namespace osuCrypto::LogVole
         const ShrinkExpandReceiverState& state, const ShrinkExpandExpandReceiverInput& input,
         RingNttContext& ctx, std::shared_ptr<const std::vector<RnsPoly>>& publicA,
         std::shared_ptr<DigestTree>& tree, std::vector<RnsPoly>& receiverCt2,
-        std::vector<RnsPoly>& ct1AppliedNtt, CpuBenchmarkState cpuBenchmark)
+        std::vector<RnsPoly>& ct1AppliedNtt, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if ((!input.mTree && input.mX.size() != state.mParams.mMu) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -1057,21 +1054,21 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
+        if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, scope))
         {
             return false;
         }
 
         std::shared_ptr<const std::vector<RnsPoly>> publicB;
-        if (!receiverPublicHosts(ctx, state, publicA, publicB)) return false;
+        if (!receiverPublicHosts(ctx, state, publicA, publicB, scope)) return false;
 
-        if (!ensureReceiverDigestTree(ctx, state, input, tree))
+        if (!ensureReceiverDigestTree(ctx, state, input, tree, scope))
         {
             return false;
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        const bool senderRole = currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender;
+        const bool senderRole = scope.mRole == ProtocolCacheRole::Sender;
         HostStep sampleStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: sampling" : "cpu receiver expand detail: sampling", &cpuBenchmark);
         if (!buildHashedCt2(
                 ctx,
@@ -1153,7 +1150,7 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
         std::span<LencEvalBuffer> lencBuffers,
         const ShrinkExpandReceiverState& state, const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark)
+        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope)
     {
         if (gpu::enabled(state.mRingFactoryOwner)) co_return false;
         RingNttContext ctx{};
@@ -1164,11 +1161,10 @@ namespace osuCrypto::LogVole
         auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
         auto& receiverCt2 = scratch.ct2();
         std::vector<RnsPoly> decPartialNtt;
-        const ProtocolCacheScope cacheScope{currentProtocolCacheScope().mRunId, ProtocolCacheRole::Receiver};
+        cacheScope.mRole = ProtocolCacheRole::Receiver;
         {
-            ScopedProtocolCacheScope scope(cacheScope);
             if (!prepareReceiverExpansion(state, input, ctx, publicA, tree,
-                    receiverCt2, decPartialNtt, cpuBenchmark)) co_return false;
+                    receiverCt2, decPartialNtt, cpuBenchmark, cacheScope)) co_return false;
         }
         HostStep decryptStep(hostProfiler(ctx), "cpu receiver expand detail: decrypt", &cpuBenchmark);
         if (!co_await lheDec(executor, lheBuffers, ctx, decPartialNtt, input.mSkX,
@@ -1195,7 +1191,6 @@ namespace osuCrypto::LogVole
                 state.mParams.mTau, state.mParams.mGadgetLogBase, evalNtt, true,
                 state.mParams.mNumWorkerThreads)) co_return false;
         evalStep.stop();
-        ScopedProtocolCacheScope scope(cacheScope);
         co_return finishReceiverExpansion(ctx, state, decPartialNtt, evalNtt, receiverCt2,
             fusedEval, false, out, cpuBenchmark);
     }
@@ -1203,7 +1198,7 @@ namespace osuCrypto::LogVole
     bool shrinkExpandExpandReceiver(
         const ShrinkExpandReceiverState& state,
         const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out, u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark)
+        ShrinkExpandReceiverExpandOutput& out, u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         RingNttContext ctx{};
         std::shared_ptr<const std::vector<RnsPoly>> publicA;
@@ -1212,8 +1207,8 @@ namespace osuCrypto::LogVole
         auto& receiverCt2 = scratch.ct2();
         std::vector<RnsPoly> ct1AppliedNtt;
         if (!prepareReceiverExpansion(state, input, ctx, publicA, tree,
-                receiverCt2, ct1AppliedNtt, cpuBenchmark)) return false;
-        const bool senderRole = currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender;
+                receiverCt2, ct1AppliedNtt, cpuBenchmark, scope)) return false;
+        const bool senderRole = scope.mRole == ProtocolCacheRole::Sender;
         HostStep decryptStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt", &cpuBenchmark);
         std::vector<RnsPoly> decPartialNtt;
         auto rowWorkers = cpuRowWorkers;
@@ -1228,7 +1223,7 @@ namespace osuCrypto::LogVole
                 publicA.get(),
                 true,
                 true,
-                rowWorkers, cpuBenchmark, &scratch.cpuRows()))
+                rowWorkers, cpuBenchmark, &scratch.cpuRows(), scope))
         {
             return false;
         }
@@ -1547,9 +1542,7 @@ namespace osuCrypto::LogVole
         if (!prepareDenoise(ctx, tbaPrime, data)) co_return false;
         std::vector<RnsPoly> result(tbaPrime.size() / data.mModuli.size());
         const auto partitions = std::min(workerAllowance, result.size());
-        const auto cacheScope = currentProtocolCacheScope();
         auto denoiseRange = [&](std::size_t first, std::size_t last, CpuBenchmarkState& worker) {
-            ScopedProtocolCacheScope scope(cacheScope);
             CpuBenchmarkWorkerScope timing(partitions > 1 ? worker.mContext : nullptr);
             CpuBenchmarkTaskScope metrics(worker);
             for (auto i = first; i != last; ++i) denoiseRow(ctx, data, tbaPrime, i, result[i]);
