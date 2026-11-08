@@ -1439,7 +1439,7 @@ namespace osuCrypto::LogVole
     {
         if (setupResults.empty()) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        if (cpuBenchmark.mContext)
+        if (cpuBenchmark.mContext && gpu::enabled(ctx))
         {
             const auto& limits = *cpuBenchmark.mContext;
             const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
@@ -1527,6 +1527,13 @@ namespace osuCrypto::LogVole
 
         const u32 levels = ilog2Exact(width);
         const u32 ctTauMax = std::max(tauHi, tauLeaf);
+        if (!gpu::enabled(ctx))
+        {
+            requestedWorkers = std::max(1u, requestedWorkers);
+            if (gpuSetupLencEnabled(options, ctx) && setupResults.size() <
+                std::min(std::size_t(requestedWorkers), std::size_t(levels) * width * 2u * ctTauMax))
+                co_return false;
+        }
         std::vector<std::vector<RnsPoly>> rLayersNtt(levels, std::vector<RnsPoly>(width));
 
         const bool devicePadding = deviceAssemblyRequested && options.mLencDevicePadding;

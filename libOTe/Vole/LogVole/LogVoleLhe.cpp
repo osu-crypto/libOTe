@@ -252,7 +252,7 @@ namespace osuCrypto::LogVole
     {
         if (setupResults.empty()) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        if (cpuBenchmark.mContext)
+        if (cpuBenchmark.mContext && gpu::enabled(ctx))
         {
             const auto& limits = *cpuBenchmark.mContext;
             const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
@@ -314,6 +314,12 @@ namespace osuCrypto::LogVole
             }
         }
 
+        if (!gpu::enabled(ctx))
+        {
+            requestedWorkers = std::max(1u, requestedWorkers);
+            if (parallelLheSetupEnabled(options, ctx) && setupResults.size() <
+                std::min(std::size_t(requestedWorkers), rCount * skCount)) co_return false;
+        }
         RingTensor ct1{};
         ct1.mRows = publicCount;
         ct1.mCols = static_cast<u32>(skCount);

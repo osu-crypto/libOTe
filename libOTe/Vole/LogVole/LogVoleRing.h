@@ -526,7 +526,8 @@ namespace osuCrypto::LogVole
     // Each chunk exclusively writes one status byte. A single chunk runs inline.
     // Await started work before destroying it or reusing the borrowed storage.
     // setupResults must be nonempty and may be reused by sequential phases.
-    // requestedWorkers and the optional benchmark cap further bound its size.
+    // CPU requestedWorkers selects logical tasks, bounded by useful work; zero
+    // selects one. Storage must hold every task. GPU compatibility policy is unchanged.
     // Sampling and replay use only borrowed numeric resources, without protocol identity.
     macoro::task<bool> samplePolyErrorCompactBatchFromSeeds(
         macoro::thread_pool& executor, std::span<u8> setupResults,

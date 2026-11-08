@@ -722,6 +722,22 @@ Five focused CPU checks pass in 0.23 seconds with one executor thread, including
 three logical tasks, rejection, joins and reuse; CPU interactive golden passes
 in 4.11 seconds. No benchmarks or GPU execution checks were run for this step.
 
+The grouped follow-up removes diagnostic limits from existing asynchronous CPU
+CRT wrapping/decoding, compact error sampling/replay, root-zeta, and independent
+LENC/LHE setup phases. Explicit requested counts select tasks, bounded by useful
+work; zero selects one. Insufficient caller storage rejects before PRNG or output
+changes. Root-zeta retains its explicit seed layout. Sender seed evaluation uses
+the supplied buffer span as its task allowance and forwards exclusive subspans
+to nested work. Sequential shared-PRNG phases remain sequential by algorithm.
+GPU-enabled compatibility caps and synchronous legacy schedulers remain; the
+runtime declaration inventory remains 24 and the completion estimate remains 89%.
+The Windows build completed with one incremental finish (182.13 seconds) after
+the initial 240-second runner limit; all library and frontend objects had already
+compiled without errors. Four focused CPU checks pass in 0.30 seconds with one
+executor thread, including three logical tasks, sampler/CRT rejection, unchanged
+PRNG progression, buffer reuse and joined failures. Small CPU interactive golden
+passes in 3.91 seconds. No benchmarks or GPU execution checks were run.
+
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their
    operation/resource owners. Retire `CpuRowScratch` scheduling and legacy

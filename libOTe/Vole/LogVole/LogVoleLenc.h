@@ -196,6 +196,9 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>* publicBNtt = nullptr,
         u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {});
 
+    // Independent CPU setup phases use requestedWorkers logical tasks (zero
+    // selects one), bounded by useful work; setupResults must hold every task.
+    // Shared-PRNG sequential phases and GPU compatibility policy are unchanged.
     macoro::task<bool> lencEncTrunc(
         macoro::thread_pool& executor, std::span<u8> setupResults,
         const RingNttContext& ctx,

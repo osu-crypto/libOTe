@@ -303,7 +303,8 @@ namespace osuCrypto::LogVole
 
     // Lazy CPU sampling. All references/spans are borrowed until completion.
     // Await started work before destroying it or reusing these buffers.
-    // Buffers bound execution concurrency, not seed layout; one chunk runs inline.
+    // requestedWorkers selects logical tasks (zero selects one); buffers must
+    // hold every task. Seed layout is unchanged; one task runs inline.
     // Pre-size mWords to 4 * ceil((gadgetLogBase + 1) / 64) and seed mPrng once
     // to prepare storage ahead of the first query. Later calls reuse both allocations.
     macoro::task<bool> sampleRootZeta(
@@ -579,7 +580,8 @@ namespace osuCrypto::LogVole
     // message must have been received). It exists so that a cached result can
     // be reused across the response and the key release within one SID.
     // Lazy operation borrowing state, PRNG, executor and exclusive LHE buffers
-    // through completion. Each level caps concurrency by its worker allowance.
+    // through completion. The supplied span selects logical tasks at each level;
+    // nested independent chunks receive one exclusive buffer each.
     // Await before reuse/destruction; join the executor outside its own workers.
     // Captures the protocol scope at creation. GPU execution keeps its legacy path.
     macoro::task<bool> senderPrecompute(

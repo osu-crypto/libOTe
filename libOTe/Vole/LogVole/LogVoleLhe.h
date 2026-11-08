@@ -37,6 +37,9 @@ namespace osuCrypto::LogVole
     // Then out retains rows/columns with no host polynomials; eager fallback
     // instead returns the ordinary tensor and resets the owner. Failure leaves
     // both caller outputs unchanged. Default/public calls remain eager.
+    // Independent CPU setup phases use requestedWorkers logical tasks (zero
+    // selects one), bounded by useful work; setupResults must hold every task.
+    // Shared-PRNG sequential phases and GPU compatibility policy are unchanged.
     macoro::task<bool> lheEnc1(
         macoro::thread_pool& executor, std::span<u8> setupResults,
         const RingNttContext& ctx,

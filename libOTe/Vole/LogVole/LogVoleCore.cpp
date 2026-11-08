@@ -1130,7 +1130,7 @@ namespace osuCrypto::LogVole
     {
         if (setupResults.empty()) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        if (cpuBenchmark.mContext)
+        if (cpuBenchmark.mContext && gpu::enabled(ctx))
         {
             const auto& limits = *cpuBenchmark.mContext;
             const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
@@ -1490,7 +1490,7 @@ namespace osuCrypto::LogVole
     {
         if (setupResults.empty()) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        if (cpuBenchmark.mContext)
+        if (cpuBenchmark.mContext && gpu::enabled(ctx))
         {
             const auto& limits = *cpuBenchmark.mContext;
             const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
@@ -2087,16 +2087,11 @@ namespace osuCrypto::LogVole
         const auto& moduli = getRingHostModuli(ctx);
         if (moduli.size() != ringModulusCount(ctx)) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        auto allowance = buffers.size();
-        if (requestedWorkers) allowance = std::min(allowance, std::size_t(requestedWorkers));
-        if (cpuBenchmark.mContext)
-        {
-            const auto& limits = *cpuBenchmark.mContext;
-            allowance = std::min(allowance, std::max<std::size_t>(1, limits.mWorkerLimit
-                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size()));
-        }
         const auto count = serialSource ? std::size_t(randomizerWidth) : taskSeeds.size();
-        auto chunks = buffers.first(serialSource ? 1 : std::min(allowance, count));
+        const auto taskCount = serialSource ? std::size_t{1} :
+            std::min(std::size_t(std::max(1u, requestedWorkers)), count);
+        if (buffers.size() < taskCount) co_return false;
+        auto chunks = buffers.first(taskCount);
         const auto words = (std::size_t(gadgetLogBase) + 1 + 63) / 64;
         for (auto& buffer : chunks) buffer.mWords.resize(4 * words);
         std::vector<RnsPoly> zeta(randomizerWidth);
@@ -2147,6 +2142,7 @@ namespace osuCrypto::LogVole
         if (requestedWorkers <= 1)
             co_return co_await sampleRootZetaAsync(executor, buffers, ctx, randomizerWidth,
                 gadgetLogBase, &prng, {}, 1, out, 1, false, cpuBenchmark);
+        if (buffers.size() < requestedWorkers) co_return false;
         // Seed layout depends on protocol workers, never the execution allowance.
         std::vector<block> seeds(std::size_t(randomizerWidth) * requestedWorkers);
         prng.get(seeds.data(), seeds.size());
@@ -5361,11 +5357,8 @@ namespace osuCrypto::LogVole
                 seed.empty()) co_return false;
             const auto rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
             if (!rho) co_return false;
-            auto allowance = buffers.size();
-            if (const auto limit = state.mShrinkExpandState.mParams.mNumWorkerThreads)
-                allowance = std::min<std::size_t>(allowance, limit);
+            const auto allowance = buffers.size();
             if (!allowance) co_return false;
-            buffers = buffers.first(allowance);
             RingNttContext ctx;
             {
                 if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx,

@@ -2568,8 +2568,9 @@ namespace osuCrypto::LogVole
         CpuBenchmarkState cpuBenchmark)
     {
         if (setupResults.empty()) co_return false;
+        if (!gpu::enabled(ctx)) requestedWorkers = std::max(1u, requestedWorkers);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        if (cpuBenchmark.mContext)
+        if (cpuBenchmark.mContext && gpu::enabled(ctx))
         {
             const auto& limits = *cpuBenchmark.mContext;
             const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
@@ -2586,6 +2587,8 @@ namespace osuCrypto::LogVole
         for (std::size_t i = 0; i < seeds.size(); ++i)
             if (active.empty() || active[i]) activeRows.push_back(i);
         if (activeRows.empty()) co_return true;
+        if (!gpu::enabled(ctx) && setupResults.size() <
+            std::min(std::size_t(requestedWorkers), activeRows.size())) co_return false;
 
         std::shared_ptr<const u64> prefixOwner;
         std::span<const u64> prefixes;
@@ -2750,8 +2753,9 @@ namespace osuCrypto::LogVole
         std::span<const u8> active, CpuBenchmarkState cpuBenchmark)
     {
         if (setupResults.empty()) co_return false;
+        if (!gpu::enabled(ctx)) requestedWorkers = std::max(1u, requestedWorkers);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        if (cpuBenchmark.mContext)
+        if (cpuBenchmark.mContext && gpu::enabled(ctx))
         {
             const auto& limits = *cpuBenchmark.mContext;
             const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
@@ -2768,6 +2772,12 @@ namespace osuCrypto::LogVole
             host.clear();
             device.reset();
             co_return true;
+        }
+        if (!gpu::enabled(ctx))
+        {
+            const auto activeCount = active.empty() ? seeds.size() :
+                std::size_t(std::count_if(active.begin(), active.end(), [](u8 value) { return value != 0; }));
+            if (setupResults.size() < std::min(std::size_t(requestedWorkers), activeCount)) co_return false;
         }
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (gpu::enabled(ctx) && ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianResident)
@@ -2916,8 +2926,9 @@ namespace osuCrypto::LogVole
         std::span<const u8> active, CpuBenchmarkState cpuBenchmark)
     {
         if (setupResults.empty()) co_return false;
+        if (!gpu::enabled(ctx)) requestedWorkers = std::max(1u, requestedWorkers);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        if (cpuBenchmark.mContext)
+        if (cpuBenchmark.mContext && gpu::enabled(ctx))
         {
             const auto& limits = *cpuBenchmark.mContext;
             const auto capacity = std::max<std::size_t>(1, limits.mWorkerLimit
@@ -2931,6 +2942,8 @@ namespace osuCrypto::LogVole
             co_return false;
         const auto words = seeds.size() * n;
         if (!device && host.size() == words) co_return true;
+        if (!gpu::enabled(ctx) && setupResults.size() <
+            std::min(std::size_t(requestedWorkers), seeds.size())) co_return false;
         std::vector<u64> next(words, 0);
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (device)

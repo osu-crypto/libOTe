@@ -1757,15 +1757,9 @@ namespace osuCrypto::LogVole
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx.mRing);
         const auto slots = zpSlotCount(ctx);
         const auto count = static_cast<std::size_t>(zpRingLabelCount(ctx, labels.size()));
-        auto allowance = buffers.size();
-        if (requestedWorkers) allowance = std::min(allowance, std::size_t(requestedWorkers));
-        if (cpuBenchmark.mContext)
-        {
-            const auto& limits = *cpuBenchmark.mContext;
-            allowance = std::min(allowance, std::max<std::size_t>(1, limits.mWorkerLimit
-                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size()));
-        }
-        auto chunks = buffers.first(std::min(allowance, count));
+        const auto taskCount = std::min(std::size_t(std::max(1u, requestedWorkers)), count);
+        if (buffers.size() < taskCount) co_return false;
+        auto chunks = buffers.first(taskCount);
         for (auto& buffer : chunks)
         {
             buffer.mSlots.resize(slots);
@@ -1956,15 +1950,9 @@ namespace osuCrypto::LogVole
             co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx.mRing);
         const auto count = static_cast<std::size_t>(zpRingLabelCount(ctx, zpLabelCount));
-        auto allowance = buffers.size();
-        if (requestedWorkers) allowance = std::min(allowance, std::size_t(requestedWorkers));
-        if (cpuBenchmark.mContext)
-        {
-            const auto& limits = *cpuBenchmark.mContext;
-            allowance = std::min(allowance, std::max<std::size_t>(1, limits.mWorkerLimit
-                ? std::min(limits.mWorkerLimit, limits.mCpus.size()) : limits.mCpus.size()));
-        }
-        auto chunks = buffers.first(std::min(allowance, count));
+        const auto taskCount = std::min(std::size_t(std::max(1u, requestedWorkers)), count);
+        if (buffers.size() < taskCount) co_return false;
+        auto chunks = buffers.first(taskCount);
         for (auto& buffer : chunks) prepareDecodeBuffer(buffer, ctx);
         // Ordinary metadata owns aligned payloads; SIMD arithmetic and scratch
         // remain in the synchronous kernel, never in the coroutine frame.

@@ -255,6 +255,24 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
         3.2, 19.2, &referencePrng, true, nullptr, 1, nullptr, {}, nullptr, nullptr,
         nullptr, nullptr, 0, false, serialOptions)));
     const auto expectedNext = referencePrng.get<block>();
+    PRNG rejectedLencPrng(toBlock(723, 12)), savedLencPrng(toBlock(723, 12));
+    LencEncodeOutput rejectedLenc;
+    rejectedLenc.mLacct.mCt.mRows = 777;
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lencEncTrunc(setupResources.executor,
+        std::span(setupResources.results).first(1), ctx, inputs, 1, 30, 29, rejectedLencPrng,
+        rejectedLenc, 3.2, 19.2, 2, true, false, nullptr, 3, false, false,
+        nullptr, nullptr, parallelOptions, benchmark)));
+    LOGVOLE_REQUIRE_EQ(rejectedLenc.mLacct.mCt.mRows, 777u);
+    LOGVOLE_REQUIRE_TRUE(rejectedLencPrng.get<block>() == savedLencPrng.get<block>());
+    PRNG rejectedLhePrng(toBlock(723, 13)), savedLhePrng(toBlock(723, 13));
+    RingTensor rejectedLhe;
+    rejectedLhe.mRows = 777;
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor,
+        std::span(setupResources.results).first(1), ctx, reference.mRNtt, inputs, 30, rejectedLhe,
+        3.2, 19.2, &rejectedLhePrng, true, nullptr, 3, nullptr, {}, nullptr, nullptr,
+        nullptr, nullptr, 0, false, parallelOptions, benchmark)));
+    LOGVOLE_REQUIRE_EQ(rejectedLhe.mRows, 777u);
+    LOGVOLE_REQUIRE_TRUE(rejectedLhePrng.get<block>() == savedLhePrng.get<block>());
     std::array<block, 6> zetaSeeds;
     random.get(zetaSeeds.data(), zetaSeeds.size());
     std::vector<RnsPoly> referenceZeta;
@@ -263,6 +281,8 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     for (u32 allowance : {1u, 3u, 2u, 1u})
     {
         std::vector<RnsPoly> zeta;
+        // Diagnostics cannot reduce the independent CPU setup task count.
+        telemetry.mWorkerLimit = 1;
         LOGVOLE_REQUIRE_TRUE(sampleRootZetaFromTaskSeeds(ctx, 2, 65, zetaSeeds, 3,
             zeta, allowance, true, benchmark, &scratch));
         equalBatch(zeta, referenceZeta);
@@ -393,8 +413,21 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
         3.2, 19.2, seeds, ctx, 3, active, benchmark)));
     LOGVOLE_REQUIRE_TRUE(lazyNoise == expectedNoise);
     LOGVOLE_REQUIRE_EQ(telemetry.mPeakTaskThreads.load(), 1u);
-    LOGVOLE_REQUIRE_EQ(setupResources.results[1], u8{0xA5});
-    LOGVOLE_REQUIRE_EQ(setupResources.results[2], u8{0xA5});
+    LOGVOLE_REQUIRE_EQ(setupResources.results[1], u8{1});
+    LOGVOLE_REQUIRE_EQ(setupResources.results[2], u8{1});
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(samplePolyErrorCompactBatchFromSeeds(
+        setupResources.executor, std::span(setupResources.results).first(1), lazyNoise,
+        3.2, 19.2, seeds, ctx, 3, active, benchmark)));
+    LOGVOLE_REQUIRE_TRUE(lazyNoise == expectedNoise);
+    std::vector<u64> rejectedNoise{123};
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(samplePolyErrorCompactBatchForSetup(
+        setupResources.executor, std::span(setupResources.results).first(1), rejectedNoise, lazyDevice,
+        3.2, 19.2, seeds, ctx, 3, active, benchmark)));
+    LOGVOLE_REQUIRE_TRUE(rejectedNoise == std::vector<u64>{123});
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(materializePolyErrorCompactBatchForSetup(
+        setupResources.executor, std::span(setupResources.results).first(1), rejectedNoise, lazyDevice,
+        3.2, 19.2, seeds, ctx, 3, active, benchmark)));
+    LOGVOLE_REQUIRE_TRUE(rejectedNoise == std::vector<u64>{123});
 
     PRNG untouched(toBlock(723, 99)), rejected(toBlock(723, 99));
     std::vector<RnsPoly> unpublished;
@@ -427,22 +460,26 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
         {
             LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootZetaFromTaskSeeds(
                 setupResources.executor, std::span(zetaBuffers).first(allowance), ctx,
-                2, bits, zetaSeeds, 3, actual, 3, forceReject, benchmark))));
+                2, bits, zetaSeeds, 3, actual, static_cast<u32>(allowance), forceReject, benchmark))));
             equalBatch(actual, expected);
         }
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(sampleRootZetaFromTaskSeeds(
+            setupResources.executor, std::span(zetaBuffers).first(1), ctx,
+            2, bits, zetaSeeds, 3, actual, 3, forceReject, benchmark)));
+        equalBatch(actual, expected);
         for (std::size_t i = 0; i != zetaBuffers.size(); ++i)
         {
             LOGVOLE_REQUIRE_TRUE(zetaBuffers[i].mWords.data() == wordStorage[i]);
             LOGVOLE_REQUIRE_TRUE(zetaBuffers[i].mPrng.mBuffer.data() == prngStorage[i]);
         }
     }
-    for (u32 ranges : {1u, 3u})
+    for (u32 ranges : {0u, 1u, 3u})
     {
         PRNG expectedPrng(toBlock(723, 101)), actualPrng(toBlock(723, 101));
         std::vector<RnsPoly> expected, actual;
         LOGVOLE_REQUIRE_TRUE(sampleRootZeta(ctx, 2, 208, expectedPrng, expected, ranges));
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootZeta(
-            setupResources.executor, std::span(zetaBuffers).first(1), ctx,
+            setupResources.executor, std::span(zetaBuffers).first(std::max(1u, ranges)), ctx,
             2, 208, actualPrng, actual, ranges, benchmark))));
         equalBatch(actual, expected);
         LOGVOLE_REQUIRE_TRUE(expectedPrng.get<block>() == actualPrng.get<block>());
@@ -462,6 +499,12 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(sampleRootZeta(setupResources.executor,
         {}, ctx, 2, 208, emptyActual, lazyZeta, 3)));
     LOGVOLE_REQUIRE_TRUE(emptyActual.get<block>() == emptyExpected.get<block>());
+    PRNG shortActual(toBlock(723, 104)), shortExpected(toBlock(723, 104));
+    const auto savedZeta = lazyZeta;
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(sampleRootZeta(setupResources.executor,
+        std::span(zetaBuffers).first(1), ctx, 2, 208, shortActual, lazyZeta, 3)));
+    LOGVOLE_REQUIRE_TRUE(shortActual.get<block>() == shortExpected.get<block>());
+    equalBatch(lazyZeta, savedZeta);
     telemetry.mWorkerLimit = 1;
     telemetry.reset();
     LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootZetaFromTaskSeeds(
@@ -1566,7 +1609,7 @@ void LogVole_Cpu_AsyncInputWrapping(const oc::CLP& cmd)
         for (std::size_t allowance : {1u, 2u, 3u})
         {
             LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(wrapZpLabelsCrt(executor,
-                std::span(buffers).first(allowance), ctx, labels, lift, pad, 3, actual))));
+                std::span(buffers).first(allowance), ctx, labels, lift, pad, static_cast<u32>(allowance), actual))));
             equal(actual, expected);
             for (std::size_t i = 0; i != outputs.size(); ++i)
                 LOGVOLE_REQUIRE_TRUE(outputs[i] == actual[i].mCoeffs.data());
@@ -1579,6 +1622,12 @@ void LogVole_Cpu_AsyncInputWrapping(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(wrapZpLabelsCrt(executor, buffers,
             ctx, labels, lift, ctx.mPlaintextModulus, 3, actual)));
         equal(actual, expected);
+        if (count > slots)
+        {
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(wrapZpLabelsCrt(executor,
+                std::span(buffers).first(1), ctx, labels, lift, pad, 3, actual)));
+            equal(actual, expected);
+        }
         LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(wrapZpLabelsCrt(executor, {},
             ctx, labels, lift, pad, 3, actual)));
         equal(actual, expected);
@@ -1590,8 +1639,11 @@ void LogVole_Cpu_AsyncInputWrapping(const oc::CLP& cmd)
     CpuBenchmarkContext telemetry;
     telemetry.mCpus = {0, 1, 2};
     telemetry.mWorkerLimit = 1;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(wrapZpLabelsCrt(executor, buffers,
+        ctx, labels, false, 0, 3, actual, CpuBenchmarkState{&telemetry}))));
+    telemetry.reset();
     LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(wrapZpLabelsCrt(idle, buffers,
-        ctx, labels, false, 0, 3, actual, CpuBenchmarkState{&telemetry})));
+        ctx, labels, false, 0, 1, actual, CpuBenchmarkState{&telemetry})));
     LOGVOLE_REQUIRE_EQ(telemetry.mPeakTaskThreads.load(), 1u);
 }
 
@@ -1643,12 +1695,12 @@ void LogVole_Cpu_AsyncOutputUnwrapping(const oc::CLP& cmd)
         for (std::size_t allowance : {1u, 2u, 3u})
         {
             auto operation = unwrapRingLabelsCrt(executor, std::span(buffers).first(allowance),
-                *selected, ring, count, rounded, 3, actual);
+                *selected, ring, count, rounded, static_cast<u32>(allowance), actual);
             LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(operation))));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
             const auto outputStorage = actual.data();
             LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(unwrapRingLabelsCrt(executor,
-                std::span(buffers).first(allowance), *selected, ring, count, rounded, 3, actual))));
+                std::span(buffers).first(allowance), *selected, ring, count, rounded, static_cast<u32>(allowance), actual))));
             LOGVOLE_REQUIRE_TRUE(actual.data() == outputStorage);
             LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
         }
@@ -1661,6 +1713,12 @@ void LogVole_Cpu_AsyncOutputUnwrapping(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(unwrapRingLabelsCrt(executor, {},
             ctx, ring, count, rounded, 3, actual)));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
+        if (count > slots)
+        {
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(unwrapRingLabelsCrt(executor,
+                std::span(buffers).first(1), ctx, ring, count, rounded, 3, actual)));
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
+        }
         LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(unwrapRingLabelsCrt(executor, buffers,
             ctx, ring, ring.size() * slots + 1, rounded, 3, actual)));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
@@ -1681,8 +1739,11 @@ void LogVole_Cpu_AsyncOutputUnwrapping(const oc::CLP& cmd)
     CpuBenchmarkContext telemetry;
     telemetry.mCpus = {0, 1, 2};
     telemetry.mWorkerLimit = 1;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(unwrapRingLabelsCrt(executor, buffers, ctx,
+        ring, labels.size(), false, 3, actual, CpuBenchmarkState{&telemetry}))));
+    telemetry.reset();
     LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(idle, buffers, ctx,
-        ring, labels.size(), false, 3, actual, CpuBenchmarkState{&telemetry})));
+        ring, labels.size(), false, 1, actual, CpuBenchmarkState{&telemetry})));
     LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, labels));
     LOGVOLE_REQUIRE_EQ(telemetry.mPeakTaskThreads.load(), 1u);
     LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(idle,

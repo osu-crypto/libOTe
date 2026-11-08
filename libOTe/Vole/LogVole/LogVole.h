@@ -550,7 +550,8 @@ namespace osuCrypto::LogVole
     // CPU-only, lazy encoding. Borrow all operands and exclusive buffers until
     // completion; await started work before destruction/reuse. Output may be
     // partially updated on an execution failure, but validation leaves it intact.
-    // Buffer count bounds concurrency; one chunk runs inline without a pool.
+    // requestedWorkers selects logical tasks, bounded by useful work; zero
+    // selects one. Buffers must hold every task; one runs inline without a pool.
     macoro::task<bool> wrapZpLabelsCrt(
         macoro::thread_pool& executor, std::span<ZpEncodeBuffer> buffers,
         const ZpCrtContext& ctx, std::span<const u64> labels, bool multiplyByDelta,
@@ -567,7 +568,8 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // Borrow all inputs, output, executor and exclusive buffers until completion.
-    // Buffer count bounds concurrency; one chunk executes inline.
+    // requestedWorkers selects logical tasks (zero selects one), bounded by
+    // useful work. Buffers must hold every task; one executes inline.
     macoro::task<bool> unwrapRingLabelsCrt(
         macoro::thread_pool& executor, std::span<ZpDecodeBuffer> buffers,
         const ZpCrtContext& ctx, const std::vector<RnsPoly>& labels, u64 zpLabelCount,
