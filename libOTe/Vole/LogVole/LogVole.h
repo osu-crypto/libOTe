@@ -104,7 +104,7 @@ namespace osuCrypto::LogVole
     bool makeNativeSealSetupContexts(const RingParams& ring,
         u32 plaintextModulusBits, RingNttContext& ringOut,
         ZpCrtContext& zpOut, std::shared_ptr<ZpContextFactory> factory = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
 
     struct CivoleParams
     {
@@ -296,7 +296,8 @@ namespace osuCrypto
         // Empty move target; queries require construction with options.
         LogVoleSender() = default;
         explicit LogVoleSender(LogVoleOptions options,
-            std::shared_ptr<LogVole::ZpContextFactory> factory = {});
+            std::shared_ptr<LogVole::ZpContextFactory> factory = {},
+            LogVole::ProtocolCacheScopeView configureScope = {});
         const LogVoleOptions& options() const { return mOptions; }
         LogVole::HostStepProfiler* hostProfiler() const
         {
@@ -353,7 +354,7 @@ namespace osuCrypto
         task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults,
             u64 delta,
             PRNG& prng,
-            Socket& sock, LogVole::ProtocolCacheScope setupScope = LogVole::currentProtocolCacheScope());
+            Socket& sock, LogVole::ProtocolCacheScope setupScope = {});
 
         // Online phase after offline(). Writes sender keys b.
         // Caller supplies an executor, exclusive ring-sized LHE products, and
@@ -407,7 +408,8 @@ namespace osuCrypto
         // Empty move target; queries require construction with options.
         LogVoleReceiver() = default;
         explicit LogVoleReceiver(LogVoleOptions options,
-            std::shared_ptr<LogVole::ZpContextFactory> factory = {});
+            std::shared_ptr<LogVole::ZpContextFactory> factory = {},
+            LogVole::ProtocolCacheScopeView configureScope = {});
         const LogVoleOptions& options() const { return mOptions; }
         LogVole::HostStepProfiler* hostProfiler() const
         {
@@ -471,7 +473,7 @@ namespace osuCrypto
         u64 outputDeviceCount() const { return mOutputDeviceCount; }
 
         // Run reusable offline setup matching the sender's offline phase.
-        task<> offline(Socket& sock, LogVole::ProtocolCacheScope setupScope = LogVole::currentProtocolCacheScope());
+        task<> offline(Socket& sock, LogVole::ProtocolCacheScope setupScope = {});
 
         // Online phase. x must have the configured size and each x[i] must be
         // in Z_p. Writes receiver MACs a, unless mKeepOutputOnDevice is set.
@@ -528,7 +530,7 @@ namespace osuCrypto::LogVole
     u64 zpRingLabelCount(const ZpCrtContext& ctx, u64 zpLabelCount);
     bool makeZpCrtContext(const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out,
         std::shared_ptr<ZpContextFactory> factory = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
 
     bool wrapZpBatchCrt(
         const ZpCrtContext& ctx,
@@ -536,14 +538,14 @@ namespace osuCrypto::LogVole
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
-        RnsPoly& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        RnsPoly& out, ProtocolCacheScopeView scope = {});
 
     bool wrapZpConstantCrt(
         const ZpCrtContext& ctx,
         u64 value,
         bool multiplyByDelta,
         u32 requestedWorkers,
-        RnsPoly& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        RnsPoly& out, ProtocolCacheScopeView scope = {});
 
     // CPU-only, lazy encoding. Borrow all operands and exclusive buffers until
     // completion; await started work before destruction/reuse. Output may be
@@ -562,7 +564,7 @@ namespace osuCrypto::LogVole
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
-        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // Borrow all inputs, output, executor and exclusive buffers until completion.
     // Buffer count bounds concurrency; one chunk executes inline.
@@ -579,7 +581,7 @@ namespace osuCrypto::LogVole
         u64 zpLabelCount,
         bool scaleAndRound,
         u32 requestedWorkers,
-        AlignedUnVec<u64>& out, CpuBenchmarkState cpuBenchmark = {});
+        AlignedUnVec<u64>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // Low-level CI-VOLE state-machine API. Applications should normally prefer
     // osuCrypto::LogVoleSender and osuCrypto::LogVoleReceiver above.
@@ -588,13 +590,13 @@ namespace osuCrypto::LogVole
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
         PRNG& prng,
-        Socket& sock, RootWirePinOverlapEvidence& rootWirePin, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        Socket& sock, RootWirePinOverlapEvidence& rootWirePin, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
 
     task<> civoleReceiverOffline(
         const CivoleReceiverOfflineInput& input,
         CivoleReceiverState& state,
         Socket& sock, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        ProtocolCacheScope setupScope = {});
 
     // Legacy staged release; production CPU output uses the awaited release API.
     bool civoleSenderReleaseK(

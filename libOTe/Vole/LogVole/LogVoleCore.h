@@ -291,7 +291,7 @@ namespace osuCrypto::LogVole
         const gpu::DeviceBatch* rootR1Device = nullptr,
         const LazyRootErrorHostState* rootR1Host = nullptr,
         const gpu::RetainedPublicUniform* retainedBStarNtt = nullptr,
-        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
 
     // Exclusive per-chunk CPU sampling storage. Reuse across awaited queries.
     // mWords holds eta, mask, raw candidate and magnitude; mPrng retains its AES buffer.
@@ -364,16 +364,16 @@ namespace osuCrypto::LogVole
         SenderState& state,
         PRNG& prng,
         RootOfflineMessage& message,
-        bool deferRandomizerHost = false, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        bool deferRandomizerHost = false, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
 
     bool finalizeRootOfflineReceiver(
         ReceiverState& state,
-        const RootOfflineMessage& message, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const RootOfflineMessage& message, ProtocolCacheScopeView scope = {});
 
     // Consumes ciphertext storage after validation; state is unchanged on failure.
     bool finalizeRootOfflineReceiver(
         ReceiverState& state,
-        RootOfflineMessage&& message, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        RootOfflineMessage&& message, ProtocolCacheScopeView scope = {});
 
     // `xDevice` is an optional opaque gpu::DeviceBatch holding the same input as
     // `x`. When present the device shrink reads it directly, so the Root's input
@@ -391,7 +391,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<void> xDevice = {},
         u64 xDeviceCount = 0,
         bool deferDPrimeHash = false, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScope cacheScope = currentProtocolCacheScope());
+        ProtocolCacheScope cacheScope = {});
 
     // Completes a hash deferred by prepareRootDigestReceiver. Idempotent after
     // success. The state owns mDPrime for the whole Root exchange, so callers can
@@ -434,7 +434,7 @@ namespace osuCrypto::LogVole
         const SenderState* precomputeRoot = nullptr,
         const RnsPoly* preSampledKPrime = nullptr,
         bool deferPrecompute = false,
-        std::shared_ptr<void> preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
+        std::shared_ptr<void> preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
     // Single-use production overload. After validating the wire shape, this
     // moves the decoded d' coefficients into the query state instead of copying
@@ -449,14 +449,14 @@ namespace osuCrypto::LogVole
         const SenderState* precomputeRoot = nullptr,
         const RnsPoly* preSampledKPrime = nullptr,
         bool deferPrecompute = false,
-        std::shared_ptr<void> preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
+        std::shared_ptr<void> preSampledKPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
     // Draws the k'_Rt that prepareRootResponseSender would draw, so it can be
     // moved off the critical path.
     // When requested and supported, returns a synchronized device-generated
     // polynomial and leaves out empty. CPU consumers materialize it lazily.
     bool sampleRootResponseKPrime(const SenderState& state, PRNG& prng, RnsPoly& out,
-        std::shared_ptr<void>* deviceOut = nullptr);
+        std::shared_ptr<void>* deviceOut = nullptr, ProtocolCacheScopeView cacheScope = {});
 
     // Device preparation for the digest-independent Root response operands.
     // Immutable offline skRRt caching is enabled by default and can be rolled
@@ -467,7 +467,7 @@ namespace osuCrypto::LogVole
     bool prepareRootResponseDeviceOperands(
         const SenderState& state,
         const RnsPoly& kPrime,
-        std::shared_ptr<void>& preparedKPrimeDevice);
+        std::shared_ptr<void>& preparedKPrimeDevice, ProtocolCacheScopeView cacheScope);
 
     // When `rootKeyDevice` is supplied and the GPU path is available, the whole key
     // derivation runs on the device and the key is returned there (an opaque
@@ -479,7 +479,7 @@ namespace osuCrypto::LogVole
         const RootDigestState& digestState,
         const RootResponseMessage& response,
         RnsPoly& rootKey,
-        std::shared_ptr<void>* rootKeyDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
+        std::shared_ptr<void>* rootKeyDevice = nullptr, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView cacheScope = {});
 
     // Single-use production overload matching prepareRootResponseSender's owned
     // path. It validates before moving skPrime out of the decoded response.
@@ -488,21 +488,21 @@ namespace osuCrypto::LogVole
         const RootDigestState& digestState,
         RootResponseMessage&& response,
         RnsPoly& rootKey,
-        std::shared_ptr<void>* rootKeyDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
+        std::shared_ptr<void>* rootKeyDevice = nullptr, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView cacheScope = {});
 
     bool computeRootSenderKey(
         const SenderState& state,
         std::span<const u8> seed,
-        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark = {});
+        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView cacheScope = {});
 
     macoro::task<bool> prepareSenderOffline(
         macoro::thread_pool& executor, std::span<u8> setupResults,
         const SenderOfflineInput& input,
         PRNG& prng,
-        SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
     // Explicit inspection of a selected internal top-key owner. This fills
     // independent mutable key vectors only after device setup/recursion ends.
-    bool materializeSenderTopSk1HostViews(SenderState& state, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+    bool materializeSenderTopSk1HostViews(SenderState& state, ProtocolCacheScopeView scope = {});
 
     namespace detail
     {
@@ -513,14 +513,14 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<u8> setupResults,
             const SenderOfflineInput& input,
             PRNG& prng,
-            SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+            SenderOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
     }
 
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         const OfflineMessage& message,
         ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView setupScope = currentProtocolCacheScope());
+        ProtocolCacheScopeView setupScope = {});
 
     // Consumes message storage; recursive failure may leave message partly moved.
     // Output remains unchanged on failure, and reusable internal states are copied.
@@ -528,14 +528,14 @@ namespace osuCrypto::LogVole
         const ReceiverOfflineInput& input,
         OfflineMessage&& message,
         ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView setupScope = currentProtocolCacheScope());
+        ProtocolCacheScopeView setupScope = {});
 
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
         const ShrinkExpandOfflineMessage& shrinkExpandMessage,
         const RootOfflineMessage& rootMessage,
         ReceiverOfflineOutput& out, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView setupScope = currentProtocolCacheScope());
+        ProtocolCacheScopeView setupScope = {});
 
     bool ensureSenderPrecompute(
         const SenderState& state);
@@ -584,7 +584,7 @@ namespace osuCrypto::LogVole
     // Captures the protocol scope at creation. GPU execution keeps its legacy path.
     macoro::task<bool> senderPrecompute(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
-        const SenderState& state, PRNG& prng, CpuBenchmarkState cpuBenchmark = {});
+        const SenderState& state, PRNG& prng, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
     // True when a usable senderPrecompute() result is cached.
     bool senderHasPrecompute(const SenderState& state);
@@ -609,7 +609,7 @@ namespace osuCrypto::LogVole
         std::span<LencEvalBuffer> lencBuffers,
         ReceiverState& state, const ReceiverOnlineInput& input,
         const RootDigestState& digestState, RootResponseMessage response,
-        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {});
+        ReceiverOnlineOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
     bool seedLabelAgg(
         const std::vector<RnsPoly>& inputHat,
@@ -654,7 +654,7 @@ namespace osuCrypto::LogVole
         u32 alpha,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out, const std::shared_ptr<const RingNttContext>& ringOwner = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        std::vector<RnsPoly>& out, const std::shared_ptr<const RingNttContext>& ringOwner = {}, ProtocolCacheScopeView scope = {});
 
     bool seedLabelSampleCt2FromSeed(
         std::span<const u8> seed,

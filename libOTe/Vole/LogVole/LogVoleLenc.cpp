@@ -596,7 +596,7 @@ namespace osuCrypto::LogVole
             bool leafInputsAreGadget,
             const std::vector<RnsPoly>* publicBNtt,
             u32,
-            DigestTree& out)
+            DigestTree& out, ProtocolCacheScopeView scope)
         {
             if (xCount == 0 || tauHi == 0)
             {
@@ -623,7 +623,7 @@ namespace osuCrypto::LogVole
             }
             else
             {
-                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau, currentProtocolCacheScope());
+                cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, fullTau, scope);
                 publicBNtt = cachedPublicBNtt.get();
             }
 
@@ -937,7 +937,7 @@ namespace osuCrypto::LogVole
         DigestTree& out,
         u32 requestedWidthPadded,
         const std::vector<RnsPoly>* publicBNtt,
-        u32 requestedWorkers)
+        u32 requestedWorkers, ProtocolCacheScopeView scope)
     {
         return buildDigestTree(
             ctx,
@@ -947,7 +947,7 @@ namespace osuCrypto::LogVole
             out,
             requestedWidthPadded,
             publicBNtt,
-            requestedWorkers);
+            requestedWorkers, scope);
     }
 
     bool buildDigestTree(
@@ -958,7 +958,7 @@ namespace osuCrypto::LogVole
         DigestTree& out,
         u32 requestedWidthPadded,
         const std::vector<RnsPoly>* publicBNtt,
-        u32)
+        u32, ProtocolCacheScopeView scope)
     {
         if (x.empty() || tau == 0 || !validateRingBatchShape(x, ctx.mParams))
         {
@@ -978,7 +978,7 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, tau, currentProtocolCacheScope());
+            cachedPublicBNtt = getOrCreateCachedPublicBNtt(ctx, tau, scope);
             publicBNtt = cachedPublicBNtt.get();
         }
 
@@ -1225,10 +1225,10 @@ namespace osuCrypto::LogVole
         u32 tau,
         u32 gadgetLogBase,
         RnsPoly& out,
-        u32 widthPadded)
+        u32 widthPadded, ProtocolCacheScopeView scope)
     {
         DigestTree tree{};
-        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, tree, widthPadded, nullptr, 1))
+        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, tree, widthPadded, nullptr, 1, scope))
         {
             return false;
         }
@@ -1245,7 +1245,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         std::vector<RnsPoly>& out,
         bool outputNtt,
-        u32 requestedWorkers)
+        u32 requestedWorkers, ProtocolCacheScopeView scope)
     {
         if (x.size() != mu)
         {
@@ -1253,7 +1253,7 @@ namespace osuCrypto::LogVole
         }
 
         DigestTree tree{};
-        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, tree, lacct.mWidthPadded, nullptr, requestedWorkers))
+        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, tree, lacct.mWidthPadded, nullptr, requestedWorkers, scope))
         {
             return false;
         }
@@ -1377,7 +1377,7 @@ namespace osuCrypto::LogVole
         u32 requestedWidthPadded,
         bool leafInputsAreGadget,
         const std::vector<RnsPoly>* publicBNtt,
-        u32 requestedWorkers)
+        u32 requestedWorkers, ProtocolCacheScopeView scope)
     {
         return buildDigestTreeTrunc(
             ctx,
@@ -1389,7 +1389,7 @@ namespace osuCrypto::LogVole
             requestedWidthPadded,
             leafInputsAreGadget,
             publicBNtt,
-            requestedWorkers);
+            requestedWorkers, scope);
     }
 
     bool buildDigestTreeTrunc(
@@ -1402,7 +1402,7 @@ namespace osuCrypto::LogVole
         u32 requestedWidthPadded,
         bool leafInputsAreGadget,
         const std::vector<RnsPoly>* publicBNtt,
-        u32 requestedWorkers)
+        u32 requestedWorkers, ProtocolCacheScopeView scope)
     {
         if (x.empty() || !validateRingBatchShape(x, ctx.mParams))
         {
@@ -1420,7 +1420,7 @@ namespace osuCrypto::LogVole
             leafInputsAreGadget,
             publicBNtt,
             requestedWorkers,
-            out);
+            out, scope);
     }
 
 
@@ -2117,11 +2117,11 @@ namespace osuCrypto::LogVole
         u32 plaintextModulusBits,
         RnsPoly& out,
         u32 widthPadded,
-        bool leafInputsAreGadget)
+        bool leafInputsAreGadget, ProtocolCacheScopeView scope)
     {
         DigestTree tree{};
         if (!buildDigestTreeTrunc(
-                ctx, x, tauHi, gadgetLogBase, plaintextModulusBits, tree, widthPadded, leafInputsAreGadget, nullptr, 1))
+                ctx, x, tauHi, gadgetLogBase, plaintextModulusBits, tree, widthPadded, leafInputsAreGadget, nullptr, 1, scope))
         {
             return false;
         }
@@ -2140,7 +2140,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out,
         bool outputNtt,
         u32 requestedWorkers,
-        bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
+        bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (x.size() != mu)
@@ -2151,7 +2151,7 @@ namespace osuCrypto::LogVole
         DigestTree tree{};
         if (!buildDigestTreeTrunc(
                 ctx, x, tauHi, gadgetLogBase, plaintextModulusBits, tree, lacct.mWidthPadded, leafInputsAreGadget,
-                nullptr, requestedWorkers))
+                nullptr, requestedWorkers, scope))
         {
             return false;
         }

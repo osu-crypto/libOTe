@@ -62,7 +62,7 @@ namespace
         options.mUseGpu = false;
         RingNttContext result;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(source.mParams, result,
-            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(options, source.mFactory->protocolService()), ProtocolCacheScope({}, source.mResourceScope.mRole)));
         return result;
     }
 
@@ -146,39 +146,39 @@ namespace
 
     bool prepare_sender_offline_for_test(
         const ShrinkExpandSenderOfflineInput& input,
-        ShrinkExpandSenderState& state)
+        ShrinkExpandSenderState& state, ProtocolCacheScope scope = {})
     {
     tests_libOTe::logvole_test::SetupResources setupResources;
         oc::PRNG prng(oc::block(0x5100, 0x5101));
-        return macoro::sync_wait(osuCrypto::LogVole::prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results, input, prng, state));
+        return macoro::sync_wait(osuCrypto::LogVole::prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results, input, prng, state, CpuBenchmarkState{}, scope));
     }
 
     bool prepare_sender_offline_for_test(
         const SenderOfflineInput& input,
-        SenderOfflineOutput& out)
+        SenderOfflineOutput& out, ProtocolCacheScope scope = {})
     {
     tests_libOTe::logvole_test::SetupResources setupResources;
         oc::PRNG prng(oc::block(0x5200, 0x5201));
-        return macoro::sync_wait(osuCrypto::LogVole::prepareSenderOffline(setupResources.executor, setupResources.results, input, prng, out));
+        return macoro::sync_wait(osuCrypto::LogVole::prepareSenderOffline(setupResources.executor, setupResources.results, input, prng, out, CpuBenchmarkState{}, scope));
     }
 
     bool finalize_receiver_from_sender_wire(
         const ShrinkExpandReceiverOfflineInput& input,
         const ShrinkExpandSenderState& sender,
-        ShrinkExpandReceiverState& receiver)
+        ShrinkExpandReceiverState& receiver, ProtocolCacheScopeView scope = {})
     {
         const auto workers = input.mParams.mNumWorkerThreads;
         auto bytes = encodeShrinkExpandOfflineState(sender, workers);
         ShrinkExpandOfflineMessage message;
         return decode(bytes, message, workers) &&
-            finalizeShrinkExpandReceiverOffline(input, std::move(message), receiver);
+            finalizeShrinkExpandReceiverOffline(input, std::move(message), receiver, scope);
     }
 
-    bool prepare_root_offline_sender_for_test(SenderState& state, RootOfflineMessage& message)
+    bool prepare_root_offline_sender_for_test(SenderState& state, RootOfflineMessage& message, ProtocolCacheScope scope = {})
     {
     tests_libOTe::logvole_test::SetupResources setupResources;
         oc::PRNG prng(oc::block(0x5300, 0x5301));
-        return macoro::sync_wait(osuCrypto::LogVole::prepareRootOfflineSender(setupResources.executor, setupResources.results, state, prng, message));
+        return macoro::sync_wait(osuCrypto::LogVole::prepareRootOfflineSender(setupResources.executor, setupResources.results, state, prng, message, false, {}, scope));
     }
 
     bool prepare_root_digest_receiver_for_test(
@@ -186,7 +186,7 @@ namespace
         const std::vector<RnsPoly>& x,
         RootDigestState& digestState,
         RootDigestMessage& message,
-        bool deferDPrimeHash = false)
+        bool deferDPrimeHash = false, ProtocolCacheScope scope = {})
     {
         oc::PRNG prng(oc::block(0x5400, 0x5401));
         return [&] {
@@ -194,7 +194,7 @@ namespace
             tests_libOTe::logvole_test::ReceiverBuffers buffers(state.mParams.mShrinkExpand);
             return macoro::sync_wait(osuCrypto::LogVole::prepareRootDigestReceiver(
                 resources.executor, buffers.zeta,
-            state, x, prng, digestState, message, {}, 0, deferDPrimeHash));
+            state, x, prng, digestState, message, {}, 0, deferDPrimeHash, {}, scope));
         }();
     }
 
@@ -202,24 +202,24 @@ namespace
         const SenderState& state,
         const RootDigestMessage& request,
         RootResponseMessage& response,
-        bool deferPrecompute = false)
+        bool deferPrecompute = false, ProtocolCacheScope scope = {})
     {
         oc::PRNG prng(oc::block(0x5500, 0x5501));
         return tests_libOTe::logvole_test::prepareRootResponse(
             state, request, prng, response, nullptr, nullptr,
-            deferPrecompute);
+            deferPrecompute, std::shared_ptr<void>{}, CpuBenchmarkState{}, scope);
     }
 
     bool prepare_root_response_sender_owned_for_test(
         const SenderState& state,
         RootDigestMessage&& request,
         RootResponseMessage& response,
-        bool deferPrecompute = false)
+        bool deferPrecompute = false, ProtocolCacheScope scope = {})
     {
         oc::PRNG prng(oc::block(0x5500, 0x5501));
         return tests_libOTe::logvole_test::prepareRootResponse(
             state, std::move(request), prng, response, nullptr, nullptr,
-            deferPrecompute);
+            deferPrecompute, std::shared_ptr<void>{}, CpuBenchmarkState{}, scope);
     }
 
     bool run_socket_online_for_test(
@@ -803,18 +803,18 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_EQ(forecastRootOfflineWireSize(
             productionForecastParams, false), expectedRootBytes);
         const auto runId = identityService->allocate();
-        ScopedProtocolCacheScope ownerScope(ProtocolCacheRole::Sender, runId);
+        const ProtocolCacheScope cacheScope(runId, ProtocolCacheRole::Sender);
         ZpCrtContext zp{};
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mShrinkExpand.mRing,
             params.mShrinkExpand.mPlaintextModulusBits, zp,
-            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, identityService)), cacheScope));
         LOGVOLE_REQUIRE_TRUE(zp.mGpuLightweight);
         const oc::u64 scalar = zp.mPlaintextModulus - 1u;
-        auto delta = gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr);
+        auto delta = gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr, cacheScope);
         LOGVOLE_REQUIRE_TRUE(delta != nullptr);
         LOGVOLE_REQUIRE_EQ(delta->count(), 1u);
         LOGVOLE_REQUIRE_TRUE(gpu::setupDeltaBatchMatches(
-            zp.mRing, *delta, 1u, runId));
+            zp.mRing, *delta, 1u, runId, cacheScope));
         RnsPoly hostDelta{};
         {
             ZpCrtContext cpuZp;
@@ -828,12 +828,12 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         expect_poly_equal(exactDelta[0], hostDelta);
 
         auto rep = gpu::seedLabelRepResident(zp.mRing, *delta, 1u,
-            params.mShrinkExpand.mAlpha, tauHi);
+            params.mShrinkExpand.mAlpha, tauHi, cacheScope);
         LOGVOLE_REQUIRE_TRUE(rep != nullptr);
         const std::size_t repCount = static_cast<std::size_t>(
             params.mShrinkExpand.mAlpha) * tauHi * ringModulusCount(zp.mRing);
         LOGVOLE_REQUIRE_TRUE(gpu::setupSeedLabelRepBatchMatches(
-            zp.mRing, *rep, repCount, runId));
+            zp.mRing, *rep, repCount, runId, cacheScope));
         std::vector<RnsPoly> expectedRep, actualRep;
         LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
             std::vector<RnsPoly>{hostDelta}, 1u,
@@ -843,20 +843,20 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         expect_batch_equal(expectedRep, actualRep, "CI delta device repetition");
 
         {
-            ScopedProtocolCacheScope wrongRole(ProtocolCacheRole::Receiver, runId);
+            const ProtocolCacheScope cacheScope(runId, ProtocolCacheRole::Receiver);
             LOGVOLE_REQUIRE_FALSE(gpu::setupDeltaBatchMatches(
-                zp.mRing, *delta, 1u, runId));
+                zp.mRing, *delta, 1u, runId, cacheScope));
             LOGVOLE_REQUIRE_FALSE(gpu::setupSeedLabelRepBatchMatches(
-                zp.mRing, *rep, repCount, runId));
+                zp.mRing, *rep, repCount, runId, cacheScope));
             LOGVOLE_REQUIRE_TRUE(gpu::seedLabelRepResident(zp.mRing,
-                *delta, 1u, params.mShrinkExpand.mAlpha, tauHi) == nullptr);
+                *delta, 1u, params.mShrinkExpand.mAlpha, tauHi, cacheScope) == nullptr);
         }
         {
-            ScopedProtocolCacheScope wrongRun(ProtocolCacheRole::Sender, runId.mService->qualify(runId.mValue + 1u));
+            const ProtocolCacheScope cacheScope(runId.mService->qualify(runId.mValue + 1u), ProtocolCacheRole::Sender);
             LOGVOLE_REQUIRE_FALSE(gpu::setupDeltaBatchMatches(
-                zp.mRing, *delta, 1u, runId));
+                zp.mRing, *delta, 1u, runId, cacheScope));
             LOGVOLE_REQUIRE_FALSE(gpu::setupSeedLabelRepBatchMatches(
-                zp.mRing, *rep, repCount, runId));
+                zp.mRing, *rep, repCount, runId, cacheScope));
         }
         RingNttContext reordered = zp.mRing;
         LOGVOLE_REQUIRE_TRUE(reordered.mRawModuli != nullptr);
@@ -866,15 +866,15 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         std::swap(reorderedModuli->mValues[0], reorderedModuli->mValues[1]);
         reordered.mRawModuli = std::move(reorderedModuli);
         LOGVOLE_REQUIRE_FALSE(gpu::setupDeltaBatchMatches(
-            reordered, *delta, 1u, runId));
+            reordered, *delta, 1u, runId, cacheScope));
         LOGVOLE_REQUIRE_FALSE(gpu::setupSeedLabelRepBatchMatches(
-            reordered, *rep, repCount, runId));
+            reordered, *rep, repCount, runId, cacheScope));
         LOGVOLE_REQUIRE_FALSE(gpu::setupDeltaBatchMatches(
-            zp.mRing, *delta, 2u, runId));
+            zp.mRing, *delta, 2u, runId, cacheScope));
         {
             tests_libOTe::logvole_test::ScopedOptionValue forced(zp.mRing.mExecutionOptions.mAdvanced.mProtocol.mFailures.mDeltaDevice, true);
             LOGVOLE_REQUIRE_TRUE(gpu::wrapSetupDeltaResident(
-                zp, scalar, {}, nullptr) == nullptr);
+                zp, scalar, {}, nullptr, cacheScope) == nullptr);
         }
 
         SenderOfflineInput hostInput{};
@@ -900,7 +900,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         };
         const auto runOffline = [&](const SenderOfflineInput& in,
             ProtocolCacheRunId scopeRun, bool useGpu) {
-            ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, scopeRun);
+            const ProtocolCacheScope cacheScope(scopeRun, ProtocolCacheRole::Sender);
             auto selectedOptions = advanced;
             selectedOptions.mUseGpu = useGpu;
             oc::PRNG prng(seed, 3);
@@ -908,8 +908,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             LogVoleRingSender sender;
             Snapshot out;
             auto configured = tests_libOTe::logvole_test::withAdvancedOptions(
-                in, selectedOptions, ProtocolCacheRole::Sender);
-            macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, configured, out.mState, prng, socket, out.mRootWirePin));
+                in, selectedOptions, ProtocolCacheRole::Sender, cacheScope);
+            macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, configured, out.mState, prng, socket, out.mRootWirePin, cacheScope));
             out.mRootCudaWire = rootWireCudaAllocEvidenceSnapshot();
             macoro::sync_wait(socket.flush());
             auto bytes = socket.getOutbound();
@@ -968,10 +968,9 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             const auto cudaRunId = identityService->allocate();
             auto cudaInput = selectedInput;
             {
-                ScopedProtocolCacheScope freshScope(
-                    ProtocolCacheRole::Sender, cudaRunId);
+                const ProtocolCacheScope cacheScope(cudaRunId, ProtocolCacheRole::Sender);
                 cudaInput.mWrappedDeltaDevice =
-                    gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr);
+                    gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr, cacheScope);
             }
             LOGVOLE_REQUIRE_TRUE(cudaInput.mWrappedDeltaDevice != nullptr);
             cudaInput.mSenderOwnerRunId = cudaRunId;
@@ -1028,14 +1027,14 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         expect_batch_equal(baseline.mState.mShrinkExpandState.mSk1,
             topSecret.hostSk1(), "top HE secret seed replay");
         LOGVOLE_REQUIRE_TRUE(gpu::topSecretUniformBatchMatches(zp.mRing,
-            *topSecret.mTopSk1Device, tauHi, runId));
+            *topSecret.mTopSk1Device, tauHi, runId, cacheScope));
         LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(zp.mRing,
-            *topSecret.mTopSk1Device, tauHi, runId));
+            *topSecret.mTopSk1Device, tauHi, runId, false, cacheScope));
         auto ordinaryUpload = gpu::upload(zp.mRing,
             baseline.mState.mShrinkExpandState.mSk1);
         LOGVOLE_REQUIRE_TRUE(ordinaryUpload != nullptr);
         LOGVOLE_REQUIRE_FALSE(gpu::topSecretUniformBatchMatches(zp.mRing,
-            *ordinaryUpload, tauHi, runId));
+            *ordinaryUpload, tauHi, runId, cacheScope));
         // Gamma one repeats the complete polynomial across all limbs;
         // gamma=tau>1 selects one limb per row. Both are protocol shapes.
         for (const std::uint32_t width : {1u, 2u})
@@ -1053,17 +1052,17 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                 std::vector<RnsPoly> declined{};
                 std::shared_ptr<gpu::DeviceBatch> sampledKey;
                 LOGVOLE_REQUIRE_TRUE(sampleTopSecretUniformBatch(zp.mRing,
-                    width, privatePrng, declined, sampledKey, privateHost));
+                    width, privatePrng, declined, sampledKey, privateHost, cacheScope));
                 privateKey = std::move(sampledKey);
                 LOGVOLE_REQUIRE_TRUE(declined.empty() && privateKey && privateHost);
             }
             auto privateRep = gpu::topSecretSeedLabelRepResident(zp.mRing,
-                *privateKey, params.mShrinkExpand.mAlpha, width);
+                *privateKey, params.mShrinkExpand.mAlpha, width, cacheScope);
             LOGVOLE_REQUIRE_TRUE(privateRep != nullptr);
             const std::size_t privateRows = static_cast<std::size_t>(
                 params.mShrinkExpand.mAlpha) * width * ringModulusCount(zp.mRing);
             LOGVOLE_REQUIRE_TRUE(gpu::setupSeedLabelRepBatchMatches(zp.mRing,
-                *privateRep, privateRows, runId));
+                *privateRep, privateRows, runId, cacheScope));
             std::vector<RnsPoly> hostRep, deviceRep;
             {
                 LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
@@ -1078,41 +1077,41 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                 : "top HE multi-digit selected-limb repetition");
         }
         auto rootReplica = gpu::rootHiReplicateResident(zp.mRing,
-            *topSecret.mTopSk1Device, tauHi);
+            *topSecret.mTopSk1Device, tauHi, cacheScope);
         LOGVOLE_REQUIRE_TRUE(rootReplica != nullptr);
         const std::size_t rootRows = static_cast<std::size_t>(tauHi) *
             ringModulusCount(zp.mRing);
         LOGVOLE_REQUIRE_TRUE(gpu::rootHiRepBatchMatches(zp.mRing,
-            *rootReplica, rootRows, runId));
+            *rootReplica, rootRows, runId, cacheScope));
         LOGVOLE_REQUIRE_FALSE(gpu::setupSeedLabelRepBatchMatches(zp.mRing,
-            *rootReplica, rootRows, runId));
+            *rootReplica, rootRows, runId, cacheScope));
         std::vector<RnsPoly> expectedRoot, actualRoot;
         LOGVOLE_REQUIRE_TRUE(replicateRootHiKeyByLimb(topSecret.hostSk1(),
             tauHi, params.mShrinkExpand.mRing, expectedRoot));
         LOGVOLE_REQUIRE_TRUE(gpu::download(*rootReplica, actualRoot, readbackExecution.readbackStream(), rootRows));
         expect_batch_equal(expectedRoot, actualRoot, "Root high-key whole-poly D2D replication");
         {
-            ScopedProtocolCacheScope wrongRole(ProtocolCacheRole::Receiver, runId);
+            const ProtocolCacheScope cacheScope(runId, ProtocolCacheRole::Receiver);
             LOGVOLE_REQUIRE_FALSE(gpu::topSecretUniformBatchMatches(zp.mRing,
-                *topSecret.mTopSk1Device, tauHi, runId));
+                *topSecret.mTopSk1Device, tauHi, runId, cacheScope));
             LOGVOLE_REQUIRE_FALSE(gpu::rootHiRepBatchMatches(zp.mRing,
-                *rootReplica, rootRows, runId));
+                *rootReplica, rootRows, runId, cacheScope));
         }
         {
-            ScopedProtocolCacheScope wrongRun(ProtocolCacheRole::Sender, runId.mService->qualify(runId.mValue + 1u));
+            const ProtocolCacheScope cacheScope(runId.mService->qualify(runId.mValue + 1u), ProtocolCacheRole::Sender);
             LOGVOLE_REQUIRE_FALSE(gpu::topSecretUniformBatchMatches(zp.mRing,
-                *topSecret.mTopSk1Device, tauHi, runId));
+                *topSecret.mTopSk1Device, tauHi, runId, cacheScope));
             LOGVOLE_REQUIRE_FALSE(gpu::rootHiRepBatchMatches(zp.mRing,
-                *rootReplica, rootRows, runId));
+                *rootReplica, rootRows, runId, cacheScope));
         }
         LOGVOLE_REQUIRE_FALSE(gpu::topSecretUniformBatchMatches(reordered,
-            *topSecret.mTopSk1Device, tauHi, runId));
+            *topSecret.mTopSk1Device, tauHi, runId, cacheScope));
         LOGVOLE_REQUIRE_FALSE(gpu::rootHiRepBatchMatches(reordered,
-            *rootReplica, rootRows, runId));
+            *rootReplica, rootRows, runId, cacheScope));
         LOGVOLE_REQUIRE_FALSE(gpu::topSecretUniformBatchMatches(zp.mRing,
-            *topSecret.mTopSk1Device, tauHi + 1u, runId));
+            *topSecret.mTopSk1Device, tauHi + 1u, runId, cacheScope));
         auto detachedTop = topSecret;
-        materializeShrinkExpandHostState(detachedTop);
+        materializeShrinkExpandHostState(detachedTop, cacheScope);
         LOGVOLE_REQUIRE_TRUE(detachedTop.mTopSk1Device == nullptr);
         expect_batch_equal(topSecret.hostSk1(), detachedTop.mSk1);
         detachedTop.mSk1[0].mCoeffs[0] ^= 1u;
@@ -1122,13 +1121,13 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(selected.mState.mShrinkExpandState.mLazyS != nullptr);
         LOGVOLE_REQUIRE_TRUE(selected.mState.mShrinkExpandState.mS.empty());
         expect_batch_equal(expectedRep,
-            selected.mState.mShrinkExpandState.hostS(), "CI delta selected seed-label host view");
+            selected.mState.mShrinkExpandState.hostS(cacheScope), "CI delta selected seed-label host view");
         auto detached = selected.mState.mShrinkExpandState;
-        materializeShrinkExpandHostState(detached);
+        materializeShrinkExpandHostState(detached, cacheScope);
         expect_batch_equal(expectedRep, detached.mS);
         detached.mS[0].mCoeffs[0] ^= 1u;
         expect_batch_equal(expectedRep,
-            selected.mState.mShrinkExpandState.hostS());
+            selected.mState.mShrinkExpandState.hostS(cacheScope));
 
         {
             tests_libOTe::logvole_test::ScopedOptionValue forced(advanced.mAdvanced.mProtocol.mFailures.mLencDevice, true);
@@ -1180,9 +1179,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             const auto freshRun = identityService->allocate();
             std::shared_ptr<gpu::DeviceBatch> freshDelta;
             {
-                ScopedProtocolCacheScope capture(
-                    ProtocolCacheRole::Sender, freshRun);
-                freshDelta = gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr);
+                const ProtocolCacheScope cacheScope(freshRun, ProtocolCacheRole::Sender);
+                freshDelta = gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr, cacheScope);
             }
             LOGVOLE_REQUIRE_TRUE(freshDelta != nullptr);
             auto inputForRun = recursiveSelected;
@@ -1232,10 +1230,9 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                 identityService->allocate(), false);
             const auto n25RunId = identityService->allocate();
             {
-                ScopedProtocolCacheScope freshScope(
-                    ProtocolCacheRole::Sender, n25RunId);
+                const ProtocolCacheScope cacheScope(n25RunId, ProtocolCacheRole::Sender);
                 n25Selected.mWrappedDeltaDevice =
-                    gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr);
+                    gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr, cacheScope);
             }
             LOGVOLE_REQUIRE_TRUE(n25Selected.mWrappedDeltaDevice != nullptr);
             n25Selected.mSenderOwnerRunId = n25RunId;
@@ -1320,7 +1317,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
                     actualLevel->hostSk1(), "recursive child fixed-key host view");
                 LOGVOLE_REQUIRE_TRUE(seActual.mLazyS != nullptr);
                 LOGVOLE_REQUIRE_TRUE(seActual.mS.empty());
-                expect_batch_equal(seReference.mS, seActual.hostS(), "recursive child device seed-label repetition");
+                expect_batch_equal(seReference.mS, seActual.hostS(cacheScope), "recursive child device seed-label repetition");
             }
             expect_batch_equal(seReference.mCt1.mPolys,
                 seActual.hostCt1().mPolys, "recursive top/child Ct1");
@@ -1346,32 +1343,26 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         fixedKeyInput.mDeferTopSk1Host = true;
         fixedKeyInput.mDeferHostCiphertexts = true;
         {
-            ScopedProtocolCacheScope receiverImpostor(
-                ProtocolCacheRole::Receiver,
-                fixedKeyInput.mFixedSk1OwnerRunId);
+            const ProtocolCacheScope cacheScope(fixedKeyInput.mFixedSk1OwnerRunId, ProtocolCacheRole::Receiver);
             oc::PRNG impostorPrng(seed, 3);
             ShrinkExpandSenderState rejected{};
             LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results,
-                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected)));
+                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected, CpuBenchmarkState{}, cacheScope)));
         }
         {
-            ScopedProtocolCacheScope wrongOfflineRun(
-                ProtocolCacheRole::Sender,
-                fixedKeyInput.mFixedSk1OwnerRunId.mService->qualify(fixedKeyInput.mFixedSk1OwnerRunId.mValue + 1u));
+            const ProtocolCacheScope cacheScope(fixedKeyInput.mFixedSk1OwnerRunId.mService->qualify(fixedKeyInput.mFixedSk1OwnerRunId.mValue + 1u), ProtocolCacheRole::Sender);
             oc::PRNG impostorPrng(seed, 3);
             ShrinkExpandSenderState rejected{};
             LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(prepareShrinkExpandSenderOffline(setupResources.executor, setupResources.results,
-                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected)));
+                tests_libOTe::logvole_test::withSetupOptions(fixedKeyInput, setupOptions), impostorPrng, rejected, CpuBenchmarkState{}, cacheScope)));
         }
         {
-            ScopedProtocolCacheScope wrongRole(
-                ProtocolCacheRole::Receiver,
-                recursiveActual.mState.mShrinkExpandState.mTopSk1OwnerRunId);
+            const ProtocolCacheScope cacheScope(recursiveActual.mState.mShrinkExpandState.mTopSk1OwnerRunId, ProtocolCacheRole::Receiver);
             LOGVOLE_REQUIRE_FALSE(materializeSenderTopSk1HostViews(
-                recursiveActual.mState));
+                recursiveActual.mState, cacheScope));
         }
         LOGVOLE_REQUIRE_TRUE(materializeSenderTopSk1HostViews(
-            recursiveActual.mState));
+            recursiveActual.mState, cacheScope));
         LOGVOLE_REQUIRE_TRUE(!recursiveActual.mState.mShrinkExpandState.mSk1.empty());
         auto* firstChild = recursiveActual.mState.mNextLevelState.get();
         LOGVOLE_REQUIRE_TRUE(firstChild != nullptr);
@@ -1457,12 +1448,14 @@ void LogVole_Core_ModeSelection(const oc::CLP&)
 void LogVole_Core_RuntimeCacheScopePropagatesToParallelWorkers(const oc::CLP&)
 {
     const auto identityService = ProtocolCacheService::create();
-    const ProtocolCacheScope outerScope = currentProtocolCacheScope();
     const auto runId = identityService->allocate();
+    const ProtocolCacheScope scope(runId, ProtocolCacheRole::Sender);
+    const auto factory = std::make_shared<RingContextFactory>(osuCrypto::LogVoleExecutionOptions{}, identityService);
+    RingNttContext expected;
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_params(), expected, factory, scope));
     std::atomic<std::uint32_t> observed{ 0 };
 
     {
-        ScopedProtocolCacheScope scoped(ProtocolCacheRole::Sender, runId);
         for (bool dynamic : { false, true })
         {
             std::array<std::atomic<unsigned>, 16> seen{};
@@ -1470,8 +1463,10 @@ void LogVole_Core_RuntimeCacheScopePropagatesToParallelWorkers(const oc::CLP&)
                 16,
                 4,
                 [&](std::size_t index) {
-                    const auto scope = currentProtocolCacheScope();
-                    if (scope.mRole == ProtocolCacheRole::Sender && scope.mRunId == runId &&
+                    RingNttContext selected;
+                    if (makeRingNttContext(make_params(), selected, factory, scope) &&
+                        selected.mFactoryOwner == expected.mFactoryOwner &&
+                        selected.mResourceScope.mRole == ProtocolCacheRole::Sender &&
                         seen[index].fetch_add(1, std::memory_order_relaxed) == 0)
                     {
                         observed.fetch_add(1, std::memory_order_relaxed);
@@ -1486,9 +1481,6 @@ void LogVole_Core_RuntimeCacheScopePropagatesToParallelWorkers(const oc::CLP&)
 
     LOGVOLE_EXPECT_EQ(observed.load(std::memory_order_relaxed), 32u);
 
-    const ProtocolCacheScope restoredScope = currentProtocolCacheScope();
-    LOGVOLE_EXPECT_EQ(restoredScope.mRunId, outerScope.mRunId);
-    LOGVOLE_EXPECT_TRUE(restoredScope.mRole == outerScope.mRole);
 }
 
 void LogVole_Core_SeedLabelAggSumsTauBlocks(const oc::CLP&)
@@ -1569,7 +1561,7 @@ void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP& cmd)
 #endif
     const auto params = make_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, nullptr)));
 
     const auto s = sample_batch(ctx, 1, 0x3003u);
     std::vector<RnsPoly> actual;
@@ -1610,7 +1602,7 @@ void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesResidues(const oc::CLP& 
 #endif
     const auto params = make_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, nullptr)));
 
     const std::uint32_t alpha = 2;
     const std::uint32_t tau = 3;
@@ -1655,7 +1647,7 @@ void LogVole_Core_RecursiveLiftOracleKeepsSenderResiduesUnscaled(const oc::CLP& 
 #endif
     const auto params = make_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, nullptr)));
 
     const std::uint32_t alpha = 2;
     const std::uint32_t tauHi = 2;
@@ -1917,7 +1909,7 @@ void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP& cmd)
         osuCrypto::LogVoleExecutionOptions advanced;
         advanced.mUseGpu = haveGpu;
         RingNttContext parityContext{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, parityContext, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, parityContext, std::make_shared<RingContextFactory>(advanced, nullptr)));
         const auto left = sample_batch(parityContext, 5, 0x7351u);
         auto rightNtt = sample_batch(parityContext, 5, 0x7352u);
         auto rootB = sample_batch(parityContext, 2, 0x7353u);
@@ -2037,8 +2029,7 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_params(), ctx,
         std::make_shared<RingContextFactory>(options, service), sender));
-    // The explicit caller identity wins even under unrelated receiver ambience.
-    ScopedProtocolCacheScope ambient(receiver);
+    // Explicit identities isolate the sender and foreign receiver resources.
     std::array<std::array<std::uint64_t, 8>, 2> seeds{};
     seeds[0][0] = 719; seeds[1][0] = 720;
     auto root = gpu::sampleRootSecretUniformToDevice(ctx, seeds, sender);
@@ -2064,8 +2055,7 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(ctx, *error, 2, otherRun));
     LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(ctx, *error, 2, receiver));
 
-    // Reusable mirrors must follow the explicit setup identity even while a
-    // different party is installed by their caller. Sender tokens keep their
+    // Reusable mirrors follow the explicit setup identity. Sender tokens keep their
     // offline run when the supplied operation has moved to another online run.
     ShrinkExpandSenderState senderState{};
     senderState.mParams.mRing = ctx.mParams;
@@ -2075,7 +2065,6 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
         ctx, seeds, false, senderState.mPublicANttDevice, sender));
     LOGVOLE_REQUIRE_TRUE(gpu::prepareReusableSenderCache(senderState, otherRun));
     LOGVOLE_REQUIRE_TRUE(senderState.mGpuCache);
-    LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == receiver.mRunId);
 
     RingNttContext receiverCtx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ctx.mParams, receiverCtx,
@@ -2088,15 +2077,12 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(gpu::retainUniformBatchFromSeedsDevice(
         receiverCtx, seeds, true, receiverState.mPublicBNttDevice, receiver));
     {
-        ScopedProtocolCacheScope unrelated(sender);
         LOGVOLE_REQUIRE_FALSE(gpu::prepareReusableReceiverCache(receiverState, otherRun));
         LOGVOLE_REQUIRE_FALSE(receiverState.mGpuCache);
         LOGVOLE_REQUIRE_TRUE(gpu::prepareReusableReceiverCache(receiverState, receiver));
         LOGVOLE_REQUIRE_TRUE(receiverState.mGpuCache);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == sender.mRunId);
     }
-    // Null-execution cold setup takes its explicit service, including while
-    // the caller has a foreign receiver installed. Cache keys remain role-local.
+    // Null-execution cold setup takes its explicit service. Cache keys remain role-local.
     std::vector<std::uint64_t> selectedPrimes;
     LOGVOLE_REQUIRE_TRUE(gpu::selectSealCoeffModuliDevice(ctx.mParams, selectedPrimes, {}, service));
     LOGVOLE_REQUIRE_EQ(selectedPrimes.size(), ringModulusCount(ctx));
@@ -2126,8 +2112,6 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
     auto prefetched = gpu::GpuRing::get(coldCtx);
     LOGVOLE_REQUIRE_TRUE(prefetched);
     LOGVOLE_REQUIRE_TRUE(prefetched->setupContext()->protocolService() == service);
-    LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == receiver.mRunId);
-    LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == receiver.mRole);
 
     RnsPoly zero;
     zero.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
@@ -2136,7 +2120,7 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
     const std::vector<RnsPoly> padded(2, zero), publicB(4, zero), noise(4, zero);
     std::vector<RnsPoly> ciphertext, firstR;
     std::shared_ptr<const LazyLencRandomizerState> randomizers;
-    // The producer's explicit role wins over receiver ambience. Randomizers
+    // Randomizers retain the producer's explicit role. They
     // intentionally admit another run of the same role, but reject Receiver.
     LOGVOLE_REQUIRE_TRUE(gpu::assembleLencTruncDevice(ctx, layers, padded, publicB,
         1, 1, 30, false, {}, noise, ciphertext, &firstR, {}, {}, 1, false,
@@ -2150,7 +2134,6 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_EQ(lhe.size(), 2u);
     const auto beforeLhe = lhe;
     {
-        ScopedProtocolCacheScope unrelated(sender);
         LOGVOLE_REQUIRE_FALSE(gpu::assembleLheCiphertextDevice(ctx, {}, secret, publicA,
             30, true, 0, lhe, {}, nullptr, 1, nullptr, randomizers.get(), nullptr,
             nullptr, nullptr, 0, false, {}, receiver));
@@ -2198,21 +2181,16 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
     oc::PRNG prng(oc::block(712, 71));
     macoro::task<bool> pendingSetup;
     {
-        ScopedProtocolCacheScope creation(sender);
         pendingSetup = osuCrypto::LogVole::detail::prepareSenderOfflineForTransport(
-            resources.executor, resources.results, input, prng, output);
+            resources.executor, resources.results, input, prng, output, CpuBenchmarkState{}, sender);
     }
     LOGVOLE_REQUIRE_TRUE(!output.mState.mShrinkExpandState.mRingFactoryOwner);
     {
-        ScopedProtocolCacheScope ambient(receiver);
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(std::move(pendingSetup)));
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == receiver.mRunId);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == receiver.mRole);
     }
     auto& state = output.mState.mShrinkExpandState;
     LOGVOLE_REQUIRE_TRUE(state.mLazyS);
     {
-        ScopedProtocolCacheScope ambient(sender);
         bool rejected = false;
         try { (void)state.hostS(receiver); }
         catch (const std::runtime_error&) { rejected = true; }
@@ -2224,7 +2202,6 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(rejectedMaterialization && copy.mLazyS);
     }
     {
-        ScopedProtocolCacheScope ambient(receiver);
         const auto& actual = state.hostS(sender);
         auto cpuZp = zp;
         cpuZp.mRing.mExecutionOptions.mUseGpu = false;
@@ -2240,14 +2217,11 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         materializeShrinkExpandHostState(materialized, sender);
         expect_batch_equal(materialized.mS, expected);
         LOGVOLE_REQUIRE_TRUE(!materialized.mLazyS && !materialized.mGpuCache);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == receiver.mRole);
     }
     // Exercise the production wire -> receiver resident NTT -> lazy snapshot
-    // path with a foreign service installed throughout setup and first get().
+    // path using independently owned sender and receiver services.
     const auto receiverService = ProtocolCacheService::create();
     const ProtocolCacheScope receiverSetup(receiverService->allocate(), ProtocolCacheRole::Receiver);
-    const auto unrelatedService = ProtocolCacheService::create();
-    const ProtocolCacheScope unrelated(unrelatedService->allocate(), ProtocolCacheRole::Sender);
     auto receiverOptions = options;
     receiverOptions.mAdvanced.mProtocol.mReceiverPipelinedDownload = osuCrypto::LogVoleChoice::Enabled;
     receiverOptions.mAdvanced.mStreams.mDownloadSlotMiB = 1;
@@ -2256,7 +2230,6 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         std::make_shared<RingContextFactory>(receiverOptions, receiverService), receiverSetup));
     Buffer bytes;
     {
-        ScopedProtocolCacheScope ambient(sender);
         bytes = encodeShrinkExpandOfflineState(state, 2, {}, true);
     }
     ShrinkExpandOfflineMessage eagerWire{}, lazyWire{};
@@ -2278,7 +2251,6 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
     lazyWire.mParams = receiverInput.mParams;
     ShrinkExpandReceiverState receiverState{};
     {
-        ScopedProtocolCacheScope ambient(unrelated);
         LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(
             receiverInput, std::move(lazyWire), receiverState, receiverSetup));
         LOGVOLE_REQUIRE_TRUE(receiverState.mLazyCt1Ntt && receiverState.mGpuCache);
@@ -2297,7 +2269,7 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         expect_batch_equal(materialized.mCt1.mPolys, expectedCt1);
         LOGVOLE_REQUIRE_TRUE(!materialized.mLazyCt1Ntt && !materialized.mGpuCache);
         // Rebuild a real shrink mirror from receiver-owned retained operands;
-        // this traverses cache admission and geometry under foreign ambience.
+        // this traverses cache admission and geometry with its explicit identity.
         auto shrinkState = receiverState;
         shrinkState.mGpuCache.reset();
         RnsPoly zeroInput;
@@ -2309,8 +2281,6 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(gpu::shrinkChunks(shrinkState, x,
             shrinkState.mParams.mMu, shrinkState.mParams.mTau, session, digests, dHat, receiverSetup));
         LOGVOLE_REQUIRE_TRUE(session.valid() && !digests.empty() && !dHat.empty());
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
     }
 
     // Capture the operation at lazy task construction, before its first receive.
@@ -2329,26 +2299,20 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
         auto serviceOwner = ProtocolCacheService::create();
         retainedService = serviceOwner;
         capturedRun = serviceOwner->allocate();
-        ScopedProtocolCacheScope creation(ProtocolCacheRole::Receiver, capturedRun);
-        pendingOffline = ringReceiver.offline(lazyInput, lazyOfflineState, sockets[1]);
+        pendingOffline = ringReceiver.offline(lazyInput, lazyOfflineState, sockets[1],
+            ProtocolCacheScope(capturedRun, ProtocolCacheRole::Receiver));
     }
     LOGVOLE_REQUIRE_FALSE(retainedService.expired());
     Buffer offlinePayload;
     {
-        ScopedProtocolCacheScope ambient(sender);
         offlinePayload = encodeShrinkExpandOfflineState(state, 2);
     }
     {
-        ScopedProtocolCacheScope ambient(unrelated);
         auto receiving = std::move(pendingOffline) | macoro::make_eager();
-        // It has suspended waiting for a frame; no Receiver scope may remain.
+        // Its owned setup identity survives suspension waiting for the frame.
         LOGVOLE_REQUIRE_TRUE(!lazyOfflineState.mRingFactoryOwner);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
         macoro::sync_wait(osuCrypto::LogVole::detail::sendFrame(sockets[0], offlinePayload));
         macoro::sync_wait(std::move(receiving));
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
     }
     LOGVOLE_REQUIRE_TRUE(lazyOfflineState.mRingFactoryOwner);
     LOGVOLE_REQUIRE_TRUE(lazyOfflineState.mRingFactoryOwner->mFactory->protocolService() == retainedService.lock());
@@ -2378,7 +2342,7 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
         advanced.mUseGpu = true;
         advanced.mAdvanced.mProtocol.mGaussianResident = false;
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, nullptr)));
         for (const std::uint32_t count : { 1u, 5u })
         for (const double sigma : { 0.0, 3.2 })
         for (const bool outputNtt : { false, true })
@@ -2533,7 +2497,7 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
         }
         params.mShrinkExpand.mNumWorkerThreads = 4;
         RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced, nullptr)));
         SenderOfflineInput input;
         input.mParams = params;
         input.mSk1 = sample_batch(ctx, params.mGamma, 0x475257495245u);
@@ -2555,13 +2519,13 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
             tests_libOTe::logvole_test::ScopedOptionValue publicDecline(advanced.mAdvanced.mProtocol.mFailures.mPublicRetain, (forcedReplay ? "1" : "0")[0] == '1');
             tests_libOTe::logvole_test::ScopedOptionValue extraDownload(advanced.mAdvanced.mProtocol.mExtraPipelinedDownload, !forcedReplay);
             const auto run = identityService->allocate();
-            ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, run);
+            const ProtocolCacheScope senderScope(run, ProtocolCacheRole::Sender);
             oc::PRNG actualPrng(seed, 3);
             SenderOfflineOutput actual;
             RetentionBaseline retentionBefore;
             retentionBefore.capture(ctx);
             retentionBefore.captureTree(expected.mState);
-            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Sender), actualPrng, actual)));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(input, setupOptions), advanced, ProtocolCacheRole::Sender, senderScope), actualPrng, actual, CpuBenchmarkState{}, senderScope)));
             const auto retentionAfter = retentionBefore.deltaTree(actual.mState);
             if (forcedReplay)
                 LOGVOLE_REQUIRE_EQ(retentionAfter.mCopies, 0u);
@@ -2588,8 +2552,8 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
             }
             LOGVOLE_REQUIRE_TRUE(!a && !e);
             ReceiverOfflineOutput receiver;
-            ScopedProtocolCacheScope receiverScope(ProtocolCacheRole::Receiver, run);
-            LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver), actual.mMessage, receiver));
+            const ProtocolCacheScope receiverScope(run, ProtocolCacheRole::Receiver);
+            LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(receiverInput, setupOptions), advanced, ProtocolCacheRole::Receiver, receiverScope), actual.mMessage, receiver, CpuBenchmarkState{}, receiverScope));
         }
     }
 #else
@@ -2728,7 +2692,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
     if (advanced.mUseGpu) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #endif
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, identityService)));
     Buffer serialMessage;
     std::vector<RnsPoly> serialRootCt;
     std::vector<RnsPoly> serialShrinkCt;
@@ -2860,7 +2824,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                                 const char* bStarOption = "1",
                                 const char* bStarCaptureDecline = "0") {
             const auto runId = identityService->qualify(rawRunId);
-            ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, runId);
+            const ProtocolCacheScope cacheScope(runId, ProtocolCacheRole::Sender);
             tests_libOTe::logvole_test::ScopedOptionValue forceRoot(advanced.mAdvanced.mProtocol.mFailures.mRootDevice, (rootDecline)[0] == '1');
             tests_libOTe::logvole_test::ScopedOptionValue forceLenc(advanced.mAdvanced.mProtocol.mFailures.mLencDevice, (lencDecline)[0] == '1');
             tests_libOTe::logvole_test::ScopedOptionValue forceR1(advanced.mAdvanced.mProtocol.mFailures.mRootR1Device, (r1Decline)[0] == '1');
@@ -2879,11 +2843,11 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
             nextSender.mParams.mShrinkExpand.mGpuSetup.mRootBStarDevice = bStarOption[0] != '0';
             nextSender.mShrinkExpandState = seSender;
             nextSender = tests_libOTe::logvole_test::withAdvancedOptions(
-                std::move(nextSender), advanced, ProtocolCacheRole::Sender);
+                std::move(nextSender), advanced, ProtocolCacheRole::Sender, cacheScope);
             oc::PRNG nextPrng(oc::block(0x76B0u, 0x76B1u));
             RootOfflineMessage nextMessage{};
             LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareRootOfflineSender(setupResources.executor, setupResources.results,
-                tests_libOTe::logvole_test::withSetupOptions(nextSender, setupOptions), nextPrng, nextMessage, deferHost)));
+                tests_libOTe::logvole_test::withSetupOptions(nextSender, setupOptions), nextPrng, nextMessage, deferHost, {}, cacheScope)));
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (replayGpuEnabled && runId.mValue == 0x76B002u)
             {
@@ -2892,7 +2856,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(rootOwner != nullptr);
                 LOGVOLE_REQUIRE_TRUE(nextSender.mLazyRootR1Rt != nullptr);
                 LOGVOLE_REQUIRE_TRUE(gpu::rootErrorBatchMatches(ctx,
-                    *rootOwner, leftWidth));
+                    *rootOwner, leftWidth, cacheScope));
                 RingNttContext reordered = ctx;
                 if (reordered.mRawModuli)
                 {
@@ -2903,31 +2867,31 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 else
                     std::swap(reordered.mModuli[0], reordered.mModuli[1]);
                 LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(reordered,
-                    *rootOwner, leftWidth));
+                    *rootOwner, leftWidth, cacheScope));
                 RingParams widerParams = trunc.mRing;
                 widerParams.mPolyModulusDegree *= 2;
                 RingNttContext widerCtx{};
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(widerParams, widerCtx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(widerParams, widerCtx, std::make_shared<RingContextFactory>(advanced, identityService)));
                 LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(widerCtx,
-                    *rootOwner, leftWidth));
+                    *rootOwner, leftWidth, cacheScope));
                 const auto secretOwner = std::static_pointer_cast<gpu::DeviceBatch>(
                     nextSender.mRootSkRRtDevice);
                 LOGVOLE_REQUIRE_TRUE(secretOwner != nullptr);
                 LOGVOLE_REQUIRE_TRUE(nextSender.mLazyRootSkRRt != nullptr);
                 LOGVOLE_REQUIRE_TRUE(gpu::rootSecretUniformBatchMatches(ctx,
-                    *secretOwner, tauHi, runId));
+                    *secretOwner, tauHi, runId, false, cacheScope));
                 LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(ctx,
-                    *secretOwner, tauHi, runId.mService->qualify(runId.mValue + 1u)));
+                    *secretOwner, tauHi, runId.mService->qualify(runId.mValue + 1u), false, cacheScope));
                 LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(reordered,
-                    *secretOwner, tauHi, runId));
+                    *secretOwner, tauHi, runId, false, cacheScope));
                 LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(widerCtx,
-                    *secretOwner, tauHi, runId));
+                    *secretOwner, tauHi, runId, false, cacheScope));
                 {
                     tests_libOTe::logvole_test::ScopedOptionValue forcedSkx(advanced.mAdvanced.mProtocol.mFailures.mRootSkX, true);
                     LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(reordered,
-                        *secretOwner, tauHi, runId));
+                        *secretOwner, tauHi, runId, false, cacheScope));
                     LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(widerCtx,
-                        *secretOwner, tauHi, runId));
+                        *secretOwner, tauHi, runId, false, cacheScope));
                     SenderState wrongRun{};
                     wrongRun.mParams = nextSender.mParams;
                     wrongRun.mRootSkRRtDevice = nextSender.mRootSkRRtDevice;
@@ -2935,7 +2899,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                     wrongRun.mRootSkRRtOwnerRunId =
                         nextSender.mRootSkRRtOwnerRunId.mService->qualify(nextSender.mRootSkRRtOwnerRunId.mValue + 1u);
                     wrongRun = tests_libOTe::logvole_test::withAdvancedOptions(
-                        std::move(wrongRun), advanced, ProtocolCacheRole::Sender);
+                        std::move(wrongRun), advanced, ProtocolCacheRole::Sender, cacheScope);
                     RootDigestMessage badRequest{};
                     badRequest.mDPrimeCoeffs =
                         sample_batch(ctx, 1u, 0x76B0D1u)[0].mCoeffs;
@@ -2944,21 +2908,21 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                     RootResponseMessage unchangedResponse{};
                     LOGVOLE_REQUIRE_FALSE(tests_libOTe::logvole_test::prepareRootResponse(
                         wrongRun, badRequest, badPrng, unchangedResponse,
-                        nullptr, nullptr, true));
+                        nullptr, nullptr, true, std::shared_ptr<void>{}, CpuBenchmarkState{}, cacheScope));
                     LOGVOLE_EXPECT_TRUE(unchangedResponse.mSkPrimeCoeffs.empty());
                     LOGVOLE_EXPECT_EQ(badPrng.get<oc::block>(),
                         referencePrng.get<oc::block>());
                 }
                 gpu::DeviceBatchPtr preparedKPrime;
                 if (gpu::prepareRootSenderOperandsDevice(
-                        nextSender, RnsPoly{}, preparedKPrime))
+                        nextSender, RnsPoly{}, preparedKPrime, cacheScope))
                 {
                     const auto preparedSk =
                         std::static_pointer_cast<gpu::DeviceBatch>(
                             nextSender.mRootSkRRtNttDevice);
                     LOGVOLE_REQUIRE_TRUE(preparedSk != nullptr);
                     LOGVOLE_REQUIRE_TRUE(gpu::rootSecretUniformBatchMatches(ctx,
-                        *preparedSk, tauHi, runId, true));
+                        *preparedSk, tauHi, runId, true, cacheScope));
                 }
                 auto otherR = sample_batch(ctx, leftWidth, 0x76B0C1u);
                 auto otherB = sample_batch(ctx, tauHi, 0x76B0C2u);
@@ -2968,16 +2932,16 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 oc::PRNG referencePrng(oc::block(0x76B0u, 0x76B0C3u));
                 RingTensor unchanged{};
                 {
-                    ScopedProtocolCacheScope wrongRole(ProtocolCacheRole::Receiver, runId);
+                    const ProtocolCacheScope cacheScope(runId, ProtocolCacheRole::Receiver);
                     LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(ctx,
-                        *rootOwner, leftWidth));
+                        *rootOwner, leftWidth, cacheScope));
                     LOGVOLE_REQUIRE_FALSE(gpu::rootSecretUniformBatchMatches(ctx,
-                        *secretOwner, tauHi, runId));
+                        *secretOwner, tauHi, runId, false, cacheScope));
                     LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, ctx, {}, otherR,
                         otherB, nextMessage.mPublicBStarNtt,
                         seSender.mParams.mGadgetLogBase, 1, rejectedPrng,
                         0.0, 0.0, unchanged, 4, {}, nullptr, nullptr,
-                        rootOwner.get(), nextSender.mLazyRootR1Rt.get(), nullptr, setupOptions)));
+                        rootOwner.get(), nextSender.mLazyRootR1Rt.get(), nullptr, setupOptions, {}, cacheScope)));
                 }
                 LOGVOLE_EXPECT_TRUE(unchanged.mPolys.empty());
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(),
@@ -3008,7 +2972,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
             RootResponseMessage onlineResponse{};
             LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::prepareRootResponse(
                 nextSender, onlineRequest, responsePrng, onlineResponse,
-                nullptr, nullptr, true));
+                nullptr, nullptr, true, std::shared_ptr<void>{}, CpuBenchmarkState{}, cacheScope));
             result.mResponseWire = encode(onlineResponse);
             result.mResponseNext = responsePrng.get<oc::block>();
             result.mSkR = nextSender.mLazyRootSkRRt
@@ -3074,10 +3038,10 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
         {
             // A matching ring/count/NTT token from a different nonce cannot
             // use the fixed LENC-B host fallback if the Root device declines.
-            ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, identityService->qualify(0x76B006u));
+            const ProtocolCacheScope cacheScope(identityService->qualify(0x76B006u), ProtocolCacheRole::Sender);
             std::shared_ptr<const gpu::RetainedPublicUniform> otherB;
             LOGVOLE_REQUIRE_TRUE(retainUniformPolyBatchFromNonce(ctx,
-                0x76B0BADu, 0x1EEC0DEu, 2u * (tauHi + 1u), true, otherB));
+                0x76B0BADu, 0x1EEC0DEu, 2u * (tauHi + 1u), true, otherB, cacheScope));
             auto otherR = sample_batch(ctx, leftWidth, 0x76B0A1u);
             for (auto& poly : otherR) LOGVOLE_REQUIRE_TRUE(forwardNtt(poly, ctx));
             oc::PRNG rejectedPrng(oc::block(0x76B0u, 0x76B2u));
@@ -3085,7 +3049,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
             RingTensor unchanged = message.mTopCt;
             LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, ctx, sender.mRootR1Rt,
                 otherR, {}, message.mPublicBStarNtt, seSender.mParams.mGadgetLogBase,
-                1, rejectedPrng, 0.0, 0.0, unchanged, 4, {}, nullptr, otherB.get(), nullptr, nullptr, nullptr, setupOptions)));
+                1, rejectedPrng, 0.0, 0.0, unchanged, 4, {}, nullptr, otherB.get(), nullptr, nullptr, nullptr, setupOptions, {}, cacheScope)));
             expect_batch_equal(unchanged.mPolys, message.mTopCt.mPolys);
             LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(), referencePrng.get<oc::block>());
         }
@@ -3101,18 +3065,17 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 resizeFill<int>(ring.mCoeffModulusBits, rho,
                     noGoldenSeed ? 52 : 55);
                 RingNttContext productionCtx{};
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, productionCtx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, productionCtx, std::make_shared<RingContextFactory>(advanced, identityService)));
                 const auto runId = identityService->qualify(noGoldenSeed ? 0xB57A5202u : 0xB57A5201u);
-                ScopedProtocolCacheScope senderScope(
-                    ProtocolCacheRole::Sender, runId);
+                const ProtocolCacheScope cacheScope(runId, ProtocolCacheRole::Sender);
 
                 auto owner = gpu::retainRootBStarNttDevice(
-                    productionCtx, 2u);
+                    productionCtx, 2u, cacheScope);
                 LOGVOLE_REQUIRE_TRUE(owner != nullptr);
                 LOGVOLE_REQUIRE_TRUE(gpu::retainedRootBStarNttMatches(
-                    productionCtx, *owner, 2u));
+                    productionCtx, *owner, 2u, cacheScope));
                 LOGVOLE_REQUIRE_FALSE(gpu::retainedRootBStarNttMatches(
-                    productionCtx, *owner, 3u));
+                    productionCtx, *owner, 3u, cacheScope));
                 RingNttContext reordered = productionCtx;
                 LOGVOLE_REQUIRE_TRUE(reordered.mRawModuli != nullptr);
                 auto reorderedModuli =
@@ -3122,29 +3085,27 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                     reorderedModuli->mValues[1]);
                 reordered.mRawModuli = std::move(reorderedModuli);
                 LOGVOLE_REQUIRE_FALSE(gpu::retainedRootBStarNttMatches(
-                    reordered, *owner, 2u));
+                    reordered, *owner, 2u, cacheScope));
                 {
-                    ScopedProtocolCacheScope receiverScope(
-                        ProtocolCacheRole::Receiver, runId);
+                    const ProtocolCacheScope cacheScope(runId, ProtocolCacheRole::Receiver);
                     LOGVOLE_REQUIRE_FALSE(gpu::retainedRootBStarNttMatches(
-                        productionCtx, *owner, 2u));
+                        productionCtx, *owner, 2u, cacheScope));
                 }
                 {
-                    ScopedProtocolCacheScope nextRun(
-                        ProtocolCacheRole::Sender, runId.mService->qualify(runId.mValue + 1u));
+                    const ProtocolCacheScope cacheScope(runId.mService->qualify(runId.mValue + 1u), ProtocolCacheRole::Sender);
                     LOGVOLE_REQUIRE_FALSE(gpu::retainedRootBStarNttMatches(
-                        productionCtx, *owner, 2u));
+                        productionCtx, *owner, 2u, cacheScope));
                 }
                 std::shared_ptr<const gpu::RetainedPublicUniform> wrongNonce;
                 LOGVOLE_REQUIRE_TRUE(retainUniformPolyBatchFromNonce(
                     productionCtx, 0xB57A52BADu, 0xB57A52BADu,
-                    2u, true, wrongNonce));
+                    2u, true, wrongNonce, cacheScope));
                 LOGVOLE_REQUIRE_FALSE(gpu::retainedRootBStarNttMatches(
-                    productionCtx, *wrongNonce, 2u));
+                    productionCtx, *wrongNonce, 2u, cacheScope));
 
                 const auto eagerBStar = deriveUniformPolyBatchFromNonce(
                     productionCtx, gpu::kRootBStarNonce,
-                    gpu::kRootBStarDomain, 2u, true);
+                    gpu::kRootBStarDomain, 2u, true, cacheScope);
                 auto r1 = sample_batch(productionCtx, rho,
                     noGoldenSeed ? 0xB57A5302u : 0xB57A5301u);
                 auto r2Ntt = sample_batch(productionCtx, rho,
@@ -3152,7 +3113,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 for (auto& poly : r2Ntt)
                     LOGVOLE_REQUIRE_TRUE(forwardNtt(poly, productionCtx));
                 auto publicBRootNtt = deriveUniformPolyBatchFromNonce(
-                    productionCtx, 0xB57A5500u, 0xB57A5501u, 1u, true);
+                    productionCtx, 0xB57A5500u, 0xB57A5501u, 1u, true, cacheScope);
                 const std::uint32_t gadgetLogBase = noGoldenSeed ? 208u : 110u;
                 tests_libOTe::logvole_test::ScopedOptionValue rootDevice(setupOptions.mRootDevice, true);
                 tests_libOTe::logvole_test::ScopedOptionValue rootStrict(setupOptions.mRootDeviceStrict, true);
@@ -3163,12 +3124,12 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, productionCtx,
                     r1, r2Ntt, publicBRootNtt, eagerBStar,
                     gadgetLogBase, 1, eagerPrng, 0.0, 0.0,
-                    eagerTop, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions)));
+                    eagerTop, 4,  {}, nullptr, nullptr, nullptr, nullptr, nullptr, setupOptions, {}, cacheScope)));
                 const auto before = gpu::publicUniformRetentionStats(productionCtx);
                 LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(buildRootTopCt(setupResources.executor, setupResources.results, productionCtx,
                     r1, r2Ntt, publicBRootNtt, {}, gadgetLogBase, 1,
                     retainedPrng, 0.0, 0.0, retainedTop, 4,
-                    {}, nullptr, nullptr, nullptr, nullptr, owner.get(), setupOptions)));
+                    {}, nullptr, nullptr, nullptr, nullptr, owner.get(), setupOptions, {}, cacheScope)));
                 const auto after = gpu::publicUniformRetentionStats(productionCtx);
                 LOGVOLE_EXPECT_EQ(after.mHostMaterializations,
                     before.mHostMaterializations);
@@ -3177,7 +3138,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                     eagerPrng.get<oc::block>());
                 std::vector<RnsPoly> wireBStar;
                 LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(
-                    *owner, wireBStar, readbackExecution.readbackStream()));
+                    *owner, wireBStar, readbackExecution.readbackStream(), cacheScope));
                 expect_batch_equal(wireBStar, eagerBStar);
 
                 oc::PRNG rejectedPrng(oc::block(0xB57A5602u, 0xB57A5603u));
@@ -3187,7 +3148,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                     r1, r2Ntt, publicBRootNtt, {}, gadgetLogBase, 1,
                     rejectedPrng, 0.0, 0.0, unchanged, 4,
                     {}, nullptr, nullptr, nullptr, nullptr,
-                    wrongNonce.get(), setupOptions)));
+                    wrongNonce.get(), setupOptions, {}, cacheScope)));
                 expect_batch_equal(unchanged.mPolys, retainedTop.mPolys);
                 LOGVOLE_EXPECT_EQ(rejectedPrng.get<oc::block>(),
                     referencePrng.get<oc::block>());
@@ -3356,8 +3317,6 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     RootOfflineMessage wireRoot{};
     bool expectOwnedRootWire = false;
     {
-        ScopedProtocolCacheScope receiverRole(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
         expectOwnedRootWire = gpu::available() &&
             std::endian::native == std::endian::little;
         auto receivedRoot = encode(offlineMessage, 4, {}, gpu::available());
@@ -3430,8 +3389,6 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
         oc::LogVoleEncodingOptions options;
         options.mRootCtREncodedReceive = false;
         options.mRootLacctEncodedReceive = false;
-        ScopedProtocolCacheScope receiverRole(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
         auto receivedRoot = encode(offlineMessage, 4, {}, gpu::available());
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
             std::move(receivedRoot), eagerLacctRoot, 4, options, gpu::available()));
@@ -3461,8 +3418,6 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     {
         oc::LogVoleEncodingOptions options;
         options.mRootBStarEncodedReceive = false;
-        ScopedProtocolCacheScope receiverRole(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
         auto receivedRoot = encode(offlineMessage, 4, {}, gpu::available());
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
             std::move(receivedRoot), eagerBStarRoot, 4, options, gpu::available()));
@@ -3558,8 +3513,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
     if (!gpu::available()) return;
 
     const auto runId = identityService->allocate();
-    ScopedProtocolCacheScope receiverScope(
-        ProtocolCacheRole::Receiver, runId);
+    const ProtocolCacheScope receiverScope(runId, ProtocolCacheRole::Receiver);
 
     Params params = make_recursive_params(1u);
     ShrinkExpandParams trunc{};
@@ -3580,37 +3534,36 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
     prefetchOptions.mRootDigestHash = cmd.getOr("root_digest_hash",
         prefetchOptions.mRootDigestHash ? 1 : 0) != 0;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, identityService), receiverScope));
 
     ShrinkExpandSenderOfflineInput seInput{};
     seInput.mParams = trunc;
-    seInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seInput), advanced, ProtocolCacheRole::Sender);
+    seInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seInput), advanced, ProtocolCacheRole::Sender, receiverScope);
     seInput.mS = sample_batch(ctx, trunc.mMu, 0x7D8101u);
     ShrinkExpandSenderState seSender{};
-    LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(seInput, seSender));
+    LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(seInput, seSender, ProtocolCacheScope(runId, ProtocolCacheRole::Sender)));
 
     SenderState sender{};
     sender.mParams = params;
     sender.mShrinkExpandState = seSender;
     RootOfflineMessage offlineMessage{};
     {
-        ScopedProtocolCacheScope senderScope(
-            ProtocolCacheRole::Sender, runId);
+        const ProtocolCacheScope senderScope(runId, ProtocolCacheRole::Sender);
         LOGVOLE_REQUIRE_TRUE(
-            prepare_root_offline_sender_for_test(sender, offlineMessage));
+            prepare_root_offline_sender_for_test(sender, offlineMessage, senderScope));
     }
 
     ShrinkExpandReceiverOfflineInput seReceiverInput{};
     seReceiverInput.mParams = trunc;
-    seReceiverInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seReceiverInput), advanced, ProtocolCacheRole::Receiver);
+    seReceiverInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seReceiverInput), advanced, ProtocolCacheRole::Receiver, receiverScope);
     ShrinkExpandReceiverState seReceiver{};
     LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(
-        seReceiverInput, seSender, seReceiver));
+        seReceiverInput, seSender, seReceiver, receiverScope));
 
     ReceiverState receiver{};
     receiver.mParams = params;
     receiver.mShrinkExpandState = seReceiver;
-    LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(receiver, offlineMessage));
+    LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(receiver, offlineMessage, receiverScope));
 
     // Observe a real setup's counters through a graph that shares its context.
     // Graph traversal must count that resource domain once and weak baselines
@@ -3654,7 +3607,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
     wireReceiver.mParams = params;
     wireReceiver.mShrinkExpandState = seReceiver;
     LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(
-        wireReceiver, std::move(wireRoot)));
+        wireReceiver, std::move(wireRoot), receiverScope));
     LOGVOLE_REQUIRE_TRUE(wireReceiver.mRootCtRWire != nullptr);
     LOGVOLE_REQUIRE_TRUE(wireReceiver.mRootPublicBStarWire != nullptr);
     LOGVOLE_EXPECT_TRUE(wireReceiver.mRootCtRRt.mPolys.empty());
@@ -3667,7 +3620,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
     RootDigestState digestState{};
     RootDigestMessage digestMessage{};
     LOGVOLE_REQUIRE_TRUE(prepare_root_digest_receiver_for_test(
-        receiver, x, digestState, digestMessage, true));
+        receiver, x, digestState, digestMessage, true, receiverScope));
     LOGVOLE_REQUIRE_TRUE(!digestState.mDPrimeHashValid);
     LOGVOLE_REQUIRE_TRUE(digestState.mLeftTreeGpu != nullptr);
     LOGVOLE_REQUIRE_TRUE(digestState.mTopInputsNttGpu != nullptr);
@@ -3691,7 +3644,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
         tauHi,
         rootLeftWidth(tauHi, rho),
         prepared,
-        dPrimeDevice));
+        dPrimeDevice, {}, receiverScope));
     LOGVOLE_REQUIRE_TRUE(prepared != nullptr);
     if (gpu::rootDigestHashEnabled(ctx.mExecutionOptions))
     {
@@ -3709,10 +3662,9 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
 
     RootResponseMessage response{};
     {
-        ScopedProtocolCacheScope senderScope(
-            ProtocolCacheRole::Sender, runId);
+        const ProtocolCacheScope senderScope(runId, ProtocolCacheRole::Sender);
         LOGVOLE_REQUIRE_TRUE(prepare_root_response_sender_for_test(
-            sender, digestMessage, response));
+            sender, digestMessage, response, false, senderScope));
     }
     RnsPoly skPrime{};
     skPrime.mCoeffs = response.mSkPrimeCoeffs;
@@ -3737,7 +3689,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
             rootLeftWidth(tauHi, rho),
             out,
             prepared,
-            dPrimeDevice.get());
+            dPrimeDevice.get(), {}, receiverScope);
     };
     const auto runFinalize = [&](oc::block digestHash,
                                  gpu::PreparedRootFinalize* prepared,
@@ -3779,7 +3731,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
         tauHi,
         rootLeftWidth(tauHi, rho),
         abandoned,
-        dPrimeDevice));
+        dPrimeDevice, {}, receiverScope));
     LOGVOLE_REQUIRE_TRUE(abandoned != nullptr);
     abandoned.reset();
 
@@ -3796,7 +3748,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
         tauHi,
         rootLeftWidth(tauHi, rho),
         alternateHash,
-        dPrimeDevice));
+        dPrimeDevice, {}, receiverScope));
     const oc::block mismatchedHash =
         digestState.mDPrimeHash ^ oc::block(1u, 0u);
     gpu::DeviceBatchPtr mismatchFallbackKey;
@@ -3827,7 +3779,7 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& c
     if (!gpu::available()) return;
 
     const auto runId = identityService->allocate();
-    ScopedProtocolCacheScope receiverScope(ProtocolCacheRole::Receiver, runId);
+    const ProtocolCacheScope receiverScope(runId, ProtocolCacheRole::Receiver);
 
     CivoleParams civole{};
     LOGVOLE_REQUIRE_TRUE(makeCivoleParams(
@@ -3855,30 +3807,30 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& c
     prefetchOptions.mRootDigestHash = cmd.getOr("root_digest_hash",
         prefetchOptions.mRootDigestHash ? 1 : 0) != 0;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, identityService), receiverScope));
 
     ShrinkExpandSenderOfflineInput seInput{};
     seInput.mParams = trunc;
-    seInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seInput), advanced, ProtocolCacheRole::Sender);
+    seInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seInput), advanced, ProtocolCacheRole::Sender, receiverScope);
     seInput.mS = sample_batch(ctx, trunc.mMu, 0x7D8201u);
     ShrinkExpandSenderState seSender{};
     SenderState sender{};
     sender.mParams = params;
     RootOfflineMessage offlineMessage{};
     {
-        ScopedProtocolCacheScope senderScope(ProtocolCacheRole::Sender, runId);
-        LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(seInput, seSender));
+        const ProtocolCacheScope senderScope(runId, ProtocolCacheRole::Sender);
+        LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(seInput, seSender, ProtocolCacheScope(runId, ProtocolCacheRole::Sender)));
         sender.mShrinkExpandState = seSender;
         LOGVOLE_REQUIRE_TRUE(prepare_root_offline_sender_for_test(
-            sender, offlineMessage));
+            sender, offlineMessage, senderScope));
     }
 
     ShrinkExpandReceiverOfflineInput seReceiverInput{};
     seReceiverInput.mParams = trunc;
-    seReceiverInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seReceiverInput), advanced, ProtocolCacheRole::Receiver);
+    seReceiverInput = tests_libOTe::logvole_test::withAdvancedOptions(std::move(seReceiverInput), advanced, ProtocolCacheRole::Receiver, receiverScope);
     ShrinkExpandReceiverState seReceiver{};
     LOGVOLE_REQUIRE_TRUE(finalize_receiver_from_sender_wire(
-        seReceiverInput, seSender, seReceiver));
+        seReceiverInput, seSender, seReceiver, receiverScope));
 
     // Decode an independently owned Root frame as the copied TCP receiver does.
     // Its coefficient tensors remain encoded until the receiver device chain
@@ -3897,7 +3849,7 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& c
     receiver.mParams = params;
     receiver.mShrinkExpandState = std::move(seReceiver);
     LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(
-        receiver, std::move(wireRoot)));
+        receiver, std::move(wireRoot), receiverScope));
     LOGVOLE_REQUIRE_TRUE(receiver.mRootCtRWire != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiver.mRootPublicBStarWire != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiver.mRootCtRRt.mPolys.empty());
@@ -3918,7 +3870,7 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& c
             return macoro::sync_wait(osuCrypto::LogVole::prepareRootDigestReceiver(
                 resources.executor, buffers.zeta,
             receiver, x, receiverPrng, digestState, digestMessage,
-            {}, 0, true));
+            {}, 0, true, {}, receiverScope));
         }());
         LOGVOLE_REQUIRE_TRUE(!digestState.mDPrimeHashValid);
         LOGVOLE_REQUIRE_TRUE(digestState.mLeftTreeGpu != nullptr);
@@ -3934,18 +3886,17 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& c
         LOGVOLE_REQUIRE_TRUE(gpu::prefetchRootFinalizeReceiverDevice(
             receiver, ctx, digestState.mDPrime, topInputs,
             digestState.mLeftTreeGpu, tauHi, rootLeftWidth(tauHi, rho),
-            prepared, dPrimeDevice));
+            prepared, dPrimeDevice, {}, receiverScope));
         LOGVOLE_REQUIRE_TRUE(prepared != nullptr);
         LOGVOLE_REQUIRE_TRUE(finishRootDigestHash(digestState));
         LOGVOLE_REQUIRE_TRUE(digestState.mDPrimeHashValid);
 
         RootResponseMessage response{};
         {
-            ScopedProtocolCacheScope senderScope(
-                ProtocolCacheRole::Sender, runId);
+            const ProtocolCacheScope senderScope(runId, ProtocolCacheRole::Sender);
             oc::PRNG senderPrng(oc::block(0x7D8204u, query));
             LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::prepareRootResponse(
-                sender, digestMessage, senderPrng, response));
+                sender, digestMessage, senderPrng, response, nullptr, nullptr, false, std::shared_ptr<void>{}, CpuBenchmarkState{}, senderScope));
         }
         LOGVOLE_REQUIRE_TRUE(response.mSeed.empty());
         RnsPoly skPrime{};
@@ -3964,7 +3915,7 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& c
                 digestState.mLeftTreeGpu,
                 std::span<const std::uint8_t>(publicSeed), query,
                 tauHi, rootLeftWidth(tauHi, rho), out,
-                prefix, dPrimeDevice.get());
+                prefix, dPrimeDevice.get(), {}, receiverScope);
         };
         gpu::DeviceBatchPtr splitKey;
         LOGVOLE_REQUIRE_TRUE(finalize(prepared.get(), splitKey));
@@ -4345,19 +4296,19 @@ void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
     input.mUseGpuResidentInternalState = true;
     const auto run = [&](oc::LogVoleGpuSetupOptions options, oc::LogVoleExecutionOptions advanced = {}) {
         advanced.mUseGpu = true;
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, identityService->allocate());
+        const ProtocolCacheScope scope(identityService->allocate(), ProtocolCacheRole::Sender);
         auto selected = input;
         selected.mParams.mShrinkExpand.mGpuSetup = options;
         RingNttContext configured;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, configured,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(advanced, identityService), scope));
         selected.mRingFactoryOwner = configured.mFactoryOwner;
         oc::PRNG prng(oc::block(0x5092u, 0));
         coproto::BufferingSocket socket;
         LogVoleRingSender sender;
         SenderState state;
         RootWirePinOverlapEvidence rootWirePin;
-        macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, selected, state, prng, socket, rootWirePin));
+        macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, selected, state, prng, socket, rootWirePin, scope));
         macoro::sync_wait(socket.flush());
         auto bytes = socket.getOutbound();
         LOGVOLE_REQUIRE_TRUE(bytes && !bytes->empty());
@@ -4459,17 +4410,13 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     bool senderDevice = false, receiverDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
     {
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
         senderDevice = gpu::enabled(advanced);
     }
     {
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
         receiverDevice = gpu::enabled(advanced);
     }
     if (senderDevice || receiverDevice)
     {
-        ScopedProtocolCacheScope scope(senderDevice ? ProtocolCacheRole::Sender : ProtocolCacheRole::Receiver,
-            currentProtocolCacheScope().mRunId);
 
         gpu::GpuStream uploadStream, downloadStream;
 
@@ -4554,7 +4501,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     if (cmd.getOr("lvFactoryFast", 0)) params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
     params.mShrinkExpand.mNumWorkerThreads = 4;
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced, nullptr)));
     SenderOfflineInput senderInput{};
     senderInput.mParams = params;
     senderInput.mSk1 = sample_batch(ctx, params.mGamma, 0x781234u);
@@ -4963,7 +4910,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 std::fill(ring.mCoeffModulusBits.begin(), ring.mCoeffModulusBits.end(), shape == 1 ? 55 : 52);
             }
             RingNttContext ringCtx{};
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, ringCtx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, ringCtx, std::make_shared<RingContextFactory>(advanced, nullptr)));
             for (bool truncated : {false, true})
             {
                 ShrinkExpandReceiverOfflineInput input{};
@@ -5220,7 +5167,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
     params.mShrinkExpand.mNumWorkerThreads = 4;
 
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx, std::make_shared<RingContextFactory>(advanced, nullptr)));
 
     SenderOfflineInput senderInput{};
     senderInput.mParams = params;
@@ -5240,8 +5187,6 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
 #if defined(ENABLE_LOGVOLE_CUDA)
     bool senderDeviceEnabled = false;
     {
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
         senderDeviceEnabled = gpu::enabled(advanced);
     }
     auto expectSharedSenderCache = [&](const SenderOfflineOutput& output) {
@@ -5290,8 +5235,6 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
 #if defined(ENABLE_LOGVOLE_CUDA)
     bool receiverDeviceEnabled = false;
     {
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
         receiverDeviceEnabled = gpu::enabled(advanced);
     }
     auto expectSharedReceiverCache = [&](const ReceiverOfflineOutput& output) {
@@ -5323,8 +5266,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
         // Compare actual shrink digests and all unbundled child inputs using a
         // fresh CPU-scaled cache versus the directly device-scaled cache.
         {
-            ScopedProtocolCacheScope roleScope(
-                ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+            const ProtocolCacheScope roleScope({}, ProtocolCacheRole::Receiver);
             const auto& reference = lazyReceiver.mState.mNextLevelState->mShrinkExpandState;
             const auto& candidate = receiverOffline.mState.mNextLevelState->mShrinkExpandState;
             const std::uint32_t muHi = reference.mParams.mMu;
@@ -5335,10 +5277,10 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
             std::vector<std::vector<RnsPoly>> referenceChildren, candidateChildren;
             {
                 LOGVOLE_REQUIRE_TRUE(gpu::shrinkChunks(reference, x, muHi, tauHi,
-                    referenceSession, referenceDigests, referenceChildren));
+                    referenceSession, referenceDigests, referenceChildren, roleScope));
             }
             LOGVOLE_REQUIRE_TRUE(gpu::shrinkChunks(candidate, x, muHi, tauHi,
-                candidateSession, candidateDigests, candidateChildren));
+                candidateSession, candidateDigests, candidateChildren, roleScope));
             expect_batch_equal(referenceDigests, candidateDigests);
             LOGVOLE_REQUIRE_EQ(referenceChildren.size(), candidateChildren.size());
             for (std::size_t i = 0; i < referenceChildren.size(); ++i)
@@ -5566,7 +5508,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_LT(rejectedParams.mW, muHi);
 
     RingNttContext rejectedCtx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(rejectedParams.mShrinkExpand.mRing, rejectedCtx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(rejectedParams.mShrinkExpand.mRing, rejectedCtx, std::make_shared<RingContextFactory>(advanced, nullptr)));
 
     SenderOfflineInput rejectedSenderInput{};
     rejectedSenderInput.mParams = rejectedParams;
@@ -5864,7 +5806,7 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
         auto advanced = paddedCtx.mExecutionOptions;
         advanced.mUseGpu = true;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(paddedCtx.mParams, paddedCtx,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(advanced, nullptr)));
         auto candidateDev = gpu::upload(
             paddedCtx,
             std::span<const RnsPoly>(
@@ -6006,10 +5948,10 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
         policy.mNoGoldRootPriorityPrefetch = false;
     }
     const auto makeOwner = [&](ProtocolCacheRole role) {
-        ScopedProtocolCacheScope scope(role, identityService->allocate());
+        const ProtocolCacheScope scope(identityService->allocate(), role);
         RingNttContext selected;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, selected,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(advanced, identityService), scope));
         return selected.mFactoryOwner;
     };
     senderInput.mRingFactoryOwner = makeOwner(ProtocolCacheRole::Sender);
@@ -6778,7 +6720,7 @@ void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
             osuCrypto::LogVoleExecutionOptions advanced;
             advanced.mUseGpu = true;
             RingNttContext deviceContext;
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(se.mRing, deviceContext, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(se.mRing, deviceContext, std::make_shared<RingContextFactory>(advanced, nullptr)));
             for (std::size_t i = 0; i < rho; ++i)
                 LOGVOLE_REQUIRE_EQ(ringModulusValue(deviceContext, i), zp.mRing.mModuli[i].value());
             auto safeDevice = gpu::upload(deviceContext, safe);
@@ -6824,7 +6766,7 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
         ZpCrtContext zp;
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mShrinkExpand.mRing,
             params.mShrinkExpand.mPlaintextModulusBits, zp,
-            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, nullptr))));
         const auto n = params.mShrinkExpand.mRing.mPolyModulusDegree;
         auto boundary = makeZeroPolys(params, 1).front();
         for (std::size_t i = 0; i < rho; ++i)

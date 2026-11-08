@@ -466,11 +466,8 @@ namespace osuCrypto::LogVole
                     std::shared_ptr<void> preKPrimeDevice;
                     bool havePreK = false;
                     {
-                        // Install the captured sender/SID scope only around
-                        // synchronous work, never across a socket suspension.
-                        ScopedProtocolCacheScope activeSender(senderScope);
                         havePreK = !nonInteractive && sampleRootResponseKPrime(
-                            state, prng, preKPrime, &preKPrimeDevice);
+                            state, prng, preKPrime, &preKPrimeDevice, senderScope);
                         if (havePreK || nonInteractive)
                         {
                             // Prepare the immutable SK cache and, if requested,
@@ -478,7 +475,7 @@ namespace osuCrypto::LogVole
                             // freshly device-generated key.
                             std::shared_ptr<void> uploadedKPrime;
                             (void)prepareRootResponseDeviceOperands(
-                                state, preKPrime, uploadedKPrime);
+                                state, preKPrime, uploadedKPrime, senderScope);
                             if (!preKPrimeDevice)
                                 preKPrimeDevice = std::move(uploadedKPrime);
                         }
@@ -493,9 +490,6 @@ namespace osuCrypto::LogVole
                     RootDigestMessage digest{};
                     RootResponseMessage response{};
                     {
-                        ScopedProtocolCacheScope activeSender(senderScope);
-                        // recvFrame may resume on a receiver worker. Restore
-                        // the exact captured scope before validating secrets.
                         {
                             AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
                             if (!decode(digestPayload, digest, state.mParams.mShrinkExpand.mTransport.mEncoding, gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner), hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark))
@@ -507,21 +501,17 @@ namespace osuCrypto::LogVole
                     {
                         HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: root response", &cpuBenchmark);
                         AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
-                        auto preparation = [&] {
-                            ScopedProtocolCacheScope activeSender(senderScope);
-                            return ownedFastPath
+                        auto preparation = ownedFastPath
                                 ? prepareRootResponseSender(executor, buffers, state, std::move(digest),
                                     prng, response, &precomputeRoot, havePreK ? &preKPrime : nullptr,
-                                    true, preKPrimeDevice, cpuBenchmark)
+                                    true, preKPrimeDevice, cpuBenchmark, senderScope)
                                 : prepareRootResponseSender(executor, buffers, state, digest,
                                     prng, response, &precomputeRoot, havePreK ? &preKPrime : nullptr,
-                                    true, preKPrimeDevice, cpuBenchmark);
-                        }();
+                                    true, preKPrimeDevice, cpuBenchmark, senderScope);
                         if (!co_await std::move(preparation))
                             throw std::runtime_error("LogVole sender could not prepare root response");
                     }
                     {
-                        ScopedProtocolCacheScope activeSender(senderScope);
                         if (!nonInteractive)
                         {
                             AutoTimer serTimer(globalTimingStats.mRootSerializeUs);
@@ -549,10 +539,8 @@ namespace osuCrypto::LogVole
                     {
                         HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu sender: post-response precompute", &cpuBenchmark);
                         AutoTimer rootTimer(globalTimingStats.mRootSenderHostUs);
-                        auto precompute = [&] {
-                            ScopedProtocolCacheScope activeSender(senderScope);
-                            return senderPrecompute(executor, buffers, precomputeRoot, prng, cpuBenchmark);
-                        }();
+                        auto precompute = senderPrecompute(executor, buffers,
+                            precomputeRoot, prng, cpuBenchmark, senderScope);
                         if (!co_await std::move(precompute) || state.mGoldenSeed.empty())
                             throw std::runtime_error("LogVole sender could not prepare root response");
                     }
@@ -811,10 +799,10 @@ namespace osuCrypto::LogVole
     task<> LogVoleRingSender::online(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         SenderState& state, const SenderOnlineOptions& options,
-        SenderOnlineOutput& output, PRNG& prng, Socket& sock)
+        SenderOnlineOutput& output, PRNG& prng, Socket& sock, ProtocolCacheScope cacheScope)
     {
         return onlineStart(executor, buffers, state, options, output, prng, sock,
-            currentProtocolCacheScope());
+            std::move(cacheScope));
     }
 
     task<> LogVoleRingSender::onlineStart(
@@ -834,7 +822,6 @@ namespace osuCrypto::LogVole
         cacheScope.mRole = ProtocolCacheRole::Sender;
         HostStep onlineTotal(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: online TOTAL", &cpuBenchmark);
         {
-            ScopedProtocolCacheScope scopedCache(cacheScope);
             HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: clear cache + sid", &cpuBenchmark);
             if (!(options.mUsePrecomputed && senderHasPrecompute(state)))
             {
@@ -881,10 +868,10 @@ namespace osuCrypto::LogVole
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& output,
-        Socket& sock)
+        Socket& sock, ProtocolCacheScope cacheScope)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(state.mRingFactoryOwner)};
-        const ProtocolCacheScope cacheScope{currentProtocolCacheScope().mRunId, ProtocolCacheRole::Sender};
+        cacheScope.mRole = ProtocolCacheRole::Sender;
 		u64 maxPayload = 0;
 		const bool validPayloadSize = polyPayloadSize(state.mParams.mRing, maxPayload);
 		const auto digestPayload =
@@ -893,7 +880,6 @@ namespace osuCrypto::LogVole
         RnsPoly digest{};
         Buffer responsePayload;
         {
-            ScopedProtocolCacheScope roleScope(cacheScope);
             PolyMessage digestMessage{};
             if (!decode(digestPayload, digestMessage, state.mParams.mTransport.mEncoding, gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark))
             {
@@ -906,7 +892,7 @@ namespace osuCrypto::LogVole
             }
 
             RingNttContext ctx{};
-            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner))
+            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, cacheScope))
             {
                 throw std::runtime_error("LogVole sender could not build ring context");
             }
@@ -942,7 +928,7 @@ namespace osuCrypto::LogVole
 
             responsePayload = encode(makePolyMessage(state.mParams.mRing, skX), state.mParams.mTransport.mEncoding,
                 gpu::enabled(state.mRingFactoryOwner), hostProfiler(state.mRingFactoryOwner), cpuBenchmark);
-        } // No thread-local scope survives a suspension.
+        }
         co_await detail::sendFrame(sock, std::move(responsePayload));
 
         ShrinkExpandExpandSenderInput expandInput = input;

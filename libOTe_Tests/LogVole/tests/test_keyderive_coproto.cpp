@@ -86,31 +86,28 @@ namespace
         {
             auto service = ProtocolCacheService::create();
             senderService = service;
-            ScopedProtocolCacheScope creation(ProtocolCacheRole::Sender, service->allocate());
-            senderTask = sender.keyDerive(senderInput, senderOutput, sockets[0]);
+            const ProtocolCacheScope creation(service->allocate(), ProtocolCacheRole::Sender);
+            senderTask = sender.keyDerive(senderInput, senderOutput, sockets[0], {}, false, nullptr, creation);
         }
         {
             auto service = ProtocolCacheService::create();
             receiverService = service;
-            ScopedProtocolCacheScope creation(ProtocolCacheRole::Receiver, service->allocate());
-            receiverTask = receiver.keyDerive(receiverInput, receiverOutput, sockets[1]);
+            const ProtocolCacheScope creation(service->allocate(), ProtocolCacheRole::Receiver);
+            receiverTask = receiver.keyDerive(receiverInput, receiverOutput, sockets[1], {}, false, nullptr, creation);
         }
         LOGVOLE_REQUIRE_FALSE(senderService.expired());
         LOGVOLE_REQUIRE_FALSE(receiverService.expired());
-        const auto unrelatedService = ProtocolCacheService::create();
-        const ProtocolCacheScope unrelated(unrelatedService->allocate(), ProtocolCacheRole::Unspecified);
-        ScopedProtocolCacheScope ambient(unrelated);
         auto sending = std::move(senderTask) | macoro::make_eager();
-        // The sender waits for a request without leaving its role installed.
+        // The sender waits for a request while its explicit service remains retained.
         LOGVOLE_REQUIRE_TRUE(senderOutput.mK.empty());
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
+        LOGVOLE_REQUIRE_FALSE(senderService.expired());
+        LOGVOLE_REQUIRE_FALSE(receiverService.expired());
         auto receiving = std::move(receiverTask) | macoro::make_eager();
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
+        LOGVOLE_REQUIRE_FALSE(senderService.expired());
+        LOGVOLE_REQUIRE_FALSE(receiverService.expired());
         auto result = macoro::sync_wait(macoro::when_all_ready(std::move(sending), std::move(receiving)));
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
-        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
+        LOGVOLE_REQUIRE_FALSE(senderService.expired());
+        LOGVOLE_REQUIRE_FALSE(receiverService.expired());
         std::get<0>(result).result();
         std::get<1>(result).result();
 

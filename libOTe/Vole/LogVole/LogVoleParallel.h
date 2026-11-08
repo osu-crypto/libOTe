@@ -153,11 +153,9 @@ namespace osuCrypto::LogVole::detail
         macoro::thread_pool& pool,
         Worker& worker,
         std::size_t workerIdx,
-        ProtocolCacheScope cacheScope,
         CpuBenchmarkContext* benchmarkContext)
     {
         co_await pool.schedule();
-        ScopedProtocolCacheScope scopedCache(cacheScope);
         CpuBenchmarkWorkerScope benchmarkScope(benchmarkContext);
         CpuBenchmarkState state{benchmarkContext, true};
         worker(workerIdx, state);
@@ -201,10 +199,8 @@ namespace osuCrypto::LogVole::detail
         std::atomic<bool> failed{ false };
         std::atomic<std::size_t> nextTask{ 0 };
 
-        const ProtocolCacheScope cacheScope = currentProtocolCacheScope();
         auto worker = [&](std::size_t workerIdx, CpuBenchmarkState& workerState) {
             CpuBenchmarkTaskScope taskScope(workerState);
-            ScopedProtocolCacheScope scopedCache(cacheScope);
             if (dynamic)
             {
                 // Opt-in for tasks whose randomness and outputs are indexed by
@@ -249,7 +245,7 @@ namespace osuCrypto::LogVole::detail
             std::vector<macoro::task<>> tasks;
             tasks.reserve(workerCount - 1);
             for (std::size_t i = 1; i < workerCount; ++i)
-                tasks.push_back(runPoolWorker(pool, worker, i, cacheScope, benchmark));
+                tasks.push_back(runPoolWorker(pool, worker, i, benchmark));
             auto joined = macoro::make_blocking(macoro::when_all_ready(std::move(tasks)));
 
             std::exception_ptr callerError;

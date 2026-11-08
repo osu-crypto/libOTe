@@ -82,13 +82,13 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
         {
             const auto role = party ? ProtocolCacheRole::Receiver :
                 ProtocolCacheRole::Sender;
-            ScopedProtocolCacheScope owner(role, run);
+            const ProtocolCacheScope owner(run, role);
             auto factory = std::make_shared<ZpContextFactory>(
-                std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+                std::make_shared<RingContextFactory>(options, identityService));
             auto sequentialOptions = options;
             sequentialOptions.mAdvanced.mContexts.mNativeSealBundle = false;
             auto sequentialFactory = std::make_shared<ZpContextFactory>(
-                std::make_shared<RingContextFactory>(sequentialOptions, currentProtocolCacheScope().mRunId.serviceOwner()));
+                std::make_shared<RingContextFactory>(sequentialOptions, identityService));
             std::shared_ptr<gpu::GpuPlainNtt> priorPlain;
             std::shared_ptr<gpu::GpuRing> priorDeviceRing;
             RingNttContext priorRing{};
@@ -97,27 +97,27 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             if (production)
             {
                 {
-                    ScopedProtocolCacheScope noRun(role, 0u);
+                    const ProtocolCacheScopeView noRun{{}, role};
                     RingNttContext earlyRing{};
                     ZpCrtContext earlyZp{};
                     LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
-                        params, plaintextBits, earlyRing, earlyZp, factory));
+                        params, plaintextBits, earlyRing, earlyZp, factory, noRun));
                     LOGVOLE_REQUIRE_FALSE(earlyZp.mNativeSealBundleCommitted);
                 }
                 // Keep a separate sequential owner alive while native setup is published.
                 LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
-                    params, plaintextBits, priorRing, priorZp, sequentialFactory));
+                    params, plaintextBits, priorRing, priorZp, sequentialFactory, owner));
                 LOGVOLE_REQUIRE_FALSE(priorZp.mNativeSealBundleCommitted);
                 priorDeviceRing = gpu::GpuRing::get(priorRing);
                 LOGVOLE_REQUIRE_TRUE(priorDeviceRing != nullptr);
                 priorPlain = gpu::GpuPlainNtt::getRaw(
-                    degree, priorZp.mPlaintextModulus, priorRing.mResourceScope);
+                    degree, priorZp.mPlaintextModulus, priorRing.mResourceScope, {}, owner);
                 LOGVOLE_REQUIRE_TRUE(priorPlain != nullptr);
                 priorPlainAlreadyNative =
                     priorPlain->nativeBundleOwnerRole() == role;
             }
             LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
-                params, plaintextBits, bundledRing[party], bundledZp[party], factory));
+                params, plaintextBits, bundledRing[party], bundledZp[party], factory, owner));
             LOGVOLE_REQUIRE_TRUE(bundledZp[party].mNativeSealBundleCommitted);
             LOGVOLE_REQUIRE_TRUE(bundledRing[party].mGpuLightweight &&
                 bundledZp[party].mGpuLightweight &&
@@ -133,10 +133,10 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
                 bundledZp[party].mNativePlainNtt->nativeBundleOwnerRole(),
                 role);
             LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(
-                degree, bundledZp[party].mPlaintextModulus, bundledRing[party].mResourceScope) ==
+                degree, bundledZp[party].mPlaintextModulus, bundledRing[party].mResourceScope, {}, owner) ==
                 bundledZp[party].mNativePlainNtt);
             RingNttContext standaloneRing{};
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, standaloneRing, factory->ringFactory()));
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, standaloneRing, factory->ringFactory(), owner));
             LOGVOLE_REQUIRE_TRUE(standaloneRing.mRawModuli &&
                 standaloneRing.mRawModuli->mDynamicGpuCertificate ==
                     certificate);
@@ -151,7 +151,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
                     ? priorPlain == bundledZp[party].mNativePlainNtt
                     : priorPlain != bundledZp[party].mNativePlainNtt);
                 RingNttContext fallbackRing{};
-                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, fallbackRing, sequentialFactory->ringFactory()));
+                LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, fallbackRing, sequentialFactory->ringFactory(), owner));
                 LOGVOLE_REQUIRE_TRUE(fallbackRing.mRawModuli &&
                     !fallbackRing.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(fallbackRing) ==
@@ -159,7 +159,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::getRaw(params,
                     fallbackRing.mRawModuli->mValues, fallbackRing.mResourceScope) == priorDeviceRing);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(degree,
-                    bundledZp[party].mPlaintextModulus, fallbackRing.mResourceScope) == priorPlain);
+                    bundledZp[party].mPlaintextModulus, fallbackRing.mResourceScope, {}, owner) == priorPlain);
             }
             const auto expectedQ = seal::CoeffModulus::Create(degree, widths);
             for (std::size_t j = 0; j < widths.size(); ++j)
@@ -172,9 +172,9 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
                 eagerOptions.mAdvanced.mContexts.mLightweightRing = false;
                 eagerOptions.mAdvanced.mContexts.mLightweightCrt = false;
                 auto eagerFactory = std::make_shared<ZpContextFactory>(
-                    std::make_shared<RingContextFactory>(eagerOptions, currentProtocolCacheScope().mRunId.serviceOwner()));
+                    std::make_shared<RingContextFactory>(eagerOptions, identityService));
                 LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
-                    params, plaintextBits, eagerRing, eagerZp, eagerFactory));
+                    params, plaintextBits, eagerRing, eagerZp, eagerFactory, owner));
             }
             LOGVOLE_REQUIRE_FALSE(eagerZp.mNativeSealBundleCommitted);
             expectSameMetadata(bundledRing[party], bundledZp[party],
@@ -183,18 +183,18 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             ZpCrtContext optOutZp{};
             {
                 LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
-                    params, plaintextBits, optOutRing, optOutZp, sequentialFactory));
+                    params, plaintextBits, optOutRing, optOutZp, sequentialFactory, owner));
             }
             LOGVOLE_REQUIRE_FALSE(optOutZp.mNativeSealBundleCommitted);
             expectSameMetadata(bundledRing[party], bundledZp[party],
                 optOutRing, optOutZp);
             const auto laterRun = identityService->allocate();
             {
-                ScopedProtocolCacheScope sameRole(role, laterRun);
+                const ProtocolCacheScope sameRole(laterRun, role);
                 RingNttContext reusedRing{};
                 ZpCrtContext reusedZp{};
                 LOGVOLE_REQUIRE_TRUE(makeNativeSealSetupContexts(
-                    params, plaintextBits, reusedRing, reusedZp, factory));
+                    params, plaintextBits, reusedRing, reusedZp, factory, sameRole));
                 LOGVOLE_REQUIRE_TRUE(reusedZp.mNativeSealBundleCommitted);
                 LOGVOLE_REQUIRE_TRUE(
                     reusedRing.mRawModuli->mDynamicGpuCertificate ==
@@ -203,7 +203,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
                     bundledZp[party].mNativePlainNtt);
                 RingNttContext standaloneReused{};
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params,
-                    standaloneReused, factory->ringFactory()));
+                    standaloneReused, factory->ringFactory(), sameRole));
                 LOGVOLE_REQUIRE_TRUE(standaloneReused.mRawModuli &&
                     standaloneReused.mRawModuli->mDynamicGpuCertificate ==
                         certificate);
@@ -215,10 +215,8 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(bundledZp[0].mNativePlainNtt !=
             bundledZp[1].mNativePlainNtt);
         {
-            ScopedProtocolCacheScope receiver(
-                ProtocolCacheRole::Receiver, identityService->allocate());
-            // A worker's ambient role cannot replace a retained context's
-            // explicit owner. Contradictory stored provenance is rejected.
+            // Retained context ownership remains authoritative; contradictory
+            // stored provenance is rejected.
             LOGVOLE_REQUIRE_TRUE(
                 gpu::GpuRing::get(bundledRing[0]) ==
                     bundledRing[0].mRawModuli->mDynamicGpuCertificate);
@@ -227,8 +225,7 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(wrongOwner) == nullptr);
         }
         {
-            ScopedProtocolCacheScope sender(
-                ProtocolCacheRole::Sender, identityService->allocate());
+            const ProtocolCacheScope sender(identityService->allocate(), ProtocolCacheRole::Sender);
             auto failedQ = params;
             failedQ.mCoeffModulusBits[0] = 2;
             gpu::NativeSealSetupBundle untouched{};
@@ -236,13 +233,13 @@ void LogVole_NativeSealBundle_ExactParityAndRollback(const oc::CLP& cmd)
             untouched.mOwnerRunId = identityService->qualify(91u);
             LOGVOLE_REQUIRE_FALSE(
                 gpu::buildNativeSealSetupBundleDevice(
-                    failedQ, plaintextBits, untouched, std::make_shared<gpu::GpuSetupContext>(options, nullptr, currentProtocolCacheScope().mRunId.serviceOwner())));
+                    failedQ, plaintextBits, untouched, std::make_shared<gpu::GpuSetupContext>(options, nullptr, identityService), sender));
             LOGVOLE_EXPECT_EQ(untouched.mPlaintextPrime,
                 0xdecafbadULL);
             LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, identityService->qualify(91u));
             LOGVOLE_REQUIRE_FALSE(
                 gpu::buildNativeSealSetupBundleDevice(
-                    params, 2u, untouched, std::make_shared<gpu::GpuSetupContext>(options, nullptr, currentProtocolCacheScope().mRunId.serviceOwner())));
+                    params, 2u, untouched, std::make_shared<gpu::GpuSetupContext>(options, nullptr, identityService), sender));
             LOGVOLE_EXPECT_EQ(untouched.mPlaintextPrime,
                 0xdecafbadULL);
             LOGVOLE_EXPECT_EQ(untouched.mOwnerRunId, identityService->qualify(91u));
@@ -260,9 +257,6 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
     osuCrypto::LogVoleOptions options;
     options.mUseGpu = true;
     options.mAdvanced.mContexts.mNativeSealBundle = true;
-    ScopedProtocolCacheScope noIncomingRun(
-        ProtocolCacheRole::Unspecified, 0u);
-    const auto previousScope = currentProtocolCacheScope();
     struct ProductionSetting
     {
         CivoleSetting setting;
@@ -277,7 +271,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
     {
 
         auto factory = std::make_shared<ZpContextFactory>(
-                std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+                std::make_shared<RingContextFactory>(options, identityService));
         osuCrypto::LogVoleOptions sessionOptions = options;
         sessionOptions.mRequestSize = 8u;
         sessionOptions.mPlaintextModulusBits = requestedBits;
@@ -306,10 +300,6 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
         for (auto modulus : {senderA.modulus(), senderB.modulus(),
                  receiverA.modulus(), receiverB.modulus()})
             LOGVOLE_EXPECT_EQ(modulus, exactPrime);
-        LOGVOLE_EXPECT_EQ(currentProtocolCacheScope().mRole,
-            previousScope.mRole);
-        LOGVOLE_EXPECT_EQ(currentProtocolCacheScope().mRunId,
-            previousScope.mRunId);
 
         CivoleParams params{};
         LOGVOLE_REQUIRE_TRUE(makeCivoleParams(setting, params, 1u));
@@ -318,11 +308,11 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
         {
             const auto role = party ? ProtocolCacheRole::Receiver :
                 ProtocolCacheRole::Sender;
-            ScopedProtocolCacheScope owner(role, runs[party ? 2u : 0u]);
+            const ProtocolCacheScope owner(runs[party ? 2u : 0u], role);
             LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(
                 params.mLogVole.mShrinkExpand.mRing,
                 params.mLogVole.mShrinkExpand.mPlaintextModulusBits,
-                selected[party], factory));
+                selected[party], factory, owner));
             LOGVOLE_REQUIRE_TRUE(selected[party].mNativeSealBundleCommitted);
             LOGVOLE_REQUIRE_TRUE(selected[party].mNativePlainNtt &&
                 selected[party].mRing.mRawModuli &&
@@ -334,7 +324,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                 role);
             RingNttContext standalone{};
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(
-                params.mLogVole.mShrinkExpand.mRing, standalone, factory->ringFactory()));
+                params.mLogVole.mShrinkExpand.mRing, standalone, factory->ringFactory(), owner));
             LOGVOLE_REQUIRE_TRUE(standalone.mRawModuli &&
                 standalone.mRawModuli->mDynamicGpuCertificate ==
                     selected[party].mRing.mRawModuli->mDynamicGpuCertificate);
@@ -346,32 +336,32 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                 standalone.mRawModuli->mDynamicGpuCertificate);
             LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(
                 standalone.mParams.mPolyModulusDegree,
-                selected[party].mPlaintextModulus, selected[party].mRing.mResourceScope) ==
+                selected[party].mPlaintextModulus, selected[party].mRing.mResourceScope, {}, owner) ==
                 selected[party].mNativePlainNtt);
             {
-                ScopedProtocolCacheScope otherRole(party ? ProtocolCacheRole::Sender :
-                    ProtocolCacheRole::Receiver, 0u);
+                const ProtocolCacheScopeView otherRole{{}, party ? ProtocolCacheRole::Sender :
+                    ProtocolCacheRole::Receiver};
                 RingNttContext retained;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(standalone.mParams, retained,
-                    selected[party].mRing.mFactoryOwner));
+                    selected[party].mRing.mFactoryOwner, otherRole));
                 LOGVOLE_REQUIRE_TRUE(retained.mFactoryOwner == selected[party].mRing.mFactoryOwner);
                 LOGVOLE_REQUIRE_TRUE(retained.mGpuExecution == selected[party].mRing.mGpuExecution);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(retained) ==
                     selected[party].mRing.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(retained.mParams.mPolyModulusDegree,
-                    selected[party].mPlaintextModulus, retained.mResourceScope) ==
+                    selected[party].mPlaintextModulus, retained.mResourceScope, {}, otherRole) ==
                     selected[party].mNativePlainNtt);
             }
             {
                 // Runtime callbacks use the party role with run ID zero after
                 // configure has published the native owners under a fresh run.
                 // That sequential scope must select the same native cache lane.
-                ScopedProtocolCacheScope sequentialRole(role, 0u);
+                const ProtocolCacheScopeView sequentialRole{{}, role};
                 ZpCrtContext sequential{};
                 LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(
                     params.mLogVole.mShrinkExpand.mRing,
                     params.mLogVole.mShrinkExpand.mPlaintextModulusBits,
-                    sequential, factory));
+                    sequential, factory, sequentialRole));
                 LOGVOLE_REQUIRE_TRUE(sequential.mNativeSealBundleCommitted);
                 LOGVOLE_REQUIRE_TRUE(sequential.mNativePlainNtt ==
                     selected[party].mNativePlainNtt);
@@ -382,7 +372,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                 RingNttContext sequentialStandalone{};
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(
                     params.mLogVole.mShrinkExpand.mRing,
-                    sequentialStandalone, factory->ringFactory()));
+                    sequentialStandalone, factory->ringFactory(), sequentialRole));
                 LOGVOLE_REQUIRE_TRUE(sequentialStandalone.mRawModuli &&
                     sequentialStandalone.mRawModuli->mDynamicGpuCertificate ==
                         selected[party].mRing.mRawModuli->mDynamicGpuCertificate);
@@ -395,7 +385,7 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                         selected[party].mRing.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(
                     sequentialStandalone.mParams.mPolyModulusDegree,
-                    sequential.mPlaintextModulus, sequential.mRing.mResourceScope) ==
+                    sequential.mPlaintextModulus, sequential.mRing.mResourceScope, {}, sequentialRole) ==
                         selected[party].mNativePlainNtt);
             }
             {
@@ -404,14 +394,14 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
                 fallbackOptions.mAdvanced.mContexts.mNativeSealBundle = false;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(
                     params.mLogVole.mShrinkExpand.mRing, fallback,
-                    std::make_shared<RingContextFactory>(fallbackOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                    std::make_shared<RingContextFactory>(fallbackOptions, factory->ringFactory()->protocolService()), owner));
                 LOGVOLE_REQUIRE_TRUE(fallback.mRawModuli &&
                     !fallback.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(fallback) !=
                     standalone.mRawModuli->mDynamicGpuCertificate);
                 LOGVOLE_REQUIRE_TRUE(gpu::GpuPlainNtt::getRaw(
                     fallback.mParams.mPolyModulusDegree,
-                    selected[party].mPlaintextModulus, fallback.mResourceScope) !=
+                    selected[party].mPlaintextModulus, fallback.mResourceScope, {}, owner) !=
                     selected[party].mNativePlainNtt);
             }
         }
@@ -455,13 +445,12 @@ void LogVole_NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns(
 
         const auto suppliedRun = identityService->allocate();
         {
-            ScopedProtocolCacheScope explicitOwner(
-                ProtocolCacheRole::Unspecified, suppliedRun);
+            const ProtocolCacheScope explicitOwner(suppliedRun, ProtocolCacheRole::Unspecified);
 
-            osuCrypto::LogVoleSender explicitlyScoped(sessionOptions);
+            osuCrypto::LogVoleSender explicitlyScoped(sessionOptions, {}, explicitOwner);
 
-            osuCrypto::LogVoleGarbledSender garbledScopedSender(garbledOptions);
-            osuCrypto::LogVoleGarbledReceiver garbledScopedReceiver(garbledOptions);
+            osuCrypto::LogVoleGarbledSender garbledScopedSender(garbledOptions, explicitOwner);
+            osuCrypto::LogVoleGarbledReceiver garbledScopedReceiver(garbledOptions, explicitOwner);
             LOGVOLE_EXPECT_EQ(explicitlyScoped.configureCacheIdentity(),
                 suppliedRun);
             LOGVOLE_EXPECT_EQ(garbledScopedSender.configureCacheIdentity(),

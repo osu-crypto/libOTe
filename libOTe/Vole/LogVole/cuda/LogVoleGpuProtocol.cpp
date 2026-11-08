@@ -84,7 +84,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         bool uploadPublicUniformOrHost(const RingNttContext& ctx, GpuPolyBuffer& destination,
-            std::span<const RnsPoly> host, GpuStream& stream, ProtocolCacheScopeView scope = currentProtocolCacheScope())
+            std::span<const RnsPoly> host, GpuStream& stream, ProtocolCacheScopeView scope)
         {
             auto retained = findPublicUniformRetention(ctx, host, scope);
             if (!retained) return destination.upload(host, stream);
@@ -110,7 +110,7 @@ namespace osuCrypto::LogVole::gpu
         bool copyRetainedPublicUniform(const RingNttContext& ctx,
             GpuPolyBuffer& destination, const RetainedPublicUniform& source,
             std::size_t sourceOffset, std::size_t count, bool outputNtt,
-            GpuStream& stream, ProtocolCacheScopeView scope = currentProtocolCacheScope())
+            GpuStream& stream, ProtocolCacheScopeView scope)
         {
             if (!count || sourceOffset > source.count() ||
                 count > source.count() - sourceOffset ||
@@ -1015,7 +1015,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         std::shared_ptr<OfflineCache> receiverCache(const ShrinkExpandReceiverState& state,
-            ProtocolCacheScopeView scope = currentProtocolCacheScope())
+            ProtocolCacheScopeView scope)
         {
             if (state.mGpuCache)
             {
@@ -1038,7 +1038,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         std::shared_ptr<OfflineCache> senderCache(const ShrinkExpandSenderState& state,
-            ProtocolCacheScopeView scope = currentProtocolCacheScope())
+            ProtocolCacheScopeView scope)
         {
             if (state.mGpuCache)
             {
@@ -1981,7 +1981,7 @@ namespace osuCrypto::LogVole::gpu
             ReceiverFirstQueryAllocations* plan, const GpuRing& ring,
             const RingParams& params, u32 xCount, u32 muHi, u32 tauHi,
             u32 width, u32 maxTau, std::size_t nodeCount,
-            const void* owner, u64 sid, GpuPolyBuffer& out, GpuStream& stream, ProtocolCacheScopeView scope = currentProtocolCacheScope())
+            const void* owner, u64 sid, GpuPolyBuffer& out, GpuStream& stream, ProtocolCacheScopeView scope)
         {
             if (!plan || !owner ||
                 scope.mRole != ProtocolCacheRole::Receiver ||
@@ -5515,7 +5515,7 @@ namespace osuCrypto::LogVole::gpu
         bool forceFirstReject,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark = {})
+        DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
@@ -5555,7 +5555,7 @@ namespace osuCrypto::LogVole::gpu
             return bail(ctx, "rootDigest: offline tensors");
         auto ring = cache->mRing;
 
-        auto level = receiverCache(state.mShrinkExpandState);
+        auto level = receiverCache(state.mShrinkExpandState, scope);
         // publicB[1 .. tauHi] are the Root's left public matrices, the same slice
         // prepareRootDigestReceiver takes out of buildLencPublicBNtt.
         if (!level || level->mPublicB.count() < static_cast<std::size_t>(1) + tauHi)
@@ -5720,12 +5720,12 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark)
+        DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return rootDigestReceiverDeviceImpl(
             state, ctx, leftTreeSession, &zeta, {}, 0u, tauHi, false,
-            negDPrime, topInputsNtt, negDPrimeDevice, cpuBenchmark);
+            negDPrime, topInputsNtt, negDPrimeDevice, cpuBenchmark, scope);
     }
 
     bool rootDigestReceiverDeviceFromZetaSeeds(
@@ -5738,13 +5738,13 @@ namespace osuCrypto::LogVole::gpu
         bool forceFirstReject,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark)
+        DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         return rootDigestReceiverDeviceImpl(
             state, ctx, leftTreeSession, nullptr, taskSeeds, rangesPerPoly,
             tauHi, forceFirstReject, negDPrime, topInputsNtt,
-            negDPrimeDevice, cpuBenchmark);
+            negDPrimeDevice, cpuBenchmark, scope);
     }
 
     namespace
@@ -5873,7 +5873,7 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         u32 leftWidth,
         PreparedRootFinalizePtr& prepared,
-        const DeviceBatchPtr& dPrimeDevice, CpuBenchmarkState cpuBenchmark)
+        const DeviceBatchPtr& dPrimeDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
@@ -5911,7 +5911,7 @@ namespace osuCrypto::LogVole::gpu
             return bail(ctx, "root prefetch: missing device inputs");
 
         auto cache = rootCache(state, ctx, cpuBenchmark);
-        auto level = receiverCache(state.mShrinkExpandState);
+        auto level = receiverCache(state.mShrinkExpandState, scope);
         if (!cache || !level || !cache->mRing)
             return bail(ctx, "root prefetch: device caches");
         const u32 topCols = cache->mTopCols;
@@ -5945,7 +5945,7 @@ namespace osuCrypto::LogVole::gpu
         u32 leftWidth,
         DeviceBatchPtr& rootKey,
         PreparedRootFinalize* prepared,
-        const DeviceBatch* dPrimeDevice, CpuBenchmarkState cpuBenchmark)
+        const DeviceBatch* dPrimeDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
@@ -5964,7 +5964,7 @@ namespace osuCrypto::LogVole::gpu
         // varying input, so the level cache's mu-row table has the Root's leftWidth
         // rows as its prefix - the same table lheDec would have built for
         // publicCount = leftWidth.
-        auto level = receiverCache(state.mShrinkExpandState);
+        auto level = receiverCache(state.mShrinkExpandState, scope);
         if (!level || level->mPublicA.count() < leftWidth) return bail(ctx, "root: publicA too short");
 
         const u32 topCols = cache->mTopCols;
@@ -6434,7 +6434,7 @@ namespace osuCrypto::LogVole::gpu
         u64 instanceBase,
         block maskDigestHash,
         u32 chunkCount,
-        PreparedSenderCt2Ptr& prepared)
+        PreparedSenderCt2Ptr& prepared, ProtocolCacheScopeView scope)
     {
         const LogVoleGpuProtocolOptions defaults;
         const auto& options = state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mAdvanced.mProtocol : defaults;
@@ -6446,7 +6446,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
         }
 
-        auto cache = senderCache(state);
+        auto cache = senderCache(state, scope);
         if (!cache || !cache->mRing) return false;
         auto ring = cache->mRing;
         const u32 mu = state.mParams.mMu;
@@ -6614,7 +6614,7 @@ namespace osuCrypto::LogVole::gpu
         u64 instanceBase,
         block maskDigestHash,
         u32 chunkCount,
-        PreparedReceiverCt2Ptr& prepared)
+        PreparedReceiverCt2Ptr& prepared, ProtocolCacheScopeView scope)
     {
         const LogVoleGpuProtocolOptions defaults;
         const auto& options = state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mAdvanced.mProtocol : defaults;
@@ -6627,7 +6627,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
         }
 
-        auto cache = receiverCache(state);
+        auto cache = receiverCache(state, scope);
         if (!cache || !cache->mRing) return false;
         auto ring = cache->mRing;
         const u32 mu = state.mParams.mMu;
@@ -7075,14 +7075,14 @@ namespace osuCrypto::LogVole::gpu
         u64 instanceBase,
         block maskDigestHash,
         DeviceBatchPtr& tbkAll,
-        PreparedSenderCt2* preparedCt2)
+        PreparedSenderCt2* preparedCt2, ProtocolCacheScopeView scope)
     {
         AutoTimer timer(globalTimingStats.mGpuSenderTimeUs);
         if (!enabled(state.mRingFactoryOwner)) return false;
         const bool haveDev = tbkPrimeDev != nullptr && !tbkPrimeDev->empty();
         if (haveDev == !tbkPrimeHost.empty()) return false;   // exactly one source
 
-        auto cache = senderCache(state);
+        auto cache = senderCache(state, scope);
         if (!cache) return false;
         auto ring = cache->mRing;
         const u32 mu = state.mParams.mMu;
@@ -7302,7 +7302,7 @@ namespace osuCrypto::LogVole::gpu
     bool prepareRootSenderOperandsDevice(
         const SenderState& state,
         const RnsPoly& kPrime,
-        DeviceBatchPtr& preparedKPrime)
+        DeviceBatchPtr& preparedKPrime, ProtocolCacheScopeView scope)
     {
         const LogVoleGpuProtocolOptions defaults;
         const auto& options = state.mShrinkExpandState.mRingFactoryOwner ? state.mShrinkExpandState.mRingFactoryOwner->mExecutionOptions.mAdvanced.mProtocol : defaults;
@@ -7317,7 +7317,7 @@ namespace osuCrypto::LogVole::gpu
 
         RingNttContext ctx{};
         if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx,
-                state.mShrinkExpandState.mRingFactoryOwner))
+                state.mShrinkExpandState.mRingFactoryOwner, scope))
             return bail(ctx, "root operands: context");
         auto ring = GpuRing::get(ctx);
         if (!ring ||
@@ -7339,7 +7339,7 @@ namespace osuCrypto::LogVole::gpu
                      state.mLazyRootSkRRt->count() != tauHi ||
                      !state.mLazyRootSkRRt->matches(ctx.mParams) ||
                      !rootSecretUniformBatchMatches(ctx, *secretCoeffs,
-                         tauHi, state.mRootSkRRtOwnerRunId))
+                         tauHi, state.mRootSkRRtOwnerRunId, false, scope))
                     : state.mRootSkRRt.size() != tauHi)
                 return bail(ctx, "root operands: shape");
             for (const auto& sk : state.mRootSkRRt)
@@ -7358,7 +7358,7 @@ namespace osuCrypto::LogVole::gpu
                 skNtt && skNtt->mImpl && !skNtt->mImpl->mLogicalCount &&
                 (secretDevice ?
                     rootSecretUniformBatchMatches(ctx, *skNtt,
-                        tauHi, state.mRootSkRRtOwnerRunId, true)
+                        tauHi, state.mRootSkRRtOwnerRunId, true, scope)
                     : skNtt->mImpl->mRing == ring &&
                       skNtt->mImpl->mBuf.count() == tauHi);
             if (!cachedSkValid)
@@ -7431,7 +7431,7 @@ namespace osuCrypto::LogVole::gpu
         const RnsPoly& tbkPrime,
         u32 gadgetLogBase,
         u32 tauHi,
-        RnsPoly& out,
+        RnsPoly& out, ProtocolCacheScopeView scope,
         DeviceBatchPtr* residentKPrime,
         const DeviceBatchPtr& preparedSkNtt,
         const DeviceBatchPtr& preparedKPrime,
@@ -7447,7 +7447,7 @@ namespace osuCrypto::LogVole::gpu
             (forceDecline) ||
             (rootSecretCoeffs ?
                 (!sk1.empty() || !rootSecretUniformBatchMatches(ctx,
-                    *rootSecretCoeffs, tauHi, rootSecretOwnerRunId))
+                    *rootSecretCoeffs, tauHi, rootSecretOwnerRunId, false, scope))
                 : sk1.size() != tauHi)) return bail(ctx, "skx: shape");
         auto ring = GpuRing::get(ctx);
         if (!ring) return bail(ctx, "skx: ring");
@@ -7475,7 +7475,7 @@ namespace osuCrypto::LogVole::gpu
             !preparedSkNtt->mImpl->mLogicalCount &&
             (rootSecretCoeffs ?
                 rootSecretUniformBatchMatches(ctx, *preparedSkNtt,
-                    tauHi, rootSecretOwnerRunId, true)
+                    tauHi, rootSecretOwnerRunId, true, scope)
                 : preparedSkNtt->mImpl->mRing == ring &&
                   preparedSkNtt->mImpl->mBuf.count() == tauHi);
         GpuPolyBuffer sk;
@@ -7650,19 +7650,15 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch* kPrimeRtDevice,
         u32 leftWidth,
         u32 tauHi,
-        DeviceBatchPtr& tbk)
+        DeviceBatchPtr& tbk, ProtocolCacheScopeView scope)
     {
-        // A same-process socket test may resume the sender coroutine on a
-        // thread whose current role is Receiver. Keep every ring lookup and
-        // device operand in this sender's role for the whole Root chain;
-        // senderCache separately borrows the token's offline run ID only for
-        // its immutable public-operand copy.
-        ScopedProtocolCacheScope senderScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+        // Use the sender operation role. senderCache separately selects the
+        // retained offline run for immutable public operands.
+        scope.mRole = ProtocolCacheRole::Sender;
         AutoTimer timer(globalTimingStats.mGpuSenderTimeUs);
         if (!enabled(ctx) || seed.empty() || leftWidth == 0 || tauHi == 0) return bail(ctx, "root sender: shape");
 
-        auto cache = senderCache(state);
+        auto cache = senderCache(state, scope);
         if (!cache) return bail(ctx, "root sender: offline cache");
         auto ring = cache->mRing;
         const u32 rho = ring->rho();
@@ -7759,7 +7755,7 @@ namespace osuCrypto::LogVole::gpu
 
         // ---- the Root's own expand, one chunk with nonce 0 ----
         return expandSenderChunks(
-            state, std::span<const RnsPoly>(), rootKey.get(), seed, sid, 0, dPrimeHash, tbk);
+            state, std::span<const RnsPoly>(), rootKey.get(), seed, sid, 0, dPrimeHash, tbk, nullptr, scope);
     }
 
     // ---- device-side denoise + aggregate ----------------------------------
@@ -8254,7 +8250,7 @@ namespace osuCrypto::LogVole::gpu
 
     namespace
     {
-        std::shared_ptr<GpuPlainNtt> gpuPlainTables(const ZpCrtContext& zp, ProtocolCacheScopeView scope = currentProtocolCacheScope())
+        std::shared_ptr<GpuPlainNtt> gpuPlainTables(const ZpCrtContext& zp, ProtocolCacheScopeView scope)
         {
             if (zp.mGpuLightweight)
                 return GpuPlainNtt::getRaw(
@@ -8277,11 +8273,11 @@ namespace osuCrypto::LogVole::gpu
             u64 chunkCount,
             u64 zpLabelCount,
             u64* host,
-            DeviceScalarsPtr* deviceOut)
+            DeviceScalarsPtr* deviceOut, ProtocolCacheScopeView scope)
         {
             if (chunkCount == 0 || zpLabelCount == 0) return false;
             if (chunkCount > std::numeric_limits<u32>::max()) return false;
-            auto plain = gpuPlainTables(zp);
+            auto plain = gpuPlainTables(zp, scope);
             if (!plain || plain->n() != ring.n()) return false;
 
             const u32 n = ring.n();
@@ -8389,7 +8385,7 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch& labels,
         u64 chunkCount,
         u64 zpLabelCount,
-        u64* out)
+        u64* out, ProtocolCacheScopeView scope)
     {
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         if (!enabled(zp.mRing) || labels.empty() || !out) return false;
@@ -8397,14 +8393,14 @@ namespace osuCrypto::LogVole::gpu
         if (!ring) return false;
         if (labels.count() < chunkCount) return false;
         return unwrapFromDevice(
-            zp, *ring, labels.mImpl->mBuf.data(contextStream(zp.mRing)), chunkCount, zpLabelCount, out, nullptr);
+            zp, *ring, labels.mImpl->mBuf.data(contextStream(zp.mRing)), chunkCount, zpLabelCount, out, nullptr, scope);
     }
 
     DeviceScalarsPtr unwrapLabelsToDevice(
         const ZpCrtContext& zp,
         const DeviceBatch& labels,
         u64 chunkCount,
-        u64 zpLabelCount)
+        u64 zpLabelCount, ProtocolCacheScopeView scope)
     {
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         if (!enabled(zp.mRing) || labels.empty()) return nullptr;
@@ -8413,7 +8409,7 @@ namespace osuCrypto::LogVole::gpu
         if (labels.count() < chunkCount) return nullptr;
         DeviceScalarsPtr out;
         if (!unwrapFromDevice(
-                zp, *ring, labels.mImpl->mBuf.data(contextStream(zp.mRing)), chunkCount, zpLabelCount, nullptr, &out))
+                zp, *ring, labels.mImpl->mBuf.data(contextStream(zp.mRing)), chunkCount, zpLabelCount, nullptr, &out, scope))
         {
             return nullptr;
         }
@@ -8424,7 +8420,7 @@ namespace osuCrypto::LogVole::gpu
         const ZpCrtContext& zp,
         const std::vector<RnsPoly>& labels,
         u64 zpLabelCount,
-        u64* out)
+        u64* out, ProtocolCacheScopeView scope)
     {
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         if (!enabled(zp.mRing) || labels.empty() || !out) return false;
@@ -8437,7 +8433,7 @@ namespace osuCrypto::LogVole::gpu
             Region regUp(regions().mUploadUs, stream);
             if (!src.resize(*ring, labels.size(), stream) || !src.upload(labels, stream)) return false;
         }
-        return unwrapFromDevice(zp, *ring, src.data(stream), labels.size(), zpLabelCount, out, nullptr);
+        return unwrapFromDevice(zp, *ring, src.data(stream), labels.size(), zpLabelCount, out, nullptr, scope);
     }
 
     bool unwrapLabelsBatchUnscaled(
@@ -8445,14 +8441,14 @@ namespace osuCrypto::LogVole::gpu
         const std::vector<RnsPoly>& labels,
         u64 chunkCount,
         u64 zpLabelCount,
-        u64* out)
+        u64* out, ProtocolCacheScopeView scope)
     {
         AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
         if (!enabled(zp.mRing) || !chunkCount || !zpLabelCount || !out ||
             chunkCount > labels.size() ||
             chunkCount > std::numeric_limits<u32>::max()) return false;
         auto ring = GpuRing::get(zp.mRing);
-        auto plain = gpuPlainTables(zp);
+        auto plain = gpuPlainTables(zp, scope);
         if (!ring || !plain || plain->n() != ring->n() ||
             plain->slotCount() != ring->n() ||
             plain->metadata().mMinModulus != zp.mPlaintextModulus ||

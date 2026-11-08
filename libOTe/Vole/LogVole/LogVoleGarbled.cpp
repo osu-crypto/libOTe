@@ -83,20 +83,20 @@ namespace osuCrypto::LogVole
         void configureGarbled(u64 count, u32 threads, CivoleSetting setting,
             CivoleParams& params, GarbledLabelLayout& layout, u64& modulus,
             bool& nativeBundleCommitted,
-            std::shared_ptr<const ZpCrtContext>& factoryOwner, const LogVoleOptions& options)
+            std::shared_ptr<const ZpCrtContext>& factoryOwner, const LogVoleOptions& options, ProtocolCacheScopeView scope)
         {
             if (options.mMode != OnlineMode::Interactive)
                 throw std::invalid_argument("garbled labels require interactive mode");
             CivoleParams next;
             ZpCrtContext selected{};
             auto factory = factoryOwner ? factoryOwner->mFactory :
-                std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+                std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, scope.mRunId.serviceOwner()));
             if (factory->ringFactory()->executionOptions() != static_cast<const LogVoleExecutionOptions&>(options))
                 throw std::invalid_argument("LogVole factory options do not match constructor options");
             if (!makeCivoleParams(setting, next, std::max(threads, 1u)) ||
                 !makeZpCrtContext(next.mLogVole.mShrinkExpand.mRing,
                     next.mLogVole.mShrinkExpand.mPlaintextModulusBits, selected,
-                    factory) ||
+                    factory, scope) ||
                 selected.mPlaintextModulus <= (u64{1} << 43))
                 throw std::invalid_argument("garbled labels require a supported 128-bit parameter set");
             const auto fixedBits = civoleSettingPlaintextModulusBits(setting);
@@ -155,21 +155,20 @@ namespace osuCrypto
 {
     using namespace LogVole;
 
-    LogVoleGarbledSender::LogVoleGarbledSender(LogVoleOptions options)
+    LogVoleGarbledSender::LogVoleGarbledSender(LogVoleOptions options, ProtocolCacheScopeView configureScope)
         : mOptions(std::move(options))
     {
         const auto n = mOptions.mRequestSize;
         const auto threads = mOptions.mNumThreads;
         const auto setting = mOptions.mSetting;
-        const auto inheritedRun = currentProtocolCacheScope().mRunId;
+        const auto inheritedRun = configureScope.mRunId;
         const auto identityService = inheritedRun ? inheritedRun.serviceOwner() :
             ProtocolCacheService::create();
         const auto configureRun = inheritedRun ? inheritedRun : identityService->allocate();
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Sender, configureRun);
+        const ProtocolCacheScopeView roleScope{configureRun, ProtocolCacheRole::Sender};
         bool nativeBundleCommitted = false;
         configureGarbled(n, threads, setting, mParams, mLayout, mModulus,
-            nativeBundleCommitted, mConfigureFactoryOwner, mOptions);
+            nativeBundleCommitted, mConfigureFactoryOwner, mOptions, roleScope);
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
         mState = {};
@@ -247,21 +246,20 @@ namespace osuCrypto
         labels = std::move(next);
     }
 
-    LogVoleGarbledReceiver::LogVoleGarbledReceiver(LogVoleOptions options)
+    LogVoleGarbledReceiver::LogVoleGarbledReceiver(LogVoleOptions options, ProtocolCacheScopeView configureScope)
         : mOptions(std::move(options))
     {
         const auto n = mOptions.mRequestSize;
         const auto threads = mOptions.mNumThreads;
         const auto setting = mOptions.mSetting;
-        const auto inheritedRun = currentProtocolCacheScope().mRunId;
+        const auto inheritedRun = configureScope.mRunId;
         const auto identityService = inheritedRun ? inheritedRun.serviceOwner() :
             ProtocolCacheService::create();
         const auto configureRun = inheritedRun ? inheritedRun : identityService->allocate();
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, configureRun);
+        const ProtocolCacheScopeView roleScope{configureRun, ProtocolCacheRole::Receiver};
         bool nativeBundleCommitted = false;
         configureGarbled(n, threads, setting, mParams, mLayout, mModulus,
-            nativeBundleCommitted, mConfigureFactoryOwner, mOptions);
+            nativeBundleCommitted, mConfigureFactoryOwner, mOptions, roleScope);
         mConfigureCacheRunId = configureRun;
         mNativeSealBundleAtConfigure = nativeBundleCommitted;
         mState = {};

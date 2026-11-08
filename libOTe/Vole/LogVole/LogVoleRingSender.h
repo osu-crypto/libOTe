@@ -27,19 +27,19 @@ namespace osuCrypto::LogVole
             const ShrinkExpandSenderOfflineInput& input,
             ShrinkExpandSenderState& state,
             PRNG& prng,
-            Socket& sock, ProtocolCacheScope cacheScope = currentProtocolCacheScope());
+            Socket& sock, ProtocolCacheScope cacheScope = {});
 
         task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults,
             const SenderOfflineInput& input,
             SenderState& state,
             PRNG& prng,
-            Socket& sock, RootWirePinOverlapEvidence& rootWirePin, ProtocolCacheScope cacheScope = currentProtocolCacheScope());
+            Socket& sock, RootWirePinOverlapEvidence& rootWirePin, ProtocolCacheScope cacheScope = {});
 
         task<> keyDerive(
             const KeyDeriveSenderInput& input,
             KeyDeriveSenderOutput& output,
             Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr,
-            ProtocolCacheScope scope = currentProtocolCacheScope());
+            ProtocolCacheScope scope = {});
 
         // Borrow the executor and exclusive buffers until completion. Recursive
         // levels reuse the same ring-sized products; buffers bound CPU workers.
@@ -47,7 +47,7 @@ namespace osuCrypto::LogVole
         task<> online(
             macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
             SenderState& state, const SenderOnlineOptions& options,
-            SenderOnlineOutput& output, PRNG& prng, Socket& sock);
+            SenderOnlineOutput& output, PRNG& prng, Socket& sock, ProtocolCacheScope cacheScope = {});
 
         // CPU resources are caller-owned and must outlive completion.
         // The existing GPU path does not use the executor or buffers.
@@ -56,6 +56,6 @@ namespace osuCrypto::LogVole
             const ShrinkExpandSenderState& state,
             const ShrinkExpandExpandSenderInput& input,
             ShrinkExpandSenderExpandOutput& output,
-            Socket& sock);
+            Socket& sock, ProtocolCacheScope cacheScope = {});
     };
 }

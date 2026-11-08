@@ -105,20 +105,20 @@ namespace osuCrypto::LogVole
     // GPU view. Also invalidate its device mirror before caller mutation. For
     // an ordinary state only the mirror is invalidated; allocation failures
     // leave an existing view unchanged.
-    void materializeShrinkExpandHostState(ShrinkExpandSenderState& state, ProtocolCacheScopeView scope = currentProtocolCacheScope());
-    void materializeShrinkExpandHostState(ShrinkExpandReceiverState& state, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+    void materializeShrinkExpandHostState(ShrinkExpandSenderState& state, ProtocolCacheScopeView scope = {});
+    void materializeShrinkExpandHostState(ShrinkExpandReceiverState& state, ProtocolCacheScopeView scope = {});
 
     std::vector<RnsPoly> sampleUniformBatch(
         const RingNttContext& ctx,
         u32 count,
-        PRNG& prng, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        PRNG& prng, ProtocolCacheScopeView scope = {});
 
     macoro::task<bool> prepareShrinkExpandSenderOffline(
         macoro::thread_pool& executor, std::span<u8> setupResults,
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
         ShrinkExpandOfflineMessage& message,
-        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
 
     // State-only preparation keeps one tensor package and avoids a discarded
     // message copy. Explicit internal opt-in can defer its host ciphertexts.
@@ -126,30 +126,30 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<u8> setupResults,
         const ShrinkExpandSenderOfflineInput& input,
         PRNG& prng,
-        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        ShrinkExpandSenderState& senderState, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
 
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
         const ShrinkExpandOfflineMessage& message,
         ShrinkExpandReceiverState& receiverState,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
 
     // Consumes ciphertext storage after validation; state is unchanged on failure.
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
         ShrinkExpandOfflineMessage&& message,
         ShrinkExpandReceiverState& receiverState,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
 
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         const std::vector<RnsPoly>& x,
-        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = {});
 
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         std::span<const RnsPoly> x,
-        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = {});
 
     // CPU expansion: executor and exclusive prepared buffers are borrowed
     // until completion. Output is published only after decryption succeeds.
@@ -157,7 +157,7 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = currentProtocolCacheScope());
+        ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
     [[deprecated("Use async sender expansion with explicit executor and buffers")]]
     bool shrinkExpandExpandSender(
@@ -165,7 +165,7 @@ namespace osuCrypto::LogVole
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& out,
         // CPU LHE allowance: outer chunk workers pass 1 to avoid nested pools.
-        u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // CPU expansion. All referenced objects must survive completion; buffers
     // are exclusive to this operation (not shared with a concurrent sender).
@@ -175,7 +175,7 @@ namespace osuCrypto::LogVole
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
         std::span<LencEvalBuffer> lencBuffers,
         const ShrinkExpandReceiverState& state, const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = currentProtocolCacheScope());
+        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
     [[deprecated("Use async receiver expansion with explicit executor and buffers")]]
     bool shrinkExpandExpandReceiver(
@@ -183,7 +183,7 @@ namespace osuCrypto::LogVole
         const ShrinkExpandExpandReceiverInput& input,
         ShrinkExpandReceiverExpandOutput& out,
         // CPU row allowance: outer chunk workers pass 1 to avoid nested pools.
-        u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // Borrow context/input and exclusive output until completion; input may
     // alias output. Immutable recovery data is prepared once for all chunks.

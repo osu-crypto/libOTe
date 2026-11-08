@@ -41,28 +41,6 @@ namespace osuCrypto::LogVole
             : ProtocolCacheScope(view.mRunId, view.mRole) {}
     };
 
-    // Temporary compatibility transport during explicit-context migration.
-    // Service allocation is instance-owned; this TLS stores no allocator or
-    // mutable service/session state and is removed in the next stage.
-    inline thread_local ProtocolCacheScopeView tProtocolCacheScope{};
-    inline ProtocolCacheScopeView currentProtocolCacheScope() { return tProtocolCacheScope; }
-    inline void setProtocolCacheScope(ProtocolCacheRole role, ProtocolCacheRunId runId)
-    { tProtocolCacheScope = {runId, role}; }
-
-    class ScopedProtocolCacheScope
-    {
-    public:
-        ScopedProtocolCacheScope(ProtocolCacheRole role, ProtocolCacheRunId runId)
-            : mPrevious(tProtocolCacheScope) { setProtocolCacheScope(role, runId); }
-        ScopedProtocolCacheScope(ProtocolCacheScopeView scope)
-            : mPrevious(tProtocolCacheScope) { tProtocolCacheScope = scope; }
-        ScopedProtocolCacheScope(const ScopedProtocolCacheScope&) = delete;
-        ScopedProtocolCacheScope& operator=(const ScopedProtocolCacheScope&) = delete;
-        ~ScopedProtocolCacheScope() { tProtocolCacheScope = mPrevious; }
-    private:
-        ProtocolCacheScopeView mPrevious;
-    };
-
     // Root diagnostics belong to the ring factory reuse domain.
     // Disabled factories allocate no profiler; there is no process-wide table.
     struct RootStepProfiler

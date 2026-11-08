@@ -402,7 +402,6 @@ namespace
 #else
         (void)cmd;
 #endif
-        ScopedProtocolCacheScope roleScope(ProtocolCacheRole::Unspecified, currentProtocolCacheScope().mRunId);
         CpuBenchmarkContext telemetry;
         telemetry.mWorkerLimit = 8;
 #if defined(__linux__)
@@ -729,7 +728,7 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     {
         osuCrypto::LogVoleExecutionOptions options;
         options.mAdvanced.mHostStepProfile = true;
-        auto factory = std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner());
+        auto factory = std::make_shared<RingContextFactory>(options);
         std::weak_ptr<HostStepProfiler> lifetime = factory->hostProfilerOwner();
         std::weak_ptr<RingContextFactory> factoryLifetime = factory;
         RootOfflineMessage profiled;

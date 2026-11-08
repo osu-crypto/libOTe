@@ -208,12 +208,12 @@ namespace
 #endif
         RingNttContext ctx{};
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(advanced)));
         RingNttContext cpuCtx;
         auto cpuOptions = advanced;
         cpuOptions.mUseGpu = false;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, cpuCtx,
-            std::make_shared<RingContextFactory>(cpuOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(cpuOptions)));
         check_compact_noise_parity(ctx);
         auto s = sample_batch(ctx, params.mMu, 0x1E2CB47Cu);
         const auto publicB = buildLencPublicBNtt(ctx, params.mTauHi + 1);
@@ -353,7 +353,7 @@ namespace
                         eagerOptions.mAdvanced.mProtocol.mLencRandomizerResidency = false;
                         RingNttContext eagerCtx;
                         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, eagerCtx,
-                            std::make_shared<RingContextFactory>(eagerOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                            std::make_shared<RingContextFactory>(eagerOptions)));
                         oc::PRNG eagerPrng(oc::block(0x1E2C5EEDu, 0), 3);
                         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, eagerCtx, s, params.mTauHi,
                             params.mGadgetLogBase, params.mPlaintextModulusBits, eagerPrng,
@@ -464,7 +464,7 @@ namespace
                 advanced.mAdvanced.mProtocol.mDirectDownload = directDownload;
                 RingNttContext selected;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ctx.mParams, selected,
-                    std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+                    std::make_shared<RingContextFactory>(advanced)));
                 tests_libOTe::logvole_test::ScopedOptionValue randomizerOutput(setupOptions.mLencRandomizerOutput, (deviceRandomizerOutput ? "1" : "0")[0] != '0');
                 tests_libOTe::logvole_test::ScopedOptionValue randomizerStrict(setupOptions.mLencRandomizerOutputStrict, true);
                 tests_libOTe::logvole_test::ScopedOptionValue randomizerDecline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLencRandomizerOutput, false);

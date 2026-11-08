@@ -239,24 +239,24 @@ namespace osuCrypto::LogVole
     bool validateRingBatchShape(std::span<const RnsPoly> polys, const RingParams& params);
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
         std::shared_ptr<RingContextFactory> factory = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // A retained record fixes table and execution ownership across worker/role
     // changes. CPU access materializes its exact host view when necessary.
     bool makeRingNttContext(const RingParams& params, RingNttContext& out,
         const std::shared_ptr<const RingNttContext>& retained,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // Production tuples use audited metadata without device work. Other raw
     // GPU-supported tuples construct and certify metadata on the device before
     // publication. Unsupported parameters leave out unchanged.
     bool makeGpuRingNttContext(const RingParams& params, RingNttContext& out,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // Constructs a private lightweight context from a fully sealed dynamic
     // GPU ring certificate. The caller owns the larger ring/CRT publication
     // transaction; this helper does not insert a partial ring cache entry.
     bool makeNativeGpuRingNttContextFromCertificate(
         const RingParams& params, std::span<const u64> orderedPrimes,
         std::shared_ptr<gpu::GpuRing> certificate, RingNttContext& out,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // Admit a validated native certificate into the standalone role-local
     // Ring factory after its combined CRT setup has fully committed.
     bool publishNativeGpuRingNttContext(RingNttContext& ready);
@@ -379,13 +379,13 @@ namespace osuCrypto::LogVole
     RnsPoly sampleUniformPolyNtt(const RingNttContext& ctx, PRNG& prng);
     // Exactly the scalar sampler's seed order, including a device fallback.
     std::vector<RnsPoly> sampleUniformPolyBatch(const RingNttContext& ctx, u32 count, PRNG& prng,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // Selected private top HE key; same ordered SEAL draws as ordinary setup.
     // A device decline replays these rows exactly on the host.
     bool sampleTopSecretUniformBatch(const RingNttContext& ctx, u32 count,
         PRNG& prng, std::vector<RnsPoly>& eager,
         std::shared_ptr<gpu::DeviceBatch>& resident,
-        std::shared_ptr<const LazyRootSecretHostState>& lazy, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        std::shared_ptr<const LazyRootSecretHostState>& lazy, ProtocolCacheScopeView scope = {});
     RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index);
     RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index);
     std::vector<RnsPoly> deriveUniformPolyBatchFromSeed(
@@ -397,26 +397,26 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx,
         u64 nonce,
         u64 domainTag,
-        u32 count, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        u32 count, ProtocolCacheScopeView scope = {});
     // Explicit actual transform; legacy BatchFromNonceNtt returns raw samples.
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx,
         u64 nonce,
         u64 domainTag,
         u32 count,
-        bool actualNtt, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        bool actualNtt, ProtocolCacheScopeView scope = {});
     // Optional immutable device capture; the host result is unchanged. Move
     // it directly into a const owner before registering it for public reuse.
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count,
-        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope = {});
 
     // Internal setup form which consumes no protocol PRNG and keeps the exact
     // deterministic batch exclusively on the current CUDA device. Returns
     // false without changing out when the retained path is unavailable.
     bool retainUniformPolyBatchFromNonce(
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count,
-        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>& out, ProtocolCacheScopeView scope = {});
     std::vector<RnsPoly> deriveUniformPolyBatchFromSeedNtt(
         const RingNttContext& ctx,
         block seed,

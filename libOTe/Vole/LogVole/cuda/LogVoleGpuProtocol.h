@@ -42,14 +42,14 @@ namespace osuCrypto::LogVole::gpu
     // identity, query SID, role, device, ordered ring primes and exact shape;
     // a miss takes the unchanged allocation path.
     ReceiverFirstQueryAllocationsPtr beginReceiverFirstQueryAllocations(const Params& params,
-        const std::shared_ptr<const RingNttContext>& ringOwner = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const std::shared_ptr<const RingNttContext>& ringOwner = {}, ProtocolCacheScopeView scope = {});
     void finishReceiverFirstQueryAllocations(const ReceiverFirstQueryAllocationsPtr& plan);
     bool sealReceiverFirstQueryAllocationOwner(
-        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, ProtocolCacheScopeView scope = {});
     bool bindReceiverFirstQueryAllocations(
-        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid, ProtocolCacheScopeView scope = {});
     void bindReceiverFirstQueryOnlineRun(
-        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid, ProtocolCacheRunId runId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const ReceiverFirstQueryAllocationsPtr& plan, const void* owner, u64 sid, ProtocolCacheRunId runId, ProtocolCacheScopeView scope = {});
     // Narrow correctness-test observation only; never exposes owned pointers.
     bool receiverFirstQueryAllocationStatus(
         const ReceiverFirstQueryAllocationsPtr& plan,
@@ -63,7 +63,7 @@ namespace osuCrypto::LogVole::gpu
     // initialization path available. Only for finalized receiver setup states,
     // before concurrent online use.
     bool prepareReusableReceiverCache(ShrinkExpandReceiverState& state,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // Finalize a fresh receiver package whose Ct1 is still in coefficient
     // domain. Public calls publish the same full host snapshot. Explicit
     // internal calls may retain immutable coefficient backing and materialize
@@ -75,11 +75,11 @@ namespace osuCrypto::LogVole::gpu
         bool deferHostSnapshot = false,
         std::shared_ptr<const LazyRingTensorHostState> encodedCt1 = {},
         std::shared_ptr<const LazyLacctHostState> encodedLacct = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // Sender counterpart: share only within one sender's exact setup copies,
     // before concurrent online use.
     bool prepareReusableSenderCache(ShrinkExpandSenderState& state,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     bool lencRandomizerResidencyEnabled(const LogVoleExecutionOptions& options);
 
     // Device state that has to survive from a level's shrink to its expand.
@@ -141,32 +141,32 @@ namespace osuCrypto::LogVole::gpu
     // occur after that owner expires. Missing entries use normal host uploads.
     bool registerPublicUniformRetention(const RingNttContext& ctx,
         const std::shared_ptr<const std::vector<RnsPoly>>& host,
-        const RetainedPublicUniformPtr& captured, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const RetainedPublicUniformPtr& captured, ProtocolCacheScopeView scope = {});
     RetainedPublicUniformPtr findPublicUniformRetention(
-        const RingNttContext& ctx, std::span<const RnsPoly> host, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const RingNttContext& ctx, std::span<const RnsPoly> host, ProtocolCacheScopeView scope = {});
     bool fetchRetainedPublicUniform(
-        const RetainedPublicUniform& source, std::vector<RnsPoly>& out, GpuStream& stream, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const RetainedPublicUniform& source, std::vector<RnsPoly>& out, GpuStream& stream, ProtocolCacheScopeView scope = {});
     // Validate a retained operand without touching host polynomial storage.
     // The token is scoped to its exact ring, protocol role/run and CUDA device;
     // outputNtt distinguishes legacy raw public A from transformed public B.
     bool retainedPublicUniformMatches(const RingNttContext& ctx,
         const RetainedPublicUniform& source, std::size_t expectedCount,
-        bool outputNtt, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        bool outputNtt, ProtocolCacheScopeView scope = {});
     // The sender's Root BStar is the nonce-derived, actual NTT batch sent on
     // the public Root wire. Its producer attaches the fixed nonce/domain before
     // publishing an immutable owner; consumers reject another public token.
     inline constexpr u64 kRootBStarNonce = 0x52544E43524F4F54ull;
     inline constexpr u64 kRootBStarDomain = 0xB57A52u;
     RetainedPublicUniformPtr retainRootBStarNttDevice(
-        const RingNttContext& ctx, u32 count, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const RingNttContext& ctx, u32 count, ProtocolCacheScopeView scope = {});
     bool retainedRootBStarNttMatches(const RingNttContext& ctx,
-        const RetainedPublicUniform& source, std::size_t expectedCount, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const RetainedPublicUniform& source, std::size_t expectedCount, ProtocolCacheScopeView scope = {});
     // Publish one immutable complete host snapshot. The first caller downloads
     // the synchronized device owner, or replays the already-consumed SEAL seeds
     // exactly if CUDA is unavailable. Failure leaves out unchanged.
     bool materializeRetainedPublicUniform(const RingNttContext& ctx,
         const RetainedPublicUniformPtr& source,
-        std::shared_ptr<const std::vector<RnsPoly>>& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        std::shared_ptr<const std::vector<RnsPoly>>& out, ProtocolCacheScopeView scope = {});
     struct PublicUniformRetentionStats
     {
         u64 mCaptures = 0;
@@ -189,11 +189,11 @@ namespace osuCrypto::LogVole::gpu
     // producers may publish either owner; ordinary uploads cannot impersonate
     // them, and every consumer checks role/run/device/ordered ring/count.
     bool setupDeltaBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope);
     DeviceBatchPtr seedLabelRepResident(const RingNttContext& ctx,
-        const DeviceBatch& delta, u32 gamma, u32 alpha, u32 tau, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const DeviceBatch& delta, u32 gamma, u32 alpha, u32 tau, ProtocolCacheScopeView scope = {});
     bool setupSeedLabelRepBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope);
 
     bool rootKPrimeSamplingEnabled(const LogVoleExecutionOptions& options);
     // Direct SEAL-seed replay. Publishes a coefficient-domain, synchronized
@@ -351,32 +351,32 @@ namespace osuCrypto::LogVole::gpu
     // The owner is bound to ring, Sender role, protocol run and CUDA device.
     DeviceBatchPtr expandRootErrorCompactToBatch(const RingNttContext& ctx,
         std::span<const u64> compactLimb0, const DeviceScalars* deviceCompact,
-        u32 polyCount, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        u32 polyCount, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
     bool rootErrorBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheScopeView scope);
     // Private sender Root uniform secret. This form never enters the public
     // uniform retention registry and is completed before it crosses streams.
     DeviceBatchPtr sampleRootSecretUniformToDevice(
         const RingNttContext& ctx,
-        std::span<const std::array<u64, 8>> rowSeeds, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        std::span<const std::array<u64, 8>> rowSeeds, ProtocolCacheScopeView scope = {});
     bool rootSecretUniformBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        ProtocolCacheRunId ownerRunId, bool outputNtt = false, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheRunId ownerRunId, bool outputNtt, ProtocolCacheScopeView scope);
     // Separate private top HE key provenance; no public-uniform registry entry.
     DeviceBatchPtr sampleTopSecretUniformToDevice(
         const RingNttContext& ctx,
-        std::span<const std::array<u64, 8>> rowSeeds, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        std::span<const std::array<u64, 8>> rowSeeds, ProtocolCacheScopeView scope = {});
     bool topSecretUniformBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount,
-        ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope);
     DeviceBatchPtr topSecretSeedLabelRepResident(const RingNttContext& ctx,
-        const DeviceBatch& topSecret, u32 alpha, u32 tau, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const DeviceBatch& topSecret, u32 alpha, u32 tau, ProtocolCacheScopeView scope = {});
     DeviceBatchPtr rootHiReplicateResident(const RingNttContext& ctx,
-        const DeviceBatch& topSecret, u32 tauHi, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const DeviceBatch& topSecret, u32 tauHi, ProtocolCacheScopeView scope = {});
     bool rootHiRepBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope);
     bool setupLencInputBatchMatches(const RingNttContext& ctx,
-        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope);
 
     // Root top ciphertexts: NTT(noise) - NTT(r1[row])*B[col], with
     // -2^(gadgetLogBase*(gadgetPowerOffset+col))*r2[row] on root B columns.
@@ -391,7 +391,7 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> noiseCoeffs,
         std::vector<RnsPoly>& outCtNtt,
         std::span<const u64> compactNoiseLimb0 = {}, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // Device compact inputs are completed, borrowed, immutable q0 matrices.
     // A source must be supplied on either host or device, never both.
     bool assembleRootTopCtDevice(
@@ -400,7 +400,7 @@ namespace osuCrypto::LogVole::gpu
         std::span<const RnsPoly> publicBStarNtt, u32 gadgetLogBase, u32 gadgetPowerOffset,
         std::span<const RnsPoly> noiseCoeffs, std::vector<RnsPoly>& outCtNtt,
         std::span<const u64> compactNoiseLimb0, const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     bool assembleRootTopCtDevice(
         const RingNttContext& ctx, std::span<const RnsPoly> r1Coeffs,
         std::span<const RnsPoly> r2Ntt, std::span<const RnsPoly> publicBRootNtt,
@@ -413,7 +413,7 @@ namespace osuCrypto::LogVole::gpu
         const RetainedPublicUniform* retainedPublicBFullNtt = nullptr,
         const DeviceBatch* rootR1Device = nullptr,
         const RetainedPublicUniform* retainedBStarNtt = nullptr, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
 
     // Assemble truncated LENC ciphertexts from exact host-sampled coefficient
     // noise and NTT operands. Host inputs/output are unchanged on failure, and
@@ -441,7 +441,7 @@ namespace osuCrypto::LogVole::gpu
         std::span<const u64> compactRandomizerLimb0 = {},
         u32 requestedWorkers = 1,
         bool devicePadding = false, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // The extended overload may publish a completed device owner instead of
     // host polynomials. On that success outCtNtt is empty; both outputs and the
     // optional owner remain unchanged on failure.
@@ -465,7 +465,7 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<const LazyLencRandomizerState>* retainedRandomizers = nullptr,
         const RetainedPublicUniform* retainedPublicB = nullptr,
         const DeviceBatch* seedLabelDevice = nullptr, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
 
     // LHE setup arithmetic, including canonicalization, required forward
     // transforms, gadget scaling and final inverse transforms. Optional compact
@@ -481,14 +481,14 @@ namespace osuCrypto::LogVole::gpu
         u32 gadgetLogBase, bool rInputIsNtt, u32 rPowerOffset,
         std::vector<RnsPoly>& outCoeffs,
         std::span<const u64> compactNoiseLimb0 = {}, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     bool assembleLheCiphertextDevice(
         const RingNttContext& ctx, std::span<const RnsPoly> r,
         std::span<const RnsPoly> sk1, std::span<const RnsPoly> publicANtt,
         u32 gadgetLogBase, bool rInputIsNtt, u32 rPowerOffset,
         std::vector<RnsPoly>& outCoeffs, std::span<const u64> compactNoiseLimb0,
         const DeviceScalars* compactNoiseDevice, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     // A requested deferred owner retains the completed coefficient tensor and
     // clears outCoeffs on success. All outputs remain unchanged on failure.
     // randomizers borrows a completed immutable NTT layer in place of an empty
@@ -508,7 +508,7 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch* rootSecretDevice = nullptr,
         ProtocolCacheRunId rootSecretOwnerRunId = 0,
         bool topSecretDomain = false, CpuBenchmarkState cpuBenchmark = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
 
     // GPU equivalent of gadgetDecomposeBitsRange{,Centered} for one host input
     // polynomial, producing `levels` host digit polynomials. Bit-identical: the
@@ -534,17 +534,17 @@ namespace osuCrypto::LogVole::gpu
         const RingNttContext& ctx,
         std::span<const std::array<u64, 8>> seeds,
         bool outputNtt,
-        std::vector<RnsPoly>& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        std::vector<RnsPoly>& out, ProtocolCacheScopeView scope = {});
     bool sampleUniformBatchFromSeedsDevice(
         const RingNttContext& ctx, std::span<const std::array<u64, 8>> seeds,
         bool outputNtt, std::vector<RnsPoly>& out,
-        RetainedPublicUniformPtr* captured, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        RetainedPublicUniformPtr* captured, ProtocolCacheScopeView scope = {});
     // Retained-only form: completes sampling/optional NTT and publishes a
     // device owner without a device-to-host copy. Seeds are copied into the
     // owner so an exact CPU fallback can be materialized later.
     bool retainUniformBatchFromSeedsDevice(
         const RingNttContext& ctx, std::span<const std::array<u64, 8>> seeds,
-        bool outputNtt, RetainedPublicUniformPtr& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        bool outputNtt, RetainedPublicUniformPtr& out, ProtocolCacheScopeView scope = {});
 
     // GPU equivalent of
     //   for i in [0, count): out[i] = deriveUniformPolyFromSeed(ctx, seed, tag, i)
@@ -582,7 +582,7 @@ namespace osuCrypto::LogVole::gpu
         LevelSession& session,
         std::vector<RnsPoly>& digests,
         std::vector<std::vector<RnsPoly>>& dHatChunks,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
 
     // Device-resident shrink. `xHost` or `xDev` supplies the level's input
     // (exactly one). The digests stay inside `session` and the child input is
@@ -603,7 +603,7 @@ namespace osuCrypto::LogVole::gpu
         bool allowTilePipeline = false,
         ReceiverFirstQueryAllocations* firstQueryAllocations = nullptr,
         const void* firstQueryOwner = nullptr, u64 firstQuerySid = 0,
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
 
     // Device equivalent of buildDigestTreeTrunc for a single chunk, with the tree
     // width supplied explicitly instead of taken from the level's accumulator.
@@ -635,7 +635,7 @@ namespace osuCrypto::LogVole::gpu
         u32& maxTauOut,
         RnsPoly& digest,
         std::vector<RnsPoly>& nodesFlat,
-        std::shared_ptr<void>& sessionOut, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        std::shared_ptr<void>& sessionOut, ProtocolCacheScopeView scope = {});
 
     // The arithmetic of finalizeRootResponseReceiver, entirely on the device.
     //
@@ -664,7 +664,7 @@ namespace osuCrypto::LogVole::gpu
         u32 leftWidth,
         DeviceBatchPtr& rootKey,
         PreparedRootFinalize* prepared = nullptr,
-        const DeviceBatch* dPrimeDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
+        const DeviceBatch* dPrimeDevice = nullptr, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // The default mProtocol.mRootFinalizePriorityPrefetch path uses a pre-created
     // Root cache stream at the device's greatest priority plus retained device
@@ -684,7 +684,7 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         u32 leftWidth,
         PreparedRootFinalizePtr& prepared,
-        const DeviceBatchPtr& dPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {});
+        const DeviceBatchPtr& dPrimeDevice = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // The digest step's arithmetic after the tree build, on the device:
     //   yDecomp   = centred gadget digits of the left tree's own digest
@@ -703,7 +703,7 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
+        DeviceBatchPtr* negDPrimeDevice = nullptr, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // Hot equivalent that never materializes zeta on the host. `taskSeeds` is
     // the exact [randomizer][rangesPerPoly] seed array already consumed from the
@@ -719,7 +719,7 @@ namespace osuCrypto::LogVole::gpu
         bool forceFirstReject,
         RnsPoly& negDPrime,
         DeviceBatchPtr& topInputsNtt,
-        DeviceBatchPtr* negDPrimeDevice = nullptr, CpuBenchmarkState cpuBenchmark = {});
+        DeviceBatchPtr* negDPrimeDevice = nullptr, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // Device-resident receiver expand. `skX` is one key per chunk on the device
     // and is consumed (transformed in place); the result is returned as a device
@@ -735,7 +735,7 @@ namespace osuCrypto::LogVole::gpu
         u32 outPerChunk,
         u32 totalOut,
         DeviceBatchPtr& tbm,
-        PreparedReceiverCt2* preparedCt2 = nullptr, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        PreparedReceiverCt2* preparedCt2 = nullptr, ProtocolCacheScopeView scope = {});
 
     // Batched equivalent of, for every chunk:
     //     shrinkExpandExpandReceiver(state, expandInput, expandOutput)
@@ -752,7 +752,7 @@ namespace osuCrypto::LogVole::gpu
         u32 outPerChunk,
         u32 totalOut,
         std::vector<RnsPoly>& tbm,
-        PreparedReceiverCt2* preparedCt2 = nullptr, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        PreparedReceiverCt2* preparedCt2 = nullptr, ProtocolCacheScopeView scope = {});
 
     // Receiver counterpart to the sender prefetch scheduler. The measured
     // default selects three levels only for 2^24/2^25-label requests whose exact
@@ -771,7 +771,7 @@ namespace osuCrypto::LogVole::gpu
         u64 instanceBase,
         block maskDigestHash,
         u32 chunkCount,
-        PreparedReceiverCt2Ptr& prepared);
+        PreparedReceiverCt2Ptr& prepared, ProtocolCacheScopeView scope = {});
 
     // Queue the top sender level's independent ct2 sampling on the role's
     // secondary stream before evaluating the recursive child. A dedicated
@@ -788,7 +788,7 @@ namespace osuCrypto::LogVole::gpu
         u64 instanceBase,
         block maskDigestHash,
         u32 chunkCount,
-        PreparedSenderCt2Ptr& prepared);
+        PreparedSenderCt2Ptr& prepared, ProtocolCacheScopeView scope = {});
 
     // Batched equivalent of, for every chunk:
     //     shrinkExpandExpandSender(state, expandInput, expandOutput)
@@ -804,7 +804,7 @@ namespace osuCrypto::LogVole::gpu
         u64 instanceBase,
         block maskDigestHash,
         DeviceBatchPtr& tbkAll,
-        PreparedSenderCt2* preparedCt2 = nullptr);
+        PreparedSenderCt2* preparedCt2 = nullptr, ProtocolCacheScopeView scope = {});
 
     // deriveSkxTrunc on the device:
     //   uHi     = centred gadget digits 1..tauHi of `digest`
@@ -836,7 +836,7 @@ namespace osuCrypto::LogVole::gpu
         const RnsPoly& tbkPrime,
         u32 gadgetLogBase,
         u32 tauHi,
-        RnsPoly& out,
+        RnsPoly& out, ProtocolCacheScopeView scope,
         DeviceBatchPtr* residentKPrime = nullptr,
         const DeviceBatchPtr& preparedSkNtt = {},
         const DeviceBatchPtr& preparedKPrime = {},
@@ -850,7 +850,7 @@ namespace osuCrypto::LogVole::gpu
     bool prepareRootSenderOperandsDevice(
         const SenderState& state,
         const RnsPoly& kPrime,
-        DeviceBatchPtr& preparedKPrime);
+        DeviceBatchPtr& preparedKPrime, ProtocolCacheScopeView scope);
 
     // The sender's whole Root level on the device: computeRootSenderKey followed
     // by the Root's own shrinkExpandExpandSender.
@@ -885,7 +885,7 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch* kPrimeRtDevice,
         u32 leftWidth,
         u32 tauHi,
-        DeviceBatchPtr& tbk);
+        DeviceBatchPtr& tbk, ProtocolCacheScopeView scope = {});
 
     // shrinkExpandDenoiseComb followed by seedLabelAgg, both on the device.
     // `in` normally holds outCount * rho * tau polynomials.  A nonzero
@@ -1004,7 +1004,7 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch& labels,
         u64 chunkCount,
         u64 zpLabelCount,
-        u64* out);
+        u64* out, ProtocolCacheScopeView scope = {});
 
     // Same as unwrapLabelsDevice but leaves the scalars on the device. Nothing
     // crosses PCIe at all.
@@ -1012,7 +1012,7 @@ namespace osuCrypto::LogVole::gpu
         const ZpCrtContext& ctx,
         const DeviceBatch& labels,
         u64 chunkCount,
-        u64 zpLabelCount);
+        u64 zpLabelCount, ProtocolCacheScopeView scope = {});
 
     // Same pipeline, but for labels that are still on the host. Pays an upload
     // in exchange for removing the per-chunk decode; used by the sender when the
@@ -1021,7 +1021,7 @@ namespace osuCrypto::LogVole::gpu
         const ZpCrtContext& ctx,
         const std::vector<RnsPoly>& labels,
         u64 zpLabelCount,
-        u64* out);
+        u64* out, ProtocolCacheScopeView scope = {});
 
     // Public unscaled counterpart for host RNS labels: canonical CRT compose
     // modulo p, plaintext forward NTT, slot gather and one requested-scalar
@@ -1031,7 +1031,7 @@ namespace osuCrypto::LogVole::gpu
         const std::vector<RnsPoly>& labels,
         u64 chunkCount,
         u64 zpLabelCount,
-        u64* out);
+        u64* out, ProtocolCacheScopeView scope = {});
 
     // Device counterpart of wrapZpLabelsCrt: slot scatter, the inverse
     // plaintext-modulus NTT that seal::BatchEncoder::encode performs, and the
@@ -1046,7 +1046,7 @@ namespace osuCrypto::LogVole::gpu
         bool multiplyByDelta,
         u64 padValue,
         u64 padChunks,
-        bool garbledInput = false, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        bool garbledInput = false, ProtocolCacheScopeView scope = {});
 
     // Same, for a caller whose scalars are already in device memory - the case a
     // GPU pipeline is in, where the previous stage produced x on the device.
@@ -1060,7 +1060,7 @@ namespace osuCrypto::LogVole::gpu
         u64 padChunks,
         bool garbledInput = false,
         ReceiverFirstQueryAllocations* firstQueryAllocations = nullptr,
-        const void* firstQueryOwner = nullptr, u64 firstQuerySid = 0, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const void* firstQueryOwner = nullptr, u64 firstQuerySid = 0, ProtocolCacheScopeView scope = {});
 
     // Prepare one setup key polynomial with the ordinary plaintext encoder and
     // CRT-lift arithmetic on GPU. Exactly one of a nonzero scalar, a full slot
@@ -1068,13 +1068,13 @@ namespace osuCrypto::LogVole::gpu
     // polynomial is fully downloaded before publication; failure preserves out.
     bool wrapSetupDeltaDevice(const ZpCrtContext& ctx, u64 delta,
         std::span<const u64> deltaSlots, const std::array<u64, 3>* garbledDeltas,
-        RnsPoly& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        RnsPoly& out, ProtocolCacheScopeView scope = {});
     // Sender-only variant of the same constant/slot/garbled GPU arithmetic.
     // It publishes a synchronized coefficient-domain owner without the eager
     // host RnsPoly returned by wrapSetupDeltaDevice.
     DeviceBatchPtr wrapSetupDeltaResident(const ZpCrtContext& ctx, u64 delta,
         std::span<const u64> deltaSlots,
-        const std::array<u64, 3>* garbledDeltas, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const std::array<u64, 3>* garbledDeltas, ProtocolCacheScopeView scope = {});
 
     // Copies a host scalar array to the device. Exists so a caller can place its
     // input where wrapDeviceLabels wants it; the protocol itself never calls it.

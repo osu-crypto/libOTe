@@ -68,10 +68,10 @@ namespace
         options.mAdvanced.mHostStepProfile = cmd.getOr("lvHostProfile", 0) != 0;
 
         auto senderReuse = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+            std::make_shared<RingContextFactory>(options));
         options.mCpuBenchmark = instrument ? &receiverTelemetry : nullptr;
         auto receiverReuse = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+            std::make_shared<RingContextFactory>(options));
         osuCrypto::LogVoleOptions originalSenderOptions = options;
         originalSenderOptions.mCpuBenchmark = instrument ? &senderTelemetry : nullptr;
         originalSenderOptions.mRequestSize = count;
@@ -86,10 +86,10 @@ namespace
         auto observeFactory = [](const CivoleParams& params, ProtocolCacheRole role,
             const std::shared_ptr<ZpContextFactory>& factory)
         {
-            ScopedProtocolCacheScope scope(role, 0);
+            const ProtocolCacheScopeView scope{{}, role};
             ZpCrtContext context;
             LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mLogVole.mShrinkExpand.mRing,
-                params.mLogVole.mShrinkExpand.mPlaintextModulusBits, context, factory));
+                params.mLogVole.mShrinkExpand.mPlaintextModulusBits, context, factory, scope));
             return std::weak_ptr<const ZpCrtContext>(context.mFactoryOwner);
         };
         const auto senderFactory = observeFactory(originalSender.mParams, ProtocolCacheRole::Sender, senderReuse);
@@ -113,9 +113,8 @@ namespace
         PRNG rejectedPrng(toBlock(901, seed)), expectedRejectedPrng(toBlock(901, seed));
         macoro::task<> rejectedTask;
         {
-            ScopedProtocolCacheScope creation(unrelated);
             rejectedTask = originalSender.offline(senderResources.executor, senderResources.setupResults,
-                delta, rejectedPrng, rejectedSocket);
+                delta, rejectedPrng, rejectedSocket, unrelated);
         }
         bool rejected = false;
         try { macoro::sync_wait(std::move(rejectedTask)); }
@@ -128,19 +127,15 @@ namespace
         {
             // Canonical zero remains zero at entry; Sender alone allocates its
             // fresh offline run from the configured resource service.
-            ScopedProtocolCacheScope creation(ProtocolCacheRole::Unspecified, {});
             senderSetup = originalSender.offline(senderResources.executor, senderResources.setupResults,
-                delta, senderPrng, offline[0]);
-            receiverSetup = originalReceiver.offline(offline[1]);
+                delta, senderPrng, offline[0], {});
+            receiverSetup = originalReceiver.offline(offline[1], {});
         }
         {
-            ScopedProtocolCacheScope ambient(unrelated);
             auto setup = macoro::sync_wait(macoro::when_all_ready(
                 onPool(std::move(senderSetup)), onPool(std::move(receiverSetup))));
             std::get<0>(setup).result();
             std::get<1>(setup).result();
-            LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
-            LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
         }
         LOGVOLE_REQUIRE_TRUE(originalSender.mRootWirePin.mSenderRunId.mService ==
             senderReuse->ringFactory()->protocolService().get());
@@ -447,7 +442,7 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         options.mAdvanced.mProtocol.mCt2PrefixCache = true;
         const auto selectedOptions = options;
         auto factory = std::make_shared<ZpContextFactory>(
-            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+            std::make_shared<RingContextFactory>(options));
         Party original(options, factory);
         tests_libOTe::logvole_test::SenderResources senderResources(options);
         tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(options);
@@ -528,7 +523,7 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         advanced.mAdvanced.mProtocol.mShareCache = false;
         RingNttContext first, second;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, first,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(advanced)));
         ring.mPolyModulusDegree = 2048;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, second, first.mFactoryOwner));
         LOGVOLE_REQUIRE_TRUE(second.mExecutionOptions == advanced);

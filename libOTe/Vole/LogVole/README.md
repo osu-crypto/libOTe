@@ -213,14 +213,14 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **87%** of the agreed ownership/globals refactor,
+Estimated overall completion: **89%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
 This inventory describes the committed tree. A migrated synchronous wrapper
 is not a completed async migration.
 The original 216-declaration globals snapshot remains in the local review
-artifacts; the current scan finds **25 runtime global/static/TLS declarations**.
+artifacts; the current scan finds **24 runtime global/static/TLS declarations**.
 Counts cover source branches on both platforms, not fields within objects or
 template instantiations. Compile-time constants and the five literal CUDA
 tables are excluded. The scanned LogVole library, tests, and frontend example
@@ -246,7 +246,7 @@ contain no environment reads.
 | CPU output unwrapping | Sender key release and receiver MAC output await direct `bulk_chunked` using caller-owned `ZpDecodeBuffer` storage. Each chunk reuses plaintext, slots, canonical residues and composition storage; one shared synchronous numerical kernel preserves the legacy arithmetic. Public sender/receiver, garbled and proof wrappers pass resources through. GPU/fallback and staged diagnostic release retain the synchronous API. |
 | Multiplication proof CPU execution | Public CPU prover response/verifier checks await direct `bulk_chunked` on the caller executor. `ZkMulCpuWorkspace` preallocates numerical locals/task outputs and captures its worker budget without creating a pool. The async witness API joins each independent layer, retaining scalar dependent-layer order. Shared synchronous kernels preserve arithmetic, original prover partitions, verifier task slots, reduction order and PRNG draws. Legacy diagnostics/GPU fallback lazily construct their private executor; matrix proof loops are separate remaining work. |
 | Matrix proof CPU execution | CPU prover/verifier paths await direct `bulk_chunked` with role-specific numerical workspaces prepared before proofs. Prover stores four n^2-word arrays; verifier stores two, plus O(chunks + repetitions) locals/output staging. Noncanonical copies remain lazy. Transpose tiling, unweighted inner products, original row/weighted-sum partitions and ordered reductions are unchanged. GPU-selected public objects keep CPU workspaces empty; legacy GPU host fallback remains synchronous. Standalone async product/witness APIs use exclusive caller byte-status storage. |
-| Identity service, stage one | `ProtocolCacheService` owns the atomic allocator; shared factories and GPU execution/setup owners retain/inject it. Cheap host-only IDs contain service identity plus numeric value, and cache/retained comparisons preserve affinity. Owned operation contexts and retained records keep service lifetime; lookups/copies of ID views do not increment shared ownership. The global allocator is removed. Identity TLS remains temporary compatibility transport pending explicit-context forwarding; resource constructors now use only an explicitly supplied service or a fresh instance; query-SID numeric bindings are unchanged. |
+| Identity service, stage one | `ProtocolCacheService` owns the atomic allocator; shared factories and GPU execution/setup owners retain/inject it. Cheap host-only IDs contain service identity plus numeric value, and cache/retained comparisons preserve affinity. Owned operation contexts and retained records keep service lifetime; lookups/copies of ID views do not increment shared ownership. The global allocator is removed. The compatibility identity TLS is now removed; constructors and preparation accept explicit configure views, and query-SID numeric bindings are unchanged. |
 | Resource construction boundary | Ring/CRT factory and GPU setup/execution constructors no longer inherit identity service from ambient scope. Existing phase/default-factory entry callers explicitly forward their compatibility service; supplied owners remain unchanged. Nullable raw setup creation receives its fallback service explicitly, with no extra service ownership work when execution already exists. Factory core role/run selection is now explicit; compatibility defaults at unmigrated caller boundaries and remaining operation transport still use identity TLS. |
 | Factory context forwarding | Ring/CRT factory make, native combined setup/certificate admission, and CRT host materialization receive explicit cheap scope views. Factory cache role/service selection and native bundle owner checks use that view; no current-scope read or guard remains in these cores. Existing public entry signatures have a trailing compatibility default evaluated at unmigrated caller boundaries. No operation identity is stored on shared math/context records; exact retained-record selection keeps its fixed-owner contract. |
 | Public operands and retention context | LHE/LENC public-cache creation, lookup and host materialization forward explicit views through nonce-derived uniform batches and GPU retained-owner registration/validation/materialization. Existing owned setup contexts supply these views before suspension; service ownership is retained once per entry/owner. CPU-only decryption/evaluation workers use supplied operands only, so their two unnecessary identity capture/guard pairs are removed. A remains run-keyed; CPU B retains its same-role run-zero sharing convention. |
@@ -337,9 +337,15 @@ under Receiver ambience and verifies unchanged TLS plus existing exact-output
 checks. No benchmarks or WSL run. The approximate overall estimate is 86%;
 25 runtime declarations remain while the compatibility bridge is present.
 
-Remaining identity transport includes online Core/sender/receiver and
-materialization callers. These are separate from the completed Core
-setup phase; public compatibility defaults still support unmigrated callers.
+Identity transport is explicit throughout setup, online Core/controllers,
+materialization and construction. Public defaults are canonical-zero views;
+owned asynchronous scopes retain their exact service before lazy start. The
+identity getter, guards and TLS compatibility transport are removed. Synchronous
+helpers borrow views, and numeric pool/row workers carry no identity context.
+Constructors/prepare accept an explicit configure view; supplied factories remain
+authoritative and reject a foreign nonzero service. Query scopes still qualify
+the SID through their state factory, and zero sender-offline scopes still allocate
+a fresh run. The remaining runtime declaration count is 24.
 
 Numeric-sampler validation: Windows CUDA-enabled target and frontend example
 verification pass (78.51 seconds). Three CPU checks pass in 3.35 seconds,
@@ -362,11 +368,23 @@ Online-leaf validation: Windows CUDA-enabled target and frontend example pass
 expansion equality; GPU identity, explicit materialization admission/output and
 two-query GoldenSeed checks pass in 3.42 seconds. No benchmarks or WSL run.
 
+Identity-closure validation: CUDA-enabled Windows library, tests and frontend
+example build pass. Five CPU identity/setup/two-query/seeded-ZK checks pass in
+11.41 seconds; three GPU identity/lazy/two-query checks pass in 2.36 seconds.
+Native parity/rollback passes in 2.83 seconds with the bounded factory option;
+production configure/fresh-run checks pass standalone in 25.67 seconds. Both
+Root prefetch/hash CLI checks pass in 4.52 seconds. Six low-level key-derive,
+party-cache, scalar-lifetime and public-retention checks pass in 12.64 seconds.
+Retired identity getter,
+guard, setter and TLS names have no source/test/frontend references. No
+benchmarks, WSL matrix or leak validation was run in this batch. Earlier
+validation entries above and below record historical migration checkpoints.
+
 #### Remaining runtime globals
 
 | Group | Count | Exact remaining objects | Intended owner/change |
 | --- | ---: | --- | --- |
-| Protocol run/role | 1 | Temporary `tProtocolCacheScope` compatibility view in `LogVoleRuntime.h` | Instance-owned `ProtocolCacheService` now allocates qualified IDs. Replace remaining ambient transport with explicit owned operation contexts in stage two. |
+| Protocol run/role | 0 | None | Instance-owned services allocate qualified IDs; explicit operation contexts carry role/run identity and retain service lifetime. |
 | Worker budget | 2 | `gParallelWorkerSlotsInUse`, `tParallelWorkerCap` in `LogVoleParallel.h` | Caller-supplied compute resource and explicit chunk allowance; remove the ambient scheduler after caller migration. |
 | Statistics | 5 | `RingOpsStats::resetEpoch`, `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats`; `regions()::r` in `cuda/LogVoleGpuProtocol.cpp` | Owned diagnostics and per-chunk pending counters. |
 | CUDA allocation evidence | 2 | `rootCudaWireEvidenceMutex`, `lastRootCudaWireEvidence` in `LogVoleEncoding.cpp` | Caller/actor-owned evidence sink. |
@@ -681,22 +699,19 @@ Next: thread explicit context through those GPU wrappers/download boundaries,
 then through upper protocol callers and remove compatibility defaults/TLS.
 Estimate remains 84%, with 25 runtime globals pending the final TLS deletion.
 
-Resource-constructor inheritance is removed. The next stage-two sub-batch must
-remove `currentProtocolCacheScope`/scope guards/TLS by passing the already owned
-context explicitly through the remaining phase callers, sampling/cache operations
-and retained checks. Factory cores now accept the view without consulting TLS. Existing
-config/offline run identity and online query-SID binding must remain distinct:
-stage one qualifies existing query SID values at CI-VOLE scope construction and
-explicitly projects numeric values only in the two first-query SID checks.
-It does not broaden cache reuse or redesign session/query keys. Statistics and
-worker-budget TLS remain separate work.
+Identity forwarding is complete, including construction/preparation, online
+controllers, private metadata admission, and test helpers. Admission APIs require
+explicit caller views; owned asynchronous scopes retain the exact service before
+lazy start. Configure/offline run identity and qualified query-SID binding remain
+distinct. Statistics and worker-budget TLS remain separate work.
 
 Next steps, in order:
 
-1. Resolve explicit session/cache identity and diagnostics ownership before
-   changing the remaining CPU ambient state. Retire `CpuRowScratch` scheduling
-   and legacy overloads when their GPU/fallback/diagnostic callers are gone;
-   do not treat physical legacy sites as unmigrated production CPU phases.
+1. Replace the remaining CPU worker-budget ambient state with owned compute
+   resources and explicit allowances, then move pending diagnostics into their
+   operation/resource owners. Retire `CpuRowScratch` scheduling and legacy
+   overloads when their GPU/fallback/diagnostic callers are gone; do not treat
+   physical legacy sites as unmigrated production CPU phases.
 2. Remove the remaining global groups above in separate ownership changes.
    Small independent groups need not wait for all scheduling work to finish.
 

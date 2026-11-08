@@ -585,7 +585,7 @@ namespace osuCrypto
         // handed to the VOLE; see LogVole::zkVoleRequestSize.
         void prepare(
             LogVole::ZkMulCircuit circuit,
-            LogVole::CpuBenchmarkContext* benchmark = nullptr);
+            LogVole::CpuBenchmarkContext* benchmark = nullptr, LogVole::ProtocolCacheScopeView configureScope = {});
 
         u64 modulus() const { return mVole.modulus(); }
         u64 voleRequest() const { return mVoleRequest; }
@@ -639,7 +639,7 @@ namespace osuCrypto
 
         void prepare(
             LogVole::ZkMulCircuit circuit,
-            LogVole::CpuBenchmarkContext* benchmark = nullptr);
+            LogVole::CpuBenchmarkContext* benchmark = nullptr, LogVole::ProtocolCacheScopeView configureScope = {});
 
         u64 modulus() const { return mVole.modulus(); }
         u64 voleRequest() const { return mVoleRequest; }
@@ -683,7 +683,7 @@ namespace osuCrypto
         bool mCheckOnDevice = false;
 
         void prepare(
-            LogVole::ZkMatMulStatement statement);
+            LogVole::ZkMatMulStatement statement, LogVole::ProtocolCacheScopeView configureScope = {});
 
         u64 modulus() const { return mVole.modulus(); }
         u64 voleRequest() const { return mVoleRequest; }
@@ -727,7 +727,7 @@ namespace osuCrypto
         bool mCheckOnDevice = false;
 
         void prepare(
-            LogVole::ZkMatMulStatement statement);
+            LogVole::ZkMatMulStatement statement, LogVole::ProtocolCacheScopeView configureScope = {});
 
         u64 modulus() const { return mVole.modulus(); }
         u64 voleRequest() const { return mVoleRequest; }

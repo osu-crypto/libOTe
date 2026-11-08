@@ -55,7 +55,8 @@ namespace osuCrypto
     class LogVoleGarbledSender
     {
     public:
-        explicit LogVoleGarbledSender(LogVoleOptions options);
+        explicit LogVoleGarbledSender(LogVoleOptions options,
+            LogVole::ProtocolCacheScopeView configureScope = {});
         const LogVoleOptions& options() const { return mOptions; }
         LogVoleGarbledSender(const LogVoleGarbledSender&) = delete;
         LogVoleGarbledSender& operator=(const LogVoleGarbledSender&) = delete;
@@ -96,7 +97,8 @@ namespace osuCrypto
     class LogVoleGarbledReceiver
     {
     public:
-        explicit LogVoleGarbledReceiver(LogVoleOptions options);
+        explicit LogVoleGarbledReceiver(LogVoleOptions options,
+            LogVole::ProtocolCacheScopeView configureScope = {});
         const LogVoleOptions& options() const { return mOptions; }
         LogVoleGarbledReceiver(const LogVoleGarbledReceiver&) = delete;
         LogVoleGarbledReceiver& operator=(const LogVoleGarbledReceiver&) = delete;

@@ -170,7 +170,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             ZpCrtContext selected;
             LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ctx.mRing.mParams,
                 ctx.mPlaintextModulusBits, selected, std::make_shared<ZpContextFactory>(
-                    std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
+                    std::make_shared<RingContextFactory>(advanced))));
             return selected;
         };
         const u64 p = ctx.mPlaintextModulus;
@@ -254,7 +254,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
     assignValues<int>(small.mCoeffModulusBits, {30, 30});
     ZpCrtContext smallContext;
     LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(small, 20u, smallContext,
-        std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
+        std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced))));
     checkRing(smallContext);
     if (cmd.getOr("settings_only", 0)) return;
     for (auto setting : {CivoleSetting::GoldenSeed, CivoleSetting::NoGoldenSeed})
@@ -264,7 +264,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
         ZpCrtContext ctx;
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params.mLogVole.mShrinkExpand.mRing,
             params.mLogVole.mShrinkExpand.mPlaintextModulusBits, ctx,
-            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced))));
         checkRing(ctx);
         const std::array<u64, 3> pattern{1u, ctx.mPlaintextModulus - 1u, 13u};
         std::vector<u64> slots(zpSlotCount(ctx), 0);
@@ -923,14 +923,14 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
             LOGVOLE_EXPECT_FALSE(wrapSelected);
             LOGVOLE_EXPECT_FALSE(nodesSelected);
             {
-                ScopedProtocolCacheScope receiverRole(ProtocolCacheRole::Receiver, 0u);
+                const ProtocolCacheScopeView receiverRole{{}, ProtocolCacheRole::Receiver};
                 LOGVOLE_EXPECT_FALSE(gpu::bindReceiverFirstQueryAllocations(
-                    plan, &sender.mOfflineState, 0u));
+                    plan, &sender.mOfflineState, 0u, receiverRole));
             }
             {
-                ScopedProtocolCacheScope wrongRole(ProtocolCacheRole::Sender, 0u);
+                const ProtocolCacheScopeView wrongRole{{}, ProtocolCacheRole::Sender};
                 LOGVOLE_EXPECT_FALSE(gpu::bindReceiverFirstQueryAllocations(
-                    plan, &sender.mOfflineState, 0u));
+                    plan, &sender.mOfflineState, 0u, wrongRole));
             }
         }
         else LOGVOLE_EXPECT_FALSE(plan);
@@ -986,9 +986,9 @@ void LogVole_Civole_ReceiverFirstQueryAllocationOverlapParity(const oc::CLP& cmd
                 LOGVOLE_REQUIRE_TRUE(gpu::receiverFirstQueryAllocationStatus(
                     plan, ready, wrapSelected, nodesSelected));
                 LOGVOLE_REQUIRE_TRUE(ready && wrapSelected && nodesSelected);
-                ScopedProtocolCacheScope receiverRole(ProtocolCacheRole::Receiver, receiver.mOfflineState.mCrtFactoryOwner->mFactory->ringFactory()->protocolService()->qualify(query));
+                const ProtocolCacheScope receiverRole(receiver.mOfflineState.mCrtFactoryOwner->mFactory->ringFactory()->protocolService()->qualify(query), ProtocolCacheRole::Receiver);
                 LOGVOLE_EXPECT_FALSE(gpu::bindReceiverFirstQueryAllocations(
-                    plan, &sender.mOfflineState, query));
+                    plan, &sender.mOfflineState, query, receiverRole));
             }
         }
         return summary;

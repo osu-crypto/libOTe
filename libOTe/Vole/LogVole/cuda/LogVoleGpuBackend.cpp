@@ -2566,10 +2566,10 @@ namespace osuCrypto::LogVole::gpu
                 ~JoinOnFailure() { if (!completed) pool.stop(); }
             } join{*copyPool};
             // Copies use only disjoint host ranges and diagnostics; they need
-            // no protocol identity. The generic worker still owns its context.
+            // no protocol identity.
             for (std::size_t i = 1; i < activeWorkers; ++i)
                 tasks.push_back(detail::runPoolWorker(copyPool->pool, worker, i,
-                    {}, cpuBenchmark.mContext) | macoro::make_eager());
+                    cpuBenchmark.mContext) | macoro::make_eager());
             worker(0, cpuBenchmark);
             for (auto& task : tasks) macoro::sync_wait(task);
             join.completed = true;

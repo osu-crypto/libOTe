@@ -44,20 +44,20 @@ namespace osuCrypto::LogVole
         task<> offline(
             const ShrinkExpandReceiverOfflineInput& input,
             ShrinkExpandReceiverState& state,
-            Socket& sock, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+            Socket& sock, ProtocolCacheScope setupScope = {});
 
         task<> offline(
             const ReceiverOfflineInput& input,
             ReceiverState& state,
             Socket& sock,
             std::shared_ptr<void>* firstQueryGpuAllocations = nullptr,
-            ProtocolCacheScope setupScope = currentProtocolCacheScope());
+            ProtocolCacheScope setupScope = {});
 
         task<> keyDerive(
             const KeyDeriveReceiverInput& input,
             KeyDeriveReceiverOutput& output,
             Socket& sock, LogVoleEncodingOptions encoding = {}, bool useGpu = false, HostStepProfiler* profile = nullptr,
-            ProtocolCacheScope scope = currentProtocolCacheScope());
+            ProtocolCacheScope scope = {});
 
         // CPU expansion resources are borrowed exclusively until completion and
         // may be reused across queries. Recursive levels share one ring shape;
@@ -73,7 +73,7 @@ namespace osuCrypto::LogVole
             ReceiverState& state, const ReceiverOnlineInput& input,
             ReceiverOnlineOutput& output, PRNG& prng, Socket& sock,
             std::shared_ptr<void> firstQueryGpuAllocations = {},
-            const void* firstQueryOwner = nullptr);
+            const void* firstQueryOwner = nullptr, ProtocolCacheScope cacheScope = {});
 
         // Borrow executor and exclusive prepared buffers until completion.
         // The continuation may run on an executor worker; join it externally.
@@ -83,6 +83,6 @@ namespace osuCrypto::LogVole
             const ShrinkExpandReceiverState& state,
             const ReceiverExpandInput& input,
             ShrinkExpandReceiverExpandOutput& output,
-            Socket& sock);
+            Socket& sock, ProtocolCacheScope cacheScope = {});
     };
 }

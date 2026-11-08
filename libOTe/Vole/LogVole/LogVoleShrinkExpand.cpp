@@ -137,7 +137,7 @@ namespace osuCrypto::LogVole
             const ShrinkExpandReceiverState& state,
             std::shared_ptr<const std::vector<RnsPoly>>& publicA,
             std::shared_ptr<const std::vector<RnsPoly>>& publicB,
-            ProtocolCacheScopeView scope = currentProtocolCacheScope())
+            ProtocolCacheScopeView scope)
         {
             publicA = state.mPublicANtt;
             publicB = state.mPublicBNtt;

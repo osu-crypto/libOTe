@@ -90,7 +90,8 @@ namespace
         options.mUseGpu = false;
         RingNttContext result;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(source.mParams, result,
-            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(options, source.mFactory->protocolService()),
+            ProtocolCacheScope({}, source.mResourceScope.mRole)));
         return result;
     }
 
@@ -114,9 +115,9 @@ namespace
         options.mAdvanced.mContexts.mBatchingSingleLimb = false;
         ZpCrtContext reference, candidate;
         LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, reference,
-            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()))));
+            std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, nullptr))));
         options.mAdvanced.mContexts.mBatchingSingleLimb = true;
-        auto factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+        auto factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, nullptr));
         {
             LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(ring, plaintextBits, candidate, factory));
             ZpCrtContext again;
@@ -292,7 +293,6 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
     {
         void* previous = nullptr;
         {
-            ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, runId);
             auto& stream = senderExecution.mainStream();
             previous = stream.raw();
             gpu::DeviceScalars retired;
@@ -301,7 +301,6 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
                 expected.size() * sizeof(std::uint64_t), stream.raw()));
         }
         {
-            ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, runId);
             uploaded = gpu::uploadScalars(expected, receiverExecution.mainStream());
             LOGVOLE_REQUIRE_TRUE(uploaded);
             LOGVOLE_REQUIRE_TRUE(gpu::gpuStreamSync(previous));
@@ -439,7 +438,6 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(gpu::contextStream(first).raw() != gpu::contextStream(second).raw());
         // A live bound record is reused across workers and role changes.
         std::packaged_task<void()> task([&] {
-            ScopedProtocolCacheScope other(ProtocolCacheRole::Receiver, math.mFactory->protocolService()->qualify(77));
             auto workerContext = math;
             LOGVOLE_REQUIRE_TRUE(gpu::bindContextExecution(workerContext, firstExecution));
             LOGVOLE_REQUIRE_TRUE(workerContext.mFactoryOwner == first.mFactoryOwner);
@@ -503,9 +501,9 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         assignValues<int>(params.mCoeffModulusBits, {29, 30});
         RingNttContext original;
         {
-            ScopedProtocolCacheScope sender(ProtocolCacheRole::Sender, 0);
+            const ProtocolCacheScope sender({}, ProtocolCacheRole::Sender);
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, original,
-                std::make_shared<RingContextFactory>(deviceOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                std::make_shared<RingContextFactory>(deviceOptions), sender));
         }
         LOGVOLE_REQUIRE_TRUE(original.mGpuLightweight && original.mFactoryOwner);
         auto retained = original.mFactoryOwner;
@@ -538,13 +536,13 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         original = {};
         std::weak_ptr<gpu::OwnedGpuStream> workerOwner;
         std::packaged_task<void()> task([&] {
-            ScopedProtocolCacheScope receiver(ProtocolCacheRole::Receiver, identityService->qualify(1));
+            const ProtocolCacheScope receiver(identityService->qualify(1), ProtocolCacheRole::Receiver);
             auto otherOptions = deviceOptions;
             otherOptions.mAdvanced.mContexts.mNativeSealBundle = true;
             otherOptions.mAdvanced.mContexts.mLightweightRing = false;
             RingNttContext other;
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, other,
-                std::make_shared<RingContextFactory>(otherOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                std::make_shared<RingContextFactory>(otherOptions, identityService), receiver));
             LOGVOLE_REQUIRE_FALSE(other.mGpuLightweight);
             for (unsigned round = 0; round != 2; ++round)
             {
@@ -696,7 +694,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(mainOwner.expired() && sampleOwner.expired() && memory.expired());
     }
     {
-        auto execution = std::make_shared<gpu::GpuSetupContext>(osuCrypto::LogVoleExecutionOptions{}, nullptr, currentProtocolCacheScope().mRunId.serviceOwner());
+        auto execution = std::make_shared<gpu::GpuSetupContext>(osuCrypto::LogVoleExecutionOptions{}, nullptr, nullptr);
         std::weak_ptr<gpu::GpuSetupContext> contextOwner = execution;
         auto first = execution->stream();
         LOGVOLE_REQUIRE_TRUE(execution->stream() == first);
@@ -755,11 +753,8 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         ringRecord = first.mFactoryOwner;
         second = {};
         {
-            ScopedProtocolCacheScope otherRole(
-                currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender
-                    ? ProtocolCacheRole::Receiver : ProtocolCacheRole::Sender, 0);
-            // The caller's explicit record takes precedence over an ambient
-            // worker role, even when the output also supplies its sole owner.
+            // An explicit record preserves its party selection when the
+            // output also supplies its sole owner.
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(unique, first, first.mFactoryOwner));
             LOGVOLE_REQUIRE_TRUE(first.mFactoryOwner == ringRecord.lock());
         }
@@ -790,7 +785,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         validationOptions.mAdvanced.mContexts.mLightweightRing = false;
         {
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, context,
-                std::make_shared<RingContextFactory>(validationOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                std::make_shared<RingContextFactory>(validationOptions, nullptr)));
         }
         {
             gpu::GpuRingSetupPrefetch prefetch(context, true);
@@ -844,14 +839,14 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         std::weak_ptr<gpu::OwnedGpuStream> producer;
         std::weak_ptr<gpu::GpuMemoryPool> pool;
         std::packaged_task<gpu::DeviceBatchPtr()> task([&] {
-            ScopedProtocolCacheScope scope(role, identityService->allocate());
+            const ProtocolCacheScope scope(identityService->allocate(), role);
             auto wrapOptions = deviceOptions;
             wrapOptions.mAdvanced.mContexts.mLightweightRing = false;
             wrapOptions.mAdvanced.mContexts.mLightweightCrt = false;
             ZpCrtContext ownedContext;
             LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(plainContext.mRing.mParams,
                 plainContext.mPlaintextModulusBits, ownedContext, std::make_shared<ZpContextFactory>(
-                    std::make_shared<RingContextFactory>(wrapOptions, currentProtocolCacheScope().mRunId.serviceOwner()))));
+                    std::make_shared<RingContextFactory>(wrapOptions, identityService)), scope));
             ownedContext.mFactoryOwner.reset();
             ownedContext.mRing.mFactoryOwner.reset();
             ownedContext.mRing.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(wrapOptions, nullptr, ownedContext.mRing.mFactory->protocolService());
@@ -860,9 +855,9 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
             producer = stream.allocationOwner();
             pool = stream.allocationOwner()->memory();
             // Cold allocation and a cache hit both feed the ordinary wrap path.
-            auto first = gpu::wrapLabelsDevice(ownedContext, labels, true, 0, 1);
+            auto first = gpu::wrapLabelsDevice(ownedContext, labels, true, 0, 1, false, scope);
             LOGVOLE_REQUIRE_TRUE(first);
-            auto second = gpu::wrapLabelsDevice(ownedContext, labels, true, 0, 1);
+            auto second = gpu::wrapLabelsDevice(ownedContext, labels, true, 0, 1, false, scope);
             LOGVOLE_REQUIRE_TRUE(second);
             return second;
         });
@@ -1022,7 +1017,7 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
         advanced.mUseGpu = true;
         RingNttContext base;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), base,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(advanced, nullptr)));
         std::vector<std::array<std::uint64_t, 8>> seeds(3);
         for (std::size_t row = 0; row < seeds.size(); ++row)
             for (std::size_t word = 0; word < seeds[row].size(); ++word)
@@ -1034,7 +1029,6 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
         }
         std::weak_ptr<gpu::GpuExecutionContext> firstLifetime, secondLifetime;
         gpu::RetainedPublicUniformPtr saved;
-        const auto scope = currentProtocolCacheScope();
         {
             auto first = base, second = base;
             first.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(advanced, nullptr, first.mFactory->protocolService());
@@ -1046,7 +1040,6 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(firstStream != secondStream);
             LOGVOLE_REQUIRE_TRUE(gpu::contextSampleStream(first).raw() == firstStream);
             std::packaged_task<void()> task([&] {
-                ScopedProtocolCacheScope workerScope(scope);
                 std::vector<RnsPoly> actual;
                 LOGVOLE_REQUIRE_TRUE(gpu::sampleUniformBatchFromSeedsDevice(first, seeds, false, actual, &saved));
                 expect_batch_equal(actual, expected);
@@ -1147,7 +1140,7 @@ void LogVole_RingOps_GpuStreamStagingLifetime(const oc::CLP& cmd)
     advanced.mAdvanced.mStreams.mPipelinedUpload = true;
     advanced.mAdvanced.mStreams.mPolyStageMiB = 1;
     advanced.mAdvanced.mStreams.mDownloadSlotMiB = 1;
-    auto factory = std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner());
+    auto factory = std::make_shared<RingContextFactory>(advanced, nullptr);
     auto params = make_small_params();
     params.mPolyModulusDegree = 1024;
     RingNttContext configured, reused, defaults;
@@ -1289,21 +1282,21 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
     std::shared_ptr<gpu::GpuRing> senderRing, receiverRing;
 #endif
     {
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Sender, runId);
+        const ProtocolCacheScope scope(runId, ProtocolCacheRole::Sender);
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), senderCtx,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
-        senderA = sharedLhePublicANtt(senderCtx, count);
-        senderB = sharedLencPublicBNtt(senderCtx, count / 2);
+            std::make_shared<RingContextFactory>(advanced, identityService), scope));
+        senderA = sharedLhePublicANtt(senderCtx, count, scope);
+        senderB = sharedLencPublicBNtt(senderCtx, count / 2, scope);
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (gpu::enabled(advanced)) senderRing = gpu::GpuRing::get(senderCtx);
 #endif
     }
     {
-        ScopedProtocolCacheScope scope(ProtocolCacheRole::Receiver, runId);
+        const ProtocolCacheScope scope(runId, ProtocolCacheRole::Receiver);
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), receiverCtx,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
-        receiverA = sharedLhePublicANtt(receiverCtx, count);
-        receiverB = sharedLencPublicBNtt(receiverCtx, count / 2);
+            std::make_shared<RingContextFactory>(advanced, identityService), scope));
+        receiverA = sharedLhePublicANtt(receiverCtx, count, scope);
+        receiverB = sharedLencPublicBNtt(receiverCtx, count / 2, scope);
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (gpu::enabled(advanced)) receiverRing = gpu::GpuRing::get(receiverCtx);
 #endif
@@ -1375,19 +1368,19 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 #endif
         for (std::size_t party = 0; party < 2; ++party)
         {
-            ScopedProtocolCacheScope roleScope(
-                party ? ProtocolCacheRole::Receiver : ProtocolCacheRole::Sender, run);
+            const ProtocolCacheScope roleScope(run,
+                party ? ProtocolCacheRole::Receiver : ProtocolCacheRole::Sender);
 #if defined(ENABLE_LOGVOLE_CUDA)
             roleGpu[party] = gpu::enabled(advanced);
 #endif
             auto& context = lightweight[party];
-            LOGVOLE_REQUIRE_TRUE(makeGpuRingNttContext(params, context));
+            LOGVOLE_REQUIRE_TRUE(makeGpuRingNttContext(params, context, roleScope));
             LOGVOLE_REQUIRE_TRUE(context.mGpuLightweight && context.mHostContextCache && !context.mContext);
             LOGVOLE_REQUIRE_TRUE(context.mModuli.empty() && context.mRawModuli);
             LOGVOLE_REQUIRE_TRUE(validateRingContextMetadata(context));
             RingNttContext again;
             again.mFactory = context.mFactory;
-            LOGVOLE_REQUIRE_TRUE(makeGpuRingNttContext(params, again));
+            LOGVOLE_REQUIRE_TRUE(makeGpuRingNttContext(params, again, roleScope));
             LOGVOLE_EXPECT_TRUE(again.mHostContextCache == context.mHostContextCache);
             LOGVOLE_EXPECT_TRUE(again.mRawModuli == context.mRawModuli);
             LOGVOLE_REQUIRE_EQ(ringModulusCount(context), preset.primes.size());
@@ -1399,10 +1392,10 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 
             RingNttContext selected;
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, selected,
-                std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+                std::make_shared<RingContextFactory>(advanced, identityService), roleScope));
             LOGVOLE_EXPECT_EQ(selected.mGpuLightweight, roleGpu[party]);
             LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, crt[party],
-                std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
+                std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, identityService)), roleScope));
             LOGVOLE_EXPECT_EQ(crt[party].mGpuLightweight, roleGpu[party]);
             LOGVOLE_EXPECT_EQ(crt[party].mPlaintextModulus, preset.plaintext);
             LOGVOLE_EXPECT_EQ(crt[party].mPlaintextModulusBits, preset.bits - 1u);
@@ -1423,21 +1416,21 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 {
                     auto options = advanced;
                     options.mAdvanced.mContexts.*option = false;
-                    auto factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+                    auto factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, identityService));
                     ZpCrtContext eager;
-                    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, eager, factory));
+                    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, eager, factory, roleScope));
                     LOGVOLE_REQUIRE_TRUE(!eager.mGpuLightweight && eager.mBatchingContext && eager.mBatchEncoder);
                     LOGVOLE_EXPECT_EQ(eager.mPlaintextModulus, preset.plaintext);
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(eager.mPlaintextLiftModQj, preset.lift));
                     if (option == &osuCrypto::LogVoleGpuContextOptions::mLightweightRing)
                     {
                         RingNttContext eagerRing;
-                        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, eagerRing, factory->ringFactory()));
+                        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, eagerRing, factory->ringFactory(), roleScope));
                         LOGVOLE_REQUIRE_TRUE(!eagerRing.mGpuLightweight && eagerRing.mContext);
                     }
                 }
                 ZpCrtContext restored;
-                LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, restored, crt[party].mFactory));
+                LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, preset.bits, restored, crt[party].mFactory, roleScope));
                 LOGVOLE_REQUIRE_TRUE(restored.mGpuLightweight);
                 LOGVOLE_EXPECT_TRUE(restored.mHostContextCache == crt[party].mHostContextCache);
             }
@@ -1681,10 +1674,10 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
             std::array<std::shared_ptr<gpu::GpuPlainNtt>, 2> plainOwners;
             for (std::size_t party = 0; party < 2; ++party)
             {
-                ScopedProtocolCacheScope roleScope(
-                    party ? ProtocolCacheRole::Receiver : ProtocolCacheRole::Sender, run);
+                const ProtocolCacheScope roleScope(run,
+                    party ? ProtocolCacheRole::Receiver : ProtocolCacheRole::Sender);
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, dynamicRing[party],
-                    std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+                    std::make_shared<RingContextFactory>(advanced, identityService), roleScope));
                 const auto& selected = dynamicRing[party];
                 LOGVOLE_REQUIRE_TRUE(selected.mGpuLightweight && selected.mRawModuli &&
                     selected.mRawModuli->mDynamicGpuCertificate && !selected.mContext);
@@ -1693,7 +1686,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 for (std::size_t limb = 0; limb < widths.size(); ++limb)
                     LOGVOLE_EXPECT_EQ(ringModulusValue(selected, limb), expectedPrimes[limb].value());
                 LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 30u, dynamicCrt[party],
-                    std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner()))));
+                    std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(advanced, identityService)), roleScope));
                 LOGVOLE_REQUIRE_TRUE(dynamicCrt[party].mGpuLightweight &&
                     !dynamicCrt[party].mBatchingContext && !dynamicCrt[party].mBatchEncoder);
                 const auto certificate = selected.mRawModuli->mDynamicGpuCertificate;
@@ -1705,7 +1698,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     options.mAdvanced.mContexts.mLightweightRing = false;
                     options.mAdvanced.mContexts.mLightweightCrt = false;
                     LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 30u, eager,
-                        std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()))));
+                        std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, identityService)), roleScope));
                 }
                 LOGVOLE_REQUIRE_TRUE(!eager.mGpuLightweight && eager.mBatchEncoder);
                 LOGVOLE_EXPECT_EQ(dynamicCrt[party].mPlaintextModulus, eager.mPlaintextModulus);
@@ -2027,7 +2020,7 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
             eightLimbs ? 52 : 55);
         RingNttContext batchCtx{};
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, batchCtx,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(advanced, nullptr)));
         expect_single_limb_batching_parity(batchParams, eightLimbs ? 52u : 55u);
         {
             auto options = advanced;
@@ -2039,13 +2032,13 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
             const auto plaintextBits = eightLimbs ? 52u : 55u;
             {
                 options.mAdvanced.mContexts.mFullModChain = true;
-                auto factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+                auto factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, nullptr));
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, fullRing, factory->ringFactory()));
                 LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(batchParams, plaintextBits, fullCrt, factory));
             }
             {
                 options.mAdvanced.mContexts.mFullModChain = false;
-                auto factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()));
+                auto factory = std::make_shared<ZpContextFactory>(std::make_shared<RingContextFactory>(options, nullptr));
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(batchParams, minimalRing, factory->ringFactory()));
                 LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(batchParams, plaintextBits, minimalCrt, factory));
                 RingNttContext again;
@@ -2230,7 +2223,6 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
 #endif
                         context.mWorkerLimit = workers;
                         CpuBenchmarkState cpuBenchmark{&context};
-                        const auto originalScope = currentProtocolCacheScope();
                         const auto originalSlots = detail::gParallelWorkerSlotsInUse.load();
                         std::vector<RnsPoly> downloaded;
                         LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(downloaded, stream, workers, 1u, count, cpuBenchmark));
@@ -2247,8 +2239,6 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                             LOGVOLE_REQUIRE_TRUE(context.mWorkersChecked.load() > 0u);
 #endif
                         LOGVOLE_REQUIRE_EQ(detail::gParallelWorkerSlotsInUse.load(), originalSlots);
-                        LOGVOLE_REQUIRE_EQ(currentProtocolCacheScope().mRunId, originalScope.mRunId);
-                        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == originalScope.mRole);
                     }
                 }
             }
@@ -2319,7 +2309,7 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
                 kernel.mNoGoldH200PackedRoots = 3;
             }
             LOGVOLE_REQUIRE_TRUE(kernel.valid());
-            auto factory = std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner());
+            auto factory = std::make_shared<RingContextFactory>(options, nullptr);
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, owners[variant], factory));
         }
         // Even diagnostic settings belong to the table owner. A differently
@@ -2329,7 +2319,7 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(owners[0].mRawModuli);
         LOGVOLE_REQUIRE_FALSE(gpu::GpuRing::getRaw(owners[0].mParams,
             owners[0].mRawModuli->mValues, owners[0].mResourceScope,
-            std::make_shared<gpu::GpuSetupContext>(different, nullptr, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<gpu::GpuSetupContext>(different, nullptr, nullptr)));
 
         // Alternate live owners, then return to the first: no first-use latch
         // may choose the other owner's configuration or device table layout.
@@ -2453,7 +2443,7 @@ void LogVole_RingOps_NttBatchDeviceCanonicalization(const oc::CLP& cmd)
             degree == 16384u ? 52 : degree == 8192u ? 55 : 30);
         RingNttContext ctx{};
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx,
-            std::make_shared<RingContextFactory>(testAdvanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(testAdvanced, nullptr)));
         const auto hostContext = getRingHostContext(ctx);
         LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
         const auto* tables = hostContext->key_context_data()->small_ntt_tables();
@@ -2717,7 +2707,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP& cmd)
     advanced.mAdvanced.mProtocol.mUniformSampling = false;
     const auto params = make_small_params();
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, nullptr)));
 
     const std::vector<std::uint64_t> nonces{ 1, 2, 3, 4 };
     auto a = deriveUniformPolyBatchFromNonceList(ctx, nonces, 0xF00Du, 3u, 1u);
@@ -2742,7 +2732,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP& cmd)
     };
     auto checkSetupSampling = [&](const RingParams& ring) {
         RingNttContext sampleContext{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, sampleContext, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, sampleContext, std::make_shared<RingContextFactory>(advanced, nullptr)));
         constexpr std::uint64_t nonce = 0x534554555053414Dull, domain = 0x554E49464F524Dull;
         for (std::uint32_t count : { 1u, 4u, 32u })
         {
@@ -2771,7 +2761,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP& cmd)
                 selectedOptions.mAdvanced.mProtocol.mUniformSamplingStrict = true;
                 RingNttContext selected;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, selected,
-                    std::make_shared<RingContextFactory>(selectedOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                    std::make_shared<RingContextFactory>(selectedOptions, nullptr)));
 
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (device) LOGVOLE_REQUIRE_TRUE(gpu::enabled(selected));
@@ -2798,7 +2788,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP& cmd)
                 selectedOptions.mAdvanced.mProtocol.mUniformSampling = true;
                 RingNttContext fallback;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, fallback,
-                    std::make_shared<RingContextFactory>(selectedOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                    std::make_shared<RingContextFactory>(selectedOptions, nullptr)));
                 oc::PRNG fallbackPrng(oc::block(0x53414D504C45ull, 7), 3);
                 compareExact(expectedPrivate, sampleUniformPolyBatch(fallback, count, fallbackPrng));
                 LOGVOLE_EXPECT_EQ(fallbackPrng.get<oc::block>(), nextReference);
@@ -2806,7 +2796,7 @@ void LogVole_RingOps_NonceBatchDeterminism(const oc::CLP& cmd)
                 selectedOptions.mAdvanced.mProtocol.mUniformSamplingStrict = true;
                 RingNttContext strict;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ring, strict,
-                    std::make_shared<RingContextFactory>(selectedOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                    std::make_shared<RingContextFactory>(selectedOptions, nullptr)));
                 bool rejected = false;
                 try { (void)deriveUniformPolyBatchFromNonce(strict, nonce, domain, count, true); }
                 catch (const std::runtime_error&) { rejected = true; }
@@ -2871,7 +2861,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
     // Context copies share public operands. Exported host/device results keep
     // their own backing alive without retaining the cache or a context.
     {
-        ScopedProtocolCacheScope role(ProtocolCacheRole::Sender, identityService->allocate());
+        const ProtocolCacheScope role(identityService->allocate(), ProtocolCacheRole::Sender);
         std::weak_ptr<PublicPolynomialCache> lifetime;
         gpu::RetainedPublicUniformPtr deviceA, deviceB;
         std::shared_ptr<const std::vector<RnsPoly>> hostA, hostB;
@@ -2881,26 +2871,26 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             params.mCoeffModulusBits.resize(2);
             std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), 30);
             RingNttContext context;
-            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, context, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, context, std::make_shared<RingContextFactory>(advanced, identityService), role));
             LOGVOLE_REQUIRE_TRUE(context.mPublicCache);
             lifetime = context.mPublicCache;
-            deviceA = retainedLhePublicANtt(context, 4);
-            deviceB = retainedLencPublicBNtt(context, 2);
-            hostA = sharedLhePublicANtt(context, 4);
-            hostB = sharedLencPublicBNtt(context, 2);
+            deviceA = retainedLhePublicANtt(context, 4, role);
+            deviceB = retainedLencPublicBNtt(context, 2, role);
+            hostA = sharedLhePublicANtt(context, 4, role);
+            hostB = sharedLencPublicBNtt(context, 2, role);
             LOGVOLE_REQUIRE_TRUE(deviceA && deviceB && hostA && hostB);
             auto copy = context;
             context = {};
             LOGVOLE_REQUIRE_FALSE(lifetime.expired());
-            LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(copy, 4) == hostA);
-            LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(copy, 2) == hostB);
+            LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(copy, 4, role) == hostA);
+            LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(copy, 2, role) == hostB);
             copy = {};
         }
         LOGVOLE_REQUIRE_TRUE(lifetime.expired());
         std::vector<RnsPoly> fetched;
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceA, fetched, readbackExecution.readbackStream()));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceA, fetched, readbackExecution.readbackStream(), role));
         exact(*hostA, fetched);
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceB, fetched, readbackExecution.readbackStream()));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*deviceB, fetched, readbackExecution.readbackStream(), role));
         exact(*hostB, fetched);
         const std::weak_ptr<const gpu::RetainedPublicUniform> deviceLifetimeA = deviceA;
         const std::weak_ptr<const gpu::RetainedPublicUniform> deviceLifetimeB = deviceB;
@@ -2920,11 +2910,11 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(),
             shape.first == 1024u ? 30 : shape.first == 8192u ? 55 : 52);
         const auto run = identityService->allocate();
-        ScopedProtocolCacheScope cacheScope(ProtocolCacheRole::Sender, run);
+        const ProtocolCacheScope cacheScope(run, ProtocolCacheRole::Sender);
         // Dynamic GPU contexts carry a party-local certificate. Construct the
         // context in the same role that will sample from it.
         RingNttContext ctx;
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx, std::make_shared<RingContextFactory>(advanced, identityService), cacheScope));
         constexpr std::uint32_t count = 4;
         constexpr std::uint64_t nonce = 0x52455441494e4544ULL, domain = 0x5055424c4943ULL;
 
@@ -2933,73 +2923,73 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             std::vector<RnsPoly> expected;
             {
                 auto cpuContext = cpuReferenceContext(ctx);
-                expected = deriveUniformPolyBatchFromNonce(cpuContext, nonce, domain, count, actualNtt);
+                expected = deriveUniformPolyBatchFromNonce(cpuContext, nonce, domain, count, actualNtt, cacheScope);
             }
             const auto before = gpu::publicUniformRetentionStats(ctx);
             gpu::RetainedPublicUniformPtr token;
-            auto sampled = deriveUniformPolyBatchFromNonce(ctx, nonce, domain, count, actualNtt, &token);
+            auto sampled = deriveUniformPolyBatchFromNonce(ctx, nonce, domain, count, actualNtt, &token, cacheScope);
             exact(expected, sampled);
             LOGVOLE_REQUIRE_TRUE(token && token->count() == count);
             LOGVOLE_REQUIRE_TRUE(gpu::publicUniformRetentionStats(ctx).mCaptures > before.mCaptures);
             auto owner = std::make_shared<const std::vector<RnsPoly>>(std::move(sampled));
             const std::span<const RnsPoly> span(*owner);
-            LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(ctx, owner, token));
-            LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(ctx, owner, token));
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == token);
+            LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(ctx, owner, token, cacheScope));
+            LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(ctx, owner, token, cacheScope));
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span, cacheScope) == token);
             {
                 auto shared = ctx;
-                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(shared, span) == token);
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(shared, span, cacheScope) == token);
                 const auto sharedStatsBefore = gpu::publicUniformRetentionStats(ctx);
                 auto separate = ctx;
                 separate.mPublicCache = std::make_shared<PublicPolynomialCache>();
                 const auto isolatedBefore = gpu::publicUniformRetentionStats(separate);
                 LOGVOLE_REQUIRE_EQ(isolatedBefore.mCaptures, 0u);
                 LOGVOLE_REQUIRE_EQ(isolatedBefore.mMisses, 0u);
-                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span) == nullptr);
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span, cacheScope) == nullptr);
                 LOGVOLE_REQUIRE_EQ(gpu::publicUniformRetentionStats(separate).mMisses, 1u);
                 LOGVOLE_REQUIRE_EQ(gpu::publicUniformRetentionStats(ctx).mMisses, sharedStatsBefore.mMisses);
-                LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(separate, owner, token));
-                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span) == token);
+                LOGVOLE_REQUIRE_TRUE(gpu::registerPublicUniformRetention(separate, owner, token, cacheScope));
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span, cacheScope) == token);
                 separate.mPublicCache.reset();
-                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span) == nullptr);
-                LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(separate, owner, token));
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(separate, span, cacheScope) == nullptr);
+                LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(separate, owner, token, cacheScope));
             }
             std::vector<RnsPoly> fetched;
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*token, fetched, readbackExecution.readbackStream()));
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*token, fetched, readbackExecution.readbackStream(), cacheScope));
             exact(expected, fetched);
 
             // Const ownership must originate from the captured allocations.
             // Merely copying the exact values never registers a mutable clone.
             auto copied = std::make_shared<const std::vector<RnsPoly>>(*owner);
-            LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, copied, token));
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *copied) == nullptr);
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span.first(count - 1)) == nullptr);
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span.subspan(1)) == nullptr);
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, {}) == nullptr);
+            LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, copied, token, cacheScope));
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *copied, cacheScope) == nullptr);
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span.first(count - 1), cacheScope) == nullptr);
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span.subspan(1), cacheScope) == nullptr);
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, {}, cacheScope) == nullptr);
             RingNttContext changed = ctx;
             swap_moduli_for_test(changed, 0, 1);
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(changed, span) == nullptr);
-            LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(changed, owner, token));
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(changed, span, cacheScope) == nullptr);
+            LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(changed, owner, token, cacheScope));
             changed = ctx;
             changed.mParams.mPolyModulusDegree *= 2;
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(changed, span) == nullptr);
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(changed, span, cacheScope) == nullptr);
             {
-                ScopedProtocolCacheScope peer(ProtocolCacheRole::Receiver, run);
+                const ProtocolCacheScope peer(run, ProtocolCacheRole::Receiver);
                 // Party-local GPU caches and retained allocations must not be
                 // visible through a peer role, even in this single-process test.
-                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == nullptr);
-                LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, owner, token));
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span, peer) == nullptr);
+                LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, owner, token, peer));
             }
             {
-                ScopedProtocolCacheScope anotherRun(ProtocolCacheRole::Sender, identityService->allocate());
-                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == nullptr);
-                LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, owner, token));
+                const ProtocolCacheScope anotherRun(identityService->allocate(), ProtocolCacheRole::Sender);
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span, anotherRun) == nullptr);
+                LOGVOLE_REQUIRE_FALSE(gpu::registerPublicUniformRetention(ctx, owner, token, anotherRun));
             }
             {
                 auto cpuContext = cpuReferenceContext(ctx);
-                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(cpuContext, span) == nullptr);
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(cpuContext, span, cacheScope) == nullptr);
                 auto capture = token;
-                exact(expected, deriveUniformPolyBatchFromNonce(cpuContext, nonce, domain, count, actualNtt, &capture));
+                exact(expected, deriveUniformPolyBatchFromNonce(cpuContext, nonce, domain, count, actualNtt, &capture, cacheScope));
                 LOGVOLE_REQUIRE_TRUE(capture == nullptr);
             }
             for (bool forcedDecline : {false, true})
@@ -3009,26 +2999,26 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
                 disabledOptions.mAdvanced.mProtocol.mPublicUniformRetention = false;
                 RingNttContext disabled;
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, disabled,
-                    std::make_shared<RingContextFactory>(disabledOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                    std::make_shared<RingContextFactory>(disabledOptions, identityService), cacheScope));
                 const auto& selected = forcedDecline ? ctx : disabled;
                 LOGVOLE_REQUIRE_FALSE(gpu::publicUniformRetentionEnabled(selected.mExecutionOptions));
-                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(selected, span) == nullptr);
+                LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(selected, span, cacheScope) == nullptr);
                 auto capture = token;
-                exact(expected, deriveUniformPolyBatchFromNonce(selected, nonce, domain, count, actualNtt, &capture));
+                exact(expected, deriveUniformPolyBatchFromNonce(selected, nonce, domain, count, actualNtt, &capture, cacheScope));
                 LOGVOLE_REQUIRE_TRUE(capture == nullptr);
             }
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == token);
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span, cacheScope) == token);
             {
                 auto capture = token;
                 LOGVOLE_REQUIRE_TRUE(deriveUniformPolyBatchFromNonce(
-                    ctx, nonce, domain, 0, actualNtt, &capture).empty());
+                    ctx, nonce, domain, 0, actualNtt, &capture, cacheScope).empty());
                 LOGVOLE_REQUIRE_TRUE(capture == nullptr);
                 std::vector<std::array<std::uint64_t, 8>> seeds(1);
                 std::vector<RnsPoly> unchanged = expected;
                 capture = token;
                 tests_libOTe::logvole_test::ScopedOptionValue decline(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mUniform, true);
                 LOGVOLE_REQUIRE_FALSE(gpu::sampleUniformBatchFromSeedsDevice(
-                    ctx, seeds, actualNtt, unchanged, &capture));
+                    ctx, seeds, actualNtt, unchanged, &capture, cacheScope));
                 exact(expected, unchanged);
                 LOGVOLE_REQUIRE_TRUE(capture == token);
             }
@@ -3036,8 +3026,8 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             // Lookup must reject the saved span before touching freed host
             // storage; retaining the completed device owner remains safe.
             owner.reset();
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span) == nullptr);
-            LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*token, fetched, readbackExecution.readbackStream()));
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, span, cacheScope) == nullptr);
+            LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*token, fetched, readbackExecution.readbackStream(), cacheScope));
             exact(expected, fetched);
         }
 
@@ -3046,56 +3036,56 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         std::vector<RnsPoly> expectedA, expectedB;
         {
             auto cpuContext = cpuReferenceContext(ctx);
-            expectedA = deriveUniformPolyBatchFromNonce(cpuContext, 0xA11ACE5Eull, 0xA110CA7Aull, count);
-            expectedB = deriveUniformPolyBatchFromNonce(cpuContext, 0xC0DEC0DEull, 0x1EEC0DEu, count, true);
+            expectedA = deriveUniformPolyBatchFromNonce(cpuContext, 0xA11ACE5Eull, 0xA110CA7Aull, count, cacheScope);
+            expectedB = deriveUniformPolyBatchFromNonce(cpuContext, 0xC0DEC0DEull, 0x1EEC0DEu, count, true, cacheScope);
         }
         const auto beforeRetainOnly = gpu::publicUniformRetentionStats(ctx);
-        const auto deviceA = retainedLhePublicANtt(ctx, count);
-        const auto deviceB = retainedLencPublicBNtt(ctx, count / 2);
+        const auto deviceA = retainedLhePublicANtt(ctx, count, cacheScope);
+        const auto deviceB = retainedLencPublicBNtt(ctx, count / 2, cacheScope);
         const auto afterRetainOnly = gpu::publicUniformRetentionStats(ctx);
         LOGVOLE_REQUIRE_TRUE(deviceA && deviceB && deviceA != deviceB);
-        LOGVOLE_REQUIRE_TRUE(gpu::retainedPublicUniformMatches(ctx, *deviceA, count, false));
-        LOGVOLE_REQUIRE_TRUE(gpu::retainedPublicUniformMatches(ctx, *deviceB, count, true));
+        LOGVOLE_REQUIRE_TRUE(gpu::retainedPublicUniformMatches(ctx, *deviceA, count, false, cacheScope));
+        LOGVOLE_REQUIRE_TRUE(gpu::retainedPublicUniformMatches(ctx, *deviceB, count, true, cacheScope));
         LOGVOLE_REQUIRE_EQ(afterRetainOnly.mHostMaterializations,
             beforeRetainOnly.mHostMaterializations);
         std::shared_ptr<const std::vector<RnsPoly>> materializedA, materializedB;
-        LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceA, materializedA));
-        LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceB, materializedB));
+        LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceA, materializedA, cacheScope));
+        LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceB, materializedB, cacheScope));
         exact(expectedA, *materializedA);
         exact(expectedB, *materializedB);
         const auto afterMaterialize = gpu::publicUniformRetentionStats(ctx);
         LOGVOLE_REQUIRE_EQ(afterMaterialize.mHostMaterializations,
             afterRetainOnly.mHostMaterializations + 2u);
         auto sameA = materializedB;
-        LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceA, sameA));
+        LOGVOLE_REQUIRE_TRUE(gpu::materializeRetainedPublicUniform(ctx, deviceA, sameA, cacheScope));
         LOGVOLE_REQUIRE_TRUE(sameA == materializedA);
         LOGVOLE_REQUIRE_EQ(gpu::publicUniformRetentionStats(ctx).mHostMaterializations,
             afterMaterialize.mHostMaterializations);
         {
-            ScopedProtocolCacheScope peer(ProtocolCacheRole::Receiver, run);
+            const ProtocolCacheScope peer(run, ProtocolCacheRole::Receiver);
             auto unchanged = materializedB;
-            LOGVOLE_REQUIRE_FALSE(gpu::materializeRetainedPublicUniform(ctx, deviceA, unchanged));
+            LOGVOLE_REQUIRE_FALSE(gpu::materializeRetainedPublicUniform(ctx, deviceA, unchanged, peer));
             LOGVOLE_REQUIRE_TRUE(unchanged == materializedB);
         }
-        const auto publicA = sharedLhePublicANtt(ctx, count);
-        const auto publicB = sharedLencPublicBNtt(ctx, count / 2);
+        const auto publicA = sharedLhePublicANtt(ctx, count, cacheScope);
+        const auto publicB = sharedLencPublicBNtt(ctx, count / 2, cacheScope);
         LOGVOLE_REQUIRE_TRUE(publicA && publicB);
         exact(expectedA, *publicA);
         exact(expectedB, *publicB);
-        const auto retainedA = gpu::findPublicUniformRetention(ctx, *publicA);
-        const auto retainedB = gpu::findPublicUniformRetention(ctx, *publicB);
+        const auto retainedA = gpu::findPublicUniformRetention(ctx, *publicA, cacheScope);
+        const auto retainedB = gpu::findPublicUniformRetention(ctx, *publicB, cacheScope);
         LOGVOLE_REQUIRE_TRUE(retainedA && retainedB && retainedA != retainedB);
         std::vector<RnsPoly> downloaded;
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedA, downloaded, readbackExecution.readbackStream()));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedA, downloaded, readbackExecution.readbackStream(), cacheScope));
         exact(expectedA, downloaded);
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedB, downloaded, readbackExecution.readbackStream()));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedB, downloaded, readbackExecution.readbackStream(), cacheScope));
         exact(expectedB, downloaded);
-        LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(ctx, count) == publicA);
-        LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(ctx, count / 2) == publicB);
+        LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(ctx, count, cacheScope) == publicA);
+        LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(ctx, count / 2, cacheScope) == publicB);
 
         auto mutableA = *publicA;
         mutableA[0].mCoeffs[0] = (mutableA[0].mCoeffs[0] + 1) % ringModulusValue(ctx, 0);
-        LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, mutableA) == nullptr);
+        LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, mutableA, cacheScope) == nullptr);
         auto r = expectedA;
         const std::vector<RnsPoly> sk{expectedA.front()};
         for (const auto* a : {publicA.get(), static_cast<const std::vector<RnsPoly>*>(&mutableA)})
@@ -3106,11 +3096,11 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             {
                 auto cpuContext = cpuReferenceContext(ctx);
                 LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1(setupResources.executor, setupResources.results, cpuContext, r, sk, 8, expected, 3.2, 19.2,
-                    &referencePrng, false, a, 4, nullptr,  {}, setupOptions)));
+                    &referencePrng, false, a, 4, nullptr,  {}, setupOptions, {}, cacheScope)));
             }
             const auto before = gpu::publicUniformRetentionStats(ctx);
             LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1(setupResources.executor, setupResources.results, ctx, r, sk, 8, actual, 3.2, 19.2,
-                &actualPrng, false, a, 4, nullptr,  {}, setupOptions)));
+                &actualPrng, false, a, 4, nullptr,  {}, setupOptions, {}, cacheScope)));
             const auto after = gpu::publicUniformRetentionStats(ctx);
             LOGVOLE_REQUIRE_EQ(expected.mRows, actual.mRows);
             LOGVOLE_REQUIRE_EQ(expected.mCols, actual.mCols);
@@ -3123,7 +3113,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
             }
             else LOGVOLE_REQUIRE_EQ(after.mCopies, before.mCopies);
         }
-        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedA, downloaded, readbackExecution.readbackStream()));
+        LOGVOLE_REQUIRE_TRUE(gpu::fetchRetainedPublicUniform(*retainedA, downloaded, readbackExecution.readbackStream(), cacheScope));
         exact(expectedA, downloaded);
         exact(expectedA, *publicA);
         exact(expectedB, *publicB);
@@ -3131,25 +3121,25 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
         {
             std::weak_ptr<const std::vector<RnsPoly>> oldA, oldB;
             {
-                ScopedProtocolCacheScope secondRun(ProtocolCacheRole::Sender, identityService->allocate());
-                const auto temporaryA = sharedLhePublicANtt(ctx, count);
-                const auto temporaryB = sharedLencPublicBNtt(ctx, count / 2);
+                const ProtocolCacheScope secondRun(identityService->allocate(), ProtocolCacheRole::Sender);
+                const auto temporaryA = sharedLhePublicANtt(ctx, count, secondRun);
+                const auto temporaryB = sharedLencPublicBNtt(ctx, count / 2, secondRun);
                 oldA = temporaryA;
                 oldB = temporaryB;
                 LOGVOLE_REQUIRE_TRUE(temporaryA != publicA && temporaryB != publicB);
                 exact(expectedA, *temporaryA);
                 exact(expectedB, *temporaryB);
             }
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicA) == retainedA);
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicB) == retainedB);
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicA, cacheScope) == retainedA);
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicB, cacheScope) == retainedB);
             {
-                ScopedProtocolCacheScope thirdRun(ProtocolCacheRole::Sender, identityService->allocate());
-                LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(ctx, count) != nullptr);
-                LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(ctx, count / 2) != nullptr);
+                const ProtocolCacheScope thirdRun(identityService->allocate(), ProtocolCacheRole::Sender);
+                LOGVOLE_REQUIRE_TRUE(sharedLhePublicANtt(ctx, count, thirdRun) != nullptr);
+                LOGVOLE_REQUIRE_TRUE(sharedLencPublicBNtt(ctx, count / 2, thirdRun) != nullptr);
             }
             LOGVOLE_REQUIRE_TRUE(oldA.expired() && oldB.expired());
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicA) == retainedA);
-            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicB) == retainedB);
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicA, cacheScope) == retainedA);
+            LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(ctx, *publicB, cacheScope) == retainedB);
         }
     }
 #else
@@ -3294,7 +3284,7 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP& cmd)
             n == 1024 ? 30 : n == 8192 ? 55 : 52);
         RingNttContext ctx{};
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx,
-            std::make_shared<RingContextFactory>(testAdvanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(testAdvanced, nullptr)));
         for (std::uint32_t count : { 1u, 4u, 32u }) checkCase(ctx, count, 3.2, 19.2, {});
         checkCase(ctx, 4, 0.0, 19.2, {});
         checkCase(ctx, 4, 3.2, 19.2, { 1, 0, 2, 0 });
@@ -3370,7 +3360,7 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
         }
         RingNttContext ctx;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx,
-            std::make_shared<RingContextFactory>(testAdvanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(testAdvanced, nullptr)));
         const std::size_t n = params.mPolyModulusDegree;
         for (std::uint32_t count : {1, 4, 32})
         for (double sigma : {0.0, 3.2})
@@ -3493,7 +3483,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
         auto advanced = testAdvanced;
         advanced.mAdvanced.mStreams.mDownloadSlotMiB = 1;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx,
-            std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(advanced, nullptr)));
         if (degree != 8192u)
         {
             // Check the expansion independently of the Gaussian generator,
@@ -3535,7 +3525,7 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                     selectedOptions.mAdvanced.mProtocol.mCompactPipelinedDownload = pipeline;
                     RingNttContext selected;
                     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, selected,
-                        std::make_shared<RingContextFactory>(selectedOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+                        std::make_shared<RingContextFactory>(selectedOptions, nullptr)));
                     std::vector<RnsPoly> hostOutput, residentOutput;
                     LOGVOLE_REQUIRE_TRUE(gpu::expandErrorCompactDevice(selected,
                         std::span<const std::uint64_t>(compactValues).first(std::size_t(count) * degree),
@@ -3757,14 +3747,14 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     const auto params = make_small_params();
     RingNttContext cpu;
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, cpu,
-        std::make_shared<RingContextFactory>(cpuOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+        std::make_shared<RingContextFactory>(cpuOptions, nullptr)));
     LOGVOLE_REQUIRE_FALSE(gpu::enabled(cpu));
     LOGVOLE_REQUIRE_FALSE(cpu.mGpuLightweight);
     LOGVOLE_REQUIRE_TRUE(rootProfiler(cpu) == nullptr);
     {
         auto options = cpuOptions;
         options.mAdvanced.mProtocol.mRootProfile = true;
-        auto factory = std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner());
+        auto factory = std::make_shared<RingContextFactory>(options, nullptr);
         std::weak_ptr<RingContextFactory> lifetime = factory;
         RingNttContext first, derived, independent;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, first, factory));
@@ -3772,7 +3762,7 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
         childParams.mPolyModulusDegree *= 2;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(childParams, derived, first.mFactoryOwner));
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, independent,
-            std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner())));
+            std::make_shared<RingContextFactory>(options, nullptr)));
         auto* profiler = rootProfiler(first);
         LOGVOLE_REQUIRE_TRUE(profiler != nullptr);
         LOGVOLE_REQUIRE_TRUE(rootProfiler(derived) == profiler);
@@ -3815,7 +3805,7 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     RingNttContext profiledCpu;
     const auto beforeProfiled = profileCount(hostProfiler(profiledCpu));
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, profiledCpu,
-        std::make_shared<RingContextFactory>(profiledOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+        std::make_shared<RingContextFactory>(profiledOptions, nullptr)));
     LOGVOLE_REQUIRE_TRUE(profileCount(hostProfiler(profiledCpu)) > beforeProfiled);
     LOGVOLE_REQUIRE_TRUE(hostProfiler(cpu) == nullptr);
     LOGVOLE_REQUIRE_TRUE(profiledCpu.mHostProfiler == profiledCpu.mFactory->hostProfilerOwner());
@@ -3826,7 +3816,7 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(child.mHostProfiler == profiledCpu.mHostProfiler);
     RingNttContext independent;
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, independent,
-        std::make_shared<RingContextFactory>(profiledOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+        std::make_shared<RingContextFactory>(profiledOptions, nullptr)));
     LOGVOLE_REQUIRE_TRUE(independent.mHostProfiler != profiledCpu.mHostProfiler);
     const auto independentBefore = profileCount(hostProfiler(independent));
     { HostStep step(hostProfiler(profiledCpu), "ownership test", 7); }
@@ -3834,7 +3824,7 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     const auto beforeDisabled = profileCount(hostProfiler(profiledCpu));
     RingNttContext quietCpu;
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, quietCpu,
-        std::make_shared<RingContextFactory>(cpuOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+        std::make_shared<RingContextFactory>(cpuOptions, nullptr)));
     LOGVOLE_REQUIRE_EQ(profileCount(hostProfiler(profiledCpu)), beforeDisabled);
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (!cmd.getOr("gpu", 0)) return;
@@ -3842,7 +3832,7 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     gpuOptions.mAdvanced.mHostStepProfile = true;
     RingNttContext device;
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, device,
-        std::make_shared<RingContextFactory>(gpuOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+        std::make_shared<RingContextFactory>(gpuOptions, nullptr)));
     LOGVOLE_REQUIRE_TRUE(gpu::enabled(device));
     LOGVOLE_REQUIRE_TRUE(device.mGpuLightweight);
     LOGVOLE_REQUIRE_TRUE(device.mHostProfiler == device.mGpuExecution->hostProfilerOwner());
@@ -3871,7 +3861,7 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     const auto beforeSecondCpu = profileCount(hostProfiler(profiledCpu));
     RingNttContext secondCpu;
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, secondCpu,
-        std::make_shared<RingContextFactory>(cpuOptions, currentProtocolCacheScope().mRunId.serviceOwner())));
+        std::make_shared<RingContextFactory>(cpuOptions, nullptr)));
     LOGVOLE_REQUIRE_FALSE(gpu::enabled(secondCpu));
     LOGVOLE_REQUIRE_EQ(profileCount(hostProfiler(profiledCpu)), beforeSecondCpu);
     LOGVOLE_REQUIRE_TRUE(gpu::enabled(device));

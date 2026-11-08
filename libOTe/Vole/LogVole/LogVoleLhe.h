@@ -16,15 +16,15 @@ namespace macoro { class thread_pool; }
 
 namespace osuCrypto::LogVole
 {
-    bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+    bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out, ProtocolCacheScopeView scope = {});
 
     // Setup states borrow immutable cached public data. The mutable builder
     // above continues to return an independent copy for existing callers.
     std::shared_ptr<const std::vector<RnsPoly>> sharedLhePublicANtt(
-        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {});
 
     std::shared_ptr<const gpu::RetainedPublicUniform> retainedLhePublicANtt(
-        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {});
 
     bool multiplyByGPower(
         const RingNttContext& ctx,
@@ -52,7 +52,7 @@ namespace osuCrypto::LogVole
         u32 requestedWorkers = 1,
         std::shared_ptr<const LazyRingTensorHostState>* deferredCiphertext = nullptr,
         std::shared_ptr<const LazyLencRandomizerState> randomizers = {},
-        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
 
     macoro::task<bool> lheEnc1Trunc(
         macoro::thread_pool& executor, std::span<u8> setupResults,
@@ -75,7 +75,7 @@ namespace osuCrypto::LogVole
         const LazyRootSecretHostState* rootSecretHost = nullptr,
         ProtocolCacheRunId rootSecretOwnerRunId = 0,
         bool topSecretDomain = false,
-        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
+        LogVoleGpuSetupOptions options = {}, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
 
     bool lheApplyCt1(
         const RingNttContext& ctx,
@@ -148,7 +148,7 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
         u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = {});
 
     // Consuming overload: reuses the ciphertext allocation for NTT-domain
     // decryption. The coefficient-domain special case keeps its existing path.
@@ -162,7 +162,7 @@ namespace osuCrypto::LogVole
         bool cipherInputIsNtt = false,
         bool outputNtt = false,
         u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = {});
 
     bool deriveSkx(
         const RingNttContext& ctx,

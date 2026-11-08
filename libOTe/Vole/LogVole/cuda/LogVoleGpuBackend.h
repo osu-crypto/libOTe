@@ -88,10 +88,10 @@ namespace osuCrypto::LogVole::gpu
     // fallbackService; defaults temporarily support unmigrated direct callers.
     bool selectSealCoeffModuliDevice(const RingParams& params,
         std::vector<u64>& orderedPrimes, std::shared_ptr<GpuSetupContext> execution = {},
-        const std::shared_ptr<const ProtocolCacheService>& fallbackService = currentProtocolCacheScope().mRunId.serviceOwner());
+        const std::shared_ptr<const ProtocolCacheService>& fallbackService = {});
     bool selectSealPlainModulusDevice(u32 n, u32 requestedBits, u64 minimumQ,
         u64& selectedPrime, u32& selectedBits, std::shared_ptr<GpuSetupContext> execution = {},
-        const std::shared_ptr<const ProtocolCacheService>& fallbackService = currentProtocolCacheScope().mRunId.serviceOwner());
+        const std::shared_ptr<const ProtocolCacheService>& fallbackService = {});
     class GpuRing;
     class GpuPlainNtt;
     struct NativeSealSetupBundle;
@@ -101,7 +101,7 @@ namespace osuCrypto::LogVole::gpu
     // output changes on decline; the caller publishes contexts after success.
     bool buildNativeSealSetupBundleDevice(const RingParams& params,
         u32 requestedPlaintextBits, NativeSealSetupBundle& out, std::shared_ptr<GpuSetupContext> execution = {},
-        ProtocolCacheScopeView scope = currentProtocolCacheScope());
+        ProtocolCacheScopeView scope = {});
     bool preparePlaintextLiftDevice(const GpuRing& ring, u64 plaintextPrime,
         AlignedUnVec<u64>& residues);
 
@@ -366,7 +366,7 @@ namespace osuCrypto::LogVole::gpu
         static std::shared_ptr<GpuRing> getRaw(
             const RingParams& params, std::span<const u64> orderedPrimes,
             const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution = {},
-            const std::shared_ptr<const ProtocolCacheService>& fallbackService = currentProtocolCacheScope().mRunId.serviceOwner());
+            const std::shared_ptr<const ProtocolCacheService>& fallbackService = {});
         // Publish an already certified native ring into the matching raw
         // role/mode lane. Existing sequential owners stay alive for borrowers.
         static bool publishRaw(const RingParams& params,
@@ -477,10 +477,10 @@ namespace osuCrypto::LogVole::gpu
         // Cached per (N, plaintext modulus). Returns null on failure.
         static std::shared_ptr<GpuPlainNtt> get(
             const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder,
-            const RingResourceScope& owner, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+            const RingResourceScope& owner, ProtocolCacheScopeView scope = {});
         // Builds the plaintext NTT and SEAL batching permutation on the device.
         static std::shared_ptr<GpuPlainNtt> getRaw(u32 degree, u64 plaintextPrime,
-            const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution = {}, ProtocolCacheScopeView scope = currentProtocolCacheScope());
+            const RingResourceScope& owner, std::shared_ptr<GpuSetupContext> execution = {}, ProtocolCacheScopeView scope = {});
         // Admit a fully sealed private native-bundle owner into the immutable
         // role-keyed raw table cache. Call only at the host context commit
         // boundary; no table construction or D2H occurs here.

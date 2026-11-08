@@ -2050,9 +2050,9 @@ namespace osuCrypto
     // ---- multiplication gates -------------------------------------------
 
     void ZkMulProver::prepare(
-        LogVole::ZkMulCircuit circuit, LogVole::CpuBenchmarkContext* benchmark)
+        LogVole::ZkMulCircuit circuit, LogVole::CpuBenchmarkContext* benchmark, ProtocolCacheScopeView configureScope)
     {
-        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, currentProtocolCacheScope().mRunId.serviceOwner());
+        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, configureScope.mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
@@ -2062,7 +2062,7 @@ namespace osuCrypto
         auto voleOptions = mVoleOptions;
         voleOptions.mRequestSize = mVoleRequest;
         mVole = decltype(mVole)(std::move(voleOptions),
-            std::make_shared<ZpContextFactory>(factory));
+            std::make_shared<ZpContextFactory>(factory), configureScope);
         mCpuBenchmark = benchmark ? benchmark : mVoleOptions.mCpuBenchmark;
         bool prepareCpu = true;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2210,16 +2210,13 @@ namespace osuCrypto
     }
 
     void ZkMulVerifier::prepare(
-        LogVole::ZkMulCircuit circuit, LogVole::CpuBenchmarkContext* benchmark)
+        LogVole::ZkMulCircuit circuit, LogVole::CpuBenchmarkContext* benchmark, ProtocolCacheScopeView configureScope)
     {
-        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, currentProtocolCacheScope().mRunId.serviceOwner());
+        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, configureScope.mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
 
-        LogVole::ScopedProtocolCacheScope cacheScope(
-            LogVole::ProtocolCacheRole::Sender,
-            LogVole::currentProtocolCacheScope().mRunId);
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (mUseDevice && LogVole::gpu::available() && circuit.mOperandsDevice &&
             circuit.mOperands.empty())
@@ -2246,7 +2243,7 @@ namespace osuCrypto
         auto voleOptions = mVoleOptions;
         voleOptions.mRequestSize = mVoleRequest;
         mVole = decltype(mVole)(std::move(voleOptions),
-            std::make_shared<ZpContextFactory>(factory));
+            std::make_shared<ZpContextFactory>(factory), configureScope);
         mCpuBenchmark = benchmark ? benchmark : mVoleOptions.mCpuBenchmark;
         bool prepareCpu = true;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2391,9 +2388,9 @@ namespace osuCrypto
     // ---- matrix multiplication ------------------------------------------
 
     void ZkMatMulProver::prepare(
-        LogVole::ZkMatMulStatement statement)
+        LogVole::ZkMatMulStatement statement, ProtocolCacheScopeView configureScope)
     {
-        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, currentProtocolCacheScope().mRunId.serviceOwner());
+        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, configureScope.mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
@@ -2405,7 +2402,7 @@ namespace osuCrypto
         auto voleOptions = mVoleOptions;
         voleOptions.mRequestSize = mVoleRequest;
         mVole = decltype(mVole)(std::move(voleOptions),
-            std::make_shared<ZpContextFactory>(factory));
+            std::make_shared<ZpContextFactory>(factory), configureScope);
         mMacs.resize(0);
         mDeviceState.reset();
         mCpuWorkspace = !mVoleOptions.mUseGpu
@@ -2514,9 +2511,9 @@ namespace osuCrypto
     }
 
     void ZkMatMulVerifier::prepare(
-        LogVole::ZkMatMulStatement statement)
+        LogVole::ZkMatMulStatement statement, ProtocolCacheScopeView configureScope)
     {
-        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, currentProtocolCacheScope().mRunId.serviceOwner());
+        auto factory = std::make_shared<RingContextFactory>(mVoleOptions, configureScope.mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
 #endif
@@ -2528,7 +2525,7 @@ namespace osuCrypto
         auto voleOptions = mVoleOptions;
         voleOptions.mRequestSize = mVoleRequest;
         mVole = decltype(mVole)(std::move(voleOptions),
-            std::make_shared<ZpContextFactory>(factory));
+            std::make_shared<ZpContextFactory>(factory), configureScope);
         mKeys.resize(0);
         mDeviceState.reset();
         mCpuWorkspace = !mVoleOptions.mUseGpu

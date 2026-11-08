@@ -8,17 +8,18 @@ namespace tests_libOTe::logvole_test
 {
     template<class T>
     T withAdvancedOptions(T input, const osuCrypto::LogVoleExecutionOptions& options,
-        osuCrypto::LogVole::ProtocolCacheRole role)
+        osuCrypto::LogVole::ProtocolCacheRole role,
+        osuCrypto::LogVole::ProtocolCacheScopeView callerScope = {})
     {
         using namespace osuCrypto::LogVole;
-        ScopedProtocolCacheScope scope(role, currentProtocolCacheScope().mRunId);
+        const ProtocolCacheScopeView scope{callerScope.mRunId, role};
         if constexpr (requires { input.mCrtFactoryOwner; })
         {
             ZpCrtContext context;
             const auto& params = input.mParams.mLogVole.mShrinkExpand;
             if (!makeZpCrtContext(params.mRing, params.mPlaintextModulusBits,
                     context, std::make_shared<ZpContextFactory>(
-                        std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()))))
+                        std::make_shared<RingContextFactory>(options, scope.mRunId.serviceOwner())), scope))
                 throw std::runtime_error("Failed to construct test CRT context");
             input.mCrtFactoryOwner = context.mFactoryOwner;
         }
@@ -32,7 +33,7 @@ namespace tests_libOTe::logvole_test
                     return input.mParams.mRing;
             }();
             if (!makeRingNttContext(ring, context,
-                    std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner())))
+                    std::make_shared<RingContextFactory>(options, scope.mRunId.serviceOwner()), scope))
                 throw std::runtime_error("Failed to construct test context");
             if constexpr (requires { input.mShrinkExpandState; })
                 input.mShrinkExpandState.mRingFactoryOwner = context.mFactoryOwner;

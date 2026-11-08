@@ -56,10 +56,8 @@ namespace osuCrypto::LogVole
                     return fn(0, tasks, benchmark);
                 }
                 auto locals = prepare(workers, 0, benchmark.mContext);
-                const auto cacheScope = currentProtocolCacheScope();
                 executor()->runBulkChunked(tasks, locals,
                     [&](std::size_t begin, std::size_t end, Local& local) {
-                        ScopedProtocolCacheScope scope(cacheScope);
                         FlushStats flush;
                         // The executor already accounts for this chunk.
                         CpuBenchmarkState worker{benchmark.mContext,
