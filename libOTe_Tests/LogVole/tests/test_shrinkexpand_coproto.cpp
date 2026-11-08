@@ -272,13 +272,35 @@ namespace
             co_await pool.schedule();
             co_await std::move(operation);
         };
-        auto onlineSockets = coproto::LocalAsyncSocket::makePair();
-        auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
-            sender.expand(executor, buffers, senderState, senderExpandInput, senderOutput, onlineSockets[0]),
-            onWorker(executor, receiver.expand(executor, receiverBuffers, lencBuffers,
-                receiverState, receiverExpandInput, receiverOutput, onlineSockets[1]))));
-        std::get<0>(onlineResult).result();
-        std::get<1>(onlineResult).result();
+        // Count the sender key derivation separately from its dyadic expansion.
+        // Repeat with a null selection on the same prepared resources.
+        RingOpsStats senderStats;
+        auto countedSender = senderState;
+        auto countedContext = std::make_shared<RingNttContext>(*senderState.mRingFactoryOwner);
+        countedContext->mExecutionOptions.mRingOpsStats = &senderStats;
+        countedSender.mRingFactoryOwner = countedContext;
+        auto flushWorker = [&]() -> macoro::task<> {
+            co_await executor.schedule();
+            flushRingOpsThreadLocalStats();
+        };
+        macoro::sync_wait(flushWorker());
+        flushRingOpsThreadLocalStats();
+        const auto legacyProducts = globalRingOpsStats.mMulCount.load();
+        for (bool collect : {true, false})
+        {
+            countedContext->mExecutionOptions.mRingOpsStats = collect ? &senderStats : nullptr;
+            auto onlineSockets = coproto::LocalAsyncSocket::makePair();
+            auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
+                sender.expand(executor, buffers, countedSender, senderExpandInput, senderOutput, onlineSockets[0]),
+                onWorker(executor, receiver.expand(executor, receiverBuffers, lencBuffers,
+                    receiverState, receiverExpandInput, receiverOutput, onlineSockets[1]))));
+            std::get<0>(onlineResult).result();
+            std::get<1>(onlineResult).result();
+            macoro::sync_wait(flushWorker());
+            flushRingOpsThreadLocalStats();
+            LOGVOLE_REQUIRE_EQ(senderStats.mMulCount.load(), senderState.mParams.mTau);
+            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mMulCount.load(), legacyProducts);
+        }
         checkMaskReuse();
         for (std::size_t i = 0; i < buffers.size(); ++i)
             LOGVOLE_REQUIRE_TRUE(buffers[i].mProduct.mCoeffs.data() == productAllocations[i]);

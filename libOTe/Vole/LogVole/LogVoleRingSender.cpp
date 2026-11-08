@@ -903,6 +903,9 @@ namespace osuCrypto::LogVole
                 throw std::runtime_error("LogVole sender could not build ring context");
             }
 
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             RnsPoly skX{};
             bool skxOk = false;
             if (state.mParams.mTruncateOneGadgetDigit)
@@ -914,7 +917,7 @@ namespace osuCrypto::LogVole
                     input.mTbkPrime,
                     state.mParams.mGadgetLogBase,
                     state.mParams.mTau,
-                    skX);
+                    skX, stats);
             }
             else
             {
@@ -925,7 +928,7 @@ namespace osuCrypto::LogVole
                     input.mTbkPrime,
                     state.mParams.mGadgetLogBase,
                     state.mParams.mTau,
-                    skX);
+                    skX, stats);
             }
             if (!skxOk)
             {

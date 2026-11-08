@@ -324,7 +324,7 @@ namespace osuCrypto::LogVole
     bool dyadicInnerProductNttInplace(
         std::span<const RnsPoly* const> left, std::span<const RnsPoly* const> right,
         RnsPoly& accumulator, const RingNttContext& ctx,
-        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        PendingRingOpsStats* stats = nullptr);
 
     bool dyadicMultiplyAddNttInplace(
         const RnsPoly& aNtt,
@@ -332,27 +332,27 @@ namespace osuCrypto::LogVole
         RnsPoly& cNtt,
         const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
-    bool ringAdd(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    bool ringAddInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    bool ringSub(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool ringAdd(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = nullptr);
+    bool ringAddInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, PendingRingOpsStats* stats = nullptr);
+    bool ringSub(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = nullptr);
     bool ringSubInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    bool ringMultiply(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    bool ringMultiplyInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    bool ringMultiplyScalar(const RnsPoly& a, u64 scalar, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    bool ringMultiplyScalarInplace(RnsPoly& a, u64 scalar, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool ringMultiply(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = nullptr);
+    bool ringMultiplyInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, PendingRingOpsStats* stats = nullptr);
+    bool ringMultiplyScalar(const RnsPoly& a, u64 scalar, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = nullptr);
+    bool ringMultiplyScalarInplace(RnsPoly& a, u64 scalar, const RingNttContext& ctx, PendingRingOpsStats* stats = nullptr);
 
     bool gadgetDecompose(
         const RnsPoly& poly,
         u32 base,
         u32 tau,
         const RingNttContext& ctx,
-        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = nullptr);
 
     bool gadgetRecompose(
         const std::vector<RnsPoly>& digits,
         u32 base,
         const RingNttContext& ctx,
-        RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        RnsPoly& out, PendingRingOpsStats* stats = nullptr);
 
     bool gadgetDecomposeBits(
         const RnsPoly& poly,
@@ -369,7 +369,7 @@ namespace osuCrypto::LogVole
         u32 levels,
         const RingNttContext& ctx,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = nullptr);
 
     bool gadgetDecomposeBitsRangeCentered(
         const RnsPoly& poly,
@@ -378,13 +378,13 @@ namespace osuCrypto::LogVole
         u32 levels,
         const RingNttContext& ctx,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = nullptr);
 
     bool gadgetRecomposeBits(
         const std::vector<RnsPoly>& digits,
         u32 digitBits,
         const RingNttContext& ctx,
-        RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        RnsPoly& out, PendingRingOpsStats* stats = nullptr);
 
     AlignedUnVec<u64> packRingBatch(const std::vector<RnsPoly>& polys);
     bool unpackRingBatch(
@@ -405,30 +405,30 @@ namespace osuCrypto::LogVole
         RingTensor& out,
         u32 requestedWorkers = 1);
 
-    RnsPoly deriveUniformPolyFromSeed(const RingNttContext& ctx, block seed, u64 domainTag, u32 index, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    RnsPoly deriveUniformPolyFromSeedNtt(const RingNttContext& ctx, block seed, u64 domainTag, u32 index, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    RnsPoly deriveUniformPolyFromSeed(const RingNttContext& ctx, block seed, u64 domainTag, u32 index, PendingRingOpsStats* stats = nullptr);
+    RnsPoly deriveUniformPolyFromSeedNtt(const RingNttContext& ctx, block seed, u64 domainTag, u32 index, PendingRingOpsStats* stats = nullptr);
     // Resample all coefficients, preserving existing CPU allocations where possible.
     void deriveUniformPolyBatchFromSeedInplace(
         const RingNttContext& ctx, block seed, u64 domainTag, u32 count,
-        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    RnsPoly sampleUniformPoly(const RingNttContext& ctx, PRNG& prng, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    RnsPoly sampleUniformPolyNtt(const RingNttContext& ctx, PRNG& prng, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = nullptr);
+    RnsPoly sampleUniformPoly(const RingNttContext& ctx, PRNG& prng, PendingRingOpsStats* stats = nullptr);
+    RnsPoly sampleUniformPolyNtt(const RingNttContext& ctx, PRNG& prng, PendingRingOpsStats* stats = nullptr);
     // Exactly the scalar sampler's seed order, including a device fallback.
     std::vector<RnsPoly> sampleUniformPolyBatch(const RingNttContext& ctx, u32 count, PRNG& prng,
-        ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
     // Selected private top HE key; same ordered SEAL draws as ordinary setup.
     // A device decline replays these rows exactly on the host.
     bool sampleTopSecretUniformBatch(const RingNttContext& ctx, u32 count,
         PRNG& prng, std::vector<RnsPoly>& eager,
         std::shared_ptr<gpu::DeviceBatch>& resident,
-        std::shared_ptr<const LazyRootSecretHostState>& lazy, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        std::shared_ptr<const LazyRootSecretHostState>& lazy, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
+    RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index, PendingRingOpsStats* stats = nullptr);
+    RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index, PendingRingOpsStats* stats = nullptr);
     std::vector<RnsPoly> deriveUniformPolyBatchFromSeed(
         const RingNttContext& ctx,
         block seed,
         u64 domainTag,
-        u32 count, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 count, PendingRingOpsStats* stats = nullptr);
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx,
         u64 nonce,
@@ -457,18 +457,18 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx,
         block seed,
         u64 domainTag,
-        u32 count, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 count, PendingRingOpsStats* stats = nullptr);
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonceNtt(
         const RingNttContext& ctx,
         u64 nonce,
         u64 domainTag,
-        u32 count, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 count, PendingRingOpsStats* stats = nullptr);
     std::vector<RnsPoly> deriveUniformPolyBatchFromSeedList(
         const RingNttContext& ctx,
         std::span<const block> seeds,
         u64 domainTag,
         u32 perSeedCount,
-        u32 requestedWorkers = 0, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 0, PendingRingOpsStats* stats = nullptr);
     bool deriveUniformPolyBatchFromSeedListInplace(
         const RingNttContext& ctx,
         std::span<const block> seeds,
@@ -481,14 +481,14 @@ namespace osuCrypto::LogVole
         std::span<const u64> nonces,
         u64 domainTag,
         u32 perNonceCount,
-        u32 requestedWorkers = 0, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 0, PendingRingOpsStats* stats = nullptr);
     bool deriveUniformPolyBatchFromNonceListInplace(
         const RingNttContext& ctx,
         std::span<const u64> nonces,
         u64 domainTag,
         u32 perNonceCount,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 0, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 0, PendingRingOpsStats* stats = nullptr);
 
     u64 combineSeedPublic(u64 value);
     u64 deriveDeterministicSeedMaterial(
@@ -536,7 +536,7 @@ namespace osuCrypto::LogVole
         double noiseStandardDeviation,
         double noiseMaxDeviation,
         PRNG& prng,
-        const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        const RingNttContext& ctx, PendingRingOpsStats* stats = nullptr);
 
     // Same error sampler with an already-drawn SEAL seed. Callers can draw
     // seeds in protocol order, then sample independent polynomials in parallel

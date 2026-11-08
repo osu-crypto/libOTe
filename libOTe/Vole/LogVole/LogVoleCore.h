@@ -640,7 +640,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         u32 tauHi,
         const RingParams& ring,
-        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = nullptr);
 
     bool seedLabelDenoiseTbm(
         const std::vector<RnsPoly>& tbmPrime,

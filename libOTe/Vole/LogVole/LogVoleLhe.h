@@ -21,7 +21,7 @@ namespace osuCrypto::LogVole
     // Setup states borrow immutable cached public data. The mutable builder
     // above continues to return an independent copy for existing callers.
     std::shared_ptr<const std::vector<RnsPoly>> sharedLhePublicANtt(
-        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     std::shared_ptr<const gpu::RetainedPublicUniform> retainedLhePublicANtt(
         const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
@@ -88,7 +88,7 @@ namespace osuCrypto::LogVole
         u32 tau,
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
-        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = nullptr);
 
     bool lheApplyCt1Trunc(
         const RingNttContext& ctx,
@@ -98,7 +98,7 @@ namespace osuCrypto::LogVole
         u32 tauHi,
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
-        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = nullptr);
 
     bool buildHashedCt2(
         const RingNttContext& ctx,
@@ -174,7 +174,7 @@ namespace osuCrypto::LogVole
         const RnsPoly& tbkPrime,
         u32 gadgetLogBase,
         u32 tau,
-        RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        RnsPoly& out, PendingRingOpsStats* stats = nullptr);
 
     bool deriveSkxTrunc(
         const RingNttContext& ctx,
@@ -183,5 +183,5 @@ namespace osuCrypto::LogVole
         const RnsPoly& tbkPrime,
         u32 gadgetLogBase,
         u32 tauHi,
-        RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        RnsPoly& out, PendingRingOpsStats* stats = nullptr);
 }

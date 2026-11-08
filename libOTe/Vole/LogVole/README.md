@@ -860,6 +860,38 @@ global timing fields, arithmetic and reusable storage. Sender seed-attempt
 counts provide deterministic ownership evidence without duration thresholds in
 the protocol checks. No benchmarks, GPU execution or WSL checks were run.
 
+The grouped public-statistics pass changes 37 default collector arguments in
+Ring/LHE/LENC/Core APIs to null. Omitting those arguments now disables counting;
+callers requesting totals supply an explicitly borrowed `PendingRingOpsStats*`.
+Every existing library caller of the initial 35 declarations already forwards
+its selection explicitly. Header/inline and frontend/example audits found no
+additional callers. The sender socket expansion round now forwards its selected
+collector through both full and truncated key derivation, closing the two
+remaining active CPU omissions in this batch. Its synchronous collector scope
+ends before the next suspension. GPU-selected execution retains its explicit
+legacy collector; no CUDA implementation, arithmetic, scheduling, PRNG order or
+buffer layout changes are included.
+The existing coproto fixture repeats full/truncated socket expansion with owned
+and null sender totals on reused resources. It checks the exact key-derivation
+multiplication contribution and unchanged legacy totals after caller/worker
+flushes; each fixture has one physical executor worker. Existing LHE/LENC legacy
+count assertions retain their internal explicit compatibility selection.
+No global declaration is removed: the inventory remains 23 and the overall
+estimate remains 92%. Public CPU compatibility is still incomplete: standalone
+key-derive processing/finalization, root inner-product and synchronous seed-search
+helpers, deprecated synchronous evaluation/decryption/expansion, and GPU setup/
+lazy-host fallbacks retain legacy defaults or internal selections. Standalone
+key-derive contexts have no supplied statistics owner yet; preserving their
+counts requires explicit boundary plumbing rather than silently disabling them.
+The ambient legacy worker scheduler and its blocking adapters remain separate
+debt. These public CPU surfaces prevent claiming complete CPU global/TLS removal.
+The single serialized Windows library/test/frontend-object build passes in
+308.97 seconds. Five focused coproto ownership/reuse and LHE/LENC legacy-count
+checks pass in 6.03 seconds; small two-query CPU interactive golden passes in
+3.86 seconds. No benchmarks, GPU execution or WSL checks were run. Next: group
+remaining standalone CPU diagnostic-boundary migration before another shared-
+header build, preserving explicit legacy selections at deferred GPU boundaries.
+
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their
    operation/resource owners. Retire `CpuRowScratch` scheduling and legacy

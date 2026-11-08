@@ -79,7 +79,7 @@ namespace osuCrypto::LogVole
         std::vector<std::vector<RnsPoly>> mNodeDecompNtt;
     };
 
-    std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     std::shared_ptr<const std::vector<RnsPoly>> sharedLencPublicBNtt(
         const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
@@ -140,7 +140,7 @@ namespace osuCrypto::LogVole
         bool emitRCoeffDomain = true,
         const std::vector<RnsPoly>* publicBNtt = nullptr,
         u32 requestedWorkers = 1,
-        bool deferCiphertextHost = false, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        bool deferCiphertextHost = false, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     bool lencDigest(
         const RingNttContext& ctx,
