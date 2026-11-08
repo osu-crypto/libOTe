@@ -2196,8 +2196,19 @@ void LogVole_Core_LazyIdentityContext(const oc::CLP& cmd)
     };
     SenderOfflineOutput output{};
     oc::PRNG prng(oc::block(712, 71));
-    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(osuCrypto::LogVole::detail::prepareSenderOfflineForTransport(
-        resources.executor, resources.results, input, prng, output, {}, sender)));
+    macoro::task<bool> pendingSetup;
+    {
+        ScopedProtocolCacheScope creation(sender);
+        pendingSetup = osuCrypto::LogVole::detail::prepareSenderOfflineForTransport(
+            resources.executor, resources.results, input, prng, output);
+    }
+    LOGVOLE_REQUIRE_TRUE(!output.mState.mShrinkExpandState.mRingFactoryOwner);
+    {
+        ScopedProtocolCacheScope ambient(receiver);
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(std::move(pendingSetup)));
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == receiver.mRunId);
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == receiver.mRole);
+    }
     auto& state = output.mState.mShrinkExpandState;
     LOGVOLE_REQUIRE_TRUE(state.mLazyS);
     {

@@ -1129,7 +1129,6 @@ namespace osuCrypto::LogVole
                                             CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;
-        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (cpuBenchmark.mContext)
         {
@@ -1161,11 +1160,9 @@ namespace osuCrypto::LogVole
             if (sigma > 0.0)
             {
                 {
-                    setupScopeGuard.reset();
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
                         executor, setupResults, compact, residentNoise, sigma, maxDeviation, seeds, ctx,
                         requestedWorkers, {}, cpuBenchmark, setupScope);
-                    setupScopeGuard.emplace(setupScope);
                     if (!setupOk) co_return false;
                 }
             }
@@ -1186,11 +1183,9 @@ namespace osuCrypto::LogVole
             }
             if (residentNoise)
             {
-                setupScopeGuard.reset();
                 const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
                     executor, setupResults, compact, residentNoise, sigma, maxDeviation, seeds, ctx,
                     requestedWorkers, {}, cpuBenchmark, setupScope);
-                setupScopeGuard.emplace(setupScope);
                 if (!setupOk) co_return false;
             }
             {
@@ -1206,7 +1201,6 @@ namespace osuCrypto::LogVole
                                                   ctx);
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                    ScopedProtocolCacheScope scope(setupScope);
                     CpuBenchmarkState worker =
                         chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -1228,9 +1222,7 @@ namespace osuCrypto::LogVole
                 if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
                 else if (taskCount)
                 {
-                    setupScopeGuard.reset();
                     co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                    setupScopeGuard.emplace(setupScope);
                 }
                 const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
                 if (!phaseOk || (outputNtt && !forwardNttBatch(next, ctx))) co_return false;
@@ -1270,10 +1262,8 @@ namespace osuCrypto::LogVole
                                             CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;
-        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         {
-            setupScopeGuard.reset();
             co_return co_await sampleRootErrorBatch(executor, setupResults, ctx, count, prng, sigma,
                                                        maxDeviation, outputNtt, out, 1, {}, cpuBenchmark, setupScope);
         }
@@ -1374,10 +1364,9 @@ namespace osuCrypto::LogVole
             macoro::thread_pool &executor, std::span<u8> setupResults, const RingNttContext &ctx, u32 count,
             PRNG &prng, double sigma, double clip, u32 workers,
             std::shared_ptr<const LazyRootErrorHostState> &hostState, gpu::DeviceBatchPtr &device,
-            CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope())
+            CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
         {
         if (setupResults.empty()) co_return false;
-            std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
             if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
             if (!count || !canSamplePolyErrorCompact(ctx, sigma, clip) || !ctx.mParams.mPolyModulusDegree ||
                 count > std::numeric_limits<std::size_t>::max() / ctx.mParams.mPolyModulusDegree)
@@ -1391,15 +1380,13 @@ namespace osuCrypto::LogVole
             if (sigma > 0.0)
             {
                 {
-                    setupScopeGuard.reset();
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(executor, setupResults, compact, resident, sigma,
                                                             clip, seeds, ctx, workers, {}, cpuBenchmark, setupScope);
-                    setupScopeGuard.emplace(setupScope);
                     if (!setupOk) co_return false;
                 }
             }
             else compact.resize(static_cast<std::size_t>(count) * ctx.mParams.mPolyModulusDegree, 0);
-            device = gpu::expandRootErrorCompactToBatch(ctx, compact, resident.get(), count, cpuBenchmark);
+            device = gpu::expandRootErrorCompactToBatch(ctx, compact, resident.get(), count, cpuBenchmark, setupScope);
             hostState = std::make_shared<SeededRootErrorHostState>(ctx, count,
                 sigma, clip, workers, std::move(seeds), std::move(compact),
                 std::move(resident));
@@ -1502,7 +1489,6 @@ namespace osuCrypto::LogVole
         LogVoleGpuSetupOptions options, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;
-        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         if (cpuBenchmark.mContext)
         {
@@ -1517,7 +1503,7 @@ namespace osuCrypto::LogVole
         const u32 leftWidth = static_cast<u32>(r1Count);
 #if defined(ENABLE_LOGVOLE_CUDA)
         const bool rootBatchValid = !rootR1Device || !gpu::enabled(ctx) ||
-            (rootR1Host && gpu::rootErrorBatchMatches(ctx, *rootR1Device, leftWidth));
+            (rootR1Host && gpu::rootErrorBatchMatches(ctx, *rootR1Device, leftWidth, setupScope));
 #else
         const bool rootBatchValid = !rootR1Device;
 #endif
@@ -1538,8 +1524,8 @@ namespace osuCrypto::LogVole
             const std::size_t fullCount = retainedPublicBFullNtt->count();
             if (!publicBRootNtt.empty() || fullCount < 4u || (fullCount & 1u) != 0 ||
                 fullCount / 2u - 1u >= std::numeric_limits<u32>::max() ||
-                !gpu::retainedPublicUniformMatches(ctx, *retainedPublicBFullNtt, fullCount, true) ||
-                retainedLencPublicBNtt(ctx, static_cast<u32>(fullCount / 2u)).get() != retainedPublicBFullNtt)
+                !gpu::retainedPublicUniformMatches(ctx, *retainedPublicBFullNtt, fullCount, true, setupScope) ||
+                retainedLencPublicBNtt(ctx, static_cast<u32>(fullCount / 2u), setupScope).get() != retainedPublicBFullNtt)
                 co_return false;
             tauHi = static_cast<u32>(fullCount / 2u - 1u);
         }
@@ -1549,7 +1535,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         const bool bStarOwnerValid = !retainedBStarNtt ||
             (publicBStarNtt.empty() && gpu::retainedRootBStarNttMatches(
-                ctx, *retainedBStarNtt, randomizer));
+                ctx, *retainedBStarNtt, randomizer, setupScope));
 #else
         const bool bStarOwnerValid = !retainedBStarNtt;
 #endif
@@ -1581,7 +1567,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> publicBStarFallback;
         const auto ensurePublicBRootHost = [&] {
             if (!retainedPublicBFullNtt || !publicBRootFallback.empty()) return true;
-            const auto full = sharedLencPublicBNtt(ctx, tauHi + 1u);
+            const auto full = sharedLencPublicBNtt(ctx, tauHi + 1u, setupScope);
             if (!full || full->size() != 2u * static_cast<std::size_t>(tauHi + 1u) ||
                 !validateRingBatchShape(*full, ctx.mParams)) return false;
             publicBRootFallback.assign(full->begin() + 1, full->begin() + 1 + tauHi);
@@ -1592,7 +1578,7 @@ namespace osuCrypto::LogVole
             HostStep fallbackStep(hostProfiler(ctx), "setup root: BStar exact host fallback", &cpuBenchmark);
             publicBStarFallback = deriveUniformPolyBatchFromNonce(
                 ctx, kRootBStarPublicNonce, kRootBStarPublicDomain,
-                randomizer, true);
+                randomizer, true, setupScope);
             return publicBStarFallback.size() == randomizer &&
                 validateRingBatchShape(publicBStarFallback, ctx.mParams);
         };
@@ -1631,11 +1617,9 @@ namespace osuCrypto::LogVole
                 noiseSeeds.resize(next.mPolys.size());
                 for (auto &seed : noiseSeeds) prng.get(seed.data(), seed.size());
                 {
-                    setupScopeGuard.reset();
                     const bool setupOk = co_await samplePolyErrorCompactBatchForSetup(
                         executor, setupResults, compact, residentNoise, noiseStandardDeviation,
                         noiseMaxDeviation, noiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
-                    setupScopeGuard.emplace(setupScope);
                     if (!setupOk) co_return false;
                 }
             }
@@ -1660,7 +1644,6 @@ namespace osuCrypto::LogVole
                                                 noiseSeeds[idx], ctx);
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                    ScopedProtocolCacheScope scope(setupScope);
                     CpuBenchmarkState worker =
                         chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -1682,9 +1665,7 @@ namespace osuCrypto::LogVole
                 if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
                 else if (taskCount)
                 {
-                    setupScopeGuard.reset();
                     co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                    setupScopeGuard.emplace(setupScope);
                 }
                 const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
                 if (!phaseOk) co_return false;
@@ -1710,7 +1691,6 @@ namespace osuCrypto::LogVole
                     return true;
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                    ScopedProtocolCacheScope scope(setupScope);
                     CpuBenchmarkState worker =
                         chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -1732,9 +1712,7 @@ namespace osuCrypto::LogVole
                 if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
                 else if (taskCount)
                 {
-                    setupScopeGuard.reset();
                     co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                    setupScopeGuard.emplace(setupScope);
                 }
                 const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
                 if (!phaseOk) co_return false;
@@ -1751,11 +1729,9 @@ namespace osuCrypto::LogVole
             if (options.mRootDeviceStrict || compactStrict) co_return false;
             if (residentNoise)
             {
-                setupScopeGuard.reset();
                 const bool setupOk = co_await materializePolyErrorCompactBatchForSetup(
                     executor, setupResults, compact, residentNoise, noiseStandardDeviation, noiseMaxDeviation,
                     compactNoiseSeeds, ctx, requestedWorkers, {}, cpuBenchmark, setupScope);
-                setupScopeGuard.emplace(setupScope);
                 if (!setupOk) co_return false;
             }
             // A declined device attempt preserves the exact sampled noise in
@@ -1775,7 +1751,6 @@ namespace osuCrypto::LogVole
                                                   next.mPolys[i], ctx);
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                    ScopedProtocolCacheScope scope(setupScope);
                     CpuBenchmarkState worker =
                         chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -1797,9 +1772,7 @@ namespace osuCrypto::LogVole
                 if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
                 else if (taskCount)
                 {
-                    setupScopeGuard.reset();
                     co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                    setupScopeGuard.emplace(setupScope);
                 }
                 const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
                 if (!phaseOk) co_return false;
@@ -1863,7 +1836,6 @@ namespace osuCrypto::LogVole
                 return true;
             };
             auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
-                ScopedProtocolCacheScope scope(setupScope);
                 CpuBenchmarkState worker =
                     chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                 CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
@@ -1885,9 +1857,7 @@ namespace osuCrypto::LogVole
             if (chunks.size() == 1) runChunk(0, taskCount, chunks[0]);
             else if (taskCount)
             {
-                setupScopeGuard.reset();
                 co_await macoro::bulk_chunked(executor, taskCount, chunks, runChunk);
-                setupScopeGuard.emplace(setupScope);
             }
             const bool phaseOk = std::all_of(chunks.begin(), chunks.end(), [](u8 ok) { return ok != 0; });
             if (!phaseOk) co_return false;
@@ -2301,7 +2271,6 @@ namespace osuCrypto::LogVole
                                                 ProtocolCacheScope setupScope)
     {
         if (setupResults.empty()) co_return false;
-        std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
         HostStep setupStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner),
                            "setup sender: root total", &cpuBenchmark);
         u32 tauHi = 0;
@@ -2331,7 +2300,7 @@ namespace osuCrypto::LogVole
         }
 
         RingNttContext ctx{};
-        if (!makeRingNttContext(se.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner))
+        if (!makeRingNttContext(se.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner, setupScope))
         {
             co_return false;
         }
@@ -2344,15 +2313,15 @@ namespace osuCrypto::LogVole
         if (residentTopSk1)
         {
             if (!gpu::topSecretUniformBatchMatches(ctx, *state.mShrinkExpandState.mTopSk1Device, tauHi,
-                                                   topOwnerRunId))
+                                                   topOwnerRunId, setupScope))
                 co_return false;
             const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mTopSk1Root;
             const bool strict = state.mParams.mShrinkExpand.mGpuSetup.mTopSecretConsumerStrict;
             if (!decline)
                 residentRootSkHi = gpu::rootHiReplicateResident(ctx,
-                    *state.mShrinkExpandState.mTopSk1Device, tauHi);
+                    *state.mShrinkExpandState.mTopSk1Device, tauHi, setupScope);
             if (residentRootSkHi &&
-                !gpu::rootHiRepBatchMatches(ctx, *residentRootSkHi, leftWidth, topOwnerRunId))
+                !gpu::rootHiRepBatchMatches(ctx, *residentRootSkHi, leftWidth, topOwnerRunId, setupScope))
                 co_return false;
             if (!residentRootSkHi && strict) co_return false;
             if (residentRootSkHi)
@@ -2379,10 +2348,10 @@ namespace osuCrypto::LogVole
         const bool retainRootPublicB = deferRandomizerHost &&
             state.mParams.mShrinkExpand.mGpuSetup.mRootPublicBToken;
         const auto retainedPublicBFullNtt = retainRootPublicB
-            ? retainedLencPublicBNtt(ctx, tauFull) : nullptr;
+            ? retainedLencPublicBNtt(ctx, tauFull, setupScope) : nullptr;
         const auto sharedPublicBFullNtt = retainedPublicBFullNtt
             ? std::shared_ptr<const std::vector<RnsPoly>>{}
-            : sharedLencPublicBNtt(ctx, tauFull);
+            : sharedLencPublicBNtt(ctx, tauFull, setupScope);
         if (!retainedPublicBFullNtt &&
             (!sharedPublicBFullNtt || sharedPublicBFullNtt->size() != static_cast<std::size_t>(2) * tauFull))
             co_return false;
@@ -2399,13 +2368,11 @@ namespace osuCrypto::LogVole
         const double lencMaxDev = rootNoiseMaxDeviation(lencSigma);
         LencEncodeOutput leftLenc{};
         {
-            setupScopeGuard.reset();
             const bool setupOk = co_await lencEncTrunc(
                 executor, setupResults, ctx, rootSkHi, tauHi, se.mGadgetLogBase, se.mPlaintextModulusBits,
                 prng, leftLenc, lencSigma, lencMaxDev, 0, false, true, sharedPublicBFullNtt.get(),
                 workerThreads, deferRandomizerHost, deferRandomizerHost, residentRootSkHi.get(),
                 lazyRootSkHi.get(), se.mGpuSetup, cpuBenchmark, setupScope);
-            setupScopeGuard.emplace(setupScope);
             if (!setupOk)
             {
                 co_return false;
@@ -2418,7 +2385,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         const bool bStarRequested = deferRandomizerHost && batchPublicB &&
             gpu::enabled(ctx) &&
-            currentProtocolCacheScope().mRole == ProtocolCacheRole::Sender &&
+            setupScope.mRole == ProtocolCacheRole::Sender &&
             state.mParams.mShrinkExpand.mGpuSetup.mRootBStarDevice;
         const bool bStarStrict =
             bStarRequested && state.mParams.mShrinkExpand.mGpuSetup.mRootBStarDeviceStrict;
@@ -2429,14 +2396,14 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (bStarRequested)
             {
-                retainedBStarNtt = gpu::retainRootBStarNttDevice(ctx, randomizer);
+                retainedBStarNtt = gpu::retainRootBStarNttDevice(ctx, randomizer, setupScope);
                 if (bStarStrict && !retainedBStarNtt) co_return false;
             }
             if (!retainedBStarNtt && batchPublicB && gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions))
             {
                 publicBStarNtt = deriveUniformPolyBatchFromNonce(
                     ctx, kRootBStarPublicNonce, kRootBStarPublicDomain,
-                    randomizer, true);
+                    randomizer, true, setupScope);
                 if (publicBStarNtt.size() != randomizer) co_return false;
             }
             else if (!retainedBStarNtt)
@@ -2467,28 +2434,24 @@ namespace osuCrypto::LogVole
         if (r1Eligible)
         {
             {
-                setupScopeGuard.reset();
                 const bool setupOk = co_await sampleRootErrorBatchResident(executor, setupResults, ctx, leftWidth, prng, lencSigma,
                                                  lencMaxDev, workerThreads, lazyR1, residentR1, cpuBenchmark, setupScope);
-                setupScopeGuard.emplace(setupScope);
                 if (!setupOk || (r1Strict && !residentR1)) co_return false;
             }
         }
         else
 #endif
         {
-            setupScopeGuard.reset();
             const bool setupOk = co_await sampleRootErrorBatch(executor, setupResults, ctx, leftWidth, prng,
                                                        lencSigma, lencMaxDev, false, r1, workerThreads,
                                                        state.mParams.mShrinkExpand.mGpuSetup, cpuBenchmark, setupScope);
-            setupScopeGuard.emplace(setupScope);
             if (!setupOk) co_return false;
         }
 
         std::vector<RnsPoly> skRRt;
         std::shared_ptr<const LazyRootSecretHostState> lazySkRRt;
         std::shared_ptr<gpu::DeviceBatch> residentSkRRt;
-        const ProtocolCacheRunId skRRtOwnerRunId = currentProtocolCacheScope().mRunId;
+        const ProtocolCacheRunId skRRtOwnerRunId = setupScope.mRunId;
         {
             HostStep step(hostProfiler(ctx), "setup sender: root skRRt sampling", &cpuBenchmark);
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2501,7 +2464,7 @@ namespace osuCrypto::LogVole
                 std::vector<seal::prng_seed_type> rowSeeds(tauHi);
                 // One SEAL seed per row, in exactly the old sampler order.
                 for (auto &seed : rowSeeds) prng.get(seed.data(), seed.size());
-                residentSkRRt = gpu::sampleRootSecretUniformToDevice(ctx, rowSeeds);
+                residentSkRRt = gpu::sampleRootSecretUniformToDevice(ctx, rowSeeds, setupScope);
                 lazySkRRt = std::make_shared<SeededRootSecretHostState>(ctx, std::move(rowSeeds));
                 if (!residentSkRRt)
                 {
@@ -2512,10 +2475,10 @@ namespace osuCrypto::LogVole
             else
             {
                 if (skStrict) co_return false;
-                skRRt = sampleUniformBatch(ctx, tauHi, prng);
+                skRRt = sampleUniformBatch(ctx, tauHi, prng, setupScope);
             }
 #else
-            skRRt = sampleUniformBatch(ctx, tauHi, prng);
+            skRRt = sampleUniformBatch(ctx, tauHi, prng, setupScope);
 #endif
         }
         if ((residentSkRRt && (!lazySkRRt || lazySkRRt->count() != tauHi || !lazySkRRt->matches(se.mRing))) ||
@@ -2530,13 +2493,11 @@ namespace osuCrypto::LogVole
         RingTensor ctR{};
         std::shared_ptr<const LazyRingTensorHostState> lazyCtR;
         {
-            setupScopeGuard.reset();
             const bool setupOk = co_await lheEnc1Trunc(
                 executor, setupResults, ctx, r1, skRRt, se.mGadgetLogBase, ctR, lheSigma, lheMaxDev, &prng,
                 false, nullptr, workerThreads, deferRandomizerHost ? &lazyCtR : nullptr, {}, residentR1.get(),
                 lazyR1.get(), residentSkRRt.get(), residentSkRRt ? lazySkRRt.get() : nullptr, skRRtOwnerRunId,
                 false, se.mGpuSetup, cpuBenchmark, setupScope);
-            setupScopeGuard.emplace(setupScope);
             if (!setupOk)
             {
                 co_return false;
@@ -2546,14 +2507,12 @@ namespace osuCrypto::LogVole
         RingTensor topCt{};
         std::shared_ptr<const LazyRingTensorHostState> lazyTopCt;
         {
-            setupScopeGuard.reset();
             const bool setupOk = co_await buildRootTopCt(
                 executor, setupResults, ctx, r1, leftLenc.mRNtt, publicBRootNtt, publicBStarNtt,
                 se.mGadgetLogBase, 1, prng, lencSigma, lencMaxDev, topCt, workerThreads,
                 leftLenc.mLazyRandomizers, deferRandomizerHost ? &lazyTopCt : nullptr,
                 retainedPublicBFullNtt.get(), residentR1.get(), lazyR1.get(), retainedBStarNtt.get(),
                 state.mParams.mShrinkExpand.mGpuSetup, cpuBenchmark, setupScope);
-            setupScopeGuard.emplace(setupScope);
             if (!setupOk)
             {
                 co_return false;
@@ -2568,13 +2527,13 @@ namespace osuCrypto::LogVole
             // batch on the GPU; no host-to-device return trip remains.
             HostStep wireStep(hostProfiler(ctx), "setup sender: root BStar wire materialization",
                               &cpuBenchmark);
-            if (!gpu::retainedRootBStarNttMatches(ctx, *retainedBStarNtt, randomizer) ||
-                !gpu::fetchRetainedPublicUniform(*retainedBStarNtt, publicBStarNtt, gpu::contextStream(ctx)))
+            if (!gpu::retainedRootBStarNttMatches(ctx, *retainedBStarNtt, randomizer, setupScope) ||
+                !gpu::fetchRetainedPublicUniform(*retainedBStarNtt, publicBStarNtt, gpu::contextStream(ctx), setupScope))
             {
                 if (bStarStrict) co_return false;
                 publicBStarNtt = deriveUniformPolyBatchFromNonce(
                     ctx, kRootBStarPublicNonce, kRootBStarPublicDomain,
-                    randomizer, true);
+                    randomizer, true, setupScope);
             }
             if (publicBStarNtt.size() != randomizer || !validateRingBatchShape(publicBStarNtt, se.mRing))
                 co_return false;
@@ -4740,11 +4699,9 @@ namespace osuCrypto::LogVole
                                                     SenderState &state, OfflineMessage &message, bool isTopLevel,
                                                     const ShrinkExpandSenderState *reusableInternalState,
                                                     bool encodeTransportMessages,
-                                                    CpuBenchmarkState cpuBenchmark = {},
-                                                    ProtocolCacheScope setupScope = currentProtocolCacheScope())
+                                                    CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
         {
         if (setupResults.empty()) co_return false;
-            std::optional<ScopedProtocolCacheScope> setupScopeGuard(std::in_place, setupScope);
             u32 tauHi = 0;
             u32 muHi = 0;
             const u32 rho = static_cast<u32>(input.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
@@ -4771,7 +4728,7 @@ namespace osuCrypto::LogVole
             if (!ringOwner)
             {
                 RingNttContext math;
-                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, math)) co_return false;
+                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, math, std::shared_ptr<RingContextFactory>{}, setupScope)) co_return false;
                 ringOwner = std::move(math.mFactoryOwner);
             }
             auto execution = input.mGpuExecution;
@@ -4785,7 +4742,7 @@ namespace osuCrypto::LogVole
             std::vector<RnsPoly> eagerSk1 = input.mSk1;
             std::shared_ptr<gpu::DeviceBatch> residentS;
             std::shared_ptr<const LazySeedLabelHostState> lazyS;
-            const ProtocolCacheRunId deltaOwnerRunId = currentProtocolCacheScope().mRunId;
+            const ProtocolCacheRunId deltaOwnerRunId = setupScope.mRunId;
     #if defined(ENABLE_LOGVOLE_CUDA)
             RingNttContext deltaCtx{};
             const bool chainDecline = ringOwner->mExecutionOptions.mAdvanced.mProtocol.mFailures.mDeltaChain;
@@ -4794,18 +4751,18 @@ namespace osuCrypto::LogVole
             const bool chainStrict = chainRequested && input.mParams.mShrinkExpand.mGpuSetup.mDeltaChainStrict;
             if (internalWrappedDelta)
             {
-                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, deltaCtx, ringOwner) ||
+                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, deltaCtx, ringOwner, setupScope) ||
                     !gpu::bindContextExecution(deltaCtx, execution) ||
-                    !gpu::setupDeltaBatchMatches(deltaCtx, *input.mWrappedDeltaDevice, 1u, deltaOwnerRunId))
+                    !gpu::setupDeltaBatchMatches(deltaCtx, *input.mWrappedDeltaDevice, 1u, deltaOwnerRunId, setupScope))
                     co_return false;
             }
             if (internalTopSecret)
             {
-                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, deltaCtx, ringOwner) ||
+                if (!makeRingNttContext(input.mParams.mShrinkExpand.mRing, deltaCtx, ringOwner, setupScope) ||
                     !gpu::bindContextExecution(deltaCtx, execution) ||
                     input.mSenderOwnerRunId != deltaOwnerRunId || input.mLazyTopSk1->count() != tauHi ||
                     !input.mLazyTopSk1->matches(deltaCtx.mParams) ||
-                    !gpu::topSecretUniformBatchMatches(deltaCtx, *input.mTopSk1Device, tauHi, deltaOwnerRunId))
+                    !gpu::topSecretUniformBatchMatches(deltaCtx, *input.mTopSk1Device, tauHi, deltaOwnerRunId, setupScope))
                     co_return false;
                 const bool topRepDecline = deltaCtx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mTopSk1Rep;
                 const bool topStrict = input.mParams.mShrinkExpand.mGpuSetup.mTopSecretConsumerStrict;
@@ -4814,11 +4771,11 @@ namespace osuCrypto::LogVole
                 if (topRepRequested && (!topRepDecline))
                     residentS = gpu::topSecretSeedLabelRepResident(deltaCtx,
                         *input.mTopSk1Device,
-                        input.mParams.mShrinkExpand.mAlpha, tauHi);
+                        input.mParams.mShrinkExpand.mAlpha, tauHi, setupScope);
                 const std::size_t expected = static_cast<std::size_t>(
                     input.mParams.mShrinkExpand.mAlpha) * tauHi * rho;
                 if (residentS &&
-                    !gpu::setupSeedLabelRepBatchMatches(deltaCtx, *residentS, expected, deltaOwnerRunId))
+                    !gpu::setupSeedLabelRepBatchMatches(deltaCtx, *residentS, expected, deltaOwnerRunId, setupScope))
                     co_return false;
                 if (!residentS && topRepRequested && topStrict) co_return false;
                 if (residentS)
@@ -4832,11 +4789,11 @@ namespace osuCrypto::LogVole
                 residentS = gpu::seedLabelRepResident(deltaCtx,
                     *input.mWrappedDeltaDevice, input.mParams.mGamma,
                     input.mParams.mShrinkExpand.mAlpha,
-                    tauHi);
+                    tauHi, setupScope);
                 const std::size_t expected = static_cast<std::size_t>(
                     input.mParams.mShrinkExpand.mAlpha) * tauHi * rho;
                 if (residentS &&
-                    !gpu::setupSeedLabelRepBatchMatches(deltaCtx, *residentS, expected, deltaOwnerRunId))
+                    !gpu::setupSeedLabelRepBatchMatches(deltaCtx, *residentS, expected, deltaOwnerRunId, setupScope))
                     co_return false;
                 if (chainStrict && !residentS) co_return false;
                 if (residentS)
@@ -4919,10 +4876,8 @@ namespace osuCrypto::LogVole
                 if (encodeTransportMessages)
                 {
                     {
-                        setupScopeGuard.reset();
                         const bool setupOk = co_await prepareShrinkExpandSenderOffline(executor, setupResults, seInput,
                                                                                prng, seState, cpuBenchmark, setupScope);
-                        setupScopeGuard.emplace(setupScope);
                         if (!setupOk) co_return false;
                     }
                     nextMessage.mEncodedShrinkExpandMessage =
@@ -4931,10 +4886,8 @@ namespace osuCrypto::LogVole
                 else
                 {
                     {
-                        setupScopeGuard.reset();
                         const bool setupOk = co_await prepareShrinkExpandSenderOffline(
                             executor, setupResults, seInput, prng, seMessage, seState, cpuBenchmark, setupScope);
-                        setupScopeGuard.emplace(setupScope);
                         if (!setupOk) co_return false;
                     }
                     nextMessage.mShrinkExpandMessage = std::move(seMessage);
@@ -4950,7 +4903,7 @@ namespace osuCrypto::LogVole
                 HostStep hostStep(hostProfiler(deltaCtx), "setup sender: wrapped delta public host view",
                                   &cpuBenchmark);
                 std::vector<RnsPoly> exact;
-                if (gpu::setupDeltaBatchMatches(deltaCtx, *input.mWrappedDeltaDevice, 1u, deltaOwnerRunId) &&
+                if (gpu::setupDeltaBatchMatches(deltaCtx, *input.mWrappedDeltaDevice, 1u, deltaOwnerRunId, setupScope) &&
                     gpu::download(*input.mWrappedDeltaDevice, exact, gpu::contextStream(deltaCtx), 1u) &&
                     exact.size() == 1u && validateRingPolyShape(exact[0], deltaCtx.mParams))
                     eagerSk1 = std::move(exact);
@@ -4989,10 +4942,8 @@ namespace osuCrypto::LogVole
                 }
                 else
                 {
-                    setupScopeGuard.reset();
                     const bool setupOk = co_await prepareRootOfflineSender(executor, setupResults, nextState, prng,
                                                  nextMessage.mRootMessage, encodeTransportMessages, cpuBenchmark, setupScope);
-                    setupScopeGuard.emplace(setupScope);
                     if (!setupOk)
                     {
                         co_return false;
@@ -5028,11 +4979,9 @@ namespace osuCrypto::LogVole
                 auto childMessage = std::make_unique<OfflineMessage>();
                 auto childState = std::make_unique<SenderState>();
                 {
-                    setupScopeGuard.reset();
                     const bool setupOk = co_await prepareSenderOfflineImpl(
                         executor, setupResults, childInput, prng, *childState, *childMessage, false,
                         childReusableState, encodeTransportMessages, cpuBenchmark, setupScope);
-                    setupScopeGuard.emplace(setupScope);
                     if (!setupOk)
                     {
                         co_return false;
