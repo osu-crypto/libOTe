@@ -1245,7 +1245,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         std::vector<RnsPoly>& out,
         bool outputNtt,
-        u32 requestedWorkers, ProtocolCacheScopeView scope)
+        u32 requestedWorkers, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
         if (x.size() != mu)
         {
@@ -1253,12 +1253,12 @@ namespace osuCrypto::LogVole
         }
 
         DigestTree tree{};
-        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, tree, lacct.mWidthPadded, nullptr, requestedWorkers, scope))
+        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, tree, lacct.mWidthPadded, nullptr, requestedWorkers, scope, stats))
         {
             return false;
         }
 
-        return lencEval(ctx, lacct, tree, mu, tau, gadgetLogBase, out, outputNtt, requestedWorkers);
+        return lencEval(ctx, lacct, tree, mu, tau, gadgetLogBase, out, outputNtt, requestedWorkers, stats);
     }
 
     bool lencEval(
@@ -1270,7 +1270,7 @@ namespace osuCrypto::LogVole
         u32,
         std::vector<RnsPoly>& out,
         bool outputNtt,
-        u32)
+        u32, PendingRingOpsStats* stats)
     {
         if (mu == 0 || tau == 0 || lacct.mWidthPadded == 0)
         {
@@ -1323,7 +1323,7 @@ namespace osuCrypto::LogVole
                     const auto& ctPolyLNtt =
                         lacct.mCt.mPolys[ringTensorIndex(lacct.mCt, static_cast<u32>(row), c)];
                     const auto& nodePolyLNtt = tree.mNodeDecompNtt[left][c];
-                    if (!dyadicMultiplyAddNttInplace(ctPolyLNtt, nodePolyLNtt, accNtt, ctx))
+                    if (!dyadicMultiplyAddNttInplace(ctPolyLNtt, nodePolyLNtt, accNtt, ctx, stats))
                     {
                         return false;
                     }
@@ -1331,7 +1331,7 @@ namespace osuCrypto::LogVole
                     const auto& ctPolyRNtt =
                         lacct.mCt.mPolys[ringTensorIndex(lacct.mCt, static_cast<u32>(row), tau + c)];
                     const auto& nodePolyRNtt = tree.mNodeDecompNtt[right][c];
-                    if (!dyadicMultiplyAddNttInplace(ctPolyRNtt, nodePolyRNtt, accNtt, ctx))
+                    if (!dyadicMultiplyAddNttInplace(ctPolyRNtt, nodePolyRNtt, accNtt, ctx, stats))
                     {
                         return false;
                     }
@@ -1341,7 +1341,7 @@ namespace osuCrypto::LogVole
                 parent = (bit == 0) ? left : right;
             }
 
-            if (!outputNtt && !inverseNtt(accNtt, ctx))
+            if (!outputNtt && !inverseNtt(accNtt, ctx, stats))
             {
                 return false;
             }

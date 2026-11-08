@@ -653,7 +653,10 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
-            out = sampleUniformPoly(ctx, prng);
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            out = sampleUniformPoly(ctx, prng, stats);
             return true;
         }
 
@@ -661,7 +664,7 @@ namespace osuCrypto::LogVole
             const RingNttContext& ctx,
             const std::vector<RnsPoly>& input,
             u32 tauHi,
-            RnsPoly& out, CpuBenchmarkState cpuBenchmark = {})
+            RnsPoly& out, CpuBenchmarkState cpuBenchmark = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
         {
             if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -690,7 +693,7 @@ namespace osuCrypto::LogVole
             }
 
             std::vector<RnsPoly> aggregated;
-            if (!seedLabelAgg(denoised, 1, tauHi, ctx.mParams, aggregated) ||
+            if (!seedLabelAgg(denoised, 1, tauHi, ctx.mParams, aggregated, stats) ||
                 aggregated.size() != 1)
             {
                 return false;
@@ -942,7 +945,7 @@ namespace osuCrypto::LogVole
             const RnsPoly& yLeft,
             const std::vector<RnsPoly>& zeta,
             const std::vector<RnsPoly>& cachedInputsNtt,
-            std::vector<RnsPoly>& out)
+            std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
         {
             // Socket setup keeps TopCt in the independently owned received
             // frame until a declined GPU path actually needs host polynomials.
@@ -978,7 +981,7 @@ namespace osuCrypto::LogVole
                         tauHi,
                         ctx,
                         yDecomp,
-                        state.mShrinkExpandState.mParams.mNumWorkerThreads))
+                        state.mShrinkExpandState.mParams.mNumWorkerThreads, stats))
                 {
                     return false;
                 }
@@ -994,7 +997,7 @@ namespace osuCrypto::LogVole
                 }
                 // yDecomp and zeta concatenated. All independent, so batch them into
                 // one dispatch instead of a transform per polynomial.
-                if (!forwardNttBatch(owned, ctx))
+                if (!forwardNttBatch(owned, ctx, stats))
                 {
                     return false;
                 }
@@ -1010,7 +1013,7 @@ namespace osuCrypto::LogVole
                 for (u32 col = 0; col < topCt.mCols; ++col)
                 {
                     const auto& ctPoly = topCt.mPolys[ringTensorIndex(topCt, row, col)];
-                    if (!dyadicMultiplyAddNttInplace(ctPoly, inputs[col], acc, ctx))
+                    if (!dyadicMultiplyAddNttInplace(ctPoly, inputs[col], acc, ctx, stats))
                     {
                         return false;
                     }
@@ -3321,7 +3324,10 @@ namespace osuCrypto::LogVole
         ro.Final(reinterpret_cast<u8*>(seed.data()));
         // Rejection sampling through the existing SEAL sampler, without a
         // biased reduction of hash words modulo the RNS primes.
-        auto skPrime = sampleUniformPolyFromSeed(ctx, seed);
+        PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+        auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+            (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+        auto skPrime = sampleUniformPolyFromSeed(ctx, seed, stats);
         if (!validateRingPolyShape(skPrime, ctx.mParams)) return false;
         RootResponseMessage next{};
         next.mSkPrimeCoeffs = std::move(skPrime.mCoeffs);
@@ -3377,6 +3383,9 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+        auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+            (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto residentSkCoeffs =
             std::static_pointer_cast<gpu::DeviceBatch>(state.mRootSkRRtDevice);
@@ -3487,8 +3496,8 @@ namespace osuCrypto::LogVole
                 RnsPoly inner{};
                 const auto zero = makeZeroPoly(ctx.mParams);
                 if (!deriveSkxTrunc(ctx, hostSk, dPrime, zero,
-                        state.mParams.mShrinkExpand.mGadgetLogBase, tauHi, inner) ||
-                    !ringSub(skPrime, inner, ctx, kPrime)) return false;
+                        state.mParams.mShrinkExpand.mGadgetLogBase, tauHi, inner, stats) ||
+                    !ringSub(skPrime, inner, ctx, kPrime, stats)) return false;
                 skxDone = true;
             }
             if (!skxDone &&
@@ -3500,7 +3509,7 @@ namespace osuCrypto::LogVole
                     kPrime,
                     state.mParams.mShrinkExpand.mGadgetLogBase,
                     tauHi,
-                    skPrime))
+                    skPrime, stats))
             {
                 return false;
             }
@@ -5415,16 +5424,22 @@ namespace osuCrypto::LogVole
                 std::vector<RnsPoly> rootCiphertext;
                 std::shared_ptr<const std::vector<RnsPoly>> publicA;
                 {
+                    PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                    auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
                     if (!buildHashedCt2(ctx, leftWidth, seed, state.mParams.mSessionId,
-                            *state.mRootDPrimeRt, 0, rootCiphertext)) co_return false;
-                    publicA = sharedLhePublicANtt(ctx, leftWidth, cacheScope);
+                            *state.mRootDPrimeRt, 0, rootCiphertext, stats)) co_return false;
+                    publicA = sharedLhePublicANtt(ctx, leftWidth, cacheScope, stats);
                 }
                 if (!publicA || !co_await lheDec(executor, buffers, ctx, rootCiphertext,
                         *state.mRootKPrimeRt, *publicA, LheDomain::Coefficient, cpuBenchmark))
                     co_return false;
                 RnsPoly rootKey;
-                if (!denoiseAndAggRootKey(ctx, rootCiphertext, tauHi, rootKey, cpuBenchmark))
-                    co_return false;
+                {
+                    PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                    auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                    if (!denoiseAndAggRootKey(ctx, rootCiphertext, tauHi, rootKey, cpuBenchmark, stats))
+                        co_return false;
+                }
                 ShrinkExpandExpandSenderInput input;
                 assignRange(input.mSeed, seed.begin(), seed.end());
                 input.mSid = state.mParams.mSessionId;
@@ -5461,9 +5476,13 @@ namespace osuCrypto::LogVole
             if (!chunks || !digest || !resolveRootMaskDigestHash(state)) co_return false;
             std::vector<RnsPoly> denoised, keys;
             if (!co_await shrinkExpandDenoiseComb(executor, allowance, ctx, child.mTbk,
-                    denoised, cpuBenchmark) ||
-                !seedLabelAgg(std::move(denoised), chunks, tauHi, ctx.mParams, keys) ||
-                keys.size() != chunks) co_return false;
+                    denoised, cpuBenchmark)) co_return false;
+            {
+                PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                if (!seedLabelAgg(std::move(denoised), chunks, tauHi, ctx.mParams, keys, stats) ||
+                    keys.size() != chunks) co_return false;
+            }
             const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
             const auto workers = state.mShrinkExpandState.mParams.mNumWorkerThreads;
             const bool early = !publicSeed && state.mParams.mEarlyGoldenCheck && workers >= 1 && workers <= 4;
@@ -5862,7 +5881,7 @@ namespace osuCrypto::LogVole
     static bool applyRootResponseCtR(
         const ReceiverState& state, const RootDigestState& digestState,
         const RingNttContext& ctx, u32 tauHi, std::vector<RnsPoly>& ctRApplied,
-        CpuBenchmarkState cpuBenchmark)
+        CpuBenchmarkState cpuBenchmark, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
     {
         {
             RootStep step("final: lheApplyCt1Trunc", rootProfiler(ctx));
@@ -5880,7 +5899,7 @@ namespace osuCrypto::LogVole
                     tauHi,
                     ctRApplied,
                     true,
-                    state.mShrinkExpandState.mParams.mNumWorkerThreads))
+                    state.mShrinkExpandState.mParams.mNumWorkerThreads, stats))
             {
                 return false;
             }
@@ -5892,7 +5911,7 @@ namespace osuCrypto::LogVole
         const ReceiverState& state, const RootDigestState& digestState,
         const RingNttContext& ctx, u32 tauHi, u32 replayWorkers,
         std::vector<RnsPoly>& topEvalNtt,
-        CpuBenchmarkState cpuBenchmark)
+        CpuBenchmarkState cpuBenchmark, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
     {
         std::vector<RnsPoly> replayedZeta;
         const std::vector<RnsPoly>* hostZeta = &digestState.mZeta;
@@ -5930,7 +5949,7 @@ namespace osuCrypto::LogVole
             RootStep step("final: evalRootTopCtNtt", rootProfiler(ctx));
             if (!evalRootTopCtNtt(
                     state, ctx, digestState.mYLeft, *hostZeta, *hostTopInputs,
-                    topEvalNtt))
+                    topEvalNtt, stats))
             {
                 return false;
             }
@@ -5942,7 +5961,8 @@ namespace osuCrypto::LogVole
         ReceiverState& state, const RootDigestState& digestState,
         const RingNttContext& ctx, u32 tauHi, u32 leftWidth, AlignedUnVec<u8>& ct2Seed,
         std::vector<RnsPoly>& decPartialNtt, std::vector<RnsPoly>& topEvalNtt,
-        const std::vector<RnsPoly>& leftEvalNtt, RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark)
+        const std::vector<RnsPoly>& leftEvalNtt, RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark,
+        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
     {
         std::vector<RnsPoly> ctK;
         {
@@ -5954,7 +5974,7 @@ namespace osuCrypto::LogVole
                     state.mParams.mSessionId,
                     digestState.mDPrime,
                     0,
-                    ctK))
+                    ctK, stats))
             {
                 return false;
             }
@@ -5981,8 +6001,8 @@ namespace osuCrypto::LogVole
             {
                 RnsPoly phiNtt = std::move(topEvalNtt[row]);
                 RnsPoly tbmNtt = std::move(decPartialNtt[row]);
-                if (!ringAddInplace(phiNtt, leftEvalNtt[row], ctx) ||
-                    !ringSubInplace(tbmNtt, phiNtt, ctx))
+                if (!ringAddInplace(phiNtt, leftEvalNtt[row], ctx, stats) ||
+                    !ringSubInplace(tbmNtt, phiNtt, ctx, stats))
                 {
                     return false;
                 }
@@ -5992,7 +6012,7 @@ namespace osuCrypto::LogVole
 
         {
             RootStep step("final: inverseNttBatch", rootProfiler(ctx));
-            if (!inverseNttBatch(tbmVec, ctx))
+            if (!inverseNttBatch(tbmVec, ctx, stats))
             {
                 return false;
             }
@@ -6002,7 +6022,7 @@ namespace osuCrypto::LogVole
             RootStep step("final: add ctK", rootProfiler(ctx));
             for (u32 row = 0; row < leftWidth; ++row)
             {
-                if (!ringAddInplace(tbmVec[row], ctK[row], ctx))
+                if (!ringAddInplace(tbmVec[row], ctK[row], ctx, stats))
                 {
                     return false;
                 }
@@ -6011,7 +6031,7 @@ namespace osuCrypto::LogVole
 
         state.mGoldenSeed = std::move(ct2Seed);
         RootStep step("final: denoiseAndAgg", rootProfiler(ctx));
-        return denoiseAndAggRootKey(ctx, tbmVec, tauHi, rootKey, cpuBenchmark);
+        return denoiseAndAggRootKey(ctx, tbmVec, tauHi, rootKey, cpuBenchmark, stats);
     }
 
     static bool finalizeRootResponseReceiverImpl(
@@ -6224,9 +6244,11 @@ namespace osuCrypto::LogVole
                 !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner, cacheScope))
                 co_return false;
             skPrime.mCoeffs = std::move(response.mSkPrimeCoeffs);
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
             if (!applyRootResponseCtR(state, digestState, ctx, tauHi,
-                    decPartialNtt, cpuBenchmark)) co_return false;
-            publicA = sharedLhePublicANtt(ctx, leftWidth, cacheScope);
+                    decPartialNtt, cpuBenchmark, stats)) co_return false;
+            publicA = sharedLhePublicANtt(ctx, leftWidth, cacheScope, stats);
             left = toLencLacct(state);
             if (!tree)
             {
@@ -6234,7 +6256,7 @@ namespace osuCrypto::LogVole
                 if (!buildDigestTreeTrunc(ctx, digestState.mHatDRt, tauHi,
                         state.mParams.mShrinkExpand.mGadgetLogBase,
                         state.mParams.mShrinkExpand.mPlaintextModulusBits,
-                        *tree, left.mWidthPadded, true, nullptr, 1, cacheScope)) co_return false;
+                        *tree, left.mWidthPadded, true, nullptr, 1, cacheScope, stats)) co_return false;
             }
             leftEvalNtt.resize(leftWidth);
             for (auto& poly : leftEvalNtt) poly.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
@@ -6247,7 +6269,9 @@ namespace osuCrypto::LogVole
         {
             // CPU digests retain zeta. Exceptional seed-only replay uses one
             // worker synchronously, without a nested blocking scheduler.
-            if (!evalRootResponseTop(state, digestState, ctx, tauHi, 1, topEvalNtt, cpuBenchmark)) co_return false;
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+            if (!evalRootResponseTop(state, digestState, ctx, tauHi, 1, topEvalNtt, cpuBenchmark, stats)) co_return false;
         }
         {
             RootStep step("final: lencEvalTrunc", rootProfiler(ctx));
@@ -6256,8 +6280,10 @@ namespace osuCrypto::LogVole
                     state.mParams.mShrinkExpand.mPlaintextModulusBits, leftEvalNtt,
                     LencEvalMode::Ntt, true, cpuBenchmark)) co_return false;
         }
+        PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+        auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
         co_return finishRootResponseHost(state, digestState, ctx, tauHi, leftWidth, ct2Seed,
-            decPartialNtt, topEvalNtt, leftEvalNtt, rootKey, cpuBenchmark);
+            decPartialNtt, topEvalNtt, leftEvalNtt, rootKey, cpuBenchmark, stats);
     }
 
     bool finalizeRootResponseReceiver(
@@ -6287,7 +6313,7 @@ namespace osuCrypto::LogVole
         u32 outCount,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out)
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats)
     {
         if (tau == 0 || inputHat.size() != static_cast<std::size_t>(outCount) * tau ||
             !validateRingBatchShape(inputHat, ring))
@@ -6307,7 +6333,7 @@ namespace osuCrypto::LogVole
             RnsPoly sum = inputHat[static_cast<std::size_t>(i) * tau];
             for (u32 j = 1; j < tau; ++j)
             {
-                if (!ringAddInplace(sum, inputHat[static_cast<std::size_t>(i) * tau + j], ctx))
+                if (!ringAddInplace(sum, inputHat[static_cast<std::size_t>(i) * tau + j], ctx, stats))
                 {
                     return false;
                 }
@@ -6324,9 +6350,9 @@ namespace osuCrypto::LogVole
         u32 outCount,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out)
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats)
     {
-        if (tau != 1) return seedLabelAgg(inputHat, outCount, tau, ring, out);
+        if (tau != 1) return seedLabelAgg(inputHat, outCount, tau, ring, out, stats);
         if (inputHat.size() != outCount || !validateRingBatchShape(inputHat, ring)) return false;
         if (&out != &inputHat) out = std::move(inputHat);
         return true;

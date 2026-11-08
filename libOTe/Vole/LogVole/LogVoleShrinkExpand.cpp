@@ -253,7 +253,8 @@ namespace osuCrypto::LogVole
             const RingNttContext& ctx,
             const ShrinkExpandReceiverState& state,
             const ShrinkExpandExpandReceiverInput& input,
-            std::shared_ptr<DigestTree>& out, ProtocolCacheScopeView scope)
+            std::shared_ptr<DigestTree>& out, ProtocolCacheScopeView scope,
+            PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
         {
             if (input.mTree)
             {
@@ -267,7 +268,7 @@ namespace osuCrypto::LogVole
             }
 
             DigestTree tree{};
-            if (!buildReceiverDigestTree(ctx, state, input.mX, tree, scope) ||
+            if (!buildReceiverDigestTree(ctx, state, input.mX, tree, scope, stats) ||
                 !rangesEqual(tree.mDigest.mCoeffs, input.mDigest.mCoeffs))
             {
                 return false;
@@ -791,9 +792,12 @@ namespace osuCrypto::LogVole
         }
         else
         {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             for (auto& poly : next.mCt1.mPolys)
             {
-                if (!forwardNtt(poly, ctx)) return false;
+                if (!forwardNtt(poly, ctx, stats)) return false;
             }
         }
         receiverState = std::move(next);
@@ -957,7 +961,8 @@ namespace osuCrypto::LogVole
     static bool prepareSenderExpansion(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
-        RingNttContext& ctx, std::vector<RnsPoly>& ciphertext, ProtocolCacheScopeView scope)
+        RingNttContext& ctx, std::vector<RnsPoly>& ciphertext, ProtocolCacheScopeView scope,
+        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
     {
         if (!validateRingPolyShape(input.mTbkPrime, state.mParams.mRing) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -981,7 +986,7 @@ namespace osuCrypto::LogVole
                 input.mSid,
                 maskDigest,
                 input.mNonce,
-                ciphertext))
+                ciphertext, stats))
         {
             return false;
         }
@@ -1000,9 +1005,12 @@ namespace osuCrypto::LogVole
         ShrinkExpandSenderExpandOutput next{};
         std::shared_ptr<const std::vector<RnsPoly>> publicA;
         {
-            if (!prepareSenderExpansion(state, input, ctx, next.mTbk, cacheScope) || gpu::enabled(ctx))
+            PendingRingOpsStats pending(state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr);
+            auto* stats = gpu::enabled(state.mRingFactoryOwner) ? legacyRingOpsThreadLocalStats() :
+                (state.mRingFactoryOwner && state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            if (!prepareSenderExpansion(state, input, ctx, next.mTbk, cacheScope, stats) || gpu::enabled(ctx))
                 co_return false;
-            publicA = state.mPublicANtt ? state.mPublicANtt : sharedLhePublicANtt(ctx, state.mParams.mMu, cacheScope);
+            publicA = state.mPublicANtt ? state.mPublicANtt : sharedLhePublicANtt(ctx, state.mParams.mMu, cacheScope, stats);
         }
         if (!publicA || !co_await lheDec(executor, buffers, ctx, next.mTbk,
                 input.mTbkPrime, *publicA, LheDomain::Coefficient, cpuBenchmark))
@@ -1057,7 +1065,8 @@ namespace osuCrypto::LogVole
         const ShrinkExpandReceiverState& state, const ShrinkExpandExpandReceiverInput& input,
         RingNttContext& ctx, std::shared_ptr<const std::vector<RnsPoly>>& publicA,
         std::shared_ptr<DigestTree>& tree, std::vector<RnsPoly>& receiverCt2,
-        std::vector<RnsPoly>& ct1AppliedNtt, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
+        std::vector<RnsPoly>& ct1AppliedNtt, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope,
+        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
     {
         if ((!input.mTree && input.mX.size() != state.mParams.mMu) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -1075,9 +1084,9 @@ namespace osuCrypto::LogVole
         }
 
         std::shared_ptr<const std::vector<RnsPoly>> publicB;
-        if (!receiverPublicHosts(ctx, state, publicA, publicB, scope)) return false;
+        if (!receiverPublicHosts(ctx, state, publicA, publicB, scope, stats)) return false;
 
-        if (!ensureReceiverDigestTree(ctx, state, input, tree, scope))
+        if (!ensureReceiverDigestTree(ctx, state, input, tree, scope, stats))
         {
             return false;
         }
@@ -1092,7 +1101,7 @@ namespace osuCrypto::LogVole
                 input.mSid,
                 maskDigest,
                 input.mNonce,
-                receiverCt2))
+                receiverCt2, stats))
         {
             return false;
         }
@@ -1110,7 +1119,7 @@ namespace osuCrypto::LogVole
                 state.mParams.mTau,
                 ct1AppliedNtt,
                 true,
-                state.mParams.mNumWorkerThreads);
+                state.mParams.mNumWorkerThreads, stats);
         }
         else
         {
@@ -1122,7 +1131,7 @@ namespace osuCrypto::LogVole
                 state.mParams.mTau,
                 ct1AppliedNtt,
                 true,
-                state.mParams.mNumWorkerThreads);
+                state.mParams.mNumWorkerThreads, stats);
         }
         if (!applyOk)
         {
@@ -1137,7 +1146,8 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, const ShrinkExpandReceiverState& state,
         std::vector<RnsPoly>& decPartialNtt, const std::vector<RnsPoly>& evalNtt,
         const std::vector<RnsPoly>& receiverCt2, bool fusedEval, bool senderRole,
-        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark)
+        ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark,
+        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
     {
         if (decPartialNtt.size() != state.mParams.mMu ||
             (!fusedEval && evalNtt.size() != state.mParams.mMu) ||
@@ -1148,9 +1158,9 @@ namespace osuCrypto::LogVole
         for (u32 row = 0; row < state.mParams.mMu; ++row)
         {
             RnsPoly tbm = std::move(decPartialNtt[row]);
-            if ((!fusedEval && !ringSubInplace(tbm, evalNtt[row], ctx)) ||
-                !inverseNtt(tbm, ctx) ||
-                !ringAddInplace(tbm, receiverCt2[row], ctx))
+            if ((!fusedEval && !ringSubInplace(tbm, evalNtt[row], ctx, stats)) ||
+                !inverseNtt(tbm, ctx, stats) ||
+                !ringAddInplace(tbm, receiverCt2[row], ctx, stats))
             {
                 return false;
             }
@@ -1178,8 +1188,10 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> decPartialNtt;
         cacheScope.mRole = ProtocolCacheRole::Receiver;
         {
+            PendingRingOpsStats pending(state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr);
+            auto* stats = state.mRingFactoryOwner && state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats ? &pending : nullptr;
             if (!prepareReceiverExpansion(state, input, ctx, publicA, tree,
-                    receiverCt2, decPartialNtt, cpuBenchmark, cacheScope)) co_return false;
+                    receiverCt2, decPartialNtt, cpuBenchmark, cacheScope, stats)) co_return false;
         }
         HostStep decryptStep(hostProfiler(ctx), "cpu receiver expand detail: decrypt", &cpuBenchmark);
         if (!co_await lheDec(executor, lheBuffers, ctx, decPartialNtt, input.mSkX,
@@ -1202,12 +1214,19 @@ namespace osuCrypto::LogVole
                     fusedEval ? LencEvalMode::SubtractNtt : LencEvalMode::Ntt,
                     state.mParams.mLeafInputsAreGadget, cpuBenchmark)) co_return false;
         }
-        else if (!lencEval(ctx, state.hostLacct(), *tree, state.mParams.mMu,
-                state.mParams.mTau, state.mParams.mGadgetLogBase, evalNtt, true,
-                state.mParams.mNumWorkerThreads)) co_return false;
+        else
+        {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            if (!lencEval(ctx, state.hostLacct(), *tree, state.mParams.mMu,
+                    state.mParams.mTau, state.mParams.mGadgetLogBase, evalNtt, true,
+                    state.mParams.mNumWorkerThreads, ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr)) co_return false;
+        }
         evalStep.stop();
-        co_return finishReceiverExpansion(ctx, state, decPartialNtt, evalNtt, receiverCt2,
-            fusedEval, false, out, cpuBenchmark);
+        {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            co_return finishReceiverExpansion(ctx, state, decPartialNtt, evalNtt, receiverCt2,
+                fusedEval, false, out, cpuBenchmark, ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+        }
     }
 
     bool shrinkExpandExpandReceiver(

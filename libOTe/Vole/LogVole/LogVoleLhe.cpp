@@ -812,7 +812,7 @@ namespace osuCrypto::LogVole
         u32 tau,
         std::vector<RnsPoly>& out,
         bool outputNtt,
-        u32 requestedWorkers)
+        u32 requestedWorkers, PendingRingOpsStats* stats)
     {
         if (tau == 0 || !validateCt1Ntt(ctx, ct1, tau) || !validateRingPolyShape(digest, ctx.mParams))
         {
@@ -820,12 +820,12 @@ namespace osuCrypto::LogVole
         }
 
         std::vector<RnsPoly> u;
-        if (!gadgetDecomposeBits(digest, gadgetLogBase, tau, ctx, u, requestedWorkers))
+        if (!gadgetDecomposeBits(digest, gadgetLogBase, tau, ctx, u, requestedWorkers, stats))
         {
             return false;
         }
         // tau independent digit transforms; batch them.
-        if (!forwardNttBatch(u, ctx))
+        if (!forwardNttBatch(u, ctx, stats))
         {
             return false;
         }
@@ -839,13 +839,13 @@ namespace osuCrypto::LogVole
             for (u32 col = 0; col < tau; ++col)
             {
                 const auto& cNtt = ct1.mPolys[ringTensorIndex(ct1, row, col)];
-                if (!dyadicMultiplyAddNttInplace(cNtt, u[col], accNtt, ctx))
+                if (!dyadicMultiplyAddNttInplace(cNtt, u[col], accNtt, ctx, stats))
                 {
                     return false;
                 }
             }
 
-            if (!outputNtt && !inverseNtt(accNtt, ctx))
+            if (!outputNtt && !inverseNtt(accNtt, ctx, stats))
             {
                 return false;
             }
@@ -864,7 +864,7 @@ namespace osuCrypto::LogVole
         u32 tauHi,
         std::vector<RnsPoly>& out,
         bool outputNtt,
-        u32 requestedWorkers)
+        u32 requestedWorkers, PendingRingOpsStats* stats)
     {
         if (tauHi == 0 || !validateCt1Ntt(ctx, ct1, tauHi) || !validateRingPolyShape(digest, ctx.mParams))
         {
@@ -872,13 +872,13 @@ namespace osuCrypto::LogVole
         }
 
         std::vector<RnsPoly> uHi;
-        if (!gadgetDecomposeBitsRangeCentered(digest, gadgetLogBase, 1, tauHi, ctx, uHi, requestedWorkers))
+        if (!gadgetDecomposeBitsRangeCentered(digest, gadgetLogBase, 1, tauHi, ctx, uHi, requestedWorkers, stats))
         {
             return false;
         }
         for (auto& digit : uHi)
         {
-            if (!forwardNtt(digit, ctx))
+            if (!forwardNtt(digit, ctx, stats))
             {
                 return false;
             }
@@ -893,13 +893,13 @@ namespace osuCrypto::LogVole
             for (u32 col = 0; col < tauHi; ++col)
             {
                 const auto& cNtt = ct1.mPolys[ringTensorIndex(ct1, row, col)];
-                if (!dyadicMultiplyAddNttInplace(cNtt, uHi[col], accNtt, ctx))
+                if (!dyadicMultiplyAddNttInplace(cNtt, uHi[col], accNtt, ctx, stats))
                 {
                     return false;
                 }
             }
 
-            if (!outputNtt && !inverseNtt(accNtt, ctx))
+            if (!outputNtt && !inverseNtt(accNtt, ctx, stats))
             {
                 return false;
             }
@@ -917,7 +917,7 @@ namespace osuCrypto::LogVole
         u64 sid,
         const RnsPoly& digest,
         u64 instanceIdx,
-        std::vector<RnsPoly>& out)
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats)
     {
         if (mu == 0 || !validateRingPolyShape(digest, ctx.mParams))
         {
@@ -925,7 +925,7 @@ namespace osuCrypto::LogVole
         }
 
         const block ct2Seed = deriveSeedInstanceBlock(seed, sid, digest, instanceIdx, mu);
-        deriveUniformPolyBatchFromSeedInplace(ctx, ct2Seed, 0xC720AA55u, mu, out);
+        deriveUniformPolyBatchFromSeedInplace(ctx, ct2Seed, 0xC720AA55u, mu, out, stats);
         return true;
     }
 
@@ -1210,7 +1210,7 @@ namespace osuCrypto::LogVole
         const RnsPoly& tbkPrime,
         u32 gadgetLogBase,
         u32 tau,
-        RnsPoly& out)
+        RnsPoly& out, PendingRingOpsStats* stats)
     {
         if (sk1.size() != tau ||
             !validateRingBatchShape(sk1, ctx.mParams) ||
@@ -1221,7 +1221,7 @@ namespace osuCrypto::LogVole
         }
 
         std::vector<RnsPoly> u;
-        if (!gadgetDecomposeBits(digest, gadgetLogBase, tau, ctx, u))
+        if (!gadgetDecomposeBits(digest, gadgetLogBase, tau, ctx, u, 1, stats))
         {
             return false;
         }
@@ -1230,8 +1230,8 @@ namespace osuCrypto::LogVole
         for (u32 i = 0; i < tau; ++i)
         {
             RnsPoly term{};
-            if (!ringMultiply(sk1[i], u[i], ctx, term) ||
-                !ringAddInplace(acc, term, ctx))
+            if (!ringMultiply(sk1[i], u[i], ctx, term, stats) ||
+                !ringAddInplace(acc, term, ctx, stats))
             {
                 return false;
             }
@@ -1248,7 +1248,7 @@ namespace osuCrypto::LogVole
         const RnsPoly& tbkPrime,
         u32 gadgetLogBase,
         u32 tauHi,
-        RnsPoly& out)
+        RnsPoly& out, PendingRingOpsStats* stats)
     {
         if (tauHi == 0 || sk1.size() != tauHi ||
             !validateRingBatchShape(sk1, ctx.mParams) ||
@@ -1259,7 +1259,7 @@ namespace osuCrypto::LogVole
         }
 
         std::vector<RnsPoly> uHi;
-        if (!gadgetDecomposeBitsRangeCentered(digest, gadgetLogBase, 1, tauHi, ctx, uHi))
+        if (!gadgetDecomposeBitsRangeCentered(digest, gadgetLogBase, 1, tauHi, ctx, uHi, 1, stats))
         {
             return false;
         }
@@ -1268,8 +1268,8 @@ namespace osuCrypto::LogVole
         for (u32 i = 0; i < tauHi; ++i)
         {
             RnsPoly term{};
-            if (!ringMultiply(sk1[i], uHi[i], ctx, term) ||
-                !ringAddInplace(acc, term, ctx))
+            if (!ringMultiply(sk1[i], uHi[i], ctx, term, stats) ||
+                !ringAddInplace(acc, term, ctx, stats))
             {
                 return false;
             }

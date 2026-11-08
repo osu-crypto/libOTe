@@ -737,7 +737,8 @@ namespace osuCrypto::LogVole
         if (!gpuShrinkDone)
         {
 #endif
-        auto shrinkChunk = [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark) {
+        auto shrinkChunk = [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark,
+            PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats()) {
             const auto chunkIdx = static_cast<u32>(taskIdx);
             const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
             const std::size_t end = std::min<std::size_t>(start + static_cast<std::size_t>(muHi), receiverInputCount(input));
@@ -773,7 +774,7 @@ namespace osuCrypto::LogVole
             ShrinkExpandShrinkOutput shrink{};
             std::vector<RnsPoly> decomposed;
             HostStep treeStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu shrink worker: digest tree", &cpuBenchmark);
-            if (!shrinkExpandShrink(state.mShrinkExpandState, chunk, shrink, cacheScope)) return false;
+            if (!shrinkExpandShrink(state.mShrinkExpandState, chunk, shrink, cacheScope, stats)) return false;
             treeStep.stop();
             HostStep unbundleStep(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "cpu shrink worker: unbundle", &cpuBenchmark);
             if (!seedLabelGadgetDecomposeHiAndUnbundle(
@@ -781,7 +782,7 @@ namespace osuCrypto::LogVole
                     state.mParams.mShrinkExpand.mGadgetLogBase,
                     tauHi,
                     state.mParams.mShrinkExpand.mRing,
-                    decomposed) ||
+                    decomposed, stats) ||
                 decomposed.size() != static_cast<std::size_t>(tauHi) * rho)
             {
                 return false;
@@ -801,9 +802,12 @@ namespace osuCrypto::LogVole
             auto shrinkRange = [&](std::size_t first, std::size_t last, CpuBenchmarkState& worker) {
                 CpuBenchmarkWorkerScope timing(partitions > 1 ? worker.mContext : nullptr);
                 CpuBenchmarkTaskScope metrics(worker);
-                struct FlushStats { ~FlushStats() { flushRingOpsThreadLocalStats(); } } flush;
+                auto* totals = state.mShrinkExpandState.mRingFactoryOwner
+                    ? state.mShrinkExpandState.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr;
+                PendingRingOpsStats pending(totals);
+                auto* stats = totals ? &pending : nullptr;
                 for (auto chunk = first; chunk != last; ++chunk)
-                    if (!shrinkChunk(chunk, worker))
+                    if (!shrinkChunk(chunk, worker, stats))
                         throw std::runtime_error("LogVole receiver could not prepare recursive child input");
             };
             if (partitions == 1) shrinkRange(0, wDoublePrime, cpuBenchmark);
@@ -927,8 +931,13 @@ namespace osuCrypto::LogVole
                 denoised = seedLabelDenoiseTbm(childOutput.mTbm, wPrime, tauHi,
                     state.mParams.mShrinkExpand.mRing, skXHat,
                     state.mParams.mShrinkExpand.mNumWorkerThreads, cpuBenchmark);
+            auto* totals = state.mShrinkExpandState.mRingFactoryOwner
+                ? state.mShrinkExpandState.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr;
+            PendingRingOpsStats pending(totals);
+            auto* stats = gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner)
+                ? legacyRingOpsThreadLocalStats() : totals ? &pending : nullptr;
             if (!denoised || !seedLabelAgg(std::move(skXHat), wDoublePrime, tauHi,
-                    state.mParams.mShrinkExpand.mRing, skX) || skX.size() != wDoublePrime)
+                    state.mParams.mShrinkExpand.mRing, skX, stats) || skX.size() != wDoublePrime)
                 throw std::runtime_error("LogVole receiver could not derive recursive expansion keys");
         }
 

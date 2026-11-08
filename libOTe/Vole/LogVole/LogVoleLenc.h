@@ -159,7 +159,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
-        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {});
+        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool lencEval(
         const RingNttContext& ctx,
@@ -170,7 +170,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool buildDigestTreeTrunc(
         const RingNttContext& ctx,

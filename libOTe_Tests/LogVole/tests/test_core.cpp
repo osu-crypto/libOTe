@@ -3968,6 +3968,23 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
     ReceiverOfflineOutput referenceOffline;
     LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, referenceOffline));
     auto& referenceState = referenceOffline.mState;
+    RingOpsStats senderStats, receiverStats;
+    const std::array<std::uint64_t, 11> zeroCounts{};
+    const auto selectStats = [](auto& state, RingOpsStats* sink) {
+        auto context = std::make_shared<RingNttContext>(*state.mShrinkExpandState.mRingFactoryOwner);
+        context->mExecutionOptions.mRingOpsStats = sink;
+        state.mShrinkExpandState.mRingFactoryOwner = std::move(context);
+    };
+    selectStats(sender, &senderStats);
+    selectStats(receiver, &receiverStats);
+    selectStats(referenceState, nullptr);
+    const auto counts = [](const RingOpsStats& stats) {
+        return std::array<std::uint64_t, 11>{stats.mNttCount.load(), stats.mInttCount.load(),
+            stats.mAddCount.load(), stats.mSubCount.load(), stats.mMulCount.load(),
+            stats.mMulScalarCount.load(), stats.mDyadicMulAddCount.load(),
+            stats.mGadgetDecomposeCount.load(), stats.mGadgetRecomposeCount.load(),
+            stats.mPrngPolyCount.load(), stats.mErrorAddCount.load()};
+    };
 
     macoro::thread_pool executor;
     auto work = executor.make_work();
@@ -3994,7 +4011,12 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
     }
     auto onWorker = [](macoro::thread_pool& pool, macoro::task<bool> operation) -> macoro::task<bool> {
         co_await pool.schedule();
-        co_return co_await std::move(operation);
+        flushRingOpsThreadLocalStats();
+        globalRingOpsStats.reset();
+        const auto result = co_await std::move(operation);
+        // Flush on the producing worker, including sub-threshold legacy leaks.
+        flushRingOpsThreadLocalStats();
+        co_return result;
     };
     for (std::uint64_t query = 0; query < 2; ++query)
     {
@@ -4012,17 +4034,26 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
                 resources.executor, buffers.zeta, receiver, input.mX,
             receiverPrng, digest, request));
         }());
+        const auto senderBefore = counts(senderStats);
+        const auto receiverBefore = counts(receiverStats);
         RootResponseMessage response;
         SenderOnlineOutput senderOutput;
         ReceiverOnlineOutput receiverOutput;
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(executor, prepareRootOnlineSender(executor, lheBuffers, sender, request,
             senderPrng, response, senderOutput))));
+        LOGVOLE_REQUIRE_TRUE(counts(senderStats) != senderBefore);
+        LOGVOLE_REQUIRE_TRUE(counts(receiverStats) == receiverBefore);
+        LOGVOLE_REQUIRE_TRUE(counts(globalRingOpsStats) == zeroCounts);
+        const auto senderAfter = counts(senderStats);
         const auto cachedKeys = sender.mPrecomputedTbk;
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(senderPrecompute(executor, lheBuffers, sender, senderPrng)));
         LOGVOLE_EXPECT_TRUE(sender.mPrecomputedTbk == cachedKeys);
         referenceState.mParams.mSessionId = query;
         ReceiverOnlineOutput reference;
-        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootOnlineReceiver(executor, lheBuffers, lencBuffers, referenceState, input, digest, response, reference)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(executor, finalizeRootOnlineReceiver(executor, lheBuffers, lencBuffers, referenceState, input, digest, response, reference))));
+        LOGVOLE_REQUIRE_TRUE(counts(senderStats) == senderAfter);
+        LOGVOLE_REQUIRE_TRUE(counts(receiverStats) == receiverBefore);
+        LOGVOLE_REQUIRE_TRUE(counts(globalRingOpsStats) == zeroCounts);
         if (query == 1) digest.mLeftTree.reset(); // Exercise exact tree reconstruction.
         const auto oldRoot = receiver.mRootDPrimeRt;
         const auto oldSeed = receiver.mGoldenSeed;
@@ -4036,6 +4067,9 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(rangesEqual(receiver.mGoldenSeed, oldSeed));
         auto moved = std::move(operation);
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(executor, std::move(moved))));
+        LOGVOLE_REQUIRE_TRUE(counts(receiverStats) != receiverBefore);
+        LOGVOLE_REQUIRE_TRUE(counts(senderStats) == senderAfter);
+        LOGVOLE_REQUIRE_TRUE(counts(globalRingOpsStats) == zeroCounts);
         LOGVOLE_REQUIRE_TRUE(rangesEqual(receiverOutput.mSeed, reference.mSeed));
         LOGVOLE_REQUIRE_EQ(receiverOutput.mTbm.size(), reference.mTbm.size());
         for (std::size_t i = 0; i < reference.mTbm.size(); ++i)
@@ -5874,6 +5908,8 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
 {
     const auto identityService = ProtocolCacheService::create();
     tests_libOTe::logvole_test::SetupResources setupResources;
+    // Four declared tasks require four exclusive result and arithmetic slots.
+    std::array<oc::u8, 4> setupResults{};
     RootWirePinOverlapEvidence rootWirePin;
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0)) LOGVOLE_REQUIRE_TRUE(gpu::available());
@@ -5965,7 +6001,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     auto offlineSockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG senderOfflinePrng(oc::block(0x7D53u, 0));
     auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(setupResources.executor, setupResources.results, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
+        sender.offline(setupResources.executor, setupResults, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();
@@ -5983,7 +6019,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     unchanged.mParams.mW = 777;
     oc::PRNG invalidPrng(oc::block(0x7D54u, 0));
     coproto::BufferingSocket invalidSocket;
-    auto failedAttempt = sender.offline(setupResources.executor, setupResources.results, invalid, unchanged, invalidPrng, invalidSocket, failedPin);
+    auto failedAttempt = sender.offline(setupResources.executor, setupResults, invalid, unchanged, invalidPrng, invalidSocket, failedPin);
     LOGVOLE_REQUIRE_TRUE(failedPin.mSelected); // The returned task is still lazy.
     bool rejected = false;
     try { macoro::sync_wait(std::move(failedAttempt)); }
@@ -6030,11 +6066,11 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     oc::PRNG receiverOnlinePrng(oc::block(0x7D55u, 0));
     macoro::thread_pool executor;
     auto work = executor.make_work();
-    std::array<LheDecryptBuffer, 3> lheBuffers, senderBuffers;
-    std::array<const std::uint64_t*, 3> senderAllocations{};
-    std::array<LencEvalBuffer, 3> lencBuffers;
-    std::array<const std::uint64_t*, 3> productAllocations{};
-    std::array<const RnsPoly* const*, 3> ciphertextAllocations{}, nodeAllocations{};
+    std::array<LheDecryptBuffer, 4> lheBuffers, senderBuffers;
+    std::array<const std::uint64_t*, 4> senderAllocations{};
+    std::array<LencEvalBuffer, 4> lencBuffers;
+    std::array<const std::uint64_t*, 4> productAllocations{};
+    std::array<const RnsPoly* const*, 4> ciphertextAllocations{}, nodeAllocations{};
     if (!advanced.mUseGpu)
     {
         // More partitions than executor threads exercises suspension without
@@ -6057,7 +6093,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
             nodeAllocations[i] = lencBuffers[i].mNodes.data();
         }
     }
-    std::array<RootZetaBuffer, 3> zetaBuffers;
+    std::array<RootZetaBuffer, 4> zetaBuffers;
     auto receiverOperation = receiver.online(executor, lheBuffers, lencBuffers, zetaBuffers, receiverState,
         receiverOnlineInput, receiverOnline, receiverOnlinePrng, onlineSockets[1]);
     // The controller and its queued workers share the sole thread by default.

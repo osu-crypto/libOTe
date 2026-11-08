@@ -88,7 +88,7 @@ namespace osuCrypto::LogVole
         u32 tau,
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool lheApplyCt1Trunc(
         const RingNttContext& ctx,
@@ -98,7 +98,7 @@ namespace osuCrypto::LogVole
         u32 tauHi,
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool buildHashedCt2(
         const RingNttContext& ctx,
@@ -107,7 +107,7 @@ namespace osuCrypto::LogVole
         u64 sid,
         const RnsPoly& digest,
         u64 instanceIdx,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     // Caller-owned storage for one CPU decryption chunk. No executor or
     // scheduling policy is retained here. Reused exclusively until lheDec joins.
@@ -174,7 +174,7 @@ namespace osuCrypto::LogVole
         const RnsPoly& tbkPrime,
         u32 gadgetLogBase,
         u32 tau,
-        RnsPoly& out);
+        RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool deriveSkxTrunc(
         const RingNttContext& ctx,
@@ -183,5 +183,5 @@ namespace osuCrypto::LogVole
         const RnsPoly& tbkPrime,
         u32 gadgetLogBase,
         u32 tauHi,
-        RnsPoly& out);
+        RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 }

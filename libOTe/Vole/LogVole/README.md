@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **90%** of the agreed ownership/globals refactor,
+Estimated overall completion: **91%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -806,6 +806,30 @@ Small CPU interactive golden passes in 5.13 seconds. The dedicated
 offline setup, receiver transforms and `prepareRootDigestReceiver`. No benchmarks
 or GPU execution checks were run. Remaining active online receiver arithmetic,
 timing ownership and legacy public surfaces require separate audits.
+
+The CPU online statistics pass now forwards the selected borrowed totals or null
+through Core root responses, sender seed evaluation, receiver root finalization,
+ShrinkExpand expansion, LHE apply/derive/hash, nontruncated LENC evaluation and
+recursive receiver shrink/aggregation. Each synchronous CPU phase owns its
+pending collector and flushes before suspension or completion. The audit also
+fixed the missed serial CPU Ct1 forward-transform loop in receiver offline
+finalization. GPU-compatible/deprecated callers retain legacy defaults; GPU
+sources, arithmetic, PRNG order, buffers, batching, scheduling and timing are
+unchanged. No declarations are removed: the inventory remains 23 and the
+estimate advances to 91%.
+The combined Windows library/test/frontend build passes in 119.18 seconds.
+The enhanced two-query root reuse check passes in 3.91 seconds, with independent
+sender/receiver owners, a null reference receiver, producing-worker TLS flushes,
+unchanged exact outputs and reusable allocations. Three CPU setup/LENC/LHE
+regressions pass in 5.93 seconds; small two-query CPU interactive golden passes
+in 4.41 seconds. The N1024 two-level socket fixture initially timed out because
+it requested four tasks with three result/arithmetic slots after the earlier
+strict admission change. Giving that fixture four exclusive slots preserves its
+four-task seed layout. Its final test-TU/link rebuild passes in 30.24 seconds;
+recursive relation and buffer reuse pass with one physical worker (0.51 seconds)
+and two workers with alternate CPU options (0.40 seconds). No benchmarks or GPU
+execution checks were run. Timing ownership, legacy public surfaces and final
+cross-platform validation remain separate work.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their

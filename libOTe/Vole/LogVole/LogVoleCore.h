@@ -618,7 +618,7 @@ namespace osuCrypto::LogVole
         u32 outCount,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     // Consumes a temporary batch, avoiding a full copy when tau == 1.
     bool seedLabelAgg(
@@ -626,7 +626,7 @@ namespace osuCrypto::LogVole
         u32 outCount,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool seedLabelGadgetDecomposeAndUnbundle(
         const RnsPoly& digest,
