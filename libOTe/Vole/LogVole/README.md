@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **89%** of the agreed ownership/globals refactor,
+Estimated overall completion: **90%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -786,6 +786,26 @@ Two focused LENC/LHE checks pass in 7.40 seconds, including exact independent
 owner/null counts, all three output modes, three tasks on one worker and buffer
 reuse. Small CPU interactive golden passes in 4.22 seconds. No benchmarks or GPU
 execution checks were run.
+
+The grouped setup-statistics pass forwards explicit pending counters through Ring
+arithmetic, transforms, gadget operations and uniform/error sampling into live
+CPU LHE/LENC setup and root setup/digest scopes. Public polynomial caches count
+only actual generation; cache hits do not replay counts. Deferred host transforms
+create their collector when materialization runs from the retained context's
+borrowed totals selection. Synchronous chunk/serial scopes flush before joining
+or suspension, and cached records never retain a pending pointer. GPU-compatible
+paths retain their legacy selection; scheduling, PRNG order, arithmetic batching
+and timing are unchanged. Standalone legacy APIs and later online arithmetic
+families remain separate work. This forwarding pass removes no declarations:
+the inventory remains 23 and the estimate advances to 90%.
+The single combined Windows build/frontend target passes in 110.44 seconds.
+Three focused CPU setup/LENC/LHE checks pass in 8.65 seconds, including exact
+owned/null totals, cache generation/hits, unchanged PRNG progression and reuse.
+Small CPU interactive golden passes in 5.13 seconds. The dedicated
+`Core_RootOnlineLocalFlow` check passes in 2.62 seconds and directly exercises root
+offline setup, receiver transforms and `prepareRootDigestReceiver`. No benchmarks
+or GPU execution checks were run. Remaining active online receiver arithmetic,
+timing ownership and legacy public surfaces require separate audits.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their

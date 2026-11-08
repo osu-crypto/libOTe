@@ -303,15 +303,15 @@ namespace osuCrypto::LogVole
     // are done back to back: with the CUDA backend they amortise one device round
     // trip over the whole batch instead of paying a stream drain per polynomial.
     // Bit-identical to calling the single-polynomial versions in order.
-    bool forwardNttBatch(std::span<RnsPoly> polys, const RingNttContext& ctx);
-    bool inverseNttBatch(std::span<RnsPoly> polys, const RingNttContext& ctx);
+    bool forwardNttBatch(std::span<RnsPoly> polys, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool inverseNttBatch(std::span<RnsPoly> polys, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool dyadicMultiplyAddNtt(
         const RnsPoly& aNtt,
         const RnsPoly& bNtt,
         const RnsPoly& cNtt,
         const RingNttContext& ctx,
-        RnsPoly& out);
+        RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     // Inputs are borrowed and must not alias the accumulator.
     bool dyadicInnerProductNttInplace(
@@ -325,27 +325,27 @@ namespace osuCrypto::LogVole
         RnsPoly& cNtt,
         const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
-    bool ringAdd(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out);
-    bool ringAddInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx);
-    bool ringSub(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out);
+    bool ringAdd(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool ringAddInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool ringSub(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     bool ringSubInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
-    bool ringMultiply(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out);
-    bool ringMultiplyInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx);
-    bool ringMultiplyScalar(const RnsPoly& a, u64 scalar, const RingNttContext& ctx, RnsPoly& out);
-    bool ringMultiplyScalarInplace(RnsPoly& a, u64 scalar, const RingNttContext& ctx);
+    bool ringMultiply(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool ringMultiplyInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool ringMultiplyScalar(const RnsPoly& a, u64 scalar, const RingNttContext& ctx, RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool ringMultiplyScalarInplace(RnsPoly& a, u64 scalar, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool gadgetDecompose(
         const RnsPoly& poly,
         u32 base,
         u32 tau,
         const RingNttContext& ctx,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool gadgetRecompose(
         const std::vector<RnsPoly>& digits,
         u32 base,
         const RingNttContext& ctx,
-        RnsPoly& out);
+        RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool gadgetDecomposeBits(
         const RnsPoly& poly,
@@ -353,7 +353,7 @@ namespace osuCrypto::LogVole
         u32 levels,
         const RingNttContext& ctx,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool gadgetDecomposeBitsRange(
         const RnsPoly& poly,
@@ -362,7 +362,7 @@ namespace osuCrypto::LogVole
         u32 levels,
         const RingNttContext& ctx,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool gadgetDecomposeBitsRangeCentered(
         const RnsPoly& poly,
@@ -371,13 +371,13 @@ namespace osuCrypto::LogVole
         u32 levels,
         const RingNttContext& ctx,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool gadgetRecomposeBits(
         const std::vector<RnsPoly>& digits,
         u32 digitBits,
         const RingNttContext& ctx,
-        RnsPoly& out);
+        RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     AlignedUnVec<u64> packRingBatch(const std::vector<RnsPoly>& polys);
     bool unpackRingBatch(
@@ -398,90 +398,90 @@ namespace osuCrypto::LogVole
         RingTensor& out,
         u32 requestedWorkers = 1);
 
-    RnsPoly deriveUniformPolyFromSeed(const RingNttContext& ctx, block seed, u64 domainTag, u32 index);
-    RnsPoly deriveUniformPolyFromSeedNtt(const RingNttContext& ctx, block seed, u64 domainTag, u32 index);
+    RnsPoly deriveUniformPolyFromSeed(const RingNttContext& ctx, block seed, u64 domainTag, u32 index, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    RnsPoly deriveUniformPolyFromSeedNtt(const RingNttContext& ctx, block seed, u64 domainTag, u32 index, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     // Resample all coefficients, preserving existing CPU allocations where possible.
     void deriveUniformPolyBatchFromSeedInplace(
         const RingNttContext& ctx, block seed, u64 domainTag, u32 count,
-        std::vector<RnsPoly>& out);
-    RnsPoly sampleUniformPoly(const RingNttContext& ctx, PRNG& prng);
-    RnsPoly sampleUniformPolyNtt(const RingNttContext& ctx, PRNG& prng);
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    RnsPoly sampleUniformPoly(const RingNttContext& ctx, PRNG& prng, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    RnsPoly sampleUniformPolyNtt(const RingNttContext& ctx, PRNG& prng, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     // Exactly the scalar sampler's seed order, including a device fallback.
     std::vector<RnsPoly> sampleUniformPolyBatch(const RingNttContext& ctx, u32 count, PRNG& prng,
-        ProtocolCacheScopeView scope = {});
+        ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     // Selected private top HE key; same ordered SEAL draws as ordinary setup.
     // A device decline replays these rows exactly on the host.
     bool sampleTopSecretUniformBatch(const RingNttContext& ctx, u32 count,
         PRNG& prng, std::vector<RnsPoly>& eager,
         std::shared_ptr<gpu::DeviceBatch>& resident,
-        std::shared_ptr<const LazyRootSecretHostState>& lazy, ProtocolCacheScopeView scope = {});
-    RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index);
-    RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index);
+        std::shared_ptr<const LazyRootSecretHostState>& lazy, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     std::vector<RnsPoly> deriveUniformPolyBatchFromSeed(
         const RingNttContext& ctx,
         block seed,
         u64 domainTag,
-        u32 count);
+        u32 count, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx,
         u64 nonce,
         u64 domainTag,
-        u32 count, ProtocolCacheScopeView scope = {});
+        u32 count, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     // Explicit actual transform; legacy BatchFromNonceNtt returns raw samples.
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx,
         u64 nonce,
         u64 domainTag,
         u32 count,
-        bool actualNtt, ProtocolCacheScopeView scope = {});
+        bool actualNtt, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     // Optional immutable device capture; the host result is unchanged. Move
     // it directly into a const owner before registering it for public reuse.
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count,
-        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope = {});
+        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     // Internal setup form which consumes no protocol PRNG and keeps the exact
     // deterministic batch exclusively on the current CUDA device. Returns
     // false without changing out when the retained path is unavailable.
     bool retainUniformPolyBatchFromNonce(
         const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count,
-        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>& out, ProtocolCacheScopeView scope = {});
+        bool actualNtt, std::shared_ptr<const gpu::RetainedPublicUniform>& out, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     std::vector<RnsPoly> deriveUniformPolyBatchFromSeedNtt(
         const RingNttContext& ctx,
         block seed,
         u64 domainTag,
-        u32 count);
+        u32 count, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonceNtt(
         const RingNttContext& ctx,
         u64 nonce,
         u64 domainTag,
-        u32 count);
+        u32 count, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     std::vector<RnsPoly> deriveUniformPolyBatchFromSeedList(
         const RingNttContext& ctx,
         std::span<const block> seeds,
         u64 domainTag,
         u32 perSeedCount,
-        u32 requestedWorkers = 0);
+        u32 requestedWorkers = 0, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     bool deriveUniformPolyBatchFromSeedListInplace(
         const RingNttContext& ctx,
         std::span<const block> seeds,
         u64 domainTag,
         u32 perSeedCount,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 0);
+        u32 requestedWorkers = 0, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonceList(
         const RingNttContext& ctx,
         std::span<const u64> nonces,
         u64 domainTag,
         u32 perNonceCount,
-        u32 requestedWorkers = 0);
+        u32 requestedWorkers = 0, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     bool deriveUniformPolyBatchFromNonceListInplace(
         const RingNttContext& ctx,
         std::span<const u64> nonces,
         u64 domainTag,
         u32 perNonceCount,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 0);
+        u32 requestedWorkers = 0, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     u64 combineSeedPublic(u64 value);
     u64 deriveDeterministicSeedMaterial(
@@ -498,7 +498,7 @@ namespace osuCrypto::LogVole
     // Exact replay of sampleUniformPoly from its already-consumed 64-byte
     // SEAL seed; used when a device sample declines without advancing the PRNG.
     RnsPoly sampleUniformPolyFromSeed(
-        const RingNttContext& ctx, const std::array<u64, 8>& seed);
+        const RingNttContext& ctx, const std::array<u64, 8>& seed, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     // Instance seed derived from a digest *commitment*. Callers that derive many
     // instances from one digest should hash it once and use this.
@@ -529,7 +529,7 @@ namespace osuCrypto::LogVole
         double noiseStandardDeviation,
         double noiseMaxDeviation,
         PRNG& prng,
-        const RingNttContext& ctx);
+        const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     // Same error sampler with an already-drawn SEAL seed. Callers can draw
     // seeds in protocol order, then sample independent polynomials in parallel
@@ -539,7 +539,7 @@ namespace osuCrypto::LogVole
         double noiseStandardDeviation,
         double noiseMaxDeviation,
         const seal::prng_seed_type& seed,
-        const RingNttContext& ctx);
+        const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     // Exact existing Gaussian draws represented by only their canonical q0
     // limb. Eligible bounds allow centered broadcast to every RNS modulus.
@@ -547,7 +547,7 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, double noiseStandardDeviation, double noiseMaxDeviation);
     bool samplePolyErrorCompactFromSeed(
         std::span<u64> limb0, double noiseStandardDeviation, double noiseMaxDeviation,
-        const seal::prng_seed_type& seed, const RingNttContext& ctx);
+        const seal::prng_seed_type& seed, const RingNttContext& ctx, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
     // Batched exact Gaussian draws. The GPU may expand matching AES prefixes;
     // the unchanged CPU normal transform consumes them, with exact continuation
     // from the original seed if a prefix runs out. Inactive rows are untouched.

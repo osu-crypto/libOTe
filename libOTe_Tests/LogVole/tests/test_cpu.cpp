@@ -157,6 +157,12 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
 void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;
+    auto onPool = [&](macoro::task<bool> operation) -> macoro::task<bool> {
+        co_await setupResources.executor.schedule();
+        const bool ok = co_await std::move(operation);
+        flushRingOpsThreadLocalStats();
+        co_return ok;
+    };
     LogVole::detail::CpuRowScratch scratch;
     CpuBenchmarkContext telemetry;
     telemetry.mCpus = {0, 1, 2};
@@ -278,6 +284,7 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     std::vector<RnsPoly> referenceZeta;
     LOGVOLE_REQUIRE_TRUE(sampleRootZetaFromTaskSeeds(ctx, 2, 65, zetaSeeds, 3,
         referenceZeta, 1, true));
+    RingOpsStats setupOwners[2];
     for (u32 allowance : {1u, 3u, 2u, 1u})
     {
         std::vector<RnsPoly> zeta;
@@ -296,21 +303,108 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(materializePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results, noise, device,
             3.2, 19.2, seeds, ctx, allowance, active, benchmark)));
         LOGVOLE_REQUIRE_TRUE(noise == expectedNoise);
+        const auto selection = allowance == 2 ? 2u : allowance == 3 ? 1u : 0u;
+        ctx.mExecutionOptions.mRingOpsStats = selection < 2 ? &setupOwners[selection] : nullptr;
+        if (selection < 2) setupOwners[selection].reset();
+        const auto firstCount = setupOwners[0].mErrorAddCount.load();
+        const auto secondCount = setupOwners[1].mErrorAddCount.load();
+        flushRingOpsThreadLocalStats();
+        globalRingOpsStats.reset();
         PRNG actualPrng(toBlock(723, 2), 3);
         LencEncodeOutput actual;
-        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEncTrunc(setupResources.executor, setupResources.results, ctx, inputs, 1, 30, 29, actualPrng,
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(lencEncTrunc(setupResources.executor, setupResources.results, ctx, inputs, 1, 30, 29, actualPrng,
             actual, 3.2, 19.2, 2, true, false, nullptr, allowance, false, false,
-            nullptr, nullptr, parallelOptions, benchmark)));
+            nullptr, nullptr, parallelOptions, benchmark))));
         equalBatch(actual.mRNtt, reference.mRNtt);
         equalBatch(actual.mR, reference.mR);
         equalBatch(actual.mLacct.mCt.mPolys, reference.mLacct.mCt.mPolys);
         RingTensor actualLhe;
-        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, actual.mRNtt, inputs, 30, actualLhe,
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, actual.mRNtt, inputs, 30, actualLhe,
             3.2, 19.2, &actualPrng, true, nullptr, allowance, nullptr, {}, nullptr, nullptr,
-            nullptr, nullptr, 0, false, parallelOptions, benchmark)));
+            nullptr, nullptr, 0, false, parallelOptions, benchmark))));
         equalBatch(actualLhe.mPolys, referenceLhe.mPolys);
         LOGVOLE_REQUIRE_TRUE(actualPrng.get<block>() == expectedNext);
+        if (selection < 2)
+        {
+            // Two randomizer rows, four LENC cells and four LHE cells.
+            LOGVOLE_REQUIRE_EQ(setupOwners[selection].mDyadicMulAddCount.load(), 8u);
+            LOGVOLE_REQUIRE_EQ(setupOwners[selection].mErrorAddCount.load(), 10u);
+            LOGVOLE_REQUIRE_EQ(setupOwners[selection].mNttCount.load(), 10u);
+            LOGVOLE_REQUIRE_EQ(setupOwners[selection].mInttCount.load(), 6u);
+            LOGVOLE_REQUIRE_EQ(setupOwners[selection].mPrngPolyCount.load(), 0u); // Public cache hits.
+        }
+        if (selection != 0) LOGVOLE_REQUIRE_EQ(setupOwners[0].mErrorAddCount.load(), firstCount);
+        if (selection != 1) LOGVOLE_REQUIRE_EQ(setupOwners[1].mErrorAddCount.load(), secondCount);
+        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mNttCount.load(), 0u);
+        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mInttCount.load(), 0u);
+        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), 0u);
+        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mErrorAddCount.load(), 0u);
         LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
+    }
+    ctx.mExecutionOptions.mRingOpsStats = nullptr;
+    PRNG rootReferencePrng(toBlock(723, 44));
+    std::vector<RnsPoly> rootReference;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootErrorBatch(
+        setupResources.executor, setupResources.results, ctx, 2, rootReferencePrng,
+        3.2, 19.2, true, rootReference))));
+    const auto rootNext = rootReferencePrng.get<block>();
+    for (auto* sink : {&setupOwners[0], static_cast<RingOpsStats*>(nullptr)})
+    {
+        ctx.mExecutionOptions.mRingOpsStats = sink;
+        if (sink) sink->reset();
+        globalRingOpsStats.reset();
+        PRNG rootPrng(toBlock(723, 44));
+        std::vector<RnsPoly> rootActual;
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootErrorBatch(
+            setupResources.executor, setupResources.results, ctx, 2, rootPrng,
+            3.2, 19.2, true, rootActual))));
+        equalBatch(rootActual, rootReference);
+        LOGVOLE_REQUIRE_TRUE(rootPrng.get<block>() == rootNext);
+        if (sink)
+        {
+            LOGVOLE_REQUIRE_EQ(sink->mNttCount.load(), 2u);
+            LOGVOLE_REQUIRE_EQ(sink->mErrorAddCount.load(), 2u);
+        }
+        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mNttCount.load(), 0u);
+        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mErrorAddCount.load(), 0u);
+    }
+    ctx.mExecutionOptions.mRingOpsStats = nullptr;
+
+    // Start the controller on the same single worker that executes its chunks.
+    // Cache misses count actual generation; hits reuse the same immutable data.
+    for (auto* sink : {&setupOwners[0], static_cast<RingOpsStats*>(nullptr)})
+    {
+        LogVoleExecutionOptions options;
+        options.mRingOpsStats = sink;
+        RingNttContext cacheContext;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, cacheContext,
+            std::make_shared<RingContextFactory>(options)));
+        if (sink) sink->reset();
+        flushRingOpsThreadLocalStats();
+        globalRingOpsStats.reset();
+        {
+            PendingRingOpsStats pending(sink);
+            auto* stats = sink ? &pending : nullptr;
+            const auto a = sharedLhePublicANtt(cacheContext, 2, {}, stats);
+            const auto b = sharedLencPublicBNtt(cacheContext, 2, {}, stats);
+            LOGVOLE_REQUIRE_TRUE(a && b);
+            pending.flush();
+            if (sink)
+            {
+                LOGVOLE_REQUIRE_EQ(sink->mPrngPolyCount.load(), 6u);
+                LOGVOLE_REQUIRE_EQ(sink->mNttCount.load(), 4u);
+            }
+            LOGVOLE_REQUIRE_TRUE(a == sharedLhePublicANtt(cacheContext, 2, {}, stats));
+            LOGVOLE_REQUIRE_TRUE(b == sharedLencPublicBNtt(cacheContext, 2, {}, stats));
+        }
+        if (sink)
+        {
+            LOGVOLE_REQUIRE_EQ(sink->mPrngPolyCount.load(), 6u);
+            LOGVOLE_REQUIRE_EQ(sink->mNttCount.load(), 4u);
+        }
+        flushRingOpsThreadLocalStats();
+        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mPrngPolyCount.load(), 0u);
+        LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mNttCount.load(), 0u);
     }
 
     // Start the controller on the same single worker that executes its chunks.
@@ -326,11 +420,6 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     }
     LOGVOLE_REQUIRE_TRUE(lazyNoise == std::vector<u64>{123});
     for (auto status : setupResources.results) LOGVOLE_REQUIRE_EQ(status, u8{0xA5});
-    auto onPool = [&](macoro::task<bool> operation) -> macoro::task<bool> {
-        co_await setupResources.executor.schedule();
-        const bool ok = co_await std::move(operation);
-        co_return ok;
-    };
     // Setup kernels capture their explicit phase before lazy start. Cache
     // selection and arithmetic must agree when a worker resumes the task.
     const ProtocolCacheScope phase(ctx.mFactory->protocolService()->allocate(), ProtocolCacheRole::Sender);

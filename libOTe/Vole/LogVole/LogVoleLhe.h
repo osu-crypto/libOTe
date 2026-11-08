@@ -16,15 +16,15 @@ namespace macoro { class thread_pool; }
 
 namespace osuCrypto::LogVole
 {
-    bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out, ProtocolCacheScopeView scope = {});
+    bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     // Setup states borrow immutable cached public data. The mutable builder
     // above continues to return an independent copy for existing callers.
     std::shared_ptr<const std::vector<RnsPoly>> sharedLhePublicANtt(
-        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {});
+        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     std::shared_ptr<const gpu::RetainedPublicUniform> retainedLhePublicANtt(
-        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {});
+        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool multiplyByGPower(
         const RingNttContext& ctx,

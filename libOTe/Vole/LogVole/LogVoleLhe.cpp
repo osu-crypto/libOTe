@@ -51,15 +51,15 @@ namespace osuCrypto::LogVole
         using PublicACacheEntry = PublicPolynomialCache::Entry;
 
         std::vector<RnsPoly> buildLhePublicANttImpl(const RingNttContext& ctx, u32 mu,
-            std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope)
+            std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
         {
             // Legacy public A deliberately uses raw uniform residues despite
             // its Ntt suffix; retaining it must not introduce a transform.
-            return deriveUniformPolyBatchFromNonce(ctx, 0xA11ACE5Eull, 0xA110CA7Aull, mu, false, captured, scope);
+            return deriveUniformPolyBatchFromNonce(ctx, 0xA11ACE5Eull, 0xA110CA7Aull, mu, false, captured, scope, stats);
         }
 
         std::shared_ptr<PublicACacheEntry> getOrCreateCachedPublicAEntry(
-            const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope)
+            const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
         {
             if (!ctx.mPublicCache) return {};
             auto& cache = ctx.mPublicCache->mLhe;
@@ -99,13 +99,13 @@ namespace osuCrypto::LogVole
             candidate->mIdentityService = key.mRunId.serviceOwner();
 #if defined(ENABLE_LOGVOLE_CUDA)
             (void)retainUniformPolyBatchFromNonce(ctx, 0xA11ACE5Eull,
-                0xA110CA7Aull, mu, false, candidate->mDevice, scope);
+                0xA110CA7Aull, mu, false, candidate->mDevice, scope, stats);
 #endif
             if (!candidate->mDevice)
             {
                 std::shared_ptr<const gpu::RetainedPublicUniform> captured;
                 candidate->mHost = std::make_shared<const std::vector<RnsPoly>>(
-                    buildLhePublicANttImpl(ctx, mu, &captured, scope));
+                    buildLhePublicANttImpl(ctx, mu, &captured, scope, stats));
                 candidate->mDevice = std::move(captured);
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (candidate->mDevice)
@@ -120,9 +120,9 @@ namespace osuCrypto::LogVole
         }
 
         std::shared_ptr<const std::vector<RnsPoly>> getOrCreateCachedPublicANtt(
-            const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope)
+            const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
         {
-            auto entry = getOrCreateCachedPublicAEntry(ctx, mu, scope);
+            auto entry = getOrCreateCachedPublicAEntry(ctx, mu, scope, stats);
             if (!entry) return {};
             std::lock_guard<std::mutex> lock(entry->mMutex);
             if (entry->mHost) return entry->mHost;
@@ -133,7 +133,7 @@ namespace osuCrypto::LogVole
 #endif
             if (!materialized)
                 materialized = std::make_shared<const std::vector<RnsPoly>>(
-                    buildLhePublicANttImpl(ctx, mu, nullptr, scope));
+                    buildLhePublicANttImpl(ctx, mu, nullptr, scope, stats));
             if (!materialized || materialized->size() != mu ||
                 !validateRingBatchShape(*materialized, ctx.mParams)) return {};
             entry->mHost = std::move(materialized);
@@ -191,18 +191,18 @@ namespace osuCrypto::LogVole
     }
 
     std::shared_ptr<const std::vector<RnsPoly>> sharedLhePublicANtt(
-        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope)
+        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
-        return mu ? getOrCreateCachedPublicANtt(ctx, mu, scope) : nullptr;
+        return mu ? getOrCreateCachedPublicANtt(ctx, mu, scope, stats) : nullptr;
     }
 
     std::shared_ptr<const gpu::RetainedPublicUniform> retainedLhePublicANtt(
-        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope)
+        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (mu)
         {
-            auto entry = getOrCreateCachedPublicAEntry(ctx, mu, scope);
+            auto entry = getOrCreateCachedPublicAEntry(ctx, mu, scope, stats);
             if (entry && entry->mDevice && gpu::retainedPublicUniformMatches(
                     ctx, *entry->mDevice, mu, false, scope)) return entry->mDevice;
         }
@@ -213,13 +213,13 @@ namespace osuCrypto::LogVole
         return {};
     }
 
-    bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out, ProtocolCacheScopeView scope)
+    bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
         if (mu == 0)
         {
             return false;
         }
-        out = *getOrCreateCachedPublicANtt(ctx, mu, scope);
+        out = *getOrCreateCachedPublicANtt(ctx, mu, scope, stats);
         return true;
     }
 
@@ -304,11 +304,21 @@ namespace osuCrypto::LogVole
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (deviceLheSetupEnabled(options, ctx))
-                retainedPublicANtt = retainedLhePublicANtt(ctx, publicCount, setupScope);
+                retainedPublicANtt = [&]() {
+                    PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                    auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                        : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                    return retainedLhePublicANtt(ctx, publicCount, setupScope, stats);
+                }();
 #endif
             if (!retainedPublicANtt)
             {
-                cachedPublicANtt = getOrCreateCachedPublicANtt(ctx, publicCount, setupScope);
+                cachedPublicANtt = [&]() {
+                    PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                    auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                        : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                    return getOrCreateCachedPublicANtt(ctx, publicCount, setupScope, stats);
+                }();
                 publicANtt = cachedPublicANtt.get();
                 if (!publicANtt || !validatePublicANtt(ctx, *publicANtt, publicCount)) co_return false;
             }
@@ -329,11 +339,11 @@ namespace osuCrypto::LogVole
         std::shared_ptr<gpu::DeviceScalars> residentNoise;
         std::vector<seal::prng_seed_type> compactNoiseSeeds;
         const std::size_t noiseDegree = ctx.mParams.mPolyModulusDegree;
-        const auto addCompactNoise = [&](std::size_t idx, RnsPoly& poly) {
+        const auto addCompactNoise = [&](std::size_t idx, RnsPoly& poly, PendingRingOpsStats* stats) {
             RnsPoly error;
             return expandPolyErrorCompact(
                     std::span<const u64>(compactNoise).subspan(idx * noiseDegree, noiseDegree), error, ctx) &&
-                ringAddInplace(poly, error, ctx);
+                ringAddInplace(poly, error, ctx, stats);
         };
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (deviceLheSetupEnabled(options, ctx))
@@ -394,24 +404,25 @@ namespace osuCrypto::LogVole
                                                                                   : setupResults.size())}));
                         if (taskCount && chunks.empty()) co_return false;
                         std::fill(chunks.begin(), chunks.end(), u8{1});
-                        auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+                        auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark, PendingRingOpsStats* stats) {
                             return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
-                                                        noiseMaxDeviation, noiseSeeds[idx], ctx);
+                                                        noiseMaxDeviation, noiseSeeds[idx], ctx, stats);
                         };
                         auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                                : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                            struct FlushLegacyStats
+                            {
+                                bool mEnabled;
+                                ~FlushLegacyStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
+                            } flushLegacy{gpu::enabled(ctx)};
                             CpuBenchmarkState worker = chunks.size() > 1
                                 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                             CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
                             CpuBenchmarkTaskScope metrics(worker);
-                            struct FlushStats
-                            {
-                                ~FlushStats()
-                                {
-                                    flushRingOpsThreadLocalStats();
-                                }
-                            } flush;
                             for (auto i = begin; i != end; ++i)
-                                if (!item(i, worker))
+                                if (!item(i, worker, stats))
                                 {
                                     ok = 0;
                                     break;
@@ -447,7 +458,12 @@ namespace osuCrypto::LogVole
         {
             // A device decline keeps PRNG consumption unchanged, then builds
             // the exact host fallback operand only when it is consumed.
-            cachedPublicANtt = getOrCreateCachedPublicANtt(ctx, publicCount, setupScope);
+            cachedPublicANtt = [&]() {
+                PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                        : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                return getOrCreateCachedPublicANtt(ctx, publicCount, setupScope, stats);
+            }();
             publicANtt = cachedPublicANtt.get();
         }
         if (!publicANtt || !validatePublicANtt(ctx, *publicANtt, publicCount)) co_return false;
@@ -477,17 +493,15 @@ namespace osuCrypto::LogVole
                     return multiplyByGPower(ctx, r[i], gadgetLogBase, rPowerOffset, shiftedR[i]);
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    struct FlushLegacyStats
+                    {
+                        bool mEnabled;
+                        ~FlushLegacyStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
+                    } flushLegacy{gpu::enabled(ctx)};
                     CpuBenchmarkState worker = chunks.size() > 1
                         ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
                     CpuBenchmarkTaskScope metrics(worker);
-                    struct FlushStats
-                    {
-                        ~FlushStats()
-                        {
-                            flushRingOpsThreadLocalStats();
-                        }
-                    } flush;
                     for (auto i = begin; i != end; ++i)
                         if (!item(i, worker))
                         {
@@ -508,13 +522,23 @@ namespace osuCrypto::LogVole
 
         // Both sets are independent transforms, so each goes as a single batch.
         std::vector<RnsPoly> sk1Ntt = sk;
-        if (!forwardNttBatch(sk1Ntt, ctx))
+        if (![&]() {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                        : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+            return forwardNttBatch(sk1Ntt, ctx, stats);
+        }())
         {
             co_return false;
         }
 
         std::vector<RnsPoly> rNtt = *rSource;
-        if (!rInputIsNtt && !forwardNttBatch(rNtt, ctx))
+        if (!rInputIsNtt && ![&]() {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                        : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+            return forwardNttBatch(rNtt, ctx, stats);
+        }())
         {
             co_return false;
         }
@@ -536,17 +560,15 @@ namespace osuCrypto::LogVole
                     return canonicalizePoly(rNtt[row], ctx);
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    struct FlushLegacyStats
+                    {
+                        bool mEnabled;
+                        ~FlushLegacyStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
+                    } flushLegacy{gpu::enabled(ctx)};
                     CpuBenchmarkState worker = chunks.size() > 1
                         ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
                     CpuBenchmarkTaskScope metrics(worker);
-                    struct FlushStats
-                    {
-                        ~FlushStats()
-                        {
-                            flushRingOpsThreadLocalStats();
-                        }
-                    } flush;
                     for (auto i = begin; i != end; ++i)
                         if (!item(i, worker))
                         {
@@ -583,7 +605,7 @@ namespace osuCrypto::LogVole
                                                                           : setupResults.size())}));
                 if (taskCount && chunks.empty()) co_return false;
                 std::fill(chunks.begin(), chunks.end(), u8{1});
-                auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+                auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark, PendingRingOpsStats* stats) {
                     const auto row = idx / ct1.mCols;
                     const auto col = idx % ct1.mCols;
                     auto& cNtt = ct1.mPolys[idx];
@@ -598,22 +620,23 @@ namespace osuCrypto::LogVole
                                                                       coeffs);
                         }
                     }
-                    return dyadicMultiplyAddNttInplace((*publicANtt)[row], sk1Ntt[col], cNtt, ctx);
+                    return dyadicMultiplyAddNttInplace((*publicANtt)[row], sk1Ntt[col], cNtt, ctx, stats);
                 };
                 auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                    PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                    auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                        : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                    struct FlushLegacyStats
+                    {
+                        bool mEnabled;
+                        ~FlushLegacyStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
+                    } flushLegacy{gpu::enabled(ctx)};
                     CpuBenchmarkState worker = chunks.size() > 1
                         ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                     CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
                     CpuBenchmarkTaskScope metrics(worker);
-                    struct FlushStats
-                    {
-                        ~FlushStats()
-                        {
-                            flushRingOpsThreadLocalStats();
-                        }
-                    } flush;
                     for (auto i = begin; i != end; ++i)
-                        if (!item(i, worker))
+                        if (!item(i, worker, stats))
                         {
                             ok = 0;
                             break;
@@ -633,7 +656,12 @@ namespace osuCrypto::LogVole
 
             // The old inner loop ran one CPU inverse transform per ciphertext.
             // A batch amortizes the GPU transfer and launches over the matrix.
-            if (!inverseNttBatch(ct1.mPolys, ctx)) co_return false;
+            if (![&]() {
+                PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                        : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                return inverseNttBatch(ct1.mPolys, ctx, stats);
+            }()) co_return false;
 
             if (noiseStandardDeviation > 0)
             {
@@ -654,25 +682,26 @@ namespace osuCrypto::LogVole
                                                                               : setupResults.size())}));
                     if (taskCount && chunks.empty()) co_return false;
                     std::fill(chunks.begin(), chunks.end(), u8{1});
-                    auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
-                        if (!compactNoise.empty()) return addCompactNoise(idx, ct1.mPolys[idx]);
+                    auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark, PendingRingOpsStats* stats) {
+                        if (!compactNoise.empty()) return addCompactNoise(idx, ct1.mPolys[idx], stats);
                         return addPolyErrorFromSeed(ct1.mPolys[idx], noiseStandardDeviation,
-                                                    noiseMaxDeviation, noiseSeeds[idx], ctx);
+                                                    noiseMaxDeviation, noiseSeeds[idx], ctx, stats);
                     };
                     auto runChunk = [&](std::size_t begin, std::size_t end, u8 &ok) {
+                        PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                        auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                            : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                        struct FlushLegacyStats
+                        {
+                            bool mEnabled;
+                            ~FlushLegacyStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
+                        } flushLegacy{gpu::enabled(ctx)};
                         CpuBenchmarkState worker = chunks.size() > 1
                             ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                         CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
                         CpuBenchmarkTaskScope metrics(worker);
-                        struct FlushStats
-                        {
-                            ~FlushStats()
-                            {
-                                flushRingOpsThreadLocalStats();
-                            }
-                        } flush;
                         for (auto i = begin; i != end; ++i)
-                            if (!item(i, worker))
+                            if (!item(i, worker, stats))
                             {
                                 ok = 0;
                                 break;
@@ -696,31 +725,37 @@ namespace osuCrypto::LogVole
             co_return true;
         }
 
-        for (u32 row = 0; row < ct1.mRows; ++row)
         {
-            const RnsPoly &aNtt = (*publicANtt)[row];
-            for (u32 col = 0; col < ct1.mCols; ++col)
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats()
+                        : ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+            for (u32 row = 0; row < ct1.mRows; ++row)
             {
-                RnsPoly cNtt = rNtt[row];
-                if (!scaleByGPowerInplace(ctx, cNtt, gadgetLogBase, col) ||
-                    !dyadicMultiplyAddNttInplace(aNtt, sk1Ntt[col], cNtt, ctx) || !inverseNtt(cNtt, ctx))
+                const RnsPoly &aNtt = (*publicANtt)[row];
+                for (u32 col = 0; col < ct1.mCols; ++col)
                 {
-                    co_return false;
-                }
-
-                if (noiseStandardDeviation > 0)
-                {
-                    const auto idx = ringTensorIndex(ct1, row, col);
-                    if (!(compactNoise.empty()
-                              ? addPolyError(cNtt, noiseStandardDeviation, noiseMaxDeviation, *prng, ctx)
-                              : addCompactNoise(idx, cNtt)))
+                    RnsPoly cNtt = rNtt[row];
+                    if (!scaleByGPowerInplace(ctx, cNtt, gadgetLogBase, col) ||
+                        !dyadicMultiplyAddNttInplace(aNtt, sk1Ntt[col], cNtt, ctx, stats) || !inverseNtt(cNtt, ctx, stats))
                     {
                         co_return false;
                     }
-                }
 
-                ct1.mPolys[ringTensorIndex(ct1, row, col)] = std::move(cNtt);
+                    if (noiseStandardDeviation > 0)
+                    {
+                        const auto idx = ringTensorIndex(ct1, row, col);
+                        if (!(compactNoise.empty()
+                                  ? addPolyError(cNtt, noiseStandardDeviation, noiseMaxDeviation, *prng, ctx, stats)
+                                  : addCompactNoise(idx, cNtt, stats)))
+                        {
+                            co_return false;
+                        }
+                    }
+
+                    ct1.mPolys[ringTensorIndex(ct1, row, col)] = std::move(cNtt);
+                }
             }
+
         }
 
         out = std::move(ct1);

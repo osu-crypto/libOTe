@@ -137,7 +137,7 @@ namespace osuCrypto::LogVole
             const ShrinkExpandReceiverState& state,
             std::shared_ptr<const std::vector<RnsPoly>>& publicA,
             std::shared_ptr<const std::vector<RnsPoly>>& publicB,
-            ProtocolCacheScopeView scope)
+            ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
         {
             publicA = state.mPublicANtt;
             publicB = state.mPublicBNtt;
@@ -156,10 +156,10 @@ namespace osuCrypto::LogVole
                 !gpu::materializeRetainedPublicUniform(ctx, state.mPublicBNttDevice, publicB, scope))
                 return false;
 #endif
-            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu, scope);
+            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu, scope, stats);
             const u32 publicBTau = state.mParams.mTruncateOneGadgetDigit
                 ? state.mParams.mTau + 1u : state.mParams.mTau;
-            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau, scope);
+            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau, scope, stats);
             return publicA && publicB && publicA->size() == state.mParams.mMu &&
                 publicB->size() == 2u * static_cast<std::size_t>(publicBTau) &&
                 validateRingBatchShape(*publicA, ctx.mParams) &&
@@ -218,10 +218,10 @@ namespace osuCrypto::LogVole
             const RingNttContext& ctx,
             const ShrinkExpandReceiverState& state,
             std::span<const RnsPoly> x,
-            DigestTree& out, ProtocolCacheScopeView scope)
+            DigestTree& out, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
         {
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
-            if (!receiverPublicHosts(ctx, state, publicA, publicB, scope)) return false;
+            if (!receiverPublicHosts(ctx, state, publicA, publicB, scope, stats)) return false;
             const std::vector<RnsPoly>* publicBNtt = publicB.get();
             if (state.mParams.mTruncateOneGadgetDigit)
             {
@@ -235,7 +235,7 @@ namespace osuCrypto::LogVole
                     state.mLacct.mWidthPadded,
                     state.mParams.mLeafInputsAreGadget,
                     publicBNtt,
-                    state.mParams.mNumWorkerThreads);
+                    state.mParams.mNumWorkerThreads, scope, stats);
             }
 
             return buildDigestTree(
@@ -246,7 +246,7 @@ namespace osuCrypto::LogVole
                 out,
                 state.mLacct.mWidthPadded,
                 publicBNtt,
-                state.mParams.mNumWorkerThreads);
+                state.mParams.mNumWorkerThreads, scope, stats);
         }
 
         bool ensureReceiverDigestTree(
@@ -362,9 +362,9 @@ namespace osuCrypto::LogVole
         return validateShrinkExpandParams(input.mParams);
     }
 
-    std::vector<RnsPoly> sampleUniformBatch(const RingNttContext& ctx, u32 count, PRNG& prng, ProtocolCacheScopeView scope)
+    std::vector<RnsPoly> sampleUniformBatch(const RingNttContext& ctx, u32 count, PRNG& prng, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
-        return sampleUniformPolyBatch(ctx, count, prng, scope);
+        return sampleUniformPolyBatch(ctx, count, prng, scope, stats);
     }
 
     static macoro::task<bool> prepareShrinkExpandSenderOfflineImpl(
@@ -444,17 +444,20 @@ namespace osuCrypto::LogVole
         else
         {
             HostStep sk1Step(hostProfiler(ctx), "setup sender: top sk1 uniform sampling", &cpuBenchmark);
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             if (input.mDeferTopSk1Host && !message && input.mParams.mTruncateOneGadgetDigit)
             {
                 std::shared_ptr<gpu::DeviceBatch> resident;
                 std::shared_ptr<const LazyRootSecretHostState> lazy;
-                if (!sampleTopSecretUniformBatch(ctx, input.mParams.mTau, prng, next.mSk1, resident, lazy, setupScope))
+                if (!sampleTopSecretUniformBatch(ctx, input.mParams.mTau, prng, next.mSk1, resident, lazy, setupScope, stats))
                     co_return false;
                 next.mTopSk1Device = std::move(resident);
                 next.mLazyTopSk1 = std::move(lazy);
                 if (next.mTopSk1Device) next.mTopSk1OwnerRunId = setupScope.mRunId;
             }
-            else next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, prng, setupScope);
+            else next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, prng, setupScope, stats);
         }
 
         HostStep publicDataStep(hostProfiler(ctx), "setup sender: public data", &cpuBenchmark);
@@ -483,8 +486,11 @@ namespace osuCrypto::LogVole
 #endif
         if (!next.mPublicANttDevice)
         {
-            next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu, setupScope);
-            next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau, setupScope);
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu, setupScope, stats);
+            next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau, setupScope, stats);
         }
         if ((!next.mPublicANtt && !next.mPublicANttDevice) || (!next.mPublicBNtt && !next.mPublicBNttDevice))
             co_return false;
@@ -512,6 +518,9 @@ namespace osuCrypto::LogVole
         }
         else
         {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             lencOk = lencEnc(
                 ctx,
                 input.mS,
@@ -525,7 +534,7 @@ namespace osuCrypto::LogVole
                 true,
                 next.mPublicBNtt.get(),
                 input.mParams.mNumWorkerThreads,
-                input.mDeferHostCiphertexts && !message, setupScope);
+                input.mDeferHostCiphertexts && !message, setupScope, stats);
         }
         if (!lencOk)
         {
@@ -729,8 +738,11 @@ namespace osuCrypto::LogVole
 #endif
         if (!next.mPublicANttDevice)
         {
-            next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu, scope);
-            next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau, scope);
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu, scope, stats);
+            next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau, scope, stats);
         }
         if ((!next.mPublicANtt && !next.mPublicANttDevice) ||
             (!next.mPublicBNtt && !next.mPublicBNttDevice)) return false;
@@ -838,10 +850,13 @@ namespace osuCrypto::LogVole
                         state.mPublicBNttDevice, publicB, senderScope)) return;
             }
 #endif
-            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu, senderScope);
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu, senderScope, stats);
             const u32 publicBTau = state.mParams.mTruncateOneGadgetDigit
                 ? state.mParams.mTau + 1u : state.mParams.mTau;
-            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau, senderScope);
+            if (!publicB) publicB = sharedLencPublicBNtt(ctx, publicBTau, senderScope, stats);
             if (!publicA || !publicB || publicA->size() != state.mParams.mMu ||
                 publicB->size() != 2u * static_cast<std::size_t>(publicBTau) ||
                 !validateRingBatchShape(*publicA, ctx.mParams) ||
@@ -905,15 +920,15 @@ namespace osuCrypto::LogVole
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         const std::vector<RnsPoly>& x,
-        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope)
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
-        return shrinkExpandShrink(state, std::span<const RnsPoly>(x.data(), x.size()), out, scope);
+        return shrinkExpandShrink(state, std::span<const RnsPoly>(x.data(), x.size()), out, scope, stats);
     }
 
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         std::span<const RnsPoly> x,
-        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope)
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
         if (x.size() != state.mParams.mMu || !validateRingBatchShape(x, state.mParams.mRing))
         {
@@ -927,7 +942,7 @@ namespace osuCrypto::LogVole
         }
 
         DigestTree tree{};
-        if (!buildReceiverDigestTree(ctx, state, x, tree, scope))
+        if (!buildReceiverDigestTree(ctx, state, x, tree, scope, stats))
         {
             return false;
         }

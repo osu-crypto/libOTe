@@ -76,12 +76,13 @@ namespace osuCrypto::LogVole
 #endif
         }
 
-        bool setupForwardNtt(std::span<RnsPoly> polys, const RingNttContext& ctx, const LogVoleGpuSetupOptions& options)
+        bool setupForwardNtt(std::span<RnsPoly> polys, const RingNttContext& ctx, const LogVoleGpuSetupOptions& options,
+            PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
         {
-            if (setupBatchNttEnabled(options, ctx)) return forwardNttBatch(polys, ctx);
+            if (setupBatchNttEnabled(options, ctx)) return forwardNttBatch(polys, ctx, stats);
             for (auto& poly : polys)
             {
-                if (!forwardNtt(poly, ctx)) return false;
+                if (!forwardNtt(poly, ctx, stats)) return false;
             }
             return true;
         }
@@ -107,10 +108,13 @@ namespace osuCrypto::LogVole
             {
                 std::call_once(mOnce, [&] {
                     HostStep phase(hostProfiler(mCtx), "setup root: CtR host forward NTT fallback");
+                    PendingRingOpsStats pending(mCtx.mExecutionOptions.mRingOpsStats);
+                    auto* stats = gpu::enabled(mCtx) ? legacyRingOpsThreadLocalStats() :
+                        (mCtx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
                     mHost = mWire->get();
                     for (auto& poly : mHost.mPolys)
                     {
-                        if (!forwardNtt(poly, mCtx))
+                        if (!forwardNtt(poly, mCtx, stats))
                             throw std::runtime_error("LogVole CtR host NTT fallback failed");
                     }
                 });
@@ -1232,19 +1236,22 @@ namespace osuCrypto::LogVole
         }
         if (compactStrict) co_return false;
 #endif
+        PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+        auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+            (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
         for (u32 idx = 0; idx < count; ++idx)
         {
             RnsPoly poly{};
             resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             if (sigma > 0.0)
             {
-                if (!addPolyError(poly, sigma, maxDeviation, prng, ctx))
+                if (!addPolyError(poly, sigma, maxDeviation, prng, ctx, stats))
                 {
                     co_return false;
                 }
             }
 
-            if (outputNtt && !forwardNtt(poly, ctx))
+            if (outputNtt && !forwardNtt(poly, ctx, stats))
             {
                 co_return false;
             }
@@ -1587,9 +1594,12 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> r1Ntt;
         if (!deviceRequested)
         {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             if (rootR1Host) r1Host = &rootR1Host->hostCoefficients();
             r1Ntt = *r1Host;
-            if (!setupForwardNtt(r1Ntt, ctx, options)) co_return false;
+            if (!setupForwardNtt(r1Ntt, ctx, options, stats)) co_return false;
         }
 
         RingTensor next{};
@@ -1798,13 +1808,13 @@ namespace osuCrypto::LogVole
                                                        : setupResults.size())}));
             if (taskCount && chunks.empty()) co_return false;
             std::fill(chunks.begin(), chunks.end(), u8{1});
-            auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            auto item = [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark, PendingRingOpsStats* stats) {
                 const u32 row = static_cast<u32>(idx / next.mCols);
                 const u32 col = static_cast<u32>(idx % next.mCols);
                 const RnsPoly& bNtt = (col < tauHi) ? publicBRootHost[col] : publicBStarHost[col - tauHi];
                 RnsPoly cellNtt{};
                 resizeZero(cellNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-                if (!dyadicMultiplyAddNttInplace(r1Ntt[row], bNtt, cellNtt, ctx) ||
+                if (!dyadicMultiplyAddNttInplace(r1Ntt[row], bNtt, cellNtt, ctx, stats) ||
                     !negateNttInplace(cellNtt, ctx))
                 {
                     return false;
@@ -1818,15 +1828,15 @@ namespace osuCrypto::LogVole
 
                 if (batchNoise)
                 {
-                    if (!ringAddInplace(cellNtt, next.mPolys[ringTensorIndex(next, row, col)], ctx))
+                    if (!ringAddInplace(cellNtt, next.mPolys[ringTensorIndex(next, row, col)], ctx, stats))
                         return false;
                 }
                 else if (noiseStandardDeviation > 0.0)
                 {
                     RnsPoly noise{};
                     resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-                    if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, prng, ctx) ||
-                        !forwardNtt(noise, ctx) || !ringAddInplace(cellNtt, noise, ctx))
+                    if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, prng, ctx, stats) ||
+                        !forwardNtt(noise, ctx, stats) || !ringAddInplace(cellNtt, noise, ctx, stats))
                     {
                         return false;
                     }
@@ -1840,15 +1850,16 @@ namespace osuCrypto::LogVole
                     chunks.size() > 1 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
                 CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
                 CpuBenchmarkTaskScope metrics(worker);
+                PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                    (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
                 struct FlushStats
                 {
-                    ~FlushStats()
-                    {
-                        flushRingOpsThreadLocalStats();
-                    }
-                } flush;
+                    bool mEnabled;
+                    ~FlushStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
+                } flush{gpu::enabled(ctx)};
                 for (auto i = begin; i != end; ++i)
-                    if (!item(i, worker))
+                    if (!item(i, worker, stats))
                     {
                         ok = 0;
                         break;
@@ -2345,9 +2356,14 @@ namespace osuCrypto::LogVole
             state.mParams.mShrinkExpand.mGpuSetup.mRootPublicBToken;
         const auto retainedPublicBFullNtt = retainRootPublicB
             ? retainedLencPublicBNtt(ctx, tauFull, setupScope) : nullptr;
-        const auto sharedPublicBFullNtt = retainedPublicBFullNtt
-            ? std::shared_ptr<const std::vector<RnsPoly>>{}
-            : sharedLencPublicBNtt(ctx, tauFull, setupScope);
+        std::shared_ptr<const std::vector<RnsPoly>> sharedPublicBFullNtt;
+        if (!retainedPublicBFullNtt)
+        {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            sharedPublicBFullNtt = sharedLencPublicBNtt(ctx, tauFull, setupScope, stats);
+        }
         if (!retainedPublicBFullNtt &&
             (!sharedPublicBFullNtt || sharedPublicBFullNtt->size() != static_cast<std::size_t>(2) * tauFull))
             co_return false;
@@ -2389,6 +2405,9 @@ namespace osuCrypto::LogVole
         {
             HostStep bStarStep(hostProfiler(ctx), "setup sender: root BStar public uniform sampling",
                                &cpuBenchmark);
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (bStarRequested)
             {
@@ -2410,11 +2429,11 @@ namespace osuCrypto::LogVole
                 {
                     publicBStarNtt[idx] = batchPublicB
                         ? deriveUniformPolyFromNonce(ctx, kRootBStarPublicNonce,
-                            kRootBStarPublicDomain, idx)
+                            kRootBStarPublicDomain, idx, stats)
                         : deriveUniformPolyFromNonceNtt(ctx, kRootBStarPublicNonce,
-                            kRootBStarPublicDomain, idx);
+                            kRootBStarPublicDomain, idx, stats);
                 }
-                if (batchPublicB && !forwardNttBatch(publicBStarNtt, ctx)) co_return false;
+                if (batchPublicB && !forwardNttBatch(publicBStarNtt, ctx, stats)) co_return false;
             }
         }
 
@@ -2450,6 +2469,9 @@ namespace osuCrypto::LogVole
         const ProtocolCacheRunId skRRtOwnerRunId = setupScope.mRunId;
         {
             HostStep step(hostProfiler(ctx), "setup sender: root skRRt sampling", &cpuBenchmark);
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
 #if defined(ENABLE_LOGVOLE_CUDA)
             const bool skRequested = deferRandomizerHost && gpu::enabled(ctx) &&
                 state.mParams.mShrinkExpand.mGpuSetup.mRootSecretDevice;
@@ -2471,10 +2493,10 @@ namespace osuCrypto::LogVole
             else
             {
                 if (skStrict) co_return false;
-                skRRt = sampleUniformBatch(ctx, tauHi, prng, setupScope);
+                skRRt = sampleUniformBatch(ctx, tauHi, prng, setupScope, stats);
             }
 #else
-            skRRt = sampleUniformBatch(ctx, tauHi, prng, setupScope);
+            skRRt = sampleUniformBatch(ctx, tauHi, prng, setupScope, stats);
 #endif
         }
         if ((residentSkRRt && (!lazySkRRt || lazySkRRt->count() != tauHi || !lazySkRRt->matches(se.mRing))) ||
@@ -2682,7 +2704,10 @@ namespace osuCrypto::LogVole
         {
             if (message.mLazyCtR) ctR = ctRView;
             else ctR = std::forward<Message>(message).mCtR;
-            if (!setupForwardNtt(ctR.mPolys, ctx, state.mParams.mShrinkExpand.mGpuSetup)) return false;
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            if (!setupForwardNtt(ctR.mPolys, ctx, state.mParams.mShrinkExpand.mGpuSetup, stats)) return false;
         }
 
         state.mRootCtRRt = std::move(ctR);
@@ -2837,9 +2862,12 @@ namespace osuCrypto::LogVole
 #endif
         if (!gpuSessionOut)
         {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             buildXRoot();
             ShrinkExpandShrinkOutput shrink{};
-            if (!shrinkExpandShrink(state.mShrinkExpandState, xRoot, shrink, cacheScope))
+            if (!shrinkExpandShrink(state.mShrinkExpandState, xRoot, shrink, cacheScope, stats))
             {
                 co_return false;
             }
@@ -2849,7 +2877,7 @@ namespace osuCrypto::LogVole
                     state.mParams.mShrinkExpand.mGadgetLogBase,
                     tauHi,
                     state.mParams.mShrinkExpand.mRing,
-                    hatD))
+                    hatD, stats))
             {
                 co_return false;
             }
@@ -2944,6 +2972,9 @@ namespace osuCrypto::LogVole
         if (!leftTreeDone)
         {
             RootStep step("prep: buildDigestTreeTrunc(left, host)", rootProfiler(ctx));
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             if (!buildDigestTreeTrunc(
                     ctx,
                     hatD,
@@ -2954,7 +2985,7 @@ namespace osuCrypto::LogVole
                     state.mRootLacctLeft.mWidthPadded,
                     true,
                     nullptr,
-                    state.mShrinkExpandState.mParams.mNumWorkerThreads, cacheScope))
+                    state.mShrinkExpandState.mParams.mNumWorkerThreads, cacheScope, stats))
             {
                 co_return false;
             }
@@ -3106,6 +3137,9 @@ namespace osuCrypto::LogVole
         if (!digestDone)
         {
             RootStep step("prep: gadget(yLeft)", rootProfiler(ctx));
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             if (!gadgetDecomposeBitsRangeCentered(
                     yLeft,
                     state.mParams.mShrinkExpand.mGadgetLogBase,
@@ -3113,12 +3147,12 @@ namespace osuCrypto::LogVole
                     tauHi,
                     ctx,
                     yDecomp,
-                    state.mShrinkExpandState.mParams.mNumWorkerThreads))
+                    state.mShrinkExpandState.mParams.mNumWorkerThreads, stats))
             {
                 co_return false;
             }
 
-            const auto publicBFullNtt = buildLencPublicBNtt(ctx, tauFull, cacheScope);
+            const auto publicBFullNtt = buildLencPublicBNtt(ctx, tauFull, cacheScope, stats);
             if (publicBFullNtt.size() < static_cast<std::size_t>(2) * tauFull)
             {
                 co_return false;
@@ -3133,12 +3167,15 @@ namespace osuCrypto::LogVole
         if (!digestDone)
         {
             RootStep step("prep: forwardNttBatch(yDecomp++zeta)", rootProfiler(ctx));
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             topInputsNtt.resize(yDecomp.size() + zeta.size());
             for (std::size_t idx = 0; idx < yDecomp.size(); ++idx)
                 topInputsNtt[idx] = yDecomp[idx];
             for (std::size_t idx = 0; idx < zeta.size(); ++idx)
                 topInputsNtt[yDecomp.size() + idx] = zeta[idx];
-            if (!forwardNttBatch(topInputsNtt, ctx))
+            if (!forwardNttBatch(topInputsNtt, ctx, stats))
             {
                 co_return false;
             }
@@ -3148,6 +3185,9 @@ namespace osuCrypto::LogVole
         if (!digestDone)
         {
             RootStep step("prep: two inner products + INTT + negate", rootProfiler(ctx));
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             const auto& publicBStarNtt = state.mRootPublicBStarWire
                 ? state.mRootPublicBStarWire->get().mPolys
                 : state.mRootPublicBStarNtt;
@@ -3163,7 +3203,7 @@ namespace osuCrypto::LogVole
             resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             for (u32 idx = 0; idx < tauHi; ++idx)
             {
-                if (!dyadicMultiplyAddNttInplace(publicBRootNtt[idx], topInputsNtt[idx], accNtt, ctx))
+                if (!dyadicMultiplyAddNttInplace(publicBRootNtt[idx], topInputsNtt[idx], accNtt, ctx, stats))
                 {
                     co_return false;
                 }
@@ -3171,7 +3211,7 @@ namespace osuCrypto::LogVole
             for (std::size_t idx = 0; idx < zeta.size(); ++idx)
             {
                 if (!dyadicMultiplyAddNttInplace(
-                        publicBStarNtt[idx], topInputsNtt[tauHi + idx], accNtt, ctx))
+                        publicBStarNtt[idx], topInputsNtt[tauHi + idx], accNtt, ctx, stats))
                 {
                     co_return false;
                 }
@@ -3179,7 +3219,7 @@ namespace osuCrypto::LogVole
 
             RnsPoly zero = makeZeroPoly(state.mParams.mShrinkExpand.mRing);
             dPrime = std::move(accNtt);
-            if (!inverseNtt(dPrime, ctx) || !ringSub(zero, dPrime, ctx, negDPrime))
+            if (!inverseNtt(dPrime, ctx, stats) || !ringSub(zero, dPrime, ctx, negDPrime, stats))
             {
                 co_return false;
             }
@@ -6313,7 +6353,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         u32 tauHi,
         const RingParams& ring,
-        std::vector<RnsPoly>& out)
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats)
     {
         if (tauHi == 0)
         {
@@ -6327,7 +6367,7 @@ namespace osuCrypto::LogVole
         }
 
         std::vector<RnsPoly> digits;
-        if (!gadgetDecomposeBitsRangeCentered(digest, gadgetLogBase, 1, tauHi, ctx, digits))
+        if (!gadgetDecomposeBitsRangeCentered(digest, gadgetLogBase, 1, tauHi, ctx, digits, 1, stats))
         {
             return false;
         }
