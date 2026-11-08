@@ -3546,7 +3546,7 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
 
 }
 
-void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
+void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
 {
     const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -3574,6 +3574,11 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
 
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = true;
+    auto& prefetchOptions = advanced.mAdvanced.mProtocol;
+    prefetchOptions.mRootFinalizePriorityPrefetch = cmd.getOr("root_finalize_priority_prefetch",
+        prefetchOptions.mRootFinalizePriorityPrefetch ? 1 : 0) != 0;
+    prefetchOptions.mRootDigestHash = cmd.getOr("root_digest_hash",
+        prefetchOptions.mRootDigestHash ? 1 : 0) != 0;
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
 
@@ -3811,7 +3816,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP&)
 #endif
 }
 
-void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
+void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& cmd)
 {
     const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -3844,6 +3849,11 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(trunc.mMu, 16u);
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = true;
+    auto& prefetchOptions = advanced.mAdvanced.mProtocol;
+    prefetchOptions.mRootFinalizePriorityPrefetch = cmd.getOr("root_finalize_priority_prefetch",
+        prefetchOptions.mRootFinalizePriorityPrefetch ? 1 : 0) != 0;
+    prefetchOptions.mRootDigestHash = cmd.getOr("root_digest_hash",
+        prefetchOptions.mRootDigestHash ? 1 : 0) != 0;
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, currentProtocolCacheScope().mRunId.serviceOwner())));
 

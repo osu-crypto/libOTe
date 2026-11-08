@@ -18,7 +18,7 @@ namespace tests_libOTe::logvole_test
             const auto& params = input.mParams.mLogVole.mShrinkExpand;
             if (!makeZpCrtContext(params.mRing, params.mPlaintextModulusBits,
                     context, std::make_shared<ZpContextFactory>(
-                        std::make_shared<RingContextFactory>(options))))
+                        std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner()))))
                 throw std::runtime_error("Failed to construct test CRT context");
             input.mCrtFactoryOwner = context.mFactoryOwner;
         }
@@ -32,7 +32,7 @@ namespace tests_libOTe::logvole_test
                     return input.mParams.mRing;
             }();
             if (!makeRingNttContext(ring, context,
-                    std::make_shared<RingContextFactory>(options)))
+                    std::make_shared<RingContextFactory>(options, currentProtocolCacheScope().mRunId.serviceOwner())))
                 throw std::runtime_error("Failed to construct test context");
             if constexpr (requires { input.mShrinkExpandState; })
                 input.mShrinkExpandState.mRingFactoryOwner = context.mFactoryOwner;

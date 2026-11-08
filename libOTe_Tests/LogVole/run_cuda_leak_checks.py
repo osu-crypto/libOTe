@@ -61,16 +61,13 @@ def main():
     started = time.monotonic()
     for name, tests in jobs:
         environment = os.environ.copy()
-        if name == "root-prefetch":
-            environment["LV_GPU_ROOT_FINALIZE_PRIORITY_PREFETCH"] = "1"
-            # Exercise the opt-in deferred device hash in this fresh process;
-            # its execution owner must survive the intervening wire exchange.
-            environment["LV_GPU_ROOT_DIGEST_HASH"] = "1"
         command = [sanitizer, "--tool", "memcheck", "--leak-check", "full",
                    "--error-exitcode", "99"]
         command += ([str(lifetime)] if tests is None else
                     [str(executable), "-u", *tests, "-gpu", "1", "-lvCount", "8193",
                      "-lvRounds", "3", "-lvRandom", "1"])
+        if name == "root-prefetch":
+            command += ["-root_finalize_priority_prefetch", "1", "-root_digest_hash", "1"]
         tick = time.monotonic()
         remaining = 90 - (tick - started)
         if remaining <= 0:
