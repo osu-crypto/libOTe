@@ -652,6 +652,7 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
     ZkMulCpuWorkspace limitedChunks(circuit, 3, &partition);
     LOGVOLE_REQUIRE_EQ(limitedChunks.workers(), 3u);
     PRNG random(toBlock(0x50524550, 2));
+    macoro::thread_pool witnessExecutor;
     constexpr u64 q = 65537, delta = 19;
     const seal::Modulus mod(q);
     AlignedUnVec<u64> wires;
@@ -659,7 +660,8 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
     for (unsigned query = 0; query < 4; ++query)
     {
         // Alternate witness ranges and proof accumulators in the same workspace.
-        LOGVOLE_REQUIRE_TRUE(zkMulWitness(circuit, q, random, wires, 0, serial));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulWitness(
+            witnessExecutor, circuit, q, random, wires, 0, serial)));
         for (std::size_t i = 0; i < macs.size(); ++i)
         {
             macs[i] = random.get<u64>() % q;
@@ -699,8 +701,10 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(untouched.mV, 456u);
     PRNG rejectedRandom(toBlock(0x574954, 1)), untouchedRandom(toBlock(0x574954, 1));
     const std::vector<u64> savedWires(wires.begin(), wires.end());
-    LOGVOLE_REQUIRE_FALSE(zkMulWitness(circuit, q, rejectedRandom, wires, 0, parallel));
-    LOGVOLE_REQUIRE_FALSE(zkMulWitness(wrongGeometry, q, rejectedRandom, wires, 0, moved));
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulWitness(
+        witnessExecutor, circuit, q, rejectedRandom, wires, 0, parallel)));
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulWitness(
+        witnessExecutor, wrongGeometry, q, rejectedRandom, wires, 0, moved)));
     LOGVOLE_REQUIRE_TRUE(rangesEqual(wires, savedWires));
     LOGVOLE_REQUIRE_TRUE(rejectedRandom.get<block>() == untouchedRandom.get<block>());
     LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, 1, q, moved, untouched));
@@ -1843,8 +1847,15 @@ void LogVole_Cpu_CrtMixedWidthsMatchSeal(const oc::CLP&)
     }
 }
 
-void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
+void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP& cmd)
 {
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(cmd.getOr("executor_threads", 1));
+    auto onPool = [&](macoro::task<bool> operation) -> macoro::task<bool> {
+        co_await executor.schedule();
+        co_return co_await std::move(operation);
+    };
     for (u64 width : {1, 7, 8, 9, 1031})
     for (u64 depth : {1, 3})
     for (u64 modulus : {u64{257}, u64{2251799813554177}, u64{18014398508400641}})
@@ -1880,7 +1891,7 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
                 AlignedUnVec<u64> actual;
                 actual.resize(expected.size());
                 const auto* storage = actual.data();
-                LOGVOLE_REQUIRE_TRUE(zkMulWitness(circuit, modulus, optimized, actual, expected.size(), workers));
+                LOGVOLE_REQUIRE_TRUE(zkMulWitness(circuit, modulus, optimized, actual, expected.size()));
                 LOGVOLE_REQUIRE_TRUE(actual.data() == storage);
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
                 LOGVOLE_REQUIRE_TRUE(optimized.get<block>() == next);
@@ -1889,8 +1900,8 @@ void LogVole_Cpu_WitnessMatchesSequentialReference(const oc::CLP&)
                 {
                     PRNG replay(toBlock(0x7878, width));
                     std::fill(actual.begin(), actual.end(), ~u64{0});
-                    LOGVOLE_REQUIRE_TRUE(zkMulWitness(circuit, modulus, replay, actual,
-                        expected.size(), workspace));
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(zkMulWitness(executor,
+                        circuit, modulus, replay, actual, expected.size(), workspace))));
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
                     LOGVOLE_REQUIRE_TRUE(replay.get<block>() == next);
                 }
@@ -3603,7 +3614,7 @@ void LogVole_Cpu_AsyncMulProof(const oc::CLP& cmd)
             std::fill(expectedPartial.begin(), expectedPartial.end(), 777);
             std::fill(actualPartial.begin(), actualPartial.end(), 777);
             LOGVOLE_REQUIRE_FALSE(zkMulWitness(invalidLayer, q, referenceRejected,
-                expectedPartial, expectedPartial.size(), 1, settings));
+                expectedPartial, expectedPartial.size(), settings));
             LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(onPool(zkMulWitness(executor,
                 invalidLayer, q, rejected, actualPartial, actualPartial.size(), workspace))));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(actualPartial, expectedPartial));

@@ -146,21 +146,6 @@ namespace osuCrypto::LogVole
 
     namespace
     {
-        // Compatibility policy for the synchronous witness overload only.
-        // Caller-executor operations use explicit prepared task counts instead.
-        std::size_t legacyWitnessWorkerCount(u32 requested, const CpuBenchmarkContext* benchmark)
-        {
-            // Resolve the legacy zero=automatic convention once, while idle.
-            // A supplied benchmark partition is also an explicit capacity cap.
-            const auto automatic = std::max<std::size_t>(1, std::thread::hardware_concurrency());
-            auto capacity = automatic;
-            if (benchmark)
-                capacity = std::max<std::size_t>(1, benchmark->mWorkerLimit
-                    ? std::min(benchmark->mWorkerLimit, benchmark->mCpus.size())
-                    : benchmark->mCpus.size());
-            return std::min(capacity, requested ? std::size_t(requested) : automatic);
-        }
-
         void mulWitnessRange(const ZkMulCircuit& circuit, AlignedUnVec<u64>& wires,
             u64 firstGate, u64 firstOutput, u64 begin, u64 end,
             const seal::Modulus& mod, const detail::CpuZkOptions& options)
@@ -240,42 +225,11 @@ namespace osuCrypto::LogVole
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
     {
-        return zkMulWitness(circuit, modulus, prng, wires, voleSize, 1, settings, cpuBenchmark);
-    }
-
-    bool zkMulWitness(
-        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize, u32 threads, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
-    {
-        if (modulus < 2 || circuit.gateCount() == 0) return false;
-        if (circuit.mOperands.size() != 2 * circuit.gateCount()) return false;
-        if (voleSize && voleSize < circuit.voleCount()) return false;
-        const auto chunks = std::min<u64>(circuit.mWidth, std::max<u32>(1, threads));
-        const auto workers = chunks <= 1 ? std::size_t{1} : std::min<std::size_t>(chunks,
-            legacyWitnessWorkerCount(threads, cpuBenchmark.mContext));
-        // Empty owners allocate nothing. Construct only for the first independent
-        // layer needing multiple workers, then reuse them through the final join.
-        std::optional<std::vector<std::array<u64, 2>>> locals;
-        std::optional<detail::CpuExecutor> executor;
         const auto options = detail::captureCpuZkOptions(settings);
         return evaluateMulWitness(circuit, modulus, prng, wires, voleSize, options,
             [&](auto&& evaluateRange) {
-                if (workers == 1)
-                {
-                    CpuBenchmarkTaskScope taskScope(cpuBenchmark);
-                    evaluateRange(0, circuit.mWidth);
-                    return;
-                }
-                if (!executor)
-                {
-                    locals.emplace(workers);
-                    for (std::size_t i = 0; i < workers; ++i)
-                        (*locals)[i] = {i * circuit.mWidth / workers, (i + 1) * circuit.mWidth / workers};
-                    executor.emplace(workers, cpuBenchmark.mContext);
-                }
-                executor->runBulk(workers, std::span(*locals), [&](std::size_t, const auto& range) {
-                    evaluateRange(range[0], range[1]);
-                });
+                CpuBenchmarkTaskScope taskScope(cpuBenchmark);
+                evaluateRange(0, circuit.mWidth);
             });
     }
 
@@ -341,23 +295,6 @@ namespace osuCrypto::LogVole
     ZkMulCpuWorkspace::~ZkMulCpuWorkspace() = default;
     ZkMulCpuWorkspace::ZkMulCpuWorkspace(ZkMulCpuWorkspace&&) noexcept = default;
     ZkMulCpuWorkspace& ZkMulCpuWorkspace::operator=(ZkMulCpuWorkspace&&) noexcept = default;
-
-    bool zkMulWitness(
-        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize, ZkMulCpuWorkspace& workspace)
-    {
-        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
-        auto& work = *workspace.mImpl;
-        auto ranges = std::span(work.mProverLocal);
-        for (std::size_t i = 0; i < ranges.size(); ++i)
-            ranges[i] = {i * circuit.mWidth / ranges.size(), (i + 1) * circuit.mWidth / ranges.size()};
-        return evaluateMulWitness(circuit, modulus, prng, wires, voleSize, work.mOptions,
-            [&](auto&& evaluateRange) {
-                work.legacyExecutor().runBulk(ranges.size(), ranges, [&](std::size_t, const auto& range) {
-                    evaluateRange(range[0], range[1]);
-                });
-            });
-    }
 
     macoro::task<bool> zkMulWitness(macoro::thread_pool& executor,
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,

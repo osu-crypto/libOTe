@@ -738,6 +738,21 @@ executor thread, including three logical tasks, sampler/CRT rejection, unchanged
 PRNG progression, buffer reuse and joined failures. Small CPU interactive golden
 passes in 3.91 seconds. No benchmarks or GPU execution checks were run.
 
+The synchronous witness caller audit found only test fixtures and reference
+oracles, with no production/frontend callers. The scalar witness entry point now
+evaluates inline with the same independent-layer diagnostics and PRNG draws.
+The threaded and prepared synchronous witness overloads and their hardware/
+diagnostic worker policy are retired; CPU witness regression callers use the
+existing caller-executor/workspace operation. Scalar GPU-reference fixtures are
+unchanged. The workspace's legacy executor remains for GPU proof-response/value
+fallbacks. This retires test-only witness scheduling policy, not a production
+migration or a runtime-global declaration; the inventory remains 24 (89%).
+The targeted Windows build/frontend target passes in 45.82 seconds. Three focused
+witness/lifetime/proof checks pass in 0.31 seconds on one executor thread with up
+to four logical tasks, including dependent layers, integer/PRNG oracles and
+rejection parity. The small CPU asynchronous multiplication protocol passes in
+5.57 seconds. No benchmarks or GPU execution checks were run.
+
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their
    operation/resource owners. Retire `CpuRowScratch` scheduling and legacy

@@ -143,8 +143,6 @@ namespace osuCrypto::LogVole
             std::span<const u64>, u64, u64, ZkMulCpuWorkspace&, ZkProof&);
         friend bool zkMulVerifierValue(const ZkMulCircuit&, std::span<const u64>,
             u64, u64, u64, ZkMulCpuWorkspace&, u64&);
-        friend bool zkMulWitness(const ZkMulCircuit&, u64, PRNG&, AlignedUnVec<u64>&,
-            u64, ZkMulCpuWorkspace&);
         friend macoro::task<bool> zkMulProverResponse(macoro::thread_pool&, const ZkMulCircuit&,
             std::span<const u64>, std::span<const u64>, u64, u64, ZkMulCpuWorkspace&, ZkProof&);
         friend macoro::task<bool> zkMulVerifierValue(macoro::thread_pool&, const ZkMulCircuit&,
@@ -198,22 +196,11 @@ namespace osuCrypto::LogVole
     //
     // `voleSize` (0 = circuit.voleCount()) sizes the output for a padded request;
     // the slack is zeroed and never read by the check.
+    // This scalar entry point evaluates inline; parallel callers supply their
+    // executor and reusable workspace to the asynchronous overload below.
     bool zkMulWitness(
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize = 0, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
-
-    // Evaluate each independent layer with a bounded worker count. Random
-    // input/mask draws retain the sequential API's exact PRNG consumption.
-    bool zkMulWitness(
-        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize, u32 threads, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
-
-    // Legacy synchronous diagnostics/GPU fallback: lazily prepare the private
-    // pool and reuse partition ranges and CPU options across witnesses.
-    // Each layer joins before the next layer reads its outputs.
-    bool zkMulWitness(
-        const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
-        u64 voleSize, ZkMulCpuWorkspace& workspace);
 
     // U = sum_g chi^(g+1) * M[x_g] * M[y_g]                      + M[r]
     // V = sum_g chi^(g+1) * (M[z_g] - x_g*M[y_g] - y_g*M[x_g])    - r
