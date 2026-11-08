@@ -4973,7 +4973,7 @@ namespace osuCrypto::LogVole
             {
 #if defined(ENABLE_LOGVOLE_CUDA)
                 if (mode != RecursiveMode::Root)
-                    (void)gpu::prepareReusableSenderCache(nextState.mShrinkExpandState);
+                    (void)gpu::prepareReusableSenderCache(nextState.mShrinkExpandState, setupScope);
 #endif
                 if (sharedSetupStateEnabled(input.mUseGpuResidentInternalState, input.mParams.mShrinkExpand.mGpuSetup, input.mRingFactoryOwner) &&
                     nextState.mShrinkExpandState.mGpuCache)
@@ -5054,7 +5054,8 @@ namespace osuCrypto::LogVole
             Message&& message,
             ReceiverState& state,
             bool isTopLevel,
-            const ShrinkExpandReceiverState* reusableInternalState, CpuBenchmarkState cpuBenchmark = {})
+            const ShrinkExpandReceiverState* reusableInternalState, CpuBenchmarkState cpuBenchmark = {},
+            ProtocolCacheScopeView setupScope = currentProtocolCacheScope())
         {
             auto ringOwner = input.mRingFactoryOwner;
             if (!ringOwner)
@@ -5129,7 +5130,7 @@ namespace osuCrypto::LogVole
                 // each level does not upload the same ciphertexts separately.
                 // A failed eager upload retains the established lazy fallback.
                 if (mode != RecursiveMode::Root)
-                    (void)gpu::prepareReusableReceiverCache(nextState.mShrinkExpandState);
+                    (void)gpu::prepareReusableReceiverCache(nextState.mShrinkExpandState, setupScope);
 #endif
                 if (sharedSetupStateEnabled(input.mUseGpuResidentInternalState, input.mParams.mShrinkExpand.mGpuSetup, input.mRingFactoryOwner) &&
                     nextState.mShrinkExpandState.mGpuCache)
@@ -5162,7 +5163,7 @@ namespace osuCrypto::LogVole
                 childInput.mUseGpuResidentInternalState = input.mUseGpuResidentInternalState;
 
                 auto childState = std::make_unique<ReceiverState>();
-                if (!finalizeReceiverOfflineImpl(childInput, std::forward<Message>(*message.mNextLevel), *childState, false, childReusableState, cpuBenchmark))
+                if (!finalizeReceiverOfflineImpl(childInput, std::forward<Message>(*message.mNextLevel), *childState, false, childReusableState, cpuBenchmark, setupScope))
                 {
                     return false;
                 }

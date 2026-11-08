@@ -62,7 +62,8 @@ namespace osuCrypto::LogVole::gpu
     // those receiver-local copies share; failure leaves the existing lazy
     // initialization path available. Only for finalized receiver setup states,
     // before concurrent online use.
-    bool prepareReusableReceiverCache(ShrinkExpandReceiverState& state);
+    bool prepareReusableReceiverCache(ShrinkExpandReceiverState& state,
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Finalize a fresh receiver package whose Ct1 is still in coefficient
     // domain. Public calls publish the same full host snapshot. Explicit
     // internal calls may retain immutable coefficient backing and materialize
@@ -76,7 +77,8 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<const LazyLacctHostState> encodedLacct = {});
     // Sender counterpart: share only within one sender's exact setup copies,
     // before concurrent online use.
-    bool prepareReusableSenderCache(ShrinkExpandSenderState& state);
+    bool prepareReusableSenderCache(ShrinkExpandSenderState& state,
+        ProtocolCacheScopeView scope = currentProtocolCacheScope());
     bool lencRandomizerResidencyEnabled(const LogVoleExecutionOptions& options);
 
     // Device state that has to survive from a level's shrink to its expand.

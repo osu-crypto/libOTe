@@ -859,7 +859,7 @@ namespace osuCrypto::LogVole::gpu
             const RingTensor& ct1,
             const ShrinkExpandLacct& lacct,
             bool ct1IsNtt,
-            const LogVoleWireOptions& wireOptions,
+            const LogVoleWireOptions& wireOptions, ProtocolCacheScopeView scope,
             ConstWireView encodedCt1 = {},
             ConstWireView encodedLacct = {})
         {
@@ -872,9 +872,9 @@ namespace osuCrypto::LogVole::gpu
             const std::size_t publicBCount = publicB ? publicB->size()
                 : retainedPublicB ? retainedPublicB->count() : 0;
             if ((retainedPublicA && !retainedPublicUniformMatches(
-                    ctx, *retainedPublicA, publicACount, false)) ||
+                    ctx, *retainedPublicA, publicACount, false, scope)) ||
                 (retainedPublicB && !retainedPublicUniformMatches(
-                    ctx, *retainedPublicB, publicBCount, true))) return nullptr;
+                    ctx, *retainedPublicB, publicBCount, true, scope))) return nullptr;
 
             if (ring->polyWords() > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return nullptr;
             const std::size_t polyBytes = ring->polyWords() * sizeof(u64);
@@ -912,8 +912,8 @@ namespace osuCrypto::LogVole::gpu
                 if (!cache->mPublicA.resize(*ring, publicACount, stream) ||
                     !(retainedPublicA
                         ? copyRetainedPublicUniform(ctx, cache->mPublicA,
-                            *retainedPublicA, 0, publicACount, false, stream)
-                        : uploadPublicUniformOrHost(ctx, cache->mPublicA, *publicA, stream)))
+                            *retainedPublicA, 0, publicACount, false, stream, scope)
+                        : uploadPublicUniformOrHost(ctx, cache->mPublicA, *publicA, stream, scope)))
                     return nullptr;
             }
             if (publicBCount)
@@ -921,8 +921,8 @@ namespace osuCrypto::LogVole::gpu
                 if (!cache->mPublicB.resize(*ring, publicBCount, stream) ||
                     !(retainedPublicB
                         ? copyRetainedPublicUniform(ctx, cache->mPublicB,
-                            *retainedPublicB, 0, publicBCount, true, stream)
-                        : uploadPublicUniformOrHost(ctx, cache->mPublicB, *publicB, stream)))
+                            *retainedPublicB, 0, publicBCount, true, stream, scope)
+                        : uploadPublicUniformOrHost(ctx, cache->mPublicB, *publicB, stream, scope)))
                     return nullptr;
 
                 HostStep leafStep(hostProfiler(ctx), "gpu: prepare recursive public B");
@@ -1015,7 +1015,8 @@ namespace osuCrypto::LogVole::gpu
             return cache;
         }
 
-        std::shared_ptr<OfflineCache> receiverCache(const ShrinkExpandReceiverState& state)
+        std::shared_ptr<OfflineCache> receiverCache(const ShrinkExpandReceiverState& state,
+            ProtocolCacheScopeView scope = currentProtocolCacheScope())
         {
             if (state.mGpuCache)
             {
@@ -1028,16 +1029,17 @@ namespace osuCrypto::LogVole::gpu
             // per-query cost several times the rest of the level put together.
             HostStep miss(hostProfiler(state.mRingFactoryOwner), "gpu: receiverCache build");
             RingNttContext ctx{};
-            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner)) return nullptr;
+            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, scope)) return nullptr;
             auto cache = buildOfflineCache(
                 ctx, state.mPublicANtt.get(), state.mPublicBNtt.get(),
                 state.mPublicANttDevice.get(), state.mPublicBNttDevice.get(),
-                state.hostCt1(), state.hostLacct(), true, state.mParams.mTransport.mEncoding.mWire);
+                state.hostCt1(), state.hostLacct(), true, state.mParams.mTransport.mEncoding.mWire, scope);
             if (cache) state.mGpuCache = cache;
             return cache;
         }
 
-        std::shared_ptr<OfflineCache> senderCache(const ShrinkExpandSenderState& state)
+        std::shared_ptr<OfflineCache> senderCache(const ShrinkExpandSenderState& state,
+            ProtocolCacheScopeView scope = currentProtocolCacheScope())
         {
             if (state.mGpuCache)
             {
@@ -1047,12 +1049,10 @@ namespace osuCrypto::LogVole::gpu
             // Offline retained operands belong to the sender state, not the
             // current online sid. Borrow that state's original scope solely
             // while validating and copying its immutable GPU tokens.
-            ScopedProtocolCacheScope tokenScope(
-                ProtocolCacheRole::Sender,
-                state.mPublicANttDevice ? state.mPublicUniformRunId
-                    : currentProtocolCacheScope().mRunId);
+            scope = {state.mPublicANttDevice ? state.mPublicUniformRunId : scope.mRunId,
+                ProtocolCacheRole::Sender};
             RingNttContext ctx{};
-            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner)) return nullptr;
+            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, scope)) return nullptr;
             ShrinkExpandLacct empty{};
             RingTensor noCt1{};
             // Sender expansion and Root key derivation read only public A and
@@ -1064,7 +1064,7 @@ namespace osuCrypto::LogVole::gpu
             auto cache = buildOfflineCache(
                 ctx, state.mPublicANtt.get(), publicB,
                 state.mPublicANttDevice.get(), retainedPublicB,
-                noCt1, empty, true, state.mParams.mTransport.mEncoding.mWire);
+                noCt1, empty, true, state.mParams.mTransport.mEncoding.mWire, scope);
             if (cache) state.mGpuCache = cache;
             return cache;
         }
@@ -1406,22 +1406,21 @@ namespace osuCrypto::LogVole::gpu
     // deviceDescription() is defined by LogVoleGpuBackend.cpp; the declaration
     // is repeated in LogVoleGpuProtocol.h so that callers only need one header.
 
-    bool prepareReusableSenderCache(ShrinkExpandSenderState& state)
+    bool prepareReusableSenderCache(ShrinkExpandSenderState& state, ProtocolCacheScopeView scope)
     {
         const LogVoleGpuProtocolOptions defaults;
         const auto& options = state.mRingFactoryOwner
             ? state.mRingFactoryOwner->mExecutionOptions.mAdvanced.mProtocol : defaults;
         if (!options.mShareCache || !options.mShareSenderCache) return false;
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Sender, currentProtocolCacheScope().mRunId);
+        scope.mRole = ProtocolCacheRole::Sender;
         if (!enabled(state.mRingFactoryOwner)) return false;
         HostStep setupStep(hostProfiler(state.mRingFactoryOwner), "setup sender: shared device cache");
         // Publish only after buildOfflineCache completes its stream. Mutable
         // query buffers and sampler scratch remain outside the shared mirror.
-        return static_cast<bool>(senderCache(state));
+        return static_cast<bool>(senderCache(state, scope));
     }
 
-    bool prepareReusableReceiverCache(ShrinkExpandReceiverState& state)
+    bool prepareReusableReceiverCache(ShrinkExpandReceiverState& state, ProtocolCacheScopeView scope)
     {
         const LogVoleGpuProtocolOptions defaults;
         const auto& options = state.mRingFactoryOwner
@@ -1430,14 +1429,13 @@ namespace osuCrypto::LogVole::gpu
 
         // The direct Core API can arrive without a protocol role. Keep these
         // receiver tensors on the receiver stream even in that case.
-        ScopedProtocolCacheScope roleScope(
-            ProtocolCacheRole::Receiver, currentProtocolCacheScope().mRunId);
+        scope.mRole = ProtocolCacheRole::Receiver;
         if (!enabled(state.mRingFactoryOwner)) return false;
         HostStep setupStep(hostProfiler(state.mRingFactoryOwner), "setup receiver: shared device cache");
         // buildOfflineCache synchronizes before receiverCache publishes the
         // pointer. Only immutable buffers are shared; LevelSession and sampler
         // scratch remain separate for each query and stream.
-        return static_cast<bool>(receiverCache(state));
+        return static_cast<bool>(receiverCache(state, scope));
     }
 
     bool finalizeReceiverSetupDevice(
@@ -1502,7 +1500,8 @@ namespace osuCrypto::LogVole::gpu
         // transport shortcut participates in constructing this mirror.
         auto cache = buildOfflineCache(ctx, state.mPublicANtt.get(), state.mPublicBNtt.get(),
             state.mPublicANttDevice.get(), state.mPublicBNttDevice.get(),
-            ct1, lacct, false, state.mParams.mTransport.mEncoding.mWire, ct1Bytes, lacctBytes);
+            ct1, lacct, false, state.mParams.mTransport.mEncoding.mWire,
+            currentProtocolCacheScope(), ct1Bytes, lacctBytes);
         if (!cache) return false;
         // Regression hook: decline after the complete device transform, before
         // either host state or the synchronized cache has been published.

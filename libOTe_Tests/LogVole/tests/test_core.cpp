@@ -2062,6 +2062,38 @@ void LogVole_Core_PrivateIdentityMetadata(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(gpu::rootErrorBatchMatches(ctx, *error, 2, sender));
     LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(ctx, *error, 2, otherRun));
     LOGVOLE_REQUIRE_FALSE(gpu::rootErrorBatchMatches(ctx, *error, 2, receiver));
+
+    // Reusable mirrors must follow the explicit setup identity even while a
+    // different party is installed by their caller. Sender tokens keep their
+    // offline run when the supplied operation has moved to another online run.
+    ShrinkExpandSenderState senderState{};
+    senderState.mParams.mRing = ctx.mParams;
+    senderState.mRingFactoryOwner = std::make_shared<RingNttContext>(ctx);
+    senderState.mPublicUniformRunId = sender.mRunId;
+    LOGVOLE_REQUIRE_TRUE(gpu::retainUniformBatchFromSeedsDevice(
+        ctx, seeds, false, senderState.mPublicANttDevice, sender));
+    LOGVOLE_REQUIRE_TRUE(gpu::prepareReusableSenderCache(senderState, otherRun));
+    LOGVOLE_REQUIRE_TRUE(senderState.mGpuCache);
+    LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == receiver.mRunId);
+
+    RingNttContext receiverCtx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(ctx.mParams, receiverCtx,
+        std::make_shared<RingContextFactory>(options, foreign), receiver));
+    ShrinkExpandReceiverState receiverState{};
+    receiverState.mParams.mRing = receiverCtx.mParams;
+    receiverState.mRingFactoryOwner = std::make_shared<RingNttContext>(receiverCtx);
+    LOGVOLE_REQUIRE_TRUE(gpu::retainUniformBatchFromSeedsDevice(
+        receiverCtx, seeds, false, receiverState.mPublicANttDevice, receiver));
+    LOGVOLE_REQUIRE_TRUE(gpu::retainUniformBatchFromSeedsDevice(
+        receiverCtx, seeds, true, receiverState.mPublicBNttDevice, receiver));
+    {
+        ScopedProtocolCacheScope unrelated(sender);
+        LOGVOLE_REQUIRE_FALSE(gpu::prepareReusableReceiverCache(receiverState, otherRun));
+        LOGVOLE_REQUIRE_FALSE(receiverState.mGpuCache);
+        LOGVOLE_REQUIRE_TRUE(gpu::prepareReusableReceiverCache(receiverState, receiver));
+        LOGVOLE_REQUIRE_TRUE(receiverState.mGpuCache);
+        LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == sender.mRunId);
+    }
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";

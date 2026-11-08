@@ -252,10 +252,19 @@ contain no environment reads.
 | Public operands and retention context | LHE/LENC public-cache creation, lookup and host materialization forward explicit views through nonce-derived uniform batches and GPU retained-owner registration/validation/materialization. Existing owned setup contexts supply these views before suspension; service ownership is retained once per entry/owner. CPU-only decryption/evaluation workers use supplied operands only, so their two unnecessary identity capture/guard pairs are removed. A remains run-keyed; CPU B retains its same-role run-zero sharing convention. |
 | Private GPU provenance context | Root/top private uniform sampling, compact root-error ownership, delta/seed-label/repetition validation, and first-query ownership checks take cheap explicit caller views. Retained owners keep their service once; online first-query admission stays in that retained service domain. The identity-free allocation worker no longer installs a scope guard. Transitional defaults remain at unmigrated callers; lazy host materializer caller-role checks still require explicit-interface plumbing. |
 | Lazy sender host context | Seed-label lazy host access and `hostS` accept explicit caller views. Sender materializers preserve first-materialization Receiver rejection inside `call_once`; retained-device checks use the original producer identity, while fallback callbacks, CRT host/wrap helpers and repetition construction forward caller context. Top-sk1 explicit materialization also separates caller admission from producer validation. Three owner guards are removed; identity-free root/error replay interfaces remain unchanged. |
+| Reusable GPU offline mirrors | Sender/receiver cache preparation forwards an explicit borrowed identity through context creation, retained-public validation, copies and host-retention lookup. Recursive Core setup forwards its captured scope. Sender retained operands preserve their original offline run. Three TLS guards are removed; compatibility defaults and receiver Ct1 lazy materialization remain. No kernel or numerical changes. |
 | macoro `bulk_chunked` and `bulk` delegation | Reviewed and committed as `76f1b70` in `out/macoro`. One execution engine for chunk and item callbacks; focused bulk/executor/join tests pass (18 tests, 0.23 seconds on Windows). |
 | macoro bounded async `all_of` | Reviewed and committed as `9114af8` in `out/macoro`. One shared allocation plus one reusable native coroutine bridge per async partition; no synthetic-frame ABI dependency. All started predicates join and clean up before completion. |
 | Async sender seed evaluation | Explicit-executor `LogVoleRingSender::online` and `senderPrecompute` now await root LHE, recursive expansion/denoise, and bounded `all_of` validation. Early rejection joins started work before retry; focused tests compare early/full seeds, outputs, caches and PRNG order. Higher-level senders and ZK verifiers now pass these resources through. Synchronous CPU entry points are removed; the legacy evaluator is restricted to GPU sessions, including its existing host fallback. |
 | Higher-level receiver resource wiring | Public receiver, garbled receiver, CI-VOLE and ZK prover APIs pass executor/LHE/LENC buffers through. Deprecated synchronous CPU online/finalization entry points are removed. Ring scopes are captured before lazy start and no TLS guard crosses the added await. GPU finalization/fallback remains private. |
+
+Reusable-mirror validation: the CUDA-enabled Windows test target and frontend
+example object compile (66.4 seconds). Three focused CPU tests pass in 3.29
+seconds; private metadata and lazy-context GPU tests pass in 1.22 seconds,
+including explicit context under unrelated ambience, sender offline-run reuse,
+and receiver foreign-run rejection before cache publication. No benchmarks or
+WSL validation in this step.
+
 
 #### Remaining runtime globals
 
