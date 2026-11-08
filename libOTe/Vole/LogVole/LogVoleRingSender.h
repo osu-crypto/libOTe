@@ -27,13 +27,13 @@ namespace osuCrypto::LogVole
             const ShrinkExpandSenderOfflineInput& input,
             ShrinkExpandSenderState& state,
             PRNG& prng,
-            Socket& sock);
+            Socket& sock, ProtocolCacheScope cacheScope = currentProtocolCacheScope());
 
         task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults,
             const SenderOfflineInput& input,
             SenderState& state,
             PRNG& prng,
-            Socket& sock, RootWirePinOverlapEvidence& rootWirePin);
+            Socket& sock, RootWirePinOverlapEvidence& rootWirePin, ProtocolCacheScope cacheScope = currentProtocolCacheScope());
 
         task<> keyDerive(
             const KeyDeriveSenderInput& input,

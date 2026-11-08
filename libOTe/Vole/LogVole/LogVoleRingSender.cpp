@@ -51,15 +51,13 @@ namespace osuCrypto::LogVole
                 const auto view = wire.wireView();
                 try
                 {
-                    mThread = std::thread([this, view, runId, identityService = runId.serviceOwner(), device,
+                    mThread = std::thread([this, view, identityService = runId.serviceOwner(), device,
                         benchmarkContext, profile] {
                         try
                         {
                             CpuBenchmarkWorkerScope benchmarkWorker(benchmarkContext);
                 CpuBenchmarkState cpuBenchmark{benchmarkContext, true};
                             CpuBenchmarkTaskScope benchmarkTask(cpuBenchmark);
-                            ScopedProtocolCacheScope senderScope(
-                                ProtocolCacheRole::Sender, runId);
                             HostStep phase(profile, "setup: root wire preregistration");
                             mBeginNs = steadyClockNs();
                             const u64 cpuBegin = cpuBenchmarkThreadNs();
@@ -111,8 +109,6 @@ namespace osuCrypto::LogVole
                                 benchmarkContext);
                 CpuBenchmarkState cpuBenchmark{benchmarkContext, true};
                             CpuBenchmarkTaskScope benchmarkTask(cpuBenchmark);
-                            ScopedProtocolCacheScope senderScope(
-                                ProtocolCacheRole::Sender, runId);
                             HostStep phase(profile,
                                 "setup: early CUDA-owned Root wire reservation");
                             if (cudaSetDevice(device) != cudaSuccess ||
@@ -270,8 +266,6 @@ namespace osuCrypto::LogVole
                 if (!mCudaRequested || mCudaAttempted || !mRoot) return;
                 mCudaAttempted = true;
                 if (!prepareCudaWireEligibility()) return;
-                ScopedProtocolCacheScope senderScope(
-                    ProtocolCacheRole::Sender, mEvidence.mSenderRunId);
                 mReserved = reserveRootCudaWireBuffer(
                     static_cast<std::size_t>(mEvidence.mWireBytes),
                     mEvidence.mSenderRunId, mCudaSelected, true, {}, mWireOptions, mProfile);
@@ -359,7 +353,6 @@ namespace osuCrypto::LogVole
             Socket& sock,
             bool isTopLevel,
             bool hasReusableState,
-            ProtocolCacheRunId senderRunId,
             RootWirePinPlan& rootPin, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {})
         {
             RecursiveMode mode{};
@@ -386,8 +379,6 @@ namespace osuCrypto::LogVole
                 auto shrinkExpandSock = sock.fork();
                 Buffer payload;
                 {
-                    ScopedProtocolCacheScope senderScope(
-                        ProtocolCacheRole::Sender, senderRunId);
                     payload = message.mEncodedShrinkExpandMessage.empty()
                         ? encode(message.mShrinkExpandMessage,
                             params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile, cpuBenchmark)
@@ -414,8 +405,6 @@ namespace osuCrypto::LogVole
                 auto rootSock = sock.fork();
                 Buffer payload;
                 {
-                    ScopedProtocolCacheScope senderScope(
-                        ProtocolCacheRole::Sender, senderRunId);
                     payload = rootPin.mReserved.empty()
                         ? encode(message.mRootMessage,
                             params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile, cpuBenchmark)
@@ -442,7 +431,7 @@ namespace osuCrypto::LogVole
 
             auto childSock = sock.fork();
             co_await sendOfflineMessage(child, *message.mNextLevel,
-                childSock, false, childHasReusableState, senderRunId, rootPin, useGpu, profile, cpuBenchmark);
+                childSock, false, childHasReusableState, rootPin, useGpu, profile, cpuBenchmark);
         }
 
         task<> senderOnlineService(
@@ -689,9 +678,9 @@ namespace osuCrypto::LogVole
 
     task<> LogVoleRingSender::offline(macoro::thread_pool &executor, std::span<u8> setupResults,
                                       const ShrinkExpandSenderOfflineInput &input,
-                                      ShrinkExpandSenderState &state, PRNG &prng, Socket &sock)
+                                      ShrinkExpandSenderState &state, PRNG &prng, Socket &sock, ProtocolCacheScope cacheScope)
     {
-        return offlineStart(executor, setupResults, input, state, prng, sock, currentProtocolCacheScope());
+        return offlineStart(executor, setupResults, input, state, prng, sock, std::move(cacheScope));
     }
 
     task<> LogVoleRingSender::offlineStart(macoro::thread_pool &executor, std::span<u8> setupResults,
@@ -709,7 +698,6 @@ namespace osuCrypto::LogVole
         }
 
         auto payload = [&] {
-            ScopedProtocolCacheScope scope(cacheScope);
             return encode(message, input.mParams.mNumWorkerThreads, input.mParams.mTransport.mEncoding,
                 gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
         }();
@@ -719,10 +707,10 @@ namespace osuCrypto::LogVole
 
     task<> LogVoleRingSender::offline(macoro::thread_pool &executor, std::span<u8> setupResults,
                                       const SenderOfflineInput &input, SenderState &state, PRNG &prng,
-                                      Socket &sock, RootWirePinOverlapEvidence &rootWirePin)
+                                      Socket &sock, RootWirePinOverlapEvidence &rootWirePin, ProtocolCacheScope cacheScope)
     {
         return offlineStart(executor, setupResults, input, state, prng, sock, rootWirePin,
-                            currentProtocolCacheScope());
+                            std::move(cacheScope));
     }
 
     task<> LogVoleRingSender::offlineStart(macoro::thread_pool &executor, std::span<u8> setupResults,
@@ -732,6 +720,7 @@ namespace osuCrypto::LogVole
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
         const ProtocolCacheRunId senderRunId = input.mSenderOwnerRunId ? input.mSenderOwnerRunId : cacheScope.mRunId;
+        cacheScope = ProtocolCacheScope{senderRunId, ProtocolCacheRole::Sender};
         rootWirePin = {};
         rootWirePin.mSenderRunId = senderRunId;
         rootWirePin.mIdentityService = senderRunId.serviceOwner();
@@ -745,7 +734,6 @@ namespace osuCrypto::LogVole
         RootWireEarlyCudaWorker earlyWorker;
         if (earlyRequested)
         {
-            ScopedProtocolCacheScope roleScope(ProtocolCacheRole::Sender, senderRunId);
             forecastBytes = forecastRootOfflineWireSize(input.mParams, input.mLeafInputsAreGadget);
             const int device = gpu::currentDeviceOrdinal();
             const bool eligible = senderRunId != 0 && input.mUseGpuResidentInternalState &&
@@ -767,7 +755,7 @@ namespace osuCrypto::LogVole
         {
             if (!co_await detail::prepareSenderOfflineForTransport(
                     executor, setupResults, input, prng, output, cpuBenchmark,
-                    ProtocolCacheScope{senderRunId, ProtocolCacheRole::Sender}))
+                    cacheScope))
             {
                 throw std::runtime_error("LogVole sender could not prepare recursive offline state");
             }
@@ -782,7 +770,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (earlyRequested) rootPin.adoptEarlyCudaWire(earlyWorker, forecastBytes);
 #endif
-        co_await sendOfflineMessage(input.mParams, output.mMessage, sock, true, false, senderRunId, rootPin,
+        co_await sendOfflineMessage(input.mParams, output.mMessage, sock, true, false, rootPin,
                                     gpu::enabled(input.mRingFactoryOwner),
                                     hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
         // sendOfflineMessage joins the pinning worker before encoding the root.

@@ -8812,7 +8812,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool wrapSetupDeltaDevice(const ZpCrtContext& ctx, u64 delta,
         std::span<const u64> deltaSlots, const std::array<u64, 3>* garbledDeltas,
-        RnsPoly& out)
+        RnsPoly& out, ProtocolCacheScopeView scope)
     {
         if (!enabled(ctx.mRing) || ctx.mPlaintextModulus < 2 || !ringModulusCount(ctx.mRing) ||
             (ctx.mGpuLightweight
@@ -8882,7 +8882,7 @@ namespace osuCrypto::LogVole::gpu
             }
             else
             {
-                plain = gpuPlainTables(ctx);
+                plain = gpuPlainTables(ctx, scope);
                 if (!plain || plain->n() != slots || plain->metadata().mMinModulus != ctx.mPlaintextModulus)
                     return false;
                 deviceSlots = tryAllocateGpuBuffer(stream, slots * sizeof(u64));
@@ -8961,7 +8961,7 @@ namespace osuCrypto::LogVole::gpu
         }
         if (!deltaSlots.empty())
         {
-            wrapped = wrapLabelsDevice(ctx, deltaSlots, true, 0, 1);
+            wrapped = wrapLabelsDevice(ctx, deltaSlots, true, 0, 1, false, scope);
         }
         else
         {
@@ -8971,7 +8971,7 @@ namespace osuCrypto::LogVole::gpu
                     garbledDeltas ? (*garbledDeltas)[1] : 0,
                     garbledDeltas ? (*garbledDeltas)[2] : 0,
                     static_cast<u32>(slots), garbledDeltas != nullptr, prepared->data(), stream.raw())) return false;
-            wrapped = wrapDeviceLabels(ctx, *prepared, slots, true, 0, 1);
+            wrapped = wrapDeviceLabels(ctx, *prepared, slots, true, 0, 1, false, nullptr, nullptr, 0, scope);
         }
         if (!wrapped || !wrapped->mImpl || wrapped->count() != 1 ||
             (wrapped->mImpl->mLogicalCount &&

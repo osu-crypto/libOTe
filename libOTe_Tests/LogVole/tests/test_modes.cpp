@@ -6,6 +6,7 @@
 #include "libOTe_Tests/LogVole_TestUtil.h"
 #include "cryptoTools/Common/CLP.h"
 #include "coproto/Socket/LocalAsyncSock.h"
+#include "coproto/Socket/BufferingSocket.h"
 #include "macoro/sync_wait.h"
 #include "macoro/when_all.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -104,14 +105,45 @@ namespace
         };
         PRNG senderPrng(toBlock(100 ^ seed, 200)), receiverPrng(toBlock(300 ^ seed, 400));
         PRNG inputPrng(toBlock(500 ^ seed, 600));
-        auto offline = coproto::LocalAsyncSocket::makePair();
+        const auto unrelatedService = ProtocolCacheService::create();
+        const ProtocolCacheScope unrelated(unrelatedService->allocate(), ProtocolCacheRole::Receiver);
+        // The owning scope is captured before lazy start. A qualified incoming
+        // run from another service must fail before consuming protocol PRNG.
+        coproto::BufferingSocket rejectedSocket;
+        PRNG rejectedPrng(toBlock(901, seed)), expectedRejectedPrng(toBlock(901, seed));
+        macoro::task<> rejectedTask;
         {
+            ScopedProtocolCacheScope creation(unrelated);
+            rejectedTask = originalSender.offline(senderResources.executor, senderResources.setupResults,
+                delta, rejectedPrng, rejectedSocket);
+        }
+        bool rejected = false;
+        try { macoro::sync_wait(std::move(rejectedTask)); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        LOGVOLE_REQUIRE_TRUE(rejected);
+        LOGVOLE_REQUIRE_TRUE(rejectedPrng.get<block>() == expectedRejectedPrng.get<block>());
+
+        auto offline = coproto::LocalAsyncSocket::makePair();
+        macoro::task<> senderSetup, receiverSetup;
+        {
+            // Canonical zero remains zero at entry; Sender alone allocates its
+            // fresh offline run from the configured resource service.
+            ScopedProtocolCacheScope creation(ProtocolCacheRole::Unspecified, {});
+            senderSetup = originalSender.offline(senderResources.executor, senderResources.setupResults,
+                delta, senderPrng, offline[0]);
+            receiverSetup = originalReceiver.offline(offline[1]);
+        }
+        {
+            ScopedProtocolCacheScope ambient(unrelated);
             auto setup = macoro::sync_wait(macoro::when_all_ready(
-                onPool(originalSender.offline(senderResources.executor, senderResources.setupResults, delta, senderPrng, offline[0])),
-                onPool(originalReceiver.offline(offline[1]))));
+                onPool(std::move(senderSetup)), onPool(std::move(receiverSetup))));
             std::get<0>(setup).result();
             std::get<1>(setup).result();
+            LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRunId == unrelated.mRunId);
+            LOGVOLE_REQUIRE_TRUE(currentProtocolCacheScope().mRole == unrelated.mRole);
         }
+        LOGVOLE_REQUIRE_TRUE(originalSender.mRootWirePin.mSenderRunId.mService ==
+            senderReuse->ringFactory()->protocolService().get());
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto checkExecution = [](const auto& state, const auto& mathFactory) {
             const auto& selected = state.mCrtFactoryOwner;

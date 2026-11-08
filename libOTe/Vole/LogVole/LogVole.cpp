@@ -643,7 +643,7 @@ namespace osuCrypto
     }
 
     task<> LogVoleSender::offline(macoro::thread_pool &executor, std::span<u8> setupResults, u64 delta,
-                                  PRNG &prng, Socket &sock)
+                                  PRNG &prng, Socket &sock, ProtocolCacheScope setupScope)
     {
         mRootWirePin = {};
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
@@ -660,7 +660,7 @@ namespace osuCrypto
 
         CivoleSenderState state{};
         co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock, mRootWirePin,
-                                     cpuBenchmark);
+                                     cpuBenchmark, setupScope);
 
         mOfflineState = std::move(state);
         mModulus = mOfflineState.mModulus;
@@ -2068,13 +2068,13 @@ namespace osuCrypto::LogVole
     task<> civoleSenderOffline(macoro::thread_pool &executor, std::span<u8> setupResults,
                                const CivoleSenderOfflineInput &input, CivoleSenderState &state, PRNG &prng,
                                Socket &sock, RootWirePinOverlapEvidence &rootWirePin,
-                               CpuBenchmarkState cpuBenchmark)
+                               CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
         rootWirePin = {};
         // The delta producer precedes LogVoleRingSender::offline. Give both
         // stages the same fresh sender run rather than publishing a run-zero
         // device owner that a later party could accidentally reuse.
-        const ProtocolCacheRunId incomingRun = currentProtocolCacheScope().mRunId;
+        const ProtocolCacheRunId incomingRun = setupScope.mRunId;
         if (input.mCrtFactoryOwner && !input.mCrtFactoryOwner->mFactory)
             throw std::runtime_error("LogVole offline CRT context has no identity resource owner");
         const auto identityService = input.mCrtFactoryOwner
@@ -2085,14 +2085,13 @@ namespace osuCrypto::LogVole
         const ProtocolCacheRunId offlineRunId = incomingRun ? incomingRun : identityService->allocate();
         rootWirePin.mSenderRunId = offlineRunId;
         rootWirePin.mIdentityService = offlineRunId.serviceOwner();
-        std::optional<ScopedProtocolCacheScope> senderScope(std::in_place, ProtocolCacheRole::Sender,
-                                                            offlineRunId);
+        const ProtocolCacheScope senderScope(offlineRunId, ProtocolCacheRole::Sender);
         CivoleParams sessionParams = input.mParams;
 
         ZpCrtContext ctx{};
         if (!makeZpCrtContext(sessionParams.mLogVole.mShrinkExpand.mRing,
                               sessionParams.mLogVole.mShrinkExpand.mPlaintextModulusBits, ctx,
-                              input.mCrtFactoryOwner ? input.mCrtFactoryOwner->mFactory : nullptr) ||
+                              input.mCrtFactoryOwner ? input.mCrtFactoryOwner->mFactory : nullptr, senderScope) ||
             (input.mGarbledDeltaPattern
                  ? (input.mDelta != 0 || !input.mDeltaSlots.empty() || zpSlotCount(ctx) < 3 ||
                     std::any_of(input.mGarbledDeltaPattern->begin(), input.mGarbledDeltaPattern->end(),
@@ -2169,7 +2168,7 @@ namespace osuCrypto::LogVole
                 {
                     residentDelta = gpu::wrapSetupDeltaResident(
                         ctx, input.mDelta, input.mDeltaSlots,
-                        input.mGarbledDeltaPattern ? &*input.mGarbledDeltaPattern : nullptr);
+                        input.mGarbledDeltaPattern ? &*input.mGarbledDeltaPattern : nullptr, senderScope);
                     if (residentDelta) wrapped = true;
                     else if (params.mShrinkExpand.mGpuSetup.mDeltaChainStrict)
                         throw std::runtime_error("LogVole CI-VOLE sender resident delta capture declined");
@@ -2177,23 +2176,19 @@ namespace osuCrypto::LogVole
                 if (!wrapped)
                     wrapped = gpu::wrapSetupDeltaDevice(
                         ctx, input.mDelta, input.mDeltaSlots,
-                        input.mGarbledDeltaPattern ? &*input.mGarbledDeltaPattern : nullptr, wrappedDelta);
+                        input.mGarbledDeltaPattern ? &*input.mGarbledDeltaPattern : nullptr, wrappedDelta, senderScope);
             }
 #endif
             if (!wrapped && !strictDevice)
             {
                 HostStep cpuStep(hostProfiler(ctx.mRing), "setup: delta CPU preparation", &cpuBenchmark);
-                wrapped = wrapHost(wrappedDelta, {offlineRunId, ProtocolCacheRole::Sender});
+                wrapped = wrapHost(wrappedDelta, senderScope);
             }
         }
         if (!wrapped)
         {
             throw std::runtime_error("LogVole CI-VOLE sender could not wrap delta");
         }
-        // Context/bootstrap and the delta producer are synchronous. Release
-        // this thread-local scope before metadata transport can suspend; the
-        // RingSender reinstates the same run for each synchronous consumer.
-        senderScope.reset();
 
         auto metaSock = sock.fork();
         CivoleOfflineMeta meta{};
@@ -2219,7 +2214,7 @@ namespace osuCrypto::LogVole
         SenderState logVoleState{};
         auto logVoleSock = sock.fork();
         co_await sender.offline(executor, setupResults, offlineInput, logVoleState, prng, logVoleSock,
-                                rootWirePin);
+                                rootWirePin, senderScope);
 
         CivoleSenderState next{};
         next.mParams = sessionParams;

@@ -1068,7 +1068,7 @@ namespace osuCrypto::LogVole::gpu
     // polynomial is fully downloaded before publication; failure preserves out.
     bool wrapSetupDeltaDevice(const ZpCrtContext& ctx, u64 delta,
         std::span<const u64> deltaSlots, const std::array<u64, 3>* garbledDeltas,
-        RnsPoly& out);
+        RnsPoly& out, ProtocolCacheScopeView scope = currentProtocolCacheScope());
     // Sender-only variant of the same constant/slot/garbled GPU arithmetic.
     // It publishes a synchronized coefficient-domain owner without the eager
     // host RnsPoly returned by wrapSetupDeltaDevice.

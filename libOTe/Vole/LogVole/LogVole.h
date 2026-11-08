@@ -353,7 +353,7 @@ namespace osuCrypto
         task<> offline(macoro::thread_pool& executor, std::span<u8> setupResults,
             u64 delta,
             PRNG& prng,
-            Socket& sock);
+            Socket& sock, LogVole::ProtocolCacheScope setupScope = LogVole::currentProtocolCacheScope());
 
         // Online phase after offline(). Writes sender keys b.
         // Caller supplies an executor, exclusive ring-sized LHE products, and
@@ -588,7 +588,7 @@ namespace osuCrypto::LogVole
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
         PRNG& prng,
-        Socket& sock, RootWirePinOverlapEvidence& rootWirePin, CpuBenchmarkState cpuBenchmark = {});
+        Socket& sock, RootWirePinOverlapEvidence& rootWirePin, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = currentProtocolCacheScope());
 
     task<> civoleReceiverOffline(
         const CivoleReceiverOfflineInput& input,
