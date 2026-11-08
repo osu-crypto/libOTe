@@ -771,6 +771,22 @@ counts, independent reset epochs, threshold/destructor flushing and compatibilit
 totals. Small CPU interactive golden passes in 3.92 seconds. No benchmarks or GPU
 execution checks were run.
 
+Asynchronous CPU truncated LENC evaluation now uses the same per-chunk pending
+collector through leaf evaluation, the batched dyadic inner product and inverse
+NTT. Ordinary coefficient/NTT evaluation and fused NTT subtraction explicitly
+forward the selected owner or null; no collector or borrowed sink is retained in
+reusable pointer lists. The existing 32-term arithmetic batches are unchanged.
+Legacy scratch partitions retain their flush guard; non-scratch synchronous
+evaluation flushes the caller at phase completion after temporary workers join.
+No GPU source, scheduling or timing changes are included. This forwarding step
+removes no declaration: the inventory remains 23 and the estimate remains 89%.
+The Windows build/frontend target passes after an unchanged incremental retry
+(82.97 seconds) of a transient MSVC C1090/PDB24 failure in `CpuScratch.cpp`.
+Two focused LENC/LHE checks pass in 7.40 seconds, including exact independent
+owner/null counts, all three output modes, three tasks on one worker and buffer
+reuse. Small CPU interactive golden passes in 4.22 seconds. No benchmarks or GPU
+execution checks were run.
+
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their
    operation/resource owners. Retire `CpuRowScratch` scheduling and legacy

@@ -316,7 +316,8 @@ namespace osuCrypto::LogVole
     // Inputs are borrowed and must not alias the accumulator.
     bool dyadicInnerProductNttInplace(
         std::span<const RnsPoly* const> left, std::span<const RnsPoly* const> right,
-        RnsPoly& accumulator, const RingNttContext& ctx);
+        RnsPoly& accumulator, const RingNttContext& ctx,
+        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
 
     bool dyadicMultiplyAddNttInplace(
         const RnsPoly& aNtt,

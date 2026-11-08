@@ -1402,7 +1402,7 @@ namespace osuCrypto::LogVole
 
     bool dyadicInnerProductNttInplace(
         std::span<const RnsPoly* const> left, std::span<const RnsPoly* const> right,
-        RnsPoly& accumulator, const RingNttContext& ctx)
+        RnsPoly& accumulator, const RingNttContext& ctx, PendingRingOpsStats* stats)
     {
         const auto& moduli = getRingHostModuli(ctx);
         if (moduli.empty() || moduli.size() != ringModulusCount(ctx)) return false;
@@ -1434,7 +1434,7 @@ namespace osuCrypto::LogVole
                             reduceU64(c[i], modulus), modulus);
         }
         for (std::size_t t = 0; t < left.size(); ++t)
-            bumpRingStat(RingOp::DyadicMulAdd);
+            bumpRingStat(RingOp::DyadicMulAdd, stats);
         return true;
     }
 

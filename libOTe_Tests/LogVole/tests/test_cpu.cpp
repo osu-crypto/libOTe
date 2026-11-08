@@ -721,11 +721,15 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
     LogVole::detail::CpuRowScratch scratch;
     macoro::thread_pool pool;
     auto work = pool.make_work();
-    pool.create_threads(3);
+    pool.create_threads(1);
     std::array<LencEvalBuffer, 3> buffers;
     auto onWorker = [](macoro::thread_pool& executor, macoro::task<bool> operation) -> macoro::task<bool> {
         co_await executor.schedule();
-        co_return co_await std::move(operation);
+        const auto ok = co_await std::move(operation);
+        // Publish compatibility leaks on the sole worker before asserting that
+        // explicit owned/null operations leave legacy totals untouched.
+        flushRingOpsThreadLocalStats();
+        co_return ok;
     };
     for (unsigned limbs : {2, 4, 8})
     for (int bits : {30, 52, 55, 60})
@@ -799,9 +803,19 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
             buffer.mCiphertexts.reserve(capacity);
             buffer.mNodes.reserve(capacity);
         }
+        RingOpsStats owners[2];
+        unsigned operationIndex = 0;
         for (const auto mode : {LencEvalMode::Coefficient, LencEvalMode::Ntt, LencEvalMode::SubtractNtt})
         for (unsigned chunks : {1u, 3u, 1u})
         {
+            auto cpu = ctx;
+            const auto selection = (operationIndex++ + (mode == LencEvalMode::SubtractNtt ? 1u : 0u)) % 3;
+            cpu.mExecutionOptions.mRingOpsStats = selection < 2 ? &owners[selection] : nullptr;
+            if (selection < 2) owners[selection].reset();
+            const auto firstCount = owners[0].mDyadicMulAddCount.load();
+            const auto secondCount = owners[1].mDyadicMulAddCount.load();
+            flushRingOpsThreadLocalStats();
+            globalRingOpsStats.reset();
             auto actual = initial;
             auto* batchAllocation = actual.data();
             std::vector<const u64*> coefficientAllocations;
@@ -814,7 +828,7 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
                 buffers[i].mOk = false;
             }
             auto locals = std::span(buffers).first(chunks);
-            auto operation = lencEvalTrunc(pool, locals, ctx, enc.mLacct, tree, mu, 1,
+            auto operation = lencEvalTrunc(pool, locals, cpu, enc.mLacct, tree, mu, 1,
                 digitBits, plaintextBits, actual, mode, gadget);
             for (const auto& buffer : locals) LOGVOLE_REQUIRE_FALSE(buffer.mOk);
             for (unsigned row = 0; row < mu; ++row)
@@ -822,6 +836,20 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
             auto moved = std::move(operation);
             // Exercise suspension from a worker of the target pool.
             LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(pool, std::move(moved))));
+            if (selection < 2)
+            {
+                LOGVOLE_REQUIRE_EQ(owners[selection].mDyadicMulAddCount.load(), products);
+                LOGVOLE_REQUIRE_EQ(owners[selection].mInttCount.load(), mode == LencEvalMode::Coefficient ? mu : 0u);
+                LOGVOLE_REQUIRE_EQ(owners[selection].mSubCount.load(), mode == LencEvalMode::SubtractNtt ? mu : 0u);
+                LOGVOLE_REQUIRE_EQ(owners[selection].mNttCount.load(), 0u);
+            }
+            if (selection != 0) LOGVOLE_REQUIRE_EQ(owners[0].mDyadicMulAddCount.load(), firstCount);
+            if (selection != 1) LOGVOLE_REQUIRE_EQ(owners[1].mDyadicMulAddCount.load(), secondCount);
+            flushRingOpsThreadLocalStats();
+            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), 0u);
+            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mInttCount.load(), 0u);
+            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mSubCount.load(), 0u);
+            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mNttCount.load(), 0u);
             const auto& reference = mode == LencEvalMode::Coefficient ? evalCoefficient :
                 mode == LencEvalMode::Ntt ? eval : expected;
             LOGVOLE_REQUIRE_TRUE(actual.data() == batchAllocation);

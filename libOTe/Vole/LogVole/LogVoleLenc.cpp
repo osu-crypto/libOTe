@@ -2224,7 +2224,8 @@ namespace osuCrypto::LogVole
     static bool evalLencTruncLeaf(
         const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
         u32 tauHi, u32 tauLeaf, u32 ctTauMax, std::vector<RnsPoly>& out,
-        bool outputNtt, bool subtractFromOutput, std::size_t leafIdx, Local& local)
+        bool outputNtt, bool subtractFromOutput, std::size_t leafIdx, Local& local,
+        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
     {
         const auto leaf = static_cast<u32>(leafIdx);
         auto& accNtt = out[leaf];
@@ -2268,18 +2269,18 @@ namespace osuCrypto::LogVole
             parent = (bit == 0) ? left : right;
         }
 
-        if (!dyadicInnerProductNttInplace(ciphertexts, nodes, accNtt, ctx)) return false;
+        if (!dyadicInnerProductNttInplace(ciphertexts, nodes, accNtt, ctx, stats)) return false;
 
         // Eval is the negative path sum. Subtracting it adds the products
         // directly to the existing NTT row, avoiding a separate zeroed
         // batch, negation pass and subsequent ring subtraction.
         if (subtractFromOutput)
         {
-            globalRingOpsStats.mSubCount.fetch_add(1, std::memory_order_relaxed);
+            if (stats) stats->bump(RingOp::Sub);
             return true;
         }
 
-        if (!outputNtt && !inverseNtt(accNtt, ctx))
+        if (!outputNtt && !inverseNtt(accNtt, ctx, stats))
         {
             return false;
         }
@@ -2339,12 +2340,17 @@ namespace osuCrypto::LogVole
         useCpuScratch = useCpuScratch && !gpu::enabled(ctx);
 #endif
         if (!useCpuScratch)
+        {
+            // The temporary pool joins and flushes worker TLS at destruction;
+            // flush the caller once at phase completion, including exceptions.
+            struct FlushStats { ~FlushStats() { flushRingOpsThreadLocalStats(); } } flush;
             return detail::runParallelTasks(mu, requestedWorkers, [&](std::size_t leaf, CpuBenchmarkState&) {
                 detail::CpuRowScratch::Local local;
                 local.mCiphertexts.reserve(terms);
                 local.mNodes.reserve(terms);
                 return evalLeaf(leaf, local);
             }, false, &cpuBenchmark);
+        }
 
         const auto hardware = requestedWorkers == 1 ? std::size_t{1} :
             std::max<std::size_t>(1, std::thread::hardware_concurrency());
@@ -2398,11 +2404,12 @@ namespace osuCrypto::LogVole
                 ? CpuBenchmarkState{cpuBenchmark.mContext, true} : cpuBenchmark;
             CpuBenchmarkWorkerScope timing(chunks.size() > 1 ? worker.mContext : nullptr);
             CpuBenchmarkTaskScope metrics(worker);
-            struct FlushStats { ~FlushStats() { flushRingOpsThreadLocalStats(); } } flush;
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
             for (auto leaf = begin; leaf != end; ++leaf)
             {
                 if (!evalLencTruncLeaf(ctx, lacct, tree, tauHi, tauLeaf, ctTauMax, out,
-                    mode != LencEvalMode::Coefficient, mode == LencEvalMode::SubtractNtt, leaf, chunk))
+                    mode != LencEvalMode::Coefficient, mode == LencEvalMode::SubtractNtt, leaf, chunk, stats))
                 {
                     chunk.mOk = false;
                     break;
