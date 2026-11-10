@@ -923,10 +923,11 @@ namespace osuCrypto
 					const auto count = mEagerSend ?
 						std::min<u64>(8, mPntCount - batch) :
 						mPntCount;
-					pprf::allocateExpandBuffer<F>(
+					auto layout = pprf::allocateExpandBuffer<F>(
 						sumsPerTree, count, programPuncturedPoint,
-						buff, theirSums, leafMsgs, ctx);
+						buff, ctx);
 					co_await chl.recv(buff);
+					pprf::partitionExpandBuffer(buff, layout, theirSums, leafMsgs);
 
 					for (u64 j = 0; j < count; ++j)
 					{
