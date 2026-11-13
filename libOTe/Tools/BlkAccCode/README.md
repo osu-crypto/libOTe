@@ -52,12 +52,15 @@ seed, AES-expanded public randomness, or the complete VOLE protocol.
 Using seeded randomness retains a cryptographic assumption about the resulting
 code ensemble. A fresh joint seed alone does not remove that assumption.
 
-The adapter keeps libOTe's existing conservative large-field tuning: a 0.20
-pseudo-distance for the 64-bit linear-character criterion and at least
-`secParam` noise positions. At the default `secParam = 128`, this selects 200
-positions. The same tuning applies to both constituents; the quarter-rate
-profile does not use the paper's 0.60 value to reduce noise.
-These are attack calibrations, not a proof of 128-bit security for all sizes.
+The adapter uses pseudo-distance 0.30 for RS[16,8,9] and 0.60 for RS[16,4,13].
+These are engineering choices informed by the paper, applied across supported
+lengths as attack calibrations. They do not extend the finite certificates.
+The 64-bit linear-character criterion gives rounded noise floors of 128 and
+56 positions, respectively. The independent floor of at least `secParam`
+positions remains in effect. At the default `secParam = 128`, both profiles
+therefore use 128 noise positions, down from 200 with pseudo-distance 0.20.
+Increasing the pseudo-distances further would not lower this default count.
+These calibrations are not a proof of 128-bit security for all sizes.
 
 The PPRF expands its physical prefix. The adapter pads that prefix with at
 most 15 additional zeros when rounding to a multiple of 16, in addition to

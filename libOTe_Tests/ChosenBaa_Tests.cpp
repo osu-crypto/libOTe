@@ -119,12 +119,31 @@ void ChosenBaa_Code_test(const CLP&)
             if (config.mNoiseVectorSize % 16 ||
                 config.mNoiseVectorSize / rate < n ||
                 config.mNoiseVectorSize < config.mNumPartitions * config.mSizePer ||
-                config.mNumPartitions != 200)
+                config.mNumPartitions != 128)
                 throw RTE_LOC;
+        }
+        // A lower attack floor exposes the distinct distance terms. Check
+        // both noise distributions; stationary coefficients include zero.
+        for (auto noise : {SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary})
+        {
+            const auto config = syndromeDecodingConfigure(40, 4096, type, noise, {1.0});
+            const u64 expected = type == MultType::ChosenBaa16x8 ? 128 : 56;
+            if (config.mNumPartitions != expected) throw RTE_LOC;
         }
         bool rejected = false;
         try { syndromeDecodingConfigure(128, u64(1) << 31, type,
             SdNoiseDistribution::Regular, {1.0}); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        if (!rejected) throw RTE_LOC;
+    }
+    if (getRegNoiseWeight(0.60, 4096, 40, SdNoiseDistribution::Stationary,
+        SdNoiseSecurityModel::binary()) != 56)
+        throw RTE_LOC;
+    for (double distance : {0.60, std::numeric_limits<double>::quiet_NaN(), 1e-300})
+    {
+        bool rejected = false;
+        try { getRegNoiseWeight(distance, 4096, 128, SdNoiseDistribution::Regular,
+            SdNoiseSecurityModel::binary()); }
         catch (const std::invalid_argument&) { rejected = true; }
         if (!rejected) throw RTE_LOC;
     }

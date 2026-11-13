@@ -273,10 +273,11 @@ namespace osuCrypto
         case MultType::ChosenBaa16x8:
         case MultType::ChosenBaa16x4:
             scaler = multType == MultType::ChosenBaa16x8 ? 2 : 4;
-            // Conservative tuning; the finite paper certificates apply at
-            // k=2^20, not automatically to every requested length.
-            // Retain the existing large-field 0.20 linear-test floor.
-            minDist = 0.20;
+            // Pseudo-distance tuning informed by the RS BAA paper. These
+            // are attack estimates at arbitrary lengths, not an extension
+            // of the finite certificates at k=2^20. Keep the independent
+            // noise-position attack floor in getRegNoiseWeight.
+            minDist = multType == MultType::ChosenBaa16x8 ? 0.30 : 0.60;
             break;
         case MultType::BlkAcc3x8:
         case MultType::BlkAcc3x32:

@@ -54,8 +54,9 @@ namespace osuCrypto
     {
         constexpr u64 pseudoDistanceSecurity = 64;
 
-        if (pseudoMinDistRatio > 0.5 || pseudoMinDistRatio <= 0)
-            throw RTE_LOC;
+        if (!std::isfinite(pseudoMinDistRatio) ||
+            pseudoMinDistRatio > 1.0 || pseudoMinDistRatio <= 0)
+            throw std::invalid_argument("Pseudo distance must be in (0, 1]. " LOCATION);
         if (!std::isfinite(securityModel.mRegularNoiseFactor) ||
             securityModel.mRegularNoiseFactor < 1.0 ||
             securityModel.mRegularNoiseFactor > 2.0)
@@ -70,10 +71,17 @@ namespace osuCrypto
         else
             throw RTE_LOC;
 
-        const auto bias = 1.0 - hitFactor * pseudoMinDistRatio;
-        const auto pseudoDistanceWeight = bias == 0.0 ? u64{ 1 } :
-            static_cast<u64>(std::ceil(
-                -double(pseudoDistanceSecurity) / std::log2(bias)));
+        // Large-field distances may exceed 1/2. The supported character
+        // bound requires nonnegative bias, so the limit depends on the noise
+        // distribution (1/2 for binary regular noise, 1 for stationary noise).
+        const auto decay = hitFactor * pseudoMinDistRatio;
+        if (decay > 1.0)
+            throw std::invalid_argument("Pseudo distance gives a negative character bias. " LOCATION);
+        const auto requiredWeight = decay == 1.0 ? 1.0 : std::ceil(
+            -double(pseudoDistanceSecurity) * std::log(2.0) / std::log1p(-decay));
+        if (!std::isfinite(requiredWeight) || requiredWeight >= std::ldexp(1.0, 64))
+            throw std::invalid_argument("Pseudo-distance noise weight exceeds the supported range. " LOCATION);
+        const auto pseudoDistanceWeight = static_cast<u64>(requiredWeight);
 
         auto attackWeight = secParam;
         if (nd == SdNoiseDistribution::Regular &&
