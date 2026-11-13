@@ -748,7 +748,7 @@ namespace osuCrypto::LogVole
         {
 #endif
         auto shrinkChunk = [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark,
-            PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats()) {
+            PendingRingOpsStats* stats) {
             const auto chunkIdx = static_cast<u32>(taskIdx);
             const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
             const std::size_t end = std::min<std::size_t>(start + static_cast<std::size_t>(muHi), receiverInputCount(input));
@@ -830,7 +830,9 @@ namespace osuCrypto::LogVole
             }
         }
         else if (!detail::runParallelTasks(wDoublePrime, state.mParams.mShrinkExpand.mNumWorkerThreads,
-                shrinkChunk, false, &cpuBenchmark))
+                [&](std::size_t row, CpuBenchmarkState& worker) {
+                    return shrinkChunk(row, worker, legacyRingOpsThreadLocalStats());
+                }, false, &cpuBenchmark))
             throw std::runtime_error("LogVole receiver could not prepare recursive child input");
 #if defined(ENABLE_LOGVOLE_CUDA)
         }
@@ -1128,7 +1130,11 @@ namespace osuCrypto::LogVole
         ShrinkExpandShrinkOutput shrink{};
         Buffer digestPayload;
         {
-            if (!shrinkExpandShrink(state, input.mX, shrink, cacheScope))
+            auto* totals = state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr;
+            PendingRingOpsStats pending(totals);
+            auto* stats = gpu::enabled(state.mRingFactoryOwner) ? legacyRingOpsThreadLocalStats() :
+                totals ? &pending : nullptr;
+            if (!shrinkExpandShrink(state, input.mX, shrink, cacheScope, stats))
             {
                 throw std::runtime_error("LogVole receiver could not shrink");
             }

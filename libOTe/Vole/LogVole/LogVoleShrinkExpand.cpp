@@ -138,7 +138,7 @@ namespace osuCrypto::LogVole
             const ShrinkExpandReceiverState& state,
             std::shared_ptr<const std::vector<RnsPoly>>& publicA,
             std::shared_ptr<const std::vector<RnsPoly>>& publicB,
-            ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
         {
             publicA = state.mPublicANtt;
             publicB = state.mPublicBNtt;
@@ -219,7 +219,7 @@ namespace osuCrypto::LogVole
             const RingNttContext& ctx,
             const ShrinkExpandReceiverState& state,
             std::span<const RnsPoly> x,
-            DigestTree& out, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            DigestTree& out, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
         {
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
             if (!receiverPublicHosts(ctx, state, publicA, publicB, scope, stats)) return false;
@@ -255,7 +255,7 @@ namespace osuCrypto::LogVole
             const ShrinkExpandReceiverState& state,
             const ShrinkExpandExpandReceiverInput& input,
             std::shared_ptr<DigestTree>& out, ProtocolCacheScopeView scope,
-            PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            PendingRingOpsStats* stats)
         {
             if (input.mTree)
             {
@@ -469,8 +469,8 @@ namespace osuCrypto::LogVole
         if (input.mDeferHostCiphertexts && !message && gpu::enabled(ctx) &&
             gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions))
         {
-            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu, setupScope);
-            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau, setupScope);
+            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu, setupScope, legacyRingOpsThreadLocalStats());
+            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau, setupScope, legacyRingOpsThreadLocalStats());
             if (!next.mPublicANttDevice || !next.mPublicBNttDevice)
             {
                 next.mPublicANttDevice.reset();
@@ -710,6 +710,9 @@ namespace osuCrypto::LogVole
                 std::make_shared<gpu::GpuExecutionContext>(ctx.mExecutionOptions, ctx.mHostProfiler, ctx.mFactory->protocolService()))) return false;
 #endif
 
+        PendingRingOpsStats operationPending(ctx.mExecutionOptions.mRingOpsStats);
+        auto* operationStats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+            ctx.mExecutionOptions.mRingOpsStats ? &operationPending : nullptr;
         ShrinkExpandReceiverState next{};
         next.mCpuScratch = input.mCpuScratch ? input.mCpuScratch :
             std::make_shared<detail::ShrinkExpandScratch>();
@@ -720,8 +723,8 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (input.mDeferHostSnapshot)
         {
-            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu, receiverScope);
-            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau, receiverScope);
+            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu, receiverScope, operationStats);
+            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau, receiverScope, operationStats);
             // Publish retained-only state only as a complete A/B pair. A
             // partial device attempt falls back to two exact eager owners.
             if (!next.mPublicANttDevice || !next.mPublicBNttDevice)
@@ -772,7 +775,7 @@ namespace osuCrypto::LogVole
         if (!next.mPublicANtt || !next.mPublicBNtt)
         {
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
-            if (!receiverPublicHosts(ctx, next, publicA, publicB, receiverScope)) return false;
+            if (!receiverPublicHosts(ctx, next, publicA, publicB, receiverScope, operationStats)) return false;
             // Materialize both local owners completely before publishing either
             // one to the state consumed by the CPU rollback.
             next.mPublicANtt = std::move(publicA);
@@ -789,7 +792,7 @@ namespace osuCrypto::LogVole
         // the existing device NTT instead of serial host transforms per cell.
         if (setupBatchNttEnabled(input.mParams.mGpuSetup, ctx))
         {
-            if (!forwardNttBatch(next.mCt1.mPolys, ctx)) return false;
+            if (!forwardNttBatch(next.mCt1.mPolys, ctx, operationStats)) return false;
         }
         else
         {
@@ -905,8 +908,11 @@ namespace osuCrypto::LogVole
             RingNttContext ctx{};
             const ProtocolCacheScopeView receiverScope{scope.mRunId, ProtocolCacheRole::Receiver};
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
-            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, receiverScope) ||
-                !receiverPublicHosts(ctx, state, publicA, publicB, receiverScope)) return;
+            if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, receiverScope)) return;
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+            if (!receiverPublicHosts(ctx, state, publicA, publicB, receiverScope, stats)) return;
             next.mPublicANtt = std::move(publicA);
             next.mPublicBNtt = std::move(publicB);
         }
@@ -963,7 +969,7 @@ namespace osuCrypto::LogVole
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
         RingNttContext& ctx, std::vector<RnsPoly>& ciphertext, ProtocolCacheScopeView scope,
-        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+        PendingRingOpsStats* stats)
     {
         if (!validateRingPolyShape(input.mTbkPrime, state.mParams.mRing) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -1039,7 +1045,7 @@ namespace osuCrypto::LogVole
         // Legacy callers retain their reusable ciphertext storage.
         auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
         auto& senderCt2 = scratch.ct2();
-        if (!prepareSenderExpansion(state, input, ctx, senderCt2, scope)) return false;
+        if (!prepareSenderExpansion(state, input, ctx, senderCt2, scope, legacyRingOpsThreadLocalStats())) return false;
         ShrinkExpandSenderExpandOutput next{};
         auto lheWorkers = cpuLheWorkers;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1067,7 +1073,7 @@ namespace osuCrypto::LogVole
         RingNttContext& ctx, std::shared_ptr<const std::vector<RnsPoly>>& publicA,
         std::shared_ptr<DigestTree>& tree, std::vector<RnsPoly>& receiverCt2,
         std::vector<RnsPoly>& ct1AppliedNtt, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope,
-        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+        PendingRingOpsStats* stats)
     {
         if ((!input.mTree && input.mX.size() != state.mParams.mMu) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
@@ -1148,7 +1154,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& decPartialNtt, const std::vector<RnsPoly>& evalNtt,
         const std::vector<RnsPoly>& receiverCt2, bool fusedEval, bool senderRole,
         ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark,
-        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+        PendingRingOpsStats* stats)
     {
         if (decPartialNtt.size() != state.mParams.mMu ||
             (!fusedEval && evalNtt.size() != state.mParams.mMu) ||
@@ -1242,7 +1248,7 @@ namespace osuCrypto::LogVole
         auto& receiverCt2 = scratch.ct2();
         std::vector<RnsPoly> ct1AppliedNtt;
         if (!prepareReceiverExpansion(state, input, ctx, publicA, tree,
-                receiverCt2, ct1AppliedNtt, cpuBenchmark, scope)) return false;
+                receiverCt2, ct1AppliedNtt, cpuBenchmark, scope, legacyRingOpsThreadLocalStats())) return false;
         const bool senderRole = scope.mRole == ProtocolCacheRole::Sender;
         HostStep decryptStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt", &cpuBenchmark);
         std::vector<RnsPoly> decPartialNtt;
@@ -1301,7 +1307,7 @@ namespace osuCrypto::LogVole
                 state.mParams.mGadgetLogBase,
                 evalNtt,
                 true,
-                state.mParams.mNumWorkerThreads);
+                state.mParams.mNumWorkerThreads, legacyRingOpsThreadLocalStats());
         }
         if (!evalOk)
         {
@@ -1310,7 +1316,7 @@ namespace osuCrypto::LogVole
 
         evalStep.stop();
         return finishReceiverExpansion(ctx, state, decPartialNtt, evalNtt, receiverCt2,
-            fusedEval, senderRole, out, cpuBenchmark);
+            fusedEval, senderRole, out, cpuBenchmark, legacyRingOpsThreadLocalStats());
     }
 
     struct RecoveryConstants

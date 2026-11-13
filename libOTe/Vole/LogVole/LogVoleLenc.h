@@ -82,12 +82,12 @@ namespace osuCrypto::LogVole
     std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     std::shared_ptr<const std::vector<RnsPoly>> sharedLencPublicBNtt(
-        const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     // Internal device-resident view of the same deterministic cached batch.
     // It is exact-role/run/device scoped and does not create a host snapshot.
     std::shared_ptr<const gpu::RetainedPublicUniform> retainedLencPublicBNtt(
-        const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     bool prepareKeyDeriveRequest(
         const KeyDeriveReceiverInput& input,
@@ -115,7 +115,7 @@ namespace osuCrypto::LogVole
         DigestTree& out,
         u32 requestedWidthPadded = 0,
         const std::vector<RnsPoly>* publicBNtt = nullptr,
-        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     bool buildDigestTree(
         const RingNttContext& ctx,
@@ -125,7 +125,7 @@ namespace osuCrypto::LogVole
         DigestTree& out,
         u32 requestedWidthPadded = 0,
         const std::vector<RnsPoly>* publicBNtt = nullptr,
-        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     bool lencEnc(
         const RingNttContext& ctx,
@@ -159,7 +159,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
-        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     bool lencEval(
         const RingNttContext& ctx,
@@ -170,7 +170,7 @@ namespace osuCrypto::LogVole
         u32 gadgetLogBase,
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
-        u32 requestedWorkers = 1, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, PendingRingOpsStats* stats = nullptr);
 
     bool buildDigestTreeTrunc(
         const RingNttContext& ctx,
@@ -182,7 +182,7 @@ namespace osuCrypto::LogVole
         u32 requestedWidthPadded = 0,
         bool leafInputsAreGadget = false,
         const std::vector<RnsPoly>* publicBNtt = nullptr,
-        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     bool buildDigestTreeTrunc(
         const RingNttContext& ctx,
@@ -194,7 +194,7 @@ namespace osuCrypto::LogVole
         u32 requestedWidthPadded = 0,
         bool leafInputsAreGadget = false,
         const std::vector<RnsPoly>* publicBNtt = nullptr,
-        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        u32 requestedWorkers = 1, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     // Independent CPU setup phases use requestedWorkers logical tasks (zero
     // selects one), bounded by useful work; setupResults must hold every task.

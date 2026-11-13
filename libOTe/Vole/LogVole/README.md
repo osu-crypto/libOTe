@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **94%** of the agreed ownership/globals refactor,
+Estimated overall completion: **95%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -961,6 +961,38 @@ and two-query GoldenSeed 4.02 seconds. No GPU execution, WSL, broad suite, leak
 checks or benchmarks were run. Next: remove remaining CPU TLS diagnostic defaults
 with explicit pending collectors, then finish the remaining diagnostic scheduler
 boundaries while preserving GPU compatibility behavior.
+
+The remaining implicit ring-statistics defaults are now explicit: 33 public
+collector arguments default to null, and 31 private helper collectors are
+required arguments. Context-owning CPU digest, socket shrink, root setup/noise
+and lazy-host replay boundaries select their borrowed owner or null. The two
+context-free seed-label decomposition/sampling helpers accept an optional
+pending collector so explicit compatibility callers can retain their counts.
+GPU compatibility entrypoints explicitly select legacy collectors; parallel
+callbacks acquire them on their executing thread. Four calls in
+`cuda/LogVoleGpuProtocol.cpp` now pass the existing legacy collector explicitly;
+GPU arithmetic, scheduling, PRNG order and batching are unchanged.
+Generic `CpuRowScratch` execution no longer flushes ring diagnostics. Counted
+compact-noise replay owns one CPU collector per existing chunk, with a guarded
+legacy flush only for GPU execution; uncounted callbacks need no flush. CPU
+phases therefore leave unrelated pending legacy work untouched. The focused
+statistics test covers omitted public arguments, an unflushed legacy sentinel,
+configured/null digest owners, and serial/parallel compatibility counts using
+CPU arithmetic. The combined serialized Windows library/test/frontend-object
+build passes in 726.92 seconds. Four defaults/sentinel/setup and LHE/LENC
+ownership checks pass in 9.08 seconds (the new compatibility/sentinel test takes
+42 ms); eight root/local/reuse/recursive and socket checks pass in 15.37 seconds;
+eight standalone key-derive/error, inner-product and golden-search checks pass
+in 1.65 seconds. Small two-query CPU interactive golden passes in 5.84 seconds.
+The source audit finds no remaining implicit TLS collector defaults. Explicit
+legacy collectors remain in the GPU compatibility and lazy-host fallback
+boundaries; those compatibility entrypoints can still execute CPU arithmetic.
+The inventory remains 23 runtime-global declarations for retained GPU/legacy
+work, and the rough overall estimate advances to 95%. Scheduling cleanup and
+Linux/LSAN validation remain pending. No benchmarks, GPU execution tests or WSL
+checks were run. Next: retire remaining synchronous ZK scheduling interfaces using
+their existing async workspaces, then finish golden/reference and staged key
+release boundaries.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their

@@ -45,20 +45,14 @@ namespace osuCrypto::LogVole
                     std::size_t, std::size_t, CpuBenchmarkState&>, bool>);
                 if (!tasks) return true;
                 const auto workers = setupWorkers(tasks, allowance, benchmark.mContext);
-                struct FlushStats
-                {
-                    ~FlushStats() { flushRingOpsThreadLocalStats(); }
-                };
                 if (workers == 1)
                 {
                     CpuBenchmarkTaskScope metrics(benchmark);
-                    FlushStats flush;
                     return fn(0, tasks, benchmark);
                 }
                 auto locals = prepare(workers, 0, benchmark.mContext);
                 executor()->runBulkChunked(tasks, locals,
                     [&](std::size_t begin, std::size_t end, Local& local) {
-                        FlushStats flush;
                         // The executor already accounts for this chunk.
                         CpuBenchmarkState worker{benchmark.mContext,
                             &local != locals.data() || benchmark.mIsWorker, 1};

@@ -111,7 +111,7 @@ namespace osuCrypto::LogVole
     std::vector<RnsPoly> sampleUniformBatch(
         const RingNttContext& ctx,
         u32 count,
-        PRNG& prng, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        PRNG& prng, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     macoro::task<bool> prepareShrinkExpandSenderOffline(
         macoro::thread_pool& executor, std::span<u8> setupResults,
@@ -144,12 +144,12 @@ namespace osuCrypto::LogVole
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         const std::vector<RnsPoly>& x,
-        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         std::span<const RnsPoly> x,
-        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        ShrinkExpandShrinkOutput& out, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     // CPU expansion: executor and exclusive prepared buffers are borrowed
     // until completion. Output is published only after decryption succeeds.

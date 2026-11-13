@@ -1,3 +1,5 @@
+#include "libOTe_Tests/LogVole_RingStatsTestUtil.h"
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe_Tests/LogVole_TestOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
@@ -3878,4 +3880,101 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
 #else
     (void)cmd;
 #endif
+}
+
+void LogVole_RingOps_StatisticsDefaultsAndCompatibility(const oc::CLP&)
+{
+    using tests_libOTe::logvole_test::ringStatsSnapshot;
+    RingParams params;
+    params.mPolyModulusDegree = 1024;
+    assignValues<int>(params.mCoeffModulusBits, {30, 30});
+    RingNttContext ctx;
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    RingOpsStats owned;
+    ctx.mExecutionOptions.mRingOpsStats = &owned;
+    const auto zeros = ringStatsSnapshot(owned);
+    auto original = deriveUniformPolyFromNonce(ctx, 17, 19, 0);
+    std::vector<RnsPoly> input{original, original}, publicA;
+    LOGVOLE_REQUIRE_TRUE(buildLhePublicANtt(ctx, 2, publicA));
+    RnsPoly zero;
+    resizeZero(zero.mCoeffs, ringPolyCoeffCount(params));
+    std::array<osuCrypto::u64, 8> seed{};
+    osuCrypto::PRNG prng(osuCrypto::toBlock(71));
+    flushRingOpsThreadLocalStats();
+    globalRingOpsStats.reset();
+    // A pending sentinel detects unwanted CPU flushes as well as writes.
+    legacyRingOpsThreadLocalStats()->bump(RingOp::Add);
+    auto roundtrip = original;
+    LOGVOLE_REQUIRE_TRUE(forwardNtt(roundtrip, ctx));
+    LOGVOLE_REQUIRE_TRUE(inverseNtt(roundtrip, ctx));
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(roundtrip.mCoeffs, original.mCoeffs));
+    auto batch = input;
+    LOGVOLE_REQUIRE_TRUE(forwardNttBatch(batch, ctx));
+    RnsPoly product = zero;
+    LOGVOLE_REQUIRE_TRUE(dyadicMultiplyAddNttInplace(batch[0], batch[1], product, ctx));
+    LOGVOLE_REQUIRE_TRUE(dyadicMultiplyAddNtt(batch[0], batch[1], zero, ctx, product));
+    LOGVOLE_REQUIRE_TRUE(inverseNttBatch(batch, ctx));
+    LOGVOLE_REQUIRE_TRUE(ringSubInplace(roundtrip, zero, ctx));
+    auto uniform = sampleUniformPolyFromSeed(ctx, seed);
+    LOGVOLE_REQUIRE_TRUE(forwardNttCanonical(uniform, ctx));
+    auto sampled = sampleUniformBatch(ctx, 2, prng);
+    auto nonceBatch = deriveUniformPolyBatchFromNonce(ctx, 21, 23, 2, true);
+    std::array<osuCrypto::block, 1> seeds{osuCrypto::ZeroBlock};
+    LOGVOLE_REQUIRE_TRUE(deriveUniformPolyBatchFromSeedListInplace(ctx, seeds, 25, 2, sampled));
+    LOGVOLE_REQUIRE_TRUE(addPolyErrorFromSeed(roundtrip, 3.2, 19.2, seed, ctx));
+    std::vector<osuCrypto::u64> compact(params.mPolyModulusDegree);
+    LOGVOLE_REQUIRE_TRUE(samplePolyErrorCompactFromSeed(compact, 3.2, 19.2, seed, ctx));
+    std::vector<RnsPoly> digits;
+    LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBits(original, 20, 3, ctx, digits));
+    DigestTree tree, truncated;
+    LOGVOLE_REQUIRE_TRUE(buildDigestTree(ctx, input, 3, 20, tree));
+    LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(ctx, input, 2, 20, 20, truncated));
+    LencEncodeOutput encoded;
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, input, 3, 20, prng, encoded));
+    std::vector<RnsPoly> evaluated, aggregated;
+    LOGVOLE_REQUIRE_TRUE(lencEval(ctx, encoded.mLacct, tree, 2, 3, 20, evaluated));
+    LOGVOLE_REQUIRE_TRUE(seedLabelAgg(input, 1, 2, params, aggregated));
+    LOGVOLE_REQUIRE_TRUE(seedLabelGadgetDecomposeAndUnbundle(original, 20, 3, params, digits));
+    std::array<osuCrypto::u8, 16> seedBytes{};
+    LOGVOLE_REQUIRE_TRUE(seedLabelSampleCt2FromSeed(seedBytes, 1, original, 0, 2, params, sampled));
+    detail::CpuRowScratch scratch;
+    CpuBenchmarkState benchmark;
+    LOGVOLE_REQUIRE_TRUE(scratch.runBulk(2, 2, [](std::size_t) { return true; }, benchmark));
+    LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(owned) == zeros);
+    LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
+    flushRingOpsThreadLocalStats();
+    auto sentinel = zeros;
+    sentinel[2] = 1;
+    LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == sentinel);
+
+    // Convenience digest boundaries must keep their configured CPU owner.
+    RnsPoly digest;
+    LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, input, 3, 20, digest));
+    LOGVOLE_REQUIRE_TRUE(owned.mDyadicMulAddCount.load() > 0);
+    const auto afterDigest = ringStatsSnapshot(owned);
+    ctx.mExecutionOptions.mRingOpsStats = nullptr;
+    RnsPoly disabledDigest;
+    LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, input, 3, 20, disabledDigest));
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(digest.mCoeffs, disabledDigest.mCoeffs));
+    LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(owned) == afterDigest);
+    flushRingOpsThreadLocalStats();
+    LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == sentinel);
+
+    // Exercise explicit GPU compatibility forwarding with CPU arithmetic;
+    // each synchronous worker must publish its own collector before the join.
+    for (osuCrypto::u32 workers : {1u, 2u})
+    {
+        globalRingOpsStats.reset();
+        std::vector<RnsPoly> decrypted;
+        LOGVOLE_REQUIRE_TRUE(detail::gpuLegacyLheDec(ctx, input, zero, decrypted,
+            &publicA, false, false, workers, {}, &scratch));
+        flushRingOpsThreadLocalStats();
+        auto expected = zeros;
+        expected[0] = 1;
+        expected[1] = 2;
+        expected[6] = 2;
+        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == expected);
+        for (std::size_t i = 0; i < input.size(); ++i)
+            LOGVOLE_REQUIRE_TRUE(rangesEqual(decrypted[i].mCoeffs, input[i].mCoeffs));
+    }
 }

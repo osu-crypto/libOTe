@@ -52,7 +52,7 @@ namespace osuCrypto::LogVole
         using PublicACacheEntry = PublicPolynomialCache::Entry;
 
         std::vector<RnsPoly> buildLhePublicANttImpl(const RingNttContext& ctx, u32 mu,
-            std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
         {
             // Legacy public A deliberately uses raw uniform residues despite
             // its Ntt suffix; retaining it must not introduce a transform.
@@ -60,7 +60,7 @@ namespace osuCrypto::LogVole
         }
 
         std::shared_ptr<PublicACacheEntry> getOrCreateCachedPublicAEntry(
-            const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
         {
             if (!ctx.mPublicCache) return {};
             auto& cache = ctx.mPublicCache->mLhe;
@@ -121,7 +121,7 @@ namespace osuCrypto::LogVole
         }
 
         std::shared_ptr<const std::vector<RnsPoly>> getOrCreateCachedPublicANtt(
-            const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
         {
             auto entry = getOrCreateCachedPublicAEntry(ctx, mu, scope, stats);
             if (!entry) return {};
@@ -1009,7 +1009,7 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, std::span<const seal::Modulus> moduli,
         const RnsPoly& publicA, const RnsPoly& skNtt, const RnsPoly& cipher,
         RnsPoly& result, RnsPoly& product, LheDomain domain, bool fused,
-        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+        PendingRingOpsStats* stats)
     {
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         if (domain == LheDomain::Ntt && fused)
@@ -1077,12 +1077,12 @@ namespace osuCrypto::LogVole
         {
             // A device decline keeps PRNG consumption unchanged, then builds
             // the exact host fallback operand only when it is consumed.
-            cachedPublicANtt = getOrCreateCachedPublicANtt(ctx, publicCount, scope);
+            cachedPublicANtt = getOrCreateCachedPublicANtt(ctx, publicCount, scope, legacyRingOpsThreadLocalStats());
             publicANtt = cachedPublicANtt.get();
         }
 
         RnsPoly skNtt = sk;
-        if (!forwardNtt(skNtt, ctx))
+        if (!forwardNtt(skNtt, ctx, legacyRingOpsThreadLocalStats()))
         {
             return false;
         }
@@ -1097,7 +1097,7 @@ namespace osuCrypto::LogVole
             if (!runLheRows(ctx, result.size(), requestedWorkers, cpuBenchmark, cpuScratch, 0, true,
                 [&](std::size_t row, RnsPoly&) {
                     return decryptLheRow(ctx, moduli, (*publicANtt)[row], skNtt, cipher[row],
-                        result[row], result[row], LheDomain::Coefficient, false);
+                        result[row], result[row], LheDomain::Coefficient, false, legacyRingOpsThreadLocalStats());
                 })) return false;
             out = std::move(result);
             return true;
@@ -1110,14 +1110,14 @@ namespace osuCrypto::LogVole
         const bool inplace = ctx.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe;
         std::vector<RnsPoly> result = inplace && ownedCipher && publicANtt != ownedCipher
             ? std::move(*ownedCipher) : std::vector<RnsPoly>(cipher.begin(), cipher.end());
-        if (!cipherInputIsNtt && !forwardNttBatch(result, ctx))
+        if (!cipherInputIsNtt && !forwardNttBatch(result, ctx, legacyRingOpsThreadLocalStats()))
         {
             return false;
         }
 
         auto decryptRow = [&](std::size_t row, RnsPoly& product) {
             return decryptLheRow(ctx, moduli, (*publicANtt)[row], skNtt, result[row],
-                result[row], product, LheDomain::Ntt, inplace);
+                result[row], product, LheDomain::Ntt, inplace, legacyRingOpsThreadLocalStats());
         };
         if (!runLheRows(ctx, result.size(), requestedWorkers, cpuBenchmark,
             cpuScratch, inplace ? 0 : ringPolyCoeffCount(ctx.mParams), true, decryptRow))
@@ -1125,7 +1125,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        if (!outputNtt && !inverseNttBatch(result, ctx))
+        if (!outputNtt && !inverseNttBatch(result, ctx, legacyRingOpsThreadLocalStats()))
         {
             return false;
         }

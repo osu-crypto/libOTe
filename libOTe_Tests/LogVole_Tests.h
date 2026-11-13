@@ -93,6 +93,7 @@
     X(LencOps, EvalMatchesRmulDigestMinusSmulX) \
     X(LencOps, TruncEvalPrebuiltTreeDomainsAndReuse) \
     X(LencOps, TruncLeafInputsAreGadgetPath) \
+    X(RingOps, StatisticsDefaultsAndCompatibility) \
     X(RingOps, NttRoundTrip) \
     X(RingOps, PartyCachesDoNotAlias) \
     X(RingOps, ScalarUploadLifetimeAndRoleSwitch) \

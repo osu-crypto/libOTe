@@ -609,7 +609,7 @@ namespace osuCrypto::LogVole
         u32 outCount,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = nullptr);
 
     // Consumes a temporary batch, avoiding a full copy when tau == 1.
     bool seedLabelAgg(
@@ -617,14 +617,14 @@ namespace osuCrypto::LogVole
         u32 outCount,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = nullptr);
 
     bool seedLabelGadgetDecomposeAndUnbundle(
         const RnsPoly& digest,
         u32 gadgetLogBase,
         u32 tau,
         const RingParams& ring,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = nullptr);
 
     bool seedLabelGadgetDecomposeHiAndUnbundle(
         const RnsPoly& digest,
@@ -648,7 +648,7 @@ namespace osuCrypto::LogVole
         u32 instanceIdx,
         u32 coeffCount,
         const RingParams& ring,
-        std::vector<RnsPoly>& out);
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = nullptr);
 
     bool validateGoldenSeedSearch(const Params& params);
 

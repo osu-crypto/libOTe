@@ -16,7 +16,7 @@ namespace macoro { class thread_pool; }
 
 namespace osuCrypto::LogVole
 {
-    bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+    bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     // Setup states borrow immutable cached public data. The mutable builder
     // above continues to return an independent copy for existing callers.
@@ -24,7 +24,7 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     std::shared_ptr<const gpu::RetainedPublicUniform> retainedLhePublicANtt(
-        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        const RingNttContext& ctx, u32 mu, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     bool multiplyByGPower(
         const RingNttContext& ctx,
@@ -107,7 +107,7 @@ namespace osuCrypto::LogVole
         u64 sid,
         const RnsPoly& digest,
         u64 instanceIdx,
-        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats());
+        std::vector<RnsPoly>& out, PendingRingOpsStats* stats = nullptr);
 
     // Caller-owned storage for one CPU decryption chunk. No executor or
     // scheduling policy is retained here. Reused exclusively until lheDec joins.

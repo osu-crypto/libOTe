@@ -272,7 +272,7 @@ namespace osuCrypto::LogVole
 
         thread_local PendingRingOpsStats tlsRingOpsStats{&globalRingOpsStats};
 
-        void bumpRingStat(RingOp operation, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+        void bumpRingStat(RingOp operation, PendingRingOpsStats* stats)
         {
             if (stats) stats->bump(operation);
         }
@@ -2896,7 +2896,7 @@ namespace osuCrypto::LogVole
                 {
                     for (std::size_t row = 0; row < seeds.size(); ++row)
                         if ((active.empty() || active[row]) && sampled.mComplete[row])
-                            bumpRingStat(RingOp::ErrorAdd);
+                            bumpRingStat(RingOp::ErrorAdd, legacyRingOpsThreadLocalStats());
                     host.clear();
                     device = std::move(sampled.mValues);
                     co_return true;
@@ -3034,9 +3034,20 @@ namespace osuCrypto::LogVole
 #else
         if (device) return false;
 #endif
-        if (!setupScratch.runBulk(seeds.size(), requestedWorkers, [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) {
-                return (!active.empty() && !active[row]) ||
-                    samplePolyErrorCompactFromSeed(std::span<u64>(next).subspan(row * n, n), sigma, clip, seeds[row], ctx);
+        if (!setupScratch.runBulkChunked(seeds.size(), requestedWorkers,
+            [&](std::size_t begin, std::size_t end, CpuBenchmarkState&) {
+                struct FlushStats {
+                    bool mEnabled;
+                    ~FlushStats() { if (mEnabled) flushRingOpsThreadLocalStats(); }
+                } flush{gpu::enabled(ctx)};
+                PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+                    ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+                for (auto row = begin; row != end; ++row)
+                    if ((active.empty() || active[row]) &&
+                        !samplePolyErrorCompactFromSeed(std::span<u64>(next).subspan(row * n, n),
+                            sigma, clip, seeds[row], ctx, stats)) return false;
+                return true;
             }, cpuBenchmark)) return false;
         host = std::move(next);
         return true;

@@ -237,7 +237,7 @@ namespace osuCrypto::LogVole::gpu
         if (decline) return {};
         RetainedPublicUniformPtr next;
         if (!retainUniformPolyBatchFromNonce(ctx, kRootBStarNonce,
-                kRootBStarDomain, count, true, next, scope) || !next ||
+                kRootBStarDomain, count, true, next, scope, legacyRingOpsThreadLocalStats()) || !next ||
             !retainedPublicUniformMatches(ctx, *next, count, true, scope) ||
             next.use_count() != 1) return {};
         auto producer = std::const_pointer_cast<RetainedPublicUniform>(next);
@@ -290,8 +290,8 @@ namespace osuCrypto::LogVole::gpu
                 next.resize(value.mSeeds.size());
                 for (std::size_t i = 0; i < value.mSeeds.size(); ++i)
                 {
-                    next[i] = sampleUniformPolyFromSeed(ctx, value.mSeeds[i]);
-                    if (value.mOutputNtt && !forwardNttCanonical(next[i], ctx)) return false;
+                    next[i] = sampleUniformPolyFromSeed(ctx, value.mSeeds[i], legacyRingOpsThreadLocalStats());
+                    if (value.mOutputNtt && !forwardNttCanonical(next[i], ctx, legacyRingOpsThreadLocalStats())) return false;
                 }
             }
             catch (...)
@@ -826,7 +826,7 @@ namespace osuCrypto::LogVole::gpu
                             throw std::runtime_error("LogVole receiver lazy Ct1 has invalid coefficient backing");
                         next = coefficients;
                         for (auto& poly : next.mPolys)
-                            if (!forwardNtt(poly, mContext))
+                            if (!forwardNtt(poly, mContext, legacyRingOpsThreadLocalStats()))
                                 throw std::runtime_error("LogVole receiver lazy Ct1 host NTT failed");
                     }
                     mNtt = std::move(next);

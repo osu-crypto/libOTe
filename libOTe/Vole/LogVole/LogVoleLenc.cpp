@@ -98,7 +98,7 @@ namespace osuCrypto::LogVole
             return out;
         }
 
-        bool negatePoly(const RingNttContext& ctx, RnsPoly poly, RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+        bool negatePoly(const RingNttContext& ctx, RnsPoly poly, RnsPoly& out, PendingRingOpsStats* stats)
         {
             if (!validateRingPolyShape(poly, ctx.mParams)) return false;
             const auto& moduli = getRingHostModuli(ctx);
@@ -122,7 +122,7 @@ namespace osuCrypto::LogVole
             const std::vector<RnsPoly>& in,
             u32 widthPadded,
             std::vector<RnsPoly>& out,
-            bool transformToNtt = true, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            bool transformToNtt, PendingRingOpsStats* stats)
         {
             if (in.size() > widthPadded)
             {
@@ -149,7 +149,7 @@ namespace osuCrypto::LogVole
         }
 
         std::vector<RnsPoly> buildLencPublicBNttImpl(const RingNttContext& ctx, u32 tau,
-            std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            std::shared_ptr<const gpu::RetainedPublicUniform>* captured, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
         {
             return deriveUniformPolyBatchFromNonce(
                 ctx, 0xC0DEC0DEull, 0x1EEC0DEu, 2u * tau, true, captured, scope, stats);
@@ -159,7 +159,7 @@ namespace osuCrypto::LogVole
         using PublicBCacheEntry = PublicPolynomialCache::Entry;
 
         std::shared_ptr<PublicBCacheEntry> getOrCreateCachedPublicBEntry(
-            const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
         {
             if (!ctx.mPublicCache) return {};
             auto& cache = ctx.mPublicCache->mLenc;
@@ -225,7 +225,7 @@ namespace osuCrypto::LogVole
         }
 
         std::shared_ptr<const std::vector<RnsPoly>> getOrCreateCachedPublicBNtt(
-            const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            const RingNttContext& ctx, u32 tau, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
         {
             auto entry = getOrCreateCachedPublicBEntry(ctx, tau, scope, stats);
             if (!entry) return {};
@@ -259,7 +259,7 @@ namespace osuCrypto::LogVole
             const RnsPoly* const* leftPtrs,
             const RnsPoly* const* rightPtrs,
             std::size_t size,
-            RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            RnsPoly& out, PendingRingOpsStats* stats)
         {
             if (size == 0)
             {
@@ -369,7 +369,7 @@ namespace osuCrypto::LogVole
             u32 rightLimb,
             u64 rightScaleModQj,
             const RnsPoly& rightDigitNtt,
-            RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            RnsPoly& out, PendingRingOpsStats* stats)
         {
             const std::size_t coeffCount = ringPolyCoeffCount(ctx.mParams);
             if (leftBNtt.mCoeffs.size() != coeffCount || leftDigitNtt.mCoeffs.size() != coeffCount ||
@@ -455,7 +455,7 @@ namespace osuCrypto::LogVole
             const RnsPoly& poly,
             u32 tauHi,
             u32 gadgetLogBase,
-            std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            std::vector<RnsPoly>& out, PendingRingOpsStats* stats)
         {
             std::vector<RnsPoly> hiDec;
             if (!gadgetDecomposeBitsRangeCentered(poly, gadgetLogBase, 1u, tauHi, ctx, hiDec, 1, stats))
@@ -482,7 +482,7 @@ namespace osuCrypto::LogVole
             u32 tauHi,
             u32 tauLeaf,
             u32 gadgetLogBase,
-            std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            std::vector<RnsPoly>& out, PendingRingOpsStats* stats)
         {
             std::vector<RnsPoly> leafDec;
             if (!gadgetDecomposeBits(poly, gadgetLogBase, tauLeaf, ctx, leafDec, 1, stats))
@@ -513,7 +513,7 @@ namespace osuCrypto::LogVole
             const RnsPoly& liftedPoly,
             u32 limbIdx,
             u64 invCrtLiftModQj,
-            std::vector<RnsPoly>& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            std::vector<RnsPoly>& out, PendingRingOpsStats* stats)
         {
             const auto& moduli = getRingHostModuli(ctx);
             if (limbIdx >= moduli.size()) return false;
@@ -566,7 +566,7 @@ namespace osuCrypto::LogVole
             PRNG& prng,
             double noiseStandardDeviation,
             double noiseMaxDeviation,
-            RnsPoly& out, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            RnsPoly& out, PendingRingOpsStats* stats)
         {
             RnsPoly noise{};
             resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
@@ -597,7 +597,7 @@ namespace osuCrypto::LogVole
             bool leafInputsAreGadget,
             const std::vector<RnsPoly>* publicBNtt,
             u32,
-            DigestTree& out, ProtocolCacheScopeView scope, PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+            DigestTree& out, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
         {
             if (xCount == 0 || tauHi == 0)
             {
@@ -1228,8 +1228,11 @@ namespace osuCrypto::LogVole
         RnsPoly& out,
         u32 widthPadded, ProtocolCacheScopeView scope)
     {
+        PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+        auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+            ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
         DigestTree tree{};
-        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, tree, widthPadded, nullptr, 1, scope))
+        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, tree, widthPadded, nullptr, 1, scope, stats))
         {
             return false;
         }
@@ -2179,9 +2182,12 @@ namespace osuCrypto::LogVole
         u32 widthPadded,
         bool leafInputsAreGadget, ProtocolCacheScopeView scope)
     {
+        PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+        auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+            ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
         DigestTree tree{};
         if (!buildDigestTreeTrunc(
-                ctx, x, tauHi, gadgetLogBase, plaintextModulusBits, tree, widthPadded, leafInputsAreGadget, nullptr, 1, scope))
+                ctx, x, tauHi, gadgetLogBase, plaintextModulusBits, tree, widthPadded, leafInputsAreGadget, nullptr, 1, scope, stats))
         {
             return false;
         }
@@ -2211,7 +2217,7 @@ namespace osuCrypto::LogVole
         DigestTree tree{};
         if (!buildDigestTreeTrunc(
                 ctx, x, tauHi, gadgetLogBase, plaintextModulusBits, tree, lacct.mWidthPadded, leafInputsAreGadget,
-                nullptr, requestedWorkers, scope))
+                nullptr, requestedWorkers, scope, legacyRingOpsThreadLocalStats()))
         {
             return false;
         }
@@ -2278,7 +2284,7 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
         u32 tauHi, u32 tauLeaf, u32 ctTauMax, std::vector<RnsPoly>& out,
         bool outputNtt, bool subtractFromOutput, std::size_t leafIdx, Local& local,
-        PendingRingOpsStats* stats = legacyRingOpsThreadLocalStats())
+        PendingRingOpsStats* stats)
     {
         const auto leaf = static_cast<u32>(leafIdx);
         auto& accNtt = out[leaf];
@@ -2386,7 +2392,7 @@ namespace osuCrypto::LogVole
         const auto terms = std::size_t{2} * lacct.mLevels * ctTauMax;
         auto evalLeaf = [&](std::size_t leafIdx, detail::CpuRowScratch::Local& local) {
             return evalLencTruncLeaf(ctx, lacct, tree, tauHi, tauLeaf, ctTauMax,
-                out, outputNtt, subtractFromOutput, leafIdx, local);
+                out, outputNtt, subtractFromOutput, leafIdx, local, legacyRingOpsThreadLocalStats());
         };
         bool useCpuScratch = cpuScratch != nullptr;
 #if defined(ENABLE_LOGVOLE_CUDA)
