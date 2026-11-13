@@ -287,6 +287,9 @@ namespace osuCrypto
 		if (numOTs == 0)
 			throw std::invalid_argument("Silent OT count must be nonzero. " LOCATION);
 
+		if (isChosenBaa(multType))
+			throw std::invalid_argument("Chosen BAA is a field code for Silent VOLE, not binary Silent OT. " LOCATION);
+
 		(void)scaler;
 		if (malType != SilentSecType::SemiHonest &&
 			malType != SilentSecType::Malicious)

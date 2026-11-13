@@ -598,6 +598,26 @@ void Vole_Silent_baseOT_test(const oc::CLP& cmd)
 
 
 
+void Vole_Silent_ChosenBaa_test(const oc::CLP&)
+{
+    for (auto type : {MultType::ChosenBaa16x8, MultType::ChosenBaa16x4})
+        for (auto noise : {SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary})
+            for (bool malicious : {false, true})
+                for (u64 n : {u64(1), u64(129), u64(2049)})
+                    Vole_Silent_test_impl<block, block, CoeffCtxGF128>(
+                        n, type, false, true, malicious, noise, n >= 512);
+    Vole_Silent_test_impl<block, block, CoeffCtxGF128>(
+        1024, MultType::ChosenBaa16x8, false, false, true, SdNoiseDistribution::Regular, true);
+    bool rejected = false;
+    try
+    {
+        SilentVoleSender<u64,u64,CoeffCtxInteger> sender;
+        sender.configure(1024, SilentSecType::SemiHonest, MultType::ChosenBaa16x8);
+    }
+    catch (const std::invalid_argument&) { rejected = true; }
+    if (!rejected) throw RTE_LOC;
+}
+
 void Vole_Silent_mal_test(const oc::CLP& cmd)
 {
 	auto debug = cmd.isSet("debug");
@@ -1093,6 +1113,7 @@ void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_defaultMatrixRank_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_baseOT_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_ChosenBaa_test(const oc::CLP&) { throwDisabled(); }
 void Vole_Silent_mal_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_malBase_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_Clear_test(const oc::CLP& cmd) { throwDisabled(); }

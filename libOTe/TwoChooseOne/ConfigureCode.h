@@ -68,6 +68,8 @@ namespace osuCrypto
 
         // experimental
         Tungsten = 12, // very fast, based on turbo codes. Unknown min distance.
+        ChosenBaa16x8 = 14, // GF(2^128), RS[16,8,9], two weighted accumulators.
+        ChosenBaa16x4 = 15, // GF(2^128), RS[16,4,13].
         Spin = 13 // BCH-SPIN; BAA-style 0.25 linear-attack tuning (not minimum distance).
     };
 
@@ -75,6 +77,12 @@ namespace osuCrypto
     {
         switch (m)
         {
+        case MultType::ChosenBaa16x8:
+            o << "ChosenBaa16x8";
+            break;
+        case MultType::ChosenBaa16x4:
+            o << "ChosenBaa16x4";
+            break;
         case MultType::Spin:
             o << "Spin";
             break;
@@ -106,6 +114,11 @@ namespace osuCrypto
         }
 
         return o;
+    }
+
+    constexpr bool isChosenBaa(MultType type)
+    {
+        return type == MultType::ChosenBaa16x8 || type == MultType::ChosenBaa16x4;
     }
 
     constexpr MultType DefaultMultType = MultType::BlkAcc3x32;
@@ -257,6 +270,14 @@ namespace osuCrypto
         case MultType::QuasiCyclic:
             QuasiCyclicConfigure(scaler, minDist);
             break;
+        case MultType::ChosenBaa16x8:
+        case MultType::ChosenBaa16x4:
+            scaler = multType == MultType::ChosenBaa16x8 ? 2 : 4;
+            // Conservative tuning; the finite paper certificates apply at
+            // k=2^20, not automatically to every requested length.
+            // Retain the existing large-field 0.20 linear-test floor.
+            minDist = 0.20;
+            break;
         case MultType::BlkAcc3x8:
         case MultType::BlkAcc3x32:
         {
@@ -307,6 +328,13 @@ namespace osuCrypto
                 minDist, baseSize, secParam, noiseType, securityModel), 2);
             config.mSizePer = std::max<u64>(4, roundUpTo(divCeil(baseSize, config.mNumPartitions), 2));
 			config.mNoiseVectorSize = config.mNumPartitions * config.mSizePer;
+        }
+        if (isChosenBaa(multType))
+        {
+            config.mNoiseVectorSize = roundUpTo(
+                std::max(config.mNoiseVectorSize, config.mNumPartitions * config.mSizePer), 16);
+            if (config.mNoiseVectorSize > std::numeric_limits<u32>::max())
+                throw std::invalid_argument("Chosen BAA length exceeds its index space. " LOCATION);
         }
         return config;
     }

@@ -1,4 +1,5 @@
 #pragma once
+#include "libOTe/Tools/BlkAccCode/ChosenBaaCode.h"
 // © 2022 Visa.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 // 
@@ -618,6 +619,12 @@ namespace osuCrypto
 		if (noiseType != SdNoiseDistribution::Regular &&
 			noiseType != SdNoiseDistribution::Stationary)
 			throw std::invalid_argument("Unknown noise type. " LOCATION);
+		if (isChosenBaa(mult))
+		{
+			if constexpr (!(std::is_same_v<F, block> && std::is_same_v<G, block> &&
+				std::is_same_v<Ctx, CoeffCtxGF128>))
+				throw std::invalid_argument("Chosen BAA VOLE currently requires GF(2^128). " LOCATION);
+		}
 		if (mult == MultType::QuasiCyclic)
 			throw std::invalid_argument(
 				"QuasiCyclic is a binary code supported by Silent OT, not Silent VOLE. " LOCATION);
@@ -781,6 +788,9 @@ namespace osuCrypto
 		if (mRequestSize < n)
 			throw std::invalid_argument("n does not match the requested number of OTs via configure(...). " LOCATION);
 
+		if (isChosenBaa(mLpnMultType))
+			co_await chosenBaaSeed(false, prng, chl, mCodeSeed);
+
 		// Generate base correlations if needed
 		if (hasBaseCors() == false)
 			co_await genBaseCors(prng, chl);
@@ -918,6 +928,15 @@ namespace osuCrypto
 				mC.begin(),
 				{}
 			);
+			break;
+		}
+		case MultType::ChosenBaa16x8:
+		case MultType::ChosenBaa16x4:
+		{
+			if constexpr (std::is_same_v<F, block> && std::is_same_v<G, block> &&
+				std::is_same_v<Ctx, CoeffCtxGF128>)
+				chosenBaaCompress(mLpnMultType, mCodeSeed, mA, mC);
+			else throw std::runtime_error("Chosen BAA requires GF(2^128). " LOCATION);
 			break;
 		}
 		case MultType::BlkAcc3x8:

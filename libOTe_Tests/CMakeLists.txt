@@ -31,6 +31,7 @@ set(SRCS
     UInt_Tests.cpp
     Permutation_Tests.cpp
     BlkAccCode_Tests.cpp
+    ChosenBaa_Tests.cpp
     AnyField_Tests.cpp
 )
 
