@@ -558,15 +558,6 @@ namespace osuCrypto::LogVole
         u64 padValue, u32 requestedWorkers, std::vector<RnsPoly>& out,
         CpuBenchmarkState cpuBenchmark = {});
 
-    // Legacy synchronous entry point for GPU/fallback and diagnostic callers.
-    bool wrapZpLabelsCrt(
-        const ZpCrtContext& ctx,
-        std::span<const u64> labels,
-        bool multiplyByDelta,
-        u64 padValue,
-        u32 requestedWorkers,
-        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
-
     // Borrow all inputs, output, executor and exclusive buffers until completion.
     // requestedWorkers selects logical tasks (zero selects one), bounded by
     // useful work. Buffers must hold every task; one executes inline.
@@ -575,15 +566,6 @@ namespace osuCrypto::LogVole
         const ZpCrtContext& ctx, const std::vector<RnsPoly>& labels, u64 zpLabelCount,
         bool scaleAndRound, u32 requestedWorkers, AlignedUnVec<u64>& out,
         CpuBenchmarkState cpuBenchmark = {});
-
-    // Legacy synchronous GPU/fallback and diagnostic entry point.
-    bool unwrapRingLabelsCrt(
-        const ZpCrtContext& ctx,
-        const std::vector<RnsPoly>& labels,
-        u64 zpLabelCount,
-        bool scaleAndRound,
-        u32 requestedWorkers,
-        AlignedUnVec<u64>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     // Low-level CI-VOLE state-machine API. Applications should normally prefer
     // osuCrypto::LogVoleSender and osuCrypto::LogVoleReceiver above.
@@ -600,8 +582,13 @@ namespace osuCrypto::LogVole
         Socket& sock, CpuBenchmarkState cpuBenchmark = {},
         ProtocolCacheScope setupScope = {});
 
-    // Legacy staged release; production CPU output uses the awaited release API.
-    bool civoleSenderReleaseK(
+    // Release only an already prepared cache; no randomness, network exchange,
+    // or precomputation occurs here. Borrow executor, state, output and exclusive
+    // decode buffers from task creation through awaited completion; state and
+    // output must remain exclusively used. Failed decoding records no used SID and leaves
+    // output intact; selecting a new active SID retains its legacy reset.
+    macoro::task<bool> civoleSenderReleaseK(
+        macoro::thread_pool& executor, std::span<ZpDecodeBuffer> unwrapBuffers,
         CivoleSenderState& state,
         CivoleSid sid,
         CivoleReleaseKOutput& output, CpuBenchmarkState cpuBenchmark = {});

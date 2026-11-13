@@ -109,6 +109,8 @@ namespace
 #if defined(ENABLE_LOGVOLE_CUDA)
     void expect_single_limb_batching_parity(const RingParams& ring, std::uint32_t plaintextBits)
     {
+        macoro::thread_pool crtExecutor;
+        std::array<ZpDecodeBuffer, 3> crtDecodeBuffers;
         // Compare two explicitly owned eager SEAL representations.
         osuCrypto::LogVoleExecutionOptions options;
         options.mUseGpu = true;
@@ -179,8 +181,8 @@ namespace
             auto fullHost = reference, singleHost = candidate;
             fullHost.mRing = cpuReferenceContext(reference.mRing);
             singleHost.mRing = cpuReferenceContext(candidate.mRing);
-            LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(fullHost, {fullEncoded}, labels.size(), scaleAndRound, 1u, fullUnwrapped));
-            LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(singleHost, {singleEncoded}, labels.size(), scaleAndRound, 1u, singleUnwrapped));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtExecutor, crtDecodeBuffers, fullHost, {fullEncoded}, labels.size(), scaleAndRound, 1u, fullUnwrapped)));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtExecutor, crtDecodeBuffers, singleHost, {singleEncoded}, labels.size(), scaleAndRound, 1u, singleUnwrapped)));
             LOGVOLE_REQUIRE_TRUE(rangesEqual(fullUnwrapped, singleUnwrapped));
             // A toy one-limb ring can have Q/p too small for exact rounded
             // recovery, independently of the batching helper. Production
@@ -1321,6 +1323,9 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
 
 void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources crtResources;
+    std::array<ZpEncodeBuffer, 3> crtEncodeBuffers;
+    std::array<ZpDecodeBuffer, 3> crtDecodeBuffers;
     const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
@@ -1572,14 +1577,12 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
             AlignedUnVec<std::uint64_t> expectedDecoded;
 #if defined(ENABLE_LOGVOLE_CUDA)
             {
-                LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(
-                    eagerCrt, {reference}, labels.size(), scaled, 1u,
-                    expectedDecoded));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, eagerCrt, {reference}, labels.size(), scaled, 1u,
+                    expectedDecoded)));
             }
 #else
-            LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(
-                eagerCrt, {reference}, labels.size(), scaled, 1u,
-                expectedDecoded));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, eagerCrt, {reference}, labels.size(), scaled, 1u,
+                expectedDecoded)));
 #endif
             for (const auto& candidate : crt)
             {
@@ -1587,7 +1590,9 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(wrapZpBatchCrt(candidate, labels, scaled, 0u, 1u, encoded));
                 expect_poly_equal(encoded, reference);
                 AlignedUnVec<std::uint64_t> decoded;
-                LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(candidate, {encoded}, labels.size(), scaled, 1u, decoded));
+                LOGVOLE_REQUIRE_TRUE(((candidate).mGpuLightweight || (candidate).mRing.mExecutionOptions.mUseGpu
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(candidate, {encoded}, labels.size(), scaled, 1u, decoded)
+                    : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, candidate, {encoded}, labels.size(), scaled, 1u, decoded))));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(decoded, labels));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(decoded, expectedDecoded));
                 if (candidate.mGpuLightweight)
@@ -1608,13 +1613,13 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 raw.mCoeffs[offset] += preset.primes[limb];
             }
             AlignedUnVec<std::uint64_t> expected;
-            LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(
-                eagerCrt, {raw}, labels.size(), false, 1u, expected));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, eagerCrt, {raw}, labels.size(), false, 1u, expected)));
             for (const auto& candidate : crt)
             {
                 AlignedUnVec<std::uint64_t> actual;
-                LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(
-                    candidate, {raw}, labels.size(), false, 1u, actual));
+                LOGVOLE_REQUIRE_TRUE(((candidate).mGpuLightweight || (candidate).mRing.mExecutionOptions.mUseGpu
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(candidate, {raw}, labels.size(), false, 1u, actual)
+                    : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, candidate, {raw}, labels.size(), false, 1u, actual))));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
             }
         }
@@ -1641,9 +1646,11 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 AlignedUnVec<std::uint64_t> unchanged;
                 assignValues<std::uint64_t>(unchanged,
                     {0xdecafbadULL, 0x12345678ULL});
-                LOGVOLE_REQUIRE_FALSE(unwrapRingLabelsCrt(
-                    malformed, {validEncoded}, labels.size(), false, 1u,
-                    unchanged)) << " corruption " << corruption;
+                LOGVOLE_REQUIRE_FALSE(((malformed).mGpuLightweight || (malformed).mRing.mExecutionOptions.mUseGpu
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(malformed, {validEncoded}, labels.size(), false, 1u,
+                    unchanged)
+                    : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, malformed, {validEncoded}, labels.size(), false, 1u,
+                    unchanged)))) << " corruption " << corruption;
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(unchanged,
                     std::vector<std::uint64_t>{0xdecafbadULL, 0x12345678ULL}));
             }
@@ -1836,15 +1843,15 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                         dynamicCrt[party], labels, scaled, 0u, 1u, actual));
                     expect_poly_equal(actual, reference);
                     AlignedUnVec<std::uint64_t> decoded;
-                    LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(
-                        dynamicCrt[party], {actual}, labels.size(), scaled, 1u, decoded));
+                    LOGVOLE_REQUIRE_TRUE(((dynamicCrt[party]).mGpuLightweight || (dynamicCrt[party]).mRing.mExecutionOptions.mUseGpu
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(dynamicCrt[party], {actual}, labels.size(), scaled, 1u, decoded)
+                    : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, dynamicCrt[party], {actual}, labels.size(), scaled, 1u, decoded))));
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(decoded, labels));
                     if (!scaled)
                     {
                         AlignedUnVec<std::uint64_t> expectedDecoded;
-                        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(
-                            eager, {actual}, labels.size(), false, 1u,
-                            expectedDecoded));
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, eager, {actual}, labels.size(), false, 1u,
+                            expectedDecoded)));
                         LOGVOLE_REQUIRE_TRUE(rangesEqual(decoded, expectedDecoded));
 
                         // Force the path that reduces a full 64-bit host
@@ -1854,12 +1861,13 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                             raw.mCoeffs[limb * static_cast<std::size_t>(degree)] +=
                                 expectedPrimes[limb].value();
                         AlignedUnVec<std::uint64_t> expectedRaw, actualRaw;
-                        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(
-                            eager, {raw}, labels.size(), false, 1u,
-                            expectedRaw));
-                        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(
-                            dynamicCrt[party], {raw}, labels.size(), false,
-                            1u, actualRaw));
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, eager, {raw}, labels.size(), false, 1u,
+                            expectedRaw)));
+                        LOGVOLE_REQUIRE_TRUE(((dynamicCrt[party]).mGpuLightweight || (dynamicCrt[party]).mRing.mExecutionOptions.mUseGpu
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(dynamicCrt[party], {raw}, labels.size(), false,
+                            1u, actualRaw)
+                    : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, dynamicCrt[party], {raw}, labels.size(), false,
+                            1u, actualRaw))));
                         LOGVOLE_REQUIRE_TRUE(rangesEqual(actualRaw, expectedRaw));
                     }
                 }
@@ -1885,10 +1893,10 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                         expect_poly_equal(actualEmpty, expectedEmpty);
 
                         std::vector<RnsPoly> expectedLabels, actualLabels;
-                        LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(
-                            eager, twoRings, scaled, 7u, 2u, expectedLabels));
-                        LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(
-                            dynamicCrt[party], twoRings, scaled, 7u, 2u, actualLabels));
+                        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(wrapZpLabelsCrt(crtResources.executor, crtEncodeBuffers, eager, twoRings, scaled, 7u, 2u, expectedLabels)));
+                        LOGVOLE_REQUIRE_TRUE(((dynamicCrt[party]).mGpuLightweight || (dynamicCrt[party]).mRing.mExecutionOptions.mUseGpu
+                    ? osuCrypto::LogVole::detail::gpuLegacyWrapZpLabelsCrt(dynamicCrt[party], twoRings, scaled, 7u, 2u, actualLabels)
+                    : macoro::sync_wait(wrapZpLabelsCrt(crtResources.executor, crtEncodeBuffers, dynamicCrt[party], twoRings, scaled, 7u, 2u, actualLabels))));
                         LOGVOLE_REQUIRE_EQ(actualLabels.size(), 2u);
                         for (std::size_t i = 0; i < actualLabels.size(); ++i)
                             expect_poly_equal(actualLabels[i], expectedLabels[i]);
@@ -1908,16 +1916,20 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                         eager, labels, false, 0u, 1u, valid));
                     AlignedUnVec<std::uint64_t> unchanged;
                     assignValues<std::uint64_t>(unchanged, {23u, 47u});
-                    LOGVOLE_REQUIRE_FALSE(unwrapRingLabelsCrt(
-                        invalidCrt, {valid}, labels.size(), false,
-                        1u, unchanged));
+                    LOGVOLE_REQUIRE_FALSE(((invalidCrt).mGpuLightweight || (invalidCrt).mRing.mExecutionOptions.mUseGpu
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(invalidCrt, {valid}, labels.size(), false,
+                        1u, unchanged)
+                    : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, invalidCrt, {valid}, labels.size(), false,
+                        1u, unchanged))));
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(unchanged,
                         std::vector<std::uint64_t>{23u, 47u}));
                     RnsPoly invalidShape;
                     assignValues<std::uint64_t>(invalidShape.mCoeffs, {17u});
-                    LOGVOLE_REQUIRE_FALSE(unwrapRingLabelsCrt(
-                        dynamicCrt[party], {invalidShape}, labels.size(),
-                        false, 1u, unchanged));
+                    LOGVOLE_REQUIRE_FALSE(((dynamicCrt[party]).mGpuLightweight || (dynamicCrt[party]).mRing.mExecutionOptions.mUseGpu
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(dynamicCrt[party], {invalidShape}, labels.size(),
+                        false, 1u, unchanged)
+                    : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, dynamicCrt[party], {invalidShape}, labels.size(),
+                        false, 1u, unchanged))));
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(unchanged,
                         std::vector<std::uint64_t>{23u, 47u}));
                 }

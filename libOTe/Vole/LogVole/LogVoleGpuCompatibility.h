@@ -7,6 +7,22 @@
 
 namespace osuCrypto::LogVole::detail
 {
+    bool gpuLegacyWrapZpLabelsCrt(
+        const ZpCrtContext& ctx,
+        std::span<const u64> labels,
+        bool multiplyByDelta,
+        u64 padValue,
+        u32 requestedWorkers,
+        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
+
+    bool gpuLegacyUnwrapRingLabelsCrt(
+        const ZpCrtContext& ctx,
+        const std::vector<RnsPoly>& labels,
+        u64 zpLabelCount,
+        bool scaleAndRound,
+        u32 requestedWorkers,
+        AlignedUnVec<u64>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
+
     bool gpuLegacyLheDec(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& cipher,

@@ -412,6 +412,106 @@ void LogVole_Civole_RejectsPeerOfflineWidth(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(state.mW, 0ull);
 }
 
+void LogVole_Civole_AsyncStagedKeyRelease(const oc::CLP&)
+{
+    // The same small feasible GoldenSeed ring used by the core root-flow tests.
+    CivoleParams params;
+    auto& se = params.mLogVole.mShrinkExpand;
+    se.mRing.mPolyModulusDegree = 1024;
+    assignValues<int>(se.mRing.mCoeffModulusBits, {54, 54, 54, 54, 54, 54, 54});
+    se.mPlaintextModulusBits = 54;
+    se.mAlpha = 2;
+    se.mTau = 3;
+    se.mMu = se.mAlpha * se.mTau * 7;
+    se.mGadgetLogBase = 126;
+    se.mMode = ShrinkExpandMode::FullNoise;
+    se.mNoiseBound = 2;
+    se.mNumWorkerThreads = 2;
+    params.mLogVole.mW = se.mMu;
+    params.mLogVole.mGamma = 1;
+    constexpr CivoleSid sid = 0;
+    constexpr u64 count = 1027, delta = 13;
+    CivoleSenderState sender;
+    CivoleReceiverState receiver;
+    run_offline_pair(params, delta, count, sender, receiver);
+    LOGVOLE_REQUIRE_FALSE(sender.mLogVoleState.mNextLevelState);
+    LOGVOLE_REQUIRE_FALSE(receiver.mLogVoleState.mNextLevelState);
+    tests_libOTe::logvole_test::SetupResources resources;
+    tests_libOTe::logvole_test::ReceiverBuffers buffers(se, false, 2);
+    CivoleReleaseKOutput output;
+    output.mSid = 77;
+    output.mModulus = 83;
+    assignValues<u64>(output.mKeys, {61, 62});
+    const auto unchangedOutput = [&] {
+        LOGVOLE_REQUIRE_EQ(output.mSid, 77u);
+        LOGVOLE_REQUIRE_EQ(output.mModulus, 83u);
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(output.mKeys, std::array<u64, 2>{61, 62}));
+    };
+    // Cold release establishes the SID but cannot invent a key cache or publish it.
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(civoleSenderReleaseK(
+        resources.executor, buffers.unwrap, sender, sid, output)));
+    LOGVOLE_REQUIRE_TRUE(sender.mHasActiveSid && sender.mActiveSid == sid);
+    LOGVOLE_REQUIRE_TRUE(sender.mUsedSids.empty());
+    LOGVOLE_REQUIRE_FALSE(sender.mKeyReleased);
+    unchangedOutput();
+
+    const auto& receiverCrt = *receiver.mCrtFactoryOwner;
+    std::vector<u64> x(count, 7);
+    std::vector<RnsPoly> wrapped;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(wrapZpLabelsCrt(resources.executor,
+        buffers.wrap, receiverCrt, x, false, 0, 2, wrapped)));
+    RootDigestState digest;
+    RootDigestMessage request;
+    oc::PRNG receiverPrng(oc::block(0x737461676564, 1));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareRootDigestReceiver(resources.executor,
+        buffers.zeta, receiver.mLogVoleState, wrapped, receiverPrng, digest, request)));
+    RootResponseMessage response;
+    oc::PRNG senderPrng(oc::block(0x737461676564, 2));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareRootResponseSender(resources.executor,
+        buffers.lhe, sender.mLogVoleState, request, senderPrng, response)));
+    const auto cache = sender.mLogVoleState.mPrecomputedTbk;
+    LOGVOLE_REQUIRE_TRUE(cache && !cache->empty());
+    const auto seed = sender.mLogVoleState.mGoldenSeed;
+    oc::PRNG cachedPrng(oc::block(0x737461676564, 3)), untouchedPrng(oc::block(0x737461676564, 3));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(senderPrecompute(resources.executor,
+        buffers.lhe, sender.mLogVoleState, cachedPrng)));
+    LOGVOLE_REQUIRE_TRUE(sender.mLogVoleState.mPrecomputedTbk == cache);
+    LOGVOLE_REQUIRE_EQ(cachedPrng.get<oc::block>(), untouchedPrng.get<oc::block>());
+
+    // Two useful CRT chunks require two exclusive decode buffers. Failed
+    // admission leaves the authoritative cache, unused SID and caller output intact.
+    for (const auto allowance : {std::size_t{0}, std::size_t{1}})
+    {
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(civoleSenderReleaseK(resources.executor,
+            std::span(buffers.unwrap).first(allowance), sender, sid, output)));
+        LOGVOLE_REQUIRE_TRUE(sender.mUsedSids.empty());
+        LOGVOLE_REQUIRE_FALSE(sender.mKeyReleased);
+        LOGVOLE_REQUIRE_TRUE(sender.mLogVoleState.mPrecomputedTbk == cache);
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(sender.mLogVoleState.mGoldenSeed, seed));
+        unchangedOutput();
+    }
+    auto scalar = *sender.mCrtFactoryOwner;
+    scalar.mRing.mCpuCapabilities = osuCrypto::CpuCapabilities(osuCrypto::CpuCapabilities::Mode::Scalar);
+    AlignedUnVec<u64> expected;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(resources.executor,
+        buffers.unwrap, scalar, *cache, count, true, 1, expected)));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(civoleSenderReleaseK(resources.executor,
+        buffers.unwrap, sender, sid, output)));
+    LOGVOLE_REQUIRE_EQ(output.mSid, sid);
+    LOGVOLE_REQUIRE_EQ(output.mModulus, sender.mModulus);
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(output.mKeys, expected));
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(sender.mReleasedKeys, expected));
+    LOGVOLE_REQUIRE_TRUE(sender.mKeyReleased);
+    LOGVOLE_REQUIRE_EQ(sender.mUsedSids.size(), 1u);
+    LOGVOLE_REQUIRE_EQ(sender.mUsedSids.front(), sid);
+    const auto storage = output.mKeys.data();
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(civoleSenderReleaseK(resources.executor,
+        buffers.unwrap, sender, sid, output)));
+    LOGVOLE_REQUIRE_TRUE(output.mKeys.data() == storage);
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(output.mKeys, expected));
+    LOGVOLE_REQUIRE_EQ(sender.mUsedSids.size(), 1u);
+}
+
 void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
 {
     const auto params = make_params();
@@ -452,7 +552,7 @@ void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
     expect_vole_relation(x, delta, releaseK.mKeys, receiverSetX.mMacs, modulus);
 
     CivoleReleaseKOutput releaseKAgain{};
-    LOGVOLE_EXPECT_FALSE(civoleSenderReleaseK(senderState, sid, releaseKAgain));
+    LOGVOLE_EXPECT_FALSE(macoro::sync_wait(civoleSenderReleaseK(senderResources.executor, senderResources.unwrap, senderState, sid, releaseKAgain)));
 
     auto senderSockets = coproto::LocalAsyncSocket::makePair();
     bool senderThrew = false;
@@ -778,7 +878,7 @@ void LogVole_Civole_NonInteractivePublicKeyAndSequentialQueries(const oc::CLP& c
     LOGVOLE_EXPECT_EQ(publish.bytesReceived(), 0ull);
 
     CivoleReleaseKOutput staged;
-    LOGVOLE_EXPECT_FALSE(civoleSenderReleaseK(sender.mOfflineState, 0, staged));
+    LOGVOLE_EXPECT_FALSE(macoro::sync_wait(civoleSenderReleaseK(senderResources.executor, senderResources.unwrap, sender.mOfflineState, 0, staged)));
     std::vector<u64> x(n), a(n), b(n), previousKeys;
     for (u64 client = 0; client < 2; ++client)
     {

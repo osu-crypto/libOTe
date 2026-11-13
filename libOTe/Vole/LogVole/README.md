@@ -387,7 +387,7 @@ validation entries above and below record historical migration checkpoints.
 | Protocol run/role | 0 | None | Instance-owned services allocate qualified IDs; explicit operation contexts carry role/run identity and retain service lifetime. |
 | Worker budget | 2 | `gParallelWorkerSlotsInUse`, `tParallelWorkerCap` in `LogVoleParallel.h` | Caller-supplied compute resource and explicit chunk allowance; remove the ambient scheduler after caller migration. |
 | Statistics | 4 | `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats`; `regions()::r` in `cuda/LogVoleGpuProtocol.cpp` | Owned diagnostics and per-chunk pending counters. |
-| CUDA allocation evidence | 2 | `rootCudaWireEvidenceMutex`, `lastRootCudaWireEvidence` in `LogVoleEncoding.cpp` | Caller/actor-owned evidence sink. |
+| CUDA allocation evidence | 2 | `rootCudaWireEvidenceMutex`, `lastRootCudaWireEvidence` in `LogVoleEncoding.cpp` | Caller/actor-owned evidence sink. CPU offline start still resets this shared evidence; CPU reachability remains to migrate. |
 | Capability/compatibility caches | 4 | `defaultPublicSenderCt2PrefetchLevels()::h200`, `available()::ok`, `gaussianTransformHostCompatible()::{recognized, arithmeticCompatible}` | Capture once in the appropriate CPU/GPU resource owner. |
 | CUDA error/name storage | 4 | `gLastError`, `gLastWhere`, `gpuDeviceName()::name`, `gpuLastErrorOk()::buf` in `cuda/LogVoleGpuKernels.cu` | Execution-owned error state and owned name/message storage. |
 | CUDA attribute initialization | 7 | `gSharedConfigured`, `gPointwisePseudo55TreeSharedConfigured`, `gPointwisePseudo55TreeWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpVectorSharedConfigured`, `gPointwisePseudo55SparseSharedConfigured`, `gNttInversePostWarpStages05SharedConfigured` | Owned device preparation; consider only a justified CUDA initialization guard as an exception. |
@@ -407,14 +407,18 @@ Twelve normal synchronous declarations have been retired: eight deprecated
 LHE/LENC/shrink-expand/denoise overloads, root sender-key computation, two root
 response-finalization overloads, and seed-label denoise. Their existing GPU
 session/fallback implementations remain and are explicitly named in the internal
-`LogVoleGpuCompatibility.h`, included only by implementation files. Normal CPU
+`LogVoleGpuCompatibility.h`, included by implementation files and explicit GPU
+compatibility tests. Normal CPU
 callers and staged tests use explicit executors and prepared buffers; small root
 recovery calls `detail::denoiseCombSerial`, which shares the same preparation and
 row kernels with async denoise and never enters the scheduler. This interface
 retirement removes no physical legacy scheduler site or runtime declaration.
-The synchronous input-wrapping and output-unwrapping sites still serve
-GPU/fallback and diagnostic callers; production CPU paths use explicit-resource
-async overloads. The staged synchronous `civoleSenderReleaseK` API remains legacy.
+The two synchronous input-wrapping/output-unwrapping implementations now serve
+only explicit internal GPU compatibility callers; CPU tests and production use
+caller executors and encode/decode buffers. Staged `civoleSenderReleaseK` now
+awaits the same async CPU decode API, retaining its existing cached-only semantics
+and SID/key publication order. Its GPU branch retains the existing compatibility
+behavior.
 Eight normal synchronous ZK interfaces are retired. Four unused implementations
 (matrix witness/product and scalar matrix response/value wrappers) are deleted;
 four required multiplication/matrix proof/value implementations remain explicitly
@@ -1030,6 +1034,37 @@ checks were run. Next: retire the public synchronous `sampleRootZeta` and
 close synchronous wrapping/unwrapping, staged key release and golden/reference
 scheduling boundaries. Follow with the Windows/WSL ownership and host-leak
 milestone gate.
+
+CRT/staged-release retirement removes the normal synchronous wrap/unwrap
+interfaces and converts `civoleSenderReleaseK` to an explicit-executor task with
+caller-owned decode buffers. CPU tests reuse those existing async algorithms;
+the input-wrap oracle still encodes each ring independently with `wrapZpBatchCrt`,
+and scalar-capability decode plus known labels remains the output oracle.
+Mixed GPU/lightweight tests select the internal compatibility implementations
+explicitly. No arithmetic, batching, GPU scheduling or cache generation is added.
+A real small GoldenSeed offline/root exchange establishes the staged key cache;
+the new test checks cold SID establishment, empty/insufficient decode buffers,
+unchanged cache/unused SID/output on admission failure, scalar output agreement,
+metadata and used-SID publication exactly once, replay rejection and cached PRNG
+stability.
+
+The serialized CUDA-enabled Windows library/test/public-example-object build
+passes in **278.18 seconds**. All **nine focused CPU checks pass**: staged release
+1.94 seconds; async wrapping/unwrapping and leaf decoder/product checks 31.20
+seconds; root reuse/SID validation 7.74 seconds; small GoldenSeed/noninteractive
+mode checks 19.38 seconds. The large hardcoded noninteractive public-key test and
+heavy GPU/lightweight context matrix were compiled, without running them. No GPU
+execution tests, benchmarks, WSL or host-leak checks were run. The inventory stays
+at **23 runtime-global declarations** and **19 physical legacy parallel sites**;
+the rough overall completion estimate remains **96%**.
+
+Remaining CPU closure includes the public synchronous `sampleRootZeta` and
+`sampleRootZetaFromTaskSeeds` interfaces (production already uses async), golden/
+reference scheduling, and the shared CUDA allocation-evidence reset still reached
+by CPU offline start. Windows/WSL ownership and host-leak milestone validation
+remain pending. Validation also depends on the local macoro coroutine/bulk and
+lifetime changes: publishing/pinning that dependency revision and verifying a clean
+dependency fetch remain final integration work.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their

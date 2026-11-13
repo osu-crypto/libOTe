@@ -55,6 +55,7 @@
     X(Civole, RejectsPeerOfflineWidth) \
     X(Civole, GpuSetupDeltaParity) \
     X(Civole, ValidationAndSidReuse) \
+    X(Civole, AsyncStagedKeyRelease) \
     X(Civole, RejectedHostInputPreservesSid) \
     X(Civole, StateMachineAutoOfflineSequentialSids) \
     X(Civole, NonInteractiveOracleAndMask) \

@@ -4040,6 +4040,8 @@ void LogVole_Core_TimingOwnership(const oc::CLP&)
 
 void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
 {
+    std::array<ZpEncodeBuffer, 3> crtEncodeBuffers;
+    std::array<ZpDecodeBuffer, 3> crtDecodeBuffers;
     tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
     // Check the public host outputs directly, including their final Z_p relation.
@@ -4128,7 +4130,7 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         std::vector<std::uint64_t> x(params.mTotalLabelCount, 7 + query);
         ReceiverOnlineInput input;
         input.mSid = query;
-        LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(ctx, x, false, 0, 1, input.mX));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(wrapZpLabelsCrt(setupResources.executor, crtEncodeBuffers, ctx, x, false, 0, 1, input.mX)));
         RootDigestState digest;
         RootDigestMessage request;
         LOGVOLE_REQUIRE_TRUE([&] {
@@ -4216,10 +4218,10 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         for (std::size_t i = 0; i < reference.mTbm.size(); ++i)
             LOGVOLE_REQUIRE_TRUE(rangesEqual(failedOutput.mTbm[i].mCoeffs, reference.mTbm[i].mCoeffs));
         AlignedUnVec<std::uint64_t> keys, macs;
-        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(ctx, senderOutput.mTbk,
-            x.size(), true, 1, keys));
-        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(ctx, receiverOutput.mTbm,
-            x.size(), true, 1, macs));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(setupResources.executor, crtDecodeBuffers, ctx, senderOutput.mTbk,
+            x.size(), true, 1, keys)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(setupResources.executor, crtDecodeBuffers, ctx, receiverOutput.mTbm,
+            x.size(), true, 1, macs)));
         LOGVOLE_REQUIRE_EQ(keys.size(), x.size());
         LOGVOLE_REQUIRE_EQ(macs.size(), x.size());
         for (std::size_t i = 0; i < x.size(); ++i)
@@ -6699,6 +6701,8 @@ namespace
 
 void LogVole_Core_LeafGoldenSeedMatchesDecoder(const oc::CLP&)
 {
+    macoro::thread_pool crtExecutor;
+    std::array<ZpDecodeBuffer, 3> crtDecodeBuffers;
     // Every leaf value the check accepts must decode consistently: for |e| <= B and any m in Z_p,
     // decode(K + floor(q/p)*m + e) = decode(K) + m. The worst accepted K are the ones closest to the
     // rounding boundary, so the test finds them by bisecting on the check itself instead of assuming
@@ -6762,8 +6766,8 @@ void LogVole_Core_LeafGoldenSeedMatchesDecoder(const oc::CLP&)
 
         AlignedUnVec<std::uint64_t> keySlots;
         AlignedUnVec<std::uint64_t> macSlots;
-        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(zp, { key }, zpSlotCount(zp), true, 1, keySlots));
-        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(zp, { mac }, zpSlotCount(zp), true, 1, macSlots));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtExecutor, crtDecodeBuffers, zp, { key }, zpSlotCount(zp), true, 1, keySlots)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtExecutor, crtDecodeBuffers, zp, { mac }, zpSlotCount(zp), true, 1, macSlots)));
 
         seal::Plaintext plain(n);
         plain.set_zero();
@@ -6813,6 +6817,8 @@ void LogVole_Core_LeafGoldenSeedMatchesDecoder(const oc::CLP&)
 
 void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
 {
+    macoro::thread_pool crtExecutor;
+    std::array<ZpDecodeBuffer, 3> crtDecodeBuffers;
     Params params = make_golden_params();
     auto& se = params.mShrinkExpand;
     se.mRing.mPolyModulusDegree = 8192;
@@ -6871,8 +6877,8 @@ void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
                     mac.mCoeffs[i * n + n - 1], noise, noiseSign > 0,
                     zp.mRing.mModuli[i]);
         AlignedUnVec<std::uint64_t> keys, macs;
-        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(zp, {key}, n, true, 1, keys));
-        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(zp, {mac}, n, true, 1, macs));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtExecutor, crtDecodeBuffers, zp, {key}, n, true, 1, keys)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(crtExecutor, crtDecodeBuffers, zp, {mac}, n, true, 1, macs)));
         LOGVOLE_REQUIRE_EQ(keys.size(), inputs.size());
         LOGVOLE_REQUIRE_EQ(macs.size(), inputs.size());
         const seal::Modulus modulus(p);

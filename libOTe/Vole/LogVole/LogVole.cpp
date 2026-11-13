@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "macoro/bulk.h"
 #include "libOTe/Vole/LogVole/LogVole.h"
 
@@ -1683,7 +1684,7 @@ namespace osuCrypto::LogVole
         return encodeSlotsToRingCrt(ctx, slots, encoder, plain, multiplyByDelta, out);
     }
 
-    bool wrapZpLabelsCrt(
+    bool detail::gpuLegacyWrapZpLabelsCrt(
         const ZpCrtContext& ctx,
         std::span<const u64> labels,
         bool multiplyByDelta,
@@ -1714,7 +1715,7 @@ namespace osuCrypto::LogVole
             }
 #endif
             const auto host = getZpHostContext(ctx, scope);
-            return host && wrapZpLabelsCrt(
+            return host && detail::gpuLegacyWrapZpLabelsCrt(
                 *host, labels, multiplyByDelta, padValue, requestedWorkers, out, cpuBenchmark, scope);
         }
         if (!validateZpContext(ctx) ||
@@ -1980,7 +1981,7 @@ namespace osuCrypto::LogVole
         co_return std::all_of(chunks.begin(), chunks.end(), [](const auto& b) { return b.mOk; });
     }
 
-    bool unwrapRingLabelsCrt(
+    bool detail::gpuLegacyUnwrapRingLabelsCrt(
         const ZpCrtContext& ctx,
         const std::vector<RnsPoly>& labels,
         u64 zpLabelCount,
@@ -2036,7 +2037,7 @@ namespace osuCrypto::LogVole
         if (ctx.mGpuLightweight)
         {
             const auto host = getZpHostContext(ctx, scope);
-            return host && unwrapRingLabelsCrt(
+            return host && detail::gpuLegacyUnwrapRingLabelsCrt(
                 *host, labels, zpLabelCount, scaleAndRound, requestedWorkers, out, cpuBenchmark, scope);
         }
 
@@ -2294,22 +2295,23 @@ namespace osuCrypto::LogVole
         state = std::move(next);
     }
 
-    bool civoleSenderReleaseK(
+    macoro::task<bool> civoleSenderReleaseK(
+        macoro::thread_pool& executor, std::span<ZpDecodeBuffer> unwrapBuffers,
         CivoleSenderState& state,
         CivoleSid sid,
         CivoleReleaseKOutput& output, CpuBenchmarkState cpuBenchmark)
     {
         // NI fixes k only after d' arrives; it cannot offer staged key release.
-        if (state.mParams.mLogVole.mOnlineMode == OnlineMode::NonInteractive) return false;
+        if (state.mParams.mLogVole.mOnlineMode == OnlineMode::NonInteractive) co_return false;
         const auto ctxOwner = stateCrtContext(state);
-        if (!ctxOwner) return false;
+        if (!ctxOwner) co_return false;
         const ProtocolCacheScope queryScope{ctxOwner->mFactory->ringFactory()->protocolService()->qualify(sid), ProtocolCacheRole::Sender};
 
         if (!prepareSenderSidForReleaseK(state, sid) ||
             !ensureSenderPrecompute(state.mLogVoleState) ||
             !state.mLogVoleState.mPrecomputedTbk)
         {
-            return false;
+            co_return false;
         }
 
         const auto& ctx = *ctxOwner;
@@ -2328,17 +2330,25 @@ namespace osuCrypto::LogVole
             if (!haveKeys) keys.resize(0);
         }
 #endif
-        if (!haveKeys &&
-            !unwrapRingLabelsCrt(
-                ctx,
-                *state.mLogVoleState.mPrecomputedTbk,
-                state.mW,
-                true,
-                state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
-                keys, cpuBenchmark, queryScope))
+        bool unwrapped = haveKeys;
+        if (!unwrapped)
         {
-            return false;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            // A GPU-selected lightweight context keeps its exact host fallback
+            // even if the device is unavailable when this cache is released.
+            if (ctx.mRing.mExecutionOptions.mUseGpu)
+                unwrapped = detail::gpuLegacyUnwrapRingLabelsCrt(ctx,
+                    *state.mLogVoleState.mPrecomputedTbk, state.mW, true,
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, cpuBenchmark, queryScope);
+            else
+#endif
+            {
+                unwrapped = co_await unwrapRingLabelsCrt(executor, unwrapBuffers, ctx,
+                    *state.mLogVoleState.mPrecomputedTbk, state.mW, true,
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, cpuBenchmark);
+            }
         }
+        if (!unwrapped) co_return false;
 
         state.mKeyReleased = true;
         const auto usedSidCount = state.mUsedSids.size();
@@ -2351,7 +2361,7 @@ namespace osuCrypto::LogVole
         next.mModulus = state.mModulus;
         next.mKeys = state.mReleasedKeys;
         output = std::move(next);
-        return true;
+        co_return true;
     }
 
     task<> civoleSenderRelease(
@@ -2444,7 +2454,7 @@ namespace osuCrypto::LogVole
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (gpu::enabled(ctx.mRing))
-                unwrapped = unwrapRingLabelsCrt(ctx, ringKeys, state.mW, true,
+                unwrapped = detail::gpuLegacyUnwrapRingLabelsCrt(ctx, ringKeys, state.mW, true,
                     state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, cpuBenchmark, queryScope);
             else
 #endif
@@ -2588,7 +2598,7 @@ namespace osuCrypto::LogVole
             }
             bool wrappedOk;
             if (gpu::enabled(ctx.mRing))
-                wrappedOk = wrapZpLabelsCrt(ctx, packedX, false, 0,
+                wrappedOk = detail::gpuLegacyWrapZpLabelsCrt(ctx, packedX, false, 0,
                     state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, wrapped, cpuBenchmark, queryScope);
             else
             {
@@ -2678,7 +2688,7 @@ namespace osuCrypto::LogVole
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (gpu::enabled(ctx.mRing))
-                unwrapped = unwrapRingLabelsCrt(ctx, online.mTbm, state.mW, true,
+                unwrapped = detail::gpuLegacyUnwrapRingLabelsCrt(ctx, online.mTbm, state.mW, true,
                     state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, macs, cpuBenchmark, queryScope);
             else
 #endif

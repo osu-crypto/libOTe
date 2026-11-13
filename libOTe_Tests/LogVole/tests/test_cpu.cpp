@@ -1840,7 +1840,15 @@ void LogVole_Cpu_AsyncInputWrapping(const oc::CLP& cmd)
         std::vector<u64> labels(count);
         for (std::size_t i = 0; i != count; ++i) labels[i] = i % ctx.mPlaintextModulus;
         std::vector<RnsPoly> expected, actual;
-        LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(ctx, labels, lift, pad, 1, expected));
+        // Independent per-ring encoding oracle, outside the async batch scheduler.
+        expected.resize(zpRingLabelCount(ctx, labels.size()));
+        for (std::size_t i = 0; i != expected.size(); ++i)
+        {
+            const auto offset = i * slots;
+            const auto size = std::min<std::size_t>(slots, labels.size() - offset);
+            LOGVOLE_REQUIRE_TRUE(wrapZpBatchCrt(ctx,
+                std::span<const u64>(labels).subspan(offset, size), lift, pad, 1, expected[i]));
+        }
         auto operation = wrapZpLabelsCrt(executor, buffers, ctx, labels, lift, pad, 3, actual);
         LOGVOLE_REQUIRE_TRUE(actual.empty());
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(std::move(operation))));
@@ -1890,6 +1898,8 @@ void LogVole_Cpu_AsyncInputWrapping(const oc::CLP& cmd)
 
 void LogVole_Cpu_AsyncOutputUnwrapping(const oc::CLP& cmd)
 {
+    std::array<ZpEncodeBuffer, 3> crtEncodeBuffers;
+    std::array<ZpDecodeBuffer, 3> crtDecodeBuffers;
     RingParams params;
     params.mPolyModulusDegree = 1024;
     assignValues<int>(params.mCoeffModulusBits, {52, 52, 52, 52});
@@ -1922,7 +1932,7 @@ void LogVole_Cpu_AsyncOutputUnwrapping(const oc::CLP& cmd)
         std::vector<u64> labels(count);
         for (std::size_t i = 0; i != count; ++i) labels[i] = (i * 137) % ctx.mPlaintextModulus;
         std::vector<RnsPoly> ring;
-        LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(ctx, labels, rounded, 0, 1, ring));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(wrapZpLabelsCrt(executor, crtEncodeBuffers, ctx, labels, rounded, 0, 1, ring)));
         // Noncanonical residues exercise the existing canonical fallback as well
         // as SIMD dispatch; both must retain exactly the same scalar outputs.
         for (auto& poly : ring)
@@ -1930,7 +1940,7 @@ void LogVole_Cpu_AsyncOutputUnwrapping(const oc::CLP& cmd)
                 for (std::size_t i = 0; i != slots; ++i)
                     poly.mCoeffs[j * slots + i] += ringModulusValue(ctx.mRing, j);
         AlignedUnVec<u64> expected, actual;
-        LOGVOLE_REQUIRE_TRUE(unwrapRingLabelsCrt(scalar, ring, count, rounded, 1, expected));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(executor, crtDecodeBuffers, scalar, ring, count, rounded, 1, expected)));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(expected, labels));
         for (const auto* selected : {&ctx, &scalar})
         for (std::size_t allowance : {1u, 2u, 3u})
@@ -1975,7 +1985,7 @@ void LogVole_Cpu_AsyncOutputUnwrapping(const oc::CLP& cmd)
     macoro::thread_pool idle;
     std::vector<u64> labels(2 * slots + 7, 1);
     std::vector<RnsPoly> ring;
-    LOGVOLE_REQUIRE_TRUE(wrapZpLabelsCrt(ctx, labels, false, 0, 1, ring));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(wrapZpLabelsCrt(executor, crtEncodeBuffers, ctx, labels, false, 0, 1, ring)));
     AlignedUnVec<u64> actual;
     CpuBenchmarkContext telemetry;
     telemetry.mCpus = {0, 1, 2};

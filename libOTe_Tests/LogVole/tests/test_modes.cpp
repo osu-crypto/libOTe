@@ -172,9 +172,9 @@ namespace
         {
             auto saved = std::move(originalSender.mOfflineState.mCrtFactoryOwner);
             CivoleReleaseKOutput rejected;
-            LOGVOLE_REQUIRE_FALSE(civoleSenderReleaseK(originalSender.mOfflineState, 0, rejected));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(civoleSenderReleaseK(senderResources.executor, senderResources.unwrap, originalSender.mOfflineState, 0, rejected)));
             originalSender.mOfflineState.mCrtFactoryOwner = originalReceiver.mOfflineState.mCrtFactoryOwner;
-            LOGVOLE_REQUIRE_FALSE(civoleSenderReleaseK(originalSender.mOfflineState, 0, rejected));
+            LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(civoleSenderReleaseK(senderResources.executor, senderResources.unwrap, originalSender.mOfflineState, 0, rejected)));
             originalSender.mOfflineState.mCrtFactoryOwner = std::move(saved);
             LOGVOLE_REQUIRE_FALSE(originalSender.mOfflineState.mHasActiveSid);
         }
