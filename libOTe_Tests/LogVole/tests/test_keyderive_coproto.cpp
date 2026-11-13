@@ -3,6 +3,7 @@
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
+#include "libOTe_Tests/LogVole_RingStatsTestUtil.h"
 
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "macoro/sync_wait.h"
@@ -60,7 +61,7 @@ namespace
         }
     }
 
-    void run_coproto_case(std::uint64_t seed, std::uint32_t tau)
+    void run_coproto_case(std::uint64_t seed, std::uint32_t tau, bool collect = false)
     {
         const auto params = make_params();
         RingNttContext ctx{};
@@ -80,6 +81,9 @@ namespace
         KeyDeriveSenderOutput senderOutput{};
         KeyDeriveReceiverOutput receiverOutput{};
 
+        RingOpsStats senderStats, receiverStats;
+        flushRingOpsThreadLocalStats();
+        globalRingOpsStats.reset();
         auto sockets = coproto::LocalAsyncSocket::makePair();
         macoro::task<> senderTask, receiverTask;
         std::weak_ptr<const ProtocolCacheService> senderService, receiverService;
@@ -87,13 +91,13 @@ namespace
             auto service = ProtocolCacheService::create();
             senderService = service;
             const ProtocolCacheScope creation(service->allocate(), ProtocolCacheRole::Sender);
-            senderTask = sender.keyDerive(senderInput, senderOutput, sockets[0], {}, false, nullptr, creation);
+            senderTask = sender.keyDerive(senderInput, senderOutput, sockets[0], {}, false, nullptr, creation, nullptr, collect ? &senderStats : nullptr);
         }
         {
             auto service = ProtocolCacheService::create();
             receiverService = service;
             const ProtocolCacheScope creation(service->allocate(), ProtocolCacheRole::Receiver);
-            receiverTask = receiver.keyDerive(receiverInput, receiverOutput, sockets[1], {}, false, nullptr, creation);
+            receiverTask = receiver.keyDerive(receiverInput, receiverOutput, sockets[1], {}, false, nullptr, creation, nullptr, collect ? &receiverStats : nullptr);
         }
         LOGVOLE_REQUIRE_FALSE(senderService.expired());
         LOGVOLE_REQUIRE_FALSE(receiverService.expired());
@@ -110,6 +114,20 @@ namespace
         LOGVOLE_REQUIRE_FALSE(receiverService.expired());
         std::get<0>(result).result();
         std::get<1>(result).result();
+
+        using tests_libOTe::logvole_test::ringStatsSnapshot;
+        const auto zeros = ringStatsSnapshot(RingOpsStats{});
+        auto expectedSender = zeros, expectedReceiver = zeros;
+        if (collect)
+        {
+            expectedSender[0] = 3u * tau;
+            expectedSender[6] = tau;
+            expectedReceiver[1] = tau;
+        }
+        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(senderStats) == expectedSender);
+        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(receiverStats) == expectedReceiver);
+        flushRingOpsThreadLocalStats();
+        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
 
         expect_batch_equal(senderOutput.mK, senderInput.mSk2);
         LOGVOLE_REQUIRE_EQ(receiverOutput.mM.size(), receiverInput.mD.size());
@@ -179,7 +197,8 @@ namespace
 
 void LogVole_KeyDeriveCoproto_HappyPathAndAlgebraicRelation(const oc::CLP&)
 {
-    run_coproto_case(0x1110u, 3);
+    run_coproto_case(0x1110u, 3, true);
+    run_coproto_case(0x1110u, 3, false);
 }
 
 void LogVole_KeyDeriveCoproto_DeterministicRegressionSeeds(const oc::CLP&)

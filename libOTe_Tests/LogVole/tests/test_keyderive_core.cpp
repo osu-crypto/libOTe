@@ -1,6 +1,8 @@
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
+#include "libOTe_Tests/LogVole_RingStatsTestUtil.h"
+#include <algorithm>
 
 #include <cstddef>
 #include <cstdint>
@@ -101,6 +103,44 @@ namespace
         LOGVOLE_REQUIRE_TRUE(finalizeKeyDeriveResponse(receiver, response, receiverOutput));
 
         expect_keyderive_relation(ctx, sender, receiver, senderOutput, receiverOutput);
+        using tests_libOTe::logvole_test::ringStatsSnapshot;
+        RingOpsStats senderStats, receiverStats;
+        const auto zeros = ringStatsSnapshot(senderStats);
+        auto expectedSender = zeros, expectedReceiver = zeros;
+        expectedSender[0] = 3u * tau;
+        expectedSender[6] = tau;
+        expectedReceiver[1] = tau;
+        for (bool collect : {true, false})
+        {
+            flushRingOpsThreadLocalStats();
+            globalRingOpsStats.reset();
+            const auto senderBefore = ringStatsSnapshot(senderStats);
+            const auto receiverBefore = ringStatsSnapshot(receiverStats);
+            KeyDeriveResponse actualResponse;
+            KeyDeriveSenderOutput actualSender;
+            KeyDeriveReceiverOutput actualReceiver;
+            {
+                PendingRingOpsStats pending(collect ? &senderStats : nullptr);
+                LOGVOLE_REQUIRE_TRUE(processKeyDeriveRequest(sender, request, actualResponse,
+                    actualSender, {}, collect ? &pending : nullptr));
+            }
+            LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(receiverStats) == receiverBefore);
+            const auto senderAfter = ringStatsSnapshot(senderStats);
+            {
+                PendingRingOpsStats pending(collect ? &receiverStats : nullptr);
+                LOGVOLE_REQUIRE_TRUE(finalizeKeyDeriveResponse(receiver, actualResponse,
+                    actualReceiver, {}, collect ? &pending : nullptr));
+            }
+            LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(senderStats) == senderAfter);
+            LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(senderStats) == (collect ? expectedSender : senderBefore));
+            LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(receiverStats) == (collect ? expectedReceiver : receiverBefore));
+            flushRingOpsThreadLocalStats();
+            LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
+            LOGVOLE_REQUIRE_TRUE(std::equal(actualResponse.mMNttCoeffs.begin(), actualResponse.mMNttCoeffs.end(),
+                response.mMNttCoeffs.begin(), response.mMNttCoeffs.end()));
+            expect_batch_equal(actualSender.mK, senderOutput.mK);
+            expect_batch_equal(actualReceiver.mM, receiverOutput.mM);
+        }
     }
 }
 
@@ -138,5 +178,17 @@ void LogVole_KeyDeriveCore_MetadataMismatchRejected(const oc::CLP&)
 
     KeyDeriveResponse response{};
     KeyDeriveSenderOutput senderOutput{};
-    LOGVOLE_REQUIRE_FALSE(processKeyDeriveRequest(sender, request, response, senderOutput));
+    RingOpsStats stats;
+    const auto before = tests_libOTe::logvole_test::ringStatsSnapshot(stats);
+    response.mTau = 777;
+    {
+        PendingRingOpsStats pending(&stats);
+        LOGVOLE_REQUIRE_FALSE(processKeyDeriveRequest(sender, request, response, senderOutput, {}, &pending));
+        KeyDeriveReceiverOutput receiverOutput;
+        LOGVOLE_REQUIRE_FALSE(finalizeKeyDeriveResponse(receiver, response, receiverOutput, {}, &pending));
+        LOGVOLE_REQUIRE_TRUE(receiverOutput.mM.empty());
+    }
+    LOGVOLE_REQUIRE_EQ(response.mTau, 777u);
+    LOGVOLE_REQUIRE_TRUE(senderOutput.mK.empty());
+    LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::ringStatsSnapshot(stats) == before);
 }

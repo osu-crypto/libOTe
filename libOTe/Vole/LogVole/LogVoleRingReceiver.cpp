@@ -454,7 +454,7 @@ namespace osuCrypto::LogVole
         const KeyDeriveReceiverInput& input,
         KeyDeriveReceiverOutput& output,
         Socket& sock, LogVoleEncodingOptions encoding, bool useGpu, HostStepProfiler* profile, ProtocolCacheScope scope,
-        TimingStats* timing)
+        TimingStats* timing, RingOpsStats* totals)
     {
         CpuBenchmarkState cpuBenchmark{};
         if (useGpu) timing = &globalTimingStats;
@@ -478,9 +478,11 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole receiver could not decode key-derive response");
         }
 
-        if (!finalizeKeyDeriveResponse(input, response, output, scope))
         {
-            throw std::runtime_error("LogVole receiver rejected key-derive response");
+            PendingRingOpsStats pending(totals);
+            auto* stats = useGpu ? legacyRingOpsThreadLocalStats() : totals ? &pending : nullptr;
+            if (!finalizeKeyDeriveResponse(input, response, output, scope, stats))
+                throw std::runtime_error("LogVole receiver rejected key-derive response");
         }
     }
 

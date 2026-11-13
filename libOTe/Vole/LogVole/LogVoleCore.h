@@ -709,5 +709,5 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& sk2PerInstance,
         const RnsPoly& digest,
         PRNG& prng,
-        GoldenSeedSearchOutput& out, CpuBenchmarkState cpuBenchmark = {});
+        GoldenSeedSearchOutput& out, CpuBenchmarkState cpuBenchmark = {}, RingOpsStats* totals = nullptr);
 }

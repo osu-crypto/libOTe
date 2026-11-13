@@ -1,3 +1,4 @@
+#include "libOTe_Tests/LogVole_RingStatsTestUtil.h"
 #include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe_Tests/LogVole_TestOptions.h"
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
@@ -2622,6 +2623,26 @@ void LogVole_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)
     }
 
     expect_poly_equal(actual, expected);
+    using tests_libOTe::logvole_test::ringStatsSnapshot;
+    RingOpsStats totals;
+    const auto zeros = ringStatsSnapshot(totals);
+    auto expectedCounts = zeros;
+    expectedCounts[0] = count;
+    expectedCounts[1] = 1;
+    expectedCounts[6] = count;
+    for (bool collect : {true, false})
+    {
+        ctx.mExecutionOptions.mRingOpsStats = collect ? &totals : nullptr;
+        const auto before = ringStatsSnapshot(totals);
+        flushRingOpsThreadLocalStats();
+        globalRingOpsStats.reset();
+        RnsPoly repeated;
+        LOGVOLE_REQUIRE_TRUE(rootInnerProductNtt(ctx, leftNtt, rightCoeff, repeated));
+        expect_poly_equal(repeated, expected);
+        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(totals) == (collect ? expectedCounts : before));
+        flushRingOpsThreadLocalStats();
+        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
+    }
 }
 
 void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
@@ -6444,6 +6465,37 @@ void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
     GoldenSeedSearchOutput found{};
     oc::PRNG prng(oc::block(0x6008u, 0));
     LOGVOLE_REQUIRE_TRUE(findGoldenSeed(params, sk2, digest, prng, found));
+    using tests_libOTe::logvole_test::ringStatsSnapshot;
+    RingOpsStats totals;
+    const auto zeros = ringStatsSnapshot(totals);
+    const auto nextRandom = prng.get<oc::u64>();
+    for (bool collect : {true, false})
+    {
+        oc::PRNG repeatedPrng(oc::block(0x6008u, 0));
+        GoldenSeedSearchOutput repeated;
+        const auto before = ringStatsSnapshot(totals);
+        flushRingOpsThreadLocalStats();
+        globalRingOpsStats.reset();
+        LOGVOLE_REQUIRE_TRUE(findGoldenSeed(params, sk2, digest, repeatedPrng, repeated, {},
+            collect ? &totals : nullptr));
+        LOGVOLE_REQUIRE_TRUE(std::equal(found.mSeed.begin(), found.mSeed.end(),
+            repeated.mSeed.begin(), repeated.mSeed.end()));
+        expect_batch_equal(found.mTbkPerSampledPoly, repeated.mTbkPerSampledPoly);
+        LOGVOLE_REQUIRE_EQ(nextRandom, repeatedPrng.get<oc::u64>());
+        const auto counts = ringStatsSnapshot(totals);
+        if (collect)
+        {
+            LOGVOLE_REQUIRE_EQ(counts[0], sk2.size());
+            LOGVOLE_REQUIRE_EQ(counts[1], params.mShrinkExpand.mMu * sk2.size());
+            LOGVOLE_REQUIRE_EQ(counts[6], counts[1]);
+            LOGVOLE_REQUIRE_TRUE(counts[3] >= counts[1]);
+            LOGVOLE_REQUIRE_TRUE(counts[9] >= params.mShrinkExpand.mMu);
+        }
+        else
+            LOGVOLE_REQUIRE_TRUE(counts == before);
+        flushRingOpsThreadLocalStats();
+        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
+    }
     LOGVOLE_EXPECT_EQ(found.mSeed.size(), std::size_t{ 16 });
     LOGVOLE_REQUIRE_EQ(found.mTbkPerSampledPoly.size(), params.mShrinkExpand.mMu);
 

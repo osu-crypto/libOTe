@@ -781,7 +781,7 @@ namespace osuCrypto::LogVole
         const KeyDeriveSenderInput& input,
         const KeyDeriveRequest& request,
         KeyDeriveResponse& response,
-        KeyDeriveSenderOutput& output, ProtocolCacheScopeView scope)
+        KeyDeriveSenderOutput& output, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
         if (!validateKeyDeriveSenderInput(input))
         {
@@ -821,15 +821,15 @@ namespace osuCrypto::LogVole
             RnsPoly sk2 = input.mSk2[i];
             RnsPoly d = std::move(dBatch[i]);
 
-            if (!forwardNtt(sk1, ctx) ||
-                !forwardNtt(sk2, ctx) ||
-                !forwardNtt(d, ctx))
+            if (!forwardNtt(sk1, ctx, stats) ||
+                !forwardNtt(sk2, ctx, stats) ||
+                !forwardNtt(d, ctx, stats))
             {
                 return false;
             }
 
             RnsPoly mNtt{};
-            if (!dyadicMultiplyAddNtt(sk1, d, sk2, ctx, mNtt))
+            if (!dyadicMultiplyAddNtt(sk1, d, sk2, ctx, mNtt, stats))
             {
                 return false;
             }
@@ -853,7 +853,7 @@ namespace osuCrypto::LogVole
     bool finalizeKeyDeriveResponse(
         const KeyDeriveReceiverInput& input,
         const KeyDeriveResponse& response,
-        KeyDeriveReceiverOutput& output, ProtocolCacheScopeView scope)
+        KeyDeriveReceiverOutput& output, ProtocolCacheScopeView scope, PendingRingOpsStats* stats)
     {
         if (!validateKeyDeriveReceiverInput(input))
         {
@@ -892,7 +892,7 @@ namespace osuCrypto::LogVole
         {
             auto& poly = mNttBatch[i];
             if (!canonicalizePoly(poly, ctx) ||
-                !inverseNtt(poly, ctx))
+                !inverseNtt(poly, ctx, stats))
             {
                 return false;
             }

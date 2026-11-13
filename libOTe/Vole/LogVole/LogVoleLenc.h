@@ -97,12 +97,12 @@ namespace osuCrypto::LogVole
         const KeyDeriveSenderInput& input,
         const KeyDeriveRequest& request,
         KeyDeriveResponse& response,
-        KeyDeriveSenderOutput& output, ProtocolCacheScopeView scope = {});
+        KeyDeriveSenderOutput& output, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     bool finalizeKeyDeriveResponse(
         const KeyDeriveReceiverInput& input,
         const KeyDeriveResponse& response,
-        KeyDeriveReceiverOutput& output, ProtocolCacheScopeView scope = {});
+        KeyDeriveReceiverOutput& output, ProtocolCacheScopeView scope = {}, PendingRingOpsStats* stats = nullptr);
 
     // Tree widths are powers of two and at least two. Automatic padding adds
     // a zero leaf for a singleton; an explicit width below two is rejected.

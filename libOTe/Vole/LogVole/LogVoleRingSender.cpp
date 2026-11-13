@@ -774,7 +774,7 @@ namespace osuCrypto::LogVole
         const KeyDeriveSenderInput& input,
         KeyDeriveSenderOutput& output,
         Socket& sock, LogVoleEncodingOptions encoding, bool useGpu, HostStepProfiler* profile, ProtocolCacheScope scope,
-        TimingStats* timing)
+        TimingStats* timing, RingOpsStats* totals)
     {
         CpuBenchmarkState cpuBenchmark{};
         if (useGpu) timing = &globalTimingStats;
@@ -794,9 +794,11 @@ namespace osuCrypto::LogVole
         }
 
         KeyDeriveResponse response{};
-        if (!processKeyDeriveRequest(input, request, response, output, scope))
         {
-            throw std::runtime_error("LogVole sender rejected key-derive request");
+            PendingRingOpsStats pending(totals);
+            auto* stats = useGpu ? legacyRingOpsThreadLocalStats() : totals ? &pending : nullptr;
+            if (!processKeyDeriveRequest(input, request, response, output, scope, stats))
+                throw std::runtime_error("LogVole sender rejected key-derive request");
         }
 
         co_await detail::sendFrame(sock, encode(response, encoding, useGpu, profile, cpuBenchmark));

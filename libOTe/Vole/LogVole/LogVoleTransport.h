@@ -59,11 +59,11 @@ namespace osuCrypto::LogVole::detail
         }
     }
 
-    // Legacy default is for unmigrated callers; CPU protocol callers pass their
-    // borrowed timing owner or null explicitly through operation completion.
+    // Protocol callers pass their borrowed timing owner or null explicitly
+    // through operation completion. Standalone calls default to disabled timing.
     template<ProtocolCacheRole Role>
     inline task<Buffer> recvFrame(Socket& sock, u64 maxPayloadSize, const LogVoleWireOptions& options, bool useGpu = false, HostStepProfiler* profile = nullptr,
-        TimingStats* timing = &globalTimingStats)
+        TimingStats* timing = nullptr)
     {
         std::array<u8, kFrameHeaderSize> header{};
         // Preserve the header-only wait region and successful-receive accounting.

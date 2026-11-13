@@ -2178,10 +2178,13 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+        auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
+            ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
         std::vector<RnsPoly> rightNtt = rightCoeff;
         for (auto& poly : rightNtt)
         {
-            if (!forwardNtt(poly, ctx))
+            if (!forwardNtt(poly, ctx, stats))
             {
                 return false;
             }
@@ -2191,13 +2194,13 @@ namespace osuCrypto::LogVole
         resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
         for (std::size_t idx = 0; idx < leftNtt.size(); ++idx)
         {
-            if (!dyadicMultiplyAddNttInplace(leftNtt[idx], rightNtt[idx], accNtt, ctx))
+            if (!dyadicMultiplyAddNttInplace(leftNtt[idx], rightNtt[idx], accNtt, ctx, stats))
             {
                 return false;
             }
         }
 
-        if (!outputNtt && !inverseNtt(accNtt, ctx))
+        if (!outputNtt && !inverseNtt(accNtt, ctx, stats))
         {
             return false;
         }
@@ -6805,7 +6808,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& sk2PerInstance,
         const RnsPoly& digest,
         PRNG& prng,
-        GoldenSeedSearchOutput& out, CpuBenchmarkState cpuBenchmark)
+        GoldenSeedSearchOutput& out, CpuBenchmarkState cpuBenchmark, RingOpsStats* totals)
     {
         if (sk2PerInstance.empty() ||
             !validateRingBatchShape(sk2PerInstance, params.mShrinkExpand.mRing) ||
@@ -6844,8 +6847,10 @@ namespace osuCrypto::LogVole
         }
         const std::size_t sampledPolyCountSize = static_cast<std::size_t>(sampledPolyCount);
 
+        PendingRingOpsStats pending(totals);
+        auto* stats = totals ? &pending : nullptr;
         std::vector<RnsPoly> publicANtt;
-        if (!buildLhePublicANtt(ctx, mu, publicANtt))
+        if (!buildLhePublicANtt(ctx, mu, publicANtt, {}, stats))
         {
             return false;
         }
@@ -6854,7 +6859,7 @@ namespace osuCrypto::LogVole
         for (std::size_t instanceIdx = 0; instanceIdx < sk2PerInstance.size(); ++instanceIdx)
         {
             RnsPoly sk2Ntt = sk2PerInstance[instanceIdx];
-            if (!forwardNtt(sk2Ntt, ctx))
+            if (!forwardNtt(sk2Ntt, ctx, stats))
             {
                 return false;
             }
@@ -6863,8 +6868,8 @@ namespace osuCrypto::LogVole
             {
                 RnsPoly askNtt{};
                 resizeZero(askNtt.mCoeffs, coeffCount);
-                if (!dyadicMultiplyAddNttInplace(publicANtt[rowIdx], sk2Ntt, askNtt, ctx) ||
-                    !inverseNtt(askNtt, ctx))
+                if (!dyadicMultiplyAddNttInplace(publicANtt[rowIdx], sk2Ntt, askNtt, ctx, stats) ||
+                    !inverseNtt(askNtt, ctx, stats))
                 {
                     return false;
                 }
@@ -6899,7 +6904,7 @@ namespace osuCrypto::LogVole
                     0xC720AA55u,
                     mu,
                     attemptCt2PerSampledPoly,
-                    params.mShrinkExpand.mNumWorkerThreads <= 1 ? 0 : params.mShrinkExpand.mNumWorkerThreads) ||
+                    params.mShrinkExpand.mNumWorkerThreads <= 1 ? 0 : params.mShrinkExpand.mNumWorkerThreads, stats) ||
                 attemptCt2PerSampledPoly.size() != sampledPolyCountSize)
             {
                 return false;
@@ -6913,7 +6918,7 @@ namespace osuCrypto::LogVole
                     if (!ringSubInplace(
                             attemptCt2PerSampledPoly[sampledPolyIdx],
                             askPerSampledPoly[sampledPolyIdx],
-                            ctx))
+                            ctx, stats))
                     {
                         return false;
                     }

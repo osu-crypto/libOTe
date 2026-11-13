@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **92%** of the agreed ownership/globals refactor,
+Estimated overall completion: **93%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -891,6 +891,34 @@ checks pass in 6.03 seconds; small two-query CPU interactive golden passes in
 3.86 seconds. No benchmarks, GPU execution or WSL checks were run. Next: group
 remaining standalone CPU diagnostic-boundary migration before another shared-
 header build, preserving explicit legacy selections at deferred GPU boundaries.
+
+The standalone CPU diagnostic-boundary pass adds an optional borrowed
+`RingOpsStats*` after timing on sender/receiver key-derive coroutines. Their
+synchronous processing/finalization accepts an explicit pending collector;
+collectors leave scope before socket suspension. Root inner-product selects its
+context owner, and synchronous golden-seed search accepts borrowed totals and
+forwards its pending collector through setup, sampling and subtraction. Null
+disables collection. Standalone frame receives now default to disabled timing;
+production callers already select their timing explicitly. GPU key-derive and
+root inner-product retain their explicit legacy diagnostic selections. No CUDA
+implementation, scheduling, PRNG order, batching or buffer layout changes are
+included. Golden-seed sampling remains serial despite its requested-worker
+argument; candidate validation still uses its existing uncounted parallel work.
+The declaration inventory remains 23 and the overall estimate advances to 93%.
+Deprecated synchronous evaluation/decryption/expansion, GPU setup/lazy-host
+fallback diagnostics, and ambient scheduling/blocking adapters remain open.
+The serialized combined Windows library/test/frontend-object build first
+regenerated 140 targets after Ninja reported an old build-log version. Its
+600.02-second wrapper timed out after target 112; process checks confirmed all
+build children had ended before continuation. The incremental continuation
+passes in 235.50 seconds. Eight focused CPU key-derive core/socket, metadata and
+oversized-frame rejection, root inner-product and golden-search checks pass in
+1.89 seconds. They verify owned/null totals, exact key-derive counts, legacy
+isolation and unchanged arithmetic; golden search also preserves output and
+PRNG continuation. Small two-query CPU interactive golden passes in 5.17 seconds.
+No benchmarks, GPU execution or WSL checks were run. Next: group the remaining
+legacy synchronous CPU diagnostic surfaces, then address caller-owned scheduling
+and matching buffers without changing deterministic task/seed layouts.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their
