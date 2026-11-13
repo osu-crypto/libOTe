@@ -230,6 +230,15 @@ void ChosenBaa_Code_test(const CLP&)
         checkPrimeField<4>(n);
         checkPrimeField<8>(n);
     }
+#ifdef OC_ENABLE_SSE2
+    // Cover both sides of the prefetch dispatch threshold and a non-power-of-two
+    // length. The forward/transpose check also exercises the bounded hint tail.
+    for (u64 n : {(u64{1} << 18) - 16, u64{1} << 18, (u64{1} << 18) + 16})
+    {
+        checkCode<4>(n);
+        checkCode<8>(n);
+    }
+#endif
     for (u64 n : {u64(0), u64(17), u64(1) << 32})
     {
         bool rejected = false;

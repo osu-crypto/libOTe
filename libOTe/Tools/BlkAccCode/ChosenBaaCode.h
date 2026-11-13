@@ -61,13 +61,33 @@ namespace osuCrypto
                 scatter<Pair, Count, J + 1>(indices, a, b, oa, ob);
             }
         }
-        template<bool Pair>
-        void stage(const F* a, const F* b, F* outA, F* outB, u64 which) const
+        template<bool Pair, u64 J = 0>
+        static OC_FORCEINLINE void prefetchDestinations(const u32* indices, F* a, F* b)
+        {
+#ifdef OC_ENABLE_SSE2
+            if constexpr (J < 8)
+            {
+                const auto dest = indices[J];
+                _mm_prefetch(reinterpret_cast<const char*>(a + dest), _MM_HINT_T2);
+                if constexpr (Pair)
+                    _mm_prefetch(reinterpret_cast<const char*>(b + dest), _MM_HINT_T2);
+                prefetchDestinations<Pair, J + 1>(indices, a, b);
+            }
+#endif
+        }
+        template<bool Pair, bool Prefetch>
+        void stageImpl(const F* a, const F* b, F* outA, F* outB, u64 which) const
         {
             PRNG weights(mWeightSeeds[which]);
             F sumA = Field::zero(), sumB = Field::zero();
             for (u64 i = 0; i < mN; i += 8)
             {
+                // Schedule future random destination lines before their stores.
+                // Bound the metadata reads as well as the prefetch addresses;
+                // the final eight batches use the same arithmetic without hints.
+                if constexpr (Prefetch)
+                    if (i + 64 + 8 <= mN)
+                        prefetchDestinations<Pair>(mPerm[which].data() + i + 64, outA, outB);
                 std::array<F, 8> coeffs, valuesA, valuesB;
                 Field::sample8(weights, coeffs.data());
 #if defined(OC_ENABLE_VPCLMUL) && defined(ENABLE_AVX512)
@@ -103,6 +123,20 @@ namespace osuCrypto
                     }
                 }
             }
+        }
+        template<bool Pair>
+        void stage(const F* a, const F* b, F* outA, F* outB, u64 which) const
+        {
+#ifdef OC_ENABLE_SSE2
+            if constexpr (std::is_same_v<Field, ChosenBaaField<block>>)
+            {
+                // Small inputs already fit in cache; avoid issuing extra hints.
+                // Select the loop once rather than testing size in every batch.
+                if (mN >= (u64{1} << 18))
+                    return stageImpl<Pair, true>(a, b, outA, outB, which);
+            }
+#endif
+            stageImpl<Pair, false>(a, b, outA, outB, which);
         }
         static const Matrix& matrixData()
         {

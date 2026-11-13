@@ -152,3 +152,39 @@ The ordinary AVX2 path is effectively unchanged in this measurement. The large
 ARM improvement primarily fixes the previous accidental software-multiply
 dispatch. Backend comparisons against the original encoder, plus independent
 bit-polynomial arithmetic tests, check correctness separately from timings.
+
+### Prefetch follow-up
+
+The x86 GF(2^128) path now prefetches eight random destination cache lines 64
+entries ahead, retaining the eight-entry arithmetic schedule. The hint uses
+`_MM_HINT_T2` and requires no additional instruction-set feature. Both the
+permutation-index reads and destination addresses stay in bounds; the final
+eight batches issue no hints. A single dispatch per stage enables this loop
+only at physical input lengths of at least 2^18. Smaller inputs, ARM, portable,
+and generic-field policies retain their previous schedule.
+
+The following sequential Peach measurements compare the previous PR revision
+`50f27b4d` with this follow-up using the same harness, flags, seeds, and half-rate
+profile. Peach was pinned to CPU 2, with boost disabled and a 4.5 GHz setting;
+the compiler was GCC 15.2 at `-O3`. Length means the number of input field
+elements to the transpose encoder, whose output length is half as large.
+Setup is excluded and scratch allocation is included, as in the preceding table.
+
+| Backend | Input length | Single before | Single after | Pair before | Pair after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| AVX-512 + VPCLMUL | 65,536 | 0.784 | 0.790 | 1.746 | 1.747 |
+| AVX-512 + VPCLMUL | 1,048,576 | 23.84 | 13.72 | 51.63 | 34.68 |
+| AVX-512 + VPCLMUL | 2,097,152 | 67.74 | 40.82 | 114.19 | 74.60 |
+| AVX2 + VPCLMUL | 1,048,576 | 25.32 | 15.60 | 56.33 | 43.72 |
+| AVX2/PCLMUL | 1,048,576 | 29.68 | 20.00 | 65.32 | 52.36 |
+
+Alternating repeat runs at 1,048,576 inputs measured 13.68--13.72 ms single and
+34.68--34.85 ms paired for AVX-512. The smaller input showed no material change.
+Tests around the dispatch threshold cover the non-power-of-two tail and the
+forward/transpose identity. Native M3 experiments found no benefit from these
+hints, so ARM keeps its existing schedule. Wider scatter batches and an
+additional inverse-permutation gather pass were also measured and rejected.
+
+A separate stage-only comparison with identical precomputed full-field weights
+measured 8.86 ms transpose and 9.06 ms forward at 2,097,152 elements on Peach.
+This excludes weight generation and the RS map and is not a full-encoder timing.
