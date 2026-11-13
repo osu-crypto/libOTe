@@ -1,13 +1,77 @@
-#include "libOTe/Tools/BlkAccCode/ChosenBaaCode.h"
+#include "libOTe/Tools/BlkAccCode/ChosenBaaVole.h"
 #include "cryptoTools/Common/CLP.h"
 #include "cryptoTools/Common/TestCollection.h"
 #include "Common.h"
+#include "libOTe/Tools/Field/Goldilocks.h"
 #include <algorithm>
 
 using namespace osuCrypto;
 
 namespace
 {
+    struct RepeatedPoints : ChosenBaaField<Goldilocks>
+    {
+        static Goldilocks point(u64) { return Goldilocks(1); }
+    };
+    template<u64 K>
+    void checkPrimeField(u64 n)
+    {
+        using F = Goldilocks;
+        using Field = ChosenBaaField<F>;
+        ChosenBaaCode<K, F> code;
+        code.config(n, block(901, n));
+        PRNG random(block(902, n));
+        std::array<F, K> polynomial;
+        for (auto& x : polynomial) x = F(random.get());
+        std::array<F, 16> evaluated;
+        for (u64 i = 0; i < 16; ++i)
+        {
+            F value(0);
+            for (u64 j = K; j-- > 0;) value = value * Field::point(i) + polynomial[j];
+            evaluated[i] = value;
+        }
+        for (u64 col = 0; col < 16 - K; ++col)
+        {
+            F value(0);
+            for (u64 row = 0; row < K; ++row) value += evaluated[row] * code.matrix(row, col);
+            if (value != evaluated[K + col]) throw RTE_LOC;
+        }
+        AlignedUnVector<F> x(n), y(n), z(n), message(code.outputSize()), forward(n), next(n), weights(n);
+        for (auto* v : {&x, &y, &message}) for (auto& value : *v) value = F(random.get());
+        const auto original = x, originalY = y;
+        const F alpha(random.get());
+        for (u64 i = 0; i < n; ++i) z[i] = x[i] + alpha * y[i];
+        code.dualEncode2(x,y);
+        code.dualEncode(z);
+        auto separate = originalY;
+        code.dualEncode(separate);
+        for (u64 i = 0; i < code.outputSize(); ++i)
+            if (z[i] != x[i] + alpha * y[i] || y[i] != separate[i]) throw RTE_LOC;
+        for (u64 i = 0; i < n / 16; ++i)
+        {
+            for (u64 j = 0; j < K; ++j) forward[16*i+j] = message[K*i+j];
+            for (u64 col = 0; col < 16-K; ++col)
+            {
+                F value(0);
+                for (u64 row = 0; row < K; ++row) value += message[K*i+row] * code.matrix(row,col);
+                forward[16*i+K+col] = value;
+            }
+        }
+        for (u64 stage = 0; stage < 2; ++stage)
+        {
+            PRNG prng(code.weightSeed(stage));
+            // Independent scalar sampler: uniform field elements, rejecting zero.
+            for (auto& w : weights) do { w = F(prng.get()); } while (w == F(0));
+            F sum(0);
+            for (u64 i = n; i-- > 0;)
+                next[i] = sum += forward[code.permutationIndex(stage,i)] * weights[i];
+            std::swap(next,forward);
+        }
+        F lhs(0),rhs(0);
+        for (u64 i = 0; i < message.size(); ++i) lhs += message[i] * x[i];
+        for (u64 i = 0; i < n; ++i) rhs += original[i] * forward[i];
+        if (lhs != rhs) throw RTE_LOC;
+    }
     template<u64 K>
     void checkCode(u64 n)
     {
@@ -109,6 +173,10 @@ namespace
 
 void ChosenBaa_Code_test(const CLP&)
 {
+    bool repeatedRejected = false;
+    try { ChosenBaaCode<8, Goldilocks, RepeatedPoints> code; code.config(16, ZeroBlock); }
+    catch (const std::invalid_argument&) { repeatedRejected = true; }
+    if (!repeatedRejected) throw RTE_LOC;
     for (auto type : {MultType::ChosenBaa16x8, MultType::ChosenBaa16x4})
     {
         const u64 rate = type == MultType::ChosenBaa16x8 ? 2 : 4;
@@ -159,6 +227,8 @@ void ChosenBaa_Code_test(const CLP&)
     {
         checkCode<4>(n);
         checkCode<8>(n);
+        checkPrimeField<4>(n);
+        checkPrimeField<8>(n);
     }
     for (u64 n : {u64(0), u64(17), u64(1) << 32})
     {

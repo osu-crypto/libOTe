@@ -4,25 +4,28 @@
 #include "cryptoTools/Common/Aligned.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/CompilerHints.h"
-#include "libOTe/Tools/Coproto.h"
-#include "libOTe/TwoChooseOne/ConfigureCode.h"
+#include "ChosenBaaField.h"
+
 #include <array>
+#include <limits>
 
 namespace osuCrypto
 {
-    // GF(2^128) transpose encoder for chosen-block BAA, RS[16,K,17-K].
+    // Field-generic transpose encoder for chosen-block BAA, RS[16,K,17-K].
     // Ported from ladnir/libOTe chosen-block-baa, fa7bfc3c8a0178fc99b0b666d5f31fc2a9277579.
     // Both interleavers are Fisher--Yates shuffles, including at power-of-two
     // lengths. Each accumulator output has an independent nonzero field weight.
     // Randomness is expanded by AES; see README.md for the proof boundary.
-    template<u64 K>
+    template<u64 K, typename F = block, typename Field = ChosenBaaField<F>>
     class ChosenBaaCode
     {
         static_assert(K == 4 || K == 8);
+        static_assert(std::is_same_v<F, typename Field::Element>);
+        using Matrix = std::array<F, K * (16 - K)>;
         u64 mN = 0;
         std::array<AlignedUnVector<u32>, 2> mPerm;
         std::array<block, 2> mWeightSeeds;
-        std::array<block, K * (16 - K)> mMatrix;
+        const Matrix* mMatrix = nullptr;
 
         static u32 sampleBelow(PRNG& prng, u32 bound)
         {
@@ -36,73 +39,108 @@ namespace osuCrypto
             return u32(product >> 32);
         }
 
-        static block inverse(block x)
+        // Fixed, unrolled prefix and scatter kernels expose independent products.
+        template<bool Pair, u64 Count = 8, u64 J = 0>
+        static OC_FORCEINLINE void prefix(const F* a, const F* b, F* va, F* vb, F& sa, F& sb)
         {
-            block result = x;
-            for (u64 i = 1; i < 127; ++i)
-                result = result.gf128Mul(result).gf128Mul(x);
-            return result.gf128Mul(result);
+            if constexpr (J < Count)
+            {
+                va[J] = sa = Field::add(sa, a[J]);
+                if constexpr (Pair) vb[J] = sb = Field::add(sb, b[J]);
+                prefix<Pair, Count, J + 1>(a, b, va, vb, sa, sb);
+            }
         }
-
-        // Fixed-size kernels keep independent field products visible to the
-        // compiler. No permutation dispatch or allocation in the scan loop.
+        template<bool Pair, u64 Count = 8, u64 J = 0>
+        static OC_FORCEINLINE void scatter(const u32* indices, const F* a, const F* b, F* oa, F* ob)
+        {
+            if constexpr (J < Count)
+            {
+                const auto dest = indices[J];
+                oa[dest] = a[J];
+                if constexpr (Pair) ob[dest] = b[J];
+                scatter<Pair, Count, J + 1>(indices, a, b, oa, ob);
+            }
+        }
         template<bool Pair>
-        void stage(block* a, block* b, block* outA, block* outB, u64 which) const
+        void stage(const F* a, const F* b, F* outA, F* outB, u64 which) const
         {
             PRNG weights(mWeightSeeds[which]);
-            block sumA = ZeroBlock, sumB = ZeroBlock;
+            F sumA = Field::zero(), sumB = Field::zero();
             for (u64 i = 0; i < mN; i += 8)
             {
-                std::array<block, 8> coeffs, valuesA, valuesB;
-                weights.get(coeffs.data(), coeffs.size());
-                for (u64 j = 0; j < 8; ++j)
+                std::array<F, 8> coeffs, valuesA, valuesB;
+                Field::sample8(weights, coeffs.data());
+#if defined(OC_ENABLE_VPCLMUL) && defined(ENABLE_AVX512)
+                if constexpr (std::is_same_v<Field, ChosenBaaField<block>>)
                 {
-                    while (coeffs[j] == ZeroBlock)
-                        coeffs[j] = weights.get<block>();
-                    sumA ^= a[i + j];
-                    valuesA[j] = sumA.gf128Mul(coeffs[j]);
-                    if constexpr (Pair)
-                    {
-                        sumB ^= b[i + j];
-                        valuesB[j] = sumB.gf128Mul(coeffs[j]);
-                    }
+                    const F* bi = nullptr;
+                    if constexpr (Pair) bi = b + i;
+                    prefix<Pair>(a + i, bi, valuesA.data(), valuesB.data(), sumA, sumB);
+                    Field::mul8(valuesA.data(), coeffs.data());
+                    if constexpr (Pair) Field::mul8(valuesB.data(), coeffs.data());
+                    scatter<Pair>(mPerm[which].data() + i, valuesA.data(), valuesB.data(), outA, outB);
                 }
-                for (u64 j = 0; j < 8; ++j)
+                else
+#endif
                 {
-                    const auto dest = mPerm[which][i + j];
-                    outA[dest] = valuesA[j];
-                    if constexpr (Pair)
-                        outB[dest] = valuesB[j];
+                    // Preserve the interleaved prefix/product schedule for
+                    // 128-bit PCLMUL, PMULL, and generic field arithmetic.
+                    for (u64 j = 0; j < 8; ++j)
+                    {
+                        sumA = Field::add(sumA, a[i + j]);
+                        valuesA[j] = Field::mul(sumA, coeffs[j]);
+                        if constexpr (Pair)
+                        {
+                            sumB = Field::add(sumB, b[i + j]);
+                            valuesB[j] = Field::mul(sumB, coeffs[j]);
+                        }
+                    }
+                    for (u64 j = 0; j < 8; ++j)
+                    {
+                        const auto dest = mPerm[which][i + j];
+                        outA[dest] = valuesA[j];
+                        if constexpr (Pair) outB[dest] = valuesB[j];
+                    }
                 }
             }
         }
-
-        template<u64 Row = 0>
-        OC_FORCEINLINE void local(const block* in, block* out) const
+        static const Matrix& matrixData()
         {
-            if constexpr (Row < K)
-            {
-                block low = ZeroBlock, high = ZeroBlock;
-                for (u64 col = 0; col < 16 - K; ++col)
+            // One immutable RS matrix per field/profile, independent of the seed.
+            // Thread-safe initialization does field inversion only on first use.
+            static const Matrix matrix = [] {
+                Matrix result;
+                for (u64 i = 0; i < 16; ++i)
+                    for (u64 j = 0; j < i; ++j)
+                        if (Field::point(i) == Field::point(j))
+                            throw std::invalid_argument("Chosen BAA requires sixteen distinct evaluation points.");
+                for (u64 row = 0; row < K; ++row)
                 {
-                    block lo, hi;
-                    in[K + col].gf128Mul(mMatrix[Row * (16 - K) + col], lo, hi);
-                    low ^= lo;
-                    high ^= hi;
+                    const F x = Field::point(row);
+                    F denominator = Field::one();
+                    for (u64 h = 0; h < K; ++h)
+                        if (h != row) denominator = Field::mul(denominator, Field::sub(x, Field::point(h)));
+                    const F inv = Field::inverse(denominator);
+                    for (u64 col = 0; col < 16 - K; ++col)
+                    {
+                        F numerator = Field::one();
+                        for (u64 h = 0; h < K; ++h)
+                            if (h != row) numerator = Field::mul(numerator, Field::sub(Field::point(K + col), Field::point(h)));
+                        // Consecutive output rows form consecutive SIMD lanes.
+                        result[col * K + row] = Field::mul(numerator, inv);
+                    }
                 }
-                // Reduction is linear: reduce once per output, rather than
-                // once per constituent coefficient.
-                out[Row] = in[Row] ^ low.gf128Reduce(high);
-                local<Row + 1>(in, out);
-            }
+                return result;
+            }();
+            return matrix;
         }
 
         template<bool Pair>
-        void encode(span<block> a, span<block> b) const
+        void encode(span<F> a, span<F> b) const
         {
             if (!mN || a.size() != mN || (Pair && b.size() != mN))
                 throw std::invalid_argument("Chosen BAA input size does not match configuration.");
-            AlignedUnVector<block> scratchA(mN), scratchB;
+            AlignedUnVector<F> scratchA(mN), scratchB;
             if constexpr (Pair)
                 scratchB.resize(mN);
             stage<Pair>(a.data(), b.data(), scratchA.data(), scratchB.data(), 1);
@@ -110,9 +148,9 @@ namespace osuCrypto
             for (u64 i = 0; i < mN / 16; ++i)
             {
                 // The output prefix cannot overwrite a future constituent.
-                local(a.data() + 16 * i, a.data() + K * i);
+                Field::template local<K>(a.data() + 16 * i, a.data() + K * i, mMatrix->data());
                 if constexpr (Pair)
-                    local(b.data() + 16 * i, b.data() + K * i);
+                    Field::template local<K>(b.data() + 16 * i, b.data() + K * i, mMatrix->data());
             }
         }
 
@@ -121,6 +159,7 @@ namespace osuCrypto
         {
             if (!n || n % 16 || n > std::numeric_limits<u32>::max())
                 throw std::invalid_argument("Chosen BAA length must be a positive multiple of 16 fitting u32.");
+            mMatrix = &matrixData();
             PRNG master(seed);
             const std::array<block, 2> permutationSeeds{ master.get<block>(), master.get<block>() };
             mWeightSeeds = { master.get<block>(), master.get<block>() };
@@ -134,24 +173,6 @@ namespace osuCrypto
                 for (u64 remaining = n; remaining > 1; --remaining)
                     std::swap(perm[remaining - 1], perm[sampleBelow(random, u32(remaining))]);
             }
-            for (u64 row = 0; row < K; ++row)
-            {
-                const block x(0, row + 1);
-                block denominator = OneBlock;
-                for (u64 h = 0; h < K; ++h)
-                    if (h != row)
-                        denominator = denominator.gf128Mul(x ^ block(0, h + 1));
-                const block inv = inverse(denominator);
-                for (u64 col = 0; col < 16 - K; ++col)
-                {
-                    const block point(0, K + col + 1);
-                    block numerator = OneBlock;
-                    for (u64 h = 0; h < K; ++h)
-                        if (h != row)
-                            numerator = numerator.gf128Mul(point ^ block(0, h + 1));
-                    mMatrix[row * (16 - K) + col] = numerator.gf128Mul(inv);
-                }
-            }
             mN = n;
         }
 
@@ -162,12 +183,13 @@ namespace osuCrypto
             return mPerm.at(stage)[i];
         }
         block weightSeed(u64 stage) const { return mWeightSeeds.at(stage); }
-        block matrix(u64 row, u64 col) const { return mMatrix.at(row * (16 - K) + col); }
-        void dualEncode(span<block> a) const { encode<false>(a, {}); }
-        void dualEncode2(span<block> a, span<block> b) const { encode<true>(a, b); }
+        F matrix(u64 row, u64 col) const
+        {
+            if (!mMatrix || row >= K || col >= 16 - K) throw std::out_of_range("Chosen BAA matrix index.");
+            return (*mMatrix)[col * K + row];
+        }
+        void dualEncode(span<F> a) const { encode<false>(a, {}); }
+        void dualEncode2(span<F> a, span<F> b) const { encode<true>(a, b); }
     };
 
-    // Keep aligned encoder state and scratch out of the caller's coroutine frame.
-    OC_NOINLINE void chosenBaaCompress(MultType type, block seed, span<block> a, span<block> b = {});
-    task<> chosenBaaSeed(bool sender, PRNG& prng, Socket& chl, block& seed);
 }
