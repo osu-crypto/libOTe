@@ -77,6 +77,7 @@
     X(Encoding, SingletonOfflinePayloadBound) \
     X(Encoding, RootResidentWireExact) \
     X(Encoding, PinnedWireBufferOwnership) \
+    X(Encoding, RootCudaEvidenceOwnership) \
     X(KeyDeriveCore, AlgebraicRelation) \
     X(KeyDeriveCore, DeterministicRegressionSeeds) \
     X(KeyDeriveCore, MetadataMismatchRejected) \

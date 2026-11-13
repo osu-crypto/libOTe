@@ -6,6 +6,7 @@
 
 namespace osuCrypto::LogVole
 {
+    struct RootWireCudaAllocEvidenceOwner;
     class LogVoleRingSender
     {
         task<> offlineStart(
@@ -16,6 +17,7 @@ namespace osuCrypto::LogVole
             macoro::thread_pool& executor, std::span<u8> setupResults,
             const SenderOfflineInput& input, SenderState& state,
             PRNG& prng, Socket& sock, RootWirePinOverlapEvidence& rootWirePin,
+            std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence,
             ProtocolCacheScope cacheScope);
         task<> onlineStart(
             macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
@@ -33,7 +35,8 @@ namespace osuCrypto::LogVole
             const SenderOfflineInput& input,
             SenderState& state,
             PRNG& prng,
-            Socket& sock, RootWirePinOverlapEvidence& rootWirePin, ProtocolCacheScope cacheScope = {});
+            Socket& sock, RootWirePinOverlapEvidence& rootWirePin,
+            std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence, ProtocolCacheScope cacheScope = {});
 
         // CPU diagnostics are borrowed through completion; null disables collection.
         // GPU execution retains the legacy diagnostic selection.

@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
+#include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/config.h"
 #include <cstdlib>
 #include <exception>
@@ -26,6 +27,7 @@ namespace osuCrypto::LogVole
             std::size_t capacity = 0, activeBytes = 0;
             ProtocolCacheRunId runId = 0;
             std::shared_ptr<const ProtocolCacheService> identityService;
+            std::shared_ptr<RootWireCudaAllocEvidenceOwner> evidence;
             bool cudaOwned = false;
             PinState pinState = PinState::Unregistered;
             ~Block()
@@ -69,7 +71,7 @@ namespace osuCrypto::LogVole
     WireMemoryPool::~WireMemoryPool() = default;
 
     void* WireMemoryPool::allocate(std::size_t bytes, std::size_t alignment,
-        bool cudaOwned, ProtocolCacheRunId runId) noexcept
+        bool cudaOwned, ProtocolCacheRunId runId, std::shared_ptr<RootWireCudaAllocEvidenceOwner> evidence) noexcept
     {
         constexpr auto page = Impl::pageAlignment;
         if (!bytes || !alignment || (alignment & (alignment - 1)) || alignment > page ||
@@ -89,6 +91,7 @@ namespace osuCrypto::LogVole
                     return nullptr;
                 block->activeBytes = bytes;
                 block->runId = runId;
+                block->evidence = std::move(evidence);
                 block->identityService = runId.serviceOwner();
                 it->second.pop_back();
                 return block->pointer;
@@ -97,6 +100,7 @@ namespace osuCrypto::LogVole
             block->capacity = capacity;
             block->activeBytes = bytes;
             block->runId = runId;
+            block->evidence = std::move(evidence);
             block->identityService = runId.serviceOwner();
             block->cudaOwned = cudaOwned;
             if (cudaOwned)
@@ -148,10 +152,34 @@ namespace osuCrypto::LogVole
         {
             block.activeBytes = 0;
             block.runId = 0;
+            block.evidence.reset();
+            block.identityService.reset();
             try { mImpl->free[{block.cudaOwned, block.capacity}].push_back(&block); }
             catch (...) { /* Still owned; trim/destruction will release it. */ }
         }
         return true;
+    }
+
+    void WireMemoryPool::noteRootCudaWireDirectDownload(const void* pointer,
+        std::size_t bytes, bool completed) noexcept
+    {
+        if (!completed || !bytes) return;
+        try
+        {
+            // Pool -> evidence is the only nested lock order. The evidence
+            // owner never retains or calls into the pool.
+            std::lock_guard lock(mImpl->mutex);
+            const auto* block = mImpl->find(pointer, bytes);
+            if (!block || !block->runId || !block->evidence) return;
+            auto& owner = *block->evidence;
+            std::lock_guard evidenceLock(owner.mMutex);
+            auto& value = owner.mEvidence;
+            if (value.mSenderRunId != block->runId ||
+                value.mDirectDownloadBytes > std::numeric_limits<u64>::max() - bytes) return;
+            value.mDirectDownloadBytes += static_cast<u64>(bytes);
+            ++value.mDirectDownloadCalls;
+        }
+        catch (...) {}
     }
 
     bool WireMemoryPool::contains(const void* pointer, std::size_t bytes) const noexcept

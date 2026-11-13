@@ -179,6 +179,10 @@ namespace
             LOGVOLE_REQUIRE_FALSE(originalSender.mOfflineState.mHasActiveSid);
         }
 
+        const auto allocationEvidenceOwner = originalSender.mRootWireCudaAllocEvidence;
+        LOGVOLE_REQUIRE_TRUE(allocationEvidenceOwner);
+        const auto allocationEvidence = rootWireCudaAllocEvidenceSnapshot(allocationEvidenceOwner);
+        LOGVOLE_REQUIRE_EQ(allocationEvidence.mSenderRunId, originalSender.mRootWirePin.mSenderRunId);
         const auto pinRun = originalSender.mRootWirePin.mSenderRunId;
         LOGVOLE_REQUIRE_TRUE(pinRun != 0);
         // Moving an established session must retain the new backend/mode state.
@@ -188,6 +192,8 @@ namespace
         receiver = std::move(originalReceiver);
         LOGVOLE_REQUIRE_FALSE(originalSender.isConfigured());
         LOGVOLE_REQUIRE_EQ(sender.mRootWirePin.mSenderRunId, pinRun);
+        LOGVOLE_REQUIRE_TRUE(sender.mRootWireCudaAllocEvidence == allocationEvidenceOwner);
+        LOGVOLE_REQUIRE_FALSE(originalSender.mRootWireCudaAllocEvidence);
         LOGVOLE_REQUIRE_EQ(originalSender.mRootWirePin.mSenderRunId, ProtocolCacheRunId{});
         LOGVOLE_REQUIRE_FALSE(originalReceiver.isConfigured());
         LOGVOLE_REQUIRE_EQ(sender.setting(), setting);
@@ -307,6 +313,7 @@ namespace
         }
         sender.clear();
         receiver.clear();
+        LOGVOLE_REQUIRE_TRUE(sender.mRootWireCudaAllocEvidence == allocationEvidenceOwner);
         LOGVOLE_REQUIRE_EQ(sender.mRootWirePin.mSenderRunId, ProtocolCacheRunId{});
         LOGVOLE_REQUIRE_FALSE(sender.mRootWirePin.mRequested);
         LOGVOLE_REQUIRE_FALSE(sender.outputDevice());

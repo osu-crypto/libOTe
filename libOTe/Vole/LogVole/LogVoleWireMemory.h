@@ -13,6 +13,7 @@ namespace osuCrypto::LogVole
     // buffers. A Buffer retains its pool; callers may share a pool across
     // buffers to reuse pages and their CUDA registration. No global registry.
     // Every transfer must finish before releasing its active allocation.
+    struct RootWireCudaAllocEvidenceOwner;
     class WireMemoryPool
     {
     public:
@@ -21,8 +22,10 @@ namespace osuCrypto::LogVole
         WireMemoryPool(const WireMemoryPool&) = delete;
         WireMemoryPool& operator=(const WireMemoryPool&) = delete;
         void* allocate(std::size_t bytes, std::size_t alignment,
-            bool cudaOwned = false, ProtocolCacheRunId runId = 0) noexcept;
+            bool cudaOwned = false, ProtocolCacheRunId runId = 0, std::shared_ptr<RootWireCudaAllocEvidenceOwner> evidence = {}) noexcept;
         bool release(void* pointer) noexcept;
+        // Completion uses active allocation provenance; views do not copy owners.
+        void noteRootCudaWireDirectDownload(const void* pointer, std::size_t bytes, bool completed) noexcept;
         bool contains(const void* pointer, std::size_t bytes) const noexcept;
         bool isPinned(const void* pointer, std::size_t bytes) const noexcept;
         bool isCudaOwned(const void* pointer, std::size_t bytes) const noexcept;

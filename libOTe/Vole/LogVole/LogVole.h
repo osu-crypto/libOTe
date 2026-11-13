@@ -1,5 +1,6 @@
 #pragma once
 #include "libOTe/Vole/LogVole/LogVoleIdentity.h"
+#include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
 
 #include "libOTe/Tools/Coproto.h"
@@ -318,6 +319,8 @@ namespace osuCrypto
         LogVole::CommunicationStats mLastOnlineComm;
         // Local offline transport diagnostics. Read after offline finishes.
         LogVole::RootWirePinOverlapEvidence mRootWirePin;
+        std::shared_ptr<LogVole::RootWireCudaAllocEvidenceOwner> mRootWireCudaAllocEvidence =
+            std::make_shared<LogVole::RootWireCudaAllocEvidenceOwner>();
         State mState = State::Default;
         LogVole::CivoleParams mParams;
         LogVole::CivoleSenderState mOfflineState;
@@ -574,7 +577,8 @@ namespace osuCrypto::LogVole
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
         PRNG& prng,
-        Socket& sock, RootWirePinOverlapEvidence& rootWirePin, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
+        Socket& sock, RootWirePinOverlapEvidence& rootWirePin,
+        std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
 
     task<> civoleReceiverOffline(
         const CivoleReceiverOfflineInput& input,

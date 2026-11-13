@@ -902,6 +902,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         {
             SenderState mState;
             RootWirePinOverlapEvidence mRootWirePin;
+            std::shared_ptr<RootWireCudaAllocEvidenceOwner> mCudaEvidence =
+                std::make_shared<RootWireCudaAllocEvidenceOwner>();
             std::vector<oc::u8> mWire;
             std::array<oc::u64, 16> mNextRandom{};
             RootWireCudaAllocEvidence mRootCudaWire;
@@ -917,8 +919,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             Snapshot out;
             auto configured = tests_libOTe::logvole_test::withAdvancedOptions(
                 in, selectedOptions, ProtocolCacheRole::Sender, cacheScope);
-            macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, configured, out.mState, prng, socket, out.mRootWirePin, cacheScope));
-            out.mRootCudaWire = rootWireCudaAllocEvidenceSnapshot();
+            macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, configured, out.mState, prng, socket, out.mRootWirePin, out.mCudaEvidence, cacheScope));
+            out.mRootCudaWire = rootWireCudaAllocEvidenceSnapshot(out.mCudaEvidence);
             macoro::sync_wait(socket.flush());
             auto bytes = socket.getOutbound();
             LOGVOLE_REQUIRE_TRUE(bytes && !bytes->empty());
@@ -956,7 +958,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             coproto::BufferingSocket retrySocket;
             LogVoleRingSender sender;
             bool rejected = false;
-            try { macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, invalid, selected.mState, retryPrng, retrySocket, selected.mRootWirePin)); }
+            try { macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, invalid, selected.mState, retryPrng, retrySocket, selected.mRootWirePin, selected.mCudaEvidence)); }
             catch (const std::runtime_error&) { rejected = true; }
             LOGVOLE_REQUIRE_TRUE(rejected);
             LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mSenderRunId, invalid.mSenderOwnerRunId);
@@ -4485,7 +4487,8 @@ void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
         LogVoleRingSender sender;
         SenderState state;
         RootWirePinOverlapEvidence rootWirePin;
-        macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, selected, state, prng, socket, rootWirePin, scope));
+        auto rootWirePinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
+        macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, selected, state, prng, socket, rootWirePin, rootWirePinCudaEvidence, scope));
         macoro::sync_wait(socket.flush());
         auto bytes = socket.getOutbound();
         LOGVOLE_REQUIRE_TRUE(bytes && !bytes->empty());
@@ -6053,6 +6056,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     // Four declared tasks require four exclusive result and arithmetic slots.
     std::array<oc::u8, 4> setupResults{};
     RootWirePinOverlapEvidence rootWirePin;
+    auto rootWirePinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0)) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #endif
@@ -6143,7 +6147,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     auto offlineSockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG senderOfflinePrng(oc::block(0x7D53u, 0));
     auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(setupResources.executor, setupResults, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
+        sender.offline(setupResources.executor, setupResults, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin, rootWirePinCudaEvidence),
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();
@@ -6152,7 +6156,10 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     // An unrelated failed sender must not change this completed sender's result.
     const auto completedRun = rootWirePin.mSenderRunId;
     const auto completedBytes = rootWirePin.mWireBytes;
+    const auto completedCudaEvidence = rootWireCudaAllocEvidenceSnapshot(rootWirePinCudaEvidence);
+    LOGVOLE_REQUIRE_EQ(completedCudaEvidence.mSenderRunId, completedRun);
     RootWirePinOverlapEvidence failedPin;
+    auto failedPinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
     failedPin.mSelected = failedPin.mRequested = true;
     failedPin.mPinBeginNs = failedPin.mWireBytes = 99;
     SenderOfflineInput invalid;
@@ -6161,7 +6168,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     unchanged.mParams.mW = 777;
     oc::PRNG invalidPrng(oc::block(0x7D54u, 0));
     coproto::BufferingSocket invalidSocket;
-    auto failedAttempt = sender.offline(setupResources.executor, setupResults, invalid, unchanged, invalidPrng, invalidSocket, failedPin);
+    auto failedAttempt = sender.offline(setupResources.executor, setupResults, invalid, unchanged, invalidPrng, invalidSocket, failedPin, failedPinCudaEvidence);
     LOGVOLE_REQUIRE_TRUE(failedPin.mSelected); // The returned task is still lazy.
     bool rejected = false;
     try { macoro::sync_wait(std::move(failedAttempt)); }
@@ -6174,6 +6181,12 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_EQ(failedPin.mWireBytes, 0u);
     LOGVOLE_REQUIRE_EQ(rootWirePin.mSenderRunId, completedRun);
     LOGVOLE_REQUIRE_EQ(rootWirePin.mWireBytes, completedBytes);
+    const auto preservedCudaEvidence = rootWireCudaAllocEvidenceSnapshot(rootWirePinCudaEvidence);
+    LOGVOLE_REQUIRE_EQ(preservedCudaEvidence.mSenderRunId, completedCudaEvidence.mSenderRunId);
+    LOGVOLE_REQUIRE_EQ(preservedCudaEvidence.mWireBytes, completedCudaEvidence.mWireBytes);
+    LOGVOLE_REQUIRE_EQ(preservedCudaEvidence.mDirectDownloadCalls, completedCudaEvidence.mDirectDownloadCalls);
+    LOGVOLE_REQUIRE_EQ(rootWireCudaAllocEvidenceSnapshot(failedPinCudaEvidence).mSenderRunId,
+        invalid.mSenderOwnerRunId);
 
     LOGVOLE_REQUIRE_TRUE(senderState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiverState.mNextLevelState != nullptr);
@@ -6337,6 +6350,7 @@ void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;
     RootWirePinOverlapEvidence rootWirePin;
+    auto rootWirePinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
     Params params = make_recursive_params(2);
     params.mShrinkExpand.mNumWorkerThreads = 4;
 
@@ -6358,7 +6372,7 @@ void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
     auto offlineSockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG senderOfflinePrng(oc::block(0x7D73u, 0));
     auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(setupResources.executor, setupResources.results, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin),
+        sender.offline(setupResources.executor, setupResources.results, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin, rootWirePinCudaEvidence),
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();

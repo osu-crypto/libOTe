@@ -11,6 +11,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <type_traits>
 #include <utility>
@@ -23,7 +24,7 @@ namespace osuCrypto::LogVole
     {
         std::shared_ptr<WireMemoryPool> makeSetupWireMemory(std::size_t bytes, LogVoleWireOptions options, bool useGpu);
         void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
-            WireMemoryPool* memory, bool cudaOwned, ProtocolCacheRunId runId);
+            WireMemoryPool* memory, bool cudaOwned, ProtocolCacheRunId runId, const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence);
         void deallocateSetupWireBytes(void* pointer, WireMemoryPool* memory) noexcept;
 
         template<typename T> struct SetupWireAllocator
@@ -37,15 +38,16 @@ namespace osuCrypto::LogVole
 
             std::shared_ptr<const ProtocolCacheService> mIdentityService;
             std::shared_ptr<WireMemoryPool> mMemory;
+            std::shared_ptr<RootWireCudaAllocEvidenceOwner> mEvidence;
             bool mCudaOwned = false;
             ProtocolCacheRunId mRunId = 0;
 
             SetupWireAllocator() = default;
             explicit SetupWireAllocator(std::shared_ptr<WireMemoryPool> memory,
-                bool cudaOwned = false, ProtocolCacheRunId runId = 0)
-                : mIdentityService(runId.serviceOwner()), mMemory(std::move(memory)), mCudaOwned(cudaOwned), mRunId(runId) {}
+                bool cudaOwned = false, ProtocolCacheRunId runId = 0, std::shared_ptr<RootWireCudaAllocEvidenceOwner> evidence = {})
+                : mIdentityService(runId.serviceOwner()), mMemory(std::move(memory)), mEvidence(std::move(evidence)), mCudaOwned(cudaOwned), mRunId(runId) {}
             template<typename U> SetupWireAllocator(const SetupWireAllocator<U>& other) noexcept
-                : mIdentityService(other.mIdentityService), mMemory(other.mMemory), mCudaOwned(other.mCudaOwned), mRunId(other.mRunId) {}
+                : mIdentityService(other.mIdentityService), mMemory(other.mMemory), mEvidence(other.mEvidence), mCudaOwned(other.mCudaOwned), mRunId(other.mRunId) {}
             SetupWireAllocator select_on_container_copy_construction() const
             { return SetupWireAllocator(mMemory); }
 
@@ -54,7 +56,7 @@ namespace osuCrypto::LogVole
                 if (count > std::numeric_limits<std::size_t>::max() / sizeof(T))
                     throw std::bad_array_new_length();
                 return static_cast<T*>(allocateSetupWireBytes(count * sizeof(T),
-                    std::max<std::size_t>(gDefaultAlignment, alignof(T)), mMemory.get(), mCudaOwned, mRunId));
+                    std::max<std::size_t>(gDefaultAlignment, alignof(T)), mMemory.get(), mCudaOwned, mRunId, mEvidence));
             }
             void deallocate(T* pointer, std::size_t) noexcept { deallocateSetupWireBytes(pointer, mMemory.get()); }
 
@@ -233,7 +235,7 @@ namespace osuCrypto::LogVole
     // can be moved into coproto. Only this one reservation asks the allocator
     // for CUDA page-locked pages; a decline returns the usual Buffer storage.
     Buffer reserveRootCudaWireBuffer(std::size_t bytes, ProtocolCacheRunId senderRunId,
-        bool& cudaOwned, bool recordSelection = true, std::shared_ptr<WireMemoryPool> memory = {},
+        const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, bool& cudaOwned, bool recordSelection = true, std::shared_ptr<WireMemoryPool> memory = {},
         LogVoleWireOptions options = {}, HostStepProfiler* profile = nullptr);
     // Shrink the logical wire without reallocating or copying its CUDA-owned
     // pages. The owning pool also contracts the active provenance range.
@@ -265,17 +267,24 @@ namespace osuCrypto::LogVole
         bool mEarlyLaunched = false;
         bool mEarlyAdopted = false;
     };
-    void resetRootWireCudaAllocEvidence(ProtocolCacheRunId senderRunId,
+    // One sender-owned diagnostic sink, retained by active wire allocations.
+    // It never owns a pool; nested locking always proceeds pool -> evidence.
+    struct RootWireCudaAllocEvidenceOwner
+    {
+        mutable std::mutex mMutex;
+        RootWireCudaAllocEvidence mEvidence;
+    };
+    void resetRootWireCudaAllocEvidence(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId,
         bool requested) noexcept;
-    void noteRootWireCudaAllocEligibility(ProtocolCacheRunId senderRunId,
+    void noteRootWireCudaAllocEligibility(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId,
         std::size_t wireBytes, bool eligible) noexcept;
-    void noteRootWireCudaEarlyPlan(ProtocolCacheRunId senderRunId, bool requested,
+    void noteRootWireCudaEarlyPlan(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId, bool requested,
         bool eligible, std::size_t forecastBytes, bool launched) noexcept;
-    void noteRootWireCudaEarlyJoin(ProtocolCacheRunId senderRunId, u64 joinWaitNs,
+    void noteRootWireCudaEarlyJoin(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId, u64 joinWaitNs,
         bool adopted) noexcept;
-    void noteRootWireCudaExpectedDownloads(ProtocolCacheRunId senderRunId,
+    void noteRootWireCudaExpectedDownloads(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId,
         const RootOfflineMessage& message);
-    RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot() noexcept;
+    RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence) noexcept;
 
     Buffer encode(const RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     Buffer encode(const RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});

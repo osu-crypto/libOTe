@@ -29,8 +29,6 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        std::mutex rootCudaWireEvidenceMutex;
-        RootWireCudaAllocEvidence lastRootCudaWireEvidence{};
 
         u64 rootCudaWireSteadyNs()
         {
@@ -54,7 +52,7 @@ namespace osuCrypto::LogVole
         }
 
         void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
-            WireMemoryPool* memory, bool cudaOwned, ProtocolCacheRunId runId)
+            WireMemoryPool* memory, bool cudaOwned, ProtocolCacheRunId runId, const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence)
         {
             if (!bytes) return nullptr;
             if (alignment < alignof(void*) || (alignment & (alignment - 1u)) ||
@@ -68,7 +66,7 @@ namespace osuCrypto::LogVole
             if (memory && cudaOwned && gpu::available())
             {
 
-                if (void* pointer = memory->allocate(bytes, alignment, true, runId))
+                if (void* pointer = memory->allocate(bytes, alignment, true, runId, evidence))
                     return pointer;
             }
             if (memory && bytes >= (std::size_t{1} << 20) && alignment <= 4096 &&
@@ -99,73 +97,78 @@ namespace osuCrypto::LogVole
         }
     }
 
-    void resetRootWireCudaAllocEvidence(ProtocolCacheRunId senderRunId,
+    void resetRootWireCudaAllocEvidence(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId,
         bool requested) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            lastRootCudaWireEvidence = {};
-            lastRootCudaWireEvidence.mSenderRunId = senderRunId;
-            lastRootCudaWireEvidence.mIdentityService = senderRunId.serviceOwner();
-            lastRootCudaWireEvidence.mRequested = requested;
+            if (!evidence) return;
+            std::lock_guard lock(evidence->mMutex);
+            evidence->mEvidence = {};
+            evidence->mEvidence.mSenderRunId = senderRunId;
+            evidence->mEvidence.mIdentityService = senderRunId.serviceOwner();
+            evidence->mEvidence.mRequested = requested;
         }
         catch (...) {}
     }
 
-    void noteRootWireCudaAllocEligibility(ProtocolCacheRunId senderRunId,
+    void noteRootWireCudaAllocEligibility(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId,
         std::size_t wireBytes, bool eligible) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId != senderRunId) return;
-            lastRootCudaWireEvidence.mWireBytes = static_cast<u64>(wireBytes);
-            lastRootCudaWireEvidence.mEligible = eligible;
+            if (!evidence) return;
+            std::lock_guard lock(evidence->mMutex);
+            if (evidence->mEvidence.mSenderRunId != senderRunId) return;
+            evidence->mEvidence.mWireBytes = static_cast<u64>(wireBytes);
+            evidence->mEvidence.mEligible = eligible;
         }
         catch (...) {}
     }
 
-    void noteRootWireCudaEarlyPlan(ProtocolCacheRunId senderRunId, bool requested,
+    void noteRootWireCudaEarlyPlan(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId, bool requested,
         bool eligible, std::size_t forecastBytes, bool launched) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId != senderRunId) return;
-            lastRootCudaWireEvidence.mEarlyRequested = requested;
-            lastRootCudaWireEvidence.mEarlyEligible = eligible;
-            lastRootCudaWireEvidence.mEarlyForecastBytes =
+            if (!evidence) return;
+            std::lock_guard lock(evidence->mMutex);
+            if (evidence->mEvidence.mSenderRunId != senderRunId) return;
+            evidence->mEvidence.mEarlyRequested = requested;
+            evidence->mEvidence.mEarlyEligible = eligible;
+            evidence->mEvidence.mEarlyForecastBytes =
                 static_cast<u64>(forecastBytes);
-            lastRootCudaWireEvidence.mEarlyLaunched = launched;
+            evidence->mEvidence.mEarlyLaunched = launched;
         }
         catch (...) {}
     }
 
-    void noteRootWireCudaEarlyJoin(ProtocolCacheRunId senderRunId, u64 joinWaitNs,
+    void noteRootWireCudaEarlyJoin(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId, u64 joinWaitNs,
         bool adopted) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId != senderRunId) return;
-            lastRootCudaWireEvidence.mEarlyJoinWaitNs = joinWaitNs;
-            lastRootCudaWireEvidence.mEarlyAdopted = adopted;
+            if (!evidence) return;
+            std::lock_guard lock(evidence->mMutex);
+            if (evidence->mEvidence.mSenderRunId != senderRunId) return;
+            evidence->mEvidence.mEarlyJoinWaitNs = joinWaitNs;
+            evidence->mEvidence.mEarlyAdopted = adopted;
             if (adopted)
             {
-                lastRootCudaWireEvidence.mSelected = true;
-                lastRootCudaWireEvidence.mDeclined = false;
+                evidence->mEvidence.mSelected = true;
+                evidence->mEvidence.mDeclined = false;
             }
         }
         catch (...) {}
     }
 
-    RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot() noexcept
+    RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence) noexcept
     {
         try
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            return lastRootCudaWireEvidence;
+            if (!evidence) return {};
+            std::lock_guard lock(evidence->mMutex);
+            return evidence->mEvidence;
         }
         catch (...) { return {}; }
     }
@@ -177,54 +180,36 @@ namespace osuCrypto::LogVole
 
     void recordRootCudaWireDirectDownload(ConstWireView wire, bool completed) noexcept
     {
-#if defined(ENABLE_LOGVOLE_CUDA)
-        const auto bytes = wire.size();
-        if (!completed || !bytes || !wire.mMemory) return;
-        const ProtocolCacheRunId ownerRunId = wire.mMemory->ownerRunId(wire.data(), bytes);
-        if (!ownerRunId) return;
-        try
-        {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId != ownerRunId ||
-                lastRootCudaWireEvidence.mDirectDownloadBytes >
-                    std::numeric_limits<u64>::max() - bytes)
-                return;
-            lastRootCudaWireEvidence.mDirectDownloadBytes +=
-                static_cast<u64>(bytes);
-            ++lastRootCudaWireEvidence.mDirectDownloadCalls;
-        }
-        catch (...) {}
-#else
-        (void)wire;
-        (void)completed;
-#endif
+        if (wire.mMemory)
+            wire.mMemory->noteRootCudaWireDirectDownload(wire.data(), wire.size(), completed);
     }
 
     Buffer reserveRootCudaWireBuffer(std::size_t bytes, ProtocolCacheRunId senderRunId,
-        bool& cudaOwned, bool recordSelection, std::shared_ptr<WireMemoryPool> memory, LogVoleWireOptions options, HostStepProfiler* profile)
+        const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, bool& cudaOwned, bool recordSelection, std::shared_ptr<WireMemoryPool> memory, LogVoleWireOptions options, HostStepProfiler* profile)
     {
         cudaOwned = false;
         if (!options.mPinned) return Buffer(bytes, options, false, profile);
         const u64 wallBegin = rootCudaWireSteadyNs();
         const u64 cpuBegin = cpuBenchmarkThreadNs();
         if (!memory) memory = std::make_shared<WireMemoryPool>();
-        Buffer reserved(detail::SetupWireAllocator<u8>(std::move(memory), true, senderRunId));
+        Buffer reserved(detail::SetupWireAllocator<u8>(std::move(memory), true, senderRunId, evidence));
         reserved.resize(bytes, AllocType::Uninitialized, options, true, profile);
         cudaOwned = isRootCudaWireHostRange(reserved.wireView());
         const u64 cpuElapsed = cpuBenchmarkThreadNs() - cpuBegin;
         const u64 wallEnd = rootCudaWireSteadyNs();
         {
-            std::lock_guard lock(rootCudaWireEvidenceMutex);
-            if (lastRootCudaWireEvidence.mSenderRunId == senderRunId)
+            if (!evidence) return reserved;
+            std::lock_guard lock(evidence->mMutex);
+            if (evidence->mEvidence.mSenderRunId == senderRunId)
             {
-                lastRootCudaWireEvidence.mAllocationBeginNs = wallBegin;
-                lastRootCudaWireEvidence.mAllocationEndNs = wallEnd;
-                lastRootCudaWireEvidence.mAllocationCpuNs = cpuElapsed;
+                evidence->mEvidence.mAllocationBeginNs = wallBegin;
+                evidence->mEvidence.mAllocationEndNs = wallEnd;
+                evidence->mEvidence.mAllocationCpuNs = cpuElapsed;
                 if (recordSelection)
                 {
-                    lastRootCudaWireEvidence.mSelected = cudaOwned;
-                    lastRootCudaWireEvidence.mDeclined =
-                        lastRootCudaWireEvidence.mEligible && !cudaOwned;
+                    evidence->mEvidence.mSelected = cudaOwned;
+                    evidence->mEvidence.mDeclined =
+                        evidence->mEvidence.mEligible && !cudaOwned;
                 }
             }
         }
@@ -1198,7 +1183,7 @@ namespace osuCrypto::LogVole
         return rootWireLayout(message).mBytes;
     }
 
-    void noteRootWireCudaExpectedDownloads(ProtocolCacheRunId senderRunId,
+    void noteRootWireCudaExpectedDownloads(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId,
         const RootOfflineMessage& message)
     {
         const auto layout = rootWireLayout(message);
@@ -1218,10 +1203,11 @@ namespace osuCrypto::LogVole
         addTensor(message.mCtR, message.mLazyCtR);
         addTensor(message.mLacctLeft.mCt, message.mLazyLacctLeft);
         addTensor(message.mTopCt, message.mLazyTopCt);
-        std::lock_guard lock(rootCudaWireEvidenceMutex);
-        if (lastRootCudaWireEvidence.mSenderRunId != senderRunId) return;
-        lastRootCudaWireEvidence.mExpectedDirectDownloadBytes = expectedBytes;
-        lastRootCudaWireEvidence.mExpectedDirectDownloadCalls = expectedCalls;
+        if (!evidence) return;
+        std::lock_guard lock(evidence->mMutex);
+        if (evidence->mEvidence.mSenderRunId != senderRunId) return;
+        evidence->mEvidence.mExpectedDirectDownloadBytes = expectedBytes;
+        evidence->mEvidence.mExpectedDirectDownloadCalls = expectedCalls;
     }
 
     Buffer encode(const RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)

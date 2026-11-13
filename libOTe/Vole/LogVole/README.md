@@ -213,14 +213,14 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **97%** of the agreed ownership/globals refactor,
+Estimated overall completion: **98%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
 This inventory describes the committed tree. A migrated synchronous wrapper
 is not a completed async migration.
 The original 216-declaration globals snapshot remains in the local review
-artifacts; the current scan finds **23 runtime global/static/TLS declarations**.
+artifacts; the current inventory contains **21 runtime global/static/TLS declarations**.
 Counts cover source branches on both platforms, not fields within objects or
 template instantiations. Compile-time constants and the five literal CUDA
 tables are excluded. The scanned LogVole library, tests, and frontend example
@@ -239,7 +239,7 @@ contain no environment reads.
 | Intermediate receiver shrink | Committed in `b792a035`; direct `bulk_chunked` on the caller executor, unchanged arithmetic/padding, exclusive output ranges, and inline execution for one partition. Per-partition benchmark state is allocated only for parallel work. |
 | Intermediate receiver denoise | Committed in `216ef876`; direct async `bulk_chunked`, one shared recovery-data preparation, unchanged unrolled row kernel, and alias-safe output publication. Normal synchronous entry point retired; root recovery shares the serial arithmetic core. |
 | Empty-moduli sentinel and CLI tags | Removed in `dd980823`; a borrowed modulus span and function-local tags replace the globals. |
-| Sender pinning evidence moved onto sender state | Reviewed and committed. `LogVoleSender::mRootWirePin` owns the result; low-level callers pass an exclusive reference. Shared evidence/mutex and snapshot API removed. Separate CUDA allocation evidence remains global. |
+| Sender pinning evidence moved onto sender state | Reviewed and committed. `LogVoleSender::mRootWirePin` owns the result; low-level callers pass an exclusive reference. Shared pin evidence/mutex removed. CUDA allocation evidence now has an explicit shared sink retained by its sender and active wire allocation. |
 | Offline setup migration | Twenty former setup sites now await direct `bulk_chunked` with caller executor and exclusive status storage, wired through public sender/verifier APIs. Sequential phases reuse the storage; one chunk runs inline. Sampling order and arithmetic batching are preserved. Synchronous GPU lazy materialization retains the legacy adapter. |
 | Online receiver zeta | CPU digest preparation awaits direct `bulk_chunked` with caller executor and exclusive `RootZetaBuffer` storage, threaded through public receiver/garbled/prover APIs. Each chunk reuses multiprecision scratch and an AES PRNG buffer. Protocol range count still determines seed layout; buffer count only bounds execution. GPU sampling/fallback remains synchronous and unchanged. |
 | Receiver input wrapping | CPU CI-VOLE input wrapping awaits direct `bulk_chunked` using caller-owned `ZpEncodeBuffer` storage. Each chunk reuses slots and SEAL plaintext storage; the encoding/lifting arithmetic is shared with the legacy entry point. Public receiver, garbled receiver, and prover APIs pass the buffers through. GPU wrapping/fallback remains unchanged. |
@@ -387,7 +387,7 @@ validation entries above and below record historical migration checkpoints.
 | Protocol run/role | 0 | None | Instance-owned services allocate qualified IDs; explicit operation contexts carry role/run identity and retain service lifetime. |
 | Worker budget | 2 | `gParallelWorkerSlotsInUse`, `tParallelWorkerCap` in `LogVoleParallel.h` | Caller-supplied compute resource and explicit chunk allowance; remove the ambient scheduler after caller migration. |
 | Statistics | 4 | `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats`; `regions()::r` in `cuda/LogVoleGpuProtocol.cpp` | Owned diagnostics and per-chunk pending counters. |
-| CUDA allocation evidence | 2 | `rootCudaWireEvidenceMutex`, `lastRootCudaWireEvidence` in `LogVoleEncoding.cpp` | Caller/actor-owned evidence sink. CPU offline start still resets this shared evidence; CPU reachability remains to migrate. |
+| CUDA allocation evidence | 0 | None | Sender-owned shared sink; active wire blocks retain it through completion and release it before entering the reuse cache. CPU offline resets only its supplied owner. |
 | Capability/compatibility caches | 4 | `defaultPublicSenderCt2PrefetchLevels()::h200`, `available()::ok`, `gaussianTransformHostCompatible()::{recognized, arithmeticCompatible}` | Capture once in the appropriate CPU/GPU resource owner. |
 | CUDA error/name storage | 4 | `gLastError`, `gLastWhere`, `gpuDeviceName()::name`, `gpuLastErrorOk()::buf` in `cuda/LogVoleGpuKernels.cu` | Execution-owned error state and owned name/message storage. |
 | CUDA attribute initialization | 7 | `gSharedConfigured`, `gPointwisePseudo55TreeSharedConfigured`, `gPointwisePseudo55TreeWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpVectorSharedConfigured`, `gPointwisePseudo55SparseSharedConfigured`, `gNttInversePostWarpStages05SharedConfigured` | Owned device preparation; consider only a justified CUDA initialization guard as an exception. |
@@ -1094,6 +1094,29 @@ to **97%**; the retained runtime-global inventory and physical GPU compatibility
 scheduler sites are unchanged. Remaining closure includes the shared CUDA evidence
 owner/reset still reached by CPU offline setup, Windows/WSL ownership and host-leak
 checks, and clean dependency integration/publishing of the local macoro revision.
+
+Root CUDA allocation evidence is now explicitly owned. High-level senders retain
+one reusable shared sink; low-level offline callers supply an owner captured by
+value through completion. Reset/note/snapshot operations select that sink and its
+qualified run ID. Active wire allocations retain the sink; completion checks the
+live in-range block and matching run, and release drops ownership before block
+reuse. The shared mutex/snapshot globals are removed, including the reset formerly
+reached by CPU offline start. Pool-to-evidence is the only nested lock order.
+Existing GPU allocation/download behavior is unchanged.
+
+The serialized CUDA-enabled Windows library/test/public-example-object build
+passes in **417.90 seconds**. Five registered CPU checks pass: the new host-pool
+owner/run/completion/reuse/lifetime regression (0.14 seconds), pinned-wire ownership
+and two-level protocol/isolation (0.56 seconds), the actual grouped message-round-
+trip registration `Encoding_AllMessageRoundTrips` (0.69 seconds), and small two-query
+GoldenSeed with sender-owner move/clear checks (4.18 seconds). The initial round-
+trip leaf name was not a registration; its grouped registration was then run
+explicitly. No GPU execution, benchmarks, WSL or host-leak checks ran. Removing the
+two evidence globals reduces the runtime inventory from **23 to 21 declarations**;
+the approximate overall estimate advances to **98%**. Remaining milestone work is
+Windows/WSL ownership and host-leak validation, the deferred GPU/legacy global
+ownership work listed above, and clean macoro dependency integration/pinning. No
+dependency publication is included.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their

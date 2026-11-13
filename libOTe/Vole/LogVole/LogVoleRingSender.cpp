@@ -97,12 +97,12 @@ namespace osuCrypto::LogVole
             Buffer mReserved;
             bool mCudaOwned = false;
 
-            bool start(std::size_t forecastBytes, ProtocolCacheRunId runId, int device,
+            bool start(std::size_t forecastBytes, ProtocolCacheRunId runId, std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence, int device,
                 CpuBenchmarkContext* benchmarkContext, const LogVoleWireOptions& options, HostStepProfiler* profile)
             {
                 try
                 {
-                    mThread = std::thread([this, forecastBytes, runId, identityService = runId.serviceOwner(), device,
+                    mThread = std::thread([this, forecastBytes, runId, cudaEvidence = std::move(cudaEvidence), identityService = runId.serviceOwner(), device,
                         benchmarkContext, &options, profile] {
                         try
                         {
@@ -115,7 +115,7 @@ namespace osuCrypto::LogVole
                             if (cudaSetDevice(device) != cudaSuccess ||
                                 !gpu::available()) return;
                             mReserved = reserveRootCudaWireBuffer(
-                                forecastBytes, runId, mCudaOwned, false, {}, options, profile);
+                                forecastBytes, runId, cudaEvidence, mCudaOwned, false, {}, options, profile);
                         }
                         catch (...) { mCudaOwned = false; }
                     });
@@ -179,6 +179,7 @@ namespace osuCrypto::LogVole
         struct RootWirePinPlan
         {
             RootWirePinOverlapEvidence mEvidence{};
+            std::shared_ptr<RootWireCudaAllocEvidenceOwner> mCudaEvidence;
             RootOfflineMessage* mRoot = nullptr;
             const LogVoleWireOptions& mWireOptions;
             HostStepProfiler* const mProfile;
@@ -193,10 +194,10 @@ namespace osuCrypto::LogVole
             RootWirePinWorker mWorker;
 #endif
 
-            RootWirePinPlan(ProtocolCacheRunId senderRunId, bool requested,
+            RootWirePinPlan(ProtocolCacheRunId senderRunId, std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence, bool requested,
                 bool cudaRequested,
                 RootOfflineMessage* root, bool ownedSend, const LogVoleWireOptions& options, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
-                : mRoot(root), mWireOptions(options), mProfile(profile), mCpuBenchmark(cpuBenchmark),
+                : mCudaEvidence(std::move(cudaEvidence)), mRoot(root), mWireOptions(options), mProfile(profile), mCpuBenchmark(cpuBenchmark),
                   mCudaRequested(cudaRequested), mOwnedSend(ownedSend)
             {
                 mEvidence.mSenderRunId = senderRunId;
@@ -210,7 +211,7 @@ namespace osuCrypto::LogVole
                 if (!mCudaRequested || !mRoot) return false;
                 mEvidence.mWireBytes = rootOfflineWireSize(*mRoot);
                 noteRootWireCudaExpectedDownloads(
-                    mEvidence.mSenderRunId, *mRoot);
+                    mCudaEvidence, mEvidence.mSenderRunId, *mRoot);
                 const bool deviceExport = mRoot->mLazyCtR ||
                     mRoot->mLazyLacctLeft || mRoot->mLazyTopCt;
                 const bool eligible = mEvidence.mSenderRunId != 0 &&
@@ -220,7 +221,7 @@ namespace osuCrypto::LogVole
                     mOwnedSend &&
                     mWireOptions.mPinned &&
                     mWireOptions.mDirectDownload;
-                noteRootWireCudaAllocEligibility(mEvidence.mSenderRunId,
+                noteRootWireCudaAllocEligibility(mCudaEvidence, mEvidence.mSenderRunId,
                     static_cast<std::size_t>(mEvidence.mWireBytes), eligible);
                 return eligible;
 #else
@@ -256,7 +257,7 @@ namespace osuCrypto::LogVole
                     // existing exact-size late reservation fallback.
                     early.mReserved = Buffer{};
                 }
-                noteRootWireCudaEarlyJoin(mEvidence.mSenderRunId,
+                noteRootWireCudaEarlyJoin(mCudaEvidence, mEvidence.mSenderRunId,
                     joinWaitNs, adopted);
             }
 #endif
@@ -269,7 +270,7 @@ namespace osuCrypto::LogVole
                 if (!prepareCudaWireEligibility()) return;
                 mReserved = reserveRootCudaWireBuffer(
                     static_cast<std::size_t>(mEvidence.mWireBytes),
-                    mEvidence.mSenderRunId, mCudaSelected, true, {}, mWireOptions, mProfile);
+                    mEvidence.mSenderRunId, mCudaEvidence, mCudaSelected, true, {}, mWireOptions, mProfile);
 #endif
             }
 
@@ -700,15 +701,17 @@ namespace osuCrypto::LogVole
 
     task<> LogVoleRingSender::offline(macoro::thread_pool &executor, std::span<u8> setupResults,
                                       const SenderOfflineInput &input, SenderState &state, PRNG &prng,
-                                      Socket &sock, RootWirePinOverlapEvidence &rootWirePin, ProtocolCacheScope cacheScope)
+                                      Socket &sock, RootWirePinOverlapEvidence &rootWirePin,
+                                      std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence, ProtocolCacheScope cacheScope)
     {
-        return offlineStart(executor, setupResults, input, state, prng, sock, rootWirePin,
+        return offlineStart(executor, setupResults, input, state, prng, sock, rootWirePin, cudaEvidence,
                             std::move(cacheScope));
     }
 
     task<> LogVoleRingSender::offlineStart(macoro::thread_pool &executor, std::span<u8> setupResults,
                                            const SenderOfflineInput &input, SenderState &state, PRNG &prng,
                                            Socket &sock, RootWirePinOverlapEvidence &rootWirePin,
+                                           std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence,
                                            ProtocolCacheScope cacheScope)
     {
         CpuBenchmarkState cpuBenchmark{cpuBenchmarkContext(input.mRingFactoryOwner)};
@@ -721,14 +724,14 @@ namespace osuCrypto::LogVole
         const bool rootPinRequested = encoding.mRootWirePinOverlap;
         const bool rootCudaRequested = encoding.mRootWireCudaAlloc;
         const bool earlyRequested = rootCudaRequested && encoding.mRootWireCudaAllocEarly;
-        resetRootWireCudaAllocEvidence(senderRunId, rootCudaRequested);
+        resetRootWireCudaAllocEvidence(cudaEvidence, senderRunId, rootCudaRequested);
         std::size_t forecastBytes = 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
         RootWireEarlyCudaWorker earlyWorker;
         if (earlyRequested)
         {
             forecastBytes = forecastRootOfflineWireSize(input.mParams, input.mLeafInputsAreGadget);
-            const int device = gpu::currentDeviceOrdinal();
+            const int device = gpu::enabled(input.mRingFactoryOwner) ? gpu::currentDeviceOrdinal() : -1;
             const bool eligible = senderRunId != 0 && input.mUseGpuResidentInternalState &&
                                   forecastBytes >= (std::size_t{1} << 20) &&
                                   gpu::enabled(input.mRingFactoryOwner) && device >= 0 &&
@@ -737,12 +740,12 @@ namespace osuCrypto::LogVole
                                   input.mParams.mShrinkExpand.mGpuSetup.mLazyCiphertexts &&
                                   input.mParams.mShrinkExpand.mGpuSetup.mDirectWire;
             const bool launched =
-                eligible && earlyWorker.start(forecastBytes, senderRunId, device, cpuBenchmark.mContext,
+                eligible && earlyWorker.start(forecastBytes, senderRunId, cudaEvidence, device, cpuBenchmark.mContext,
                                               encoding.mWire, hostProfiler(input.mRingFactoryOwner));
-            noteRootWireCudaEarlyPlan(senderRunId, earlyRequested, eligible, forecastBytes, launched);
+            noteRootWireCudaEarlyPlan(cudaEvidence, senderRunId, earlyRequested, eligible, forecastBytes, launched);
         }
 #else
-        noteRootWireCudaEarlyPlan(senderRunId, earlyRequested, false, 0, false);
+        noteRootWireCudaEarlyPlan(cudaEvidence, senderRunId, earlyRequested, false, 0, false);
 #endif
         SenderOfflineOutput output{};
         {
@@ -754,7 +757,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        RootWirePinPlan rootPin(senderRunId, rootPinRequested, rootCudaRequested,
+        RootWirePinPlan rootPin(senderRunId, cudaEvidence, rootPinRequested, rootCudaRequested,
                                 (rootPinRequested || rootCudaRequested)
                                     ? terminalRootMessage(input.mParams, output.mMessage)
                                     : nullptr,

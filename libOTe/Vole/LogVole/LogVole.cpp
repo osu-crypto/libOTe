@@ -496,6 +496,7 @@ namespace osuCrypto
     using namespace LogVole;
 
     LogVoleSender::LogVoleSender(LogVoleSender&& other)
+        : mRootWireCudaAllocEvidence{}
     {
         *this = std::move(other);
     }
@@ -513,6 +514,7 @@ namespace osuCrypto
             mNextSid = other.mNextSid;
             mLastOnlineComm = other.mLastOnlineComm;
             mRootWirePin = other.mRootWirePin;
+            mRootWireCudaAllocEvidence = std::move(other.mRootWireCudaAllocEvidence);
             mState = other.mState;
             mSetting = other.mSetting;
             mConfigureCacheRunId = other.mConfigureCacheRunId;
@@ -658,7 +660,7 @@ namespace osuCrypto
         input.mW = mRequestSize;
 
         CivoleSenderState state{};
-        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock, mRootWirePin,
+        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock, mRootWirePin, mRootWireCudaAllocEvidence,
                                      cpuBenchmark, setupScope);
 
         mOfflineState = std::move(state);
@@ -2057,6 +2059,7 @@ namespace osuCrypto::LogVole
     task<> civoleSenderOffline(macoro::thread_pool &executor, std::span<u8> setupResults,
                                const CivoleSenderOfflineInput &input, CivoleSenderState &state, PRNG &prng,
                                Socket &sock, RootWirePinOverlapEvidence &rootWirePin,
+                               std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence,
                                CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
         rootWirePin = {};
@@ -2203,7 +2206,7 @@ namespace osuCrypto::LogVole
         SenderState logVoleState{};
         auto logVoleSock = sock.fork();
         co_await sender.offline(executor, setupResults, offlineInput, logVoleState, prng, logVoleSock,
-                                rootWirePin, senderScope);
+                                rootWirePin, cudaEvidence, senderScope);
 
         CivoleSenderState next{};
         next.mParams = sessionParams;

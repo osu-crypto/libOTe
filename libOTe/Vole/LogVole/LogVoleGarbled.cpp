@@ -215,7 +215,7 @@ namespace osuCrypto
         }
         CivoleSenderState state;
         RootWirePinOverlapEvidence rootWirePin;
-        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock, rootWirePin,
+        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock, rootWirePin, mRootWireCudaAllocEvidence,
                                      cpuBenchmark);
         mState = std::move(state);
         mDeltas = deltas;
