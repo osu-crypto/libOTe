@@ -3,6 +3,7 @@
 // Existing synchronous GPU session paths and host fallbacks. CPU callers use
 // the explicit-executor APIs in the normal headers.
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
+#include "libOTe/Vole/LogVole/LogVoleZk.h"
 
 namespace osuCrypto::LogVole::detail
 {
@@ -116,4 +117,41 @@ namespace osuCrypto::LogVole::detail
         std::vector<RnsPoly>& out,
         u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
 
+    // Existing ZK GPU-session host fallback; CPU proofs await their executor.
+    bool gpuLegacyZkMulProverResponse(
+        const ZkMulCircuit& circuit,
+        std::span<const u64> wires,
+        std::span<const u64> macs,
+        u64 chi,
+        u64 modulus,
+        ZkMulCpuWorkspace& workspace,
+        ZkProof& out);
+
+    bool gpuLegacyZkMulVerifierValue(
+        const ZkMulCircuit& circuit,
+        std::span<const u64> keys,
+        u64 chi,
+        u64 delta,
+        u64 modulus,
+        ZkMulCpuWorkspace& workspace,
+        u64& out);
+
+    bool gpuLegacyZkMatMulProverResponse(
+        const ZkMatMulStatement& st,
+        std::span<const u64> wires,
+        std::span<const u64> macs,
+        const ZkMatMulChallenge& ch,
+        u64 modulus,
+        u32 threads,
+        std::vector<ZkProof>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
+
+    bool gpuLegacyZkMatMulVerifierValue(
+        const ZkMatMulStatement& st,
+        std::span<const u64> keys,
+        std::span<const u64> publicProduct,
+        const ZkMatMulChallenge& ch,
+        u64 delta,
+        u64 modulus,
+        u32 threads,
+        std::vector<u64>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 }

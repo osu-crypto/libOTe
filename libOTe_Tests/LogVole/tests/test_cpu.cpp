@@ -604,6 +604,9 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
 
 void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
 {
+    macoro::thread_pool proofExecutor;
+    auto proofWork = proofExecutor.make_work();
+    proofExecutor.create_threads(1);
     struct Failure {};
     LogVole::detail::CpuExecutor executor(2);
     std::array<std::thread::id, 2> threads;
@@ -759,19 +762,19 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
         const u64 chi = query == 0 ? 0 : random.get<u64>();
         ZkProof expected, actual;
         u64 expectedValue = 0, actualValue = 0;
-        LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, serial, expected));
-        LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, limitedChunks, actual));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(proofExecutor, circuit, wires, macs, chi, q, serial, expected)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(proofExecutor, circuit, wires, macs, chi, q, limitedChunks, actual)));
         LOGVOLE_REQUIRE_EQ(actual.mU, expected.mU);
         LOGVOLE_REQUIRE_EQ(actual.mV, expected.mV);
-        LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, serial, expectedValue));
-        LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, parallel, actual));
-        LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, parallel, actualValue));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulVerifierValue(proofExecutor, circuit, keys, chi, delta, q, serial, expectedValue)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(proofExecutor, circuit, wires, macs, chi, q, parallel, actual)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulVerifierValue(proofExecutor, circuit, keys, chi, delta, q, parallel, actualValue)));
         LOGVOLE_REQUIRE_EQ(actual.mU, expected.mU);
         LOGVOLE_REQUIRE_EQ(actual.mV, expected.mV);
         LOGVOLE_REQUIRE_EQ(actualValue, expectedValue);
         LOGVOLE_REQUIRE_TRUE(zkAccept(actual, actualValue, delta, q));
-        LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, automatic, actual));
-        LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, automatic, actualValue));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(proofExecutor, circuit, wires, macs, chi, q, automatic, actual)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulVerifierValue(proofExecutor, circuit, keys, chi, delta, q, automatic, actualValue)));
         LOGVOLE_REQUIRE_EQ(actual.mU, expected.mU);
         LOGVOLE_REQUIRE_EQ(actual.mV, expected.mV);
         LOGVOLE_REQUIRE_EQ(actualValue, expectedValue);
@@ -782,10 +785,10 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
     LOGVOLE_REQUIRE_FALSE(parallel.prepared());
     LOGVOLE_REQUIRE_EQ(parallel.workers(), 0u);
     ZkProof untouched{123, 456};
-    LOGVOLE_REQUIRE_FALSE(zkMulProverResponse(circuit, wires, macs, 1, q, parallel, untouched));
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulProverResponse(proofExecutor, circuit, wires, macs, 1, q, parallel, untouched)));
     ZkMulCircuit wrongGeometry = circuit;
     ++wrongGeometry.mDepth;
-    LOGVOLE_REQUIRE_FALSE(zkMulProverResponse(wrongGeometry, wires, macs, 1, q, moved, untouched));
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulProverResponse(proofExecutor, wrongGeometry, wires, macs, 1, q, moved, untouched)));
     LOGVOLE_REQUIRE_EQ(untouched.mU, 123u);
     LOGVOLE_REQUIRE_EQ(untouched.mV, 456u);
     PRNG rejectedRandom(toBlock(0x574954, 1)), untouchedRandom(toBlock(0x574954, 1));
@@ -796,7 +799,7 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
         witnessExecutor, wrongGeometry, q, rejectedRandom, wires, 0, moved)));
     LOGVOLE_REQUIRE_TRUE(rangesEqual(wires, savedWires));
     LOGVOLE_REQUIRE_TRUE(rejectedRandom.get<block>() == untouchedRandom.get<block>());
-    LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, 1, q, moved, untouched));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(proofExecutor, circuit, wires, macs, 1, q, moved, untouched)));
     bool invalidRejected = false;
     try { ZkMulCpuWorkspace invalid(ZkMulCircuit{}, 2); }
     catch (const std::invalid_argument&) { invalidRejected = true; }
@@ -2384,13 +2387,14 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                     LOGVOLE_REQUIRE_TRUE(fallbackOwner != copied.mOperandsDevice);
                     ZkMulCpuWorkspace hostWorkspace(reference, 1);
                     ZkProof hostProof;
-                    LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, witness, fallbackProver.mMacs,
-                        fallbackProver.mLastChallenge, fallbackProver.modulus(), hostWorkspace, hostProof));
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(
+                        setupResources.executor, reference, witness, fallbackProver.mMacs,
+                        fallbackProver.mLastChallenge, fallbackProver.modulus(), hostWorkspace, hostProof)));
                     LOGVOLE_REQUIRE_EQ(fallbackProver.mLastProof.mU, hostProof.mU);
                     LOGVOLE_REQUIRE_EQ(fallbackProver.mLastProof.mV, hostProof.mV);
                     u64 hostValue = 0;
-                    LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(reference, fallbackVerifier.mKeys,
-                        fallbackVerifier.mLastChallenge, 19, fallbackVerifier.modulus(), hostWorkspace, hostValue));
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulVerifierValue(setupResources.executor, reference, fallbackVerifier.mKeys,
+                        fallbackVerifier.mLastChallenge, 19, fallbackVerifier.modulus(), hostWorkspace, hostValue)));
                     LOGVOLE_REQUIRE_EQ(fallbackVerifier.mLastValue, hostValue);
                 }
 
@@ -2489,8 +2493,8 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                                 LOGVOLE_REQUIRE_EQ(macs[i], mulAddMod(witness[i], 19u, keys[i], modulus));
                             ZkMulCpuWorkspace hostWorkspace(reference, 1);
                             ZkProof hostProof;
-                            LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, witness, macs,
-                                gpuProver.mLastChallenge, gpuProver.modulus(), hostWorkspace, hostProof));
+                            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(setupResources.executor, reference, witness, macs,
+                                gpuProver.mLastChallenge, gpuProver.modulus(), hostWorkspace, hostProof)));
                             LOGVOLE_REQUIRE_EQ(gpuProver.mLastProof.mU, hostProof.mU);
                             LOGVOLE_REQUIRE_EQ(gpuProver.mLastProof.mV, hostProof.mV);
                         }
@@ -2540,10 +2544,14 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
             ZkMulCpuWorkspace referenceWorkspace(reference, 1), actualWorkspace(actual, 4);
             ZkProof referenceProof, actualProof;
             u64 referenceValue = 0, actualValue = 0;
-            LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, expected, macs, 73, modulus, referenceWorkspace, referenceProof));
-            LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(actual, fetched, macs, 73, modulus, actualWorkspace, actualProof));
-            LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(reference, keys, 73, 19, modulus, referenceWorkspace, referenceValue));
-            LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(actual, keys, 73, 19, modulus, actualWorkspace, actualValue));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(
+                setupResources.executor, reference, expected, macs, 73, modulus, referenceWorkspace, referenceProof)));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(
+                setupResources.executor, actual, fetched, macs, 73, modulus, actualWorkspace, actualProof)));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulVerifierValue(
+                setupResources.executor, reference, keys, 73, 19, modulus, referenceWorkspace, referenceValue)));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulVerifierValue(
+                setupResources.executor, actual, keys, 73, 19, modulus, actualWorkspace, actualValue)));
             LOGVOLE_REQUIRE_EQ(referenceProof.mU, actualProof.mU);
             LOGVOLE_REQUIRE_EQ(referenceProof.mV, actualProof.mV);
             LOGVOLE_REQUIRE_EQ(referenceValue, actualValue);
@@ -2590,6 +2598,9 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
 
 void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
 {
+    macoro::thread_pool proofExecutor;
+    auto proofWork = proofExecutor.make_work();
+    proofExecutor.create_threads(1);
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
@@ -2638,8 +2649,10 @@ void LogVole_Cpu_GpuZkBufferOwnership(const oc::CLP& cmd)
     ZkMulCpuWorkspace expectedWorkspace(reference, 1);
     ZkProof expectedProof;
     u64 expectedValue = 0;
-    LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(reference, witness, macs, chi, modulus, expectedWorkspace, expectedProof));
-    LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(reference, keys, chi, delta, modulus, expectedWorkspace, expectedValue));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(
+        proofExecutor, reference, witness, macs, chi, modulus, expectedWorkspace, expectedProof)));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulVerifierValue(
+        proofExecutor, reference, keys, chi, delta, modulus, expectedWorkspace, expectedValue)));
 
     using Packet = std::tuple<ZkMulCircuit, std::shared_ptr<gpu::ZkMulDeviceState>,
         std::shared_ptr<gpu::ZkMulDeviceState>, gpu::DeviceScalarsPtr,
@@ -2787,8 +2800,10 @@ void LogVole_Cpu_GpuZkMatMulSeededInputsMatchReference(const oc::CLP& cmd)
             if (dim <= 33)
             {
                 AlignedUnVec<u64> expectedProduct, actualProduct;
-                LOGVOLE_REQUIRE_TRUE(zkMatMulFillProduct(statement, modulus, 1,
-                    expected, expectedProduct));
+                macoro::thread_pool productExecutor;
+                std::array<u8, 1> productResults{};
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulFillProduct(productExecutor,
+                    productResults, statement, modulus, 1, expected, expectedProduct)));
                 gpu::DeviceScalars product;
                 LOGVOLE_REQUIRE_TRUE(gpu::zkMatMulFillProductDevice(*device, statement,
                     modulus, product, operationExecution.mainStream()));
@@ -3863,6 +3878,9 @@ void LogVole_Cpu_AsyncMulProof(const oc::CLP& cmd)
 
 void LogVole_Cpu_ZkProofMatchesReference(const oc::CLP&)
 {
+    macoro::thread_pool proofExecutor;
+    auto proofWork = proofExecutor.make_work();
+    proofExecutor.create_threads(1);
     PRNG random(toBlock(0x819, 0x514));
     for (u64 q : {257ULL, 2251799813554177ULL, 18014398508400641ULL})
     for (u64 budget : {3ULL, 83ULL, 4096ULL})
@@ -3909,8 +3927,8 @@ void LogVole_Cpu_ZkProofMatchesReference(const oc::CLP&)
                 ZkMulCpuWorkspace workspace(circuit, threads, nullptr, proofSettings);
                 ZkProof proof;
                 u64 b = 0;
-                LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(circuit, wires, macs, chi, q, workspace, proof));
-                LOGVOLE_REQUIRE_TRUE(zkMulVerifierValue(circuit, keys, chi, delta, q, workspace, b));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(proofExecutor, circuit, wires, macs, chi, q, workspace, proof)));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulVerifierValue(proofExecutor, circuit, keys, chi, delta, q, workspace, b)));
                 LOGVOLE_REQUIRE_EQ(proof.mU, reference.mU);
                 LOGVOLE_REQUIRE_EQ(proof.mV, reference.mV);
                 LOGVOLE_REQUIRE_EQ(b, bReference);

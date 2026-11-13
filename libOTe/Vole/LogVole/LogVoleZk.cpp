@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe/Tools/Field/UInt.h"
 #include "libOTe/Vole/LogVole/LogVoleZk.h"
 
@@ -417,7 +418,7 @@ namespace osuCrypto::LogVole
         }
     }
 
-    bool zkMulProverResponse(
+    bool detail::gpuLegacyZkMulProverResponse(
         const ZkMulCircuit& circuit,
         std::span<const u64> wires,
         std::span<const u64> macs,
@@ -463,7 +464,7 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool zkMulVerifierValue(
+    bool detail::gpuLegacyZkMulVerifierValue(
         const ZkMulCircuit& circuit,
         std::span<const u64> keys,
         u64 chi,
@@ -828,32 +829,6 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool zkMatMulFillProduct(
-        const ZkMatMulStatement& st, u64 modulus, u32 threads,
-        std::span<const u64> wires, AlignedUnVec<u64>& publicProduct, CpuBenchmarkState cpuBenchmark)
-    {
-        if (!validateZkMatMulStatement(st) || modulus < 2 || wires.size() < st.voleCount()) return false;
-        const seal::Modulus mod(modulus);
-        const u64 n = st.mDim;
-        AlignedUnVec<u64> product(st.entries());
-        const u64* a = wires.data() + st.offsetA();
-        const u64* b = wires.data() + st.offsetB();
-        const bool ok = detail::runParallelTasks(static_cast<std::size_t>(n), threads, [&](std::size_t row, CpuBenchmarkState& cpuBenchmark) {
-            matMulProductRow(a, b, product.data(), n, row, mod);
-            return true;
-        }, false, &cpuBenchmark);
-        if (ok) publicProduct = std::move(product);
-        return ok;
-    }
-
-    bool zkMatMulWitness(
-        const ZkMatMulStatement& st, u64 modulus, u32 threads, PRNG& prng,
-        AlignedUnVec<u64>& wires, AlignedUnVec<u64>& publicProduct, u64 voleSize, CpuBenchmarkState cpuBenchmark)
-    {
-        return zkMatMulWitnessInputs(st, modulus, prng, wires, voleSize) &&
-               zkMatMulFillProduct(st, modulus, threads, wires, publicProduct, cpuBenchmark);
-    }
-
     macoro::task<bool> zkMatMulFillProduct(macoro::thread_pool& executor, std::span<u8> results,
         const ZkMatMulStatement& st, u64 modulus, u32 threads,
         std::span<const u64> wires, AlignedUnVec<u64>& publicProduct, CpuBenchmarkState cpuBenchmark)
@@ -911,7 +886,7 @@ namespace osuCrypto::LogVole
         out = std::move(next);
     }
 
-    bool zkMatMulProverResponse(
+    bool detail::gpuLegacyZkMatMulProverResponse(
         const ZkMatMulStatement& st,
         std::span<const u64> wires,
         std::span<const u64> macs,
@@ -964,18 +939,7 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool zkMatMulProverResponse(
-        const ZkMatMulStatement& st, std::span<const u64> wires, std::span<const u64> macs,
-        const ZkMatMulChallenge& ch, u64 modulus, u32 threads, ZkProof& out, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
-    {
-        if (st.repetitions() != 1) return false;
-        std::vector<ZkProof> proofs;
-        if (!zkMatMulProverResponse(st, wires, macs, ch, modulus, threads, proofs, settings, cpuBenchmark)) return false;
-        out = proofs.front();
-        return true;
-    }
-
-    bool zkMatMulVerifierValue(
+    bool detail::gpuLegacyZkMatMulVerifierValue(
         const ZkMatMulStatement& st,
         std::span<const u64> keys,
         std::span<const u64> publicProduct,
@@ -1016,18 +980,6 @@ namespace osuCrypto::LogVole
             values[rep] = addMod(b, keys[st.maskIndex(rep)] % modulus, mod);
         }
         out = std::move(values);
-        return true;
-    }
-
-    bool zkMatMulVerifierValue(
-        const ZkMatMulStatement& st, std::span<const u64> keys,
-        std::span<const u64> publicProduct, const ZkMatMulChallenge& ch, u64 delta,
-        u64 modulus, u32 threads, u64& out, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
-    {
-        if (st.repetitions() != 1) return false;
-        std::vector<u64> values;
-        if (!zkMatMulVerifierValue(st, keys, publicProduct, ch, delta, modulus, threads, values, settings, cpuBenchmark)) return false;
-        out = values.front();
         return true;
     }
 
@@ -2132,7 +2084,7 @@ namespace osuCrypto
                 workspace = &fallback;
             }
             if (mVoleOptions.mUseGpu)
-                ok = zkMulProverResponse(
+                ok = LogVole::detail::gpuLegacyZkMulProverResponse(
                     mCircuit, wires, std::span<const u64>(mMacs.data(), mMacs.size()), mLastChallenge,
                     mVole.modulus(), *workspace, mLastProof);
             else
@@ -2294,7 +2246,7 @@ namespace osuCrypto
                 workspace = &fallback;
             }
             if (mVoleOptions.mUseGpu)
-                ok = zkMulVerifierValue(
+                ok = LogVole::detail::gpuLegacyZkMulVerifierValue(
                     mCircuit, std::span<const u64>(mKeys.data(), mKeys.size()), mLastChallenge,
                     mVole.mDelta, mVole.modulus(), *workspace, value);
             else
@@ -2434,7 +2386,7 @@ namespace osuCrypto
             }
 #endif
             if (mVoleOptions.mUseGpu)
-                ok = zkMatMulProverResponse(
+                ok = LogVole::detail::gpuLegacyZkMatMulProverResponse(
                     mStatement, wires, std::span<const u64>(mMacs.data(), mMacs.size()), ch,
                     mVole.modulus(), mVole.numThreads(), mLastProofs, mSettings, cpuBenchmark);
             else
@@ -2556,7 +2508,7 @@ namespace osuCrypto
             }
 #endif
             if (mVoleOptions.mUseGpu)
-                ok = zkMatMulVerifierValue(
+                ok = LogVole::detail::gpuLegacyZkMatMulVerifierValue(
                     mStatement, std::span<const u64>(mKeys.data(), mKeys.size()), product, ch, mVole.mDelta,
                     mVole.modulus(), mVole.numThreads(), values, mSettings, cpuBenchmark);
             else

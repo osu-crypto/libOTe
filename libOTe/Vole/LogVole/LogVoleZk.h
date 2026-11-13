@@ -128,20 +128,31 @@ namespace osuCrypto::LogVole
     // gate picks two uniform wires from the layer below.
     bool makeZkMulCircuit(u64 gateCount, u64 depth, block seed, ZkMulCircuit& out);
 
+    class ZkMulCpuWorkspace;
+    namespace detail
+    {
+        // Declarations are required here for qualified private-workspace friends;
+        // the synchronous GPU host fallback interfaces remain internal.
+        bool gpuLegacyZkMulProverResponse(const ZkMulCircuit&, std::span<const u64>,
+            std::span<const u64>, u64, u64, ZkMulCpuWorkspace&, ZkProof&);
+        bool gpuLegacyZkMulVerifierValue(const ZkMulCircuit&, std::span<const u64>,
+            u64, u64, u64, ZkMulCpuWorkspace&, u64&);
+    }
+
     // Prepared exclusive CPU numerical storage, options and concurrency budget.
     // Construct before the first proof. Width/depth and the captured benchmark
     // partition remain fixed; borrowed benchmark storage must outlive the owner.
     // Async calls borrow a caller executor and join all children before returning.
     // Calls/moves/destruction require exclusive use through awaited completion.
-    // Legacy synchronous calls lazily prepare a private pool for diagnostics and
-    // GPU fallback; production CPU async calls never construct or use that pool.
+    // Internal GPU host fallback lazily prepares a private pool; CPU async
+    // calls never construct or use that pool.
     class ZkMulCpuWorkspace
     {
         struct Impl;
         std::unique_ptr<Impl> mImpl;
-        friend bool zkMulProverResponse(const ZkMulCircuit&, std::span<const u64>,
+        friend bool detail::gpuLegacyZkMulProverResponse(const ZkMulCircuit&, std::span<const u64>,
             std::span<const u64>, u64, u64, ZkMulCpuWorkspace&, ZkProof&);
-        friend bool zkMulVerifierValue(const ZkMulCircuit&, std::span<const u64>,
+        friend bool detail::gpuLegacyZkMulVerifierValue(const ZkMulCircuit&, std::span<const u64>,
             u64, u64, u64, ZkMulCpuWorkspace&, u64&);
         friend macoro::task<bool> zkMulProverResponse(macoro::thread_pool&, const ZkMulCircuit&,
             std::span<const u64>, std::span<const u64>, u64, u64, ZkMulCpuWorkspace&, ZkProof&);
@@ -202,27 +213,6 @@ namespace osuCrypto::LogVole
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize = 0, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
 
-    // U = sum_g chi^(g+1) * M[x_g] * M[y_g]                      + M[r]
-    // V = sum_g chi^(g+1) * (M[z_g] - x_g*M[y_g] - y_g*M[x_g])    - r
-    bool zkMulProverResponse(
-        const ZkMulCircuit& circuit,
-        std::span<const u64> wires,
-        std::span<const u64> macs,
-        u64 chi,
-        u64 modulus,
-        ZkMulCpuWorkspace& workspace,
-        ZkProof& out);
-
-    // B = sum_g chi^(g+1) * (K[x_g]*K[y_g] + K[z_g]*Delta) + K[r]
-    bool zkMulVerifierValue(
-        const ZkMulCircuit& circuit,
-        std::span<const u64> keys,
-        u64 chi,
-        u64 delta,
-        u64 modulus,
-        ZkMulCpuWorkspace& workspace,
-        u64& out);
-
     // Explicit-executor CPU APIs. Borrow circuit, inputs, outputs, workspace and
     // executor through awaited completion. Workspace buffers bound concurrency;
     // one chunk runs inline without a pool. Witness layers join before reads
@@ -230,9 +220,14 @@ namespace osuCrypto::LogVole
     macoro::task<bool> zkMulWitness(macoro::thread_pool& executor,
         const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize, ZkMulCpuWorkspace& workspace);
+
+    // U = sum_g chi^(g+1) * M[x_g] * M[y_g]                      + M[r]
+    // V = sum_g chi^(g+1) * (M[z_g] - x_g*M[y_g] - y_g*M[x_g])    - r
     macoro::task<bool> zkMulProverResponse(macoro::thread_pool& executor,
         const ZkMulCircuit& circuit, std::span<const u64> wires, std::span<const u64> macs,
         u64 chi, u64 modulus, ZkMulCpuWorkspace& workspace, ZkProof& out);
+
+    // B = sum_g chi^(g+1) * (K[x_g]*K[y_g] + K[z_g]*Delta) + K[r]
     macoro::task<bool> zkMulVerifierValue(macoro::thread_pool& executor,
         const ZkMulCircuit& circuit, std::span<const u64> keys, u64 chi, u64 delta,
         u64 modulus, ZkMulCpuWorkspace& workspace, u64& out);
@@ -322,19 +317,6 @@ namespace osuCrypto::LogVole
         const ZkMatMulStatement& st, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
         u64 voleSize = 0);
 
-    // Legacy synchronous diagnostics/GPU fallback; CPU applications can use
-    // the explicit-executor overloads below.
-    // Construct the public product C = A*B mod p separately from the private
-    // witness. Honest statement preparation is excluded from proof timing.
-    bool zkMatMulFillProduct(
-        const ZkMatMulStatement& st, u64 modulus, u32 threads,
-        std::span<const u64> wires, AlignedUnVec<u64>& publicProduct, CpuBenchmarkState cpuBenchmark = {});
-
-    // Both of the above.
-    bool zkMatMulWitness(
-        const ZkMatMulStatement& st, u64 modulus, u32 threads, PRNG& prng,
-        AlignedUnVec<u64>& wires, AlignedUnVec<u64>& publicProduct, u64 voleSize = 0, CpuBenchmarkState cpuBenchmark = {});
-
     // Independent, uniform field coefficients for every output entry and
     // repetition, expanded from one 16-byte verifier seed after authentication.
     struct ZkMatMulChallenge
@@ -353,56 +335,18 @@ namespace osuCrypto::LogVole
     // and the device check paths need the same challenge powers.
     u64 zkPowMod(u64 base, u64 exp, u64 modulus);
 
-    // Legacy synchronous diagnostics/GPU fallback.
-    bool zkMatMulProverResponse(
-        const ZkMatMulStatement& st,
-        std::span<const u64> wires,
-        std::span<const u64> macs,
-        const ZkMatMulChallenge& ch,
-        u64 modulus,
-        u32 threads,
-        ZkProof& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
-
-    // Repeated matrix checks retain every equation. The scalar overloads above
-    // and below reject statements with more than one repetition.
-    // Legacy synchronous diagnostics/GPU fallback.
-    bool zkMatMulProverResponse(
-        const ZkMatMulStatement& st,
-        std::span<const u64> wires,
-        std::span<const u64> macs,
-        const ZkMatMulChallenge& ch,
-        u64 modulus,
-        u32 threads,
-        std::vector<ZkProof>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
-
-    // Legacy synchronous diagnostics/GPU fallback.
-    bool zkMatMulVerifierValue(
-        const ZkMatMulStatement& st,
-        std::span<const u64> keys,
-        std::span<const u64> publicProduct,
-        const ZkMatMulChallenge& ch,
-        u64 delta,
-        u64 modulus,
-        u32 threads,
-        u64& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
-
-    // Legacy synchronous diagnostics/GPU fallback.
-    bool zkMatMulVerifierValue(
-        const ZkMatMulStatement& st,
-        std::span<const u64> keys,
-        std::span<const u64> publicProduct,
-        const ZkMatMulChallenge& ch,
-        u64 delta,
-        u64 modulus,
-        u32 threads,
-        std::vector<u64>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
-
     // Explicit CPU execution; all borrowed inputs/resources live until joined.
+    // Workspaces, result storage and outputs are exclusive through completion.
+    // Callers must not mutate borrowed inputs/challenges or reuse a witness PRNG
+    // while its operation is active. Witness generation owns its output access.
     // threads requests logical tasks (zero selects one), bounded by matrix rows.
     // The status span must hold every task; one task runs inline.
+    // Construct public C = A*B separately; honest preparation is outside proof timing.
     macoro::task<bool> zkMatMulFillProduct(macoro::thread_pool& executor, std::span<u8> results,
         const ZkMatMulStatement& st, u64 modulus, u32 threads,
         std::span<const u64> wires, AlignedUnVec<u64>& publicProduct, CpuBenchmarkState cpuBenchmark = {});
+
+    // Sample A/B/masks inline, then await product construction with the same rows.
     macoro::task<bool> zkMatMulWitness(macoro::thread_pool& executor, std::span<u8> results,
         const ZkMatMulStatement& st, u64 modulus, u32 threads, PRNG& prng,
         AlignedUnVec<u64>& wires, AlignedUnVec<u64>& publicProduct, u64 voleSize = 0,
@@ -531,7 +475,6 @@ namespace osuCrypto
         // With device VOLE input, the host `wires` argument supplies its size
         // and receives the refreshed mask; other host entries are not read.
         std::shared_ptr<void> mWiresDevice;
-
 
         // Whether the VOLE itself may take its input from mWiresDevice. Set false
         // to hand the VOLE the host span instead while the check still runs on the

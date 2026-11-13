@@ -218,7 +218,8 @@ namespace
         if constexpr (multiplication)
             LOGVOLE_REQUIRE_TRUE(zkMulWitness(statement, p, witnessPrng, wires, request));
         else
-            LOGVOLE_REQUIRE_TRUE(zkMatMulWitness(statement, p, 1, witnessPrng, wires, publicProduct, request));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulWitness(
+                setupResources.executor, setupResources.results, statement, p, 1, witnessPrng, wires, publicProduct, request)));
         const auto original = wires;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (device)
@@ -309,8 +310,8 @@ namespace
             {
                 ZkMulCpuWorkspace workspace(statement, 1);
                 ZkProof expectedProof;
-                LOGVOLE_REQUIRE_TRUE(zkMulProverResponse(statement, actual, macs,
-                    prover.mLastChallenge, p, workspace, expectedProof));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMulProverResponse(setupResources.executor, statement, actual, macs,
+                    prover.mLastChallenge, p, workspace, expectedProof)));
                 LOGVOLE_REQUIRE_EQ(prover.mLastProof.mU, expectedProof.mU);
                 LOGVOLE_REQUIRE_EQ(prover.mLastProof.mV, expectedProof.mV);
             }
@@ -318,9 +319,10 @@ namespace
             {
                 ZkMatMulChallenge challenge;
                 zkMatMulChallenge(statement, prover.mLastSeed, p, challenge);
+                ZkMatMulProverWorkspace workspace(statement, 1);
                 std::vector<ZkProof> expectedProofs;
-                LOGVOLE_REQUIRE_TRUE(zkMatMulProverResponse(statement, actual, macs,
-                    challenge, p, 1, expectedProofs));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulProverResponse(setupResources.executor,
+                    statement, actual, macs, challenge, p, workspace, expectedProofs)));
                 LOGVOLE_REQUIRE_EQ(prover.mLastProofs.size(), maskCount);
                 LOGVOLE_REQUIRE_EQ(verifier.mLastValues.size(), maskCount);
                 for (u32 rep = 0; rep < maskCount; ++rep)
@@ -335,16 +337,17 @@ namespace
         }
     }
 
-    void checkBothStatements(CivoleSetting setting, bool device)
+    void checkBothStatements(CivoleSetting setting, bool device,
+        u64 instances = 3, bool fastCpu = false)
     {
         ZkMulCircuit circuit;
         LOGVOLE_REQUIRE_TRUE(makeZkMulCircuit(4, 2, toBlock(0x43495243554954, 1), circuit));
-        checkFreshMasks<ZkMulProver, ZkMulVerifier>(circuit, setting, device);
+        checkFreshMasks<ZkMulProver, ZkMulVerifier>(circuit, setting, device, instances, fastCpu);
         ZkMatMulStatement matrix;
         matrix.mDim = 2;
-        checkFreshMasks<ZkMatMulProver, ZkMatMulVerifier>(matrix, setting, device);
+        checkFreshMasks<ZkMatMulProver, ZkMatMulVerifier>(matrix, setting, device, instances, fastCpu);
         matrix.mReps = 3;
-        checkFreshMasks<ZkMatMulProver, ZkMatMulVerifier>(matrix, setting, device);
+        checkFreshMasks<ZkMatMulProver, ZkMatMulVerifier>(matrix, setting, device, instances, fastCpu);
     }
 
 }
@@ -376,10 +379,12 @@ void LogVole_Zk_AsyncMatMulProtocol(const CLP&)
     LOGVOLE_REQUIRE_FALSE(verifier.mCpuWorkspace.prepared());
 }
 
-void LogVole_Zk_FreshMaskCpu(const CLP&)
+void LogVole_Zk_FreshMaskCpu(const CLP& cmd)
 {
-    checkBothStatements(CivoleSetting::GoldenSeed, false);
-    checkBothStatements(CivoleSetting::NoGoldenSeed, false);
+    const bool fast = cmd.getOr("lvFactoryFast", 0) != 0;
+    const u64 instances = fast ? 2 : 3;
+    checkBothStatements(CivoleSetting::GoldenSeed, false, instances, fast);
+    checkBothStatements(CivoleSetting::NoGoldenSeed, false, instances, fast);
 }
 
 void LogVole_Zk_FreshMaskGpu(const CLP& cmd)
@@ -400,10 +405,13 @@ void LogVole_Zk_FreshMaskGpu(const CLP& cmd)
 
 void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources resources;
     checkMatMulCpuTerms();
     constexpr u64 p = 17, delta = 3;
     const seal::Modulus modulus(p);
     ZkMatMulStatement statement{1, 2};
+    ZkMatMulProverWorkspace statementProver(statement, 1);
+    ZkMatMulVerifierWorkspace statementVerifier(statement, 1);
     LOGVOLE_REQUIRE_TRUE(validateZkMatMulStatement(statement));
     LOGVOLE_REQUIRE_EQ(statement.voleCount(), 4u);
     std::array<u64, 4> wires{0, 0, 5, 9};
@@ -415,9 +423,10 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
     assignValues<u64>(challenge.mCoefficients, {1, p - 1});
     std::vector<ZkProof> proofs;
     std::vector<u64> values;
-    LOGVOLE_REQUIRE_TRUE(zkMatMulProverResponse(statement, wires, macs, challenge, p, 1, proofs));
-    LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(statement, keys, publicProduct, challenge,
-        delta, p, 1, values));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulProverResponse(
+        resources.executor, statement, wires, macs, challenge, p, statementProver, proofs)));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(
+        resources.executor, statement, keys, publicProduct, challenge, delta, p, statementVerifier, values)));
     LOGVOLE_REQUIRE_EQ(proofs.size(), 2u);
     // Opposite coefficients produce nonzero residuals that sum to zero. Each
     // repetition must reject independently when public C=1 but A=B=0.
@@ -425,19 +434,27 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
     LOGVOLE_REQUIRE_TRUE(!zkAccept(proofs[1], values[1], delta, p));
     LOGVOLE_REQUIRE_TRUE(!zkMatMulAccept(proofs, values, delta, p));
     LOGVOLE_REQUIRE_TRUE(!zkMatMulAccept(std::span<const ZkProof>(proofs.data(), 1), values, delta, p));
-    ZkProof scalar{13, 14};
-    u64 scalarValue = 15;
-    LOGVOLE_REQUIRE_TRUE(!zkMatMulProverResponse(statement, wires, macs, challenge, p, 1, scalar));
-    LOGVOLE_REQUIRE_TRUE(!zkMatMulVerifierValue(statement, keys, publicProduct, challenge,
-        delta, p, 1, scalarValue));
-    LOGVOLE_REQUIRE_EQ(scalar.mU, 13u);
-    LOGVOLE_REQUIRE_EQ(scalarValue, 15u);
+    // A vector result supports both repetitions; missing resources must
+    // reject before replacing the caller's existing proof/value vectors.
+    std::vector<ZkProof> denseProofs{{13, 14}};
+    std::vector<u64> denseValues{15};
+    ZkMatMulProverWorkspace missingProver;
+    ZkMatMulVerifierWorkspace missingVerifier;
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulProverResponse(resources.executor,
+        statement, wires, macs, challenge, p, missingProver, denseProofs)));
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulVerifierValue(resources.executor,
+        statement, keys, publicProduct, challenge, delta, p, missingVerifier, denseValues)));
+    LOGVOLE_REQUIRE_EQ(denseProofs.size(), 1u);
+    LOGVOLE_REQUIRE_EQ(denseProofs[0].mU, 13u);
+    LOGVOLE_REQUIRE_EQ(denseProofs[0].mV, 14u);
+    LOGVOLE_REQUIRE_EQ(denseValues.size(), 1u);
+    LOGVOLE_REQUIRE_EQ(denseValues[0], 15u);
 
     // Changing only the verifier's public statement changes acceptance. The
     // private witness has no C slot from which an expected result can be inferred.
     publicProduct[0] = 0;
-    LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(statement, keys, publicProduct, challenge,
-        delta, p, 1, values));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(
+        resources.executor, statement, keys, publicProduct, challenge, delta, p, statementVerifier, values)));
     LOGVOLE_REQUIRE_TRUE(zkMatMulAccept(proofs, values, delta, p));
     proofs[1].mU = (proofs[1].mU + 1u) % p;
     LOGVOLE_REQUIRE_TRUE(!zkMatMulAccept(proofs, values, delta, p));
@@ -445,6 +462,8 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
     // A full coefficient matrix distinguishes a residual whose row and column
     // sums vanish. The former u=v=(1,1) projection would miss this entire error.
     ZkMatMulStatement dense{2, 1};
+    ZkMatMulProverWorkspace denseProver(dense, 1);
+    ZkMatMulVerifierWorkspace denseVerifier(dense, 1);
     AlignedUnVec<u64> denseWires, denseKeys, denseMacs;
     denseWires.resize(dense.voleCount());
     denseKeys.resize(dense.voleCount());
@@ -459,26 +478,28 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
     ZkMatMulChallenge denseChallenge;
     assignValues<u64>(denseChallenge.mCoefficients, {1, 2, 3, 5});
     std::array<u64, 4> wrongProduct{p - 1, 1, 1, p - 1};
-    LOGVOLE_REQUIRE_TRUE(zkMatMulProverResponse(dense, denseWires, denseMacs,
-        denseChallenge, p, 1, scalar));
-    LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(dense, denseKeys, wrongProduct,
-        denseChallenge, delta, p, 1, scalarValue));
-    LOGVOLE_REQUIRE_TRUE(!zkAccept(scalar, scalarValue, delta, p));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulProverResponse(
+        resources.executor, dense, denseWires, denseMacs, denseChallenge, p, denseProver, denseProofs)));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(
+        resources.executor, dense, denseKeys, wrongProduct, denseChallenge, delta, p, denseVerifier, denseValues)));
+    LOGVOLE_REQUIRE_EQ(denseProofs.size(), 1u);
+    LOGVOLE_REQUIRE_EQ(denseValues.size(), 1u);
+    LOGVOLE_REQUIRE_TRUE(!zkMatMulAccept(denseProofs, denseValues, delta, p));
     std::array<u64, 4> zeroProduct{};
-    LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(dense, denseKeys, zeroProduct,
-        denseChallenge, delta, p, 1, scalarValue));
-    LOGVOLE_REQUIRE_TRUE(zkAccept(scalar, scalarValue, delta, p));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(
+        resources.executor, dense, denseKeys, zeroProduct, denseChallenge, delta, p, denseVerifier, denseValues)));
+    LOGVOLE_REQUIRE_TRUE(zkMatMulAccept(denseProofs, denseValues, delta, p));
     std::array<u64, 4> identity{1, 0, 0, 1};
-    LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(dense, denseKeys, identity,
-        denseChallenge, delta, p, 1, scalarValue));
-    LOGVOLE_REQUIRE_TRUE(!zkAccept(scalar, scalarValue, delta, p));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(
+        resources.executor, dense, denseKeys, identity, denseChallenge, delta, p, denseVerifier, denseValues)));
+    LOGVOLE_REQUIRE_TRUE(!zkMatMulAccept(denseProofs, denseValues, delta, p));
 
     // Bind the last public output as well as the first. Checking only a prefix
     // of a packed output array must never accept a changed trailing entry.
     std::array<u64, 4> trailingError{0, 0, 0, 1};
-    LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(dense, denseKeys, trailingError,
-        denseChallenge, delta, p, 1, scalarValue));
-    LOGVOLE_REQUIRE_TRUE(!zkAccept(scalar, scalarValue, delta, p));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(
+        resources.executor, dense, denseKeys, trailingError, denseChallenge, delta, p, denseVerifier, denseValues)));
+    LOGVOLE_REQUIRE_TRUE(!zkMatMulAccept(denseProofs, denseValues, delta, p));
 
     // Check the exact per-entry equations with an independent triple-loop
     // oracle. This includes nonzero A/B and a public product computed without
@@ -511,7 +532,10 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
             expectedProduct[i * direct.mDim + j] = value;
         }
         AlignedUnVec<u64> computedProduct;
-        LOGVOLE_REQUIRE_TRUE(zkMatMulFillProduct(direct, field, 2, inputs, computedProduct));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulFillProduct(resources.executor,
+            resources.results, direct, field, 2, inputs, computedProduct)));
+        ZkMatMulProverWorkspace serialProver(direct, 1), parallelProver(direct, 3);
+        ZkMatMulVerifierWorkspace serialVerifier(direct, 1), parallelVerifier(direct, 3);
         LOGVOLE_REQUIRE_TRUE(rangesEqual(computedProduct, expectedProduct));
         ZkMatMulChallenge directChallenge;
         const block seed = toBlock(0x646972656374, field);
@@ -528,14 +552,15 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
         }
         std::vector<ZkProof> singleProofs;
         std::vector<u64> singleValues;
-        LOGVOLE_REQUIRE_TRUE(zkMatMulProverResponse(direct, inputs, directMacs,
-            directChallenge, field, 1, singleProofs));
-        LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(direct, directKeys, expectedProduct,
-            directChallenge, delta, field, 1, singleValues));
-        LOGVOLE_REQUIRE_TRUE(zkMatMulProverResponse(direct, inputs, directMacs,
-            directChallenge, field, 3, proofs));
-        LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(direct, directKeys, expectedProduct,
-            directChallenge, delta, field, 3, values));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulProverResponse(
+            resources.executor, direct, inputs, directMacs, directChallenge, field, serialProver, singleProofs)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(
+            resources.executor, direct, directKeys, expectedProduct, directChallenge, delta, field, serialVerifier,
+            singleValues)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulProverResponse(
+            resources.executor, direct, inputs, directMacs, directChallenge, field, parallelProver, proofs)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(
+            resources.executor, direct, directKeys, expectedProduct, directChallenge, delta, field, parallelVerifier, values)));
         for (u32 rep = 0; rep < direct.repetitions(); ++rep)
         {
             LOGVOLE_REQUIRE_EQ(proofs[rep].mU, singleProofs[rep].mU);
@@ -590,10 +615,11 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
             liftedMacs[i] = lift(liftedMacs[i]);
             liftedKeys[i] = lift(liftedKeys[i]);
         }
-        LOGVOLE_REQUIRE_TRUE(zkMatMulProverResponse(direct, liftedInputs, liftedMacs,
-            directChallenge, field, 3, singleProofs));
-        LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(direct, liftedKeys, expectedProduct,
-            directChallenge, delta, field, 3, singleValues));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulProverResponse(
+            resources.executor, direct, liftedInputs, liftedMacs, directChallenge, field, parallelProver, singleProofs)));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(
+            resources.executor, direct, liftedKeys, expectedProduct, directChallenge, delta, field, parallelVerifier,
+            singleValues)));
         for (u32 rep = 0; rep < direct.repetitions(); ++rep)
         {
             LOGVOLE_REQUIRE_EQ(proofs[rep].mU, singleProofs[rep].mU);
@@ -603,7 +629,7 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
     }
 
     // Invalid public statements and coefficient arrays fail before replacing
-    // caller-owned output. Both scalar and vector callers retain their values.
+    // caller-owned output. Invalid or mismatched workspaces retain values too.
     std::vector<ZkProof> sentinelProofs{{13, 14}};
     std::vector<u64> sentinelValues{15};
     auto assertUnchanged = [&] {
@@ -616,12 +642,8 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
     for (const auto& invalid : {std::vector<u64>{},
         std::vector<u64>{0}, std::vector<u64>{0, 0, 0, 0, 0}, std::vector<u64>{0, 0, 0, p}})
     {
-        LOGVOLE_REQUIRE_TRUE(!zkMatMulVerifierValue(dense, denseKeys, invalid,
-            denseChallenge, delta, p, 1, sentinelValues));
-        scalarValue = 15;
-        LOGVOLE_REQUIRE_TRUE(!zkMatMulVerifierValue(dense, denseKeys, invalid,
-            denseChallenge, delta, p, 1, scalarValue));
-        LOGVOLE_REQUIRE_EQ(scalarValue, 15u);
+        LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(zkMatMulVerifierValue(
+            resources.executor, dense, denseKeys, invalid, denseChallenge, delta, p, denseVerifier, sentinelValues)));
         assertUnchanged();
     }
     for (const auto& invalid : {std::vector<u64>{},
@@ -629,21 +651,18 @@ void LogVole_Zk_MatMulIndependentRepetitions(const CLP&)
     {
         ZkMatMulChallenge invalidChallenge;
         assignRange(invalidChallenge.mCoefficients, invalid.begin(), invalid.end());
-        LOGVOLE_REQUIRE_TRUE(!zkMatMulProverResponse(dense, denseWires, denseMacs,
-            invalidChallenge, p, 1, sentinelProofs));
-        LOGVOLE_REQUIRE_TRUE(!zkMatMulVerifierValue(dense, denseKeys, zeroProduct,
-            invalidChallenge, delta, p, 1, sentinelValues));
-        scalar = {13, 14};
-        scalarValue = 15;
-        LOGVOLE_REQUIRE_TRUE(!zkMatMulProverResponse(dense, denseWires, denseMacs,
-            invalidChallenge, p, 1, scalar));
-        LOGVOLE_REQUIRE_TRUE(!zkMatMulVerifierValue(dense, denseKeys, zeroProduct,
-            invalidChallenge, delta, p, 1, scalarValue));
-        LOGVOLE_REQUIRE_EQ(scalar.mU, 13u);
-        LOGVOLE_REQUIRE_EQ(scalar.mV, 14u);
-        LOGVOLE_REQUIRE_EQ(scalarValue, 15u);
+        LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(zkMatMulProverResponse(
+            resources.executor, dense, denseWires, denseMacs, invalidChallenge, p, denseProver, sentinelProofs)));
+        LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(zkMatMulVerifierValue(
+            resources.executor, dense, denseKeys, zeroProduct, invalidChallenge, delta, p, denseVerifier, sentinelValues)));
         assertUnchanged();
     }
+    // Correctly shaped inputs still require matching workspace geometry.
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulProverResponse(resources.executor,
+        dense, denseWires, denseMacs, denseChallenge, p, statementProver, sentinelProofs)));
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMatMulVerifierValue(resources.executor,
+        dense, denseKeys, zeroProduct, denseChallenge, delta, p, statementVerifier, sentinelValues)));
+    assertUnchanged();
     LOGVOLE_REQUIRE_TRUE(!validateZkMatMulStatement({0, 1}));
     LOGVOLE_REQUIRE_TRUE(!validateZkMatMulStatement({std::numeric_limits<u64>::max(), 1}));
 }
@@ -692,8 +711,8 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
         const auto request = prover.mVole.requestSize();
         LOGVOLE_REQUIRE_TRUE(!prover.mDeviceState && !verifier.mDeviceState);
         AlignedUnVec<u64> wires, publicProduct;
-        LOGVOLE_REQUIRE_TRUE(zkMatMulWitness(statement, prover.modulus(), 1, witnessPrng,
-            wires, publicProduct, request));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulWitness(setupResources.executor, setupResources.results,
+            statement, prover.modulus(), 1, witnessPrng, wires, publicProduct, request)));
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (device)
         {
@@ -742,10 +761,12 @@ void LogVole_Zk_MatMulReconfigure(const CLP& cmd)
             zkMatMulChallenge(statement, prover.mLastSeed, prover.modulus(), challenge);
             std::vector<ZkProof> expectedProofs;
             std::vector<u64> expectedValues;
-            LOGVOLE_REQUIRE_TRUE(zkMatMulProverResponse(statement, actual, macs,
-                challenge, prover.modulus(), 1, expectedProofs));
-            LOGVOLE_REQUIRE_TRUE(zkMatMulVerifierValue(statement, keys, publicProduct,
-                challenge, 19, prover.modulus(), 1, expectedValues));
+            ZkMatMulProverWorkspace proofWorkspace(statement, 1);
+            ZkMatMulVerifierWorkspace valueWorkspace(statement, 1);
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulProverResponse(setupResources.executor,
+                statement, actual, macs, challenge, prover.modulus(), proofWorkspace, expectedProofs)));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(zkMatMulVerifierValue(setupResources.executor,
+                statement, keys, publicProduct, challenge, 19, prover.modulus(), valueWorkspace, expectedValues)));
             for (u32 rep = 0; rep < statement.repetitions(); ++rep)
             {
                 LOGVOLE_REQUIRE_EQ(prover.mLastProofs[rep].mU, expectedProofs[rep].mU);

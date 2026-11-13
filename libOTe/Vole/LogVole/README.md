@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **95%** of the agreed ownership/globals refactor,
+Estimated overall completion: **96%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -398,10 +398,10 @@ without `-current` are historical, not the remaining-work list.
 
 #### Remaining scheduling migration
 
-There are **20 `detail::runParallelTasks` call sites** in library `.cpp` files:
+There are **19 `detail::runParallelTasks` call sites** in library `.cpp` files:
 `LogVole.cpp` (2), `LogVoleCore.cpp` (4), `LogVoleEncoding.cpp` (2),
 `LogVoleLenc.cpp` (1), `LogVoleLhe.cpp` (1), `LogVoleRingReceiver.cpp` (2),
-`LogVoleShrinkExpand.cpp` (2), `LogVoleZk.cpp` (5), and
+`LogVoleShrinkExpand.cpp` (2), `LogVoleZk.cpp` (4), and
 `cuda/LogVoleGpuBackend.cpp` (1). These are call sites, not independent algorithms.
 Twelve normal synchronous declarations have been retired: eight deprecated
 LHE/LENC/shrink-expand/denoise overloads, root sender-key computation, two root
@@ -415,8 +415,12 @@ retirement removes no physical legacy scheduler site or runtime declaration.
 The synchronous input-wrapping and output-unwrapping sites still serve
 GPU/fallback and diagnostic callers; production CPU paths use explicit-resource
 async overloads. The staged synchronous `civoleSenderReleaseK` API remains legacy.
-The five synchronous matrix sites now serve diagnostic/GPU-fallback APIs;
-production CPU matrix proof phases use prepared workspaces and direct awaits.
+Eight normal synchronous ZK interfaces are retired. Four unused implementations
+(matrix witness/product and scalar matrix response/value wrappers) are deleted;
+four required multiplication/matrix proof/value implementations remain explicitly
+named at the internal GPU fallback boundary. Its four matrix scheduling sites
+remain; production CPU proof phases and tests use prepared workspaces and direct
+awaits.
 Setup message/state copying and codec parallelism are GPU-gated; leave those
 alone while GPU migration is deferred. Their CPU paths already copy inline.
 
@@ -428,10 +432,10 @@ legacy seed-replay helper used only by that GPU lazy getter. CPU finalization's
 exceptional seed-only replay retains its existing inline, one-worker fallback.
 The getter uses `std::call_once` and
 cannot await; changing that boundary is separate from CPU offline setup.
-Five physical executor `runBulk` sites remain in ZK (3), legacy LHE (1),
-and legacy LENC (1). ZK's three sites and its verifier `run` now serve only
-legacy synchronous diagnostic/GPU-fallback APIs; multiplication CPU production
-uses the explicit-executor async overloads. They still reach the blocking
+Three physical executor `runBulk` sites remain in internal GPU compatibility:
+ZK multiplication (1), LHE (1), and LENC (1). ZK's verifier also retains one
+executor `run` site. CPU production and ZK diagnostic tests use the explicit-
+executor async overloads. They still reach the blocking
 `CpuExecutor::runBulkChunked` adapter when a legacy caller requests them. Direct `sync_wait` expressions remain in `LogVoleCpuExecutor.h` and
 `cuda/LogVoleGpuBackend.cpp`; deleting just those expressions is not a migration.
 
@@ -993,6 +997,39 @@ Linux/LSAN validation remain pending. No benchmarks, GPU execution tests or WSL
 checks were run. Next: retire remaining synchronous ZK scheduling interfaces using
 their existing async workspaces, then finish golden/reference and staged key
 release boundaries.
+
+ZK synchronous-interface retirement removes eight normal CPU interfaces using
+the existing async workspace APIs. Four unused synchronous definitions are deleted:
+matrix product/witness and scalar matrix prover/verifier wrappers. Four required
+GPU host-fallback definitions remain internal, each reached by one production
+caller behind its existing GPU guard. The multiplication workspace grants private
+access through two narrow detail friends; no accessor or execution wrapper is
+added. Fixed arithmetic partitions, reduction order, challenge/RNG progression,
+workspace layouts and GPU scheduling are unchanged. Serial multiplication witness
+and matrix witness-input helpers remain ordinary arithmetic. The inventory stays
+at **23 runtime-global declarations**; deleting the unused product scheduler
+reduces physical `runParallelTasks` sites from 20 to **19**. The rough overall
+completion estimate advances to **96%**.
+
+The serialized CUDA-enabled Windows library/test/public-example-object build
+passes in 240.14 seconds. Four CPU workspace/lifetime/reference/async proof checks
+pass in 0.35 seconds; matrix independent repetitions/reconfiguration pass in
+18.63 seconds; both async proof protocols pass in 8.54 seconds. Fresh-mask CPU
+coverage retains all six GoldenSeed/NoGoldenSeed and multiplication/matrix-one-
+repetition/matrix-three-repetition cases. Its existing `lvFactoryFast` test mode
+now selects two queries and two logical workers while default/GPU coverage remains
+unchanged. The original 60-second aggregate run timed out without an assertion
+failure. Temporary stage markers showed all three GoldenSeed cases finishing in
+about 11.3 seconds and NoGoldenSeed cases taking roughly 21 seconds each, with
+progress through configure, offline and each query. After removing the markers,
+the final test-only rebuild passes in 11.22 seconds and the complete fresh-mask
+check passes in **72.79 seconds** under a measured 100-second bound. All **nine
+focused CPU checks pass**. No GPU execution tests, benchmarks, WSL or host-leak
+checks were run. Next: retire the public synchronous `sampleRootZeta` and
+`sampleRootZetaFromTaskSeeds` interfaces (production CPU already uses async), then
+close synchronous wrapping/unwrapping, staged key release and golden/reference
+scheduling boundaries. Follow with the Windows/WSL ownership and host-leak
+milestone gate.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their
