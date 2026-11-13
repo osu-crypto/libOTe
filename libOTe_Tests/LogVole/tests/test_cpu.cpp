@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe_Tests/WideArithmeticOracle.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuSampler.h"
@@ -281,17 +282,30 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(rejectedLhePrng.get<block>() == savedLhePrng.get<block>());
     std::array<block, 6> zetaSeeds;
     random.get(zetaSeeds.data(), zetaSeeds.size());
+    std::array<RootZetaBuffer, 3> zetaBuffers;
+    std::array<const u64*, 3> wordStorage;
+    std::array<const block*, 3> prngStorage;
+    for (std::size_t i = 0; i != zetaBuffers.size(); ++i)
+    {
+        zetaBuffers[i].mWords.resize(16);
+        zetaBuffers[i].mPrng.SetSeed(ZeroBlock);
+        wordStorage[i] = zetaBuffers[i].mWords.data();
+        prngStorage[i] = zetaBuffers[i].mPrng.mBuffer.data();
+    }
     std::vector<RnsPoly> referenceZeta;
-    LOGVOLE_REQUIRE_TRUE(sampleRootZetaFromTaskSeeds(ctx, 2, 65, zetaSeeds, 3,
-        referenceZeta, 1, true));
+    // Explicit compatibility reference preserves the independent seed-replay
+    // orchestration; its serial allowance creates no worker pool.
+    LOGVOLE_REQUIRE_TRUE(LogVole::detail::gpuLegacySampleRootZetaFromTaskSeeds(
+        ctx, 2, 65, zetaSeeds, 3, referenceZeta, 1, true));
     RingOpsStats setupOwners[2];
     for (u32 allowance : {1u, 3u, 2u, 1u})
     {
         std::vector<RnsPoly> zeta;
         // Diagnostics cannot reduce the independent CPU setup task count.
         telemetry.mWorkerLimit = 1;
-        LOGVOLE_REQUIRE_TRUE(sampleRootZetaFromTaskSeeds(ctx, 2, 65, zetaSeeds, 3,
-            zeta, allowance, true, benchmark, &scratch));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(sampleRootZetaFromTaskSeeds(setupResources.executor,
+            std::span(zetaBuffers).first(allowance), ctx, 2, 65, zetaSeeds, 3,
+            zeta, allowance, true, benchmark)));
         equalBatch(zeta, referenceZeta);
         std::vector<u64> noise;
         std::shared_ptr<gpu::DeviceScalars> device;
@@ -528,23 +542,13 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     // Zeta ranges keep their seed layout when the execution allowance changes.
     // Run the controller and every chunk on one thread; storage is reused across
     // widths, rejection, and queries rather than allocated for each range.
-    std::array<RootZetaBuffer, 3> zetaBuffers;
-    std::array<const u64*, 3> wordStorage;
-    std::array<const block*, 3> prngStorage;
-    for (std::size_t i = 0; i != zetaBuffers.size(); ++i)
-    {
-        zetaBuffers[i].mWords.resize(16);
-        zetaBuffers[i].mPrng.SetSeed(ZeroBlock);
-        wordStorage[i] = zetaBuffers[i].mWords.data();
-        prngStorage[i] = zetaBuffers[i].mPrng.mBuffer.data();
-    }
     telemetry.mWorkerLimit = 3;
     for (u32 bits : {1u, 63u, 65u, 127u, 208u})
     for (bool forceReject : {false, true})
     {
         std::vector<RnsPoly> expected, actual;
-        LOGVOLE_REQUIRE_TRUE(sampleRootZetaFromTaskSeeds(ctx, 2, bits,
-            zetaSeeds, 3, expected, 1, forceReject));
+        LOGVOLE_REQUIRE_TRUE(LogVole::detail::gpuLegacySampleRootZetaFromTaskSeeds(
+            ctx, 2, bits, zetaSeeds, 3, expected, 1, forceReject));
         for (std::size_t allowance : {1u, 3u, 2u})
         {
             LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootZetaFromTaskSeeds(
@@ -566,7 +570,18 @@ void LogVole_Cpu_OfflineSetupExecution(const oc::CLP&)
     {
         PRNG expectedPrng(toBlock(723, 101)), actualPrng(toBlock(723, 101));
         std::vector<RnsPoly> expected, actual;
-        LOGVOLE_REQUIRE_TRUE(sampleRootZeta(ctx, 2, 208, expectedPrng, expected, ranges));
+        if (ranges > 1)
+        {
+            // Parent draws are fixed by the protocol's [poly][range] layout,
+            // independently of the async sampler's execution allowance.
+            std::vector<block> replaySeeds(2 * ranges);
+            expectedPrng.get(replaySeeds.data(), replaySeeds.size());
+            LOGVOLE_REQUIRE_TRUE(LogVole::detail::gpuLegacySampleRootZetaFromTaskSeeds(
+                ctx, 2, 208, replaySeeds, ranges, expected, 1));
+        }
+        else
+            LOGVOLE_REQUIRE_TRUE(LogVole::detail::gpuLegacySampleRootZeta(
+                ctx, 2, 208, expectedPrng, expected, 1));
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onPool(sampleRootZeta(
             setupResources.executor, std::span(zetaBuffers).first(std::max(1u, ranges)), ctx,
             2, 208, actualPrng, actual, ranges, benchmark))));

@@ -2576,25 +2576,37 @@ void LogVole_Core_RootZetaShapeAndBounds(const oc::CLP&)
     const std::uint32_t gadgetLogBase = 8;
     std::vector<RnsPoly> zeta;
     oc::PRNG prng(oc::block(0x8401u, 0));
-    LOGVOLE_REQUIRE_TRUE(sampleRootZeta(ctx, randomizer, gadgetLogBase, prng, zeta));
+    macoro::thread_pool executor;
+    std::array<RootZetaBuffer, 1> buffers;
+    buffers[0].mWords.resize(4);
+    buffers[0].mPrng.SetSeed(oc::ZeroBlock);
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(sampleRootZeta(
+        executor, buffers, ctx, randomizer, gadgetLogBase, prng, zeta)));
     LOGVOLE_REQUIRE_EQ(zeta.size(), randomizer);
 
     const std::uint64_t eta = (std::uint64_t{ 1 } << gadgetLogBase) - 1;
     const std::size_t n = params.mPolyModulusDegree;
+    oc::PRNG oracle(oc::block(0x8401u, 0));
     for (const auto& poly : zeta)
     {
         LOGVOLE_REQUIRE_TRUE(validateRingPolyShape(poly, params));
-        for (std::size_t modIdx = 0; modIdx < ringModulusCount(ctx); ++modIdx)
+        for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
         {
-            const std::uint64_t mod = ringModulusValue(ctx, modIdx);
-            const std::size_t offset = modIdx * n;
-            for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
+            std::uint64_t draw;
+            const auto mask = 2 * eta + 1;
+            do { draw = oracle.get<std::uint64_t>() & mask; } while (draw == mask);
+            const bool negative = draw <= eta;
+            const auto magnitude = negative ? eta - draw : draw - eta;
+            for (std::size_t modIdx = 0; modIdx < ringModulusCount(ctx); ++modIdx)
             {
-                const std::uint64_t value = poly.mCoeffs[offset + coeffIdx];
+                const auto mod = ringModulusValue(ctx, modIdx);
+                const auto value = poly.mCoeffs[modIdx * n + coeffIdx];
                 LOGVOLE_EXPECT_TRUE(value <= eta || value >= mod - eta);
+                LOGVOLE_REQUIRE_EQ(value, negative && magnitude ? mod - magnitude : magnitude);
             }
         }
     }
+    LOGVOLE_REQUIRE_TRUE(prng.get<oc::block>() == oracle.get<oc::block>());
 }
 
 void LogVole_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)

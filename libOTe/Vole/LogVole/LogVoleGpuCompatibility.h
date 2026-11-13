@@ -7,6 +7,38 @@
 
 namespace osuCrypto::LogVole::detail
 {
+    // Legacy synchronous sampling retained for GPU paths and the explicit serial
+    // CPU seed-only fallback. The latter uses requestedWorkers = 1 without a pool.
+    // requestedWorkers > 1 splits the coefficients across the worker pool, each
+    // range drawing from its own PRNG keyed from `prng`. zeta is the receiver's
+    // local randomizer, so only its distribution matters; requestedWorkers = 1
+    // keeps the original single-stream draw order.
+    bool gpuLegacySampleRootZeta(
+        const RingNttContext& ctx,
+        u32 randomizerWidth,
+        u32 gadgetLogBase,
+        PRNG& prng,
+        std::vector<RnsPoly>& out,
+        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+
+    // Exact replay of sampleRootZeta's parallel path. `taskSeeds` is ordered as
+    // [poly][range], with one independent cryptoTools AES-CTR PRNG per range.
+    // Keeping this boundary explicit lets the GPU consume the already-drawn
+    // seeds while any allocation/launch fallback reconstructs the same zeta
+    // without advancing the parent PRNG a second time. `forceFirstReject` is a
+    // deterministic test hook: it treats task zero's first candidate as rejected
+    // in both the CPU and GPU implementations.
+    bool gpuLegacySampleRootZetaFromTaskSeeds(
+        const RingNttContext& ctx,
+        u32 randomizerWidth,
+        u32 gadgetLogBase,
+        std::span<const block> taskSeeds,
+        u32 rangesPerPoly,
+        std::vector<RnsPoly>& out,
+        u32 requestedWorkers = 1,
+        bool forceFirstReject = false, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* cpuSetupScratch = nullptr);
+
+
     bool gpuLegacyWrapZpLabelsCrt(
         const ZpCrtContext& ctx,
         std::span<const u64> labels,

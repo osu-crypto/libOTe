@@ -1058,9 +1058,8 @@ execution tests, benchmarks, WSL or host-leak checks were run. The inventory sta
 at **23 runtime-global declarations** and **19 physical legacy parallel sites**;
 the rough overall completion estimate remains **96%**.
 
-Remaining CPU closure includes the public synchronous `sampleRootZeta` and
-`sampleRootZetaFromTaskSeeds` interfaces (production already uses async), golden/
-reference scheduling, and the shared CUDA allocation-evidence reset still reached
+Remaining CPU closure includes golden/reference scheduling and the shared CUDA
+allocation-evidence reset still reached
 by CPU offline start. Windows/WSL ownership and host-leak milestone validation
 remain pending. Validation also depends on the local macoro coroutine/bulk and
 lifetime changes: publishing/pinning that dependency revision and verifying a clean
@@ -1080,6 +1079,21 @@ the remaining ambient state. Socket detached-send semantics remain out of scope.
 Use fast focused tests per coherent step; broader cross-platform/leak checks
 belong at milestones. No benchmarks are needed for this migration.
 
+Zeta interface retirement removes the normal synchronous `sampleRootZeta` and
+`sampleRootZetaFromTaskSeeds` APIs. GPU compatibility retains their exact bodies;
+the exceptional CPU seed-only finalization replay also uses that shared kernel
+with one worker, inline without a pool. Ordinary CPU callers use the existing
+async executor and prepared zeta buffers. Tests retain independent scalar draws,
+serial compatibility seed replay, exact parent PRNG continuation, all five wide
+sampler widths, rejection, resource admission and reuse checks.
+
+The resumed serialized Windows library/test/public-example-object build passes
+in **179.70 seconds** against local macoro **`3f3de08`**. All **four focused CPU
+checks pass in 4.22 seconds**: root-zeta shape/bounds, offline setup execution,
+root state reuse across queries, and failure joining children. The dependency
+revision remains local and was not published. No GPU execution, benchmarks, WSL
+or host-leak checks were run. The estimate remains **96%**; golden/reference
+scheduling, allocation-evidence ownership and final milestone validation remain.
 ### Deferred option cleanup
 
 - Prune transport/encoding optionality after the ownership refactor. Audit the

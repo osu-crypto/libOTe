@@ -2054,7 +2054,7 @@ namespace osuCrypto::LogVole
         }
     }
 
-    bool sampleRootZetaFromTaskSeeds(
+    bool detail::gpuLegacySampleRootZetaFromTaskSeeds(
         const RingNttContext& ctx,
         u32 randomizerWidth,
         u32 gadgetLogBase,
@@ -2070,7 +2070,7 @@ namespace osuCrypto::LogVole
             rangesPerPoly, out, requestedWorkers, forceFirstReject, cpuBenchmark, cpuSetupScratch);
     }
 
-    bool sampleRootZeta(
+    bool detail::gpuLegacySampleRootZeta(
         const RingNttContext& ctx,
         u32 randomizerWidth,
         u32 gadgetLogBase,
@@ -2093,7 +2093,7 @@ namespace osuCrypto::LogVole
         std::vector<block> taskSeeds(
             static_cast<std::size_t>(randomizerWidth) * workers);
         prng.get(taskSeeds.data(), taskSeeds.size());
-        return sampleRootZetaFromTaskSeeds(
+        return detail::gpuLegacySampleRootZetaFromTaskSeeds(
             ctx, randomizerWidth, gadgetLogBase, taskSeeds, workers, out,
             workers, false, cpuBenchmark, cpuSetupScratch);
     }
@@ -3048,7 +3048,7 @@ namespace osuCrypto::LogVole
             }
             else if (gpu::enabled(ctx))
             {
-                if (!sampleRootZeta(ctx, state.mRootRandomizerWidth,
+                if (!detail::gpuLegacySampleRootZeta(ctx, state.mRootRandomizerWidth,
                         state.mParams.mShrinkExpand.mGadgetLogBase, prng, zeta, 1u, cpuBenchmark))
                     co_return false;
             }
@@ -3107,7 +3107,7 @@ namespace osuCrypto::LogVole
             if (gpu::enabled(ctx))
             {
                 auto setupLease = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
-                if (!sampleRootZetaFromTaskSeeds(
+                if (!detail::gpuLegacySampleRootZetaFromTaskSeeds(
                         ctx,
                         state.mRootRandomizerWidth,
                         state.mParams.mShrinkExpand.mGadgetLogBase,
@@ -5967,7 +5967,7 @@ namespace osuCrypto::LogVole
         {
             RootStep step("final: replay root zeta fallback", rootProfiler(ctx));
             auto setupLease = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
-            if (!sampleRootZetaFromTaskSeeds(
+            if (!detail::gpuLegacySampleRootZetaFromTaskSeeds(
                     ctx,
                     state.mRootRandomizerWidth,
                     state.mParams.mShrinkExpand.mGadgetLogBase,
