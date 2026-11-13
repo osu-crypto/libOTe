@@ -202,4 +202,14 @@ namespace osuCrypto::LogVole::detail
         u64 modulus,
         u32 threads,
         std::vector<u64>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
+    // Existing GPU-session candidate validation and its scheduling.
+    bool gpuLegacyValidateGoldenSeedCandidate(
+        const Params& params,
+        const std::vector<RnsPoly>& tbkPerSampledPoly,
+        bool& out, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+
+    bool gpuLegacyValidateLeafGoldenSeedCandidate(
+        const Params& params,
+        const std::vector<RnsPoly>& tbk,
+        bool& out, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 }

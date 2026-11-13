@@ -262,7 +262,13 @@ namespace
                 buffer.mNodes.reserve(terms);
             }
         }
-        std::array<RootZetaBuffer, 3> zetaBuffers;
+        // Zeta seed partitions follow the protocol task count, independently
+        // of the deliberately three-slot LHE/LENC execution allowance above.
+        std::size_t zetaTasks = 1;
+        for (auto* level = &receiver; level; level = level->mNextLevelState.get())
+            zetaTasks = std::max(zetaTasks,
+                std::size_t(std::max(1u, level->mParams.mShrinkExpand.mNumWorkerThreads)));
+        std::vector<RootZetaBuffer> zetaBuffers(zetaTasks);
         auto sockets = coproto::LocalAsyncSocket::makePair();
         try
         {
@@ -5814,6 +5820,7 @@ void LogVole_Core_RecursiveGadgetInputSubproblem(const oc::CLP&)
 
 void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources validationResources;
 
     Params paddedSeedParams{};
     std::vector<RnsPoly> paddedRejectedCandidate;
@@ -5936,8 +5943,7 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
             LOGVOLE_REQUIRE_EQ(paddedSeedParams.mShrinkExpand.mMu, 16u);
             paddedRejectedCandidate.assign(muHi, zero_poly(ctx));
             bool candidateOk = false;
-            LOGVOLE_REQUIRE_TRUE(validateGoldenSeedCandidate(
-                paddedSeedParams, paddedRejectedCandidate, candidateOk));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateGoldenSeedCandidate(validationResources.executor, 2, paddedSeedParams, paddedRejectedCandidate, candidateOk)));
             LOGVOLE_REQUIRE_TRUE(candidateOk);
 
             // Force the target-0 rounding fraction to the top boundary in tail
@@ -5964,8 +5970,7 @@ void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
                     sourceMod.value() / 2u,
                     puncturedModSource,
                     sourceMod);
-            LOGVOLE_REQUIRE_TRUE(validateGoldenSeedCandidate(
-                paddedSeedParams, paddedRejectedCandidate, candidateOk));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateGoldenSeedCandidate(validationResources.executor, 2, paddedSeedParams, paddedRejectedCandidate, candidateOk)));
             LOGVOLE_REQUIRE_FALSE(candidateOk);
             paddedCtx = ctx;
         }
@@ -6461,6 +6466,7 @@ void LogVole_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)
 
 void LogVole_Core_GoldenSeedRejectsMalformedCandidate(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources validationResources;
     const Params params = make_golden_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
@@ -6477,7 +6483,11 @@ void LogVole_Core_GoldenSeedRejectsMalformedCandidate(const oc::CLP&)
         resizeZero(poly.mCoeffs, ringPolyCoeffCount(params.mShrinkExpand.mRing));
     }
     bool candidateOk = true;
-    LOGVOLE_EXPECT_FALSE(validateGoldenSeedCandidate(params, wrongCount, candidateOk));
+    LOGVOLE_EXPECT_FALSE(macoro::sync_wait(validateGoldenSeedCandidate(
+        validationResources.executor, 0, params, wrongCount, candidateOk)));
+    LOGVOLE_REQUIRE_TRUE(candidateOk);
+    LOGVOLE_EXPECT_FALSE(macoro::sync_wait(validateGoldenSeedCandidate(validationResources.executor, 2, params, wrongCount, candidateOk)));
+    LOGVOLE_REQUIRE_TRUE(candidateOk);
 
     std::vector<RnsPoly> wrongShape(expectedCount);
     for (auto& poly : wrongShape)
@@ -6487,11 +6497,13 @@ void LogVole_Core_GoldenSeedRejectsMalformedCandidate(const oc::CLP&)
     wrongShape[0].mCoeffs.resize(wrongShape[0].mCoeffs.size() - 1);
 
     candidateOk = true;
-    LOGVOLE_EXPECT_FALSE(validateGoldenSeedCandidate(params, wrongShape, candidateOk));
+    LOGVOLE_EXPECT_FALSE(macoro::sync_wait(validateGoldenSeedCandidate(validationResources.executor, 2, params, wrongShape, candidateOk)));
+    LOGVOLE_REQUIRE_TRUE(candidateOk);
 }
 
 void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources validationResources;
     const auto params = make_golden_params();
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
@@ -6499,9 +6511,20 @@ void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
     const auto sk2 = sample_batch(ctx, 1, 0x6006u);
     const auto digest = deriveUniformPolyFromNonce(ctx, 0x6007u, 0xD1CEu, 0);
 
+    GoldenSeedSearchOutput rejected;
+    assignValues<oc::u8>(rejected.mSeed, {11, 12});
+    const auto* rejectedStorage = rejected.mSeed.data();
+    oc::PRNG rejectedPrng(oc::block(0x6008u, 9)), untouchedPrng(oc::block(0x6008u, 9));
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(findGoldenSeed(validationResources.executor,
+        0, params, sk2, digest, rejectedPrng, rejected)));
+    LOGVOLE_REQUIRE_TRUE(rejected.mSeed.data() == rejectedStorage);
+    LOGVOLE_REQUIRE_TRUE(rangesEqual(rejected.mSeed, std::array<oc::u8, 2>{11, 12}));
+    LOGVOLE_REQUIRE_TRUE(rejected.mTbkPerSampledPoly.empty());
+    LOGVOLE_REQUIRE_EQ(rejectedPrng.get<oc::u64>(), untouchedPrng.get<oc::u64>());
+
     GoldenSeedSearchOutput found{};
     oc::PRNG prng(oc::block(0x6008u, 0));
-    LOGVOLE_REQUIRE_TRUE(findGoldenSeed(params, sk2, digest, prng, found));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(findGoldenSeed(validationResources.executor, 2, params, sk2, digest, prng, found)));
     using tests_libOTe::logvole_test::ringStatsSnapshot;
     RingOpsStats totals;
     const auto zeros = ringStatsSnapshot(totals);
@@ -6513,8 +6536,8 @@ void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
         const auto before = ringStatsSnapshot(totals);
         flushRingOpsThreadLocalStats();
         globalRingOpsStats.reset();
-        LOGVOLE_REQUIRE_TRUE(findGoldenSeed(params, sk2, digest, repeatedPrng, repeated, {},
-            collect ? &totals : nullptr));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(findGoldenSeed(validationResources.executor, 1, params, sk2, digest, repeatedPrng, repeated, {},
+            collect ? &totals : nullptr)));
         LOGVOLE_REQUIRE_TRUE(std::equal(found.mSeed.begin(), found.mSeed.end(),
             repeated.mSeed.begin(), repeated.mSeed.end()));
         expect_batch_equal(found.mTbkPerSampledPoly, repeated.mTbkPerSampledPoly);
@@ -6537,7 +6560,7 @@ void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(found.mTbkPerSampledPoly.size(), params.mShrinkExpand.mMu);
 
     bool candidateOk = false;
-    LOGVOLE_REQUIRE_TRUE(validateGoldenSeedCandidate(params, found.mTbkPerSampledPoly, candidateOk));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateGoldenSeedCandidate(validationResources.executor, 2, params, found.mTbkPerSampledPoly, candidateOk)));
     LOGVOLE_EXPECT_TRUE(candidateOk);
 
     std::vector<RnsPoly> repeatCt2;
@@ -6571,6 +6594,7 @@ void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
 
 void LogVole_Core_LeafGoldenSeedChecksOutputRounding(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources validationResources;
     // Five limbs put p*B/q near 2^-68, above the fixed-point undershoot (below 2^-71), and keep the
     // per-limb margin B*q_j/q near 2^-67, far below the per-limb distance (about 1/p) of the
     // coefficient built below.
@@ -6602,12 +6626,46 @@ void LogVole_Core_LeafGoldenSeedChecksOutputRounding(const oc::CLP&)
     // V = 0 gives frac(p*V/q) = 0, as far from the rounding boundary as possible.
     const std::vector<RnsPoly> safe = makeZeroBatch(params.mW);
     bool candidateOk = false;
-    LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, safe, candidateOk));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(validationResources.executor, 2, params, safe, candidateOk)));
     LOGVOLE_EXPECT_TRUE(candidateOk);
 
+    CpuBenchmarkContext telemetry;
+#if defined(__linux__)
+    cpu_set_t affinity;
+    CPU_ZERO(&affinity);
+    LOGVOLE_REQUIRE_EQ(sched_getaffinity(0, sizeof(affinity), &affinity), 0);
+    for (int cpu = 0; cpu != CPU_SETSIZE; ++cpu)
+        if (CPU_ISSET(cpu, &affinity)) telemetry.mCpus.push_back(cpu);
+#else
+    telemetry.mCpus = {0, 1};
+#endif
+    telemetry.mWorkerLimit = 2;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(
+        validationResources.executor, 2, params, safe, candidateOk, nullptr, CpuBenchmarkState{&telemetry})));
+    LOGVOLE_REQUIRE_TRUE(candidateOk);
+    LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+#if defined(__linux__)
+    LOGVOLE_REQUIRE_EQ(telemetry.mWorkersChecked.load(), 4u);
+    LOGVOLE_REQUIRE_EQ(telemetry.mAffinityFailures.load(), 0u);
+#else
+    LOGVOLE_REQUIRE_EQ(telemetry.mWorkersChecked.load(), 0u);
+#endif
+    LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() > 0u);
+    LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() <= 2u);
+    telemetry.reset();
+    CpuBenchmarkState inherited{&telemetry};
+    {
+        CpuBenchmarkTaskScope parent(inherited);
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(
+            validationResources.executor, 1, params, safe, candidateOk, nullptr, inherited)));
+        LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 1u);
+    }
+    LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+    LOGVOLE_REQUIRE_EQ(telemetry.mPeakTaskThreads.load(), 1u);
+
     candidateOk = true;
-    LOGVOLE_EXPECT_FALSE(validateLeafGoldenSeedCandidate(params, makeZeroBatch(params.mW - 1), candidateOk));
-    LOGVOLE_EXPECT_FALSE(validateLeafGoldenSeedCandidate(params, {}, candidateOk));
+    LOGVOLE_EXPECT_FALSE(macoro::sync_wait(validateLeafGoldenSeedCandidate(validationResources.executor, 2, params, makeZeroBatch(params.mW - 1), candidateOk)));
+    LOGVOLE_EXPECT_FALSE(macoro::sync_wait(validateLeafGoldenSeedCandidate(validationResources.executor, 2, params, {}, candidateOk)));
 
     // V = (2p)^-1 mod q gives frac(p*V/q) = 1/2 + 1/(2q), so a noise term of -1 already flips the
     // rounding to Z_p. Modulo each q/q_j, V stays about 1/p or more from the boundary, so the
@@ -6626,11 +6684,22 @@ void LogVole_Core_LeafGoldenSeedChecksOutputRounding(const oc::CLP&)
     }
 
     candidateOk = true;
-    LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, boundary, candidateOk));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(validationResources.executor, 2, params, boundary, candidateOk)));
     LOGVOLE_EXPECT_FALSE(candidateOk);
+    telemetry.reset();
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(
+        validationResources.executor, 2, params, boundary, candidateOk, nullptr, CpuBenchmarkState{&telemetry})));
+    LOGVOLE_REQUIRE_FALSE(candidateOk);
+    LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+#if defined(__linux__)
+    LOGVOLE_REQUIRE_TRUE(telemetry.mWorkersChecked.load() <= 4u);
+    LOGVOLE_REQUIRE_EQ(telemetry.mAffinityFailures.load(), 0u);
+#else
+    LOGVOLE_REQUIRE_EQ(telemetry.mWorkersChecked.load(), 0u);
+#endif
 
     candidateOk = false;
-    LOGVOLE_REQUIRE_TRUE(validateGoldenSeedCandidate(params, boundary, candidateOk));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateGoldenSeedCandidate(validationResources.executor, 2, params, boundary, candidateOk)));
     LOGVOLE_EXPECT_TRUE(candidateOk);
 }
 namespace
@@ -6713,6 +6782,7 @@ namespace
 
 void LogVole_Core_LeafGoldenSeedMatchesDecoder(const oc::CLP&)
 {
+    tests_libOTe::logvole_test::SetupResources validationResources;
     macoro::thread_pool crtExecutor;
     std::array<ZpDecodeBuffer, 3> crtDecodeBuffers;
     // Every leaf value the check accepts must decode consistently: for |e| <= B and any m in Z_p,
@@ -6755,7 +6825,7 @@ void LogVole_Core_LeafGoldenSeedMatchesDecoder(const oc::CLP&)
         std::vector<RnsPoly> batch = makeZeroPolys(params, params.mW);
         setOffset(batch.back(), s, above);
         bool candidateOk = false;
-        LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, batch, candidateOk));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(validationResources.executor, 2, params, batch, candidateOk)));
         return candidateOk;
     };
 
@@ -6829,6 +6899,7 @@ void LogVole_Core_LeafGoldenSeedMatchesDecoder(const oc::CLP&)
 
 void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources validationResources;
     macoro::thread_pool crtExecutor;
     std::array<ZpDecodeBuffer, 3> crtDecodeBuffers;
     Params params = make_golden_params();
@@ -6905,7 +6976,7 @@ void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
     auto unsafe = makeCandidate(wideU64OneShift(100), true);
     LOGVOLE_REQUIRE_GT(mismatchedSlots(unsafe.back(), 0), std::size_t{0});
     bool accepted = true;
-    LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, unsafe, accepted));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(validationResources.executor, 2, params, unsafe, accepted)));
     LOGVOLE_EXPECT_FALSE(accepted);
 
     // Offsets beyond the full product allowance must remain usable on both
@@ -6916,7 +6987,7 @@ void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
     {
         auto safe = makeCandidate(safeOffset, above);
         accepted = false;
-        LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, safe, accepted));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(validationResources.executor, 2, params, safe, accepted)));
         LOGVOLE_EXPECT_TRUE(accepted);
         for (const int sign : {-1, 0, 1})
             LOGVOLE_EXPECT_EQ(mismatchedSlots(safe.back(), sign), std::size_t{0});
@@ -6959,6 +7030,7 @@ void LogVole_Core_LeafGoldenSeedChecksPlaintextProduct(const oc::CLP& cmd)
 
 void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
 {
+    tests_libOTe::logvole_test::SetupResources validationResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requested = cmd.getOr("gpu", 0) != 0;
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::available());
@@ -7022,7 +7094,7 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
             auto logical = batch;
             logical.resize(params.mW);
             bool hostOk = false, deviceOk = false;
-            LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, logical, hostOk));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(validationResources.executor, 2, params, logical, hostOk)));
             LOGVOLE_REQUIRE_EQ(hostOk, !bad);
             LOGVOLE_REQUIRE_TRUE(gpu::validateLeafGoldenSeedDevice(params, zp.mRing, *device, deviceOk));
             LOGVOLE_REQUIRE_EQ(hostOk, deviceOk);
@@ -7039,7 +7111,7 @@ void LogVole_Core_LeafGoldenSeedGpuParity(const oc::CLP& cmd)
         }
         auto random = sample_batch(zp.mRing, params.mW, 0x193000u + rho);
         bool hostOk = false, deviceOk = false;
-        LOGVOLE_REQUIRE_TRUE(validateLeafGoldenSeedCandidate(params, random, hostOk));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateLeafGoldenSeedCandidate(validationResources.executor, 2, params, random, hostOk)));
         auto randomDevice = gpu::upload(zp.mRing, random);
         LOGVOLE_REQUIRE_TRUE(randomDevice != nullptr);
         LOGVOLE_REQUIRE_TRUE(gpu::validateLeafGoldenSeedDevice(params, zp.mRing, *randomDevice, deviceOk));

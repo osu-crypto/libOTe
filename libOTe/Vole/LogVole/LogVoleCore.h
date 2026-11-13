@@ -645,19 +645,29 @@ namespace osuCrypto::LogVole
     // against the truncated parameter set the recursion actually runs.
     bool validateCt2SeedMode(const Params& params);
 
-    bool validateGoldenSeedCandidate(
+    // CPU-only lazy validation/search. Executor and all borrowed inputs, PRNG,
+    // outputs and diagnostic owners must survive task creation through completion.
+    // Outputs and PRNG require exclusive use until the operation joins. taskCount
+    // bounds validation partitions; zero rejects without output/PRNG mutation,
+    // and one partition runs inline. Validation
+    // reports operation success separately from acceptance and publishes out only
+    // on success. Search draws one seed per completed attempt and publishes once.
+    macoro::task<bool> validateGoldenSeedCandidate(
+        macoro::thread_pool& executor, std::size_t taskCount,
         const Params& params,
         const std::vector<RnsPoly>& tbkPerSampledPoly,
         bool& out, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     // Leaf validation takes exactly mW logical output polynomials. Intermediate
     // levels continue to validate the entire padded sample with Q/q_j.
-    bool validateLeafGoldenSeedCandidate(
+    macoro::task<bool> validateLeafGoldenSeedCandidate(
+        macoro::thread_pool& executor, std::size_t taskCount,
         const Params& params,
         const std::vector<RnsPoly>& tbk,
         bool& out, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
-    bool findGoldenSeed(
+    macoro::task<bool> findGoldenSeed(
+        macoro::thread_pool& executor, std::size_t taskCount,
         const Params& params,
         const std::vector<RnsPoly>& sk2PerInstance,
         const RnsPoly& digest,

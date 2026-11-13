@@ -21,9 +21,11 @@
 #include "cryptoTools/Crypto/RandomOracle.h"
 
 #include <chrono>
+#include <type_traits>
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <ranges>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -3896,8 +3898,8 @@ namespace osuCrypto::LogVole
                 if (isLeaf && expandOutput.mTbk.size() > state.mParams.mW)
                     expandOutput.mTbk.resize(state.mParams.mW);
                 if (!publicSeed &&
-                    !(isLeaf ? validateLeafGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)
-                             : validateGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)))
+                    !(isLeaf ? detail::gpuLegacyValidateLeafGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)
+                             : detail::gpuLegacyValidateGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)))
                 {
                     return false;
                 }
@@ -4162,8 +4164,8 @@ namespace osuCrypto::LogVole
 
             bool candidateOk = publicSeed || (earlyCheck && candidateValid.load(std::memory_order_relaxed));
             if (!publicSeed && !earlyCheck &&
-                !(isLeaf ? validateLeafGoldenSeedCandidate(seedParams, finalTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)
-                         : validateGoldenSeedCandidate(seedParams, finalTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)))
+                !(isLeaf ? detail::gpuLegacyValidateLeafGoldenSeedCandidate(seedParams, finalTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)
+                         : detail::gpuLegacyValidateGoldenSeedCandidate(seedParams, finalTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)))
             {
                 return false;
             }
@@ -5435,12 +5437,36 @@ namespace osuCrypto::LogVole
         // children before this error is translated back to the bool API.
         struct SenderSeedEvaluationFailure {};
 
-        macoro::task<bool> validateSenderSeedAsync(
-            macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
-            const Params& params, const RingNttContext& ctx,
-            const std::vector<RnsPoly>& values, bool isLeaf, bool& accepted)
+        // Indexed all_of materializes each value before invoking its partition.
+        // Scopes start on first use and are never moved after entering; metrics
+        // end before timing, and both end before the benchmark state is destroyed.
+        struct GoldenValidationTelemetry
         {
-            if (!params.mW || !params.mShrinkExpand.mMu) co_return false;
+            CpuBenchmarkState mState;
+            bool mParallel;
+            std::optional<CpuBenchmarkWorkerScope> mTiming;
+            std::optional<CpuBenchmarkTaskScope> mMetrics;
+
+            GoldenValidationTelemetry(CpuBenchmarkState benchmark, bool parallel)
+                : mState(parallel ? CpuBenchmarkState{benchmark.mContext, true} : benchmark),
+                  mParallel(parallel) {}
+            GoldenValidationTelemetry(const GoldenValidationTelemetry&) = delete;
+            GoldenValidationTelemetry(GoldenValidationTelemetry&&) = delete;
+            void enter()
+            {
+                if (mMetrics) return;
+                mTiming.emplace(mParallel ? mState.mContext : nullptr);
+                mMetrics.emplace(mState);
+            }
+        };
+
+        macoro::task<bool> validateSenderSeedAsync(
+            macoro::thread_pool& executor, std::size_t taskCount,
+            const Params& params, const RingNttContext& ctx,
+            const std::vector<RnsPoly>& values, bool isLeaf, bool& accepted,
+            CpuBenchmarkState cpuBenchmark = {})
+        {
+            if (!taskCount || (isLeaf ? !params.mW : !params.mShrinkExpand.mMu)) co_return false;
             const auto expected = isLeaf ? std::size_t(params.mW) :
                 ((std::size_t(params.mW) + params.mShrinkExpand.mMu - 1) /
                     params.mShrinkExpand.mMu) * params.mShrinkExpand.mMu;
@@ -5450,16 +5476,29 @@ namespace osuCrypto::LogVole
             RoundingCheckConstants leafRounding;
             if (!(isLeaf ? buildLeafRoundingCheckConstants(params, ctx, leafRounding) :
                     buildRoundingCheckConstants(params, ctx, rounding))) co_return false;
+            const auto partitions = std::min(taskCount, values.size());
+            auto resources = std::views::iota(std::size_t{0}, partitions);
+            auto predicate = [&](std::size_t i, auto& resource) {
+                if constexpr (std::is_same_v<std::remove_cvref_t<decltype(resource)>, GoldenValidationTelemetry>)
+                    resource.enter();
+                bool ok = false;
+                if (!(isLeaf ? checkRoundingPolynomial(ctx, leafRounding, values[i], ok) :
+                        checkGoldenPolynomial(params, ctx, rounding, values[i], i, ok)))
+                    throw SenderSeedEvaluationFailure{};
+                return ok;
+            };
             try
             {
-                accepted = co_await macoro::all_of(executor, values.size(), buffers,
-                    [&](std::size_t i, LheDecryptBuffer&) {
-                        bool ok = false;
-                        if (!(isLeaf ? checkRoundingPolynomial(ctx, leafRounding, values[i], ok) :
-                                checkGoldenPolynomial(params, ctx, rounding, values[i], i, ok)))
-                            throw SenderSeedEvaluationFailure{};
-                        return ok;
-                    });
+                if (cpuBenchmark.mContext)
+                {
+                    auto telemetry = resources | std::views::transform(
+                        [cpuBenchmark, parallel = partitions > 1](std::size_t) {
+                            return GoldenValidationTelemetry(cpuBenchmark, parallel);
+                        });
+                    accepted = co_await macoro::all_of(executor, values.size(), telemetry, predicate);
+                }
+                else
+                    accepted = co_await macoro::all_of(executor, values.size(), resources, predicate);
             }
             catch (const SenderSeedEvaluationFailure&) { co_return false; }
             co_return true;
@@ -5508,7 +5547,7 @@ namespace osuCrypto::LogVole
                 if (isLeaf && expanded.mTbk.size() > state.mParams.mW)
                     expanded.mTbk.resize(state.mParams.mW);
                 bool accepted = publicSeed;
-                if (!publicSeed && !co_await validateSenderSeedAsync(executor, buffers,
+                if (!publicSeed && !co_await validateSenderSeedAsync(executor, buffers.size(),
                         seedParams, ctx, expanded.mTbk, isLeaf, accepted)) co_return false;
                 if (!accepted) { out = {}; co_return true; }
                 state.mGoldenSeed = input.mSeed;
@@ -5583,7 +5622,7 @@ namespace osuCrypto::LogVole
             bool accepted = false;
             try { accepted = co_await macoro::all_of(executor, chunks, buffers, expandChunk); }
             catch (const SenderSeedEvaluationFailure&) { co_return false; }
-            if (!publicSeed && !early && !co_await validateSenderSeedAsync(executor, buffers,
+            if (!publicSeed && !early && !co_await validateSenderSeedAsync(executor, buffers.size(),
                     seedParams, ctx, finalTbk, isLeaf, accepted)) co_return false;
             if (!accepted) { out = {}; co_return true; }
             finalTbk.resize(state.mParams.mW);
@@ -6714,7 +6753,33 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool validateLeafGoldenSeedCandidate(
+    macoro::task<bool> validateGoldenSeedCandidate(
+        macoro::thread_pool& executor, std::size_t taskCount,
+        const Params& params, const std::vector<RnsPoly>& tbkPerSampledPoly, bool& out,
+        HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
+    {
+        HostStep validationStep(profile, "cpu sender detail: golden validation", &cpuBenchmark);
+        if (!taskCount) co_return false;
+        RingNttContext ctx;
+        if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx)) co_return false;
+        co_return co_await validateSenderSeedAsync(executor, taskCount, params, ctx,
+            tbkPerSampledPoly, false, out, cpuBenchmark);
+    }
+
+    macoro::task<bool> validateLeafGoldenSeedCandidate(
+        macoro::thread_pool& executor, std::size_t taskCount,
+        const Params& params, const std::vector<RnsPoly>& tbk, bool& out,
+        HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
+    {
+        HostStep validationStep(profile, "cpu sender detail: golden validation", &cpuBenchmark);
+        if (!taskCount) co_return false;
+        RingNttContext ctx;
+        if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx)) co_return false;
+        co_return co_await validateSenderSeedAsync(executor, taskCount, params, ctx,
+            tbk, true, out, cpuBenchmark);
+    }
+
+    bool detail::gpuLegacyValidateLeafGoldenSeedCandidate(
         const Params& params, const std::vector<RnsPoly>& tbk, bool& out, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
     {
         HostStep validationStep(profile, "cpu sender detail: golden validation", &cpuBenchmark);
@@ -6785,7 +6850,7 @@ namespace osuCrypto::LogVole
             : validateGoldenSeedSearch(effective);
     }
 
-    bool validateGoldenSeedCandidate(
+    bool detail::gpuLegacyValidateGoldenSeedCandidate(
         const Params& params,
         const std::vector<RnsPoly>& tbkPerSampledPoly,
         bool& out, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
@@ -6848,25 +6913,26 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool findGoldenSeed(
+    macoro::task<bool> findGoldenSeed(
+        macoro::thread_pool& executor, std::size_t taskCount,
         const Params& params,
         const std::vector<RnsPoly>& sk2PerInstance,
         const RnsPoly& digest,
         PRNG& prng,
         GoldenSeedSearchOutput& out, CpuBenchmarkState cpuBenchmark, RingOpsStats* totals)
     {
-        if (sk2PerInstance.empty() ||
+        if (!taskCount || sk2PerInstance.empty() ||
             !validateRingBatchShape(sk2PerInstance, params.mShrinkExpand.mRing) ||
             !validateRingPolyShape(digest, params.mShrinkExpand.mRing))
         {
-            return false;
+            co_return false;
         }
 
         RingNttContext ctx{};
         if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx) ||
             !validateGoldenSeedSearchBudget(params, ctx))
         {
-            return false;
+            co_return false;
         }
 
         const std::size_t rho = ringModulusCount(ctx);
@@ -6875,52 +6941,54 @@ namespace osuCrypto::LogVole
         const u32 mu = params.mShrinkExpand.mMu;
         if (mu == 0)
         {
-            return false;
+            co_return false;
         }
 
         const u64 wDoublePrime = static_cast<u64>((params.mW + mu - 1) / mu);
         if (sk2PerInstance.size() != wDoublePrime)
         {
-            return false;
+            co_return false;
         }
 
         const u64 sampledPolyCount = wDoublePrime * static_cast<u64>(mu);
         if (sampledPolyCount == 0 ||
             sampledPolyCount > static_cast<u64>(std::numeric_limits<std::size_t>::max()))
         {
-            return false;
+            co_return false;
         }
         const std::size_t sampledPolyCountSize = static_cast<std::size_t>(sampledPolyCount);
 
-        PendingRingOpsStats pending(totals);
-        auto* stats = totals ? &pending : nullptr;
         std::vector<RnsPoly> publicANtt;
-        if (!buildLhePublicANtt(ctx, mu, publicANtt, {}, stats))
-        {
-            return false;
-        }
-
         std::vector<RnsPoly> askPerSampledPoly(sampledPolyCountSize);
-        for (std::size_t instanceIdx = 0; instanceIdx < sk2PerInstance.size(); ++instanceIdx)
         {
-            RnsPoly sk2Ntt = sk2PerInstance[instanceIdx];
-            if (!forwardNtt(sk2Ntt, ctx, stats))
+            PendingRingOpsStats pending(totals);
+            auto* stats = totals ? &pending : nullptr;
+            if (!buildLhePublicANtt(ctx, mu, publicANtt, {}, stats))
             {
-                return false;
+                co_return false;
             }
 
-            for (u32 rowIdx = 0; rowIdx < mu; ++rowIdx)
+            for (std::size_t instanceIdx = 0; instanceIdx < sk2PerInstance.size(); ++instanceIdx)
             {
-                RnsPoly askNtt{};
-                resizeZero(askNtt.mCoeffs, coeffCount);
-                if (!dyadicMultiplyAddNttInplace(publicANtt[rowIdx], sk2Ntt, askNtt, ctx, stats) ||
-                    !inverseNtt(askNtt, ctx, stats))
+                RnsPoly sk2Ntt = sk2PerInstance[instanceIdx];
+                if (!forwardNtt(sk2Ntt, ctx, stats))
                 {
-                    return false;
+                    co_return false;
                 }
 
-                const std::size_t sampledPolyIdx = instanceIdx * static_cast<std::size_t>(mu) + rowIdx;
-                askPerSampledPoly[sampledPolyIdx] = std::move(askNtt);
+                for (u32 rowIdx = 0; rowIdx < mu; ++rowIdx)
+                {
+                    RnsPoly askNtt{};
+                    resizeZero(askNtt.mCoeffs, coeffCount);
+                    if (!dyadicMultiplyAddNttInplace(publicANtt[rowIdx], sk2Ntt, askNtt, ctx, stats) ||
+                        !inverseNtt(askNtt, ctx, stats))
+                    {
+                        co_return false;
+                    }
+
+                    const std::size_t sampledPolyIdx = instanceIdx * static_cast<std::size_t>(mu) + rowIdx;
+                    askPerSampledPoly[sampledPolyIdx] = std::move(askNtt);
+                }
             }
         }
 
@@ -6943,37 +7011,45 @@ namespace osuCrypto::LogVole
                     mu);
             }
 
-            if (!deriveUniformPolyBatchFromSeedListInplace(
-                    ctx,
-                    attemptInstanceSeeds,
-                    0xC720AA55u,
-                    mu,
-                    attemptCt2PerSampledPoly,
-                    params.mShrinkExpand.mNumWorkerThreads <= 1 ? 0 : params.mShrinkExpand.mNumWorkerThreads, stats) ||
-                attemptCt2PerSampledPoly.size() != sampledPolyCountSize)
             {
-                return false;
-            }
-
-            for (std::size_t instanceIdx = 0; instanceIdx < sk2PerInstance.size(); ++instanceIdx)
-            {
-                for (u32 rowIdx = 0; rowIdx < mu; ++rowIdx)
+                // Serial sampling/subtraction retain the same seed/row order.
+                // Flush this phase's explicit collector before validation suspends.
+                PendingRingOpsStats pending(totals);
+                auto* stats = totals ? &pending : nullptr;
+                if (!deriveUniformPolyBatchFromSeedListInplace(
+                        ctx,
+                        attemptInstanceSeeds,
+                        0xC720AA55u,
+                        mu,
+                        attemptCt2PerSampledPoly,
+                        params.mShrinkExpand.mNumWorkerThreads <= 1 ? 0 : params.mShrinkExpand.mNumWorkerThreads, stats) ||
+                    attemptCt2PerSampledPoly.size() != sampledPolyCountSize)
                 {
-                    const std::size_t sampledPolyIdx = instanceIdx * static_cast<std::size_t>(mu) + rowIdx;
-                    if (!ringSubInplace(
-                            attemptCt2PerSampledPoly[sampledPolyIdx],
-                            askPerSampledPoly[sampledPolyIdx],
-                            ctx, stats))
+                    co_return false;
+                }
+
+                for (std::size_t instanceIdx = 0; instanceIdx < sk2PerInstance.size(); ++instanceIdx)
+                {
+                    for (u32 rowIdx = 0; rowIdx < mu; ++rowIdx)
                     {
-                        return false;
+                        const std::size_t sampledPolyIdx = instanceIdx * static_cast<std::size_t>(mu) + rowIdx;
+                        if (!ringSubInplace(
+                                attemptCt2PerSampledPoly[sampledPolyIdx],
+                                askPerSampledPoly[sampledPolyIdx],
+                                ctx, stats))
+                        {
+                            co_return false;
+                        }
                     }
                 }
             }
 
             bool candidateOk = false;
-            if (!validateGoldenSeedCandidate(params, attemptCt2PerSampledPoly, candidateOk, hostProfiler(ctx), cpuBenchmark))
             {
-                return false;
+                HostStep validationStep(hostProfiler(ctx), "cpu sender detail: golden validation", &cpuBenchmark);
+                if (!co_await validateSenderSeedAsync(executor, taskCount, params, ctx,
+                        attemptCt2PerSampledPoly, false, candidateOk, cpuBenchmark))
+                    co_return false;
             }
 
             if (candidateOk)
@@ -6982,10 +7058,10 @@ namespace osuCrypto::LogVole
                 next.mSeed = std::move(seed);
                 next.mTbkPerSampledPoly = std::move(attemptCt2PerSampledPoly);
                 out = std::move(next);
-                return true;
+                co_return true;
             }
         }
 
-        return false;
+        co_return false;
     }
 }

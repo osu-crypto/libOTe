@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **96%** of the agreed ownership/globals refactor,
+Estimated overall completion: **97%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -1064,6 +1064,36 @@ by CPU offline start. Windows/WSL ownership and host-leak milestone validation
 remain pending. Validation also depends on the local macoro coroutine/bulk and
 lifetime changes: publishing/pinning that dependency revision and verifying a clean
 dependency fetch remain final integration work.
+
+Golden validation/search now exposes three explicit-executor task interfaces
+with a caller-supplied partition count. One shared CPU validator uses indexed
+`all_of` with a sized `std::views::iota` descriptor; it no longer borrows unrelated
+LHE scratch. Null diagnostics adds no task/clock scopes. Enabled diagnostics uses
+immovable per-partition telemetry values with lazy timing/task scopes, destroyed
+before partition completion. Two synchronous validator bodies remain internal for
+four GPU fallback calls; no synchronous search copy remains. Candidate rejection
+is distinct from operation failure, and invalid/zero-task admission leaves outputs
+unchanged. Search retains serial sampling/subtraction, one 16-byte seed per
+completed attempt, the 100-attempt limit and publication only on acceptance.
+Explicit statistics collectors flush before each validation await. No arithmetic,
+seed layout, GPU scheduling or dependency publishing changes are included.
+
+The initial serialized Windows library/test/public-example-object build passes in
+280.93 seconds. Validation/search/totals/PRNG-continuation/telemetry checks pass in
+1.68 seconds; the plaintext-product check passes in 2.42 seconds; small two-query
+CPU GoldenSeed passes in 3.86 seconds. Early/full evaluation initially hit the
+60-second cap because its existing socket helper supplied three zeta buffers to
+the four-task case. The receiver's admission failure left its peer awaiting the
+missing message. The helper now sizes only zeta storage to the maximum declared
+receiver-chain task count, retaining the intentional three-slot LHE/LENC allowance.
+No socket/cancellation machinery changed. The fixture/header-documentation rebuild
+passes in 369.06 seconds and the complete one/two/four-task early/full comparison
+passes in **4.84 seconds**. All **six focused CPU checks pass**. No GPU execution,
+benchmarks, WSL or host-leak validation ran. The rough completion estimate advances
+to **97%**; the retained runtime-global inventory and physical GPU compatibility
+scheduler sites are unchanged. Remaining closure includes the shared CUDA evidence
+owner/reset still reached by CPU offline setup, Windows/WSL ownership and host-leak
+checks, and clean dependency integration/publishing of the local macoro revision.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their
