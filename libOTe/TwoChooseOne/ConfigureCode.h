@@ -127,7 +127,7 @@ namespace osuCrypto
     u64 getRegNoiseWeight(
         double pseudoMinDistRatio,
         u64 N,
-        u64 secParam,
+        u64 noisePositionFloor,
         SdNoiseDistribution noiseType,
         SdNoiseSecurityModel securityModel);
 
@@ -276,7 +276,8 @@ namespace osuCrypto
             // Pseudo-distance tuning informed by the RS BAA paper. These
             // are attack estimates at arbitrary lengths, not an extension
             // of the finite certificates at k=2^20. Keep the independent
-            // noise-position attack floor in getRegNoiseWeight.
+            // rate-dependent noise-position floor below, independently of
+            // the distance requirement in getRegNoiseWeight.
             minDist = multType == MultType::ChosenBaa16x8 ? 0.30 : 0.60;
             break;
         case MultType::BlkAcc3x8:
@@ -299,6 +300,12 @@ namespace osuCrypto
 
         SdConfig config;
 
+        // Chosen BAA uses secParam positions at rate 1/2 and ceil(secParam/2)
+        // at rate 1/4. This is an attack-cost calibration, not a security proof.
+        // Only the independent attack floor scales; the distance bound does not.
+        const u64 noisePositionFloor = multType == MultType::ChosenBaa16x4
+            ? secParam / 2 + secParam % 2 : secParam;
+
         auto baseSize = roundUpTo(requestSize * scaler, 2);
 
         const bool preferPow2 =
@@ -308,7 +315,7 @@ namespace osuCrypto
         if (preferPow2)
         {
             config.mNumPartitions = roundUpTo(getRegNoiseWeight(
-                minDist, baseSize, secParam, noiseType, securityModel), 2);
+                minDist, baseSize, noisePositionFloor, noiseType, securityModel), 2);
             config.mSizePer = std::max<u64>(4, roundUpTo(baseSize / config.mNumPartitions, 2));
 		    config.mNoiseVectorSize =  std::max(baseSize, config.mNumPartitions * config.mSizePer);
 
@@ -326,7 +333,7 @@ namespace osuCrypto
         {
 			// non power of two case. 
             config.mNumPartitions = roundUpTo(getRegNoiseWeight(
-                minDist, baseSize, secParam, noiseType, securityModel), 2);
+                minDist, baseSize, noisePositionFloor, noiseType, securityModel), 2);
             config.mSizePer = std::max<u64>(4, roundUpTo(divCeil(baseSize, config.mNumPartitions), 2));
 			config.mNoiseVectorSize = config.mNumPartitions * config.mSizePer;
         }

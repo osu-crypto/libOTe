@@ -112,14 +112,15 @@ void ChosenBaa_Code_test(const CLP&)
     for (auto type : {MultType::ChosenBaa16x8, MultType::ChosenBaa16x4})
     {
         const u64 rate = type == MultType::ChosenBaa16x8 ? 2 : 4;
+        for (auto noise : {SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary})
         for (u64 n : {1, 7, 8, 9, 511, 512, 1023, 1024, 1048576})
         {
             auto config = syndromeDecodingConfigure(128, n, type,
-                SdNoiseDistribution::Regular, {1.0});
+                noise, {1.0});
             if (config.mNoiseVectorSize % 16 ||
                 config.mNoiseVectorSize / rate < n ||
                 config.mNoiseVectorSize < config.mNumPartitions * config.mSizePer ||
-                config.mNumPartitions != 128)
+                config.mNumPartitions != (rate == 2 ? 128 : 64))
                 throw RTE_LOC;
         }
         // A lower attack floor exposes the distinct distance terms. Check
@@ -129,6 +130,13 @@ void ChosenBaa_Code_test(const CLP&)
             const auto config = syndromeDecodingConfigure(40, 4096, type, noise, {1.0});
             const u64 expected = type == MultType::ChosenBaa16x8 ? 128 : 56;
             if (config.mNumPartitions != expected) throw RTE_LOC;
+            // Odd targets round the quarter-rate floor up before batching.
+            for (u64 security : {129, 256})
+            {
+                const auto scaled = syndromeDecodingConfigure(security, 4096, type, noise, {1.0});
+                const u64 floor = rate == 2 ? security : security / 2 + security % 2;
+                if (scaled.mNumPartitions != roundUpTo(floor, u64{8})) throw RTE_LOC;
+            }
         }
         bool rejected = false;
         try { syndromeDecodingConfigure(128, u64(1) << 31, type,

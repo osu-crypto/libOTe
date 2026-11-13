@@ -56,11 +56,16 @@ The adapter uses pseudo-distance 0.30 for RS[16,8,9] and 0.60 for RS[16,4,13].
 These are engineering choices informed by the paper, applied across supported
 lengths as attack calibrations. They do not extend the finite certificates.
 The 64-bit linear-character criterion gives rounded noise floors of 128 and
-56 positions, respectively. The independent floor of at least `secParam`
-positions remains in effect. At the default `secParam = 128`, both profiles
-therefore use 128 noise positions, down from 200 with pseudo-distance 0.20.
+56 positions, respectively. The independent attack floor is `secParam`
+positions at rate 1/2 and `ceil(secParam / 2)` at rate 1/4. The selector takes
+the maximum of the distance requirement, attack floor, and implementation
+minimum, then rounds up to eight positions. At the default `secParam = 128`,
+the profiles therefore use 128 and 64 noise positions, respectively.
 Increasing the pseudo-distances further would not lower this default count.
 These calibrations are not a proof of 128-bit security for all sizes.
+The rate-dependent floors reflect the different decoding costs; the historical
+107-position SSD calibration is superseded by the stronger estimates in
+[Regular Syndrome Decoding Is Easier Than Previously Estimated](https://arxiv.org/abs/2610.29175).
 
 The PPRF expands its physical prefix. The adapter pads that prefix with at
 most 15 additional zeros when rounding to a multiple of 16, in addition to
