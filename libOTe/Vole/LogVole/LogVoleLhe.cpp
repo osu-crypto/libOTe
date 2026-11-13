@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
@@ -1183,7 +1184,7 @@ namespace osuCrypto::LogVole
         co_return true;
     }
 
-    bool lheDec(
+    bool detail::gpuLegacyLheDec(
         const RingNttContext& ctx, const std::vector<RnsPoly>& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
         bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
@@ -1193,7 +1194,7 @@ namespace osuCrypto::LogVole
         return lheDecImpl(ctx, cipher, sk, out, publicANtt, cipherInputIsNtt, outputNtt, requestedWorkers, nullptr, cpuBenchmark, cpuScratch, scope);
     }
 
-    bool lheDec(
+    bool detail::gpuLegacyLheDec(
         const RingNttContext& ctx, std::vector<RnsPoly>&& cipher, const RnsPoly& sk,
         std::vector<RnsPoly>& out, const std::vector<RnsPoly>* publicANtt,
         bool cipherInputIsNtt, bool outputNtt, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,

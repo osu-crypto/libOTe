@@ -470,31 +470,22 @@ namespace osuCrypto::LogVole
         const RnsPoly& kPrime,
         std::shared_ptr<void>& preparedKPrimeDevice, ProtocolCacheScopeView cacheScope);
 
-    // When `rootKeyDevice` is supplied and the GPU path is available, the whole key
-    // derivation runs on the device and the key is returned there (an opaque
-    // gpu::DeviceBatch of one polynomial), leaving `rootKey` untouched. The device
-    // expand is the only consumer, so this saves a download and a re-upload as well
-    // as the arithmetic.
-    bool finalizeRootResponseReceiver(
-        ReceiverState& state,
-        const RootDigestState& digestState,
-        const RootResponseMessage& response,
-        RnsPoly& rootKey,
-        std::shared_ptr<void>* rootKeyDevice = nullptr, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView cacheScope = {});
+    // Lazy CPU-only root phases. Prepare buffers as required by lheDec and
+    // lencEvalTrunc. Borrow executor, exclusive prepared buffers, state,
+    // seed/digest and output through completion. Await started work before reuse.
+    // The caller owns the executor and must join it outside its worker threads.
+    macoro::task<bool> computeRootSenderKey(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const SenderState& state, std::span<const u8> seed,
+        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
-    // Single-use production overload matching prepareRootResponseSender's owned
-    // path. It validates before moving skPrime out of the decoded response.
-    bool finalizeRootResponseReceiver(
-        ReceiverState& state,
-        const RootDigestState& digestState,
-        RootResponseMessage&& response,
-        RnsPoly& rootKey,
-        std::shared_ptr<void>* rootKeyDevice = nullptr, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView cacheScope = {});
-
-    bool computeRootSenderKey(
-        const SenderState& state,
-        std::span<const u8> seed,
-        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView cacheScope = {});
+    // Consumes response seed/skPrime only after validating their shapes. Pass an
+    // explicit copy when the response must remain available after completion.
+    macoro::task<bool> finalizeRootResponseReceiver(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
+        std::span<LencEvalBuffer> lencBuffers,
+        ReceiverState& state, const RootDigestState& digestState, RootResponseMessage& response,
+        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
     macoro::task<bool> prepareSenderOffline(
         macoro::thread_pool& executor, std::span<u8> setupResults,
@@ -641,14 +632,6 @@ namespace osuCrypto::LogVole
         u32 tauHi,
         const RingParams& ring,
         std::vector<RnsPoly>& out, PendingRingOpsStats* stats = nullptr);
-
-    bool seedLabelDenoiseTbm(
-        const std::vector<RnsPoly>& tbmPrime,
-        u32 wPrime,
-        u32 tau,
-        const RingParams& ring,
-        std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
 
     bool seedLabelRepOfflineSenderInput(
         const std::vector<RnsPoly>& s,

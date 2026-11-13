@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 #include <chrono>
 
@@ -947,7 +948,7 @@ namespace osuCrypto::LogVole
         bool expanded;
         if (gpu::enabled(state.mRingFactoryOwner))
         {
-            expanded = shrinkExpandExpandSender(state, expandInput, output,
+            expanded = detail::gpuLegacyExpandSender(state, expandInput, output,
                 state.mParams.mNumWorkerThreads, cpuBenchmark, cacheScope);
         }
         else

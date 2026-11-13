@@ -213,7 +213,7 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **93%** of the agreed ownership/globals refactor,
+Estimated overall completion: **94%** of the agreed ownership/globals refactor,
 including remaining scheduling, cleanup and cross-platform/leak validation.
 This is a rough work estimate, not a declaration count.
 
@@ -230,14 +230,14 @@ contain no environment reads.
 | --- | --- |
 | Explicit CPU capabilities, settings, and context-owned host/root profiling | Committed; residual capability caches are listed below. |
 | Explicit CPU benchmark state; benchmark TLS removed | Committed (`49a1e92e`). |
-| Async in-place LHE, explicit executor and buffers | Committed (`305f7a26`); legacy overloads deprecated. |
+| Async in-place LHE, explicit executor and buffers | Committed (`305f7a26`); normal synchronous overloads retired, internal GPU compatibility retained. |
 | Standalone sender expansion using async LHE | Committed (`cbe43e90`). |
-| Async truncated LENC, including fused subtraction | Committed (`42e5c113`); legacy overloads deprecated. |
+| Async truncated LENC, including fused subtraction | Committed (`42e5c113`); normal synchronous overloads retired, internal GPU compatibility retained. |
 | Standalone receiver expansion using async LHE/LENC | Reviewed and committed (`d2266368`). Full-digit LENC retains its synchronous arithmetic. Existing state-owned mask storage remains leased across awaits without holding a mutex. |
 | Root receiver finalization and key-derivation prefix | Committed in `d9faba17`; async LHE/LENC with caller-owned buffers, owned response before lazy start, and unchanged root/output publication. |
 | Intermediate receiver expansion | Committed in `fce0002d`; bounded partition tasks joined by `when_all_scope`, exclusive LHE/LENC buffers per partition, sequential chunks, and row parallelism for a single chunk. The legacy CPU entry point is removed; the GPU fallback remains. |
 | Intermediate receiver shrink | Committed in `b792a035`; direct `bulk_chunked` on the caller executor, unchanged arithmetic/padding, exclusive output ranges, and inline execution for one partition. Per-partition benchmark state is allocated only for parallel work. |
-| Intermediate receiver denoise | Committed in `216ef876`; direct async `bulk_chunked`, one shared recovery-data preparation, unchanged unrolled row kernel, and alias-safe output publication. Legacy synchronous entry point is deprecated. |
+| Intermediate receiver denoise | Committed in `216ef876`; direct async `bulk_chunked`, one shared recovery-data preparation, unchanged unrolled row kernel, and alias-safe output publication. Normal synchronous entry point retired; root recovery shares the serial arithmetic core. |
 | Empty-moduli sentinel and CLI tags | Removed in `dd980823`; a borrowed modulus span and function-local tags replace the globals. |
 | Sender pinning evidence moved onto sender state | Reviewed and committed. `LogVoleSender::mRootWirePin` owns the result; low-level callers pass an exclusive reference. Shared evidence/mutex and snapshot API removed. Separate CUDA allocation evidence remains global. |
 | Offline setup migration | Twenty former setup sites now await direct `bulk_chunked` with caller executor and exclusive status storage, wired through public sender/verifier APIs. Sequential phases reuse the storage; one chunk runs inline. Sampling order and arithmetic batching are preserved. Synchronous GPU lazy materialization retains the legacy adapter. |
@@ -403,7 +403,16 @@ There are **20 `detail::runParallelTasks` call sites** in library `.cpp` files:
 `LogVoleLenc.cpp` (1), `LogVoleLhe.cpp` (1), `LogVoleRingReceiver.cpp` (2),
 `LogVoleShrinkExpand.cpp` (2), `LogVoleZk.cpp` (5), and
 `cuda/LogVoleGpuBackend.cpp` (1). These are call sites, not independent algorithms.
-The synchronous input-wrapping and output-unwrapping sites now serve
+Twelve normal synchronous declarations have been retired: eight deprecated
+LHE/LENC/shrink-expand/denoise overloads, root sender-key computation, two root
+response-finalization overloads, and seed-label denoise. Their existing GPU
+session/fallback implementations remain and are explicitly named in the internal
+`LogVoleGpuCompatibility.h`, included only by implementation files. Normal CPU
+callers and staged tests use explicit executors and prepared buffers; small root
+recovery calls `detail::denoiseCombSerial`, which shares the same preparation and
+row kernels with async denoise and never enters the scheduler. This interface
+retirement removes no physical legacy scheduler site or runtime declaration.
+The synchronous input-wrapping and output-unwrapping sites still serve
 GPU/fallback and diagnostic callers; production CPU paths use explicit-resource
 async overloads. The staged synchronous `civoleSenderReleaseK` API remains legacy.
 The five synchronous matrix sites now serve diagnostic/GPU-fallback APIs;
@@ -577,13 +586,14 @@ synchronous APIs remain legacy diagnostics/GPU fallback, alongside their async
 alternatives. The synchronous rounding validators and `findGoldenSeed` are used
 by GPU-gated legacy sender evaluation or exposed as diagnostic helpers; normal
 CPU candidate evaluation calls its polynomial predicates directly under async
-execution. Ordinary CPU root-key recovery calls synchronous `shrinkExpandDenoiseComb`
-with a forced allowance of one; that branch now runs the numerical loop directly
-with the same nonempty task-metrics scope, bypassing the legacy scheduling
-adapter. Its parallel branch remains for legacy diagnostic/GPU fallback. Remaining asynchronous scheduling
-migration is at the deferred GPU/fallback boundary. Remaining CPU ambient
-protocol run/role identity and statistics require explicit session/diagnostics
-ownership decisions; worker-budget globals still support the legacy adapter.
+execution. Ordinary CPU root-key recovery now calls `detail::denoiseCombSerial`
+directly, sharing the numerical preparation and row kernel with async denoise
+and preserving the nonempty task-metrics scope. The internal GPU compatibility
+denoise retains its existing serial/parallel execution behavior. Remaining CPU
+cleanup covers diagnostic statistics defaults and synchronous diagnostic
+scheduling. The explicit internal GPU compatibility boundary retains its
+existing fallback scheduling and diagnostics; worker-budget globals still
+support that legacy adapter. Protocol run/role identity is already explicit.
 
 Final inline denoise cleanup: CUDA-enabled Windows library/tests/example-object
 build passes in 27.13 seconds. Existing integer-rounding denoise and root-online
@@ -919,6 +929,38 @@ PRNG continuation. Small two-query CPU interactive golden passes in 5.17 seconds
 No benchmarks, GPU execution or WSL checks were run. Next: group the remaining
 legacy synchronous CPU diagnostic surfaces, then address caller-owned scheduling
 and matching buffers without changing deterministic task/seed layouts.
+
+CPU synchronous-interface retirement: the twelve declarations listed above are
+removed from normal headers. Existing async root finalization is available to
+staged CPU callers with explicit executor/LHE/LENC buffers and a mutable response;
+validation precedes seed/skPrime consumption. The shared async root-key phase
+borrows the production context, preserving one context construction and the
+existing arithmetic, batching, seed progression and explicit pending statistics.
+GPU compatibility implementations remain internal, and their migration is deferred;
+no CUDA implementation file or GPU scheduling policy changed. Targeted GPU
+interface plumbing is authorized when it helps CPU cleanup or the later GPU pass;
+GPU arithmetic and scheduling redesign remain deferred. Other synchronous
+CPU diagnostic surfaces remain in golden validation/search, wrapping/unwrapping,
+staged key release and ZK helpers. Worker-budget globals and blocking adapters
+remain for those diagnostic and GPU boundaries. The inventory stays at **23
+runtime declarations** and **20 physical `runParallelTasks` sites**; the approximate
+overall migration estimate advances to **94%**.
+
+The serialized CUDA-enabled Windows library/test/public-example-object build
+passes in 410.97 seconds. Focused CPU groups cover independent LHE/LENC arithmetic
+and integer-denoise oracles, LENC domains/reuse/admission/singleton cases, full and
+truncated shrink-expand with sockets, root local flow/relation/reuse and two-level
+local/socket relations, plus a small two-query interactive GoldenSeed run. The
+first twelve-test kernel group passed eleven tests and exposed an existing test
+fixture requesting four encoder chunks with only three result slots. A helper-local
+four-slot array fixes that admission mismatch; its test-only rebuild passes in
+10.50 seconds and isolated rerun in 0.45 seconds. All **25 distinct affected CPU
+checks pass**: the other kernel checks took 8.23 seconds including the initial
+failure, seven shrink-expand checks 0.88 seconds, five root checks 9.91 seconds,
+and two-query GoldenSeed 4.02 seconds. No GPU execution, WSL, broad suite, leak
+checks or benchmarks were run. Next: remove remaining CPU TLS diagnostic defaults
+with explicit pending collectors, then finish the remaining diagnostic scheduler
+boundaries while preserving GPU compatibility behavior.
 
 1. Migrate the remaining CPU scheduling paths to caller-supplied fixed executors,
    explicit task counts and matching buffers, then move pending diagnostics into their

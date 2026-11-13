@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
@@ -2188,7 +2189,7 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool lencEvalTrunc(
+    bool detail::gpuLegacyLencEvalTrunc(
         const RingNttContext& ctx,
         const LencLacct& lacct,
         const std::vector<RnsPoly>& x,
@@ -2215,7 +2216,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        return lencEvalTrunc(
+        return detail::gpuLegacyLencEvalTrunc(
             ctx, lacct, tree, mu, tauHi, gadgetLogBase, plaintextModulusBits, out, outputNtt, requestedWorkers,
             leafInputsAreGadget, cpuBenchmark, cpuScratch);
     }
@@ -2474,7 +2475,7 @@ namespace osuCrypto::LogVole
         co_return true;
     }
 
-    bool lencEvalTrunc(
+    bool detail::gpuLegacyLencEvalTrunc(
         const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
         u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
         std::vector<RnsPoly>& out, bool outputNtt, u32 requestedWorkers, bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)
@@ -2484,7 +2485,7 @@ namespace osuCrypto::LogVole
             out, outputNtt, requestedWorkers, leafInputsAreGadget, false, cpuBenchmark, cpuScratch);
     }
 
-    bool lencSubtractEvalTruncNttInplace(
+    bool detail::gpuLegacyLencSubtractEvalTruncNttInplace(
         const RingNttContext& ctx, const LencLacct& lacct, const DigestTree& tree,
         u32 mu, u32 tauHi, u32 gadgetLogBase, u32 plaintextModulusBits,
         std::vector<RnsPoly>& out, u32 requestedWorkers, bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* cpuScratch)

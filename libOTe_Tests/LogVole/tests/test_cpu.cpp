@@ -807,7 +807,6 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;
     PRNG random(toBlock(0x4556414c, 0x46555345));
-    LogVole::detail::CpuRowScratch scratch;
     macoro::thread_pool pool;
     auto work = pool.make_work();
     pool.create_threads(1);
@@ -849,44 +848,88 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
         DigestTree tree{};
         LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(ctx, inputs, 1, digitBits, plaintextBits,
             tree, enc.mLacct.mWidthPadded, gadget));
-        // Independent composition of the existing coefficient-domain evaluator,
-        // forward transform and ring subtraction specifies the fused operation.
-        std::vector<RnsPoly> eval;
-        globalRingOpsStats.reset();
-        LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(ctx, enc.mLacct, tree, mu, 1, digitBits,
-            plaintextBits, eval, false, 1, gadget));
-        flushRingOpsThreadLocalStats();
-        const auto products = globalRingOpsStats.mDyadicMulAddCount.load();
+        // Independent scalar modular path sum: no batched evaluator or fused
+        // product kernel participates in this arithmetic oracle.
+        const auto hostModuli = getRingHostModuli(ctx);
+        const auto ctTau = enc.mLacct.mCt.mCols / 2;
+        std::vector<RnsPoly> eval(mu);
+        u64 products = 0;
+        for (unsigned leaf = 0; leaf < mu; ++leaf)
+        {
+            auto& acc = eval[leaf];
+            resizeZero(acc.mCoeffs, ringPolyCoeffCount(params));
+            unsigned parent = 0;
+            for (unsigned level = 0; level < enc.mLacct.mLevels; ++level)
+            {
+                const unsigned left = 2 * parent + 1, right = left + 1;
+                const auto row = level * enc.mLacct.mWidthPadded + leaf;
+                const auto terms = tree.mNodeDecompNtt[left].size();
+                for (unsigned side = 0; side < 2; ++side)
+                for (unsigned digit = 0; digit < terms; ++digit)
+                {
+                    const auto& ct = enc.mLacct.mCt.mPolys[
+                        ringTensorIndex(enc.mLacct.mCt, row, side * ctTau + digit)];
+                    const auto& node = tree.mNodeDecompNtt[side ? right : left][digit];
+                    for (unsigned j = 0; j < limbs; ++j)
+                    for (unsigned k = 0; k < 1024; ++k)
+                    {
+                        const auto i = j * 1024 + k;
+                        const auto& q = hostModuli[j];
+                        acc.mCoeffs[i] = seal::util::add_uint_mod(acc.mCoeffs[i],
+                            seal::util::multiply_uint_mod(ct.mCoeffs[i], node.mCoeffs[i], q), q);
+                    }
+                    ++products;
+                }
+                parent = (leaf >> (enc.mLacct.mLevels - 1 - level)) & 1 ? right : left;
+            }
+            LOGVOLE_REQUIRE_TRUE(inverseNtt(acc, ctx));
+            for (unsigned j = 0; j < limbs; ++j)
+            for (unsigned k = 0; k < 1024; ++k)
+            {
+                auto& value = acc.mCoeffs[j * 1024 + k];
+                value = value ? ringModulusValue(ctx, j) - value : 0;
+            }
+        }
         const auto evalCoefficient = eval;
         LOGVOLE_REQUIRE_TRUE(forwardNttBatch(eval, ctx));
         auto expected = initial;
         for (unsigned row = 0; row < mu; ++row)
             LOGVOLE_REQUIRE_TRUE(ringSubInplace(expected[row], eval[row], ctx));
-        for (u32 workers : {1, 2, 4, 8, 1})
+        const auto capacity = std::size_t{2} * enc.mLacct.mLevels * ctTau;
+        std::array<LencEvalBuffer, 8> reusableBuffers;
+        for (auto& buffer : reusableBuffers)
+        {
+            buffer.mCiphertexts.reserve(capacity);
+            buffer.mNodes.reserve(capacity);
+        }
+        RingOpsStats repeatedStats;
+        auto repeatedCtx = ctx;
+        repeatedCtx.mExecutionOptions.mRingOpsStats = &repeatedStats;
+        for (u32 tasks : {1, 2, 4, 8, 1})
         {
             auto actual = initial;
-            globalRingOpsStats.reset();
-            LOGVOLE_REQUIRE_TRUE(lencSubtractEvalTruncNttInplace(ctx, enc.mLacct, tree,
-                mu, 1, digitBits, plaintextBits, actual, workers, gadget, {}, &scratch));
-            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), products);
-            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mSubCount.load(), mu);
+            repeatedStats.reset();
+            auto locals = std::span(reusableBuffers).first(tasks);
+            auto* ciphertextAllocation = locals[0].mCiphertexts.data();
+            auto* nodeAllocation = locals[0].mNodes.data();
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEvalTrunc(pool, locals,
+                repeatedCtx, enc.mLacct, tree, mu, 1, digitBits, plaintextBits,
+                actual, LencEvalMode::SubtractNtt, gadget)));
+            LOGVOLE_REQUIRE_EQ(repeatedStats.mDyadicMulAddCount.load(), products);
+            LOGVOLE_REQUIRE_EQ(repeatedStats.mSubCount.load(), mu);
             for (unsigned row = 0; row < mu; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, expected[row].mCoeffs));
-            auto* executor = scratch.executor();
-            // Reuse the same lists for separate evaluation and coefficient output.
-            LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(ctx, enc.mLacct, tree, mu, 1, digitBits,
-                plaintextBits, actual, false, workers, gadget, {}, &scratch));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEvalTrunc(pool, locals,
+                repeatedCtx, enc.mLacct, tree, mu, 1, digitBits, plaintextBits,
+                actual, LencEvalMode::Coefficient, gadget)));
             LOGVOLE_REQUIRE_TRUE(forwardNttBatch(actual, ctx));
             for (unsigned row = 0; row < mu; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, eval[row].mCoeffs));
-            LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
-            for (auto& local : scratch.prepare(1, 0, nullptr))
-            {
-                LOGVOLE_REQUIRE_TRUE(local.mCiphertexts.empty());
-                LOGVOLE_REQUIRE_TRUE(local.mNodes.empty());
-            }
+            LOGVOLE_REQUIRE_TRUE(locals[0].mCiphertexts.data() == ciphertextAllocation);
+            LOGVOLE_REQUIRE_TRUE(locals[0].mNodes.data() == nodeAllocation);
+            for (const auto& local : locals)
+                LOGVOLE_REQUIRE_TRUE(local.mCiphertexts.empty() && local.mNodes.empty());
         }
-        const auto capacity = std::size_t{4} * enc.mLacct.mLevels; // tauHi == 1.
         for (auto& buffer : buffers)
         {
             buffer.mCiphertexts.reserve(capacity);
@@ -987,8 +1030,8 @@ void LogVole_Cpu_FusedExpandEvalMatchesSeparateOperations(const oc::CLP&)
         }
         auto invalid = initial;
         invalid.pop_back();
-        LOGVOLE_REQUIRE_FALSE(lencSubtractEvalTruncNttInplace(ctx, enc.mLacct, tree,
-            mu, 1, digitBits, plaintextBits, invalid, 1, gadget, {}, &scratch));
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lencEvalTrunc(pool, buffers, ctx, enc.mLacct, tree,
+            mu, 1, digitBits, plaintextBits, invalid, LencEvalMode::SubtractNtt, gadget)));
         for (unsigned row = 0; row < invalid.size(); ++row)
             LOGVOLE_REQUIRE_TRUE(rangesEqual(invalid[row].mCoeffs, initial[row].mCoeffs));
     }
@@ -1323,7 +1366,6 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
     }
     LOGVOLE_REQUIRE_EQ(firstStats.mNttCount.load(), 0u);
     PRNG random(toBlock(0x4c4845, 0x444543));
-    auto scratchOwner = std::make_shared<LogVole::detail::ShrinkExpandScratch>();
     // The application owns compute and memory independently. A fixed pool is
     // reused across shapes, calls, and different chunk counts.
     macoro::thread_pool lhePool;
@@ -1384,39 +1426,55 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
             auto reference = expected;
             if (inputNtt) LOGVOLE_REQUIRE_TRUE(forwardNttBatch(input, ctx));
             if (outputNtt) LOGVOLE_REQUIRE_TRUE(forwardNttBatch(reference, ctx));
-            std::vector<RnsPoly> actual;
-            LOGVOLE_REQUIRE_TRUE(lheDec(ctx, input, sk, actual, &publicA, inputNtt, outputNtt, workers));
+            const auto domain = inputNtt ? LheDomain::Ntt : LheDomain::Coefficient;
+            auto chunks = std::span(lheBuffers).first(workers);
+            auto actual = input;
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, ctx,
+                actual, sk, publicA, domain)));
+            if (inputNtt != outputNtt)
+                LOGVOLE_REQUIRE_TRUE(outputNtt ? forwardNttBatch(actual, ctx) : inverseNttBatch(actual, ctx));
             for (unsigned row = 0; row < rows; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
-            auto lease = LogVole::detail::ShrinkExpandScratch::acquire(scratchOwner);
-            auto& scratch = lease.cpuRows();
             auto consumed = input;
-            LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, actual, &publicA,
-                inputNtt, outputNtt, workers, {}, &scratch));
+            auto* consumedBatch = consumed.data();
+            const auto* consumedCoefficients = consumed[0].mCoeffs.data();
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, ctx,
+                consumed, sk, publicA, domain)));
+            if (inputNtt != outputNtt)
+                LOGVOLE_REQUIRE_TRUE(outputNtt ? forwardNttBatch(consumed, ctx) : inverseNttBatch(consumed, ctx));
+            LOGVOLE_REQUIRE_TRUE(consumed.data() == consumedBatch);
+            LOGVOLE_REQUIRE_TRUE(consumed[0].mCoeffs.data() == consumedCoefficients);
+            actual = std::move(consumed);
             for (unsigned row = 0; row < rows; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
             consumed = input;
-            LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, consumed, &publicA, inputNtt, outputNtt, workers));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, ctx,
+                consumed, sk, publicA, domain)));
+            if (inputNtt != outputNtt)
+                LOGVOLE_REQUIRE_TRUE(outputNtt ? forwardNttBatch(consumed, ctx) : inverseNttBatch(consumed, ctx));
             for (unsigned row = 0; row < rows; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(consumed[row].mCoeffs, reference[row].mCoeffs));
             if (!inputNtt && !outputNtt)
             {
-                auto* executor = scratch.executor();
+                RingOpsStats totals;
+                auto ownedCtx = ctx;
+                ownedCtx.mExecutionOptions.mRingOpsStats = &totals;
+                auto* productAllocation = chunks[0].mProduct.mCoeffs.data();
                 for (unsigned repeat = 0; repeat < 2; ++repeat)
                 {
-                    globalRingOpsStats.reset();
-                    LOGVOLE_REQUIRE_TRUE(lheDec(ctx, input, sk, actual, &publicA,
-                        false, false, workers, {}, &scratch));
-                    flushRingOpsThreadLocalStats();
-                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), rows);
-                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mInttCount.load(), rows);
-                    LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
+                    totals.reset();
+                    actual = input;
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, ownedCtx,
+                        actual, sk, publicA, LheDomain::Coefficient)));
+                    LOGVOLE_REQUIRE_EQ(totals.mDyadicMulAddCount.load(), rows);
+                    LOGVOLE_REQUIRE_EQ(totals.mInttCount.load(), rows);
+                    LOGVOLE_REQUIRE_TRUE(chunks[0].mProduct.mCoeffs.data() == productAllocation);
                     for (unsigned row = 0; row < rows; ++row)
                         LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
                 }
                 consumed = input;
-                LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, consumed, &publicA,
-                    false, false, workers, {}, &scratch));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, ctx,
+                    consumed, sk, publicA, LheDomain::Coefficient)));
                 for (unsigned row = 0; row < rows; ++row)
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(consumed[row].mCoeffs, reference[row].mCoeffs));
             }
@@ -1534,51 +1592,63 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
             if (inputNtt && outputNtt)
             {
                 // A caller may use the ciphertext batch as its public A too.
-                std::vector<RnsPoly> aliasReference;
-                LOGVOLE_REQUIRE_TRUE(lheDec(ctx, input, sk, aliasReference, &input, true, true, workers));
+                // Independent scalar modular subtraction specifies that alias.
+                auto aliasReference = input;
+                for (unsigned row = 0; row < rows; ++row)
+                for (unsigned j = 0; j < limbs; ++j)
+                for (unsigned k = 0; k < 1024; ++k)
+                {
+                    const auto i = j * 1024 + k;
+                    const auto& q = hostModuli[j];
+                    aliasReference[row].mCoeffs[i] = seal::util::sub_uint_mod(input[row].mCoeffs[i],
+                        seal::util::multiply_uint_mod(input[row].mCoeffs[i], skNtt.mCoeffs[i], q), q);
+                }
                 auto aliasCpu = ctx;
                 aliasCpu.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe = true;
                 consumed = input;
-                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, std::span(lheBuffers).first(workers), aliasCpu,
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, aliasCpu,
                     consumed, sk, consumed, LheDomain::Ntt, lheBenchmark)));
                 for (unsigned row = 0; row < rows; ++row)
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(consumed[row].mCoeffs, aliasReference[row].mCoeffs));
                 consumed = input;
-                LOGVOLE_REQUIRE_TRUE(lheDec(ctx, std::move(consumed), sk, consumed, &consumed,
-                    true, true, workers, {}, &scratch));
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, ctx,
+                    consumed, sk, consumed, LheDomain::Ntt)));
                 for (unsigned row = 0; row < rows; ++row)
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(consumed[row].mCoeffs, aliasReference[row].mCoeffs));
                 // Reused products must be cleared for every row and query.
                 auto separate = ctx;
                 separate.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe = false;
-                auto* executor = scratch.executor();
+                RingOpsStats totals;
+                separate.mExecutionOptions.mRingOpsStats = &totals;
+                const auto* productAllocation = chunks[0].mProduct.mCoeffs.data();
                 for (unsigned repeat = 0; repeat < 2; ++repeat)
                 {
-                    globalRingOpsStats.reset();
-                    LOGVOLE_REQUIRE_TRUE(lheDec(separate, input, sk, actual, &publicA,
-                        true, true, workers, {}, &scratch));
-                    // Counts must be published before return, even while the
-                    // pool stays alive and across resets between queries.
-                    flushRingOpsThreadLocalStats();
-                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mDyadicMulAddCount.load(), rows);
-                    LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mSubCount.load(), rows);
-                    if (repeat == 0)
-                        executor = scratch.executor();
-                    else
-                        LOGVOLE_REQUIRE_TRUE(scratch.executor() == executor);
+                    totals.reset();
+                    actual = input;
+                    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, separate,
+                        actual, sk, publicA, LheDomain::Ntt)));
+                    // Counts are published at the join while the pool stays alive.
+                    LOGVOLE_REQUIRE_EQ(totals.mDyadicMulAddCount.load(), rows);
+                    LOGVOLE_REQUIRE_EQ(totals.mSubCount.load(), rows);
+                    LOGVOLE_REQUIRE_TRUE(chunks[0].mProduct.mCoeffs.data() == productAllocation);
                     for (unsigned row = 0; row < rows; ++row)
                         LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
                 }
-                // Another active operation gets an independent owner/partition set.
-                auto second = LogVole::detail::ShrinkExpandScratch::acquire(scratchOwner);
-                LOGVOLE_REQUIRE_TRUE(&second.cpuRows() != &scratch);
-                LOGVOLE_REQUIRE_TRUE(lheDec(separate, input, sk, actual, &publicA,
-                    true, true, workers, {}, &second.cpuRows()));
+                // Another caller-owned buffer set has independent allocations.
+                std::array<LheDecryptBuffer, 8> secondBuffers;
+                for (auto& buffer : secondBuffers)
+                    buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params));
+                LOGVOLE_REQUIRE_TRUE(secondBuffers[0].mProduct.mCoeffs.data() != productAllocation);
+                actual = input;
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool,
+                    std::span(secondBuffers).first(workers), separate, actual, sk, publicA, LheDomain::Ntt)));
                 for (unsigned row = 0; row < rows; ++row)
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[row].mCoeffs, reference[row].mCoeffs));
             }
             // The owning output may alias the input batch.
-            LOGVOLE_REQUIRE_TRUE(lheDec(ctx, input, sk, input, &publicA, inputNtt, outputNtt, workers));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(lhePool, chunks, ctx, input, sk, publicA, domain)));
+            if (inputNtt != outputNtt)
+                LOGVOLE_REQUIRE_TRUE(outputNtt ? forwardNttBatch(input, ctx) : inverseNttBatch(input, ctx));
             for (unsigned row = 0; row < rows; ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(input[row].mCoeffs, reference[row].mCoeffs));
         }
@@ -1587,6 +1657,9 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
 
 void LogVole_Cpu_DenoiseMatchesIntegerRounding(const oc::CLP&)
 {
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(1);
     PRNG random(toBlock(0x44454e4f, 0x495345));
     for (unsigned limbs : {1, 2, 4, 8})
     for (int bits : {30, 52, 55, 60})
@@ -1635,13 +1708,13 @@ void LogVole_Cpu_DenoiseMatchesIntegerRounding(const oc::CLP&)
         for (u32 workers : {1, 3, 8})
         {
             std::vector<RnsPoly> actual;
-            LOGVOLE_REQUIRE_TRUE(shrinkExpandDenoiseComb(ctx, input, actual, workers));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandDenoiseComb(executor, workers, ctx, input, actual)));
             LOGVOLE_REQUIRE_EQ(actual.size(), expected.size());
             for (std::size_t i = 0; i < count; ++i)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual[i].mCoeffs, expected[i].mCoeffs));
         }
         auto alias = input;
-        LOGVOLE_REQUIRE_TRUE(shrinkExpandDenoiseComb(ctx, alias, alias, 3));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandDenoiseComb(executor, 3, ctx, alias, alias)));
         for (std::size_t i = 0; i < count; ++i)
             LOGVOLE_REQUIRE_TRUE(rangesEqual(alias[i].mCoeffs, expected[i].mCoeffs));
         std::vector<RnsPoly> moved;
@@ -1652,7 +1725,7 @@ void LogVole_Cpu_DenoiseMatchesIntegerRounding(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(moved[0].mCoeffs.data() == originalAllocation);
         auto malformed = input;
         malformed[0].mCoeffs.resize(1);
-        LOGVOLE_REQUIRE_TRUE(!shrinkExpandDenoiseComb(ctx, malformed, moved, 8));
+        LOGVOLE_REQUIRE_TRUE(!macoro::sync_wait(shrinkExpandDenoiseComb(executor, 8, ctx, malformed, moved)));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(moved[0].mCoeffs, expected[0].mCoeffs));
     }
 }

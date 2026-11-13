@@ -159,14 +159,6 @@ namespace osuCrypto::LogVole
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
-    [[deprecated("Use async sender expansion with explicit executor and buffers")]]
-    bool shrinkExpandExpandSender(
-        const ShrinkExpandSenderState& state,
-        const ShrinkExpandExpandSenderInput& input,
-        ShrinkExpandSenderExpandOutput& out,
-        // CPU LHE allowance: outer chunk workers pass 1 to avoid nested pools.
-        u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
-
     // CPU expansion. All referenced objects must survive completion; buffers
     // are exclusive to this operation (not shared with a concurrent sender).
     // Prepare LHE product storage and LENC pointer capacity as their APIs require.
@@ -177,14 +169,6 @@ namespace osuCrypto::LogVole
         const ShrinkExpandReceiverState& state, const ShrinkExpandExpandReceiverInput& input,
         ShrinkExpandReceiverExpandOutput& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope cacheScope = {});
 
-    [[deprecated("Use async receiver expansion with explicit executor and buffers")]]
-    bool shrinkExpandExpandReceiver(
-        const ShrinkExpandReceiverState& state,
-        const ShrinkExpandExpandReceiverInput& input,
-        ShrinkExpandReceiverExpandOutput& out,
-        // CPU row allowance: outer chunk workers pass 1 to avoid nested pools.
-        u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
-
     // Borrow context/input and exclusive output until completion; input may
     // alias output. Immutable recovery data is prepared once for all chunks.
     // workerAllowance bounds concurrency; one worker runs inline.
@@ -193,10 +177,12 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx, const std::vector<RnsPoly>& tbaPrime,
         std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {});
 
-    [[deprecated("Use async denoise with an explicit executor and worker allowance")]]
-    bool shrinkExpandDenoiseComb(
-        const RingNttContext& ctx,
-        const std::vector<RnsPoly>& tbaPrime,
-        std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
+}
+
+namespace osuCrypto::LogVole::detail
+{
+    // Ordinary serial arithmetic for small root-key recovery workloads.
+    bool denoiseCombSerial(const RingNttContext& ctx,
+        const std::vector<RnsPoly>& input, std::vector<RnsPoly>& out,
+        CpuBenchmarkState benchmark = {});
 }

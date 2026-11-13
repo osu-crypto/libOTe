@@ -284,8 +284,11 @@ namespace
         senderExpandInput.mNonce = 0;
         senderExpandInput.mTbkPrime = tbkPrime;
 
+        tests_libOTe::logvole_test::SenderResources senderResources(params.mRing, false, 3);
+        tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(params, false, 3);
         ShrinkExpandSenderExpandOutput senderExpand{};
-        if (!shrinkExpandExpandSender(senderState, senderExpandInput, senderExpand, 1))
+        if (!macoro::sync_wait(shrinkExpandExpandSender(senderResources.executor,
+            std::span(senderResources.buffers).first(1), senderState, senderExpandInput, senderExpand)))
         {
             return false;
         }
@@ -293,22 +296,22 @@ namespace
             auto lease = detail::ShrinkExpandScratch::acquire(senderState.mCpuScratch);
             LOGVOLE_REQUIRE_TRUE(lease.cpuRows().executor() == nullptr);
         }
-        detail::CpuExecutor* senderExecutor = nullptr;
+        const auto* senderProduct = senderResources.buffers[0].mProduct.mCoeffs.data();
         for (oc::u32 workers : {3u, 3u, 1u})
         {
             benchmark.reset();
             ShrinkExpandSenderExpandOutput repeated;
-            LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(senderState, senderExpandInput,
-                repeated, workers, {&benchmark}));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandSender(senderResources.executor,
+                std::span(senderResources.buffers).first(workers), senderState, senderExpandInput,
+                repeated, {&benchmark})));
             LOGVOLE_REQUIRE_EQ(benchmark.mActiveTaskThreads.load(), 0u);
             LOGVOLE_REQUIRE_TRUE(benchmark.mPeakTaskThreads.load() <= workers);
             LOGVOLE_REQUIRE_EQ(repeated.mTbk.size(), senderExpand.mTbk.size());
             for (std::size_t row = 0; row < repeated.mTbk.size(); ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(repeated.mTbk[row].mCoeffs, senderExpand.mTbk[row].mCoeffs));
             auto lease = detail::ShrinkExpandScratch::acquire(senderState.mCpuScratch);
-            if (!senderExecutor) senderExecutor = lease.cpuRows().executor();
-            LOGVOLE_REQUIRE_TRUE(senderExecutor != nullptr);
-            LOGVOLE_REQUIRE_TRUE(lease.cpuRows().executor() == senderExecutor);
+            LOGVOLE_REQUIRE_TRUE(lease.cpuRows().executor() == nullptr);
+            LOGVOLE_REQUIRE_TRUE(senderResources.buffers[0].mProduct.mCoeffs.data() == senderProduct);
         }
 
         ShrinkExpandExpandReceiverInput receiverExpandInput{};
@@ -321,7 +324,9 @@ namespace
         receiverExpandInput.mTree = shrink.mTree;
 
         ShrinkExpandReceiverExpandOutput receiverExpand{};
-        if (!shrinkExpandExpandReceiver(receiverState, receiverExpandInput, receiverExpand, 1))
+        if (!macoro::sync_wait(shrinkExpandExpandReceiver(senderResources.executor,
+            std::span(receiverBuffers.lhe).first(1), std::span(receiverBuffers.lenc).first(1),
+            receiverState, receiverExpandInput, receiverExpand)))
         {
             return false;
         }
@@ -331,22 +336,28 @@ namespace
         }
         // Reuse the same operation storage across parallel and serial calls.
         // A serial allowance must remain serial even with a prepared pool.
-        detail::CpuExecutor* executor = nullptr;
+        const auto* receiverProduct = receiverBuffers.lhe[0].mProduct.mCoeffs.data();
+        const auto* receiverCiphertexts = receiverBuffers.lenc[0].mCiphertexts.data();
+        const auto* receiverNodes = receiverBuffers.lenc[0].mNodes.data();
         for (oc::u32 workers : {3u, 3u, 1u})
         {
             benchmark.reset();
             ShrinkExpandReceiverExpandOutput repeated;
-            LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiverState, receiverExpandInput,
-                repeated, workers, {&benchmark}));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandReceiver(senderResources.executor,
+                std::span(receiverBuffers.lhe).first(workers), std::span(receiverBuffers.lenc).first(workers),
+                receiverState, receiverExpandInput, repeated, {&benchmark})));
             LOGVOLE_REQUIRE_EQ(benchmark.mActiveTaskThreads.load(), 0u);
             LOGVOLE_REQUIRE_TRUE(benchmark.mPeakTaskThreads.load() <= workers);
             LOGVOLE_REQUIRE_EQ(repeated.mTbm.size(), receiverExpand.mTbm.size());
             for (std::size_t row = 0; row < repeated.mTbm.size(); ++row)
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(repeated.mTbm[row].mCoeffs, receiverExpand.mTbm[row].mCoeffs));
             auto lease = detail::ShrinkExpandScratch::acquire(receiverState.mCpuScratch);
-            if (!executor) executor = lease.cpuRows().executor();
-            LOGVOLE_REQUIRE_TRUE(executor != nullptr);
-            LOGVOLE_REQUIRE_TRUE(lease.cpuRows().executor() == executor);
+            LOGVOLE_REQUIRE_TRUE(lease.cpuRows().executor() == nullptr);
+            LOGVOLE_REQUIRE_TRUE(receiverBuffers.lhe[0].mProduct.mCoeffs.data() == receiverProduct);
+            LOGVOLE_REQUIRE_TRUE(receiverBuffers.lenc[0].mCiphertexts.data() == receiverCiphertexts);
+            LOGVOLE_REQUIRE_TRUE(receiverBuffers.lenc[0].mNodes.data() == receiverNodes);
+            LOGVOLE_REQUIRE_TRUE(receiverBuffers.lenc[0].mCiphertexts.empty());
+            LOGVOLE_REQUIRE_TRUE(receiverBuffers.lenc[0].mNodes.empty());
         }
 
         std::vector<RnsPoly> diff;
@@ -597,11 +608,11 @@ void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
     }
 
     std::vector<RnsPoly> outBatch;
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandDenoiseComb(ctx, tbaPrime, outBatch));
-    expect_batch_equal(outBatch, xBatch);
     macoro::thread_pool executor;
     auto work = executor.make_work();
     executor.create_threads(1);
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandDenoiseComb(executor, 1, ctx, tbaPrime, outBatch)));
+    expect_batch_equal(outBatch, xBatch);
     auto onPool = [](macoro::thread_pool& pool, macoro::task<bool> operation) -> macoro::task<bool> {
         co_await pool.schedule();
         co_return co_await std::move(operation);
@@ -666,9 +677,12 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     senderExpandInput.mNonce = 0;
     senderExpandInput.mTbkPrime = tbkPrime;
 
+    const auto tasks = std::max(1u, senderState.mParams.mNumWorkerThreads);
+    tests_libOTe::logvole_test::SenderResources senderResources(params.mRing, false, tasks);
+    tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(params, false, tasks);
     ShrinkExpandSenderExpandOutput senderExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(senderState, senderExpandInput, senderExpand,
-        senderState.mParams.mNumWorkerThreads));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandSender(senderResources.executor,
+        senderResources.buffers, senderState, senderExpandInput, senderExpand)));
 
     ShrinkExpandExpandReceiverInput receiverExpandInput{};
     receiverExpandInput.mSid = senderExpandInput.mSid;
@@ -680,8 +694,8 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     receiverExpandInput.mTree = shrink.mTree;
 
     ShrinkExpandReceiverExpandOutput receiverExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiverState, receiverExpandInput, receiverExpand,
-        receiverState.mParams.mNumWorkerThreads));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandReceiver(senderResources.executor,
+        receiverBuffers.lhe, receiverBuffers.lenc, receiverState, receiverExpandInput, receiverExpand)));
 
     std::vector<RnsPoly> tbmMinusTbk;
     LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverExpand.mTbm, senderExpand.mTbk, tbmMinusTbk));

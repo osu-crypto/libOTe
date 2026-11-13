@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include <optional>
 #include "macoro/when_all_scope.h"
 #include "macoro/bulk.h"
@@ -937,7 +938,7 @@ namespace osuCrypto::LogVole
                     childOutput.mTbm, skXHat, cpuBenchmark);
             }
             else
-                denoised = seedLabelDenoiseTbm(childOutput.mTbm, wPrime, tauHi,
+                denoised = detail::gpuLegacySeedLabelDenoiseTbm(childOutput.mTbm, wPrime, tauHi,
                     state.mParams.mShrinkExpand.mRing, skXHat,
                     state.mParams.mShrinkExpand.mNumWorkerThreads, cpuBenchmark);
             auto* totals = state.mShrinkExpandState.mRingFactoryOwner
@@ -1085,7 +1086,7 @@ namespace osuCrypto::LogVole
                     const auto chunk = static_cast<u32>(taskIdx);
                     auto expandInput = chunkInput(chunk);
                     ShrinkExpandReceiverExpandOutput expandOutput;
-                    return shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput,
+                    return detail::gpuLegacyExpandReceiver(state.mShrinkExpandState, expandInput,
                         expandOutput, cpuRowWorkers, worker, cacheScope) && storeChunk(chunk, expandOutput);
                 }, false, &cpuBenchmark))
                 throw std::runtime_error("LogVole receiver could not expand recursive chunk");
@@ -1167,7 +1168,7 @@ namespace osuCrypto::LogVole
         bool expanded;
         if (gpu::enabled(state.mRingFactoryOwner))
         {
-            expanded = shrinkExpandExpandReceiver(state, coreInput, output,
+            expanded = detail::gpuLegacyExpandReceiver(state, coreInput, output,
                 state.mParams.mNumWorkerThreads, cpuBenchmark, cacheScope);
         }
         else

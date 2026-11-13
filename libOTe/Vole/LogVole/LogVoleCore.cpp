@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 
@@ -687,7 +688,7 @@ namespace osuCrypto::LogVole
             }
 #endif
             std::vector<RnsPoly> denoised;
-            if (!shrinkExpandDenoiseComb(ctx, input, denoised, 1, cpuBenchmark))
+            if (!detail::denoiseCombSerial(ctx, input, denoised, cpuBenchmark))
             {
                 return false;
             }
@@ -3674,7 +3675,7 @@ namespace osuCrypto::LogVole
     }
 
 
-    bool computeRootSenderKey(
+    bool detail::gpuLegacyComputeRootSenderKey(
         const SenderState& state,
         std::span<const u8> seed,
         RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView cacheScope)
@@ -3725,7 +3726,7 @@ namespace osuCrypto::LogVole
                 *state.mRootDPrimeRt,
                 0,
                 ctK) ||
-            !lheDec(
+            !detail::gpuLegacyLheDec(
                 ctx,
                 ctK,
                 *state.mRootKPrimeRt,
@@ -3846,7 +3847,7 @@ namespace osuCrypto::LogVole
                 RnsPoly rootKey{};
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: root key (host)", &cpuBenchmark);
-                    if (!computeRootSenderKey(state, seed, rootKey, cpuBenchmark, cacheScope))
+                    if (!detail::gpuLegacyComputeRootSenderKey(state, seed, rootKey, cpuBenchmark, cacheScope))
                     {
                         return false;
                     }
@@ -3865,7 +3866,7 @@ namespace osuCrypto::LogVole
                 bool candidateOk = publicSeed;
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: root expand (host)", &cpuBenchmark);
-                    if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput,
+                    if (!detail::gpuLegacyExpandSender(state.mShrinkExpandState, expandInput, expandOutput,
                             state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark, cacheScope))
                     {
                         return false;
@@ -4049,7 +4050,7 @@ namespace osuCrypto::LogVole
 
             std::vector<RnsPoly> kPrimeHat;
             std::vector<RnsPoly> kPrime;
-            if (!seedLabelDenoiseTbm(
+            if (!detail::gpuLegacySeedLabelDenoiseTbm(
                     childEval.mTbk,
                     wPrime,
                     tauHi,
@@ -4104,7 +4105,7 @@ namespace osuCrypto::LogVole
                         expandInput.mTbkPrime = kPrime[chunkIdx];
 
                         ShrinkExpandSenderExpandOutput expandOutput{};
-                        if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput, cpuLheWorkers, cpuBenchmark, cacheScope) ||
+                        if (!detail::gpuLegacyExpandSender(state.mShrinkExpandState, expandInput, expandOutput, cpuLheWorkers, cpuBenchmark, cacheScope) ||
                             expandOutput.mTbk.size() != muHi)
                         {
                             return false;
@@ -5363,6 +5364,52 @@ namespace osuCrypto::LogVole
         return true;
     }
 
+    static macoro::task<bool> computeRootSenderKeyWithContext(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const SenderState& state, std::span<const u8> seed,
+        const RingNttContext& ctx, u32 tauHi, u32 rho, RnsPoly& rootKey,
+        CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope)
+    {
+        const auto leftWidth = rootLeftWidth(tauHi, rho);
+        std::vector<RnsPoly> rootCiphertext;
+        std::shared_ptr<const std::vector<RnsPoly>> publicA;
+        {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+            if (!buildHashedCt2(ctx, leftWidth, seed, state.mParams.mSessionId,
+                    *state.mRootDPrimeRt, 0, rootCiphertext, stats)) co_return false;
+            publicA = sharedLhePublicANtt(ctx, leftWidth, cacheScope, stats);
+        }
+        if (!publicA || !co_await lheDec(executor, buffers, ctx, rootCiphertext,
+                *state.mRootKPrimeRt, *publicA, LheDomain::Coefficient, cpuBenchmark))
+            co_return false;
+        {
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+            if (!denoiseAndAggRootKey(ctx, rootCiphertext, tauHi, rootKey, cpuBenchmark, stats))
+                co_return false;
+        }
+        co_return true;
+    }
+
+    macoro::task<bool> computeRootSenderKey(
+        macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers,
+        const SenderState& state, std::span<const u8> seed,
+        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope)
+    {
+        u32 tauHi = 0;
+        const auto rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        if (buffers.empty() || seed.empty() || !rho || !computeTauHi(state.mParams, tauHi) ||
+            !state.mRootKPrimeRt || !state.mRootDPrimeRt)
+            co_return false;
+        RingNttContext ctx;
+        if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx,
+                state.mShrinkExpandState.mRingFactoryOwner, cacheScope) || gpu::enabled(ctx))
+            co_return false;
+        co_return co_await computeRootSenderKeyWithContext(executor, buffers, state, seed,
+            ctx, tauHi, rho, rootKey, cpuBenchmark, cacheScope);
+    }
+
     namespace
     {
         // A failed expansion/check is not a rejected seed. all_of joins started
@@ -5424,26 +5471,9 @@ namespace osuCrypto::LogVole
             {
                 if (!validRootWidth(state.mParams, muHi) || !state.mRootKPrimeRt ||
                     !state.mRootDPrimeRt || !state.mRootDPrimeHashValid) co_return false;
-                const auto leftWidth = rootLeftWidth(tauHi, rho);
-                std::vector<RnsPoly> rootCiphertext;
-                std::shared_ptr<const std::vector<RnsPoly>> publicA;
-                {
-                    PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-                    auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
-                    if (!buildHashedCt2(ctx, leftWidth, seed, state.mParams.mSessionId,
-                            *state.mRootDPrimeRt, 0, rootCiphertext, stats)) co_return false;
-                    publicA = sharedLhePublicANtt(ctx, leftWidth, cacheScope, stats);
-                }
-                if (!publicA || !co_await lheDec(executor, buffers, ctx, rootCiphertext,
-                        *state.mRootKPrimeRt, *publicA, LheDomain::Coefficient, cpuBenchmark))
-                    co_return false;
                 RnsPoly rootKey;
-                {
-                    PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-                    auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
-                    if (!denoiseAndAggRootKey(ctx, rootCiphertext, tauHi, rootKey, cpuBenchmark, stats))
-                        co_return false;
-                }
+                if (!co_await computeRootSenderKeyWithContext(executor, buffers, state, seed,
+                        ctx, tauHi, rho, rootKey, cpuBenchmark, cacheScope)) co_return false;
                 ShrinkExpandExpandSenderInput input;
                 assignRange(input.mSeed, seed.begin(), seed.end());
                 input.mSid = state.mParams.mSessionId;
@@ -5687,13 +5717,13 @@ namespace osuCrypto::LogVole
         std::shared_ptr<void>* keyDevSlot = nullptr;
 #endif
         const bool keyOk = ownedResponse
-            ? finalizeRootResponseReceiver(
+            ? detail::gpuLegacyFinalizeRootResponseReceiver(
                   state,
                   digestState,
                   std::move(*ownedResponse),
                   receiverKey,
                   keyDevSlot, cpuBenchmark, cacheScope)
-            : finalizeRootResponseReceiver(
+            : detail::gpuLegacyFinalizeRootResponseReceiver(
                   state,
                   digestState,
                   response,
@@ -5768,7 +5798,7 @@ namespace osuCrypto::LogVole
         auto expandInput = rootReceiverExpansionInput(state, input, digestState, std::move(receiverKey));
 
         ShrinkExpandReceiverExpandOutput expandOutput{};
-        if (!shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput,
+        if (!detail::gpuLegacyExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput,
                 state.mShrinkExpandState.mParams.mNumWorkerThreads, cpuBenchmark, cacheScope))
         {
             return false;
@@ -5776,12 +5806,6 @@ namespace osuCrypto::LogVole
 
         return finishRootReceiverExpansion(state, input, digestState, expandOutput, next, out);
     }
-
-    static macoro::task<bool> finalizeRootResponseReceiverAsync(
-        macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
-        std::span<LencEvalBuffer> lencBuffers,
-        ReceiverState& state, const RootDigestState& digestState, RootResponseMessage& response,
-        RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope);
 
     static macoro::task<bool> finalizeRootOnlineReceiverAsync(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
@@ -5799,7 +5823,7 @@ namespace osuCrypto::LogVole
         ShrinkExpandExpandReceiverInput expandInput;
         ReceiverOnlineOutput next;
         RnsPoly receiverKey;
-        if (!co_await finalizeRootResponseReceiverAsync(executor, lheBuffers, lencBuffers,
+        if (!co_await finalizeRootResponseReceiver(executor, lheBuffers, lencBuffers,
                 state, digestState, response, receiverKey, cpuBenchmark, cacheScope)) co_return false;
         next.mSeed = state.mGoldenSeed;
         expandInput = rootReceiverExpansionInput(state, input, digestState, std::move(receiverKey));
@@ -6167,7 +6191,7 @@ namespace osuCrypto::LogVole
             if (!gpu::enabled(ctx))
 #endif
                 cpuScratch.emplace(detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch));
-            if (!lheDec(
+            if (!detail::gpuLegacyLheDec(
                     ctx,
                     ctRApplied,
                     skPrime,
@@ -6194,7 +6218,7 @@ namespace osuCrypto::LogVole
             // it. The overload without a tree rebuilds it, which is the single
             // largest host cost in the Root and is pure duplicate work.
             const bool ok = digestState.mLeftTree
-                ? lencEvalTrunc(
+                ? detail::gpuLegacyLencEvalTrunc(
                       ctx,
                       toLencLacct(state),
                       *digestState.mLeftTree,
@@ -6206,7 +6230,7 @@ namespace osuCrypto::LogVole
                       true,
                       state.mShrinkExpandState.mParams.mNumWorkerThreads,
                       true, cpuBenchmark, cpuScratch ? &cpuScratch->cpuRows() : nullptr)
-                : lencEvalTrunc(
+                : detail::gpuLegacyLencEvalTrunc(
                       ctx,
                       toLencLacct(state),
                       digestState.mHatDRt,
@@ -6227,13 +6251,17 @@ namespace osuCrypto::LogVole
             decPartialNtt, topEvalNtt, leftEvalNtt, rootKey, cpuBenchmark);
     }
 
-    static macoro::task<bool> finalizeRootResponseReceiverAsync(
+    macoro::task<bool> finalizeRootResponseReceiver(
         macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
         std::span<LencEvalBuffer> lencBuffers,
         ReceiverState& state, const RootDigestState& digestState, RootResponseMessage& response,
         RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark, ProtocolCacheScope cacheScope)
     {
+        if (lheBuffers.empty() || lencBuffers.empty()) co_return false;
         RingNttContext ctx;
+        if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx,
+                state.mShrinkExpandState.mRingFactoryOwner, cacheScope) || gpu::enabled(ctx))
+            co_return false;
         u32 tauHi = 0, leftWidth = 0;
         AlignedUnVec<u8> ct2Seed;
         RnsPoly skPrime;
@@ -6245,9 +6273,7 @@ namespace osuCrypto::LogVole
             if (!prepareRootResponseSeed(state, digestState, response, &response, tauHi, ct2Seed)) co_return false;
             const auto rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
             leftWidth = rootLeftWidth(tauHi, rho);
-            if (!rho || digestState.mHatDRt.size() != leftWidth ||
-                !makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx, state.mShrinkExpandState.mRingFactoryOwner, cacheScope))
-                co_return false;
+            if (!rho || digestState.mHatDRt.size() != leftWidth) co_return false;
             skPrime.mCoeffs = std::move(response.mSkPrimeCoeffs);
             PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
             auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
@@ -6291,7 +6317,7 @@ namespace osuCrypto::LogVole
             decPartialNtt, topEvalNtt, leftEvalNtt, rootKey, cpuBenchmark, stats);
     }
 
-    bool finalizeRootResponseReceiver(
+    bool detail::gpuLegacyFinalizeRootResponseReceiver(
         ReceiverState& state,
         const RootDigestState& digestState,
         const RootResponseMessage& response,
@@ -6302,7 +6328,7 @@ namespace osuCrypto::LogVole
             state, digestState, response, nullptr, rootKey, rootKeyDevice, cpuBenchmark, cacheScope);
     }
 
-    bool finalizeRootResponseReceiver(
+    bool detail::gpuLegacyFinalizeRootResponseReceiver(
         ReceiverState& state,
         const RootDigestState& digestState,
         RootResponseMessage&& response,
@@ -6454,7 +6480,7 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool seedLabelDenoiseTbm(
+    bool detail::gpuLegacySeedLabelDenoiseTbm(
         const std::vector<RnsPoly>& tbmPrime,
         u32 wPrime,
         u32 tau,
@@ -6481,7 +6507,7 @@ namespace osuCrypto::LogVole
         }
 #endif
 
-        return shrinkExpandDenoiseComb(ctx, tbmPrime, out, requestedWorkers, cpuBenchmark);
+        return detail::gpuLegacyDenoiseComb(ctx, tbmPrime, out, requestedWorkers, cpuBenchmark);
     }
 
     bool seedLabelRepOfflineSenderInput(

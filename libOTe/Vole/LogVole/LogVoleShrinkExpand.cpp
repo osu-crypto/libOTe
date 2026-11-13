@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
@@ -1029,7 +1030,7 @@ namespace osuCrypto::LogVole
             cpuBenchmark, std::move(cacheScope));
     }
 
-    bool shrinkExpandExpandSender(
+    bool detail::gpuLegacyExpandSender(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& out, u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
@@ -1044,7 +1045,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (gpu::enabled(ctx)) lheWorkers = state.mParams.mNumWorkerThreads;
 #endif
-        if (!lheDec(
+        if (!detail::gpuLegacyLheDec(
                 ctx,
                 senderCt2,
                 input.mTbkPrime,
@@ -1229,7 +1230,7 @@ namespace osuCrypto::LogVole
         }
     }
 
-    bool shrinkExpandExpandReceiver(
+    bool detail::gpuLegacyExpandReceiver(
         const ShrinkExpandReceiverState& state,
         const ShrinkExpandExpandReceiverInput& input,
         ShrinkExpandReceiverExpandOutput& out, u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
@@ -1249,7 +1250,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (gpu::enabled(ctx)) rowWorkers = state.mParams.mNumWorkerThreads;
 #endif
-        if (!lheDec(
+        if (!detail::gpuLegacyLheDec(
                 ctx,
                 std::move(ct1AppliedNtt),
                 input.mSkX,
@@ -1269,14 +1270,14 @@ namespace osuCrypto::LogVole
         const bool fusedEval = ctx.mExecutionOptions.mAdvanced.mCpu.mFusedExpandEval && state.mParams.mTruncateOneGadgetDigit;
         if (fusedEval)
         {
-            evalOk = lencSubtractEvalTruncNttInplace(
+            evalOk = detail::gpuLegacyLencSubtractEvalTruncNttInplace(
                 ctx, state.hostLacct(), *tree, state.mParams.mMu, state.mParams.mTau,
                 state.mParams.mGadgetLogBase, state.mParams.mPlaintextModulusBits,
                 decPartialNtt, rowWorkers, state.mParams.mLeafInputsAreGadget, cpuBenchmark, &scratch.cpuRows());
         }
         else if (state.mParams.mTruncateOneGadgetDigit)
         {
-            evalOk = lencEvalTrunc(
+            evalOk = detail::gpuLegacyLencEvalTrunc(
                 ctx,
                 state.hostLacct(),
                 *tree,
@@ -1537,26 +1538,35 @@ namespace osuCrypto::LogVole
         output = std::move(polyOut);
     }
 
-    bool shrinkExpandDenoiseComb(
+    bool detail::denoiseCombSerial(const RingNttContext& ctx,
+        const std::vector<RnsPoly>& input, std::vector<RnsPoly>& out,
+        CpuBenchmarkState benchmark)
+    {
+        if (!benchmark.mContext) benchmark.mContext = cpuBenchmarkContext(ctx);
+        DenoiseData data;
+        if (!prepareDenoise(ctx, input, data)) return false;
+        std::vector<RnsPoly> result(input.size() / data.mModuli.size());
+        if (!result.empty())
+        {
+            CpuBenchmarkTaskScope metrics(benchmark);
+            for (std::size_t i = 0; i != result.size(); ++i)
+                denoiseRow(ctx, data, input, i, result[i]);
+        }
+        out = std::move(result);
+        return true;
+    }
+
+    bool detail::gpuLegacyDenoiseComb(
         const RingNttContext& ctx, const std::vector<RnsPoly>& tbaPrime,
         std::vector<RnsPoly>& out, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
     {
+        if (requestedWorkers == 1)
+            return detail::denoiseCombSerial(ctx, tbaPrime, out, cpuBenchmark);
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
         DenoiseData data;
         if (!prepareDenoise(ctx, tbaPrime, data)) return false;
         std::vector<RnsPoly> result(tbaPrime.size() / data.mModuli.size());
-        if (requestedWorkers == 1)
-        {
-            // Root-key recovery is deliberately sequential; preserve the task
-            // metrics scope without entering the legacy scheduling adapter.
-            if (!result.empty())
-            {
-                CpuBenchmarkTaskScope metrics(cpuBenchmark);
-                for (std::size_t i = 0; i != result.size(); ++i)
-                    denoiseRow(ctx, data, tbaPrime, i, result[i]);
-            }
-        }
-        else if (!detail::runParallelTasks(result.size(), requestedWorkers,
+        if (!detail::runParallelTasks(result.size(), requestedWorkers,
             [&](std::size_t i, CpuBenchmarkState&) {
                 denoiseRow(ctx, data, tbaPrime, i, result[i]);
                 return true;

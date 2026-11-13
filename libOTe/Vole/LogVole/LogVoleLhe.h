@@ -139,34 +139,6 @@ namespace osuCrypto::LogVole
         const RnsPoly& sk, const std::vector<RnsPoly>& publicANtt,
         LheDomain domain, CpuBenchmarkState cpuBenchmark = {});
 
-    // cpuScratch supplies exclusive reusable resources for CPU row phases.
-    // Other phases/backends retain their existing execution path.
-    [[deprecated("Use async in-place lheDec with explicit executor and buffers")]]
-    bool lheDec(
-        const RingNttContext& ctx,
-        const std::vector<RnsPoly>& cipher,
-        const RnsPoly& sk,
-        std::vector<RnsPoly>& out,
-        const std::vector<RnsPoly>* publicANtt = nullptr,
-        bool cipherInputIsNtt = false,
-        bool outputNtt = false,
-        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = {});
-
-    // Consuming overload: reuses the ciphertext allocation for NTT-domain
-    // decryption. The coefficient-domain special case keeps its existing path.
-    [[deprecated("Use async in-place lheDec with explicit executor and buffers")]]
-    bool lheDec(
-        const RingNttContext& ctx,
-        std::vector<RnsPoly>&& cipher,
-        const RnsPoly& sk,
-        std::vector<RnsPoly>& out,
-        const std::vector<RnsPoly>* publicANtt = nullptr,
-        bool cipherInputIsNtt = false,
-        bool outputNtt = false,
-        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = {});
-
     bool deriveSkx(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& sk1,

@@ -13,6 +13,7 @@
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -629,10 +630,23 @@ void LogVole_LencOps_SingletonPaddingAndRelation(const oc::CLP&)
                 params.mPlaintextModulusBits, digest)
             : lencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest));
         LOGVOLE_REQUIRE_TRUE(validateRingPolyShape(digest, ctx.mParams));
-        std::vector<RnsPoly> eval;
+        std::vector<RnsPoly> eval(1);
+        eval[0].mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
+        DigestTree evalTree;
+        if (truncated)
+            LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(ctx, x, params.mTauHi,
+                params.mGadgetLogBase, params.mPlaintextModulusBits, evalTree,
+                enc.mLacct.mWidthPadded));
+        std::array<LencEvalBuffer, 3> evalBuffers;
+        for (auto& buffer : evalBuffers)
+        {
+            buffer.mCiphertexts.reserve(2u * enc.mLacct.mLevels * (params.mTauHi + 1u));
+            buffer.mNodes.reserve(2u * enc.mLacct.mLevels * (params.mTauHi + 1u));
+        }
         LOGVOLE_REQUIRE_TRUE(truncated
-            ? lencEvalTrunc(ctx, enc.mLacct, x, 1, params.mTauHi,
-                params.mGadgetLogBase, params.mPlaintextModulusBits, eval)
+            ? macoro::sync_wait(lencEvalTrunc(setupResources.executor, evalBuffers,
+                ctx, enc.mLacct, evalTree, 1, params.mTauHi,
+                params.mGadgetLogBase, params.mPlaintextModulusBits, eval, LencEvalMode::Coefficient))
             : lencEval(ctx, enc.mLacct, x, 1, params.mTau,
                 params.mGadgetLogBase, eval));
         LOGVOLE_REQUIRE_EQ(eval.size(), 1u);
@@ -912,7 +926,7 @@ void LogVole_LencOps_TruncDigestTreeDeterministic(const oc::CLP&)
     expect_poly_equal(digest, tree1.mDigest);
 }
 
-void LogVole_LencOps_TruncEvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
+void LogVole_LencOps_TruncEvalPrebuiltTreeDomainsAndReuse(const oc::CLP&)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;
     const auto params = make_params();
@@ -933,39 +947,58 @@ void LogVole_LencOps_TruncEvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
         prng,
         enc)));
 
-    std::vector<RnsPoly> evalFromX;
-    LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(
-        ctx,
-        enc.mLacct,
-        x,
-        params.mMu,
-        params.mTauHi,
-        params.mGadgetLogBase,
-        params.mPlaintextModulusBits,
-        evalFromX));
-
-    DigestTree tree{};
-    LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(
-        ctx,
-        x,
-        params.mTauHi,
-        params.mGadgetLogBase,
-        params.mPlaintextModulusBits,
-        tree,
+    DigestTree tree;
+    LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(ctx, x, params.mTauHi,
+        params.mGadgetLogBase, params.mPlaintextModulusBits, tree,
         enc.mLacct.mWidthPadded));
-
-    std::vector<RnsPoly> evalFromTree;
-    LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(
-        ctx,
+    std::array<LencEvalBuffer, 3> evalBuffers;
+    for (auto& buffer : evalBuffers)
+    {
+        buffer.mCiphertexts.reserve(2u * enc.mLacct.mLevels * (params.mTauHi + 1u));
+        buffer.mNodes.reserve(2u * enc.mLacct.mLevels * (params.mTauHi + 1u));
+    }
+    std::vector<RnsPoly> evalCoefficient(params.mMu);
+    for (auto& poly : evalCoefficient) poly.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEvalTrunc(
+        setupResources.executor, evalBuffers, ctx,
         enc.mLacct,
         tree,
         params.mMu,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
-        evalFromTree));
+        evalCoefficient, LencEvalMode::Coefficient)));
 
-    expect_batch_equal(evalFromX, evalFromTree);
+    std::array<const RnsPoly* const*, 3> ciphertextAllocations{}, nodeAllocations{};
+    for (std::size_t i = 0; i < evalBuffers.size(); ++i)
+    {
+        ciphertextAllocations[i] = evalBuffers[i].mCiphertexts.data();
+        nodeAllocations[i] = evalBuffers[i].mNodes.data();
+    }
+    const auto* treeAllocation = tree.mNodeDecompNtt.data();
+    const auto* ciphertextAllocation = enc.mLacct.mCt.mPolys.data();
+    std::vector<RnsPoly> evalNtt(params.mMu);
+    for (auto& poly : evalNtt) poly.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEvalTrunc(
+        setupResources.executor, evalBuffers, ctx,
+        enc.mLacct,
+        tree,
+        params.mMu,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        evalNtt, LencEvalMode::Ntt)));
+    LOGVOLE_REQUIRE_TRUE(inverseNttBatch(evalNtt, ctx));
+    LOGVOLE_REQUIRE_TRUE(tree.mNodeDecompNtt.data() == treeAllocation);
+    LOGVOLE_REQUIRE_TRUE(enc.mLacct.mCt.mPolys.data() == ciphertextAllocation);
+    for (std::size_t i = 0; i < evalBuffers.size(); ++i)
+    {
+        LOGVOLE_REQUIRE_TRUE(evalBuffers[i].mCiphertexts.data() == ciphertextAllocations[i]);
+        LOGVOLE_REQUIRE_TRUE(evalBuffers[i].mNodes.data() == nodeAllocations[i]);
+        LOGVOLE_REQUIRE_TRUE(evalBuffers[i].mCiphertexts.empty() && evalBuffers[i].mNodes.empty());
+    }
+
+    expect_batch_equal(evalCoefficient, evalNtt);
 }
 
 void LogVole_LencOps_TruncEvalRejectsMuMismatch(const oc::CLP&)
@@ -989,16 +1022,29 @@ void LogVole_LencOps_TruncEvalRejectsMuMismatch(const oc::CLP&)
         prng,
         enc)));
 
-    std::vector<RnsPoly> eval;
-    LOGVOLE_REQUIRE_FALSE(lencEvalTrunc(
-        ctx,
+    std::array<LencEvalBuffer, 3> evalBuffers;
+    for (auto& buffer : evalBuffers)
+    {
+        buffer.mCiphertexts.reserve(2u * enc.mLacct.mLevels * (params.mTauHi + 1u));
+        buffer.mNodes.reserve(2u * enc.mLacct.mLevels * (params.mTauHi + 1u));
+    }
+    // The explicit-tree API rejects a leaf count beyond the padded tree.
+    const auto invalidMu = enc.mLacct.mWidthPadded + 1u;
+    std::vector<RnsPoly> eval(invalidMu);
+    for (auto& poly : eval) poly.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
+    DigestTree tree;
+    LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(ctx, x, params.mTauHi,
+        params.mGadgetLogBase, params.mPlaintextModulusBits, tree,
+        enc.mLacct.mWidthPadded));
+    LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lencEvalTrunc(
+        setupResources.executor, evalBuffers, ctx,
         enc.mLacct,
-        x,
-        params.mMu + 1u,
+        tree,
+        invalidMu,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
-        eval));
+        eval, LencEvalMode::Coefficient)));
 }
 
 void LogVole_LencOps_TruncLeafInputsAreGadgetPath(const oc::CLP&)
@@ -1042,19 +1088,24 @@ void LogVole_LencOps_TruncLeafInputsAreGadgetPath(const oc::CLP&)
     const std::uint32_t firstLeaf = tree.mWidthPadded - 1u;
     LOGVOLE_REQUIRE_EQ(tree.mNodeDecompNtt[firstLeaf].size(), 1u);
 
-    std::vector<RnsPoly> eval;
-    LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(
-        ctx,
+    std::array<LencEvalBuffer, 3> evalBuffers;
+    for (auto& buffer : evalBuffers)
+    {
+        buffer.mCiphertexts.reserve(2u * enc.mLacct.mLevels * (params.mTauHi + 1u));
+        buffer.mNodes.reserve(2u * enc.mLacct.mLevels * (params.mTauHi + 1u));
+    }
+    std::vector<RnsPoly> eval(params.mMu);
+    for (auto& poly : eval) poly.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lencEvalTrunc(
+        setupResources.executor, evalBuffers, ctx,
         enc.mLacct,
         tree,
         params.mMu,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
-        eval,
-        false,
-        1,
-        true));
+        eval, LencEvalMode::Coefficient,
+        true)));
     LOGVOLE_EXPECT_EQ(eval.size(), params.mMu);
     LOGVOLE_EXPECT_EQ(enc.mLacct.mCt.mCols, 2u * params.mTauHi);
 }

@@ -91,7 +91,7 @@
     X(LencOps, SingletonPaddingAndRelation) \
     X(LencOps, DigestTreeDeterministic) \
     X(LencOps, EvalMatchesRmulDigestMinusSmulX) \
-    X(LencOps, TruncEvalFromPrebuiltTreeMatchesEvalFromX) \
+    X(LencOps, TruncEvalPrebuiltTreeDomainsAndReuse) \
     X(LencOps, TruncLeafInputsAreGadgetPath) \
     X(RingOps, NttRoundTrip) \
     X(RingOps, PartyCachesDoNotAlias) \

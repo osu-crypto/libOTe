@@ -173,7 +173,8 @@ namespace
 
     void check_enc1_serial_reference(const RingParams& ring, bool useGpu, std::uint32_t cols, std::uint32_t gadgetBits = 20)
     {
-    tests_libOTe::logvole_test::SetupResources setupResources;
+        tests_libOTe::logvole_test::SetupResources setupResources;
+        std::array<oc::u8, 4> setupResults{};
         osuCrypto::LogVoleGpuSetupOptions setupOptions;
         osuCrypto::LogVoleExecutionOptions advanced;
         advanced.mUseGpu = useGpu;
@@ -274,8 +275,8 @@ namespace
                 auto invoke = [&](oc::PRNG& prng, RingTensor& out,
                                   std::shared_ptr<const LazyRingTensorHostState>* deferred = nullptr) {
                     return truncate
-                        ? macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, r, sk, gadgetBits, out, sigma, 19.2, &prng, inputNtt, &publicA, 4, deferred,  {}, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions))
-                        : macoro::sync_wait(lheEnc1(setupResources.executor, setupResources.results, ctx, r, sk, gadgetBits, out, sigma, 19.2, &prng, inputNtt, &publicA, 4, deferred,  {}, setupOptions));
+                        ? macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResults, ctx, r, sk, gadgetBits, out, sigma, 19.2, &prng, inputNtt, &publicA, 4, deferred,  {}, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions))
+                        : macoro::sync_wait(lheEnc1(setupResources.executor, setupResults, ctx, r, sk, gadgetBits, out, sigma, 19.2, &prng, inputNtt, &publicA, 4, deferred,  {}, setupOptions));
                 };
                 for (const char* blocks : {"0", "1"})
                 {
@@ -301,7 +302,7 @@ namespace
                         const auto* storage = rejected.mPolys.data();
                         oc::PRNG rejectedPrng(oc::block(0x345678u, 0), 3);
                         oc::PRNG untouchedPrng(oc::block(0x345678u, 0), 3);
-                        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, r, sk, gadgetBits, rejected,
+                        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResults, ctx, r, sk, gadgetBits, rejected,
                             -1.0, 19.2, &rejectedPrng, inputNtt, &publicA, 4, &owner,  {}, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions)));
                         LOGVOLE_REQUIRE_TRUE(owner == retained);
                         LOGVOLE_REQUIRE_TRUE(rejected.mPolys.data() == storage);
@@ -375,9 +376,9 @@ namespace
                 oc::PRNG actualPrng(oc::block(0x345678u, 0), 3);
                 RingTensor actual{};
                 const bool ok = truncate
-                    ? macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, r, sk, gadgetBits, actual, sigma, 19.2,
+                    ? macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResults, ctx, r, sk, gadgetBits, actual, sigma, 19.2,
                         &actualPrng, inputNtt, &publicA, workers, nullptr,  {}, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions))
-                    : macoro::sync_wait(lheEnc1(setupResources.executor, setupResources.results, ctx, r, sk, gadgetBits, actual, sigma, 19.2,
+                    : macoro::sync_wait(lheEnc1(setupResources.executor, setupResults, ctx, r, sk, gadgetBits, actual, sigma, 19.2,
                         &actualPrng, inputNtt, &publicA, workers, nullptr,  {}, setupOptions));
                 LOGVOLE_REQUIRE_TRUE(ok);
                 expect_tensor_equal(expected, actual);
@@ -395,9 +396,9 @@ namespace
                 tests_libOTe::logvole_test::ScopedOptionValue forceOption(ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mLheDevice, true);
                 auto invoke = [&](oc::PRNG& prng, RingTensor& output, double clip) {
                     return truncate
-                        ? macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResources.results, ctx, r, sk, gadgetBits, output, sigma, clip,
+                        ? macoro::sync_wait(lheEnc1Trunc(setupResources.executor, setupResults, ctx, r, sk, gadgetBits, output, sigma, clip,
                             &prng, inputNtt, &publicA, 4, nullptr,  {}, nullptr, nullptr, nullptr, nullptr, 0, false, setupOptions))
-                        : macoro::sync_wait(lheEnc1(setupResources.executor, setupResources.results, ctx, r, sk, gadgetBits, output, sigma, clip,
+                        : macoro::sync_wait(lheEnc1(setupResources.executor, setupResults, ctx, r, sk, gadgetBits, output, sigma, clip,
                             &prng, inputNtt, &publicA, 4, nullptr,  {}, setupOptions));
                 };
                 for (const char* parallel : { "0", "1" })
@@ -496,6 +497,7 @@ void LogVole_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP& cmd)
     LOGVOLE_EXPECT_EQ(ct1.mCols, params.mTau);
     expect_tensor_equal(ct1, ct2);
 
+    tests_libOTe::logvole_test::SenderResources decrypt(params.mRing);
     for (std::uint32_t col = 0; col < params.mTau; ++col)
     {
         std::vector<RnsPoly> column;
@@ -505,8 +507,9 @@ void LogVole_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP& cmd)
             column.push_back(ct1.mPolys[ringTensorIndex(ct1, row, col)]);
         }
 
-        std::vector<RnsPoly> dec;
-        LOGVOLE_REQUIRE_TRUE(lheDec(ctx, column, sk1[col], dec, &publicA));
+        auto dec = column;
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(decrypt.executor, decrypt.buffers,
+            ctx, dec, sk1[col], publicA, LheDomain::Coefficient)));
 
         for (std::uint32_t row = 0; row < params.mMu; ++row)
         {
@@ -559,8 +562,11 @@ void LogVole_LheOps_ApplyCt1AndDeriveSkxRelation(const oc::CLP&)
     RnsPoly skx{};
     LOGVOLE_REQUIRE_TRUE(deriveSkx(ctx, sk1, digest, tbkPrime, params.mGadgetLogBase, params.mTau, skx));
 
-    std::vector<RnsPoly> dec;
-    LOGVOLE_REQUIRE_TRUE(lheDec(ctx, applied, skx, dec, &publicA, true));
+    tests_libOTe::logvole_test::SenderResources decrypt(params.mRing);
+    auto dec = applied;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(decrypt.executor, decrypt.buffers,
+        ctx, dec, skx, publicA, LheDomain::Ntt)));
+    LOGVOLE_REQUIRE_TRUE(inverseNttBatch(dec, ctx));
 
     for (std::uint32_t row = 0; row < params.mMu; ++row)
     {
@@ -597,8 +603,11 @@ void LogVole_LheOps_TruncApplyCt1AndDeriveSkxRelation(const oc::CLP&)
     RnsPoly skx{};
     LOGVOLE_REQUIRE_TRUE(deriveSkxTrunc(ctx, sk1, digest, tbkPrime, params.mGadgetLogBase, params.mTauHi, skx));
 
-    std::vector<RnsPoly> dec;
-    LOGVOLE_REQUIRE_TRUE(lheDec(ctx, applied, skx, dec, &publicA, true));
+    tests_libOTe::logvole_test::SenderResources decrypt(params.mRing);
+    auto dec = applied;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(lheDec(decrypt.executor, decrypt.buffers,
+        ctx, dec, skx, publicA, LheDomain::Ntt)));
+    LOGVOLE_REQUIRE_TRUE(inverseNttBatch(dec, ctx));
 
     RnsPoly highPart{};
     LOGVOLE_REQUIRE_TRUE(recompute_trunc_high_part(ctx, digest, params.mGadgetLogBase, params.mTauHi, highPart));

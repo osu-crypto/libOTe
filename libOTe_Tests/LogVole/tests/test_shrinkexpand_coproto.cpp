@@ -312,12 +312,13 @@ namespace
             LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mNodes.data() == nodeAllocations[i]);
             LOGVOLE_REQUIRE_TRUE(lencBuffers[i].mCiphertexts.empty() && lencBuffers[i].mNodes.empty());
         }
-        // The migrated production path must preserve the exact legacy result.
+        // Socket and direct async expansion must preserve the same arithmetic result.
         ShrinkExpandShrinkOutput shrink;
         LOGVOLE_REQUIRE_TRUE(shrinkExpandShrink(receiverState, x, shrink));
         senderExpandInput.mDigest = std::move(shrink.mDigest);
         ShrinkExpandSenderExpandOutput reference;
-        LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(senderState, senderExpandInput, reference, 1));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandSender(executor, std::span(buffers).first(1),
+            senderState, senderExpandInput, reference)));
         expect_batch_equal(senderOutput.mTbk, reference.mTbk);
 
         ShrinkExpandExpandReceiverInput coreInput;
@@ -335,7 +336,8 @@ namespace
             : deriveSkx(ctx, senderState.hostSk1(), coreInput.mDigest, tbkPrime,
                 params.mGadgetLogBase, params.mTau, coreInput.mSkX));
         ShrinkExpandReceiverExpandOutput receiverReference;
-        LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiverState, coreInput, receiverReference, 1));
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandReceiver(executor, std::span(receiverBuffers).first(1),
+            std::span(lencBuffers).first(1), receiverState, coreInput, receiverReference)));
         expect_batch_equal(receiverOutput.mTbm, receiverReference.mTbm);
         if (params.mTruncateOneGadgetDigit)
         {

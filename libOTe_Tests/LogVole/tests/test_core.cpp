@@ -1752,10 +1752,12 @@ void LogVole_Core_SeedLabelDenoiseMatchesShrinkExpandComb(const oc::CLP&)
     const auto input = sample_batch(ctx, outCount * tau, 0x5005u);
 
     std::vector<RnsPoly> expected;
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandDenoiseComb(ctx, input, expected));
+    LOGVOLE_REQUIRE_TRUE(detail::denoiseCombSerial(ctx, input, expected));
 
     std::vector<RnsPoly> actual;
-    LOGVOLE_REQUIRE_TRUE(seedLabelDenoiseTbm(input, outCount, tau, params, actual));
+    tests_libOTe::logvole_test::SetupResources resources;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandDenoiseComb(
+        resources.executor, outCount, ctx, input, actual)));
     expect_batch_equal(actual, expected);
 }
 
@@ -3326,8 +3328,15 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
 
     RnsPoly senderKey{};
     RnsPoly receiverKey{};
-    LOGVOLE_REQUIRE_TRUE(computeRootSenderKey(sender, response.mSeed, senderKey));
-    LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(receiver, digestState, response, receiverKey));
+    tests_libOTe::logvole_test::SetupResources rootResources;
+    tests_libOTe::logvole_test::ReceiverBuffers rootBuffers(params.mShrinkExpand, false,
+        std::max(1u, params.mShrinkExpand.mNumWorkerThreads));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(computeRootSenderKey(
+        rootResources.executor, rootBuffers.lhe, sender, response.mSeed, senderKey)));
+    RootResponseMessage receiverKeyResponse = response;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootResponseReceiver(
+        rootResources.executor, rootBuffers.lhe, rootBuffers.lenc, receiver,
+        digestState, receiverKeyResponse, receiverKey)));
     LOGVOLE_EXPECT_TRUE(rangesEqual(receiver.mGoldenSeed, response.mSeed));
     LOGVOLE_EXPECT_FALSE(response.mSkPrimeCoeffs.empty());
 
@@ -3390,8 +3399,10 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     }
     RnsPoly declinedKey{};
     {
-        LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(
-            wireReceiver, digestState, response, declinedKey));
+        RootResponseMessage declinedKeyResponse = response;
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootResponseReceiver(
+            rootResources.executor, rootBuffers.lhe, rootBuffers.lenc, wireReceiver,
+            digestState, declinedKeyResponse, declinedKey)));
     }
     LOGVOLE_EXPECT_TRUE(rangesEqual(receiverKey.mCoeffs, declinedKey.mCoeffs));
     if (expectOwnedRootWire)
@@ -3431,8 +3442,10 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
         !eagerLacctReceiver.mRootLacctLeft.mCt.mPolys.empty());
     RnsPoly eagerLacctKey{};
     {
-        LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(
-            eagerLacctReceiver, digestState, response, eagerLacctKey));
+        RootResponseMessage eagerLacctKeyResponse = response;
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootResponseReceiver(
+            rootResources.executor, rootBuffers.lhe, rootBuffers.lenc, eagerLacctReceiver,
+            digestState, eagerLacctKeyResponse, eagerLacctKey)));
     }
     LOGVOLE_EXPECT_TRUE(rangesEqual(receiverKey.mCoeffs, eagerLacctKey.mCoeffs));
 
@@ -3457,19 +3470,21 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
         !eagerBStarReceiver.mRootPublicBStarNtt.empty());
     RnsPoly eagerBStarKey{};
     {
-        LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(
-            eagerBStarReceiver, digestState, response, eagerBStarKey));
+        RootResponseMessage eagerBStarKeyResponse = response;
+        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootResponseReceiver(
+            rootResources.executor, rootBuffers.lhe, rootBuffers.lenc, eagerBStarReceiver,
+            digestState, eagerBStarKeyResponse, eagerBStarKey)));
     }
     LOGVOLE_EXPECT_TRUE(rangesEqual(receiverKey.mCoeffs, eagerBStarKey.mCoeffs));
 #endif
 
-    // Passing no device-output slot deliberately exercises the owned overload's
-    // host fallback. Its local keeps the moved sk' alive across any device-path
-    // decline, while the const result remains bit-identical and unconsumed.
+    // CPU finalization explicitly consumes its mutable response after validation;
+    // the independent reference response remains available for later phases.
     RootResponseMessage consumedResponse = ownedResponse;
     RnsPoly ownedReceiverKey{};
-    LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(
-        receiver, digestState, std::move(consumedResponse), ownedReceiverKey));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootResponseReceiver(
+        rootResources.executor, rootBuffers.lhe, rootBuffers.lenc, receiver,
+        digestState, consumedResponse, ownedReceiverKey)));
     LOGVOLE_EXPECT_TRUE(consumedResponse.mSeed.empty());
     LOGVOLE_EXPECT_TRUE(consumedResponse.mSkPrimeCoeffs.empty());
     LOGVOLE_EXPECT_TRUE(rangesEqual(receiverKey.mCoeffs, ownedReceiverKey.mCoeffs));
@@ -3481,8 +3496,9 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     const std::size_t malformedResponsePolySize =
         malformedResponse.mSkPrimeCoeffs.size();
     RnsPoly rejectedReceiverKey{};
-    LOGVOLE_EXPECT_FALSE(finalizeRootResponseReceiver(
-        receiver, digestState, std::move(malformedResponse), rejectedReceiverKey));
+    LOGVOLE_EXPECT_FALSE(macoro::sync_wait(finalizeRootResponseReceiver(
+        rootResources.executor, rootBuffers.lhe, rootBuffers.lenc, receiver,
+        digestState, malformedResponse, rejectedReceiverKey)));
     LOGVOLE_EXPECT_EQ(malformedResponse.mSeed.size(), malformedResponseSeedSize);
     LOGVOLE_EXPECT_EQ(
         malformedResponse.mSkPrimeCoeffs.size(), malformedResponsePolySize);
@@ -3496,8 +3512,8 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     senderExpandInput.mTbkPrime = senderKey;
 
     ShrinkExpandSenderExpandOutput senderExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(sender.mShrinkExpandState, senderExpandInput, senderExpand,
-        sender.mShrinkExpandState.mParams.mNumWorkerThreads));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandSender(rootResources.executor, rootBuffers.lhe,
+        sender.mShrinkExpandState, senderExpandInput, senderExpand)));
 
     ShrinkExpandExpandReceiverInput receiverExpandInput{};
     receiverExpandInput.mSid = params.mSessionId;
@@ -3510,8 +3526,8 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     receiverExpandInput.mTree = digestState.mRootTree;
 
     ShrinkExpandReceiverExpandOutput receiverExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiver.mShrinkExpandState, receiverExpandInput, receiverExpand,
-        receiver.mShrinkExpandState.mParams.mNumWorkerThreads));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandReceiver(rootResources.executor, rootBuffers.lhe, rootBuffers.lenc,
+        receiver.mShrinkExpandState, receiverExpandInput, receiverExpand)));
     LOGVOLE_REQUIRE_EQ(senderExpand.mTbk.size(), x.size());
     LOGVOLE_REQUIRE_EQ(receiverExpand.mTbm.size(), x.size());
 
@@ -4277,8 +4293,15 @@ void LogVole_Core_RootOnlineLocalRelation(const oc::CLP&)
 
     RnsPoly senderKey{};
     RnsPoly receiverKey{};
-    LOGVOLE_REQUIRE_TRUE(computeRootSenderKey(sender, response.mSeed, senderKey));
-    LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(receiver, digestState, response, receiverKey));
+    tests_libOTe::logvole_test::SetupResources rootResources;
+    tests_libOTe::logvole_test::ReceiverBuffers rootBuffers(params.mShrinkExpand, false,
+        std::max(1u, params.mShrinkExpand.mNumWorkerThreads));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(computeRootSenderKey(
+        rootResources.executor, rootBuffers.lhe, sender, response.mSeed, senderKey)));
+    RootResponseMessage receiverKeyResponse = response;
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootResponseReceiver(
+        rootResources.executor, rootBuffers.lhe, rootBuffers.lenc, receiver,
+        digestState, receiverKeyResponse, receiverKey)));
 
     RnsPoly directReceiverKey{};
     LOGVOLE_REQUIRE_TRUE(deriveSkxTrunc(
@@ -4306,8 +4329,8 @@ void LogVole_Core_RootOnlineLocalRelation(const oc::CLP&)
     senderExpandInput.mTbkPrime = senderKey;
 
     ShrinkExpandSenderExpandOutput senderExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(sender.mShrinkExpandState, senderExpandInput, senderExpand,
-        sender.mShrinkExpandState.mParams.mNumWorkerThreads));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandSender(rootResources.executor, rootBuffers.lhe,
+        sender.mShrinkExpandState, senderExpandInput, senderExpand)));
 
     ShrinkExpandExpandReceiverInput receiverExpandInput{};
     receiverExpandInput.mSid = params.mSessionId;
@@ -4320,8 +4343,8 @@ void LogVole_Core_RootOnlineLocalRelation(const oc::CLP&)
     receiverExpandInput.mTree = digestState.mRootTree;
 
     ShrinkExpandReceiverExpandOutput receiverExpand{};
-    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiver.mShrinkExpandState, receiverExpandInput, receiverExpand,
-        receiver.mShrinkExpandState.mParams.mNumWorkerThreads));
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandExpandReceiver(rootResources.executor, rootBuffers.lhe, rootBuffers.lenc,
+        receiver.mShrinkExpandState, receiverExpandInput, receiverExpand)));
 
     std::vector<RnsPoly> actual;
     std::vector<RnsPoly> expected;
