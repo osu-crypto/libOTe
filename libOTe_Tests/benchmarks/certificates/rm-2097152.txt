@@ -1,0 +1,14 @@
+n=2097152 L=209715 delta_actual=0.099999904632568359 cutoff=32
+RM(2,5) [32,16,8]
+  exact outer coefficient w= 8: bounded contribution 2^(-48.093459)
+  exact outer coefficient w=12: bounded contribution 2^(-76.095413)
+  exact outer coefficient w=16: bounded contribution 2^(-87.730642)
+  exact outer coefficient w=20: bounded contribution 2^(-112.898385)
+  exact outer coefficient w=24: bounded contribution 2^(-124.736857)
+  exact outer coefficient w=28: bounded contribution 2^(-148.208138)
+  exact outer coefficient w=32: bounded contribution 2^(-160.115887)
+  w<=32 subtotal upper bound: 2^(-47.093459)
+  w>32 subtotal upper bound: 2^(-158.898549)
+  largest tail summand bound: w=36 h=42 2^(-159.898560)
+  COMPLETE mu_bin upper bound: 2^(-47.093459)
+  CERTIFIED SECURITY BITS: 47.093459

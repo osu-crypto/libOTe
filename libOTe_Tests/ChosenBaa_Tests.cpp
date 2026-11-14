@@ -3,7 +3,10 @@
 #include "cryptoTools/Common/TestCollection.h"
 #include "Common.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
+#include "libOTe/Tools/BlkAccCode/ReedMullerBaaCode.h"
+#include "libOTe/Tools/BlkAccCode/SmallAlphabetBaaCode.h"
 #include <algorithm>
+#include <bit>
 
 using namespace osuCrypto;
 
@@ -68,6 +71,12 @@ namespace
             std::swap(next,forward);
         }
         F lhs(0),rhs(0);
+        AlignedUnVector<F> optimized(n), workspace(n);
+        code.encode(message, optimized, workspace);
+        if (!std::equal(optimized.begin(), optimized.end(), forward.begin())) throw RTE_LOC;
+        optimized = original;
+        code.dualEncode(optimized, workspace);
+        for (u64 i = 0; i < code.outputSize(); ++i) if (optimized[i] != x[i]) throw RTE_LOC;
         for (u64 i = 0; i < message.size(); ++i) lhs += message[i] * x[i];
         for (u64 i = 0; i < n; ++i) rhs += original[i] * forward[i];
         if (lhs != rhs) throw RTE_LOC;
@@ -149,6 +158,12 @@ namespace
             std::swap(forward, next);
         }
         block lhs = ZeroBlock, rhs = ZeroBlock;
+        AlignedUnVector<block> optimized(n), workspace(n);
+        code.encode(message, optimized, workspace);
+        if (!std::equal(optimized.begin(), optimized.end(), forward.begin())) throw RTE_LOC;
+        optimized = originalX;
+        code.dualEncode(optimized, workspace);
+        for (u64 i = 0; i < code.outputSize(); ++i) if (optimized[i] != x[i]) throw RTE_LOC;
         for (u64 i = 0; i < message.size(); ++i)
             lhs ^= message[i].gf128Mul(x[i]);
         for (u64 i = 0; i < n; ++i)
@@ -161,6 +176,88 @@ namespace
             if (separate[i] != y[i]) throw RTE_LOC;
     }
 
+    template<typename F>
+    void checkSmall(u64 n)
+    {
+        using Field = ChosenBaaField<F>;
+        SmallAlphabetBaaCode<F> code;
+        code.config(n, block(210, n));
+        PRNG random(block(211, n));
+        AlignedUnVector<F> message(n / 2), input(n), forward(n), scalar(n), next(n), scratch(n);
+        for (auto* v : {&message, &input}) for (auto& x : *v) x = F(random.get());
+        for (u64 b = 0; b < n / 16; ++b)
+        {
+            for (u64 j = 0; j < 8; ++j) scalar[b * 16 + j] = message[b * 8 + j];
+            for (u64 col = 0; col < 8; ++col)
+            {
+                F sum = Field::zero();
+                for (u64 row = 0; row < 8; ++row)
+                    sum = Field::add(sum, Field::mul(message[b * 8 + row], code.matrix(row, col)));
+                scalar[b * 16 + 8 + col] = sum;
+            }
+        }
+        for (unsigned stage = 0; stage < 2; ++stage)
+        {
+            F sum = Field::zero(); std::vector<bool> seen(n);
+            for (u64 i = 0; i < n; ++i)
+            {
+                const auto meta = code.metadata(stage, i), p = meta & ((1u << 24) - 1);
+                if (p >= n || seen[p]) throw RTE_LOC;
+                seen[p] = true;
+                next[i] = sum = Field::add(scalar[p], Field::mul(sum, Field::point(meta >> 24)));
+            }
+            std::swap(scalar, next);
+        }
+        code.encode(message, forward, scratch);
+        if (!std::equal(scalar.begin(), scalar.end(), forward.begin())) throw RTE_LOC;
+        F lhs = Field::zero(), rhs = Field::zero();
+        for (u64 i = 0; i < n; ++i) lhs = Field::add(lhs, Field::mul(input[i], forward[i]));
+        code.dualEncode(input, scratch);
+        for (u64 i = 0; i < n / 2; ++i) rhs = Field::add(rhs, Field::mul(message[i], input[i]));
+        if (lhs != rhs) throw RTE_LOC;
+    }
+    void checkRm(u64 n)
+    {
+        ReedMullerBaaCode<> code;
+        code.config(n, block(109, n));
+        PRNG random(block(110, n));
+        AlignedUnVector<block> message(n / 2), input(n), forward(n), scalar(n), next(n), scratch(n);
+        random.get(message.data(), message.size()); random.get(input.data(), n);
+        // Independent evaluation of all degree <= 2 Boolean monomials.
+        for (u64 b = 0; b < n / 32; ++b)
+        for (unsigned point = 0; point < 32; ++point)
+        {
+            auto value = ZeroBlock;
+            unsigned row = 0;
+            for (unsigned mask = 0; mask < 32; ++mask)
+                if (std::popcount(mask) <= 2)
+                {
+                    if ((point & mask) == mask) value ^= message[b * 16 + row];
+                    ++row;
+                }
+            scalar[b * 32 + point] = value;
+        }
+        for (unsigned stage = 0; stage < 2; ++stage)
+        {
+            block sum = ZeroBlock;
+            std::vector<bool> seen(n);
+            for (u64 i = 0; i < n; ++i)
+            {
+                const auto p = code.permutationIndex(stage, i);
+                if (p >= n || seen[p]) throw RTE_LOC;
+                seen[p] = true;
+                next[i] = sum ^= scalar[p];
+            }
+            std::swap(scalar, next);
+        }
+        code.encode(message, forward, scratch);
+        if (!std::equal(scalar.begin(), scalar.end(), forward.begin())) throw RTE_LOC;
+        block lhs = ZeroBlock, rhs = ZeroBlock;
+        for (u64 i = 0; i < n; ++i) lhs ^= input[i].gf128Mul(forward[i]);
+        code.dualEncode(input, scratch);
+        for (u64 i = 0; i < n / 2; ++i) rhs ^= message[i].gf128Mul(input[i]);
+        if (lhs != rhs) throw RTE_LOC;
+    }
     task<> badOpening(Socket& socket)
     {
         std::array<u8, 32> invalidCommitment{};
@@ -173,6 +270,34 @@ namespace
 
 void ChosenBaa_Code_test(const CLP&)
 {
+    for (u64 bit = 0; bit < 128; ++bit)
+    for (u32 c = 1; c <= 256; ++c)
+    {
+        const block x = bit < 64 ? block(0, u64{1} << bit) : block(u64{1} << (bit - 64), 0);
+        if (SmallBaaArithmetic<block>::madd(x, c, ZeroBlock) != x.gf128Mul(block(0, c))) throw RTE_LOC;
+    }
+    for (u64 n : {16, 32, 48, 256, 1040, 262144})
+    {
+        checkSmall<block>(n);
+        if (n < 262144) checkSmall<Goldilocks>(n);
+    }
+    for (u64 n : {32, 64, 96, 256, 1056, 262144}) checkRm(n);
+    // Exhaust the binary constituent: this verifies the exact RM weight
+    // enumerator used by the finite distance calculation, not just distance 8.
+    std::array<u64, 33> spectrum{};
+    std::array<block, 16> rmInput;
+    std::array<block, 32> rmOutput;
+    for (u64 word = 0; word < (1u << 16); ++word)
+    {
+        for (unsigned j = 0; j < 16; ++j) rmInput[j] = block(0, (word >> j) & 1);
+        ReedMullerBaaCode<>::localEncode(rmInput.data(), rmOutput.data());
+        u64 weight = 0; for (auto x : rmOutput) weight += (x != ZeroBlock);
+        ++spectrum[weight];
+    }
+    std::array<u64, 33> expected{};
+    expected[0] = expected[32] = 1; expected[8] = expected[24] = 620;
+    expected[12] = expected[20] = 13888; expected[16] = 36518;
+    if (spectrum != expected) throw RTE_LOC;
     bool repeatedRejected = false;
     try { ChosenBaaCode<8, Goldilocks, RepeatedPoints> code; code.config(16, ZeroBlock); }
     catch (const std::invalid_argument&) { repeatedRejected = true; }

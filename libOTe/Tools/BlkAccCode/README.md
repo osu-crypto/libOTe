@@ -1,5 +1,12 @@
 # Chosen-block BAA for GF(2^128) VOLE
 
+Standalone code experiments now also provide `ReedMullerBaaCode` (10% distance)
+and `SmallAlphabetBaaCode` (30.524% distance), with allocation-free forward and
+transpose interfaces. See the [code-distance and encoding comparison](../../../libOTe_Tests/benchmarks/ChosenBaaDirections.md)
+for their exact certificate dimensions, proof scope, Fp controls, and timing
+method. These are separate encoder classes; the protocol profiles described
+below still use the original full-field `ChosenBaaCode`.
+
 `ChosenBaa16x8` uses the systematic RS[16,8,9] constituent over GF(2^128).
 `ChosenBaa16x4` uses RS[16,4,13]. Both profiles apply two independently
 weighted accumulator stages and two independent Fisher--Yates shuffles.

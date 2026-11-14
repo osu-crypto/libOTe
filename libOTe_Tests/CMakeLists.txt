@@ -50,6 +50,10 @@ if(LIBOTE_BAA_BENCHMARK)
     target_include_directories(chosen_baa_benchmark PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
     target_compile_features(chosen_baa_benchmark PRIVATE cxx_std_20)
     target_link_libraries(chosen_baa_benchmark PRIVATE cryptoTools)
+    add_executable(chosen_baa_directions benchmarks/ChosenBaaDirections.cpp)
+    target_include_directories(chosen_baa_directions PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
+    target_compile_features(chosen_baa_directions PRIVATE cxx_std_20)
+    target_link_libraries(chosen_baa_directions PRIVATE cryptoTools)
 endif()
 
 

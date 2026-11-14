@@ -49,6 +49,22 @@ namespace osuCrypto
                 local<K, Row + 1>(in, out, matrix);
             }
         }
+        template<u64 K, u64 Col, u64 Row = 0>
+        static OC_FORCEINLINE F forwardDot(const F* in, const F* matrix, F sum)
+        {
+            if constexpr (Row == K) return sum;
+            else return forwardDot<K, Col, Row + 1>(in, matrix,
+                add(sum, mul(in[Row], matrix[Row * (16 - K) + Col])));
+        }
+        template<u64 K, u64 Col = 0>
+        static OC_FORCEINLINE void localForward(const F* in, F* out, const F* matrix)
+        {
+            if constexpr (Col < 16 - K)
+            {
+                out[K + Col] = forwardDot<K, Col>(in, matrix, zero());
+                localForward<K, Col + 1>(in, out, matrix);
+            }
+        }
     };
 
     namespace chosen_baa_detail
@@ -179,6 +195,43 @@ namespace osuCrypto
                 dot<K,Row>(in,matrix,lo,hi);
                 out[Row]=in[Row]^lo.gf128Reduce(hi);
                 local<K,Row+1>(in,out,matrix);
+#endif
+            }
+        }
+        template<u64 K, u64 Col, u64 Row = 0, typename V>
+        static OC_FORCEINLINE void forwardDot(const block* in, const block* matrix, V& lo, V& hi)
+        {
+            if constexpr (Row < K)
+            {
+#ifdef OC_ENABLE_VPCLMUL
+                using W = chosen_baa_detail::Wide;
+                V l, h;
+                W::product(W::broadcast(in[Row]), W::load(matrix + Row * (16 - K) + Col), l, h);
+                lo = W::bxor(lo, l); hi = W::bxor(hi, h);
+#else
+                block l, h;
+                in[Row].gf128Mul(matrix[Row * (16 - K) + Col], l, h);
+                lo ^= l; hi ^= h;
+#endif
+                forwardDot<K, Col, Row + 1>(in, matrix, lo, hi);
+            }
+        }
+        template<u64 K, u64 Col = 0>
+        static OC_FORCEINLINE void localForward(const block* in, block* out, const block* matrix)
+        {
+            if constexpr (Col < 16 - K)
+            {
+#ifdef OC_ENABLE_VPCLMUL
+                using W = chosen_baa_detail::Wide;
+                auto lo = W::broadcast(ZeroBlock), hi = lo;
+                forwardDot<K, Col>(in, matrix, lo, hi);
+                W::store(out + K + Col, W::reduce(lo, hi));
+                localForward<K, Col + W::lanes>(in, out, matrix);
+#else
+                block lo = ZeroBlock, hi = ZeroBlock;
+                forwardDot<K, Col>(in, matrix, lo, hi);
+                out[K + Col] = lo.gf128Reduce(hi);
+                localForward<K, Col + 1>(in, out, matrix);
 #endif
             }
         }

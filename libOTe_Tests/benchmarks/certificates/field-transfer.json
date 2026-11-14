@@ -1,0 +1,12 @@
+{
+  "construction": "MDS [16,8,9]; two uniform independent permutations; two recursive scans",
+  "alphabet": "256 distinct nonzero elements of any one fixed field admitting the local MDS code",
+  "n": 2097152,
+  "k": 1048576,
+  "minimum_distance_at_least": 640135,
+  "failure_upper": "2310514520786904766507047478833/1461501637330902918203684832716283019655932542976",
+  "failure_log2_upper": "-11826788599401/200000000000",
+  "direct_leaves": 349,
+  "characteristic_dependent_leaves": 0,
+  "ledger_sha256": "45cce4c94abfbfc967eeb9c4316b75a8c497dbd75605e8fcbe7cc3ee4a4adda1"
+}

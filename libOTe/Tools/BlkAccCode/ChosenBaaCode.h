@@ -26,6 +26,7 @@ namespace osuCrypto
         std::array<AlignedUnVector<u32>, 2> mPerm;
         std::array<block, 2> mWeightSeeds;
         const Matrix* mMatrix = nullptr;
+        Matrix mForwardMatrix;
 
         static u32 sampleBelow(PRNG& prng, u32 bound)
         {
@@ -62,7 +63,7 @@ namespace osuCrypto
             }
         }
         template<bool Pair, u64 J = 0>
-        static OC_FORCEINLINE void prefetchDestinations(const u32* indices, F* a, F* b)
+        static OC_FORCEINLINE void prefetchDestinations(const u32* indices, const F* a, const F* b)
         {
 #ifdef OC_ENABLE_SSE2
             if constexpr (J < 8)
@@ -177,6 +178,11 @@ namespace osuCrypto
             AlignedUnVector<F> scratchA(mN), scratchB;
             if constexpr (Pair)
                 scratchB.resize(mN);
+            transposeWithScratch<Pair>(a, b, scratchA, scratchB);
+        }
+        template<bool Pair>
+        void transposeWithScratch(span<F> a, span<F> b, span<F> scratchA, span<F> scratchB) const
+        {
             stage<Pair>(a.data(), b.data(), scratchA.data(), scratchB.data(), 1);
             stage<Pair>(scratchA.data(), scratchB.data(), a.data(), b.data(), 0);
             for (u64 i = 0; i < mN / 16; ++i)
@@ -188,12 +194,52 @@ namespace osuCrypto
             }
         }
 
+        template<u64 J = 0>
+        static OC_FORCEINLINE void gatherForward(const F* in, const u32* perm, F* values)
+        {
+            if constexpr (J < 8) { values[J] = in[perm[J]]; gatherForward<J + 1>(in, perm, values); }
+        }
+        template<u64 J = 0>
+        static OC_FORCEINLINE void suffixForward(F* values, F* out, F& sum)
+        {
+            if constexpr (J < 8)
+            {
+                out[7 - J] = sum = Field::add(sum, values[7 - J]);
+                suffixForward<J + 1>(values, out, sum);
+            }
+        }
+        void forwardStage(const F* in, F* out, u64 which) const
+        {
+            // The reverse traversal needs the same coefficient stream as the
+            // transpose. Generate it into the destination, then consume and
+            // overwrite each batch; no separate weight array or allocation.
+            PRNG random(mWeightSeeds[which]);
+            for (u64 i = 0; i < mN; i += 8) Field::sample8(random, out + i);
+            F sum = Field::zero();
+            const auto* p = mPerm[which].data();
+            for (u64 end = mN; end; end -= 8)
+            {
+                const auto i = end - 8;
+#ifdef OC_ENABLE_SSE2
+                if constexpr (std::is_same_v<F, block>)
+                    if (i >= 256) prefetchDestinations<false>(p + i - 256, in, nullptr);
+#endif
+                std::array<F, 8> v;
+                gatherForward(in, p + i, v.data());
+                Field::mul8(v.data(), out + i);
+                suffixForward(v.data(), out + i, sum);
+            }
+        }
+
     public:
         void config(u64 n, block seed)
         {
             if (!n || n % 16 || n > std::numeric_limits<u32>::max())
                 throw std::invalid_argument("Chosen BAA length must be a positive multiple of 16 fitting u32.");
             mMatrix = &matrixData();
+            for (u64 row = 0; row < K; ++row)
+                for (u64 col = 0; col < 16 - K; ++col)
+                    mForwardMatrix[row * (16 - K) + col] = (*mMatrix)[col * K + row];
             PRNG master(seed);
             const std::array<block, 2> permutationSeeds{ master.get<block>(), master.get<block>() };
             mWeightSeeds = { master.get<block>(), master.get<block>() };
@@ -224,6 +270,28 @@ namespace osuCrypto
         }
         void dualEncode(span<F> a) const { encode<false>(a, {}); }
         void dualEncode2(span<F> a, span<F> b) const { encode<true>(a, b); }
+        // Caller-owned disjoint scratch removes allocation from repeated calls.
+        void dualEncode(span<F> a, span<F> scratch) const
+        {
+            if (!mN || a.size() != mN || scratch.size() != mN)
+                throw std::invalid_argument("Chosen BAA transpose buffer size.");
+            transposeWithScratch<false>(a, {}, scratch, {});
+        }
+        // Forward map of dualEncode: k -> n. All three buffers are disjoint.
+        void encode(span<const F> input, span<F> output, span<F> scratch) const
+        {
+            if (!mN || input.size() != outputSize() || output.size() != mN || scratch.size() != mN)
+                throw std::invalid_argument("Chosen BAA forward buffer size.");
+            for (u64 i = 0; i < mN / 16; ++i)
+            {
+                const auto* src = input.data() + K * i;
+                auto* dst = output.data() + 16 * i;
+                for (u64 j = 0; j < K; ++j) dst[j] = src[j];
+                Field::template localForward<K>(src, dst, mForwardMatrix.data());
+            }
+            forwardStage(output.data(), scratch.data(), 0);
+            forwardStage(scratch.data(), output.data(), 1);
+        }
     };
 
 }
