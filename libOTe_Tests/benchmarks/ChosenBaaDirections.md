@@ -115,6 +115,62 @@ The second command uses the original gen-BAA verifier and its numpy/scipy
 dependencies. Its uncompressed ledger SHA-256 is
 `45cce4c94abfbfc967eeb9c4316b75a8c497dbd75605e8fcbe7cc3ee4a4adda1`.
 
+The target optimization pass preserves both code matrices, coefficient streams,
+and distance evidence. At the same dimensions on Peach, six seeds with two
+warmups and 31 samples per direction give the following milliseconds. Old and
+new executables alternate order across seeds; every per-seed checksum matches.
+
+| Profile | Previous forward / transpose | Current forward | Current transpose |
+| --- | ---: | ---: | ---: |
+| RM, >10% | 10.77 / 12.99 | 10.57 (10.56–10.62) | 9.57 (9.50–9.61) |
+| RS q256, >30.524% | 19.94 / 19.44 | 17.35 (17.30–17.42) | 16.85 (16.83–16.91) |
+
+Thus the RM transpose beats the 10.7 ms target, and both q256 directions are
+approximately 17 ms. The higher distance certificate remains 30.524%, not 32%.
+`results/target-summary.json` records these aggregates; the source, scripts,
+individual results, compiler flags and machine details are archived in
+`results/peach-code-targets-20261114.tar.gz`.
+
+The RM transpose keeps the first suffix/scatter pass, then computes the final
+suffix sum contiguously and fuses its inverse gather with local compression.
+The inverse permutation adds 4n bytes of setup storage (8 MiB here), with no
+encoding-time allocation. AArch64 retains the original scatter/compression
+path: the fused version regressed the native M3 transpose from about 17.4 to
+20.6 ms. It therefore allocates no inverse permutation on AArch64.
+
+The q256 fast path uses three GFNI bytewise affine maps for polynomial
+multiplication and reduction. It computes the low and high product bytes in
+parallel and folds the highest byte modulo x^128+x^7+x^2+x+1. A shared 16 KiB
+constant table stores duplicated low/high matrices and the two-byte reduction
+map on one cache line per coefficient. This removes broadcasts from the
+recurrence. Table selection depends only on the public code coefficient.
+All 256 coefficients, including polynomial x^8 (encoding 256), pass tests on
+all 128 input basis vectors against full GF(2^128) multiplication.
+
+GFNI is selected at compile time when both `OC_ENABLE_SSE2` and `__GFNI__` are
+defined. These Peach results use `-O3 -march=native`, including AVX-512,
+VPCLMUL and GFNI. For a compatible GCC/Clang x86 target, `-mgfni` (for example
+`-DCMAKE_CXX_FLAGS=-mgfni`) enables the new path without requiring AVX-512.
+This is a static ISA requirement, not runtime CPU dispatch. Builds without
+GFNI retain the two-carryless-product kernel; ARM retains PMULL, portable
+builds retain scalar arithmetic, and other fields retain their compile-time
+arithmetic policy. Both profiles prefetch 256 elements ahead on x86.
+
+Sequential full-size backend spot checks (one seed, 15 samples, five for
+portable) give RM forward/transpose of 10.82/10.13 ms with AVX2+VPCLMUL,
+10.87/10.47 ms with plain AVX2, and 21.37/20.71 ms with portable arithmetic.
+The corresponding q256 times without GFNI are 21.14/21.87, 23.48/23.34,
+and 332.68/298.76 ms. These are backend checks, not the six-seed target result. The final M3 path
+measured 20.57–22.92/17.95–18.06 ms for RM and
+35.54–35.99/28.11–28.42 ms for q256 across two seeds; raw results are in
+`results/mac-code-targets-20261114.tar.gz`.
+GFNI-enabled unit tests pass the independent scalar references, generic
+Goldilocks checks, transpose identities and exhaustive multiplier tests.
+ASan/UBSan also passes n=32, 96, 1056 and 262144 with GFNI enabled.
+
+The following tables retain the earlier comparison with Fp and the prior
+backend measurements; they precede the target optimization above.
+
 On Peach (Ryzen 7950X, CPU 2, 4.5 GHz, boost disabled, GCC 15.2, `-O3
 -march=native`), the six-seed results are below. Times are milliseconds;
 parentheses show the range of per-seed medians. The archive in
@@ -130,11 +186,12 @@ source hashes, compiler/machine details, and per-seed results. The separate
 | Fp, q=256, >30.524% | 17.36 (17.27â€“17.56) | 23.04 (23.01â€“23.12) |
 | Previous GF full-field RS, 30% | 30.92 (30.80â€“31.01) | 28.02 (27.73â€“28.16) |
 
-The high-distance GF forward encoder remains about 15% slower than Fp. Its
+In that earlier implementation, the high-distance GF forward encoder was about
+15% slower than Fp. Its
 transpose is about 15% faster, and its two directions are within 3%. The lower
 distance GF code is faster than the corresponding Fp control, with the weaker
-10% versus 11.7% distance bound. These results do not establish a forward-time
-match for the high-distance code. The previous full-field row is measured with
+10% versus 11.7% distance bound. The current target measurements above close this forward-time gap; these
+earlier results alone did not. The previous full-field row is measured with
 the same caller-owned buffers; older timings that included allocation and
 different cache preparation should not be substituted into this table.
 

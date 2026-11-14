@@ -2,6 +2,7 @@
 #include "ChosenBaaCode.h"
 #include <algorithm>
 #include "AdditiveRs8.h"
+#include "SmallBaaGfni.h"
 
 namespace osuCrypto
 {
@@ -19,12 +20,16 @@ namespace osuCrypto
         // eight bits, so multiplication by x^7+x^2+x+1 cannot overflow again.
         static OC_FORCEINLINE block madd(block state, u32 coefficient, block input)
         {
+#if defined(OC_ENABLE_SSE2) && defined(__GFNI__)
+            return chosen_baa_detail::smallGfniMadd(state, coefficient, input);
+#else
             const block c(0, coefficient);
             const auto lo = state.clmulepi64_si128<0x00>(c);
             const auto hi = state.clmulepi64_si128<0x01>(c);
             const auto overflow = hi.srli_si128<8>();
             return input ^ lo ^ hi.slli_si128<8>() ^ overflow ^
                 overflow.slli_epi64(1) ^ overflow.slli_epi64(2) ^ overflow.slli_epi64(7);
+#endif
         }
     };
 
@@ -99,7 +104,7 @@ namespace osuCrypto
             for (u64 j = 0; j < mN; j += 16)
             {
                 const u64 i = Transpose ? mN - j - 16 : j;
-                constexpr u64 lead = Transpose ? 64 : 256;
+                constexpr u64 lead = 256;
                 if (j + lead + 16 <= mN)
                     prefetch<Transpose>(in, out, p + (Transpose ? i - lead : i + lead));
                 if constexpr (Transpose) transposeBatch(in + i, out, p + i, sum, coefficient);

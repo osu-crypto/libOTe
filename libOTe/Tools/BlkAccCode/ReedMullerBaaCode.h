@@ -17,6 +17,13 @@ namespace osuCrypto
     {
         u64 mN = 0;
         std::array<AlignedUnVector<u32>, 2> mPerm;
+        AlignedUnVector<u32> mInverseFirst;
+#if defined(__aarch64__) || defined(_M_ARM64)
+        // Native M3 measurements favor the direct scatter/compression path.
+        static constexpr bool fusedTranspose = false;
+#else
+        static constexpr bool fusedTranspose = true;
+#endif
         static constexpr std::array<unsigned, 16> monomials{
             0,1,2,3,4,5,6,8,9,10,12,16,17,18,20,24 };
 
@@ -100,7 +107,7 @@ namespace osuCrypto
             for (u64 j = 0; j < mN; j += 16)
             {
                 const u64 i = Transpose ? mN - j - 16 : j;
-                constexpr u64 lead = Transpose ? 64 : 256;
+                constexpr u64 lead = 256;
                 if (j + lead + 16 <= mN)
                 {
                     const u64 ahead = Transpose ? i - lead : i + lead;
@@ -113,6 +120,37 @@ namespace osuCrypto
                     gather(in, p + i, v.data());
                     accumulate<false>(v.data(), out + i, p + i, sum);
                 }
+            }
+        }
+        template<unsigned J = 0>
+        static OC_FORCEINLINE void suffixBatch(F* in, F& sum)
+        {
+            if constexpr (J < 16)
+            {
+                constexpr unsigned pos = 15 - J;
+                in[pos] = sum = Field::add(sum, in[pos]);
+                suffixBatch<J + 1>(in, sum);
+            }
+        }
+        void finishTranspose(F* in, F* out) const
+        {
+            // Separate the contiguous suffix scan from the permutation, then
+            // fuse its inverse gather with local compression. This avoids a
+            // full random-write pass and an additional read of the codeword.
+            F sum = Field::zero();
+            for (u64 end = mN; end; end -= 16) suffixBatch(in + end - 16, sum);
+            const auto* p = mInverseFirst.data();
+            for (u64 i = 0; i < mN; i += 32)
+            {
+                if (i + 256 + 32 <= mN)
+                {
+                    prefetch<false>(in, out, p + i + 256);
+                    prefetch<false>(in, out, p + i + 272);
+                }
+                std::array<F, 32> v;
+                gather(in, p + i, v.data());
+                gather(in, p + i + 16, v.data() + 16);
+                localTranspose(v.data(), out + i / 2);
             }
         }
     public:
@@ -130,6 +168,11 @@ namespace osuCrypto
                 for (u64 i = 0; i < n; ++i) p[i] = u32(i);
                 PRNG random(seeds[s]);
                 for (u64 i = n; i > 1; --i) std::swap(p[i - 1], p[below(random, u32(i))]);
+            }
+            if constexpr (fusedTranspose)
+            {
+                mInverseFirst.resize(n);
+                for (u64 i = 0; i < n; ++i) mInverseFirst[mPerm[0][i]] = u32(i);
             }
             mN = n;
         }
@@ -166,8 +209,13 @@ namespace osuCrypto
             if (!mN || inOut.size() != mN || scratch.size() != mN)
                 throw std::invalid_argument("RM BAA transpose buffer size.");
             stage<true>(inOut.data(), scratch.data(), 1);
-            stage<true>(scratch.data(), inOut.data(), 0);
-            for (u64 i = 0; i < mN / 32; ++i) localTranspose(inOut.data() + 32 * i, inOut.data() + 16 * i);
+            if constexpr (fusedTranspose) finishTranspose(scratch.data(), inOut.data());
+            else
+            {
+                stage<true>(scratch.data(), inOut.data(), 0);
+                for (u64 i = 0; i < mN / 32; ++i)
+                    localTranspose(inOut.data() + 32 * i, inOut.data() + 16 * i);
+            }
         }
     };
 }
