@@ -12690,16 +12690,34 @@ namespace osuCrypto::LogVole::gpu
         }
 
 
-        bool gSharedConfigured = false;
+
+        // Launchers retain the device/stream contract of the borrowed tables.
+        // Only cold initialization queries CUDA; warm dispatch is an atomic load.
+        bool lockKernelInitialization(KernelInitializationState& state,
+            std::atomic<bool>& configured, std::unique_lock<std::mutex>& lock, bool& ready)
+        {
+            lock = std::unique_lock<std::mutex>(state.mMutex);
+            ready = configured.load(std::memory_order_relaxed);
+            if (ready) return true;
+            int device = -1;
+            return check(cudaGetDevice(&device), "kernel initialization device") &&
+                device == state.mDevice;
+        }
 
         // Request the tile size rather than the ring degree. Two reasons: a degree
         // above kNttMaxTileLen would ask for more than the 100 KiB a block can
         // opt into on sm_89 (N = 16384 wants 128 KiB), and the request is a cap, so
         // making it constant also removes the latent bug where the first n seen in
         // a process fixed the limit for every later, possibly larger, n.
-        bool configureShared(u32)
+        bool configureShared(const RingConstView& rc)
         {
-            if (gSharedConfigured) return true;
+            auto* state = rc.mKernelInitialization;
+            if (!state) return false;
+            if (state->mSharedConfigured.load(std::memory_order_acquire)) return true;
+            std::unique_lock<std::mutex> lock;
+            bool ready = false;
+            if (!lockKernelInitialization(*state, state->mSharedConfigured, lock, ready)) return false;
+            if (ready) return true;
             const size_t bytes = static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
                     cudaFuncSetAttribute(
@@ -12968,23 +12986,23 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseFusedIp)"))
                 return false;
-            gSharedConfigured = true;
+            state->mSharedConfigured.store(true, std::memory_order_release);
             return true;
         }
 
-        bool gPointwisePseudo55TreeSharedConfigured = false;
-        bool gPointwisePseudo55TreeWarpSharedConfigured = false;
-        bool gPointwisePseudo55TreeProductWarpSharedConfigured = false;
-        bool gPointwisePseudo55TreeProductWarpVectorSharedConfigured = false;
-        bool gPointwisePseudo55SparseSharedConfigured = false;
-        bool gNttInversePostWarpStages05SharedConfigured = false;
 
         // Keep Stage-110's opt-in attributes out of the common configureShared
         // path. Only an explicit alpha=2 production dispatch (or its focused
         // test hook) touches these separate candidate symbols.
-        bool configureNttInversePostWarpStages05Shared()
+        bool configureNttInversePostWarpStages05Shared(const RingConstView& rc)
         {
-            if (gNttInversePostWarpStages05SharedConfigured) return true;
+            auto* state = rc.mKernelInitialization;
+            if (!state) return false;
+            if (state->mNttInversePostWarpStages05SharedConfigured.load(std::memory_order_acquire)) return true;
+            std::unique_lock<std::mutex> lock;
+            bool ready = false;
+            if (!lockKernelInitialization(*state, state->mNttInversePostWarpStages05SharedConfigured, lock, ready)) return false;
+            if (ready) return true;
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -13008,16 +13026,22 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inversePostWarpStages05ReverseSub)"))
                 return false;
-            gNttInversePostWarpStages05SharedConfigured = true;
+            state->mNttInversePostWarpStages05SharedConfigured.store(true, std::memory_order_release);
             return true;
         }
 
         // Keep the two tree symbols' attributes independent: a Stage-104
         // configuration failure must not disable the preceding rollback or any
         // other pointwise family.
-        bool configurePointwisePseudo55TreeShared()
+        bool configurePointwisePseudo55TreeShared(const RingConstView& rc)
         {
-            if (gPointwisePseudo55TreeSharedConfigured) return true;
+            auto* state = rc.mKernelInitialization;
+            if (!state) return false;
+            if (state->mPointwisePseudo55TreeSharedConfigured.load(std::memory_order_acquire)) return true;
+            std::unique_lock<std::mutex> lock;
+            bool ready = false;
+            if (!lockKernelInitialization(*state, state->mPointwisePseudo55TreeSharedConfigured, lock, ready)) return false;
+            if (ready) return true;
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -13027,13 +13051,19 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseTreePairPseudo55)"))
                 return false;
-            gPointwisePseudo55TreeSharedConfigured = true;
+            state->mPointwisePseudo55TreeSharedConfigured.store(true, std::memory_order_release);
             return true;
         }
 
-        bool configurePointwisePseudo55TreeWarpShared()
+        bool configurePointwisePseudo55TreeWarpShared(const RingConstView& rc)
         {
-            if (gPointwisePseudo55TreeWarpSharedConfigured) return true;
+            auto* state = rc.mKernelInitialization;
+            if (!state) return false;
+            if (state->mPointwisePseudo55TreeWarpSharedConfigured.load(std::memory_order_acquire)) return true;
+            std::unique_lock<std::mutex> lock;
+            bool ready = false;
+            if (!lockKernelInitialization(*state, state->mPointwisePseudo55TreeWarpSharedConfigured, lock, ready)) return false;
+            if (ready) return true;
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -13043,13 +13073,19 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseTreePairWarpStagesPseudo55)"))
                 return false;
-            gPointwisePseudo55TreeWarpSharedConfigured = true;
+            state->mPointwisePseudo55TreeWarpSharedConfigured.store(true, std::memory_order_release);
             return true;
         }
 
-        bool configurePointwisePseudo55TreeProductWarpShared()
+        bool configurePointwisePseudo55TreeProductWarpShared(const RingConstView& rc)
         {
-            if (gPointwisePseudo55TreeProductWarpSharedConfigured) return true;
+            auto* state = rc.mKernelInitialization;
+            if (!state) return false;
+            if (state->mPointwisePseudo55TreeProductWarpSharedConfigured.load(std::memory_order_acquire)) return true;
+            std::unique_lock<std::mutex> lock;
+            bool ready = false;
+            if (!lockKernelInitialization(*state, state->mPointwisePseudo55TreeProductWarpSharedConfigured, lock, ready)) return false;
+            if (ready) return true;
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -13059,14 +13095,19 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseTreePairProductWarpStages05Pseudo55)"))
                 return false;
-            gPointwisePseudo55TreeProductWarpSharedConfigured = true;
+            state->mPointwisePseudo55TreeProductWarpSharedConfigured.store(true, std::memory_order_release);
             return true;
         }
 
-        bool configurePointwisePseudo55TreeProductWarpVectorShared()
+        bool configurePointwisePseudo55TreeProductWarpVectorShared(const RingConstView& rc)
         {
-            if (gPointwisePseudo55TreeProductWarpVectorSharedConfigured)
-                return true;
+            auto* state = rc.mKernelInitialization;
+            if (!state) return false;
+            if (state->mPointwisePseudo55TreeProductWarpVectorSharedConfigured.load(std::memory_order_acquire)) return true;
+            std::unique_lock<std::mutex> lock;
+            bool ready = false;
+            if (!lockKernelInitialization(*state, state->mPointwisePseudo55TreeProductWarpVectorSharedConfigured, lock, ready)) return false;
+            if (ready) return true;
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -13076,13 +13117,19 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseTreePairProductWarpStages05VectorPairsPseudo55)"))
                 return false;
-            gPointwisePseudo55TreeProductWarpVectorSharedConfigured = true;
+            state->mPointwisePseudo55TreeProductWarpVectorSharedConfigured.store(true, std::memory_order_release);
             return true;
         }
 
-        bool configurePointwisePseudo55SparseShared()
+        bool configurePointwisePseudo55SparseShared(const RingConstView& rc)
         {
-            if (gPointwisePseudo55SparseSharedConfigured) return true;
+            auto* state = rc.mKernelInitialization;
+            if (!state) return false;
+            if (state->mPointwisePseudo55SparseSharedConfigured.load(std::memory_order_acquire)) return true;
+            std::unique_lock<std::mutex> lock;
+            bool ready = false;
+            if (!lockKernelInitialization(*state, state->mPointwisePseudo55SparseSharedConfigured, lock, ready)) return false;
+            if (ready) return true;
             const size_t bytes =
                 static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
             if (!check(
@@ -13092,7 +13139,7 @@ namespace osuCrypto::LogVole::gpu
                         static_cast<int>(bytes)),
                     "cudaFuncSetAttribute(inverseRecursiveLeafSparsePseudo55)"))
                 return false;
-            gPointwisePseudo55SparseSharedConfigured = true;
+            state->mPointwisePseudo55SparseSharedConfigured.store(true, std::memory_order_release);
             return true;
         }
 
@@ -13252,7 +13299,7 @@ namespace osuCrypto::LogVole::gpu
         const RingConstView& rc, u64* data, u32 polyCount, const u32* polyIdx, void* stream)
     {
         if (polyCount == 0) return true;
-        if (!configureShared(rc.mN)) return false;
+        if (!configureShared(rc)) return false;
         if (!configureH200RootPersistence(rc, stream, false)) return false;
         const DeviceRing rg = toDevice(rc);
         const u32 tiles = nttTileCount(rc.mN);
@@ -13476,7 +13523,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (polyCount == 0 || outCount == 0) return true;
         if (!data || !inverseSlotMap || !out || rc.mRho != 1u || slotCount != rc.mN ||
-            outCount > static_cast<u64>(polyCount) * slotCount || !configureShared(rc.mN))
+            outCount > static_cast<u64>(polyCount) * slotCount || !configureShared(rc))
             return false;
 
         const u32 tiles = nttTileCount(rc.mN);
@@ -13579,7 +13626,7 @@ namespace osuCrypto::LogVole::gpu
         void* stream)
     {
         if (polyCount == 0) return true;
-        if (!in || !out || !configureShared(rc.mN)) return false;
+        if (!in || !out || !configureShared(rc)) return false;
         const u32 tiles = nttTileCount(rc.mN);
         // The two-tile load recomputes the one crossing stage directly from the
         // immutable source. More than two tiles need separate in-place crossing
@@ -13681,7 +13728,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (polyCount == 0u) return true;
         if (!canLaunchNttForwardFromPlainBroadcast(rc) || !in || !out ||
-            !configureShared(rc.mN))
+            !configureShared(rc))
             return false;
         if (!configureH200RootPersistence(rc, stream, false)) return false;
 
@@ -13818,7 +13865,7 @@ namespace osuCrypto::LogVole::gpu
         void* stream)
     {
         if (polyCount == 0) return true;
-        if (!in || !limbSel || !out || !configureShared(rc.mN)) return false;
+        if (!in || !limbSel || !out || !configureShared(rc)) return false;
         if (!configureH200RootPersistence(rc, stream, false)) return false;
         const u32 tiles = nttTileCount(rc.mN);
         if (tiles > 2u) return false;
@@ -14096,7 +14143,7 @@ namespace osuCrypto::LogVole::gpu
         if (!canLaunchNttInverseScatterBroadcast(plainRc, ringRc) || !labels ||
             !inverseSlotMap || !out ||
             labelCount > static_cast<u64>(chunkCount) * plainRc.mN ||
-            !configureShared(plainRc.mN))
+            !configureShared(plainRc))
             return false;
 
         const size_t shBytes = static_cast<size_t>(plainRc.mN) * sizeof(u64);
@@ -14179,7 +14226,7 @@ namespace osuCrypto::LogVole::gpu
         if (!canLaunchNttInverseScatterSingleLimb(plainRc, ringRc) ||
             !labels || !inverseSlotMap || !out ||
             labelCount > static_cast<u64>(chunkCount) * plainRc.mN ||
-            !configureShared(plainRc.mN))
+            !configureShared(plainRc))
             return false;
 
         const size_t shBytes = static_cast<size_t>(plainRc.mN) * sizeof(u64);
@@ -14262,7 +14309,7 @@ namespace osuCrypto::LogVole::gpu
         bool alphaIsTwo)
     {
         if (polyCount == 0) return true;
-        if (!configureShared(rc.mN)) return false;
+        if (!configureShared(rc)) return false;
         if (!configureH200RootPersistence(rc, stream, true)) return false;
         const DeviceRing rg = toDevice(rc);
         const u32 tiles = nttTileCount(rc.mN);
@@ -14597,7 +14644,7 @@ namespace osuCrypto::LogVole::gpu
                             fusedLastTwoStages && vectorShoupLoads &&
                             rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
-                            if (!configureNttInversePostWarpStages05Shared())
+                            if (!configureNttInversePostWarpStages05Shared(rc))
                                 return false;
                             nttInversePostWarpStages05Add8192Rho4Kernel<<<
                                 polyCount * 4u, 512u, shBytes, st>>>(
@@ -14643,7 +14690,7 @@ namespace osuCrypto::LogVole::gpu
                             fusedLastTwoStages && vectorShoupLoads &&
                             rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
-                            if (!configureNttInversePostWarpStages05Shared())
+                            if (!configureNttInversePostWarpStages05Shared(rc))
                                 return false;
                             nttInversePostWarpStages05Negate8192Rho4Kernel<<<
                                 polyCount * 4u, 512u, shBytes, st>>>(
@@ -14689,7 +14736,7 @@ namespace osuCrypto::LogVole::gpu
                             vectorShoupLoads &&
                             rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
-                            if (!configureNttInversePostWarpStages05Shared())
+                            if (!configureNttInversePostWarpStages05Shared(rc))
                                 return false;
                             nttInversePostWarpStages05ReverseSub8192Rho4Kernel<<<
                                 polyCount * 4u, 512u, shBytes, st>>>(
@@ -15469,7 +15516,7 @@ namespace osuCrypto::LogVole::gpu
         const u64 requiredNodes = 4ull * nodesAtDepth - 1ull;
         if ((outCount % nodesAtDepth) != 0u || nodeCount < requiredNodes)
             return true;
-        if (!configureShared(rc.mN)) return false;
+        if (!configureShared(rc)) return false;
 
         const u32 blocks = outCount * 4u;
         const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
@@ -15492,7 +15539,7 @@ namespace osuCrypto::LogVole::gpu
                     if (vectorPairAligned &&
                         rc.mKernelOptions.mNttLog13InverseTreeProductWarpVectorPairs)
                     {
-                        if (!configurePointwisePseudo55TreeProductWarpVectorShared())
+                        if (!configurePointwisePseudo55TreeProductWarpVectorShared(rc))
                             return false;
                         nttInverseTreePairNegateProductWarpStages05VectorPairsPseudo55Kernel<<<
                             blocks, 512u, shBytes, asStream(stream)>>>(
@@ -15503,7 +15550,7 @@ namespace osuCrypto::LogVole::gpu
                             cudaGetLastError(),
                             "nttInverseTreePairNegateProductWarpStages05VectorPairsPseudo55");
                     }
-                    if (!configurePointwisePseudo55TreeProductWarpShared())
+                    if (!configurePointwisePseudo55TreeProductWarpShared(rc))
                         return false;
                     nttInverseTreePairNegateProductWarpStages05Pseudo55Kernel<<<
                         blocks, 512u, shBytes, asStream(stream)>>>(
@@ -15513,7 +15560,7 @@ namespace osuCrypto::LogVole::gpu
                         cudaGetLastError(),
                         "nttInverseTreePairNegateProductWarpStages05Pseudo55");
                 }
-                if (!configurePointwisePseudo55TreeWarpShared()) return false;
+                if (!configurePointwisePseudo55TreeWarpShared(rc)) return false;
                 nttInverseTreePairNegateWarpStagesPseudo55Kernel<<<
                     blocks, 512u, shBytes, asStream(stream)>>>(
                     iv, out, publicB, nodes, depth, nodeCount, publicCol);
@@ -15522,7 +15569,7 @@ namespace osuCrypto::LogVole::gpu
                     cudaGetLastError(),
                     "nttInverseTreePairNegateWarpStagesPseudo55");
             }
-            if (!configurePointwisePseudo55TreeShared()) return false;
+            if (!configurePointwisePseudo55TreeShared(rc)) return false;
             nttInverseTreePairNegateFusedFirstStagePseudo55Kernel<<<
                 blocks, 512u, shBytes, asStream(stream)>>>(
                 iv, out, publicB, nodes, depth, nodeCount, publicCol);
@@ -15581,7 +15628,7 @@ namespace osuCrypto::LogVole::gpu
             out == leftB || out == rightB ||
             rightB != leftB + (size_t(4u) << 13u))
             return true;
-        if (!configureShared(rc.mN)) return false;
+        if (!configureShared(rc)) return false;
 
         constexpr u32 threads = 512u;
         const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
@@ -15618,7 +15665,7 @@ namespace osuCrypto::LogVole::gpu
             out == leftB || out == rightB ||
             rightB != leftB + (size_t(4u) << 13u))
             return true;
-        if (!configureShared(rc.mN)) return false;
+        if (!configureShared(rc)) return false;
 
         constexpr u32 threads = 512u;
         const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
@@ -15626,7 +15673,7 @@ namespace osuCrypto::LogVole::gpu
             pointwisePseudo55ProductionEligible(rc);
         if (usePseudo55)
         {
-            if (!configurePointwisePseudo55SparseShared()) return false;
+            if (!configurePointwisePseudo55SparseShared(rc)) return false;
             nttInverseRecursiveLeafSparseNegateNoZeroPseudo55Kernel<<<
                 logicalCount, threads, shBytes, asStream(stream)>>>(
                 toDeviceInverseRho4(rc), nodes, leftB, packed, out);
@@ -16161,7 +16208,8 @@ namespace osuCrypto::LogVole::gpu
 
 
 
-    bool prepareKernelDispatch(RingConstView& rc, const LogVoleGpuKernelOptions& options)
+    bool prepareKernelDispatch(RingConstView& rc, const LogVoleGpuKernelOptions& options,
+        KernelInitializationState& initialization)
     {
         if (!options.valid()) return false;
         rc.mKernelOptions = options;
@@ -16169,6 +16217,11 @@ namespace osuCrypto::LogVole::gpu
         cudaDeviceProp prop{};
         if (!check(cudaGetDevice(&device), "kernel dispatch device") ||
             !check(cudaGetDeviceProperties(&prop, device), "kernel dispatch properties")) return false;
+        // Preparation runs before the owning table record is published. Never
+        // reset readiness or reuse an existing owner's state on another device.
+        if (initialization.mDevice != -1 && initialization.mDevice != device) return false;
+        initialization.mDevice = device;
+        rc.mKernelInitialization = &initialization;
         rc.mSmCount = prop.multiProcessorCount > 0 ? static_cast<u32>(prop.multiProcessorCount) : 142u;
         rc.mH200Shared = prop.major == 9 && std::strstr(prop.name, "H200") &&
             prop.sharedMemPerBlockOptin >= 16384u * sizeof(u64);

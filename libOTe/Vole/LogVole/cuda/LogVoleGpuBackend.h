@@ -425,6 +425,7 @@ namespace osuCrypto::LogVole::gpu
         bool initDenoise(const RingNttContext& ctx);
 
         std::shared_ptr<GpuSetupContext> mSetup;
+        KernelInitializationState mKernelInitialization;
         RingConstView mView{};
         DenoiseConstView mDenoise{};
         bool mDenoiseReady = false;
@@ -523,6 +524,7 @@ namespace osuCrypto::LogVole::gpu
         bool initRaw(u32 degree, u64 plaintextPrime);
 
         std::shared_ptr<GpuSetupContext> mSetup;
+        KernelInitializationState mKernelInitialization;
         RingConstView mView{};
         const u32* mSlotMap = nullptr;
         const u32* mInverseSlotMap = nullptr;

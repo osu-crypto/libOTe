@@ -1223,3 +1223,20 @@ checking follows its existing automatic one-to-four-worker eligibility policy;
 the full path remains where that policy requires it. Together, these cleanups
 remove 20 selectors: 15 transport selectors, three CPU-kernel selectors, and two
 top-level selectors. Broader GPU option cleanup remains separate.
+
+The first GPU cleanup batch removes six unused kernel selectors: four H200
+sampler selectors and two rejection selectors, plus their validation/equality
+plumbing. Repository-wide searches found no consumers outside the options
+header. Active kernel options, dispatch, and arithmetic remain unchanged.
+
+Each GPU ring/plaintext-table owner now owns its seven lazy kernel-attribute
+readiness flags; launch views borrow that state with the device tables. Warm
+dispatch reads one atomic flag; cold initialization locks, checks the captured
+device, and publishes readiness only after success, allowing retries on failure.
+Views retain the existing matching-device/primary-context/stream lifetime contract;
+device reset invalidates their owning tables and initialization state together.
+
+Validation: the serialized Windows VS 14.50 CUDA build and frontend example
+compilation passed. The five focused GPU checks (kernel options, two-tile parity,
+NTT round trip, memory-pool lifecycle, and party-cache separation) passed with
+`-gpu 1 -lvFactoryFast 1`: five passed, zero skipped; no benchmarks were run.

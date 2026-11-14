@@ -7,6 +7,8 @@
 // from ordinary C++ translation units. Streams are passed as void* and cast to
 // cudaStream_t inside the .cu file.
 
+#include <atomic>
+#include <mutex>
 #include <cstddef>
 #include <cstdint>
 
@@ -104,16 +106,36 @@ namespace osuCrypto::LogVole::gpu
         std::size_t mH200RootL2MaxWindow = 0;
     };
 
+    // Host initialization belongs to the same owner as the ring constants. Views
+    // borrow this state just as they borrow the device tables. Families remain
+    // independently lazy; concurrent readers only lock on first configuration.
+    // As with the device pointers, launches require this owner's CUDA device/
+    // primary context and a matching stream. Device reset invalidates the owner.
+    struct KernelInitializationState
+    {
+        int mDevice = -1;
+        std::atomic<bool> mSharedConfigured{false};
+        std::atomic<bool> mNttInversePostWarpStages05SharedConfigured{false};
+        std::atomic<bool> mPointwisePseudo55TreeSharedConfigured{false};
+        std::atomic<bool> mPointwisePseudo55TreeWarpSharedConfigured{false};
+        std::atomic<bool> mPointwisePseudo55TreeProductWarpSharedConfigured{false};
+        std::atomic<bool> mPointwisePseudo55TreeProductWarpVectorSharedConfigured{false};
+        std::atomic<bool> mPointwisePseudo55SparseSharedConfigured{false};
+        std::mutex mMutex;
+    };
+
     // Host-only launch metadata. Kernel parameters use the unchanged device
     // base above, so settings never enlarge device arguments or enter device memory.
     struct RingConstView : RingDeviceConstView
     {
+        KernelInitializationState* mKernelInitialization = nullptr;
         LogVoleGpuKernelOptions mKernelOptions;
         u32 mSmCount = 142;
         bool mH200Shared = false;
     };
 
-    bool prepareKernelDispatch(RingConstView& rc, const LogVoleGpuKernelOptions& options);
+    bool prepareKernelDispatch(RingConstView& rc, const LogVoleGpuKernelOptions& options,
+        KernelInitializationState& initialization);
 
     bool gpuDeviceAvailable();
     const char* gpuDeviceName();

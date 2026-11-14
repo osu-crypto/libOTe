@@ -2347,6 +2347,12 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
             gpu::GpuPolyBuffer device;
             LOGVOLE_REQUIRE_TRUE(device.resize(*ring, original.size(), stream));
             LOGVOLE_REQUIRE_TRUE(device.upload(original, stream));
+            // A borrowed view without its table owner's initialization state
+            // must fail before launch, without poisoning the valid owner.
+            auto detached = ring->view(stream);
+            detached.mKernelInitialization = nullptr;
+            LOGVOLE_REQUIRE_FALSE(gpu::launchNttForward(
+                detached, device.data(stream), 2, nullptr, stream.raw()));
             LOGVOLE_REQUIRE_TRUE(gpu::nttForward(*ring, device.data(stream), 2, stream));
             std::vector<RnsPoly> transformed;
             LOGVOLE_REQUIRE_TRUE(device.download(transformed, stream));

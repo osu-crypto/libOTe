@@ -512,8 +512,8 @@ namespace osuCrypto::LogVole::gpu
 
             std::shared_ptr<GpuRing> ring(new GpuRing());
             std::shared_ptr<GpuPlainNtt> plain(new GpuPlainNtt());
-            if (!prepareKernelDispatch(ring->mView, stream.mExecution->executionOptions().mAdvanced.mKernels) ||
-                !prepareKernelDispatch(plain->mView, stream.mExecution->executionOptions().mAdvanced.mKernels)) return false;
+            if (!prepareKernelDispatch(ring->mView, stream.mExecution->executionOptions().mAdvanced.mKernels, ring->mKernelInitialization) ||
+                !prepareKernelDispatch(plain->mView, stream.mExecution->executionOptions().mAdvanced.mKernels, plain->mKernelInitialization)) return false;
             ring->mParams = params;
             allocateRawNttView(arena, ring->mView, n, rho);
             auto* ringScratch = arena.take<u64>(3u * rho);
@@ -1458,7 +1458,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuRing::initRaw(const RingParams& params, std::span<const u64> primes)
     {
-        if (!mSetup || !prepareKernelDispatch(mView, mSetup->executionOptions().mAdvanced.mKernels)) return false;
+        if (!mSetup || !prepareKernelDispatch(mView, mSetup->executionOptions().mAdvanced.mKernels, mKernelInitialization)) return false;
         HostStep setupStep(mSetup->hostProfiler(), "setup GPU raw ring init");
         const u32 n = params.mPolyModulusDegree;
         const u32 rho = static_cast<u32>(primes.size());
@@ -1535,7 +1535,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuRing::init(const RingNttContext& ctx)
     {
-        if (!prepareKernelDispatch(mView, ctx.mExecutionOptions.mAdvanced.mKernels)) return false;
+        if (!prepareKernelDispatch(mView, ctx.mExecutionOptions.mAdvanced.mKernels, mKernelInitialization)) return false;
         HostStep initStep(osuCrypto::LogVole::hostProfiler(ctx), "setup GPU ring init");
         auto keyData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
         if (!keyData) return false;
@@ -2133,7 +2133,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPlainNtt::initRaw(u32 n, u64 p)
     {
-        if (!mSetup || !prepareKernelDispatch(mView, mSetup->executionOptions().mAdvanced.mKernels)) return false;
+        if (!mSetup || !prepareKernelDispatch(mView, mSetup->executionOptions().mAdvanced.mKernels, mKernelInitialization)) return false;
         HostStep setupStep(mSetup->hostProfiler(), "setup GPU raw plaintext NTT init");
         u32 status = ~u32{0};
         RawSetupStream stream(mSetup);
@@ -2162,7 +2162,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool GpuPlainNtt::init(const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder)
     {
-        if (!mSetup || !prepareKernelDispatch(mView, mSetup->executionOptions().mAdvanced.mKernels)) return false;
+        if (!mSetup || !prepareKernelDispatch(mView, mSetup->executionOptions().mAdvanced.mKernels, mKernelInitialization)) return false;
         auto data = batchingContext.first_context_data();
         if (!data || !data->plain_ntt_tables()) return false;
 

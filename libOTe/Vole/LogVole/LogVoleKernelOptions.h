@@ -40,10 +40,6 @@ namespace osuCrypto
         std::uint32_t mNoGoldH200GadgetGarnerMode = 14u;
         std::uint32_t mNoGoldH200GadgetFoldMode = 3u;
         std::uint32_t mNoGoldH200GadgetSchedule = 0u;
-        bool mNoGoldH200SplitSampler = true;
-        std::uint32_t mNoGoldH200SampleParts = 2u;
-        std::uint32_t mNoGoldH200SampleReduction = 1u;
-        bool mNoGoldH200SampleSharedPrefix = true;
         bool mNoGoldH200Gadget208 = true;
         bool mNoGoldH200Gadget208Pseudo52 = true;
         bool mNttLog14H200InverseWarp05 = true;
@@ -104,8 +100,6 @@ namespace osuCrypto
         bool mExpandAccumulatorPseudo55Dual = true;
         bool mExpandAccumulatorPseudo55DualPackedPairs = true;
         bool mExpandAccumulatorTiled = true;
-        bool mRejectFastpath = true;
-        bool mRejectReduceFusion = true;
         bool mDenoiseSpecialized = true;
         bool mDenoiseShoup = true;
         bool mDenoiseHotGeometry = true;
@@ -152,8 +146,6 @@ namespace osuCrypto
                 mNoGoldH200GadgetGarnerMode <= 14u &&
                 mNoGoldH200GadgetFoldMode <= 3u &&
                 mNoGoldH200GadgetSchedule <= 4u &&
-                (mNoGoldH200SampleParts == 2u || mNoGoldH200SampleParts == 4u || mNoGoldH200SampleParts == 8u || mNoGoldH200SampleParts == 16u) &&
-                mNoGoldH200SampleReduction <= 2u &&
                 (mNttForwardThreads == 256u || mNttForwardThreads == 512u || mNttForwardThreads == 1024u) &&
                 (mNttInverseThreads == 256u || mNttInverseThreads == 512u || mNttInverseThreads == 1024u) &&
                 (mNttLog14H200InverseThreads == 512u || mNttLog14H200InverseThreads == 1024u) &&
@@ -200,10 +192,6 @@ namespace osuCrypto
                 mNoGoldH200GadgetGarnerMode == other.mNoGoldH200GadgetGarnerMode &&
                 mNoGoldH200GadgetFoldMode == other.mNoGoldH200GadgetFoldMode &&
                 mNoGoldH200GadgetSchedule == other.mNoGoldH200GadgetSchedule &&
-                mNoGoldH200SplitSampler == other.mNoGoldH200SplitSampler &&
-                mNoGoldH200SampleParts == other.mNoGoldH200SampleParts &&
-                mNoGoldH200SampleReduction == other.mNoGoldH200SampleReduction &&
-                mNoGoldH200SampleSharedPrefix == other.mNoGoldH200SampleSharedPrefix &&
                 mNoGoldH200Gadget208 == other.mNoGoldH200Gadget208 &&
                 mNoGoldH200Gadget208Pseudo52 == other.mNoGoldH200Gadget208Pseudo52 &&
                 mNttLog14H200InverseWarp05 == other.mNttLog14H200InverseWarp05 &&
@@ -263,8 +251,6 @@ namespace osuCrypto
                 mExpandAccumulatorPseudo55Dual == other.mExpandAccumulatorPseudo55Dual &&
                 mExpandAccumulatorPseudo55DualPackedPairs == other.mExpandAccumulatorPseudo55DualPackedPairs &&
                 mExpandAccumulatorTiled == other.mExpandAccumulatorTiled &&
-                mRejectFastpath == other.mRejectFastpath &&
-                mRejectReduceFusion == other.mRejectReduceFusion &&
                 mDenoiseSpecialized == other.mDenoiseSpecialized &&
                 mDenoiseShoup == other.mDenoiseShoup &&
                 mDenoiseHotGeometry == other.mDenoiseHotGeometry &&
