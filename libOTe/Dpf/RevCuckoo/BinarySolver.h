@@ -937,7 +937,9 @@ namespace osuCrypto
 			span< MatrixView<const u8>> m{ &MM,1 };
 			span< MatrixView<const u8>> y{ &YY,1 };
 			span< MatrixView<u8>> x{ &X,1 };
-			return solve(m, y, x, prng, sock);
+			// Keep the by-value views in this coroutine frame while solve uses
+			// spans over them. The caller still owns the matrix data and socket.
+			co_await solve(m, y, x, prng, sock);
 		}
 
 		task<> solve(

@@ -8,6 +8,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  chosen-baa-portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - name: Build portable Silent VOLE
+        run: python3 build.py --par=4 -DENABLE_SILENT_VOLE=ON -DENABLE_SILENTOT=ON -DENABLE_SOFTSPOKEN_OT=ON -DENABLE_MRR=ON -DENABLE_CIRCUITS=ON -DENABLE_SSE=OFF -DENABLE_AVX=OFF -DENABLE_AVX2=OFF -DENABLE_AVX512=OFF -DENABLE_VPCLMUL=OFF -DENABLE_VAES=OFF -DENABLE_ARM_AES=OFF -DENABLE_EDWARDS25519_ASM=OFF -DENABLE_BITPOLYMUL=OFF -DENABLE_SODIUM=OFF -DENABLE_LOGVOLE=OFF -DENABLE_SPIN=OFF -DCMAKE_BUILD_TYPE=Release
+      - name: Test portable arithmetic and chosen BAA
+        run: |
+          ./out/build/linux/frontend/frontend_libOTe -u block_operation
+          ./out/build/linux/frontend/frontend_libOTe -u ChosenBaa
+
   build-ubuntu:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -106,7 +120,7 @@ jobs:
   build-macos:
     needs: build-ubuntu
     if: ${{ !cancelled() }}
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5

@@ -38,11 +38,18 @@
 #include "libOTe_Tests/AnyField_Tests.h"
 
 
+void ChosenBaa_Code_test(const osuCrypto::CLP&);
+void ChosenBaa_Seed_test(const osuCrypto::CLP&);
+void Vole_Silent_ChosenBaa_test(const osuCrypto::CLP&);
+
 using namespace osuCrypto;
 namespace tests_libOTe
 {
 	TestCollection Tests([](TestCollection& tc)
 		{
+			tc.add("ChosenBaa_Code_test", ChosenBaa_Code_test);
+			tc.add("ChosenBaa_Seed_test", ChosenBaa_Seed_test);
+			tc.add("Vole_Silent_ChosenBaa_test", Vole_Silent_ChosenBaa_test);
 			tc.add("AnyField_F9_Test                       ", AnyField_F9_Test);
 			tc.add("AnyField_F9Transform_Test              ", AnyField_F9Transform_Test);
 			tc.add("AnyField_F4_Test                       ", AnyField_F4_Test);
