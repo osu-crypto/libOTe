@@ -213,9 +213,11 @@ plots, profiling outputs, and benchmark results are excluded.
 
 ### Ownership and execution inventory — 2026-11-06
 
-Estimated overall completion: **98%** of the agreed ownership/globals refactor,
-including remaining scheduling, cleanup and cross-platform/leak validation.
-This is a rough work estimate, not a declaration count.
+The agreed CPU phase is **100% complete and validated** by the focused Windows
+functional and Linux host-LSan gates below. The GPU phase remains deferred with
+**21 runtime global/static/TLS declarations**. The earlier **98% overall** figure
+is a historical rough work estimate, not a claim that the full globals refactor
+is complete or a declaration count.
 
 This inventory describes the committed tree. A migrated synchronous wrapper
 is not a completed async migration.
@@ -1147,6 +1149,50 @@ root state reuse across queries, and failure joining children. The dependency
 revision remains local and was not published. No GPU execution, benchmarks, WSL
 or host-leak checks were run. The estimate remains **96%**; golden/reference
 scheduling, allocation-evidence ownership and final milestone validation remain.
+### CPU ownership and host-leak milestone
+
+The current source checkpoint `58ed36fd` passes the Windows functional gates
+recorded above and a fresh Ubuntu 24.04/GCC 13 C++20 build with standalone
+LeakSanitizer. The initial `/mnt/c` build was interrupted, then deliberately
+stopped during its continuation after measured Plan9 filesystem stalls. An exact
+source/cryptoTools snapshot (checksum comparison found no differences), reviewed
+Linux dependencies, install files and CUDA toolkit were copied to native ext4;
+no previous build objects were reused. Native configure passed in **10.02 seconds**
+and the two-worker build passed in **546.89 seconds**.
+
+The executable loads `liblsan`; an intentional unreachable 137-byte allocation
+reported one leak and exited **23**. With
+`LSAN_OPTIONS=exitcode=23:leak_check_at_exit=1` and no suppressions, all **22
+registered CPU checks passed**, each process exiting zero without a leak report:
+
+| Focused group | Checks | Seconds |
+| --- | ---: | ---: |
+| Evidence ownership, explicit statistics/timing, identity, setup/lifetime/join | 7 | 0.22 |
+| Async LHE/LENC, CRT wrapping/decoding and ZK workspaces | 7 | 0.42 |
+| Root-zeta/reuse, golden validation/search, staged release and recursive setup | 6 | 14.21 |
+| Small two-query GoldenSeed and noninteractive modes | 2 | 8.17 |
+
+The isolated native macoro build also passes its seven focused `all_of`
+lifetime/allocation checks under the same LSan settings (28.48-second build;
+CTest 0.03 seconds, exit zero with no leak report).
+
+This gate covers unreachable host allocations at process exit. It is not an
+AddressSanitizer check, a native Windows leak check, or a GPU memory/leak test.
+CUDA was compiled and linked because the focused target requires it; these
+checks selected CPU execution only. No benchmarks or broad GPU fixtures ran.
+The normal CPU resource/diagnostic ownership milestone is validated. The source
+audit found no environment reads, `__int128` arithmetic, hidden executor creation
+or internal blocking waits on normal CPU paths; the retained one-worker seed
+replay runs inline. Explicit GPU compatibility/diagnostic APIs can still execute
+host arithmetic and retain their deferred ambient behavior. **21
+GPU/explicit-compatibility global declarations** remain deferred. Validation
+requires the reviewed local macoro revision
+`feea851f3bda2bdc80993252144fd38a46acca85`, pinned explicitly during configure;
+it was not published, so this does not establish clean-clone reproducibility.
+Detailed configure/build/control and per-group logs are retained in ignored
+`out/review/cpu-owned-*` artifacts. The native executable remains under
+`/root/logvole-cpu-lsan-58ed36fd` in the Ubuntu 24.04 WSL distro.
+
 ### Deferred option cleanup
 
 - Prune transport/encoding optionality after the ownership refactor. Audit the
