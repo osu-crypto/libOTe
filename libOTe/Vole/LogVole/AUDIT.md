@@ -86,61 +86,47 @@ in [`LogVoleCore.cpp`](LogVoleCore.cpp) follows the prose's intended interval;
 this erratum does not call for a runtime predicate change. This comparison
 does not certify all fixed-point or reciprocal-error boundary cases.
 
-## Requirements for a future opened fresh-setup ZK route
+## Paper's opened fresh-setup ZK route
 
-Status: **REQUIREMENTS ONLY; this route is not implemented.** The existing ZK
-wrappers use semi-honest VOLE. The requirements below specify a separate route;
-the missing wrapper is not an implementation defect in those wrappers.
-This section uses paper revision `e569700` in the local `logVole` paper tree;
-see `alg/golden-seed.tex`, `lower-golden.tex`, and
-`alg/shrinkexpand-trunc.tex`.
+Status: **NOT IMPLEMENTED.** The existing ZK wrappers use semi-honest VOLE.
+This section records paper revision `e569700`: `zkp.tex`, `alg/it-mac-zk.tex`,
+and `zk-proof.tex`. The prover is the VOLE receiver; the verifier is the sender.
 
-Here the prover is the VOLE receiver, and the verifier is the VOLE sender.
-Each proof must use fresh, single-use setup. Before learning the verifier's
-VOLE correlation `Delta`, the prover must commit to its proof values using
-hiding, binding commitments. After the online exchange, the verifier discloses
-its setup state and coins for an audit against the recorded public transcript
-and agreed configuration. The prover opens its commitments only after that
-audit succeeds. Discard the setup after success or abort.
+The verifier samples `Delta` and sends a fresh setup transcript `T_set`.
+The prover extends its witness-derived circuit trace with fresh sacrificed
+RLC coordinates `u_t` and the fresh IT-MAC masking coordinate `V1*`.
+The parties run chosen-input VOLE on this extended input `x'`, giving the
+prover labels `m_i` and the verifier keys `k_i`. After receiving the verifier's
+random-linear-check (RLC) challenges, the prover commits to the masked answers
+`u'_t = u_t + sum_i chi_i^(t)*x_i`. Gate batching uses coefficients derived
+from `H(T_set, C_rlc, transcript)`. The prover then commits to the final
+IT-MAC values `(Vhat_1, Vhat_2)`.
 
-The audit and its supporting lemma must meet these obligations:
+Only then does the verifier disclose `Delta`, its setup coins, and all `k_i`.
+The prover recomputes `T_set` from `Delta` and the disclosed coins, rejecting a
+mismatch. It also checks `m_i = k_i + x'_i*Delta` for every extended coordinate,
+including all `u_t` and `V1*`. After these checks succeed, it opens both
+commitments. The verifier checks the RLC identities and
+`Uhat = Vhat_2 + Vhat_1*Delta`, accepting only if all checks pass.
+These are checks on the actual extended input; the algorithm does not prescribe
+online-sender replay or an audit over all possible receiver inputs.
+The setup is fresh for each proof and single use because `Delta` is revealed.
 
-1. **Complete replay.** Check all verifier setup material, its complete online
-   response, and its output keys against the disclosed state and coins.
-   Bind dimensions, moduli, domains, seeds, SIDs and all other configuration
-   affecting these computations to the recorded transcript.
-2. **Uniform deterministic budgets.** Check required coefficient bounds
-   on setup errors and bounded masks. Derive an instance budget `B_inst` for
-   each denoise from those bounds, including truncation and numerical errors.
-   Each budget must hold uniformly over all legal receiver inputs and
-   randomness consistent with the recorded digest and transcript, rather than
-   one replayed input.
-3. **Every denoise.** Check golden admissibility at every denoise actually
-   executed, including `DerandRoot`. For scale gap `delta` and the value `tbk`
-   entering that denoise, require
-   `|residue_delta(tbk)| + B_inst < delta/2`, componentwise, where
-   `residue_delta` is the centered residue modulo `delta`. Use the actual
-   decoding scale and account for its rounding convention. Replaying the
-   earliest successful search counter is unnecessary if the accepted candidate
-   satisfies all required checks.
-4. **Witness-independent acceptance.** The audit's rejection decision must not
-   depend on the prover's witness. Prove that every accepted transcript fixes
-   labels satisfying `m = k + x*Delta`, in the output field, for all legal
-   receiver inputs `x` and randomness consistent with its digest and transcript.
-   A witness-dependent check for one supplied input does not suffice.
-5. **Public root matrix.** Fix or canonically derive `B*` publicly, and enforce
-   its required value before releasing the digest. The implemented root `B*`
-   admission guard is one prerequisite, not this full audit. A public seed
-   expansion requires an explicit random-oracle or suitable pseudorandomness
-   setup assumption; a known AES key alone does not supply such a theorem.
-   Do not apply a statistical theorem for a uniformly sampled matrix literally
-   to one fixed expanded matrix.
+### Open proof questions and implementation scope
 
-These obligations are a contract for a sufficient audit lemma, not a proof
-that the route is zero knowledge. Separate knowledge soundness of the
-random-linear-combination check from any explicit assumption that the digest
-provides knowledge of its preimage. A simulator against a malicious verifier,
-including its rewinding strategy and abort behavior, remains to be proved.
+The algorithm and theorem state a binding commitment assumption, while the
+zero-knowledge sketch also invokes commitment hiding. The sketch does not yet
+specify a complete simulator against a malicious verifier or resolve how its
+pre-opening commitments are opened to the simulated final values. These are
+proof questions, not additional steps in the paper's algorithm. Likewise,
+RLC-based extraction and the alternative digest-knowledge assumption in
+`zkp.tex` are distinct knowledge-soundness routes.
+
+The implemented public `B*` derivation and admission guard are an implementation
+prerequisite, not an additional step stated in `alg/it-mac-zk.tex`. Any security
+argument for seeded public-matrix expansion must state its setup assumption;
+it does not follow literally from a statistical theorem for a uniformly sampled
+matrix. This record does not claim that the opened route or its proof is complete.
 
 ## June 2026 completed corrections
 
