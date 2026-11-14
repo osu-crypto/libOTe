@@ -6131,8 +6131,6 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     {
         auto& encoding = params.mShrinkExpand.mTransport.mEncoding;
         encoding.mWire = {false, false, false};
-        encoding.mRootU64Memcpy = false;
-        encoding.mSetupMemcpy = false;
         encoding.mParallel = false;
         encoding.mEncodedReceive = false;
         encoding.mRootEncodedReceive = false;
@@ -6156,8 +6154,6 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     receiverInput.mParams = params;
     oc::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
-    if (cmd.getOr("cpu_options", 0) != 0)
-        advanced.mAdvanced.mCpu = {false, false, false};
     if (cmd.getOr("protocol_options", 0) != 0)
     {
         auto& policy = advanced.mAdvanced.mProtocol;

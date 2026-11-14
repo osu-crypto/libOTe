@@ -1195,8 +1195,13 @@ Detailed configure/build/control and per-group logs are retained in ignored
 
 ### Deferred option cleanup
 
+The first production cleanup removes five baseline selectors: the three CPU
+kernel switches and the two memcpy codec switches. Established optimized paths
+are standard. The endian-safe fallback, alias handling, and general APIs remain;
+this changes neither protocol bytes nor arithmetic.
+
 - Prune transport/encoding optionality after the ownership refactor. Audit the
-  18 switches under `mAdvanced.mTransport`: retain only controls justified by a
+  16 switches under `mAdvanced.mTransport`: retain only controls justified by a
   concrete caller requirement or measured supported-platform tradeoff. Make
   established ownership/move and endian-safe codec paths standard; use the
   configured thread count for parallel work. Remove unneeded experimental

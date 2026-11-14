@@ -331,13 +331,6 @@ namespace
         const auto expected = scalar_wire(message);
         LOGVOLE_REQUIRE_TRUE(expected.size() > (std::size_t(1) << 20));
         const auto serial = encode(message, 1, {}, useGpu, nullptr, cpuBenchmark);
-        oc::LogVoleEncodingOptions scalarOptions;
-        scalarOptions.mSetupMemcpy = false;
-        scalarOptions.mParallel = false;
-        expect_bytes_equal(encode(message, 8, scalarOptions, useGpu, nullptr, cpuBenchmark), as_span(expected));
-        Message scalarDecoded{};
-        LOGVOLE_REQUIRE_TRUE(decode(as_span(expected), scalarDecoded, 8, scalarOptions, useGpu, nullptr, cpuBenchmark));
-        expect_bytes_equal(as_span(scalar_wire(scalarDecoded)), as_span(expected));
         oc::LogVoleEncodingOptions serialOptions;
         serialOptions.mParallel = false;
         expect_bytes_equal(encode(message, 8, serialOptions, useGpu, nullptr, cpuBenchmark), as_span(expected));
@@ -1165,19 +1158,12 @@ void LogVole_Encoding_RootDigestAndResponseRoundTrip(const oc::CLP&)
         std::numeric_limits<std::uint64_t>::max(),
     });
 
-    oc::LogVoleEncodingOptions scalarOptions;
-    scalarOptions.mRootU64Memcpy = false;
-    expect_bytes_equal(encode(digest, scalarOptions), std::span<const std::uint8_t>(goldenDigestWire));
-    RootDigestMessage scalarDigest{};
-    LOGVOLE_REQUIRE_TRUE(decode(std::span<const std::uint8_t>(goldenDigestWire), scalarDigest, scalarOptions));
-    LOGVOLE_EXPECT_TRUE(rangesEqual(scalarDigest.mDPrimeCoeffs, digest.mDPrimeCoeffs));
     const auto encodedDigest = encode(digest);
     expect_bytes_equal(
         std::span<const std::uint8_t>(encodedDigest.data(), encodedDigest.size()),
         std::span<const std::uint8_t>(goldenDigestWire.data(), goldenDigestWire.size()));
 
-    // Decoding a manually supplied legacy payload exercises fast-decoder /
-    // legacy-encoder interoperability when the experiment is enabled.
+    // Decode independently specified little-endian wire bytes.
     RootDigestMessage decodedDigest{};
     LOGVOLE_REQUIRE_TRUE(decode(
         std::span<const std::uint8_t>(goldenDigestWire.data(), goldenDigestWire.size()),

@@ -425,46 +425,42 @@ void LogVole_ShrinkExpandCoproto_OfflineAndExpandDeterministicRelation(const oc:
 
 void LogVole_ShrinkExpandCoproto_TruncOfflineAndExpandBoundedRelation(const oc::CLP&)
 {
-    for (bool fused : {true, false})
+    const auto params = make_params(true);
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+
+    const auto s = sample_batch(ctx, params.mMu, 0x2101u);
+
+    // The application owns one executor and prepared buffers across queries.
+    macoro::thread_pool executor;
+    auto work = executor.make_work();
+    executor.create_threads(1);
+    std::array<LheDecryptBuffer, 3> buffers;
+    for (auto& buffer : buffers) buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mRing));
+    LogVoleRingSender sender{};
+    LogVoleRingReceiver receiver{};
+    ShrinkExpandSenderState senderState{};
+    ShrinkExpandReceiverState receiverState{};
+    osuCrypto::LogVoleExecutionOptions execution;
+    run_offline(params, s, sender, receiver, senderState, receiverState, execution);
+    std::array<LheDecryptBuffer, 3> receiverBuffers;
+    for (auto& buffer : receiverBuffers) buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mRing));
+    std::array<LencEvalBuffer, 3> lencBuffers;
+    const auto terms = std::size_t{2} * receiverState.hostLacct().mLevels * (params.mTau + 1);
+    for (auto& buffer : lencBuffers)
     {
-        const auto params = make_params(true);
-        RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
-
-        const auto s = sample_batch(ctx, params.mMu, 0x2101u);
-
-        // The application owns one executor and prepared buffers across queries.
-        macoro::thread_pool executor;
-        auto work = executor.make_work();
-        executor.create_threads(1);
-        std::array<LheDecryptBuffer, 3> buffers;
-        for (auto& buffer : buffers) buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mRing));
-        LogVoleRingSender sender{};
-        LogVoleRingReceiver receiver{};
-        ShrinkExpandSenderState senderState{};
-        ShrinkExpandReceiverState receiverState{};
-        osuCrypto::LogVoleExecutionOptions execution;
-        execution.mAdvanced.mCpu.mFusedExpandEval = fused;
-        run_offline(params, s, sender, receiver, senderState, receiverState, execution);
-        std::array<LheDecryptBuffer, 3> receiverBuffers;
-        for (auto& buffer : receiverBuffers) buffer.mProduct.mCoeffs.resize(ringPolyCoeffCount(params.mRing));
-        std::array<LencEvalBuffer, 3> lencBuffers;
-        const auto terms = std::size_t{2} * receiverState.hostLacct().mLevels * (params.mTau + 1);
-        for (auto& buffer : lencBuffers)
-        {
-            buffer.mCiphertexts.reserve(terms);
-            buffer.mNodes.reserve(terms);
-        }
-
-        auto x = sample_batch(ctx, params.mMu, 0x3101u);
-        const auto tbkPrime = sample_poly(ctx, 0x4101u);
-
-        ShrinkExpandSenderExpandOutput senderOutput{};
-        ShrinkExpandReceiverExpandOutput receiverOutput{};
-        run_expand(executor, buffers, receiverBuffers, lencBuffers, sender, receiver, senderState, receiverState, 0xA99u, tbkPrime, x, senderOutput, receiverOutput);
-
-        expect_relation(ctx, params, s, x, senderOutput, receiverOutput);
+        buffer.mCiphertexts.reserve(terms);
+        buffer.mNodes.reserve(terms);
     }
+
+    auto x = sample_batch(ctx, params.mMu, 0x3101u);
+    const auto tbkPrime = sample_poly(ctx, 0x4101u);
+
+    ShrinkExpandSenderExpandOutput senderOutput{};
+    ShrinkExpandReceiverExpandOutput receiverOutput{};
+    run_expand(executor, buffers, receiverBuffers, lencBuffers, sender, receiver, senderState, receiverState, 0xA99u, tbkPrime, x, senderOutput, receiverOutput);
+
+    expect_relation(ctx, params, s, x, senderOutput, receiverOutput);
 }
 
 void LogVole_ShrinkExpandCoproto_FullNoiseTolerance(const oc::CLP&)

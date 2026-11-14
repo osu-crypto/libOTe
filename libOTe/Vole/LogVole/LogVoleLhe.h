@@ -130,7 +130,7 @@ namespace osuCrypto::LogVole
     // The awaiting caller may resume on an executor worker. Destroy/join that
     // executor from outside its worker threads, not from that continuation.
     // Each active product needs ringPolyCoeffCount words for coefficient-domain
-    // or non-fused NTT arithmetic. Batch/coefficient allocations are retained.
+    // arithmetic. Batch/coefficient allocations are retained.
     // Validation failure leaves ciphertext unchanged; execution failure may
     // leave partially decrypted rows. No work occurs before the task is awaited.
     macoro::task<bool> lheDec(

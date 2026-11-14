@@ -1008,11 +1008,11 @@ namespace osuCrypto::LogVole
     static bool decryptLheRow(
         const RingNttContext& ctx, std::span<const seal::Modulus> moduli,
         const RnsPoly& publicA, const RnsPoly& skNtt, const RnsPoly& cipher,
-        RnsPoly& result, RnsPoly& product, LheDomain domain, bool fused,
+        RnsPoly& result, RnsPoly& product, LheDomain domain,
         PendingRingOpsStats* stats)
     {
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
-        if (domain == LheDomain::Ntt && fused)
+        if (domain == LheDomain::Ntt)
         {
             for (std::size_t j = 0; j < moduli.size(); ++j)
             {
@@ -1031,7 +1031,6 @@ namespace osuCrypto::LogVole
         product.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
         std::fill(product.mCoeffs.begin(), product.mCoeffs.end(), u64{0});
         if (!dyadicMultiplyAddNttInplace(publicA, skNtt, product, ctx, stats)) return false;
-        if (domain == LheDomain::Ntt) return ringSubInplace(result, product, ctx, stats);
         // cipher - INTT(A * NTT(sk)): retain the coefficient-domain shortcut.
         if (!inverseNtt(product, ctx, stats)) return false;
         for (std::size_t j = 0; j < moduli.size(); ++j)
@@ -1097,7 +1096,7 @@ namespace osuCrypto::LogVole
             if (!runLheRows(ctx, result.size(), requestedWorkers, cpuBenchmark, cpuScratch, 0, true,
                 [&](std::size_t row, RnsPoly&) {
                     return decryptLheRow(ctx, moduli, (*publicANtt)[row], skNtt, cipher[row],
-                        result[row], result[row], LheDomain::Coefficient, false, legacyRingOpsThreadLocalStats());
+                        result[row], result[row], LheDomain::Coefficient, legacyRingOpsThreadLocalStats());
                 })) return false;
             out = std::move(result);
             return true;
@@ -1107,8 +1106,7 @@ namespace osuCrypto::LogVole
         // and batched. This is the Root recursion level's hot path, and it used to
         // pay one transform per row per direction; batching lets the CUDA backend
         // amortise a single device round trip over all of them.
-        const bool inplace = ctx.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe;
-        std::vector<RnsPoly> result = inplace && ownedCipher && publicANtt != ownedCipher
+        std::vector<RnsPoly> result = ownedCipher && publicANtt != ownedCipher
             ? std::move(*ownedCipher) : std::vector<RnsPoly>(cipher.begin(), cipher.end());
         if (!cipherInputIsNtt && !forwardNttBatch(result, ctx, legacyRingOpsThreadLocalStats()))
         {
@@ -1117,10 +1115,10 @@ namespace osuCrypto::LogVole
 
         auto decryptRow = [&](std::size_t row, RnsPoly& product) {
             return decryptLheRow(ctx, moduli, (*publicANtt)[row], skNtt, result[row],
-                result[row], product, LheDomain::Ntt, inplace, legacyRingOpsThreadLocalStats());
+                result[row], product, LheDomain::Ntt, legacyRingOpsThreadLocalStats());
         };
         if (!runLheRows(ctx, result.size(), requestedWorkers, cpuBenchmark,
-            cpuScratch, inplace ? 0 : ringPolyCoeffCount(ctx.mParams), true, decryptRow))
+            cpuScratch, 0, true, decryptRow))
         {
             return false;
         }
@@ -1148,9 +1146,8 @@ namespace osuCrypto::LogVole
             co_return false;
         const auto& moduli = getRingHostModuli(ctx);
         if (moduli.empty()) co_return false;
-        const bool fused = ctx.mExecutionOptions.mAdvanced.mCpu.mInplaceLhe;
         auto chunks = buffers.first(std::min(buffers.size(), ciphertextAndOutput.size()));
-        if (domain == LheDomain::Coefficient || !fused)
+        if (domain == LheDomain::Coefficient)
             for (const auto& chunk : chunks)
                 if (chunk.mProduct.mCoeffs.size() != ringPolyCoeffCount(ctx.mParams)) co_return false;
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
@@ -1171,7 +1168,7 @@ namespace osuCrypto::LogVole
             {
                 auto& value = ciphertextAndOutput[row];
                 if (!decryptLheRow(ctx, moduli, publicANtt[row], skNtt, value,
-                    value, chunk.mProduct, domain, fused, stats))
+                    value, chunk.mProduct, domain, stats))
                 {
                     chunk.mOk = false;
                     break;

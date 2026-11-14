@@ -14,8 +14,6 @@ namespace osuCrypto
     struct LogVoleEncodingOptions
     {
         LogVoleWireOptions mWire;
-        bool mRootU64Memcpy = true;
-        bool mSetupMemcpy = true;
         bool mParallel = true;
         bool mEncodedReceive = true;
         bool mRootEncodedReceive = true;

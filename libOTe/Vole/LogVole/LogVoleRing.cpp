@@ -1241,7 +1241,7 @@ namespace osuCrypto::LogVole
 
     bool forwardNttCanonical(RnsPoly& poly, const RingNttContext& ctx, PendingRingOpsStats* stats)
     {
-        return forwardNttImpl(poly, ctx, !ctx.mExecutionOptions.mAdvanced.mCpu.mSkipRedundantReduce, stats);
+        return forwardNttImpl(poly, ctx, false, stats);
     }
 
     bool inverseNtt(RnsPoly& poly, const RingNttContext& ctx, PendingRingOpsStats* stats)

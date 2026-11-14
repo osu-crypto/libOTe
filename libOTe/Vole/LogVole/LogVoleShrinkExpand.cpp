@@ -1206,19 +1206,13 @@ namespace osuCrypto::LogVole
         decryptStep.stop();
 
         HostStep evalStep(hostProfiler(ctx), "cpu receiver expand detail: tree eval", &cpuBenchmark);
-        const bool fusedEval = ctx.mExecutionOptions.mAdvanced.mCpu.mFusedExpandEval && state.mParams.mTruncateOneGadgetDigit;
+        const bool fusedEval = state.mParams.mTruncateOneGadgetDigit;
         std::vector<RnsPoly> evalNtt;
         if (state.mParams.mTruncateOneGadgetDigit)
         {
-            if (!fusedEval)
-            {
-                evalNtt.resize(state.mParams.mMu);
-                for (auto& row : evalNtt) row.mCoeffs.resize(ringPolyCoeffCount(ctx.mParams));
-            }
             if (!co_await lencEvalTrunc(executor, lencBuffers, ctx, state.hostLacct(), *tree,
                     state.mParams.mMu, state.mParams.mTau, state.mParams.mGadgetLogBase,
-                    state.mParams.mPlaintextModulusBits, fusedEval ? decPartialNtt : evalNtt,
-                    fusedEval ? LencEvalMode::SubtractNtt : LencEvalMode::Ntt,
+                    state.mParams.mPlaintextModulusBits, decPartialNtt, LencEvalMode::SubtractNtt,
                     state.mParams.mLeafInputsAreGadget, cpuBenchmark)) co_return false;
         }
         else
@@ -1273,28 +1267,13 @@ namespace osuCrypto::LogVole
         HostStep evalStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: tree eval" : "cpu receiver expand detail: tree eval", &cpuBenchmark);
         std::vector<RnsPoly> evalNtt;
         bool evalOk = false;
-        const bool fusedEval = ctx.mExecutionOptions.mAdvanced.mCpu.mFusedExpandEval && state.mParams.mTruncateOneGadgetDigit;
+        const bool fusedEval = state.mParams.mTruncateOneGadgetDigit;
         if (fusedEval)
         {
             evalOk = detail::gpuLegacyLencSubtractEvalTruncNttInplace(
                 ctx, state.hostLacct(), *tree, state.mParams.mMu, state.mParams.mTau,
                 state.mParams.mGadgetLogBase, state.mParams.mPlaintextModulusBits,
                 decPartialNtt, rowWorkers, state.mParams.mLeafInputsAreGadget, cpuBenchmark, &scratch.cpuRows());
-        }
-        else if (state.mParams.mTruncateOneGadgetDigit)
-        {
-            evalOk = detail::gpuLegacyLencEvalTrunc(
-                ctx,
-                state.hostLacct(),
-                *tree,
-                state.mParams.mMu,
-                state.mParams.mTau,
-                state.mParams.mGadgetLogBase,
-                state.mParams.mPlaintextModulusBits,
-                evalNtt,
-                true,
-                rowWorkers,
-                state.mParams.mLeafInputsAreGadget, cpuBenchmark, &scratch.cpuRows());
         }
         else
         {

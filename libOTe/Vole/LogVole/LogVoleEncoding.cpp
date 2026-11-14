@@ -266,12 +266,11 @@ namespace osuCrypto::LogVole
         // Root exchanges two full ring polynomials, and their generic scalar
         // little-endian codec is visible on the online critical path. Keep the
         // native object-representation copy on little-endian hosts; repeated
-        // H200 A/B/A trials showed a consistent online win. This switch is
-        // independent of the offline codec below. Non-little-endian hosts use
-        // the established byte-at-a-time path.
-        bool setupMemcpyCodecEnabled(const LogVoleEncodingOptions& options)
+        // H200 A/B/A trials showed a consistent online win. Non-little-endian
+        // hosts use the established byte-at-a-time path.
+        constexpr bool setupMemcpyCodecEnabled()
         {
-            return std::endian::native == std::endian::little && options.mSetupMemcpy;
+            return std::endian::native == std::endian::little;
         }
 
         u32 setupCodecWorkers(u32 requested, const LogVoleEncodingOptions& options, bool useGpu)
@@ -487,7 +486,7 @@ namespace osuCrypto::LogVole
             {
                 auto cpuBenchmark = mCpuBenchmark;
                 writeU32(static_cast<u32>(ringBatchCoeffCount(polys)));
-                const bool nativeCopy = setupMemcpyCodecEnabled(mOptions);
+                constexpr bool nativeCopy = setupMemcpyCodecEnabled();
                 if (nativeCopy && mWorkers > 1 && polys.size() > 1 &&
                     ringBatchCoeffCount(polys) * sizeof(u64) >= (std::size_t(1) << 20))
                 {
@@ -639,7 +638,7 @@ namespace osuCrypto::LogVole
             u32 workers, const LogVoleEncodingOptions& options, bool useGpu, CpuBenchmarkState cpuBenchmark = {})
         {
             const auto modulusCount = static_cast<u32>(ring.mCoeffModulusBits.size());
-            if (!setupMemcpyCodecEnabled(options))
+            if constexpr (!setupMemcpyCodecEnabled())
             {
                 AlignedUnVec<u64> flat;
                 return readU64Vector(payload, offset, flat) &&
@@ -714,11 +713,8 @@ namespace osuCrypto::LogVole
         {
             if constexpr (std::endian::native == std::endian::little)
             {
-                if (writer.mOptions.mRootU64Memcpy)
-                {
-                    writer.writeNativeLittleEndianU64Vector(values);
-                    return;
-                }
+                writer.writeNativeLittleEndianU64Vector(values);
+                return;
             }
             writer.writeU64Vector(values);
         }
@@ -726,14 +722,11 @@ namespace osuCrypto::LogVole
         bool readRootU64Vector(
             std::span<const u8> payload,
             u64& offset,
-            AlignedUnVec<u64>& values, const LogVoleEncodingOptions& options, bool useGpu)
+            AlignedUnVec<u64>& values)
         {
             if constexpr (std::endian::native == std::endian::little)
             {
-                if (options.mRootU64Memcpy)
-                {
-                    return readNativeLittleEndianU64Vector(payload, offset, values);
-                }
+                return readNativeLittleEndianU64Vector(payload, offset, values);
             }
             return readU64Vector(payload, offset, values);
         }
@@ -1652,7 +1645,7 @@ namespace osuCrypto::LogVole
     bool decode(std::span<const u8> payload, RootDigestMessage& message, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
     {
         u64 offset = 0;
-        if (!readRootU64Vector(payload, offset, message.mDPrimeCoeffs, options, useGpu) ||
+        if (!readRootU64Vector(payload, offset, message.mDPrimeCoeffs) ||
             offset != payload.size() ||
             message.mDPrimeCoeffs.empty())
         {
@@ -1681,7 +1674,7 @@ namespace osuCrypto::LogVole
         // on the wire because the receiver derives it from the transcript. The
         // receiver rejects an empty seed when its own mode says it should have
         // received one, so this stays unambiguous.
-        if (!readRootU64Vector(payload, offset, message.mSkPrimeCoeffs, options, useGpu) ||
+        if (!readRootU64Vector(payload, offset, message.mSkPrimeCoeffs) ||
             offset != payload.size() ||
             message.mSkPrimeCoeffs.empty())
         {

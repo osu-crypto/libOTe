@@ -60,14 +60,6 @@ namespace osuCrypto
         bool operator==(const LogVoleGpuSetupOptions&) const = default;
     };
 
-    struct LogVoleCpuOptions
-    {
-        bool mInplaceLhe = true;
-        bool mFusedExpandEval = true;
-        bool mSkipRedundantReduce = true;
-        bool operator==(const LogVoleCpuOptions&) const = default;
-    };
-
     struct LogVoleGpuStreamOptions
     {
         bool mDebug = false;
@@ -237,7 +229,6 @@ namespace osuCrypto
         LogVoleGpuSetupOptions mGpuSetup;
         LogVoleTransportOptions mTransport;
         bool mHostStepProfile = false;
-        LogVoleCpuOptions mCpu;
         LogVoleGpuStreamOptions mStreams;
         LogVoleGpuKernelOptions mKernels;
         LogVoleGpuProtocolOptions mProtocol;
