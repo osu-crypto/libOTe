@@ -62,8 +62,6 @@ namespace
         CivoleReceiverState& receiverState)
     {
     tests_libOTe::logvole_test::SetupResources setupResources;
-        RootWirePinOverlapEvidence rootWirePin;
-        auto rootWirePinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
         oc::PRNG senderPrng(oc::block(11, 22));
         CivoleSenderOfflineInput senderInput{};
         senderInput.mParams = params;
@@ -76,7 +74,7 @@ namespace
 
         auto sockets = coproto::LocalAsyncSocket::makePair();
         auto result = macoro::sync_wait(macoro::when_all_ready(
-            civoleSenderOffline(setupResources.executor, setupResources.results, senderInput, senderState, senderPrng, sockets[0], rootWirePin, rootWirePinCudaEvidence),
+            civoleSenderOffline(setupResources.executor, setupResources.results, senderInput, senderState, senderPrng, sockets[0]),
             civoleReceiverOffline(receiverInput, receiverState, sockets[1])));
         std::get<0>(result).result();
         std::get<1>(result).result();
@@ -148,8 +146,6 @@ static_assert(std::is_move_assignable_v<LogVoleReceiver>);
 void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;
-    RootWirePinOverlapEvidence rootWirePin;
-    auto rootWirePinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
     osuCrypto::LogVoleExecutionOptions advanced;
     osuCrypto::LogVoleGpuSetupOptions setupOptions;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -289,7 +285,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             CivoleSenderState expected;
             coproto::BufferingSocket referenceSocket;
             {
-                macoro::sync_wait(civoleSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withSetupOptions(referenceInput, setupOptions), expected, referencePrng, referenceSocket, rootWirePin, rootWirePinCudaEvidence));
+                macoro::sync_wait(civoleSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withSetupOptions(referenceInput, setupOptions), expected, referencePrng, referenceSocket));
                 macoro::sync_wait(referenceSocket.flush());
             }
             auto expectedWire = referenceSocket.getOutbound();
@@ -302,7 +298,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
                 oc::PRNG actualPrng(seed, 3);
                 CivoleSenderState actual;
                 coproto::BufferingSocket actualSocket;
-                macoro::sync_wait(civoleSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(actualInput, setupOptions), advanced, ProtocolCacheRole::Sender), actual, actualPrng, actualSocket, rootWirePin, rootWirePinCudaEvidence));
+                macoro::sync_wait(civoleSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(actualInput, setupOptions), advanced, ProtocolCacheRole::Sender), actual, actualPrng, actualSocket));
                 macoro::sync_wait(actualSocket.flush());
                 auto actualWire = actualSocket.getOutbound();
                 LOGVOLE_REQUIRE_TRUE(actualWire && rangesEqual(*expectedWire, *actualWire));
@@ -347,7 +343,7 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
             unchanged.mW = 777u;
             coproto::BufferingSocket socket;
             bool threw = false;
-            try { macoro::sync_wait(civoleSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(candidate, setupOptions), advanced, ProtocolCacheRole::Sender), unchanged, prng, socket, rootWirePin, rootWirePinCudaEvidence)); }
+            try { macoro::sync_wait(civoleSenderOffline(setupResources.executor, setupResources.results, tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(candidate, setupOptions), advanced, ProtocolCacheRole::Sender), unchanged, prng, socket)); }
             catch (const std::runtime_error&) { threw = true; }
             LOGVOLE_REQUIRE_TRUE(threw);
             LOGVOLE_REQUIRE_EQ(socket.bytesSent(), 0u);
@@ -364,8 +360,6 @@ void LogVole_Civole_GpuSetupDeltaParity(const oc::CLP& cmd)
 void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;
-    RootWirePinOverlapEvidence rootWirePin;
-    auto rootWirePinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
     const auto params = make_params();
 
     CivoleSenderOfflineInput senderInput{};
@@ -379,7 +373,7 @@ void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
     bool threw = false;
     try
     {
-        macoro::sync_wait(civoleSenderOffline(setupResources.executor, setupResources.results, senderInput, senderState, prng, sockets[0], rootWirePin, rootWirePinCudaEvidence));
+        macoro::sync_wait(civoleSenderOffline(setupResources.executor, setupResources.results, senderInput, senderState, prng, sockets[0]));
     }
     catch (const std::runtime_error&)
     {

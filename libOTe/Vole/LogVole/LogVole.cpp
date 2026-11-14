@@ -496,7 +496,6 @@ namespace osuCrypto
     using namespace LogVole;
 
     LogVoleSender::LogVoleSender(LogVoleSender&& other)
-        : mRootWireCudaAllocEvidence{}
     {
         *this = std::move(other);
     }
@@ -513,8 +512,6 @@ namespace osuCrypto
             mNumThreads = other.mNumThreads;
             mNextSid = other.mNextSid;
             mLastOnlineComm = other.mLastOnlineComm;
-            mRootWirePin = other.mRootWirePin;
-            mRootWireCudaAllocEvidence = std::move(other.mRootWireCudaAllocEvidence);
             mState = other.mState;
             mSetting = other.mSetting;
             mConfigureCacheRunId = other.mConfigureCacheRunId;
@@ -615,8 +612,6 @@ namespace osuCrypto
         }
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;
-        params.mLogVole.mAllowPartialRootWidth = mOptions.mAdvanced.mAllowPartialRootWidth;
-        params.mLogVole.mEarlyGoldenCheck = mOptions.mAdvanced.mEarlyGoldenCheck;
         params.mLogVole.mShrinkExpand.mGpuSetup = mOptions.mAdvanced.mGpuSetup;
         params.mLogVole.mShrinkExpand.mTransport = mOptions.mAdvanced.mTransport;
 
@@ -646,7 +641,6 @@ namespace osuCrypto
     task<> LogVoleSender::offline(macoro::thread_pool &executor, std::span<u8> setupResults, u64 delta,
                                   PRNG &prng, Socket &sock, ProtocolCacheScope setupScope)
     {
-        mRootWirePin = {};
         CpuBenchmarkState cpuBenchmark{mOptions.mCpuBenchmark};
         if (!isConfigured())
         {
@@ -660,7 +654,7 @@ namespace osuCrypto
         input.mW = mRequestSize;
 
         CivoleSenderState state{};
-        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock, mRootWirePin, mRootWireCudaAllocEvidence,
+        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock,
                                      cpuBenchmark, setupScope);
 
         mOfflineState = std::move(state);
@@ -743,7 +737,6 @@ namespace osuCrypto
         mNumThreads = 1;
         mNextSid = 0;
         mLastOnlineComm = {};
-        mRootWirePin = {};
         mSetting = LogVole::CivoleSetting::GoldenSeed;
         mParams = {};
         mOfflineState = {};
@@ -803,8 +796,6 @@ namespace osuCrypto
         }
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         params.mLogVole.mOnlineMode = mode;
-        params.mLogVole.mAllowPartialRootWidth = mOptions.mAdvanced.mAllowPartialRootWidth;
-        params.mLogVole.mEarlyGoldenCheck = mOptions.mAdvanced.mEarlyGoldenCheck;
         params.mLogVole.mShrinkExpand.mGpuSetup = mOptions.mAdvanced.mGpuSetup;
         params.mLogVole.mShrinkExpand.mTransport = mOptions.mAdvanced.mTransport;
 
@@ -2058,11 +2049,9 @@ namespace osuCrypto::LogVole
 
     task<> civoleSenderOffline(macoro::thread_pool &executor, std::span<u8> setupResults,
                                const CivoleSenderOfflineInput &input, CivoleSenderState &state, PRNG &prng,
-                               Socket &sock, RootWirePinOverlapEvidence &rootWirePin,
-                               std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence,
+                               Socket &sock,
                                CpuBenchmarkState cpuBenchmark, ProtocolCacheScope setupScope)
     {
-        rootWirePin = {};
         // The delta producer precedes LogVoleRingSender::offline. Give both
         // stages the same fresh sender run rather than publishing a run-zero
         // device owner that a later party could accidentally reuse.
@@ -2075,8 +2064,6 @@ namespace osuCrypto::LogVole
         if (incomingRun && incomingRun.mService != identityService.get())
             throw std::invalid_argument("LogVole offline owner belongs to another identity service");
         const ProtocolCacheRunId offlineRunId = incomingRun ? incomingRun : identityService->allocate();
-        rootWirePin.mSenderRunId = offlineRunId;
-        rootWirePin.mIdentityService = offlineRunId.serviceOwner();
         const ProtocolCacheScope senderScope(offlineRunId, ProtocolCacheRole::Sender);
         CivoleParams sessionParams = input.mParams;
 
@@ -2205,8 +2192,7 @@ namespace osuCrypto::LogVole
         LogVoleRingSender sender{};
         SenderState logVoleState{};
         auto logVoleSock = sock.fork();
-        co_await sender.offline(executor, setupResults, offlineInput, logVoleState, prng, logVoleSock,
-                                rootWirePin, cudaEvidence, senderScope);
+        co_await sender.offline(executor, setupResults, offlineInput, logVoleState, prng, logVoleSock, senderScope);
 
         CivoleSenderState next{};
         next.mParams = sessionParams;

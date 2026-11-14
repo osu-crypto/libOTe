@@ -30,10 +30,10 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        bool setupMoveStateEnabled(bool requested, const std::shared_ptr<const RingNttContext>& owner)
+        bool setupMoveStateEnabled(const std::shared_ptr<const RingNttContext>& owner)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            return requested && gpu::enabled(owner);
+            return gpu::enabled(owner);
 #else
             return false;
 #endif
@@ -105,8 +105,7 @@ namespace osuCrypto::LogVole
 
         // Root's 256 KiB digest hash is needed only after the response arrives.
         // Schedule the already-encoded digest first, then compute the hash while
-        // the sender prepares its response. Disable mDeferRootDigestHash for
-        // the exact historical call order; direct/Core callers remain eager.
+        // the sender prepares its response; direct/Core callers remain eager.
 
 
 
@@ -404,7 +403,7 @@ namespace osuCrypto::LogVole
             throw std::runtime_error("LogVole receiver received malformed shrink/expand offline message");
         }
 
-        const bool finalized = setupMoveStateEnabled(input.mParams.mTransport.mMoveReceivedState, input.mRingFactoryOwner)
+        const bool finalized = setupMoveStateEnabled(input.mRingFactoryOwner)
             ? finalizeShrinkExpandReceiverOffline(input, std::move(message), state, setupScope)
             : finalizeShrinkExpandReceiverOffline(input, message, state, setupScope);
         if (!finalized)
@@ -433,7 +432,7 @@ namespace osuCrypto::LogVole
         co_await recvOfflineMessage(input.mParams, message, sock, true, false, gpu::enabled(input.mRingFactoryOwner), hostProfilerOwner(input.mRingFactoryOwner), timingStats(input.mRingFactoryOwner), cpuBenchmark);
 
         ReceiverOfflineOutput output{};
-        const bool finalized = setupMoveStateEnabled(input.mParams.mShrinkExpand.mTransport.mMoveReceivedState, input.mRingFactoryOwner)
+        const bool finalized = setupMoveStateEnabled(input.mRingFactoryOwner)
             ? finalizeReceiverOffline(input, std::move(message), output, cpuBenchmark, setupScope)
             : finalizeReceiverOffline(input, message, output, cpuBenchmark, setupScope);
         if (!finalized)
@@ -592,17 +591,15 @@ namespace osuCrypto::LogVole
             const bool nonInteractive = state.mParams.mOnlineMode == OnlineMode::NonInteractive;
             {
                 auto rootSock = sock.fork();
-                const bool ownedFastPath = state.mParams.mShrinkExpand.mTransport.mOwnedRootMessages;
                 RootDigestState digestState{};
                 RootDigestMessage digest{};
-                const bool deferDigestHash = state.mParams.mShrinkExpand.mTransport.mDeferRootDigestHash;
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: prepare digest", state.mParams.mW, &cpuBenchmark);
                     auto* timing = timingStats(state.mShrinkExpandState.mRingFactoryOwner);
                     AutoTimer rootTimer(timing ? &timing->mRootReceiverHostUs : nullptr);
                     const bool prepared = co_await prepareRootDigestReceiver(executor, zetaBuffers,
                         state, input.mX, prng, digestState, digest,
-                        input.mXDevice, input.mXCount, deferDigestHash, cpuBenchmark, cacheScope);
+                        input.mXDevice, input.mXCount, true, cpuBenchmark, cacheScope);
                     if (!prepared)
                     {
                         throw std::runtime_error("LogVole receiver could not prepare root digest");
@@ -618,14 +615,7 @@ namespace osuCrypto::LogVole
                 digestFrameSize = detail::frameBytes(digestPayload);
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "root: send digest", state.mParams.mW, &cpuBenchmark);
-                    if (ownedFastPath)
-                    {
-                        co_await detail::sendOwnedFrame(rootSock, std::move(digestPayload));
-                    }
-                    else
-                    {
-                        co_await detail::sendFrame(rootSock, digestPayload);
-                    }
+                    co_await detail::sendOwnedFrame(rootSock, std::move(digestPayload));
                 }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -637,11 +627,11 @@ namespace osuCrypto::LogVole
                 tryPrefetchRootFinalizeBase(state, digestState, cpuBenchmark, cacheScope);
 #endif
 
-                // sendFrame has handed an owned copy to coproto before it
+                // sendOwnedFrame has handed the buffer to coproto before it
                 // resumes us. Hashing remains synchronous on this coroutine;
                 // only after it succeeds does mDPrimeHash become authoritative
                 // for response validation and the seed-dependent CT2 suffix.
-                if (deferDigestHash && !finishRootDigestHash(digestState,
+                if (!finishRootDigestHash(digestState,
                         rootProfiler(state.mShrinkExpandState.mRingFactoryOwner)))
                 {
                     throw std::runtime_error("LogVole receiver could not hash root digest");
@@ -675,7 +665,7 @@ namespace osuCrypto::LogVole
                     AutoTimer rootTimer(timing ? &timing->mRootReceiverHostUs : nullptr);
                     auto operation = finalizeRootOnlineReceiver(executor, lheBuffers, lencBuffers,
                         state, input, digestState,
-                        ownedFastPath ? std::move(response) : RootResponseMessage(response), output, cpuBenchmark, cacheScope);
+                        std::move(response), output, cpuBenchmark, cacheScope);
                     const bool finalized = co_await std::move(operation);
                     if (!finalized)
                     {

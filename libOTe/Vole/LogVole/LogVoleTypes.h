@@ -372,30 +372,8 @@ namespace osuCrypto::LogVole
         // instead of bounding them.
         u32 mCt2StatBits = 128;
 
-        // Permit a nonzero Root width below the full shrink/expand block.
-        // Copied with the parameters into each recursive level.
-        bool mAllowPartialRootWidth = false;
-
-        // Reject invalid GoldenSeed candidates during CPU expansion when eligible.
-        bool mEarlyGoldenCheck = true;
     };
 
-    struct RootWirePinOverlapEvidence
-    {
-        ProtocolCacheRunId mSenderRunId = 0;
-        std::shared_ptr<const ProtocolCacheService> mIdentityService;
-        u64 mWireBytes = 0;
-        u64 mPinBeginNs = 0;
-        u64 mPinEndNs = 0;
-        u64 mPinCpuNs = 0;
-        u64 mJoinWaitNs = 0;
-        bool mRequested = false;
-        bool mEligible = false;
-        bool mLaunched = false;
-        bool mAlreadyPinned = false;
-        bool mPinSucceeded = false;
-        bool mSelected = false;
-    };
     struct SenderState
     {
         Params mParams;

@@ -1193,19 +1193,33 @@ Detailed configure/build/control and per-group logs are retained in ignored
 `out/review/cpu-owned-*` artifacts. The native executable remains under
 `/root/logvole-cpu-lsan-58ed36fd` in the Ubuntu 24.04 WSL distro.
 
-### Deferred option cleanup
+### Production option cleanup
 
 The first production cleanup removes five baseline selectors: the three CPU
 kernel switches and the two memcpy codec switches. Established optimized paths
 are standard. The endian-safe fallback, alias handling, and general APIs remain;
 this changes neither protocol bytes nor arithmetic.
 
-- Prune transport/encoding optionality after the ownership refactor. Audit the
-  16 switches under `mAdvanced.mTransport`: retain only controls justified by a
-  concrete caller requirement or measured supported-platform tradeoff. Make
-  established ownership/move and endian-safe codec paths standard; use the
-  configured thread count for parallel work. Remove unneeded experimental
-  root-pinning/allocation variants and their alternative implementations, not
-  just their flags. Preserve required portability, allocation-failure fallback,
-  protocol bytes, and structured lifetimes. Do not assume every current default
-  is universally fastest; record the reason for each retained control.
+The transport cleanup makes owned setup/root sends and root-message moves
+standard, preserving the existing GPU-only eligibility for moving received
+offline state. It removes the disabled root pin-overlap and CUDA-owned/early
+allocation experiments and their evidence plumbing. Codec workers use the
+configured thread count under the existing GPU eligibility policy. Eligible
+little-endian GPU transport receives retain encoded tensors; CPU and other
+endian hosts retain eager decoding. Direct decode APIs remain eager. The root
+digest hash follows the existing deferred transport schedule, while direct/Core
+callers retain their eager default. Protocol bytes and arithmetic are unchanged.
+
+Only three wire-memory controls remain under `mAdvanced.mTransport`: `mPinned`
+selects host registration, `mDirectDownload` permits device downloads into wire
+storage, and `mHugePages` permits huge-page advice for large eligible buffers.
+These control supported allocation/transfer tradeoffs. Ordinary wire-pool
+pinning, allocation-failure fallback, and direct transfers remain; none of these
+controls changes protocol bytes.
+
+The top-level CPU cleanup removes partial-root geometry support and the early
+golden-check override. Production root geometry remains required. Early golden
+checking follows its existing automatic one-to-four-worker eligibility policy;
+the full path remains where that policy requires it. Together, these cleanups
+remove 20 selectors: 15 transport selectors, three CPU-kernel selectors, and two
+top-level selectors. Broader GPU option cleanup remains separate.

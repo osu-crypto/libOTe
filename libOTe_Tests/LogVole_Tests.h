@@ -77,7 +77,6 @@
     X(Encoding, SingletonOfflinePayloadBound) \
     X(Encoding, RootResidentWireExact) \
     X(Encoding, PinnedWireBufferOwnership) \
-    X(Encoding, RootCudaEvidenceOwnership) \
     X(KeyDeriveCore, AlgebraicRelation) \
     X(KeyDeriveCore, DeterministicRegressionSeeds) \
     X(KeyDeriveCore, MetadataMismatchRejected) \
@@ -143,14 +142,13 @@
     X(Core, NoGoldenSeedRootFinalizePrefetchTwoQueryExact) \
     X(Core, TwoLevelLocalApiRelation) \
     X(Core, RecursiveGadgetInputSubproblem) \
-    X(Core, PartialRootWidthExperimental) \
     X(Core, RejectsWidthsBelowRandomizedRootBlock) \
+    X(Core, GoldenWorkerPoliciesMatch) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedRejectsMalformedCandidate) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Core, LeafGoldenSeedChecksPlaintextProduct) \
     X(Core, LeafGoldenSeedGpuParity) \
-    X(Core, EarlyGoldenMatchesFullEvaluation) \
     X(LencOps, EvalFromPrebuiltTreeMatchesEvalFromX) \
     X(LencOps, EvalRejectsMuMismatch) \
     X(LencOps, TruncEncShapeAndDeterminism) \

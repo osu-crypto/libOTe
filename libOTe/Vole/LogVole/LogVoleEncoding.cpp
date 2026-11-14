@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <cmath>
 #include <bit>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -27,17 +26,6 @@
 
 namespace osuCrypto::LogVole
 {
-    namespace
-    {
-
-        u64 rootCudaWireSteadyNs()
-        {
-            return static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count());
-        }
-
-    }
-
     namespace detail
     {
         std::shared_ptr<WireMemoryPool> makeSetupWireMemory(std::size_t bytes, LogVoleWireOptions options, bool useGpu)
@@ -52,7 +40,7 @@ namespace osuCrypto::LogVole
         }
 
         void* allocateSetupWireBytes(std::size_t bytes, std::size_t alignment,
-            WireMemoryPool* memory, bool cudaOwned, ProtocolCacheRunId runId, const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence)
+            WireMemoryPool* memory)
         {
             if (!bytes) return nullptr;
             if (alignment < alignof(void*) || (alignment & (alignment - 1u)) ||
@@ -63,12 +51,6 @@ namespace osuCrypto::LogVole
             if (bytes > std::numeric_limits<std::size_t>::max() - overhead)
                 throw std::bad_array_new_length();
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (memory && cudaOwned && gpu::available())
-            {
-
-                if (void* pointer = memory->allocate(bytes, alignment, true, runId, evidence))
-                    return pointer;
-            }
             if (memory && bytes >= (std::size_t{1} << 20) && alignment <= 4096 &&
                 gpu::available())
             {
@@ -81,8 +63,6 @@ namespace osuCrypto::LogVole
             }
 #else
             (void)memory;
-            (void)cudaOwned;
-            (void)runId;
 #endif
             void* pointer = AlignedAllocator<u8>::aligned_malloc(bytes, alignment);
             if (!pointer) throw std::bad_alloc();
@@ -95,146 +75,6 @@ namespace osuCrypto::LogVole
             if (memory && memory->release(pointer)) return;
             AlignedAllocator<u8>::aligned_free(pointer);
         }
-    }
-
-    void resetRootWireCudaAllocEvidence(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId,
-        bool requested) noexcept
-    {
-        try
-        {
-            if (!evidence) return;
-            std::lock_guard lock(evidence->mMutex);
-            evidence->mEvidence = {};
-            evidence->mEvidence.mSenderRunId = senderRunId;
-            evidence->mEvidence.mIdentityService = senderRunId.serviceOwner();
-            evidence->mEvidence.mRequested = requested;
-        }
-        catch (...) {}
-    }
-
-    void noteRootWireCudaAllocEligibility(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId,
-        std::size_t wireBytes, bool eligible) noexcept
-    {
-        try
-        {
-            if (!evidence) return;
-            std::lock_guard lock(evidence->mMutex);
-            if (evidence->mEvidence.mSenderRunId != senderRunId) return;
-            evidence->mEvidence.mWireBytes = static_cast<u64>(wireBytes);
-            evidence->mEvidence.mEligible = eligible;
-        }
-        catch (...) {}
-    }
-
-    void noteRootWireCudaEarlyPlan(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId, bool requested,
-        bool eligible, std::size_t forecastBytes, bool launched) noexcept
-    {
-        try
-        {
-            if (!evidence) return;
-            std::lock_guard lock(evidence->mMutex);
-            if (evidence->mEvidence.mSenderRunId != senderRunId) return;
-            evidence->mEvidence.mEarlyRequested = requested;
-            evidence->mEvidence.mEarlyEligible = eligible;
-            evidence->mEvidence.mEarlyForecastBytes =
-                static_cast<u64>(forecastBytes);
-            evidence->mEvidence.mEarlyLaunched = launched;
-        }
-        catch (...) {}
-    }
-
-    void noteRootWireCudaEarlyJoin(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId, u64 joinWaitNs,
-        bool adopted) noexcept
-    {
-        try
-        {
-            if (!evidence) return;
-            std::lock_guard lock(evidence->mMutex);
-            if (evidence->mEvidence.mSenderRunId != senderRunId) return;
-            evidence->mEvidence.mEarlyJoinWaitNs = joinWaitNs;
-            evidence->mEvidence.mEarlyAdopted = adopted;
-            if (adopted)
-            {
-                evidence->mEvidence.mSelected = true;
-                evidence->mEvidence.mDeclined = false;
-            }
-        }
-        catch (...) {}
-    }
-
-    RootWireCudaAllocEvidence rootWireCudaAllocEvidenceSnapshot(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence) noexcept
-    {
-        try
-        {
-            if (!evidence) return {};
-            std::lock_guard lock(evidence->mMutex);
-            return evidence->mEvidence;
-        }
-        catch (...) { return {}; }
-    }
-
-    bool isRootCudaWireHostRange(ConstWireView wire) noexcept
-    {
-        return wire.mMemory && wire.mMemory->isCudaOwned(wire.data(), wire.size());
-    }
-
-    void recordRootCudaWireDirectDownload(ConstWireView wire, bool completed) noexcept
-    {
-        if (wire.mMemory)
-            wire.mMemory->noteRootCudaWireDirectDownload(wire.data(), wire.size(), completed);
-    }
-
-    Buffer reserveRootCudaWireBuffer(std::size_t bytes, ProtocolCacheRunId senderRunId,
-        const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, bool& cudaOwned, bool recordSelection, std::shared_ptr<WireMemoryPool> memory, LogVoleWireOptions options, HostStepProfiler* profile)
-    {
-        cudaOwned = false;
-        if (!options.mPinned) return Buffer(bytes, options, false, profile);
-        const u64 wallBegin = rootCudaWireSteadyNs();
-        const u64 cpuBegin = cpuBenchmarkThreadNs();
-        if (!memory) memory = std::make_shared<WireMemoryPool>();
-        Buffer reserved(detail::SetupWireAllocator<u8>(std::move(memory), true, senderRunId, evidence));
-        reserved.resize(bytes, AllocType::Uninitialized, options, true, profile);
-        cudaOwned = isRootCudaWireHostRange(reserved.wireView());
-        const u64 cpuElapsed = cpuBenchmarkThreadNs() - cpuBegin;
-        const u64 wallEnd = rootCudaWireSteadyNs();
-        {
-            if (!evidence) return reserved;
-            std::lock_guard lock(evidence->mMutex);
-            if (evidence->mEvidence.mSenderRunId == senderRunId)
-            {
-                evidence->mEvidence.mAllocationBeginNs = wallBegin;
-                evidence->mEvidence.mAllocationEndNs = wallEnd;
-                evidence->mEvidence.mAllocationCpuNs = cpuElapsed;
-                if (recordSelection)
-                {
-                    evidence->mEvidence.mSelected = cudaOwned;
-                    evidence->mEvidence.mDeclined =
-                        evidence->mEvidence.mEligible && !cudaOwned;
-                }
-            }
-        }
-        return reserved;
-    }
-
-    bool shrinkRootCudaWireBuffer(Buffer& reserved,
-        std::size_t exactBytes) noexcept
-    {
-#if defined(ENABLE_LOGVOLE_CUDA)
-        if (!exactBytes || exactBytes > reserved.size() ||
-            !isRootCudaWireHostRange(reserved.wireView()))
-            return false;
-        const std::size_t oldBytes = reserved.size();
-        if (!reserved.memory()->contract(reserved.data(),
-                oldBytes, exactBytes)) return false;
-        try { reserved.resize(exactBytes); }
-        catch (...) { return false; }
-        return reserved.size() == exactBytes &&
-            isRootCudaWireHostRange(reserved.wireView());
-#else
-        (void)reserved;
-        (void)exactBytes;
-        return false;
-#endif
     }
 
     void adviseGpuSetupWireBuffer(Buffer& buffer, const LogVoleWireOptions& options, bool useGpu)
@@ -273,10 +113,10 @@ namespace osuCrypto::LogVole
             return std::endian::native == std::endian::little;
         }
 
-        u32 setupCodecWorkers(u32 requested, const LogVoleEncodingOptions& options, bool useGpu)
+        u32 setupCodecWorkers(u32 requested, bool useGpu)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if ((useGpu && gpu::available()) && options.mParallel)
+            if (useGpu && gpu::available())
                 return std::max<u32>(1u, requested);
 #endif
             return 1;
@@ -405,17 +245,16 @@ namespace osuCrypto::LogVole
             Buffer mBuffer;
             std::size_t mOffset = 0;
             u32 mWorkers = 1;
-            const LogVoleEncodingOptions& mOptions;
             CpuBenchmarkState mCpuBenchmark;
 
             explicit BufferWriter(std::size_t size, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {})
-                : mBuffer(size, options.mWire, useGpu, profile), mWorkers(setupCodecWorkers(workers, options, useGpu)), mOptions(options), mCpuBenchmark(cpuBenchmark)
+                : mBuffer(size, options.mWire, useGpu, profile), mWorkers(setupCodecWorkers(workers, useGpu)), mCpuBenchmark(cpuBenchmark)
             {
                 adviseGpuSetupWireBuffer(mBuffer, options.mWire, useGpu);
             }
 
             explicit BufferWriter(Buffer&& reserved, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {})
-                : mBuffer(std::move(reserved)), mWorkers(setupCodecWorkers(workers, options, useGpu)), mOptions(options), mCpuBenchmark(cpuBenchmark)
+                : mBuffer(std::move(reserved)), mWorkers(setupCodecWorkers(workers, useGpu)), mCpuBenchmark(cpuBenchmark)
             {
                 adviseGpuSetupWireBuffer(mBuffer, options.mWire, useGpu);
             }
@@ -635,7 +474,7 @@ namespace osuCrypto::LogVole
             const RingParams& ring,
             u32 polyCount,
             std::vector<RnsPoly>& polys,
-            u32 workers, const LogVoleEncodingOptions& options, bool useGpu, CpuBenchmarkState cpuBenchmark = {})
+            u32 workers, bool useGpu, CpuBenchmarkState cpuBenchmark = {})
         {
             const auto modulusCount = static_cast<u32>(ring.mCoeffModulusBits.size());
             if constexpr (!setupMemcpyCodecEnabled())
@@ -666,10 +505,10 @@ namespace osuCrypto::LogVole
 
             polys.resize(polyCount);
             const auto bytes = static_cast<std::size_t>(perPoly) * sizeof(u64);
-            if (setupCodecWorkers(workers, options, useGpu) > 1 && polyCount > 1 &&
+            if (setupCodecWorkers(workers, useGpu) > 1 && polyCount > 1 &&
                 static_cast<std::size_t>(coeffCount) * sizeof(u64) >= (std::size_t(1) << 20))
             {
-                if (!detail::runParallelTasks(polyCount, setupCodecWorkers(workers, options, useGpu), [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+                if (!detail::runParallelTasks(polyCount, setupCodecWorkers(workers, useGpu), [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     auto& poly = polys[i];
                     poly.mCoeffs.resize(static_cast<std::size_t>(perPoly));
                     std::memcpy(poly.mCoeffs.data(), payload.data() + offset + i * bytes, bytes);
@@ -696,7 +535,7 @@ namespace osuCrypto::LogVole
             u64& offset,
             const RingParams& ring,
             RingTensor& tensor,
-            u32 workers, const LogVoleEncodingOptions& options, bool useGpu, CpuBenchmarkState cpuBenchmark = {})
+            u32 workers, bool useGpu, CpuBenchmarkState cpuBenchmark = {})
         {
             if (!readU32(payload, offset, tensor.mRows) ||
                 !readU32(payload, offset, tensor.mCols) ||
@@ -706,7 +545,7 @@ namespace osuCrypto::LogVole
                 return false;
             }
             return readOfflineRingBatch(
-                payload, offset, ring, tensor.mRows * tensor.mCols, tensor.mPolys, workers, options, useGpu, cpuBenchmark);
+                payload, offset, ring, tensor.mRows * tensor.mCols, tensor.mPolys, workers, useGpu, cpuBenchmark);
         }
 
         void writeRootU64Vector(BufferWriter& writer, const AlignedUnVec<u64>& values)
@@ -1176,33 +1015,6 @@ namespace osuCrypto::LogVole
         return rootWireLayout(message).mBytes;
     }
 
-    void noteRootWireCudaExpectedDownloads(const std::shared_ptr<RootWireCudaAllocEvidenceOwner>& evidence, ProtocolCacheRunId senderRunId,
-        const RootOfflineMessage& message)
-    {
-        const auto layout = rootWireLayout(message);
-        u64 expectedBytes = 0;
-        u64 expectedCalls = 0;
-        const auto addTensor = [&](const RingTensor& tensor,
-                                   const auto& lazy) {
-            if (!lazy) return;
-            const u64 bytes = static_cast<u64>(ringTensorSize(tensor)) *
-                layout.mWordsPerPoly * sizeof(u64);
-            if (!bytes) return;
-            if (expectedBytes > std::numeric_limits<u64>::max() - bytes)
-                throw std::length_error("LogVole Root lazy wire downloads are too large");
-            expectedBytes += bytes;
-            ++expectedCalls;
-        };
-        addTensor(message.mCtR, message.mLazyCtR);
-        addTensor(message.mLacctLeft.mCt, message.mLazyLacctLeft);
-        addTensor(message.mTopCt, message.mLazyTopCt);
-        if (!evidence) return;
-        std::lock_guard lock(evidence->mMutex);
-        if (evidence->mEvidence.mSenderRunId != senderRunId) return;
-        evidence->mEvidence.mExpectedDirectDownloadBytes = expectedBytes;
-        evidence->mEvidence.mExpectedDirectDownloadCalls = expectedCalls;
-    }
-
     Buffer encode(const RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
     {
         return encodeRootOfflineIntoBuffer(message,
@@ -1357,10 +1169,10 @@ namespace osuCrypto::LogVole
         message.mLazyLacct.reset();
         u64 offset = 0;
         if (!readParams(payload, offset, message.mParams) ||
-            !readOfflineRingTensor(payload, offset, message.mParams.mRing, message.mCt1, workers, options, useGpu, cpuBenchmark) ||
+            !readOfflineRingTensor(payload, offset, message.mParams.mRing, message.mCt1, workers, useGpu, cpuBenchmark) ||
             !readU32(payload, offset, message.mLacct.mWidthPadded) ||
             !readU32(payload, offset, message.mLacct.mLevels) ||
-            !readOfflineRingTensor(payload, offset, message.mParams.mRing, message.mLacct.mCt, workers, options, useGpu, cpuBenchmark) ||
+            !readOfflineRingTensor(payload, offset, message.mParams.mRing, message.mLacct.mCt, workers, useGpu, cpuBenchmark) ||
             offset != payload.size())
         {
             return false;
@@ -1420,7 +1232,7 @@ namespace osuCrypto::LogVole
         auto* profile = profileOwner.get();
         bool enabled = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        enabled = (useGpu && gpu::available()) && options.mEncodedReceive;
+        enabled = useGpu && gpu::available();
 #endif
         if (!enabled || std::endian::native != std::endian::little)
             return decode(payload, message, workers, options, useGpu, profile, cpuBenchmark);
@@ -1505,14 +1317,14 @@ namespace osuCrypto::LogVole
             !readU32(payload, offset, message.mPlaintextModulusBits) ||
             !readU32(payload, offset, message.mLeftWidth) ||
             !readU32(payload, offset, message.mRandomizerWidth) ||
-            !readOfflineRingTensor(payload, offset, message.mRing, message.mCtR, workers, options, useGpu, cpuBenchmark) ||
+            !readOfflineRingTensor(payload, offset, message.mRing, message.mCtR, workers, useGpu, cpuBenchmark) ||
             !readU32(payload, offset, message.mLacctLeft.mWidthPadded) ||
             !readU32(payload, offset, message.mLacctLeft.mLevels) ||
-            !readOfflineRingTensor(payload, offset, message.mRing, message.mLacctLeft.mCt, workers, options, useGpu, cpuBenchmark) ||
-            !readOfflineRingTensor(payload, offset, message.mRing, message.mTopCt, workers, options, useGpu, cpuBenchmark) ||
+            !readOfflineRingTensor(payload, offset, message.mRing, message.mLacctLeft.mCt, workers, useGpu, cpuBenchmark) ||
+            !readOfflineRingTensor(payload, offset, message.mRing, message.mTopCt, workers, useGpu, cpuBenchmark) ||
             !readU32(payload, offset, publicBStarCount) ||
             !readOfflineRingBatch(
-                payload, offset, message.mRing, publicBStarCount, message.mPublicBStarNtt, workers, options, useGpu, cpuBenchmark) ||
+                payload, offset, message.mRing, publicBStarCount, message.mPublicBStarNtt, workers, useGpu, cpuBenchmark) ||
             offset != payload.size())
         {
             return false;
@@ -1535,14 +1347,8 @@ namespace osuCrypto::LogVole
     {
         auto* profile = profileOwner.get();
         bool enabled = false;
-        bool retainCtR = false;
-        bool retainLacct = false;
-        bool retainPublicBStar = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        enabled = (useGpu && gpu::available()) && options.mRootEncodedReceive;
-        retainCtR = options.mRootCtREncodedReceive;
-        retainLacct = options.mRootLacctEncodedReceive;
-        retainPublicBStar = options.mRootBStarEncodedReceive;
+        enabled = useGpu && gpu::available();
 #endif
         if (!enabled || std::endian::native != std::endian::little)
             return decode(payload, message, workers, options, useGpu, profile, cpuBenchmark);
@@ -1594,50 +1400,34 @@ namespace osuCrypto::LogVole
             !readU32(payload, offset, next.mPlaintextModulusBits) ||
             !readU32(payload, offset, next.mLeftWidth) ||
             !readU32(payload, offset, next.mRandomizerWidth) ||
-            !(retainCtR
-                ? readOwnedTensor(next.mCtR, ctR)
-                : readOfflineRingTensor(payload, offset, next.mRing, next.mCtR, workers, options, useGpu, cpuBenchmark)) ||
+            !readOwnedTensor(next.mCtR, ctR) ||
             !readU32(payload, offset, next.mLacctLeft.mWidthPadded) ||
             !readU32(payload, offset, next.mLacctLeft.mLevels) ||
-            !(retainLacct
-                ? readOwnedTensor(next.mLacctLeft.mCt, lacct)
-                : readOfflineRingTensor(payload, offset, next.mRing, next.mLacctLeft.mCt, workers, options, useGpu, cpuBenchmark)) ||
+            !readOwnedTensor(next.mLacctLeft.mCt, lacct) ||
             !readOwnedTensor(next.mTopCt, topCt) ||
             !readU32(payload, offset, publicBStarCount) ||
-            !(retainPublicBStar
-                ? readOwnedPublicBStar(publicBStarCount, publicBStar)
-                : readOfflineRingBatch(payload, offset, next.mRing, publicBStarCount,
-                    next.mPublicBStarNtt, workers, options, useGpu, cpuBenchmark)) ||
+            !readOwnedPublicBStar(publicBStarCount, publicBStar) ||
             offset != payload.size())
             return false;
 
         auto owner = std::make_shared<const Buffer>(std::move(payload));
         const auto words = static_cast<std::size_t>(ringPolyCoeffCount(next.mRing));
-        if (retainCtR)
-        {
-            next.mLazyCtR = std::make_shared<EncodedTensorHostState>(owner,
-                ctR.offset, ctR.bytes, next.mCtR.mRows, next.mCtR.mCols, words, profileOwner);
-            next.mOwnedCtRWire = next.mLazyCtR;
-        }
-        if (retainLacct)
-        {
-            next.mLazyLacctLeft = std::make_shared<EncodedTensorHostState>(owner,
-                lacct.offset, lacct.bytes, next.mLacctLeft.mCt.mRows,
-                next.mLacctLeft.mCt.mCols, words, profileOwner);
-            next.mOwnedLacctLeftWire = next.mLazyLacctLeft;
-        }
+        next.mLazyCtR = std::make_shared<EncodedTensorHostState>(owner,
+            ctR.offset, ctR.bytes, next.mCtR.mRows, next.mCtR.mCols, words, profileOwner);
+        next.mOwnedCtRWire = next.mLazyCtR;
+        next.mLazyLacctLeft = std::make_shared<EncodedTensorHostState>(owner,
+            lacct.offset, lacct.bytes, next.mLacctLeft.mCt.mRows,
+            next.mLacctLeft.mCt.mCols, words, profileOwner);
+        next.mOwnedLacctLeftWire = next.mLazyLacctLeft;
         next.mLazyTopCt = std::make_shared<EncodedTensorHostState>(owner,
             topCt.offset, topCt.bytes, next.mTopCt.mRows, next.mTopCt.mCols,
             words, profileOwner);
         next.mOwnedTopCtWire = next.mLazyTopCt;
         next.mPublicBStarCount = publicBStarCount;
-        if (retainPublicBStar)
-        {
-            next.mLazyPublicBStar = std::make_shared<EncodedTensorHostState>(
-                std::move(owner), publicBStar.offset, publicBStar.bytes,
-                publicBStarCount, 1u, words, profileOwner);
-            next.mOwnedPublicBStarWire = next.mLazyPublicBStar;
-        }
+        next.mLazyPublicBStar = std::make_shared<EncodedTensorHostState>(
+            std::move(owner), publicBStar.offset, publicBStar.bytes,
+            publicBStarCount, 1u, words, profileOwner);
+        next.mOwnedPublicBStarWire = next.mLazyPublicBStar;
         message = std::move(next);
         return true;
     }

@@ -1183,21 +1183,14 @@ namespace osuCrypto::LogVole::gpu
         template <typename DirectCopy, typename FallbackCopy>
         bool transferSetupWire(ConstWireView wire, GpuStream& stream,
             bool registerFresh, bool fallbackOnPoolPinFailure, const LogVoleWireOptions& options,
-            const DirectCopy& directCopy, const FallbackCopy& fallbackCopy,
-            bool* cudaOwnedDirectCompleted = nullptr)
+            const DirectCopy& directCopy, const FallbackCopy& fallbackCopy)
         {
             void* host = const_cast<u8*>(wire.data());
             const auto bytes = wire.size();
             auto* memory = wire.mMemory;
-            if (cudaOwnedDirectCompleted) *cudaOwnedDirectCompleted = false;
             SetupWireTransfer transfer{stream};
             const bool usePinned = options.mPinned;
-            // This exact sender-owned Root wire is backed by cudaHostAlloc,
-            // not by the lazily registered setup pool. Its allocator tracks
-            // the active range until coproto finishes the borrowed TCP send.
-            const bool cudaOwnedRoot = usePinned &&
-                isRootCudaWireHostRange(wire);
-            const bool pooledOwner = usePinned && memory && memory->contains(host, bytes) && !cudaOwnedRoot;
+            const bool pooledOwner = usePinned && memory && memory->contains(host, bytes);
             bool pooled = pooledOwner && memory->isPinned(host, bytes);
             if (pooledOwner && !pooled && registerFresh)
             {
@@ -1205,7 +1198,7 @@ namespace osuCrypto::LogVole::gpu
                 if (!memory->pin(host, bytes, pooled) &&
                     !fallbackOnPoolPinFailure) return false;
             }
-            if (!pooledOwner && !cudaOwnedRoot &&
+            if (!pooledOwner &&
                 bytes >= (std::size_t{1} << 20) &&
                 usePinned && registerFresh)
             {
@@ -1214,14 +1207,12 @@ namespace osuCrypto::LogVole::gpu
                 if (!gpuTryRegisterHost(host, bytes, registered)) return false;
                 if (registered) transfer.mRegistered = host;
             }
-            HostStep copyStep(stream.hostProfiler(), cudaOwnedRoot ? "setup: CUDA-owned Root wire transfer" : pooled
+            HostStep copyStep(stream.hostProfiler(), pooled
                 ? "setup: pooled pinned wire transfer" : transfer.mRegistered
                 ? "setup: registered wire transfer" : "setup: staged wire transfer");
-            const bool copied = (cudaOwnedRoot || pooled || transfer.mRegistered)
+            const bool copied = (pooled || transfer.mRegistered)
                 ? directCopy() : fallbackCopy();
             const bool completed = transfer.finish();
-            if (cudaOwnedDirectCompleted)
-                *cudaOwnedDirectCompleted = cudaOwnedRoot && copied && completed;
             return copied && completed;
         }
     }
@@ -1246,13 +1237,10 @@ namespace osuCrypto::LogVole::gpu
         // profiling. A previously registered pool block remains direct.
         const bool pinFreshPool = options.mDirectDownload &&
             (wire.mMemory && wire.mMemory->contains(hostDst, bytes));
-        bool cudaOwnedDirectCompleted = false;
         const bool completed = transferSetupWire(wire, stream,
             pinFreshPool, true, options,
             [&] { return gpuMemcpyD2H(hostDst, deviceSrc, bytes, stream.raw()); },
-            [&] { return downloadToHost(hostDst, deviceSrc, bytes, stream); },
-            &cudaOwnedDirectCompleted);
-        recordRootCudaWireDirectDownload(wire, cudaOwnedDirectCompleted);
+            [&] { return downloadToHost(hostDst, deviceSrc, bytes, stream); });
         return completed;
     }
 

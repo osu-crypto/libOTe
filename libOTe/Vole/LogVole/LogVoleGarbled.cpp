@@ -103,8 +103,6 @@ namespace osuCrypto::LogVole
             if (!fixedBits && options.mPlaintextModulusBits != next.mLogVole.mShrinkExpand.mPlaintextModulusBits)
                 throw std::invalid_argument("garbled labels require the selected parameter set modulus width");
             GarbledLabelLayout shape(count, next.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree);
-            next.mLogVole.mAllowPartialRootWidth = options.mAdvanced.mAllowPartialRootWidth;
-            next.mLogVole.mEarlyGoldenCheck = options.mAdvanced.mEarlyGoldenCheck;
             next.mLogVole.mShrinkExpand.mGpuSetup = options.mAdvanced.mGpuSetup;
             next.mLogVole.mShrinkExpand.mTransport = options.mAdvanced.mTransport;
             next.mLogVole.mTotalLabelCount = shape.scalarCount();
@@ -214,8 +212,7 @@ namespace osuCrypto
             input.mDeltaSlots = slots;
         }
         CivoleSenderState state;
-        RootWirePinOverlapEvidence rootWirePin;
-        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock, rootWirePin, mRootWireCudaAllocEvidence,
+        co_await civoleSenderOffline(executor, setupResults, input, state, prng, sock,
                                      cpuBenchmark);
         mState = std::move(state);
         mDeltas = deltas;

@@ -8,10 +8,6 @@ namespace osuCrypto
     namespace LogVole { struct CpuBenchmarkContext; struct RingOpsStats; struct TimingStats; }
     struct LogVoleTransportOptions
     {
-        bool mOwnedSetupSend = true;
-        bool mOwnedRootMessages = true;
-        bool mDeferRootDigestHash = true;
-        bool mMoveReceivedState = true;
         LogVoleEncodingOptions mEncoding;
         bool operator==(const LogVoleTransportOptions&) const = default;
     };
@@ -224,8 +220,6 @@ namespace osuCrypto
     // A cache owner has one configuration for its entire lifetime.
     struct LogVoleAdvancedOptions
     {
-        bool mAllowPartialRootWidth = false;
-        bool mEarlyGoldenCheck = true;
         LogVoleGpuSetupOptions mGpuSetup;
         LogVoleTransportOptions mTransport;
         bool mHostStepProfile = false;

@@ -85,8 +85,6 @@ namespace osuCrypto
         std::shared_ptr<const LogVole::ZpCrtContext> mConfigureFactoryOwner;
         LogVole::CivoleParams mParams;
         LogVole::CivoleSenderState mState;
-        std::shared_ptr<LogVole::RootWireCudaAllocEvidenceOwner> mRootWireCudaAllocEvidence =
-            std::make_shared<LogVole::RootWireCudaAllocEvidenceOwner>();
         LogVole::GarbledLabelLayout mLayout;
         LogVole::GarbledLabel mDeltas{};
         u64 mModulus = 0;

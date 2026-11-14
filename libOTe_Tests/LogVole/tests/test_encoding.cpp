@@ -11,7 +11,6 @@
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 #include "cryptoTools/Common/CLP.h"
-#include "coproto/Socket/BufferingSocket.h"
 #include "macoro/sync_wait.h"
 
 #include <algorithm>
@@ -331,9 +330,6 @@ namespace
         const auto expected = scalar_wire(message);
         LOGVOLE_REQUIRE_TRUE(expected.size() > (std::size_t(1) << 20));
         const auto serial = encode(message, 1, {}, useGpu, nullptr, cpuBenchmark);
-        oc::LogVoleEncodingOptions serialOptions;
-        serialOptions.mParallel = false;
-        expect_bytes_equal(encode(message, 8, serialOptions, useGpu, nullptr, cpuBenchmark), as_span(expected));
         for (auto workers : { 0u, 1u, 8u })
         {
             telemetry.reset();
@@ -523,79 +519,8 @@ void LogVole_Encoding_SeedMessageRoundTrip(const oc::CLP&)
     LOGVOLE_EXPECT_FALSE(decode(std::span<const std::uint8_t>{}, empty));
 }
 
-void LogVole_Encoding_RootCudaEvidenceOwnership(const oc::CLP&)
-{
-    const auto serviceA = ProtocolCacheService::create();
-    const auto serviceB = ProtocolCacheService::create();
-    const auto runA = serviceA->qualify(17);
-    const auto runB = serviceB->qualify(17);
-    auto ownerA = std::make_shared<RootWireCudaAllocEvidenceOwner>();
-    auto ownerB = std::make_shared<RootWireCudaAllocEvidenceOwner>();
-    resetRootWireCudaAllocEvidence(ownerA, runA, true);
-    resetRootWireCudaAllocEvidence(ownerB, runB, false);
-    noteRootWireCudaAllocEligibility(ownerA, runA, 128, true);
-    noteRootWireCudaAllocEligibility(ownerA, runB, 999, false);
-    noteRootWireCudaEarlyPlan(ownerA, runB, true, true, 999, true);
-    auto first = rootWireCudaAllocEvidenceSnapshot(ownerA);
-    LOGVOLE_REQUIRE_EQ(first.mSenderRunId, runA);
-    LOGVOLE_REQUIRE_EQ(first.mWireBytes, 128u);
-    LOGVOLE_REQUIRE_TRUE(first.mRequested && first.mEligible);
-    LOGVOLE_REQUIRE_FALSE(first.mEarlyRequested);
-    const auto second = rootWireCudaAllocEvidenceSnapshot(ownerB);
-    LOGVOLE_REQUIRE_EQ(second.mSenderRunId, runB);
-    LOGVOLE_REQUIRE_EQ(second.mWireBytes, 0u);
-    LOGVOLE_REQUIRE_FALSE(second.mRequested);
-
-    auto pool = std::make_shared<WireMemoryPool>();
-    auto* block = static_cast<std::uint8_t*>(pool->allocate(128, 64, false, runA, ownerA));
-    LOGVOLE_REQUIRE_TRUE(block != nullptr);
-    std::weak_ptr<RootWireCudaAllocEvidenceOwner> lifetimeA = ownerA;
-    ownerA.reset();
-    LOGVOLE_REQUIRE_FALSE(lifetimeA.expired());
-    recordRootCudaWireDirectDownload({block + 8, 24, pool.get()}, true);
-    auto retainedA = lifetimeA.lock();
-    LOGVOLE_REQUIRE_TRUE(retainedA);
-    first = rootWireCudaAllocEvidenceSnapshot(retainedA);
-    LOGVOLE_REQUIRE_EQ(first.mDirectDownloadCalls, 1u);
-    LOGVOLE_REQUIRE_EQ(first.mDirectDownloadBytes, 24u);
-    recordRootCudaWireDirectDownload({block, 32, pool.get()}, false);
-    recordRootCudaWireDirectDownload({block + 120, 16, pool.get()}, true);
-    recordRootCudaWireDirectDownload({block + 8, 0, pool.get()}, true);
-    first = rootWireCudaAllocEvidenceSnapshot(retainedA);
-    LOGVOLE_REQUIRE_EQ(first.mDirectDownloadCalls, 1u);
-    LOGVOLE_REQUIRE_EQ(first.mDirectDownloadBytes, 24u);
-    LOGVOLE_REQUIRE_EQ(rootWireCudaAllocEvidenceSnapshot(ownerB).mDirectDownloadCalls, 0u);
-    retainedA.reset();
-    LOGVOLE_REQUIRE_TRUE(pool->release(block));
-    LOGVOLE_REQUIRE_TRUE(lifetimeA.expired()); // Cached pool pages do not retain the sink.
-
-    auto* reused = static_cast<std::uint8_t*>(pool->allocate(128, 64, false, runB, ownerB));
-    LOGVOLE_REQUIRE_TRUE(reused == block);
-    recordRootCudaWireDirectDownload({reused + 16, 32, pool.get()}, true);
-    auto rebound = rootWireCudaAllocEvidenceSnapshot(ownerB);
-    LOGVOLE_REQUIRE_EQ(rebound.mDirectDownloadCalls, 1u);
-    LOGVOLE_REQUIRE_EQ(rebound.mDirectDownloadBytes, 32u);
-    const auto nextRun = serviceB->qualify(18);
-    resetRootWireCudaAllocEvidence(ownerB, nextRun, true);
-    recordRootCudaWireDirectDownload({reused, 16, pool.get()}, true);
-    noteRootWireCudaAllocEligibility(ownerB, runB, 777, true);
-    rebound = rootWireCudaAllocEvidenceSnapshot(ownerB);
-    LOGVOLE_REQUIRE_EQ(rebound.mSenderRunId, nextRun);
-    LOGVOLE_REQUIRE_EQ(rebound.mWireBytes, 0u);
-    LOGVOLE_REQUIRE_EQ(rebound.mDirectDownloadCalls, 0u);
-    LOGVOLE_REQUIRE_EQ(rebound.mDirectDownloadBytes, 0u);
-    LOGVOLE_REQUIRE_TRUE(pool->release(reused));
-    recordRootCudaWireDirectDownload({reused, 16, pool.get()}, true);
-    LOGVOLE_REQUIRE_EQ(rootWireCudaAllocEvidenceSnapshot(ownerB).mDirectDownloadCalls, 0u);
-    std::weak_ptr<RootWireCudaAllocEvidenceOwner> lifetimeB = ownerB;
-    ownerB.reset();
-    LOGVOLE_REQUIRE_TRUE(lifetimeB.expired());
-}
-
 void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
 {
-    auto cudaEvidenceOwner = std::make_shared<RootWireCudaAllocEvidenceOwner>();
-    const auto identityService = ProtocolCacheService::create();
     const RingParams ring = make_ring();
 
     RootOfflineMessage message{};
@@ -626,16 +551,6 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
         message, std::move(reserved), 1u);
     LOGVOLE_REQUIRE_TRUE(reservedEncoded.data() == reservedPointer);
     expect_bytes_equal(reservedEncoded, encoded);
-    bool cudaOwned = false;
-    Buffer requestedRootWire = reserveRootCudaWireBuffer(
-        encoded.size(), identityService->qualify(987u), cudaEvidenceOwner, cudaOwned);
-    const auto* const requestedPointer = requestedRootWire.data();
-    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(requestedRootWire.wireView()), cudaOwned);
-    const auto requestedEncoded = encodeRootOfflineIntoBuffer(
-        message, std::move(requestedRootWire), 1u);
-    LOGVOLE_REQUIRE_TRUE(requestedEncoded.data() == requestedPointer);
-    LOGVOLE_REQUIRE_EQ(isRootCudaWireHostRange(requestedEncoded.wireView()), cudaOwned);
-    expect_bytes_equal(requestedEncoded, encoded);
     bool rejectedWrongSize = false;
     try
     {
@@ -692,8 +607,6 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
 
 void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
 {
-    auto cudaEvidenceOwner = std::make_shared<RootWireCudaAllocEvidenceOwner>();
-    const auto identityService = ProtocolCacheService::create();
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0) == 0 || std::endian::native != std::endian::little) return;
     LOGVOLE_REQUIRE_TRUE(gpu::available());
@@ -737,55 +650,13 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
         expect_tensor_equal(decoded.mLacctLeft.mCt, eager.mLacctLeft.mCt);
         expect_tensor_equal(decoded.mTopCt, eager.mTopCt);
     }
-    const auto cudaWireTestRunId = identityService->qualify(987u);
-    resetRootWireCudaAllocEvidence(cudaEvidenceOwner, cudaWireTestRunId, true);
-    noteRootWireCudaAllocEligibility(cudaEvidenceOwner, cudaWireTestRunId,
-        rootOfflineWireSize(resident), true);
-    noteRootWireCudaExpectedDownloads(cudaEvidenceOwner, cudaWireTestRunId, resident);
-    bool cudaOwned = false;
-    const std::size_t exactRootBytes = rootOfflineWireSize(resident);
-    const std::size_t forecastRootBytes = exactRootBytes + 4096u;
-    Buffer reserved = reserveRootCudaWireBuffer(
-        forecastRootBytes, cudaWireTestRunId, cudaEvidenceOwner, cudaOwned);
-    LOGVOLE_REQUIRE_TRUE(cudaOwned);
-    const auto* const reservedPointer = reserved.data();
-    auto rootMemory = reserved.memory();
-    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange({reservedPointer, forecastRootBytes, rootMemory.get()}));
-    LOGVOLE_REQUIRE_TRUE(shrinkRootCudaWireBuffer(reserved,
-        exactRootBytes));
-    LOGVOLE_REQUIRE_TRUE(reserved.data() == reservedPointer);
-    LOGVOLE_REQUIRE_EQ(reserved.size(), exactRootBytes);
-    LOGVOLE_REQUIRE_TRUE(reserved.capacity() >= forecastRootBytes);
-    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange({reservedPointer, forecastRootBytes, rootMemory.get()}));
-    LOGVOLE_REQUIRE_TRUE(isRootCudaWireHostRange({reservedPointer, exactRootBytes, rootMemory.get()}));
-    Buffer cudaWire = encodeRootOfflineIntoBuffer(resident,
-        std::move(reserved), 4u, {}, true);
-    LOGVOLE_REQUIRE_TRUE(cudaWire.data() == reservedPointer);
-    expect_bytes_equal(cudaWire, as_span(exact));
-    const auto cudaEvidence = rootWireCudaAllocEvidenceSnapshot(cudaEvidenceOwner);
-    LOGVOLE_REQUIRE_TRUE(cudaEvidence.mSelected);
-    LOGVOLE_REQUIRE_EQ(cudaEvidence.mDirectDownloadCalls,
-        cudaEvidence.mExpectedDirectDownloadCalls);
-    LOGVOLE_REQUIRE_EQ(cudaEvidence.mDirectDownloadBytes,
-        cudaEvidence.mExpectedDirectDownloadBytes);
-    LOGVOLE_REQUIRE_EQ(cudaEvidence.mDirectDownloadCalls, 3u);
-    coproto::BufferingSocket socket;
-    macoro::sync_wait(socket.send(std::move(cudaWire)));
-    macoro::sync_wait(socket.flush());
-    LOGVOLE_REQUIRE_FALSE(isRootCudaWireHostRange({reservedPointer, exactRootBytes, rootMemory.get()}));
-    bool reusedCudaOwned = false;
-    Buffer reused = reserveRootCudaWireBuffer(forecastRootBytes,
-        cudaWireTestRunId, cudaEvidenceOwner, reusedCudaOwned, true, rootMemory);
-    LOGVOLE_REQUIRE_TRUE(reusedCudaOwned);
-    LOGVOLE_REQUIRE_TRUE(reused.data() == reservedPointer);
     LOGVOLE_EXPECT_EQ(ctR->hostRequests(), 0u);
     LOGVOLE_EXPECT_EQ(lacct->hostRequests(), 0u);
     LOGVOLE_EXPECT_EQ(topCt->hostRequests(), 0u);
-    // Two ordinary encodes plus the CUDA-owned reserved-buffer encode each
-    // request one direct download from every lazy tensor.
-    LOGVOLE_EXPECT_EQ(ctR->copyRequests(), 3u);
-    LOGVOLE_EXPECT_EQ(lacct->copyRequests(), 3u);
-    LOGVOLE_EXPECT_EQ(topCt->copyRequests(), 3u);
+    // Each ordinary encode requests one direct download from every lazy tensor.
+    LOGVOLE_EXPECT_EQ(ctR->copyRequests(), 2u);
+    LOGVOLE_EXPECT_EQ(lacct->copyRequests(), 2u);
+    LOGVOLE_EXPECT_EQ(topCt->copyRequests(), 2u);
 
     // Deferred materialization retains diagnostics without retaining a context
     // factory or putting profiling state on the wire buffer itself.
@@ -941,56 +812,6 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     LOGVOLE_EXPECT_TRUE(!refreshed.mOwnedPublicBStarWire && !refreshed.mLazyPublicBStar);
     LOGVOLE_EXPECT_EQ(refreshed.mPublicBStarNtt.size(), eager.mPublicBStarNtt.size());
     expect_bytes_equal(encode(refreshed, 4, {}, true), as_span(exact));
-    {
-        oc::LogVoleEncodingOptions options;
-        options.mRootCtREncodedReceive = false;
-        RootOfflineMessage stagedCtR{};
-        auto stagedWire = encode(eager, 1, {}, true);
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedCtR, 4, options, true));
-        LOGVOLE_EXPECT_TRUE(!stagedCtR.mCtR.mPolys.empty() && !stagedCtR.mOwnedCtRWire);
-        LOGVOLE_EXPECT_TRUE(stagedCtR.mLacctLeft.mCt.mPolys.empty() && stagedCtR.mOwnedLacctLeftWire);
-        LOGVOLE_EXPECT_TRUE(stagedCtR.mTopCt.mPolys.empty() && stagedCtR.mOwnedTopCtWire);
-        expect_bytes_equal(encode(stagedCtR, 4, {}, true), as_span(exact));
-    }
-    {
-        oc::LogVoleEncodingOptions options;
-        options.mRootLacctEncodedReceive = false;
-        RootOfflineMessage stagedLacct{};
-        auto stagedWire = encode(eager, 1, {}, true);
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedLacct, 4, options, true));
-        LOGVOLE_EXPECT_TRUE(!stagedLacct.mLacctLeft.mCt.mPolys.empty() &&
-            !stagedLacct.mOwnedLacctLeftWire);
-        LOGVOLE_EXPECT_TRUE(stagedLacct.mCtR.mPolys.empty() && stagedLacct.mOwnedCtRWire);
-        LOGVOLE_EXPECT_TRUE(stagedLacct.mTopCt.mPolys.empty() && stagedLacct.mOwnedTopCtWire);
-        expect_bytes_equal(encode(stagedLacct, 4, {}, true), as_span(exact));
-    }
-    {
-        oc::LogVoleEncodingOptions options;
-        options.mRootBStarEncodedReceive = false;
-        RootOfflineMessage stagedBStar{};
-        auto stagedWire = encode(eager, 1, {}, true);
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), stagedBStar, 4, options, true));
-        LOGVOLE_EXPECT_TRUE(!stagedBStar.mPublicBStarNtt.empty() &&
-            !stagedBStar.mOwnedPublicBStarWire);
-        LOGVOLE_EXPECT_TRUE(stagedBStar.mCtR.mPolys.empty() && stagedBStar.mOwnedCtRWire);
-        LOGVOLE_EXPECT_TRUE(stagedBStar.mLacctLeft.mCt.mPolys.empty() &&
-            stagedBStar.mOwnedLacctLeftWire);
-        LOGVOLE_EXPECT_TRUE(stagedBStar.mTopCt.mPolys.empty() && stagedBStar.mOwnedTopCtWire);
-        expect_bytes_equal(encode(stagedBStar, 4, {}, true), as_span(exact));
-    }
-    {
-        oc::LogVoleEncodingOptions options;
-        options.mRootEncodedReceive = false;
-        RootOfflineMessage staged{};
-        auto stagedWire = encode(eager, 1, {}, true);
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(std::move(stagedWire), staged, 4, options, true));
-        LOGVOLE_EXPECT_TRUE(!staged.mCtR.mPolys.empty() && !staged.mOwnedCtRWire);
-        LOGVOLE_EXPECT_TRUE(!staged.mLacctLeft.mCt.mPolys.empty() && !staged.mOwnedLacctLeftWire);
-        LOGVOLE_EXPECT_TRUE(!staged.mTopCt.mPolys.empty() && !staged.mOwnedTopCtWire);
-        LOGVOLE_EXPECT_TRUE(!staged.mPublicBStarNtt.empty() && !staged.mOwnedPublicBStarWire);
-        expect_bytes_equal(encode(staged, 4, {}, true), as_span(exact));
-    }
-
     auto declining = std::make_shared<TestRootDeviceTensor>(eager.mTopCt, false);
     resident.mLazyTopCt = declining;
     expect_bytes_equal(encode(resident, 1, {}, true), as_span(exact));

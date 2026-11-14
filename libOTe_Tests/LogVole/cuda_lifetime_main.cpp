@@ -64,14 +64,6 @@ int main()
             require(wire.allocate(4099, 64) == host && wire.isPinned(host, 4099), "wire registration reuse");
             require(wire.release(host), "wire reuse release");
             wire.trim();
-            const auto identityService = osuCrypto::LogVole::ProtocolCacheService::create();
-            auto* root = wire.allocate(8192, 64, true, identityService->qualify(37));
-            require(root && wire.isCudaOwned(root, 8192) && wire.ownerRunId(root, 8192) == identityService->qualify(37), "CUDA wire owner");
-            require(wire.contract(root, 8192, 4099) && !wire.contains(root, 8192), "CUDA wire contraction");
-            require(wire.release(root), "CUDA wire release");
-            require(wire.allocate(8192, 64, true, identityService->qualify(41)) == root && wire.ownerRunId(root, 8192) == identityService->qualify(41), "CUDA wire reuse");
-            // Destruction releases this still-active allocation too; clients
-            // must retain the pool for every active allocation they own.
         }
         for (unsigned round = 0; round != 3; ++round)
         {

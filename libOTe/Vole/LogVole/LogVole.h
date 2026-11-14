@@ -317,10 +317,6 @@ namespace osuCrypto
         u64 mDelta = 0;
         LogVole::CivoleSid mNextSid = 0;
         LogVole::CommunicationStats mLastOnlineComm;
-        // Local offline transport diagnostics. Read after offline finishes.
-        LogVole::RootWirePinOverlapEvidence mRootWirePin;
-        std::shared_ptr<LogVole::RootWireCudaAllocEvidenceOwner> mRootWireCudaAllocEvidence =
-            std::make_shared<LogVole::RootWireCudaAllocEvidenceOwner>();
         State mState = State::Default;
         LogVole::CivoleParams mParams;
         LogVole::CivoleSenderState mOfflineState;
@@ -577,8 +573,7 @@ namespace osuCrypto::LogVole
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
         PRNG& prng,
-        Socket& sock, RootWirePinOverlapEvidence& rootWirePin,
-        std::shared_ptr<RootWireCudaAllocEvidenceOwner> cudaEvidence, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
+        Socket& sock, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScope setupScope = {});
 
     task<> civoleReceiverOffline(
         const CivoleReceiverOfflineInput& input,

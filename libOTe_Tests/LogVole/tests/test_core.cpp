@@ -798,18 +798,6 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
         params.mW = muHi;
         params.mTotalLabelCount = (oc::u64{1} << 18) + 3u;
-        const std::size_t expectedRootBytes =
-            setting == CivoleSetting::GoldenSeed ? 10'223'704u : 95'420'512u;
-        LOGVOLE_REQUIRE_EQ(forecastRootOfflineWireSize(params, false),
-            expectedRootBytes);
-        auto recursiveForecastParams = params;
-        recursiveForecastParams.mW = 4u * muHi;
-        LOGVOLE_REQUIRE_EQ(forecastRootOfflineWireSize(
-            recursiveForecastParams, false), expectedRootBytes);
-        auto productionForecastParams = params;
-        productionForecastParams.mW = 1u << 25;
-        LOGVOLE_REQUIRE_EQ(forecastRootOfflineWireSize(
-            productionForecastParams, false), expectedRootBytes);
         const auto runId = identityService->allocate();
         const ProtocolCacheScope cacheScope(runId, ProtocolCacheRole::Sender);
         ZpCrtContext zp{};
@@ -901,12 +889,8 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         struct Snapshot
         {
             SenderState mState;
-            RootWirePinOverlapEvidence mRootWirePin;
-            std::shared_ptr<RootWireCudaAllocEvidenceOwner> mCudaEvidence =
-                std::make_shared<RootWireCudaAllocEvidenceOwner>();
             std::vector<oc::u8> mWire;
             std::array<oc::u64, 16> mNextRandom{};
-            RootWireCudaAllocEvidence mRootCudaWire;
         };
         const auto runOffline = [&](const SenderOfflineInput& in,
             ProtocolCacheRunId scopeRun, bool useGpu) {
@@ -919,8 +903,7 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             Snapshot out;
             auto configured = tests_libOTe::logvole_test::withAdvancedOptions(
                 in, selectedOptions, ProtocolCacheRole::Sender, cacheScope);
-            macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, configured, out.mState, prng, socket, out.mRootWirePin, out.mCudaEvidence, cacheScope));
-            out.mRootCudaWire = rootWireCudaAllocEvidenceSnapshot(out.mCudaEvidence);
+            macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, configured, out.mState, prng, socket, cacheScope));
             macoro::sync_wait(socket.flush());
             auto bytes = socket.getOutbound();
             LOGVOLE_REQUIRE_TRUE(bytes && !bytes->empty());
@@ -931,100 +914,9 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         const auto baselineRunId = identityService->allocate();
         const auto baseline = runOffline(tests_libOTe::logvole_test::withSetupOptions(hostInput, setupOptions),
             baselineRunId, false);
-        auto selected = [&] {
-            auto pinInput = selectedInput;
-            pinInput.mParams.mShrinkExpand.mTransport.mEncoding.mRootWirePinOverlap = true;
-            return runOffline(tests_libOTe::logvole_test::withSetupOptions(pinInput, setupOptions), runId, true);
-        }();
+        auto selected = runOffline(tests_libOTe::logvole_test::withSetupOptions(selectedInput, setupOptions), runId, true);
         LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.mWire, selected.mWire));
         LOGVOLE_REQUIRE_TRUE(baseline.mNextRandom == selected.mNextRandom);
-        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mRequested);
-        LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mSenderRunId, runId);
-        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mWireBytes >=
-            (std::size_t{1} << 20));
-        if (selected.mRootWirePin.mLaunched)
-            LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mPinEndNs >=
-                selected.mRootWirePin.mPinBeginNs);
-        // A later sender cannot overwrite the earlier sender's diagnostics.
-        LOGVOLE_REQUIRE_FALSE(baseline.mRootWirePin.mRequested);
-        LOGVOLE_REQUIRE_FALSE(baseline.mRootWirePin.mSelected);
-        LOGVOLE_REQUIRE_EQ(baseline.mRootWirePin.mSenderRunId, baselineRunId);
-        if (cmd.getOr("pin_result_only", 0) != 0)
-        {
-            // A failed new attempt must clear the previous attempt's diagnostics.
-            SenderOfflineInput invalid;
-            invalid.mSenderOwnerRunId = identityService->allocate();
-            oc::PRNG retryPrng(seed, 3);
-            coproto::BufferingSocket retrySocket;
-            LogVoleRingSender sender;
-            bool rejected = false;
-            try { macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, invalid, selected.mState, retryPrng, retrySocket, selected.mRootWirePin, selected.mCudaEvidence)); }
-            catch (const std::runtime_error&) { rejected = true; }
-            LOGVOLE_REQUIRE_TRUE(rejected);
-            LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mSenderRunId, invalid.mSenderOwnerRunId);
-            LOGVOLE_REQUIRE_FALSE(selected.mRootWirePin.mRequested);
-            LOGVOLE_REQUIRE_FALSE(selected.mRootWirePin.mSelected);
-            LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mPinBeginNs, 0u);
-            LOGVOLE_REQUIRE_EQ(selected.mRootWirePin.mWireBytes, 0u);
-            LOGVOLE_REQUIRE_FALSE(baseline.mRootWirePin.mSelected);
-            return;
-        }
-        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mEligible);
-        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mPinSucceeded);
-        LOGVOLE_REQUIRE_TRUE(selected.mRootWirePin.mSelected);
-        const bool earlyCudaWire = cmd.getOr("root_cuda_wire_early", 0) != 0;
-        if (cmd.getOr("root_cuda_wire", 0) != 0 || earlyCudaWire)
-        {
-            const auto cudaRunId = identityService->allocate();
-            auto cudaInput = selectedInput;
-            {
-                const ProtocolCacheScope cacheScope(cudaRunId, ProtocolCacheRole::Sender);
-                cudaInput.mWrappedDeltaDevice =
-                    gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr, cacheScope);
-            }
-            LOGVOLE_REQUIRE_TRUE(cudaInput.mWrappedDeltaDevice != nullptr);
-            cudaInput.mSenderOwnerRunId = cudaRunId;
-            auto cudaActual = [&] {
-                auto& encoding = cudaInput.mParams.mShrinkExpand.mTransport.mEncoding;
-                encoding.mRootWireCudaAlloc = true;
-                encoding.mRootWirePinOverlap = false;
-                encoding.mRootWireCudaAllocEarly = earlyCudaWire;
-                return runOffline(tests_libOTe::logvole_test::withSetupOptions(cudaInput, setupOptions), cudaRunId, true);
-            }();
-            LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.mWire,
-                cudaActual.mWire));
-            LOGVOLE_REQUIRE_TRUE(baseline.mNextRandom ==
-                cudaActual.mNextRandom);
-            LOGVOLE_REQUIRE_EQ(cudaActual.mRootCudaWire.mSenderRunId,
-                cudaRunId);
-            LOGVOLE_REQUIRE_TRUE(cudaActual.mRootCudaWire.mRequested);
-            LOGVOLE_REQUIRE_TRUE(cudaActual.mRootCudaWire.mEligible);
-            LOGVOLE_REQUIRE_TRUE(cudaActual.mRootCudaWire.mSelected);
-            LOGVOLE_REQUIRE_FALSE(cudaActual.mRootCudaWire.mDeclined);
-            LOGVOLE_REQUIRE_TRUE(cudaActual.mRootCudaWire.mDirectDownloadCalls > 0);
-            LOGVOLE_REQUIRE_TRUE(cudaActual.mRootCudaWire.mDirectDownloadBytes > 0);
-            LOGVOLE_REQUIRE_EQ(cudaActual.mRootCudaWire.mDirectDownloadCalls,
-                cudaActual.mRootCudaWire.mExpectedDirectDownloadCalls);
-            LOGVOLE_REQUIRE_EQ(cudaActual.mRootCudaWire.mDirectDownloadBytes,
-                cudaActual.mRootCudaWire.mExpectedDirectDownloadBytes);
-            LOGVOLE_REQUIRE_FALSE(cudaActual.mRootWirePin.mSelected);
-            LOGVOLE_REQUIRE_EQ(cudaActual.mRootCudaWire.mWireBytes,
-                expectedRootBytes);
-            LOGVOLE_REQUIRE_EQ(cudaActual.mRootCudaWire.mEarlyRequested,
-                earlyCudaWire);
-            if (earlyCudaWire)
-            {
-                LOGVOLE_REQUIRE_TRUE(cudaActual.mRootCudaWire.mEarlyEligible);
-                LOGVOLE_REQUIRE_TRUE(cudaActual.mRootCudaWire.mEarlyLaunched);
-                LOGVOLE_REQUIRE_TRUE(cudaActual.mRootCudaWire.mEarlyAdopted);
-                LOGVOLE_REQUIRE_EQ(
-                    cudaActual.mRootCudaWire.mEarlyForecastBytes,
-                    expectedRootBytes);
-                LOGVOLE_REQUIRE_TRUE(
-                    cudaActual.mRootCudaWire.mAllocationEndNs >=
-                    cudaActual.mRootCudaWire.mAllocationBeginNs);
-            }
-        }
         expect_batch_equal(baseline.mState.mSk1, selected.mState.mSk1, "CI delta public snapshot");
         // The top HE secret is distinct from mSk1's wrapped CI delta. It was
         // sampled once from the same parent SEAL row draws and stayed private
@@ -1152,35 +1044,6 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(baseline.mNextRandom == declined.mNextRandom);
             LOGVOLE_REQUIRE_TRUE(declined.mState.mShrinkExpandState.mLazyS == nullptr);
         }
-        {
-            auto eagerInput = selectedInput;
-            eagerInput.mParams.mShrinkExpand.mGpuSetup.mDirectWire = false;
-            eagerInput.mParams.mShrinkExpand.mTransport.mEncoding.mRootWireCudaAlloc = true;
-            eagerInput.mParams.mShrinkExpand.mTransport.mEncoding.mRootWireCudaAllocEarly = true;
-            auto eager = runOffline(tests_libOTe::logvole_test::withSetupOptions(eagerInput, setupOptions), runId, true);
-            LOGVOLE_REQUIRE_TRUE(rangesEqual(baseline.mWire, eager.mWire));
-            LOGVOLE_REQUIRE_TRUE(baseline.mNextRandom == eager.mNextRandom);
-            LOGVOLE_REQUIRE_TRUE(eager.mState.mShrinkExpandState.mLazyS == nullptr);
-            LOGVOLE_REQUIRE_TRUE(!eager.mState.mShrinkExpandState.mS.empty());
-            LOGVOLE_REQUIRE_TRUE(eager.mRootCudaWire.mEarlyRequested);
-            LOGVOLE_REQUIRE_FALSE(eager.mRootCudaWire.mEarlyEligible);
-            LOGVOLE_REQUIRE_FALSE(eager.mRootCudaWire.mEarlyLaunched);
-            LOGVOLE_REQUIRE_FALSE(eager.mRootCudaWire.mEarlyAdopted);
-            LOGVOLE_REQUIRE_FALSE(eager.mRootCudaWire.mSelected);
-        }
-        {
-            oc::PRNG publicPrng(seed, 3);
-            SenderOfflineOutput publicOutput{};
-            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(setupResources.executor, setupResources.results,
-                tests_libOTe::logvole_test::withSetupOptions(hostInput, setupOptions), publicPrng, publicOutput)));
-            LOGVOLE_REQUIRE_TRUE(publicOutput.mState.mShrinkExpandState.mLazyS == nullptr);
-            LOGVOLE_REQUIRE_TRUE(!publicOutput.mState.mShrinkExpandState.mS.empty());
-            LOGVOLE_REQUIRE_TRUE(publicOutput.mState.mShrinkExpandState.mTopSk1Device == nullptr);
-            LOGVOLE_REQUIRE_TRUE(!publicOutput.mState.mShrinkExpandState.mSk1.empty());
-        }
-
-        // Three Core levels make the top key traverse two recursive child
-        // fixed-key Ct1 and seed-label LENC operations before terminal Root.
         SenderOfflineInput recursiveHost = hostInput;
         recursiveHost.mParams.mW = 4u * muHi;
         SenderOfflineInput recursiveSelected = selectedInput;
@@ -1202,111 +1065,9 @@ void LogVole_Core_GpuSetupDeltaChain(const oc::CLP& cmd)
         };
         const auto recursiveBaseline = runOffline(tests_libOTe::logvole_test::withSetupOptions(recursiveHost, setupOptions),
             identityService->allocate(), false);
-        // This three-level tree follows the production recursive transport
-        // shape: the terminal Root reuses its parent's shrink state, so the
-        // pin worker must launch during an ancestor frame instead of Root's
-        // own (absent) shrink frame.
-        auto recursiveActual = [&] {
-            recursiveSelected.mParams.mShrinkExpand.mTransport.mEncoding.mRootWirePinOverlap = true;
-            return runRecursiveSelected();
-        }();
-        LOGVOLE_REQUIRE_TRUE(rangesEqual(recursiveBaseline.mWire,
-            recursiveActual.mWire));
-        LOGVOLE_REQUIRE_TRUE(recursiveBaseline.mNextRandom ==
-            recursiveActual.mNextRandom);
-        LOGVOLE_REQUIRE_TRUE(recursiveActual.mRootWirePin.mRequested);
-        LOGVOLE_REQUIRE_TRUE(recursiveActual.mRootWirePin.mWireBytes >=
-            (std::size_t{1} << 20));
-        LOGVOLE_REQUIRE_TRUE(recursiveActual.mRootWirePin.mEligible);
-        LOGVOLE_REQUIRE_TRUE(recursiveActual.mRootWirePin.mPinSucceeded);
-        LOGVOLE_REQUIRE_TRUE(recursiveActual.mRootWirePin.mSelected);
-        LOGVOLE_REQUIRE_TRUE(recursiveActual.mRootWirePin.mLaunched ||
-            recursiveActual.mRootWirePin.mAlreadyPinned);
-        const bool earlyCudaWireN25 =
-            cmd.getOr("root_cuda_wire_early_n25", 0) != 0;
-        const bool cudaWireN25 = cmd.getOr("root_cuda_wire_n25", 0) != 0 ||
-            earlyCudaWireN25;
-        if (cmd.getOr("root_pin_n25", 0) != 0 || cudaWireN25)
-        {
-            // Optional production-size sender-only check. It exercises the
-            // same reused terminal Root with W and label budget both at 2^25,
-            // and compares the complete framed offline bytes and PRNG state.
-            SenderOfflineInput n25Host = hostInput;
-            n25Host.mParams.mW = 1u << 25;
-            n25Host.mParams.mTotalLabelCount = oc::u64{1} << 25;
-            SenderOfflineInput n25Selected = selectedInput;
-            n25Selected.mParams = n25Host.mParams;
-            const auto n25Baseline = runOffline(tests_libOTe::logvole_test::withSetupOptions(n25Host, setupOptions),
-                identityService->allocate(), false);
-            const auto n25RunId = identityService->allocate();
-            {
-                const ProtocolCacheScope cacheScope(n25RunId, ProtocolCacheRole::Sender);
-                n25Selected.mWrappedDeltaDevice =
-                    gpu::wrapSetupDeltaResident(zp, scalar, {}, nullptr, cacheScope);
-            }
-            LOGVOLE_REQUIRE_TRUE(n25Selected.mWrappedDeltaDevice != nullptr);
-            n25Selected.mSenderOwnerRunId = n25RunId;
-            auto n25Actual = [&] {
-                auto& encoding = n25Selected.mParams.mShrinkExpand.mTransport.mEncoding;
-                encoding.mRootWirePinOverlap = !cudaWireN25;
-                encoding.mRootWireCudaAlloc = cudaWireN25;
-                encoding.mRootWireCudaAllocEarly = earlyCudaWireN25;
-                return runOffline(tests_libOTe::logvole_test::withSetupOptions(n25Selected, setupOptions), n25RunId, true);
-            }();
-            LOGVOLE_REQUIRE_TRUE(rangesEqual(n25Baseline.mWire,
-                n25Actual.mWire));
-            LOGVOLE_REQUIRE_TRUE(n25Baseline.mNextRandom ==
-                n25Actual.mNextRandom);
-            if (cudaWireN25)
-            {
-                LOGVOLE_REQUIRE_EQ(n25Actual.mRootCudaWire.mSenderRunId,
-                    n25RunId);
-                LOGVOLE_REQUIRE_TRUE(n25Actual.mRootCudaWire.mRequested);
-                LOGVOLE_REQUIRE_TRUE(n25Actual.mRootCudaWire.mEligible);
-                LOGVOLE_REQUIRE_TRUE(n25Actual.mRootCudaWire.mSelected);
-                LOGVOLE_REQUIRE_FALSE(n25Actual.mRootCudaWire.mDeclined);
-                LOGVOLE_REQUIRE_TRUE(
-                    n25Actual.mRootCudaWire.mDirectDownloadCalls > 0);
-                LOGVOLE_REQUIRE_TRUE(
-                    n25Actual.mRootCudaWire.mDirectDownloadBytes > 0);
-                LOGVOLE_REQUIRE_EQ(
-                    n25Actual.mRootCudaWire.mDirectDownloadCalls,
-                    n25Actual.mRootCudaWire.mExpectedDirectDownloadCalls);
-                LOGVOLE_REQUIRE_EQ(
-                    n25Actual.mRootCudaWire.mDirectDownloadBytes,
-                    n25Actual.mRootCudaWire.mExpectedDirectDownloadBytes);
-                LOGVOLE_REQUIRE_FALSE(n25Actual.mRootWirePin.mSelected);
-                LOGVOLE_REQUIRE_EQ(n25Actual.mRootCudaWire.mWireBytes,
-                    expectedRootBytes);
-                LOGVOLE_REQUIRE_EQ(n25Actual.mRootCudaWire.mEarlyRequested,
-                    earlyCudaWireN25);
-                if (earlyCudaWireN25)
-                {
-                    LOGVOLE_REQUIRE_TRUE(
-                        n25Actual.mRootCudaWire.mEarlyEligible);
-                    LOGVOLE_REQUIRE_TRUE(
-                        n25Actual.mRootCudaWire.mEarlyLaunched);
-                    LOGVOLE_REQUIRE_TRUE(
-                        n25Actual.mRootCudaWire.mEarlyAdopted);
-                    LOGVOLE_REQUIRE_EQ(
-                        n25Actual.mRootCudaWire.mEarlyForecastBytes,
-                        expectedRootBytes);
-                }
-            }
-            else
-            {
-                LOGVOLE_REQUIRE_TRUE(n25Actual.mRootWirePin.mRequested);
-                LOGVOLE_REQUIRE_EQ(n25Actual.mRootWirePin.mSenderRunId,
-                    n25RunId);
-                LOGVOLE_REQUIRE_TRUE(n25Actual.mRootWirePin.mWireBytes >=
-                    (std::size_t{1} << 20));
-                LOGVOLE_REQUIRE_TRUE(n25Actual.mRootWirePin.mEligible);
-                LOGVOLE_REQUIRE_TRUE(n25Actual.mRootWirePin.mPinSucceeded);
-                LOGVOLE_REQUIRE_TRUE(n25Actual.mRootWirePin.mSelected);
-                LOGVOLE_REQUIRE_TRUE(n25Actual.mRootWirePin.mLaunched ||
-                    n25Actual.mRootWirePin.mAlreadyPinned);
-            }
-        }
+        auto recursiveActual = runRecursiveSelected();
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(recursiveBaseline.mWire, recursiveActual.mWire));
+        LOGVOLE_REQUIRE_TRUE(recursiveBaseline.mNextRandom == recursiveActual.mNextRandom);
         const SenderState* referenceLevel = &recursiveBaseline.mState;
         SenderState* actualLevel = &recursiveActual.mState;
         const auto privateOwner =
@@ -3253,20 +3014,9 @@ void LogVole_Core_RootRandomizerWidthTracksGadgetBase(const oc::CLP&)
     params.mShrinkExpand.mTau = 2;
     params.mShrinkExpand.mGadgetLogBase = 110;
     LOGVOLE_EXPECT_EQ(rootRandomizerWidth(params.mShrinkExpand), 3u);
-    const auto standaloneRootBytes = forecastRootOfflineWireSize(
-        params, false);
-    LOGVOLE_REQUIRE_TRUE(standaloneRootBytes > 0u);
-    auto recursive = params;
-    recursive.mW *= 4u;
-    LOGVOLE_EXPECT_EQ(forecastRootOfflineWireSize(recursive, false),
-        standaloneRootBytes);
-
     params.mShrinkExpand.mGadgetLogBase = 30;
     LOGVOLE_EXPECT_TRUE(rootRandomizerWidth(params.mShrinkExpand) >= 6);
-    LOGVOLE_EXPECT_TRUE(forecastRootOfflineWireSize(params, false) >
-        standaloneRootBytes);
-    params.mShrinkExpand.mGadgetLogBase = 0u;
-    LOGVOLE_EXPECT_EQ(forecastRootOfflineWireSize(params, false), 0u);
+
 }
 
 void LogVole_Core_RootOfflineRejectsMetadataMismatch(const oc::CLP&)
@@ -3501,65 +3251,6 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(wireReceiver.mRootTopCt.mPolys.empty(), expectOwnedRootWire);
     LOGVOLE_EXPECT_EQ(wireReceiver.mRootPublicBStarNtt.empty(), expectOwnedRootWire);
 
-    RootOfflineMessage eagerLacctRoot{};
-    {
-        oc::LogVoleEncodingOptions options;
-        options.mRootCtREncodedReceive = false;
-        options.mRootLacctEncodedReceive = false;
-        auto receivedRoot = encode(offlineMessage, 4, {}, gpu::available());
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
-            std::move(receivedRoot), eagerLacctRoot, 4, options, gpu::available()));
-    }
-    LOGVOLE_EXPECT_TRUE(!eagerLacctRoot.mOwnedCtRWire &&
-        !eagerLacctRoot.mCtR.mPolys.empty());
-    LOGVOLE_EXPECT_TRUE(!eagerLacctRoot.mOwnedLacctLeftWire &&
-        !eagerLacctRoot.mLacctLeft.mCt.mPolys.empty());
-    LOGVOLE_REQUIRE_TRUE(static_cast<bool>(eagerLacctRoot.mOwnedTopCtWire) == expectOwnedRootWire);
-    ReceiverState eagerLacctReceiver{};
-    eagerLacctReceiver.mParams = params;
-    eagerLacctReceiver.mShrinkExpandState = seReceiver;
-    LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(eagerLacctReceiver,
-        std::move(eagerLacctRoot)));
-    LOGVOLE_EXPECT_TRUE(!eagerLacctReceiver.mRootCtRWire &&
-        !eagerLacctReceiver.mRootCtRRt.mPolys.empty());
-    LOGVOLE_EXPECT_TRUE(!eagerLacctReceiver.mRootLacctLeftWire &&
-        !eagerLacctReceiver.mRootLacctLeft.mCt.mPolys.empty());
-    RnsPoly eagerLacctKey{};
-    {
-        RootResponseMessage eagerLacctKeyResponse = response;
-        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootResponseReceiver(
-            rootResources.executor, rootBuffers.lhe, rootBuffers.lenc, eagerLacctReceiver,
-            digestState, eagerLacctKeyResponse, eagerLacctKey)));
-    }
-    LOGVOLE_EXPECT_TRUE(rangesEqual(receiverKey.mCoeffs, eagerLacctKey.mCoeffs));
-
-    RootOfflineMessage eagerBStarRoot{};
-    {
-        oc::LogVoleEncodingOptions options;
-        options.mRootBStarEncodedReceive = false;
-        auto receivedRoot = encode(offlineMessage, 4, {}, gpu::available());
-        LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
-            std::move(receivedRoot), eagerBStarRoot, 4, options, gpu::available()));
-    }
-    LOGVOLE_EXPECT_TRUE(!eagerBStarRoot.mOwnedPublicBStarWire &&
-        !eagerBStarRoot.mPublicBStarNtt.empty());
-    LOGVOLE_REQUIRE_TRUE(static_cast<bool>(eagerBStarRoot.mOwnedTopCtWire) ==
-        expectOwnedRootWire);
-    ReceiverState eagerBStarReceiver{};
-    eagerBStarReceiver.mParams = params;
-    eagerBStarReceiver.mShrinkExpandState = seReceiver;
-    LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(
-        eagerBStarReceiver, std::move(eagerBStarRoot)));
-    LOGVOLE_EXPECT_TRUE(!eagerBStarReceiver.mRootPublicBStarWire &&
-        !eagerBStarReceiver.mRootPublicBStarNtt.empty());
-    RnsPoly eagerBStarKey{};
-    {
-        RootResponseMessage eagerBStarKeyResponse = response;
-        LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(finalizeRootResponseReceiver(
-            rootResources.executor, rootBuffers.lhe, rootBuffers.lenc, eagerBStarReceiver,
-            digestState, eagerBStarKeyResponse, eagerBStarKey)));
-    }
-    LOGVOLE_EXPECT_TRUE(rangesEqual(receiverKey.mCoeffs, eagerBStarKey.mCoeffs));
 #endif
 
     // CPU finalization explicitly consumes its mutable response after validation;
@@ -4550,9 +4241,7 @@ void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
         coproto::BufferingSocket socket;
         LogVoleRingSender sender;
         SenderState state;
-        RootWirePinOverlapEvidence rootWirePin;
-        auto rootWirePinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
-        macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, selected, state, prng, socket, rootWirePin, rootWirePinCudaEvidence, scope));
+        macoro::sync_wait(sender.offline(setupResources.executor, setupResources.results, selected, state, prng, socket, scope));
         macoro::sync_wait(socket.flush());
         auto bytes = socket.getOutbound();
         LOGVOLE_REQUIRE_TRUE(bytes && !bytes->empty());
@@ -5885,199 +5574,6 @@ void LogVole_Core_RecursiveGadgetInputSubproblem(const oc::CLP&)
     run_recursive_gadget_subproblem_test(true);
 }
 
-void LogVole_Core_PartialRootWidthExperimental(const oc::CLP&)
-{
-    tests_libOTe::logvole_test::SetupResources validationResources;
-
-    Params paddedSeedParams{};
-    std::vector<RnsPoly> paddedRejectedCandidate;
-    RingNttContext paddedCtx{};
-
-    for (const std::uint32_t width : { 8u, 16u })
-    {
-        Params params = make_alpha4_root_params(width);
-        params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
-        const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
-        const std::uint32_t rho = static_cast<std::uint32_t>(
-            params.mShrinkExpand.mRing.mCoeffModulusBits.size());
-        const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
-        LOGVOLE_REQUIRE_EQ(muHi, 16u);
-        LOGVOLE_REQUIRE_TRUE(width <= muHi);
-        LOGVOLE_REQUIRE_FALSE(params.mAllowPartialRootWidth);
-        params.mAllowPartialRootWidth = width < muHi;
-
-        RingNttContext ctx{};
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
-
-        SenderOfflineInput senderInput{};
-        senderInput.mParams = params;
-        senderInput.mSk1 = sample_batch(ctx, 1u, 0x7DA100u + width);
-        SenderOfflineOutput senderOffline{};
-        LOGVOLE_REQUIRE_TRUE(
-            prepare_sender_offline_for_test(senderInput, senderOffline));
-
-        ReceiverOfflineInput receiverInput{};
-        receiverInput.mParams = params;
-        ReceiverOfflineOutput receiverOffline{};
-        LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(
-            receiverInput, senderOffline.mMessage, receiverOffline));
-
-        ReceiverOnlineInput onlineInput{};
-        onlineInput.mX = sample_small_plain_batch(
-            ctx, width, 0x7DA200u + width,
-            std::min<std::uint32_t>(
-                20u, params.mShrinkExpand.mPlaintextModulusBits));
-        SenderOnlineOutput senderOnline{};
-        ReceiverOnlineOutput receiverOnline{};
-        LOGVOLE_REQUIRE_TRUE(run_local_online_for_test(
-            senderOffline.mState,
-            receiverOffline.mState,
-            onlineInput,
-            senderOnline,
-            receiverOnline));
-        LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), width);
-        LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), width);
-
-        std::vector<RnsPoly> sRep;
-        LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
-            senderInput.mSk1,
-            params.mGamma,
-            params.mShrinkExpand.mAlpha,
-            tauHi,
-            params.mShrinkExpand.mRing,
-            sRep));
-        LOGVOLE_REQUIRE_TRUE(sRep.size() >= width);
-        sRep.resize(width);
-
-        std::vector<RnsPoly> actual;
-        std::vector<RnsPoly> expected;
-        LOGVOLE_REQUIRE_TRUE(subtract_batches(
-            ctx, receiverOnline.mTbm, senderOnline.mTbk, actual));
-        LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(
-            ctx, sRep, onlineInput.mX, expected));
-        long double maxLog2 = 0.0L;
-        LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(
-            ctx, actual, expected, params, maxLog2))
-            << "width=" << width
-            << " max centered log2 residual " << static_cast<double>(maxLog2);
-
-        if (width == 8u)
-        {
-            // An independent instance still rejects this same partial width.
-            // Its policy cannot be changed by the opted-in instance above.
-            auto strictSender = senderInput;
-            strictSender.mParams.mAllowPartialRootWidth = false;
-            SenderOfflineOutput strictSenderOutput;
-            LOGVOLE_REQUIRE_FALSE(prepare_sender_offline_for_test(strictSender, strictSenderOutput));
-            auto strictReceiver = receiverInput;
-            strictReceiver.mParams.mAllowPartialRootWidth = false;
-            ReceiverOfflineOutput strictReceiverOutput;
-            LOGVOLE_REQUIRE_FALSE(finalizeReceiverOffline(
-                strictReceiver, senderOffline.mMessage, strictReceiverOutput));
-
-            // The option permits one incomplete Root block, not an oversized
-            // logical input and not arbitrary Root widths.
-            std::vector<RnsPoly> overwideInput = onlineInput.mX;
-            overwideInput.push_back(zero_poly(ctx));
-            RootDigestState rejectedDigestState{};
-            RootDigestMessage rejectedDigest{};
-            LOGVOLE_EXPECT_FALSE(prepare_root_digest_receiver_for_test(
-                receiverOffline.mState,
-                overwideInput,
-                rejectedDigestState,
-                rejectedDigest));
-
-            receiverOffline.mState.mParams.mW = 0u;
-            LOGVOLE_EXPECT_FALSE(prepare_root_digest_receiver_for_test(
-                receiverOffline.mState,
-                {},
-                rejectedDigestState,
-                rejectedDigest));
-            receiverOffline.mState.mParams.mW = 17u;
-            LOGVOLE_EXPECT_FALSE(prepare_root_digest_receiver_for_test(
-                receiverOffline.mState,
-                onlineInput.mX,
-                rejectedDigestState,
-                rejectedDigest));
-            receiverOffline.mState.mParams.mW = width;
-
-            // Intermediate Root candidates remain physically muHi-wide. A
-            // failure in the padded half must still reject that Q/q_j check.
-            LOGVOLE_REQUIRE_TRUE(makeEffectiveTruncParams(
-                params, paddedSeedParams));
-            LOGVOLE_REQUIRE_TRUE(paddedSeedParams.mAllowPartialRootWidth);
-            LOGVOLE_REQUIRE_EQ(paddedSeedParams.mW, 8u);
-            LOGVOLE_REQUIRE_EQ(paddedSeedParams.mShrinkExpand.mMu, 16u);
-            paddedRejectedCandidate.assign(muHi, zero_poly(ctx));
-            bool candidateOk = false;
-            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateGoldenSeedCandidate(validationResources.executor, 2, paddedSeedParams, paddedRejectedCandidate, candidateOk)));
-            LOGVOLE_REQUIRE_TRUE(candidateOk);
-
-            // Force the target-0 rounding fraction to the top boundary in tail
-            // row 8.  For source limb 1, v=(q1/2)*(q2*q3 mod q1) makes the
-            // validator's v*inv(q2*q3) equal floor(q1/2); multiplying by
-            // floor(2^128/q1) lands within <q1/2 of 2^127.  Adding the validator's
-            // 2^127 rounding term therefore wraps within the rejection margin.
-            const std::size_t n = params.mShrinkExpand.mRing.mPolyModulusDegree;
-            const std::size_t sourceLimb = 1u;
-            const auto& moduli = getRingHostModuli(ctx);
-            LOGVOLE_REQUIRE_EQ(moduli.size(), rho);
-            const seal::Modulus& sourceMod = moduli[sourceLimb];
-            std::uint64_t puncturedModSource = 1u;
-            for (std::size_t limb = 1u; limb < rho; ++limb)
-            {
-                if (limb == sourceLimb) continue;
-                puncturedModSource = seal::util::multiply_uint_mod(
-                    puncturedModSource,
-                    moduli[limb].value(),
-                    sourceMod);
-            }
-            paddedRejectedCandidate[8].mCoeffs[sourceLimb * n] =
-                seal::util::multiply_uint_mod(
-                    sourceMod.value() / 2u,
-                    puncturedModSource,
-                    sourceMod);
-            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateGoldenSeedCandidate(validationResources.executor, 2, paddedSeedParams, paddedRejectedCandidate, candidateOk)));
-            LOGVOLE_REQUIRE_FALSE(candidateOk);
-            paddedCtx = ctx;
-        }
-    }
-
-#if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::available())
-    {
-        auto advanced = paddedCtx.mExecutionOptions;
-        advanced.mUseGpu = true;
-        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(paddedCtx.mParams, paddedCtx,
-            std::make_shared<RingContextFactory>(advanced, nullptr)));
-        auto candidateDev = gpu::upload(
-            paddedCtx,
-            std::span<const RnsPoly>(
-                paddedRejectedCandidate.data(), paddedRejectedCandidate.size()));
-        LOGVOLE_REQUIRE_TRUE(candidateDev != nullptr);
-        LOGVOLE_REQUIRE_EQ(candidateDev->count(), 16u);
-        gpu::GoldenValidationAttempt attempt;
-        LOGVOLE_REQUIRE_TRUE(attempt.begin(paddedCtx));
-
-        gpu::DeviceBatchPtr prefix;
-        LOGVOLE_REQUIRE_TRUE(gpu::denoiseAndAggValidateDevice(
-            attempt,
-            paddedCtx,
-            *candidateDev,
-            1u,
-            paddedSeedParams,
-            prefix,
-            8u));
-        LOGVOLE_REQUIRE_TRUE(prefix != nullptr);
-        LOGVOLE_REQUIRE_EQ(prefix->count(), 2u);
-
-        bool accepted = true;
-        LOGVOLE_REQUIRE_TRUE(attempt.finish(accepted));
-        LOGVOLE_EXPECT_FALSE(accepted);
-    }
-#endif
-}
-
 void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
 {
     const Params params = make_rejected_root_width_params();
@@ -6119,24 +5615,16 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     tests_libOTe::logvole_test::SetupResources setupResources;
     // Four declared tasks require four exclusive result and arithmetic slots.
     std::array<oc::u8, 4> setupResults{};
-    RootWirePinOverlapEvidence rootWirePin;
-    auto rootWirePinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
 #if defined(ENABLE_LOGVOLE_CUDA)
     if (cmd.getOr("gpu", 0)) LOGVOLE_REQUIRE_TRUE(gpu::available());
 #endif
     Params params = make_recursive_params(2);
-    const bool transport = cmd.getOr("legacy_transport", 0) == 0;
-    params.mShrinkExpand.mTransport = {transport, transport, transport, transport};
     if (cmd.getOr("scalar_wire", 0) != 0)
     {
         auto& encoding = params.mShrinkExpand.mTransport.mEncoding;
         encoding.mWire = {false, false, false};
-        encoding.mParallel = false;
-        encoding.mEncodedReceive = false;
-        encoding.mRootEncodedReceive = false;
     }
     params.mShrinkExpand.mNumWorkerThreads = 4;
-    params.mAllowPartialRootWidth = true;
     params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
@@ -6207,57 +5695,33 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     auto offlineSockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG senderOfflinePrng(oc::block(0x7D53u, 0));
     auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(setupResources.executor, setupResults, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin, rootWirePinCudaEvidence),
+        sender.offline(setupResources.executor, setupResults, senderInput, senderState, senderOfflinePrng, offlineSockets[0]),
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();
 
-    // Evidence belongs to its caller and is reset only when a new attempt starts.
-    // An unrelated failed sender must not change this completed sender's result.
-    const auto completedRun = rootWirePin.mSenderRunId;
-    const auto completedBytes = rootWirePin.mWireBytes;
-    const auto completedCudaEvidence = rootWireCudaAllocEvidenceSnapshot(rootWirePinCudaEvidence);
-    LOGVOLE_REQUIRE_EQ(completedCudaEvidence.mSenderRunId, completedRun);
-    RootWirePinOverlapEvidence failedPin;
-    auto failedPinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
-    failedPin.mSelected = failedPin.mRequested = true;
-    failedPin.mPinBeginNs = failedPin.mWireBytes = 99;
     SenderOfflineInput invalid;
     invalid.mSenderOwnerRunId = identityService->qualify(0x7D54);
     SenderState unchanged;
     unchanged.mParams.mW = 777;
     oc::PRNG invalidPrng(oc::block(0x7D54u, 0));
     coproto::BufferingSocket invalidSocket;
-    auto failedAttempt = sender.offline(setupResources.executor, setupResults, invalid, unchanged, invalidPrng, invalidSocket, failedPin, failedPinCudaEvidence);
-    LOGVOLE_REQUIRE_TRUE(failedPin.mSelected); // The returned task is still lazy.
+    auto failedAttempt = sender.offline(setupResources.executor, setupResults, invalid, unchanged, invalidPrng, invalidSocket);
+    LOGVOLE_REQUIRE_EQ(unchanged.mParams.mW, 777u); // The returned task is still lazy.
     bool rejected = false;
     try { macoro::sync_wait(std::move(failedAttempt)); }
     catch (const std::runtime_error&) { rejected = true; }
     LOGVOLE_REQUIRE_TRUE(rejected);
     LOGVOLE_REQUIRE_EQ(unchanged.mParams.mW, 777u);
-    LOGVOLE_REQUIRE_EQ(failedPin.mSenderRunId, invalid.mSenderOwnerRunId);
-    LOGVOLE_REQUIRE_FALSE(failedPin.mRequested || failedPin.mSelected);
-    LOGVOLE_REQUIRE_EQ(failedPin.mPinBeginNs, 0u);
-    LOGVOLE_REQUIRE_EQ(failedPin.mWireBytes, 0u);
-    LOGVOLE_REQUIRE_EQ(rootWirePin.mSenderRunId, completedRun);
-    LOGVOLE_REQUIRE_EQ(rootWirePin.mWireBytes, completedBytes);
-    const auto preservedCudaEvidence = rootWireCudaAllocEvidenceSnapshot(rootWirePinCudaEvidence);
-    LOGVOLE_REQUIRE_EQ(preservedCudaEvidence.mSenderRunId, completedCudaEvidence.mSenderRunId);
-    LOGVOLE_REQUIRE_EQ(preservedCudaEvidence.mWireBytes, completedCudaEvidence.mWireBytes);
-    LOGVOLE_REQUIRE_EQ(preservedCudaEvidence.mDirectDownloadCalls, completedCudaEvidence.mDirectDownloadCalls);
-    LOGVOLE_REQUIRE_EQ(rootWireCudaAllocEvidenceSnapshot(failedPinCudaEvidence).mSenderRunId,
-        invalid.mSenderOwnerRunId);
 
     LOGVOLE_REQUIRE_TRUE(senderState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiverState.mNextLevelState != nullptr);
     for (auto* level = &senderState; level; level = level->mNextLevelState.get())
     {
-        LOGVOLE_REQUIRE_TRUE(level->mParams.mAllowPartialRootWidth);
         LOGVOLE_REQUIRE_TRUE(level->mShrinkExpandState.mRingFactoryOwner->mExecutionOptions == advanced);
     }
     for (auto* level = &receiverState; level; level = level->mNextLevelState.get())
     {
-        LOGVOLE_REQUIRE_TRUE(level->mParams.mAllowPartialRootWidth);
         LOGVOLE_REQUIRE_TRUE(level->mShrinkExpandState.mRingFactoryOwner->mExecutionOptions == advanced);
     }
 
@@ -6409,8 +5873,6 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
 void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;
-    RootWirePinOverlapEvidence rootWirePin;
-    auto rootWirePinCudaEvidence = std::make_shared<RootWireCudaAllocEvidenceOwner>();
     Params params = make_recursive_params(2);
     params.mShrinkExpand.mNumWorkerThreads = 4;
 
@@ -6432,7 +5894,7 @@ void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
     auto offlineSockets = coproto::LocalAsyncSocket::makePair();
     oc::PRNG senderOfflinePrng(oc::block(0x7D73u, 0));
     auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(setupResources.executor, setupResources.results, senderInput, senderState, senderOfflinePrng, offlineSockets[0], rootWirePin, rootWirePinCudaEvidence),
+        sender.offline(setupResources.executor, setupResources.results, senderInput, senderState, senderOfflinePrng, offlineSockets[0]),
         receiver.offline(receiverInput, receiverState, offlineSockets[1])));
     std::get<0>(offlineResult).result();
     std::get<1>(offlineResult).result();
@@ -6468,35 +5930,65 @@ void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(senderState.mPrecomputedTbk->size(), params.mW);
 }
 
-void LogVole_Core_EarlyGoldenMatchesFullEvaluation(const oc::CLP&)
+void LogVole_Core_GoldenWorkerPoliciesMatch(const oc::CLP&)
 {
-    for (std::uint32_t workers : {1u, 2u, 4u})
     {
+        tests_libOTe::logvole_test::SetupResources setupResources;
+        std::array<oc::u8, 5> setupResults{};
         Params params = make_recursive_params(3);
         params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
-        LOGVOLE_REQUIRE_TRUE(params.mEarlyGoldenCheck);
-        params.mShrinkExpand.mNumWorkerThreads = workers;
+        params.mShrinkExpand.mNumWorkerThreads = 1;
         RingNttContext ctx{};
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
         SenderOnlineOutput referenceSender;
         ReceiverOnlineOutput referenceReceiver;
         std::array<oc::block, 2> referenceNext{};
-        for (const bool early : {false, true})
+        std::vector<Buffer> referenceSetup;
+        oc::block referenceSetupNext{};
+        // Five workers select full evaluation; one selects early checking.
+        for (const std::uint32_t workers : {5u, 1u})
         {
-            params.mEarlyGoldenCheck = early;
             SenderOfflineInput input{};
             input.mParams = params;
             input.mSk1 = sample_batch(ctx, 1, 0x7E101u);
             SenderOfflineOutput sender;
-            LOGVOLE_REQUIRE_TRUE(prepare_sender_offline_for_test(input, sender));
+            oc::PRNG setupPrng(oc::block(0x5200, 0x5201));
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(prepareSenderOffline(
+                setupResources.executor, setupResults, input, setupPrng, sender)));
             ReceiverOfflineInput receiverInput{};
             receiverInput.mParams = params;
             ReceiverOfflineOutput receiver;
             LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, sender.mMessage, receiver));
-            for (auto* level = &sender.mState; level; level = level->mNextLevelState.get())
-                LOGVOLE_REQUIRE_EQ(level->mParams.mEarlyGoldenCheck, early);
-            for (auto* level = &receiver.mState; level; level = level->mNextLevelState.get())
-                LOGVOLE_REQUIRE_EQ(level->mParams.mEarlyGoldenCheck, early);
+            // Setup randomness and wire geometry are identical; vary only the
+            // online worker policy after both independent setups finish.
+            std::vector<Buffer> setupWire;
+            for (const auto* level = &sender.mMessage; level; level = level->mNextLevel.get())
+            {
+                if (level->mHasShrinkExpandMessage)
+                    setupWire.push_back(encode(level->mShrinkExpandMessage));
+                if (!level->mNextLevel)
+                    setupWire.push_back(encode(level->mRootMessage));
+            }
+            const auto setupNext = setupPrng.get<oc::block>();
+            if (workers == 5u)
+            {
+                referenceSetup = std::move(setupWire);
+                referenceSetupNext = setupNext;
+            }
+            else
+            {
+                LOGVOLE_REQUIRE_EQ(setupWire.size(), referenceSetup.size());
+                for (std::size_t i = 0; i < setupWire.size(); ++i)
+                    LOGVOLE_REQUIRE_TRUE(rangesEqual(setupWire[i], referenceSetup[i]));
+                LOGVOLE_REQUIRE_TRUE(setupNext == referenceSetupNext);
+            }
+            // Root zeta sampling depends on protocol workers. Keep receiver
+            // and terminal Root budgets fixed; vary deterministic expansion only.
+            for (auto* level = &sender.mState; level->mNextLevelState; level = level->mNextLevelState.get())
+            {
+                level->mParams.mShrinkExpand.mNumWorkerThreads = workers;
+                level->mShrinkExpandState.mParams.mNumWorkerThreads = workers;
+            }
             ReceiverOnlineInput onlineInput{};
             onlineInput.mSid = 19;
             onlineInput.mX = sample_small_plain_batch(ctx, params.mW, 0x7E102u, 20);
@@ -6508,7 +6000,7 @@ void LogVole_Core_EarlyGoldenMatchesFullEvaluation(const oc::CLP&)
                 sender.mState, receiver.mState, onlineInput,
                 senderPrng, receiverPrng, actualSender, actualReceiver));
             const std::array<oc::block, 2> next{senderPrng.get<oc::block>(), receiverPrng.get<oc::block>()};
-            if (!early)
+            if (workers == 5u)
             {
                 referenceSender = std::move(actualSender);
                 referenceReceiver = std::move(actualReceiver);

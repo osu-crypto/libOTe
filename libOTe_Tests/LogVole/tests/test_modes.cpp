@@ -145,8 +145,6 @@ namespace
             std::get<0>(setup).result();
             std::get<1>(setup).result();
         }
-        LOGVOLE_REQUIRE_TRUE(originalSender.mRootWirePin.mSenderRunId.mService ==
-            senderReuse->ringFactory()->protocolService().get());
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto checkExecution = [](const auto& state, const auto& mathFactory) {
             const auto& selected = state.mCrtFactoryOwner;
@@ -179,22 +177,12 @@ namespace
             LOGVOLE_REQUIRE_FALSE(originalSender.mOfflineState.mHasActiveSid);
         }
 
-        const auto allocationEvidenceOwner = originalSender.mRootWireCudaAllocEvidence;
-        LOGVOLE_REQUIRE_TRUE(allocationEvidenceOwner);
-        const auto allocationEvidence = rootWireCudaAllocEvidenceSnapshot(allocationEvidenceOwner);
-        LOGVOLE_REQUIRE_EQ(allocationEvidence.mSenderRunId, originalSender.mRootWirePin.mSenderRunId);
-        const auto pinRun = originalSender.mRootWirePin.mSenderRunId;
-        LOGVOLE_REQUIRE_TRUE(pinRun != 0);
         // Moving an established session must retain the new backend/mode state.
         LogVoleSender sender(std::move(originalSender));
         tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(sender.options());
         LogVoleReceiver receiver;
         receiver = std::move(originalReceiver);
         LOGVOLE_REQUIRE_FALSE(originalSender.isConfigured());
-        LOGVOLE_REQUIRE_EQ(sender.mRootWirePin.mSenderRunId, pinRun);
-        LOGVOLE_REQUIRE_TRUE(sender.mRootWireCudaAllocEvidence == allocationEvidenceOwner);
-        LOGVOLE_REQUIRE_FALSE(originalSender.mRootWireCudaAllocEvidence);
-        LOGVOLE_REQUIRE_EQ(originalSender.mRootWirePin.mSenderRunId, ProtocolCacheRunId{});
         LOGVOLE_REQUIRE_FALSE(originalReceiver.isConfigured());
         LOGVOLE_REQUIRE_EQ(sender.setting(), setting);
         LOGVOLE_REQUIRE_EQ(receiver.setting(), setting);
@@ -313,9 +301,6 @@ namespace
         }
         sender.clear();
         receiver.clear();
-        LOGVOLE_REQUIRE_TRUE(sender.mRootWireCudaAllocEvidence == allocationEvidenceOwner);
-        LOGVOLE_REQUIRE_EQ(sender.mRootWirePin.mSenderRunId, ProtocolCacheRunId{});
-        LOGVOLE_REQUIRE_FALSE(sender.mRootWirePin.mRequested);
         LOGVOLE_REQUIRE_FALSE(sender.outputDevice());
         LOGVOLE_REQUIRE_FALSE(receiver.outputDevice());
         LOGVOLE_REQUIRE_TRUE(senderFactory.expired());
@@ -379,10 +364,6 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         LogVoleOptions options;
         options.mRequestSize = 7;
         options.mNumThreads = 2;
-        LOGVOLE_REQUIRE_FALSE(options.mAdvanced.mAllowPartialRootWidth);
-        options.mAdvanced.mAllowPartialRootWidth = true;
-        LOGVOLE_REQUIRE_TRUE(options.mAdvanced.mEarlyGoldenCheck);
-        options.mAdvanced.mEarlyGoldenCheck = false;
         const LogVoleGpuSetupOptions defaults;
         options.mAdvanced.mGpuSetup.mDirectWire = !defaults.mDirectWire;
         options.mAdvanced.mGpuSetup.mLazyCiphertexts = !defaults.mLazyCiphertexts;
@@ -461,16 +442,6 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
             LOGVOLE_REQUIRE_TRUE(actual.mParallelLenc == expected.mParallelLenc);
             LOGVOLE_REQUIRE_TRUE(actual.mPublicSenderCt2PrefetchLevels == expected.mPublicSenderCt2PrefetchLevels);
         };
-        options.mAdvanced.mTransport.mOwnedSetupSend = false;
-        options.mAdvanced.mTransport.mOwnedRootMessages = false;
-        options.mAdvanced.mTransport.mDeferRootDigestHash = false;
-        options.mAdvanced.mTransport.mMoveReceivedState = false;
-        const auto checkTransport = [](const auto& party, bool expected) {
-            LOGVOLE_REQUIRE_EQ(party.mParams.mLogVole.mShrinkExpand.mTransport.mOwnedSetupSend, expected);
-            LOGVOLE_REQUIRE_EQ(party.mParams.mLogVole.mShrinkExpand.mTransport.mOwnedRootMessages, expected);
-            LOGVOLE_REQUIRE_EQ(party.mParams.mLogVole.mShrinkExpand.mTransport.mDeferRootDigestHash, expected);
-            LOGVOLE_REQUIRE_EQ(party.mParams.mLogVole.mShrinkExpand.mTransport.mMoveReceivedState, expected);
-        };
         options.mAdvanced.mStreams.mIndexScratchKiB = 256;
         options.mAdvanced.mStreams.mPipelinedUpload = true;
         options.mAdvanced.mProtocol.mFusedWrap = false;
@@ -488,8 +459,6 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         options.mAdvanced = {};
         options.mAdvanced.mGpuSetup = defaults;
         options.mAdvanced.mTransport = {};
-        options.mAdvanced.mAllowPartialRootWidth = false; // Constructor owns its copy.
-        options.mAdvanced.mEarlyGoldenCheck = true;
         Party strict(options);
         LOGVOLE_REQUIRE_EQ(strict.requestSize(), 1ull);
         LOGVOLE_REQUIRE_EQ(strict.numThreads(), 1u);
@@ -516,36 +485,18 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         try { Party incompatible(options, factory); }
         catch (const std::invalid_argument&) { rejected = true; }
         LOGVOLE_REQUIRE_TRUE(rejected);
-        LOGVOLE_REQUIRE_TRUE(original.mParams.mLogVole.mAllowPartialRootWidth);
-        LOGVOLE_REQUIRE_FALSE(original.mParams.mLogVole.mEarlyGoldenCheck);
         checkGpu(original.mParams.mLogVole.mShrinkExpand.mGpuSetup, selectedGpu);
-        checkTransport(original, false);
-        LOGVOLE_REQUIRE_FALSE(strict.mParams.mLogVole.mAllowPartialRootWidth);
-        LOGVOLE_REQUIRE_TRUE(strict.mParams.mLogVole.mEarlyGoldenCheck);
         checkGpu(strict.mParams.mLogVole.mShrinkExpand.mGpuSetup, defaults);
-        checkTransport(strict, true);
 
         Party moved(std::move(original));
-        LOGVOLE_REQUIRE_TRUE(moved.mParams.mLogVole.mAllowPartialRootWidth);
-        LOGVOLE_REQUIRE_FALSE(moved.mParams.mLogVole.mEarlyGoldenCheck);
         checkGpu(moved.mParams.mLogVole.mShrinkExpand.mGpuSetup, selectedGpu);
-        checkTransport(moved, false);
         Party assigned;
         assigned = std::move(moved);
-        LOGVOLE_REQUIRE_TRUE(assigned.mParams.mLogVole.mAllowPartialRootWidth);
-        LOGVOLE_REQUIRE_FALSE(assigned.mParams.mLogVole.mEarlyGoldenCheck);
         checkGpu(assigned.mParams.mLogVole.mShrinkExpand.mGpuSetup, selectedGpu);
-        checkTransport(assigned, false);
         assigned.clear();
         assigned = Party(selectedOptions, factory);
-        LOGVOLE_REQUIRE_TRUE(assigned.mParams.mLogVole.mAllowPartialRootWidth);
-        LOGVOLE_REQUIRE_FALSE(assigned.mParams.mLogVole.mEarlyGoldenCheck);
         checkGpu(assigned.mParams.mLogVole.mShrinkExpand.mGpuSetup, selectedGpu);
-        checkTransport(assigned, false);
-        LOGVOLE_REQUIRE_FALSE(strict.mParams.mLogVole.mAllowPartialRootWidth);
-        LOGVOLE_REQUIRE_TRUE(strict.mParams.mLogVole.mEarlyGoldenCheck);
         checkGpu(strict.mParams.mLogVole.mShrinkExpand.mGpuSetup, defaults);
-        checkTransport(strict, true);
     };
     // A derived ring with different dimensions retains the supplied owner's settings.
     {

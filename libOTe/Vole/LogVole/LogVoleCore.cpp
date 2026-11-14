@@ -731,8 +731,7 @@ namespace osuCrypto::LogVole
 
         bool validRootWidth(const Params& params, u32 muHi)
         {
-            return params.mW == muHi ||
-                   (params.mAllowPartialRootWidth && params.mW != 0u && params.mW < muHi);
+            return params.mW == muHi;
         }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -4117,7 +4116,7 @@ namespace osuCrypto::LogVole
             const bool publicSeed = state.mParams.mCt2SeedMode == Ct2SeedMode::PublicSeed;
             const Params seedParams = makeSeedParams(state.mParams, state.mShrinkExpandState.mParams);
             const auto workers = state.mShrinkExpandState.mParams.mNumWorkerThreads;
-            const bool earlyCheck = !publicSeed && state.mParams.mEarlyGoldenCheck && workers >= 1 && workers <= 4;
+            const bool earlyCheck = !publicSeed && workers >= 1 && workers <= 4;
             RingNttContext checkCtx{};
             std::vector<RoundingCheckConstants> rounding;
             RoundingCheckConstants leafRounding;
@@ -5602,7 +5601,7 @@ namespace osuCrypto::LogVole
             }
             const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
             const auto workers = state.mShrinkExpandState.mParams.mNumWorkerThreads;
-            const bool early = !publicSeed && state.mParams.mEarlyGoldenCheck && workers >= 1 && workers <= 4;
+            const bool early = !publicSeed && workers >= 1 && workers <= 4;
             std::vector<RoundingCheckConstants> rounding;
             RoundingCheckConstants leafRounding;
             if (early && !(isLeaf ? buildLeafRoundingCheckConstants(seedParams, ctx, leafRounding) :
