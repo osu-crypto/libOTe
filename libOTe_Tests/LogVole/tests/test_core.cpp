@@ -2725,6 +2725,50 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
     LOGVOLE_EXPECT_EQ(receiver.mRootTopCt.mRows, message.mTopCt.mRows);
     LOGVOLE_EXPECT_EQ(receiver.mRootPublicBStarNtt.size(), message.mPublicBStarNtt.size());
 
+    // Admission must pin BStar to the public derivation, including shape-valid
+    // replacements. A failed admission must preserve an already admitted root.
+    struct DeferredBStar final : LazyRingTensorHostState
+    {
+        RingTensor mHost;
+        const RingTensor& get() const override { return mHost; }
+    };
+    const auto* admittedCtR = receiver.mRootCtRRt.mPolys.data();
+    const auto* admittedTopCt = receiver.mRootTopCt.mPolys.data();
+    const auto* admittedBStar = receiver.mRootPublicBStarNtt.data();
+    for (std::uint32_t replacement = 0; replacement < 3; ++replacement)
+    {
+        RootOfflineMessage changed = message;
+        if (replacement == 0)
+            changed.mPublicBStarNtt[0].mCoeffs[0] ^= 1u;
+        else if (replacement == 1)
+            for (auto& poly : changed.mPublicBStarNtt)
+                std::fill(poly.mCoeffs.begin(), poly.mCoeffs.end(), 0);
+        else
+            changed.mPublicBStarNtt[0].mCoeffs[0] += ctx.mModuli[0].value();
+        LOGVOLE_EXPECT_FALSE(finalizeRootOfflineReceiver(receiver, changed));
+
+        auto lazy = std::make_shared<DeferredBStar>();
+        lazy->mHost.mPolys = changed.mPublicBStarNtt;
+        changed.mPublicBStarNtt.clear();
+        changed.mLazyPublicBStar = lazy;
+        LOGVOLE_EXPECT_FALSE(finalizeRootOfflineReceiver(receiver, std::move(changed)));
+        LOGVOLE_EXPECT_TRUE(receiver.mRootCtRRt.mPolys.data() == admittedCtR);
+        LOGVOLE_EXPECT_TRUE(receiver.mRootTopCt.mPolys.data() == admittedTopCt);
+        LOGVOLE_EXPECT_TRUE(receiver.mRootPublicBStarNtt.data() == admittedBStar);
+        LOGVOLE_EXPECT_EQ(receiver.mRootRandomizerWidth, randomizer);
+        expect_poly_equal(receiver.mRootPublicBStarNtt[0], message.mPublicBStarNtt[0]);
+    }
+    {
+        RootOfflineMessage deferred = message;
+        auto lazy = std::make_shared<DeferredBStar>();
+        lazy->mHost.mPolys = std::move(deferred.mPublicBStarNtt);
+        deferred.mLazyPublicBStar = lazy;
+        ReceiverState lazyReceiver{};
+        lazyReceiver.mParams = params;
+        LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(lazyReceiver, std::move(deferred)));
+        expect_poly_equal(lazyReceiver.mRootPublicBStarNtt[0], message.mPublicBStarNtt[0]);
+    }
+
     RnsPoly roundTrip = receiver.mRootCtRRt.mPolys[0];
     LOGVOLE_REQUIRE_TRUE(inverseNtt(roundTrip, ctx));
     expect_poly_equal(roundTrip, message.mCtR.mPolys[0]);
@@ -3392,6 +3436,26 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
         LOGVOLE_EXPECT_FALSE(finalizeRootOfflineReceiver(
             rejected, std::move(badBStarCount)));
         LOGVOLE_EXPECT_EQ(rejected.mRootRandomizerWidth, 12345u);
+        for (std::uint32_t replacement = 0; replacement < 2; ++replacement)
+        {
+            RootOfflineMessage changed = offlineMessage;
+            if (replacement == 0)
+                changed.mPublicBStarNtt[0].mCoeffs[0] ^= 1u;
+            else
+                for (auto& poly : changed.mPublicBStarNtt)
+                    std::fill(poly.mCoeffs.begin(), poly.mCoeffs.end(), 0);
+            RootOfflineMessage changedWire{};
+            LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
+                encode(changed, 4, {}, true), changedWire, 4, {}, true));
+            LOGVOLE_REQUIRE_TRUE(changedWire.mOwnedPublicBStarWire != nullptr);
+            const auto retainedBStar = changedWire.mOwnedPublicBStarWire;
+            LOGVOLE_EXPECT_FALSE(finalizeRootOfflineReceiver(rejected, std::move(changedWire)));
+            LOGVOLE_EXPECT_TRUE(changedWire.mOwnedPublicBStarWire == retainedBStar);
+            LOGVOLE_EXPECT_TRUE(changedWire.mPublicBStarNtt.empty());
+            LOGVOLE_EXPECT_EQ(rejected.mRootRandomizerWidth, 12345u);
+            LOGVOLE_EXPECT_TRUE(rejected.mRootCtRRt.mPolys.empty());
+            LOGVOLE_EXPECT_TRUE(rejected.mRootPublicBStarNtt.empty());
+        }
     }
     ReceiverState wireReceiver{};
     wireReceiver.mParams = params;

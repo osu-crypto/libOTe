@@ -86,6 +86,62 @@ in [`LogVoleCore.cpp`](LogVoleCore.cpp) follows the prose's intended interval;
 this erratum does not call for a runtime predicate change. This comparison
 does not certify all fixed-point or reciprocal-error boundary cases.
 
+## Requirements for a future opened fresh-setup ZK route
+
+Status: **REQUIREMENTS ONLY; this route is not implemented.** The existing ZK
+wrappers use semi-honest VOLE. The requirements below specify a separate route;
+the missing wrapper is not an implementation defect in those wrappers.
+This section uses paper revision `e569700` in the local `logVole` paper tree;
+see `alg/golden-seed.tex`, `lower-golden.tex`, and
+`alg/shrinkexpand-trunc.tex`.
+
+Here the prover is the VOLE receiver, and the verifier is the VOLE sender.
+Each proof must use fresh, single-use setup. Before learning the verifier's
+VOLE correlation `Delta`, the prover must commit to its proof values using
+hiding, binding commitments. After the online exchange, the verifier discloses
+its setup state and coins for an audit against the recorded public transcript
+and agreed configuration. The prover opens its commitments only after that
+audit succeeds. Discard the setup after success or abort.
+
+The audit and its supporting lemma must meet these obligations:
+
+1. **Complete replay.** Check all verifier setup material, its complete online
+   response, and its output keys against the disclosed state and coins.
+   Bind dimensions, moduli, domains, seeds, SIDs and all other configuration
+   affecting these computations to the recorded transcript.
+2. **Uniform deterministic budgets.** Check required coefficient bounds
+   on setup errors and bounded masks. Derive an instance budget `B_inst` for
+   each denoise from those bounds, including truncation and numerical errors.
+   Each budget must hold uniformly over all legal receiver inputs and
+   randomness consistent with the recorded digest and transcript, rather than
+   one replayed input.
+3. **Every denoise.** Check golden admissibility at every denoise actually
+   executed, including `DerandRoot`. For scale gap `delta` and the value `tbk`
+   entering that denoise, require
+   `|residue_delta(tbk)| + B_inst < delta/2`, componentwise, where
+   `residue_delta` is the centered residue modulo `delta`. Use the actual
+   decoding scale and account for its rounding convention. Replaying the
+   earliest successful search counter is unnecessary if the accepted candidate
+   satisfies all required checks.
+4. **Witness-independent acceptance.** The audit's rejection decision must not
+   depend on the prover's witness. Prove that every accepted transcript fixes
+   labels satisfying `m = k + x*Delta`, in the output field, for all legal
+   receiver inputs `x` and randomness consistent with its digest and transcript.
+   A witness-dependent check for one supplied input does not suffice.
+5. **Public root matrix.** Fix or canonically derive `B*` publicly, and enforce
+   its required value before releasing the digest. The implemented root `B*`
+   admission guard is one prerequisite, not this full audit. A public seed
+   expansion requires an explicit random-oracle or suitable pseudorandomness
+   setup assumption; a known AES key alone does not supply such a theorem.
+   Do not apply a statistical theorem for a uniformly sampled matrix literally
+   to one fixed expanded matrix.
+
+These obligations are a contract for a sufficient audit lemma, not a proof
+that the route is zero knowledge. Separate knowledge soundness of the
+random-linear-combination check from any explicit assumption that the digest
+provides knowledge of its preimage. A simulator against a malicious verifier,
+including its rewinding strategy and abort behavior, remains to be proved.
+
 ## June 2026 completed corrections
 
 ### LV-AUDIT-001: Secret/noise randomness derived from public seeds

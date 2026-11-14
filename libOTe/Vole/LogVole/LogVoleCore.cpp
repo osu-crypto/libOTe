@@ -2720,6 +2720,31 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        // BStar is a fixed public matrix, not a sender-chosen root key.
+        // Check its canonical NTT representation before admitting any root
+        // state. Compare owned wire bytes directly to preserve deferred storage.
+        for (u32 idx = 0; idx < randomizer; ++idx)
+        {
+            const auto expected = deriveUniformPolyFromNonceNtt(
+                ctx, kRootBStarPublicNonce, kRootBStarPublicDomain, idx, nullptr);
+            if (expected.mCoeffs.size() != rootPolyWords) return false;
+            if (ownedPublicBStarWire)
+            {
+                const auto* encoded = publicBStarWireBytes.data() +
+                    static_cast<u64>(idx) * rootPolyWords * sizeof(u64);
+                for (u64 word = 0; word < rootPolyWords; ++word)
+                {
+                    u64 value = 0;
+                    for (u32 byte = 0; byte < sizeof(u64); ++byte)
+                        value |= static_cast<u64>(encoded[word * sizeof(u64) + byte]) << (8u * byte);
+                    if (value != expected.mCoeffs[word]) return false;
+                }
+            }
+            else if (!std::equal(expected.mCoeffs.begin(), expected.mCoeffs.end(),
+                                 publicBStarView[idx].mCoeffs.begin()))
+                return false;
+        }
+
         RingTensor ctR{};
         std::shared_ptr<const LazyRingTensorHostState> ctRWire;
         if (ownedCtRWire)
