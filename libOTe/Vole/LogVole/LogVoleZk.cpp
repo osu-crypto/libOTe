@@ -57,6 +57,25 @@ namespace osuCrypto::LogVole
 
     namespace
     {
+        // Check geometry before using the circuit's unchecked size accessors.
+        // Earlier gates in the same layer are valid scalar witness dependencies.
+        bool validateMulCircuit(const ZkMulCircuit& circuit, bool deviceOnly = false)
+        {
+            constexpr u64 maxWires = std::numeric_limits<u32>::max();
+            if (!circuit.mWidth || !circuit.mDepth || circuit.mWidth > maxWires ||
+                circuit.mDepth > maxWires / circuit.mWidth - 1)
+                return false;
+            if (deviceOnly && circuit.mOperands.empty() && circuit.mOperandsDevice)
+                return true;
+            const u64 gates = circuit.gateCount();
+            if (circuit.mOperands.size() != 2 * gates) return false;
+            for (u64 g = 0; g != gates; ++g)
+                if (circuit.mOperands[2*g] >= circuit.outputWire(g) ||
+                    circuit.mOperands[2*g+1] >= circuit.outputWire(g))
+                    return false;
+            return true;
+        }
+
         u64 subMod(u64 lhs, u64 rhs, const seal::Modulus& mod)
         {
             return seal::util::sub_uint_mod(lhs, rhs, mod);
@@ -104,7 +123,7 @@ namespace osuCrypto::LogVole
 
     bool makeZkMulCircuitForBudget(u64 voleBudget, u64 depth, block seed, ZkMulCircuit& out)
     {
-        if (voleBudget < 2 || depth == 0) return false;
+        if (voleBudget < 2 || depth == 0 || depth == std::numeric_limits<u64>::max()) return false;
         // voleCount = width * (depth + 1) + 1 has to fit, so take the largest
         // width that does and let the caller see the resulting gate count.
         const u64 width = (voleBudget - 1) / (depth + 1);
@@ -117,11 +136,12 @@ namespace osuCrypto::LogVole
         if (gateCount == 0 || depth == 0) return false;
         if (gateCount % depth) return false;
 
+        const u64 width = gateCount / depth;
+        constexpr u64 maxWires = std::numeric_limits<u32>::max();
+        if (width == 0 || width > maxWires || depth > maxWires / width - 1) return false;
         out = ZkMulCircuit{};
         out.mDepth = depth;
-        out.mWidth = gateCount / depth;
-        if (out.mWidth == 0) return false;
-        if (out.wireCount() > std::numeric_limits<u32>::max()) return false;
+        out.mWidth = width;
 
         out.mOperands.resize(static_cast<std::size_t>(2 * gateCount));
         PRNG prng(seed);
@@ -191,8 +211,7 @@ namespace osuCrypto::LogVole
             const ZkMulCircuit& circuit, u64 modulus, PRNG& prng, AlignedUnVec<u64>& wires,
             u64 voleSize, const detail::CpuZkOptions& options, RunLayer&& runLayer)
         {
-            if (modulus < 2 || circuit.gateCount() == 0) return false;
-            if (circuit.mOperands.size() != 2 * circuit.gateCount()) return false;
+            if (modulus < 2 || !validateMulCircuit(circuit)) return false;
             if (voleSize && voleSize < circuit.voleCount()) return false;
 
             const seal::Modulus mod(modulus);
@@ -278,9 +297,7 @@ namespace osuCrypto::LogVole
     {
         // Match the circuit's existing u32 wire-index contract, and validate
         // before multiplying sizes or constructing any pool/buffer.
-        const u64 maxWires = std::numeric_limits<u32>::max();
-        if (circuit.mWidth == 0 || circuit.mDepth == 0 ||
-            circuit.mWidth > maxWires || circuit.mDepth > maxWires / circuit.mWidth - 1)
+        if (!validateMulCircuit(circuit))
             throw std::invalid_argument("LogVole CPU proof workspace has invalid circuit geometry");
         if (circuit.gateCount() > std::numeric_limits<std::size_t>::max() /
                 sizeof(std::array<u64, 2>))
@@ -302,7 +319,7 @@ namespace osuCrypto::LogVole
         u64 voleSize, ZkMulCpuWorkspace& workspace)
     {
         if (!workspace.mImpl || !workspace.mImpl->matches(circuit) || modulus < 2 ||
-            circuit.gateCount() == 0 || circuit.mOperands.size() != 2 * circuit.gateCount() ||
+            !validateMulCircuit(circuit) ||
             (voleSize && voleSize < circuit.voleCount())) co_return false;
         auto& work = *workspace.mImpl;
         const seal::Modulus mod(modulus);
@@ -427,13 +444,10 @@ namespace osuCrypto::LogVole
         ZkMulCpuWorkspace& workspace,
         ZkProof& out)
     {
-        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
+        if (!validateMulCircuit(circuit) || !workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
         auto& work = *workspace.mImpl;
-        const u64 gates = circuit.gateCount();
-        if (gates == 0 || modulus < 2) return false;
+        if (modulus < 2) return false;
         if (wires.size() < circuit.voleCount() || macs.size() < circuit.voleCount()) return false;
-        if (circuit.mOperands.size() != 2 * gates) return false;
-
         const seal::Modulus mod(modulus);
 
         // Workers traverse circuit layers in the same order to encourage
@@ -473,13 +487,10 @@ namespace osuCrypto::LogVole
         ZkMulCpuWorkspace& workspace,
         u64& out)
     {
-        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
+        if (!validateMulCircuit(circuit) || !workspace.mImpl || !workspace.mImpl->matches(circuit)) return false;
         auto& work = *workspace.mImpl;
-        const u64 gates = circuit.gateCount();
-        if (gates == 0 || modulus < 2) return false;
+        if (modulus < 2) return false;
         if (keys.size() < circuit.voleCount()) return false;
-        if (circuit.mOperands.size() != 2 * gates) return false;
-
         const seal::Modulus mod(modulus);
 
         const std::size_t chunks = work.mVerifierChunks;
@@ -510,13 +521,10 @@ namespace osuCrypto::LogVole
         ZkMulCpuWorkspace& workspace,
         ZkProof& out)
     {
-        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) co_return false;
+        if (!validateMulCircuit(circuit) || !workspace.mImpl || !workspace.mImpl->matches(circuit)) co_return false;
         auto& work = *workspace.mImpl;
-        const u64 gates = circuit.gateCount();
-        if (gates == 0 || modulus < 2) co_return false;
+        if (modulus < 2) co_return false;
         if (wires.size() < circuit.voleCount() || macs.size() < circuit.voleCount()) co_return false;
-        if (circuit.mOperands.size() != 2 * gates) co_return false;
-
         const seal::Modulus mod(modulus);
 
         // Workers traverse circuit layers in the same order to encourage
@@ -563,13 +571,10 @@ namespace osuCrypto::LogVole
         ZkMulCpuWorkspace& workspace,
         u64& out)
     {
-        if (!workspace.mImpl || !workspace.mImpl->matches(circuit)) co_return false;
+        if (!validateMulCircuit(circuit) || !workspace.mImpl || !workspace.mImpl->matches(circuit)) co_return false;
         auto& work = *workspace.mImpl;
-        const u64 gates = circuit.gateCount();
-        if (gates == 0 || modulus < 2) co_return false;
+        if (modulus < 2) co_return false;
         if (keys.size() < circuit.voleCount()) co_return false;
-        if (circuit.mOperands.size() != 2 * gates) co_return false;
-
         const seal::Modulus mod(modulus);
 
         const std::size_t chunks = work.mVerifierChunks;
@@ -1945,6 +1950,12 @@ namespace osuCrypto
     void ZkMulProver::prepare(
         LogVole::ZkMulCircuit circuit, LogVole::CpuBenchmarkContext* benchmark, ProtocolCacheScopeView configureScope)
     {
+        bool deviceOnly = false;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        deviceOnly = mUseDevice && gpu::available();
+#endif
+        if (!validateMulCircuit(circuit, deviceOnly))
+            throw std::invalid_argument("LogVole ZK multiplication has invalid circuit");
         auto factory = std::make_shared<RingContextFactory>(mVoleOptions, configureScope.mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
@@ -2105,6 +2116,12 @@ namespace osuCrypto
     void ZkMulVerifier::prepare(
         LogVole::ZkMulCircuit circuit, LogVole::CpuBenchmarkContext* benchmark, ProtocolCacheScopeView configureScope)
     {
+        bool deviceOnly = false;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        deviceOnly = true;
+#endif
+        if (!validateMulCircuit(circuit, deviceOnly))
+            throw std::invalid_argument("LogVole ZK multiplication has invalid circuit");
         auto factory = std::make_shared<RingContextFactory>(mVoleOptions, configureScope.mRunId.serviceOwner());
 #if defined(ENABLE_LOGVOLE_CUDA)
         auto execution = std::make_shared<gpu::GpuExecutionContext>(mVoleOptions, factory->hostProfilerOwner(), factory->protocolService());
@@ -2131,6 +2148,8 @@ namespace osuCrypto
             circuit.mOperandsDevice.reset();
         }
 #endif
+        if (!validateMulCircuit(circuit, deviceOnly))
+            throw std::invalid_argument("LogVole ZK multiplication has invalid circuit");
         mCircuit = std::move(circuit);
         mVoleRequest = std::max(mVoleOptions.mRequestSize, mCircuit.voleCount());
         auto voleOptions = mVoleOptions;

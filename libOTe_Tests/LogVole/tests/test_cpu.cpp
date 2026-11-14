@@ -794,6 +794,49 @@ void LogVole_Cpu_PreparedExecutionLifetime(const oc::CLP&)
         LOGVOLE_REQUIRE_EQ(actual.mV, expected.mV);
         LOGVOLE_REQUIRE_EQ(actualValue, expectedValue);
     }
+    // A workspace does not freeze its caller-owned circuit. Revalidate every
+    // direct boundary before touching outputs, scheduling, or drawing randomness.
+    const auto originalOperand = circuit.mOperands[1];
+    for (u32 bad : {static_cast<u32>(circuit.outputWire(0)),
+            static_cast<u32>(circuit.maskIndex()), std::numeric_limits<u32>::max()})
+    {
+        circuit.mOperands[1] = bad;
+        ZkProof proof{123, 456};
+        u64 value = 789;
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulProverResponse(
+            proofExecutor, circuit, wires, macs, 1, q, serial, proof)));
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulVerifierValue(
+            proofExecutor, circuit, keys, 1, delta, q, serial, value)));
+        LOGVOLE_REQUIRE_FALSE(LogVole::detail::gpuLegacyZkMulProverResponse(
+            circuit, wires, macs, 1, q, serial, proof));
+        LOGVOLE_REQUIRE_FALSE(LogVole::detail::gpuLegacyZkMulVerifierValue(
+            circuit, keys, 1, delta, q, serial, value));
+        LOGVOLE_REQUIRE_EQ(proof.mU, 123u);
+        LOGVOLE_REQUIRE_EQ(proof.mV, 456u);
+        LOGVOLE_REQUIRE_EQ(value, 789u);
+        PRNG rejected(toBlock(123)), saved(toBlock(123));
+        const std::vector<u64> savedWires(wires.begin(), wires.end());
+        LOGVOLE_REQUIRE_FALSE(zkMulWitness(circuit, q, rejected, wires));
+        LOGVOLE_REQUIRE_FALSE(macoro::sync_wait(zkMulWitness(
+            witnessExecutor, circuit, q, rejected, wires, 0, serial)));
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(wires, savedWires));
+        LOGVOLE_REQUIRE_TRUE(rejected.get<block>() == saved.get<block>());
+        bool rejectedWorkspace = false;
+        try { ZkMulCpuWorkspace invalid(circuit, 1); }
+        catch (const std::invalid_argument&) { rejectedWorkspace = true; }
+        LOGVOLE_REQUIRE_TRUE(rejectedWorkspace);
+    }
+    circuit.mOperands[1] = originalOperand;
+    // Overflow-adjacent depths must fail without dividing by a wrapped zero.
+    ZkMulCircuit budgetCircuit;
+    constexpr auto max = std::numeric_limits<u64>::max();
+    LOGVOLE_REQUIRE_FALSE(makeZkMulCircuit(max, max, ZeroBlock, budgetCircuit));
+    LOGVOLE_REQUIRE_FALSE(makeZkMulCircuitForBudget(max, max, ZeroBlock, budgetCircuit));
+    LOGVOLE_REQUIRE_FALSE(makeZkMulCircuitForBudget(max, max - 1, ZeroBlock, budgetCircuit));
+    LOGVOLE_REQUIRE_FALSE(makeZkMulCircuitForBudget(max, max - 2, ZeroBlock, budgetCircuit));
+    LOGVOLE_REQUIRE_TRUE(makeZkMulCircuitForBudget(7, 2, ZeroBlock, budgetCircuit));
+    LOGVOLE_REQUIRE_EQ(budgetCircuit.mWidth, 2u);
+    LOGVOLE_REQUIRE_EQ(budgetCircuit.voleCount(), 7u);
     // Move only while quiescent: the stable heap owner retains pool and scratch.
     ZkMulCpuWorkspace moved(std::move(parallel));
     LOGVOLE_REQUIRE_TRUE(moved.prepared());
