@@ -4,9 +4,23 @@
 
 #if defined(ENABLE_SPARSE_DPF)
 #include "libOTe/Dpf/RevCuckoo/BinarySolver.h"
+#include "libOTe/Tools/CompilerHints.h"
 
 namespace osuCrypto
 {
+
+	namespace
+	{
+		// Return the lazy task across a non-inlined call boundary. The matrix
+		// storage stays alive in the test, but these view descriptors do not.
+		// solveOne must own its descriptor copies until solve has completed.
+		OC_NOINLINE task<> deferredSolveOne(BinarySolver& solver,
+			MatrixView<const u8> matrix, MatrixView<const u8> rhs,
+			MatrixView<u8> solution, PRNG& prng, Socket& socket)
+		{
+			return solver.solveOne(matrix, rhs, solution, prng, socket);
+		}
+	}
 
 
 	void setBase(std::array<BinarySolver, 2>& s)
@@ -438,10 +452,10 @@ namespace osuCrypto
 			}
 
 			auto sock = coproto::LocalAsyncSocket::makePair();
+			auto solve0 = deferredSolveOne(s[0], Ms[0], ys[0], xs[0], prng, sock[0]);
+			auto solve1 = deferredSolveOne(s[1], Ms[1], ys[1], xs[1], prng, sock[1]);
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				s[0].solveOne(Ms[0], ys[0], xs[0], prng, sock[0]),
-				s[1].solveOne(Ms[1], ys[1], xs[1], prng, sock[1])
-			));
+				std::move(solve0), std::move(solve1)));
 
 			std::get<0>(r).result();
 			std::get<1>(r).result();
