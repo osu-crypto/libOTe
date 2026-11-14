@@ -86,6 +86,28 @@ in [`LogVoleCore.cpp`](LogVoleCore.cpp) follows the prose's intended interval;
 this erratum does not call for a runtime predicate change. This comparison
 does not certify all fixed-point or reciprocal-error boundary cases.
 
+### Opened-setup ZK proof questions (2026-11-14)
+
+Status: **OPEN; deferred for Lucien's review, no changes proposed now.**
+These questions use paper `e569700` and code `920658e4`; earlier entries retain
+their stated provenance.
+
+**Simulator.** `zk-proof.tex:78-91` samples honest verifier setup, commits before
+opening, then samples correlated final values after `Delta`.
+**Question for Lucien:** What is the complete simulator for an actual malicious
+verifier, including consistent commitment openings and abort behavior? This is a
+proof-completion question, not an attack claim or proposed protocol change.
+
+**Commitments.** `zkp.tex:75-77` lists binding; `zk-proof.tex:91` invokes hiding.
+**Question for Lucien:** Which exact commitment properties does the completed
+simulator require, and how should the theorem state them?
+
+**Public `B*`.** `Digest-Properties.tex:34,68-69` uses a uniformly sampled matrix;
+the implementation uses fixed public AES expansion. The admission guard prevents
+substitution but does not prove an expansion assumption. **Question for Lucien:**
+Which explicit setup, random-oracle, or other assumption covers this instantiation?
+The statistical uniform-matrix theorem alone does not supply that argument.
+
 ## Paper's opened fresh-setup ZK route
 
 Status: **NOT IMPLEMENTED.** The existing ZK wrappers use semi-honest VOLE.
@@ -112,21 +134,9 @@ These are checks on the actual extended input; the algorithm does not prescribe
 online-sender replay or an audit over all possible receiver inputs.
 The setup is fresh for each proof and single use because `Delta` is revealed.
 
-### Open proof questions and implementation scope
-
-The algorithm and theorem state a binding commitment assumption, while the
-zero-knowledge sketch also invokes commitment hiding. The sketch does not yet
-specify a complete simulator against a malicious verifier or resolve how its
-pre-opening commitments are opened to the simulated final values. These are
-proof questions, not additional steps in the paper's algorithm. Likewise,
-RLC-based extraction and the alternative digest-knowledge assumption in
-`zkp.tex` are distinct knowledge-soundness routes.
-
-The implemented public `B*` derivation and admission guard are an implementation
-prerequisite, not an additional step stated in `alg/it-mac-zk.tex`. Any security
-argument for seeded public-matrix expansion must state its setup assumption;
-it does not follow literally from a statistical theorem for a uniformly sampled
-matrix. This record does not claim that the opened route or its proof is complete.
+The deferred proof and public-matrix questions are recorded in the Lucien
+review section above. RLC-based extraction and the alternative digest-knowledge
+assumption in `zkp.tex` remain distinct knowledge-soundness routes.
 
 ## June 2026 completed corrections
 
