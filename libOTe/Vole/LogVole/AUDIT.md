@@ -1,10 +1,90 @@
-# LogVole Fixed Audit Issues
+# LogVole Audit Record
 
 This record preserves the June 2026 completed-fix history and the subsequent
-implementation corrections, paper alignment and CPU optimization. Each entry
-records an implemented correction and its validation. Test names refer to the
+implementation corrections, paper alignment and CPU optimization. The open
+review questions below are separate from the completed corrections, whose entries
+record implemented changes and validation. Test names refer to the
 registered suites in
 [`LogVole_Tests.h`](../../../libOTe_Tests/LogVole_Tests.h).
+
+## Open questions for Lucien: paper and noise alignment (2026-11-13)
+
+Status: **OPEN; review requested, no sampler or protocol change proposed.**
+This comparison uses implementation revision `54f79490` and paper revision
+`78878ea` in the local `logVole` paper repository (`C:/Users/peter/repo/logVole`).
+Paper paths below refer to that revision and the active `p.tex` input tree.
+
+### Concrete integer-noise distribution and security parameters
+
+The paper's `prelims-app.tex:114` defines the discrete Gaussian with mass
+proportional to `exp(-pi*k^2/s^2)`. Lines 162–165 discuss clipping that discrete
+distribution and bound the resulting statistical distance. The concrete
+[`samplePolyNormal`](LogVoleRing.cpp) instead uses SEAL 4.1.1's clipped
+continuous-normal distribution and converts each result to an integer by
+truncation toward zero. The
+[`CUDA Gaussian transform`](cuda/LogVoleGpuGaussianKernels.cu) preserves this
+conversion. Ordinary setup supplies `sigma = 3.19*sqrt(tau)` for LacE noise
+and `3.19*sqrt(widthPadded)` for LHE noise in
+[`LogVoleShrinkExpand.cpp`](LogVoleShrinkExpand.cpp); root setup has analogous
+choices in [`LogVoleCore.cpp`](LogVoleCore.cpp).
+
+For illustration, continuous standard deviation `3.19*sqrt(2) = 4.511...`
+becomes approximately `4.132` after integer truncation. Its zero probability
+is approximately `0.175424`, whereas a discrete Gaussian with the matched
+continuous width `s = sigma*sqrt(2*pi)` has zero probability approximately
+`0.088431`. This difference is a distribution and parameter-alignment issue;
+the zero-probability difference is not a security-loss estimate or evidence
+of a break. Ordinary LWE security can tolerate a range of error distributions,
+but that robustness does not by itself identify which concrete parameters and
+leaky-LWE assumptions cover this sampler.
+
+These are three separate choices: instantiating random streams with an AES
+PRG, clipping Gaussian tails, and discretizing a continuous Gaussian by
+integer truncation. The paper's negligible tail-clipping lemma addresses the
+second choice for its stated discrete distribution, not the third choice.
+
+**Question for Lucien:** Is the implemented integer-noise distribution covered
+by suitable RLWE and adaptive error-leakage RLWE assumptions at the actual
+standard deviations and parameter sets? Please identify the matching
+assumptions or reduction and the security estimates for those parameters, or
+specify what distribution/parameter alignment is required.
+
+### Fresh hiding noise in the proof and hash-derived corrections
+
+The paper's `proofsh-trunc.tex:575–578` and `:666` invoke fresh hiding noise
+from `overline chi_LacE`. Its error-leakage experiments in
+`prelims-app.tex:116–159` likewise include fresh masking noise, and
+`alg/golden-seed.tex:45–50` gives a hiding-noise width that depends on the
+reuse bound `T`. However, `alg/shrinkexpand-trunc.tex:36–40` specifies
+hash-derived correction ciphertexts directly. The corresponding concrete
+paths, `prepareSenderExpansion` and `finishReceiverExpansion` in
+[`LogVoleShrinkExpand.cpp`](LogVoleShrinkExpand.cpp), derive those corrections,
+subtract the LacE evaluation and combine the ciphertext terms without an
+explicit fresh Gaussian hiding-noise draw. Root-response `kPrime` sampling
+in [`LogVoleCore.cpp`](LogVoleCore.cpp) is uniform sampling. The public noise
+budget estimator's leaky-LWE width calculations alone do not establish a
+distributional correspondence for these executed paths.
+
+**Question for Lucien:** What distributional or simulation argument connects
+the hash-derived corrections, including golden-seed conditioning, to the
+proof's fresh `overline chi_LacE`-masked leakage? Please map that argument to
+the concrete setup widths, reuse bound and online sampling paths. The paper
+algorithm and implementation both use hash-derived corrections here, so this
+is an open proof/instantiation question rather than a demonstrated omission
+from an otherwise matching implementation.
+
+### Paper erratum: golden-seed acceptance inequality
+
+In `alg/golden-seed.tex:26–27`, `e` is centered modulo the component's scale
+gap `delta`, but the pseudocode rejects when `|e| > B`. To match the good
+interval in `lower-golden.tex:57`, a robust sufficient acceptance condition is
+`|e_i| + B < delta_i/2` for every component; reject if any component satisfies
+`|e_i| + B >= delta_i/2`. Equality may be allowed only with a stated
+rounding-tie convention and corresponding noise-bound assumptions.
+The implementation's boundary-distance predicate
+in [`LogVoleCore.cpp`](LogVoleCore.cpp) follows the prose's intended interval;
+this erratum does not call for a runtime predicate change. This comparison
+does not certify all fixed-point or reciprocal-error boundary cases.
 
 ## June 2026 completed corrections
 
