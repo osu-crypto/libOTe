@@ -4415,9 +4415,6 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
             LOGVOLE_EXPECT_EQ(source.back(), 0xa5u);
             LOGVOLE_EXPECT_EQ(destination.front(), 0x5au);
             LOGVOLE_EXPECT_EQ(destination.back(), 0x5au);
-            const char* error = nullptr;
-            const bool noError = gpu::gpuLastErrorOk(&error);
-            LOGVOLE_REQUIRE_TRUE(noError) << (error ? error : "");
             if (cleanup.registeredSource)
             {
                 LOGVOLE_REQUIRE_TRUE(gpu::gpuUnregisterHost(cleanup.registeredSource));

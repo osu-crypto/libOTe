@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <stdexcept>
 #include <thread>
 
@@ -1124,7 +1125,7 @@ namespace osuCrypto::LogVole::gpu
                     mStorage[slot] = OwnedGpuBuffer(mOwner.allocationOwner(), count * sizeof(T));
                     return static_cast<T*>(mStorage[slot].data());
                 }
-                catch (...) { return nullptr; }
+                catch (const std::bad_alloc&) { return nullptr; }
             }
 
             u64* mSeeds = nullptr;
@@ -1328,7 +1329,7 @@ namespace osuCrypto::LogVole::gpu
                     mRho = rho;
                     return mRho != 0;
                 }
-                catch (...) { return false; }
+                catch (const std::bad_alloc&) { return false; }
             }
         };
     }
@@ -2156,7 +2157,7 @@ namespace osuCrypto::LogVole::gpu
             mProducerStream = next->raw();
             return true;
         }
-        catch (...) { return false; }
+        catch (const std::bad_alloc&) { return false; }
     }
 
     bool DeviceScalars::resize(std::size_t count, GpuStream& stream)
@@ -2187,7 +2188,7 @@ namespace osuCrypto::LogVole::gpu
             mProducerStream = stream.raw();
             return true;
         }
-        catch (...) { return false; }
+        catch (const std::bad_alloc&) { return false; }
     }
 
     bool syncStream(const RingNttContext& ctx)

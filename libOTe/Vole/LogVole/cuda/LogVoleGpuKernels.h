@@ -11,6 +11,7 @@
 #include <mutex>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace osuCrypto::LogVole::gpu
 {
@@ -138,8 +139,7 @@ namespace osuCrypto::LogVole::gpu
         KernelInitializationState& initialization);
 
     bool gpuDeviceAvailable();
-    const char* gpuDeviceName();
-    bool gpuLastErrorOk(const char** msg);
+    std::string gpuDeviceName();
 
     // ---- memory -----------------------------------------------------------
     // Optional registration of an exact caller-owned host span. A supported

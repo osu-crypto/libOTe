@@ -391,8 +391,24 @@ validation entries above and below record historical migration checkpoints.
 | Statistics | 4 | `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats`; `regions()::r` in `cuda/LogVoleGpuProtocol.cpp` | Owned diagnostics and per-chunk pending counters. |
 | CUDA allocation evidence | 0 | None | Sender-owned shared sink; active wire blocks retain it through completion and release it before entering the reuse cache. CPU offline resets only its supplied owner. |
 | Capability/compatibility caches | 4 | `defaultPublicSenderCt2PrefetchLevels()::h200`, `available()::ok`, `gaussianTransformHostCompatible()::{recognized, arithmeticCompatible}` | Capture once in the appropriate CPU/GPU resource owner. |
-| CUDA error/name storage | 4 | `gLastError`, `gLastWhere`, `gpuDeviceName()::name`, `gpuLastErrorOk()::buf` in `cuda/LogVoleGpuKernels.cu` | Execution-owned error state and owned name/message storage. |
+| CUDA error/name storage | 0 | None | Kernel API failures throw owned error messages; device descriptions return owned strings. |
 | CUDA attribute initialization | 7 | `gSharedConfigured`, `gPointwisePseudo55TreeSharedConfigured`, `gPointwisePseudo55TreeWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpVectorSharedConfigured`, `gPointwisePseudo55SparseSharedConfigured`, `gNttInversePostWarpStages05SharedConfigured` | Owned device preparation; consider only a justified CUDA initialization guard as an exception. |
+
+The main CUDA kernel API reports unexpected failures by throwing
+`std::runtime_error` with the operation, numeric CUDA code, and CUDA message.
+The allocator reports CUDA out-of-memory failures as `std::bad_alloc`, which
+optional allocation paths catch to retain their fallback. Unsupported shapes
+and invalid input still return `false`; benign host-registration declines keep
+the unpinned fallback. Cleanup that cannot establish required completion fails
+closed during destruction. This change does not migrate the separate CUDA ZK
+kernel error policy.
+
+Validation: the Windows build completed in 442.81 seconds, including the
+focused tests, lifecycle target, and frontend object. All six GPU tests passed
+with zero skips in 1.17 seconds; `GpuImmediateErrors` completed in 332 ms.
+The lifecycle target was built but not executed. No leak validation,
+benchmarks, or Linux validation was run for this change. The patch remains
+uncommitted for review.
 
 The declaration-level scan with source locations is in the local artifacts
 `out/review/logvole-globals-inventory-current.{txt,json}`. The older files

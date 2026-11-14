@@ -25,6 +25,7 @@
 #include <map>
 #include <mutex>
 #include <new>
+#include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -529,16 +530,14 @@ namespace osuCrypto::LogVole::gpu
                 rc.mN == 16384u && rc.mLogN == 14u && rc.mRho == 8u;
         }
 
-        cudaError_t gLastError = cudaSuccess;
-        const char* gLastWhere = "";
-
         inline bool check(cudaError_t e, const char* where)
         {
             if (e != cudaSuccess)
             {
-                gLastError = e;
-                gLastWhere = where;
-                return false;
+                // Consume only this reported failure, preserving any distinct
+                // asynchronous error for its own operation boundary.
+                if (cudaPeekAtLastError() == e) (void)cudaGetLastError();
+                throw std::runtime_error(std::string(where) + " (CUDA " + std::to_string(static_cast<int>(e)) + "): " + cudaGetErrorString(e));
             }
             return true;
         }
@@ -13166,29 +13165,14 @@ namespace osuCrypto::LogVole::gpu
         return count > 0;
     }
 
-    const char* gpuDeviceName()
+    std::string gpuDeviceName()
     {
-        static char name[256] = { 0 };
+        char name[256]{};
         cudaDeviceProp prop{};
         if (cudaGetDeviceProperties(&prop, 0) != cudaSuccess) return "unknown";
         std::snprintf(name, sizeof(name), "%s (sm_%d%d, %d SMs)", prop.name, prop.major, prop.minor,
                       prop.multiProcessorCount);
         return name;
-    }
-
-    bool gpuLastErrorOk(const char** msg)
-    {
-        const cudaError_t e = cudaGetLastError();
-        if (e != cudaSuccess)
-        {
-            gLastError = e;
-            gLastWhere = "async";
-        }
-        if (gLastError == cudaSuccess) return true;
-        static char buf[512];
-        std::snprintf(buf, sizeof(buf), "%s: %s", gLastWhere, cudaGetErrorString(gLastError));
-        if (msg) *msg = buf;
-        return false;
     }
 
     bool gpuStreamWaitEvent(void* stream, void* event)
@@ -13252,7 +13236,13 @@ namespace osuCrypto::LogVole::gpu
     void* gpuStreamCreate()
     {
         cudaStream_t s = nullptr;
-        if (!check(cudaStreamCreate(&s), "streamCreate")) return nullptr;
+        const auto error = cudaStreamCreate(&s);
+        if (error == cudaErrorMemoryAllocation)
+        {
+            if (cudaPeekAtLastError() == error) (void)cudaGetLastError();
+            return nullptr;
+        }
+        check(error, "streamCreate");
         return s;
     }
 
@@ -13270,7 +13260,13 @@ namespace osuCrypto::LogVole::gpu
     void* gpuEventCreate()
     {
         cudaEvent_t e = nullptr;
-        if (!check(cudaEventCreateWithFlags(&e, cudaEventDisableTiming), "eventCreate")) return nullptr;
+        const auto error = cudaEventCreateWithFlags(&e, cudaEventDisableTiming);
+        if (error == cudaErrorMemoryAllocation)
+        {
+            if (cudaPeekAtLastError() == error) (void)cudaGetLastError();
+            return nullptr;
+        }
+        check(error, "eventCreate");
         return e;
     }
 

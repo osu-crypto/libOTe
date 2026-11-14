@@ -26,11 +26,5 @@ int main(int argc, char** argv)
     tests.add("UInt_Conversions_Test", UInt_Conversions_Test);
     tests.add("UInt_WordArithmetic_Test", UInt_WordArithmetic_Test);
     const auto result = tests.runIf(cmd);
-    if (result != osuCrypto::TestCollection::Result::passed)
-    {
-        const char* error = nullptr;
-        if (!osuCrypto::LogVole::gpu::gpuLastErrorOk(&error))
-            std::cerr << "Last recorded CUDA error: " << error << std::endl;
-    }
     return result == osuCrypto::TestCollection::Result::passed ? 0 : 1;
 }

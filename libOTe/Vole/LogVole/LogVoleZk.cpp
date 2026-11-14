@@ -1213,15 +1213,7 @@ namespace osuCrypto::LogVole::gpu
         // a bare "could not run its device check".
         bool zkFail(const char* where)
         {
-            const char* msg = nullptr;
-            if (!gpuLastErrorOk(&msg) && msg)
-            {
-                std::fprintf(stderr, "[lvzk] %s failed: %s\n", where, msg);
-            }
-            else
-            {
-                std::fprintf(stderr, "[lvzk] %s failed\n", where);
-            }
+            std::fprintf(stderr, "[lvzk] %s failed\n", where);
             return false;
         }
     }

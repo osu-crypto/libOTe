@@ -33,6 +33,7 @@
 #include <cfenv>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <future>
 #include <thread>
@@ -313,6 +314,70 @@ void LogVole_RingOps_ScalarUploadLifetimeAndRoleSwitch(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(fetched == expected);
         }
     }
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_RingOps_GpuImmediateErrors(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool requested = cmd.getOr("gpu", 0) != 0;
+    if (requested) LOGVOLE_REQUIRE_TRUE(gpu::available());
+    if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+
+    gpu::GpuStream failedStream;
+    std::uint64_t value = 0x123456789abcdef0ull;
+    std::string firstMessage;
+    std::exception_ptr firstError;
+    try
+    {
+        (void)gpu::gpuMemcpyH2D(nullptr, &value, sizeof(value), failedStream.raw());
+    }
+    catch (const std::runtime_error& error)
+    {
+        firstMessage = error.what();
+        firstError = std::current_exception();
+    }
+    LOGVOLE_REQUIRE_TRUE(firstMessage.find("H2D") != std::string::npos);
+    LOGVOLE_REQUIRE_TRUE(firstMessage.find("CUDA 1") != std::string::npos);
+    LOGVOLE_REQUIRE_TRUE(firstMessage.find("invalid argument") != std::string::npos);
+    std::string secondMessage;
+    try
+    {
+        (void)gpu::gpuMemcpyD2H(&value, nullptr, sizeof(value), failedStream.raw());
+    }
+    catch (const std::runtime_error& error)
+    {
+        secondMessage = error.what();
+    }
+    LOGVOLE_REQUIRE_TRUE(secondMessage.find("D2H") != std::string::npos);
+    LOGVOLE_REQUIRE_TRUE(secondMessage.find("CUDA 1") != std::string::npos);
+    LOGVOLE_REQUIRE_TRUE(secondMessage.find("invalid argument") != std::string::npos);
+    try { std::rethrow_exception(firstError); }
+    catch (const std::runtime_error& error)
+    {
+        LOGVOLE_REQUIRE_TRUE(firstMessage == error.what());
+    }
+
+    // Argument errors do not poison an unrelated owner or leave sticky history.
+    gpu::GpuStream validStream;
+    gpu::OwnedGpuBuffer storage(validStream.allocationOwner(), 4 * sizeof(std::uint32_t));
+    std::uint64_t fetched = 0;
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(storage.data(), &value, sizeof(value), validStream.raw()));
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(&fetched, storage.data(), sizeof(fetched), validStream.raw()));
+    LOGVOLE_REQUIRE_TRUE(validStream.sync());
+    LOGVOLE_REQUIRE_EQ(fetched, value);
+    // An unsupported geometry remains a normal decline before any submission.
+    auto* map = static_cast<std::uint32_t*>(storage.data());
+    LOGVOLE_REQUIRE_TRUE(!gpu::launchPrepareRawSlotMaps(3, map, map, validStream.raw()));
+    LOGVOLE_REQUIRE_TRUE(gpu::launchPrepareRawSlotMaps(2, map, map + 2, validStream.raw()));
+    std::array<std::uint32_t, 4> maps{};
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(maps.data(), map, sizeof(maps), validStream.raw()));
+    LOGVOLE_REQUIRE_TRUE(validStream.sync());
+    const std::array<std::uint32_t, 4> expectedMaps{0, 1, 0, 1};
+    LOGVOLE_REQUIRE_TRUE(maps == expectedMaps);
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
@@ -826,7 +891,6 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         catch (const Cancelled&) { cancelled = true; }
         LOGVOLE_REQUIRE_EQ(cancelled, round != 0);
         LOGVOLE_REQUIRE_TRUE(validationLifetime.expired());
-        LOGVOLE_REQUIRE_TRUE(gpu::gpuLastErrorOk(nullptr));
     }
     // A worker can export an unfinished wrapped polynomial, then retire its
     // stream-owned lift cache. The exported allocation keeps the native stream

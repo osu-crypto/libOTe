@@ -102,6 +102,7 @@
     X(RingOps, UniformSamplerScratchOwnership) \
     X(RingOps, GpuStreamStagingLifetime) \
     X(RingOps, GpuBufferResizeBounds) \
+    X(RingOps, GpuImmediateErrors) \
     X(RingOps, LightweightProductionContexts) \
     X(NativeSealBundle, ExactParityAndRollback) \
     X(NativeSealBundle, ProductionConfigureUsesDeviceAndFreshRuns) \

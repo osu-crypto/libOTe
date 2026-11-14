@@ -5,6 +5,7 @@
 #include <exception>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -17,7 +18,11 @@ namespace osuCrypto::LogVole::gpu
         void requireCuda(cudaError_t error, const char* operation)
         {
             if (error != cudaSuccess)
-                throw std::runtime_error(std::string(operation) + ": " + cudaGetErrorString(error));
+            {
+                if (cudaPeekAtLastError() == error) (void)cudaGetLastError();
+                if (error == cudaErrorMemoryAllocation) throw std::bad_alloc();
+                throw std::runtime_error(std::string(operation) + " (CUDA " + std::to_string(static_cast<int>(error)) + "): " + cudaGetErrorString(error));
+            }
         }
 
         // Destruction cannot report an exception. Do not silently continue after

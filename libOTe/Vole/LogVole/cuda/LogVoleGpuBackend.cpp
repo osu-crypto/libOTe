@@ -24,6 +24,7 @@
 #include <exception>
 #include <thread>
 #include <limits>
+#include <new>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -159,7 +160,7 @@ namespace osuCrypto::LogVole::gpu
                     mOwner = mExecution->stream();
                     mStream = mOwner->raw();
                 }
-                catch (...)
+                catch (const std::bad_alloc&)
                 {
                     // Factory callers use a null stream as a clean decline.
                     mOwner.reset();
@@ -187,7 +188,7 @@ namespace osuCrypto::LogVole::gpu
             RawScratchArena(std::size_t bytes, RawSetupStream& stream)
             {
                 try { mStorage = OwnedGpuBuffer(stream.allocationOwner(), bytes); }
-                catch (...) {}
+                catch (const std::bad_alloc&) {}
             }
             template<typename T> T* take(std::size_t count)
             {
@@ -207,7 +208,7 @@ namespace osuCrypto::LogVole::gpu
             RawConstantArena(std::size_t bytes, RawSetupStream& stream)
             {
                 try { mStorage = OwnedGpuBuffer(stream.allocationOwner(), bytes); }
-                catch (...) {}
+                catch (const std::bad_alloc&) {}
             }
             explicit operator bool() const { return static_cast<bool>(mStorage); }
             template<typename T> T* take(std::size_t count)
@@ -281,7 +282,7 @@ namespace osuCrypto::LogVole::gpu
             HostStep allocationStep(stream.mExecution->hostProfiler(), "setup GPU constants allocate");
             OwnedGpuBuffer storage;
             try { storage = OwnedGpuBuffer(stream.allocationOwner(), host.size() * sizeof(T)); }
-            catch (...) { return nullptr; }
+            catch (const std::bad_alloc&) { return nullptr; }
             void* d = storage.data();
             allocationStep.stop();
             if (!d) return nullptr;
@@ -671,7 +672,7 @@ namespace osuCrypto::LogVole::gpu
             out = std::move(next);
             return true;
         }
-        catch (...) { return false; }
+        catch (const std::bad_alloc&) { return false; }
     }
 
     bool available()
@@ -725,7 +726,7 @@ namespace osuCrypto::LogVole::gpu
                         mPinned = static_cast<u8*>(mStorage.data());
                         mPending[0] = mPending[1] = false;
                     }
-                    catch (...) { return false; }
+                    catch (const std::bad_alloc&) { return false; }
                 }
                 return mPinned && prepareEvents();
             }
@@ -795,7 +796,16 @@ namespace osuCrypto::LogVole::gpu
         mPipelinedUpload = mOptions.mPipelinedUpload;
         if (!mStream || !allocateScratch) return;
         mScratchWords = std::size_t(mOptions.mIndexScratchKiB) * 256u;
-        if (mOptions.mLazyIndexScratch == LogVoleChoice::Disabled) (void)ensureIndexScratch();
+        try
+        {
+            if (mOptions.mLazyIndexScratch == LogVoleChoice::Disabled) (void)ensureIndexScratch();
+        }
+        catch (...)
+        {
+            // A throwing constructor has no destructor to release a raw stream.
+            if (!mAllocationOwner) gpuStreamDestroy(mStream);
+            throw;
+        }
     }
 
     std::unique_ptr<GpuStream> GpuStream::createHighestPriority(LogVoleGpuStreamOptions options, std::shared_ptr<HostStepProfiler> profile)
@@ -865,7 +875,7 @@ namespace osuCrypto::LogVole::gpu
             mDeviceScratch = static_cast<u32*>(mDeviceScratchStorage.data());
             return true;
         }
-        catch (...) { return false; }
+        catch (const std::bad_alloc&) { return false; }
     }
 
     u8* GpuStream::staging(std::size_t bytes)
@@ -888,7 +898,7 @@ namespace osuCrypto::LogVole::gpu
             mStagingBytes = want;
             return mStaging;
         }
-        catch (...) { return nullptr; }
+        catch (const std::bad_alloc&) { return nullptr; }
     }
 
     bool GpuStream::sync() const
@@ -1165,18 +1175,28 @@ namespace osuCrypto::LogVole::gpu
 
             bool finish()
             {
-                // Never short-circuit the drain or unregister after an enqueue
-                // failure. The caller may release the span as soon as we return.
-                const bool completed = mStream.sync();
-                const bool released = !mRegistered || gpuUnregisterHost(mRegistered);
+                // Drain and unregister independently: an enqueue or completion
+                // failure must not leave the caller's span registered.
+                std::exception_ptr failure;
+                bool completed = false;
+                bool released = false;
+                try { completed = mStream.sync(); }
+                catch (...) { failure = std::current_exception(); }
+                try { released = !mRegistered || gpuUnregisterHost(mRegistered); }
+                catch (...) { if (!failure) failure = std::current_exception(); }
                 mRegistered = nullptr;
                 mFinished = true;
+                if (failure) std::rethrow_exception(failure);
                 return completed && released;
             }
 
             ~SetupWireTransfer()
             {
-                if (!mFinished) (void)finish();
+                if (!mFinished)
+                {
+                    try { (void)finish(); }
+                    catch (...) { std::terminate(); }
+                }
             }
         };
 
@@ -1271,8 +1291,14 @@ namespace osuCrypto::LogVole::gpu
         if (!deviceDst || !src || rowBytes > dstPitch ||
             rows > std::numeric_limits<std::size_t>::max() / dstPitch ||
             rows > std::numeric_limits<std::size_t>::max() / rowBytes) return false;
-        return cudaMemcpy2DAsync(deviceDst, dstPitch, src, rowBytes, rowBytes, rows,
-            cudaMemcpyHostToDevice, static_cast<cudaStream_t>(stream.raw())) == cudaSuccess;
+        const auto error = cudaMemcpy2DAsync(deviceDst, dstPitch, src, rowBytes, rowBytes, rows,
+            cudaMemcpyHostToDevice, static_cast<cudaStream_t>(stream.raw()));
+        if (error != cudaSuccess)
+        {
+            if (cudaPeekAtLastError() == error) (void)cudaGetLastError();
+            throw std::runtime_error(std::string("cudaMemcpy2DAsync H2D (CUDA ") + std::to_string(static_cast<int>(error)) + "): " + cudaGetErrorString(error));
+        }
+        return true;
     }
 
     bool copyRowsFromDevice(void* deviceDst, std::size_t dstPitch, const void* src,
@@ -1282,8 +1308,14 @@ namespace osuCrypto::LogVole::gpu
         if (!deviceDst || !src || rowBytes > dstPitch ||
             rows > std::numeric_limits<std::size_t>::max() / dstPitch ||
             rows > std::numeric_limits<std::size_t>::max() / rowBytes) return false;
-        return cudaMemcpy2DAsync(deviceDst, dstPitch, src, rowBytes, rowBytes, rows,
-            cudaMemcpyDeviceToDevice, static_cast<cudaStream_t>(stream.raw())) == cudaSuccess;
+        const auto error = cudaMemcpy2DAsync(deviceDst, dstPitch, src, rowBytes, rowBytes, rows,
+            cudaMemcpyDeviceToDevice, static_cast<cudaStream_t>(stream.raw()));
+        if (error != cudaSuccess)
+        {
+            if (cudaPeekAtLastError() == error) (void)cudaGetLastError();
+            throw std::runtime_error(std::string("cudaMemcpy2DAsync D2D (CUDA ") + std::to_string(static_cast<int>(error)) + "): " + cudaGetErrorString(error));
+        }
+        return true;
     }
 
     // ---- GpuRing ----------------------------------------------------------
@@ -1407,7 +1439,7 @@ namespace osuCrypto::LogVole::gpu
             cache.rawRings.emplace(std::move(key), ring);
             return ring;
         }
-        catch (...) { return nullptr; }
+        catch (const std::bad_alloc&) { return nullptr; }
     }
 
     bool GpuRing::publishRaw(const RingParams& params,
@@ -2030,7 +2062,7 @@ namespace osuCrypto::LogVole::gpu
             out = view;
             return true;
         }
-        catch (...) { return false; }
+        catch (const std::bad_alloc&) { return false; }
     }
 
     // ---- GpuPlainNtt ------------------------------------------------------
@@ -2092,7 +2124,7 @@ namespace osuCrypto::LogVole::gpu
             cache.rawPlains.emplace_back(key, tables);
             return tables;
         }
-        catch (...) { return nullptr; }
+        catch (const std::bad_alloc&) { return nullptr; }
     }
 
     bool GpuPlainNtt::publishRaw(u32 n, u64 p,
@@ -2333,7 +2365,7 @@ namespace osuCrypto::LogVole::gpu
             mCount = mCapacity = count;
             return true;
         }
-        catch (...) { return false; }
+        catch (const std::bad_alloc&) { return false; }
     }
 
     bool GpuPolyBuffer::upload(std::span<const RnsPoly> polys, GpuStream& stream, std::size_t dstOffset)
