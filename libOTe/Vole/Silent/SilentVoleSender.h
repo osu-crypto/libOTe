@@ -155,7 +155,10 @@ namespace osuCrypto
 		SilentSecType mSecurityType = SilentSecType::SemiHonest;
 
 		// The matrix multiplication type which compresses the sparse vector
-		MultType mLpnMultType = DefaultMultType;
+		static constexpr MultType DefaultCode =
+			std::is_same_v<F, block> && std::is_same_v<G, block> && std::is_same_v<Ctx, CoeffCtxGF128>
+			? MultType::ChosenBaa30 : DefaultMultType;
+		MultType mLpnMultType = DefaultCode;
 
 		// Format used for PPRF output organization
 		PprfOutputFormat mPprfFormat = PprfOutputFormat::ByTreeIndex;
@@ -228,12 +231,12 @@ namespace osuCrypto
 		 * coefficients; small-group contexts use a larger weight.
 		 * @param secParam Security parameter (typically 128)
 		 * @param ctx Context object for F, G operations (default constructed if not provided)
-		 * @param mult the lpn compression matrix type to use (default DefaultMultType)
+		 * @param mult the lpn compression matrix type to use (default DefaultCode)
 		 */
 		void configure(
 			u64 requestSize,
 			SilentSecType malType = SilentSecType::SemiHonest,
-			MultType mult = DefaultMultType,
+			MultType mult = DefaultCode,
 			SilentBaseType type = SilentBaseType::BaseExtend,
 			SdNoiseDistribution noiseType = SdNoiseDistribution::Regular,
 			u64 secParam = 128,
@@ -766,6 +769,8 @@ namespace osuCrypto
 				encoder.dualEncode<F, Ctx>(mB.begin(), mCtx);
 				break;
 			}
+			case MultType::ChosenBaa10:
+			case MultType::ChosenBaa30:
 			case MultType::ChosenBaa16x8:
 			case MultType::ChosenBaa16x4:
 			{

@@ -70,6 +70,8 @@ namespace osuCrypto
         Tungsten = 12, // very fast, based on turbo codes. Unknown min distance.
         ChosenBaa16x8 = 14, // GF(2^128), RS[16,8,9], two weighted accumulators.
         ChosenBaa16x4 = 15, // GF(2^128), RS[16,4,13].
+        ChosenBaa10 = 16, // Rate 1/2, 10% distance tier; backend depends on field.
+        ChosenBaa30 = 17, // Rate 1/2, 30% distance tier; backend depends on field.
         Spin = 13 // BCH-SPIN; BAA-style 0.25 linear-attack tuning (not minimum distance).
     };
 
@@ -77,6 +79,12 @@ namespace osuCrypto
     {
         switch (m)
         {
+        case MultType::ChosenBaa10:
+            o << "ChosenBaa10";
+            break;
+        case MultType::ChosenBaa30:
+            o << "ChosenBaa30";
+            break;
         case MultType::ChosenBaa16x8:
             o << "ChosenBaa16x8";
             break;
@@ -118,7 +126,8 @@ namespace osuCrypto
 
     constexpr bool isChosenBaa(MultType type)
     {
-        return type == MultType::ChosenBaa16x8 || type == MultType::ChosenBaa16x4;
+        return type == MultType::ChosenBaa10 || type == MultType::ChosenBaa30 ||
+            type == MultType::ChosenBaa16x8 || type == MultType::ChosenBaa16x4;
     }
 
     constexpr MultType DefaultMultType = MultType::BlkAcc3x32;
@@ -270,6 +279,13 @@ namespace osuCrypto
         case MultType::QuasiCyclic:
             QuasiCyclicConfigure(scaler, minDist);
             break;
+        case MultType::ChosenBaa10:
+        case MultType::ChosenBaa30:
+            scaler = 2;
+            // Distance-tier tuning at arbitrary lengths, not a finite-size
+            // certificate. Both retain the independent half-rate noise floor.
+            minDist = multType == MultType::ChosenBaa10 ? 0.10 : 0.30;
+            break;
         case MultType::ChosenBaa16x8:
         case MultType::ChosenBaa16x4:
             scaler = multType == MultType::ChosenBaa16x8 ? 2 : 4;
@@ -340,7 +356,10 @@ namespace osuCrypto
         if (isChosenBaa(multType))
         {
             config.mNoiseVectorSize = roundUpTo(
-                std::max(config.mNoiseVectorSize, config.mNumPartitions * config.mSizePer), 16);
+                std::max(config.mNoiseVectorSize, config.mNumPartitions * config.mSizePer),
+                multType == MultType::ChosenBaa10 ? 32 : 16);
+            if (multType == MultType::ChosenBaa30 && config.mNoiseVectorSize > (u64{1} << 24))
+                throw std::invalid_argument("ChosenBaa30 length exceeds its packed index space. " LOCATION);
             if (config.mNoiseVectorSize > std::numeric_limits<u32>::max())
                 throw std::invalid_argument("Chosen BAA length exceeds its index space. " LOCATION);
         }

@@ -135,7 +135,10 @@ namespace osuCrypto
 		SdNoiseDistribution mNoiseType = SdNoiseDistribution::Regular;
 
 		// The matrix multiplication type which compresses the sparse vector
-		MultType mLpnMultType = DefaultMultType;
+		static constexpr MultType DefaultCode =
+			std::is_same_v<F, block> && std::is_same_v<G, block> && std::is_same_v<Ctx, CoeffCtxGF128>
+			? MultType::ChosenBaa30 : DefaultMultType;
+		MultType mLpnMultType = DefaultCode;
 
 		// The multi-point punctured PRF for generating the sparse vectors
 		// Variant allows selecting between Regular and Stationary PPRF
@@ -205,7 +208,7 @@ namespace osuCrypto
 		void configure(
 			u64 requestSize,
 			SilentSecType malType = SilentSecType::SemiHonest,
-			MultType mult = DefaultMultType,
+			MultType mult = DefaultCode,
 			SilentBaseType type = SilentBaseType::BaseExtend,
 			SdNoiseDistribution noiseType = SdNoiseDistribution::Regular,
 			u64 secParam = 128,
@@ -930,6 +933,8 @@ namespace osuCrypto
 			);
 			break;
 		}
+		case MultType::ChosenBaa10:
+		case MultType::ChosenBaa30:
 		case MultType::ChosenBaa16x8:
 		case MultType::ChosenBaa16x4:
 		{

@@ -1,6 +1,6 @@
 #include "libOTe/Tools/BlkAccCode/ChosenBaaCode.h"
-#include "libOTe/Tools/BlkAccCode/ReedMullerBaaCode.h"
-#include "libOTe/Tools/BlkAccCode/SmallAlphabetBaaCode.h"
+#include "libOTe/Tools/BlkAccCode/ChosenBaa10.h"
+#include "libOTe/Tools/BlkAccCode/ChosenBaa30.h"
 #include <chrono>
 #include <iostream>
 #include <algorithm>
@@ -52,7 +52,7 @@ int main(int argc, char** argv)
     const u64 seed = argc > 3 ? std::stoull(argv[3]) : 1;
     if (!iterations || !n || n % 32 || n > std::numeric_limits<u32>::max()) throw std::invalid_argument("benchmark arguments");
     std::cout << "code,k,n,seed,setup_ms,forward_ms,transpose_ms,checksum\n";
-    run<ReedMullerBaaCode<>>("gf128_rm", n, seed, iterations);
-    run<SmallAlphabetBaaCode<>>("gf128_q256", n, seed, iterations);
+    run<ChosenBaa10<>>("gf128_chosen_baa10", n, seed, iterations);
+    run<ChosenBaa30<>>("gf128_chosen_baa30", n, seed, iterations);
     run<ChosenBaaCode<8>>("gf128_rs", n, seed, iterations);
 }

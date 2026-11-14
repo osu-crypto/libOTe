@@ -600,14 +600,14 @@ void Vole_Silent_baseOT_test(const oc::CLP& cmd)
 
 void Vole_Silent_ChosenBaa_test(const oc::CLP&)
 {
-    for (auto type : {MultType::ChosenBaa16x8, MultType::ChosenBaa16x4})
+    for (auto type : {MultType::ChosenBaa10, MultType::ChosenBaa30, MultType::ChosenBaa16x8, MultType::ChosenBaa16x4})
         for (auto noise : {SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary})
             for (bool malicious : {false, true})
                 for (u64 n : {u64(1), u64(129), u64(2049)})
                     Vole_Silent_test_impl<block, block, CoeffCtxGF128>(
                         n, type, false, true, malicious, noise, n >= 512);
     Vole_Silent_test_impl<block, block, CoeffCtxGF128>(
-        1024, MultType::ChosenBaa16x8, false, false, true, SdNoiseDistribution::Regular, true);
+        1024, MultType::ChosenBaa30, false, false, true, SdNoiseDistribution::Regular, true);
     bool rejected = false;
     try
     {

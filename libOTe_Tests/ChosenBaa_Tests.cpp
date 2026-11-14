@@ -180,7 +180,7 @@ namespace
     void checkSmall(u64 n)
     {
         using Field = ChosenBaaField<F>;
-        SmallAlphabetBaaCode<F> code;
+        ChosenBaa30<F> code;
         code.config(n, block(210, n));
         PRNG random(block(211, n));
         AlignedUnVector<F> message(n / 2), input(n), forward(n), scalar(n), next(n), scratch(n);
@@ -218,7 +218,7 @@ namespace
     }
     void checkRm(u64 n)
     {
-        ReedMullerBaaCode<> code;
+        ChosenBaa10<> code;
         code.config(n, block(109, n));
         PRNG random(block(110, n));
         AlignedUnVector<block> message(n / 2), input(n), forward(n), scalar(n), next(n), scratch(n);
@@ -258,6 +258,57 @@ namespace
         for (u64 i = 0; i < n / 2; ++i) rhs ^= message[i].gf128Mul(input[i]);
         if (lhs != rhs) throw RTE_LOC;
     }
+    void checkNewton(u64 n)
+    {
+        using F = Goldilocks;
+        ChosenBaa10<F> code;
+        code.config(n, block(212, n));
+        PRNG random(block(213, n));
+        AlignedUnVector<F> message(n / 2), input(n), forward(n), expected(n), next(n), scratch(n);
+        for (auto* v : {&message, &input}) for (auto& x : *v) x = F(random.get());
+        // Independent binomial evaluation of the extended Newton constituent.
+        for (u64 i = 0; i < n; i += 16)
+        {
+            for (unsigned t = 0; t < 15; ++t)
+            {
+                F sum(0); u64 choose = 1;
+                for (unsigned j = 0; j < 8; ++j)
+                {
+                    sum += message[i / 2 + j] * F(choose);
+                    choose = j < t ? choose * (t - j) / (j + 1) : 0;
+                }
+                expected[i + t] = sum;
+            }
+            expected[i + 15] = message[i / 2 + 7];
+        }
+        for (unsigned stage = 0; stage < 2; ++stage)
+        {
+            F sum(0);
+            for (u64 i = 0; i < n; ++i) next[i] = sum += expected[code.permutationIndex(stage, i)];
+            std::swap(expected, next);
+        }
+        code.encode(message, forward, scratch);
+        if (!std::equal(expected.begin(), expected.end(), forward.begin())) throw RTE_LOC;
+        F lhs(0), rhs(0);
+        for (u64 i = 0; i < n; ++i) lhs += input[i] * forward[i];
+        code.dualEncode(input, scratch);
+        for (u64 i = 0; i < n / 2; ++i) rhs += message[i] * input[i];
+        if (lhs != rhs) throw RTE_LOC;
+    }
+    template<typename Code>
+    void checkProfileAdapter(MultType type, u64 n)
+    {
+        const block seed(214, n);
+        Code code; code.config(n, seed);
+        PRNG random(block(215, n));
+        AlignedUnVector<block> a(n), b(n), scratch(n);
+        random.get(a.data(), n); random.get(b.data(), n);
+        auto expectedA = a, expectedB = b;
+        code.dualEncode(expectedA, scratch); code.dualEncode(expectedB, scratch);
+        chosenBaaCompress(type, seed, a, b);
+        for (u64 i = 0; i < n / 2; ++i)
+            if (a[i] != expectedA[i] || b[i] != expectedB[i]) throw RTE_LOC;
+    }
     task<> badOpening(Socket& socket)
     {
         std::array<u8, 32> invalidCommitment{};
@@ -270,6 +321,30 @@ namespace
 
 void ChosenBaa_Code_test(const CLP&)
 {
+    for (u64 n : {32, 96, 1056, 4096})
+    {
+        checkNewton(n);
+        checkProfileAdapter<ChosenBaa10<>>(MultType::ChosenBaa10, n);
+        checkProfileAdapter<ChosenBaa30<>>(MultType::ChosenBaa30, n);
+    }
+    for (auto type : {MultType::ChosenBaa10, MultType::ChosenBaa30})
+    {
+        for (auto noise : {SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary})
+        for (u64 n : {1, 129, 1024, 1048576})
+        {
+            const auto c = syndromeDecodingConfigure(128, n, type, noise, {1.0});
+            const u64 weight = type == MultType::ChosenBaa10 ? 424 : 128;
+            const u64 alignment = type == MultType::ChosenBaa10 ? 32 : 16;
+            if (c.mNumPartitions != weight || c.mNoiseVectorSize % alignment ||
+                c.mNoiseVectorSize / 2 < n || c.mNoiseVectorSize < c.mNumPartitions * c.mSizePer)
+                throw RTE_LOC;
+        }
+    }
+    bool tooLarge = false;
+    try { syndromeDecodingConfigure(128, (u64{1} << 23) + 1, MultType::ChosenBaa30,
+        SdNoiseDistribution::Regular, {1.0}); }
+    catch (const std::invalid_argument&) { tooLarge = true; }
+    if (!tooLarge) throw RTE_LOC;
     for (u64 bit = 0; bit < 128; ++bit)
     for (u32 c = 1; c <= 256; ++c)
     {
