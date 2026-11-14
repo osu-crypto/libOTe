@@ -482,6 +482,7 @@ namespace osuCrypto::LogVole
                 baseExcludingJ.reserve((rho > 0) ? (rho - 1) : 0);
 
                 double log2DeltaJ = 0.0;
+                wideU64 undershoot{};
                 for (std::size_t w = 0; w < rho; ++w)
                 {
                     if (w == j)
@@ -491,6 +492,8 @@ namespace osuCrypto::LogVole
                     constants.mSrcLimbIndices[srcLimbIdx++] = w;
                     baseExcludingJ.push_back(fullBase.base()[w]);
                     log2DeltaJ += safeLog2(static_cast<double>(fullBase.base()[w].value()));
+                    undershoot = wideU64Add(undershoot,
+                        makeWideU64(fullBase.base()[w].value(), 0));
                 }
 
                 if (!std::isfinite(log2DeltaJ) || log2B > (log2DeltaJ - 1.0))
@@ -514,8 +517,15 @@ namespace osuCrypto::LogVole
                     }
                 }
 
-                const long double marginExp = static_cast<long double>(log2B - log2DeltaJ + 128.0);
-                constants.mMargin = floorToWideU64(std::exp2(marginExp));
+                // Each reciprocal sum undershoots by an error in [0, sum(q_w)).
+                // The predicate/decoder error difference needs one such allowance,
+                // for either noise sign. Slack and +1 round the noise margin up.
+                constexpr double exponentSlack = 0x1p-32;
+                const long double marginExp = static_cast<long double>(
+                    log2B - log2DeltaJ + exponentSlack + 128.0);
+                constants.mMargin = wideU64Add(wideU64Add(
+                    floorToWideU64(std::exp2(marginExp)), makeWideU64(1, 0)), undershoot);
+                if (!wideU64Less(constants.mMargin, wideU64OneShift(127))) return false;
             }
 
             out = std::move(rounding);
@@ -5372,14 +5382,24 @@ namespace osuCrypto::LogVole
             for (std::size_t target = 0; target < rho; ++target)
             {
                 double log2Delta = 0.0;
+                wideU64 undershoot{};
                 for (std::size_t limb = 0; limb < rho; ++limb)
                     if (limb != target)
+                    {
                         log2Delta += safeLog2(
                             static_cast<double>(ringModulusValue(ctx, limb)));
+                        undershoot = wideU64Add(undershoot,
+                            makeWideU64(ringModulusValue(ctx, limb), 0));
+                    }
                 if (!std::isfinite(log2Delta) || log2B > log2Delta - 1.0)
                     return false;
-                const auto margin = floorToWideU64(std::exp2(
-                    static_cast<long double>(log2B - log2Delta + 128.0)));
+                // Match the CPU predicate's upward rounding and single allowance
+                // for the difference of two downward reciprocal errors.
+                constexpr double exponentSlack = 0x1p-32;
+                const auto margin = wideU64Add(wideU64Add(floorToWideU64(std::exp2(
+                    static_cast<long double>(log2B - log2Delta + exponentSlack + 128.0))),
+                    makeWideU64(1, 0)), undershoot);
+                if (!wideU64Less(margin, wideU64OneShift(127))) return false;
                 marginLo[target] = margin.mLo;
                 marginHi[target] = margin.mHi;
             }

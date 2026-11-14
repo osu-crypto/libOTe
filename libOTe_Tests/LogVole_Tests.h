@@ -147,6 +147,7 @@
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedRejectsMalformedCandidate) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
+    X(Core, IntermediateGoldenSeedMatchesDecoder) \
     X(Core, LeafGoldenSeedChecksPlaintextProduct) \
     X(Core, LeafGoldenSeedGpuParity) \
     X(LencOps, EvalFromPrebuiltTreeMatchesEvalFromX) \

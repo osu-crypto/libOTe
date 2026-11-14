@@ -42,6 +42,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <random>
@@ -6343,6 +6344,106 @@ namespace
             resizeZero(poly.mCoeffs, ringPolyCoeffCount(params.mShrinkExpand.mRing));
         }
         return polys;
+    }
+}
+
+void LogVole_Core_IntermediateGoldenSeedMatchesDecoder(const oc::CLP&)
+{
+    tests_libOTe::logvole_test::SetupResources resources;
+    const Params params = make_five_limb_golden_params();
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+    const auto& moduli = getRingHostModuli(ctx);
+    const std::size_t rho = moduli.size();
+    const std::size_t n = ctx.mParams.mPolyModulusDegree;
+    const std::size_t coeff = n - 1;
+    // Leave explicit slack beneath B, beyond floating-point evaluation error.
+    const Words noise = wordsBelowPow2(noiseBoundLog2(params) - std::ldexp(1.0, -40), rho);
+    Words one(rho, 0), fourB(rho);
+    one[0] = 1;
+    seal::util::left_shift_uint(noise.data(), 2, rho, fourB.data());
+
+    std::vector<std::uint64_t> marginLo, marginHi;
+    LOGVOLE_REQUIRE_TRUE(goldenSeedRoundingMargins(params, ctx, marginLo, marginHi));
+
+    // For each target, Delta is the product of the other primes. K0=(Delta-1)/2
+    // is the last integer below its exact centered-reconstruction boundary.
+    // Only one coefficient of one sampled polynomial is nonzero.
+    for (std::size_t target = 0; target < rho; ++target)
+    {
+        std::vector<seal::Modulus> reducedModuli;
+        for (std::size_t i = 0; i < rho; ++i)
+            if (i != target) reducedModuli.push_back(moduli[i]);
+        seal::util::RNSBase reduced(reducedModuli, seal::MemoryManager::GetPool());
+        const auto margin = makeWideU64(marginLo[target], marginHi[target]);
+        std::vector<std::uint64_t> boundary(rho);
+        for (std::size_t i = 0; i < rho; ++i)
+        {
+            std::uint64_t delta = 1;
+            for (std::size_t w = 0; w < rho; ++w)
+                if (w != target)
+                    delta = seal::util::multiply_uint_mod(delta, moduli[w].value(), moduli[i]);
+            boundary[i] = seal::util::multiply_uint_mod(
+                seal::util::sub_uint_mod(delta, 1, moduli[i]),
+                (moduli[i].value() + 1) / 2, moduli[i]);
+        }
+        for (const bool above : {true, false})
+        {
+            auto setOffset = [&](RnsPoly& poly, const Words& s) {
+                for (std::size_t i = 0; i < rho; ++i)
+                    poly.mCoeffs[i * n + coeff] = addOffset(boundary[i], s, above, moduli[i]);
+            };
+            // Locate the boundary using one coefficient and precomputed CRT data;
+            // confirm acceptance through the public asynchronous predicate below.
+            auto accepts = [&](const Words& s) {
+                wideU64 fraction = wideU64OneShift(127);
+                std::size_t index = 0;
+                for (std::size_t i = 0; i < rho; ++i)
+                    if (i != target)
+                    {
+                        const auto value = addOffset(boundary[i], s, above, moduli[i]);
+                        const auto x = seal::util::multiply_uint_mod(value,
+                            reduced.inv_punctured_prod_mod_base_array()[index++], moduli[i]);
+                        fraction = wideU64Add(fraction,
+                            wideU64MulLow(x, reciprocal2Pow128Wide(moduli[i].value())));
+                    }
+                return !wideU64Less(fraction, margin) &&
+                    !wideU64Less(wideU64Negate(fraction), margin);
+            };
+            const Words accepted = bisectAcceptThreshold(one, fourB, accepts);
+            auto key = makeZeroPolys(params, params.mShrinkExpand.mMu);
+            setOffset(key[target], accepted);
+            bool candidateOk = false;
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(validateGoldenSeedCandidate(
+                resources.executor, 1, params, key, candidateOk)));
+            LOGVOLE_REQUIRE_TRUE(candidateOk);
+            std::vector<RnsPoly> decodedKey;
+            LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandDenoiseComb(
+                resources.executor, 1, ctx, key, decodedKey)));
+            for (const bool addNoise : {true, false})
+            {
+                auto perturbed = key;
+                for (std::size_t i = 0; i < rho; ++i)
+                    perturbed[target].mCoeffs[i * n + coeff] = addOffset(
+                        perturbed[target].mCoeffs[i * n + coeff], noise, addNoise, moduli[i]);
+                std::vector<RnsPoly> decodedPerturbed;
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(shrinkExpandDenoiseComb(
+                    resources.executor, 1, ctx, perturbed, decodedPerturbed)));
+                // With plaintext zero, bounded integer noise must leave the recovered label unchanged.
+                if (decodedKey[0].mCoeffs[target * n + coeff] !=
+                    decodedPerturbed[0].mCoeffs[target * n + coeff])
+                {
+                    std::cerr << "target=" << target << " above=" << above << " addNoise=" << addNoise
+                        << " log2B=" << noiseBoundLog2(params) << "\naccepted words:";
+                    for (auto word : accepted) std::cerr << " " << word;
+                    std::cerr << "\nnoise words:";
+                    for (auto word : noise) std::cerr << " " << word;
+                    std::cerr << "\n";
+                }
+                LOGVOLE_EXPECT_EQ(decodedKey[0].mCoeffs[target * n + coeff],
+                    decodedPerturbed[0].mCoeffs[target * n + coeff]);
+            }
+        }
     }
 }
 

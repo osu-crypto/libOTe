@@ -438,3 +438,24 @@ Leaf tests also passed with scalar CPU checking and eager CUDA validation
 selected explicitly. Detailed equations, validation and the leaf-rounding
 before/after measurements are in
 [the leaf golden-seed correction](../../../docs/leaf_golden_seed_fix.md).
+
+## Intermediate golden-seed reciprocal margin correction
+
+The intermediate per-limb predicate now rounds its noise margin upward and
+adds the sum of its source primes to cover fixed-point reciprocal errors.
+Each downward reciprocal error lies in the same interval, so their difference
+requires one such allowance for either noise sign. Margins reaching half the
+fixed-point range are rejected. CPU and lightweight GPU context construction
+use the same corrected constants; leaf predicates and arithmetic kernels are
+unchanged.
+
+A crafted native candidate was accepted by the previous public predicate,
+but adding noise within the stated bound changed the recovered CPU label by
+one. `LogVole_Core_IntermediateGoldenSeedMatchesDecoder` retains this
+boundary regression and covers all five target limbs, both sides of each
+rounding boundary, and both noise signs. The upward numerical slack and
+one-ulp rounding allowance match the existing leaf margin policy.
+
+The final regression fails with the previous constant builder and passes
+after the fix in under 0.5 seconds. Five focused Windows CPU checks passed
+in 4.53 seconds.
