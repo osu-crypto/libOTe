@@ -7,7 +7,6 @@
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuZkArith.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuZk.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
@@ -889,103 +888,6 @@ namespace osuCrypto::LogVole
             coefficient = sample % modulus;
         }
         out = std::move(next);
-    }
-
-    bool detail::gpuLegacyZkMatMulProverResponse(
-        const ZkMatMulStatement& st,
-        std::span<const u64> wires,
-        std::span<const u64> macs,
-        const ZkMatMulChallenge& ch,
-        u64 modulus,
-        u32 threads,
-        std::vector<ZkProof>& out, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
-    {
-        const auto options = detail::captureCpuZkOptions(settings);
-        if (!validMatMulChallenge(st, ch, modulus) ||
-            wires.size() < st.voleCount() || macs.size() < st.voleCount()) return false;
-        const seal::Modulus mod(modulus);
-        const auto n = static_cast<std::size_t>(st.mDim), entries = static_cast<std::size_t>(st.entries());
-        const auto chunks = std::min<std::size_t>(n, std::max<u32>(1, threads));
-        AlignedUnVec<u64> ownedA, ownedMa, bt, mbt, a0(entries), cross(entries);
-        const u64* a = canonicalMatMulInput(wires.data(), entries, modulus, ownedA);
-        const u64* ma = canonicalMatMulInput(macs.data(), entries, modulus, ownedMa);
-        transposeMatMulInput(wires.data() + st.offsetB(), n, modulus, bt);
-        transposeMatMulInput(macs.data() + st.offsetB(), n, modulus, mbt);
-        const bool ok = detail::runParallelTasks(chunks, threads, [&](std::size_t chunk, CpuBenchmarkState& cpuBenchmark) {
-            const auto begin = chunk * n / chunks, end = (chunk + 1) * n / chunks;
-            matMulProverRows(a, ma, bt.data(), mbt.data(), a0.data(), cross.data(),
-                n, begin, end, mod, options);
-            return true;
-        }, false, &cpuBenchmark);
-        if (!ok) return false;
-
-        // The n^2 unweighted inner products are identical for every repetition.
-        // Reuse them; only the independent coefficients and masks change.
-        std::vector<ZkProof> proofs(st.repetitions());
-        for (u32 rep = 0; rep < st.repetitions(); ++rep)
-        {
-            std::vector<std::array<u64, 2>> partial(chunks);
-            if (!detail::runParallelTasks(chunks, threads, [&](std::size_t chunk, CpuBenchmarkState& cpuBenchmark) {
-                partial[chunk] = batchMatMulTerms<true>(a0.data(), cross.data(),
-                    ch.mCoefficients.data() + rep * entries, chunk * entries / chunks,
-                    (chunk + 1) * entries / chunks, mod);
-                return true;
-            }, false, &cpuBenchmark)) return false;
-            u64 u = 0, mixed = 0;
-            for (const auto& sums : partial)
-            {
-                u = addMod(u, sums[0], mod);
-                mixed = addMod(mixed, sums[1], mod);
-            }
-            proofs[rep].mU = addMod(u, macs[st.maskIndex(rep)] % modulus, mod);
-            proofs[rep].mV = subMod(subMod(0, mixed, mod), wires[st.maskIndex(rep)] % modulus, mod);
-        }
-        out = std::move(proofs);
-        return true;
-    }
-
-    bool detail::gpuLegacyZkMatMulVerifierValue(
-        const ZkMatMulStatement& st,
-        std::span<const u64> keys,
-        std::span<const u64> publicProduct,
-        const ZkMatMulChallenge& ch,
-        u64 delta,
-        u64 modulus,
-        u32 threads,
-        std::vector<u64>& out, const LogVoleZkOptions& settings, CpuBenchmarkState cpuBenchmark)
-    {
-        const auto options = detail::captureCpuZkOptions(settings);
-        if (!validMatMulChallenge(st, ch, modulus) ||
-            !validMatMulPublicProduct(st, publicProduct, modulus) || keys.size() < st.voleCount()) return false;
-        const seal::Modulus mod(modulus);
-        const auto n = static_cast<std::size_t>(st.mDim), entries = static_cast<std::size_t>(st.entries());
-        const auto chunks = std::min<std::size_t>(n, std::max<u32>(1, threads));
-        const u64 deltaSquared = mulMod(delta % modulus, delta % modulus, mod);
-        AlignedUnVec<u64> ownedA, bt, products(entries);
-        const u64* a = canonicalMatMulInput(keys.data(), entries, modulus, ownedA);
-        transposeMatMulInput(keys.data() + st.offsetB(), n, modulus, bt);
-        if (!detail::runParallelTasks(chunks, threads, [&](std::size_t chunk, CpuBenchmarkState& cpuBenchmark) {
-            const auto begin = chunk * n / chunks, end = (chunk + 1) * n / chunks;
-            matMulVerifierRows(a, bt.data(), products.data(), publicProduct, deltaSquared,
-                n, begin, end, mod, options);
-            return true;
-        }, false, &cpuBenchmark)) return false;
-        std::vector<u64> values(st.repetitions());
-        for (u32 rep = 0; rep < st.repetitions(); ++rep)
-        {
-            std::vector<std::array<u64, 2>> partial(chunks);
-            if (!detail::runParallelTasks(chunks, threads, [&](std::size_t chunk, CpuBenchmarkState& cpuBenchmark) {
-                partial[chunk] = batchMatMulTerms<false>(products.data(), nullptr,
-                    ch.mCoefficients.data() + rep * entries, chunk * entries / chunks,
-                    (chunk + 1) * entries / chunks, mod);
-                return true;
-            }, false, &cpuBenchmark)) return false;
-            u64 b = 0;
-            for (const auto& sums : partial) b = addMod(b, sums[0], mod);
-            values[rep] = addMod(b, keys[st.maskIndex(rep)] % modulus, mod);
-        }
-        out = std::move(values);
-        return true;
     }
 
     macoro::task<bool> zkMatMulProverResponse(
@@ -2342,7 +2244,6 @@ namespace osuCrypto
     task<> ZkMatMulProver::prove(macoro::thread_pool& executor, std::span<LheDecryptBuffer> lheBuffers,
         std::span<LencEvalBuffer> lencBuffers, std::span<RootZetaBuffer> zetaBuffers, std::span<ZpEncodeBuffer> wrapBuffers, std::span<ZpDecodeBuffer> unwrapBuffers, std::span<u64> wires, PRNG& prng, Socket& sock)
     {
-        CpuBenchmarkState cpuBenchmark{mVoleOptions.mCpuBenchmark};
         const auto execution = mGpuExecution;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!execution) throw std::logic_error("LogVole ZK proof requires configuration");
@@ -2411,14 +2312,15 @@ namespace osuCrypto
                 throw std::runtime_error("LogVole ZK could not run its device check");
             }
 #endif
-            if (mVoleOptions.mUseGpu)
-                ok = LogVole::detail::gpuLegacyZkMatMulProverResponse(
-                    mStatement, wires, std::span<const u64>(mMacs.data(), mMacs.size()), ch,
-                    mVole.modulus(), mVole.numThreads(), mLastProofs, mSettings, cpuBenchmark);
-            else
-                ok = co_await zkMatMulProverResponse(executor,
-                    mStatement, wires, std::span<const u64>(mMacs.data(), mMacs.size()), ch,
-                    mVole.modulus(), mCpuWorkspace, mLastProofs);
+            // Allocate host numerical storage only when a host check is needed.
+            // Keep it for later checks; the awaited primary algorithm exclusively
+            // borrows this workspace and the caller executor until all children join.
+            if (!mCpuWorkspace.prepared())
+                mCpuWorkspace = ZkMatMulProverWorkspace(mStatement, mVole.numThreads(),
+                    mVoleOptions.mCpuBenchmark, mSettings);
+            ok = co_await zkMatMulProverResponse(executor,
+                mStatement, wires, std::span<const u64>(mMacs.data(), mMacs.size()), ch,
+                mVole.modulus(), mCpuWorkspace, mLastProofs);
         }
         if (!ok) throw std::runtime_error("LogVole ZK matmul prover could not build its response");
         mLastProof = mLastProofs.front();
@@ -2471,7 +2373,6 @@ namespace osuCrypto
 
     task<> ZkMatMulVerifier::verify(macoro::thread_pool& executor, std::span<LheDecryptBuffer> buffers, std::span<ZpDecodeBuffer> unwrapBuffers, std::span<const u64> publicProduct, PRNG& prng, Socket& sock)
     {
-        CpuBenchmarkState cpuBenchmark{mVoleOptions.mCpuBenchmark};
         const auto execution = mGpuExecution;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!execution) throw std::logic_error("LogVole ZK proof requires configuration");
@@ -2538,14 +2439,12 @@ namespace osuCrypto
                 throw std::runtime_error("LogVole ZK could not run its device check");
             }
 #endif
-            if (mVoleOptions.mUseGpu)
-                ok = LogVole::detail::gpuLegacyZkMatMulVerifierValue(
-                    mStatement, std::span<const u64>(mKeys.data(), mKeys.size()), product, ch, mVole.mDelta,
-                    mVole.modulus(), mVole.numThreads(), values, mSettings, cpuBenchmark);
-            else
-                ok = co_await zkMatMulVerifierValue(executor,
-                    mStatement, std::span<const u64>(mKeys.data(), mKeys.size()), product, ch, mVole.mDelta,
-                    mVole.modulus(), mCpuWorkspace, values);
+            if (!mCpuWorkspace.prepared())
+                mCpuWorkspace = ZkMatMulVerifierWorkspace(mStatement, mVole.numThreads(),
+                    mVoleOptions.mCpuBenchmark, mSettings);
+            ok = co_await zkMatMulVerifierValue(executor,
+                mStatement, std::span<const u64>(mKeys.data(), mKeys.size()), product, ch, mVole.mDelta,
+                mVole.modulus(), mCpuWorkspace, values);
         }
         if (!ok) throw std::runtime_error("LogVole ZK matmul verifier could not evaluate the check");
         mCheckMs = msSinceCheck(tCheck);

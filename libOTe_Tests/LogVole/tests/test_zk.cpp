@@ -179,7 +179,7 @@ namespace
 
     template<typename Prover, typename Verifier, typename Statement>
     void checkFreshMasks(const Statement& statement, CivoleSetting setting, bool device,
-        u64 instances = 3, bool fastCpu = false)
+        u64 instances = 3, bool fastCpu = false, bool gpuVoleHostCheck = false)
     {
     tests_libOTe::logvole_test::SetupResources setupResources;
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -192,8 +192,8 @@ namespace
 
         constexpr bool multiplication = std::is_same_v<Prover, ZkMulProver>;
         LogVoleOptions voleOptions;
-        voleOptions.mUseGpu = device;
-        const u64 request = device ? 65536 : 16;
+        voleOptions.mUseGpu = device || gpuVoleHostCheck;
+        const u64 request = voleOptions.mUseGpu ? 65536 : 16;
         voleOptions.mRequestSize = request;
         voleOptions.mSetting = setting;
         if (fastCpu)
@@ -207,6 +207,12 @@ namespace
         prover.mUseDevice = verifier.mUseDevice = device;
         prover.prepare(statement);
         verifier.prepare(statement);
+        if constexpr (!multiplication)
+            if (voleOptions.mUseGpu)
+            {
+                LOGVOLE_REQUIRE_FALSE(prover.mCpuWorkspace.prepared());
+                LOGVOLE_REQUIRE_FALSE(verifier.mCpuWorkspace.prepared());
+            }
         tests_libOTe::logvole_test::SenderResources senderResources(verifier.mVole.options());
         tests_libOTe::logvole_test::ReceiverBuffers receiverBuffers(verifier.mVole.options());
         const u64 p = prover.modulus(), delta = 19, maskIndex = statement.maskIndex();
@@ -277,6 +283,18 @@ namespace
             std::get<0>(online).result();
             std::get<1>(online).result();
             LOGVOLE_REQUIRE_TRUE(verifier.mAccepted);
+            if constexpr (!multiplication)
+            {
+                // GPU proofs retain empty host scratch. GPU VOLE with host
+                // proofs prepares it on the first check and reuses it thereafter.
+                LOGVOLE_REQUIRE_EQ(prover.mCpuWorkspace.prepared(), !device);
+                LOGVOLE_REQUIRE_EQ(verifier.mCpuWorkspace.prepared(), !device);
+                if (gpuVoleHostCheck)
+                {
+                    LOGVOLE_REQUIRE_FALSE(prover.mCheckOnDevice);
+                    LOGVOLE_REQUIRE_FALSE(verifier.mCheckOnDevice);
+                }
+            }
             if (!deviceOnly)
                 for (u32 rep = 0; rep < maskCount; ++rep)
                     LOGVOLE_REQUIRE_EQ(wires[maskIndex + rep], expectedMasks[rep]);
@@ -394,6 +412,10 @@ void LogVole_Zk_FreshMaskGpu(const CLP& cmd)
     if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
     LOGVOLE_REQUIRE_TRUE(gpu::available());
     checkBothStatements(CivoleSetting::GoldenSeed, true);
+    // Keep GPU VOLE enabled while selecting the existing host-proof mode.
+    // Two checks exercise cold preparation followed by workspace reuse.
+    checkFreshMasks<ZkMatMulProver, ZkMatMulVerifier>(ZkMatMulStatement{2, 3},
+        CivoleSetting::GoldenSeed, false, 2, false, true);
     // Resident NoGoldenSeed witness packing currently targets H200.
     if (gpu::deviceDescription().find("H200") != std::string::npos)
         checkBothStatements(CivoleSetting::NoGoldenSeed, true);

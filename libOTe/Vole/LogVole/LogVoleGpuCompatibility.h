@@ -184,24 +184,6 @@ namespace osuCrypto::LogVole::detail
         ZkMulCpuWorkspace& workspace,
         u64& out);
 
-    bool gpuLegacyZkMatMulProverResponse(
-        const ZkMatMulStatement& st,
-        std::span<const u64> wires,
-        std::span<const u64> macs,
-        const ZkMatMulChallenge& ch,
-        u64 modulus,
-        u32 threads,
-        std::vector<ZkProof>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
-
-    bool gpuLegacyZkMatMulVerifierValue(
-        const ZkMatMulStatement& st,
-        std::span<const u64> keys,
-        std::span<const u64> publicProduct,
-        const ZkMatMulChallenge& ch,
-        u64 delta,
-        u64 modulus,
-        u32 threads,
-        std::vector<u64>& out, const LogVoleZkOptions& settings = {}, CpuBenchmarkState cpuBenchmark = {});
     // Existing GPU-session candidate validation and its scheduling.
     bool gpuLegacyValidateGoldenSeedCandidate(
         const Params& params,
