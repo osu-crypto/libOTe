@@ -31,6 +31,7 @@ set(SRCS
     UInt_Tests.cpp
     Permutation_Tests.cpp
     BlkAccCode_Tests.cpp
+    ChosenBaa_Tests.cpp
     AnyField_Tests.cpp
 )
 
@@ -42,6 +43,18 @@ target_compile_definitions(libOTe_Tests PRIVATE
 
 
 target_link_libraries(libOTe_Tests libOTe)
+
+option(LIBOTE_BAA_BENCHMARK "Build the standalone chosen BAA benchmark" OFF)
+if(LIBOTE_BAA_BENCHMARK)
+    add_executable(chosen_baa_benchmark benchmarks/ChosenBaa.cpp)
+    target_include_directories(chosen_baa_benchmark PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
+    target_compile_features(chosen_baa_benchmark PRIVATE cxx_std_20)
+    target_link_libraries(chosen_baa_benchmark PRIVATE cryptoTools)
+    add_executable(chosen_baa_directions benchmarks/ChosenBaaDirections.cpp)
+    target_include_directories(chosen_baa_directions PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
+    target_compile_features(chosen_baa_directions PRIVATE cxx_std_20)
+    target_link_libraries(chosen_baa_directions PRIVATE cryptoTools)
+endif()
 
 
 # make projects that include libOTe_Tests use this as an include folder

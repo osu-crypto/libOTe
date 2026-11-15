@@ -1,0 +1,9 @@
+Linux peach48 6.17.0-41-generic #41-Ubuntu SMP PREEMPT_DYNAMIC Sat Jun 20 18:01:40 UTC 2026 x86_64 GNU/Linux
+c++ (Ubuntu 15.2.0-4ubuntu4) 15.2.0
+Copyright (C) 2025 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+/sys/devices/system/cpu/cpu2/cpufreq/scaling_governor: userspace
+/sys/devices/system/cpu/cpu2/cpufreq/scaling_cur_freq: 4491234
+/sys/devices/system/cpu/cpufreq/boost: 0

@@ -1,3 +1,4 @@
+#include "libOTe/Tools/BlkAccCode/ChosenBaaVole.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #ifdef ENABLE_SILENTOT
 
@@ -287,6 +288,9 @@ namespace osuCrypto
 		if (numOTs == 0)
 			throw std::invalid_argument("Silent OT count must be nonzero. " LOCATION);
 
+		if (isChosenBaa(multType))
+			throw std::invalid_argument("Chosen BAA is a field code for Silent VOLE, not binary Silent OT. " LOCATION);
+
 		(void)scaler;
 		if (malType != SilentSecType::SemiHonest &&
 			malType != SilentSecType::Malicious)
@@ -575,6 +579,8 @@ namespace osuCrypto
 		}
 
 		// Apply compression to convert sparse to dense vector
+		if (mLpnMultType == MultType::BinaryBAA)
+			co_await chosenBaaSeed(false, prng, chl, mCodeSeed);
 		compress(type);
 		setTimePoint("recver.expand.dualEncode");
 
@@ -805,7 +811,10 @@ namespace osuCrypto
                 mSpin->transpose(mA);
                 break;
 #endif
-			case osuCrypto::MultType::QuasiCyclic:
+			case MultType::BinaryBAA:
+                binaryBaaCompress(mCodeSeed, mA);
+                break;
+            case osuCrypto::MultType::QuasiCyclic:
 			{
 #ifdef ENABLE_BITPOLYMUL
 				QuasiCyclicCode code;
@@ -892,7 +901,10 @@ namespace osuCrypto
                 mSpin->transpose(mC);
                 break;
 #endif
-			case osuCrypto::MultType::QuasiCyclic:
+			case MultType::BinaryBAA:
+                binaryBaaCompress(mCodeSeed, mA, mC);
+                break;
+            case osuCrypto::MultType::QuasiCyclic:
 			{
 #ifdef ENABLE_BITPOLYMUL
 				QuasiCyclicCode code;

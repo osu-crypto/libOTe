@@ -1,0 +1,23 @@
+{
+  "kind": "small-q-fresh-pairs-direct-sparse-v2",
+  "n": 2097152,
+  "k": 1048576,
+  "prime": 340282366920938463463374607431768211297,
+  "q": 256,
+  "width": 1,
+  "block_k": 8,
+  "scans": 2,
+  "permutations": 2,
+  "precode": "extended_newton_8_16",
+  "minimum_distance_at_least": 640135,
+  "failure_upper": "2310514520786904766507047478833/1461501637330902918203684832716283019655932542976",
+  "failure_log2_upper": "-11826788599401/200000000000",
+  "sparse_failure_upper": "85834659071620047151345714481/91343852333181432387730302044767688728495783936",
+  "dense_leaves": {
+    "direct": 349,
+    "fresh_pairs": 0
+  },
+  "gap_limit": 4,
+  "complete_distance_certificate": true,
+  "scope": "All nonzero messages; uniform independent interval coefficients and two permutations; short-gap triangle-free pair bound plus exact long-gap tail; direct rank-potential sparse bound."
+}

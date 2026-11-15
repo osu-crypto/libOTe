@@ -1,4 +1,5 @@
 ﻿#include "SilentOT_Tests.h"
+#include "libOTe/TwoChooseOne/ConfigureCode.h"
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
@@ -695,6 +696,12 @@ namespace {
         // Set receiver's base OTs and VOLEs
         {
             BitVector choices = recver.sampleBaseChoiceBits(prng);
+            if (recver.mSecurityType == SilentSecType::Malicious)
+            {
+                BitVector checkChoices(128);
+                checkChoices.randomize(prng);
+                choices.append(checkChoices);
+            }
             std::vector<block> msg(choices.size());
             for (u64 i = 0; i < msg.size(); ++i)
                 msg[i] = msg2[i][choices[i]];
@@ -1175,7 +1182,7 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 #endif
 }
 
-void OtExt_Silent_Tungsten_Test(const oc::CLP& cmd)
+static void silentBinaryCodeTest(const oc::CLP& cmd, MultType mult)
 {
 #if defined(ENABLE_SILENTOT) 
     auto sockets = cp::LocalAsyncSocket::makePair();
@@ -1193,16 +1200,18 @@ void OtExt_Silent_Tungsten_Test(const oc::CLP& cmd)
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
 
+    for (auto noise : {SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary})
+    for (auto security : {SilentSecType::SemiHonest, SilentSecType::Malicious})
     for (auto n : nn)
     {
-        // Test 1: Random OT with Tungsten encoding
+        // Test 1: Random OT with the selected binary code
         {
             std::vector<std::array<block, 2>> msg2(n);
             std::vector<block> msg1(n);
             BitVector choice(n);
             
-            sender.configure(n, 2, 1, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Tungsten);
-            recver.configure(n, 2, 1, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Tungsten);
+            sender.configure(n, 2, 1, security, noise, mult);
+            recver.configure(n, 2, 1, security, noise, mult);
 
             fakeBase(n, s, threads, prng, recver, sender);
             
@@ -1214,10 +1223,10 @@ void OtExt_Silent_Tungsten_Test(const oc::CLP& cmd)
             checkRandom(msg1, msg2, choice, n, verbose);
         }
 
-        // Test 2: Correlated OT with Tungsten encoding
+        // Test 2: Correlated OT with the selected binary code
         {
-            sender.configure(n);
-            recver.configure(n);
+            sender.configure(n, 2, 1, security, noise, mult);
+            recver.configure(n, 2, 1, security, noise, mult);
             auto type = ChoiceBitPacking::False;
             
             fakeBase(n, s, threads, prng, recver, sender);
@@ -1232,8 +1241,18 @@ void OtExt_Silent_Tungsten_Test(const oc::CLP& cmd)
         }
     }
 #else
-    throw UnitTestSkipped("ENABLE_SILENTOT or ENABLE_INSECURE_SILVER are not defined.");
+    throw UnitTestSkipped("ENABLE_SILENTOT is not defined.");
 #endif
+}
+
+void OtExt_Silent_Tungsten_Test(const oc::CLP& cmd)
+{
+    silentBinaryCodeTest(cmd, MultType::Tungsten);
+}
+
+void OtExt_Silent_BinaryBAA_Test(const oc::CLP& cmd)
+{
+    silentBinaryCodeTest(cmd, MultType::BinaryBAA);
 }
 
 // Silent OT with the SPIN code (MultType::Spin). The default sizes select

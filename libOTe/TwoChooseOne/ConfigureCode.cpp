@@ -25,16 +25,18 @@ namespace osuCrypto
     // floor is ceil(-64/log2(1-a*delta)), where a is the applicable factor.
     //
     // Second, pseudo distance does not model the best non-linear/algebraic
-    // attacks. We independently require at least secParam noise positions.
+    // attacks. The caller supplies an independent noise-position floor:
+    // secParam normally, or ceil(secParam/2) for quarter-rate chosen BAA.
     // Current regular-LPN estimates put the small binary N=2048, t=128 case
     // below 128 bits, so binary regular-noise sizes through 2048 use
-    // ceil(9*secParam/8) instead.
+    // ceil(9*noisePositionFloor/8) instead.
     //
     // For stationary noise, this floor counts the secret support positions,
     // not the nonzero coefficients in one sampled error vector. The SSD
     // algebraic analysis already models coefficients uniform in the field,
-    // including zero, and its evaluated rate-one-half instances require at
-    // most 107 support positions for 128-bit security. Scaling this floor by
+    // including zero. The former calibration from 107 support positions is
+    // superseded by stronger RSD estimates (arxiv.org/abs/2610.29175).
+    // Scaling this floor by
     // the reciprocal nonzero probability would instead partially reinstate a
     // 128-bit linear-test requirement: the effect of zero coefficients on
     // linear tests (including ISD-style tests) is already captured by the
@@ -48,14 +50,15 @@ namespace osuCrypto
     u64 getRegNoiseWeight(
         double pseudoMinDistRatio,
         u64 N,
-        u64 secParam,
+        u64 noisePositionFloor,
         SdNoiseDistribution nd,
         SdNoiseSecurityModel securityModel)
     {
         constexpr u64 pseudoDistanceSecurity = 64;
 
-        if (pseudoMinDistRatio > 0.5 || pseudoMinDistRatio <= 0)
-            throw RTE_LOC;
+        if (!std::isfinite(pseudoMinDistRatio) ||
+            pseudoMinDistRatio > 1.0 || pseudoMinDistRatio <= 0)
+            throw std::invalid_argument("Pseudo distance must be in (0, 1]. " LOCATION);
         if (!std::isfinite(securityModel.mRegularNoiseFactor) ||
             securityModel.mRegularNoiseFactor < 1.0 ||
             securityModel.mRegularNoiseFactor > 2.0)
@@ -70,15 +73,22 @@ namespace osuCrypto
         else
             throw RTE_LOC;
 
-        const auto bias = 1.0 - hitFactor * pseudoMinDistRatio;
-        const auto pseudoDistanceWeight = bias == 0.0 ? u64{ 1 } :
-            static_cast<u64>(std::ceil(
-                -double(pseudoDistanceSecurity) / std::log2(bias)));
+        // Large-field distances may exceed 1/2. The supported character
+        // bound requires nonnegative bias, so the limit depends on the noise
+        // distribution (1/2 for binary regular noise, 1 for stationary noise).
+        const auto decay = hitFactor * pseudoMinDistRatio;
+        if (decay > 1.0)
+            throw std::invalid_argument("Pseudo distance gives a negative character bias. " LOCATION);
+        const auto requiredWeight = decay == 1.0 ? 1.0 : std::ceil(
+            -double(pseudoDistanceSecurity) * std::log(2.0) / std::log1p(-decay));
+        if (!std::isfinite(requiredWeight) || requiredWeight >= std::ldexp(1.0, 64))
+            throw std::invalid_argument("Pseudo-distance noise weight exceeds the supported range. " LOCATION);
+        const auto pseudoDistanceWeight = static_cast<u64>(requiredWeight);
 
-        auto attackWeight = secParam;
+        auto attackWeight = noisePositionFloor;
         if (nd == SdNoiseDistribution::Regular &&
             securityModel.mRegularNoiseFactor == 2.0 && N <= 2048)
-            attackWeight = divCeil(secParam * 9, u64{ 8 });
+            attackWeight = divCeil(noisePositionFloor * 9, u64{ 8 });
 
         auto t = std::max({ u64{ 40 }, pseudoDistanceWeight, attackWeight });
         if(N < 512)

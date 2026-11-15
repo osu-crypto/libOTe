@@ -9,6 +9,7 @@ set(SRCS
     Tools/LDPC/Util.cpp
     Tools/LinearCode.cpp
     Tools/Tools.cpp
+    Tools/BlkAccCode/ChosenBaaCode.cpp
     Tools/TungstenCode/TungstenData.cpp
     TwoChooseOne/ConfigureCode.cpp
     TwoChooseOne/OTExtInterface.cpp

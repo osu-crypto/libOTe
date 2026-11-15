@@ -24,7 +24,7 @@ namespace osuCrypto
 
 
 		// the LPN compression type.
-		MultType mulType = (MultType)cmd.getOr("multType", (int)DefaultMultType);
+		MultType mulType = (MultType)cmd.getOr("multType", (int)SilentVoleSender<F, G>::DefaultCode);
 
 		// regular noise or stationary noise.
 		SdNoiseDistribution noiseType = (SdNoiseDistribution)cmd.getOr("noise", (int)SdNoiseDistribution::Regular);

@@ -641,7 +641,7 @@ namespace osuCrypto
 			u64 trials = cmd.getOr("t", 10);
 
 			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-			MultType multType = (MultType)cmd.getOr("m", (int)DefaultMultType);
+			MultType multType = (MultType)cmd.getOr("m", (int)SilentVoleSender<block, block, CoeffCtxGF128>::DefaultCode);
 
 			auto noise = (SdNoiseDistribution)cmd.getOr("noise", (int)SdNoiseDistribution::Regular);
 			auto mal = (SilentSecType)cmd.getOr("mal", (int)SilentSecType::SemiHonest);

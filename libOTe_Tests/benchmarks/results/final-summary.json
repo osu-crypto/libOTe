@@ -1,0 +1,62 @@
+{
+  "fp_q1": {
+    "forward_ms": {
+      "median": 12.1503,
+      "min": 12.1258,
+      "max": 12.2103
+    },
+    "transpose_ms": {
+      "median": 17.1494,
+      "min": 17.0981,
+      "max": 17.1694
+    }
+  },
+  "fp_q256": {
+    "forward_ms": {
+      "median": 17.36,
+      "min": 17.2674,
+      "max": 17.56
+    },
+    "transpose_ms": {
+      "median": 23.04045,
+      "min": 23.0135,
+      "max": 23.1216
+    }
+  },
+  "gf128_q256": {
+    "forward_ms": {
+      "median": 19.94475,
+      "min": 19.8645,
+      "max": 20.0204
+    },
+    "transpose_ms": {
+      "median": 19.48625,
+      "min": 19.4437,
+      "max": 19.5071
+    }
+  },
+  "gf128_rm": {
+    "forward_ms": {
+      "median": 10.71635,
+      "min": 10.7043,
+      "max": 10.7751
+    },
+    "transpose_ms": {
+      "median": 12.9825,
+      "min": 12.9764,
+      "max": 13.3566
+    }
+  },
+  "gf128_rs": {
+    "forward_ms": {
+      "median": 30.9152,
+      "min": 30.797,
+      "max": 31.0084
+    },
+    "transpose_ms": {
+      "median": 28.023049999999998,
+      "min": 27.7324,
+      "max": 28.1616
+    }
+  }
+}
