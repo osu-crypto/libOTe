@@ -155,6 +155,7 @@ namespace osuCrypto
 
 		// Seed for syndrome decoding
 		block mCodeSeed = ZeroBlock;
+        std::unique_ptr<ChosenBaaWorkspace> mChosenBaaWorkspace;
 
 		// Number of threads to use for parallel operations (default: 1)
 		// this does not actually create multiple threads but determines how 
@@ -669,8 +670,10 @@ namespace osuCrypto
 		mNoiseVecSize = param.mNoiseVectorSize;
 		mPprfFormat = format;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
-		mA = {};
-		mC = {};
+        // Invalidate old outputs while retaining capacity. Expansion overwrites
+        // all of A and explicitly zeros C before placing fresh noise.
+        mCtx.resize(mA, 0);
+        mCtx.resize(mC, 0);
 		mBaseA = {};
 		mBaseC = {};
 		mMalCheckSeed.reset();
@@ -941,7 +944,7 @@ namespace osuCrypto
 		{
 			if constexpr (std::is_same_v<F, block> && std::is_same_v<G, block> &&
 				std::is_same_v<Ctx, CoeffCtxGF128>)
-				chosenBaaCompress(mLpnMultType, mCodeSeed, mA, mC);
+				chosenBaaCompress(mLpnMultType, mCodeSeed, mChosenBaaWorkspace, mA, mC);
 			else throw std::runtime_error("Chosen BAA requires GF(2^128). " LOCATION);
 			break;
 		}
@@ -1173,6 +1176,7 @@ namespace osuCrypto
 	template< typename F, typename G, typename Ctx >
 	void SilentVoleReceiver<F, G, Ctx>::clear()
 	{
+        mChosenBaaWorkspace.reset();
 		mA = {};
 		mC = {};
 		mBaseA = {};

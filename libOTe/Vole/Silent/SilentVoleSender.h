@@ -142,7 +142,8 @@ namespace osuCrypto
 		SdNoiseDistribution mNoiseType = SdNoiseDistribution::Regular;
 
 		// Seed for syndrome decoding
-		block mCodeSeed = ZeroBlock; 
+		block mCodeSeed = ZeroBlock;
+        std::unique_ptr<ChosenBaaWorkspace> mChosenBaaWorkspace;
 
 		// The base VOLE correlation vector (sender's share)
 		// Used to initialize the non-zeros of the noisy vector
@@ -562,7 +563,8 @@ namespace osuCrypto
 		mNoiseVecSize = config.mNoiseVectorSize;
 		mPprfFormat = format;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
-		mB = {};
+        // Expansion overwrites the output; keep its allocation across runs.
+        mCtx.resize(mB, 0);
 		mBaseB = {};
 		mDerandomizeMalCheck = false;
 		mState = State::Configured;
@@ -777,7 +779,7 @@ namespace osuCrypto
 			{
 				if constexpr (std::is_same_v<F, block> && std::is_same_v<G, block> &&
 					std::is_same_v<Ctx, CoeffCtxGF128>)
-					chosenBaaCompress(mLpnMultType, mCodeSeed, mB);
+					chosenBaaCompress(mLpnMultType, mCodeSeed, mChosenBaaWorkspace, mB);
 				else throw std::runtime_error("Chosen BAA requires GF(2^128). " LOCATION);
 				break;
 			}
@@ -876,6 +878,7 @@ namespace osuCrypto
 	template<typename F, typename G, typename Ctx>
 	void SilentVoleSender<F, G, Ctx>::clear()
 	{
+        mChosenBaaWorkspace.reset();
 		// Free active protocol state and reset the generator.
 		mB = {};
 		mBaseB = {};

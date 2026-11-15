@@ -6,15 +6,22 @@ namespace osuCrypto
 {
     void chosenBaaCompress(MultType type, block seed, span<block> a, span<block> b)
     {
+        std::unique_ptr<ChosenBaaWorkspace> workspace;
+        chosenBaaCompress(type, seed, workspace, a, b);
+    }
+
+    void chosenBaaCompress(MultType type, block seed,
+        std::unique_ptr<ChosenBaaWorkspace>& workspace, span<block> a, span<block> b)
+    {
         if (!b.empty() && b.size() != a.size())
             throw std::invalid_argument("Chosen BAA paired buffers differ in size.");
         if (type == MultType::ChosenBAA30)
         {
-            ChosenBAA30<> code;
-            code.config(a.size(), seed);
-            AlignedUnVector<block> scratch(a.size());
-            code.dualEncode(a, scratch);
-            if (!b.empty()) code.dualEncode(b, scratch);
+            if (!workspace) workspace = std::make_unique<ChosenBaaWorkspace>();
+            workspace->code.config(a.size(), seed);
+            workspace->scratch.resize(a.size());
+            workspace->code.dualEncode(a, workspace->scratch);
+            if (!b.empty()) workspace->code.dualEncode(b, workspace->scratch);
         }
         else if (type == MultType::ChosenBaa16x8)
         {

@@ -294,6 +294,25 @@ namespace
 
 void ChosenBaa_Code_test(const CLP&)
 {
+    {
+        std::unique_ptr<ChosenBaaWorkspace> workspace;
+        PRNG prng(block(46, 91));
+        for (u64 n : {256, 64, 512, 256})
+        {
+            AlignedUnVector<block> a(n), c(n);
+            prng.get(a.data(), n);
+            prng.get(c.data(), n);
+            auto expectedA = a, expectedC = c;
+            auto seed = prng.get<block>();
+            auto oldCapacity = workspace ? workspace->scratch.capacity() : 0;
+            auto oldData = workspace ? workspace->scratch.data() : nullptr;
+            chosenBaaCompress(MultType::ChosenBAA30, seed, expectedA, expectedC);
+            chosenBaaCompress(MultType::ChosenBAA30, seed, workspace, a, c);
+            if (!std::equal(a.begin(), a.end(), expectedA.begin()) ||
+                !std::equal(c.begin(), c.end(), expectedC.begin())) throw RTE_LOC;
+            if (oldCapacity >= n && workspace->scratch.data() != oldData) throw RTE_LOC;
+        }
+    }
     for (u64 n : {32, 96, 1056, 4096})
     {
         checkProfileAdapter<BinaryBAA<>>(MultType::BinaryBAA, n);
