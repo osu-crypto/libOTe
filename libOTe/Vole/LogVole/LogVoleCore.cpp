@@ -2451,7 +2451,7 @@ namespace osuCrypto::LogVole
                 retainedBStarNtt = gpu::retainRootBStarNttDevice(ctx, randomizer, setupScope);
                 if (bStarStrict && !retainedBStarNtt) co_return false;
             }
-            if (!retainedBStarNtt && batchPublicB && gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions))
+            if (!retainedBStarNtt && batchPublicB && gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)))
             {
                 publicBStarNtt = deriveUniformPolyBatchFromNonce(
                     ctx, kRootBStarPublicNonce, kRootBStarPublicDomain,
@@ -2514,7 +2514,7 @@ namespace osuCrypto::LogVole
                 state.mParams.mShrinkExpand.mGpuSetup.mRootSecretDevice;
             const bool skStrict =
                 skRequested && state.mParams.mShrinkExpand.mGpuSetup.mRootSecretDeviceStrict;
-            if (skRequested && gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions))
+            if (skRequested && gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)))
             {
                 std::vector<seal::prng_seed_type> rowSeeds(tauHi);
                 // One SEAL seed per row, in exactly the old sampler order.
@@ -3332,7 +3332,7 @@ namespace osuCrypto::LogVole
 
         RootStep step("wire: hash dPrime after send", profiler);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (digestState.mDPrimeGpu && digestState.mGpuExecution && gpu::rootDigestHashEnabled(digestState.mGpuExecution->executionOptions()))
+        if (digestState.mDPrimeGpu && digestState.mGpuExecution && gpu::rootDigestHashEnabled(digestState.mGpuExecution->executionOptions(), digestState.mGpuExecution->gpuEnabled()))
         {
             const auto device = std::static_pointer_cast<gpu::DeviceBatch>(digestState.mDPrimeGpu);
             if (gpu::hashRootDigestDevice(*device, digestState.mDPrimeHash,
@@ -3526,11 +3526,11 @@ namespace osuCrypto::LogVole
                     &residentKPrime,
                     preparedSkNtt,
                     preparedKPrimeDev,
-                    gpu::rootDigestHashEnabled(ctx.mExecutionOptions) ? &deviceDigestHash : nullptr,
+                    gpu::rootDigestHashEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)) ? &deviceDigestHash : nullptr,
                     nonInteractive,
                     residentSkCoeffs,
                     state.mRootSkRRtOwnerRunId);
-                haveDeviceDigestHash = skxDone && gpu::rootDigestHashEnabled(ctx.mExecutionOptions);
+                haveDeviceDigestHash = skxDone && gpu::rootDigestHashEnabled(ctx.mExecutionOptions, gpu::enabled(ctx));
             }
 #endif
             // A successful device pre-sample deliberately has no host mirror.
@@ -4834,7 +4834,7 @@ namespace osuCrypto::LogVole
     #if defined(ENABLE_LOGVOLE_CUDA)
             if (!execution)
                 execution = std::make_shared<gpu::GpuExecutionContext>(ringOwner->mExecutionOptions,
-                                                                       ringOwner->mHostProfiler, ringOwner->mFactory->protocolService());
+                                                                       ringOwner->mHostProfiler, ringOwner->mFactory->protocolService(), ringOwner->mGpuAvailable);
     #endif
             std::vector<RnsPoly> eagerSk1 = input.mSk1;
             std::shared_ptr<gpu::DeviceBatch> residentS;
@@ -5114,7 +5114,7 @@ namespace osuCrypto::LogVole
             auto cpuScratch = input.mCpuScratch ? input.mCpuScratch :
                 std::make_shared<detail::ShrinkExpandScratch>();
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (!execution) execution = std::make_shared<gpu::GpuExecutionContext>(ringOwner->mExecutionOptions, ringOwner->mHostProfiler, ringOwner->mFactory->protocolService());
+            if (!execution) execution = std::make_shared<gpu::GpuExecutionContext>(ringOwner->mExecutionOptions, ringOwner->mHostProfiler, ringOwner->mFactory->protocolService(), ringOwner->mGpuAvailable);
 #endif
             u32 tauHi = 0;
             u32 muHi = 0;

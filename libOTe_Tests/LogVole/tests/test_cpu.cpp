@@ -2317,6 +2317,7 @@ void LogVole_Cpu_GpuZkSeededPreparationMatchesReference(const oc::CLP& cmd)
                 sessionOptions.mSetting = setting;
                 sessionOptions.mRequestSize = budget;
                 ZkMulProver reconfiguredProver({}, sessionOptions);
+                reconfiguredProver.mUseDevice = true;
                 reconfiguredProver.mDeviceState = gpu::makeZkMulDeviceState(copied, operationExecution.mainStream());
                 LOGVOLE_REQUIRE_TRUE(reconfiguredProver.mDeviceState != nullptr);
                 reconfiguredProver.prepare(copied, nullptr, configureScope);

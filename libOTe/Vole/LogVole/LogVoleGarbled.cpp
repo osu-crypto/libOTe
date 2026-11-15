@@ -202,7 +202,7 @@ namespace osuCrypto
         bool prepareDeltaOnDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         prepareDeltaOnDevice =
-            gpu::enabled(mOptions) && mParams.mLogVole.mShrinkExpand.mGpuSetup.mDeltaDevice;
+            (mOptions.mUseGpu && mConfigureFactoryOwner && gpu::enabled(mConfigureFactoryOwner->mRing)) && mParams.mLogVole.mShrinkExpand.mGpuSetup.mDeltaDevice;
 #endif
         if (prepareDeltaOnDevice) input.mGarbledDeltaPattern = deltas;
         else
@@ -299,7 +299,7 @@ namespace osuCrypto
         if (!mInputDevice && std::any_of(x.begin(), x.end(), [&](u64 v) { return v >= mModulus; }))
             throw std::invalid_argument("garbled-label input is outside Z_p");
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (mInputDevice && (!gpu::enabled(mOptions) ||
+        if (mInputDevice && (!(mOptions.mUseGpu && mConfigureFactoryOwner && gpu::enabled(mConfigureFactoryOwner->mRing)) ||
             std::static_pointer_cast<gpu::DeviceScalars>(mInputDevice)->count() != mLayout.mLabelCount))
             throw std::invalid_argument("garbled-label device input has the wrong size or no GPU backend");
 #else

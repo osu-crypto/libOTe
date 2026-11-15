@@ -1324,10 +1324,14 @@ void LogVole_Core_GdecompHiUnbundleLiftsOneLimbPerOutput(const oc::CLP&)
 
 void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE(gpu::enabled(advanced));
+    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE((advanced.mUseGpu && testGpuAvailable));
 #else
     (void)cmd;
 #endif
@@ -1344,7 +1348,7 @@ void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP& cmd)
         expect_poly_equal(poly, s[0]);
     }
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::enabled(advanced))
+    if ((advanced.mUseGpu && testGpuAvailable))
     {
         // Exercise the device entry point directly so fallback cannot conceal
         // a declined launch. Repetition must preserve even unreduced words.
@@ -1365,10 +1369,14 @@ void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP& cmd)
 
 void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesResidues(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE(gpu::enabled(advanced));
+    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE((advanced.mUseGpu && testGpuAvailable));
 #else
     (void)cmd;
 #endif
@@ -1410,10 +1418,14 @@ void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesResidues(const oc::CLP& 
 
 void LogVole_Core_RecursiveLiftOracleKeepsSenderResiduesUnscaled(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE(gpu::enabled(advanced));
+    if (cmd.getOr("gpu", 0) != 0) LOGVOLE_REQUIRE_TRUE((advanced.mUseGpu && testGpuAvailable));
 #else
     (void)cmd;
 #endif
@@ -1480,7 +1492,7 @@ void LogVole_Core_RecursiveLiftOracleKeepsSenderResiduesUnscaled(const oc::CLP& 
     }
     LOGVOLE_EXPECT_TRUE(wouldCatchDoubleLift);
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::enabled(advanced))
+    if ((advanced.mUseGpu && testGpuAvailable))
     {
         std::vector<RnsPoly> device;
         LOGVOLE_REQUIRE_TRUE(gpu::seedLabelRepDevice(ctx, s, tauHi, alpha, tauHi, device));
@@ -2433,6 +2445,10 @@ void LogVole_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)
 
 void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     const auto identityService = ProtocolCacheService::create();
     tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions advanced;
@@ -2638,7 +2654,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
     // without advancing the parent PRNG a second time.
     {
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool replayGpuEnabled = gpu::enabled(advanced);
+        const bool replayGpuEnabled = (advanced.mUseGpu && testGpuAvailable);
 #else
         constexpr bool replayGpuEnabled = false;
 #endif
@@ -3462,7 +3478,7 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
         prepared,
         dPrimeDevice, {}, receiverScope));
     LOGVOLE_REQUIRE_TRUE(prepared != nullptr);
-    if (gpu::rootDigestHashEnabled(ctx.mExecutionOptions))
+    if (gpu::rootDigestHashEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)))
     {
         // Require the device entry point itself to succeed; a CPU fallback in
         // finishRootDigestHash must not hide a missing or incorrect reader.
@@ -4326,6 +4342,10 @@ void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
 
 void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     const auto identityService = ProtocolCacheService::create();
     tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions advanced;
@@ -4346,10 +4366,10 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
     bool senderDevice = false, receiverDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
     {
-        senderDevice = gpu::enabled(advanced);
+        senderDevice = (advanced.mUseGpu && testGpuAvailable);
     }
     {
-        receiverDevice = gpu::enabled(advanced);
+        receiverDevice = (advanced.mUseGpu && testGpuAvailable);
     }
     if (senderDevice || receiverDevice)
     {
@@ -4525,7 +4545,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 // path whose first lazy materialization is checked below.
                 auto roundTripBytes = expected;
                 ShrinkExpandOfflineMessage roundTrip{};
-                LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(roundTripBytes), roundTrip, 4, {}, gpu::enabled(advanced)));
+                LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(roundTripBytes), roundTrip, 4, {}, (advanced.mUseGpu && testGpuAvailable)));
                 LOGVOLE_REQUIRE_TRUE(roundTrip.mLazyCt1 && roundTrip.mLazyLacct);
                 LOGVOLE_EXPECT_TRUE(rangesEqual(expected, encode(roundTrip, 4)));
             }
@@ -4917,7 +4937,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                 // before first host access to exercise receiver ownership.
                 auto payload = encode(wire);
                 ShrinkExpandOfflineMessage encoded{};
-                LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(payload), encoded, 4, {}, gpu::enabled(advanced)));
+                LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(payload), encoded, 4, {}, (advanced.mUseGpu && testGpuAvailable)));
                 LOGVOLE_REQUIRE_TRUE(encoded.mLazyCt1 && encoded.mLazyLacct);
                 LOGVOLE_EXPECT_TRUE(encoded.mCt1.mPolys.empty() && encoded.mLacct.mCt.mPolys.empty());
                 auto lazyInput = input;
@@ -4974,13 +4994,13 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
                         auto untouched = wire;
                         untouched.mCt1.mPolys[0].mCoeffs[0] ^= 1u;
                         const auto before = encode(untouched);
-                        LOGVOLE_EXPECT_FALSE(decodeShrinkExpandOfflineForTransport(std::move(bad), untouched, 4, {}, gpu::enabled(advanced)));
+                        LOGVOLE_EXPECT_FALSE(decodeShrinkExpandOfflineForTransport(std::move(bad), untouched, 4, {}, (advanced.mUseGpu && testGpuAvailable)));
                         LOGVOLE_EXPECT_TRUE(rangesEqual(before, encode(untouched)));
                         LOGVOLE_EXPECT_TRUE(!untouched.mLazyCt1 && !untouched.mLazyLacct);
                     }
                     auto validBytes = encode(wire);
                     ShrinkExpandOfflineMessage invalidLazy{};
-                    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(validBytes), invalidLazy, 4, {}, gpu::enabled(advanced)));
+                    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(validBytes), invalidLazy, 4, {}, (advanced.mUseGpu && testGpuAvailable)));
                     ++invalidLazy.mCt1.mCols;
                     auto unchanged = cpuReference;
                     unchanged.mCt1.mPolys[0].mCoeffs[0] ^= 1u;
@@ -5027,7 +5047,7 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 
                     auto encodedBytes = encode(wire);
                     ShrinkExpandOfflineMessage encodedFailure{};
-                    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(encodedBytes), encodedFailure, 4, {}, gpu::enabled(advanced)));
+                    LOGVOLE_REQUIRE_TRUE(decodeShrinkExpandOfflineForTransport(std::move(encodedBytes), encodedFailure, 4, {}, (advanced.mUseGpu && testGpuAvailable)));
                     marker.mCt1.mPolys[0].mCoeffs[0] ^= 1u;
                     const auto encodedMarkerValue = marker.mCt1.mPolys[0].mCoeffs[0];
                     LOGVOLE_EXPECT_FALSE(finalizeShrinkExpandReceiverOffline(tests_libOTe::logvole_test::withAdvancedOptions(tests_libOTe::logvole_test::withSetupOptions(lazyInput, setupOptions), advanced, ProtocolCacheRole::Receiver), std::move(encodedFailure), marker));
@@ -5053,6 +5073,10 @@ void LogVole_Core_GpuResidentSetupState(const oc::CLP& cmd)
 
 void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     const auto identityService = ProtocolCacheService::create();
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
@@ -5069,7 +5093,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
     // resident-state fixture covers optional top-level NTT cache retention.
     tests_libOTe::logvole_test::ScopedOptionValue residentNtt(setupOptions.mReceiverResidentNtt, false);
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::enabled(advanced))
+    if ((advanced.mUseGpu && testGpuAvailable))
     {
         const auto seed = oc::block(0x414553435452ull, 0x123456789ull);
         for (std::size_t count : { 1u, 2u, 3u, 257u, 1025u, 8193u })
@@ -5120,7 +5144,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
 #if defined(ENABLE_LOGVOLE_CUDA)
     bool senderDeviceEnabled = false;
     {
-        senderDeviceEnabled = gpu::enabled(advanced);
+        senderDeviceEnabled = (advanced.mUseGpu && testGpuAvailable);
     }
     auto expectSharedSenderCache = [&](const SenderOfflineOutput& output) {
         if (!senderDeviceEnabled) return;
@@ -5168,7 +5192,7 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP& cmd)
 #if defined(ENABLE_LOGVOLE_CUDA)
     bool receiverDeviceEnabled = false;
     {
-        receiverDeviceEnabled = gpu::enabled(advanced);
+        receiverDeviceEnabled = (advanced.mUseGpu && testGpuAvailable);
     }
     auto expectSharedReceiverCache = [&](const ReceiverOfflineOutput& output) {
         if (!receiverDeviceEnabled) return;

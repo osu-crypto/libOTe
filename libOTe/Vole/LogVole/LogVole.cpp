@@ -1106,9 +1106,9 @@ namespace osuCrypto::LogVole
         key.mRole = ownerScope.mRole;
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto& options = ringFactory()->executionOptions().mAdvanced.mContexts;
-        key.mExpandModChain = !gpu::enabled(ringFactory()->executionOptions()) || options.mFullModChain;
-        key.mSingleBatchLimb = gpu::enabled(ringFactory()->executionOptions()) && options.mBatchingSingleLimb;
-        key.mGpuLightweight = gpu::enabled(ringFactory()->executionOptions()) && options.mLightweightCrt &&
+        key.mExpandModChain = !ringFactory()->gpuEnabled() || options.mFullModChain;
+        key.mSingleBatchLimb = ringFactory()->gpuEnabled() && options.mBatchingSingleLimb;
+        key.mGpuLightweight = ringFactory()->gpuEnabled() && options.mLightweightCrt &&
             options.mLightweightRing &&
             !key.mExpandModChain && key.mSingleBatchLimb &&
             gpuZpTupleSupported(ring, plaintextModulusBits);
@@ -1180,7 +1180,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto& options = factory->ringFactory()->executionOptions().mAdvanced.mContexts;
         const auto ownerScope = scope;
-        const bool requested = gpu::enabled(factory->ringFactory()->executionOptions()) &&
+        const bool requested = factory->ringFactory()->gpuEnabled() &&
             gpu::dynamicSealSetupSupported(ring) &&
             (ownerScope.mRole == ProtocolCacheRole::Sender ||
                 ownerScope.mRole == ProtocolCacheRole::Receiver) &&
@@ -1224,7 +1224,7 @@ namespace osuCrypto::LogVole
         gpu::NativeSealSetupBundle prepared{};
         if (gpu::buildNativeSealSetupBundleDevice(
                 ring, plaintextModulusBits, prepared,
-                std::make_shared<gpu::GpuSetupContext>(ringFactory->executionOptions(), ringFactory->hostProfilerOwner(), ringFactory->protocolService()), scope))
+                std::make_shared<gpu::GpuSetupContext>(ringFactory->executionOptions(), ringFactory->hostProfilerOwner(), ringFactory->protocolService(), ringFactory->gpuAvailable()), scope))
         {
             if (prepared.mOwnerRole != scope.mRole ||
                 prepared.mOwnerRunId != scope.mRunId ||
@@ -2087,7 +2087,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx.mRing, std::make_shared<gpu::GpuExecutionContext>(
-                                                      ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler, ctx.mRing.mFactory->protocolService())))
+                                                      ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler, ctx.mRing.mFactory->protocolService(), ctx.mRing.mGpuAvailable)))
             throw std::runtime_error("LogVole CI-VOLE sender execution context is invalid");
         // Retain this session's selected ring in its CRT record as well. The
         // parent is an immutable math record, never a reference to this copy.
@@ -2237,7 +2237,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx.mRing,
-                std::make_shared<gpu::GpuExecutionContext>(ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler, ctx.mRing.mFactory->protocolService())))
+                std::make_shared<gpu::GpuExecutionContext>(ctx.mRing.mExecutionOptions, ctx.mRing.mHostProfiler, ctx.mRing.mFactory->protocolService(), ctx.mRing.mGpuAvailable)))
             throw std::runtime_error("LogVole CI-VOLE receiver execution context is invalid");
         ctx.mFactoryOwner = std::make_shared<const ZpCrtContext>(ctx);
 #endif

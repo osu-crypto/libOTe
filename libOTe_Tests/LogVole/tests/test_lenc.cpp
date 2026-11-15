@@ -193,6 +193,10 @@ namespace
 
     void check_trunc_setup_parity(const LencParams& params, bool useGpu, std::uint32_t width = 0)
     {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     tests_libOTe::logvole_test::SetupResources setupResources;
         osuCrypto::LogVoleGpuSetupOptions setupOptions;
         osuCrypto::LogVoleExecutionOptions advanced;
@@ -201,7 +205,7 @@ namespace
         advanced.mAdvanced.mStreams.mReuseDownloadStaging = false;
         advanced.mAdvanced.mProtocol.mGaussianResident = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool haveGpu = gpu::enabled(advanced);
+        const bool haveGpu = (advanced.mUseGpu && testGpuAvailable);
         gpu::GaussianHostCompatibility gaussianCompatibility;
         const bool haveGaussian = haveGpu && gaussianCompatibility.compatible();
 #else

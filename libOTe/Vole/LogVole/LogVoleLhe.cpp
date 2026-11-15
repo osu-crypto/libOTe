@@ -70,13 +70,13 @@ namespace osuCrypto::LogVole
             key.mRunId = scope.mRunId;
             key.mRole = scope.mRole;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions)) key.mDevice = gpu::currentDeviceOrdinal();
+            if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions, gpu::enabled(ctx))) key.mDevice = gpu::currentDeviceOrdinal();
 #endif
 
             {
                 std::lock_guard<std::mutex> lock(cache.mMutex);
 #if defined(ENABLE_LOGVOLE_CUDA)
-                if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions) && key.mRunId != 0)
+                if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)) && key.mRunId != 0)
                 {
                     // A completed run's otherwise unowned host snapshot can
                     // retire; the retention registry holds only a weak owner.

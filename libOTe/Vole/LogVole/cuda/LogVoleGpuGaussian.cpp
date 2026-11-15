@@ -202,7 +202,7 @@ namespace osuCrypto::LogVole::gpu
         GaussianDeviceSampleBuffer* deviceOut, u32 wordsPerPrefix, std::span<const u8> active, const LogVoleFailureOptions& failures)
     {
         HostStep totalStep(stream.hostProfiler(), "setup: Gaussian GPU transform");
-        if (!available() || !stream.gaussianCompatibility().compatible() || seeds.empty() || seeds.size() > 65535u ||
+        if (!stream.raw() || !stream.gaussianCompatibility().compatible() || seeds.empty() || seeds.size() > 65535u ||
             !coefficients || modulus < 2 || !std::isfinite(sigma) || sigma < 0 ||
             !std::isfinite(clip) || clip < 0 ||
             static_cast<long double>(clip) >= static_cast<long double>(modulus >> 1u) ||
@@ -325,7 +325,7 @@ namespace osuCrypto::LogVole::gpu
         GaussianPrngPrefixBuffer& out, const LogVoleFailureOptions& failures)
     {
         HostStep totalStep(stream.hostProfiler(), "setup: Gaussian GPU PRG prefixes");
-        if (!available() || seeds.empty() || !wordsPerPrefix || wordsPerPrefix % 512u ||
+        if (!stream.raw() || seeds.empty() || !wordsPerPrefix || wordsPerPrefix % 512u ||
             seeds.size() > std::numeric_limits<u32>::max()) return false;
         const bool decline = failures.mGaussianPrg;
         if (decline) return false;

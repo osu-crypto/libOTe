@@ -769,7 +769,12 @@ namespace osuCrypto::LogVole
     RingContextFactory::RingContextFactory(LogVoleExecutionOptions options,
         std::shared_ptr<const ProtocolCacheService> service)
         : mProtocolService(service ? std::move(service) : ProtocolCacheService::create()),
-          mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
+          mImpl(std::make_unique<Impl>()), mExecutionOptions(options),
+#if defined(ENABLE_LOGVOLE_CUDA)
+          mGpuAvailable(options.mUseGpu && gpu::available())
+#else
+          mGpuAvailable(false)
+#endif
     {
         if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
         if (mExecutionOptions.mAdvanced.mHostStepProfile)
@@ -808,10 +813,10 @@ namespace osuCrypto::LogVole
         key.mRole = scope.mRole;
         key.mGpuLightweight = lightweight;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        key.mExpandModChain = !gpu::enabled(mExecutionOptions) || mExecutionOptions.mAdvanced.mContexts.mFullModChain;
+        key.mExpandModChain = !gpuEnabled() || mExecutionOptions.mAdvanced.mContexts.mFullModChain;
         key.mNativeSealBundleRequested = lightweight && !key.mExpandModChain &&
             gpu::dynamicSealSetupSupported(params) &&
-            gpu::nativeSealBundleCacheRequested(key.mRole, mExecutionOptions);
+            gpu::nativeSealBundleCacheRequested(key.mRole, mExecutionOptions, gpuEnabled());
 #endif
 
         {
@@ -831,7 +836,7 @@ namespace osuCrypto::LogVole
 
         RingResourceScope resources{key.mRole, key.mNativeSealBundleRequested};
 #if defined(ENABLE_LOGVOLE_CUDA)
-        resources.mTables = std::make_shared<gpu::GpuTableCache>(mExecutionOptions, hostProfilerOwner());
+        resources.mTables = std::make_shared<gpu::GpuTableCache>(mExecutionOptions, hostProfilerOwner(), mGpuAvailable);
 #endif
         RingNttContext built{};
         if (lightweight)
@@ -840,7 +845,7 @@ namespace osuCrypto::LogVole
             const auto primes = productionRingModuli(params);
             built.mParams = params;
 #if defined(ENABLE_LOGVOLE_CUDA)
-            built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner(), mProtocolService);
+            built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner(), mProtocolService, mGpuAvailable);
 #endif
             auto metadata = std::make_shared<RingModulusMetadata>();
             if (!primes.empty()) metadata->mValues.assign(primes.begin(), primes.end());
@@ -872,14 +877,15 @@ namespace osuCrypto::LogVole
         }
 
         built.mExecutionOptions = mExecutionOptions;
+        built.mGpuAvailable = mGpuAvailable;
         built.mHostProfiler = hostProfilerOwner();
         built.mCpuCapabilities = CpuCapabilities{};
         built.mFactory = owner;
         built.mResourceScope = std::move(resources);
         built.mPublicCache = std::make_shared<PublicPolynomialCache>();
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (!built.mGpuSetup) built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner(), mProtocolService);
-        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(mExecutionOptions, hostProfilerOwner(), mProtocolService);
+        if (!built.mGpuSetup) built.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(mExecutionOptions, hostProfilerOwner(), mProtocolService, mGpuAvailable);
+        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(mExecutionOptions, hostProfilerOwner(), mProtocolService, mGpuAvailable);
 #endif
         auto shared = std::make_shared<const RingNttContext>(built);
         {
@@ -902,7 +908,7 @@ namespace osuCrypto::LogVole
         bool lightweight = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         const auto& options = factory->executionOptions().mAdvanced.mContexts;
-        lightweight = gpu::enabled(factory->executionOptions()) && options.mLightweightRing &&
+        lightweight = factory->gpuEnabled() && options.mLightweightRing &&
             !options.mFullModChain &&
             (!productionRingModuli(params).empty() ||
                 (gpu::dynamicSealSetupSupported(params) && gpu::currentDeviceOrdinal() == 0));
@@ -941,18 +947,18 @@ namespace osuCrypto::LogVole
 
     bool makeGpuRingNttContext(const RingParams& params, RingNttContext& out, ProtocolCacheScopeView scope)
     {
+        LogVoleExecutionOptions options;
+        options.mUseGpu = true;
+        auto factory = out.mFactory ? out.mFactory : std::make_shared<RingContextFactory>(options, scope.mRunId.serviceOwner());
         if (productionRingModuli(params).empty())
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (!gpu::available() || gpu::currentDeviceOrdinal() != 0 ||
+            if (!factory->gpuEnabled() || gpu::currentDeviceOrdinal() != 0 ||
                 !gpu::dynamicSealSetupSupported(params)) return false;
 #else
             return false;
 #endif
         }
-        LogVoleExecutionOptions options;
-        options.mUseGpu = true;
-        auto factory = out.mFactory ? out.mFactory : std::make_shared<RingContextFactory>(options, scope.mRunId.serviceOwner());
         return factory->make(params, out, true, factory, scope);
     }
 
@@ -981,10 +987,11 @@ namespace osuCrypto::LogVole
             params.mCoeffModulusBits.end());
         built.mGpuSetup = certificate->setupContext();
         built.mExecutionOptions = built.mGpuSetup->executionOptions();
+        built.mGpuAvailable = built.mGpuSetup->gpuAvailable();
         built.mHostProfiler = built.mGpuSetup->hostProfilerOwner();
-        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(built.mExecutionOptions, built.mHostProfiler, built.mFactory ? built.mFactory->protocolService() : certificate->setupContext()->protocolService());
+        built.mGpuExecution = std::make_shared<gpu::GpuExecutionContext>(built.mExecutionOptions, built.mHostProfiler, built.mFactory ? built.mFactory->protocolService() : certificate->setupContext()->protocolService(), built.mGpuAvailable);
         built.mResourceScope = {certificate->rawOwnerRole(), certificate->nativeSealBundleOwner(),
-            std::make_shared<gpu::GpuTableCache>(built.mExecutionOptions, built.mHostProfiler)};
+            std::make_shared<gpu::GpuTableCache>(built.mExecutionOptions, built.mHostProfiler, built.mGpuAvailable)};
         metadata->mDynamicGpuCertificate = std::move(certificate);
         built.mRawModuli = std::move(metadata);
         built.mGpuLightweight = true;
@@ -1017,7 +1024,7 @@ namespace osuCrypto::LogVole
         HostStep publicationStep(hostProfiler(), "setup: native ring context publication");
         const auto owner = ready.mResourceScope;
         if (ready.mExecutionOptions != mExecutionOptions ||
-            !gpu::nativeSealBundleCacheRequested(owner.mRole, mExecutionOptions) ||
+            !gpu::nativeSealBundleCacheRequested(owner.mRole, mExecutionOptions, gpuEnabled()) ||
             !ready.mGpuLightweight || !ready.mRawModuli ||
             !ready.mRawModuli->mDynamicGpuCertificate ||
             !ready.mRawModuli->mDynamicGpuCertificate->nativeSealBundleOwner() ||
@@ -2041,7 +2048,7 @@ namespace osuCrypto::LogVole
     static bool useDeviceUniformSetup(const RingNttContext& ctx)
     {
         if (!gpu::enabled(ctx)) return false;
-        const bool available = gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions) &&
+        const bool available = gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)) &&
             (ctx.mGpuLightweight ? validateLightweightRingContext(ctx) :
                 (ctx.mContext && ctx.mContext->key_context_data()));
         if (!available && ctx.mExecutionOptions.mAdvanced.mProtocol.mUniformSampling &&

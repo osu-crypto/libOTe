@@ -56,8 +56,11 @@ namespace osuCrypto
         {
             LogVoleOptions options;
             options.mUseGpu = cmd.getOr("gpu", 0) != 0;
-            if (options.mUseGpu &&
-                !LogVole::gpu::enabled(options))
+            bool selectedGpu = false;
+#if defined(ENABLE_LOGVOLE_CUDA)
+            selectedGpu = options.mUseGpu && LogVole::gpu::available();
+#endif
+            if (options.mUseGpu && !selectedGpu)
                 throw std::runtime_error("CUDA support and an available device are required for -gpu 1");
             return options;
         }

@@ -137,17 +137,17 @@ namespace osuCrypto::LogVole::gpu
         }
     }
 
-    bool publicUniformRetentionEnabled(const LogVoleExecutionOptions& options)
+    bool publicUniformRetentionEnabled(const LogVoleExecutionOptions& options, bool selectedGpu)
     {
         const bool decline = options.mAdvanced.mProtocol.mFailures.mPublicRetain;
-        return options.mAdvanced.mProtocol.mPublicUniformRetention && !(decline) && enabled(options);
+        return options.mAdvanced.mProtocol.mPublicUniformRetention && !(decline) && (options.mUseGpu && selectedGpu);
     }
 
     bool registerPublicUniformRetention(const RingNttContext& ctx,
         const std::shared_ptr<const std::vector<RnsPoly>>& host,
         const RetainedPublicUniformPtr& captured, ProtocolCacheScopeView scope)
     {
-        if (!ctx.mPublicCache || !publicUniformRetentionEnabled(ctx.mExecutionOptions) || !host || !captured || captured->count() == 0 ||
+        if (!ctx.mPublicCache || !publicUniformRetentionEnabled(ctx.mExecutionOptions, enabled(ctx)) || !host || !captured || captured->count() == 0 ||
             !retentionContextMatches(ctx, *captured->mImpl, scope) ||
             !retentionHostMatches(*host, *captured->mImpl)) return false;
         const auto bytes = captured->mImpl->mValues.bytes();
@@ -178,7 +178,7 @@ namespace osuCrypto::LogVole::gpu
     RetainedPublicUniformPtr findPublicUniformRetention(
         const RingNttContext& ctx, std::span<const RnsPoly> host, ProtocolCacheScopeView scope)
     {
-        if (!ctx.mPublicCache || !publicUniformRetentionEnabled(ctx.mExecutionOptions) || host.empty()) return {};
+        if (!ctx.mPublicCache || !publicUniformRetentionEnabled(ctx.mExecutionOptions, enabled(ctx)) || host.empty()) return {};
         auto& retention = ctx.mPublicCache->mRetention;
         RetainedPublicUniformPtr candidate;
         std::shared_ptr<const std::vector<RnsPoly>> owner;
@@ -211,7 +211,7 @@ namespace osuCrypto::LogVole::gpu
     bool fetchRetainedPublicUniform(const RetainedPublicUniform& source,
         std::vector<RnsPoly>& out, GpuStream& stream, ProtocolCacheScopeView scope)
     {
-        if (!available() || source.count() == 0 ||
+        if (!stream.raw() || source.count() == 0 ||
             source.mImpl->mDevice != currentDeviceOrdinal() ||
             source.mImpl->mRole != scope.mRole || source.mImpl->mRunId != scope.mRunId)
             return false;
@@ -275,7 +275,7 @@ namespace osuCrypto::LogVole::gpu
         HostStep materializeStep(hostProfiler(ctx), "setup: public uniform host materialization");
         std::vector<RnsPoly> next;
         bool downloaded = false;
-        if (available() && currentDeviceOrdinal() == value.mDevice)
+        if (enabled(ctx) && currentDeviceOrdinal() == value.mDevice)
         {
             auto& stream = contextSampleStream(ctx);
             std::lock_guard use(value.mDeviceUseMutex);
@@ -787,7 +787,7 @@ namespace osuCrypto::LogVole::gpu
                     next.mCols = mCoefficients.mCols;
                     bool downloaded = false;
                     {
-                        if (available() && currentDeviceOrdinal() == mDevice)
+                        if (enabled(mContext) && currentDeviceOrdinal() == mDevice)
                         {
                             auto& stream = contextStream(mContext);
                             StreamDrain drain{stream};
@@ -1525,9 +1525,9 @@ namespace osuCrypto::LogVole::gpu
         return true;
     }
 
-    bool lencRandomizerResidencyEnabled(const LogVoleExecutionOptions& options)
+    bool lencRandomizerResidencyEnabled(const LogVoleExecutionOptions& options, bool selectedGpu)
     {
-        return enabled(options) && options.mAdvanced.mProtocol.mLencRandomizerResidency;
+        return (options.mUseGpu && selectedGpu) && options.mAdvanced.mProtocol.mLencRandomizerResidency;
     }
 
     namespace
@@ -1775,7 +1775,7 @@ namespace osuCrypto::LogVole::gpu
 
         void reserve()
         {
-            if (!available() || currentDeviceOrdinal() != mDevice) return;
+            if (currentDeviceOrdinal() != mDevice) return;
             GpuStream stream(mStreamOptions, mHostProfiler);
             if (!stream.raw()) return;
             bool ok = false;
@@ -2174,7 +2174,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool syncStream(const RingNttContext& ctx)
     {
-        if (!available()) return true;
+        if (!enabled(ctx)) return true;
         return contextStream(ctx).sync();
     }
 
@@ -2318,9 +2318,9 @@ namespace osuCrypto::LogVole::gpu
         return ok;
     }
 
-    bool setupUniformSamplingEnabled(const LogVoleExecutionOptions& options)
+    bool setupUniformSamplingEnabled(const LogVoleExecutionOptions& options, bool selectedGpu)
     {
-        return options.mAdvanced.mProtocol.mUniformSampling && enabled(options);
+        return options.mAdvanced.mProtocol.mUniformSampling && (options.mUseGpu && selectedGpu);
     }
 
     namespace
@@ -2330,7 +2330,7 @@ namespace osuCrypto::LogVole::gpu
             bool synchronize, std::shared_ptr<RetainedPublicUniform>& out, ProtocolCacheScopeView scope)
         {
             HostStep totalStep(hostProfiler(ctx), "setup: uniform device total");
-            if (!setupUniformSamplingEnabled(ctx.mExecutionOptions) || seeds.empty() ||
+            if (!setupUniformSamplingEnabled(ctx.mExecutionOptions, enabled(ctx)) || seeds.empty() ||
                 seeds.size() > std::numeric_limits<u32>::max()) return false;
             const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mUniform;
             if (decline) return false;
@@ -2398,7 +2398,7 @@ namespace osuCrypto::LogVole::gpu
         const RingNttContext& ctx, std::span<const std::array<u64, 8>> seeds,
         bool outputNtt, RetainedPublicUniformPtr& out, ProtocolCacheScopeView scope)
     {
-        if (!publicUniformRetentionEnabled(ctx.mExecutionOptions)) return false;
+        if (!publicUniformRetentionEnabled(ctx.mExecutionOptions, enabled(ctx))) return false;
         const std::size_t polyWords = ringPolyCoeffCount(ctx.mParams);
         if (!polyWords || seeds.size() > publicRetentionByteLimit / sizeof(u64) / polyWords)
             return false;
@@ -2480,7 +2480,7 @@ namespace osuCrypto::LogVole::gpu
             if (!retained->mImpl->mValues.download(next, stream, 0, retained->count()) ||
                 next.size() != seeds.size()) return false;
         }
-        const bool keep = captured && publicUniformRetentionEnabled(ctx.mExecutionOptions) &&
+        const bool keep = captured && publicUniformRetentionEnabled(ctx.mExecutionOptions, enabled(ctx)) &&
             retained->mImpl->mValues.bytes() <= publicRetentionByteLimit;
         if (keep)
         {
@@ -7206,9 +7206,9 @@ namespace osuCrypto::LogVole::gpu
 
     // ---- sender Root ------------------------------------------------------
 
-    bool rootDigestHashEnabled(const LogVoleExecutionOptions& options)
+    bool rootDigestHashEnabled(const LogVoleExecutionOptions& options, bool selectedGpu)
     {
-        return enabled(options) && options.mAdvanced.mProtocol.mRootDigestHash;
+        return (options.mUseGpu && selectedGpu) && options.mAdvanced.mProtocol.mRootDigestHash;
     }
 
     namespace
@@ -7232,23 +7232,23 @@ namespace osuCrypto::LogVole::gpu
         if (!digest.mImpl ||
             digest.mImpl->mLogicalCount || digest.mImpl->mBuf.count() != 1u ||
             !digest.mImpl->mRing ||
-            !rootDigestHashEnabled(digest.mImpl->mRing->executionOptions()) ||
+            !rootDigestHashEnabled(digest.mImpl->mRing->executionOptions(), digest.mImpl->mRing->gpuEnabled()) ||
             digest.mImpl->mRing->polyWords() >
                 std::numeric_limits<u32>::max()) return false;
         return hashRootWordsDevice(digest.mImpl->mRing->view(stream), digest.mImpl->mBuf.data(stream),
             static_cast<u32>(digest.mImpl->mRing->polyWords()), out, stream);
     }
 
-    bool rootKPrimeSamplingEnabled(const LogVoleExecutionOptions& options)
+    bool rootKPrimeSamplingEnabled(const LogVoleExecutionOptions& options, bool selectedGpu)
     {
-        return enabled(options) && options.mAdvanced.mProtocol.mRootKPrimeSampling;
+        return (options.mUseGpu && selectedGpu) && options.mAdvanced.mProtocol.mRootKPrimeSampling;
     }
 
     bool sampleRootKPrimeDevice(const RingNttContext& ctx,
         const std::array<u64, 8>& seed, DeviceBatchPtr& out)
     {
         out.reset();
-        if (!rootKPrimeSamplingEnabled(ctx.mExecutionOptions)) return false;
+        if (!rootKPrimeSamplingEnabled(ctx.mExecutionOptions, enabled(ctx))) return false;
         // Validation hook: Core must replay its already-consumed seed if the
         // device path declines. Never draw substitute parent randomness.
         const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootKPrime;
@@ -8962,7 +8962,7 @@ namespace osuCrypto::LogVole::gpu
 
     DeviceScalarsPtr uploadScalars(std::span<const u64> src, GpuStream& stream)
     {
-        if (!available() || src.empty()) return nullptr;
+        if (!stream.raw() || src.empty()) return nullptr;
         // Allocator reuse dependencies must be recorded on the stream that
         // will receive the upload, including after a protocol-role switch.
         auto out = std::make_shared<DeviceScalars>();
@@ -8981,7 +8981,7 @@ namespace osuCrypto::LogVole::gpu
 
     DeviceScalarsPtr sampleScalarsFromSeed(block seed, u64 count, u64 modulus, GpuStream& stream)
     {
-        if (!available() || !count || !modulus ||
+        if (!stream.raw() || !count || !modulus ||
             count > std::numeric_limits<std::size_t>::max() / sizeof(u64)) return nullptr;
         HostStep sampleStep(stream.hostProfiler(), "gpu: sample input scalars");
         auto out = std::make_shared<DeviceScalars>();

@@ -31,7 +31,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<WireMemoryPool> makeSetupWireMemory(std::size_t bytes, LogVoleWireOptions options, bool useGpu)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (bytes >= (std::size_t{1} << 20) && options.mPinned && useGpu && gpu::available())
+            if (bytes >= (std::size_t{1} << 20) && options.mPinned && useGpu)
                 return std::make_shared<WireMemoryPool>();
 #else
             (void)bytes;
@@ -51,8 +51,7 @@ namespace osuCrypto::LogVole
             if (bytes > std::numeric_limits<std::size_t>::max() - overhead)
                 throw std::bad_array_new_length();
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (memory && bytes >= (std::size_t{1} << 20) && alignment <= 4096 &&
-                gpu::available())
+            if (memory && bytes >= (std::size_t{1} << 20) && alignment <= 4096)
             {
 
                 if (void* pointer = memory->allocate(bytes, alignment))
@@ -80,7 +79,7 @@ namespace osuCrypto::LogVole
     void adviseGpuSetupWireBuffer(Buffer& buffer, const LogVoleWireOptions& options, bool useGpu)
     {
 #if defined(__linux__) && defined(ENABLE_LOGVOLE_CUDA) && defined(MADV_HUGEPAGE)
-        if (!options.mHugePages || !(useGpu && gpu::available()) || buffer.size() < (std::size_t{8} << 20))
+        if (!options.mHugePages || !useGpu || buffer.size() < (std::size_t{8} << 20))
             return;
         if (buffer.memory() && buffer.memory()->contains(buffer.data(), buffer.size())) return;
         constexpr std::uintptr_t alignment = std::uintptr_t{2} << 20;
@@ -116,7 +115,7 @@ namespace osuCrypto::LogVole
         u32 setupCodecWorkers(u32 requested, bool useGpu)
         {
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (useGpu && gpu::available())
+            if (useGpu)
                 return std::max<u32>(1u, requested);
 #endif
             return 1;
@@ -1232,7 +1231,7 @@ namespace osuCrypto::LogVole
         auto* profile = profileOwner.get();
         bool enabled = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        enabled = useGpu && gpu::available();
+        enabled = useGpu;
 #endif
         if (!enabled || std::endian::native != std::endian::little)
             return decode(payload, message, workers, options, useGpu, profile, cpuBenchmark);
@@ -1348,7 +1347,7 @@ namespace osuCrypto::LogVole
         auto* profile = profileOwner.get();
         bool enabled = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        enabled = useGpu && gpu::available();
+        enabled = useGpu;
 #endif
         if (!enabled || std::endian::native != std::endian::little)
             return decode(payload, message, workers, options, useGpu, profile, cpuBenchmark);

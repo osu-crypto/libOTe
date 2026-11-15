@@ -160,6 +160,7 @@ namespace osuCrypto::LogVole
         const std::shared_ptr<const ProtocolCacheService> mProtocolService;
         std::unique_ptr<Impl> mImpl;
         const LogVoleExecutionOptions mExecutionOptions;
+        const bool mGpuAvailable;
         friend bool makeRingNttContext(const RingParams&, RingNttContext&,
             std::shared_ptr<RingContextFactory>, ProtocolCacheScopeView);
         friend bool makeGpuRingNttContext(const RingParams&, RingNttContext&, ProtocolCacheScopeView);
@@ -172,6 +173,8 @@ namespace osuCrypto::LogVole
             std::shared_ptr<const ProtocolCacheService> service = {});
         const std::shared_ptr<const ProtocolCacheService>& protocolService() const noexcept { return mProtocolService; }
         const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
+        bool gpuAvailable() const noexcept { return mGpuAvailable; }
+        bool gpuEnabled() const noexcept { return mExecutionOptions.mUseGpu && mGpuAvailable; }
         RootStepProfiler* rootProfiler() const noexcept;
         HostStepProfiler* hostProfiler() const noexcept;
         const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const noexcept;
@@ -195,6 +198,8 @@ namespace osuCrypto::LogVole
         // once on construction; retained/context copies reuse that decision.
         CpuCapabilities mCpuCapabilities{CpuCapabilities::Mode::Scalar};
         LogVoleExecutionOptions mExecutionOptions;
+        // Captured by the factory; mutable execution options still select CPU/GPU.
+        bool mGpuAvailable = false;
         std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::shared_ptr<RingContextFactory> mFactory;
         // A CRT-selected ring carries its explicit plaintext factory into leaf
@@ -601,17 +606,13 @@ namespace osuCrypto::LogVole::gpu
 #if defined(ENABLE_LOGVOLE_CUDA)
     bool available();
 #endif
-    inline bool enabled(const LogVoleExecutionOptions& options)
+    inline bool enabled(const RingNttContext& ctx)
     {
-#if defined(ENABLE_LOGVOLE_CUDA)
-        return options.mUseGpu && available();
+        #if defined(ENABLE_LOGVOLE_CUDA)
+        return ctx.mExecutionOptions.mUseGpu && ctx.mGpuAvailable;
 #else
         return false;
 #endif
-    }
-    inline bool enabled(const RingNttContext& ctx)
-    {
-        return enabled(ctx.mExecutionOptions);
     }
     inline bool enabled(const std::shared_ptr<const RingNttContext>& owner)
     {

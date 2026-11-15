@@ -23,6 +23,7 @@
 #include <memory>
 #include <exception>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -30,14 +31,19 @@
 
 namespace osuCrypto::LogVole::gpu
 {
+    // Explicit GPU resource constructors discover once when no captured fact is supplied.
+    // CPU factories pass false, and derived owners forward their existing fact.
     // Caller-owned reuse of ring and plaintext tables. Table owners retain
     // setup resources independently, with no reference back to this cache.
     class GpuTableCache
     {
     public:
         explicit GpuTableCache(LogVoleExecutionOptions options = {},
-            std::shared_ptr<HostStepProfiler> profiler = {});
+            std::shared_ptr<HostStepProfiler> profiler = {},
+            std::optional<bool> gpuAvailable = {});
         const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
+        bool gpuAvailable() const noexcept { return mGpuAvailable; }
+        bool gpuEnabled() const noexcept { return mExecutionOptions.mUseGpu && mGpuAvailable; }
         HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
         const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
         ~GpuTableCache();
@@ -51,6 +57,7 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::unique_ptr<Impl> mImpl;
         const LogVoleExecutionOptions mExecutionOptions;
+        const bool mGpuAvailable;
     };
     // Explicit cold-setup execution domain. Copies of ring/CRT resources can
     // retain this domain; it owns reusable per-worker streams without TLS.
@@ -60,8 +67,11 @@ namespace osuCrypto::LogVole::gpu
     public:
         explicit GpuSetupContext(LogVoleExecutionOptions options = {},
             std::shared_ptr<HostStepProfiler> profiler = {},
-            std::shared_ptr<const ProtocolCacheService> service = {});
+            std::shared_ptr<const ProtocolCacheService> service = {},
+            std::optional<bool> gpuAvailable = {});
         const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
+        bool gpuAvailable() const noexcept { return mGpuAvailable; }
+        bool gpuEnabled() const noexcept { return mExecutionOptions.mUseGpu && mGpuAvailable; }
         HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
         const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
         const std::shared_ptr<const ProtocolCacheService>& protocolService() const noexcept { return mProtocolService; }
@@ -75,8 +85,10 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::unique_ptr<Impl> mImpl;
         const LogVoleExecutionOptions mExecutionOptions;
+        const bool mGpuAvailable;
     };
 
+    // Uncached device discovery, for explicit cold construction/diagnostics only.
     bool available();
     std::string deviceDescription();
     // Returns -1 if the current CUDA device cannot be queried.
@@ -235,8 +247,11 @@ namespace osuCrypto::LogVole::gpu
     public:
         explicit GpuExecutionContext(LogVoleExecutionOptions options = {},
             std::shared_ptr<HostStepProfiler> profiler = {},
-            std::shared_ptr<const ProtocolCacheService> service = {});
+            std::shared_ptr<const ProtocolCacheService> service = {},
+            std::optional<bool> gpuAvailable = {});
         const LogVoleExecutionOptions& executionOptions() const { return mExecutionOptions; }
+        bool gpuAvailable() const noexcept { return mGpuAvailable; }
+        bool gpuEnabled() const noexcept { return mExecutionOptions.mUseGpu && mGpuAvailable; }
         HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
         const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
         const std::shared_ptr<const ProtocolCacheService>& protocolService() const noexcept { return mProtocolService; }
@@ -261,6 +276,7 @@ namespace osuCrypto::LogVole::gpu
         std::shared_ptr<HostStepProfiler> mHostProfiler;
         std::unique_ptr<Impl> mImpl;
         const LogVoleExecutionOptions mExecutionOptions;
+        const bool mGpuAvailable;
     };
 
     GpuStream& contextStream(const RingNttContext& ctx);
@@ -332,7 +348,7 @@ namespace osuCrypto::LogVole::gpu
 
     // Explicit native setup selects a role-local cache lane on device 0.
     // Factory construction still requires a nonzero owned protocol run.
-    bool nativeSealBundleCacheRequested(ProtocolCacheRole role, const LogVoleExecutionOptions& settings);
+    bool nativeSealBundleCacheRequested(ProtocolCacheRole role, const LogVoleExecutionOptions& settings, bool selectedGpu);
 
     // Upload a compact host matrix into pitched device rows. The caller keeps
     // src alive until stream completion; untouched device columns stay unused.
@@ -434,6 +450,7 @@ namespace osuCrypto::LogVole::gpu
         }
         const u64* sampleMaxMultiple() const { return mSampleMaxMultiple; }
         const std::shared_ptr<GpuSetupContext>& setupContext() const { return mSetup; }
+        bool gpuEnabled() const noexcept { return mSetup && mSetup->gpuEnabled(); }
 
     private:
         GpuRing() = default;

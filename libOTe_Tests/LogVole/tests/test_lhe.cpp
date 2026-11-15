@@ -173,6 +173,10 @@ namespace
 
     void check_enc1_serial_reference(const RingParams& ring, bool useGpu, std::uint32_t cols, std::uint32_t gadgetBits = 20)
     {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
         tests_libOTe::logvole_test::SetupResources setupResources;
         std::array<oc::u8, 4> setupResults{};
         osuCrypto::LogVoleGpuSetupOptions setupOptions;
@@ -180,7 +184,7 @@ namespace
         advanced.mUseGpu = useGpu;
         advanced.mAdvanced.mProtocol.mGaussianResident = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
-        const bool haveGpu = gpu::enabled(advanced);
+        const bool haveGpu = (advanced.mUseGpu && testGpuAvailable);
         gpu::GaussianHostCompatibility gaussianCompatibility;
         const bool haveGaussian = haveGpu && gaussianCompatibility.compatible();
 #else

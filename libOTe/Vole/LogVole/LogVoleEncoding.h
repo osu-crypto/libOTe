@@ -18,6 +18,8 @@
 
 namespace osuCrypto::LogVole
 {
+    // useGpu arguments below are resolved backend selections from the caller's
+    // context/owner. Encoding never performs device discovery.
     struct Params;
     namespace detail
     {

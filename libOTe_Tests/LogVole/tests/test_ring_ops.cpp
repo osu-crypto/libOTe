@@ -111,6 +111,15 @@ namespace
     }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
+    // Raw backend tests keep their CPU oracle dispatch while explicitly owning
+    // GPU tables. Discovery belongs to this cold fixture boundary.
+    void prepareGpuTableOwners(RingNttContext& ctx)
+    {
+        ctx.mResourceScope.mTables = std::make_shared<gpu::GpuTableCache>(ctx.mExecutionOptions);
+        ctx.mGpuSetup = std::make_shared<gpu::GpuSetupContext>(ctx.mExecutionOptions,
+            ctx.mHostProfiler, ctx.mFactory->protocolService(), ctx.mResourceScope.mTables->gpuAvailable());
+    }
+
     void expect_single_limb_batching_parity(const RingParams& ring, std::uint32_t plaintextBits)
     {
         macoro::thread_pool crtExecutor;
@@ -402,6 +411,8 @@ void LogVole_RingOps_GpuBufferResizeBounds(const oc::CLP& cmd)
     largeParams.mPolyModulusDegree = 4096;
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), smallContext));
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(largeParams, largeContext));
+    prepareGpuTableOwners(smallContext);
+    prepareGpuTableOwners(largeContext);
     auto small = gpu::GpuRing::get(smallContext);
     auto large = gpu::GpuRing::get(largeContext);
     LOGVOLE_REQUIRE_TRUE(small && large);
@@ -545,6 +556,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(native.expired());
         // Sharing an immutable table must not keep completed session streams
         // or their private allocation pools alive across successive sessions.
+        prepareGpuTableOwners(math);
         const auto tables = gpu::GpuRing::get(math);
         LOGVOLE_REQUIRE_TRUE(tables);
         for (unsigned round = 0; round != 2; ++round)
@@ -578,6 +590,14 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
                 std::make_shared<RingContextFactory>(deviceOptions), sender));
         }
         LOGVOLE_REQUIRE_TRUE(original.mGpuLightweight && original.mFactoryOwner);
+        LOGVOLE_REQUIRE_TRUE(original.mFactory->gpuAvailable() && original.mGpuAvailable);
+        LOGVOLE_REQUIRE_TRUE(original.mGpuSetup->gpuAvailable() && original.mGpuExecution->gpuAvailable());
+        {
+            auto forcedCpu = original;
+            forcedCpu.mExecutionOptions.mUseGpu = false;
+            LOGVOLE_REQUIRE_FALSE(gpu::enabled(forcedCpu));
+        }
+        LOGVOLE_REQUIRE_TRUE(gpu::enabled(original));
         auto retained = original.mFactoryOwner;
         std::weak_ptr<const RingNttContext> record = retained;
         std::weak_ptr<gpu::GpuExecutionContext> domain = original.mGpuExecution;
@@ -590,6 +610,15 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         auto plain = gpu::GpuPlainNtt::getRaw(params.mPolyModulusDegree,
             p, original.mResourceScope, original.mGpuSetup);
         LOGVOLE_REQUIRE_TRUE(tables && plain);
+        {
+            auto unavailable = original.mResourceScope;
+            unavailable.mTables = std::make_shared<gpu::GpuTableCache>(
+                original.mExecutionOptions, nullptr, false);
+            LOGVOLE_REQUIRE_FALSE(gpu::GpuRing::getRaw(params, tables->hostModuli(),
+                unavailable, original.mGpuSetup));
+            LOGVOLE_REQUIRE_FALSE(gpu::GpuPlainNtt::getRaw(params.mPolyModulusDegree,
+                p, unavailable, original.mGpuSetup));
+        }
         std::weak_ptr<gpu::GpuRing> ringTable = tables;
         std::weak_ptr<gpu::GpuPlainNtt> plainTable = plain;
         {
@@ -700,6 +729,7 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 17, context));
             }
             LOGVOLE_REQUIRE_FALSE(context.mGpuLightweight);
+            prepareGpuTableOwners(context.mRing);
             ring = gpu::GpuRing::get(context.mRing);
             plain = gpu::GpuPlainNtt::get(*context.mBatchingContext,
                 *context.mBatchEncoder, context.mRing.mResourceScope);
@@ -819,6 +849,18 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
         RingNttContext first, second;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(unique, first));
         auto ringFactory = first.mFactory;
+        LOGVOLE_REQUIRE_FALSE(ringFactory->gpuAvailable());
+        LOGVOLE_REQUIRE_FALSE(gpu::enabled(first));
+        {
+            auto cpuForced = first;
+            cpuForced.mGpuAvailable = true;
+            LOGVOLE_REQUIRE_FALSE(gpu::enabled(cpuForced));
+        }
+#if defined(ENABLE_LOGVOLE_CUDA)
+        LOGVOLE_REQUIRE_FALSE(first.mGpuSetup->gpuAvailable());
+        LOGVOLE_REQUIRE_FALSE(first.mGpuExecution->gpuAvailable());
+        LOGVOLE_REQUIRE_FALSE(first.mResourceScope.mTables->gpuAvailable());
+#endif
         ringFactoryLifetime = ringFactory;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(unique, second, first.mFactory));
         LOGVOLE_REQUIRE_TRUE(first.mFactoryOwner && first.mFactoryOwner == second.mFactoryOwner);
@@ -1004,6 +1046,7 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
         constexpr gpu::u32 count = 3, streamWords = 1031;
         RingNttContext context;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(make_small_params(), context));
+        prepareGpuTableOwners(context);
         auto ring = gpu::GpuRing::get(context);
         LOGVOLE_REQUIRE_TRUE(ring);
         gpu::GpuExecutionContext execution;
@@ -1141,6 +1184,7 @@ void LogVole_RingOps_UniformSamplerScratchOwnership(const oc::CLP& cmd)
         }
         RingNttContext ctx;
         LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        prepareGpuTableOwners(ctx);
         auto ring = gpu::GpuRing::get(ctx);
         LOGVOLE_REQUIRE_TRUE(ring != nullptr);
         const auto words = ring->polyWords();
@@ -1233,6 +1277,7 @@ void LogVole_RingOps_GpuStreamStagingLifetime(const oc::CLP& cmd)
         std::make_shared<gpu::GpuExecutionContext>()));
     LOGVOLE_REQUIRE_TRUE(configured.mGpuExecution == savedExecution);
     LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(configured));
+    prepareGpuTableOwners(defaults);
     LOGVOLE_REQUIRE_TRUE(gpu::GpuRing::get(defaults));
     advanced.mAdvanced.mStreams.mIndexScratchKiB = 257;
     bool rejected = false;
@@ -1340,6 +1385,10 @@ void LogVole_RingOps_GpuStreamStagingLifetime(const oc::CLP& cmd)
 
 void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     const auto identityService = ProtocolCacheService::create();
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
@@ -1359,7 +1408,7 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
         senderA = sharedLhePublicANtt(senderCtx, count, scope);
         senderB = sharedLencPublicBNtt(senderCtx, count / 2, scope);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled(advanced)) senderRing = gpu::GpuRing::get(senderCtx);
+        if ((advanced.mUseGpu && testGpuAvailable)) senderRing = gpu::GpuRing::get(senderCtx);
 #endif
     }
     {
@@ -1369,7 +1418,7 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
         receiverA = sharedLhePublicANtt(receiverCtx, count, scope);
         receiverB = sharedLencPublicBNtt(receiverCtx, count / 2, scope);
 #if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled(advanced)) receiverRing = gpu::GpuRing::get(receiverCtx);
+        if ((advanced.mUseGpu && testGpuAvailable)) receiverRing = gpu::GpuRing::get(receiverCtx);
 #endif
     }
 
@@ -1380,7 +1429,7 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
     expect_batch_equal(*senderA, *receiverA);
     expect_batch_equal(*senderB, *receiverB);
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::enabled(advanced))
+    if ((advanced.mUseGpu && testGpuAvailable))
     {
         LOGVOLE_REQUIRE_TRUE(senderRing && receiverRing);
         LOGVOLE_EXPECT_TRUE(senderRing != receiverRing);
@@ -1390,6 +1439,10 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
 
 void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     tests_libOTe::logvole_test::SetupResources crtResources;
     std::array<ZpEncodeBuffer, 3> crtEncodeBuffers;
     std::array<ZpDecodeBuffer, 3> crtDecodeBuffers;
@@ -1402,7 +1455,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
     osuCrypto::LogVoleExecutionOptions advanced;
     advanced.mUseGpu = requestGpu;
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (requestGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled(advanced));
+    if (requestGpu) LOGVOLE_REQUIRE_TRUE((advanced.mUseGpu && testGpuAvailable));
 #else
     (void)requestGpu;
 #endif
@@ -1445,7 +1498,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
             const ProtocolCacheScope roleScope(run,
                 party ? ProtocolCacheRole::Receiver : ProtocolCacheRole::Sender);
 #if defined(ENABLE_LOGVOLE_CUDA)
-            roleGpu[party] = gpu::enabled(advanced);
+            roleGpu[party] = (advanced.mUseGpu && testGpuAvailable);
 #endif
             auto& context = lightweight[party];
             LOGVOLE_REQUIRE_TRUE(makeGpuRingNttContext(params, context, roleScope));
@@ -1725,7 +1778,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
     }
 
 #if defined(ENABLE_LOGVOLE_CUDA)
-    if (gpu::enabled(advanced))
+    if ((advanced.mUseGpu && testGpuAvailable))
     {
         // The production constants above remain the fast path. These tuples
         // force exact dynamic prime selection, mixed-width ordering, device
@@ -2460,6 +2513,7 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
     std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), 52);
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+    prepareGpuTableOwners(ctx);
     auto ring = gpu::GpuRing::get(ctx);
     LOGVOLE_REQUIRE_TRUE(ring && ring->n() == params.mPolyModulusDegree &&
         ring->rho() == params.mCoeffModulusBits.size());
@@ -2509,11 +2563,15 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
 
 void LogVole_RingOps_NttBatchDeviceCanonicalization(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     osuCrypto::LogVoleExecutionOptions testAdvanced;
     testAdvanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool requestGpu = cmd.getOr("gpu", 0) != 0;
-    if (requestGpu) LOGVOLE_REQUIRE_TRUE(gpu::enabled(testAdvanced));
+    if (requestGpu) LOGVOLE_REQUIRE_TRUE((testAdvanced.mUseGpu && testGpuAvailable));
 #else
     (void)cmd;
 #endif
@@ -2602,7 +2660,7 @@ void LogVole_RingOps_NttBatchDeviceCanonicalization(const oc::CLP& cmd)
 
             tests_libOTe::logvole_test::ScopedOptionValue reduction(ctx.mExecutionOptions.mAdvanced.mProtocol.mNttCanonicalize, true);
 #if defined(ENABLE_LOGVOLE_CUDA)
-            if (gpu::enabled(testAdvanced) && count == 4u)
+            if ((testAdvanced.mUseGpu && testGpuAvailable) && count == 4u)
             {
                 for (const char* declineAt : {"1", "2"})
                 {
@@ -2938,7 +2996,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
     tests_libOTe::logvole_test::ScopedOptionValue lheStrict(setupOptions.mLheDeviceStrict, true);
 
     tests_libOTe::logvole_test::ScopedOptionValue compact(setupOptions.mCompactNoise, false);
-    LOGVOLE_REQUIRE_TRUE(gpu::publicUniformRetentionEnabled(advanced));
+    LOGVOLE_REQUIRE_TRUE(gpu::publicUniformRetentionEnabled(advanced, true));
     auto exact = [](const auto& a, const auto& b) {
         LOGVOLE_REQUIRE_EQ(a.size(), b.size());
         for (std::size_t i = 0; i < a.size(); ++i)
@@ -3088,7 +3146,7 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, disabled,
                     std::make_shared<RingContextFactory>(disabledOptions, identityService), cacheScope));
                 const auto& selected = forcedDecline ? ctx : disabled;
-                LOGVOLE_REQUIRE_FALSE(gpu::publicUniformRetentionEnabled(selected.mExecutionOptions));
+                LOGVOLE_REQUIRE_FALSE(gpu::publicUniformRetentionEnabled(selected.mExecutionOptions, gpu::enabled(selected)));
                 LOGVOLE_REQUIRE_TRUE(gpu::findPublicUniformRetention(selected, span, cacheScope) == nullptr);
                 auto capture = token;
                 exact(expected, deriveUniformPolyBatchFromNonce(selected, nonce, domain, count, actualNtt, &capture, cacheScope));
@@ -3237,12 +3295,16 @@ void LogVole_RingOps_PublicUniformRetentionParity(const oc::CLP& cmd)
 
 void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP& cmd)
 {
+#if defined(ENABLE_LOGVOLE_CUDA)
+    const bool testGpuAvailable = gpu::available();
+#endif
+
     tests_libOTe::logvole_test::SetupResources setupResources;
     osuCrypto::LogVoleExecutionOptions testAdvanced;
     tests_libOTe::logvole_test::ScopedOptionValue originalTransform(testAdvanced.mAdvanced.mProtocol.mGaussianTransform, false);
 #if defined(ENABLE_LOGVOLE_CUDA)
     testAdvanced.mUseGpu = cmd.getOr("gpu", 0) != 0;
-    const bool haveGpu = gpu::enabled(testAdvanced);
+    const bool haveGpu = (testAdvanced.mUseGpu && testGpuAvailable);
     if (testAdvanced.mUseGpu) LOGVOLE_REQUIRE_TRUE(haveGpu);
     if (haveGpu)
     {

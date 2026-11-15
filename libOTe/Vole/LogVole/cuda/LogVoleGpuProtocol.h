@@ -80,7 +80,7 @@ namespace osuCrypto::LogVole::gpu
     // before concurrent online use.
     bool prepareReusableSenderCache(ShrinkExpandSenderState& state,
         ProtocolCacheScopeView scope = {});
-    bool lencRandomizerResidencyEnabled(const LogVoleExecutionOptions& options);
+    bool lencRandomizerResidencyEnabled(const LogVoleExecutionOptions& options, bool selectedGpu);
 
     // Device state that has to survive from a level's shrink to its expand.
     class LevelSession
@@ -133,7 +133,7 @@ namespace osuCrypto::LogVole::gpu
     };
     using RetainedPublicUniformPtr = std::shared_ptr<const RetainedPublicUniform>;
 
-    bool publicUniformRetentionEnabled(const LogVoleExecutionOptions& options);
+    bool publicUniformRetentionEnabled(const LogVoleExecutionOptions& options, bool selectedGpu);
     // Register only the original captured host allocations moved directly into
     // a const owner. They must not have been modified after sampling. A copied
     // vector cannot register; lookup requires its live immutable owner, exact
@@ -195,13 +195,13 @@ namespace osuCrypto::LogVole::gpu
     bool setupSeedLabelRepBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheRunId ownerRunId, ProtocolCacheScopeView scope);
 
-    bool rootKPrimeSamplingEnabled(const LogVoleExecutionOptions& options);
+    bool rootKPrimeSamplingEnabled(const LogVoleExecutionOptions& options, bool selectedGpu);
     // Direct SEAL-seed replay. Publishes a coefficient-domain, synchronized
     // device polynomial; never consumes protocol PRNG state itself.
     bool sampleRootKPrimeDevice(const RingNttContext& ctx,
         const std::array<u64, 8>& seed, DeviceBatchPtr& out);
 
-    bool rootDigestHashEnabled(const LogVoleExecutionOptions& options);
+    bool rootDigestHashEnabled(const LogVoleExecutionOptions& options, bool selectedGpu);
     bool hashRootDigestDevice(const DeviceBatch& digest, block& out, GpuStream& stream);
 
     // A coefficient-domain ct2 batch sampled ahead of the sender's top
@@ -529,7 +529,7 @@ namespace osuCrypto::LogVole::gpu
     // Exact setup sampling from already-consumed SEAL seeds. The opt-in gate
     // also checks that the configured SEAL factory uses Blake2xb. On failure,
     // out is unchanged and callers can replay the same seeds on the CPU.
-    bool setupUniformSamplingEnabled(const LogVoleExecutionOptions& options);
+    bool setupUniformSamplingEnabled(const LogVoleExecutionOptions& options, bool selectedGpu);
     bool sampleUniformBatchFromSeedsDevice(
         const RingNttContext& ctx,
         std::span<const std::array<u64, 8>> seeds,

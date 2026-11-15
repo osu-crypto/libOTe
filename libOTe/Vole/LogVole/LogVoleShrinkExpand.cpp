@@ -397,7 +397,7 @@ namespace osuCrypto::LogVole
         if (!gpu::bindContextExecution(ctx, input.mGpuExecution
                                                 ? input.mGpuExecution
                                                 : std::make_shared<gpu::GpuExecutionContext>(
-                                                      ctx.mExecutionOptions, ctx.mHostProfiler, ctx.mFactory->protocolService())))
+                                                      ctx.mExecutionOptions, ctx.mHostProfiler, ctx.mFactory->protocolService(), ctx.mGpuAvailable)))
             co_return false;
         if (input.mFixedSk1Device &&
             (!gpu::topSecretUniformBatchMatches(ctx, *input.mFixedSk1Device, input.mParams.mTau,
@@ -467,7 +467,7 @@ namespace osuCrypto::LogVole
             input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (input.mDeferHostCiphertexts && !message && gpu::enabled(ctx) &&
-            gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions))
+            gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)))
         {
             next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu, setupScope, legacyRingOpsThreadLocalStats());
             next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau, setupScope, legacyRingOpsThreadLocalStats());
@@ -707,7 +707,7 @@ namespace osuCrypto::LogVole
 
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::bindContextExecution(ctx, input.mGpuExecution ? input.mGpuExecution :
-                std::make_shared<gpu::GpuExecutionContext>(ctx.mExecutionOptions, ctx.mHostProfiler, ctx.mFactory->protocolService()))) return false;
+                std::make_shared<gpu::GpuExecutionContext>(ctx.mExecutionOptions, ctx.mHostProfiler, ctx.mFactory->protocolService(), ctx.mGpuAvailable))) return false;
 #endif
 
         PendingRingOpsStats operationPending(ctx.mExecutionOptions.mRingOpsStats);

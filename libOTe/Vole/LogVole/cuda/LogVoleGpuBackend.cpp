@@ -153,11 +153,12 @@ namespace osuCrypto::LogVole::gpu
             void* mStream = nullptr;
             const std::shared_ptr<OwnedGpuStream>& allocationOwner() { return mOwner; }
             explicit RawSetupStream(std::shared_ptr<GpuSetupContext> execution,
-                std::shared_ptr<const ProtocolCacheService> service = {})
+                std::shared_ptr<const ProtocolCacheService> service = {},
+                std::optional<bool> gpuAvailable = {})
             {
                 try
                 {
-                    mExecution = execution ? std::move(execution) : std::make_shared<GpuSetupContext>(osuCrypto::LogVoleExecutionOptions{}, nullptr, std::move(service));
+                    mExecution = execution ? std::move(execution) : std::make_shared<GpuSetupContext>(osuCrypto::LogVoleExecutionOptions{}, nullptr, std::move(service), gpuAvailable);
                     mOwner = mExecution->stream();
                     mStream = mOwner->raw();
                 }
@@ -303,9 +304,11 @@ namespace osuCrypto::LogVole::gpu
         RawPlainCache rawPlains;
     };
 
-    GpuTableCache::GpuTableCache(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler)
+    GpuTableCache::GpuTableCache(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler,
+        std::optional<bool> gpuAvailable)
         : mHostProfiler(options.mAdvanced.mHostStepProfile ? std::move(profiler) : nullptr),
-          mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
+          mImpl(std::make_unique<Impl>()), mExecutionOptions(options),
+          mGpuAvailable(gpuAvailable ? *gpuAvailable : available())
     {
         if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
         if (!mHostProfiler && mExecutionOptions.mAdvanced.mHostStepProfile)
@@ -322,10 +325,11 @@ namespace osuCrypto::LogVole::gpu
     };
 
     GpuSetupContext::GpuSetupContext(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler,
-        std::shared_ptr<const ProtocolCacheService> service)
+        std::shared_ptr<const ProtocolCacheService> service, std::optional<bool> gpuAvailable)
         : mProtocolService(service ? std::move(service) : ProtocolCacheService::create()),
           mHostProfiler(options.mAdvanced.mHostStepProfile ? std::move(profiler) : nullptr),
-          mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
+          mImpl(std::make_unique<Impl>()), mExecutionOptions(options),
+          mGpuAvailable(gpuAvailable ? *gpuAvailable : available())
     {
         if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
         if (!mHostProfiler && mExecutionOptions.mAdvanced.mHostStepProfile)
@@ -358,13 +362,12 @@ namespace osuCrypto::LogVole::gpu
             [](int bits) { return bits >= 2 && bits <= 60; });
     }
 
-    bool nativeSealBundleCacheRequested(ProtocolCacheRole role, const LogVoleExecutionOptions& settings)
+    bool nativeSealBundleCacheRequested(ProtocolCacheRole role, const LogVoleExecutionOptions& settings, bool selectedGpu)
     {
         const auto& options = settings.mAdvanced.mContexts;
-        if (!enabled(settings) ||
+        if (!settings.mUseGpu || !selectedGpu ||
             (role != ProtocolCacheRole::Sender && role != ProtocolCacheRole::Receiver)) return false;
-        return options.mNativeSealBundle &&
-            available() && currentDeviceOrdinal() == 0;
+        return options.mNativeSealBundle && currentDeviceOrdinal() == 0;
     }
 
     bool selectSealCoeffModuliDevice(const RingParams& params,
@@ -372,11 +375,11 @@ namespace osuCrypto::LogVole::gpu
         const std::shared_ptr<const ProtocolCacheService>& fallbackService)
     {
         HostStep step(execution ? execution->hostProfiler() : nullptr, "setup: dynamic GPU ring prime selection");
-        if (!dynamicSealSetupSupported(params) || !available() || currentDeviceOrdinal() != 0)
+        if (!dynamicSealSetupSupported(params) || !(execution ? execution->gpuAvailable() : available()) || currentDeviceOrdinal() != 0)
             return false;
         const u32 rho = static_cast<u32>(params.mCoeffModulusBits.size());
         std::array<u8, 16u * sizeof(u64) + sizeof(u32)> hostRecord{};
-        RawSetupStream stream(execution, execution ? nullptr : fallbackService);
+        RawSetupStream stream(execution, execution ? nullptr : fallbackService, true);
         if (!stream.mStream) return false;
         RawScratchArena arena(256u, stream);
         auto* bits = arena.take<int>(rho);
@@ -405,10 +408,10 @@ namespace osuCrypto::LogVole::gpu
     {
         HostStep step(execution ? execution->hostProfiler() : nullptr, "setup: dynamic GPU plaintext prime selection");
         if (n < 1024u || n > 131072u || (n & (n - 1u)) || !requestedBits ||
-            minimumQ <= 2u * n || !available() || currentDeviceOrdinal() != 0)
+            minimumQ <= 2u * n || !(execution ? execution->gpuAvailable() : available()) || currentDeviceOrdinal() != 0)
             return false;
         std::array<u8, sizeof(u64) + 2u * sizeof(u32)> hostRecord{};
-        RawSetupStream stream(execution, execution ? nullptr : fallbackService);
+        RawSetupStream stream(execution, execution ? nullptr : fallbackService, true);
         if (!stream.mStream) return false;
         RawScratchArena arena(128u, stream);
         auto* record = arena.take<u8>(sizeof(u64) + 2u * sizeof(u32));
@@ -438,7 +441,7 @@ namespace osuCrypto::LogVole::gpu
         const auto& view = ring.metadata();
         if (!ring.n() || !ring.rho() || ring.rho() > 16u ||
             plaintextPrime <= 2u * ring.n() || plaintextPrime >= view.mMinModulus ||
-            !view.mBaseProd || !available() || currentDeviceOrdinal() != 0) return false;
+            !view.mBaseProd || currentDeviceOrdinal() != 0) return false;
         std::array<u8, 16u * sizeof(u64) + sizeof(u32)> hostRecord{};
         RawSetupStream stream(ring.setupContext());
         if (!stream.mStream) return false;
@@ -472,7 +475,7 @@ namespace osuCrypto::LogVole::gpu
         if (!options.mNativeSealBundle || !options.mLightweightRing ||
             !options.mLightweightCrt || options.mFullModChain || !options.mBatchingSingleLimb ||
             !dynamicSealSetupSupported(params) ||
-            requestedPlaintextBits < 2u || !available() ||
+            requestedPlaintextBits < 2u || !(execution ? execution->gpuAvailable() : available()) ||
             currentDeviceOrdinal() != 0) return false;
         const auto ownerScope = scope;
         if ((ownerScope.mRole != ProtocolCacheRole::Sender &&
@@ -497,7 +500,7 @@ namespace osuCrypto::LogVole::gpu
             constexpr std::size_t maxRecordBytes =
                 16u * 2u * sizeof(u64) + sizeof(u64) + 6u * sizeof(u32);
             std::array<u8, maxRecordBytes> hostRecord{};
-            RawSetupStream stream(execution, execution ? nullptr : ownerScope.mRunId.serviceOwner());
+            RawSetupStream stream(execution, execution ? nullptr : ownerScope.mRunId.serviceOwner(), true);
             if (!stream.mStream) return false;
             RawConstantArena arena(capacity, stream);
             if (!arena) return false;
@@ -678,8 +681,7 @@ namespace osuCrypto::LogVole::gpu
 
     bool available()
     {
-        static const bool ok = gpuDeviceAvailable();
-        return ok;
+        return gpuDeviceAvailable();
     }
 
     std::string deviceDescription()
@@ -970,14 +972,15 @@ namespace osuCrypto::LogVole::gpu
     };
 
     GpuExecutionContext::GpuExecutionContext(LogVoleExecutionOptions options, std::shared_ptr<HostStepProfiler> profiler,
-        std::shared_ptr<const ProtocolCacheService> service)
+        std::shared_ptr<const ProtocolCacheService> service, std::optional<bool> gpuAvailable)
         : mProtocolService(service ? std::move(service) : ProtocolCacheService::create()),
           mHostProfiler(options.mAdvanced.mHostStepProfile ? std::move(profiler) : nullptr),
-          mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
+          mImpl(std::make_unique<Impl>()), mExecutionOptions(options),
+          mGpuAvailable(gpuAvailable ? *gpuAvailable : available())
     {
         if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
-        if (mExecutionOptions.mUseGpu)
-            mImpl->isH200 = deviceDescription().find("H200") != std::string::npos;
+        if (gpuEnabled())
+            mImpl->isH200 = gpuDeviceName().find("H200") != std::string::npos;
         if (!mHostProfiler && mExecutionOptions.mAdvanced.mHostStepProfile)
             mHostProfiler = std::make_shared<HostStepProfiler>();
     }
@@ -1392,14 +1395,14 @@ namespace osuCrypto::LogVole::gpu
             {
                 const auto& certificate =
                     ctx.mRawModuli->mDynamicGpuCertificate;
-                return available() && currentDeviceOrdinal() == 0 &&
+                return ctx.mResourceScope.mTables->gpuAvailable() && currentDeviceOrdinal() == 0 &&
                     certificate->rawOwnerRole() == ctx.mResourceScope.mRole
                     ? certificate : nullptr;
             }
             return getRaw(ctx.mParams, ctx.mRawModuli->mValues, ctx.mResourceScope, ctx.mGpuSetup,
                 ctx.mGpuSetup || !ctx.mFactory ? nullptr : ctx.mFactory->protocolService());
         }
-        if (!available()) return nullptr;
+        if (!ctx.mResourceScope.mTables->gpuAvailable()) return nullptr;
 
         RingCacheKey key{};
         key.mDegree = ctx.mParams.mPolyModulusDegree;
@@ -1433,7 +1436,7 @@ namespace osuCrypto::LogVole::gpu
             if (params.mCoeffModulusBits[j] != static_cast<int>(bits)) return nullptr;
         }
         // The caching allocator currently selects device 0's memory pool.
-        if (!available() || currentDeviceOrdinal() != 0) return nullptr;
+        if (!owner.mTables->gpuAvailable() || currentDeviceOrdinal() != 0) return nullptr;
         try
         {
             RawRingCacheKey key{params.mPolyModulusDegree,
@@ -1450,7 +1453,7 @@ namespace osuCrypto::LogVole::gpu
             if (execution && execution->executionOptions() != owner.mTables->executionOptions()) return nullptr;
             std::shared_ptr<GpuRing> ring(new GpuRing());
             ring->mSetup = execution ? std::move(execution) :
-                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), fallbackService);
+                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), fallbackService, owner.mTables->gpuAvailable());
             ring->mRawOwnerRole = owner.mRole;
             if (!ring->initRaw(params, primes)) return nullptr;
             cache.rawRings.emplace(std::move(key), ring);
@@ -2093,7 +2096,7 @@ namespace osuCrypto::LogVole::gpu
         const seal::SEALContext& batchingContext, const seal::BatchEncoder& encoder,
         const RingResourceScope& owner, ProtocolCacheScopeView scope)
     {
-        if (!owner.mTables || !available()) return nullptr;
+        if (!owner.mTables || !owner.mTables->gpuAvailable()) return nullptr;
 
         auto data = batchingContext.first_context_data();
         if (!data) return nullptr;
@@ -2109,7 +2112,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         std::shared_ptr<GpuPlainNtt> tables(new GpuPlainNtt());
-        tables->mSetup = std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), scope.mRunId.serviceOwner());
+        tables->mSetup = std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), scope.mRunId.serviceOwner(), owner.mTables->gpuAvailable());
         if (!tables->init(batchingContext, encoder)) return nullptr;
         cache.plains.emplace_back(key, tables);
         return tables;
@@ -2120,7 +2123,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (!owner.mTables ||
             !validRawPrimes(n, std::span<const u64>(&p, 1)) ||
-            !available() || currentDeviceOrdinal() != 0) return nullptr;
+            !owner.mTables->gpuAvailable() || currentDeviceOrdinal() != 0) return nullptr;
         try
         {
             const RawPlainKey key{n, p, owner.mRole, owner.mNativeGpuTables};
@@ -2136,7 +2139,7 @@ namespace osuCrypto::LogVole::gpu
             if (execution && execution->executionOptions() != owner.mTables->executionOptions()) return nullptr;
             std::shared_ptr<GpuPlainNtt> tables(new GpuPlainNtt());
             tables->mSetup = execution ? std::move(execution) :
-                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), scope.mRunId.serviceOwner());
+                std::make_shared<GpuSetupContext>(owner.mTables->executionOptions(), owner.mTables->hostProfilerOwner(), scope.mRunId.serviceOwner(), owner.mTables->gpuAvailable());
             if (!tables->initRaw(n, p)) return nullptr;
             cache.rawPlains.emplace_back(key, tables);
             return tables;

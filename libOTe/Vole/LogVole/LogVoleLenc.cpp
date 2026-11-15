@@ -170,7 +170,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
             // Retained device operands belong to one cold protocol run. Keep
             // the old host-only cache scope when this feature is disabled.
-            if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions))
+            if (gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)))
             {
                 key.mRunId = scope.mRunId;
                 key.mDevice = gpu::currentDeviceOrdinal();
@@ -1531,7 +1531,7 @@ namespace osuCrypto::LogVole
         bool retainRandomizers = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         retainRandomizers = deferRandomizerHost && gpuSetupLencDeviceEnabled(options, ctx) &&
-                            gpu::lencRandomizerResidencyEnabled(ctx.mExecutionOptions);
+                            gpu::lencRandomizerResidencyEnabled(ctx.mExecutionOptions, gpu::enabled(ctx));
 #endif
         RecursiveLeafScaling leafScaling{};
         if (leafInputsAreGadget && !retainRandomizers && !buildRecursiveLeafScaling(ctx, leafScaling))
