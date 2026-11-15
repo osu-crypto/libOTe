@@ -4034,6 +4034,8 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     if (!cmd.getOr("gpu", 0)) return;
     LOGVOLE_REQUIRE_TRUE(gpu::available());
     gpuOptions.mAdvanced.mHostStepProfile = true;
+    RingOpsStats deviceStats, independentStats;
+    gpuOptions.mRingOpsStats = &deviceStats;
     RingNttContext device;
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, device,
         std::make_shared<RingContextFactory>(gpuOptions, nullptr)));
@@ -4061,7 +4063,35 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     auto expected = input;
     LOGVOLE_REQUIRE_TRUE(forwardNttBatch(expected, cpu));
     auto actual = input;
-    LOGVOLE_REQUIRE_TRUE(forwardNttBatch(actual, device));
+    {
+        PendingRingOpsStats pending(device.mExecutionOptions.mRingOpsStats);
+        LOGVOLE_REQUIRE_TRUE(forwardNttBatch(actual, device, &pending));
+    }
+    LOGVOLE_REQUIRE_EQ(deviceStats.mNttCount.load(), input.size());
+    RnsPoly firstDigest;
+    LOGVOLE_REQUIRE_TRUE(lencDigest(device, input, 3, 20, firstDigest));
+    LOGVOLE_REQUIRE_TRUE(deviceStats.mDyadicMulAddCount.load() > 0u);
+    const auto firstCounts = tests_libOTe::logvole_test::ringStatsSnapshot(deviceStats);
+    for (auto* owner : {&independentStats, static_cast<RingOpsStats*>(nullptr)})
+    {
+        auto options = gpuOptions;
+        options.mRingOpsStats = owner;
+        RingNttContext independentDevice;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, independentDevice,
+            std::make_shared<RingContextFactory>(options, nullptr)));
+        auto independentInput = input;
+        {
+            PendingRingOpsStats pending(independentDevice.mExecutionOptions.mRingOpsStats);
+            LOGVOLE_REQUIRE_TRUE(forwardNttBatch(independentInput, independentDevice, &pending));
+        }
+        expect_batch_equal(actual, independentInput);
+        RnsPoly independentDigest;
+        LOGVOLE_REQUIRE_TRUE(lencDigest(independentDevice, input, 3, 20, independentDigest));
+        LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::ringStatsSnapshot(deviceStats) == firstCounts);
+        LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::ringStatsSnapshot(independentStats) == firstCounts);
+        LOGVOLE_REQUIRE_TRUE(rangesEqual(independentDigest.mCoeffs, firstDigest.mCoeffs));
+    }
+
     expect_batch_equal(expected, actual);
     LOGVOLE_REQUIRE_TRUE(inverseNttBatch(actual, device));
     expect_batch_equal(input, actual);
@@ -4116,9 +4146,9 @@ void LogVole_RingOps_StatisticsDefaultsAndCompatibility(const oc::CLP&)
     RingParams params;
     params.mPolyModulusDegree = 1024;
     assignValues<int>(params.mCoeffModulusBits, {30, 30});
+    RingOpsStats owned;
     RingNttContext ctx;
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
-    RingOpsStats owned;
     ctx.mExecutionOptions.mRingOpsStats = &owned;
     const auto zeros = ringStatsSnapshot(owned);
     auto original = deriveUniformPolyFromNonce(ctx, 17, 19, 0);
@@ -4128,10 +4158,6 @@ void LogVole_RingOps_StatisticsDefaultsAndCompatibility(const oc::CLP&)
     resizeZero(zero.mCoeffs, ringPolyCoeffCount(params));
     std::array<osuCrypto::u64, 8> seed{};
     osuCrypto::PRNG prng(osuCrypto::toBlock(71));
-    flushRingOpsThreadLocalStats();
-    globalRingOpsStats.reset();
-    // A pending sentinel detects unwanted CPU flushes as well as writes.
-    legacyRingOpsThreadLocalStats()->bump(RingOp::Add);
     auto roundtrip = original;
     LOGVOLE_REQUIRE_TRUE(forwardNtt(roundtrip, ctx));
     LOGVOLE_REQUIRE_TRUE(inverseNtt(roundtrip, ctx));
@@ -4169,11 +4195,6 @@ void LogVole_RingOps_StatisticsDefaultsAndCompatibility(const oc::CLP&)
     CpuBenchmarkState benchmark;
     LOGVOLE_REQUIRE_TRUE(scratch.runBulk(2, 2, [](std::size_t) { return true; }, benchmark));
     LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(owned) == zeros);
-    LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
-    flushRingOpsThreadLocalStats();
-    auto sentinel = zeros;
-    sentinel[2] = 1;
-    LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == sentinel);
 
     // Convenience digest boundaries must keep their configured CPU owner.
     RnsPoly digest;
@@ -4185,23 +4206,20 @@ void LogVole_RingOps_StatisticsDefaultsAndCompatibility(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, input, 3, 20, disabledDigest));
     LOGVOLE_REQUIRE_TRUE(rangesEqual(digest.mCoeffs, disabledDigest.mCoeffs));
     LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(owned) == afterDigest);
-    flushRingOpsThreadLocalStats();
-    LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == sentinel);
 
-    // Exercise explicit GPU compatibility forwarding with CPU arithmetic;
-    // each synchronous worker must publish its own collector before the join.
+    // Compatibility workers publish to the explicitly selected owner before joining.
     for (osuCrypto::u32 workers : {1u, 2u})
     {
-        globalRingOpsStats.reset();
+        owned.reset();
+        ctx.mExecutionOptions.mRingOpsStats = &owned;
         std::vector<RnsPoly> decrypted;
         LOGVOLE_REQUIRE_TRUE(detail::gpuLegacyLheDec(ctx, input, zero, decrypted,
-            &publicA, false, false, workers, {}, &scratch));
-        flushRingOpsThreadLocalStats();
+            &publicA, false, false, workers, {}, scratch, {}));
         auto expected = zeros;
         expected[0] = 1;
         expected[1] = 2;
         expected[6] = 2;
-        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == expected);
+        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(owned) == expected);
         for (std::size_t i = 0; i < input.size(); ++i)
             LOGVOLE_REQUIRE_TRUE(rangesEqual(decrypted[i].mCoeffs, input[i].mCoeffs));
     }

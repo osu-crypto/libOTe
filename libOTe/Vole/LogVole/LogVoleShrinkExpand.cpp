@@ -447,8 +447,7 @@ namespace osuCrypto::LogVole
         {
             HostStep sk1Step(hostProfiler(ctx), "setup sender: top sk1 uniform sampling", &cpuBenchmark);
             PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
-                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            auto* stats = (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             if (input.mDeferTopSk1Host && !message && input.mParams.mTruncateOneGadgetDigit)
             {
                 std::shared_ptr<gpu::DeviceBatch> resident;
@@ -469,8 +468,10 @@ namespace osuCrypto::LogVole
         if (input.mDeferHostCiphertexts && !message && gpu::enabled(ctx) &&
             gpu::publicUniformRetentionEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)))
         {
-            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu, setupScope, legacyRingOpsThreadLocalStats());
-            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau, setupScope, legacyRingOpsThreadLocalStats());
+            PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+            auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+            next.mPublicANttDevice = retainedLhePublicANtt(ctx, input.mParams.mMu, setupScope, stats);
+            next.mPublicBNttDevice = retainedLencPublicBNtt(ctx, publicBTau, setupScope, stats);
             if (!next.mPublicANttDevice || !next.mPublicBNttDevice)
             {
                 next.mPublicANttDevice.reset();
@@ -489,8 +490,7 @@ namespace osuCrypto::LogVole
         if (!next.mPublicANttDevice)
         {
             PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
-                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            auto* stats = (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu, setupScope, stats);
             next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau, setupScope, stats);
         }
@@ -521,8 +521,7 @@ namespace osuCrypto::LogVole
         else
         {
             PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
-                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            auto* stats = (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             lencOk = lencEnc(
                 ctx,
                 input.mS,
@@ -711,8 +710,7 @@ namespace osuCrypto::LogVole
 #endif
 
         PendingRingOpsStats operationPending(ctx.mExecutionOptions.mRingOpsStats);
-        auto* operationStats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
-            ctx.mExecutionOptions.mRingOpsStats ? &operationPending : nullptr;
+        auto* operationStats = ctx.mExecutionOptions.mRingOpsStats ? &operationPending : nullptr;
         ShrinkExpandReceiverState next{};
         next.mCpuScratch = input.mCpuScratch ? input.mCpuScratch :
             std::make_shared<detail::ShrinkExpandScratch>();
@@ -744,8 +742,7 @@ namespace osuCrypto::LogVole
         if (!next.mPublicANttDevice)
         {
             PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
-                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            auto* stats = (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             next.mPublicANtt = sharedLhePublicANtt(ctx, input.mParams.mMu, scope, stats);
             next.mPublicBNtt = sharedLencPublicBNtt(ctx, publicBTau, scope, stats);
         }
@@ -797,8 +794,7 @@ namespace osuCrypto::LogVole
         else
         {
             PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
-                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            auto* stats = (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             for (auto& poly : next.mCt1.mPolys)
             {
                 if (!forwardNtt(poly, ctx, stats)) return false;
@@ -859,8 +855,7 @@ namespace osuCrypto::LogVole
             }
 #endif
             PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
-                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            auto* stats = (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             if (!publicA) publicA = sharedLhePublicANtt(ctx, state.mParams.mMu, senderScope, stats);
             const u32 publicBTau = state.mParams.mTruncateOneGadgetDigit
                 ? state.mParams.mTau + 1u : state.mParams.mTau;
@@ -910,8 +905,7 @@ namespace osuCrypto::LogVole
             std::shared_ptr<const std::vector<RnsPoly>> publicA, publicB;
             if (!makeRingNttContext(state.mParams.mRing, ctx, state.mRingFactoryOwner, receiverScope)) return;
             PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
-                ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
+            auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
             if (!receiverPublicHosts(ctx, state, publicA, publicB, receiverScope, stats)) return;
             next.mPublicANtt = std::move(publicA);
             next.mPublicBNtt = std::move(publicB);
@@ -1013,8 +1007,7 @@ namespace osuCrypto::LogVole
         std::shared_ptr<const std::vector<RnsPoly>> publicA;
         {
             PendingRingOpsStats pending(state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr);
-            auto* stats = gpu::enabled(state.mRingFactoryOwner) ? legacyRingOpsThreadLocalStats() :
-                (state.mRingFactoryOwner && state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            auto* stats = (state.mRingFactoryOwner && state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             if (!prepareSenderExpansion(state, input, ctx, next.mTbk, cacheScope, stats) || gpu::enabled(ctx))
                 co_return false;
             publicA = state.mPublicANtt ? state.mPublicANtt : sharedLhePublicANtt(ctx, state.mParams.mMu, cacheScope, stats);
@@ -1041,16 +1034,15 @@ namespace osuCrypto::LogVole
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& out, u32 cpuLheWorkers, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
+        auto* totals = state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr;
+        PendingRingOpsStats pending(totals);
+        auto* stats = totals ? &pending : nullptr;
         RingNttContext ctx{};
         // Legacy callers retain their reusable ciphertext storage.
         auto scratch = detail::ShrinkExpandScratch::acquire(state.mCpuScratch);
         auto& senderCt2 = scratch.ct2();
-        if (!prepareSenderExpansion(state, input, ctx, senderCt2, scope, legacyRingOpsThreadLocalStats())) return false;
+        if (!prepareSenderExpansion(state, input, ctx, senderCt2, scope, stats)) return false;
         ShrinkExpandSenderExpandOutput next{};
-        auto lheWorkers = cpuLheWorkers;
-#if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled(ctx)) lheWorkers = state.mParams.mNumWorkerThreads;
-#endif
         if (!detail::gpuLegacyLheDec(
                 ctx,
                 senderCt2,
@@ -1059,7 +1051,7 @@ namespace osuCrypto::LogVole
                 state.mPublicANtt ? state.mPublicANtt.get() : nullptr,
                 false,
                 false,
-                lheWorkers, cpuBenchmark, &scratch.cpuRows(), scope))
+                cpuLheWorkers, cpuBenchmark, scratch.cpuRows(), scope))
         {
             return false;
         }
@@ -1235,6 +1227,9 @@ namespace osuCrypto::LogVole
         const ShrinkExpandExpandReceiverInput& input,
         ShrinkExpandReceiverExpandOutput& out, u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
+        auto* totals = state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr;
+        PendingRingOpsStats pending(totals);
+        auto* stats = totals ? &pending : nullptr;
         RingNttContext ctx{};
         std::shared_ptr<const std::vector<RnsPoly>> publicA;
         std::shared_ptr<DigestTree> tree;
@@ -1242,14 +1237,10 @@ namespace osuCrypto::LogVole
         auto& receiverCt2 = scratch.ct2();
         std::vector<RnsPoly> ct1AppliedNtt;
         if (!prepareReceiverExpansion(state, input, ctx, publicA, tree,
-                receiverCt2, ct1AppliedNtt, cpuBenchmark, scope, legacyRingOpsThreadLocalStats())) return false;
+                receiverCt2, ct1AppliedNtt, cpuBenchmark, scope, stats)) return false;
         const bool senderRole = scope.mRole == ProtocolCacheRole::Sender;
         HostStep decryptStep(hostProfiler(ctx), senderRole ? "cpu sender expand detail: decrypt" : "cpu receiver expand detail: decrypt", &cpuBenchmark);
         std::vector<RnsPoly> decPartialNtt;
-        auto rowWorkers = cpuRowWorkers;
-#if defined(ENABLE_LOGVOLE_CUDA)
-        if (gpu::enabled(ctx)) rowWorkers = state.mParams.mNumWorkerThreads;
-#endif
         if (!detail::gpuLegacyLheDec(
                 ctx,
                 std::move(ct1AppliedNtt),
@@ -1258,7 +1249,7 @@ namespace osuCrypto::LogVole
                 publicA.get(),
                 true,
                 true,
-                rowWorkers, cpuBenchmark, &scratch.cpuRows(), scope))
+                cpuRowWorkers, cpuBenchmark, scratch.cpuRows(), scope))
         {
             return false;
         }
@@ -1273,7 +1264,7 @@ namespace osuCrypto::LogVole
             evalOk = detail::gpuLegacyLencSubtractEvalTruncNttInplace(
                 ctx, state.hostLacct(), *tree, state.mParams.mMu, state.mParams.mTau,
                 state.mParams.mGadgetLogBase, state.mParams.mPlaintextModulusBits,
-                decPartialNtt, rowWorkers, state.mParams.mLeafInputsAreGadget, cpuBenchmark, &scratch.cpuRows());
+                decPartialNtt, cpuRowWorkers, state.mParams.mLeafInputsAreGadget, cpuBenchmark, scratch.cpuRows());
         }
         else
         {
@@ -1286,7 +1277,7 @@ namespace osuCrypto::LogVole
                 state.mParams.mGadgetLogBase,
                 evalNtt,
                 true,
-                state.mParams.mNumWorkerThreads, legacyRingOpsThreadLocalStats());
+                state.mParams.mNumWorkerThreads, stats);
         }
         if (!evalOk)
         {
@@ -1295,7 +1286,7 @@ namespace osuCrypto::LogVole
 
         evalStep.stop();
         return finishReceiverExpansion(ctx, state, decPartialNtt, evalNtt, receiverCt2,
-            fusedEval, senderRole, out, cpuBenchmark, legacyRingOpsThreadLocalStats());
+            fusedEval, senderRole, out, cpuBenchmark, stats);
     }
 
     struct RecoveryConstants

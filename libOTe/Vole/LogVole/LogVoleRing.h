@@ -54,8 +54,6 @@ namespace osuCrypto::LogVole
         void reset();
     };
 
-    inline RingOpsStats globalRingOpsStats;
-
     enum class RingOp : std::size_t
     {
         Ntt, Intt, Add, Sub, Mul, MulScalar, DyadicMulAdd,
@@ -69,7 +67,7 @@ namespace osuCrypto::LogVole
     {
         RingOpsStats* mSink;
         u64 mEpoch;
-        std::array<u64, static_cast<std::size_t>(RingOp::Count)> mCounts{};
+        std::array<u64, static_cast<std::size_t>(RingOp::Count)> mCounts;
         void syncEpoch() noexcept;
     public:
         explicit PendingRingOpsStats(RingOpsStats* sink) noexcept;
@@ -79,11 +77,6 @@ namespace osuCrypto::LogVole
         void bump(RingOp operation) noexcept;
         void flush() noexcept;
     };
-
-    // Compatibility only: unmigrated synchronous/GPU callers use the old sink.
-    PendingRingOpsStats* legacyRingOpsThreadLocalStats() noexcept;
-
-    void flushRingOpsThreadLocalStats();
 
     struct TimingStats
     {
@@ -132,8 +125,6 @@ namespace osuCrypto::LogVole
 
         void reset();
     };
-
-    inline TimingStats globalTimingStats;
 
     struct AutoTimer
     {

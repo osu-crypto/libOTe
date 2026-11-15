@@ -1,4 +1,6 @@
 #include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include <optional>
 #include "macoro/when_all_scope.h"
 #include "macoro/bulk.h"
@@ -457,7 +459,7 @@ namespace osuCrypto::LogVole
         TimingStats* timing, RingOpsStats* totals)
     {
         CpuBenchmarkState cpuBenchmark{};
-        if (useGpu) timing = &globalTimingStats;
+
         scope.mRole = ProtocolCacheRole::Receiver;
         KeyDeriveRequest request{};
         if (!prepareKeyDeriveRequest(input, request))
@@ -480,7 +482,7 @@ namespace osuCrypto::LogVole
 
         {
             PendingRingOpsStats pending(totals);
-            auto* stats = useGpu ? legacyRingOpsThreadLocalStats() : totals ? &pending : nullptr;
+            auto* stats = totals ? &pending : nullptr;
             if (!finalizeKeyDeriveResponse(input, response, output, scope, stats))
                 throw std::runtime_error("LogVole receiver rejected key-derive response");
         }
@@ -819,11 +821,22 @@ namespace osuCrypto::LogVole
                 co_await macoro::bulk_chunked(executor, wDoublePrime, std::span(workers), shrinkRange);
             }
         }
-        else if (!detail::runParallelTasks(wDoublePrime, state.mParams.mShrinkExpand.mNumWorkerThreads,
-                [&](std::size_t row, CpuBenchmarkState& worker) {
-                    return shrinkChunk(row, worker, legacyRingOpsThreadLocalStats());
-                }, false, &cpuBenchmark))
-            throw std::runtime_error("LogVole receiver could not prepare recursive child input");
+        else
+        {
+            auto scratch = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
+            if (!scratch.cpuRows().runBulkChunked(wDoublePrime,
+                state.mParams.mShrinkExpand.mNumWorkerThreads,
+                [&](std::size_t begin, std::size_t end, CpuBenchmarkState& worker) {
+                    auto* totals = state.mShrinkExpandState.mRingFactoryOwner
+                        ? state.mShrinkExpandState.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr;
+                    PendingRingOpsStats pending(totals);
+                    auto* stats = totals ? &pending : nullptr;
+                    for (auto row = begin; row != end; ++row)
+                        if (!shrinkChunk(row, worker, stats)) return false;
+                    return true;
+                }, cpuBenchmark))
+                throw std::runtime_error("LogVole receiver could not prepare recursive child input");
+        }
 #if defined(ENABLE_LOGVOLE_CUDA)
         }
 #endif
@@ -936,8 +949,7 @@ namespace osuCrypto::LogVole
             auto* totals = state.mShrinkExpandState.mRingFactoryOwner
                 ? state.mShrinkExpandState.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr;
             PendingRingOpsStats pending(totals);
-            auto* stats = gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner)
-                ? legacyRingOpsThreadLocalStats() : totals ? &pending : nullptr;
+            auto* stats = totals ? &pending : nullptr;
             if (!denoised || !seedLabelAgg(std::move(skXHat), wDoublePrime, tauHi,
                     state.mParams.mShrinkExpand.mRing, skX, stats) || skX.size() != wDoublePrime)
                 throw std::runtime_error("LogVole receiver could not derive recursive expansion keys");
@@ -1122,8 +1134,7 @@ namespace osuCrypto::LogVole
         {
             auto* totals = state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr;
             PendingRingOpsStats pending(totals);
-            auto* stats = gpu::enabled(state.mRingFactoryOwner) ? legacyRingOpsThreadLocalStats() :
-                totals ? &pending : nullptr;
+            auto* stats = totals ? &pending : nullptr;
             if (!shrinkExpandShrink(state, input.mX, shrink, cacheScope, stats))
             {
                 throw std::runtime_error("LogVole receiver could not shrink");

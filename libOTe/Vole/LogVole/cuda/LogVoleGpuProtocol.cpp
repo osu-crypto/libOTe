@@ -30,6 +30,14 @@
 
 namespace osuCrypto::LogVole::gpu
 {
+    namespace
+    {
+        std::atomic<u64>* timingCounter(TimingStats* stats, std::atomic<u64> TimingStats::* counter) noexcept
+        {
+            return stats ? &(stats->*counter) : nullptr;
+        }
+    }
+
     struct RetainedPublicUniform::Impl
     {
         std::shared_ptr<GpuRing> mRing;
@@ -236,9 +244,11 @@ namespace osuCrypto::LogVole::gpu
             count == 0) return {};
         const bool decline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootBStarDevice;
         if (decline) return {};
+        PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+        auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
         RetainedPublicUniformPtr next;
         if (!retainUniformPolyBatchFromNonce(ctx, kRootBStarNonce,
-                kRootBStarDomain, count, true, next, scope, legacyRingOpsThreadLocalStats()) || !next ||
+                kRootBStarDomain, count, true, next, scope, stats) || !next ||
             !retainedPublicUniformMatches(ctx, *next, count, true, scope) ||
             next.use_count() != 1) return {};
         auto producer = std::const_pointer_cast<RetainedPublicUniform>(next);
@@ -288,11 +298,13 @@ namespace osuCrypto::LogVole::gpu
             // PRNG, so forced CPU rollback remains exact.
             try
             {
+                PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
+                auto* stats = ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
                 next.resize(value.mSeeds.size());
                 for (std::size_t i = 0; i < value.mSeeds.size(); ++i)
                 {
-                    next[i] = sampleUniformPolyFromSeed(ctx, value.mSeeds[i], legacyRingOpsThreadLocalStats());
-                    if (value.mOutputNtt && !forwardNttCanonical(next[i], ctx, legacyRingOpsThreadLocalStats())) return false;
+                    next[i] = sampleUniformPolyFromSeed(ctx, value.mSeeds[i], stats);
+                    if (value.mOutputNtt && !forwardNttCanonical(next[i], ctx, stats)) return false;
                 }
             }
             catch (...)
@@ -807,8 +819,10 @@ namespace osuCrypto::LogVole::gpu
                             !validateRingBatchShape(coefficients.mPolys, mContext.mParams))
                             throw std::runtime_error("LogVole receiver lazy Ct1 has invalid coefficient backing");
                         next = coefficients;
+                        PendingRingOpsStats pending(mContext.mExecutionOptions.mRingOpsStats);
+                        auto* stats = mContext.mExecutionOptions.mRingOpsStats ? &pending : nullptr;
                         for (auto& poly : next.mPolys)
-                            if (!forwardNtt(poly, mContext, legacyRingOpsThreadLocalStats()))
+                            if (!forwardNtt(poly, mContext, stats))
                                 throw std::runtime_error("LogVole receiver lazy Ct1 host NTT failed");
                     }
                     mNtt = std::move(next);
@@ -4165,7 +4179,7 @@ namespace osuCrypto::LogVole::gpu
         const void* firstQueryOwner, u64 firstQuerySid,
         const ShrinkOverride& ov, ProtocolCacheScopeView scope)
     {
-        AutoTimer timer(globalTimingStats.mGpuShrinkTimeUs);
+        AutoTimer timer(timingCounter(timingStats(state.mRingFactoryOwner), &TimingStats::mGpuShrinkTimeUs));
         const std::span<const RnsPoly> x = xHost;
         if (!enabled(state.mRingFactoryOwner) || muHi == 0 || tauHi == 0) return bail(state.mRingFactoryOwner, "disabled or degenerate sizes");
         if (state.mParams.mTau != tauHi) return bail(state.mRingFactoryOwner, "tau mismatch");
@@ -5500,7 +5514,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr* negDPrimeDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuMiscTimeUs));
         if (negDPrimeDevice) negDPrimeDevice->reset();
         const bool seededZeta = !zetaTaskSeeds.empty();
         const u32 randomizerWidth = seededZeta
@@ -5858,7 +5872,7 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatchPtr& dPrimeDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuMiscTimeUs));
         prepared.reset();
         if (!enabled(ctx) || !rootFinalizePriorityPrefetchEnabledImpl(ctx.mExecutionOptions.mAdvanced.mProtocol))
             return false;
@@ -5930,7 +5944,7 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatch* dPrimeDevice, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx);
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(ctx) || tauHi == 0 || leftWidth == 0 || seed.empty()) return bail(ctx, "root: sizes");
 
         auto tree = std::static_pointer_cast<LevelSession>(leftTreeSession);
@@ -6420,7 +6434,7 @@ namespace osuCrypto::LogVole::gpu
     {
         const LogVoleGpuProtocolOptions defaults;
         const auto& options = state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mAdvanced.mProtocol : defaults;
-        AutoTimer timer(globalTimingStats.mGpuSenderTimeUs);
+        AutoTimer timer(timingCounter(timingStats(state.mRingFactoryOwner), &TimingStats::mGpuSenderTimeUs));
         prepared.reset();
         if (!enabled(state.mRingFactoryOwner) || !topSenderCt2PrefetchEnabledImpl(options) || seed.size() != 16u ||
             chunkCount == 0u)
@@ -6600,7 +6614,7 @@ namespace osuCrypto::LogVole::gpu
     {
         const LogVoleGpuProtocolOptions defaults;
         const auto& options = state.mRingFactoryOwner ? state.mRingFactoryOwner->mExecutionOptions.mAdvanced.mProtocol : defaults;
-        AutoTimer timer(globalTimingStats.mGpuExpandTimeUs);
+        AutoTimer timer(timingCounter(timingStats(state.mRingFactoryOwner), &TimingStats::mGpuExpandTimeUs));
         prepared.reset();
         if (!enabled(state.mRingFactoryOwner) || receiverCt2PrefetchMode(options) == LogVoleChoice::Disabled ||
             seed.size() != 16u ||
@@ -6666,7 +6680,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr& tbmDev,
         PreparedReceiverCt2* preparedCt2, ProtocolCacheScopeView scope)
     {
-        AutoTimer timer(globalTimingStats.mGpuExpandTimeUs);
+        AutoTimer timer(timingCounter(timingStats(state.mRingFactoryOwner), &TimingStats::mGpuExpandTimeUs));
         const std::span<const RnsPoly> skX = skXHost;
         if (!enabled(state.mRingFactoryOwner) || !session.valid()) return false;
         auto& impl = *session.mImpl;
@@ -7059,7 +7073,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr& tbkAll,
         PreparedSenderCt2* preparedCt2, ProtocolCacheScopeView scope)
     {
-        AutoTimer timer(globalTimingStats.mGpuSenderTimeUs);
+        AutoTimer timer(timingCounter(timingStats(state.mRingFactoryOwner), &TimingStats::mGpuSenderTimeUs));
         if (!enabled(state.mRingFactoryOwner)) return false;
         const bool haveDev = tbkPrimeDev != nullptr && !tbkPrimeDev->empty();
         if (haveDev == !tbkPrimeHost.empty()) return false;   // exactly one source
@@ -7288,7 +7302,7 @@ namespace osuCrypto::LogVole::gpu
     {
         const LogVoleGpuProtocolOptions defaults;
         const auto& options = state.mShrinkExpandState.mRingFactoryOwner ? state.mShrinkExpandState.mRingFactoryOwner->mExecutionOptions.mAdvanced.mProtocol : defaults;
-        AutoTimer timer(globalTimingStats.mGpuSenderTimeUs);
+        AutoTimer timer(timingCounter(timingStats(state.mShrinkExpandState.mRingFactoryOwner), &TimingStats::mGpuSenderTimeUs));
         preparedKPrime.reset();
         const bool prepareSk = rootSkNttResidentEnabled(options);
         // A device-generated key intentionally has no host polynomial to
@@ -7422,7 +7436,7 @@ namespace osuCrypto::LogVole::gpu
         const DeviceBatchPtr& rootSecretCoeffs,
         ProtocolCacheRunId rootSecretOwnerRunId)
     {
-        AutoTimer timer(globalTimingStats.mGpuSenderTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuSenderTimeUs));
         if (residentKPrime) residentKPrime->reset();
         const bool forceDecline = ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootSkX;
         if (!enabled(ctx) || tauHi == 0 ||
@@ -7637,7 +7651,7 @@ namespace osuCrypto::LogVole::gpu
         // Use the sender operation role. senderCache separately selects the
         // retained offline run for immutable public operands.
         scope.mRole = ProtocolCacheRole::Sender;
-        AutoTimer timer(globalTimingStats.mGpuSenderTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuSenderTimeUs));
         if (!enabled(ctx) || seed.empty() || leftWidth == 0 || tauHi == 0) return bail(ctx, "root sender: shape");
 
         auto cache = senderCache(state, scope);
@@ -7820,7 +7834,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr& out,
         u64 logicalInputCount)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(ctx) || in.empty() || tau == 0) return false;
         auto ring = GpuRing::get(ctx);
         if (!ring || !ring->denoiseReady() || !in.mImpl || in.mImpl->mRing != ring ||
@@ -7878,7 +7892,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr& out,
         u64 logicalInputCount)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(ctx) || in.empty() || tau == 0 ||
             validatedLevelParams.mCt2SeedMode != Ct2SeedMode::GoldenSeed)
             return false;
@@ -7955,7 +7969,7 @@ namespace osuCrypto::LogVole::gpu
     bool validateGoldenSeedDevice(const Params& params, const RingNttContext& ctx,
         const DeviceBatch& tbk, bool& ok)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(ctx) || tbk.empty() || params.mCt2SeedMode != Ct2SeedMode::GoldenSeed)
             return false;
 
@@ -8061,7 +8075,7 @@ namespace osuCrypto::LogVole::gpu
         const Params& params, const RingNttContext& ctx,
         const DeviceBatch& tbk)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuMiscTimeUs));
         return attempt.stream() &&
             enqueueLeafGoldenValidation(params, ctx, tbk, *attempt.stream(), true);
     }
@@ -8069,7 +8083,7 @@ namespace osuCrypto::LogVole::gpu
     bool validateLeafGoldenSeedDevice(const Params& params, const RingNttContext& ctx,
         const DeviceBatch& tbk, bool& ok)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(ctx) || !ctx.mGpuExecution) return false;
         auto& stream = contextStream(ctx);
         if (!enqueueLeafGoldenValidation(params, ctx, tbk, stream, false)) return false;
@@ -8087,7 +8101,7 @@ namespace osuCrypto::LogVole::gpu
     bool denoiseCombBatch(
         const RingNttContext& ctx, const std::vector<RnsPoly>& in, std::vector<RnsPoly>& out)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(ctx), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(ctx)) return false;
         auto ring = GpuRing::get(ctx);
         if (!ring || !ring->denoiseReady()) return false;
@@ -8369,7 +8383,7 @@ namespace osuCrypto::LogVole::gpu
         u64 zpLabelCount,
         u64* out, ProtocolCacheScopeView scope)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(zp.mRing), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(zp.mRing) || labels.empty() || !out) return false;
         auto ring = GpuRing::get(zp.mRing);
         if (!ring) return false;
@@ -8384,7 +8398,7 @@ namespace osuCrypto::LogVole::gpu
         u64 chunkCount,
         u64 zpLabelCount, ProtocolCacheScopeView scope)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(zp.mRing), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(zp.mRing) || labels.empty()) return nullptr;
         auto ring = GpuRing::get(zp.mRing);
         if (!ring) return nullptr;
@@ -8404,7 +8418,7 @@ namespace osuCrypto::LogVole::gpu
         u64 zpLabelCount,
         u64* out, ProtocolCacheScopeView scope)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(zp.mRing), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(zp.mRing) || labels.empty() || !out) return false;
         auto ring = GpuRing::get(zp.mRing);
         if (!ring) return false;
@@ -8425,7 +8439,7 @@ namespace osuCrypto::LogVole::gpu
         u64 zpLabelCount,
         u64* out, ProtocolCacheScopeView scope)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(zp.mRing), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(zp.mRing) || !chunkCount || !zpLabelCount || !out ||
             chunkCount > labels.size() ||
             chunkCount > std::numeric_limits<u32>::max()) return false;
@@ -8639,7 +8653,7 @@ namespace osuCrypto::LogVole::gpu
         u64 padChunks,
         bool garbledInput, ProtocolCacheScopeView scope)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(zp.mRing), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(zp.mRing) || labels.empty()) return nullptr;
 
         auto& stream = contextStream(zp.mRing);
@@ -8672,7 +8686,7 @@ namespace osuCrypto::LogVole::gpu
         ReceiverFirstQueryAllocations* firstQueryAllocations,
         const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope)
     {
-        AutoTimer timer(globalTimingStats.mGpuMiscTimeUs);
+        AutoTimer timer(timingCounter(timingStats(zp.mRing), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(zp.mRing) || labels.empty()) return nullptr;
         const std::size_t count = labelCount
             ? std::min<std::size_t>(static_cast<std::size_t>(labelCount), labels.count())

@@ -279,13 +279,6 @@ namespace
         auto countedContext = std::make_shared<RingNttContext>(*senderState.mRingFactoryOwner);
         countedContext->mExecutionOptions.mRingOpsStats = &senderStats;
         countedSender.mRingFactoryOwner = countedContext;
-        auto flushWorker = [&]() -> macoro::task<> {
-            co_await executor.schedule();
-            flushRingOpsThreadLocalStats();
-        };
-        macoro::sync_wait(flushWorker());
-        flushRingOpsThreadLocalStats();
-        const auto legacyProducts = globalRingOpsStats.mMulCount.load();
         for (bool collect : {true, false})
         {
             countedContext->mExecutionOptions.mRingOpsStats = collect ? &senderStats : nullptr;
@@ -296,10 +289,7 @@ namespace
                     receiverState, receiverExpandInput, receiverOutput, onlineSockets[1]))));
             std::get<0>(onlineResult).result();
             std::get<1>(onlineResult).result();
-            macoro::sync_wait(flushWorker());
-            flushRingOpsThreadLocalStats();
             LOGVOLE_REQUIRE_EQ(senderStats.mMulCount.load(), senderState.mParams.mTau);
-            LOGVOLE_REQUIRE_EQ(globalRingOpsStats.mMulCount.load(), legacyProducts);
         }
         checkMaskReuse();
         for (std::size_t i = 0; i < buffers.size(); ++i)

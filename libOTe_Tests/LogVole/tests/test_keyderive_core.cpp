@@ -112,8 +112,6 @@ namespace
         expectedReceiver[1] = tau;
         for (bool collect : {true, false})
         {
-            flushRingOpsThreadLocalStats();
-            globalRingOpsStats.reset();
             const auto senderBefore = ringStatsSnapshot(senderStats);
             const auto receiverBefore = ringStatsSnapshot(receiverStats);
             KeyDeriveResponse actualResponse;
@@ -134,8 +132,6 @@ namespace
             LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(senderStats) == senderAfter);
             LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(senderStats) == (collect ? expectedSender : senderBefore));
             LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(receiverStats) == (collect ? expectedReceiver : receiverBefore));
-            flushRingOpsThreadLocalStats();
-            LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
             LOGVOLE_REQUIRE_TRUE(std::equal(actualResponse.mMNttCoeffs.begin(), actualResponse.mMNttCoeffs.end(),
                 response.mMNttCoeffs.begin(), response.mMNttCoeffs.end()));
             expect_batch_equal(actualSender.mK, senderOutput.mK);

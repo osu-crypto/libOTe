@@ -82,8 +82,6 @@ namespace
         KeyDeriveReceiverOutput receiverOutput{};
 
         RingOpsStats senderStats, receiverStats;
-        flushRingOpsThreadLocalStats();
-        globalRingOpsStats.reset();
         auto sockets = coproto::LocalAsyncSocket::makePair();
         macoro::task<> senderTask, receiverTask;
         std::weak_ptr<const ProtocolCacheService> senderService, receiverService;
@@ -126,8 +124,6 @@ namespace
         }
         LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(senderStats) == expectedSender);
         LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(receiverStats) == expectedReceiver);
-        flushRingOpsThreadLocalStats();
-        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
 
         expect_batch_equal(senderOutput.mK, senderInput.mSk2);
         LOGVOLE_REQUIRE_EQ(receiverOutput.mM.size(), receiverInput.mD.size());

@@ -1696,7 +1696,8 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (gpu::enabled(ctx.mRing))
             {
-                AutoTimer wrapTimer(globalTimingStats.mWrapTimeUs);
+                auto* timing = timingStats(ctx.mRing);
+                AutoTimer wrapTimer(timing ? &timing->mWrapTimeUs : nullptr);
                 const u64 expectedChunks = zpRingLabelCount(ctx, labels.size());
                 if (!expectedChunks)
                 {

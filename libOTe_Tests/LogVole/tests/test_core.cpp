@@ -2432,14 +2432,10 @@ void LogVole_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)
     {
         ctx.mExecutionOptions.mRingOpsStats = collect ? &totals : nullptr;
         const auto before = ringStatsSnapshot(totals);
-        flushRingOpsThreadLocalStats();
-        globalRingOpsStats.reset();
         RnsPoly repeated;
         LOGVOLE_REQUIRE_TRUE(rootInnerProductNtt(ctx, leftNtt, rightCoeff, repeated));
         expect_poly_equal(repeated, expected);
         LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(totals) == (collect ? expectedCounts : before));
-        flushRingOpsThreadLocalStats();
-        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
     }
 }
 
@@ -3772,8 +3768,6 @@ void LogVole_Core_TimingOwnership(const oc::CLP&)
 {
     using tests_libOTe::logvole_test::timingSnapshot;
     TimingStats first, second;
-    globalTimingStats.reset();
-    const auto globalBefore = timingSnapshot(globalTimingStats);
     {
         AutoTimer disabled(static_cast<std::atomic<oc::u64>*>(nullptr));
         LOGVOLE_REQUIRE_TRUE(disabled.mStart == std::chrono::steady_clock::time_point{});
@@ -3829,7 +3823,6 @@ void LogVole_Core_TimingOwnership(const oc::CLP&)
     receive.template operator()<ProtocolCacheRole::Receiver>(nullptr);
     LOGVOLE_REQUIRE_TRUE(timingSnapshot(first) == firstAfter);
     LOGVOLE_REQUIRE_TRUE(timingSnapshot(second) == secondAfter);
-    LOGVOLE_REQUIRE_TRUE(timingSnapshot(globalTimingStats) == globalBefore);
 }
 
 void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
@@ -3868,7 +3861,6 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
     auto& referenceState = referenceOffline.mState;
     RingOpsStats senderStats, receiverStats;
     TimingStats senderTiming, receiverTiming;
-    const std::array<std::uint64_t, 11> zeroCounts{};
     const auto selectStats = [](auto& state, RingOpsStats* sink, TimingStats* timing) {
         auto context = std::make_shared<RingNttContext>(*state.mShrinkExpandState.mRingFactoryOwner);
         context->mExecutionOptions.mRingOpsStats = sink;
@@ -3911,11 +3903,7 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
     }
     auto onWorker = [](macoro::thread_pool& pool, macoro::task<bool> operation) -> macoro::task<bool> {
         co_await pool.schedule();
-        flushRingOpsThreadLocalStats();
-        globalRingOpsStats.reset();
         const auto result = co_await std::move(operation);
-        // Flush on the producing worker, including sub-threshold legacy leaks.
-        flushRingOpsThreadLocalStats();
         co_return result;
     };
     for (std::uint64_t query = 0; query < 2; ++query)
@@ -3934,7 +3922,6 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
                 resources.executor, buffers.zeta, receiver, input.mX,
             receiverPrng, digest, request));
         }());
-        globalTimingStats.reset();
         const auto receiverTimingBefore = tests_libOTe::logvole_test::timingSnapshot(receiverTiming);
         const auto senderAttemptsBefore = senderTiming.mSeedAttemptCount.load();
         const auto senderBefore = counts(senderStats);
@@ -3946,7 +3933,6 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
             senderPrng, response, senderOutput))));
         LOGVOLE_REQUIRE_TRUE(counts(senderStats) != senderBefore);
         LOGVOLE_REQUIRE_TRUE(counts(receiverStats) == receiverBefore);
-        LOGVOLE_REQUIRE_TRUE(counts(globalRingOpsStats) == zeroCounts);
         LOGVOLE_REQUIRE_TRUE(senderTiming.mSeedAttemptCount.load() > senderAttemptsBefore);
         LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(receiverTiming) == receiverTimingBefore);
         const auto senderTimingAfter = tests_libOTe::logvole_test::timingSnapshot(senderTiming);
@@ -3959,7 +3945,6 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(executor, finalizeRootOnlineReceiver(executor, lheBuffers, lencBuffers, referenceState, input, digest, response, reference))));
         LOGVOLE_REQUIRE_TRUE(counts(senderStats) == senderAfter);
         LOGVOLE_REQUIRE_TRUE(counts(receiverStats) == receiverBefore);
-        LOGVOLE_REQUIRE_TRUE(counts(globalRingOpsStats) == zeroCounts);
         LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(senderTiming) == senderTimingAfter);
         LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(receiverTiming) == receiverTimingBefore);
         if (query == 1) digest.mLeftTree.reset(); // Exercise exact tree reconstruction.
@@ -3977,11 +3962,7 @@ void LogVole_Core_RootOnlineStateReuseAcrossQueries(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(onWorker(executor, std::move(moved))));
         LOGVOLE_REQUIRE_TRUE(counts(receiverStats) != receiverBefore);
         LOGVOLE_REQUIRE_TRUE(counts(senderStats) == senderAfter);
-        LOGVOLE_REQUIRE_TRUE(counts(globalRingOpsStats) == zeroCounts);
         LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(senderTiming) == senderTimingAfter);
-        const TimingStats emptyTiming;
-        LOGVOLE_REQUIRE_TRUE(tests_libOTe::logvole_test::timingSnapshot(globalTimingStats) ==
-            tests_libOTe::logvole_test::timingSnapshot(emptyTiming));
         LOGVOLE_REQUIRE_TRUE(rangesEqual(receiverOutput.mSeed, reference.mSeed));
         LOGVOLE_REQUIRE_EQ(receiverOutput.mTbm.size(), reference.mTbm.size());
         for (std::size_t i = 0; i < reference.mTbm.size(); ++i)
@@ -6117,15 +6098,12 @@ void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(findGoldenSeed(validationResources.executor, 2, params, sk2, digest, prng, found)));
     using tests_libOTe::logvole_test::ringStatsSnapshot;
     RingOpsStats totals;
-    const auto zeros = ringStatsSnapshot(totals);
     const auto nextRandom = prng.get<oc::u64>();
     for (bool collect : {true, false})
     {
         oc::PRNG repeatedPrng(oc::block(0x6008u, 0));
         GoldenSeedSearchOutput repeated;
         const auto before = ringStatsSnapshot(totals);
-        flushRingOpsThreadLocalStats();
-        globalRingOpsStats.reset();
         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(findGoldenSeed(validationResources.executor, 1, params, sk2, digest, repeatedPrng, repeated, {},
             collect ? &totals : nullptr)));
         LOGVOLE_REQUIRE_TRUE(std::equal(found.mSeed.begin(), found.mSeed.end(),
@@ -6143,8 +6121,6 @@ void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
         }
         else
             LOGVOLE_REQUIRE_TRUE(counts == before);
-        flushRingOpsThreadLocalStats();
-        LOGVOLE_REQUIRE_TRUE(ringStatsSnapshot(globalRingOpsStats) == zeros);
     }
     LOGVOLE_EXPECT_EQ(found.mSeed.size(), std::size_t{ 16 });
     LOGVOLE_REQUIRE_EQ(found.mTbkPerSampledPoly.size(), params.mShrinkExpand.mMu);

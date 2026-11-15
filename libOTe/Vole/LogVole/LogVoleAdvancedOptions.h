@@ -238,10 +238,10 @@ namespace osuCrypto
         // Optional borrowed diagnostics. The caller keeps this alive until all
         // operations (including deferred materialization) using these options finish.
         LogVole::CpuBenchmarkContext* mCpuBenchmark = nullptr;
-        // Optional borrowed CPU arithmetic totals, retained by the caller
+        // Optional borrowed arithmetic totals, retained by the caller
         // through all operations using this immutable selection.
         LogVole::RingOpsStats* mRingOpsStats = nullptr;
-        // Optional borrowed CPU timing totals, retained by the caller through
+        // Optional borrowed timing totals, retained by the caller through
         // all operations (including deferred materialization) using these options.
         LogVole::TimingStats* mTimingStats = nullptr;
         LogVoleAdvancedOptions mAdvanced;

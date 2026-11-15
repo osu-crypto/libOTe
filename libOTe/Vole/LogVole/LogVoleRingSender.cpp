@@ -319,7 +319,7 @@ namespace osuCrypto::LogVole
         TimingStats* timing, RingOpsStats* totals)
     {
         CpuBenchmarkState cpuBenchmark{};
-        if (useGpu) timing = &globalTimingStats;
+
         scope.mRole = ProtocolCacheRole::Sender;
 		u64 maxPayload = 0;
 		if (input.mSk1.size() > std::numeric_limits<u32>::max())
@@ -338,7 +338,7 @@ namespace osuCrypto::LogVole
         KeyDeriveResponse response{};
         {
             PendingRingOpsStats pending(totals);
-            auto* stats = useGpu ? legacyRingOpsThreadLocalStats() : totals ? &pending : nullptr;
+            auto* stats = totals ? &pending : nullptr;
             if (!processKeyDeriveRequest(input, request, response, output, scope, stats))
                 throw std::runtime_error("LogVole sender rejected key-derive request");
         }
@@ -448,8 +448,7 @@ namespace osuCrypto::LogVole
             }
 
             PendingRingOpsStats pending(ctx.mExecutionOptions.mRingOpsStats);
-            auto* stats = gpu::enabled(ctx) ? legacyRingOpsThreadLocalStats() :
-                (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
+            auto* stats = (ctx.mExecutionOptions.mRingOpsStats ? &pending : nullptr);
             RnsPoly skX{};
             bool skxOk = false;
             if (state.mParams.mTruncateOneGadgetDigit)

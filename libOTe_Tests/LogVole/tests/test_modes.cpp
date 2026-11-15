@@ -30,7 +30,6 @@ namespace
 
         const bool device = cmd.getOr("gpu", 0) != 0;
         TimingStats senderTiming, receiverTiming;
-        const auto globalTimingBefore = tests_libOTe::logvole_test::timingSnapshot(globalTimingStats);
         const bool collectTiming = !device && cmd.getOr("lvTiming", 0) != 0;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (device) LOGVOLE_REQUIRE_TRUE(gpu::available());
@@ -307,9 +306,6 @@ namespace
         LOGVOLE_REQUIRE_TRUE(receiverFactory.expired());
         if (!device)
         {
-            const auto globalTimingAfter = tests_libOTe::logvole_test::timingSnapshot(globalTimingStats);
-            for (std::size_t i = 0; i < globalTimingAfter.size(); ++i)
-                LOGVOLE_REQUIRE_EQ(globalTimingAfter[i], globalTimingBefore[i]) << "timing field " << i;
             LOGVOLE_REQUIRE_EQ(senderTiming.mReceiverWaitUs.load(), 0u);
             LOGVOLE_REQUIRE_EQ(receiverTiming.mSenderWaitUs.load(), 0u);
             LOGVOLE_REQUIRE_EQ(senderTiming.mRootReceiverHostUs.load(), 0u);

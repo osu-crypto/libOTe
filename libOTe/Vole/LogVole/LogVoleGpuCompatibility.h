@@ -60,22 +60,22 @@ namespace osuCrypto::LogVole::detail
         const std::vector<RnsPoly>& cipher,
         const RnsPoly& sk,
         std::vector<RnsPoly>& out,
-        const std::vector<RnsPoly>* publicANtt = nullptr,
-        bool cipherInputIsNtt = false,
-        bool outputNtt = false,
-        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = {});
+        const std::vector<RnsPoly>* publicANtt,
+        bool cipherInputIsNtt,
+        bool outputNtt,
+        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
+        detail::CpuRowScratch& cpuScratch, ProtocolCacheScopeView scope);
 
     bool gpuLegacyLheDec(
         const RingNttContext& ctx,
         std::vector<RnsPoly>&& cipher,
         const RnsPoly& sk,
         std::vector<RnsPoly>& out,
-        const std::vector<RnsPoly>* publicANtt = nullptr,
-        bool cipherInputIsNtt = false,
-        bool outputNtt = false,
-        u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = {});
+        const std::vector<RnsPoly>* publicANtt,
+        bool cipherInputIsNtt,
+        bool outputNtt,
+        u32 requestedWorkers, CpuBenchmarkState cpuBenchmark,
+        detail::CpuRowScratch& cpuScratch, ProtocolCacheScopeView scope);
 
     bool gpuLegacyLencEvalTrunc(
         const RingNttContext& ctx,
@@ -86,10 +86,10 @@ namespace osuCrypto::LogVole::detail
         u32 gadgetLogBase,
         u32 plaintextModulusBits,
         std::vector<RnsPoly>& out,
-        bool outputNtt = false,
-        u32 requestedWorkers = 1,
-        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr, ProtocolCacheScopeView scope = {});
+        bool outputNtt,
+        u32 requestedWorkers,
+        bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark,
+        detail::CpuRowScratch& cpuScratch, ProtocolCacheScopeView scope);
 
     bool gpuLegacyLencEvalTrunc(
         const RingNttContext& ctx,
@@ -100,10 +100,10 @@ namespace osuCrypto::LogVole::detail
         u32 gadgetLogBase,
         u32 plaintextModulusBits,
         std::vector<RnsPoly>& out,
-        bool outputNtt = false,
-        u32 requestedWorkers = 1,
-        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr);
+        bool outputNtt,
+        u32 requestedWorkers,
+        bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark,
+        detail::CpuRowScratch& cpuScratch);
 
     bool gpuLegacyLencSubtractEvalTruncNttInplace(
         const RingNttContext& ctx,
@@ -114,9 +114,9 @@ namespace osuCrypto::LogVole::detail
         u32 gadgetLogBase,
         u32 plaintextModulusBits,
         std::vector<RnsPoly>& out,
-        u32 requestedWorkers = 1,
-        bool leafInputsAreGadget = false, CpuBenchmarkState cpuBenchmark = {},
-        detail::CpuRowScratch* cpuScratch = nullptr);
+        u32 requestedWorkers,
+        bool leafInputsAreGadget, CpuBenchmarkState cpuBenchmark,
+        detail::CpuRowScratch& cpuScratch);
 
     bool gpuLegacyExpandSender(
         const ShrinkExpandSenderState& state,
