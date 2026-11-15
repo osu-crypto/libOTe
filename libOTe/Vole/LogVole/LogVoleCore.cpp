@@ -764,8 +764,8 @@ namespace osuCrypto::LogVole
             {
                 return 0u;
             }
-            static const bool h200 = gpu::deviceDescription().find("H200") != std::string::npos;
-            return h200 ? 2u : 0u;
+            const auto& owner = state.mShrinkExpandState.mRingFactoryOwner;
+            return owner && owner->mGpuExecution && owner->mGpuExecution->isH200() ? 2u : 0u;
         }
 
         // Depth three is a small but repeatable win at the measured 2^24 and

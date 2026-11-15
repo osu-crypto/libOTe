@@ -18,6 +18,7 @@
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuMemory.h"
 
+#include <atomic>
 #include <memory>
 #include <exception>
 #include <mutex>
@@ -134,6 +135,13 @@ namespace osuCrypto::LogVole::gpu
     class GpuStream
     {
     public:
+        enum class RegionKind : u8 { Upload, Kernel, Download };
+        // Debug timing belongs to this stream and is reported after it drains.
+        std::atomic<u64>& regionCounter(RegionKind kind)
+        {
+            return mRegionUs[static_cast<unsigned>(kind)];
+        }
+
         GpuStream();
         explicit GpuStream(LogVoleGpuStreamOptions options, std::shared_ptr<HostStepProfiler> profile = {});
         const LogVoleGpuStreamOptions& options() const { return mOptions; }
@@ -185,6 +193,7 @@ namespace osuCrypto::LogVole::gpu
             std::shared_ptr<GpuMemoryPool> memory = {}, LogVoleGpuStreamOptions options = {}, std::shared_ptr<HostStepProfiler> profile = {});
         bool ensureIndexScratch();
 
+        std::atomic<u64> mRegionUs[3]{};
         const LogVoleGpuStreamOptions mOptions;
         const std::shared_ptr<HostStepProfiler> mHostProfiler;
         void* mStream = nullptr;
@@ -224,6 +233,9 @@ namespace osuCrypto::LogVole::gpu
         HostStepProfiler* hostProfiler() const { return mHostProfiler.get(); }
         const std::shared_ptr<HostStepProfiler>& hostProfilerOwner() const { return mHostProfiler; }
         const std::shared_ptr<const ProtocolCacheService>& protocolService() const noexcept { return mProtocolService; }
+        // Preserves the prefetch policy's device-zero name match, captured at
+        // construction only for a GPU-enabled domain; not a current-device query.
+        bool isH200() const noexcept;
         ~GpuExecutionContext();
         GpuExecutionContext(const GpuExecutionContext&) = delete;
         GpuExecutionContext& operator=(const GpuExecutionContext&) = delete;

@@ -3911,6 +3911,8 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
         std::make_shared<RingContextFactory>(cpuOptions, nullptr)));
     LOGVOLE_REQUIRE_EQ(profileCount(hostProfiler(profiledCpu)), beforeDisabled);
 #if defined(ENABLE_LOGVOLE_CUDA)
+    LOGVOLE_REQUIRE_TRUE(cpu.mGpuExecution != nullptr);
+    LOGVOLE_REQUIRE_FALSE(cpu.mGpuExecution->isH200());
     if (!cmd.getOr("gpu", 0)) return;
     LOGVOLE_REQUIRE_TRUE(gpu::available());
     gpuOptions.mAdvanced.mHostStepProfile = true;
@@ -3918,6 +3920,8 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, device,
         std::make_shared<RingContextFactory>(gpuOptions, nullptr)));
     LOGVOLE_REQUIRE_TRUE(gpu::enabled(device));
+    LOGVOLE_REQUIRE_EQ(device.mGpuExecution->isH200(),
+        gpu::deviceDescription().find("H200") != std::string::npos);
     LOGVOLE_REQUIRE_TRUE(device.mGpuLightweight);
     LOGVOLE_REQUIRE_TRUE(device.mHostProfiler == device.mGpuExecution->hostProfilerOwner());
     LOGVOLE_REQUIRE_TRUE(device.mHostProfiler == device.mGpuSetup->hostProfilerOwner());
@@ -3926,6 +3930,7 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(device.mHostProfiler != profiledCpu.mHostProfiler);
     gpu::GpuExecutionContext disabledProfile(cpuOptions, device.mHostProfiler);
     LOGVOLE_REQUIRE_TRUE(disabledProfile.hostProfiler() == nullptr);
+    LOGVOLE_REQUIRE_FALSE(disabledProfile.isH200());
     LOGVOLE_REQUIRE_FALSE(gpu::enabled(cpu));
 
     std::vector<RnsPoly> input(4);
@@ -3942,6 +3947,29 @@ void LogVole_RingOps_BackendSelectionOwnership(const oc::CLP& cmd)
     expect_batch_equal(expected, actual);
     LOGVOLE_REQUIRE_TRUE(inverseNttBatch(actual, device));
     expect_batch_equal(input, actual);
+    {
+        // A real readback with tracing disabled must leave its own diagnostics
+        // untouched and must never write another stream's totals.
+        osuCrypto::LogVoleGpuStreamOptions quietOptions, tracedOptions;
+        tracedOptions.mDebug = true;
+        gpu::GpuStream quiet(quietOptions), traced(tracedOptions);
+        using RegionKind = gpu::GpuStream::RegionKind;
+        quiet.regionCounter(RegionKind::Download).store(17);
+        traced.regionCounter(RegionKind::Download).store(23);
+        auto batch = gpu::upload(device, input);
+        LOGVOLE_REQUIRE_TRUE(batch != nullptr);
+        std::vector<RnsPoly> fetched;
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*batch, fetched, quiet));
+        expect_batch_equal(input, fetched);
+        LOGVOLE_REQUIRE_EQ(quiet.regionCounter(RegionKind::Download).load(), 17ull);
+        LOGVOLE_REQUIRE_EQ(traced.regionCounter(RegionKind::Download).load(), 23ull);
+        LOGVOLE_REQUIRE_TRUE(gpu::download(*batch, fetched, traced));
+        expect_batch_equal(input, fetched);
+        LOGVOLE_REQUIRE_TRUE(traced.regionCounter(RegionKind::Download).load() > 23ull);
+        LOGVOLE_REQUIRE_EQ(quiet.regionCounter(RegionKind::Download).load(), 17ull);
+        // Avoid reporting the seeded test sentinel as an actual measurement.
+        traced.regionCounter(RegionKind::Download).store(0);
+    }
     const auto beforeSecondCpu = profileCount(hostProfiler(profiledCpu));
     RingNttContext secondCpu;
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, secondCpu,

@@ -606,32 +606,6 @@ namespace osuCrypto::LogVole::gpu
             return false;
         }
 
-        // Region timer used to separate kernel time from transfer time and host
-        // glue. Accumulates explicitly enabled measurements into exit totals.
-        struct RegionTotals
-        {
-            std::atomic<u64> mUploadUs{ 0 };
-            std::atomic<u64> mKernelUs{ 0 };
-            std::atomic<u64> mDownloadUs{ 0 };
-            std::atomic<u64> mHostUs{ 0 };
-
-            ~RegionTotals()
-            {
-                if (!(mUploadUs.load() || mKernelUs.load() || mDownloadUs.load() || mHostUs.load())) return;
-                std::fprintf(
-                    stderr,
-                    "[logvole-gpu] totals: upload %.1f ms, kernels %.1f ms, download %.1f ms, host %.1f ms\n",
-                    mUploadUs.load() / 1000.0, mKernelUs.load() / 1000.0, mDownloadUs.load() / 1000.0,
-                    mHostUs.load() / 1000.0);
-            }
-        };
-
-        RegionTotals& regions()
-        {
-            static RegionTotals r;
-            return r;
-        }
-
         // Syncs the stream so the measurement attributes GPU work correctly.
         // Only active when tracing; otherwise it is a no-op and does not perturb
         // the pipeline.
@@ -641,14 +615,20 @@ namespace osuCrypto::LogVole::gpu
             void* mStream;
             std::chrono::steady_clock::time_point mStart;
 
-            Region(std::atomic<u64>& sink, GpuStream& stream) : mSink(&sink), mStream(stream.raw())
+            Region(GpuStream::RegionKind kind, GpuStream& stream) : mSink(nullptr), mStream(stream.raw())
             {
-                if (!stream.options().mDebug) { mSink = nullptr; return; }
+                if (!stream.options().mDebug) return;
+                mSink = &stream.regionCounter(kind);
                 gpuStreamSync(mStream);
                 mStart = std::chrono::steady_clock::now();
             }
 
-            ~Region()
+            Region(const Region&) = delete;
+            Region& operator=(const Region&) = delete;
+
+            ~Region() { stop(); }
+
+            void stop()
             {
                 if (!mSink) return;
                 gpuStreamSync(mStream);
@@ -657,6 +637,7 @@ namespace osuCrypto::LogVole::gpu
                                          std::chrono::steady_clock::now() - mStart)
                                          .count()),
                     std::memory_order_relaxed);
+                mSink = nullptr;
             }
         };
 
@@ -2845,7 +2826,7 @@ namespace osuCrypto::LogVole::gpu
             batch.mImpl->mLogicalCount != batch.mImpl->mBuf.count())
             return false;
         if (!ensurePlainBroadcastMaterialized(*batch.mImpl, stream)) return false;
-        Region regDown(regions().mDownloadUs, stream);
+        Region regDown(GpuStream::RegionKind::Download, stream);
         return batch.mImpl->mBuf.download(out, stream, 0, count ? count : batch.count());
     }
 
@@ -2857,7 +2838,7 @@ namespace osuCrypto::LogVole::gpu
         auto batch = std::make_shared<DeviceBatch>();
         batch->mImpl->mRing = ring;
         auto& stream = contextStream(ctx);
-        Region regUp(regions().mUploadUs, stream);
+        Region regUp(GpuStream::RegionKind::Upload, stream);
         if (!batch->mImpl->mBuf.resize(*ring, polys.size(), stream) ||
             !batch->mImpl->mBuf.upload(polys, stream))
         {
@@ -4272,7 +4253,7 @@ namespace osuCrypto::LogVole::gpu
             !ensurePlainBroadcastMaterialized(*xDev->mImpl, stream))
             return false;
 
-        Region* regUp = new Region(regions().mUploadUs, stream);
+        Region regUp(GpuStream::RegionKind::Upload, stream);
 
         if (directRecursiveLeaves)
         {
@@ -4348,8 +4329,8 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        delete regUp;
-        auto regKern = std::make_unique<Region>(regions().mKernelUs, stream);
+        regUp.stop();
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
 
         const std::size_t totalNodes =
             static_cast<std::size_t>(chunkCount) * nodeCount * maxTau + 1u;
@@ -4846,7 +4827,7 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        regKern.reset();
+        regKern.stop();
         // The tree ladder has queued its final read/write of this coefficient
         // scratch. Return it to the stream-ordered cache before descending into
         // recursion so deeper levels can reuse hundreds of MiB rather than grow
@@ -4856,7 +4837,7 @@ namespace osuCrypto::LogVole::gpu
         // ---- digests and the child input ----
         if (wantHostOutputs)
         {
-            Region regDown(regions().mDownloadUs, stream);
+            Region regDown(GpuStream::RegionKind::Download, stream);
             if (!impl->mDigest.download(digests, stream, 0, chunkCount)) return false;
         }
 
@@ -4932,7 +4913,7 @@ namespace osuCrypto::LogVole::gpu
                 {
                     std::vector<RnsPoly> flat;
                     {
-                        Region regDown(regions().mDownloadUs, stream);
+                        Region regDown(GpuStream::RegionKind::Download, stream);
                         if (!unbundled.download(flat, stream, 0, outCount)) return false;
                     }
 
@@ -5576,7 +5557,7 @@ namespace osuCrypto::LogVole::gpu
                 if (mPending) mStream.sync();
             }
         } pinnedSeeds{stream};
-        auto regKern = std::make_unique<Region>(regions().mKernelUs, stream);
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
 
         // gadget(yLeft) straight into the first tauHi slots, then zeta into the rest.
         // yLeft is the tree's digest and is already here, so it never crosses.
@@ -5598,7 +5579,7 @@ namespace osuCrypto::LogVole::gpu
                 !scratch.ensureRootZetaRejects(zetaTaskSeeds.size()))
                 return false;
             {
-                Region regUp(regions().mUploadUs, stream);
+                Region regUp(GpuStream::RegionKind::Upload, stream);
                 const void* source = zetaTaskSeeds.data();
                 if (noGoldZetaGeometry && noGoldRootPinnedSeedsEnabled(ctx.mExecutionOptions.mAdvanced.mProtocol))
                 {
@@ -5635,7 +5616,7 @@ namespace osuCrypto::LogVole::gpu
         }
         else
         {
-            Region regUp(regions().mUploadUs, stream);
+            Region regUp(GpuStream::RegionKind::Upload, stream);
             if (!inputs->mImpl->mBuf.upload(*zeta, stream, tauHi)) return false;
         }
         if (!launchNttForward(ring->view(stream), inputsData, topCols, nullptr, stream.raw())) return false;
@@ -5687,12 +5668,12 @@ namespace osuCrypto::LogVole::gpu
                 static_cast<u32>(ElemOp::Negate), nullptr, stream.raw()))
             return false;
 
-        regKern.reset();
+        regKern.stop();
 
         // d' is the one value that has to reach the host: it goes on the wire.
         std::vector<RnsPoly> out;
         {
-            Region regDown(regions().mDownloadUs, stream);
+            Region regDown(GpuStream::RegionKind::Download, stream);
             if (!acc.download(out, stream, 0, 1) || out.size() != 1) return false;
             pinnedSeeds.mPending = false;
         }
@@ -5801,7 +5782,7 @@ namespace osuCrypto::LogVole::gpu
             // were prepared before send. The first call fills them once on this
             // stream; later Root queries issue no index copies at all.
             {
-                Region regUp(regions().mUploadUs, *workspace->mStream);
+                Region regUp(GpuStream::RegionKind::Upload, *workspace->mStream);
                 impl.mWorkQueued = true;
                 if (!ensureRootFinalizePriorityIndices(
                         *workspace, *cache, treeImpl, tauHi, leftWidth,
@@ -5809,8 +5790,8 @@ namespace osuCrypto::LogVole::gpu
                     return false;
             }
 
-            auto regKern = std::make_unique<Region>(
-                regions().mKernelUs, *workspace->mStream);
+            Region regKern(
+                GpuStream::RegionKind::Kernel, *workspace->mStream);
             const auto& ring = *cache->mRing;
 
             if (!launchGadgetDecompose(
@@ -5850,7 +5831,7 @@ namespace osuCrypto::LogVole::gpu
                 return false;
             }
 
-            regKern.reset();
+            regKern.stop();
             if (!gpuEventRecord(
                     impl.mReadyEvent, workspace->mStream->raw()))
                 return false;
@@ -5980,7 +5961,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         auto& stream = contextStream(ctx);
-        auto regKern = std::make_unique<Region>(regions().mKernelUs, stream);
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
 
         GpuPolyBuffer acc;
         GpuPolyBuffer phi;
@@ -6056,7 +6037,7 @@ namespace osuCrypto::LogVole::gpu
                 *ring, (havePreparedBase || haveResidentDPrime) ? 1u : 2u, stream))
             return false;
         {
-            Region regUp(regions().mUploadUs, stream);
+            Region regUp(GpuStream::RegionKind::Upload, stream);
             if (havePreparedBase || haveResidentDPrime)
             {
                 if (!scalars.upload(
@@ -6310,7 +6291,7 @@ namespace osuCrypto::LogVole::gpu
                 return false;
         }
 
-        regKern.reset();
+        regKern.stop();
         rootKey = std::move(result);
         return true;
     }
@@ -6470,7 +6451,7 @@ namespace osuCrypto::LogVole::gpu
         impl.mReadyEvent = gpuEventCreate();
         if (!impl.mReadyEvent) return false;
 
-        Region regKern(regions().mKernelUs, sampleStream);
+        Region regKern(GpuStream::RegionKind::Kernel, sampleStream);
         if (!sampleCt2BatchWithScratch(
                 *ring, *cache, state.mParams.mRing, chunkCount, mu, seed, sid,
                 instanceBase, maskDigestHash, impl.mCt2, sampleStream,
@@ -6651,7 +6632,7 @@ namespace osuCrypto::LogVole::gpu
         impl.mReadyEvent = gpuEventCreate();
         if (!impl.mReadyEvent) return false;
 
-        Region regKern(regions().mKernelUs, sampleStream);
+        Region regKern(GpuStream::RegionKind::Kernel, sampleStream);
         if (!sampleCt2BatchWithScratch(
                 *ring, *cache, state.mParams.mRing, chunkCount, mu, seed, sid,
                 instanceBase, maskDigestHash, impl.mCt2, sampleStream,
@@ -6712,7 +6693,7 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = contextStream(*state.mRingFactoryOwner);
         stream.reset();
 
-        auto regKern = std::make_unique<Region>(regions().mKernelUs, stream);
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
 
         // ct2 sampling is independent of this level's arithmetic chain. A
         // recycled sampler buffer still needs the write-after-read edge from
@@ -6993,7 +6974,7 @@ namespace osuCrypto::LogVole::gpu
                 state.mParams.mAlpha == 2u))
             return false;
 
-        regKern.reset();
+        regKern.stop();
 
         if (!wantHostOutput)
         {
@@ -7009,7 +6990,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         // ---- download the used outputs ----
-        Region regDown(regions().mDownloadUs, stream);
+        Region regDown(GpuStream::RegionKind::Download, stream);
         tbm.resize(totalOut);
         for (u32 c = 0; c < chunkCount; ++c)
         {
@@ -7097,7 +7078,7 @@ namespace osuCrypto::LogVole::gpu
         if (!state.mRingFactoryOwner || !state.mRingFactoryOwner->mGpuExecution) return false;
         auto& stream = contextStream(*state.mRingFactoryOwner);
 
-        auto regKern = std::make_unique<Region>(regions().mKernelUs, stream);
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
 
         GpuPolyBuffer ct2;
         if (preparedCt2)
@@ -7212,7 +7193,7 @@ namespace osuCrypto::LogVole::gpu
                 return false;
         }
 
-        regKern.reset();
+        regKern.stop();
 
         // The result stays on the device; the caller decides whether it is ever
         // needed on the host.
@@ -7378,7 +7359,7 @@ namespace osuCrypto::LogVole::gpu
                 if (!skNtt->mImpl->mBuf.resize(*ring, tauHi, stream))
                     return bail(ctx, "root operands: sk alloc");
                 {
-                    Region regUp(regions().mUploadUs, stream);
+                    Region regUp(GpuStream::RegionKind::Upload, stream);
                     if (!(secretDevice
                             ? gpuMemcpyD2D(skNtt->mImpl->mBuf.data(stream),
                                 secretCoeffs->mImpl->mBuf.data(stream),
@@ -7391,7 +7372,7 @@ namespace osuCrypto::LogVole::gpu
                         return bail(ctx, "root operands: sk upload");
                 }
                 {
-                    Region regKern(regions().mKernelUs, stream);
+                    Region regKern(GpuStream::RegionKind::Kernel, stream);
                     if (!launchNttForward(
                             ring->view(stream), skNtt->mImpl->mBuf.data(stream), tauHi,
                             nullptr, stream.raw()) ||
@@ -7412,7 +7393,7 @@ namespace osuCrypto::LogVole::gpu
             if (!kPrimeDevice->mImpl->mBuf.resize(*ring, 1u, stream))
                 return bail(ctx, "root operands: kPrime alloc");
             {
-                Region regUp(regions().mUploadUs, stream);
+                Region regUp(GpuStream::RegionKind::Upload, stream);
                 // The span upload drains its staging buffer. That is intentional:
                 // the owner can safely cross recvFrame without retaining the host
                 // source or a producer-stream event.
@@ -7468,7 +7449,7 @@ namespace osuCrypto::LogVole::gpu
             return bail(ctx, "skx: host input shape");
 
         auto& stream = contextStream(ctx);
-        Region regKern(regions().mKernelUs, stream);
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
 
         const bool havePreparedSk =
             rootSkNttResidentEnabled(ctx.mExecutionOptions.mAdvanced.mProtocol) &&
@@ -7681,7 +7662,7 @@ namespace osuCrypto::LogVole::gpu
         if (!ring->denoiseReady()) return bail(ctx, "root sender: denoise tables");
 
         auto& stream = contextStream(ctx);
-        Region regKern(regions().mKernelUs, stream);
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
 
         // ---- buildHashedCt2(ctx, leftWidth, seed, sid, d'_Rt, 0) ----
         GpuPolyBuffer ctK;
@@ -7859,7 +7840,7 @@ namespace osuCrypto::LogVole::gpu
         const std::size_t aggCount = denoised / tau;
 
         auto& stream = contextStream(ctx);
-        Region regKern(regions().mKernelUs, stream);
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
 
         GpuPolyBuffer mid;
         if (!mid.resize(*ring, denoised, stream)) return false;
@@ -7931,7 +7912,7 @@ namespace osuCrypto::LogVole::gpu
                 validatedLevelParams, ctx, *ring, scratch, stream))
             return false;
 
-        Region regKern(regions().mKernelUs, stream);
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
         GpuPolyBuffer mid;
         if (!mid.resize(*ring, physicalDenoised, stream) ||
             !launchDenoiseCombValidate(
@@ -7995,7 +7976,7 @@ namespace osuCrypto::LogVole::gpu
         if (!goldenSeedMargins(params, ctx, marginLo, marginHi)) return false;
 
         auto& stream = contextStream(ctx);
-        Region regKern(regions().mKernelUs, stream);
+        Region regKern(GpuStream::RegionKind::Kernel, stream);
 
         auto& scratch = validateScratch(stream);
         if (scratch.mAttemptActive || !scratch.ensure(rho)) return false;
@@ -8070,7 +8051,7 @@ namespace osuCrypto::LogVole::gpu
             }
             if (!gpuMemcpyH2D(scratch.mLeaf, limbs.data(), limbs.size() * sizeof(LeafGoldenSeedLimb),
                     stream.raw())) return false;
-            Region regKern(regions().mKernelUs, stream);
+            Region regKern(GpuStream::RegionKind::Kernel, stream);
             return launchValidateLeafGoldenSeed(ring->view(stream), scratch.mLeaf, tbk.mImpl->mBuf.data(stream),
                 params.mW, constants.mMarginLo, constants.mMarginHi, scratch.mFlag, stream.raw());
         }
@@ -8121,15 +8102,15 @@ namespace osuCrypto::LogVole::gpu
         GpuPolyBuffer dst;
         if (!src.resize(*ring, in.size(), stream) || !dst.resize(*ring, outCount, stream)) return false;
         {
-            Region regUp(regions().mUploadUs, stream);
+            Region regUp(GpuStream::RegionKind::Upload, stream);
             if (!src.upload(in, stream)) return false;
         }
         {
-            Region regKern(regions().mKernelUs, stream);
+            Region regKern(GpuStream::RegionKind::Kernel, stream);
             if (!denoiseComb(*ring, src.data(stream), dst.data(stream), static_cast<u32>(outCount), stream))
                 return false;
         }
-        Region regDown(regions().mDownloadUs, stream);
+        Region regDown(GpuStream::RegionKind::Download, stream);
         return dst.download(out, stream, 0, outCount);
     }
 
@@ -8320,7 +8301,7 @@ namespace osuCrypto::LogVole::gpu
 
             bool ok = true;
             {
-                Region regKern(regions().mKernelUs, stream);
+                Region regKern(GpuStream::RegionKind::Kernel, stream);
                 if (fusedScale)
                 {
                     ok = launchScaleNttForwardGather(
@@ -8364,7 +8345,7 @@ namespace osuCrypto::LogVole::gpu
                 // staging through pinned buffers and copying on the host only
                 // reaches 5.1 GB/s on a fresh destination because the explicit
                 // memcpy faults page by page.
-                Region regDown(regions().mDownloadUs, stream);
+                Region regDown(GpuStream::RegionKind::Download, stream);
                 ok = gpuMemcpyD2H(
                          host, flat, static_cast<std::size_t>(zpLabelCount) * sizeof(u64), stream.raw()) &&
                      stream.sync();
@@ -8431,7 +8412,7 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = contextStream(zp.mRing);
         GpuPolyBuffer src;
         {
-            Region regUp(regions().mUploadUs, stream);
+            Region regUp(GpuStream::RegionKind::Upload, stream);
             if (!src.resize(*ring, labels.size(), stream) || !src.upload(labels, stream)) return false;
         }
         return unwrapFromDevice(zp, *ring, src.data(stream), labels.size(), zpLabelCount, out, nullptr, scope);
@@ -8468,7 +8449,7 @@ namespace osuCrypto::LogVole::gpu
         if (!coefficients || !scalars || !source.resize(*ring, chunkCount, stream))
             return false;
         {
-            Region upload(regions().mUploadUs, stream);
+            Region upload(GpuStream::RegionKind::Upload, stream);
             if (!source.upload(
                     std::span<const RnsPoly>(labels.data(),
                         static_cast<std::size_t>(chunkCount)), stream)) return false;
@@ -8478,7 +8459,7 @@ namespace osuCrypto::LogVole::gpu
         const u32 chunks = static_cast<u32>(chunkCount);
         bool ok = false;
         {
-            Region kernels(regions().mKernelUs, stream);
+            Region kernels(GpuStream::RegionKind::Kernel, stream);
             ok = launchComposeReducePlain(
                 ring->view(stream), plain->view(stream), source.data(stream), chunks,
                 coeff, stream.raw());
@@ -8498,7 +8479,7 @@ namespace osuCrypto::LogVole::gpu
         }
         if (!ok) return false;
         {
-            Region download(regions().mDownloadUs, stream);
+            Region download(GpuStream::RegionKind::Download, stream);
             return gpuMemcpyD2H(
                        out, flat, static_cast<std::size_t>(zpLabelCount) * sizeof(u64),
                        stream.raw()) && stream.sync();
@@ -8620,7 +8601,7 @@ namespace osuCrypto::LogVole::gpu
 
         bool ok = false;
         {
-            Region regKern(regions().mKernelUs, stream);
+            Region regKern(GpuStream::RegionKind::Kernel, stream);
             if (fusedWrap)
             {
                 ok = singleLimbWrap
@@ -8668,7 +8649,7 @@ namespace osuCrypto::LogVole::gpu
 
         bool ok = false;
         {
-            Region regUp(regions().mUploadUs, stream);
+            Region regUp(GpuStream::RegionKind::Upload, stream);
             ok = uploadFromHost(scalars, labels.data(), labels.size() * sizeof(u64), stream);
         }
         DeviceBatchPtr out = ok

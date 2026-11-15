@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -834,6 +835,14 @@ namespace osuCrypto::LogVole::gpu
         mHostScratchStorage.reset();
         mStagingStorage.reset();
         if (!mAllocationOwner) gpuStreamDestroy(mStream);
+        if (!mOptions.mDebug) return;
+        const auto upload = mRegionUs[0].load(std::memory_order_relaxed);
+        const auto kernel = mRegionUs[1].load(std::memory_order_relaxed);
+        const auto download = mRegionUs[2].load(std::memory_order_relaxed);
+        if (upload || kernel || download)
+            std::fprintf(stderr,
+                "[logvole-gpu] stream totals: upload %.1f ms, kernels %.1f ms, download %.1f ms\n",
+                upload / 1000.0, kernel / 1000.0, download / 1000.0);
     }
 
     const std::shared_ptr<OwnedGpuStream>& GpuStream::allocationOwner()
@@ -950,6 +959,7 @@ namespace osuCrypto::LogVole::gpu
         };
         std::mutex mutex;
         int device = -1;
+        bool isH200 = false;
         std::shared_ptr<GpuMemoryPool> memory;
         std::unordered_map<std::thread::id, Worker> workers;
         using Record = std::weak_ptr<const RingNttContext>;
@@ -963,9 +973,12 @@ namespace osuCrypto::LogVole::gpu
           mImpl(std::make_unique<Impl>()), mExecutionOptions(options)
     {
         if (!mExecutionOptions.valid()) throw std::invalid_argument("Invalid LogVole advanced options");
+        if (mExecutionOptions.mUseGpu)
+            mImpl->isH200 = deviceDescription().find("H200") != std::string::npos;
         if (!mHostProfiler && mExecutionOptions.mAdvanced.mHostStepProfile)
             mHostProfiler = std::make_shared<HostStepProfiler>();
     }
+    bool GpuExecutionContext::isH200() const noexcept { return mImpl->isH200; }
     GpuExecutionContext::~GpuExecutionContext() = default;
 
     GpuStream& GpuExecutionContext::stream(Lane lane)

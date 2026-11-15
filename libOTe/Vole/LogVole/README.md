@@ -388,11 +388,16 @@ validation entries above and below record historical migration checkpoints.
 | --- | ---: | --- | --- |
 | Protocol run/role | 0 | None | Instance-owned services allocate qualified IDs; explicit operation contexts carry role/run identity and retain service lifetime. |
 | Worker budget | 2 | `gParallelWorkerSlotsInUse`, `tParallelWorkerCap` in `LogVoleParallel.h` | Caller-supplied compute resource and explicit chunk allowance; remove the ambient scheduler after caller migration. |
-| Statistics | 4 | `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats`; `regions()::r` in `cuda/LogVoleGpuProtocol.cpp` | Owned diagnostics and per-chunk pending counters. |
+| Statistics | 3 | `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats` | Owned diagnostics and per-chunk pending counters; GPU region timing totals belong to each `GpuStream`. |
 | CUDA allocation evidence | 0 | None | Sender-owned shared sink; active wire blocks retain it through completion and release it before entering the reuse cache. CPU offline resets only its supplied owner. |
-| Capability/compatibility caches | 4 | `defaultPublicSenderCt2PrefetchLevels()::h200`, `available()::ok`, `gaussianTransformHostCompatible()::{recognized, arithmeticCompatible}` | Capture once in the appropriate CPU/GPU resource owner. |
+| Capability/compatibility caches | 3 | `available()::ok`, `gaussianTransformHostCompatible()::{recognized, arithmeticCompatible}` | Capture once in the appropriate CPU/GPU resource owner; the legacy device-zero H200 prefetch flag belongs to `GpuExecutionContext`. |
 | CUDA error/name storage | 0 | None | Kernel API failures throw owned error messages; device descriptions return owned strings. |
-| CUDA attribute initialization | 7 | `gSharedConfigured`, `gPointwisePseudo55TreeSharedConfigured`, `gPointwisePseudo55TreeWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpSharedConfigured`, `gPointwisePseudo55TreeProductWarpVectorSharedConfigured`, `gPointwisePseudo55SparseSharedConfigured`, `gNttInversePostWarpStages05SharedConfigured` | Owned device preparation; consider only a justified CUDA initialization guard as an exception. |
+| CUDA attribute initialization | 0 | None | Seven lazy readiness flags belong to `GpuRing`/`GpuPlainNtt`; launch views borrow their owners' lifetime. |
+
+Each stream reports its nonzero upload, kernel and download timing totals when
+its owner is released, after draining queued work. Disabled region tracing adds no
+allocation, synchronization or clock reads. The execution context captures
+the existing device-zero H200 prefetch decision once, preserving that policy.
 
 The main CUDA kernel API reports unexpected failures by throwing
 `std::runtime_error` with the operation, numeric CUDA code, and CUDA message.
