@@ -1,3 +1,5 @@
+#include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe_Tests/LogVole_RingStatsTestUtil.h"
 #include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe_Tests/LogVole_SenderResources.h"
@@ -9,7 +11,6 @@
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
 #include "libOTe/Vole/LogVole/LogVolePublicCache.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVole.h"
 #include "libOTe/config.h"
 #include "libOTe/Vole/LogVole/LogVoleGarbled.h"
@@ -1352,17 +1353,15 @@ void LogVole_RingOps_GpuStreamStagingLifetime(const oc::CLP& cmd)
 #endif
         CpuBenchmarkState cpuBenchmark{&telemetry};
         for (const char* reuse : {"0", "1"})
-        for (bool reuseWorkers : {false, true})
         {
             auto downloadOptions = streamOptions;
             downloadOptions.mReuseDownloadStaging = reuse[0] == '1';
-            downloadOptions.mDownloadReuseWorkers = reuseWorkers;
             telemetry.reset();
             gpu::GpuStream downloadStream(downloadOptions);
             LOGVOLE_REQUIRE_TRUE(downloadStream.staging(std::size_t(2) << 20));
             std::vector<RnsPoly> host;
-            LOGVOLE_REQUIRE_TRUE(polynomials.downloadPipelined(host, downloadStream, 2, 0, 0, cpuBenchmark));
-            LOGVOLE_REQUIRE_EQ(telemetry.mWorkerSlots.load(), 0u);
+            detail::CpuRowScratch copyScratch;
+            LOGVOLE_REQUIRE_TRUE(polynomials.downloadPipelined(host, downloadStream, 2, copyScratch, 0, 0, cpuBenchmark));
             LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
             LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() > 0u);
             LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() <= 2u);
@@ -1439,6 +1438,7 @@ void LogVole_RingOps_PartyCachesDoNotAlias(const oc::CLP& cmd)
 
 void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
 {
+    const auto crtCompute = std::make_shared<osuCrypto::LogVole::detail::ShrinkExpandScratch>();
 #if defined(ENABLE_LOGVOLE_CUDA)
     const bool testGpuAvailable = gpu::available();
 #endif
@@ -1711,7 +1711,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                 expect_poly_equal(encoded, reference);
                 AlignedUnVec<std::uint64_t> decoded;
                 LOGVOLE_REQUIRE_TRUE(((candidate).mGpuLightweight || (candidate).mRing.mExecutionOptions.mUseGpu
-                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(candidate, {encoded}, labels.size(), scaled, 1u, decoded)
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(candidate, {encoded}, labels.size(), scaled, 1u, decoded, crtCompute)
                     : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, candidate, {encoded}, labels.size(), scaled, 1u, decoded))));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(decoded, labels));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(decoded, expectedDecoded));
@@ -1738,7 +1738,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
             {
                 AlignedUnVec<std::uint64_t> actual;
                 LOGVOLE_REQUIRE_TRUE(((candidate).mGpuLightweight || (candidate).mRing.mExecutionOptions.mUseGpu
-                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(candidate, {raw}, labels.size(), false, 1u, actual)
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(candidate, {raw}, labels.size(), false, 1u, actual, crtCompute)
                     : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, candidate, {raw}, labels.size(), false, 1u, actual))));
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(actual, expected));
             }
@@ -1768,7 +1768,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     {0xdecafbadULL, 0x12345678ULL});
                 LOGVOLE_REQUIRE_FALSE(((malformed).mGpuLightweight || (malformed).mRing.mExecutionOptions.mUseGpu
                     ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(malformed, {validEncoded}, labels.size(), false, 1u,
-                    unchanged)
+                    unchanged, crtCompute)
                     : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, malformed, {validEncoded}, labels.size(), false, 1u,
                     unchanged)))) << " corruption " << corruption;
                 LOGVOLE_REQUIRE_TRUE(rangesEqual(unchanged,
@@ -1964,7 +1964,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     expect_poly_equal(actual, reference);
                     AlignedUnVec<std::uint64_t> decoded;
                     LOGVOLE_REQUIRE_TRUE(((dynamicCrt[party]).mGpuLightweight || (dynamicCrt[party]).mRing.mExecutionOptions.mUseGpu
-                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(dynamicCrt[party], {actual}, labels.size(), scaled, 1u, decoded)
+                    ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(dynamicCrt[party], {actual}, labels.size(), scaled, 1u, decoded, crtCompute)
                     : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, dynamicCrt[party], {actual}, labels.size(), scaled, 1u, decoded))));
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(decoded, labels));
                     if (!scaled)
@@ -1985,7 +1985,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                             expectedRaw)));
                         LOGVOLE_REQUIRE_TRUE(((dynamicCrt[party]).mGpuLightweight || (dynamicCrt[party]).mRing.mExecutionOptions.mUseGpu
                     ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(dynamicCrt[party], {raw}, labels.size(), false,
-                            1u, actualRaw)
+                            1u, actualRaw, crtCompute)
                     : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, dynamicCrt[party], {raw}, labels.size(), false,
                             1u, actualRaw))));
                         LOGVOLE_REQUIRE_TRUE(rangesEqual(actualRaw, expectedRaw));
@@ -2015,7 +2015,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                         std::vector<RnsPoly> expectedLabels, actualLabels;
                         LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(wrapZpLabelsCrt(crtResources.executor, crtEncodeBuffers, eager, twoRings, scaled, 7u, 2u, expectedLabels)));
                         LOGVOLE_REQUIRE_TRUE(((dynamicCrt[party]).mGpuLightweight || (dynamicCrt[party]).mRing.mExecutionOptions.mUseGpu
-                    ? osuCrypto::LogVole::detail::gpuLegacyWrapZpLabelsCrt(dynamicCrt[party], twoRings, scaled, 7u, 2u, actualLabels)
+                    ? osuCrypto::LogVole::detail::gpuLegacyWrapZpLabelsCrt(dynamicCrt[party], twoRings, scaled, 7u, 2u, actualLabels, crtCompute)
                     : macoro::sync_wait(wrapZpLabelsCrt(crtResources.executor, crtEncodeBuffers, dynamicCrt[party], twoRings, scaled, 7u, 2u, actualLabels))));
                         LOGVOLE_REQUIRE_EQ(actualLabels.size(), 2u);
                         for (std::size_t i = 0; i < actualLabels.size(); ++i)
@@ -2038,7 +2038,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     assignValues<std::uint64_t>(unchanged, {23u, 47u});
                     LOGVOLE_REQUIRE_FALSE(((invalidCrt).mGpuLightweight || (invalidCrt).mRing.mExecutionOptions.mUseGpu
                     ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(invalidCrt, {valid}, labels.size(), false,
-                        1u, unchanged)
+                        1u, unchanged, crtCompute)
                     : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, invalidCrt, {valid}, labels.size(), false,
                         1u, unchanged))));
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(unchanged,
@@ -2047,7 +2047,7 @@ void LogVole_RingOps_LightweightProductionContexts(const oc::CLP& cmd)
                     assignValues<std::uint64_t>(invalidShape.mCoeffs, {17u});
                     LOGVOLE_REQUIRE_FALSE(((dynamicCrt[party]).mGpuLightweight || (dynamicCrt[party]).mRing.mExecutionOptions.mUseGpu
                     ? osuCrypto::LogVole::detail::gpuLegacyUnwrapRingLabelsCrt(dynamicCrt[party], {invalidShape}, labels.size(),
-                        false, 1u, unchanged)
+                        false, 1u, unchanged, crtCompute)
                     : macoro::sync_wait(unwrapRingLabelsCrt(crtResources.executor, crtDecodeBuffers, dynamicCrt[party], {invalidShape}, labels.size(),
                         false, 1u, unchanged))));
                     LOGVOLE_REQUIRE_TRUE(rangesEqual(unchanged,
@@ -2293,6 +2293,7 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                         LOGVOLE_REQUIRE_TRUE(stream.existingStaging(capacity + 1u) == nullptr);
                         LOGVOLE_REQUIRE_EQ(stream.stagingCapacity(), capacity);
 
+                        detail::CpuRowScratch copyScratch;
                         for (std::uint32_t workers : {1u, 4u})
                         {
                             if (reuse[0] == '1')
@@ -2305,7 +2306,7 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                                     ring->polyBytes(), stream.raw()));
                             }
                             std::vector<RnsPoly> downloaded{actual[0]};
-                            LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(downloaded, stream, workers, 1u, count));
+                            LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(downloaded, stream, workers, copyScratch, 1u, count));
                             LOGVOLE_REQUIRE_EQ(downloaded.size(), count);
                             for (std::size_t i = 0; i < count; ++i)
                                 LOGVOLE_REQUIRE_TRUE(rangesEqual(downloaded[i].mCoeffs, actual[i + 1u].mCoeffs));
@@ -2321,14 +2322,14 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                                 // takes the private fallback without growing
                                 // or borrowing this stream's staging.
                                 std::vector<RnsPoly> privateDownload;
-                                LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(privateDownload, emptyStream, workers, 1u, count));
+                                LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(privateDownload, emptyStream, workers, copyScratch, 1u, count));
                                 expect_batch_equal(privateDownload, downloaded);
                                 LOGVOLE_REQUIRE_EQ(emptyStream.stagingCapacity(), 0u);
                             }
                             const auto expectedDownload = downloaded;
-                            LOGVOLE_REQUIRE_FALSE(device.downloadPipelined(downloaded, stream, workers, actual.size() + 1u));
+                            LOGVOLE_REQUIRE_FALSE(device.downloadPipelined(downloaded, stream, workers, copyScratch, actual.size() + 1u));
                             expect_batch_equal(downloaded, expectedDownload);
-                            LOGVOLE_REQUIRE_FALSE(device.downloadPipelined(downloaded, stream, workers, 1u, actual.size()));
+                            LOGVOLE_REQUIRE_FALSE(device.downloadPipelined(downloaded, stream, workers, copyScratch, 1u, actual.size()));
                             expect_batch_equal(downloaded, expectedDownload);
                         }
                     }
@@ -2336,13 +2337,11 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                 if (count == 65)
                 {
                     // Reuse one bounded worker pool across eight full chunks
-                    // and a one-polynomial tail, then release all worker state.
+                    // and a one-polynomial tail, then reuse it for another download.
 
-                    for (const char* reuseWorkers : {"0", "1"})
                     for (std::uint32_t workers : {1u, 4u})
                     {
                         osuCrypto::LogVoleGpuStreamOptions downloadOptions;
-                        downloadOptions.mDownloadReuseWorkers = reuseWorkers[0] == '1';
                         gpu::GpuStream stream(downloadOptions);
                         LOGVOLE_REQUIRE_TRUE(stream.staging(std::size_t(16) << 20) != nullptr);
                         CpuBenchmarkContext context;
@@ -2357,13 +2356,16 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
 #endif
                         context.mWorkerLimit = workers;
                         CpuBenchmarkState cpuBenchmark{&context};
-                        const auto originalSlots = detail::gParallelWorkerSlotsInUse.load();
+                        detail::CpuRowScratch copyScratch;
                         std::vector<RnsPoly> downloaded;
-                        LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(downloaded, stream, workers, 1u, count, cpuBenchmark));
+                        LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(downloaded, stream, workers, copyScratch, 1u, count, cpuBenchmark));
+                        auto* copyExecutor = copyScratch.executor();
+                        LOGVOLE_REQUIRE_TRUE(device.downloadPipelined(downloaded, stream, workers, copyScratch, 1u, count, cpuBenchmark));
+                        LOGVOLE_REQUIRE_TRUE(copyScratch.executor() == copyExecutor);
+                        if (workers == 1) LOGVOLE_REQUIRE_TRUE(copyExecutor == nullptr);
                         LOGVOLE_REQUIRE_EQ(downloaded.size(), count);
                         for (std::size_t i = 0; i < count; ++i)
                             LOGVOLE_REQUIRE_TRUE(rangesEqual(downloaded[i].mCoeffs, actual[i + 1u].mCoeffs));
-                        LOGVOLE_REQUIRE_EQ(context.mWorkerSlots.load(), 0u);
                         LOGVOLE_REQUIRE_EQ(context.mActiveTaskThreads.load(), 0u);
                         LOGVOLE_REQUIRE_TRUE(context.mPeakTaskThreads.load() <= workers);
                         LOGVOLE_REQUIRE_TRUE(context.mPeakTaskThreads.load() > 0u);
@@ -2372,7 +2374,6 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
                         if (workers > 1u && context.mCpus.size() > 1u)
                             LOGVOLE_REQUIRE_TRUE(context.mWorkersChecked.load() > 0u);
 #endif
-                        LOGVOLE_REQUIRE_EQ(detail::gParallelWorkerSlotsInUse.load(), originalSlots);
                     }
                 }
             }

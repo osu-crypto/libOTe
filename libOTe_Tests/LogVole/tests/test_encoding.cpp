@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuBenchmark.h"
@@ -327,30 +328,43 @@ namespace
         CpuBenchmarkContext& telemetry, bool expectParallel, bool useGpu)
     {
         CpuBenchmarkState cpuBenchmark{&telemetry};
+        detail::CpuRowScratch compute;
         const auto expected = scalar_wire(message);
         LOGVOLE_REQUIRE_TRUE(expected.size() > (std::size_t(1) << 20));
         const auto serial = encode(message, 1, {}, useGpu, nullptr, cpuBenchmark);
+        telemetry.reset();
+        const auto noCompute = encode(message, 8, {}, useGpu, nullptr, cpuBenchmark, nullptr);
+        expect_bytes_equal(noCompute, as_span(expected));
+        LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+        LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() <= 1u);
+        std::vector<std::uint8_t> noComputeUnaligned(expected.size() + 1u, 0xA5);
+        std::copy(expected.begin(), expected.end(), noComputeUnaligned.begin() + 1);
+        telemetry.reset();
+        Message noComputeDecoded{};
+        LOGVOLE_REQUIRE_TRUE(decode(as_span(noComputeUnaligned).subspan(1), noComputeDecoded,
+            8, {}, useGpu, nullptr, cpuBenchmark, nullptr));
+        expect_bytes_equal(as_span(scalar_wire(noComputeDecoded)), as_span(expected));
+        LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
+        LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() <= 1u);
         for (auto workers : { 0u, 1u, 8u })
         {
             telemetry.reset();
-            const auto wire = encode(message, workers, {}, useGpu, nullptr, cpuBenchmark);
+            const auto wire = encode(message, workers, {}, useGpu, nullptr, cpuBenchmark, &compute);
             expect_bytes_equal(wire, as_span(expected));
             expect_bytes_equal(wire, serial);
 #if defined(__linux__)
             LOGVOLE_EXPECT_EQ(telemetry.mWorkersChecked.load() != 0, expectParallel && workers > 1);
 #endif
-            LOGVOLE_EXPECT_EQ(telemetry.mWorkerSlots.load(), 0u);
             // Decode an independently produced, deliberately unaligned wire,
             // rather than feeding the implementation its own encoded buffer.
             std::vector<std::uint8_t> unaligned(expected.size() + 1u, 0xA5);
             std::copy(expected.begin(), expected.end(), unaligned.begin() + 1);
             telemetry.reset();
             Message decoded{};
-            LOGVOLE_REQUIRE_TRUE(decode(as_span(unaligned).subspan(1), decoded, workers, {}, useGpu, nullptr, cpuBenchmark));
+            LOGVOLE_REQUIRE_TRUE(decode(as_span(unaligned).subspan(1), decoded, workers, {}, useGpu, nullptr, cpuBenchmark, &compute));
 #if defined(__linux__)
             LOGVOLE_EXPECT_EQ(telemetry.mWorkersChecked.load() != 0, expectParallel && workers > 1);
 #endif
-            LOGVOLE_EXPECT_EQ(telemetry.mWorkerSlots.load(), 0u);
             expect_bytes_equal(as_span(scalar_wire(decoded)), as_span(expected));
         }
 
@@ -642,10 +656,11 @@ void LogVole_Encoding_RootResidentWireExact(const oc::CLP& cmd)
     resident.mTopCt.mPolys.clear();
     for (auto workers : { 1u, 4u })
     {
-        const auto wire = encode(resident, workers, {}, true);
+        detail::CpuRowScratch compute;
+        const auto wire = encode(resident, workers, {}, true, nullptr, {}, &compute);
         expect_bytes_equal(wire, as_span(exact));
         RootOfflineMessage decoded{};
-        LOGVOLE_REQUIRE_TRUE(decode(wire, decoded, workers, {}, true));
+        LOGVOLE_REQUIRE_TRUE(decode(wire, decoded, workers, {}, true, nullptr, {}, &compute));
         expect_tensor_equal(decoded.mCtR, eager.mCtR);
         expect_tensor_equal(decoded.mLacctLeft.mCt, eager.mLacctLeft.mCt);
         expect_tensor_equal(decoded.mTopCt, eager.mTopCt);

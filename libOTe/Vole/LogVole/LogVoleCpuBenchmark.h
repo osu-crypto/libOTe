@@ -20,7 +20,6 @@ namespace osuCrypto::LogVole
     {
         std::vector<int> mCpus;
         std::size_t mWorkerLimit = 0;
-        std::atomic<std::size_t> mWorkerSlots{0};
         std::atomic<std::uint64_t> mWorkerCpuNs{0};
         std::atomic<std::uint64_t> mWorkersChecked{0};
         std::atomic<std::uint64_t> mAffinityFailures{0};

@@ -9,7 +9,6 @@
 #include "libOTe/config.h"
 
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/LogVoleTransport.h"
 
@@ -175,7 +174,7 @@ namespace osuCrypto::LogVole
             Socket& sock,
             bool isTopLevel,
             bool hasReusableState, bool useGpu, std::shared_ptr<HostStepProfiler> profileOwner,
-            TimingStats* timing, CpuBenchmarkState cpuBenchmark = {})
+            TimingStats* timing, const std::shared_ptr<detail::ShrinkExpandScratch>& computeOwner, CpuBenchmarkState cpuBenchmark = {})
         {
             auto* profile = profileOwner.get();
             RecursiveMode mode{};
@@ -197,8 +196,11 @@ namespace osuCrypto::LogVole
 					shrinkExpandOfflinePayloadSize(params.mShrinkExpand, maxPayload);
 				auto shrinkExpandPayload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(
 					shrinkExpandSock, detail::requirePayloadSize(validPayloadSize, maxPayload), params.mShrinkExpand.mTransport.mEncoding.mWire, useGpu, profile, timing);
+                std::optional<detail::ShrinkExpandScratch::Lease> compute;
+                if (useGpu && params.mShrinkExpand.mNumWorkerThreads > 1)
+                    compute.emplace(detail::ShrinkExpandScratch::acquire(computeOwner));
                 if (!decodeShrinkExpandOfflineForTransport(std::move(shrinkExpandPayload), message.mShrinkExpandMessage,
-                        params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profileOwner, cpuBenchmark))
+                        params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profileOwner, cpuBenchmark, compute ? &compute->cpuRows() : nullptr))
                 {
                     throw std::runtime_error("LogVole receiver could not decode shrink/expand offline message");
                 }
@@ -220,8 +222,11 @@ namespace osuCrypto::LogVole
 					rootOfflinePayloadSize(params.mShrinkExpand, tauHi, maxPayload);
 				auto rootPayload =
 					co_await detail::recvFrame<ProtocolCacheRole::Receiver>(rootSock, detail::requirePayloadSize(validPayloadSize, maxPayload), params.mShrinkExpand.mTransport.mEncoding.mWire, useGpu, profile, timing);
+                std::optional<detail::ShrinkExpandScratch::Lease> compute;
+                if (useGpu && params.mShrinkExpand.mNumWorkerThreads > 1)
+                    compute.emplace(detail::ShrinkExpandScratch::acquire(computeOwner));
                 if (!decodeRootOfflineForTransport(std::move(rootPayload),
-                        message.mRootMessage, params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profileOwner, cpuBenchmark))
+                        message.mRootMessage, params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profileOwner, cpuBenchmark, compute ? &compute->cpuRows() : nullptr))
                 {
                     throw std::runtime_error("LogVole receiver could not decode root offline message");
                 }
@@ -236,7 +241,7 @@ namespace osuCrypto::LogVole
 
             message.mNextLevel = std::make_unique<OfflineMessage>();
             auto childSock = sock.fork();
-            co_await recvOfflineMessage(child, *message.mNextLevel, childSock, false, childHasReusableState, useGpu, profileOwner, timing, cpuBenchmark);
+            co_await recvOfflineMessage(child, *message.mNextLevel, childSock, false, childHasReusableState, useGpu, profileOwner, timing, computeOwner, cpuBenchmark);
         }
     }
 
@@ -399,15 +404,26 @@ namespace osuCrypto::LogVole
 		const bool validPayloadSize = shrinkExpandOfflinePayloadSize(input.mParams, maxPayload);
 		const auto payload = co_await detail::recvFrame<ProtocolCacheRole::Receiver>(sock, detail::requirePayloadSize(validPayloadSize, maxPayload), input.mParams.mTransport.mEncoding.mWire, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), timingStats(input.mRingFactoryOwner));
 
+        std::optional<ShrinkExpandReceiverOfflineInput> selectedInput;
+        if (gpu::enabled(input.mRingFactoryOwner) && !input.mCpuScratch)
+        {
+            selectedInput.emplace(input);
+            selectedInput->mCpuScratch = std::make_shared<detail::ShrinkExpandScratch>();
+        }
+        const auto& codecInput = selectedInput ? *selectedInput : input;
+        std::optional<detail::ShrinkExpandScratch::Lease> compute;
+        if (gpu::enabled(input.mRingFactoryOwner) && input.mParams.mNumWorkerThreads > 1)
+            compute.emplace(detail::ShrinkExpandScratch::acquire(codecInput.mCpuScratch));
         ShrinkExpandOfflineMessage message{};
-        if (!decode(payload, message, input.mParams.mNumWorkerThreads, input.mParams.mTransport.mEncoding, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark))
+        if (!decode(payload, message, input.mParams.mNumWorkerThreads, input.mParams.mTransport.mEncoding, gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark, compute ? &compute->cpuRows() : nullptr))
         {
             throw std::runtime_error("LogVole receiver received malformed shrink/expand offline message");
         }
 
+        compute.reset();
         const bool finalized = setupMoveStateEnabled(input.mRingFactoryOwner)
-            ? finalizeShrinkExpandReceiverOffline(input, std::move(message), state, setupScope)
-            : finalizeShrinkExpandReceiverOffline(input, message, state, setupScope);
+            ? finalizeShrinkExpandReceiverOffline(codecInput, std::move(message), state, setupScope)
+            : finalizeShrinkExpandReceiverOffline(codecInput, message, state, setupScope);
         if (!finalized)
         {
             throw std::runtime_error("LogVole receiver rejected shrink/expand offline message");
@@ -430,13 +446,20 @@ namespace osuCrypto::LogVole
             ? gpu::beginReceiverFirstQueryAllocations(input.mParams, input.mRingFactoryOwner, setupScope)
             : gpu::ReceiverFirstQueryAllocationsPtr{};
 #endif
+        std::optional<ReceiverOfflineInput> selectedInput;
+        if (gpu::enabled(input.mRingFactoryOwner) && !input.mCpuScratch)
+        {
+            selectedInput.emplace(input);
+            selectedInput->mCpuScratch = std::make_shared<detail::ShrinkExpandScratch>();
+        }
+        const auto& codecInput = selectedInput ? *selectedInput : input;
         OfflineMessage message{};
-        co_await recvOfflineMessage(input.mParams, message, sock, true, false, gpu::enabled(input.mRingFactoryOwner), hostProfilerOwner(input.mRingFactoryOwner), timingStats(input.mRingFactoryOwner), cpuBenchmark);
+        co_await recvOfflineMessage(input.mParams, message, sock, true, false, gpu::enabled(input.mRingFactoryOwner), hostProfilerOwner(input.mRingFactoryOwner), timingStats(input.mRingFactoryOwner), codecInput.mCpuScratch, cpuBenchmark);
 
         ReceiverOfflineOutput output{};
         const bool finalized = setupMoveStateEnabled(input.mRingFactoryOwner)
-            ? finalizeReceiverOffline(input, std::move(message), output, cpuBenchmark, setupScope)
-            : finalizeReceiverOffline(input, message, output, cpuBenchmark, setupScope);
+            ? finalizeReceiverOffline(codecInput, std::move(message), output, cpuBenchmark, setupScope)
+            : finalizeReceiverOffline(codecInput, message, output, cpuBenchmark, setupScope);
         if (!finalized)
         {
             throw std::runtime_error("LogVole receiver rejected recursive offline message");
@@ -943,9 +966,12 @@ namespace osuCrypto::LogVole
                     childOutput.mTbm, skXHat, cpuBenchmark);
             }
             else
-                denoised = detail::gpuLegacySeedLabelDenoiseTbm(childOutput.mTbm, wPrime, tauHi,
+            {
+                auto scratch = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
+                denoised = detail::gpuLegacySeedLabelDenoiseTbm(scratch.cpuRows(), childOutput.mTbm, wPrime, tauHi,
                     state.mParams.mShrinkExpand.mRing, skXHat,
                     state.mParams.mShrinkExpand.mNumWorkerThreads, cpuBenchmark);
+            }
             auto* totals = state.mShrinkExpandState.mRingFactoryOwner
                 ? state.mShrinkExpandState.mRingFactoryOwner->mExecutionOptions.mRingOpsStats : nullptr;
             PendingRingOpsStats pending(totals);
@@ -1085,14 +1111,15 @@ namespace osuCrypto::LogVole
         {
             // Existing host fallback for GPU sessions; CPU sessions use the async branch.
             const u32 cpuRowWorkers = wDoublePrime > 1 ? 1 : state.mParams.mShrinkExpand.mNumWorkerThreads;
-            if (!detail::runParallelTasks(wDoublePrime, state.mParams.mShrinkExpand.mNumWorkerThreads,
+            auto scratch = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
+            if (!scratch.cpuRows().runBulk(wDoublePrime, state.mParams.mShrinkExpand.mNumWorkerThreads,
                 [&](std::size_t taskIdx, CpuBenchmarkState& worker) {
                     const auto chunk = static_cast<u32>(taskIdx);
                     auto expandInput = chunkInput(chunk);
                     ShrinkExpandReceiverExpandOutput expandOutput;
                     return detail::gpuLegacyExpandReceiver(state.mShrinkExpandState, expandInput,
                         expandOutput, cpuRowWorkers, worker, cacheScope) && storeChunk(chunk, expandOutput);
-                }, false, &cpuBenchmark))
+                }, cpuBenchmark))
                 throw std::runtime_error("LogVole receiver could not expand recursive chunk");
         }
         expandPhase.stop();

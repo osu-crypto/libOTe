@@ -1,3 +1,4 @@
+#include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
 #include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
 #include "libOTe_Tests/LogVole_SenderResources.h"
 #include "libOTe_Tests/LogVole_TestOptions.h"
@@ -199,6 +200,7 @@ void LogVole_Garbled_SequentialRelation(const oc::CLP& cmd)
 
 void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
 {
+    const auto crtCompute = std::make_shared<osuCrypto::LogVole::detail::ShrinkExpandScratch>();
 #if defined(ENABLE_LOGVOLE_CUDA)
     osuCrypto::LogVole::gpu::GpuExecutionContext operationExecution;
 #endif
@@ -234,7 +236,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
                 for (u32 j = 0; j < 3; ++j) repeated[layout.scalarIndex(i, j)] = x[i];
             }
             std::vector<RnsPoly> expected;
-            LOGVOLE_REQUIRE_TRUE(osuCrypto::LogVole::detail::gpuLegacyWrapZpLabelsCrt(ctx, repeated, false, 0, 1, expected));
+            LOGVOLE_REQUIRE_TRUE(osuCrypto::LogVole::detail::gpuLegacyWrapZpLabelsCrt(ctx, repeated, false, 0, 1, expected, crtCompute));
             auto input = gpu::uploadScalars(x, operationExecution.mainStream());
             for (bool deviceInput : {false, true})
             {
@@ -268,7 +270,7 @@ void LogVole_Garbled_GpuPackingMatchesCrt(const oc::CLP& cmd)
                 for (u32 j = 0; j < 3; ++j)
                     repeated[layout.scalarIndex(i, j)] = expectedBits[i];
             std::vector<RnsPoly> expectedBitPacking, actualBitPacking;
-            LOGVOLE_REQUIRE_TRUE(osuCrypto::LogVole::detail::gpuLegacyWrapZpLabelsCrt(ctx, repeated, false, 0, 1, expectedBitPacking));
+            LOGVOLE_REQUIRE_TRUE(osuCrypto::LogVole::detail::gpuLegacyWrapZpLabelsCrt(ctx, repeated, false, 0, 1, expectedBitPacking, crtCompute));
             auto wrappedBits = gpu::wrapDeviceLabels(ctx, *generatedBits,
                 count, false, 0, layout.ringCount(), true);
             LOGVOLE_REQUIRE_TRUE(wrappedBits);

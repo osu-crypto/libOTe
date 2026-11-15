@@ -65,7 +65,6 @@ namespace osuCrypto
         std::uint32_t mPolyStageMiB = 8;
         std::uint32_t mDownloadSlotMiB = 8;
         bool mReuseDownloadStaging = true;
-        bool mDownloadReuseWorkers = true;
 
         bool valid() const noexcept
         {

@@ -45,7 +45,7 @@ namespace osuCrypto::LogVole::detail
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
-        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
+        std::vector<RnsPoly>& out, const std::shared_ptr<ShrinkExpandScratch>& compute, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     bool gpuLegacyUnwrapRingLabelsCrt(
         const ZpCrtContext& ctx,
@@ -53,7 +53,7 @@ namespace osuCrypto::LogVole::detail
         u64 zpLabelCount,
         bool scaleAndRound,
         u32 requestedWorkers,
-        AlignedUnVec<u64>& out, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
+        AlignedUnVec<u64>& out, const std::shared_ptr<ShrinkExpandScratch>& compute, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     bool gpuLegacyLheDec(
         const RingNttContext& ctx,
@@ -133,7 +133,7 @@ namespace osuCrypto::LogVole::detail
         u32 cpuRowWorkers, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
 
     bool gpuLegacyDenoiseComb(
-        const RingNttContext& ctx,
+        CpuRowScratch& scratch, const RingNttContext& ctx,
         const std::vector<RnsPoly>& tbaPrime,
         std::vector<RnsPoly>& out,
         u32 requestedWorkers = 1, CpuBenchmarkState cpuBenchmark = {});
@@ -158,7 +158,7 @@ namespace osuCrypto::LogVole::detail
         RnsPoly& rootKey, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView cacheScope = {});
 
     bool gpuLegacySeedLabelDenoiseTbm(
-        const std::vector<RnsPoly>& tbmPrime,
+        CpuRowScratch& scratch, const std::vector<RnsPoly>& tbmPrime,
         u32 wPrime,
         u32 tau,
         const RingParams& ring,
@@ -186,12 +186,12 @@ namespace osuCrypto::LogVole::detail
 
     // Existing GPU-session candidate validation and its scheduling.
     bool gpuLegacyValidateGoldenSeedCandidate(
-        const Params& params,
+        CpuRowScratch& scratch, const Params& params,
         const std::vector<RnsPoly>& tbkPerSampledPoly,
         bool& out, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     bool gpuLegacyValidateLeafGoldenSeedCandidate(
-        const Params& params,
+        CpuRowScratch& scratch, const Params& params,
         const std::vector<RnsPoly>& tbk,
         bool& out, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 }

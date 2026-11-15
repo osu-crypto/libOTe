@@ -6,7 +6,8 @@
 
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -1683,7 +1684,7 @@ namespace osuCrypto::LogVole
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
-        std::vector<RnsPoly>& out, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
+        std::vector<RnsPoly>& out, const std::shared_ptr<detail::ShrinkExpandScratch>& compute, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx.mRing);
         if (ctx.mGpuLightweight)
@@ -1710,7 +1711,7 @@ namespace osuCrypto::LogVole
 #endif
             const auto host = getZpHostContext(ctx, scope);
             return host && detail::gpuLegacyWrapZpLabelsCrt(
-                *host, labels, multiplyByDelta, padValue, requestedWorkers, out, cpuBenchmark, scope);
+                *host, labels, multiplyByDelta, padValue, requestedWorkers, out, compute, cpuBenchmark, scope);
         }
         if (!validateZpContext(ctx) ||
             !validateZpValues(ctx, labels) ||
@@ -1724,7 +1725,8 @@ namespace osuCrypto::LogVole
         const u64 slotCount = zpSlotCount(ctx);
         const u64 chunkCount = zpRingLabelCount(ctx, labels.size());
         out.resize(chunkCount);
-        return detail::runParallelTasks(
+        auto scratch = detail::ShrinkExpandScratch::acquire(compute);
+        return scratch.cpuRows().runBulk(
             static_cast<std::size_t>(chunkCount),
             requestedWorkers,
             [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark) {
@@ -1738,7 +1740,7 @@ namespace osuCrypto::LogVole
                     padValue,
                     requestedWorkers,
                     out[chunkIdx]);
-            }, false, &cpuBenchmark);
+            }, cpuBenchmark);
     }
 
     macoro::task<bool> wrapZpLabelsCrt(
@@ -1981,7 +1983,7 @@ namespace osuCrypto::LogVole
         u64 zpLabelCount,
         bool scaleAndRound,
         u32 requestedWorkers,
-        AlignedUnVec<u64>& out, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
+        AlignedUnVec<u64>& out, const std::shared_ptr<detail::ShrinkExpandScratch>& compute, CpuBenchmarkState cpuBenchmark, ProtocolCacheScopeView scope)
     {
         if (!cpuBenchmark.mContext) cpuBenchmark.mContext = cpuBenchmarkContext(ctx.mRing);
         if (!validateZpContext(ctx) || !validateRingBatchShape(labels, ctx.mRing.mParams))
@@ -2032,7 +2034,7 @@ namespace osuCrypto::LogVole
         {
             const auto host = getZpHostContext(ctx, scope);
             return host && detail::gpuLegacyUnwrapRingLabelsCrt(
-                *host, labels, zpLabelCount, scaleAndRound, requestedWorkers, out, cpuBenchmark, scope);
+                *host, labels, zpLabelCount, scaleAndRound, requestedWorkers, out, compute, cpuBenchmark, scope);
         }
 
         if (!validateDecodeContexts(ctx)) return false;
@@ -2040,12 +2042,15 @@ namespace osuCrypto::LogVole
         auto* timing = timingStats(ctx.mRing);
         AutoTimer unwrapTimer(timing ? &timing->mUnwrapTimeUs : nullptr);
         out.resize(static_cast<std::size_t>(zpLabelCount));
-        return detail::runParallelTasks(static_cast<std::size_t>(chunkCount), requestedWorkers,
-            [&](std::size_t labelIdx, CpuBenchmarkState&) {
+        auto scratch = detail::ShrinkExpandScratch::acquire(compute);
+        return scratch.cpuRows().runBulkChunked(static_cast<std::size_t>(chunkCount), requestedWorkers,
+            [&](std::size_t begin, std::size_t end, CpuBenchmarkState&) {
                 ZpDecodeBuffer buffer;
                 prepareDecodeBuffer(buffer, ctx);
-                return decode.decode(labels, zpLabelCount, scaleAndRound, labelIdx, buffer, out);
-            }, false, &cpuBenchmark);
+                for (auto label = begin; label != end; ++label)
+                    if (!decode.decode(labels, zpLabelCount, scaleAndRound, label, buffer, out)) return false;
+                return true;
+            }, cpuBenchmark);
     }
 
     task<> civoleSenderOffline(macoro::thread_pool &executor, std::span<u8> setupResults,
@@ -2329,7 +2334,7 @@ namespace osuCrypto::LogVole
             if (ctx.mRing.mExecutionOptions.mUseGpu)
                 unwrapped = detail::gpuLegacyUnwrapRingLabelsCrt(ctx,
                     *state.mLogVoleState.mPrecomputedTbk, state.mW, true,
-                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, cpuBenchmark, queryScope);
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, state.mLogVoleState.mShrinkExpandState.mCpuScratch, cpuBenchmark, queryScope);
             else
 #endif
             {
@@ -2445,7 +2450,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (gpu::enabled(ctx.mRing))
                 unwrapped = detail::gpuLegacyUnwrapRingLabelsCrt(ctx, ringKeys, state.mW, true,
-                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, cpuBenchmark, queryScope);
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, keys, state.mLogVoleState.mShrinkExpandState.mCpuScratch, cpuBenchmark, queryScope);
             else
 #endif
             {
@@ -2589,7 +2594,7 @@ namespace osuCrypto::LogVole
             bool wrappedOk;
             if (gpu::enabled(ctx.mRing))
                 wrappedOk = detail::gpuLegacyWrapZpLabelsCrt(ctx, packedX, false, 0,
-                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, wrapped, cpuBenchmark, queryScope);
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, wrapped, state.mLogVoleState.mShrinkExpandState.mCpuScratch, cpuBenchmark, queryScope);
             else
             {
                 wrappedOk = co_await wrapZpLabelsCrt(executor, wrapBuffers, ctx, packedX, false, 0,
@@ -2679,7 +2684,7 @@ namespace osuCrypto::LogVole
 #if defined(ENABLE_LOGVOLE_CUDA)
             if (gpu::enabled(ctx.mRing))
                 unwrapped = detail::gpuLegacyUnwrapRingLabelsCrt(ctx, online.mTbm, state.mW, true,
-                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, macs, cpuBenchmark, queryScope);
+                    state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads, macs, state.mLogVoleState.mShrinkExpandState.mCpuScratch, cpuBenchmark, queryScope);
             else
 #endif
             {

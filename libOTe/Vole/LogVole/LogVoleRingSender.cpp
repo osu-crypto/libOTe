@@ -1,8 +1,9 @@
 #include "libOTe/Vole/LogVole/LogVoleGpuCompatibility.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/LogVoleTransport.h"
 #include "libOTe/config.h"
@@ -13,6 +14,7 @@
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
 #endif
 
+#include <optional>
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
@@ -66,7 +68,7 @@ namespace osuCrypto::LogVole
             Socket& sock,
             bool isTopLevel,
             bool hasReusableState,
-            bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {})
+            bool useGpu, HostStepProfiler* profile, const std::shared_ptr<detail::ShrinkExpandScratch>& computeOwner, CpuBenchmarkState cpuBenchmark = {})
         {
             RecursiveMode mode{};
             if (!detail::recursiveMode(params, mode))
@@ -92,9 +94,12 @@ namespace osuCrypto::LogVole
                 auto shrinkExpandSock = sock.fork();
                 Buffer payload;
                 {
+                    std::optional<detail::ShrinkExpandScratch::Lease> compute;
+                    if (message.mEncodedShrinkExpandMessage.empty() && useGpu && params.mShrinkExpand.mNumWorkerThreads > 1)
+                        compute.emplace(detail::ShrinkExpandScratch::acquire(computeOwner));
                     payload = message.mEncodedShrinkExpandMessage.empty()
                         ? encode(message.mShrinkExpandMessage,
-                            params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile, cpuBenchmark)
+                            params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile, cpuBenchmark, compute ? &compute->cpuRows() : nullptr)
                         : std::move(message.mEncodedShrinkExpandMessage);
                 }
                 co_await sendOfflineFrame(shrinkExpandSock, std::move(payload), profile, cpuBenchmark);
@@ -107,8 +112,15 @@ namespace osuCrypto::LogVole
             if (mode == RecursiveMode::Root)
             {
                 auto rootSock = sock.fork();
-                Buffer payload = encode(message.mRootMessage,
-                    params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding, useGpu, profile, cpuBenchmark);
+                Buffer payload;
+                {
+                    std::optional<detail::ShrinkExpandScratch::Lease> compute;
+                    if (useGpu && params.mShrinkExpand.mNumWorkerThreads > 1)
+                        compute.emplace(detail::ShrinkExpandScratch::acquire(computeOwner));
+                    payload = encode(message.mRootMessage,
+                        params.mShrinkExpand.mNumWorkerThreads, params.mShrinkExpand.mTransport.mEncoding,
+                        useGpu, profile, cpuBenchmark, compute ? &compute->cpuRows() : nullptr);
+                }
                 co_await sendOfflineFrame(rootSock, std::move(payload), profile, cpuBenchmark);
                 co_return;
             }
@@ -126,7 +138,7 @@ namespace osuCrypto::LogVole
 
             auto childSock = sock.fork();
             co_await sendOfflineMessage(child, *message.mNextLevel,
-                childSock, false, childHasReusableState, useGpu, profile, cpuBenchmark);
+                childSock, false, childHasReusableState, useGpu, profile, computeOwner, cpuBenchmark);
         }
 
         task<> senderOnlineService(
@@ -274,8 +286,12 @@ namespace osuCrypto::LogVole
         }
 
         auto payload = [&] {
+            std::optional<detail::ShrinkExpandScratch::Lease> compute;
+            if (gpu::enabled(input.mRingFactoryOwner) && input.mParams.mNumWorkerThreads > 1)
+                compute.emplace(detail::ShrinkExpandScratch::acquire(state.mCpuScratch));
             return encode(message, input.mParams.mNumWorkerThreads, input.mParams.mTransport.mEncoding,
-                gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
+                gpu::enabled(input.mRingFactoryOwner), hostProfiler(input.mRingFactoryOwner), cpuBenchmark,
+                compute ? &compute->cpuRows() : nullptr);
         }();
         co_await sendOfflineFrame(sock, std::move(payload),
             hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
@@ -308,7 +324,7 @@ namespace osuCrypto::LogVole
 
         co_await sendOfflineMessage(input.mParams, output.mMessage, sock, true, false,
                                     gpu::enabled(input.mRingFactoryOwner),
-                                    hostProfiler(input.mRingFactoryOwner), cpuBenchmark);
+                                    hostProfiler(input.mRingFactoryOwner), output.mState.mShrinkExpandState.mCpuScratch, cpuBenchmark);
         state = std::move(output.mState);
     }
 

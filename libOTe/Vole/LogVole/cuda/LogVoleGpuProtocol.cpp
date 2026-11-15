@@ -756,14 +756,14 @@ namespace osuCrypto::LogVole::gpu
             const u64* mMaxMultiple = nullptr;   // [rho], owned by mRing
         };
 
-        bool downloadReceiverCt1Snapshot(const OfflineCache& cache,
+        bool downloadReceiverCt1Snapshot(const RingNttContext& ctx, const OfflineCache& cache,
             std::vector<RnsPoly>& out, GpuStream& stream, u32 workers)
         {
             CpuBenchmarkState cpuBenchmark{cache.mRing->executionOptions().mCpuBenchmark};
             const auto setting = cache.mRing->executionOptions().mAdvanced.mProtocol.mReceiverPipelinedDownload;
             const bool usePipeline = setting == LogVoleChoice::Enabled ||
                 (setting == LogVoleChoice::Automatic && cache.mCt1.bytes() >= (std::size_t(16) << 20));
-            return (usePipeline ? cache.mCt1.downloadPipelined(out, stream, workers, 0, 0, cpuBenchmark)
+            return (usePipeline ? cache.mCt1.downloadPipelined(out, stream, workers, ctx.mGpuExecution->transferCpuScratch(), 0, 0, cpuBenchmark)
                                 : cache.mCt1.download(out, stream)) && stream.sync();
         }
 
@@ -804,7 +804,7 @@ namespace osuCrypto::LogVole::gpu
                             auto& stream = contextStream(mContext);
                             StreamDrain drain{stream};
                             HostStep downloadStep(hostProfiler(mContext), "setup receiver: lazy NTT host download");
-                            downloaded = downloadReceiverCt1Snapshot(*mCache, next.mPolys, stream, mWorkers);
+                            downloaded = downloadReceiverCt1Snapshot(mContext, *mCache, next.mPolys, stream, mWorkers);
                         }
                     }
                     // A failed transfer has drained before next is reused.
@@ -1525,7 +1525,7 @@ namespace osuCrypto::LogVole::gpu
         StreamDrain drain{stream};
         {
             HostStep downloadStep(hostProfiler(ctx), "setup receiver: resident NTT host snapshot");
-            if (!downloadReceiverCt1Snapshot(*cache, nextCt1, stream, state.mParams.mNumWorkerThreads)) return false;
+            if (!downloadReceiverCt1Snapshot(ctx, *cache, nextCt1, stream, state.mParams.mNumWorkerThreads)) return false;
         }
         // Atomic publication preserves coefficient-domain fallback even if a
         // later download fails after the cache's NTT has completed.
@@ -2942,7 +2942,7 @@ namespace osuCrypto::LogVole::gpu
         }
         const bool pipelineRequested = ctx.mExecutionOptions.mAdvanced.mProtocol.mCompactPipelinedDownload && count >= 4;
         if (!(pipelineRequested
-                ? samples.downloadPipelined(next, stream, requestedWorkers, 0, 0, cpuBenchmark)
+                ? samples.downloadPipelined(next, stream, requestedWorkers, ctx.mGpuExecution->transferCpuScratch(), 0, 0, cpuBenchmark)
                 : samples.download(next, stream)) || next.size() != count) return false;
         if (!out) return false;
         *out = std::move(next);
@@ -3297,7 +3297,7 @@ namespace osuCrypto::LogVole::gpu
         HostStep downloadStep(hostProfiler(ctx), "setup: root device download", &cpuBenchmark);
         if ((ctx.mExecutionOptions.mAdvanced.mProtocol.mExtraPipelinedDownload) && count >= 4)
         {
-            if (!ctBuffer.downloadPipelined(next, stream, requestedWorkers, 0, 0, cpuBenchmark) || next.size() != count)
+            if (!ctBuffer.downloadPipelined(next, stream, requestedWorkers, ctx.mGpuExecution->transferCpuScratch(), 0, 0, cpuBenchmark) || next.size() != count)
                 return false;
             outCtNtt = std::move(next);
             return true;
@@ -3678,7 +3678,7 @@ namespace osuCrypto::LogVole::gpu
         HostStep downloadStep(hostProfiler(ctx), "setup: lenc device download", &cpuBenchmark);
         if (ctx.mExecutionOptions.mAdvanced.mProtocol.mPipelinedDownload)
         {
-            if (!ctBuffer.downloadPipelined(outCtNtt, stream, requestedWorkers, 0, 0, cpuBenchmark)) return false;
+            if (!ctBuffer.downloadPipelined(outCtNtt, stream, requestedWorkers, ctx.mGpuExecution->transferCpuScratch(), 0, 0, cpuBenchmark)) return false;
             if (outFirstRNtt) *outFirstRNtt = std::move(firstRNtt);
             if (retainedRandomizers) *retainedRandomizers = std::move(randomizerOwner);
             return true;
@@ -3941,7 +3941,7 @@ namespace osuCrypto::LogVole::gpu
         HostStep downloadStep(hostProfiler(ctx), "setup: lhe device download", &cpuBenchmark);
         if ((ctx.mExecutionOptions.mAdvanced.mProtocol.mExtraPipelinedDownload) && count >= 4)
         {
-            if (!ctBuffer.downloadPipelined(next, stream, requestedWorkers, 0, 0, cpuBenchmark) || next.size() != count)
+            if (!ctBuffer.downloadPipelined(next, stream, requestedWorkers, ctx.mGpuExecution->transferCpuScratch(), 0, 0, cpuBenchmark) || next.size() != count)
                 return false;
             outCoeffs = std::move(next);
             return true;

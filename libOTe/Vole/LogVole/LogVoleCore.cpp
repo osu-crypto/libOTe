@@ -8,7 +8,6 @@
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "macoro/all_of.h"
 
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -3858,6 +3857,7 @@ namespace osuCrypto::LogVole
                 }
 #endif
 
+                auto cpuScratch = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
                 RnsPoly rootKey{};
                 {
                     HostStep step(hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), "send: root key (host)", &cpuBenchmark);
@@ -3891,8 +3891,8 @@ namespace osuCrypto::LogVole
                 if (isLeaf && expandOutput.mTbk.size() > state.mParams.mW)
                     expandOutput.mTbk.resize(state.mParams.mW);
                 if (!publicSeed &&
-                    !(isLeaf ? detail::gpuLegacyValidateLeafGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)
-                             : detail::gpuLegacyValidateGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)))
+                    !(isLeaf ? detail::gpuLegacyValidateLeafGoldenSeedCandidate(cpuScratch.cpuRows(), seedParams, expandOutput.mTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)
+                             : detail::gpuLegacyValidateGoldenSeedCandidate(cpuScratch.cpuRows(), seedParams, expandOutput.mTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)))
                 {
                     return false;
                 }
@@ -4062,10 +4062,11 @@ namespace osuCrypto::LogVole
             }
 #endif
 
+            auto cpuScratch = detail::ShrinkExpandScratch::acquire(state.mShrinkExpandState.mCpuScratch);
             std::vector<RnsPoly> kPrimeHat;
             std::vector<RnsPoly> kPrime;
             if (!detail::gpuLegacySeedLabelDenoiseTbm(
-                    childEval.mTbk,
+                    cpuScratch.cpuRows(), childEval.mTbk,
                     wPrime,
                     tauHi,
                     state.mParams.mShrinkExpand.mRing,
@@ -4100,7 +4101,7 @@ namespace osuCrypto::LogVole
 
             {
             const u32 cpuLheWorkers = wDoublePrime > 1 ? 1 : state.mShrinkExpandState.mParams.mNumWorkerThreads;
-            if (!detail::runParallelTasks(
+            if (!cpuScratch.cpuRows().runBulk(
                     wDoublePrime,
                     state.mShrinkExpandState.mParams.mNumWorkerThreads,
                     [&](std::size_t taskIdx, CpuBenchmarkState& cpuBenchmark) {
@@ -4149,7 +4150,7 @@ namespace osuCrypto::LogVole
                             finalTbk[start + idx] = std::move(expandOutput.mTbk[idx]);
                         }
                         return true;
-                    }, false, &cpuBenchmark))
+                    }, cpuBenchmark))
             {
                 return false;
             }
@@ -4157,8 +4158,8 @@ namespace osuCrypto::LogVole
 
             bool candidateOk = publicSeed || (earlyCheck && candidateValid.load(std::memory_order_relaxed));
             if (!publicSeed && !earlyCheck &&
-                !(isLeaf ? detail::gpuLegacyValidateLeafGoldenSeedCandidate(seedParams, finalTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)
-                         : detail::gpuLegacyValidateGoldenSeedCandidate(seedParams, finalTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)))
+                !(isLeaf ? detail::gpuLegacyValidateLeafGoldenSeedCandidate(cpuScratch.cpuRows(), seedParams, finalTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)
+                         : detail::gpuLegacyValidateGoldenSeedCandidate(cpuScratch.cpuRows(), seedParams, finalTbk, candidateOk, hostProfiler(state.mShrinkExpandState.mRingFactoryOwner), cpuBenchmark)))
             {
                 return false;
             }
@@ -4492,7 +4493,7 @@ namespace osuCrypto::LogVole
             std::vector<RnsPoly>* mDestination;
         };
 
-        bool copySetupPolys(std::initializer_list<SetupPolyCopy> batches, u32 workers, CpuBenchmarkState cpuBenchmark = {})
+        bool copySetupPolys(detail::CpuRowScratch& scratch, std::initializer_list<SetupPolyCopy> batches, u32 workers, CpuBenchmarkState cpuBenchmark = {})
         {
             std::size_t taskCount = 0;
             for (const auto& batch : batches)
@@ -4500,7 +4501,7 @@ namespace osuCrypto::LogVole
                 batch.mDestination->resize(batch.mSource->size());
                 taskCount += batch.mSource->size();
             }
-            return detail::runParallelTasks(taskCount, workers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
+            return scratch.runBulk(taskCount, workers, [&](std::size_t idx, CpuBenchmarkState& cpuBenchmark) {
                 for (const auto& batch : batches)
                 {
                     if (idx < batch.mSource->size())
@@ -4511,7 +4512,7 @@ namespace osuCrypto::LogVole
                     idx -= batch.mSource->size();
                 }
                 return false;
-            }, false, &cpuBenchmark);
+            }, cpuBenchmark);
         }
 
         template <typename State>
@@ -4578,7 +4579,8 @@ namespace osuCrypto::LogVole
             }
             ShrinkExpandSenderState next{};
             copySetupMetadata(source, next);
-            if (!copySetupPolys({
+            auto scratch = detail::ShrinkExpandScratch::acquire(source.mCpuScratch);
+            if (!copySetupPolys(scratch.cpuRows(), {
                     { &source.mS, &next.mS },
                     { &source.mR, &next.mR },
                     { &source.mSk1, &next.mSk1 },
@@ -4609,7 +4611,8 @@ namespace osuCrypto::LogVole
             }
             ShrinkExpandReceiverState next{};
             copySetupMetadata(source, next);
-            if (!copySetupPolys({
+            auto scratch = detail::ShrinkExpandScratch::acquire(source.mCpuScratch);
+            if (!copySetupPolys(scratch.cpuRows(), {
                     { &source.mCt1.mPolys, &next.mCt1.mPolys },
                     { &source.mLacct.mCt.mPolys, &next.mLacct.mCt.mPolys }
                 }, source.mParams.mNumWorkerThreads, cpuBenchmark)) return false;
@@ -6538,7 +6541,7 @@ namespace osuCrypto::LogVole
     }
 
     bool detail::gpuLegacySeedLabelDenoiseTbm(
-        const std::vector<RnsPoly>& tbmPrime,
+        CpuRowScratch& scratch, const std::vector<RnsPoly>& tbmPrime,
         u32 wPrime,
         u32 tau,
         const RingParams& ring,
@@ -6564,7 +6567,7 @@ namespace osuCrypto::LogVole
         }
 #endif
 
-        return detail::gpuLegacyDenoiseComb(ctx, tbmPrime, out, requestedWorkers, cpuBenchmark);
+        return detail::gpuLegacyDenoiseComb(scratch, ctx, tbmPrime, out, requestedWorkers, cpuBenchmark);
     }
 
     bool seedLabelRepOfflineSenderInput(
@@ -6779,7 +6782,7 @@ namespace osuCrypto::LogVole
     }
 
     bool detail::gpuLegacyValidateLeafGoldenSeedCandidate(
-        const Params& params, const std::vector<RnsPoly>& tbk, bool& out, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
+        CpuRowScratch& scratch, const Params& params, const std::vector<RnsPoly>& tbk, bool& out, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
     {
         HostStep validationStep(profile, "cpu sender detail: golden validation", &cpuBenchmark);
         if (!params.mW || tbk.size() != params.mW ||
@@ -6789,14 +6792,14 @@ namespace osuCrypto::LogVole
         if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx) ||
             !buildLeafRoundingCheckConstants(params, ctx, constants)) return false;
         std::atomic<bool> accepted{true};
-        if (!detail::runParallelTasks(tbk.size(), params.mShrinkExpand.mNumWorkerThreads,
+        if (!scratch.runBulk(tbk.size(), params.mShrinkExpand.mNumWorkerThreads,
                 [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     if (!accepted.load(std::memory_order_relaxed)) return true;
                     bool ok = false;
                     if (!checkRoundingPolynomial(ctx, constants, tbk[i], ok)) return false;
                     if (!ok) accepted.store(false, std::memory_order_relaxed);
                     return true;
-                }, false, &cpuBenchmark)) return false;
+                }, cpuBenchmark)) return false;
         out = accepted.load(std::memory_order_relaxed);
         return true;
     }
@@ -6850,7 +6853,7 @@ namespace osuCrypto::LogVole
     }
 
     bool detail::gpuLegacyValidateGoldenSeedCandidate(
-        const Params& params,
+        CpuRowScratch& scratch, const Params& params,
         const std::vector<RnsPoly>& tbkPerSampledPoly,
         bool& out, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
     {
@@ -6889,7 +6892,7 @@ namespace osuCrypto::LogVole
         // used by incremental CPU candidate evaluation, with global indices.
         std::atomic<bool> ok{ true };
         std::atomic<bool> shapeError{ false };
-        const bool ran = detail::runParallelTasks(tbkPerSampledPoly.size(),
+        const bool ran = scratch.runBulk(tbkPerSampledPoly.size(),
             params.mShrinkExpand.mNumWorkerThreads, [&](std::size_t sampledPolyIdx, CpuBenchmarkState& cpuBenchmark) {
                 if (!ok.load(std::memory_order_relaxed)) return true;
                 bool accepted = false;
@@ -6901,7 +6904,7 @@ namespace osuCrypto::LogVole
                 }
                 if (!accepted) ok.store(false, std::memory_order_relaxed);
                 return true;
-            }, false, &cpuBenchmark);
+            }, cpuBenchmark);
 
         if (!ran || shapeError.load())
         {

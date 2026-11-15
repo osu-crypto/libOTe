@@ -4,7 +4,7 @@
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVole.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/LogVoleTransport.h"
@@ -1228,10 +1228,12 @@ void LogVole_Core_RuntimeCacheScopePropagatesToParallelWorkers(const oc::CLP&)
     std::atomic<std::uint32_t> observed{ 0 };
 
     {
-        for (bool dynamic : { false, true })
+        detail::CpuRowScratch scratch;
+        CpuBenchmarkState benchmark;
+        for (unsigned repeat = 0; repeat != 2; ++repeat)
         {
             std::array<std::atomic<unsigned>, 16> seen{};
-            LOGVOLE_REQUIRE_TRUE(detail::runParallelTasks(
+            LOGVOLE_REQUIRE_TRUE(scratch.runBulk(
                 16,
                 4,
                 [&](std::size_t index) {
@@ -1245,10 +1247,10 @@ void LogVole_Core_RuntimeCacheScopePropagatesToParallelWorkers(const oc::CLP&)
                         return true;
                     }
                     return false;
-                }, dynamic));
+                }, benchmark));
         }
-        LOGVOLE_REQUIRE_TRUE(!detail::runParallelTasks(100, 4,
-            [](std::size_t index) { return index != 0; }, true));
+        LOGVOLE_REQUIRE_TRUE(!scratch.runBulk(100, 4,
+            [](std::size_t index) { return index != 0; }, benchmark));
     }
 
     LOGVOLE_EXPECT_EQ(observed.load(std::memory_order_relaxed), 32u);
@@ -4262,7 +4264,6 @@ void LogVole_Core_GpuSetupOptions(const oc::CLP& cmd)
     advanced.mAdvanced.mStreams.mDownloadSlotMiB = 1;
     advanced.mAdvanced.mStreams.mPolyStageMiB = 1;
     advanced.mAdvanced.mStreams.mReuseDownloadStaging = false;
-    advanced.mAdvanced.mStreams.mDownloadReuseWorkers = false;
     advanced.mAdvanced.mProtocol.mLencRandomizerResidency = false;
     advanced.mAdvanced.mProtocol.mPublicUniformRetention = false;
     advanced.mAdvanced.mProtocol.mUniformSampling = false;

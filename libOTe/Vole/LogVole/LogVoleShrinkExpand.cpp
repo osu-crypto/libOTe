@@ -3,7 +3,7 @@
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 
 #include "libOTe/config.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -608,19 +608,28 @@ namespace osuCrypto::LogVole
             const std::size_t lacctCount = next.mLacct.mCt.mPolys.size();
             nextMessage.mCt1.mPolys.resize(ct1Count);
             nextMessage.mLacct.mCt.mPolys.resize(lacctCount);
-            // Each worker allocates and copies its own polynomial. Message and
-            // state remain independently mutable, exactly as with assignment.
-            if (!detail::runParallelTasks(
-                    ct1Count + lacctCount, input.mParams.mNumWorkerThreads,
-                    [&](std::size_t index, CpuBenchmarkState& cpuBenchmark) {
-                        if (index < ct1Count) nextMessage.mCt1.mPolys[index] = next.mCt1.mPolys[index];
-                        else
-                            nextMessage.mLacct.mCt.mPolys[index - ct1Count] =
-                                next.mLacct.mCt.mPolys[index - ct1Count];
-                        return true;
-                    },
-                    false, &cpuBenchmark))
-                co_return false;
+            // Copies own disjoint output polynomials; all source and destination
+            // storage stays in this coroutine until the caller-executor join.
+            const auto count = ct1Count + lacctCount;
+            const auto partitions = std::min<std::size_t>(count,
+                std::max<u32>(1, input.mParams.mNumWorkerThreads));
+            auto copyRange = [&](std::size_t first, std::size_t last, CpuBenchmarkState& worker) {
+                CpuBenchmarkWorkerScope timing(partitions > 1 ? worker.mContext : nullptr);
+                CpuBenchmarkTaskScope metrics(worker);
+                for (auto index = first; index != last; ++index)
+                {
+                    if (index < ct1Count) nextMessage.mCt1.mPolys[index] = next.mCt1.mPolys[index];
+                    else
+                        nextMessage.mLacct.mCt.mPolys[index - ct1Count] =
+                            next.mLacct.mCt.mPolys[index - ct1Count];
+                }
+            };
+            if (partitions <= 1) copyRange(0, count, cpuBenchmark);
+            else
+            {
+                std::vector<CpuBenchmarkState> workers(partitions, {cpuBenchmark.mContext, true});
+                co_await macoro::bulk_chunked(executor, count, std::span(workers), copyRange);
+            }
         }
         else
         {
@@ -1533,7 +1542,7 @@ namespace osuCrypto::LogVole
     }
 
     bool detail::gpuLegacyDenoiseComb(
-        const RingNttContext& ctx, const std::vector<RnsPoly>& tbaPrime,
+        CpuRowScratch& scratch, const RingNttContext& ctx, const std::vector<RnsPoly>& tbaPrime,
         std::vector<RnsPoly>& out, u32 requestedWorkers, CpuBenchmarkState cpuBenchmark)
     {
         if (requestedWorkers == 1)
@@ -1542,11 +1551,11 @@ namespace osuCrypto::LogVole
         DenoiseData data;
         if (!prepareDenoise(ctx, tbaPrime, data)) return false;
         std::vector<RnsPoly> result(tbaPrime.size() / data.mModuli.size());
-        if (!detail::runParallelTasks(result.size(), requestedWorkers,
+        if (!scratch.runBulk(result.size(), requestedWorkers,
             [&](std::size_t i, CpuBenchmarkState&) {
                 denoiseRow(ctx, data, tbaPrime, i, result[i]);
                 return true;
-            }, false, &cpuBenchmark)) return false;
+            }, cpuBenchmark)) return false;
         out = std::move(result);
         return true;
     }

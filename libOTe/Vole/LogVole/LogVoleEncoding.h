@@ -18,6 +18,7 @@
 
 namespace osuCrypto::LogVole
 {
+    namespace detail { class CpuRowScratch; }
     // useGpu arguments below are resolved backend selections from the caller's
     // context/owner. Encoding never performs device discovery.
     struct Params;
@@ -207,36 +208,39 @@ namespace osuCrypto::LogVole
     Buffer encode(const KeyDeriveRequest& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     Buffer encode(const KeyDeriveResponse& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     Buffer encode(const ShrinkExpandOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
-    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    // Worker-count codecs borrow exclusive compute until the synchronous call
+    // returns. A null resource selects the serial codec. Wire buffers own only
+    // bytes and allocation policy.
+    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr);
     // Borrow the completed sender tensors while producing independently owned
     // wire bytes. This avoids constructing a second mutable tensor package.
     Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     Buffer encode(const PolyMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     Buffer encode(const SeedMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     Buffer encode(const RootOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
-    Buffer encode(const RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    Buffer encode(const RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr);
     std::size_t rootOfflineWireSize(const RootOfflineMessage& message);
     Buffer encodeRootOfflineIntoBuffer(const RootOfflineMessage& message,
-        Buffer&& reserved, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr);
+        Buffer&& reserved, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, detail::CpuRowScratch* compute = nullptr, CpuBenchmarkState cpuBenchmark = {});
     Buffer encode(const RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     Buffer encode(const RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 
     bool decode(std::span<const u8> payload, KeyDeriveRequest& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     bool decode(std::span<const u8> payload, KeyDeriveResponse& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
-    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr);
     // Internal socket route. Validate dimensions and coefficient spans first,
     // then retain the received bytes without allocating host polynomials.
     bool decodeShrinkExpandOfflineForTransport(Buffer&& payload,
-        ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {}, CpuBenchmarkState cpuBenchmark = {});
+        ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr);
     bool decode(std::span<const u8> payload, PolyMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     bool decode(std::span<const u8> payload, SeedMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     bool decode(std::span<const u8> payload, RootOfflineMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
-    bool decode(std::span<const u8> payload, RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
+    bool decode(std::span<const u8> payload, RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr);
     // Internal socket route: retain the selected complete Root tensor segments
     // in the independently received Buffer until their first GPU or host consumer.
     bool decodeRootOfflineForTransport(Buffer&& payload,
-        RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {}, CpuBenchmarkState cpuBenchmark = {});
+        RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options = {}, bool useGpu = false, const std::shared_ptr<HostStepProfiler>& profileOwner = {}, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr);
     bool decode(std::span<const u8> payload, RootDigestMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
     bool decode(std::span<const u8> payload, RootResponseMessage& message, const LogVoleEncodingOptions& options = {}, bool useGpu = false, HostStepProfiler* profile = nullptr, CpuBenchmarkState cpuBenchmark = {});
 

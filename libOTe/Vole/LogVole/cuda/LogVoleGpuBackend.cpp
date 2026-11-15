@@ -3,7 +3,7 @@
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVolePublicCache.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
 
@@ -959,6 +959,7 @@ namespace osuCrypto::LogVole::gpu
         struct Worker
         {
             std::unique_ptr<GpuStream> main, sample, readback;
+            std::unique_ptr<detail::CpuRowScratch> downloadCompute;
         };
         std::mutex mutex;
         int device = -1;
@@ -1002,6 +1003,15 @@ namespace osuCrypto::LogVole::gpu
         if (!stream)
             stream.reset(new GpuStream(false, lane != Lane::Readback, mImpl->memory, mExecutionOptions.mAdvanced.mStreams, mHostProfiler, &mImpl->gaussianCompatibility));
         return *stream;
+    }
+
+    detail::CpuRowScratch& GpuExecutionContext::transferCpuScratch()
+    {
+        std::lock_guard lock(mImpl->mutex);
+        auto& worker = mImpl->workers[std::this_thread::get_id()];
+        if (!worker.downloadCompute)
+            worker.downloadCompute = std::make_unique<detail::CpuRowScratch>();
+        return *worker.downloadCompute;
     }
 
     GpuStream& GpuExecutionContext::mainStream() { return stream(Lane::Main); }
@@ -2498,7 +2508,7 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool GpuPolyBuffer::downloadPipelined(
-        std::vector<RnsPoly>& polys, GpuStream& stream, u32 workers,
+        std::vector<RnsPoly>& polys, GpuStream& stream, u32 workers, detail::CpuRowScratch& cpuScratch,
         std::size_t srcOffset, std::size_t count, CpuBenchmarkState cpuBenchmark) const
     {
         if (srcOffset > mCount || count > mCount - srcOffset ||
@@ -2540,80 +2550,24 @@ namespace osuCrypto::LogVole::gpu
         }
         // Workers borrow this stream's selected storage until their join.
         u8* const pinned = selected;
-        struct CopyPool
-        {
-            macoro::thread_pool::work work;
-            macoro::thread_pool pool;
-            explicit CopyPool(std::size_t threads)
-            {
-                work = pool.make_work();
-                try { pool.create_threads(threads); }
-                catch (...) { stop(); throw; }
-            }
-            void stop()
-            {
-                work.reset();
-                pool.join();
-            }
-            ~CopyPool() { stop(); }
-        };
-        std::unique_ptr<detail::ParallelWorkerSlotGuard> copySlots;
-        std::unique_ptr<CopyPool> copyPool;
-        std::size_t copyWorkers = 1;
-        const auto requested = detail::resolveWorkerCount(workers, runPolys);
-        if (stream.options().mDownloadReuseWorkers && num > runPolys && requested > 1)
-        {
-            HostStep workersStep(stream.hostProfiler(), "setup: pipelined download worker pool", &cpuBenchmark);
-            // Reserve the same bounded worker budget once for this synchronous
-            // download. No pool or reserved worker survives its return.
-            copySlots = std::make_unique<detail::ParallelWorkerSlotGuard>(requested, cpuBenchmark.mContext);
-            copyWorkers = std::min(requested, copySlots->grantedWorkers());
-            if (copyWorkers > 1) copyPool = std::make_unique<CopyPool>(copyWorkers - 1);
-        }
+        // The transfer execution owner reuses the primary CPU executor across
+        // chunks and later downloads. Callers supply the explicit worker allowance.
         auto materialize = [&](std::size_t offset, std::size_t length, u32 slot) {
             {
                 HostStep waitStep(stream.hostProfiler(), "setup: pipelined download DMA wait", &cpuBenchmark);
                 if (!gpuEventSync(staging.mEvent[slot])) return false;
             }
             HostStep copyStep(stream.hostProfiler(), "setup: pipelined download host copy", &cpuBenchmark);
-            auto copyOne = [&](std::size_t i) {
-                auto& coefficients = next[offset + i].mCoeffs;
-                coefficients.resize(mPolyWords);
-                std::memcpy(coefficients.data(), pinned + slot * slotBytes + i * polyBytes, polyBytes);
-                return true;
-            };
-            if (!copyPool)
-                return detail::runParallelTasks(length, copySlots ? 1 : workers, copyOne, false, &cpuBenchmark);
-
-            const auto activeWorkers = std::min(copyWorkers, length);
-            detail::ParallelWorkerCapScope capScope(activeWorkers);
-            auto worker = [&](std::size_t workerIdx, CpuBenchmarkState& cpuBenchmark) {
-                CpuBenchmarkTaskScope taskScope(cpuBenchmark);
-                const auto begin = workerIdx * length / activeWorkers;
-                const auto end = (workerIdx + 1) * length / activeWorkers;
-                for (auto i = begin; i < end; ++i) (void)copyOne(i);
-            };
-            std::vector<macoro::eager_task<>> tasks;
-            tasks.reserve(activeWorkers - 1);
-            // On scheduling, allocation, or copy exceptions, finish every
-            // queued worker before tasks, worker, or its borrowed storage die.
-            // Individual waits keep the owning task vector intact even if an
-            // awaiter allocation fails; all tasks already run concurrently.
-            struct JoinOnFailure
-            {
-                CopyPool& pool;
-                bool completed = false;
-                ~JoinOnFailure() { if (!completed) pool.stop(); }
-            } join{*copyPool};
-            // Copies use only disjoint host ranges and diagnostics; they need
-            // no protocol identity.
-            for (std::size_t i = 1; i < activeWorkers; ++i)
-                tasks.push_back(detail::runPoolWorker(copyPool->pool, worker, i,
-                    cpuBenchmark.mContext) | macoro::make_eager());
-            worker(0, cpuBenchmark);
-            for (auto& task : tasks) macoro::sync_wait(task);
-            join.completed = true;
-            return true;
+            return cpuScratch.runBulkChunked(length, workers,
+                [&](std::size_t begin, std::size_t end, CpuBenchmarkState&) {
+                    for (auto i = begin; i != end; ++i)
+                    {
+                        auto& coefficients = next[offset + i].mCoeffs;
+                        coefficients.resize(mPolyWords);
+                        std::memcpy(coefficients.data(), pinned + slot * slotBytes + i * polyBytes, polyBytes);
+                    }
+                    return true;
+                }, cpuBenchmark);
         };
         std::size_t previousOffset = 0, previousLength = 0;
         u32 previousSlot = 0;

@@ -294,7 +294,6 @@ namespace
             for (const auto* telemetry : {&senderTelemetry, &receiverTelemetry})
             {
                 LOGVOLE_REQUIRE_EQ(telemetry->mActiveTaskThreads.load(), 0u);
-                LOGVOLE_REQUIRE_EQ(telemetry->mWorkerSlots.load(), 0u);
                 if (!device) LOGVOLE_REQUIRE_TRUE(telemetry->mPeakTaskThreads.load() > 0u);
             }
         }

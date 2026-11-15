@@ -8,7 +8,6 @@
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/LogVolePublicCache.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuExecutor.h"
 #include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #include "libOTe/Vole/LogVole/LogVoleZk.h"
@@ -54,42 +53,45 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
     telemetry.mWorkerLimit = 2;
     other.mCpus.resize(1);
     CpuBenchmarkState state{&telemetry};
-    for (bool dynamic : {false, true})
+    LogVole::detail::CpuRowScratch scratch;
+    for (unsigned repeat = 0; repeat != 2; ++repeat)
     {
         telemetry.reset();
-        LOGVOLE_REQUIRE_TRUE(LogVole::detail::runParallelTasks(4, 2,
+        LOGVOLE_REQUIRE_TRUE(scratch.runBulk(4, 2,
             [&](std::size_t, CpuBenchmarkState& workerState) {
                 LOGVOLE_REQUIRE_TRUE(workerState.mContext == &telemetry);
                 LOGVOLE_REQUIRE_EQ(workerState.mTaskDepth, 1u);
-                return LogVole::detail::runParallelTasks(3, 1,
+                LogVole::detail::CpuRowScratch serial;
+                const bool ok = serial.runBulk(3, 1,
                     [&](std::size_t, CpuBenchmarkState& nestedState) {
                         LOGVOLE_REQUIRE_EQ(nestedState.mTaskDepth, 2u);
                         LOGVOLE_REQUIRE_EQ(other.mActiveTaskThreads.load(), 0u);
                         return true;
-                    }, false, &workerState);
-            }, dynamic, &state));
+                    }, workerState);
+                LOGVOLE_REQUIRE_TRUE(serial.executor() == nullptr);
+                return ok;
+            }, state));
         LOGVOLE_REQUIRE_EQ(state.mTaskDepth, 0u);
         LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
-        LOGVOLE_REQUIRE_EQ(telemetry.mWorkerSlots.load(), 0u);
         LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() <= 2u);
         LOGVOLE_REQUIRE_TRUE(telemetry.mPeakTaskThreads.load() > 0u);
     }
     {
         CpuBenchmarkTaskScope outer(state);
         CpuBenchmarkState otherState{&other};
-        LOGVOLE_REQUIRE_TRUE(LogVole::detail::runParallelTasks(1, 1,
+        LOGVOLE_REQUIRE_TRUE(scratch.runBulk(1, 1,
             [&](std::size_t, CpuBenchmarkState& independent) {
                 LOGVOLE_REQUIRE_EQ(independent.mTaskDepth, 1u);
                 LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 1u);
                 LOGVOLE_REQUIRE_EQ(other.mActiveTaskThreads.load(), 1u);
                 return true;
-            }, false, &otherState));
+            }, otherState));
         bool innerThrew = false;
         try
         {
-            LogVole::detail::runParallelTasks(1, 1,
+            scratch.runBulk(1, 1,
                 [](std::size_t) -> bool { throw std::runtime_error("instrumented task"); },
-                false, &state);
+                state);
         }
         catch (const std::runtime_error&) { innerThrew = true; }
         LOGVOLE_REQUIRE_TRUE(innerThrew);
@@ -114,11 +116,11 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
     bool propagated = false;
     try
     {
-        LogVole::detail::runParallelTasks(1, 1, [](std::size_t) -> bool { throw Failure{}; });
+        scratch.runBulk(1, 1, [](std::size_t) -> bool { throw Failure{}; }, state);
     }
     catch (const Failure&) { propagated = true; }
     LOGVOLE_REQUIRE_TRUE(propagated);
-    if (LogVole::detail::hardwareWorkerSlots() < 2) return;
+    if (std::thread::hardware_concurrency() < 2) return;
 
     for (bool callerThrows : {true, false})
     {
@@ -127,7 +129,7 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
         bool joinedBeforeThrow = false;
         try
         {
-            (void)LogVole::detail::runParallelTasks(2, 2, [&](std::size_t task) -> bool {
+            (void)scratch.runBulk(2, 2, [&](std::size_t task) -> bool {
                 if (task == 1)
                 {
                     childStarted.store(true, std::memory_order_release);
@@ -142,7 +144,7 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
                 childStarted.wait(false, std::memory_order_acquire);
                 if (callerThrows) throw Failure{};
                 return true;
-            });
+            }, state);
         }
         catch (const Failure&)
         {
@@ -152,6 +154,16 @@ void LogVole_Cpu_ParallelFailureJoinsChildren(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(propagated);
         LOGVOLE_REQUIRE_TRUE(joinedBeforeThrow);
     }
+    std::atomic<bool> completed{false};
+    const bool ok = scratch.runBulk(2, 2, [&](std::size_t task) {
+        if (task == 0) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        completed.store(true, std::memory_order_release);
+        return true;
+    }, state);
+    LOGVOLE_REQUIRE_FALSE(ok);
+    LOGVOLE_REQUIRE_TRUE(completed.load(std::memory_order_acquire));
+    LOGVOLE_REQUIRE_EQ(telemetry.mActiveTaskThreads.load(), 0u);
 }
 
 
@@ -1563,7 +1575,6 @@ void LogVole_Cpu_LheDecryptMatchesTransformReference(const oc::CLP&)
                     LOGVOLE_REQUIRE_EQ(owners[repeat].mInttCount.load(), inputNtt ? 0u : rows);
                     LOGVOLE_REQUIRE_EQ(lheTelemetry.mActiveTaskThreads.load(), 0u);
                     LOGVOLE_REQUIRE_TRUE(lheTelemetry.mPeakTaskThreads.load() <= std::min(workers, 3u));
-                    LOGVOLE_REQUIRE_EQ(lheTelemetry.mWorkerSlots.load(), 0u);
                 }
                 LOGVOLE_REQUIRE_EQ(owners[0].mDyadicMulAddCount.load(), rows);
                 cpu.mExecutionOptions.mRingOpsStats = nullptr;

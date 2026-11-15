@@ -387,7 +387,7 @@ validation entries above and below record historical migration checkpoints.
 | Group | Count | Exact remaining objects | Intended owner/change |
 | --- | ---: | --- | --- |
 | Protocol run/role | 0 | None | Instance-owned services allocate qualified IDs; explicit operation contexts carry role/run identity and retain service lifetime. |
-| Worker budget | 2 | `gParallelWorkerSlotsInUse`, `tParallelWorkerCap` in `LogVoleParallel.h` | Caller-supplied compute resource and explicit chunk allowance; remove the ambient scheduler after caller migration. |
+| Worker budget | 0 | None | Caller executors and explicit chunk allowances schedule primary async work. Synchronous GPU host work borrows exclusive, reusable CPU scratch from its operation/state owner. |
 | Statistics | 0 | None | Optional execution-options sinks collect CPU and GPU counters/timings; per-chunk pending counters retain batching. Callers join work before reading/resetting sinks and keep sinks alive through context/stream teardown. GPU region timing totals belong to each `GpuStream`. |
 | CUDA allocation evidence | 0 | None | Sender-owned shared sink; active wire blocks retain it through completion and release it before entering the reuse cache. CPU offline resets only its supplied owner. |
 | Capability/compatibility caches | 0 | None | Device availability is captured at factory construction and forwarded to contexts and resource domains. Explicit standalone GPU owners discover once; `available()` is an uncached cold query. Gaussian compiler/libm facts belong to `GpuExecutionContext`, borrowed by its streams; direct streams own their cache inline. FP environment checks remain per-use. The legacy device-zero H200 prefetch flag belongs to `GpuExecutionContext`. |
@@ -421,50 +421,30 @@ without `-current` are historical, not the remaining-work list.
 
 #### Remaining scheduling migration
 
-There are **19 `detail::runParallelTasks` call sites** in library `.cpp` files:
-`LogVole.cpp` (2), `LogVoleCore.cpp` (4), `LogVoleEncoding.cpp` (2),
-`LogVoleLenc.cpp` (1), `LogVoleLhe.cpp` (1), `LogVoleRingReceiver.cpp` (2),
-`LogVoleShrinkExpand.cpp` (2), `LogVoleZk.cpp` (4), and
-`cuda/LogVoleGpuBackend.cpp` (1). These are call sites, not independent algorithms.
-Twelve normal synchronous declarations have been retired: eight deprecated
-LHE/LENC/shrink-expand/denoise overloads, root sender-key computation, two root
-response-finalization overloads, and seed-label denoise. Their existing GPU
-session/fallback implementations remain and are explicitly named in the internal
-`LogVoleGpuCompatibility.h`, included by implementation files and explicit GPU
-compatibility tests. Normal CPU
-callers and staged tests use explicit executors and prepared buffers; small root
-recovery calls `detail::denoiseCombSerial`, which shares the same preparation and
-row kernels with async denoise and never enters the scheduler. This interface
-retirement removes no physical legacy scheduler site or runtime declaration.
-The two synchronous input-wrapping/output-unwrapping implementations now serve
-only explicit internal GPU compatibility callers; CPU tests and production use
-caller executors and encode/decode buffers. Staged `civoleSenderReleaseK` now
-awaits the same async CPU decode API, retaining its existing cached-only semantics
-and SID/key publication order. Its GPU branch retains the existing compatibility
-behavior.
-Eight normal synchronous ZK interfaces are retired. Four unused implementations
-(matrix witness/product and scalar matrix response/value wrappers) are deleted;
-four required multiplication/matrix proof/value implementations remain explicitly
-named at the internal GPU fallback boundary. Its four matrix scheduling sites
-remain; production CPU proof phases and tests use prepared workspaces and direct
-awaits.
-Setup message/state copying and codec parallelism are GPU-gated; leave those
-alone while GPU migration is deferred. Their CPU paths already copy inline.
+The ambient scheduler and its global worker counter/TLS cap have been removed;
+no library or test calls `runParallelTasks`. CPU proof phases and online kernels
+await the caller executor with explicit numerical buffers and chunk allowances.
+Synchronous GPU host numerical paths borrow exclusive state-owned
+`CpuRowScratch` leases and reuse the existing bulk execution algorithm. An
+explicit inner allowance of one prevents nested chunk pools. A failed item stops
+its chunk; independent chunks still join before failure is returned. Golden-seed
+validation retains its shared rejection flags and early skips.
 
-Of the original **22 `setupScratch.runBulk` sites**, 20 offline sampling and
-assembly sites now use direct async `bulk_chunked`; CPU online receiver zeta
-also uses it. Three calls to `setupScratch.runBulk` remain: legacy zeta sampling
-for GPU/fallback callers, synchronous GPU lazy root-error expansion, and a named
-legacy seed-replay helper used only by that GPU lazy getter. CPU finalization's
-exceptional seed-only replay retains its existing inline, one-worker fallback.
-The getter uses `std::call_once` and
-cannot await; changing that boundary is separate from CPU offline setup.
-Three physical executor `runBulk` sites remain in internal GPU compatibility:
-ZK multiplication (1), LHE (1), and LENC (1). ZK's verifier also retains one
-executor `run` site. CPU production and ZK diagnostic tests use the explicit-
-executor async overloads. They still reach the blocking
-`CpuExecutor::runBulkChunked` adapter when a legacy caller requests them. Direct `sync_wait` expressions remain in `LogVoleCpuExecutor.h` and
-`cuda/LogVoleGpuBackend.cpp`; deleting just those expressions is not a migration.
+GPU matmul host proofs use the primary async algorithm on the caller executor.
+Their existing member numerical workspace is prepared only when an actual host
+proof is required and reused on later checks. Successful device execution keeps
+that workspace empty, and device-only failures remain fatal.
+
+Setup message copying awaits direct `bulk_chunked` on the caller executor.
+Synchronous setup-state copies and codecs borrow explicit operation/state
+scratch. GPU D2H materialization borrows lazy execution-owned transfer scratch;
+all host copy chunks join before pinned staging is reused. Serial work creates
+no pool or partition-storage allocation. No scheduler resource is discovered
+from thread history or a process-global budget.
+
+The existing synchronous execution adapter in `CpuExecutor` remains for these
+synchronous boundaries; primary async callers do not use it. Its macoro bulk
+operation joins all borrowed work before returning, including on exceptions.
 
 Receiver review validation: the Windows build and four end-to-end tests passed
 in 0.57 seconds, including fused/separate evaluation, one-worker execution,

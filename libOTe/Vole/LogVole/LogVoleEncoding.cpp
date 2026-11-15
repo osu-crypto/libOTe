@@ -1,7 +1,8 @@
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/config.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
-#include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuScratch.h"
+#include "libOTe/Vole/LogVole/LogVoleCpuRows.h"
 #if defined(ENABLE_LOGVOLE_CUDA)
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuProtocol.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
@@ -17,6 +18,7 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -245,15 +247,16 @@ namespace osuCrypto::LogVole
             std::size_t mOffset = 0;
             u32 mWorkers = 1;
             CpuBenchmarkState mCpuBenchmark;
+            detail::CpuRowScratch* mCompute;
 
-            explicit BufferWriter(std::size_t size, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {})
-                : mBuffer(size, options.mWire, useGpu, profile), mWorkers(setupCodecWorkers(workers, useGpu)), mCpuBenchmark(cpuBenchmark)
+            explicit BufferWriter(std::size_t size, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr)
+                : mBuffer(size, options.mWire, useGpu, profile), mWorkers(setupCodecWorkers(workers, useGpu)), mCpuBenchmark(cpuBenchmark), mCompute(compute)
             {
                 adviseGpuSetupWireBuffer(mBuffer, options.mWire, useGpu);
             }
 
-            explicit BufferWriter(Buffer&& reserved, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {})
-                : mBuffer(std::move(reserved)), mWorkers(setupCodecWorkers(workers, useGpu)), mCpuBenchmark(cpuBenchmark)
+            explicit BufferWriter(Buffer&& reserved, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr)
+                : mBuffer(std::move(reserved)), mWorkers(setupCodecWorkers(workers, useGpu)), mCpuBenchmark(cpuBenchmark), mCompute(compute)
             {
                 adviseGpuSetupWireBuffer(mBuffer, options.mWire, useGpu);
             }
@@ -325,17 +328,17 @@ namespace osuCrypto::LogVole
                 auto cpuBenchmark = mCpuBenchmark;
                 writeU32(static_cast<u32>(ringBatchCoeffCount(polys)));
                 constexpr bool nativeCopy = setupMemcpyCodecEnabled();
-                if (nativeCopy && mWorkers > 1 && polys.size() > 1 &&
+                if (mCompute && nativeCopy && mWorkers > 1 && polys.size() > 1 &&
                     ringBatchCoeffCount(polys) * sizeof(u64) >= (std::size_t(1) << 20))
                 {
                     std::vector<std::size_t> offsets(polys.size() + 1, mOffset);
                     for (std::size_t i = 0; i < polys.size(); ++i)
                         offsets[i + 1] = offsets[i] + polys[i].mCoeffs.size() * sizeof(u64);
-                    if (!detail::runParallelTasks(polys.size(), mWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+                    if (!mCompute->runBulk(polys.size(), mWorkers, [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                         const auto bytes = offsets[i + 1] - offsets[i];
                         if (bytes) std::memcpy(mBuffer.data() + offsets[i], polys[i].mCoeffs.data(), bytes);
                         return true;
-                    }, false, &cpuBenchmark)) throw std::runtime_error("parallel offline encoding failed");
+                    }, cpuBenchmark)) throw std::runtime_error("parallel offline encoding failed");
                     mOffset = offsets.back();
                     return;
                 }
@@ -473,7 +476,7 @@ namespace osuCrypto::LogVole
             const RingParams& ring,
             u32 polyCount,
             std::vector<RnsPoly>& polys,
-            u32 workers, bool useGpu, CpuBenchmarkState cpuBenchmark = {})
+            u32 workers, bool useGpu, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr)
         {
             const auto modulusCount = static_cast<u32>(ring.mCoeffModulusBits.size());
             if constexpr (!setupMemcpyCodecEnabled())
@@ -504,15 +507,15 @@ namespace osuCrypto::LogVole
 
             polys.resize(polyCount);
             const auto bytes = static_cast<std::size_t>(perPoly) * sizeof(u64);
-            if (setupCodecWorkers(workers, useGpu) > 1 && polyCount > 1 &&
+            if (compute && setupCodecWorkers(workers, useGpu) > 1 && polyCount > 1 &&
                 static_cast<std::size_t>(coeffCount) * sizeof(u64) >= (std::size_t(1) << 20))
             {
-                if (!detail::runParallelTasks(polyCount, setupCodecWorkers(workers, useGpu), [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
+                if (!compute->runBulk(polyCount, setupCodecWorkers(workers, useGpu), [&](std::size_t i, CpuBenchmarkState& cpuBenchmark) {
                     auto& poly = polys[i];
                     poly.mCoeffs.resize(static_cast<std::size_t>(perPoly));
                     std::memcpy(poly.mCoeffs.data(), payload.data() + offset + i * bytes, bytes);
                     return true;
-                }, false, &cpuBenchmark)) return false;
+                }, cpuBenchmark)) return false;
                 offset += static_cast<u64>(coeffCount) * sizeof(u64);
                 return true;
             }
@@ -534,7 +537,7 @@ namespace osuCrypto::LogVole
             u64& offset,
             const RingParams& ring,
             RingTensor& tensor,
-            u32 workers, bool useGpu, CpuBenchmarkState cpuBenchmark = {})
+            u32 workers, bool useGpu, CpuBenchmarkState cpuBenchmark = {}, detail::CpuRowScratch* compute = nullptr)
         {
             if (!readU32(payload, offset, tensor.mRows) ||
                 !readU32(payload, offset, tensor.mCols) ||
@@ -544,7 +547,7 @@ namespace osuCrypto::LogVole
                 return false;
             }
             return readOfflineRingBatch(
-                payload, offset, ring, tensor.mRows * tensor.mCols, tensor.mPolys, workers, useGpu, cpuBenchmark);
+                payload, offset, ring, tensor.mRows * tensor.mCols, tensor.mPolys, workers, useGpu, cpuBenchmark, compute);
         }
 
         void writeRootU64Vector(BufferWriter& writer, const AlignedUnVec<u64>& values)
@@ -845,7 +848,7 @@ namespace osuCrypto::LogVole
         const ShrinkExpandParams& params,
         const RingTensor& ct1,
         const ShrinkExpandLacct& lacct,
-        u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
+        u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* compute)
     {
         HostStep phase(profile, "setup codec: encode shrink expand", &cpuBenchmark);
         BufferWriter writer(
@@ -853,7 +856,7 @@ namespace osuCrypto::LogVole
             2u * sizeof(u32) +
             ringBatchByteSize(ct1.mPolys) +
             4u * sizeof(u32) +
-            ringBatchByteSize(lacct.mCt.mPolys), workers, options, useGpu, profile, cpuBenchmark);
+            ringBatchByteSize(lacct.mCt.mPolys), workers, options, useGpu, profile, cpuBenchmark, compute);
         writer.writeParams(params);
         writer.writeU32(ct1.mRows);
         writer.writeU32(ct1.mCols);
@@ -866,20 +869,23 @@ namespace osuCrypto::LogVole
         return writer.finish();
     }
 
-    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
+    Buffer encode(const ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* compute)
     {
         return encodeShrinkExpandOfflineTensors(message.mParams,
             message.mLazyCt1 ? message.mLazyCt1->get() : message.mCt1,
-            message.mLazyLacct ? message.mLazyLacct->get() : message.mLacct, workers, options, useGpu, profile, cpuBenchmark);
+            message.mLazyLacct ? message.mLazyLacct->get() : message.mLacct, workers, options, useGpu, profile, cpuBenchmark, compute);
     }
 
     Buffer encodeShrinkExpandOfflineState(const ShrinkExpandSenderState& state, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
     {
         if (state.mSharedHostState)
             return encodeShrinkExpandOfflineState(*state.mSharedHostState, workers, options, useGpu, profile, cpuBenchmark);
+        std::optional<detail::ShrinkExpandScratch::Lease> lease;
+        if (useGpu && workers > 1) lease.emplace(detail::ShrinkExpandScratch::acquire(state.mCpuScratch));
+        auto* compute = lease ? &lease->cpuRows() : nullptr;
         if ((!state.mLazyCt1 && !state.mLazyLacct) ||
             std::endian::native != std::endian::little)
-            return encodeShrinkExpandOfflineTensors(state.mParams, state.hostCt1(), state.hostLacct(), workers, options, useGpu, profile, cpuBenchmark);
+            return encodeShrinkExpandOfflineTensors(state.mParams, state.hostCt1(), state.hostLacct(), workers, options, useGpu, profile, cpuBenchmark, compute);
 
         HostStep phase(profile, "setup codec: encode resident shrink expand", &cpuBenchmark);
         const u64 wordsPerPoly = ringPolyCoeffCount(state.mParams.mRing);
@@ -892,7 +898,7 @@ namespace osuCrypto::LogVole
         const u32 ct1Words = tensorWords(state.mCt1);
         const u32 lacctWords = tensorWords(state.mLacct.mCt);
         BufferWriter writer(paramsByteSize(state.mParams) + 8u * sizeof(u32) +
-            (static_cast<std::size_t>(ct1Words) + lacctWords) * sizeof(u64), workers, options, useGpu, profile, cpuBenchmark);
+            (static_cast<std::size_t>(ct1Words) + lacctWords) * sizeof(u64), workers, options, useGpu, profile, cpuBenchmark, compute);
         const auto writeTensor = [&](const RingTensor& tensor, u32 words,
                                      const auto& lazy, const auto& host) {
             const auto writeHost = [&](const RingTensor& materialized) {
@@ -1014,16 +1020,16 @@ namespace osuCrypto::LogVole
         return rootWireLayout(message).mBytes;
     }
 
-    Buffer encode(const RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
+    Buffer encode(const RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* compute)
     {
         return encodeRootOfflineIntoBuffer(message,
-            Buffer(rootOfflineWireSize(message), options.mWire, useGpu, profile), workers, options, useGpu, profile);
+            Buffer(rootOfflineWireSize(message), options.mWire, useGpu, profile), workers, options, useGpu, profile, compute, cpuBenchmark);
     }
 
     Buffer encodeRootOfflineIntoBuffer(const RootOfflineMessage& message,
-        Buffer&& reserved, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile)
+        Buffer&& reserved, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, detail::CpuRowScratch* compute, CpuBenchmarkState cpuBenchmark)
     {
-        HostStep phase(profile, "setup codec: encode root");
+        HostStep phase(profile, "setup codec: encode root", &cpuBenchmark);
         const auto layout = rootWireLayout(message);
         if (reserved.size() != layout.mBytes)
             throw std::invalid_argument("LogVole reserved Root wire size does not match message");
@@ -1036,7 +1042,7 @@ namespace osuCrypto::LogVole
         };
         const bool ownedPublicBStar = layout.mOwnedPublicBStar;
         const u32 publicBStarCount = layout.mPublicBStarCount;
-        BufferWriter writer(std::move(reserved), workers, options, useGpu, profile);
+        BufferWriter writer(std::move(reserved), workers, options, useGpu, profile, cpuBenchmark, compute);
         const auto writeTensor = [&](const RingTensor& tensor, const auto& lazy) {
             if (!lazy)
             {
@@ -1161,17 +1167,17 @@ namespace osuCrypto::LogVole
         return decode(payload, message, 1, options, useGpu, profile, cpuBenchmark);
     }
 
-    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
+    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* compute)
     {
         HostStep phase(profile, "setup codec: decode shrink expand", &cpuBenchmark);
         message.mLazyCt1.reset();
         message.mLazyLacct.reset();
         u64 offset = 0;
         if (!readParams(payload, offset, message.mParams) ||
-            !readOfflineRingTensor(payload, offset, message.mParams.mRing, message.mCt1, workers, useGpu, cpuBenchmark) ||
+            !readOfflineRingTensor(payload, offset, message.mParams.mRing, message.mCt1, workers, useGpu, cpuBenchmark, compute) ||
             !readU32(payload, offset, message.mLacct.mWidthPadded) ||
             !readU32(payload, offset, message.mLacct.mLevels) ||
-            !readOfflineRingTensor(payload, offset, message.mParams.mRing, message.mLacct.mCt, workers, useGpu, cpuBenchmark) ||
+            !readOfflineRingTensor(payload, offset, message.mParams.mRing, message.mLacct.mCt, workers, useGpu, cpuBenchmark, compute) ||
             offset != payload.size())
         {
             return false;
@@ -1226,7 +1232,7 @@ namespace osuCrypto::LogVole
     }
 
     bool decodeShrinkExpandOfflineForTransport(Buffer&& payload,
-        ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, const std::shared_ptr<HostStepProfiler>& profileOwner, CpuBenchmarkState cpuBenchmark)
+        ShrinkExpandOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, const std::shared_ptr<HostStepProfiler>& profileOwner, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* compute)
     {
         auto* profile = profileOwner.get();
         bool enabled = false;
@@ -1234,7 +1240,7 @@ namespace osuCrypto::LogVole
         enabled = useGpu;
 #endif
         if (!enabled || std::endian::native != std::endian::little)
-            return decode(payload, message, workers, options, useGpu, profile, cpuBenchmark);
+            return decode(payload, message, workers, options, useGpu, profile, cpuBenchmark, compute);
 
         HostStep phase(profile, "setup codec: retain encoded shrink expand", &cpuBenchmark);
         ShrinkExpandOfflineMessage next{};
@@ -1304,7 +1310,7 @@ namespace osuCrypto::LogVole
         return decode(payload, message, 1, options, useGpu, profile, cpuBenchmark);
     }
 
-    bool decode(std::span<const u8> payload, RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark)
+    bool decode(std::span<const u8> payload, RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, HostStepProfiler* profile, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* compute)
     {
         HostStep phase(profile, "setup codec: decode root", &cpuBenchmark);
         u64 offset = 0;
@@ -1316,14 +1322,14 @@ namespace osuCrypto::LogVole
             !readU32(payload, offset, message.mPlaintextModulusBits) ||
             !readU32(payload, offset, message.mLeftWidth) ||
             !readU32(payload, offset, message.mRandomizerWidth) ||
-            !readOfflineRingTensor(payload, offset, message.mRing, message.mCtR, workers, useGpu, cpuBenchmark) ||
+            !readOfflineRingTensor(payload, offset, message.mRing, message.mCtR, workers, useGpu, cpuBenchmark, compute) ||
             !readU32(payload, offset, message.mLacctLeft.mWidthPadded) ||
             !readU32(payload, offset, message.mLacctLeft.mLevels) ||
-            !readOfflineRingTensor(payload, offset, message.mRing, message.mLacctLeft.mCt, workers, useGpu, cpuBenchmark) ||
-            !readOfflineRingTensor(payload, offset, message.mRing, message.mTopCt, workers, useGpu, cpuBenchmark) ||
+            !readOfflineRingTensor(payload, offset, message.mRing, message.mLacctLeft.mCt, workers, useGpu, cpuBenchmark, compute) ||
+            !readOfflineRingTensor(payload, offset, message.mRing, message.mTopCt, workers, useGpu, cpuBenchmark, compute) ||
             !readU32(payload, offset, publicBStarCount) ||
             !readOfflineRingBatch(
-                payload, offset, message.mRing, publicBStarCount, message.mPublicBStarNtt, workers, useGpu, cpuBenchmark) ||
+                payload, offset, message.mRing, publicBStarCount, message.mPublicBStarNtt, workers, useGpu, cpuBenchmark, compute) ||
             offset != payload.size())
         {
             return false;
@@ -1342,7 +1348,7 @@ namespace osuCrypto::LogVole
     }
 
     bool decodeRootOfflineForTransport(Buffer&& payload,
-        RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, const std::shared_ptr<HostStepProfiler>& profileOwner, CpuBenchmarkState cpuBenchmark)
+        RootOfflineMessage& message, u32 workers, const LogVoleEncodingOptions& options, bool useGpu, const std::shared_ptr<HostStepProfiler>& profileOwner, CpuBenchmarkState cpuBenchmark, detail::CpuRowScratch* compute)
     {
         auto* profile = profileOwner.get();
         bool enabled = false;
@@ -1350,7 +1356,7 @@ namespace osuCrypto::LogVole
         enabled = useGpu;
 #endif
         if (!enabled || std::endian::native != std::endian::little)
-            return decode(payload, message, workers, options, useGpu, profile, cpuBenchmark);
+            return decode(payload, message, workers, options, useGpu, profile, cpuBenchmark, compute);
 
         HostStep phase(profile, "setup codec: retain encoded root tensors", &cpuBenchmark);
         RootOfflineMessage next{};

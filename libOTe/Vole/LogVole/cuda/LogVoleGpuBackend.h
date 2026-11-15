@@ -266,6 +266,9 @@ namespace osuCrypto::LogVole::gpu
         GpuStream& sampleStream();
         // Readback does not allocate the compute lanes' index scratch.
         GpuStream& readbackStream();
+        // Synchronous host materialization borrows its initiating worker's
+        // lazy CPU partition. All children join before the caller reuses it.
+        detail::CpuRowScratch& transferCpuScratch();
     private:
         friend bool bindContextExecution(RingNttContext& ctx,
             const std::shared_ptr<GpuExecutionContext>& execution);
@@ -634,7 +637,7 @@ namespace osuCrypto::LogVole::gpu
         // Optional setup path: bounded pinned DMA overlapped with parallel
         // materialization into independently owned host polynomials. Publishes
         // only after the complete batch succeeds; unchanged output on failure.
-        bool downloadPipelined(std::vector<RnsPoly>& polys, GpuStream& stream, u32 workers,
+        bool downloadPipelined(std::vector<RnsPoly>& polys, GpuStream& stream, u32 workers, detail::CpuRowScratch& cpuScratch,
                                std::size_t srcOffset = 0, std::size_t count = 0, CpuBenchmarkState cpuBenchmark = {}) const;
         // Queues the copy without synchronising; the caller must sync.
         bool downloadAsync(RnsPoly& poly, std::size_t srcIdx, GpuStream& stream) const;
