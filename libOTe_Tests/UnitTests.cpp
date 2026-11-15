@@ -254,6 +254,7 @@ namespace tests_libOTe
 			tc.add("OtExt_Silent_paramSweep_Test            ", OtExt_Silent_paramSweep_Test);
 			tc.add("OtExt_Silent_QuasiCyclic_Test           ", OtExt_Silent_QuasiCyclic_Test);
 			tc.add("OtExt_Silent_Tungsten_Test              ", OtExt_Silent_Tungsten_Test);
+			tc.add("OtExt_Silent_BinaryBAA_Test              ", OtExt_Silent_BinaryBAA_Test);
 			tc.add("OtExt_Silent_Spin_Test                  ", OtExt_Silent_Spin_Test);
 			tc.add("OtExt_Silent_stationary_Test            ", OtExt_Silent_stationary_Test);
 			tc.add("OtExt_Silent_baseOT_Test                ", OtExt_Silent_baseOT_Test);

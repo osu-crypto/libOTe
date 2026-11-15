@@ -6,15 +6,13 @@ transpose encoding applies the same matrix transposed, `n -> k`. Distance
 refers to the forward code. All performance measurements are single-threaded
 and run sequentially, including across hosts.
 
-The public profile names are now `ChosenBaa10<F>` and `ChosenBaa30<F>`.
-For GF128 they retain the measured RM and small-alphabet implementations below.
-`MultType::ChosenBaa30` is the GF128 Silent VOLE default; both tiers are
-selectable there. Generic prime-field encoders use the same public names,
-with a Newton backend for the low tier. Their performance is not represented
-by the separately optimized Fp128 reference timings below. The code-distance
-certificates and archived measurements are unchanged by these API names.
+The public profiles are `BinaryBAA<Word>` for independent binary lanes and
+`ChosenBAA30<F>` for large fields. BinaryBAA is available in binary Silent OT
+and rejected by Silent VOLE. ChosenBAA30 is the GF128 Silent VOLE default.
+The historical measurements below retain their original construction labels.
 
-Two GF(2^128) implementations underlie these profiles. `ReedMullerBaaCode<>` uses
+Two implementations underlie these profiles. BinaryBAA packs independent
+binary lanes into 128-bit words; ChosenBAA30 operates on GF(2^128) symbols. `ReedMullerBaaCode<>` uses
 RM(2,5)[32,16,8], two Fisher--Yates permutations, and two plain accumulators.
 It needs only XORs during encoding. `SmallAlphabetBaaCode<>` uses RS[16,8,9], two
 Fisher--Yates permutations, and two recursive scans with independently sampled

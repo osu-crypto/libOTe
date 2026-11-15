@@ -137,7 +137,7 @@ namespace osuCrypto
 		// The matrix multiplication type which compresses the sparse vector
 		static constexpr MultType DefaultCode =
 			std::is_same_v<F, block> && std::is_same_v<G, block> && std::is_same_v<Ctx, CoeffCtxGF128>
-			? MultType::ChosenBaa30 : DefaultMultType;
+			? MultType::ChosenBAA30 : DefaultMultType;
 		MultType mLpnMultType = DefaultCode;
 
 		// The multi-point punctured PRF for generating the sparse vectors
@@ -628,6 +628,8 @@ namespace osuCrypto
 				std::is_same_v<Ctx, CoeffCtxGF128>))
 				throw std::invalid_argument("Chosen BAA VOLE currently requires GF(2^128). " LOCATION);
 		}
+		if (mult == MultType::BinaryBAA)
+			throw std::invalid_argument("BinaryBAA is a binary code; use ChosenBAA30 for large-field VOLE.");
 		if (mult == MultType::QuasiCyclic)
 			throw std::invalid_argument(
 				"QuasiCyclic is a binary code supported by Silent OT, not Silent VOLE. " LOCATION);
@@ -933,8 +935,7 @@ namespace osuCrypto
 			);
 			break;
 		}
-		case MultType::ChosenBaa10:
-		case MultType::ChosenBaa30:
+		case MultType::ChosenBAA30:
 		case MultType::ChosenBaa16x8:
 		case MultType::ChosenBaa16x4:
 		{

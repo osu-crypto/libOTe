@@ -1,6 +1,6 @@
 #include "libOTe/Tools/BlkAccCode/ChosenBaaCode.h"
-#include "libOTe/Tools/BlkAccCode/ChosenBaa10.h"
-#include "libOTe/Tools/BlkAccCode/ChosenBaa30.h"
+#include "libOTe/Tools/BlkAccCode/BinaryBAA.h"
+#include "libOTe/Tools/BlkAccCode/ChosenBAA30.h"
 #include <chrono>
 #include <iostream>
 #include <algorithm>
@@ -52,7 +52,7 @@ int main(int argc, char** argv)
     const u64 seed = argc > 3 ? std::stoull(argv[3]) : 1;
     if (!iterations || !n || n % 32 || n > std::numeric_limits<u32>::max()) throw std::invalid_argument("benchmark arguments");
     std::cout << "code,k,n,seed,setup_ms,forward_ms,transpose_ms,checksum\n";
-    run<ChosenBaa10<>>("gf128_chosen_baa10", n, seed, iterations);
-    run<ChosenBaa30<>>("gf128_chosen_baa30", n, seed, iterations);
+    run<BinaryBAA<>>("binary_baa_packed128", n, seed, iterations);
+    run<ChosenBAA30<>>("gf128_chosen_baa30", n, seed, iterations);
     run<ChosenBaaCode<8>>("gf128_rs", n, seed, iterations);
 }

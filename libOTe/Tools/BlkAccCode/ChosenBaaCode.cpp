@@ -8,17 +8,9 @@ namespace osuCrypto
     {
         if (!b.empty() && b.size() != a.size())
             throw std::invalid_argument("Chosen BAA paired buffers differ in size.");
-        if (type == MultType::ChosenBaa10)
+        if (type == MultType::ChosenBAA30)
         {
-            ChosenBaa10<> code;
-            code.config(a.size(), seed);
-            AlignedUnVector<block> scratch(a.size());
-            code.dualEncode(a, scratch);
-            if (!b.empty()) code.dualEncode(b, scratch);
-        }
-        else if (type == MultType::ChosenBaa30)
-        {
-            ChosenBaa30<> code;
+            ChosenBAA30<> code;
             code.config(a.size(), seed);
             AlignedUnVector<block> scratch(a.size());
             code.dualEncode(a, scratch);
@@ -39,6 +31,23 @@ namespace osuCrypto
             else code.dualEncode2(a, b);
         }
         else throw std::invalid_argument("Not a chosen BAA profile.");
+    }
+
+    void binaryBaaCompress(block seed, span<block> values, span<u8> choices)
+    {
+        if (!choices.empty() && choices.size() != values.size())
+            throw std::invalid_argument("BinaryBAA buffer lengths differ.");
+        BinaryBAA<> code;
+        code.config(values.size(), seed);
+        AlignedUnVector<block> scratch(values.size());
+        code.dualEncode(values, scratch);
+        if (!choices.empty())
+        {
+            BinaryBAA<u8> bits;
+            bits.config(choices.size(), seed);
+            AlignedUnVector<u8> bitScratch(choices.size());
+            bits.dualEncode(choices, bitScratch);
+        }
     }
 
     namespace

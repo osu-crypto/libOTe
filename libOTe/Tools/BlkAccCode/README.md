@@ -1,66 +1,38 @@
-# Chosen BAA distance profiles
+# BAA profiles
 
-Use `ChosenBaa10<F>` or `ChosenBaa30<F>` to select a distance tier and a field.
-Both expose `config(n, seed)`, `messageSize()`, `codewordSize()`,
-`encode(message, output, scratch)`, and `dualEncode(inOut, scratch)`.
-Encoding uses caller-owned disjoint buffers and allocates no memory.
-For example:
+Use `BinaryBAA<Word>` for binary codes and `ChosenBAA30<F>` for large fields.
+Both provide `config(n, seed)`, `encode(message, output, scratch)`, and
+`dualEncode(inOut, scratch)`, with caller-owned buffers and no encoding allocations.
 
 ```cpp
-#include "libOTe/Tools/BlkAccCode/ChosenBaa10.h"
-#include "libOTe/Tools/BlkAccCode/ChosenBaa30.h"
-#include "libOTe/Tools/Field/Goldilocks.h"
-
-osuCrypto::ChosenBaa10<> fastGF;                  // GF(2^128)
-osuCrypto::ChosenBaa30<> highGF;
-osuCrypto::ChosenBaa10<osuCrypto::Goldilocks> fastFp;
-osuCrypto::ChosenBaa30<osuCrypto::Goldilocks> highFp;
+#include "libOTe/Tools/BlkAccCode/BinaryBAA.h"
+#include "libOTe/Tools/BlkAccCode/ChosenBAA30.h"
+osuCrypto::BinaryBAA<> binary; // block stores 128 independent binary lanes
+osuCrypto::ChosenBAA30<> field; // GF(2^128)
 ```
 
-These names describe distance tiers, not universal distance guarantees for
-all fields and lengths. At n=2^21, the GF low tier's numerical certificate
-bounds distance above 10% with a 47.093-bit setup margin; the large-prime
-Newton low tier has an 11.7% certificate for p=2^128-159. The high tier's
-direct-rank certificate bounds distance above 30.524% with a 59.13394-bit
-setup margin. See the [code-distance and encoding comparison](../../../libOTe_Tests/benchmarks/ChosenBaaDirections.md)
-for the probability space, field restrictions and finite-size evidence.
-The Goldilocks examples exercise the API and correctness, not a transferred
-low-tier distance certificate.
+BinaryBAA uses RM(2,5)[32,16,8] and XOR scans, with the length-specific
+10% certificate at n=2^21. It supplies no extension-field lane mixing.
+ChosenBAA30 uses RS[16,8,9] and 256 nonzero scan coefficients, with the
+30.524% direct-rank certificate at n=2^21. Certificates assume ideal
+uniform setup; the distance tiers are tuning values at other lengths.
+ChosenBAA30 retains a compile-time field policy, including Goldilocks
+correctness coverage. Optimized Fp128 reference timings are separate.
 
-The GF backend of `ChosenBaa10` is lifted RM(2,5)[32,16,8] with XOR scans.
-The generic prime-field backend is extended Newton [16,8] with plain scans,
-using fixed, unrolled addition circuits. It requires characteristic >14.
-`ChosenBaa10Backend<F, Field>` can specialize another field representation.
-The `ChosenBaa30` backend uses RS[16,8,9] and a 256-element nonzero alphabet.
-GF128 retains its AVX-512/GFNI, AVX2, PMULL and portable kernels. The optimized
-Fp128 AVX-512 implementation remains a separate reference harness; this change
-does not claim its timings for the generic prime-field API.
+`MultType::BinaryBAA` is available in binary Silent OT, including packed
+and separate choice bits. Silent VOLE rejects this binary selector.
+`MultType::ChosenBAA30` is the GF128 Silent VOLE and volePSI default.
+Other VOLE fields and the Silent OT default retain their existing defaults.
+Both protocol integrations use a joint committed seed exchange. At the default
+security setting, BinaryBAA selects 200 regular or 424 stationary noise positions;
+ChosenBAA30 selects 128 for either distribution. BinaryBAA lengths are
+multiples of 32 fitting u32; ChosenBAA30 lengths are multiples of 16 up to
+2^24. The former ChosenBaa10 field-dependent API has been removed.
 
-## Silent VOLE and PSI selection
-
-`MultType::ChosenBaa30` is the default for GF128 Silent VOLE and the volePSI
-integration. Select `MultType::ChosenBaa10` for the faster low-distance tier.
-Both have rate one half. Silent VOLE currently accepts these profiles only
-with `block` scalar/value types and `CoeffCtxGF128`; the standalone encoder
-API supports the other fields above. Other VOLE fields keep their existing
-default. Silent OT's default is unchanged.
-
-Both tiers retain the joint seed exchange below. The 30 tier supports positive
-lengths divisible by 16 up to 2^24. The GF 10 tier supports positive lengths
-divisible by 32 below 2^32. The selector checks these limits before allocation
-and pads the PPRF prefix to the corresponding alignment. The two peers must
-select the same profile and upgrade together; the new defaults change the
-wire protocol relative to the older full-field profiles.
-
-For arbitrary VOLE lengths the pseudo-distances are 0.10 and 0.30, with the
-independent half-rate noise floor of `secParam` and the existing 64-bit
-linear-character criterion. At `secParam=128`, this selects 424 and 128 noise
-positions respectively, for both regular and stationary GF128 noise.
-The RM backend remains binary under field extension; its distance alone is
-not a claim of the same algebraic hardness as the full-field constructions.
-These parameters are attack-cost calibrations, not finite-size certificates
-or a complete VOLE security proof. Zero padding and output truncation must be
-accounted for when applying a finite code certificate to a particular shape.
+The exploratory q=1/q=2 variants, proof notes, and timing snapshots are
+archived in gen-BAA under field-universality/libote-baa-exploration/2026-11-14.
+The prime-field Newton low tier is preserved in that archive, not exposed as a
+BinaryBAA backend.
 
 ## Legacy full-field profiles
 
@@ -145,7 +117,7 @@ must account for those exact dimensions and punctured coordinates.
 Silent VOLE accepts these profiles only with `CoeffCtxGF128` and `block` for
 both scalar and value types. Other field contexts require a separate port.
 These legacy profiles are explicitly selected; the GF128 default is now
-`ChosenBaa30` as described above.
+`ChosenBAA30` as described above.
 
 ## Fields and arithmetic backends
 
