@@ -46,6 +46,14 @@ namespace osuCrypto
         std::array<AlignedUnVector<u32>, 2> mMeta;
         std::array<F, 64> mMatrix, mForward;
         static constexpr bool additiveLocal = std::is_same_v<Field, ChosenBaaField<block>>;
+#if defined(OC_ENABLE_SSE2) && defined(OC_ENABLE_VPCLMUL)
+        // A short, fully unrolled GF128 recurrence schedules better than sixteen
+        // live steps on the measured x86 backends. Other field/backends retain
+        // the existing sixteen-element schedule.
+        static constexpr unsigned scanBatch = additiveLocal ? 4 : 16;
+#else
+        static constexpr unsigned scanBatch = 16;
+#endif
         chosen_baa_detail::AdditiveRs8 mAdditive;
         static u32 below(PRNG& random, u32 bound)
         {
@@ -57,10 +65,35 @@ namespace osuCrypto
             }
             return u32(p >> 32);
         }
+        static void shuffle(AlignedUnVector<u32>& p, PRNG& random)
+        {
+            constexpr u64 batch = 64;
+            std::array<u32, batch> indices;
+            u64 i = p.size();
+            for (; i > batch; i -= batch)
+            {
+                // Draw in exactly the scalar Fisher--Yates order, including
+                // rejection draws. Only the memory accesses are scheduled ahead.
+                for (u64 j = 0; j < batch; ++j)
+                {
+                    indices[j] = below(random, u32(i - j));
+#if defined(__GNUC__) || defined(__clang__)
+                    __builtin_prefetch(p.data() + indices[j], 1, 3);
+#elif defined(OC_ENABLE_SSE2)
+                    _mm_prefetch(reinterpret_cast<const char*>(p.data() + indices[j]), _MM_HINT_T0);
+#endif
+                }
+                // Swaps must stay ordered: sampled indices can coincide or
+                // refer to another position in this batch.
+                for (u64 j = 0; j < batch; ++j)
+                    std::swap(p[i - j - 1], p[indices[j]]);
+            }
+            for (; i > 1; --i) std::swap(p[i - 1], p[below(random, u32(i))]);
+        }
         template<bool Transpose, unsigned J = 0>
         static OC_FORCEINLINE void prefetch(const F* in, F* out, const u32* p)
         {
-            if constexpr (J < 16)
+            if constexpr (J < scanBatch)
             {
 #ifdef OC_ENABLE_SSE2
                 const F* address = Transpose ? out + (p[J] & indexMask) : in + (p[J] & indexMask);
@@ -72,12 +105,12 @@ namespace osuCrypto
         template<unsigned J = 0>
         static OC_FORCEINLINE void gather(const F* in, const u32* p, F* values)
         {
-            if constexpr (J < 16) { values[J] = in[p[J] & indexMask]; gather<J + 1>(in, p, values); }
+            if constexpr (J < scanBatch) { values[J] = in[p[J] & indexMask]; gather<J + 1>(in, p, values); }
         }
         template<unsigned J = 0>
         static OC_FORCEINLINE void forwardBatch(const F* values, F* out, const u32* p, F& sum)
         {
-            if constexpr (J < 16)
+            if constexpr (J < scanBatch)
             {
                 out[J] = sum = Arithmetic::madd(sum, (p[J] >> 24) + 1, values[J]);
                 forwardBatch<J + 1>(values, out, p, sum);
@@ -86,9 +119,9 @@ namespace osuCrypto
         template<unsigned J = 0>
         static OC_FORCEINLINE void transposeBatch(const F* in, F* out, const u32* p, F& sum, u32& coefficient)
         {
-            if constexpr (J < 16)
+            if constexpr (J < scanBatch)
             {
-                constexpr auto pos = 15 - J;
+                constexpr auto pos = scanBatch - 1 - J;
                 sum = Arithmetic::madd(sum, coefficient, in[pos]);
                 coefficient = (p[pos] >> 24) + 1;
                 out[p[pos] & indexMask] = sum;
@@ -101,16 +134,16 @@ namespace osuCrypto
             const auto* p = mMeta[which].data();
             F sum = Field::zero();
             u32 coefficient = 1;
-            for (u64 j = 0; j < mN; j += 16)
+            for (u64 j = 0; j < mN; j += scanBatch)
             {
-                const u64 i = Transpose ? mN - j - 16 : j;
+                const u64 i = Transpose ? mN - j - scanBatch : j;
                 constexpr u64 lead = 256;
-                if (j + lead + 16 <= mN)
+                if (j + lead + scanBatch <= mN)
                     prefetch<Transpose>(in, out, p + (Transpose ? i - lead : i + lead));
                 if constexpr (Transpose) transposeBatch(in + i, out, p + i, sum, coefficient);
                 else
                 {
-                    std::array<F, 16> values;
+                    std::array<F, scanBatch> values;
                     gather(in, p + i, values.data());
                     forwardBatch(values.data(), out + i, p + i, sum);
                 }
@@ -148,8 +181,17 @@ namespace osuCrypto
                 auto& p = mMeta[s]; p.resize(n);
                 for (u64 i = 0; i < n; ++i) p[i] = u32(i);
                 PRNG random(permutationSeeds[s]), coefficients(coefficientSeeds[s]);
-                for (u64 i = n; i > 1; --i) std::swap(p[i - 1], p[below(random, u32(i))]);
-                for (u64 i = 0; i < n; ++i) p[i] |= u32(coefficients.get<u8>()) << 24;
+                shuffle(p, random);
+                for (u64 i = 0; i < n; )
+                {
+                    // Consume the same byte stream in contiguous chunks, so
+                    // packing coefficients can vectorize without per-byte PRNG
+                    // calls. Consume the view before the next PRNG operation.
+                    const auto bytes = coefficients.getBufferSpan(n - i);
+                    for (u64 j = 0; j < bytes.size(); ++j)
+                        p[i + j] |= u32(bytes[j]) << 24;
+                    i += bytes.size();
+                }
             }
             mN = n;
         }

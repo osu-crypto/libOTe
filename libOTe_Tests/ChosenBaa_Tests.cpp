@@ -176,6 +176,37 @@ namespace
             if (separate[i] != y[i]) throw RTE_LOC;
     }
 
+    void checkSmallSetup(u64 n)
+    {
+        const block seed(216, n);
+        ChosenBAA30<> code;
+        code.config(n, seed);
+        PRNG master(seed);
+        const std::array<block, 2> permutations{master.get<block>(), master.get<block>()};
+        const std::array<block, 2> coefficients{master.get<block>(), master.get<block>()};
+        // The original scalar setup defines the seed-to-code mapping. Cover
+        // prefetch-batch tails and a large shuffle that exercises rejection.
+        for (unsigned stage = 0; stage < 2; ++stage)
+        {
+            PRNG random(permutations[stage]), coefficient(coefficients[stage]);
+            std::vector<u32> expected(n);
+            for (u64 i = 0; i < n; ++i) expected[i] = u32(i);
+            for (u32 i = u32(n); i > 1; --i)
+            {
+                u64 product = u64(random.get<u32>()) * i;
+                if (u32(product) < i)
+                {
+                    const u32 threshold = (u32(0) - i) % i;
+                    while (u32(product) < threshold) product = u64(random.get<u32>()) * i;
+                }
+                std::swap(expected[i - 1], expected[product >> 32]);
+            }
+            for (u64 i = 0; i < n; ++i)
+                if (code.metadata(stage, i) != (expected[i] | (u32(coefficient.get<u8>()) << 24)))
+                    throw RTE_LOC;
+        }
+    }
+
     template<typename F>
     void checkSmall(u64 n)
     {
@@ -294,6 +325,7 @@ namespace
 
 void ChosenBaa_Code_test(const CLP&)
 {
+    for (u64 n : {16, 48, 64, 80, 128, 144, 1048592}) checkSmallSetup(n);
     {
         std::unique_ptr<ChosenBaaWorkspace> workspace;
         PRNG prng(block(46, 91));
