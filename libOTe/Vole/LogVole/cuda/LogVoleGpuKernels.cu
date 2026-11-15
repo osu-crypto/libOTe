@@ -11683,119 +11683,6 @@ namespace osuCrypto::LogVole::gpu
             h[7] ^= v7 ^ v15;
         }
 
-        // Exact RandomOracle(16) used by hashSeedDigest: label, coefficient
-        // count, then native little-endian u64 coefficients. This is ordinary
-        // sequential BLAKE2b, NOT a tree hash; changing the hash construction
-        // would change the protocol transcript.
-        __global__ __launch_bounds__(32) void rootDigestHashKernel(
-            const u64* words, u32 count, u64* out)
-        {
-            if (threadIdx.x != 0u) return;
-            u64 h[8];
-#pragma unroll
-            for (u32 i = 0u; i < 8u; ++i) h[i] = kBlake2bIV[i];
-            h[0] ^= 0x01010010ull;
-            const u64 total = static_cast<u64>(count) + 2u;
-            for (u64 offset = 0u; offset < total; offset += 16u)
-            {
-                u64 m[16];
-#pragma unroll
-                for (u32 i = 0u; i < 16u; ++i)
-                {
-                    const u64 j = offset + i;
-                    m[i] = j == 0u ? 0x4C56444947455354ull :
-                        (j == 1u ? count : (j < total ? words[j - 2u] : 0u));
-                }
-                const bool last = offset + 16u >= total;
-                blake2bCompress(h, m, (last ? total : offset + 16u) * 8u,
-                    0u, last ? ~u64(0) : 0u);
-            }
-            out[0] = h[0];
-            out[1] = h[1];
-        }
-
-        __device__ __forceinline__ u64 rootHashShuffle(u64 value, u32 source)
-        {
-            const u32 lo = __shfl_sync(0xFu, static_cast<u32>(value), source, 4);
-            const u32 hi = __shfl_sync(0xFu, static_cast<u32>(value >> 32u), source, 4);
-            return static_cast<u64>(lo) | (static_cast<u64>(hi) << 32u);
-        }
-
-        __device__ __forceinline__ void rootHashLaneG(
-            u64& a, u64& b, u64& c, u64& d, u64 x, u64 y)
-        {
-            a += b + x; d = rotr64(d ^ a, 32u);
-            c += d; b = rotr64(b ^ c, 24u);
-            a += b + y; d = rotr64(d ^ a, 16u);
-            c += d; b = rotr64(b ^ c, 63u);
-        }
-
-        template<u64 Sigma>
-        __device__ __forceinline__ void rootHashLaneRound(
-            u64& a, u64& b, u64& c, u64& d, const u64* message, u32 lane)
-        {
-            const u32 col = lane * 8u;
-            rootHashLaneG(a, b, c, d, message[(Sigma >> col) & 15u],
-                message[(Sigma >> (col + 4u)) & 15u]);
-            b = rootHashShuffle(b, (lane + 1u) & 3u);
-            c = rootHashShuffle(c, (lane + 2u) & 3u);
-            d = rootHashShuffle(d, (lane + 3u) & 3u);
-            rootHashLaneG(a, b, c, d, message[(Sigma >> (col + 32u)) & 15u],
-                message[(Sigma >> (col + 36u)) & 15u]);
-            b = rootHashShuffle(b, (lane + 3u) & 3u);
-            c = rootHashShuffle(c, (lane + 2u) & 3u);
-            d = rootHashShuffle(d, (lane + 1u) & 3u);
-        }
-
-        // Four independent G functions per half-round run in four lanes.
-        // Blocks still chain sequentially: this preserves the ordinary digest,
-        // unlike a tree hash. Only the first subgroup participates in shuffles
-        // and barriers; no full-warp collective names the exited lanes.
-        __global__ __launch_bounds__(32) void rootDigestHashWarpKernel(
-            const u64* words, u32 count, u64* out)
-        {
-            const u32 lane = threadIdx.x;
-            if (lane >= 4u) return;
-            __shared__ u64 message[16];
-            const u64 ivLo = kBlake2bIV[lane];
-            const u64 ivHi = kBlake2bIV[lane + 4u];
-            u64 hLo = ivLo ^ (lane == 0u ? 0x01010010ull : 0ull);
-            u64 hHi = ivHi;
-            const u64 total = static_cast<u64>(count) + 2u;
-            for (u64 offset = 0u; offset < total; offset += 16u)
-            {
-                __syncwarp(0xFu); // Previous compression must finish reading.
-#pragma unroll
-                for (u32 i = 0u; i < 4u; ++i)
-                {
-                    const u32 slot = lane + i * 4u;
-                    const u64 j = offset + slot;
-                    message[slot] = j == 0u ? 0x4C56444947455354ull :
-                        (j == 1u ? count : (j < total ? words[j - 2u] : 0u));
-                }
-                __syncwarp(0xFu);
-                const bool last = offset + 16u >= total;
-                u64 a = hLo, b = hHi, c = ivLo, d = ivHi;
-                if (lane == 0u) d ^= (last ? total : offset + 16u) * 8u;
-                if (lane == 2u && last) d = ~d;
-                rootHashLaneRound<0xfedcba9876543210ull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0x357b20c16df984aeull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0x491763eadf250c8bull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0x8f04a562ebcd1397ull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0xd386cb1efa427509ull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0x91ef57d438b0a6c2ull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0xb8293670a4def15cull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0xa2684f05931ce7bdull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0x5a417d2c803b9ef6ull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0x0dc3e9bf5167482aull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0xfedcba9876543210ull>(a, b, c, d, message, lane);
-                rootHashLaneRound<0x357b20c16df984aeull>(a, b, c, d, message, lane);
-                hLo ^= a ^ c;
-                hHi ^= b ^ d;
-            }
-            if (lane < 2u) out[lane] = hLo;
-        }
-
         // ---- osuCrypto::RandomOracle (Blake2b-16) --------------------------
         //
         // Blake2b parameter word 0 for an unkeyed hash with `outlen` output
@@ -17542,19 +17429,6 @@ namespace osuCrypto::LogVole::gpu
         aesUniformRepairKernel<<<grid, 128, 0, asStream(stream)>>>(
             ring, keys, maxMultiple, out, outIdx, count, rejectEpochs, rejectEpoch);
         return check(cudaGetLastError(), "aesUniformRepair");
-    }
-
-    bool launchRootDigestHash(
-        const RingConstView& rc, const u64* words, u32 count, u64* out, void* stream)
-    {
-        if ((!words && count != 0u) || !out) return false;
-        const bool warp = rc.mKernelOptions.mRootDigestHashWarp == LogVoleChoice::Enabled ||
-            (rc.mKernelOptions.mRootDigestHashWarp == LogVoleChoice::Automatic && rc.mH200Shared);
-        if (warp)
-            rootDigestHashWarpKernel<<<1u, 32u, 0u, asStream(stream)>>>(words, count, out);
-        else
-            rootDigestHashKernel<<<1u, 32u, 0u, asStream(stream)>>>(words, count, out);
-        return check(cudaGetLastError(), "rootDigestHash");
     }
 
     bool launchRootZetaRho4(

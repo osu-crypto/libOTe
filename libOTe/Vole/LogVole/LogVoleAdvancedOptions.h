@@ -162,11 +162,7 @@ namespace osuCrypto
         bool mDeltaConstantDirect = true;
         bool mDeltaLightweight = true;
         bool mDeltaSmallDownload = true;
-        bool mRootDirectUpload = false;
-        bool mRootKPrimeResident = false;
-        bool mRootOperandResidency = false;
         bool mRootSkNttResident = true;
-        bool mRootKPrimePreupload = false;
         bool mRootDPrimeResident = true;
         bool mRootFinalizePriorityPrefetch = true;
         bool mIdentityLeaf = true;
@@ -183,15 +179,11 @@ namespace osuCrypto
         bool mNoGoldRootZeta = true;
         bool mNoGoldRootPinnedSeeds = true;
         bool mSenderInplaceKey = true;
-        bool mCt2PrefixCache = false;
         bool mTopSenderCt2Prefetch = true;
         LogVoleChoice mReceiverCt2Prefetch = LogVoleChoice::Automatic;
-        bool mReceiverShrinkTilePipeline = false;
-        std::uint32_t mReceiverShrinkTileCount = 4;
         bool mDeferredGoldenValidation = true;
         bool mInplaceHiDigit = true;
         bool mLencRandomizerResidency = true;
-        bool mRootDigestHash = false;
         bool mRootKPrimeSampling = true;
         bool mNoGoldRootPriorityPrefetch = true;
         // -1 retains the request-dependent level selection; explicit values are 1..3.
@@ -209,8 +201,7 @@ namespace osuCrypto
                 (mSenderCt2PrefetchLevels == -1 ||
                     (mSenderCt2PrefetchLevels >= 1 && mSenderCt2PrefetchLevels <= 3)) &&
                 (mReceiverCt2PrefetchLevels == -1 ||
-                    (mReceiverCt2PrefetchLevels >= 1 && mReceiverCt2PrefetchLevels <= 3)) &&
-                (mReceiverShrinkTileCount == 2 || mReceiverShrinkTileCount == 4);
+                    (mReceiverCt2PrefetchLevels >= 1 && mReceiverCt2PrefetchLevels <= 3));
         }
         bool operator==(const LogVoleGpuProtocolOptions&) const = default;
     };

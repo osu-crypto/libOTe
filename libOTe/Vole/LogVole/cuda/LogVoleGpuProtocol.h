@@ -201,8 +201,6 @@ namespace osuCrypto::LogVole::gpu
     bool sampleRootKPrimeDevice(const RingNttContext& ctx,
         const std::array<u64, 8>& seed, DeviceBatchPtr& out);
 
-    bool rootDigestHashEnabled(const LogVoleExecutionOptions& options, bool selectedGpu);
-    bool hashRootDigestDevice(const DeviceBatch& digest, block& out, GpuStream& stream);
 
     // A coefficient-domain ct2 batch sampled ahead of the sender's top
     // recursive expansion. The implementation owns both the device output and
@@ -586,11 +584,7 @@ namespace osuCrypto::LogVole::gpu
 
     // Device-resident shrink. `xHost` or `xDev` supplies the level's input
     // (exactly one). The digests stay inside `session` and the child input is
-    // returned as a device batch, so nothing crosses PCIe. `allowTilePipeline`
-    // is supplied only by the outer recursive receiver frames; the backend still
-    // enforces the opt-in switch and exact production geometry.
-    // mProtocol.mReceiverShrinkTilePipeline=1 enables the experiment;
-    // mProtocol.mReceiverShrinkTileCount selects the bounded 2/4-way split (default 4).
+    // returned as a device batch, so nothing crosses PCIe.
     bool shrinkChunksDevice(
         const ShrinkExpandReceiverState& state,
         std::span<const RnsPoly> xHost,
@@ -600,7 +594,6 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         LevelSession& session,
         DeviceBatchPtr& dHat,
-        bool allowTilePipeline = false,
         ReceiverFirstQueryAllocations* firstQueryAllocations = nullptr,
         const void* firstQueryOwner = nullptr, u64 firstQuerySid = 0,
         ProtocolCacheScopeView scope = {});
@@ -816,16 +809,9 @@ namespace osuCrypto::LogVole::gpu
     // reply to the root digest, so it is on the critical path of both parties and
     // it does not scale with the label count.
     //
-    // When residentKPrime is non-null and mProtocol.mRootKPrimeResident=1, a
-    // one-polynomial coefficient-domain copy of tbkPrime is returned after the
-    // function's mandatory output download has synchronized its producer
-    // stream. The caller may therefore hand it to a later stream without an
-    // event. A null returned handle is a soft miss and preserves the host path.
-    // mProtocol.mRootSkNttResident caches the immutable transformed secret key by
-    // default; mProtocol.mRootKPrimePreupload independently enables the synchronized
-    // fresh key upload before the Root request arrives. mProtocol.mRootOperandResidency
-    // enables both. Each handle is validated and each missing operand independently
-    // takes the established upload path.
+    // A prepared device-generated key is returned through residentKPrime after
+    // the output download synchronizes its producer stream. Immutable transformed
+    // secret keys are cached by default; missing operands use the upload path.
     // recoverNonInteractiveMask changes the result to tbkPrime - <sk1,g^-1(d)>,
     // where tbkPrime is the public oracle response. residentKPrime then holds
     // that computed mask for the following expansion.
@@ -840,17 +826,15 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr* residentKPrime = nullptr,
         const DeviceBatchPtr& preparedSkNtt = {},
         const DeviceBatchPtr& preparedKPrime = {},
-        block* digestHash = nullptr,
         bool recoverNonInteractiveMask = false,
         const DeviceBatchPtr& rootSecretCoeffs = {},
         ProtocolCacheRunId rootSecretOwnerRunId = 0);
 
-    // Root response preparation. Immutable skRRt caching is on by default; fresh
-    // kPrime preupload remains independently opt-in. A false return is a soft miss.
+    // Root response preparation caches immutable transformed skRRt by default.
+    // A false return is a soft miss.
     bool prepareRootSenderOperandsDevice(
         const SenderState& state,
-        const RnsPoly& kPrime,
-        DeviceBatchPtr& preparedKPrime, ProtocolCacheScopeView scope);
+        ProtocolCacheScopeView scope);
 
     // The sender's whole Root level on the device: computeRootSenderKey followed
     // by the Root's own shrinkExpandExpandSender.

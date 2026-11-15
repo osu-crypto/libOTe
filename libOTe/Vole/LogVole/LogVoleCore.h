@@ -385,8 +385,8 @@ namespace osuCrypto::LogVole
     // while it is waiting for that digest to arrive; the PRNG stream is unchanged
     // because nothing else draws from it in between.
     // `preSampledKPrimeDevice` is its optional synchronized coefficient-domain
-    // mirror from prepareRootResponseDeviceOperands, or a device-generated key
-    // from sampleRootResponseKPrime (whose matching host pre-sample is empty).
+    // device-generated key from sampleRootResponseKPrime (whose matching host
+    // pre-sample is empty).
     // It is consumed only when the matching pre-sample is supplied; skRRt residency is
     // independent, and either missing operand takes its exact upload fallback.
     //
@@ -429,16 +429,10 @@ namespace osuCrypto::LogVole
     bool sampleRootResponseKPrime(const SenderState& state, PRNG& prng, RnsPoly& out,
         std::shared_ptr<void>* deviceOut = nullptr, ProtocolCacheScopeView cacheScope = {});
 
-    // Device preparation for the digest-independent Root response operands.
-    // Immutable offline skRRt caching is enabled by default and can be rolled
-    // back with LV_GPU_ROOT_SK_NTT_RESIDENT=0; LV_GPU_ROOT_KPRIME_PREUPLOAD
-    // independently enables a synchronized coefficient-domain fresh kPrime.
-    // LV_GPU_ROOT_OPERAND_RESIDENCY enables all components as a compatibility
-    // alias. False is a soft miss and preserves the established path.
+    // Prepare the immutable transformed Root secret key cache. False is a soft
+    // miss and preserves the established upload path.
     bool prepareRootResponseDeviceOperands(
-        const SenderState& state,
-        const RnsPoly& kPrime,
-        std::shared_ptr<void>& preparedKPrimeDevice, ProtocolCacheScopeView cacheScope);
+        const SenderState& state, ProtocolCacheScopeView cacheScope);
 
     // Lazy CPU-only root phases. Prepare buffers as required by lheDec and
     // lencEvalTrunc. Borrow executor, exclusive prepared buffers, state,

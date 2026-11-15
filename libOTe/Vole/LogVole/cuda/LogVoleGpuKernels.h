@@ -1013,9 +1013,6 @@ namespace osuCrypto::LogVole::gpu
         u64* out, const u32* outIdx, u32 count,
         unsigned char* roundKeys, std::size_t roundKeyCapacityBytes,
         u32* rejectEpochs, u32 rejectEpoch, void* stream);
-    // Exact hashSeedDigest RandomOracle(16) over label, size and coefficients.
-    bool launchRootDigestHash(
-        const RingConstView& rc, const u64* words, u32 count, u64* out, void* stream);
 
     // Root randomizer sampler for N=8192, rho=4, g=110. `taskSeeds` contains
     // exactly 3*rangesPerPoly cryptoTools AES-CTR keys in [poly][range] order;

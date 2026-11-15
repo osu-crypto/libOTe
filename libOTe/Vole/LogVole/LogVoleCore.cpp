@@ -2873,7 +2873,7 @@ namespace osuCrypto::LogVole
                     muHi,
                     tauHi,
                     *session,
-                    dHatDev, false, nullptr, nullptr, 0, cacheScope) &&
+                    dHatDev, nullptr, nullptr, 0, cacheScope) &&
                 dHatDev && dHatDev->count() >= leftWidth)
             {
                 // hatD stays on the device. It used to be downloaded here and handed
@@ -3289,18 +3289,6 @@ namespace osuCrypto::LogVole
         }
 
         RootStep step("wire: hash dPrime after send", profiler);
-#if defined(ENABLE_LOGVOLE_CUDA)
-        if (digestState.mDPrimeGpu && digestState.mGpuExecution && gpu::rootDigestHashEnabled(digestState.mGpuExecution->executionOptions(), digestState.mGpuExecution->gpuEnabled()))
-        {
-            const auto device = std::static_pointer_cast<gpu::DeviceBatch>(digestState.mDPrimeGpu);
-            if (gpu::hashRootDigestDevice(*device, digestState.mDPrimeHash,
-                    digestState.mGpuExecution->mainStream()))
-            {
-                digestState.mDPrimeHashValid = true;
-                return true;
-            }
-        }
-#endif
         digestState.mDPrimeHash = hashSeedDigest(digestState.mDPrime);
         digestState.mDPrimeHashValid = true;
         return true;
@@ -3412,8 +3400,6 @@ namespace osuCrypto::LogVole
         RnsPoly dPrime{};
         RnsPoly kPrime{};
         RnsPoly skPrime{};
-        block deviceDigestHash{};
-        bool haveDeviceDigestHash = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         gpu::DeviceBatchPtr residentKPrime;
         const auto preparedSkNtt =
@@ -3482,11 +3468,9 @@ namespace osuCrypto::LogVole
                     &residentKPrime,
                     preparedSkNtt,
                     preparedKPrimeDev,
-                    gpu::rootDigestHashEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)) ? &deviceDigestHash : nullptr,
                     nonInteractive,
                     residentSkCoeffs,
                     state.mRootSkRRtOwnerRunId);
-                haveDeviceDigestHash = skxDone && gpu::rootDigestHashEnabled(ctx.mExecutionOptions, gpu::enabled(ctx));
             }
 #endif
             // A successful device pre-sample deliberately has no host mirror.
@@ -3547,7 +3531,7 @@ namespace osuCrypto::LogVole
 #else
         state.mRootKPrimeRtDevice.reset();
 #endif
-        state.mRootDPrimeHash = haveDeviceDigestHash ? deviceDigestHash : hashSeedDigest(dPrime);
+        state.mRootDPrimeHash = hashSeedDigest(dPrime);
         state.mRootDPrimeHashValid = true;
         state.mRootDPrimeRt = std::make_shared<RnsPoly>(std::move(dPrime));
 
@@ -3664,24 +3648,13 @@ namespace osuCrypto::LogVole
     }
 
     bool prepareRootResponseDeviceOperands(
-        const SenderState& state,
-        const RnsPoly& kPrime,
-        std::shared_ptr<void>& preparedKPrimeDevice, ProtocolCacheScopeView cacheScope)
+        const SenderState& state, ProtocolCacheScopeView cacheScope)
     {
-        preparedKPrimeDevice.reset();
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (!gpu::enabled(state.mShrinkExpandState.mRingFactoryOwner)) return false;
-        gpu::DeviceBatchPtr prepared;
-        const bool preparedAny =
-            gpu::prepareRootSenderOperandsDevice(state, kPrime, prepared, cacheScope);
-        if (prepared)
-        {
-            preparedKPrimeDevice = std::move(prepared);
-        }
-        return preparedAny;
+        return gpu::prepareRootSenderOperandsDevice(state, cacheScope);
 #else
         (void)state;
-        (void)kPrime;
         (void)cacheScope;
 #endif
         return false;

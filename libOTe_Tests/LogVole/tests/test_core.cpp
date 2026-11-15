@@ -2779,9 +2779,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP& cmd)
                     LOGVOLE_EXPECT_EQ(badPrng.get<oc::block>(),
                         referencePrng.get<oc::block>());
                 }
-                gpu::DeviceBatchPtr preparedKPrime;
-                if (gpu::prepareRootSenderOperandsDevice(
-                        nextSender, RnsPoly{}, preparedKPrime, cacheScope))
+                if (gpu::prepareRootSenderOperandsDevice(nextSender, cacheScope))
                 {
                     const auto preparedSk =
                         std::static_pointer_cast<gpu::DeviceBatch>(
@@ -3361,8 +3359,6 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
     auto& prefetchOptions = advanced.mAdvanced.mProtocol;
     prefetchOptions.mRootFinalizePriorityPrefetch = cmd.getOr("root_finalize_priority_prefetch",
         prefetchOptions.mRootFinalizePriorityPrefetch ? 1 : 0) != 0;
-    prefetchOptions.mRootDigestHash = cmd.getOr("root_digest_hash",
-        prefetchOptions.mRootDigestHash ? 1 : 0) != 0;
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, identityService), receiverScope));
 
@@ -3476,17 +3472,6 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
         prepared,
         dPrimeDevice, {}, receiverScope));
     LOGVOLE_REQUIRE_TRUE(prepared != nullptr);
-    if (gpu::rootDigestHashEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)))
-    {
-        // Require the device entry point itself to succeed; a CPU fallback in
-        // finishRootDigestHash must not hide a missing or incorrect reader.
-        LOGVOLE_REQUIRE_TRUE(digestState.mGpuExecution ==
-            receiver.mShrinkExpandState.mRingFactoryOwner->mGpuExecution);
-        oc::block actual;
-        LOGVOLE_REQUIRE_TRUE(gpu::hashRootDigestDevice(*dPrimeDevice, actual,
-            readbackExecution.readbackStream()));
-        LOGVOLE_REQUIRE_TRUE(actual == hashSeedDigest(digestState.mDPrime));
-    }
     LOGVOLE_REQUIRE_TRUE(finishRootDigestHash(digestState));
     LOGVOLE_REQUIRE_TRUE(digestState.mDPrimeHashValid);
 
@@ -3634,8 +3619,6 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& c
     auto& prefetchOptions = advanced.mAdvanced.mProtocol;
     prefetchOptions.mRootFinalizePriorityPrefetch = cmd.getOr("root_finalize_priority_prefetch",
         prefetchOptions.mRootFinalizePriorityPrefetch ? 1 : 0) != 0;
-    prefetchOptions.mRootDigestHash = cmd.getOr("root_digest_hash",
-        prefetchOptions.mRootDigestHash ? 1 : 0) != 0;
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx, std::make_shared<RingContextFactory>(advanced, identityService), receiverScope));
 
@@ -5651,10 +5634,7 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
     if (cmd.getOr("protocol_options", 0) != 0)
     {
         auto& policy = advanced.mAdvanced.mProtocol;
-        policy.mRootDirectUpload = true;
-        policy.mRootKPrimeResident = true;
         policy.mRootSkNttResident = false;
-        policy.mRootKPrimePreupload = true;
         policy.mRootDPrimeResident = false;
         policy.mRootFinalizePriorityPrefetch = false;
         policy.mIdentityLeaf = false;
@@ -5671,15 +5651,11 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP& cmd)
         policy.mNoGoldRootZeta = false;
         policy.mNoGoldRootPinnedSeeds = false;
         policy.mSenderInplaceKey = false;
-        policy.mCt2PrefixCache = true;
         policy.mTopSenderCt2Prefetch = false;
         policy.mReceiverCt2Prefetch = oc::LogVoleChoice::Disabled;
-        policy.mReceiverShrinkTilePipeline = true;
-        policy.mReceiverShrinkTileCount = 2;
         policy.mDeferredGoldenValidation = false;
         policy.mInplaceHiDigit = false;
         policy.mLencRandomizerResidency = false;
-        policy.mRootDigestHash = true;
         policy.mRootKPrimeSampling = false;
         policy.mNoGoldRootPriorityPrefetch = false;
     }

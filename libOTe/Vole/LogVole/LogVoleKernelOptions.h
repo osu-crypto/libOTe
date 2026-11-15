@@ -119,7 +119,6 @@ namespace osuCrypto
         std::uint32_t mNoGoldH200PackedRoots = 1;
         std::uint32_t mRootL2MiB = 8;
         std::uint32_t mRootL2HitPercent = 100;
-        LogVoleChoice mRootDigestHashWarp = LogVoleChoice::Automatic;
 
         bool valid() const noexcept
         {
@@ -157,8 +156,7 @@ namespace osuCrypto
                 mNoGoldH200RootL2Mode <= 3u &&
                 mNoGoldH200PackedRoots <= 3u &&
                 (mRootL2MiB == 1u || mRootL2MiB == 2u || mRootL2MiB == 4u || mRootL2MiB == 8u || mRootL2MiB == 12u || mRootL2MiB == 16u) &&
-                (mRootL2HitPercent == 25u || mRootL2HitPercent == 50u || mRootL2HitPercent == 75u || mRootL2HitPercent == 100u) &&
-                (mRootDigestHashWarp == LogVoleChoice::Automatic || mRootDigestHashWarp == LogVoleChoice::Disabled || mRootDigestHashWarp == LogVoleChoice::Enabled);
+                (mRootL2HitPercent == 25u || mRootL2HitPercent == 50u || mRootL2HitPercent == 75u || mRootL2HitPercent == 100u);
         }
         bool operator==(const LogVoleGpuKernelOptions& other) const noexcept
         {
@@ -269,8 +267,7 @@ namespace osuCrypto
                 mFusedIp == other.mFusedIp &&
                 mNoGoldH200PackedRoots == other.mNoGoldH200PackedRoots &&
                 mRootL2MiB == other.mRootL2MiB &&
-                mRootL2HitPercent == other.mRootL2HitPercent &&
-                mRootDigestHashWarp == other.mRootDigestHashWarp;
+                mRootL2HitPercent == other.mRootL2HitPercent;
         }
     };
 }

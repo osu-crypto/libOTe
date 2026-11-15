@@ -374,48 +374,14 @@ namespace osuCrypto::LogVole::gpu
             return owner && debugEnabled(*owner);
         }
 
-        // Root's online inputs remain alive until the queued device chain has
-        // consumed them. Opt in to queue those one-polynomial H2Ds directly,
-        // instead of routing each through the stream's shared pinned staging
-        // buffer and draining the stream after every copy. Keeping this separate
-        // from the general upload switches gives the critical path an exact
-        // rollback while its end-to-end benefit is measured.
-        bool rootDirectUploadEnabled(const LogVoleGpuProtocolOptions& options)
-        {
-            return options.mRootDirectUpload;
-        }
-
-        // Fresh Root k' is uploaded once while deriving the response sk'. Keep
-        // that coefficient-domain polynomial alive for the later Root seed
-        // evaluation so each GoldenSeed candidate can D2D-copy it before its
-        // destructive forward NTT. Default off while the end-to-end effect is
-        // measured; the null-handle path is the exact prior H2D path.
-        bool rootKPrimeResidentEnabled(const LogVoleGpuProtocolOptions& options)
-        {
-            return options.mRootKPrimeResident;
-        }
-
-        // Compatibility alias for the original all-in-one Root operand bundle.
-        // The three component switches below permit isolated A/Bs; setting this
-        // alias still enables every component for exact reproduction.
-        bool rootOperandResidencyEnabled(const LogVoleGpuProtocolOptions& options)
-        {
-            return options.mRootOperandResidency;
-        }
-
         bool rootSkNttResidentEnabled(const LogVoleGpuProtocolOptions& options)
         {
-            return options.mRootSkNttResident || options.mRootOperandResidency;
-        }
-
-        bool rootKPrimePreuploadEnabled(const LogVoleGpuProtocolOptions& options)
-        {
-            return options.mRootKPrimePreupload || options.mRootOperandResidency;
+            return options.mRootSkNttResident;
         }
 
         bool rootDPrimeResidentEnabled(const LogVoleGpuProtocolOptions& options)
         {
-            return options.mRootDPrimeResident || options.mRootOperandResidency;
+            return options.mRootDPrimeResident;
         }
 
         // Highest-priority Root prefetch, enabled by default after the Stage-92
@@ -545,16 +511,6 @@ namespace osuCrypto::LogVole::gpu
             return options.mSenderInplaceKey;
         }
 
-        // The nine-word CT2 random-oracle prefix is immutable across recursion
-        // levels on one sampling lane; only instanceBase changes, and that is a
-        // kernel argument. Memoize the last prefix queued to each stream-local
-        // SampleScratch so repeated levels do not enqueue another tiny pageable
-        // H2D. Keep this opt-in while its host-scheduling benefit is measured.
-        bool ct2PrefixCacheEnabled(const LogVoleGpuProtocolOptions& options)
-        {
-            return options.mCt2PrefixCache;
-        }
-
         // Sampling a sender level is independent of its complete child
         // recursion. Queue it on the role's secondary stream so those kernels
         // can overlap, then make that level's expansion wait on a device event.
@@ -576,19 +532,6 @@ namespace osuCrypto::LogVole::gpu
         LogVoleChoice receiverCt2PrefetchMode(const LogVoleGpuProtocolOptions& options)
         {
             return options.mReceiverCt2Prefetch;
-        }
-
-        // Pipeline only explicitly selected receiver shrink levels. The legacy
-        // single-stream gadget -> NTT chain remains the complete default and
-        // rollback while the additional launch/event overhead is measured.
-        bool receiverShrinkTilePipelineEnabled(const LogVoleGpuProtocolOptions& options)
-        {
-            return options.mReceiverShrinkTilePipeline;
-        }
-
-        u32 receiverShrinkTileCount(const LogVoleGpuProtocolOptions& options)
-        {
-            return options.mReceiverShrinkTileCount;
         }
 
         // A sampled batch is checked again arithmetically by the next level's
@@ -1128,10 +1071,6 @@ namespace osuCrypto::LogVole::gpu
             // ct2 seed derivation: the 9-word RO prefix and the per-chunk
             // 16-byte instance seeds.
             u64* mPrefix = nullptr;
-            std::array<u64, 9> mPrefixHost{};
-            std::size_t mPrefixHostWords = 0;
-            void* mPrefixHostStream = nullptr;
-            bool mPrefixHostValid = false;
             u64* mCt2Seeds = nullptr;
             std::size_t mCt2SeedWords = 0;
             unsigned char* mRoundKeys = nullptr;
@@ -1160,61 +1099,17 @@ namespace osuCrypto::LogVole::gpu
             bool ensurePrefix()
             {
                 if (mPrefix) return true;
-                invalidatePrefixUpload();
                 mPrefix = allocate<u64>(Prefix, 9);
                 return mPrefix != nullptr;
             }
 
-            void invalidatePrefixUpload()
-            {
-                mPrefixHostWords = 0;
-                mPrefixHostStream = nullptr;
-                mPrefixHostValid = false;
-            }
-
-            bool uploadPrefix(const u64* words, std::size_t wordCount, void* stream, const LogVoleGpuProtocolOptions& options)
+            bool uploadPrefix(const u64* words, std::size_t wordCount, void* stream)
             {
                 if (stream != mOwner.raw() || !mPrefix || !words || wordCount == 0 ||
-                    wordCount > mPrefixHost.size())
-                {
-                    invalidatePrefixUpload();
+                    wordCount > 9u)
                     return false;
-                }
-
-                const bool cache = ct2PrefixCacheEnabled(options);
-                if (!cache)
-                {
-                    // Preserve the established path exactly when the experiment
-                    // is disabled; cached metadata is never populated in this
-                    // owner because its configuration is immutable.
-                    return gpuMemcpyH2D(
-                        mPrefix, words, wordCount * sizeof(u64), stream);
-                }
-                if (mPrefixHostValid && mPrefixHostWords == wordCount &&
-                    mPrefixHostStream == stream &&
-                    std::memcmp(
-                        mPrefixHost.data(), words, wordCount * sizeof(u64)) == 0)
-                {
-                    return true;
-                }
-
-                // Invalidate before the enqueue: a failed upload must never
-                // leave metadata that can turn a later retry into a false hit.
-                invalidatePrefixUpload();
-                if (!gpuMemcpyH2D(
-                        mPrefix, words, wordCount * sizeof(u64), stream))
-                {
-                    return false;
-                }
-
-                // cudaMemcpyAsync accepted the write. The source bytes are now
-                // the exact contents ordered before later work on this stream.
-                // Record them only after that successful enqueue.
-                std::copy_n(words, wordCount, mPrefixHost.begin());
-                mPrefixHostWords = wordCount;
-                mPrefixHostStream = stream;
-                mPrefixHostValid = true;
-                return true;
+                return gpuMemcpyH2D(
+                    mPrefix, words, wordCount * sizeof(u64), stream);
             }
 
             bool ensureCt2Seeds(std::size_t words)
@@ -2541,7 +2436,7 @@ namespace osuCrypto::LogVole::gpu
 
         GpuPolyBuffer dst;
         bool ok = dst.resize(*ring, count, stream) &&
-                  scratch.uploadPrefix(seedWords, 2u, stream.raw(), ctx.mExecutionOptions.mAdvanced.mProtocol) &&
+                  scratch.uploadPrefix(seedWords, 2u, stream.raw()) &&
                   launchPolySeeds(
                       ring->kernelOptions(), scratch.mPrefix, 1, count, domainTag, ctx.mParams.mPolyModulusDegree,
                       static_cast<u64>(ctx.mParams.mCoeffModulusBits.size()), scratch.mSeeds,
@@ -4046,118 +3941,6 @@ namespace osuCrypto::LogVole::gpu
         bool mWantDHat = true;
     };
 
-    struct ReceiverShrinkTileEvents
-    {
-        explicit ReceiverShrinkTileEvents(GpuStream& producer)
-            : mProducer(producer)
-        {
-        }
-
-        ~ReceiverShrinkTileEvents()
-        {
-            // A failed event record/wait or kernel launch may leave coefficient
-            // writes queued on the secondary stream without a main-stream wait.
-            // Do not let the caller's session buffers unwind under those writes.
-            if (mUnsafe) mProducer.sync();
-            for (u32 i = 0; i < mEventCount; ++i) gpuEventDestroy(mEvents[i]);
-        }
-
-        bool create(u32 count)
-        {
-            if (count > mEvents.size()) return false;
-            while (mEventCount < count)
-            {
-                void* event = gpuEventCreate();
-                if (!event) return false;
-                mEvents[mEventCount++] = event;
-            }
-            return true;
-        }
-
-        bool drain()
-        {
-            if (mUnsafe && !mProducer.sync()) return false;
-            mUnsafe = false;
-            return true;
-        }
-
-        GpuStream& mProducer;
-        std::array<void*, 5> mEvents{};
-        u32 mEventCount = 0u;
-        bool mUnsafe = false;
-    };
-
-    // Split one coefficient-domain centred decomposition into disjoint input and
-    // output-index slices. The producer queues tile i+1 while the main stream
-    // transforms tile i. `completed=false` is a soft miss: all producer work has
-    // been drained and the caller can enqueue the original whole-batch chain.
-    bool tryReceiverShrinkGadgetNttTiles(
-        const GpuRing& ring,
-        const ShrinkExpandReceiverState& state,
-        const u64* input,
-        u32 inputCount,
-        u32 levels,
-        u64* output,
-        const u32* outputIdx,
-        GpuStream& mainStream,
-        bool& completed)
-    {
-        completed = false;
-        const u32 tiles = receiverShrinkTileCount(ring.executionOptions().mAdvanced.mProtocol);
-        if ((tiles != 2u && tiles != 4u) || inputCount == 0u || levels == 0u ||
-            (inputCount % tiles) != 0u || inputCount / tiles < 32u)
-        {
-            return true;
-        }
-
-        if (!state.mRingFactoryOwner || !state.mRingFactoryOwner->mGpuExecution) return true;
-        auto& producer = contextSampleStream(*state.mRingFactoryOwner);
-        ReceiverShrinkTileEvents owned(producer);
-        if (!owned.create(tiles + 1u)) return true;
-
-        // The inverse transform that produced `input`, the mNodes allocation and
-        // the persistent output-index upload all precede this marker on main.
-        if (!gpuEventRecord(owned.mEvents[0], mainStream.raw()) ||
-            !gpuStreamWaitEvent(producer.raw(), owned.mEvents[0]))
-        {
-            return true;
-        }
-
-        const u32 tileInputs = inputCount / tiles;
-        const u32 tileOutputs = tileInputs * levels;
-        for (u32 tile = 0; tile < tiles; ++tile)
-        {
-            const std::size_t inputOffset =
-                static_cast<std::size_t>(tile) * tileInputs;
-            const std::size_t outputOffset = inputOffset * levels;
-
-            // Set this before the launch: even a host-side launch error must take
-            // the conservative drain path before the synchronous overwrite.
-            owned.mUnsafe = true;
-            if (!launchGadgetDecompose(
-                    ring.view(producer), input + inputOffset * ring.polyWords(), nullptr,
-                    tileInputs, state.mParams.mGadgetLogBase, 1u, levels, true,
-                    output, outputIdx + outputOffset, producer.raw()) ||
-                !gpuEventRecord(owned.mEvents[tile + 1u], producer.raw()) ||
-                !gpuStreamWaitEvent(mainStream.raw(), owned.mEvents[tile + 1u]) ||
-                !launchNttForward(
-                    ring.view(mainStream), output, tileOutputs,
-                    outputIdx + outputOffset, mainStream.raw()))
-            {
-                // Previous main-stream tile transforms, if any, are harmless:
-                // the legacy fallback below is queued after them and overwrites
-                // every coefficient-domain destination before transforming all.
-                return owned.drain();
-            }
-        }
-
-        // Every producer write now has a matching wait and consumer on main.
-        // CUDA event waits capture the record, so the handles can be destroyed
-        // without a host synchronisation while the streams finish asynchronously.
-        owned.mUnsafe = false;
-        completed = true;
-        return true;
-    }
 
     // Shared implementation. Exactly one of xHost / xDev supplies the level
     // input. When wantHostOutputs is false the digests and the child input stay
@@ -4174,7 +3957,6 @@ namespace osuCrypto::LogVole::gpu
         std::vector<RnsPoly>& digests,
         std::vector<std::vector<RnsPoly>>& dHatChunks,
         DeviceBatchPtr& dHatDev,
-        bool allowTilePipeline,
         ReceiverFirstQueryAllocations* firstQueryAllocations,
         const void* firstQueryOwner, u64 firstQuerySid,
         const ShrinkOverride& ov, ProtocolCacheScopeView scope)
@@ -4364,26 +4146,6 @@ namespace osuCrypto::LogVole::gpu
         const std::size_t maxNodesAtDepth = static_cast<std::size_t>(chunkCount) * (width / 2u);
         if (!impl->mScratch.resize(*ring, std::max<std::size_t>(maxNodesAtDepth, chunkCount), stream)) return false;
 
-        // Initial experiment scope: only regular device-resident recursive
-        // receiver shrinks in the fixed N=8192/rho=4/tauHi=1 tree, only among
-        // the caller-designated outer three frames, and only with at least 64
-        // complete eight-leaf chunks. Those constraints make both decomposition
-        // pairs evenly tileable and keep the narrowest four-way NTT at 32 polys.
-        const bool receiverShrinkTilePipeline =
-            allowTilePipeline && receiverShrinkTilePipelineEnabled(ring->executionOptions().mAdvanced.mProtocol) &&
-            !wantHostOutputs && xDev && ov.mWidthPadded == 0u &&
-            ov.mLeafInputsAreGadget < 0 && ov.mWantDHat &&
-            ring->n() == 8192u && rho == 4u && tauHi == 1u &&
-            tauLeafCount == 1u && maxTau == 1u && muHi == 8u && width == 8u &&
-            levels == 3u && state.mParams.mGadgetLogBase == 110u &&
-            state.mParams.mPlaintextModulusBits == 55u &&
-            state.mParams.mRing.mCoeffModulusBits.size() == 4u &&
-            std::all_of(
-                state.mParams.mRing.mCoeffModulusBits.begin(),
-                state.mParams.mRing.mCoeffModulusBits.end(),
-                [](int bits) { return bits == 55; }) &&
-            chunkCount >= 64u &&
-            static_cast<u64>(xCount) == static_cast<u64>(chunkCount) * muHi;
 
         // ---- leaf level ----
         bool recursiveLeafPairReady = false;
@@ -4463,11 +4225,9 @@ namespace osuCrypto::LogVole::gpu
                         xCount >= 256u && xCount <= 2048u &&
                         static_cast<u64>(xCount) ==
                             static_cast<u64>(chunkCount) * muHi;
-                    // Eligibility is committed before zero elision. The tiled
-                    // secondary-stream path still invokes a dense gadget and is
-                    // therefore excluded from this first sparse-pair experiment.
+                    // Eligibility is committed before zero elision.
                     const bool sparsePairEligible =
-                        sparseInverseEligible && !receiverShrinkTilePipeline &&
+                        sparseInverseEligible &&
                         state.mParams.mGadgetLogBase == 110u &&
                         state.mParams.mPlaintextModulusBits == 55u &&
                         canLaunchGadgetDecomposeHi110RecursiveLeafSparsePair(
@@ -4816,15 +4576,7 @@ namespace osuCrypto::LogVole::gpu
                 sparsePairDecomposed = true;
                 recursiveLeafSparsePairRequired = false;
             }
-            bool tiled = false;
-            if (!sparsePairDecomposed && receiverShrinkTilePipeline &&
-                !tryReceiverShrinkGadgetNttTiles(
-                    *ring, state, impl->mScratch.data(stream), outCount, tauHi,
-                    impl->mNodes.data(stream), dDst, stream, tiled))
-            {
-                return false;
-            }
-            if (!sparsePairDecomposed && !tiled)
+            if (!sparsePairDecomposed)
             {
                 if (!launchGadgetDecompose(
                         ring->view(stream), impl->mScratch.data(stream), nullptr, outCount,
@@ -4832,13 +4584,10 @@ namespace osuCrypto::LogVole::gpu
                         impl->mNodes.data(stream), dDst, stream.raw()))
                     return false;
             }
-            if (!tiled)
-            {
-                if (!launchNttForward(
-                        ring->view(stream), impl->mNodes.data(stream), static_cast<u32>(dstCount),
-                        dDst, stream.raw()))
-                    return false;
-            }
+            if (!launchNttForward(
+                    ring->view(stream), impl->mNodes.data(stream), static_cast<u32>(dstCount),
+                    dDst, stream.raw()))
+                return false;
         }
 
         regKern.stop();
@@ -4981,7 +4730,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr unused;
         return shrinkChunksImpl(
             state, x, nullptr, static_cast<u32>(x.size()), muHi, tauHi, session, true, digests, dHatChunks,
-            unused, false, nullptr, nullptr, 0, ShrinkOverride{}, scope);
+            unused, nullptr, nullptr, 0, ShrinkOverride{}, scope);
     }
 
     bool shrinkChunksDevice(
@@ -4993,7 +4742,6 @@ namespace osuCrypto::LogVole::gpu
         u32 tauHi,
         LevelSession& session,
         DeviceBatchPtr& dHat,
-        bool allowTilePipeline,
         ReceiverFirstQueryAllocations* firstQueryAllocations,
         const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope)
     {
@@ -5001,7 +4749,7 @@ namespace osuCrypto::LogVole::gpu
         std::vector<std::vector<RnsPoly>> dHatChunks;
         return shrinkChunksImpl(
             state, xHost, xDev, xCount, muHi, tauHi, session, false, digests,
-            dHatChunks, dHat, allowTilePipeline, firstQueryAllocations,
+            dHatChunks, dHat, firstQueryAllocations,
             firstQueryOwner, firstQuerySid, ShrinkOverride{}, scope);
     }
 
@@ -5036,7 +4784,7 @@ namespace osuCrypto::LogVole::gpu
         // the shrink that ran immediately before.
         if (!shrinkChunksImpl(
                 state, xDev ? std::span<const RnsPoly>() : x, xDev, xCount, xCount, tauHi,
-                *session, false, digests, dHatChunks, unused, false,
+                *session, false, digests, dHatChunks, unused,
                 nullptr, nullptr, 0, ov, scope) ||
             !session->mImpl)
         {
@@ -6360,7 +6108,7 @@ namespace osuCrypto::LogVole::gpu
                 std::memcpy(&prefix[5], &maskDigestHash, 16);
                 std::memcpy(&prefix[7], seed.data(), 16);
 
-                if (!scratch.uploadPrefix(prefix, 9u, stream.raw(), ring.executionOptions().mAdvanced.mProtocol))
+                if (!scratch.uploadPrefix(prefix, 9u, stream.raw()))
                     return false;
 
                 if (!launchCt2Seeds(
@@ -7220,39 +6968,6 @@ namespace osuCrypto::LogVole::gpu
 
     // ---- sender Root ------------------------------------------------------
 
-    bool rootDigestHashEnabled(const LogVoleExecutionOptions& options, bool selectedGpu)
-    {
-        return (options.mUseGpu && selectedGpu) && options.mAdvanced.mProtocol.mRootDigestHash;
-    }
-
-    namespace
-    {
-        bool hashRootWordsDevice(const RingConstView& rc, const u64* words, u32 count, block& out, GpuStream& stream)
-        {
-            auto resultStorage = tryAllocateGpuBuffer(stream, sizeof(block));
-            auto* result = static_cast<u64*>(resultStorage.data());
-            if (!result) return false;
-            u8* pinned = stream.staging(sizeof(block));
-            const bool queued = pinned && launchRootDigestHash(rc, words, count, result, stream.raw()) &&
-                gpuMemcpyD2H(pinned, result, sizeof(block), stream.raw());
-            const bool complete = stream.sync();
-            if (queued && complete) std::memcpy(&out, pinned, sizeof(block));
-            return queued && complete;
-        }
-    }
-
-    bool hashRootDigestDevice(const DeviceBatch& digest, block& out, GpuStream& stream)
-    {
-        if (!digest.mImpl ||
-            digest.mImpl->mLogicalCount || digest.mImpl->mBuf.count() != 1u ||
-            !digest.mImpl->mRing ||
-            !rootDigestHashEnabled(digest.mImpl->mRing->executionOptions(), digest.mImpl->mRing->gpuEnabled()) ||
-            digest.mImpl->mRing->polyWords() >
-                std::numeric_limits<u32>::max()) return false;
-        return hashRootWordsDevice(digest.mImpl->mRing->view(stream), digest.mImpl->mBuf.data(stream),
-            static_cast<u32>(digest.mImpl->mRing->polyWords()), out, stream);
-    }
-
     bool rootKPrimeSamplingEnabled(const LogVoleExecutionOptions& options, bool selectedGpu)
     {
         return (options.mUseGpu && selectedGpu) && options.mAdvanced.mProtocol.mRootKPrimeSampling;
@@ -7297,27 +7012,20 @@ namespace osuCrypto::LogVole::gpu
 
     bool prepareRootSenderOperandsDevice(
         const SenderState& state,
-        const RnsPoly& kPrime,
-        DeviceBatchPtr& preparedKPrime, ProtocolCacheScopeView scope)
+        ProtocolCacheScopeView scope)
     {
         const LogVoleGpuProtocolOptions defaults;
         const auto& options = state.mShrinkExpandState.mRingFactoryOwner ? state.mShrinkExpandState.mRingFactoryOwner->mExecutionOptions.mAdvanced.mProtocol : defaults;
         AutoTimer timer(timingCounter(timingStats(state.mShrinkExpandState.mRingFactoryOwner), &TimingStats::mGpuSenderTimeUs));
-        preparedKPrime.reset();
         const bool prepareSk = rootSkNttResidentEnabled(options);
-        // A device-generated key intentionally has no host polynomial to
-        // preupload. It must not suppress preparation of the independent,
-        // immutable SK cache when the legacy preupload switch is also enabled.
-        const bool prepareKPrime = rootKPrimePreuploadEnabled(options) && !kPrime.mCoeffs.empty();
-        if (!enabled(state.mShrinkExpandState.mRingFactoryOwner) || (!prepareSk && !prepareKPrime)) return false;
+        if (!enabled(state.mShrinkExpandState.mRingFactoryOwner) || !prepareSk) return false;
 
         RingNttContext ctx{};
         if (!makeRingNttContext(state.mParams.mShrinkExpand.mRing, ctx,
                 state.mShrinkExpandState.mRingFactoryOwner, scope))
             return bail(ctx, "root operands: context");
         auto ring = GpuRing::get(ctx);
-        if (!ring ||
-            (prepareKPrime && kPrime.mCoeffs.size() != ring->polyWords()))
+        if (!ring)
             return bail(ctx, "root operands: ring");
 
         u32 tauHi = 0u;
@@ -7400,23 +7108,6 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        if (prepareKPrime)
-        {
-            auto kPrimeDevice = std::make_shared<DeviceBatch>();
-            kPrimeDevice->mImpl->mRing = ring;
-            if (!kPrimeDevice->mImpl->mBuf.resize(*ring, 1u, stream))
-                return bail(ctx, "root operands: kPrime alloc");
-            {
-                Region regUp(GpuStream::RegionKind::Upload, stream);
-                // The span upload drains its staging buffer. That is intentional:
-                // the owner can safely cross recvFrame without retaining the host
-                // source or a producer-stream event.
-                if (!kPrimeDevice->mImpl->mBuf.upload(
-                        std::span<const RnsPoly>(&kPrime, 1u), stream))
-                    return bail(ctx, "root operands: kPrime upload");
-            }
-            preparedKPrime = std::move(kPrimeDevice);
-        }
         return true;
     }
 
@@ -7431,7 +7122,6 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr* residentKPrime,
         const DeviceBatchPtr& preparedSkNtt,
         const DeviceBatchPtr& preparedKPrime,
-        block* digestHash,
         bool recoverNonInteractiveMask,
         const DeviceBatchPtr& rootSecretCoeffs,
         ProtocolCacheRunId rootSecretOwnerRunId)
@@ -7449,7 +7139,7 @@ namespace osuCrypto::LogVole::gpu
         if (!ring) return bail(ctx, "skx: ring");
         const bool havePreparedKPrime =
             preparedKPrime && preparedKPrime->mImpl &&
-            (rootKPrimePreuploadEnabled(ctx.mExecutionOptions.mAdvanced.mProtocol) || preparedKPrime->mImpl->mFreshRootKPrime) &&
+            preparedKPrime->mImpl->mFreshRootKPrime &&
             !preparedKPrime->mImpl->mLogicalCount &&
             preparedKPrime->mImpl->mRing == ring &&
             preparedKPrime->mImpl->mBuf.count() == 1u;
@@ -7475,35 +7165,19 @@ namespace osuCrypto::LogVole::gpu
                 : preparedSkNtt->mImpl->mRing == ring &&
                   preparedSkNtt->mImpl->mBuf.count() == tauHi);
         GpuPolyBuffer sk;
-        // The established path packs digest and k' together. A preuploaded or
-        // explicitly retained k' has its own one-poly owner, so dAcc then holds
+        // The established path packs digest and k' together. A device-generated
+        // k' has its own one-poly owner, so dAcc then holds
         // only the digest and can die without taking retained k' with it.
         GpuPolyBuffer dAcc;
         GpuPolyBuffer uHi;
         GpuPolyBuffer term;
-        DeviceBatchPtr retainedKPrime;
-        if (!recoverNonInteractiveMask && !havePreparedKPrime && residentKPrime &&
-            rootKPrimeResidentEnabled(ctx.mExecutionOptions.mAdvanced.mProtocol))
-        {
-            retainedKPrime = std::make_shared<DeviceBatch>();
-            retainedKPrime->mImpl->mRing = ring;
-            if (!retainedKPrime->mImpl->mBuf.resize(*ring, 1, stream))
-            {
-                // Residency is an optimization only. Allocation pressure must
-                // not turn a successful Root response into a protocol failure.
-                retainedKPrime.reset();
-            }
-        }
-        const bool haveRetainedKPrime = static_cast<bool>(retainedKPrime);
-        const std::size_t dAccCount =
-            (havePreparedKPrime || haveRetainedKPrime) ? 1u : 2u;
+        const std::size_t dAccCount = havePreparedKPrime ? 1u : 2u;
         if ((!havePreparedSk && !sk.resize(*ring, tauHi, stream)) ||
             !dAcc.resize(*ring, dAccCount, stream) ||
             !uHi.resize(*ring, tauHi, stream) ||
             !term.resize(*ring, 1, stream))
             return bail(ctx, "skx: alloc");
         const bool inputsUploaded = [&] {
-            const bool direct = rootDirectUploadEnabled(ctx.mExecutionOptions.mAdvanced.mProtocol);
             if (!havePreparedSk)
             {
                 if (rootSecretCoeffs)
@@ -7513,44 +7187,20 @@ namespace osuCrypto::LogVole::gpu
                             tauHi * ring->polyWords() * sizeof(u64),
                             stream.raw())) return false;
                 }
-                else if (!direct)
+                else
                 {
                     if (!sk.upload(
                             std::span<const RnsPoly>(sk1.data(), sk1.size()),
                             stream))
                         return false;
                 }
-                else
-                {
-                    for (u32 i = 0; i < tauHi; ++i)
-                    {
-                        if (!sk.upload(sk1[i], i, stream)) return false;
-                    }
-                }
             }
 
-            const bool digestUploaded = direct
-                ? dAcc.upload(digest, 0, stream)
-                : dAcc.upload(
-                      std::span<const RnsPoly>(&digest, 1), stream, 0);
+            const bool digestUploaded = dAcc.upload(
+                std::span<const RnsPoly>(&digest, 1), stream, 0);
             if (!digestUploaded || havePreparedKPrime) return digestUploaded;
-
-            if (haveRetainedKPrime)
-            {
-                auto& kPrime = retainedKPrime->mImpl->mBuf;
-                return direct
-                    ? kPrime.upload(tbkPrime, 0, stream)
-                    : kPrime.upload(
-                          std::span<const RnsPoly>(&tbkPrime, 1), stream);
-            }
-
-            // sk1, digest, and tbkPrime are references owned by the caller. This
-            // function's final download synchronises the same stream before any
-            // of them can leave scope, so no temporary host storage is involved.
-            return direct
-                ? dAcc.upload(tbkPrime, 1, stream)
-                : dAcc.upload(
-                      std::span<const RnsPoly>(&tbkPrime, 1), stream, 1);
+            return dAcc.upload(
+                std::span<const RnsPoly>(&tbkPrime, 1), stream, 1);
         }();
         if (!inputsUploaded)
             return bail(ctx, "skx: upload");
@@ -7573,9 +7223,7 @@ namespace osuCrypto::LogVole::gpu
             : sk.data(stream);
         const u64* kPrimeData = havePreparedKPrime
             ? preparedKPrime->mImpl->mBuf.data(stream)
-            : (haveRetainedKPrime
-                   ? retainedKPrime->mImpl->mBuf.data(stream)
-                   : dAcc.poly(1, stream));
+            : dAcc.poly(1, stream);
 
         std::vector<u32> idx(tauHi);
         for (u32 i = 0; i < tauHi; ++i) idx[i] = i;
@@ -7607,9 +7255,6 @@ namespace osuCrypto::LogVole::gpu
                 stream.raw(), ip))
             return bail(ctx, "skx: intt+add");
 
-        if (digestHash && !hashRootWordsDevice(ring->view(stream), dAcc.data(stream),
-                static_cast<u32>(ring->polyWords()), *digestHash, stream))
-            return bail(ctx, "skx: digest hash");
         std::vector<RnsPoly> hostOut;
         if (!term.download(hostOut, stream, 0, 1) || hostOut.size() != 1) return bail(ctx, "skx: download");
         out = std::move(hostOut[0]);
@@ -7629,8 +7274,6 @@ namespace osuCrypto::LogVole::gpu
             }
             else if (havePreparedKPrime)
                 *residentKPrime = preparedKPrime;
-            else if (haveRetainedKPrime)
-                *residentKPrime = std::move(retainedKPrime);
         }
         return true;
     }
@@ -7661,8 +7304,7 @@ namespace osuCrypto::LogVole::gpu
         if (rho == 0 || leftWidth != tauHi * rho) return bail(ctx, "root sender: leftWidth");
         const bool haveResidentKPrime =
             kPrimeRtDevice && kPrimeRtDevice->mImpl &&
-            (rootKPrimeResidentEnabled(ctx.mExecutionOptions.mAdvanced.mProtocol) || rootKPrimePreuploadEnabled(ctx.mExecutionOptions.mAdvanced.mProtocol) ||
-             kPrimeRtDevice->mImpl->mFreshRootKPrime) &&
+            kPrimeRtDevice->mImpl->mFreshRootKPrime &&
             !kPrimeRtDevice->mImpl->mLogicalCount &&
             kPrimeRtDevice->mImpl->mRing == ring &&
             kPrimeRtDevice->mImpl->mBuf.count() == 1u;
@@ -7689,9 +7331,8 @@ namespace osuCrypto::LogVole::gpu
         //
         // k' is *not* offline data: prepareRootResponseSender draws a fresh k'_Rt
         // from the PRNG for every query, so the transform cannot be cached in the
-        // offline cache. Device-generated keys and opt-in host-key residency
-        // avoid its second host upload; each seed candidate still needs one
-        // device copy and one transform.
+        // offline cache. Device-generated keys avoid its second host upload; each
+        // seed candidate still needs one device copy and one transform.
         GpuPolyBuffer skNtt;
         if (!skNtt.resize(*ring, 1, stream)) return bail(ctx, "root sender: k' alloc");
 
@@ -7712,10 +7353,8 @@ namespace osuCrypto::LogVole::gpu
             // Exact host-key fallback. Device-generated keys have no host
             // mirror here: a failed D2D causes this helper to decline, after
             // which Core materializes the synchronized source for CPU replay.
-            kPrimeReady = rootDirectUploadEnabled(ctx.mExecutionOptions.mAdvanced.mProtocol)
-                              ? skNtt.upload(kPrimeRt, 0, stream)
-                              : skNtt.upload(
-                                    std::span<const RnsPoly>(&kPrimeRt, 1), stream);
+            kPrimeReady = skNtt.upload(
+                std::span<const RnsPoly>(&kPrimeRt, 1), stream);
         }
         if (!kPrimeReady ||
             !launchNttForward(ring->view(stream), skNtt.data(stream), 1, nullptr, stream.raw()))

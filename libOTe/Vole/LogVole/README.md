@@ -1230,6 +1230,16 @@ sampler selectors and two rejection selectors, plus their validation/equality
 plumbing. Repository-wide searches found no consumers outside the options
 header. Active kernel options, dispatch, and arithmetic remain unchanged.
 
+The isolated GPU experiments are removed: eight protocol selectors for Root
+direct upload, host-key residency/preupload, the operand-residency alias, GPU
+digest hashing, CT2 prefix caching, and receiver shrink tiling/count, plus the
+Root digest warp kernel selector. Established upload, host digest, prefix upload,
+and single-stream shrink paths remain. SK/DPrime residency and fresh device-key
+sampling retain their existing controls. This source cleanup changes neither
+protocol bytes nor kernel arithmetic. Validation: the Windows CUDA test target
+and frontend object build passed, and all eight focused GPU tests passed with
+zero skips in 18.43 seconds; the leak-check script passed Python syntax checking.
+
 Each GPU ring/plaintext-table owner now owns its seven lazy kernel-attribute
 readiness flags; launch views borrow that state with the device tables. Warm
 dispatch reads one atomic flag; cold initialization locks, checks the captured

@@ -176,14 +176,8 @@ namespace osuCrypto::LogVole
                             state, prng, preKPrime, &preKPrimeDevice, senderScope);
                         if (havePreK || nonInteractive)
                         {
-                            // Prepare the immutable SK cache and, if requested,
-                            // a legacy host-key upload without replacing a
-                            // freshly device-generated key.
-                            std::shared_ptr<void> uploadedKPrime;
-                            (void)prepareRootResponseDeviceOperands(
-                                state, preKPrime, uploadedKPrime, senderScope);
-                            if (!preKPrimeDevice)
-                                preKPrimeDevice = std::move(uploadedKPrime);
+                            // Prepare the immutable SK cache before the request arrives.
+                            (void)prepareRootResponseDeviceOperands(state, senderScope);
                         }
                     }
                     {

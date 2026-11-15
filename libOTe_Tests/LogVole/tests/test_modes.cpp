@@ -440,7 +440,6 @@ void LogVole_Modes_ProtocolOptions(const CLP&)
         options.mAdvanced.mStreams.mIndexScratchKiB = 256;
         options.mAdvanced.mStreams.mPipelinedUpload = true;
         options.mAdvanced.mProtocol.mFusedWrap = false;
-        options.mAdvanced.mProtocol.mCt2PrefixCache = true;
         const auto selectedOptions = options;
         auto factory = std::make_shared<ZpContextFactory>(
             std::make_shared<RingContextFactory>(options));

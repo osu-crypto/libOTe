@@ -67,7 +67,7 @@ def main():
                     [str(executable), "-u", *tests, "-gpu", "1", "-lvCount", "8193",
                      "-lvRounds", "3", "-lvRandom", "1"])
         if name == "root-prefetch":
-            command += ["-root_finalize_priority_prefetch", "1", "-root_digest_hash", "1"]
+            command += ["-root_finalize_priority_prefetch", "1"]
         tick = time.monotonic()
         remaining = 90 - (tick - started)
         if remaining <= 0:

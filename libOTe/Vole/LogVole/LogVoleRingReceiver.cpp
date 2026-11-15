@@ -752,7 +752,6 @@ namespace osuCrypto::LogVole
                 tauHi,
                 gpuSession,
                 gpuDHat,
-                recursionDepth < 3u,
                 recursionDepth == 0u ? prefetchPlan.mFirstQueryAllocations.get() : nullptr,
                 recursionDepth == 0u ? prefetchPlan.mFirstQueryOwner : nullptr,
                 recursionDepth == 0u ? input.mSid : 0, cacheScope);
