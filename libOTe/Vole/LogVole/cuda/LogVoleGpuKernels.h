@@ -101,7 +101,6 @@ namespace osuCrypto::LogVole::gpu
         const double* mFp52InvRoots = nullptr;  // [rho][N]
         // Optional per-ring GPU-prepared q, RN(1/q), and Garner operands.
         const double* mFp52GadgetConstants = nullptr; // [8 + 8 + 64]
-        const double* mFp52GadgetRatios = nullptr; // optional [64], RN(root/q)
         // Host metadata prepared in this ring's CUDA context. Zero leaves L2
         // policy untouched, including unsupported devices and synthetic views.
         std::size_t mH200RootL2MaxWindow = 0;
@@ -568,13 +567,10 @@ namespace osuCrypto::LogVole::gpu
         const RingConstView& rc, u64* data, const u32* polyIdx, u32 polyCount, void* stream);
 
     // ---- gadget decomposition --------------------------------------------
-    // Shares the cached mode parser between ring setup and online dispatch.
-    bool h200Fp52GadgetConstantsEnabled(const LogVoleGpuKernelOptions& options);
-    bool h200Fp52GadgetPredivEnabled(const LogVoleGpuKernelOptions& options);
     // Setup-only; the caller owns 80 doubles and synchronizes before publishing
     // the ring. The online gadget only reads this immutable device allocation.
     bool launchPrepareH200Fp52GadgetConstants(
-        const RingConstView& rc, double* out, void* stream, double* ratios = nullptr);
+        const RingConstView& rc, double* out, void* stream);
 
     // Mirrors gadgetDecomposeBitsRange (centered == false) and
     // gadgetDecomposeBitsRangeCentered (centered == true).

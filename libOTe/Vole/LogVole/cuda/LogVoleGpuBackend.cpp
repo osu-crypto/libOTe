@@ -636,17 +636,14 @@ namespace osuCrypto::LogVole::gpu
             plain->mSlotMap = slotMap;
             plain->mInverseSlotMap = inverseSlotMap;
             plain->mSlotCount = n;
-            if (fp52Shape && h200Fp52GadgetConstantsEnabled(ring->mView.mKernelOptions))
+            if (fp52Shape)
             {
-                const bool prediv = h200Fp52GadgetPredivEnabled(ring->mView.mKernelOptions);
-                auto* constants = arena.take<double>(prediv ? 144u : 80u);
+                auto* constants = arena.take<double>(80u);
                 if (!constants) return false;
-                auto* ratios = prediv ? constants + 80u : nullptr;
                 if (!launchPrepareH200Fp52GadgetConstants(
-                        ring->mView, constants, stream.mStream, ratios))
+                        ring->mView, constants, stream.mStream))
                     return false;
                 ring->mView.mFp52GadgetConstants = constants;
-                ring->mView.mFp52GadgetRatios = ratios;
             }
             if (!prepareH200RootPersistence(ring->mView) || !stream.sync())
                 return false;
@@ -1578,15 +1575,12 @@ namespace osuCrypto::LogVole::gpu
                 const_cast<u64*>(mInvCrtLift), const_cast<u64*>(mSampleMaxMultiple), deviceStatus, stream.mStream) ||
             !gpuMemcpyD2H(&status, deviceStatus, sizeof(status), stream.mStream) ||
             !stream.sync() || status != 0) return false;
-        if (fp52Shape && h200Fp52GadgetConstantsEnabled(mView.mKernelOptions))
+        if (fp52Shape)
         {
-            const bool prediv = h200Fp52GadgetPredivEnabled(mView.mKernelOptions);
-            auto* constants = arena.take<double>(prediv ? 144u : 80u);
+            auto* constants = arena.take<double>(80u);
             if (!constants) return false;
-            auto* ratios = prediv ? constants + 80u : nullptr;
-            if (!launchPrepareH200Fp52GadgetConstants(mView, constants, stream.mStream, ratios)) return false;
+            if (!launchPrepareH200Fp52GadgetConstants(mView, constants, stream.mStream)) return false;
             mView.mFp52GadgetConstants = constants;
-            mView.mFp52GadgetRatios = ratios;
         }
         if (!prepareH200RootPersistence(mView) || !stream.sync()) return false;
         arena.publish(mOwned);
@@ -1784,19 +1778,15 @@ namespace osuCrypto::LogVole::gpu
             mDenoiseReady = initDenoise(ctx);
         }
         HostStep gadgetStep(osuCrypto::LogVole::hostProfiler(ctx), "setup GPU ring gadget constants");
-        if (h200Fp52GadgetConstantsEnabled(mView.mKernelOptions) &&
-            h200LazyResourcesDefault() && n == 16384u && rho == 8u &&
+        if (h200LazyResourcesDefault() && n == 16384u && rho == 8u &&
             mView.mMinModulus > (u64{1} << 51u) && mView.mMaxModulus < (u64{1} << 52u))
         {
-            const bool prediv = h200Fp52GadgetPredivEnabled(mView.mKernelOptions);
-            RawConstantArena arena((prediv ? 144u : 80u) * sizeof(double), stream);
-            auto* constants = arena.take<double>(prediv ? 144u : 80u);
+            RawConstantArena arena(80u * sizeof(double), stream);
+            auto* constants = arena.take<double>(80u);
             if (!constants) return false;
             arena.publish(mOwned);
-            double* ratios = prediv ? constants + 80u : nullptr;
-            if (!launchPrepareH200Fp52GadgetConstants(mView, constants, stream.mStream, ratios)) return false;
+            if (!launchPrepareH200Fp52GadgetConstants(mView, constants, stream.mStream)) return false;
             mView.mFp52GadgetConstants = constants;
-            mView.mFp52GadgetRatios = ratios;
         }
         gadgetStep.stop();
         {

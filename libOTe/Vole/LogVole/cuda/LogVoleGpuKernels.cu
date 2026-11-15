@@ -9188,38 +9188,11 @@ namespace osuCrypto::LogVole::gpu
         // 208..415 plus that carry, reduced modulo 2^208. This avoids two general
         // multi-precision shifts and all runtime digit/level predicates. Garner
         // composition is exact and measured slightly faster for this rho=8 base.
-        __device__ __forceinline__ u64 pseudo52FoldDigit(
-            u64 acc,
-            u64 digit,
-            u32 c,
-            u64 q)
-        {
-            constexpr u64 kMask52 = (u64{ 1 } << 52u) - 1u;
-            // Exact acc*c+digit as two 32x32 partial products. The dispatch
-            // bounds acc,digit<2^52 and c<2^24, so the value is below 2^76.
-            const u64 p0 =
-                static_cast<u64>(static_cast<u32>(acc)) * c;
-            const u64 p1 =
-                static_cast<u64>(static_cast<u32>(acc >> 32u)) * c;
-            u64 tLo = p0 + (p1 << 32u);
-            u64 tCarry = static_cast<u64>(tLo < p0);
-            const u64 oldTLo = tLo;
-            tLo += digit;
-            tCarry += static_cast<u64>(tLo < oldTLo);
-            const u64 tHi = (p1 >> 32u) + tCarry;
-
-            // 2^52 == c (mod q). This first fold is below 2q under the same
-            // c bound, so one subtraction returns the canonical residue.
-            const u64 t0 = tLo & kMask52;
-            const u32 t1 = static_cast<u32>(
-                (tLo >> 52u) | (tHi << 12u));
-            u64 folded = t0 + static_cast<u64>(t1) * c;
-            if (folded >= q) folded -= q;
-            return folded;
-        }
-
         __device__ __forceinline__ u64 pseudo52FoldDigitCarry(u64 acc, u64 digit, u32 c, u64 q)
         {
+            // Dispatch bounds acc,digit<2^52 and c<2^24, so acc*c+digit
+            // is below 2^76. Since 2^52 == c (mod q), the first fold is
+            // below 2q and one subtraction returns the canonical residue.
             const Wide value = wideAddCarry(wideMul(acc, static_cast<u64>(c)), Wide{digit, 0u});
             const u64 low = value.mLo & ((u64{1} << 52u) - 1u);
             const u32 high = static_cast<u32>((value.mLo >> 52u) | (value.mHi << 12u));
@@ -9228,19 +9201,16 @@ namespace osuCrypto::LogVole::gpu
             return folded;
         }
 
-        template<u32 Mode, bool HornerCarry = false>
+        template<bool CachedConstants>
         __device__ __forceinline__ void garnerComposeRho8Fp52(
             const u64* residues, const GpuModulus* mods, const ShoupOperand* garnerInv,
             u64 (&out)[8], const double* cachedQ = nullptr,
-            const double* cachedInvQ = nullptr, const double* cachedRoots = nullptr,
-            const double* cachedRatios = nullptr)
+            const double* cachedInvQ = nullptr, const double* cachedRoots = nullptr)
         {
             // All moduli lie strictly between 2^51 and 2^52. A digit from
             // any earlier modulus is therefore below twice the current one.
-            // Initial residues use the general 64-bit reducer unless an
-            // explicitly checked canonical-input fast path applies.
             u64 v[8];
-            if constexpr (Mode == 13u || Mode == 14u)
+            if constexpr (CachedConstants)
             {
                 // Preserve earlier mixed-radix digits as exact doubles. The
                 // row order limits liveness while avoiding repeated integer
@@ -9258,58 +9228,12 @@ namespace osuCrypto::LogVole::gpu
                     {
                         double vj = vd[j];
                         if (vj >= q) vj = __dsub_rn(vj, q);
-                        if constexpr (Mode == 13u)
-                            td = mulModFp52Prediv(__dsub_rn(td, vj), cachedRoots[i * 8u + j],
-                                q, cachedRatios[i * 8u + j]);
-                        else td = mulModFp52(__dsub_rn(td, vj), cachedRoots[i * 8u + j], q, cachedInvQ[i]);
+                        td = mulModFp52(__dsub_rn(td, vj), cachedRoots[i * 8u + j], q, cachedInvQ[i]);
                     }
                     vd[i] = td;
                 }
 #pragma unroll
                 for (u32 i = 0u; i < 8u; ++i) v[i] = static_cast<u64>(vd[i]);
-            }
-            else if constexpr (Mode == 6u)
-            {
-                double vd[8];
-#pragma unroll
-                for (u32 i = 0u; i < 8u; ++i)
-                    vd[i] = static_cast<double>(barrettReduce64(
-                        residues[static_cast<size_t>(i) * 16384u], mods[i]));
-#pragma unroll
-                for (u32 j = 0u; j < 7u; ++j)
-                {
-#pragma unroll
-                    for (u32 i = j + 1u; i < 8u; ++i)
-                    {
-                        const double q = cachedQ[i];
-                        double vj = vd[j];
-                        if (vj >= q) vj = __dsub_rn(vj, q);
-                        vd[i] = mulModFp52(__dsub_rn(vd[i], vj),
-                            cachedRoots[i * 8u + j], q, cachedInvQ[i]);
-                    }
-                }
-#pragma unroll
-                for (u32 i = 0u; i < 8u; ++i) v[i] = static_cast<u64>(vd[i]);
-            }
-            else if constexpr (Mode == 8u)
-            {
-#pragma unroll
-                for (u32 i = 0u; i < 8u; ++i)
-                    v[i] = barrettReduce64(residues[static_cast<size_t>(i) * 16384u], mods[i]);
-                // Column-wise elimination exposes independent updates for all
-                // later moduli at each step of the same Garner recurrence.
-#pragma unroll
-                for (u32 j = 0u; j < 7u; ++j)
-                {
-#pragma unroll
-                    for (u32 i = j + 1u; i < 8u; ++i)
-                    {
-                        const u64 qi = mods[i].mValue;
-                        u64 vj = v[j];
-                        if (vj >= qi) vj -= qi;
-                        v[i] = mulShoup(subMod(v[i], vj, qi), garnerInv[i * 8u + j], qi);
-                    }
-                }
             }
             else
             {
@@ -9317,103 +9241,46 @@ namespace osuCrypto::LogVole::gpu
                 for (u32 i = 0u; i < 8u; ++i)
                 {
                     const GpuModulus mod = mods[i];
-                    const u64 raw = residues[static_cast<size_t>(i) * 16384u];
-                    // Production inverse outputs are canonical. This checked
-                    // short path still accepts arbitrary 64-bit API inputs:
-                    // only already-canonical residues skip the general reducer.
-                    u64 t;
-                    if constexpr (Mode == 9u || Mode >= 11u) t = raw < mod.mValue ? raw : barrettReduce64(raw, mod);
-                    else t = barrettReduce64(raw, mod);
-                    if constexpr (Mode == 2u || Mode == 4u || Mode == 7u || Mode >= 9u)
-                    {
-                        constexpr bool cached = Mode == 7u || Mode >= 10u;
-                        const double q = cached ? cachedQ[i] : static_cast<double>(mod.mValue);
-                        const double invQ = cached ? cachedInvQ[i] : __drcp_rn(q);
-                        double td = static_cast<double>(t);
+                    u64 t = barrettReduce64(residues[static_cast<size_t>(i) * 16384u], mod);
+                    const double q = static_cast<double>(mod.mValue);
+                    const double invQ = __drcp_rn(q);
+                    double td = static_cast<double>(t);
 #pragma unroll
-                        for (u32 j = 0u; j < i; ++j)
-                        {
-                            u64 vj = v[j];
-                            if (vj >= mod.mValue) vj -= mod.mValue;
-                            if constexpr (Mode == 12u)
-                                td = mulModFp52Prediv(__dsub_rn(td, static_cast<double>(vj)),
-                                    cachedRoots[i * 8u + j], q, cachedRatios[i * 8u + j]);
-                            else td = mulModFp52(__dsub_rn(td, static_cast<double>(vj)),
-                                    cached ? cachedRoots[i * 8u + j] :
-                                        static_cast<double>(garnerInv[i * 8u + j].mOperand), q, invQ);
-                        }
-                        t = static_cast<u64>(td);
-                    }
-                    else
+                    for (u32 j = 0u; j < i; ++j)
                     {
-#pragma unroll
-                        for (u32 j = 0u; j < i; ++j)
-                        {
-                            u64 vj = v[j];
-                            if constexpr (Mode == 5u) vj = barrettReduce64(vj, mod);
-                            else if (vj >= mod.mValue) vj -= mod.mValue;
-                            t = mulShoup(subMod(t, vj, mod.mValue), garnerInv[i * 8u + j], mod.mValue);
-                        }
+                        u64 vj = v[j];
+                        if (vj >= mod.mValue) vj -= mod.mValue;
+                        td = mulModFp52(__dsub_rn(td, static_cast<double>(vj)),
+                            static_cast<double>(garnerInv[i * 8u + j].mOperand), q, invQ);
                     }
+                    t = static_cast<u64>(td);
                     v[i] = t;
                 }
             }
             mpSetZero(out);
-            if constexpr (Mode >= 3u)
+            out[0] = v[7];
+#pragma unroll
+            for (u32 i = 7u; i-- > 0u;)
             {
-                out[0] = v[7];
+                // At this step the result is below 2^(52*(8-i)). Fold
+                // the next digit into the multiply's low-word carry,
+                // eliminating a separate eight-word addition chain.
+                u64 carry = v[i];
 #pragma unroll
-                for (u32 i = 7u; i-- > 0u;)
+                for (u32 k = 0u; k < 8u; ++k)
                 {
-                    // At this step the result is below 2^(52*(8-i)). Fold
-                    // the next digit into the multiply's low-word carry,
-                    // eliminating a separate eight-word addition chain.
-                    u64 carry = v[i];
-#pragma unroll
-                    for (u32 k = 0u; k < 8u; ++k)
+                    if (k < (52u * (8u - i) + 63u) / 64u)
                     {
-                        if (k < (52u * (8u - i) + 63u) / 64u)
-                        {
-                            if constexpr (HornerCarry)
-                            {
-                                const Wide word = wideAddCarry(wideMul(out[k], mods[i].mValue), Wide{carry, 0u});
-                                out[k] = word.mLo;
-                                carry = word.mHi;
-                            }
-                            else
-                            {
-                                const u64 lo = out[k] * mods[i].mValue;
-                                const u64 hi = mulHi64(out[k], mods[i].mValue);
-                                const u64 word = lo + carry;
-                                carry = hi + static_cast<u64>(word < lo);
-                                out[k] = word;
-                            }
-                        }
-                        else out[k] = 0u;
+                        const Wide word = wideAddCarry(wideMul(out[k], mods[i].mValue), Wide{carry, 0u});
+                        out[k] = word.mLo;
+                        carry = word.mHi;
                     }
-                }
-            }
-            else
-            {
-#pragma unroll
-                for (u32 i = 8u; i-- > 0u;)
-                {
-                    if (i + 1u < 8u)
-                    {
-                        u64 scaled[8];
-                        mpMulScalar(out, mods[i].mValue, scaled);
-                        mpCopy(scaled, out);
-                    }
-                    u64 digit[8], sum[8];
-                    mpSetZero(digit);
-                    digit[0] = v[i];
-                    mpAdd(out, digit, sum);
-                    mpCopy(sum, out);
+                    else out[k] = 0u;
                 }
             }
         }
 
-        template<bool Pseudo52, u32 GarnerMode = 0u, u32 FoldMode = 0u>
+        template<bool Pseudo52, bool CachedConstants = false>
         __device__ __forceinline__ void gadgetDecomposeHi208Rho8H200Body(
             DeviceRing rg,
             const u64* in,
@@ -9421,8 +9288,7 @@ namespace osuCrypto::LogVole::gpu
             u32 inCount,
             u64* out,
             const u32* outIdx,
-            const double* persistentConstants = nullptr,
-            const double* persistentRatios = nullptr)
+            const double* persistentConstants = nullptr)
         {
             constexpr u32 n = 16384u;
             constexpr u32 w = 8u;
@@ -9430,24 +9296,7 @@ namespace osuCrypto::LogVole::gpu
             const double* cachedQ = nullptr;
             const double* cachedInvQ = nullptr;
             const double* cachedRoots = nullptr;
-            if constexpr (GarnerMode == 6u || GarnerMode == 7u)
-            {
-                __shared__ double garnerConstants[80];
-                if (threadIdx.x < 8u)
-                {
-                    const double q = static_cast<double>(rg.mMods[threadIdx.x].mValue);
-                    garnerConstants[threadIdx.x] = q;
-                    garnerConstants[8u + threadIdx.x] = __drcp_rn(q);
-                }
-                if (threadIdx.x < 64u)
-                    garnerConstants[16u + threadIdx.x] =
-                        static_cast<double>(rg.mGarnerInv[threadIdx.x].mOperand);
-                __syncthreads();
-                cachedQ = garnerConstants;
-                cachedInvQ = garnerConstants + 8u;
-                cachedRoots = garnerConstants + 16u;
-            }
-            else if constexpr (GarnerMode >= 10u)
+            if constexpr (CachedConstants)
             {
                 cachedQ = persistentConstants;
                 cachedInvQ = persistentConstants + 8u;
@@ -9460,10 +9309,10 @@ namespace osuCrypto::LogVole::gpu
             {
                 const u32 ii = inIdx ? inIdx[o] : o;
                 u64 value[w];
-                if constexpr (GarnerMode != 0u)
-                    garnerComposeRho8Fp52<GarnerMode, FoldMode == 3u>(
+                if constexpr (Pseudo52)
+                    garnerComposeRho8Fp52<CachedConstants>(
                         in + static_cast<size_t>(ii) * perPoly + coeff, rg.mMods, rg.mGarnerInv,
-                        value, cachedQ, cachedInvQ, cachedRoots, persistentRatios);
+                        value, cachedQ, cachedInvQ, cachedRoots);
                 else
                     garnerCompose(
                         in + static_cast<size_t>(ii) * perPoly + coeff,
@@ -9544,33 +9393,9 @@ namespace osuCrypto::LogVole::gpu
                         const u64 d3 =
                             ((magnitude[2] >> 28u) |
                              (magnitude[3] << 36u)) & kMask52;
-                        if constexpr (FoldMode == 1u)
-                        {
-                            const double q = static_cast<double>(mod.mValue);
-                            const double invQ = __drcp_rn(q), cd = static_cast<double>(c);
-                            double digits[4]{static_cast<double>(d0), static_cast<double>(d1),
-                                static_cast<double>(d2), static_cast<double>(d3)};
-#pragma unroll
-                            for (u32 j = 0u; j < 4u; ++j)
-                                if (digits[j] >= q) digits[j] = __dsub_rn(digits[j], q);
-                            double r = digits[3];
-#pragma unroll
-                            for (u32 j = 3u; j-- > 0u;)
-                                r = addModFp52(mulModFp52(r, cd, q, invQ), digits[j], q);
-                            reduced = static_cast<u64>(r);
-                        }
-                        else if constexpr (FoldMode >= 2u)
-                        {
-                            reduced = pseudo52FoldDigitCarry(d3, d2, c, mod.mValue);
-                            reduced = pseudo52FoldDigitCarry(reduced, d1, c, mod.mValue);
-                            reduced = pseudo52FoldDigitCarry(reduced, d0, c, mod.mValue);
-                        }
-                        else
-                        {
-                            reduced = pseudo52FoldDigit(d3, d2, c, mod.mValue);
-                            reduced = pseudo52FoldDigit(reduced, d1, c, mod.mValue);
-                            reduced = pseudo52FoldDigit(reduced, d0, c, mod.mValue);
-                        }
+                        reduced = pseudo52FoldDigitCarry(d3, d2, c, mod.mValue);
+                        reduced = pseudo52FoldDigitCarry(reduced, d1, c, mod.mValue);
+                        reduced = pseudo52FoldDigitCarry(reduced, d0, c, mod.mValue);
                     }
                     else
                     {
@@ -9584,23 +9409,15 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        template<bool Pseudo52, u32 GarnerMode = 0u, u32 FoldMode = 0u>
+        template<bool Pseudo52, bool CachedConstants = false>
         __global__ __launch_bounds__(128)
         void gadgetDecomposeHi208Rho8H200Kernel(DeviceRing rg, const u64* in,
             const u32* inIdx, u32 inCount, u64* out, const u32* outIdx)
         {
-            gadgetDecomposeHi208Rho8H200Body<Pseudo52, GarnerMode, FoldMode>(rg, in, inIdx, inCount, out, outIdx);
+            gadgetDecomposeHi208Rho8H200Body<Pseudo52, CachedConstants>(rg, in, inIdx, inCount, out, outIdx);
         }
 
-        template<u32 GarnerMode, u32 FoldMode, u32 Threads, u32 MinBlocks>
-        __global__ __launch_bounds__(Threads, MinBlocks)
-        void gadgetDecomposeHi208Rho8TunedKernel(DeviceRing rg, const u64* in,
-            const u32* inIdx, u32 inCount, u64* out, const u32* outIdx)
-        {
-            gadgetDecomposeHi208Rho8H200Body<true, GarnerMode, FoldMode>(rg, in, inIdx, inCount, out, outIdx);
-        }
-
-        __global__ void prepareH200Fp52GadgetConstantsKernel(DeviceRing rg, double* out, double* ratios)
+        __global__ void prepareH200Fp52GadgetConstantsKernel(DeviceRing rg, double* out)
         {
             const u32 t = threadIdx.x;
             if (t < 8u)
@@ -9613,27 +9430,15 @@ namespace osuCrypto::LogVole::gpu
             {
                 const double root = static_cast<double>(rg.mGarnerInv[t].mOperand);
                 out[16u + t] = root;
-                if (ratios) ratios[t] = __ddiv_rn(root, static_cast<double>(rg.mMods[t / 8u].mValue));
             }
         }
 
-        template<u32 GarnerMode, u32 FoldMode>
         __global__ __launch_bounds__(128)
         void gadgetDecomposeHi208Rho8ConstantsKernel(DeviceRing rg, const u64* in,
             const u32* inIdx, u32 inCount, u64* out, const u32* outIdx, const double* constants)
         {
-            gadgetDecomposeHi208Rho8H200Body<true, GarnerMode, FoldMode>(
+            gadgetDecomposeHi208Rho8H200Body<true, true>(
                 rg, in, inIdx, inCount, out, outIdx, constants);
-        }
-
-        template<u32 GarnerMode, u32 FoldMode>
-        __global__ __launch_bounds__(128)
-        void gadgetDecomposeHi208Rho8PredivKernel(DeviceRing rg, const u64* in,
-            const u32* inIdx, u32 inCount, u64* out, const u32* outIdx,
-            const double* constants, const double* ratios)
-        {
-            gadgetDecomposeHi208Rho8H200Body<true, GarnerMode, FoldMode>(
-                rg, in, inIdx, inCount, out, outIdx, constants, ratios);
         }
 
         // ---- CRT limb helpers --------------------------------------------
@@ -16143,25 +15948,14 @@ namespace osuCrypto::LogVole::gpu
         return true;
     }
 
-    bool h200Fp52GadgetConstantsEnabled(const LogVoleGpuKernelOptions& options)
-    {
-        return options.mNoGoldH200GadgetGarnerMode >= 10u;
-    }
-
-    bool h200Fp52GadgetPredivEnabled(const LogVoleGpuKernelOptions& options)
-    {
-        const u32 mode = options.mNoGoldH200GadgetGarnerMode;
-        return mode == 12u || mode == 13u;
-    }
-
     bool launchPrepareH200Fp52GadgetConstants(
-        const RingConstView& rc, double* out, void* stream, double* ratios)
+        const RingConstView& rc, double* out, void* stream)
     {
         if (rc.mN != 16384u || rc.mLogN != 14u || rc.mRho != 8u || !rc.mMods || !rc.mGarnerInv || !out ||
             rc.mMinModulus <= (u64{1} << 51u) || rc.mMaxModulus >= (u64{1} << 52u) ||
             rc.mMinModulus > rc.mMaxModulus)
             return false;
-        prepareH200Fp52GadgetConstantsKernel<<<1u, 128u, 0u, asStream(stream)>>>(toDevice(rc), out, ratios);
+        prepareH200Fp52GadgetConstantsKernel<<<1u, 128u, 0u, asStream(stream)>>>(toDevice(rc), out);
         return check(cudaGetLastError(), "prepareH200Fp52GadgetConstants");
     }
 
@@ -16198,111 +15992,11 @@ namespace osuCrypto::LogVole::gpu
                 rc.mKernelOptions.mNoGoldH200Gadget208Pseudo52 &&
                 rc.mMaxModulus < kRadix52 &&
                 rc.mMinModulus > kRadix52 - (u64{ 1 } << 24u);
-            const u32 requestedGarner = rc.mKernelOptions.mNoGoldH200GadgetGarnerMode;
-            const u32 garnerMode = requestedGarner >= 10u && !rc.mFp52GadgetConstants ? 4u :
-                (requestedGarner == 12u || requestedGarner == 13u) && !rc.mFp52GadgetRatios ? 11u : requestedGarner;
-            const u32 foldMode = rc.mKernelOptions.mNoGoldH200GadgetFoldMode;
-            if (pseudo52 && garnerMode >= 10u)
+            if (pseudo52 && rc.mFp52GadgetConstants)
             {
-                const auto launch = [&](auto mode, auto fold) {
-                    constexpr u32 m = decltype(mode)::value, f = decltype(fold)::value;
-                    if constexpr (m == 12u || m == 13u)
-                        gadgetDecomposeHi208Rho8PredivKernel<m, f><<<grid, threads, 0u, st>>>(
-                            rg, in, inIdx, inCount, out, outIdx, rc.mFp52GadgetConstants, rc.mFp52GadgetRatios);
-                    else gadgetDecomposeHi208Rho8ConstantsKernel<m, f><<<grid, threads, 0u, st>>>(
-                            rg, in, inIdx, inCount, out, outIdx, rc.mFp52GadgetConstants);
-                };
-                const auto byFold = [&](auto mode) {
-                    switch (foldMode)
-                    {
-                    case 0u: launch(mode, std::integral_constant<u32, 0u>{}); break;
-                    case 1u: launch(mode, std::integral_constant<u32, 1u>{}); break;
-                    case 2u: launch(mode, std::integral_constant<u32, 2u>{}); break;
-                    case 3u: launch(mode, std::integral_constant<u32, 3u>{}); break;
-                    }
-                };
-                if (garnerMode == 10u) byFold(std::integral_constant<u32, 10u>{});
-                else if (garnerMode == 12u) byFold(std::integral_constant<u32, 12u>{});
-                else if (garnerMode == 13u) byFold(std::integral_constant<u32, 13u>{});
-                else if (garnerMode == 14u) byFold(std::integral_constant<u32, 14u>{});
-                else byFold(std::integral_constant<u32, 11u>{});
+                gadgetDecomposeHi208Rho8ConstantsKernel<<<grid, threads, 0u, st>>>(
+                    rg, in, inIdx, inCount, out, outIdx, rc.mFp52GadgetConstants);
                 return check(cudaGetLastError(), "gadgetDecomposeHi208Rho8Constants");
-            }
-            const u32 schedule = rc.mKernelOptions.mNoGoldH200GadgetSchedule;
-            if (pseudo52 && schedule && (garnerMode == 4u || garnerMode == 6u || garnerMode == 7u))
-            {
-                const auto launch = [&](auto mode, auto fold, auto threadCount, auto blocks) {
-                    constexpr u32 t = decltype(threadCount)::value;
-                    const dim3 tunedGrid = grid2D(rc.mN, inCount, t);
-                    gadgetDecomposeHi208Rho8TunedKernel<decltype(mode)::value, decltype(fold)::value,
-                        t, decltype(blocks)::value><<<tunedGrid, t, 0u, st>>>(rg, in, inIdx, inCount, out, outIdx);
-                };
-                const auto bySchedule = [&](auto mode, auto fold) {
-                    switch (schedule)
-                    {
-                    case 1u: launch(mode, fold, std::integral_constant<u32, 128u>{}, std::integral_constant<u32, 8u>{}); break;
-                    case 2u: launch(mode, fold, std::integral_constant<u32, 128u>{}, std::integral_constant<u32, 12u>{}); break;
-                    case 3u: launch(mode, fold, std::integral_constant<u32, 256u>{}, std::integral_constant<u32, 4u>{}); break;
-                    case 4u: launch(mode, fold, std::integral_constant<u32, 256u>{}, std::integral_constant<u32, 6u>{}); break;
-                    }
-                };
-                const auto byGarner = [&](auto fold) {
-                    switch (garnerMode)
-                    {
-                    case 4u: bySchedule(std::integral_constant<u32, 4u>{}, fold); break;
-                    case 6u: bySchedule(std::integral_constant<u32, 6u>{}, fold); break;
-                    case 7u: bySchedule(std::integral_constant<u32, 7u>{}, fold); break;
-                    }
-                };
-                switch (foldMode)
-                {
-                case 0u: byGarner(std::integral_constant<u32, 0u>{}); break;
-                case 1u: byGarner(std::integral_constant<u32, 1u>{}); break;
-                case 2u: byGarner(std::integral_constant<u32, 2u>{}); break;
-                case 3u: byGarner(std::integral_constant<u32, 3u>{}); break;
-                }
-                return check(cudaGetLastError(), "gadgetDecomposeHi208Rho8H200Schedule");
-            }
-            if (pseudo52 && foldMode && (garnerMode == 0u || garnerMode == 4u || garnerMode == 6u || garnerMode == 7u || garnerMode == 9u))
-            {
-                const auto launch = [&](auto mode, auto fold) {
-                    gadgetDecomposeHi208Rho8H200Kernel<true, decltype(mode)::value, decltype(fold)::value>
-                        <<<grid, threads, 0u, st>>>(rg, in, inIdx, inCount, out, outIdx);
-                };
-                const auto byGarner = [&](auto fold) {
-                    switch (garnerMode)
-                    {
-                    case 0u: launch(std::integral_constant<u32, 0u>{}, fold); break;
-                    case 4u: launch(std::integral_constant<u32, 4u>{}, fold); break;
-                    case 6u: launch(std::integral_constant<u32, 6u>{}, fold); break;
-                    case 7u: launch(std::integral_constant<u32, 7u>{}, fold); break;
-                    case 9u: launch(std::integral_constant<u32, 9u>{}, fold); break;
-                    }
-                };
-                if (foldMode == 1u) byGarner(std::integral_constant<u32, 1u>{});
-                else if (foldMode == 2u) byGarner(std::integral_constant<u32, 2u>{});
-                else byGarner(std::integral_constant<u32, 3u>{});
-                return check(cudaGetLastError(), "gadgetDecomposeHi208Rho8H200Fold");
-            }
-            if (pseudo52 && garnerMode)
-            {
-                const auto launch = [&](auto mode) {
-                    gadgetDecomposeHi208Rho8H200Kernel<true, decltype(mode)::value><<<grid, threads, 0u, st>>>(
-                        rg, in, inIdx, inCount, out, outIdx);
-                };
-                switch (garnerMode)
-                {
-                case 1u: launch(std::integral_constant<u32, 1u>{}); break;
-                case 2u: launch(std::integral_constant<u32, 2u>{}); break;
-                case 3u: launch(std::integral_constant<u32, 3u>{}); break;
-                case 4u: launch(std::integral_constant<u32, 4u>{}); break;
-                case 5u: launch(std::integral_constant<u32, 5u>{}); break;
-                case 6u: launch(std::integral_constant<u32, 6u>{}); break;
-                case 7u: launch(std::integral_constant<u32, 7u>{}); break;
-                case 8u: launch(std::integral_constant<u32, 8u>{}); break;
-                case 9u: launch(std::integral_constant<u32, 9u>{}); break;
-                }
-                return check(cudaGetLastError(), "gadgetDecomposeHi208Rho8H200Garner");
             }
             if (pseudo52)
                 gadgetDecomposeHi208Rho8H200Kernel<true><<<

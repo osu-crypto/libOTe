@@ -1251,3 +1251,15 @@ Validation: the serialized Windows VS 14.50 CUDA build and frontend example
 compilation passed. The five focused GPU checks (kernel options, two-tile parity,
 NTT round trip, memory-pool lifecycle, and party-cache separation) passed with
 `-gpu 1 -lvFactoryFast 1`: five passed, zero skipped; no benchmarks were run.
+
+The hi208 GPU cleanup fixes the established Garner-14, fold-3, schedule-0 paths
+and removes their three selectors and unused alternatives. Prepared constants
+retain the 80-double table; missing constants retain the former Garner-4
+fallback. The existing geometry, modulus, and hardware eligibility gates remain.
+
+Validation: the serialized Windows VS 14.50 CUDA test target and frontend object
+build passed, and an isolated SM90 kernel-object compile passed. Six focused
+checks passed with zero skips in 6.56 seconds using `-gpu 1 -lvFactoryFast 1`,
+including exact CPU-oracle hi208 parity with prepared and missing-table views.
+The local RTX 4060 exercised general dispatch; H200 runtime paths were not
+executed. No benchmarks were run.

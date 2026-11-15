@@ -2484,6 +2484,60 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(device.download(restored, stream));
             for (auto& poly : restored) LOGVOLE_REQUIRE_TRUE(canonicalizePoly(poly, cpu));
             expect_batch_equal(restored, original);
+            if (degree == 16384u)
+            {
+                auto input = original;
+                // Exercise zero, +/-1, and the CRT centering boundary alongside
+                // deterministic full-width coefficients.
+                const auto host = getRingHostContext(cpu);
+                LOGVOLE_REQUIRE_TRUE(host);
+                const auto& base = *host->key_context_data()->rns_tool()->base_q();
+                std::vector<std::uint64_t> boundaries(8u * degree, 0u);
+                for (unsigned i = 0; i < 3u; ++i)
+                {
+                    auto* value = boundaries.data() + i * 8u;
+                    seal::util::right_shift_uint(base.base_prod(), 1, 8u, value);
+                    if (i == 0u) seal::util::sub_uint(value, 8u, std::uint64_t{1}, value);
+                    if (i == 2u) seal::util::add_uint(value, 8u, std::uint64_t{1}, value);
+                }
+                base.decompose_array(boundaries.data(), degree, seal::MemoryPoolHandle::New());
+                for (auto& poly : input)
+                for (unsigned j = 0; j < 8u; ++j)
+                {
+                    auto* row = poly.mCoeffs.data() + j * degree;
+                    std::copy_n(boundaries.data() + j * degree, 3u, row);
+                    row[3] = 0u;
+                    row[4] = 1u;
+                    row[5] = ringModulusValue(cpu, j) - 1u;
+                }
+                std::vector<RnsPoly> highDigits;
+                for (const auto& poly : input)
+                {
+                    std::vector<RnsPoly> balanced;
+                    // Both levels select the general CPU integer oracle.
+                    LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(
+                        poly, 208u, 0u, 2u, cpu, balanced));
+                    highDigits.push_back(std::move(balanced[1]));
+                }
+                LOGVOLE_REQUIRE_TRUE(device.upload(input, stream));
+                gpu::GpuPolyBuffer output(*ring, input.size(), stream);
+                auto view = ring->view(stream);
+                if (view.mH200Shared)
+                    LOGVOLE_REQUIRE_TRUE(view.mFp52GadgetConstants);
+                // The same case covers the prepared-constant and missing-table
+                // H200 paths on supported devices, and general dispatch elsewhere.
+                for (bool prepared : {true, false})
+                {
+                    auto selected = view;
+                    if (!prepared) selected.mFp52GadgetConstants = nullptr;
+                    LOGVOLE_REQUIRE_TRUE(gpu::launchGadgetDecompose(selected,
+                        device.data(stream), nullptr, static_cast<std::uint32_t>(input.size()),
+                        208u, 1u, 1u, true, output.data(stream), nullptr, stream.raw()));
+                    std::vector<RnsPoly> actual;
+                    LOGVOLE_REQUIRE_TRUE(output.download(actual, stream));
+                    expect_batch_equal(actual, highDigits);
+                }
+            }
         }
     }
     osuCrypto::LogVoleExecutionOptions invalid;
