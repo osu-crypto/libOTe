@@ -1,4 +1,5 @@
 ﻿#include "SilentOT_Tests.h"
+#include "libOTe/TwoChooseOne/ConfigureCode.h"
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
