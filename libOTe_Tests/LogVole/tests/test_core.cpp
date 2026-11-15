@@ -2107,7 +2107,8 @@ void LogVole_Core_RootErrorCompactGpuParity(const oc::CLP& cmd)
     const bool requested = cmd.getOr("gpu", 0) != 0;
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::available());
     if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
-    const bool haveGaussian = gpu::gaussianTransformHostCompatible();
+    gpu::GaussianHostCompatibility gaussianCompatibility;
+    const bool haveGaussian = gaussianCompatibility.compatible();
     tests_libOTe::logvole_test::ScopedOptionValue compactOption(setupOptions.mRootCompactNoise, true);
     tests_libOTe::logvole_test::ScopedOptionValue strictOption(setupOptions.mRootCompactNoiseStrict, true);
 
@@ -2232,7 +2233,8 @@ void LogVole_Core_GaussianResidentPublicWireParity(const oc::CLP& cmd)
     const bool requested = cmd.getOr("gpu", 0) != 0;
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::available());
     if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
-    const bool haveGaussian = gpu::gaussianTransformHostCompatible();
+    gpu::GaussianHostCompatibility gaussianCompatibility;
+    const bool haveGaussian = gaussianCompatibility.compatible();
     tests_libOTe::logvole_test::ScopedOptionValue resident(advanced.mAdvanced.mProtocol.mGaussianResident, true);
     tests_libOTe::logvole_test::ScopedOptionValue residentStrict(advanced.mAdvanced.mProtocol.mGaussianResidentStrict, (haveGaussian));
 

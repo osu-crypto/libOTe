@@ -390,7 +390,7 @@ validation entries above and below record historical migration checkpoints.
 | Worker budget | 2 | `gParallelWorkerSlotsInUse`, `tParallelWorkerCap` in `LogVoleParallel.h` | Caller-supplied compute resource and explicit chunk allowance; remove the ambient scheduler after caller migration. |
 | Statistics | 3 | `globalRingOpsStats`, `globalTimingStats`, `tlsRingOpsStats` | Owned diagnostics and per-chunk pending counters; GPU region timing totals belong to each `GpuStream`. |
 | CUDA allocation evidence | 0 | None | Sender-owned shared sink; active wire blocks retain it through completion and release it before entering the reuse cache. CPU offline resets only its supplied owner. |
-| Capability/compatibility caches | 3 | `available()::ok`, `gaussianTransformHostCompatible()::{recognized, arithmeticCompatible}` | Capture once in the appropriate CPU/GPU resource owner; the legacy device-zero H200 prefetch flag belongs to `GpuExecutionContext`. |
+| Capability/compatibility caches | 1 | `available()::ok` | Gaussian compiler/libm facts belong to `GpuExecutionContext`, borrowed by its streams; direct streams own their cache inline. FP environment checks remain per-use. The legacy device-zero H200 prefetch flag belongs to `GpuExecutionContext`. |
 | CUDA error/name storage | 0 | None | Kernel API failures throw owned error messages; device descriptions return owned strings. |
 | CUDA attribute initialization | 0 | None | Seven lazy readiness flags belong to `GpuRing`/`GpuPlainNtt`; launch views borrow their owners' lifetime. |
 

@@ -181,7 +181,8 @@ namespace
         advanced.mAdvanced.mProtocol.mGaussianResident = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         const bool haveGpu = gpu::enabled(advanced);
-        const bool haveGaussian = haveGpu && gpu::gaussianTransformHostCompatible();
+        gpu::GaussianHostCompatibility gaussianCompatibility;
+        const bool haveGaussian = haveGpu && gaussianCompatibility.compatible();
 #else
         const bool haveGpu = false;
         const bool haveGaussian = false;

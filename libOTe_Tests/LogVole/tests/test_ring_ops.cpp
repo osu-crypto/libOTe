@@ -42,6 +42,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#if defined(ENABLE_LOGVOLE_CUDA) && defined(__linux__) && defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
 
 using namespace osuCrypto::LogVole;
 
@@ -3407,6 +3410,57 @@ void LogVole_RingOps_GaussianPrefixBatchParity(const oc::CLP& cmd)
     }
 }
 
+void LogVole_RingOps_GaussianHostCompatibility(const oc::CLP&)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    struct RestoreRounding
+    {
+        int mode = std::fegetround();
+        ~RestoreRounding() { std::fesetround(mode); }
+    } restore;
+    LOGVOLE_REQUIRE_EQ(std::fesetround(FE_TONEAREST), 0);
+    gpu::GaussianHostCompatibility baseline;
+    const bool expected = baseline.compatible();
+    LOGVOLE_REQUIRE_EQ(baseline.compatible(), expected);
+
+    LOGVOLE_REQUIRE_EQ(std::fesetround(FE_UPWARD), 0);
+    gpu::GaussianHostCompatibility initiallyDeclined;
+    LOGVOLE_REQUIRE_TRUE(!initiallyDeclined.compatible());
+    LOGVOLE_REQUIRE_TRUE(!baseline.compatible());
+    LOGVOLE_REQUIRE_EQ(std::fesetround(FE_TONEAREST), 0);
+    LOGVOLE_REQUIRE_EQ(initiallyDeclined.compatible(), expected);
+    LOGVOLE_REQUIRE_EQ(baseline.compatible(), expected);
+
+#if defined(__linux__) && defined(__x86_64__)
+    struct RestoreMxcsr
+    {
+        unsigned mode = _mm_getcsr();
+        ~RestoreMxcsr() { _mm_setcsr(mode); }
+    } mxcsr;
+    for (unsigned mode : {0x8000u, 0x40u})
+    {
+        _mm_setcsr(mxcsr.mode | mode);
+        gpu::GaussianHostCompatibility declined;
+        LOGVOLE_REQUIRE_TRUE(!declined.compatible());
+        LOGVOLE_REQUIRE_TRUE(!baseline.compatible());
+        _mm_setcsr(mxcsr.mode);
+        LOGVOLE_REQUIRE_EQ(declined.compatible(), expected);
+        LOGVOLE_REQUIRE_EQ(baseline.compatible(), expected);
+    }
+#endif
+
+    gpu::GaussianHostCompatibility concurrent;
+    std::array<bool, 4> results{};
+    std::array<std::thread, 4> workers;
+    for (std::size_t i = 0; i < workers.size(); ++i)
+        workers[i] = std::thread([&, i] { results[i] = concurrent.compatible(); });
+    for (auto& worker : workers) worker.join();
+    for (bool result : results) LOGVOLE_REQUIRE_EQ(result, expected);
+#else
+    LOGVOLE_SKIP() << "requires CUDA build";
+#endif
+}
+
 void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
 {
     tests_libOTe::logvole_test::SetupResources setupResources;
@@ -3416,7 +3470,8 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
     testAdvanced.mUseGpu = requested;
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::available());
     if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
-    if (!gpu::gaussianTransformHostCompatible())
+    gpu::GaussianHostCompatibility gaussianCompatibility;
+    if (!gaussianCompatibility.compatible())
     {
         LOGVOLE_SKIP() << "requires recognized CPU compiler/libm arithmetic";
         return;
@@ -3518,7 +3573,7 @@ void LogVole_RingOps_GaussianTransformBatchParity(const oc::CLP& cmd)
     {
         struct RestoreRounding { int mode = std::fegetround(); ~RestoreRounding() { std::fesetround(mode); } } rounding;
         LOGVOLE_REQUIRE_EQ(std::fesetround(FE_UPWARD), 0);
-        LOGVOLE_REQUIRE_TRUE(!gpu::gaussianTransformHostCompatible());
+        LOGVOLE_REQUIRE_TRUE(!gaussianCompatibility.compatible());
     }
 #else
     LOGVOLE_SKIP() << "requires CUDA build";
@@ -3542,7 +3597,8 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
     testAdvanced.mUseGpu = requested;
     if (requested) LOGVOLE_REQUIRE_TRUE(gpu::available());
     if (!requested) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
-    if (!cmd.getOr("settings_only", 0) && !gpu::gaussianTransformHostCompatible())
+    gpu::GaussianHostCompatibility gaussianCompatibility;
+    if (!cmd.getOr("settings_only", 0) && !gaussianCompatibility.compatible())
     {
         LOGVOLE_SKIP() << "requires recognized CPU compiler/libm arithmetic";
         return;

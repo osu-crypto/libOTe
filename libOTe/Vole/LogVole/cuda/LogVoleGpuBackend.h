@@ -17,6 +17,7 @@
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuKernels.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuMemory.h"
+#include "libOTe/Vole/LogVole/cuda/LogVoleGpuGaussian.h"
 
 #include <atomic>
 #include <memory>
@@ -165,6 +166,7 @@ namespace osuCrypto::LogVole::gpu
         GpuProtocolScratch& protocolScratch();
         GpuTransferScratch& transferScratch();
         GpuGaussianScratch& gaussianScratch();
+        GaussianHostCompatibility& gaussianCompatibility() { return *mGaussianCompatibility; }
         GpuZkScratch& zkScratch();
         bool pipelinedUploadEnabled() const { return mPipelinedUpload; }
 
@@ -190,9 +192,14 @@ namespace osuCrypto::LogVole::gpu
         friend class GpuExecutionContext;
         void recordTableRead(const std::shared_ptr<GpuTableReadState>& table);
         GpuStream(bool highestPriority, bool allocateScratch,
-            std::shared_ptr<GpuMemoryPool> memory = {}, LogVoleGpuStreamOptions options = {}, std::shared_ptr<HostStepProfiler> profile = {});
+            std::shared_ptr<GpuMemoryPool> memory = {}, LogVoleGpuStreamOptions options = {}, std::shared_ptr<HostStepProfiler> profile = {},
+            GaussianHostCompatibility* gaussianCompatibility = nullptr);
         bool ensureIndexScratch();
 
+        // Execution-owned streams borrow the stable execution Impl's cache;
+        // direct streams use their inline owner. Both outlive stream scratch.
+        GaussianHostCompatibility mOwnedGaussianCompatibility;
+        GaussianHostCompatibility* mGaussianCompatibility;
         std::atomic<u64> mRegionUs[3]{};
         const LogVoleGpuStreamOptions mOptions;
         const std::shared_ptr<HostStepProfiler> mHostProfiler;
@@ -236,6 +243,7 @@ namespace osuCrypto::LogVole::gpu
         // Preserves the prefetch policy's device-zero name match, captured at
         // construction only for a GPU-enabled domain; not a current-device query.
         bool isH200() const noexcept;
+        GaussianHostCompatibility& gaussianCompatibility();
         ~GpuExecutionContext();
         GpuExecutionContext(const GpuExecutionContext&) = delete;
         GpuExecutionContext& operator=(const GpuExecutionContext&) = delete;

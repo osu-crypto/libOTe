@@ -163,6 +163,7 @@
     X(RingOps, NonceBatchDeterminism) \
     X(RingOps, PublicUniformRetentionParity) \
     X(RingOps, GaussianPrefixBatchParity) \
+    X(RingOps, GaussianHostCompatibility) \
     X(RingOps, GaussianTransformBatchParity) \
     X(RingOps, GaussianResidentBatchParity) \
     X(ShrinkExpandCoproto, TruncOfflineAndExpandBoundedRelation) \

@@ -69,7 +69,7 @@ namespace osuCrypto::LogVole::gpu
         return *mGaussianScratch;
     }
 
-    bool gaussianTransformHostCompatible()
+    bool GaussianHostCompatibility::compatible()
     {
         // The exact operation mapping is deliberately narrow. Other C++/libm
         // implementations retain the original CPU distribution, even when their
@@ -79,7 +79,10 @@ namespace osuCrypto::LogVole::gpu
     defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE == 14 && \
     defined(__AVX512F__) && defined(__OPTIMIZE__) && !defined(__FAST_MATH__)
         if (std::fegetround() != FE_TONEAREST || (_mm_getcsr() & 0xe040u)) return false;
-        static const bool recognized = [] {
+        if (mReady.load(std::memory_order_acquire)) return mCompatible;
+        std::lock_guard lock(mMutex);
+        if (mReady.load(std::memory_order_relaxed)) return mCompatible;
+        const bool recognized = [] {
             Dl_info info{};
             // Taking &std::log can yield the executable's PLT stub in a non-PIE
             // build. Resolve the actual symbol selected by the dynamic linker.
@@ -119,8 +122,7 @@ namespace osuCrypto::LogVole::gpu
             }
             return false;
         }();
-        if (!recognized) return false;
-        static const bool arithmeticCompatible = [] {
+        const bool arithmeticCompatible = recognized && [] {
             // Canary for the actual compiler's libstdc++ distribution, not
             // just its version macros. In each case replacing radius's FMA
             // with separate multiply/add changes at least one output bit.
@@ -185,7 +187,9 @@ namespace osuCrypto::LogVole::gpu
             catch (...) { return false; }
             return true;
         }();
-        return arithmeticCompatible;
+        mCompatible = arithmeticCompatible;
+        mReady.store(true, std::memory_order_release);
+        return mCompatible;
 #else
         return false;
 #endif
@@ -198,7 +202,7 @@ namespace osuCrypto::LogVole::gpu
         GaussianDeviceSampleBuffer* deviceOut, u32 wordsPerPrefix, std::span<const u8> active, const LogVoleFailureOptions& failures)
     {
         HostStep totalStep(stream.hostProfiler(), "setup: Gaussian GPU transform");
-        if (!available() || !gaussianTransformHostCompatible() || seeds.empty() || seeds.size() > 65535u ||
+        if (!available() || !stream.gaussianCompatibility().compatible() || seeds.empty() || seeds.size() > 65535u ||
             !coefficients || modulus < 2 || !std::isfinite(sigma) || sigma < 0 ||
             !std::isfinite(clip) || clip < 0 ||
             static_cast<long double>(clip) >= static_cast<long double>(modulus >> 1u) ||

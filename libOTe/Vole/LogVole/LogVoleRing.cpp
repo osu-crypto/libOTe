@@ -2591,7 +2591,7 @@ namespace osuCrypto::LogVole
             gpu::GaussianSampleBuffer sampled;
             bool transformed = false;
             if (validPrefix && n <= std::numeric_limits<u32>::max() &&
-                gpu::gaussianTransformHostCompatible())
+                ctx.mGpuExecution && ctx.mGpuExecution->gaussianCompatibility().compatible())
             {
                 std::vector<seal::prng_seed_type> activeSeeds(activeRows.size());
                 for (std::size_t i = 0; i < activeRows.size(); ++i)
@@ -2781,7 +2781,7 @@ namespace osuCrypto::LogVole
             const bool validPrefix = blocks <= std::numeric_limits<u32>::max() / 512u;
             gpu::GaussianDeviceSampleBuffer sampled;
             bool ready = ctx.mExecutionOptions.mAdvanced.mProtocol.mGaussianTransform && validPrefix &&
-                n <= std::numeric_limits<u32>::max() && gpu::gaussianTransformHostCompatible() &&
+                n <= std::numeric_limits<u32>::max() && ctx.mGpuExecution && ctx.mGpuExecution->gaussianCompatibility().compatible() &&
                 gpu::sampleGaussianCompactResidentDevice(
                     gpu::contextSampleStream(ctx), seeds, static_cast<u32>(n), sigma, clip,
                     ringModulusValue(ctx, 0), sampled, static_cast<u32>(blocks * 512u), active, ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures);

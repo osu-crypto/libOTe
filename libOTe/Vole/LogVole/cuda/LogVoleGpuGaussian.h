@@ -3,6 +3,8 @@
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 
 #include <array>
+#include <atomic>
+#include <mutex>
 #include <memory>
 #include <span>
 #include <vector>
@@ -43,7 +45,18 @@ namespace osuCrypto::LogVole::gpu
         std::vector<u8> mComplete;
     };
 
-    bool gaussianTransformHostCompatible();
+    // Immutable compiler/libm facts are probed once per explicit owner. The
+    // current thread's rounding and MXCSR modes are checked on every use;
+    // construction and incompatible FP modes never initialize the facts.
+    class GaussianHostCompatibility
+    {
+    public:
+        bool compatible();
+    private:
+        std::atomic<bool> mReady{false};
+        std::mutex mMutex;
+        bool mCompatible = false;
+    };
 
     // Exact compact q0 samples under the recognized CPU arithmetic/libm ABI.
     // The GPU performs PRG, transform, clipping and stable compaction; no

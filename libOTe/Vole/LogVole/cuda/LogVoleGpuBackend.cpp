@@ -773,8 +773,9 @@ namespace osuCrypto::LogVole::gpu
         : GpuStream(false, true, std::move(memory), options, profile) {}
 
     GpuStream::GpuStream(bool highestPriority, bool allocateScratch,
-        std::shared_ptr<GpuMemoryPool> memory, LogVoleGpuStreamOptions options, std::shared_ptr<HostStepProfiler> profile)
-        : mOptions(captureStreamOptions(options)), mHostProfiler(std::move(profile)), mMemory(std::move(memory))
+        std::shared_ptr<GpuMemoryPool> memory, LogVoleGpuStreamOptions options, std::shared_ptr<HostStepProfiler> profile,
+        GaussianHostCompatibility* gaussianCompatibility)
+        : mGaussianCompatibility(gaussianCompatibility ? gaussianCompatibility : &mOwnedGaussianCompatibility), mOptions(captureStreamOptions(options)), mHostProfiler(std::move(profile)), mMemory(std::move(memory))
     {
         if (highestPriority)
         {
@@ -961,6 +962,8 @@ namespace osuCrypto::LogVole::gpu
         int device = -1;
         bool isH200 = false;
         std::shared_ptr<GpuMemoryPool> memory;
+        // Declared before workers so borrowed cache pointers outlive all streams.
+        GaussianHostCompatibility gaussianCompatibility;
         std::unordered_map<std::thread::id, Worker> workers;
         using Record = std::weak_ptr<const RingNttContext>;
         std::map<Record, Record, std::owner_less<Record>> contexts;
@@ -980,6 +983,7 @@ namespace osuCrypto::LogVole::gpu
     }
     bool GpuExecutionContext::isH200() const noexcept { return mImpl->isH200; }
     GpuExecutionContext::~GpuExecutionContext() = default;
+    GaussianHostCompatibility& GpuExecutionContext::gaussianCompatibility() { return mImpl->gaussianCompatibility; }
 
     GpuStream& GpuExecutionContext::stream(Lane lane)
     {
@@ -993,7 +997,7 @@ namespace osuCrypto::LogVole::gpu
         auto& stream = lane == Lane::Readback ? worker.readback :
             lane == Lane::Sample ? worker.sample : worker.main;
         if (!stream)
-            stream.reset(new GpuStream(false, lane != Lane::Readback, mImpl->memory, mExecutionOptions.mAdvanced.mStreams, mHostProfiler));
+            stream.reset(new GpuStream(false, lane != Lane::Readback, mImpl->memory, mExecutionOptions.mAdvanced.mStreams, mHostProfiler, &mImpl->gaussianCompatibility));
         return *stream;
     }
 
