@@ -12474,8 +12474,7 @@ namespace osuCrypto::LogVole::gpu
             return false;
 
         const size_t shBytes = static_cast<size_t>(plainRc.mN) * sizeof(u64);
-        if (ringRc.mKernelOptions.mNttLog13InverseScatterFixed &&
-            ringRc.mKernelOptions.mNttLog13Specialized && plainRc.mN == 8192u &&
+        if (ringRc.mKernelOptions.mNttLog13Specialized && plainRc.mN == 8192u &&
             plainRc.mLogN == 13u && ringRc.mRho == 4u)
         {
             const DeviceInverseRho4 iv = toDeviceInverseRho4(plainRc);
@@ -12533,7 +12532,7 @@ namespace osuCrypto::LogVole::gpu
             return plainRc.mN == 16384u && plainRc.mLogN == 14u;
         return plainRc.mN == 8192u && plainRc.mLogN == 13u &&
                ringRc.mN == 8192u && ringRc.mLogN == 13u &&
-               ringRc.mRho == 4u && ringRc.mKernelOptions.mNttLog13InverseScatterFixed &&
+               ringRc.mRho == 4u &&
                ringRc.mKernelOptions.mNttLog13Specialized && ringRc.mKernelOptions.mNttLog13SimpleIndex;
     }
 
@@ -13231,8 +13230,7 @@ namespace osuCrypto::LogVole::gpu
         bool fixedIpInverseEligible(const RingConstView& rc, u32 outCount)
         {
             const u64 blocks = static_cast<u64>(outCount) * 4u;
-            return rc.mKernelOptions.mNttLog13InverseFixedIp &&
-                rc.mKernelOptions.mNttLog13Specialized &&
+            return rc.mKernelOptions.mNttLog13Specialized &&
                 rc.mKernelOptions.mNttLog13InverseSpecialized &&
                 rc.mKernelOptions.mNttLog13InverseDirectStore &&
                 rc.mKernelOptions.mNttLog13InverseThreads == 512u &&

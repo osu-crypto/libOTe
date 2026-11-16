@@ -3049,6 +3049,233 @@ void LogVole_RingOps_NttLog13TreeParity(const oc::CLP& cmd)
 #endif
 }
 
+void LogVole_RingOps_NttLog13ScatterParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+    for (std::uint32_t degree : {8192u, 1024u})
+    {
+        RingParams params;
+        params.mPolyModulusDegree = degree;
+        params.mCoeffModulusBits.resize(4u);
+        std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), 55);
+        RingNttContext cpu;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, cpu));
+        prepareGpuTableOwners(cpu);
+        auto ring = gpu::GpuRing::get(cpu);
+        LOGVOLE_REQUIRE_TRUE(ring);
+        params.mCoeffModulusBits.resize(1u);
+        params.mCoeffModulusBits[0] = 30;
+        RingNttContext plainCpu;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, plainCpu));
+        prepareGpuTableOwners(plainCpu);
+        auto plain = gpu::GpuRing::get(plainCpu);
+        LOGVOLE_REQUIRE_TRUE(plain);
+        const auto plainView = plain->view(stream), ringView = ring->view(stream);
+        LOGVOLE_REQUIRE_TRUE(gpu::canLaunchNttInverseScatterBroadcast(plainView, ringView));
+        LOGVOLE_REQUIRE_EQ(gpu::canLaunchNttInverseScatterSingleLimb(plainView, ringView), degree == 8192u);
+        std::vector<std::uint32_t> slots(degree);
+        for (unsigned c = 0; c < degree; ++c) slots[c] = (5u * c + 3u) % degree;
+        const auto* slotMap = stream.uploadIdx(slots);
+        LOGVOLE_REQUIRE_TRUE(slotMap);
+        gpu::GpuPolyBuffer output(*ring, 2u, stream);
+        for (bool garbled : {false, true})
+        {
+            const std::size_t perRing = degree / 3u;
+            std::vector<std::uint64_t> labels(garbled ? perRing + 5u : degree + 17u);
+            for (std::size_t i = 0; i < labels.size(); ++i) labels[i] = 13u + 17u * i;
+            gpu::GpuPolyBuffer deviceLabels;
+            LOGVOLE_REQUIRE_TRUE(deviceLabels.resizeWords(labels.size(), 1u, stream));
+            LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(deviceLabels.data(stream), labels.data(),
+                labels.size() * sizeof(std::uint64_t), stream));
+            std::vector<RnsPoly> expected(2u), sentinel(2u);
+            for (unsigned chunk = 0; chunk < 2u; ++chunk)
+            {
+                RnsPoly coefficient;
+                coefficient.mCoeffs.resize(degree);
+                for (unsigned c = 0; c < degree; ++c)
+                {
+                    const auto slot = slots[c];
+                    const auto src = garbled ? chunk * perRing + slot / 3u : chunk * degree + slot;
+                    coefficient.mCoeffs[c] = garbled
+                        ? (slot < perRing * 3u && src < labels.size() ? labels[src] : 0u)
+                        : (src < labels.size() ? labels[src] : 7u);
+                }
+                LOGVOLE_REQUIRE_TRUE(inverseNtt(coefficient, plainCpu));
+                expected[chunk].mCoeffs.resize(4u * degree);
+                sentinel[chunk].mCoeffs.resize(4u * degree);
+                for (unsigned j = 0; j < 4u; ++j)
+                for (unsigned c = 0; c < degree; ++c)
+                {
+                    expected[chunk].mCoeffs[j * degree + c] = coefficient.mCoeffs[c];
+                    sentinel[chunk].mCoeffs[j * degree + c] = ringModulusValue(cpu, j) - 1u;
+                }
+            }
+            for (unsigned route = 0; route < (degree == 8192u ? 3u : 1u); ++route)
+            {
+                auto selected = ringView;
+                if (route == 1u) selected.mKernelOptions.mNttLog13SimpleIndex = false;
+                LOGVOLE_REQUIRE_TRUE(output.upload(sentinel, stream));
+                if (route == 2u)
+                    LOGVOLE_REQUIRE_TRUE(gpu::launchNttInverseScatterSingleLimb(plainView, selected,
+                        deviceLabels.data(stream), labels.size(), 7u, slotMap, 2u,
+                        output.data(stream), stream.raw(), garbled));
+                else
+                    LOGVOLE_REQUIRE_TRUE(gpu::launchNttInverseScatterBroadcast(plainView, selected,
+                        deviceLabels.data(stream), labels.size(), 7u, slotMap, 2u,
+                        output.data(stream), stream.raw(), garbled));
+                auto selectedExpected = expected;
+                if (route == 2u)
+                    for (unsigned p = 0; p < 2u; ++p)
+                    for (unsigned j = 1u; j < 4u; ++j)
+                        std::copy_n(sentinel[p].mCoeffs.data() + j * degree, degree,
+                            selectedExpected[p].mCoeffs.data() + j * degree);
+                std::vector<RnsPoly> actual;
+                LOGVOLE_REQUIRE_TRUE(output.download(actual, stream));
+                expect_batch_equal(actual, selectedExpected);
+            }
+        }
+    }
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_RingOps_NttLog13SparseParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    RingParams params;
+    params.mPolyModulusDegree = 8192u;
+    params.mCoeffModulusBits.resize(4u);
+    std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), 55);
+    RingNttContext cpu;
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, cpu));
+    prepareGpuTableOwners(cpu);
+    auto ring = gpu::GpuRing::get(cpu);
+    LOGVOLE_REQUIRE_TRUE(ring);
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+    const auto view = ring->view(stream);
+    LOGVOLE_REQUIRE_TRUE(view.mMinModulus > (std::uint64_t{1} << 55u) - (std::uint64_t{1} << 21u)
+        && view.mMaxModulus < (std::uint64_t{1} << 55u));
+    constexpr unsigned logicalCount = 256u, parentCount = 128u, packedCount = 64u;
+    std::vector<RnsPoly> digits(packedCount), leafB(2u);
+    for (unsigned p = 0; p < packedCount + 2u; ++p)
+    {
+        auto poly = deriveUniformPolyFromNonce(cpu, 0x53505253u, 0x4c454146u, p);
+        for (unsigned j = 0; j < 4u; ++j)
+        {
+            poly.mCoeffs[j * 8192u] = 0u;
+            poly.mCoeffs[j * 8192u + 1u] = ringModulusValue(cpu, j) - 1u;
+        }
+        if (p < packedCount) digits[p] = std::move(poly);
+        else leafB[p - packedCount] = std::move(poly);
+    }
+    std::vector<RnsPoly> expected(parentCount), sentinel(parentCount), expectedGadget(parentCount);
+    for (unsigned parent = 0; parent < parentCount; ++parent)
+    {
+        expected[parent].mCoeffs.resize(4u * 8192u);
+        std::fill(expected[parent].mCoeffs.begin(), expected[parent].mCoeffs.end(), 0u);
+        sentinel[parent].mCoeffs.resize(4u * 8192u);
+        for (unsigned j = 0; j < 4u; ++j)
+        {
+            const auto q = ringModulusValue(cpu, j);
+            const seal::Modulus modulus(q);
+            const bool active = j / 2u == parent % 2u;
+            for (unsigned c = 0; c < 8192u; ++c)
+            {
+                const auto e = j * 8192u + c;
+                sentinel[parent].mCoeffs[e] = q - 1u;
+                if (active) expected[parent].mCoeffs[e] = seal::util::multiply_uint_mod(
+                    digits[parent / 2u].mCoeffs[e], leafB[j & 1u].mCoeffs[e], modulus);
+            }
+        }
+        LOGVOLE_REQUIRE_TRUE(inverseNtt(expected[parent], cpu));
+        for (unsigned j = 0; j < 4u; ++j)
+        for (unsigned c = 0; c < 8192u; ++c)
+        {
+            auto& value = expected[parent].mCoeffs[j * 8192u + c];
+            if (value != 0u) value = ringModulusValue(cpu, j) - value;
+        }
+        std::vector<RnsPoly> high;
+        LOGVOLE_REQUIRE_TRUE(gadgetDecomposeBitsRangeCentered(expected[parent], 110u, 1u, 1u, cpu, high));
+        expectedGadget[parent] = std::move(high[0]);
+    }
+    gpu::GpuPolyBuffer nodes(*ring, 32u * 15u, stream), b(*ring, 2u, stream);
+    gpu::GpuPolyBuffer packed(*ring, packedCount, stream), output(*ring, parentCount, stream);
+    gpu::GpuPolyBuffer gadget(*ring, parentCount, stream);
+    LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(nodes.data(stream), nodes.bytes(), stream.raw()));
+    LOGVOLE_REQUIRE_TRUE(b.upload(leafB, stream));
+    const auto words = ringPolyCoeffCount(params);
+    for (unsigned logical = 0; logical < logicalCount; ++logical)
+    {
+        const unsigned leaf = logical & 7u, limb = leaf & 3u;
+        const unsigned node = (logical >> 3u) * 15u + 7u + leaf;
+        LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(nodes.data(stream) + node * words + limb * 8192u,
+            digits[logical >> 2u].mCoeffs.data() + limb * 8192u, 8192u * sizeof(std::uint64_t), stream));
+    }
+    bool declined = true;
+    LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseRecursiveLeafSparseNegate(view,
+        nodes.data(stream), b.poly(0u, stream), b.poly(1u, stream), packed.data(stream),
+        output.data(stream), logicalCount - 8u, stream.raw(), declined));
+    LOGVOLE_REQUIRE_FALSE(declined);
+    LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseRecursiveLeafSparseNegateNoZero(view,
+        nodes.data(stream), b.poly(0u, stream), b.poly(1u, stream), packed.data(stream),
+        output.data(stream), logicalCount - 8u, stream.raw(), declined));
+    LOGVOLE_REQUIRE_FALSE(declined);
+    for (unsigned route = 0; route < 3u; ++route)
+    {
+        auto selected = view;
+        if (route == 2u) selected.mKernelOptions.mPointwisePseudo55Reduce = false;
+        LOGVOLE_REQUIRE_TRUE(output.upload(sentinel, stream));
+        bool launched = false;
+        if (route == 0u)
+            LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseRecursiveLeafSparseNegate(selected,
+                nodes.data(stream), b.poly(0u, stream), b.poly(1u, stream), packed.data(stream),
+                output.data(stream), logicalCount, stream.raw(), launched));
+        else
+        {
+            // Commit the mandatory sparse consumer before leaving zero limbs
+            // unmaterialized. No dense consumer reads this sentinel-filled view.
+            LOGVOLE_REQUIRE_TRUE(gpu::canLaunchGadgetDecomposeHi110RecursiveLeafSparsePair(selected,
+                output.data(stream), parentCount, gadget.data(stream)));
+            LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseRecursiveLeafSparseNegateNoZero(selected,
+                nodes.data(stream), b.poly(0u, stream), b.poly(1u, stream), packed.data(stream),
+                output.data(stream), logicalCount, stream.raw(), launched));
+        }
+        LOGVOLE_REQUIRE_TRUE(launched);
+        auto selectedExpected = expected;
+        if (route != 0u)
+            for (unsigned parent = 0; parent < parentCount; ++parent)
+            for (unsigned j = 0; j < 4u; ++j)
+                if (j / 2u != parent % 2u)
+                    std::copy_n(sentinel[parent].mCoeffs.data() + j * 8192u, 8192u,
+                        selectedExpected[parent].mCoeffs.data() + j * 8192u);
+        std::vector<RnsPoly> actual, actualPacked;
+        LOGVOLE_REQUIRE_TRUE(output.download(actual, stream) && packed.download(actualPacked, stream));
+        expect_batch_equal(actual, selectedExpected);
+        expect_batch_equal(actualPacked, digits);
+        if (route != 0u)
+        {
+            LOGVOLE_REQUIRE_TRUE(gpu::launchGadgetDecomposeHi110RecursiveLeafSparsePair(selected,
+                output.data(stream), parentCount, gadget.data(stream), nullptr, stream.raw()));
+            std::vector<RnsPoly> high;
+            LOGVOLE_REQUIRE_TRUE(gadget.download(high, stream));
+            expect_batch_equal(high, expectedGadget);
+        }
+    }
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
 void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)

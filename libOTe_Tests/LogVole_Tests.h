@@ -127,6 +127,8 @@
     X(RingOps, NttLog13ForwardParity) \
     X(RingOps, NttLog13InverseParity) \
     X(RingOps, NttLog13TreeParity) \
+    X(RingOps, NttLog13ScatterParity) \
+    X(RingOps, NttLog13SparseParity) \
     X(RingOps, NttTwoTileInPlaceParity) \
     X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
     X(Core, RootTruncParamsAndKeyReplication) \

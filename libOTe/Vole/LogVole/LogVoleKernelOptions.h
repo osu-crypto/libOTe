@@ -35,8 +35,6 @@ namespace osuCrypto
         bool mNttLog13VectorShoupLoads = true;
         bool mNttLog13InverseSpecialized = true;
         bool mNttLog13InverseDirectStore = true;
-        bool mNttLog13InverseScatterFixed = true;
-        bool mNttLog13InverseFixedIp = true;
         bool mFixedIpMuRowReuse = true;
         bool mFixedIpWideMuRowReuse = true;
         bool mPointwisePseudo55Reduce = true;
@@ -111,8 +109,6 @@ namespace osuCrypto
                 mNttLog13VectorShoupLoads == other.mNttLog13VectorShoupLoads &&
                 mNttLog13InverseSpecialized == other.mNttLog13InverseSpecialized &&
                 mNttLog13InverseDirectStore == other.mNttLog13InverseDirectStore &&
-                mNttLog13InverseScatterFixed == other.mNttLog13InverseScatterFixed &&
-                mNttLog13InverseFixedIp == other.mNttLog13InverseFixedIp &&
                 mFixedIpMuRowReuse == other.mFixedIpMuRowReuse &&
                 mFixedIpWideMuRowReuse == other.mFixedIpWideMuRowReuse &&
                 mPointwisePseudo55Reduce == other.mPointwisePseudo55Reduce &&

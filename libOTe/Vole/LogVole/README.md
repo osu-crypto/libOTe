@@ -1396,3 +1396,17 @@ Three focused checks passed with zero skips in 57.70 seconds using
 `-gpu 1 -lvFactoryFast 1`, including the direct oracle after pruning. These are
 correctness checks, with no performance claim. H200 runtime remains untested
 locally. No benchmarks were run.
+
+Scatter and sparse NTT dispatch now follow their established defaults without
+the two local selector switches. Functional admission checks and protocol
+controls remain unchanged. Direct coverage checks fixed and generic scatter,
+single-limb output, partial plain/garbled labels, and both NoZero arithmetic
+paths with the mandatory sparse gadget consumer; complementary zero/sentinel
+limbs and packed digits are checked explicitly.
+
+Validation: both direct CPU-oracle tests passed on the RTX 4060 before pruning.
+The final Windows VS 14.50 CUDA test target and frontend object build and isolated
+SM90 compile passed, with retained scatter, sparse, tree, and H200 entries
+verified in the SM90 object. Four focused checks passed with zero skips in
+30.59 seconds using `-gpu 1 -lvFactoryFast 1`. H200 runtime remains untested
+locally. No benchmarks were run.
