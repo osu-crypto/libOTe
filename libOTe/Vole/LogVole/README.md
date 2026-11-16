@@ -1263,3 +1263,16 @@ checks passed with zero skips in 6.56 seconds using `-gpu 1 -lvFactoryFast 1`,
 including exact CPU-oracle hi208 parity with prepared and missing-table views.
 The local RTX 4060 exercised general dispatch; H200 runtime paths were not
 executed. No benchmarks were run.
+
+The H200 pointwise cleanup removes the arithmetic and thread-count selectors,
+retaining arithmetic mode 3 with 256 threads for the four established indexed
+inner-product operations. Hardware, modulus, flag, and alias eligibility gates,
+the nullable reciprocal table, and general fallbacks remain unchanged. The
+broader pseudo55 selector remains outside this batch.
+
+Validation: the serialized Windows VS 14.50 CUDA test target and frontend object
+build and isolated SM90 kernel-object compile passed. Four focused checks passed
+with zero skips in 11.69 seconds using `-gpu 1 -lvFactoryFast 1`. Direct scalar
+CPU-oracle checks cover all four operations, a general indexed fallback,
+canonical operands, noncanonical 52-bit-shape operands, and missing constants.
+The local RTX 4060 did not execute H200 runtime paths; no benchmarks were run.

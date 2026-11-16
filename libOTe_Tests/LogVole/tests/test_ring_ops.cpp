@@ -2458,6 +2458,7 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
 
         // Alternate live owners, then return to the first: no first-use latch
         // may choose the other owner's configuration or device table layout.
+        std::array<bool, 3> pointwiseChecked{};
         for (unsigned variant : {1u, 0u, 2u, 1u, 0u})
         {
             auto& ctx = owners[variant];
@@ -2484,6 +2485,93 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(device.download(restored, stream));
             for (auto& poly : restored) LOGVOLE_REQUIRE_TRUE(canonicalizePoly(poly, cpu));
             expect_batch_equal(restored, original);
+            // Four fixed pointwise contracts plus one indexed general fallback.
+            // The 55-bit specialization requires canonical inputs. For the
+            // 52-bit shape, noncanonical multi-term operands stay below 2q,
+            // while single products also exercise full-width inputs.
+            if (!pointwiseChecked[variant])
+            {
+                gpu::GpuPolyBuffer leftDevice(*ring, 2u, stream), rightDevice(*ring, 2u, stream);
+                gpu::GpuPolyBuffer result(*ring, 2u, stream);
+                for (unsigned operation = 0; operation < 5u; ++operation)
+                for (bool noncanonical : {false, true})
+                {
+                    if (degree == 8192u && noncanonical) continue;
+                    const std::uint32_t terms = operation == 2u ? 2u : operation == 3u ? 6u : 1u;
+                    const bool accumulate = operation == 3u || operation == 4u;
+                    const bool subtract = operation == 1u;
+                    const bool negate = operation == 4u;
+                    auto left = original, right = original, initial = original;
+                    for (std::size_t p = 0; p < left.size(); ++p)
+                    for (unsigned j = 0; j < cpu.mParams.mCoeffModulusBits.size(); ++j)
+                    {
+                        const auto q = ringModulusValue(cpu, j);
+                        for (std::size_t c = 0; c < degree; ++c)
+                        {
+                            const auto e = j * degree + c;
+                            left[p].mCoeffs[e] = (c + p) % 3u == 0u ? q - 1u : original[p].mCoeffs[e];
+                            right[p].mCoeffs[e] = original[1u - p].mCoeffs[e];
+                            if (noncanonical)
+                            {
+                                left[p].mCoeffs[e] += q;
+                                right[p].mCoeffs[e] += q;
+                                if (terms == 1u && c % 7u == 0u)
+                                    left[p].mCoeffs[e] = right[p].mCoeffs[e] = ~std::uint64_t{0};
+                            }
+                        }
+                    }
+                    std::vector<std::uint32_t> ai(2u * terms), bi(ai.size());
+                    for (std::size_t k = 0; k < ai.size(); ++k)
+                    {
+                        ai[k] = static_cast<std::uint32_t>((k / terms + k) % 2u);
+                        bi[k] = static_cast<std::uint32_t>((k / terms + k + 1u) % 2u);
+                    }
+                    const std::array<std::uint32_t, 2> oi{1u, 0u};
+                    auto expectedPointwise = initial;
+                    for (unsigned o = 0; o < 2u; ++o)
+                    for (unsigned j = 0; j < cpu.mParams.mCoeffModulusBits.size(); ++j)
+                    {
+                        const auto q = ringModulusValue(cpu, j);
+                        const seal::Modulus modulus(q);
+                        for (std::size_t c = 0; c < degree; ++c)
+                        {
+                            const auto e = j * degree + c;
+                            std::uint64_t sum = 0u;
+                            for (unsigned k = 0; k < terms; ++k)
+                                sum = (sum + seal::util::multiply_uint_mod(
+                                    left[ai[o * terms + k]].mCoeffs[e] % q,
+                                    right[bi[o * terms + k]].mCoeffs[e] % q, modulus)) % q;
+                            const auto destination = operation == 4u ? oi[o] : o;
+                            const auto old = initial[destination].mCoeffs[e];
+                            auto value = subtract ? (old + q - sum) % q : accumulate ? (old + sum) % q : sum;
+                            if (negate && value != 0u) value = q - value;
+                            expectedPointwise[destination].mCoeffs[e] = value;
+                        }
+                    }
+                    LOGVOLE_REQUIRE_TRUE(leftDevice.upload(left, stream) && rightDevice.upload(right, stream));
+                    const auto* aIndices = stream.uploadIdx(ai);
+                    const auto* bIndices = stream.uploadIdx(bi);
+                    const auto* outIndices = operation == 4u ? stream.uploadIdx(oi) : nullptr;
+                    LOGVOLE_REQUIRE_TRUE(aIndices && bIndices && (operation != 4u || outIndices));
+                    for (bool prepared : {true, false})
+                    {
+                        LOGVOLE_REQUIRE_TRUE(result.upload(initial, stream));
+                        auto view = ring->view(stream);
+                        if (!prepared) view.mFp52GadgetConstants = nullptr;
+                        LOGVOLE_REQUIRE_TRUE(gpu::launchInnerProduct(view,
+                            leftDevice.data(stream), rightDevice.data(stream), aIndices, bIndices,
+                            terms, result.data(stream), outIndices, 2u, accumulate, negate, stream.raw(), subtract));
+                        std::vector<RnsPoly> actual;
+                        LOGVOLE_REQUIRE_TRUE(result.download(actual, stream));
+                        for (std::size_t o = 0; o < actual.size(); ++o)
+                        for (std::size_t e = 0; e < actual[o].mCoeffs.size(); ++e)
+                            LOGVOLE_REQUIRE_EQ(actual[o].mCoeffs[e], expectedPointwise[o].mCoeffs[e])
+                                << " degree " << degree << " variant " << variant << " operation " << operation
+                                << " noncanonical " << noncanonical << " prepared " << prepared << " coefficient " << e;
+                    }
+                }
+            }
+            pointwiseChecked[variant] = true;
             if (degree == 16384u)
             {
                 auto input = original;

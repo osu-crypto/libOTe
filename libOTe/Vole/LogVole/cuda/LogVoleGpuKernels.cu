@@ -6592,9 +6592,9 @@ namespace osuCrypto::LogVole::gpu
 
         // NoGoldenSeed port of the GoldenSeed pointwise specialization. The
         // full-width reducer preserves arbitrary Wide inputs and sum wraparound;
-        // a checked FP64 single-product option falls back for noncanonical data.
-        template<u32 Terms, FixedIpMode Mode, u32 Arithmetic, u32 Threads = 256u>
-        __global__ __launch_bounds__(Threads, 2048u / Threads)
+        // the checked FP64 single-product path falls back for noncanonical data.
+        template<u32 Terms, FixedIpMode Mode>
+        __global__ __launch_bounds__(256, 8)
         void innerProductFixedIndexedH200Kernel(DeviceRing rg, const u64* aBase,
             const u64* bBase, const u32* aIdx, const u32* bIdx, u64* out,
             const double* fp52Constants)
@@ -6619,7 +6619,7 @@ namespace osuCrypto::LogVole::gpu
             const u64 q = rg.mMods[limb].mValue;
             const u64 a0 = shA[0][coeff], b0 = shB[0][coeff];
             u64 acc;
-            if constexpr (Terms == 1u && Arithmetic == 3u)
+            if constexpr (Terms == 1u)
             {
                 if (a0 < q && b0 < q)
                 {
@@ -6636,10 +6636,9 @@ namespace osuCrypto::LogVole::gpu
                 for (u32 k = 1u; k < Terms; ++k)
                 {
                     const Wide product = wideMul(shA[k][coeff], shB[k][coeff]);
-                    if constexpr (Arithmetic >= 2u) sum = wideAddCarry(sum, product);
-                    else sum = wideAdd(sum, product);
+                    sum = wideAddCarry(sum, product);
                 }
-                acc = reducePseudo52FullWide<(Arithmetic >= 2u)>(sum, q);
+                acc = reducePseudo52FullWide<true>(sum, q);
             }
             u64* dst = out + static_cast<size_t>(o) * perPoly + elem;
             if constexpr (Mode == FixedIpMode::Accumulate) acc = addMod(*dst, acc, q);
@@ -15473,42 +15472,25 @@ namespace osuCrypto::LogVole::gpu
             fixedGeometry && pointwisePseudo55ProductionEligible(rc);
         if (fixedGeometry)
         {
-            const u32 h200Arithmetic = rc.mKernelOptions.mNoGoldH200PointwiseMode;
-            if (h200Arithmetic && log14H200Shape(rc) && rc.mMods &&
+            if (log14H200Shape(rc) && rc.mMods &&
                 rc.mMinModulus > (u64{1} << 52u) - (u64{1} << 24u) &&
                 rc.mMaxModulus < (u64{1} << 52u) && aBase && bBase && out &&
                 !negate && ((terms == 1u && !accumulate) ||
                     (terms == 2u && !accumulate && !subtract) ||
                     (terms == 6u && accumulate && !subtract)))
             {
-                const auto launch = [&](auto count, auto mode, auto arithmetic, auto threadCount) {
-                    constexpr u32 t = decltype(threadCount)::value;
+                const auto launch = [&](auto count, auto mode) {
                     innerProductFixedIndexedH200Kernel<decltype(count)::value,
-                        decltype(mode)::value, decltype(arithmetic)::value, t><<<
-                            grid2D(rc.mRho * rc.mN, outCount, t), t, 0u, asStream(stream)>>>(
+                        decltype(mode)::value><<<grid, threads, 0u, asStream(stream)>>>(
                             rg, aBase, bBase, aIdx, bIdx, out, rc.mFp52GadgetConstants);
                 };
-                const auto byThreads = [&](auto count, auto mode, auto arithmetic) {
-                    switch (rc.mKernelOptions.mNoGoldH200PointwiseThreads)
-                    {
-                    case 128u: launch(count, mode, arithmetic, std::integral_constant<u32, 128u>{}); break;
-                    case 512u: launch(count, mode, arithmetic, std::integral_constant<u32, 512u>{}); break;
-                    case 1024u: launch(count, mode, arithmetic, std::integral_constant<u32, 1024u>{}); break;
-                    default: launch(count, mode, arithmetic, std::integral_constant<u32, 256u>{}); break;
-                    }
-                };
-                const auto byArithmetic = [&](auto count, auto mode) {
-                    if (h200Arithmetic == 1u) byThreads(count, mode, std::integral_constant<u32, 1u>{});
-                    else if (h200Arithmetic == 2u) byThreads(count, mode, std::integral_constant<u32, 2u>{});
-                    else byThreads(count, mode, std::integral_constant<u32, 3u>{});
-                };
                 if (terms == 1u && subtract)
-                    byArithmetic(std::integral_constant<u32, 1u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Subtract>{});
+                    launch(std::integral_constant<u32, 1u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Subtract>{});
                 else if (terms == 1u)
-                    byArithmetic(std::integral_constant<u32, 1u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Replace>{});
+                    launch(std::integral_constant<u32, 1u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Replace>{});
                 else if (terms == 2u)
-                    byArithmetic(std::integral_constant<u32, 2u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Replace>{});
-                else byArithmetic(std::integral_constant<u32, 6u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Accumulate>{});
+                    launch(std::integral_constant<u32, 2u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Replace>{});
+                else launch(std::integral_constant<u32, 6u>{}, std::integral_constant<FixedIpMode, FixedIpMode::Accumulate>{});
                 return check(cudaGetLastError(), "innerProductFixedH200");
             }
             if (terms == 1u && !accumulate && !negate)
