@@ -28,12 +28,6 @@ namespace osuCrypto
         std::uint32_t mNoGoldH200ForwardFp52Mode = 1u;
         std::uint32_t mNoGoldH200ForwardFp52Extra = 3u;
         std::uint32_t mNoGoldH200ForwardFp52Tail = 6u;
-        std::uint32_t mNoGoldH200AccumulatorSchedule = 0u;
-        std::uint32_t mNoGoldH200AccumulatorTileBlocks = 0u;
-        std::uint32_t mNoGoldH200AccumulatorPackedMode = 0u;
-        std::uint32_t mNoGoldH200AccumulatorOrder = 0u;
-        std::uint32_t mNoGoldH200AccumulatorCarryMode = 0u;
-        std::uint32_t mNoGoldH200AccumulatorLoadMode = 6u;
         std::uint32_t mNoGoldH200OuterReuseMode = 0u;
         bool mNoGoldH200Gadget208 = true;
         bool mNoGoldH200Gadget208Pseudo52 = true;
@@ -128,12 +122,6 @@ namespace osuCrypto
                 mNoGoldH200ForwardFp52Mode <= 5u &&
                 mNoGoldH200ForwardFp52Extra <= 3u &&
                 mNoGoldH200ForwardFp52Tail <= 8u &&
-                mNoGoldH200AccumulatorSchedule <= 6u &&
-                mNoGoldH200AccumulatorTileBlocks <= 64u &&
-                mNoGoldH200AccumulatorPackedMode <= 7u &&
-                mNoGoldH200AccumulatorOrder <= 4u &&
-                mNoGoldH200AccumulatorCarryMode <= 4u &&
-                mNoGoldH200AccumulatorLoadMode <= 10u &&
                 mNoGoldH200OuterReuseMode <= 10u &&
                 (mNttForwardThreads == 256u || mNttForwardThreads == 512u || mNttForwardThreads == 1024u) &&
                 (mNttInverseThreads == 256u || mNttInverseThreads == 512u || mNttInverseThreads == 1024u) &&
@@ -168,12 +156,6 @@ namespace osuCrypto
                 mNoGoldH200ForwardFp52Mode == other.mNoGoldH200ForwardFp52Mode &&
                 mNoGoldH200ForwardFp52Extra == other.mNoGoldH200ForwardFp52Extra &&
                 mNoGoldH200ForwardFp52Tail == other.mNoGoldH200ForwardFp52Tail &&
-                mNoGoldH200AccumulatorSchedule == other.mNoGoldH200AccumulatorSchedule &&
-                mNoGoldH200AccumulatorTileBlocks == other.mNoGoldH200AccumulatorTileBlocks &&
-                mNoGoldH200AccumulatorPackedMode == other.mNoGoldH200AccumulatorPackedMode &&
-                mNoGoldH200AccumulatorOrder == other.mNoGoldH200AccumulatorOrder &&
-                mNoGoldH200AccumulatorCarryMode == other.mNoGoldH200AccumulatorCarryMode &&
-                mNoGoldH200AccumulatorLoadMode == other.mNoGoldH200AccumulatorLoadMode &&
                 mNoGoldH200OuterReuseMode == other.mNoGoldH200OuterReuseMode &&
                 mNoGoldH200Gadget208 == other.mNoGoldH200Gadget208 &&
                 mNoGoldH200Gadget208Pseudo52 == other.mNoGoldH200Gadget208Pseudo52 &&

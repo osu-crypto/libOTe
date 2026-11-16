@@ -6961,44 +6961,7 @@ namespace osuCrypto::LogVole::gpu
         // q*2^64. One CTA owns a (chunk,row,limb) plane and walks coefficient
         // tiles, amortizing the ten-entry pointer table across the full
         // N=16384 limb instead of rebuilding it in 64 independent CTAs.
-        template<bool NarrowProduct>
-        __device__ __forceinline__ Wide accumulatorWideMul(u64 a, u64 b)
-        {
-            if constexpr (NarrowProduct)
-            {
-                const ulonglong2 product = mulWide52(a, b);
-                return {product.x, product.y};
-            }
-            else return wideMul(a, b);
-        }
-
-        template<u32 CarryMode>
-        __device__ __forceinline__ Wide accumulatorWideAdd(Wide a, Wide b)
-        {
-            if constexpr (CarryMode != 0u) return wideAddCarry(a, b);
-            else return wideAdd(a, b);
-        }
-
-        template<u32 CarryMode>
-        __device__ __forceinline__ Wide accumulatorWideSub(Wide a, Wide b)
-        {
-            if constexpr (CarryMode == 2u) return wideSubCarry(a, b);
-            else return wideSub(a, b);
-        }
-
-        template<u32 Mode>
-        __device__ __forceinline__ u64 accumulatorLoad(const u64* ptr)
-        {
-            if constexpr (Mode == 1u) return __ldg(ptr);
-            else if constexpr (Mode == 2u) return __ldcg(ptr);
-            else if constexpr (Mode == 3u) return __ldca(ptr);
-            else return *ptr;
-        }
-
-        template<bool Pseudo52, u32 TermUnroll = 1u, u32 MinBlocks = 8u,
-                 bool NarrowProduct = false, u32 RowTile = 16u, u32 ChunkTile = 1u,
-                 u32 CarryMode = 0u, u32 LoadMode = 0u>
-        __global__ __launch_bounds__(256, MinBlocks)
+        __global__ __launch_bounds__(256, 8)
         void expandAccumulatorTau1NoGoldH200Kernel(
             DeviceRing rg,
             const u64* ct1,
@@ -7011,7 +6974,6 @@ namespace osuCrypto::LogVole::gpu
             const u32* lacctBIdx,
             u64* out)
         {
-            static_assert(!NarrowProduct || Pseudo52);
             constexpr u32 kN = 16384u;
             constexpr u32 kRho = 8u;
             // The benchmark prints the full protocol mu=32. Recursive
@@ -7021,22 +6983,11 @@ namespace osuCrypto::LogVole::gpu
             constexpr u32 kTreeTerms = 8u;
             constexpr u32 kTotalTerms = 2u + kTreeTerms;
             constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-            constexpr u64 kRadix52 = u64{ 1 } << 52u;
-            constexpr u64 kMask52 = kRadix52 - 1u;
 
             const u32 rowLimb = blockIdx.y;
             const u32 limb = rowLimb & (kRho - 1u);
-            // A bijection of the output planes changes cache reuse only. A
-            // tile visits RowTile rows from ChunkTile chunks together; the
-            // host requires complete chunk tiles and retains the old ordering
-            // for tails. Default 16x1 is exactly the preceding traversal.
-            static_assert(16u % RowTile == 0u && RowTile * ChunkTile == 16u);
-            const u32 linear = blockIdx.z * kMu + (rowLimb >> 3u);
-            const u32 group = linear / (RowTile * ChunkTile);
-            const u32 row = RowTile == 16u ? rowLimb >> 3u :
-                (group % (kMu / RowTile)) * RowTile + linear % RowTile;
-            const u32 chunk = RowTile == 16u ? blockIdx.z :
-                (group / (kMu / RowTile)) * ChunkTile + (linear / RowTile) % ChunkTile;
+            const u32 row = rowLimb >> 3u;
+            const u32 chunk = blockIdx.z;
             const u32 o = chunk * kMu + row;
             const size_t limbBase = static_cast<size_t>(limb) * kN;
 
@@ -7084,65 +7035,24 @@ namespace osuCrypto::LogVole::gpu
                 const u32 elem = (limb << 14u) + coeff;
 
                 Wide positiveSum =
-                    accumulatorWideMul<NarrowProduct>(accumulatorLoad<LoadMode>(shA[0] + coeff),
-                        accumulatorLoad<LoadMode>(shB[0] + coeff));
-#pragma unroll TermUnroll
+                    wideMul(shA[0][coeff],
+                        shB[0][coeff]);
+#pragma unroll 1
                 for (u32 k = 2u; k < kTotalTerms; ++k)
                 {
-                    positiveSum = accumulatorWideAdd<CarryMode>(
+                    positiveSum = wideAdd(
                         positiveSum,
-                        accumulatorWideMul<NarrowProduct>(accumulatorLoad<LoadMode>(shA[k] + coeff),
-                            accumulatorLoad<LoadMode>(shB[k] + coeff)));
+                        wideMul(shA[k][coeff],
+                            shB[k][coeff]));
                 }
-                const Wide keyComplement = accumulatorWideSub<CarryMode>(
-                    accumulatorWideMul<NarrowProduct>(mod.mValue, mod.mValue),
-                    accumulatorWideMul<NarrowProduct>(accumulatorLoad<LoadMode>(shA[1] + coeff),
-                        accumulatorLoad<LoadMode>(shB[1] + coeff)));
+                const Wide keyComplement = wideSub(
+                    wideMul(mod.mValue, mod.mValue),
+                    wideMul(shA[1][coeff],
+                        shB[1][coeff]));
                 const Wide signedSum =
-                    accumulatorWideAdd<CarryMode>(positiveSum, keyComplement);
-                u64 acc;
-                if constexpr (Pseudo52)
-                {
-                    // All production moduli are q=2^52-c with c<2^24.
-                    // The ten-product non-negative sum is below 10*2^104,
-                    // so signedSum=s0+s1*R+s2*R^2 has s2<10. Since R=q+c,
-                    // two folds leave an exact value below 2q.
-                    const u32 c = static_cast<u32>(
-                        kRadix52 - mod.mValue);
-                    const u64 s0 = signedSum.mLo & kMask52;
-                    const u64 s1 =
-                        ((signedSum.mLo >> 52u) |
-                         (signedSum.mHi << 12u)) & kMask52;
-                    const u32 s2 = static_cast<u32>(
-                        signedSum.mHi >> 40u);
-
-                    const u64 p0 =
-                        static_cast<u64>(static_cast<u32>(s1)) * c;
-                    const u64 p1 =
-                        static_cast<u64>(
-                            static_cast<u32>(s1 >> 32u)) * c;
-                    u64 tLo = p0 + (p1 << 32u);
-                    u64 tCarry = static_cast<u64>(tLo < p0);
-                    const u32 s2c = s2 * c;
-                    const u64 topFold =
-                        static_cast<u64>(s2c) * c;
-                    const u64 addend = s0 + topFold;
-                    const u64 oldTLo = tLo;
-                    tLo += addend;
-                    tCarry += static_cast<u64>(tLo < oldTLo);
-                    const u64 tHi = (p1 >> 32u) + tCarry;
-
-                    const u64 t0 = tLo & kMask52;
-                    const u32 t1 = static_cast<u32>(
-                        (tLo >> 52u) | (tHi << 12u));
-                    acc = t0 + static_cast<u64>(t1) * c;
-                    if (acc >= mod.mValue) acc -= mod.mValue;
-                }
-                else
-                {
-                    acc = barrettReduce128(
-                        signedSum.mLo, signedSum.mHi, mod);
-                }
+                    wideAdd(positiveSum, keyComplement);
+                const u64 acc = barrettReduce128(
+                    signedSum.mLo, signedSum.mHi, mod);
                 out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
             }
         }
@@ -7977,14 +7887,9 @@ namespace osuCrypto::LogVole::gpu
         }
 
         // NoGoldenSeed port of the GoldenSeed vector shared-pointer table.
-        // Keep the original kernel intact for a same-binary rollback. Mode 1
-        // only packs pointers; mode 2 also splits the nine positive products
-        // across independent carry chains; modes 3/4 reload shared c late to
-        // shorten its live range. Reassociation is exact: the positive sum is
-        // below 9*2^104, and adding q^2-key stays below 10*2^104 < 2^128.
-        // In particular, do NOT port GoldenSeed's q*2^64 complement: its larger
-        // high radix digit would invalidate the existing 32-bit s2*c bound.
-        template<u32 Mode, u32 CarryMode = 0u, u32 LoadMode = 0u, u32 Prefetch = 0u>
+        // The positive sum is below 9*2^104; adding q^2-key stays below
+        // 10*2^104 < 2^128. Keep q^2 rather than a q*2^64 complement:
+        // the latter would invalidate the existing 32-bit s2*c bound.
         __global__ __launch_bounds__(256, 8)
         void expandAccumulatorTau1NoGoldH200PackedKernel(
             DeviceRing rg,
@@ -8001,8 +7906,6 @@ namespace osuCrypto::LogVole::gpu
             constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
             constexpr u64 kRadix52 = u64{ 1 } << 52u;
             constexpr u64 kMask52 = kRadix52 - 1u;
-            constexpr bool kDual = Mode == 2u || Mode == 4u;
-            constexpr bool kSharedMod = Mode == 3u || Mode == 4u || Mode == 6u;
             const u32 limb = blockIdx.y & 7u;
             const u32 row = blockIdx.y >> 3u;
             const u32 chunk = blockIdx.z;
@@ -8010,7 +7913,6 @@ namespace osuCrypto::LogVole::gpu
             const size_t limbBase = static_cast<size_t>(limb) * kN;
 
             __shared__ ulonglong2 shPairs[kTotalTerms];
-            __shared__ volatile u32 shC;
             if (threadIdx.x < kTotalTerms)
             {
                 const u32 k = threadIdx.x;
@@ -8036,71 +7938,26 @@ namespace osuCrypto::LogVole::gpu
                     reinterpret_cast<unsigned long long>(a),
                     reinterpret_cast<unsigned long long>(b));
             }
-            else if (kSharedMod && threadIdx.x == kTotalTerms)
-                shC = static_cast<u32>(kRadix52 - rg.mMods[limb].mValue);
             __syncthreads();
 
-            u64 registerQ = 0u;
-            if constexpr (!kSharedMod) registerQ = rg.mMods[limb].mValue;
+            const u64 registerQ = rg.mMods[limb].mValue;
             for (u32 tile = blockIdx.x; tile < 64u; tile += gridDim.x)
             {
                 const u32 coeff = (tile << 8u) + threadIdx.x;
                 const auto product = [&](u32 k) {
-                    if constexpr (Mode >= 5u || LoadMode != 0u)
-                    {
-                        const ulonglong2 bases = loadSharedAccumulatorPointerPair(shPairs + k);
-                        if constexpr (Prefetch == 1u || Prefetch == 2u)
-                        {
-                            if (k != 1u)
-                            {
-                                const u32 next = k == 0u ? 2u : k == 9u ? 1u : k + 1u;
-                                const ulonglong2 future = loadSharedAccumulatorPointerPair(shPairs + next);
-                                prefetchInverseFp52<(Prefetch == 2u)>(reinterpret_cast<const u64*>(future.x) + coeff);
-                                prefetchInverseFp52<(Prefetch == 2u)>(reinterpret_cast<const u64*>(future.y) + coeff);
-                            }
-                        }
-                        if constexpr (Prefetch == 3u || Prefetch == 4u)
-                        {
-                            const u32 upcoming = coeff + (gridDim.x << 8u);
-                            if (upcoming < kN)
-                            {
-                                prefetchInverseFp52<(Prefetch == 4u)>(reinterpret_cast<const u64*>(bases.x) + upcoming);
-                                prefetchInverseFp52<(Prefetch == 4u)>(reinterpret_cast<const u64*>(bases.y) + upcoming);
-                            }
-                        }
-                        return accumulatorWideMul<(Mode >= 5u)>(
-                            accumulatorLoad<LoadMode>(reinterpret_cast<const u64*>(bases.x) + coeff),
-                            accumulatorLoad<LoadMode>(reinterpret_cast<const u64*>(bases.y) + coeff));
-                    }
-                    else return multiplySharedAccumulatorPointerPair(shPairs + k, coeff);
+                    const ulonglong2 bases = loadSharedAccumulatorPointerPair(shPairs + k);
+                    return wideMul(
+                        __ldca(reinterpret_cast<const u64*>(bases.x) + coeff),
+                        __ldca(reinterpret_cast<const u64*>(bases.y) + coeff));
                 };
                 Wide positiveSum = product(0u);
-                if constexpr (kDual)
-                {
-                    Wide odd = multiplySharedAccumulatorPointerPair(shPairs + 2u, coeff);
 #pragma unroll 1
-                    for (u32 k = 3u; k < 9u; k += 2u)
-                    {
-                        positiveSum = wideAdd(positiveSum,
-                            multiplySharedAccumulatorPointerPair(shPairs + k, coeff));
-                        odd = wideAdd(odd,
-                            multiplySharedAccumulatorPointerPair(shPairs + k + 1u, coeff));
-                    }
-                    positiveSum = wideAdd(positiveSum,
-                        multiplySharedAccumulatorPointerPair(shPairs + 9u, coeff));
-                    positiveSum = wideAdd(positiveSum, odd);
-                }
-                else
-                {
-#pragma unroll 1
-                    for (u32 k = 2u; k < kTotalTerms; ++k)
-                        positiveSum = accumulatorWideAdd<CarryMode>(positiveSum,
-                            product(k));
-                }
-                const u32 c = kSharedMod ? shC : static_cast<u32>(kRadix52 - registerQ);
-                const u64 q = kSharedMod ? kRadix52 - static_cast<u64>(c) : registerQ;
-                const Wide keyComplement = accumulatorWideSub<CarryMode>(accumulatorWideMul<(Mode >= 5u)>(q, q), product(1u));
-                const Wide signedSum = accumulatorWideAdd<CarryMode>(positiveSum, keyComplement);
+                for (u32 k = 2u; k < kTotalTerms; ++k)
+                    positiveSum = wideAddCarry(positiveSum, product(k));
+                const u32 c = static_cast<u32>(kRadix52 - registerQ);
+                const u64 q = registerQ;
+                const Wide keyComplement = wideSubCarry(wideMul(q, q), product(1u));
+                const Wide signedSum = wideAddCarry(positiveSum, keyComplement);
                 const u64 s0 = signedSum.mLo & kMask52;
                 const u64 s1 = ((signedSum.mLo >> 52u) |
                     (signedSum.mHi << 12u)) & kMask52;
@@ -14640,9 +14497,7 @@ namespace osuCrypto::LogVole::gpu
                 : (rawTileBlocks > 64u
                        ? 64u
                        : static_cast<u32>(rawTileBlocks));
-            const u32 overrideTileBlocks = rc.mKernelOptions.mNoGoldH200AccumulatorTileBlocks;
-            const u32 tileBlocks = overrideTileBlocks ? overrideTileBlocks : automaticTileBlocks;
-            const dim3 grid(tileBlocks, kMu * kRho, chunks);
+            const dim3 grid(automaticTileBlocks, kMu * kRho, chunks);
             constexpr u64 kRadix52 = u64{ 1 } << 52u;
             const bool pseudo52 =
                 rc.mKernelOptions.mNoGoldH200AccumulatorPseudo52 &&
@@ -14650,159 +14505,15 @@ namespace osuCrypto::LogVole::gpu
                 rc.mMinModulus > kRadix52 - (u64{ 1 } << 24u);
             if (pseudo52)
             {
-                const auto packed = [&](auto mode) {
-                    expandAccumulatorTau1NoGoldH200PackedKernel<decltype(mode)::value><<<
-                        grid, kThreads, 0u, asStream(stream)>>>(
-                        toDevice(rc), ct1, uDigits, publicA, skNtt, lacct,
-                        nodes, lacctAIdx, lacctBIdx, out);
-                };
-                const u32 packedMode = rc.mKernelOptions.mNoGoldH200AccumulatorPackedMode;
-                const u32 order = rc.mKernelOptions.mNoGoldH200AccumulatorOrder;
-                const u32 carryMode = rc.mKernelOptions.mNoGoldH200AccumulatorCarryMode;
-                const u32 loadMode = rc.mKernelOptions.mNoGoldH200AccumulatorLoadMode;
-                if (loadMode && carryMode == 0u && packedMode == 0u && order == 0u && rc.mKernelOptions.mNoGoldH200AccumulatorSchedule == 0u)
-                {
-                    // Modes 1--3 isolate load policy; 4--6 combine the policy
-                    // with packed pointers and explicit carry/borrow chains.
-                    const auto load = [&](auto mode, auto packedPointers) {
-                        constexpr u32 m = decltype(mode)::value;
-                        if constexpr (decltype(packedPointers)::value)
-                            expandAccumulatorTau1NoGoldH200PackedKernel<1u, 2u, m><<<grid, kThreads, 0u, asStream(stream)>>>(
-                                toDevice(rc), ct1, uDigits, publicA, skNtt, lacct, nodes, lacctAIdx, lacctBIdx, out);
-                        else
-                            expandAccumulatorTau1NoGoldH200Kernel<true, 1u, 8u, false, 16u, 1u, 0u, m><<<grid, kThreads, 0u, asStream(stream)>>>(
-                                toDevice(rc), ct1, uDigits, publicA, skNtt, lacct, nodes, lacctAIdx, lacctBIdx, out);
-                    };
-                    using U1 = std::integral_constant<u32, 1u>;
-                    using U2 = std::integral_constant<u32, 2u>;
-                    using U3 = std::integral_constant<u32, 3u>;
-                    const auto prefetch = [&](auto value) {
-                        expandAccumulatorTau1NoGoldH200PackedKernel<1u, 2u, 3u, decltype(value)::value>
-                            <<<grid, kThreads, 0u, asStream(stream)>>>(
-                                toDevice(rc), ct1, uDigits, publicA, skNtt, lacct, nodes, lacctAIdx, lacctBIdx, out);
-                    };
-                    switch (loadMode)
-                    {
-                    case 1u: load(U1{}, std::false_type{}); break;
-                    case 2u: load(U2{}, std::false_type{}); break;
-                    case 3u: load(U3{}, std::false_type{}); break;
-                    case 4u: load(U1{}, std::true_type{}); break;
-                    case 5u: load(U2{}, std::true_type{}); break;
-                    case 6u: load(U3{}, std::true_type{}); break;
-                    case 7u: prefetch(U1{}); break;
-                    case 8u: prefetch(U2{}); break;
-                    case 9u: prefetch(U3{}); break;
-                    case 10u: prefetch(std::integral_constant<u32, 4u>{}); break;
-                    }
-                    return check(cudaGetLastError(), "expandAccumulatorTau1NoGoldH200Load");
-                }
-                if (carryMode && packedMode == 0u && order == 0u && rc.mKernelOptions.mNoGoldH200AccumulatorSchedule == 0u)
-                {
-                    const auto carry = [&](auto mode, auto packedPointers) {
-                        constexpr u32 c = decltype(mode)::value;
-                        if constexpr (decltype(packedPointers)::value)
-                            expandAccumulatorTau1NoGoldH200PackedKernel<1u, c><<<grid, kThreads, 0u, asStream(stream)>>>(
-                                toDevice(rc), ct1, uDigits, publicA, skNtt, lacct, nodes, lacctAIdx, lacctBIdx, out);
-                        else
-                            expandAccumulatorTau1NoGoldH200Kernel<true, 1u, 8u, false, 16u, 1u, c><<<grid, kThreads, 0u, asStream(stream)>>>(
-                                toDevice(rc), ct1, uDigits, publicA, skNtt, lacct, nodes, lacctAIdx, lacctBIdx, out);
-                    };
-                    using U1 = std::integral_constant<u32, 1u>;
-                    using U2 = std::integral_constant<u32, 2u>;
-                    switch (carryMode)
-                    {
-                    case 1u: carry(U1{}, std::false_type{}); break;
-                    case 2u: carry(U2{}, std::false_type{}); break;
-                    case 3u: carry(U1{}, std::true_type{}); break;
-                    case 4u: carry(U2{}, std::true_type{}); break;
-                    }
-                    return check(cudaGetLastError(), "expandAccumulatorTau1NoGoldH200Carry");
-                }
-                if (order && rc.mKernelOptions.mNoGoldH200AccumulatorSchedule == 0u &&
-                    (packedMode == 0u || packedMode == 7u) && (chunks % (1u << order)) == 0u)
-                {
-                    const auto reordered = [&](auto rowTile, auto chunkTile, auto narrow) {
-                        expandAccumulatorTau1NoGoldH200Kernel<true, 1u, 8u, decltype(narrow)::value,
-                            decltype(rowTile)::value, decltype(chunkTile)::value><<<
-                            grid, kThreads, 0u, asStream(stream)>>>(
-                            toDevice(rc), ct1, uDigits, publicA, skNtt, lacct,
-                            nodes, lacctAIdx, lacctBIdx, out);
-                    };
-                    const auto byOrder = [&](auto narrow) {
-                        switch (order)
-                        {
-                        case 1u: reordered(std::integral_constant<u32, 8u>{}, std::integral_constant<u32, 2u>{}, narrow); break;
-                        case 2u: reordered(std::integral_constant<u32, 4u>{}, std::integral_constant<u32, 4u>{}, narrow); break;
-                        case 3u: reordered(std::integral_constant<u32, 2u>{}, std::integral_constant<u32, 8u>{}, narrow); break;
-                        case 4u: reordered(std::integral_constant<u32, 1u>{}, std::integral_constant<u32, 16u>{}, narrow); break;
-                        }
-                    };
-                    if (packedMode == 7u) byOrder(std::true_type{});
-                    else byOrder(std::false_type{});
-                    return check(cudaGetLastError(), "expandAccumulatorTau1NoGoldH200Reordered");
-                }
-                if (packedMode != 0u)
-                {
-                    switch (packedMode)
-                    {
-                        case 1u: packed(std::integral_constant<u32, 1u>{}); break;
-                        case 2u: packed(std::integral_constant<u32, 2u>{}); break;
-                        case 3u: packed(std::integral_constant<u32, 3u>{}); break;
-                        case 4u: packed(std::integral_constant<u32, 4u>{}); break;
-                        case 5u: packed(std::integral_constant<u32, 5u>{}); break;
-                        case 6u: packed(std::integral_constant<u32, 6u>{}); break;
-                        case 7u:
-                        {
-                            const auto narrow = [&](auto unroll, auto blocks) {
-                                expandAccumulatorTau1NoGoldH200Kernel<true, decltype(unroll)::value,
-                                    decltype(blocks)::value, true><<<grid, kThreads, 0u, asStream(stream)>>>(
-                                    toDevice(rc), ct1, uDigits, publicA, skNtt, lacct,
-                                    nodes, lacctAIdx, lacctBIdx, out);
-                            };
-                            using U1 = std::integral_constant<u32, 1u>;
-                            using U2 = std::integral_constant<u32, 2u>;
-                            using U4 = std::integral_constant<u32, 4u>;
-                            using U8 = std::integral_constant<u32, 8u>;
-                            switch (rc.mKernelOptions.mNoGoldH200AccumulatorSchedule)
-                            {
-                            case 1u: narrow(U2{}, U8{}); break;
-                            case 2u: narrow(U4{}, U8{}); break;
-                            case 3u: narrow(U8{}, U8{}); break;
-                            case 4u: narrow(U2{}, U4{}); break;
-                            case 5u: narrow(U4{}, U4{}); break;
-                            case 6u: narrow(U8{}, U4{}); break;
-                            default: narrow(U1{}, U8{}); break;
-                            }
-                            break;
-                        }
-                    }
-                    return check(cudaGetLastError(), "expandAccumulatorTau1NoGoldH200Packed");
-                }
-                const auto launch = [&](auto unroll, auto blocks) {
-                    expandAccumulatorTau1NoGoldH200Kernel<true,
-                        decltype(unroll)::value, decltype(blocks)::value><<<
-                        grid, kThreads, 0u, asStream(stream)>>>(
-                        toDevice(rc), ct1, uDigits, publicA, skNtt, lacct,
-                        nodes, lacctAIdx, lacctBIdx, out);
-                };
-                using U1 = std::integral_constant<u32, 1u>;
-                using U2 = std::integral_constant<u32, 2u>;
-                using U4 = std::integral_constant<u32, 4u>;
-                using U8 = std::integral_constant<u32, 8u>;
-                switch (rc.mKernelOptions.mNoGoldH200AccumulatorSchedule)
-                {
-                    case 1u: launch(U2{}, U8{}); break;
-                    case 2u: launch(U4{}, U8{}); break;
-                    case 3u: launch(U8{}, U8{}); break;
-                    case 4u: launch(U2{}, U4{}); break;
-                    case 5u: launch(U4{}, U4{}); break;
-                    case 6u: launch(U8{}, U4{}); break;
-                    default: launch(U1{}, U8{}); break;
-                }
+                expandAccumulatorTau1NoGoldH200PackedKernel<<<
+                    grid, kThreads, 0u, asStream(stream)>>>(
+                    toDevice(rc), ct1, uDigits, publicA, skNtt, lacct,
+                    nodes, lacctAIdx, lacctBIdx, out);
+                return check(cudaGetLastError(), "expandAccumulatorTau1NoGoldH200Load");
             }
             else
             {
-                expandAccumulatorTau1NoGoldH200Kernel<false><<<
+                expandAccumulatorTau1NoGoldH200Kernel<<<
                     grid, kThreads, 0u, asStream(stream)>>>(
                     toDevice(rc), ct1, uDigits, publicA, skNtt, lacct,
                     nodes, lacctAIdx, lacctBIdx, out);

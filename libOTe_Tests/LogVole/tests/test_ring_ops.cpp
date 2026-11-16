@@ -2571,6 +2571,72 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
                     }
                 }
             }
+            if (!pointwiseChecked[variant] && degree == 16384u)
+            {
+                const auto view = ring->view(stream);
+                const bool eligible = gpu::canLaunchExpandAccumulatorTau1(view, 16u, 8u, 16u);
+                LOGVOLE_REQUIRE_EQ(eligible, view.mH200Shared && view.mKernelOptions.mNttLog14H200);
+                if (eligible)
+                {
+                    // One chunk, sixteen rows: the canonical-input bound of
+                    // the packed pseudo52 path applies to every product.
+                    std::vector<RnsPoly> rows(16u), expectedAccumulator(16u);
+                    for (unsigned row = 0; row < 16u; ++row)
+                    {
+                        rows[row] = original[row % 2u];
+                        for (unsigned j = 0; j < 8u; ++j)
+                        {
+                            rows[row].mCoeffs[j * degree] = ringModulusValue(cpu, j) - 1u;
+                            rows[row].mCoeffs[j * degree + 1u] = 0u;
+                        }
+                        expectedAccumulator[row] = rows[row];
+                    }
+                    std::array<std::uint32_t, 128> ai{}, bi{};
+                    for (unsigned k = 0; k < ai.size(); ++k)
+                    {
+                        ai[k] = (k / 8u + k) % 2u;
+                        bi[k] = (k / 8u + k + 1u) % 2u;
+                    }
+                    for (unsigned row = 0; row < 16u; ++row)
+                    for (unsigned j = 0; j < 8u; ++j)
+                    {
+                        const auto q = ringModulusValue(cpu, j);
+                        const seal::Modulus modulus(q);
+                        for (std::size_t c = 0; c < degree; ++c)
+                        {
+                            const auto e = j * degree + c;
+                            const auto mul = [&](std::uint64_t a, std::uint64_t b) {
+                                return seal::util::multiply_uint_mod(a, b, modulus);
+                            };
+                            auto sum = (mul(rows[row].mCoeffs[e], original[0].mCoeffs[e]) + q
+                                - mul(rows[row].mCoeffs[e], original[1].mCoeffs[e])) % q;
+                            for (unsigned k = 0; k < 8u; ++k)
+                                sum = (sum + mul(original[ai[row * 8u + k]].mCoeffs[e],
+                                    original[bi[row * 8u + k]].mCoeffs[e])) % q;
+                            expectedAccumulator[row].mCoeffs[e] = sum;
+                        }
+                    }
+                    gpu::GpuPolyBuffer rowDevice(*ring, 16u, stream), inputs(*ring, 2u, stream);
+                    gpu::GpuPolyBuffer output(*ring, 16u, stream);
+                    LOGVOLE_REQUIRE_TRUE(rowDevice.upload(rows, stream) && inputs.upload(original, stream));
+                    const auto* aIndices = stream.uploadIdx(ai);
+                    const auto* bIndices = stream.uploadIdx(bi);
+                    LOGVOLE_REQUIRE_TRUE(aIndices && bIndices);
+                    for (bool pseudo52 : {true, false})
+                    {
+                        auto selected = view;
+                        selected.mKernelOptions.mNoGoldH200AccumulatorPseudo52 = pseudo52;
+                        LOGVOLE_REQUIRE_TRUE(gpu::launchExpandAccumulatorTau1(selected,
+                            rowDevice.data(stream), inputs.data(stream), rowDevice.data(stream),
+                            inputs.data(stream) + ringPolyCoeffCount(cpu.mParams),
+                            inputs.data(stream), inputs.data(stream), aIndices, bIndices,
+                            16u, 8u, output.data(stream), 16u, stream.raw()));
+                        std::vector<RnsPoly> actual;
+                        LOGVOLE_REQUIRE_TRUE(output.download(actual, stream));
+                        expect_batch_equal(actual, expectedAccumulator);
+                    }
+                }
+            }
             pointwiseChecked[variant] = true;
             if (degree == 16384u)
             {

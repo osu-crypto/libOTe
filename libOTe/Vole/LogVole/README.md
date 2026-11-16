@@ -1276,3 +1276,16 @@ with zero skips in 11.69 seconds using `-gpu 1 -lvFactoryFast 1`. Direct scalar
 CPU-oracle checks cover all four operations, a general indexed fallback,
 canonical operands, noncanonical 52-bit-shape operands, and missing constants.
 The local RTX 4060 did not execute H200 runtime paths; no benchmarks were run.
+
+The H200 accumulator cleanup removes six tuning selectors and their unused
+alternatives. The established packed-pointer, explicit carry/borrow, load-3 path
+and independent non-pseudo52 Barrett path remain, with automatic tile counts and
+the existing geometry, modulus, and hardware gates.
+
+Validation: the Windows VS 14.50 CUDA test target and frontend object build
+passed with two build workers, and the isolated SM90 kernel-object compile
+passed. Two focused checks passed with zero skips in 11.59 seconds using
+`-gpu 1 -lvFactoryFast 1`. The direct sixteen-output scalar CPU-oracle case covers
+both retained accumulator paths on supported H200 hardware. The local RTX 4060
+verified admission decline and the protocol fallback; it did not execute the
+H200 fused oracle. No benchmarks were run.
