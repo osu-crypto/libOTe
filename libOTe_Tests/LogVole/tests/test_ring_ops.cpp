@@ -2437,7 +2437,6 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
                 kernel.mNttForwardThreads = 512;
                 kernel.mNttInverseThreads = 512;
                 kernel.mNttLog13SimpleIndex = false;
-                kernel.mNttLog13InverseFusedLastThreeStages = false;
                 kernel.mNoGoldH200InversePackedRoots = true;
             }
             LOGVOLE_REQUIRE_TRUE(kernel.valid());
@@ -2825,6 +2824,115 @@ void LogVole_RingOps_NttLog13ForwardParity(const oc::CLP& cmd)
         std::vector<RnsPoly> actual;
         LOGVOLE_REQUIRE_TRUE(output.download(actual, stream));
         expect_batch_equal(actual, expected);
+    }
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_RingOps_NttLog13InverseParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    RingParams params;
+    params.mPolyModulusDegree = 8192u;
+    params.mCoeffModulusBits.resize(4u);
+    std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), 55);
+    RingNttContext cpu;
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, cpu));
+    prepareGpuTableOwners(cpu);
+    auto ring = gpu::GpuRing::get(cpu);
+    LOGVOLE_REQUIRE_TRUE(ring);
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+    struct Case { unsigned pre; std::uint32_t post; bool alphaTwoSchedule; };
+    const std::array<Case, 9> cases{{
+        {0u, gpu::kElemOpNoneHost, false}, {1u, gpu::kElemOpNoneHost, false},
+        {2u, static_cast<std::uint32_t>(gpu::ElemOp::ReverseSub), false},
+        {0u, static_cast<std::uint32_t>(gpu::ElemOp::Add), false},
+        {0u, static_cast<std::uint32_t>(gpu::ElemOp::Add), true},
+        {0u, static_cast<std::uint32_t>(gpu::ElemOp::Negate), false},
+        {0u, static_cast<std::uint32_t>(gpu::ElemOp::Negate), true},
+        {0u, static_cast<std::uint32_t>(gpu::ElemOp::ReverseSub), false},
+        {0u, static_cast<std::uint32_t>(gpu::ElemOp::ReverseSub), true}}};
+    constexpr std::size_t maxCount = 65u;
+    std::vector<RnsPoly> source(maxCount), operand(maxCount);
+    for (std::size_t p = 0; p < maxCount; ++p)
+    {
+        source[p] = deriveUniformPolyFromNonce(cpu, 0x4c313349u, 0x4e565253u, p);
+        operand[p] = deriveUniformPolyFromNonce(cpu, 0x4c313349u, 0x4f504552u, p);
+        for (unsigned j = 0; j < 4u; ++j)
+        {
+            const auto q = ringModulusValue(cpu, j);
+            source[p].mCoeffs[j * 8192u] = 0u;
+            source[p].mCoeffs[j * 8192u + 1u] = q - 1u;
+            source[p].mCoeffs[j * 8192u + 2u] = q / 2u;
+            source[p].mCoeffs[j * 8192u + 3u] = q / 2u + 1u;
+            operand[p].mCoeffs[j * 8192u] = q - 1u;
+            operand[p].mCoeffs[j * 8192u + 1u] = 1u;
+        }
+    }
+    // Cache each scalar pre-operation plus CPU inverse once for all three count prefixes.
+    std::array<std::vector<RnsPoly>, 3> inverses;
+    for (unsigned pre = 0; pre < inverses.size(); ++pre)
+    {
+        inverses[pre] = source;
+        for (std::size_t p = 0; p < maxCount; ++p)
+        {
+            if (pre != 0u)
+                for (unsigned j = 0; j < 4u; ++j)
+                {
+                    const auto q = ringModulusValue(cpu, j);
+                    for (unsigned c = 0; c < 8192u; ++c)
+                    {
+                        const auto e = j * 8192u + c;
+                        const auto a = source[p].mCoeffs[e], b = operand[p].mCoeffs[e];
+                        inverses[pre][p].mCoeffs[e] = pre == 1u ? (a + b) % q : (a + q - b) % q;
+                    }
+                }
+            LOGVOLE_REQUIRE_TRUE(inverseNtt(inverses[pre][p], cpu));
+        }
+    }
+    for (std::size_t count : {std::size_t{63}, std::size_t{64}, std::size_t{65}})
+    {
+        std::vector<std::uint32_t> reverse(count);
+        for (std::size_t p = 0; p < count; ++p) reverse[p] = static_cast<std::uint32_t>(count - p - 1u);
+        gpu::GpuPolyBuffer data(*ring, count, stream), deviceOperand(*ring, count, stream);
+        LOGVOLE_REQUIRE_TRUE(deviceOperand.upload(std::span<const RnsPoly>(operand).first(count), stream));
+        const auto* indices = stream.uploadIdx(reverse);
+        LOGVOLE_REQUIRE_TRUE(indices);
+        for (const auto& test : cases)
+        {
+            std::vector<RnsPoly> expected(inverses[test.pre].begin(), inverses[test.pre].begin() + count);
+            for (std::size_t p = 0; p < count; ++p)
+            for (unsigned j = 0; j < 4u; ++j)
+            {
+                const auto q = ringModulusValue(cpu, j);
+                for (unsigned c = 0; c < 8192u; ++c)
+                {
+                    const auto e = j * 8192u + c;
+                    auto& value = expected[p].mCoeffs[e];
+                    const auto b = operand[p].mCoeffs[e];
+                    if (test.post == static_cast<std::uint32_t>(gpu::ElemOp::Add)) value = (value + b) % q;
+                    if (test.post == static_cast<std::uint32_t>(gpu::ElemOp::Negate) && value != 0u) value = q - value;
+                    if (test.post == static_cast<std::uint32_t>(gpu::ElemOp::ReverseSub)) value = (b + q - value) % q;
+                }
+            }
+            LOGVOLE_REQUIRE_TRUE(data.upload(std::span<const RnsPoly>(source).first(count), stream));
+            const auto pre = test.pre == 0u ? gpu::kElemOpNoneHost : static_cast<std::uint32_t>(
+                test.pre == 1u ? gpu::ElemOp::Add : gpu::ElemOp::Sub);
+            // Both schedule families compute the full inverse on arbitrary
+            // canonical frequency data; the alpha hint changes only dispatch.
+            LOGVOLE_REQUIRE_TRUE(gpu::launchNttInverseFused(ring->view(stream),
+                data.data(stream), static_cast<std::uint32_t>(count), indices,
+                pre, deviceOperand.data(stream), test.post, deviceOperand.data(stream),
+                stream.raw(), gpu::NttFusedIp{}, test.alphaTwoSchedule));
+            std::vector<RnsPoly> actual;
+            LOGVOLE_REQUIRE_TRUE(data.download(actual, stream));
+            expect_batch_equal(actual, expected);
+        }
     }
 #else
     (void)cmd;

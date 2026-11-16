@@ -1367,3 +1367,17 @@ SM90 compile passed, with retained kernel entries verified in the SM90 object.
 Four focused checks passed with zero skips in 20.17 seconds using
 `-gpu 1 -lvFactoryFast 1`, including the same direct oracle after pruning.
 H200 runtime execution remains untested locally. No benchmarks were run.
+
+The ordinary log13 inverse cleanup fixes five fusion controls to their
+production defaults and removes three unreachable fixed-kernel instantiations.
+Both alpha schedule families, the 256-block threshold, runtime operations,
+non-simple indexing, and common-thread/geometry fallbacks remain intact.
+
+Validation: the new direct CPU-oracle test passed on the RTX 4060 before and
+after pruning at 63, 64, and 65 polynomials, with indexed inputs, Add/Sub pre-ops,
+and Add/Negate/ReverseSub post-ops across both schedule families. The final
+Windows VS 14.50 CUDA test target and frontend object build and isolated SM90
+compile passed; six hot and eleven fixed inverse entries were verified in the
+SM90 object. Four focused checks passed with zero skips in 29.68 seconds using
+`-gpu 1 -lvFactoryFast 1`. H200 runtime remains untested locally. No benchmarks
+were run.

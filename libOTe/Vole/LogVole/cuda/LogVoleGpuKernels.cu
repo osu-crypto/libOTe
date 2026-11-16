@@ -11655,27 +11655,6 @@ namespace osuCrypto::LogVole::gpu
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseFixed8192Kernel<4u, true, 0u>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inversePlain8192SimpleIndexAddDirect)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseFixed8192Kernel<4u, true, 2u>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inversePlain8192SimpleIndexNegateDirect)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseFixed8192Kernel<4u, true, 4u>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inversePlain8192SimpleIndexReverseSubDirect)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
                         nttInverseFixed8192Kernel<4u, true, 0u, true>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
@@ -12920,18 +12899,10 @@ namespace osuCrypto::LogVole::gpu
                 rc.mKernelOptions.mNttLog13Specialized &&
                 rc.mKernelOptions.mNttLog13InverseSpecialized && rc.mN == 8192u &&
                 rc.mRho == 4u && tiles == 1u;
-            const bool fusedFirstStage =
-                rc.mKernelOptions.mNttLog13InverseFusedFirstStage;
-            const bool fusedLastTwoStages =
-                rc.mKernelOptions.mNttLog13InverseFusedLastTwoStages;
-            const bool fusedLastThreeStages =
-                rc.mKernelOptions.mNttLog13InverseFusedLastThreeStages;
-            const bool fusedLastThreeAddNegate =
-                rc.mKernelOptions.mNttLog13InverseFusedLastThreeAddNegate;
+            constexpr bool fusedFirstStage = true;
             const bool vectorShoupLoads =
                 rc.mKernelOptions.mNttLog13VectorShoupLoads;
-            const bool postWarpStages05 = alphaIsTwo &&
-                rc.mKernelOptions.mNttLog13InversePostWarpStages05;
+            const bool postWarpStages05 = alphaIsTwo;
             if (fixedGeometry && blocks >= rc.mKernelOptions.mNttLog13InverseMinBlocks)
             {
                 const bool direct =
@@ -12941,9 +12912,7 @@ namespace osuCrypto::LogVole::gpu
                     if (direct && postOp == static_cast<u32>(ElemOp::Add))
                     {
                         if (
-                            postWarpStages05 && fusedLastThreeStages &&
-                            fusedLastThreeAddNegate && fusedFirstStage &&
-                            fusedLastTwoStages && vectorShoupLoads &&
+                            postWarpStages05 && vectorShoupLoads &&
                             rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             if (!configureNttInversePostWarpStages05Shared(rc))
@@ -12953,32 +12922,23 @@ namespace osuCrypto::LogVole::gpu
                                 toDeviceInverseRho4(rc), data, polyIdx, postB);
                         }
                         else if (
-                            fusedLastThreeStages && fusedLastThreeAddNegate &&
-                            fusedFirstStage &&
-                            fusedLastTwoStages && vectorShoupLoads &&
+                            vectorShoupLoads &&
                             rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             nttInverseFusedLastThree8192Rho4PostKernel<0u><<<
                                 polyCount * 4u, 512u, shBytes, st>>>(
                                 toDeviceInverseRho4(rc), data, polyIdx, postB);
                         }
-                        else if (fusedLastTwoStages && vectorShoupLoads)
+                        else if (vectorShoupLoads)
                         {
                             nttInverseFixed8192Kernel<4u, true, 0u, true, true><<<
                                 polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
-                        else if (fusedLastTwoStages)
-                        {
-                            nttInverseFixed8192Kernel<4u, true, 0u, true><<<
-                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
-                                rg, data, polyIdx, preOp, preB, postOp, postB, ip,
-                                0u, fusedFirstStage);
-                        }
                         else
                         {
-                            nttInverseFixed8192Kernel<4u, true, 0u><<<
+                            nttInverseFixed8192Kernel<4u, true, 0u, true><<<
                                 polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
@@ -12987,9 +12947,7 @@ namespace osuCrypto::LogVole::gpu
                     else if (direct && postOp == static_cast<u32>(ElemOp::Negate))
                     {
                         if (
-                            postWarpStages05 && fusedLastThreeStages &&
-                            fusedLastThreeAddNegate && fusedFirstStage &&
-                            fusedLastTwoStages && vectorShoupLoads &&
+                            postWarpStages05 && vectorShoupLoads &&
                             rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             if (!configureNttInversePostWarpStages05Shared(rc))
@@ -12999,32 +12957,23 @@ namespace osuCrypto::LogVole::gpu
                                 toDeviceInverseRho4(rc), data, polyIdx, nullptr);
                         }
                         else if (
-                            fusedLastThreeStages && fusedLastThreeAddNegate &&
-                            fusedFirstStage &&
-                            fusedLastTwoStages && vectorShoupLoads &&
+                            vectorShoupLoads &&
                             rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             nttInverseFusedLastThree8192Rho4PostKernel<2u><<<
                                 polyCount * 4u, 512u, shBytes, st>>>(
                                 toDeviceInverseRho4(rc), data, polyIdx, nullptr);
                         }
-                        else if (fusedLastTwoStages && vectorShoupLoads)
+                        else if (vectorShoupLoads)
                         {
                             nttInverseFixed8192Kernel<4u, true, 2u, true, true><<<
                                 polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
-                        else if (fusedLastTwoStages)
-                        {
-                            nttInverseFixed8192Kernel<4u, true, 2u, true><<<
-                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
-                                rg, data, polyIdx, preOp, preB, postOp, postB, ip,
-                                0u, fusedFirstStage);
-                        }
                         else
                         {
-                            nttInverseFixed8192Kernel<4u, true, 2u><<<
+                            nttInverseFixed8192Kernel<4u, true, 2u, true><<<
                                 polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
@@ -13033,9 +12982,7 @@ namespace osuCrypto::LogVole::gpu
                     else if (direct && postOp == static_cast<u32>(ElemOp::ReverseSub))
                     {
                         if (
-                            postWarpStages05 && fusedLastThreeStages &&
-                            fusedFirstStage && fusedLastTwoStages &&
-                            vectorShoupLoads &&
+                            postWarpStages05 && vectorShoupLoads &&
                             rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             if (!configureNttInversePostWarpStages05Shared(rc))
@@ -13045,31 +12992,23 @@ namespace osuCrypto::LogVole::gpu
                                 toDeviceInverseRho4(rc), data, polyIdx, postB);
                         }
                         else if (
-                            fusedLastThreeStages && fusedFirstStage &&
-                            fusedLastTwoStages && vectorShoupLoads &&
+                            vectorShoupLoads &&
                             rc.mKernelOptions.mNttLog13InverseThreads == 512u && blocks >= 256u)
                         {
                             nttInverseFusedLastThree8192Rho4ReverseSubKernel<<<
                                 polyCount * 4u, 512u, shBytes, st>>>(
                                 toDeviceInverseRho4(rc), data, polyIdx, postB);
                         }
-                        else if (fusedLastTwoStages && vectorShoupLoads)
+                        else if (vectorShoupLoads)
                         {
                             nttInverseFixed8192Kernel<4u, true, 4u, true, true><<<
                                 polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
                         }
-                        else if (fusedLastTwoStages)
-                        {
-                            nttInverseFixed8192Kernel<4u, true, 4u, true><<<
-                                polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
-                                rg, data, polyIdx, preOp, preB, postOp, postB, ip,
-                                0u, fusedFirstStage);
-                        }
                         else
                         {
-                            nttInverseFixed8192Kernel<4u, true, 4u><<<
+                            nttInverseFixed8192Kernel<4u, true, 4u, true><<<
                                 polyCount * rc.mRho, rc.mKernelOptions.mNttLog13InverseThreads, shBytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, ip,
                                 0u, fusedFirstStage);
