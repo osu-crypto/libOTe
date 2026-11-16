@@ -6646,48 +6646,6 @@ namespace osuCrypto::LogVole::gpu
             *dst = acc;
         }
 
-        template<u32 Arithmetic, u32 Unroll, bool StreamingStore = false, bool L2Load = false>
-        __global__ __launch_bounds__(256, 8)
-        void innerProductOuter32H200Kernel(DeviceRing rg, const u64* __restrict__ publicA,
-            const u64* __restrict__ skNtt, u64* __restrict__ out, const double* fp52Constants)
-        {
-            constexpr size_t perPoly = size_t{8u} * 16384u;
-            const u32 coeff = blockIdx.x * 256u + threadIdx.x, limb = blockIdx.y, chunk = blockIdx.z;
-            const size_t elem = static_cast<size_t>(limb) * 16384u + coeff;
-            const GpuModulus mod = rg.mMods[limb];
-            const u64* keyPtr = skNtt + static_cast<size_t>(chunk) * perPoly + elem;
-            u64 key = L2Load ? __ldcg(keyPtr) : *keyPtr;
-            asm volatile("" : "+l"(key));
-            double qd = 0.0, invQ = 0.0, kd = 0.0;
-            if constexpr (Arithmetic == 2u)
-            {
-                qd = static_cast<double>(mod.mValue);
-                invQ = fp52Constants ? fp52Constants[8u + limb] : __drcp_rn(qd);
-                kd = static_cast<double>(key);
-            }
-            const u64* src = publicA + elem;
-            u64* dst = out + static_cast<size_t>(chunk) * 32u * perPoly + elem;
-#pragma unroll Unroll
-            for (u32 row = 0u; row < 32u; ++row)
-            {
-                const u64 a = L2Load ? __ldcg(src) : *src;
-                u64 value;
-                if constexpr (Arithmetic == 2u)
-                {
-                    if (a < mod.mValue && key < mod.mValue)
-                        value = static_cast<u64>(mulModFp52(static_cast<double>(a), kd, qd, invQ));
-                    else value = reducePseudo52FullWide<true>(wideMul(a, key), mod.mValue);
-                }
-                else if constexpr (Arithmetic == 1u)
-                    value = reducePseudo52FullWide<true>(wideMul(a, key), mod.mValue);
-                else value = mulMod(a, key, mod);
-                if constexpr (StreamingStore) __stcs(dst, value);
-                else *dst = value;
-                src += perPoly;
-                dst += perPoly;
-            }
-        }
-
         // Candidate-only copy of the accepted fixed indexed pointwise kernel.
         // Indexing, product/addition order and post-mode semantics stay exact;
         // only the final one/two/six-product reduction changes.
@@ -14822,38 +14780,6 @@ namespace osuCrypto::LogVole::gpu
         bool& launched)
     {
         launched = false;
-        const u32 h200Mode = rc.mKernelOptions.mNoGoldH200OuterReuseMode;
-        if (h200Mode && rc.mKernelOptions.mFixedIpWideMuRowReuse && mu == 32u &&
-            log14H200Shape(rc) && rc.mMods &&
-            rc.mMinModulus > (u64{1} << 52u) - (u64{1} << 24u) && rc.mMaxModulus < (u64{1} << 52u) &&
-            chunkCount >= 8u && chunkCount <= 65535u && publicA && skNtt && out &&
-            publicA != skNtt && out != publicA && out != skNtt)
-        {
-            const dim3 grid(64u, 8u, chunkCount);
-            const auto launch = [&](auto arithmetic, auto unroll) {
-                innerProductOuter32H200Kernel<decltype(arithmetic)::value, decltype(unroll)::value>
-                    <<<grid, 256u, 0u, asStream(stream)>>>(toDevice(rc), publicA, skNtt, out, rc.mFp52GadgetConstants);
-            };
-            const auto launchStreaming = [&](auto arithmetic, auto l2) {
-                innerProductOuter32H200Kernel<decltype(arithmetic)::value, 1u, true, decltype(l2)::value>
-                    <<<grid, 256u, 0u, asStream(stream)>>>(toDevice(rc), publicA, skNtt, out, rc.mFp52GadgetConstants);
-            };
-            switch (h200Mode)
-            {
-            case 1u: launch(std::integral_constant<u32, 1u>{}, std::integral_constant<u32, 1u>{}); break;
-            case 2u: launch(std::integral_constant<u32, 2u>{}, std::integral_constant<u32, 1u>{}); break;
-            case 3u: launch(std::integral_constant<u32, 2u>{}, std::integral_constant<u32, 2u>{}); break;
-            case 4u: launch(std::integral_constant<u32, 2u>{}, std::integral_constant<u32, 4u>{}); break;
-            case 5u: launch(std::integral_constant<u32, 1u>{}, std::integral_constant<u32, 2u>{}); break;
-            case 6u: launch(std::integral_constant<u32, 0u>{}, std::integral_constant<u32, 1u>{}); break;
-            case 7u: launchStreaming(std::integral_constant<u32, 1u>{}, std::false_type{}); break;
-            case 8u: launchStreaming(std::integral_constant<u32, 2u>{}, std::false_type{}); break;
-            case 9u: launchStreaming(std::integral_constant<u32, 1u>{}, std::true_type{}); break;
-            case 10u: launchStreaming(std::integral_constant<u32, 2u>{}, std::true_type{}); break;
-            }
-            launched = true;
-            return check(cudaGetLastError(), "innerProductOuter32H200");
-        }
         if (!rc.mKernelOptions.mFixedIpWideMuRowReuse ||
             !pointwisePseudo55ProductionEligible(rc) ||
             !innerProductOuterWideMuStructuralEligible(rc, mu, chunkCount) ||

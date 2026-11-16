@@ -28,7 +28,6 @@ namespace osuCrypto
         std::uint32_t mNoGoldH200ForwardFp52Mode = 1u;
         std::uint32_t mNoGoldH200ForwardFp52Extra = 3u;
         std::uint32_t mNoGoldH200ForwardFp52Tail = 6u;
-        std::uint32_t mNoGoldH200OuterReuseMode = 0u;
         bool mNoGoldH200Gadget208 = true;
         bool mNoGoldH200Gadget208Pseudo52 = true;
         bool mNttLog14H200InverseWarp05 = true;
@@ -122,7 +121,6 @@ namespace osuCrypto
                 mNoGoldH200ForwardFp52Mode <= 5u &&
                 mNoGoldH200ForwardFp52Extra <= 3u &&
                 mNoGoldH200ForwardFp52Tail <= 8u &&
-                mNoGoldH200OuterReuseMode <= 10u &&
                 (mNttForwardThreads == 256u || mNttForwardThreads == 512u || mNttForwardThreads == 1024u) &&
                 (mNttInverseThreads == 256u || mNttInverseThreads == 512u || mNttInverseThreads == 1024u) &&
                 (mNttLog14H200InverseThreads == 512u || mNttLog14H200InverseThreads == 1024u) &&
@@ -156,7 +154,6 @@ namespace osuCrypto
                 mNoGoldH200ForwardFp52Mode == other.mNoGoldH200ForwardFp52Mode &&
                 mNoGoldH200ForwardFp52Extra == other.mNoGoldH200ForwardFp52Extra &&
                 mNoGoldH200ForwardFp52Tail == other.mNoGoldH200ForwardFp52Tail &&
-                mNoGoldH200OuterReuseMode == other.mNoGoldH200OuterReuseMode &&
                 mNoGoldH200Gadget208 == other.mNoGoldH200Gadget208 &&
                 mNoGoldH200Gadget208Pseudo52 == other.mNoGoldH200Gadget208Pseudo52 &&
                 mNttLog14H200InverseWarp05 == other.mNttLog14H200InverseWarp05 &&

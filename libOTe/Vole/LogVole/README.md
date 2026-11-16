@@ -1289,3 +1289,12 @@ passed. Two focused checks passed with zero skips in 11.59 seconds using
 both retained accumulator paths on supported H200 hardware. The local RTX 4060
 verified admission decline and the protocol fallback; it did not execute the
 H200 fused oracle. No benchmarks were run.
+
+The outer-reuse cleanup removes the default-disabled H200 selector and its ten
+experimental variants. Active pseudo55 row-reuse paths, their caller APIs, and
+the indexed-product fallback remain unchanged.
+
+Validation: the Windows VS 14.50 CUDA test target and frontend object build and
+isolated SM90 kernel-object compile passed. Two focused checks passed with zero
+skips in 11.58 seconds using `-gpu 1 -lvFactoryFast 1`. H200 runtime execution
+was unavailable locally. No benchmarks were run.
