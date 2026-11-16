@@ -1424,3 +1424,15 @@ SM90 compile passed, with retained NTT entries verified in the SM90 object.
 Nine focused checks passed with zero skips in 51.23 seconds using
 `-gpu 1 -lvFactoryFast 1`. H200 runtime remains untested locally. No benchmarks
 were run.
+
+Shared log13 NTT dispatch now follows its production specialization, indexing,
+vector-load, inverse specialization, and direct-store defaults without five
+selector switches. Required generic geometries, runtime operations, alignment
+fallbacks, sparse zero/NoZero contracts, and table ownership remain intact.
+
+Validation: the final Windows VS 14.50 CUDA test target and frontend object
+build and isolated SM90 compile passed. Retained NTT families and absence of
+obsolete alternatives were verified in the SM90 object. All nine focused NTT
+checks passed with zero skips in 55.80 seconds using `-gpu 1 -lvFactoryFast 1`.
+The goal-scope audit found no remaining implementation work for this cleanup.
+H200 runtime remains untested locally. No benchmarks were run.

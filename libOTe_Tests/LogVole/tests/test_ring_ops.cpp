@@ -2424,13 +2424,11 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
             auto& kernel = options.mAdvanced.mKernels;
             if (variant == 1)
             {
-                kernel.mNttLog13Specialized = false;
-                kernel.mNttLog13InverseSpecialized = false;
                 kernel.mNoGoldH200InversePackedRoots = false;
             }
             else if (variant == 2)
             {
-                kernel.mNttLog13SimpleIndex = false;
+                kernel.mPointwisePseudo55Reduce = false;
                 kernel.mNoGoldH200InversePackedRoots = true;
             }
             LOGVOLE_REQUIRE_TRUE(kernel.valid());
@@ -3012,7 +3010,7 @@ void LogVole_RingOps_NttLog13TreeParity(const oc::CLP& cmd)
             deviceB.data(stream), deviceNodes.data(stream), count, 0u, nodeCount,
             publicCol, stream.raw(), launched, true));
         LOGVOLE_REQUIRE_FALSE(launched);
-        for (unsigned route = 0; route < (bits == 55 ? 4u : 2u); ++route)
+        for (unsigned route = 0; route < (bits == 55 ? 4u : 1u); ++route)
         {
             const bool shiftB = bits == 55 && route == 1u;
             const bool shiftNodes = bits == 55 && route == 2u;
@@ -3025,7 +3023,6 @@ void LogVole_RingOps_NttLog13TreeParity(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(n + p * words,
                     nodes[p].mCoeffs.data(), ring->polyBytes(), stream));
             auto selected = view;
-            if (bits == 53 && route == 1u) selected.mKernelOptions.mNttLog13SimpleIndex = false;
             // All schedule families implement the same canonical product sum.
             const bool alphaTwoSchedule = bits != 55 || route != 3u;
             LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseTreePairNegate(selected,
@@ -3108,12 +3105,11 @@ void LogVole_RingOps_NttLog13ScatterParity(const oc::CLP& cmd)
                     sentinel[chunk].mCoeffs[j * degree + c] = ringModulusValue(cpu, j) - 1u;
                 }
             }
-            for (unsigned route = 0; route < (degree == 8192u ? 3u : 1u); ++route)
+            for (unsigned route = 0; route < (degree == 8192u ? 2u : 1u); ++route)
             {
                 auto selected = ringView;
-                if (route == 1u) selected.mKernelOptions.mNttLog13SimpleIndex = false;
                 LOGVOLE_REQUIRE_TRUE(output.upload(sentinel, stream));
-                if (route == 2u)
+                if (route == 1u)
                     LOGVOLE_REQUIRE_TRUE(gpu::launchNttInverseScatterSingleLimb(plainView, selected,
                         deviceLabels.data(stream), labels.size(), 7u, slotMap, 2u,
                         output.data(stream), stream.raw(), garbled));
@@ -3122,7 +3118,7 @@ void LogVole_RingOps_NttLog13ScatterParity(const oc::CLP& cmd)
                         deviceLabels.data(stream), labels.size(), 7u, slotMap, 2u,
                         output.data(stream), stream.raw(), garbled));
                 auto selectedExpected = expected;
-                if (route == 2u)
+                if (route == 1u)
                     for (unsigned p = 0; p < 2u; ++p)
                     for (unsigned j = 1u; j < 4u; ++j)
                         std::copy_n(sentinel[p].mCoeffs.data() + j * degree, degree,

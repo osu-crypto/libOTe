@@ -23,11 +23,6 @@ namespace osuCrypto
         bool mScaleAndRoundHotHiCarry = true;
         bool mScaleNttForwardGatherHiCarry = true;
         bool mScaleNttForwardGatherSlotOwned = true;
-        bool mNttLog13Specialized = true;
-        bool mNttLog13SimpleIndex = true;
-        bool mNttLog13VectorShoupLoads = true;
-        bool mNttLog13InverseSpecialized = true;
-        bool mNttLog13InverseDirectStore = true;
         bool mFixedIpMuRowReuse = true;
         bool mFixedIpWideMuRowReuse = true;
         bool mPointwisePseudo55Reduce = true;
@@ -85,11 +80,6 @@ namespace osuCrypto
                 mScaleAndRoundHotHiCarry == other.mScaleAndRoundHotHiCarry &&
                 mScaleNttForwardGatherHiCarry == other.mScaleNttForwardGatherHiCarry &&
                 mScaleNttForwardGatherSlotOwned == other.mScaleNttForwardGatherSlotOwned &&
-                mNttLog13Specialized == other.mNttLog13Specialized &&
-                mNttLog13SimpleIndex == other.mNttLog13SimpleIndex &&
-                mNttLog13VectorShoupLoads == other.mNttLog13VectorShoupLoads &&
-                mNttLog13InverseSpecialized == other.mNttLog13InverseSpecialized &&
-                mNttLog13InverseDirectStore == other.mNttLog13InverseDirectStore &&
                 mFixedIpMuRowReuse == other.mFixedIpMuRowReuse &&
                 mFixedIpWideMuRowReuse == other.mFixedIpWideMuRowReuse &&
                 mPointwisePseudo55Reduce == other.mPointwisePseudo55Reduce &&
