@@ -1343,3 +1343,14 @@ skips in 20.72 seconds using `-gpu 1 -lvFactoryFast 1`. The RTX 4060 executed
 with aligned, one-word-shifted data, and one-word-shifted pre-input views.
 H200 integer execution and the 16384 plain-broadcast path remain conditional
 and were not executed locally. No benchmarks were run.
+
+The log13 cleanup removes three default-disabled experiments: forward direct
+store, centered diagonal identity, and small inverse direct store. Their
+exclusive template arms and attribute setup are removed. Default small inverse
+dispatch and the active inverse direct-store paths remain unchanged.
+
+Validation: the Windows VS 14.50 CUDA test target and frontend object build and
+isolated SM90 compile passed. Retained generic forward and H200 kernel entries
+were verified in the SM90 object. Three focused checks passed with zero skips
+in 19.61 seconds using `-gpu 1 -lvFactoryFast 1`. H200 runtime execution remains
+untested locally. No benchmarks were run.

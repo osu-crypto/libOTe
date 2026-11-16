@@ -47,11 +47,8 @@ namespace osuCrypto
         bool mNttLog13InverseTreeWarpStages = true;
         bool mNttLog13InverseTreeProductWarpStages05 = true;
         bool mNttLog13InverseTreeProductWarpVectorPairs = true;
-        bool mNttLog13DirectStore = false;
-        bool mNttCenteredDiagonalIdentity = false;
         bool mNttLog13InverseSpecialized = true;
         bool mNttLog13InverseDirectStore = true;
-        bool mNttLog13InverseSmallDirect = false;
         bool mNttLog13InverseScatterFixed = true;
         bool mNttLog13InverseFixedIp = true;
         bool mFixedIpMuRowReuse = true;
@@ -140,11 +137,8 @@ namespace osuCrypto
                 mNttLog13InverseTreeWarpStages == other.mNttLog13InverseTreeWarpStages &&
                 mNttLog13InverseTreeProductWarpStages05 == other.mNttLog13InverseTreeProductWarpStages05 &&
                 mNttLog13InverseTreeProductWarpVectorPairs == other.mNttLog13InverseTreeProductWarpVectorPairs &&
-                mNttLog13DirectStore == other.mNttLog13DirectStore &&
-                mNttCenteredDiagonalIdentity == other.mNttCenteredDiagonalIdentity &&
                 mNttLog13InverseSpecialized == other.mNttLog13InverseSpecialized &&
                 mNttLog13InverseDirectStore == other.mNttLog13InverseDirectStore &&
-                mNttLog13InverseSmallDirect == other.mNttLog13InverseSmallDirect &&
                 mNttLog13InverseScatterFixed == other.mNttLog13InverseScatterFixed &&
                 mNttLog13InverseFixedIp == other.mNttLog13InverseFixedIp &&
                 mFixedIpMuRowReuse == other.mFixedIpMuRowReuse &&
