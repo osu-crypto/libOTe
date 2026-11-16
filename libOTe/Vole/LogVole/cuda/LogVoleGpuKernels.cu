@@ -1520,268 +1520,13 @@ namespace osuCrypto::LogVole::gpu
 
         }
 
-        // Candidate-only counterpart of the accepted fixed out-of-place
-        // identity forward. A wrapped canonical plaintext coefficient is
-        // byte-identical in all four RNS limbs, but only limb 0 is physically
-        // materialized. Every target limb therefore reads that immutable source
-        // while retaining its own modulus, roots, destination, butterfly order,
-        // lazy ranges, and accepted shared-memory tail.
-        __global__ __launch_bounds__(kNttThreads, 2)
-        void nttForwardFromPlainBroadcast8192Rho4Kernel(
-            DeviceRing rg,
-            const u64* input,
-            const u32* inputIdx,
-            u64* output,
-            const u32* outputIdx,
-            bool fusedFirstStage)
-        {
-            extern __shared__ u64 sh[];
-            constexpr u32 n = 8192u;
-            constexpr u32 rho = 4u;
-            constexpr u32 half = n >> 1u;
-
-            const u32 limb = blockIdx.x & (rho - 1u);
-            const u32 batchSlot = blockIdx.x >> 2u;
-            const u32 inPoly = inputIdx ? inputIdx[batchSlot] : batchSlot;
-            const u32 outPoly = outputIdx ? outputIdx[batchSlot] : batchSlot;
-            const u64* src = input +
-                (static_cast<size_t>(inPoly) * rho) * n;
-            u64* dst = output +
-                (static_cast<size_t>(outPoly) * rho + limb) * n;
-            const ShoupOperand* roots =
-                rg.mRoots + static_cast<size_t>(limb) * n;
-            const u64 q = rg.mMods[limb].mValue;
-            const u64 twoQ = q << 1u;
-
-            if (fusedFirstStage)
-            {
-                const ShoupOperand r = nttLoadShoup<true>(roots + 1u);
-                for (u32 b = threadIdx.x; b < half; b += blockDim.x)
-                {
-                    const u64 u = nttGuard(src[b], twoQ);
-                    const u64 v = mulShoupLazy(src[b + half], r, q);
-                    sh[b] = u + v;
-                    sh[b + half] = u + twoQ - v;
-                }
-                __syncthreads();
-            }
-            else
-            {
-                for (u32 t = threadIdx.x; t < n; t += blockDim.x)
-                    sh[t] = src[t];
-                __syncthreads();
-                nttForwardStage8192<0u, true, true>(sh, roots, q, twoQ);
-            }
-
-            nttForwardStage8192<1u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<2u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<3u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<4u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<5u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<6u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<7u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<8u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<9u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<10u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<11u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<12u, true, true>(sh, roots, q, twoQ);
-
-            for (u32 t = threadIdx.x; t < n; t += blockDim.x)
-            {
-                u64 x = sh[t];
-                if (x >= twoQ) x -= twoQ;
-                if (x >= q) x -= q;
-                dst[t] = x;
-            }
-        }
-
-        // Candidate-only copy of the accepted fixed forward S11/S12 tail.
-        // The accepted in-place and out-of-place symbols retain their original
-        // bodies/SASS; Stage-88 special-input kernels inline this helper after
-        // producing the identical S10 shared state.
-        __device__ __forceinline__ void
-        nttForwardFusedLastTwoStore8192(
-            u64* sh,
-            const ShoupOperand* roots,
-            u64 q,
-            u64 twoQ,
-            u64* dst)
-        {
-            constexpr u32 half = 4096u;
-            for (u32 b = threadIdx.x; b < half; b += blockDim.x)
-            {
-                const u32 group = b >> 1u;
-                const u32 laneInGroup = b & 1u;
-                const u32 ix11 = (group << 2u) + laneInGroup;
-                const ShoupOperand r11 =
-                    nttLoadShoup<true>(roots + 2048u + group);
-                const u64 u11 = nttGuard(sh[ix11], twoQ);
-                const u64 v11 =
-                    mulShoupLazy(sh[ix11 + 2u], r11, q);
-                const u64 sum11 = u11 + v11;
-                const u64 diff11 = u11 + twoQ - v11;
-
-                const u64 own = laneInGroup ? diff11 : sum11;
-                const u64 send = laneInGroup ? sum11 : diff11;
-                const u64 peer =
-                    __shfl_xor_sync(0xffffffffu, send, 1u);
-                const u64 left = laneInGroup ? peer : own;
-                const u64 right = laneInGroup ? own : peer;
-
-                const ShoupOperand r12 =
-                    nttLoadShoup<true>(roots + 4096u + b);
-                const u64 u12 = nttGuard(left, twoQ);
-                const u64 v12 = mulShoupLazy(right, r12, q);
-                u64 x0 = u12 + v12;
-                u64 x1 = u12 + twoQ - v12;
-                if (x0 >= twoQ) x0 -= twoQ;
-                if (x0 >= q) x0 -= q;
-                if (x1 >= twoQ) x1 -= twoQ;
-                if (x1 >= q) x1 -= q;
-
-                const u32 ix12 = b << 1u;
-                asm volatile(
-                    "st.global.v2.u64 [%0], {%1, %2};"
-                    :
-                    : "l"(dst + ix12), "l"(x0), "l"(x1)
-                    : "memory");
-            }
-        }
-
-        // Stage-88 plaintext-broadcast sidecar. It preserves the accepted
-        // limb-0 source, per-target modulus/root selection, optional fused S0,
-        // and S1..S10 before substituting only the accepted register tail.
-        __global__ __launch_bounds__(kNttThreads, 2)
-        void nttForwardFromPlainBroadcastFusedLastTwo8192Rho4Kernel(
-            DeviceRing rg,
-            const u64* input,
-            const u32* inputIdx,
-            u64* output,
-            const u32* outputIdx,
-            bool fusedFirstStage)
-        {
-            extern __shared__ u64 sh[];
-            constexpr u32 n = 8192u;
-            constexpr u32 rho = 4u;
-            constexpr u32 half = n >> 1u;
-
-            const u32 limb = blockIdx.x & (rho - 1u);
-            const u32 batchSlot = blockIdx.x >> 2u;
-            const u32 inPoly = inputIdx ? inputIdx[batchSlot] : batchSlot;
-            const u32 outPoly = outputIdx ? outputIdx[batchSlot] : batchSlot;
-            const u64* src = input +
-                (static_cast<size_t>(inPoly) * rho) * n;
-            u64* dst = output +
-                (static_cast<size_t>(outPoly) * rho + limb) * n;
-            const ShoupOperand* roots =
-                rg.mRoots + static_cast<size_t>(limb) * n;
-            const u64 q = rg.mMods[limb].mValue;
-            const u64 twoQ = q << 1u;
-
-            if (fusedFirstStage)
-            {
-                const ShoupOperand r = nttLoadShoup<true>(roots + 1u);
-                for (u32 b = threadIdx.x; b < half; b += blockDim.x)
-                {
-                    const u64 u = nttGuard(src[b], twoQ);
-                    const u64 v =
-                        mulShoupLazy(src[b + half], r, q);
-                    sh[b] = u + v;
-                    sh[b + half] = u + twoQ - v;
-                }
-                __syncthreads();
-            }
-            else
-            {
-                for (u32 t = threadIdx.x; t < n; t += blockDim.x)
-                    sh[t] = src[t];
-                __syncthreads();
-                nttForwardStage8192<0u, true, true>(
-                    sh, roots, q, twoQ);
-            }
-
-            nttForwardStage8192<1u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<2u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<3u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<4u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<5u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<6u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<7u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<8u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<9u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<10u, true, true>(sh, roots, q, twoQ);
-            nttForwardFusedLastTwoStore8192(
-                sh, roots, q, twoQ, dst);
-        }
-
-        // Stage-88 centred-load sidecar. The source-limb selection and exact
-        // centred representative reconstruction remain scoped entirely before
-        // the transform, preventing their temporaries from extending into the
-        // register tail and threatening the two-CTA/32-register ceiling.
-        __global__ __launch_bounds__(kNttThreads, 2)
-        void nttForwardCenteredLimbFromFusedLastTwo8192Rho4Kernel(
-            DeviceRing rg,
-            const u64* input,
-            const u32* inputIdx,
-            const u32* inputLimb,
-            u64* output,
-            const u32* outputIdx)
-        {
-            extern __shared__ u64 sh[];
-            constexpr u32 n = 8192u;
-            constexpr u32 rho = 4u;
-
-            const u32 limb = blockIdx.x & (rho - 1u);
-            const u32 batchSlot = blockIdx.x >> 2u;
-            const u32 inPoly = inputIdx ? inputIdx[batchSlot] : batchSlot;
-            const u32 outPoly = outputIdx ? outputIdx[batchSlot] : batchSlot;
-            const u32 selectedLimb = inputLimb[batchSlot];
-            const u32 sourceLimb =
-                selectedLimb < rho ? selectedLimb : 0u;
-            const u64* src = input +
-                (static_cast<size_t>(inPoly) * rho + sourceLimb) * n;
-            u64* dst = output +
-                (static_cast<size_t>(outPoly) * rho + limb) * n;
-            const ShoupOperand* roots =
-                rg.mRoots + static_cast<size_t>(limb) * n;
-            const u64 q = rg.mMods[limb].mValue;
-            const u64 twoQ = q << 1u;
-
-            // The accepted centred path intentionally materializes its lifted
-            // load before S0; fusing that boundary raised register pressure.
-            // Stage-88 changes only the opposite end of the transform.
-            {
-                for (u32 t = threadIdx.x; t < n; t += blockDim.x)
-                    sh[t] = nttForwardLoad<true, 4u>(
-                        rg, src, selectedLimb, limb, t);
-            }
-            __syncthreads();
-
-            nttForwardStage8192<0u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<1u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<2u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<3u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<4u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<5u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<6u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<7u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<8u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<9u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<10u, true, true>(sh, roots, q, twoQ);
-            nttForwardFusedLastTwoStore8192(
-                sh, roots, q, twoQ, dst);
-        }
-
-        // Exact fixed-log13/rho=4 forward body with S11 and S12 fused through
-        // warp-register exchange. This is deliberately a separate symbol from
-        // nttForwardKernel: the accepted vector-Shoup kernel above remains the
-        // byte-identical rollback when the host toggle is disabled.
+        // Fixed-log13/rho=4 forward with fused S0 and register S11/S12.
+        // This path supports the common 256/512-thread launch choices.
         __global__ __launch_bounds__(kNttThreads, 2)
         void nttForwardFusedLastTwo8192Rho4Kernel(
             DeviceRing rg,
             u64* data,
-            const u32* polyIdx,
-            bool fusedFirstStage)
+            const u32* polyIdx)
         {
             extern __shared__ u64 sh[];
             constexpr u32 n = 8192u;
@@ -1798,28 +1543,17 @@ namespace osuCrypto::LogVole::gpu
             const u64 q = rg.mMods[limb].mValue;
             const u64 twoQ = q << 1u;
 
-            if (fusedFirstStage)
+            // Preserve the accepted fused S0 load, including its exact
+            // guard/Shoup/add order and its trailing CTA handoff to S1.
+            const ShoupOperand r = nttLoadShoup<true>(roots + 1u);
+            for (u32 b = threadIdx.x; b < half; b += blockDim.x)
             {
-                // Preserve the accepted fused S0 load, including its exact
-                // guard/Shoup/add order and its trailing CTA handoff to S1.
-                const ShoupOperand r = nttLoadShoup<true>(roots + 1u);
-                for (u32 b = threadIdx.x; b < half; b += blockDim.x)
-                {
-                    const u64 u = nttGuard(dst[b], twoQ);
-                    const u64 v = mulShoupLazy(dst[b + half], r, q);
-                    sh[b] = u + v;
-                    sh[b + half] = u + twoQ - v;
-                }
-                __syncthreads();
+                const u64 u = nttGuard(dst[b], twoQ);
+                const u64 v = mulShoupLazy(dst[b + half], r, q);
+                sh[b] = u + v;
+                sh[b + half] = u + twoQ - v;
             }
-            else
-            {
-                for (u32 t = threadIdx.x; t < n; t += blockDim.x)
-                    sh[t] = dst[t];
-                __syncthreads();
-                nttForwardStage8192<0u, true, true>(
-                    sh, roots, q, twoQ);
-            }
+            __syncthreads();
 
             nttForwardStage8192<1u, true, true>(sh, roots, q, twoQ);
             nttForwardStage8192<2u, true, true>(sh, roots, q, twoQ);
@@ -1968,14 +1702,12 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Stage-109 sidecars. The accepted Stage-51/88 symbols above remain
-        // untouched and are the exact default-off rollback.
+        // Fixed-log13 forward with warp-local S7..S12.
         __global__ __launch_bounds__(kNttThreads, 2)
         void nttForwardWarpStages7128192Rho4Kernel(
             DeviceRing rg,
             u64* data,
-            const u32* polyIdx,
-            bool fusedFirstStage)
+            const u32* polyIdx)
         {
             extern __shared__ u64 sh[];
             constexpr u32 n = 8192u;
@@ -1992,26 +1724,15 @@ namespace osuCrypto::LogVole::gpu
             const u64 q = rg.mMods[limb].mValue;
             const u64 twoQ = q << 1u;
 
-            if (fusedFirstStage)
+            const ShoupOperand r = nttLoadShoup<true>(roots + 1u);
+            for (u32 b = threadIdx.x; b < half; b += blockDim.x)
             {
-                const ShoupOperand r = nttLoadShoup<true>(roots + 1u);
-                for (u32 b = threadIdx.x; b < half; b += blockDim.x)
-                {
-                    const u64 u = nttGuard(dst[b], twoQ);
-                    const u64 v = mulShoupLazy(dst[b + half], r, q);
-                    sh[b] = u + v;
-                    sh[b + half] = u + twoQ - v;
-                }
-                __syncthreads();
+                const u64 u = nttGuard(dst[b], twoQ);
+                const u64 v = mulShoupLazy(dst[b + half], r, q);
+                sh[b] = u + v;
+                sh[b + half] = u + twoQ - v;
             }
-            else
-            {
-                for (u32 t = threadIdx.x; t < n; t += blockDim.x)
-                    sh[t] = dst[t];
-                __syncthreads();
-                nttForwardStage8192<0u, true, true>(
-                    sh, roots, q, twoQ);
-            }
+            __syncthreads();
 
             nttForwardStage8192<1u, true, true>(sh, roots, q, twoQ);
             nttForwardStage8192<2u, true, true>(sh, roots, q, twoQ);
@@ -2029,8 +1750,7 @@ namespace osuCrypto::LogVole::gpu
             const u64* input,
             const u32* inputIdx,
             u64* output,
-            const u32* outputIdx,
-            bool fusedFirstStage)
+            const u32* outputIdx)
         {
             extern __shared__ u64 sh[];
             constexpr u32 n = 8192u;
@@ -2050,26 +1770,15 @@ namespace osuCrypto::LogVole::gpu
             const u64 q = rg.mMods[limb].mValue;
             const u64 twoQ = q << 1u;
 
-            if (fusedFirstStage)
+            const ShoupOperand r = nttLoadShoup<true>(roots + 1u);
+            for (u32 b = threadIdx.x; b < half; b += blockDim.x)
             {
-                const ShoupOperand r = nttLoadShoup<true>(roots + 1u);
-                for (u32 b = threadIdx.x; b < half; b += blockDim.x)
-                {
-                    const u64 u = nttGuard(src[b], twoQ);
-                    const u64 v = mulShoupLazy(src[b + half], r, q);
-                    sh[b] = u + v;
-                    sh[b + half] = u + twoQ - v;
-                }
-                __syncthreads();
+                const u64 u = nttGuard(src[b], twoQ);
+                const u64 v = mulShoupLazy(src[b + half], r, q);
+                sh[b] = u + v;
+                sh[b + half] = u + twoQ - v;
             }
-            else
-            {
-                for (u32 t = threadIdx.x; t < n; t += blockDim.x)
-                    sh[t] = src[t];
-                __syncthreads();
-                nttForwardStage8192<0u, true, true>(
-                    sh, roots, q, twoQ);
-            }
+            __syncthreads();
 
             nttForwardStage8192<1u, true, true>(sh, roots, q, twoQ);
             nttForwardStage8192<2u, true, true>(sh, roots, q, twoQ);
@@ -11876,14 +11585,6 @@ namespace osuCrypto::LogVole::gpu
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttForwardKernel<
-                            false, false, false, true, 4u, true, true>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(forward8192SimpleIndexVectorShoup)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
                         nttForwardFusedLastTwo8192Rho4Kernel,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
@@ -12464,36 +12165,24 @@ namespace osuCrypto::LogVole::gpu
         if (rc.mKernelOptions.mNttLog13Specialized && rc.mN == 8192u && rc.mRho == 4u && tiles == 1u)
         {
             const bool simpleIndex = rc.mKernelOptions.mNttLog13SimpleIndex;
-            const bool fusedFirstStage = rc.mKernelOptions.mNttLog13ForwardFusedFirstStage;
-            const bool fusedLastTwoStages =
-                rc.mKernelOptions.mNttLog13ForwardFusedLastTwoStages;
+            constexpr bool fusedFirstStage = true;
             const bool vectorShoupLoads = rc.mKernelOptions.mNttLog13VectorShoupLoads;
             if (
-                simpleIndex && vectorShoupLoads &&
-                fusedLastTwoStages)
+                simpleIndex && vectorShoupLoads)
             {
                 if (
-                    rc.mKernelOptions.mNttLog13ForwardWarpStages712 &&
                     rc.mKernelOptions.mNttForwardThreads == kNttThreads)
                 {
                     nttForwardWarpStages7128192Rho4Kernel<<<
                         polyCount * rc.mRho, kNttThreads, shBytes, st>>>(
-                        rg, data, polyIdx, fusedFirstStage);
+                        rg, data, polyIdx);
                 }
                 else
                 {
                     nttForwardFusedLastTwo8192Rho4Kernel<<<
                         polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
-                        rg, data, polyIdx, fusedFirstStage);
+                        rg, data, polyIdx);
                 }
-            }
-            else if (simpleIndex && vectorShoupLoads)
-            {
-                nttForwardKernel<
-                    false, false, false, true, 4u, true, true><<<
-                    polyCount * rc.mRho, rc.mKernelOptions.mNttForwardThreads, shBytes, st>>>(
-                    rg, data, polyIdx, 0u, nullptr, nullptr, nullptr,
-                    nullptr, 0u, nullptr, 0u, fusedFirstStage);
             }
             else if (simpleIndex)
             {
@@ -12566,7 +12255,7 @@ namespace osuCrypto::LogVole::gpu
 
         if (rc.mKernelOptions.mNttLog13Specialized && rc.mN == 8192u && rc.mRho == 1u && tiles == 1u)
         {
-            const bool fusedFirstStage = rc.mKernelOptions.mNttLog13ForwardFusedFirstStage;
+            constexpr bool fusedFirstStage = true;
             if (rc.mKernelOptions.mNttLog13SimpleIndex)
             {
                 if (rc.mKernelOptions.mNttLog13VectorShoupLoads)
@@ -12653,7 +12342,7 @@ namespace osuCrypto::LogVole::gpu
         const size_t shBytes = static_cast<size_t>(rc.mN >> logTiles) * sizeof(u64);
         if (rc.mKernelOptions.mNttLog13Specialized && rc.mN == 8192u && rc.mRho == 4u && tiles == 1u)
         {
-            const bool fusedFirstStage = rc.mKernelOptions.mNttLog13ForwardFusedFirstStage;
+            constexpr bool fusedFirstStage = true;
             if (rc.mKernelOptions.mNttLog13SimpleIndex)
             {
                 if (rc.mKernelOptions.mNttLog13VectorShoupLoads)
@@ -12787,51 +12476,12 @@ namespace osuCrypto::LogVole::gpu
                 "nttForwardFromPlainBroadcast16384Rho8");
         }
 
-        const bool fusedLastTwo =
-            rc.mKernelOptions.mNttLog13ForwardPlainBroadcastFusedLastTwoStages;
-        const bool warpStages712 = fusedLastTwo &&
-            rc.mKernelOptions.mNttLog13ForwardWarpStages712;
-        if (warpStages712)
-        {
-            nttForwardFromPlainBroadcastWarpStages7128192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, out, outIdx,
-                rc.mKernelOptions.mNttLog13ForwardFusedFirstStage);
-        }
-        else if (fusedLastTwo)
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardFromPlainBroadcastFusedLastTwo8192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(forwardFromPlainBroadcastFusedLastTwo)"))
-                return false;
-            nttForwardFromPlainBroadcastFusedLastTwo8192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, out, outIdx,
-                rc.mKernelOptions.mNttLog13ForwardFusedFirstStage);
-        }
-        else
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttForwardFromPlainBroadcast8192Rho4Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(forwardFromPlainBroadcast8192Rho4)"))
-                return false;
-            nttForwardFromPlainBroadcast8192Rho4Kernel<<<
-                polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-                toDevice(rc), in, inIdx, out, outIdx,
-                rc.mKernelOptions.mNttLog13ForwardFusedFirstStage);
-        }
-        return check(
-            cudaGetLastError(),
-            warpStages712 ? "nttForwardFromPlainBroadcastWarpStages712" :
-            fusedLastTwo ? "nttForwardFromPlainBroadcastFusedLastTwo" :
-                           "nttForwardFromPlainBroadcast8192Rho4");
+        nttForwardFromPlainBroadcastWarpStages7128192Rho4Kernel<<<
+            polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
+            toDevice(rc), in, inIdx, out, outIdx);
+        return check(cudaGetLastError(), "nttForwardFromPlainBroadcastWarpStages712");
     }
+
 
     bool launchNttForwardCenteredLimbFrom(
         const RingConstView& rc,
@@ -12853,33 +12503,14 @@ namespace osuCrypto::LogVole::gpu
         const size_t shBytes = static_cast<size_t>(rc.mN >> logTiles) * sizeof(u64);
         if (rc.mKernelOptions.mNttLog13Specialized && rc.mN == 8192u && rc.mRho == 4u && tiles == 1u)
         {
-            const bool fusedFirstStage = rc.mKernelOptions.mNttLog13ForwardFusedFirstStage;
+            constexpr bool fusedFirstStage = true;
             if (rc.mKernelOptions.mNttLog13SimpleIndex)
             {
                 if (rc.mKernelOptions.mNttLog13VectorShoupLoads)
                 {
-                    const bool fusedLastTwo =
-                        rc.mKernelOptions.mNttForwardThreads == kNttThreads &&
-                        rc.mKernelOptions.mNttLog13ForwardCenteredFromFusedLastTwoStages;
-                    const bool warpStages712 = fusedLastTwo &&
-                        rc.mKernelOptions.mNttLog13ForwardWarpStages712;
-                    if (warpStages712)
+                    if (rc.mKernelOptions.mNttForwardThreads == kNttThreads)
                     {
                         nttForwardCenteredLimbFromWarpStages7128192Rho4Kernel<<<
-                            polyCount * rc.mRho, kNttThreads, shBytes,
-                            asStream(stream)>>>(
-                            rg, in, inIdx, limbSel, out, outIdx);
-                    }
-                    else if (fusedLastTwo)
-                    {
-                        if (!check(
-                                cudaFuncSetAttribute(
-                                    nttForwardCenteredLimbFromFusedLastTwo8192Rho4Kernel,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(shBytes)),
-                                "cudaFuncSetAttribute(forwardCenteredFromFusedLastTwo)"))
-                            return false;
-                        nttForwardCenteredLimbFromFusedLastTwo8192Rho4Kernel<<<
                             polyCount * rc.mRho, kNttThreads, shBytes,
                             asStream(stream)>>>(
                             rg, in, inIdx, limbSel, out, outIdx);

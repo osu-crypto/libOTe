@@ -1354,3 +1354,16 @@ isolated SM90 compile passed. Retained generic forward and H200 kernel entries
 were verified in the SM90 object. Three focused checks passed with zero skips
 in 19.61 seconds using `-gpu 1 -lvFactoryFast 1`. H200 runtime execution remains
 untested locally. No benchmarks were run.
+
+The log13 forward cleanup fixes five fusion choices to their production defaults
+and removes three exclusive alternative kernels. Required non-1024-thread,
+generic-geometry, and H200 paths remain unchanged. Direct coverage now checks
+in-place, out-of-place, plain-broadcast, centered-limb, and single-limb gather
+entries against CPU transforms, including permutations and centering boundaries.
+
+Validation: the five-entry CPU-oracle test passed on the RTX 4060 before pruning.
+The final Windows VS 14.50 CUDA test target and frontend object build and isolated
+SM90 compile passed, with retained kernel entries verified in the SM90 object.
+Four focused checks passed with zero skips in 20.17 seconds using
+`-gpu 1 -lvFactoryFast 1`, including the same direct oracle after pruning.
+H200 runtime execution remains untested locally. No benchmarks were run.

@@ -124,6 +124,7 @@
     X(Core, RepOfflineSenderInputGammaOneRepeats) \
     X(Core, SeedLabelSampleCt2FromSeedDeterministic) \
     X(RingOps, KernelOptions) \
+    X(RingOps, NttLog13ForwardParity) \
     X(RingOps, NttTwoTileInPlaceParity) \
     X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
     X(Core, RootTruncParamsAndKeyReplication) \
