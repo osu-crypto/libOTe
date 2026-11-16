@@ -2889,6 +2889,123 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
             }
         }
     }
+    // A canonical 53-bit chain forces the integer H200 paths when supported.
+    RingParams integerParams = params;
+    std::fill(integerParams.mCoeffModulusBits.begin(), integerParams.mCoeffModulusBits.end(), 53);
+    RingNttContext integerCpu;
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(integerParams, integerCpu));
+    prepareGpuTableOwners(integerCpu);
+    auto integerRing = gpu::GpuRing::get(integerCpu);
+    LOGVOLE_REQUIRE_TRUE(integerRing);
+    const auto integerView = integerRing->view(stream);
+    LOGVOLE_REQUIRE_TRUE(integerView.mMinModulus > (std::uint64_t{1} << 52u));
+    std::vector<std::size_t> integerCounts{1u, 8u};
+    if (integerView.mH200Shared)
+    {
+        const auto count = (2u * integerView.mSmCount + integerView.mRho - 1u) / integerView.mRho;
+        LOGVOLE_REQUIRE_TRUE(count > 0u && count <= 64u);
+        if (std::find(integerCounts.begin(), integerCounts.end(), count) == integerCounts.end()) integerCounts.push_back(count);
+    }
+    const auto words = ringPolyCoeffCount(integerParams);
+    for (std::size_t count : integerCounts)
+    {
+        std::vector<RnsPoly> source(count), forwardExpected(count);
+        for (std::size_t p = 0; p < count; ++p)
+        {
+            source[p] = deriveUniformPolyFromNonce(integerCpu, 0x494e544eu, 0x54543533u, p);
+            for (unsigned j = 0; j < 8u; ++j)
+            {
+                const auto q = ringModulusValue(integerCpu, j);
+                source[p].mCoeffs[j * integerParams.mPolyModulusDegree] = q - 1u;
+                source[p].mCoeffs[j * integerParams.mPolyModulusDegree + 1u] = q / 2u;
+                source[p].mCoeffs[j * integerParams.mPolyModulusDegree + 2u] = q / 2u + 1u;
+            }
+            forwardExpected[p] = source[p];
+            LOGVOLE_REQUIRE_TRUE(forwardNtt(forwardExpected[p], integerCpu));
+        }
+        // The extra polynomial explicitly owns the one-word shifted views.
+        gpu::GpuPolyBuffer data(*integerRing, count + 1u, stream);
+        gpu::GpuPolyBuffer operand(*integerRing, count + 1u, stream);
+        gpu::GpuPolyBuffer output(*integerRing, count + 1u, stream);
+        LOGVOLE_REQUIRE_TRUE(data.upload(source, stream));
+        LOGVOLE_REQUIRE_TRUE(gpu::launchNttForward(integerView, data.data(stream),
+            static_cast<std::uint32_t>(count), nullptr, stream.raw()));
+        std::vector<RnsPoly> actual;
+        LOGVOLE_REQUIRE_TRUE(data.download(actual, stream, 0u, count));
+        expect_batch_equal(actual, forwardExpected);
+        for (bool centered : {false, true})
+        {
+            if (!centered && !gpu::canLaunchNttForwardFromPlainBroadcast(integerView))
+            {
+                LOGVOLE_REQUIRE_FALSE(integerView.mH200Shared);
+                continue;
+            }
+            auto input = source, expectedBroadcast = source;
+            const auto sourceQ = ringModulusValue(integerCpu, 0u);
+            for (std::size_t p = 0; p < count; ++p)
+            {
+                for (std::size_t c = 0; c < integerParams.mPolyModulusDegree; ++c)
+                {
+                    auto value = input[p].mCoeffs[c];
+                    if (!centered) value %= integerView.mMinModulus;
+                    input[p].mCoeffs[c] = value;
+                    for (unsigned j = 0; j < 8u; ++j)
+                        expectedBroadcast[p].mCoeffs[j * integerParams.mPolyModulusDegree + c] =
+                            centered && value > sourceQ / 2u ? ringModulusValue(integerCpu, j) - (sourceQ - value) : value;
+                }
+                LOGVOLE_REQUIRE_TRUE(forwardNtt(expectedBroadcast[p], integerCpu));
+            }
+            LOGVOLE_REQUIRE_TRUE(data.upload(input, stream));
+            std::vector<std::uint32_t> limbs(count, 0u);
+            if (centered)
+            {
+                const auto* selected = stream.uploadIdx(limbs);
+                LOGVOLE_REQUIRE_TRUE(selected);
+                LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardCenteredLimbFrom(integerView,
+                    data.data(stream), nullptr, selected, output.data(stream), nullptr,
+                    static_cast<std::uint32_t>(count), stream.raw()));
+            }
+            else
+                LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardFromPlainBroadcast(integerView,
+                    data.data(stream), nullptr, output.data(stream), nullptr,
+                    static_cast<std::uint32_t>(count), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(output.download(actual, stream, 0u, count));
+            expect_batch_equal(actual, expectedBroadcast);
+        }
+        auto inverseExpected = source;
+        for (std::size_t p = 0; p < count; ++p)
+        {
+            LOGVOLE_REQUIRE_TRUE(ringAddInplace(inverseExpected[p], source[p], integerCpu));
+            LOGVOLE_REQUIRE_TRUE(inverseNtt(inverseExpected[p], integerCpu));
+            for (unsigned j = 0; j < 8u; ++j)
+            for (std::size_t c = 0; c < integerParams.mPolyModulusDegree; ++c)
+            {
+                auto& value = inverseExpected[p].mCoeffs[j * integerParams.mPolyModulusDegree + c];
+                if (value != 0u) value = ringModulusValue(integerCpu, j) - value;
+            }
+        }
+        for (unsigned alignment = 0; alignment < 3u; ++alignment)
+        {
+            auto* input = data.data(stream) + (alignment == 1u ? 1u : 0u);
+            auto* preB = operand.data(stream) + (alignment == 2u ? 1u : 0u);
+            for (std::size_t p = 0; p < count; ++p)
+            {
+                LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(input + p * words,
+                    source[p].mCoeffs.data(), integerRing->polyBytes(), stream));
+                LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(preB + p * words,
+                    source[p].mCoeffs.data(), integerRing->polyBytes(), stream));
+            }
+            LOGVOLE_REQUIRE_TRUE(gpu::launchNttInverseFused(integerView, input,
+                static_cast<std::uint32_t>(count), nullptr, static_cast<std::uint32_t>(gpu::ElemOp::Add),
+                preB, static_cast<std::uint32_t>(gpu::ElemOp::Negate), nullptr, stream.raw()));
+            actual = source;
+            for (std::size_t p = 0; p < count; ++p)
+                LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(actual[p].mCoeffs.data(),
+                    input + p * words, integerRing->polyBytes(), stream));
+            LOGVOLE_REQUIRE_TRUE(stream.sync());
+            expect_batch_equal(actual, inverseExpected);
+        }
+    }
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";

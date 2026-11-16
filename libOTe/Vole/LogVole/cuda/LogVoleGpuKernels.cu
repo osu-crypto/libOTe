@@ -2340,28 +2340,6 @@ namespace osuCrypto::LogVole::gpu
             __syncthreads();
         }
 
-        template<u32 RootFactor>
-        __device__ __forceinline__ void nttForwardLog14Tile(
-            u64* sh,
-            const ShoupOperand* roots,
-            u64 q,
-            u64 twoQ)
-        {
-            nttForwardLog14TileStage<0u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<1u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<2u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<3u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<4u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<5u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<6u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<7u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<8u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<9u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<10u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<11u, RootFactor>(sh, roots, q, twoQ);
-            nttForwardLog14TileStage<12u, RootFactor>(sh, roots, q, twoQ);
-        }
-
         template<u32 RootFactor, bool PairedPrefix = false>
         __device__ __forceinline__ void nttForwardLog14TilePrefix06(
             u64* sh,
@@ -2471,7 +2449,7 @@ namespace osuCrypto::LogVole::gpu
         // registers, and transforms both halves in turn. Compared with the
         // generic out-of-place tiled kernel this cuts traffic from 3N to 2N per
         // target limb and avoids materializing seven duplicate source limbs.
-        template<bool Warp712, bool PairedPrefix = false, u32 Threads = kNttThreads>
+        template<bool PairedPrefix = false, u32 Threads = kNttThreads>
         __global__ __launch_bounds__(Threads, Threads == 512u ? 2u : 1u)
         void nttForwardFromPlainBroadcast16384Rho8Kernel(
             DeviceRing rg,
@@ -2486,7 +2464,6 @@ namespace osuCrypto::LogVole::gpu
             constexpr u32 tileLen = 8192u;
             constexpr u32 parked = tileLen / Threads;
             static_assert(Threads == 512u || Threads == 1024u);
-            static_assert(!PairedPrefix || Warp712);
 
             const u32 limb = blockIdx.x & (rho - 1u);
             const u32 batchSlot = blockIdx.x >> 3u;
@@ -2514,24 +2491,10 @@ namespace osuCrypto::LogVole::gpu
             }
             __syncthreads();
 
-            if constexpr (Warp712)
-            {
-                nttForwardLog14TilePrefix06<2u, PairedPrefix>(
-                    sh, roots, q, twoQ);
-                nttForwardLog14WarpStages712Store<2u>(
-                    sh, roots, q, twoQ, dst);
-            }
-            else
-            {
-                nttForwardLog14Tile<2u>(sh, roots, q, twoQ);
-                for (u32 t = threadIdx.x; t < tileLen; t += blockDim.x)
-                {
-                    u64 x = sh[t];
-                    if (x >= twoQ) x -= twoQ;
-                    if (x >= q) x -= q;
-                    dst[t] = x;
-                }
-            }
+            nttForwardLog14TilePrefix06<2u, PairedPrefix>(
+                sh, roots, q, twoQ);
+            nttForwardLog14WarpStages712Store<2u>(
+                sh, roots, q, twoQ, dst);
 
             __syncthreads();
 #pragma unroll
@@ -2539,31 +2502,18 @@ namespace osuCrypto::LogVole::gpu
                 sh[threadIdx.x + i * Threads] = hi[i];
             __syncthreads();
 
-            if constexpr (Warp712)
-            {
-                nttForwardLog14TilePrefix06<3u, PairedPrefix>(
-                    sh, roots, q, twoQ);
-                nttForwardLog14WarpStages712Store<3u>(
-                    sh, roots, q, twoQ, dst + tileLen);
-            }
-            else
-            {
-                nttForwardLog14Tile<3u>(sh, roots, q, twoQ);
-                for (u32 t = threadIdx.x; t < tileLen; t += blockDim.x)
-                {
-                    u64 x = sh[t];
-                    if (x >= twoQ) x -= twoQ;
-                    if (x >= q) x -= q;
-                    dst[tileLen + t] = x;
-                }
-            }
+            nttForwardLog14TilePrefix06<3u, PairedPrefix>(
+                sh, roots, q, twoQ);
+            nttForwardLog14WarpStages712Store<3u>(
+                sh, roots, q, twoQ, dst + tileLen);
+
         }
 
         // Fixed out-of-place centred-limb transform for NoGoldenSeed. Every
         // target limb reads the selected source limb, reconstructs the same
         // signed representative as nttForwardLoad<true>, and parks the crossing
         // stage's high half so both 8192-word tiles complete in one CTA.
-        template<bool Warp712, bool PairedPrefix = false, u32 Threads = kNttThreads>
+        template<bool PairedPrefix = false, u32 Threads = kNttThreads>
         __global__ __launch_bounds__(Threads, Threads == 512u ? 2u : 1u)
         void nttForwardCenteredLimbFrom16384Rho8Kernel(
             DeviceRing rg,
@@ -2579,7 +2529,6 @@ namespace osuCrypto::LogVole::gpu
             constexpr u32 tileLen = 8192u;
             constexpr u32 parked = tileLen / Threads;
             static_assert(Threads == 512u || Threads == 1024u);
-            static_assert(!PairedPrefix || Warp712);
 
             const u32 limb = blockIdx.x & (rho - 1u);
             const u32 batchSlot = blockIdx.x >> 3u;
@@ -2613,24 +2562,10 @@ namespace osuCrypto::LogVole::gpu
             }
             __syncthreads();
 
-            if constexpr (Warp712)
-            {
-                nttForwardLog14TilePrefix06<2u, PairedPrefix>(
-                    sh, roots, q, twoQ);
-                nttForwardLog14WarpStages712Store<2u>(
-                    sh, roots, q, twoQ, dst);
-            }
-            else
-            {
-                nttForwardLog14Tile<2u>(sh, roots, q, twoQ);
-                for (u32 t = threadIdx.x; t < tileLen; t += blockDim.x)
-                {
-                    u64 x = sh[t];
-                    if (x >= twoQ) x -= twoQ;
-                    if (x >= q) x -= q;
-                    dst[t] = x;
-                }
-            }
+            nttForwardLog14TilePrefix06<2u, PairedPrefix>(
+                sh, roots, q, twoQ);
+            nttForwardLog14WarpStages712Store<2u>(
+                sh, roots, q, twoQ, dst);
 
             __syncthreads();
 #pragma unroll
@@ -2638,31 +2573,18 @@ namespace osuCrypto::LogVole::gpu
                 sh[threadIdx.x + i * Threads] = hi[i];
             __syncthreads();
 
-            if constexpr (Warp712)
-            {
-                nttForwardLog14TilePrefix06<3u, PairedPrefix>(
-                    sh, roots, q, twoQ);
-                nttForwardLog14WarpStages712Store<3u>(
-                    sh, roots, q, twoQ, dst + tileLen);
-            }
-            else
-            {
-                nttForwardLog14Tile<3u>(sh, roots, q, twoQ);
-                for (u32 t = threadIdx.x; t < tileLen; t += blockDim.x)
-                {
-                    u64 x = sh[t];
-                    if (x >= twoQ) x -= twoQ;
-                    if (x >= q) x -= q;
-                    dst[tileLen + t] = x;
-                }
-            }
+            nttForwardLog14TilePrefix06<3u, PairedPrefix>(
+                sh, roots, q, twoQ);
+            nttForwardLog14WarpStages712Store<3u>(
+                sh, roots, q, twoQ, dst + tileLen);
+
         }
 
         // Fixed in-place counterpart used by every sufficiently wide
         // NoGoldenSeed forward transform. It preserves the accepted
         // register-parked two-tile dataflow while removing DeviceRing geometry,
         // the dynamic stage loop and scalar Shoup loads from its hot body.
-        template<bool Warp712, bool PairedPrefix = false, u32 Threads = kNttThreads>
+        template<bool PairedPrefix = false, u32 Threads = kNttThreads>
         __global__ __launch_bounds__(Threads, Threads == 512u ? 2u : 1u)
         void nttForwardTwoTile16384Rho8Kernel(
             DeviceRing rg, u64* data, const u32* polyIdx)
@@ -2673,7 +2595,6 @@ namespace osuCrypto::LogVole::gpu
             constexpr u32 tileLen = 8192u;
             constexpr u32 parked = tileLen / Threads;
             static_assert(Threads == 512u || Threads == 1024u);
-            static_assert(!PairedPrefix || Warp712);
 
             const u32 limb = blockIdx.x & (rho - 1u);
             const u32 slot = blockIdx.x >> 3u;
@@ -2699,24 +2620,10 @@ namespace osuCrypto::LogVole::gpu
             }
             __syncthreads();
 
-            if constexpr (Warp712)
-            {
-                nttForwardLog14TilePrefix06<2u, PairedPrefix>(
-                    sh, roots, q, twoQ);
-                nttForwardLog14WarpStages712Store<2u>(
-                    sh, roots, q, twoQ, limbBase);
-            }
-            else
-            {
-                nttForwardLog14Tile<2u>(sh, roots, q, twoQ);
-                for (u32 t = threadIdx.x; t < tileLen; t += blockDim.x)
-                {
-                    u64 x = sh[t];
-                    if (x >= twoQ) x -= twoQ;
-                    if (x >= q) x -= q;
-                    limbBase[t] = x;
-                }
-            }
+            nttForwardLog14TilePrefix06<2u, PairedPrefix>(
+                sh, roots, q, twoQ);
+            nttForwardLog14WarpStages712Store<2u>(
+                sh, roots, q, twoQ, limbBase);
 
             __syncthreads();
 #pragma unroll
@@ -2724,24 +2631,11 @@ namespace osuCrypto::LogVole::gpu
                 sh[threadIdx.x + i * Threads] = hi[i];
             __syncthreads();
 
-            if constexpr (Warp712)
-            {
-                nttForwardLog14TilePrefix06<3u, PairedPrefix>(
-                    sh, roots, q, twoQ);
-                nttForwardLog14WarpStages712Store<3u>(
-                    sh, roots, q, twoQ, limbBase + tileLen);
-            }
-            else
-            {
-                nttForwardLog14Tile<3u>(sh, roots, q, twoQ);
-                for (u32 t = threadIdx.x; t < tileLen; t += blockDim.x)
-                {
-                    u64 x = sh[t];
-                    if (x >= twoQ) x -= twoQ;
-                    if (x >= q) x -= q;
-                    limbBase[tileLen + t] = x;
-                }
-            }
+            nttForwardLog14TilePrefix06<3u, PairedPrefix>(
+                sh, roots, q, twoQ);
+            nttForwardLog14WarpStages712Store<3u>(
+                sh, roots, q, twoQ, limbBase + tileLen);
+
         }
 
         // One tile-crossing forward stage, in global memory. Only used when
@@ -5192,21 +5086,18 @@ namespace osuCrypto::LogVole::gpu
         // per-element index read.
         constexpr u32 kMaxFusedIpTerms = 32;
 
-        template<bool Cached>
         __device__ __forceinline__ ShoupOperand inverseLog14Root(
-            const ShoupOperand* roots, const ShoupOperand* cache, u32 index)
+            const ShoupOperand* roots, u32 index)
         {
-            if constexpr (Cached) return nttLoadShoup<true>(cache + (index - 15360u));
-            else return nttLoadShoup<true>(roots + index);
+            return nttLoadShoup<true>(roots + index);
         }
 
-        template<u32 Stage, u32 TileIdx, bool Cached = false>
+        template<u32 Stage, u32 TileIdx>
         __device__ __forceinline__ void nttInverseLog14TileStage(
             u64* sh,
             const ShoupOperand* roots,
             u64 q,
-            u64 twoQ,
-            const ShoupOperand* cache = nullptr)
+            u64 twoQ)
         {
             static_assert(Stage < 13u);
             static_assert(TileIdx < 2u);
@@ -5218,8 +5109,8 @@ namespace osuCrypto::LogVole::gpu
             {
                 const u32 i = b >> Stage;
                 const u32 ix = b + (i << Stage);
-                const ShoupOperand r = inverseLog14Root<Cached && Stage >= 4u>(
-                    roots, cache, rootBase + i);
+                const ShoupOperand r = inverseLog14Root(
+                    roots, rootBase + i);
                 const u64 u = sh[ix];
                 const u64 v = sh[ix + gap];
                 sh[ix] = nttGuard(u + v, twoQ);
@@ -5231,37 +5122,14 @@ namespace osuCrypto::LogVole::gpu
                 __syncthreads();
         }
 
-        template<u32 TileIdx>
-        __device__ __forceinline__ void nttInverseLog14Tile(
-            u64* sh,
-            const ShoupOperand* roots,
-            u64 q,
-            u64 twoQ)
-        {
-            nttInverseLog14TileStage<0u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<1u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<2u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<3u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<4u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<5u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<6u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<7u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<8u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<9u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<10u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<11u, TileIdx>(sh, roots, q, twoQ);
-            nttInverseLog14TileStage<12u, TileIdx>(sh, roots, q, twoQ);
-        }
-
-        template<u32 Stage, u32 TileIdx, bool Cached = false>
+        template<u32 Stage, u32 TileIdx>
         __device__ __forceinline__ void nttInverseLog14WarpStage(
             u64& lo,
             u64& hi,
             const ShoupOperand* roots,
             u32 butterfly,
             u64 q,
-            u64 twoQ,
-            const ShoupOperand* cache = nullptr)
+            u64 twoQ)
         {
             static_assert(Stage >= 1u && Stage <= 5u);
             static_assert(TileIdx < 2u);
@@ -5276,8 +5144,8 @@ namespace osuCrypto::LogVole::gpu
                 0xffffffffu, outbound, laneMask);
             const u64 u = upper ? remote : lo;
             const u64 v = upper ? hi : remote;
-            const ShoupOperand r = inverseLog14Root<Cached && Stage >= 4u>(
-                roots, cache, rootBase + (butterfly >> Stage));
+            const ShoupOperand r = inverseLog14Root(
+                roots, rootBase + (butterfly >> Stage));
             lo = nttGuard(u + v, twoQ);
             hi = mulShoupLazy(u + twoQ - v, r, q);
         }
@@ -5285,10 +5153,9 @@ namespace osuCrypto::LogVole::gpu
         // Adjacent stages share a four-value ownership group. Carry the first
         // stage directly into the second, eliminating one shared round trip
         // and one CTA barrier without changing the lazy-reduction order.
-        template<u32 Stage, u32 TileIdx, bool Cached = false>
+        template<u32 Stage, u32 TileIdx>
         __device__ __forceinline__ void nttInverseLog14TileStagePair(
-            u64* sh, const ShoupOperand* roots, u64 q, u64 twoQ,
-            const ShoupOperand* cache = nullptr)
+            u64* sh, const ShoupOperand* roots, u64 q, u64 twoQ)
         {
             static_assert(Stage >= 6u && Stage <= 11u && TileIdx < 2u);
             constexpr u32 gap = 1u << Stage;
@@ -5305,20 +5172,20 @@ namespace osuCrypto::LogVole::gpu
                 u64 lo0, hi0, lo1, hi1;
                 {
                     const u64 u = sh[ix], v = sh[ix + gap];
-                    const ShoupOperand r = inverseLog14Root<Cached>(
-                        roots, cache, rootBase + group * 2u);
+                    const ShoupOperand r = inverseLog14Root(
+                        roots, rootBase + group * 2u);
                     lo0 = nttGuard(u + v, twoQ);
                     hi0 = mulShoupLazy(u + twoQ - v, r, q);
                 }
                 {
                     const u64 u = sh[ix + 2u * gap], v = sh[ix + 3u * gap];
-                    const ShoupOperand r = inverseLog14Root<Cached>(
-                        roots, cache, rootBase + group * 2u + 1u);
+                    const ShoupOperand r = inverseLog14Root(
+                        roots, rootBase + group * 2u + 1u);
                     lo1 = nttGuard(u + v, twoQ);
                     hi1 = mulShoupLazy(u + twoQ - v, r, q);
                 }
-                const ShoupOperand r = inverseLog14Root<Cached>(
-                    roots, cache, nextRootBase + group);
+                const ShoupOperand r = inverseLog14Root(
+                    roots, nextRootBase + group);
                 sh[ix] = nttGuard(lo0 + lo1, twoQ);
                 sh[ix + 2u * gap] = mulShoupLazy(lo0 + twoQ - lo1, r, q);
                 sh[ix + gap] = nttGuard(hi0 + hi1, twoQ);
@@ -5330,8 +5197,7 @@ namespace osuCrypto::LogVole::gpu
         // The first six inverse stages operate entirely inside 64-value warp
         // tiles. Hold each S0 pair in registers through S5, publish only the S5
         // layout, then finish S6..S12 with either single or paired stages.
-        template<u32 TileIdx, bool DirectLoad = false,
-                 bool PairedSuffix = false, bool Cached = false>
+        template<u32 TileIdx, bool DirectLoad = false>
         __device__ __forceinline__ void nttInverseLog14TileWarp05(
             u64* sh,
             const ShoupOperand* roots,
@@ -5339,8 +5205,7 @@ namespace osuCrypto::LogVole::gpu
             u64 twoQ,
             const u64* src = nullptr,
             u32 preOp = kElemOpNone,
-            const u64* preB = nullptr,
-            const ShoupOperand* cache = nullptr)
+            const u64* preB = nullptr)
         {
             constexpr u32 s0RootBase = 1u + TileIdx * 4096u;
             for (u32 butterfly = threadIdx.x;
@@ -5379,16 +5244,16 @@ namespace osuCrypto::LogVole::gpu
                 u64 lo = nttGuard(u + v, twoQ);
                 u64 hi = mulShoupLazy(u + twoQ - v, r, q);
 
-                nttInverseLog14WarpStage<1u, TileIdx, Cached>(
-                    lo, hi, roots, butterfly, q, twoQ, cache);
-                nttInverseLog14WarpStage<2u, TileIdx, Cached>(
-                    lo, hi, roots, butterfly, q, twoQ, cache);
-                nttInverseLog14WarpStage<3u, TileIdx, Cached>(
-                    lo, hi, roots, butterfly, q, twoQ, cache);
-                nttInverseLog14WarpStage<4u, TileIdx, Cached>(
-                    lo, hi, roots, butterfly, q, twoQ, cache);
-                nttInverseLog14WarpStage<5u, TileIdx, Cached>(
-                    lo, hi, roots, butterfly, q, twoQ, cache);
+                nttInverseLog14WarpStage<1u, TileIdx>(
+                    lo, hi, roots, butterfly, q, twoQ);
+                nttInverseLog14WarpStage<2u, TileIdx>(
+                    lo, hi, roots, butterfly, q, twoQ);
+                nttInverseLog14WarpStage<3u, TileIdx>(
+                    lo, hi, roots, butterfly, q, twoQ);
+                nttInverseLog14WarpStage<4u, TileIdx>(
+                    lo, hi, roots, butterfly, q, twoQ);
+                nttInverseLog14WarpStage<5u, TileIdx>(
+                    lo, hi, roots, butterfly, q, twoQ);
 
                 constexpr u32 gap = 32u;
                 const u32 output =
@@ -5397,13 +5262,13 @@ namespace osuCrypto::LogVole::gpu
                 sh[output + gap] = hi;
             }
             __syncthreads();
-            nttInverseLog14TileStage<6u, TileIdx, Cached>(
-                sh, roots, q, twoQ, cache);
-            if constexpr (PairedSuffix)
+            nttInverseLog14TileStage<6u, TileIdx>(
+                sh, roots, q, twoQ);
+            if constexpr (DirectLoad)
             {
-                nttInverseLog14TileStagePair<7u, TileIdx, Cached>(sh, roots, q, twoQ, cache);
-                nttInverseLog14TileStagePair<9u, TileIdx, Cached>(sh, roots, q, twoQ, cache);
-                nttInverseLog14TileStagePair<11u, TileIdx, Cached>(sh, roots, q, twoQ, cache);
+                nttInverseLog14TileStagePair<7u, TileIdx>(sh, roots, q, twoQ);
+                nttInverseLog14TileStagePair<9u, TileIdx>(sh, roots, q, twoQ);
+                nttInverseLog14TileStagePair<11u, TileIdx>(sh, roots, q, twoQ);
             }
             else
             {
@@ -5426,10 +5291,8 @@ namespace osuCrypto::LogVole::gpu
         // path; the production default uses separate high-occupancy IP kernels,
         // so all hot two-tile inverses reach this body. Pre/post operations keep
         // their accepted load/store order and modular arithmetic.
-        template<u32 Threads, bool Warp05, bool DirectLoad = false,
-                 bool PairedSuffix = false, bool Cached = false>
-        __global__ __launch_bounds__(
-            Threads, Threads == 512u ? 2u : 1u)
+        template<bool DirectLoad>
+        __global__ __launch_bounds__(512, 2)
         void nttInverseTwoTile16384Rho8Kernel(
             DeviceRing rg,
             u64* data,
@@ -5443,11 +5306,8 @@ namespace osuCrypto::LogVole::gpu
             constexpr u32 n = 16384u;
             constexpr u32 rho = 8u;
             constexpr u32 tileLen = 8192u;
+            constexpr u32 Threads = 512u;
             constexpr u32 parked = tileLen / Threads;
-            static_assert(Threads == 512u || Threads == 1024u);
-            static_assert(!DirectLoad || Warp05);
-            static_assert(!PairedSuffix || DirectLoad);
-            static_assert(!Cached || PairedSuffix);
 
             const u32 limb = blockIdx.x & (rho - 1u);
             const u32 slot = blockIdx.x >> 3u;
@@ -5460,22 +5320,14 @@ namespace osuCrypto::LogVole::gpu
             const u64 q = rg.mMods[limb].mValue;
             const u64 twoQ = q << 1u;
             u64 hi[parked];
-            ShoupOperand* cache = reinterpret_cast<ShoupOperand*>(sh + tileLen);
-            if constexpr (Cached)
-            {
-                for (u32 i = threadIdx.x; i < 1024u; i += Threads)
-                    cache[i] = nttLoadShoup<true>(roots + 15360u + i);
-                __syncthreads();
-            }
-
             // Transform and park the high half first.
             {
                 u64* src = limbBase + tileLen;
                 if constexpr (DirectLoad)
                 {
-                    nttInverseLog14TileWarp05<1u, true, PairedSuffix, Cached>(
+                    nttInverseLog14TileWarp05<1u, true>(
                         sh, roots, q, twoQ, src, preOp,
-                        preOp == kElemOpNone ? nullptr : preB + limbOff + tileLen, cache);
+                        preOp == kElemOpNone ? nullptr : preB + limbOff + tileLen);
                 }
                 else
                 {
@@ -5496,10 +5348,7 @@ namespace osuCrypto::LogVole::gpu
                         }
                     }
                     __syncthreads();
-                    if constexpr (Warp05)
-                        nttInverseLog14TileWarp05<1u>(sh, roots, q, twoQ);
-                    else
-                        nttInverseLog14Tile<1u>(sh, roots, q, twoQ);
+                    nttInverseLog14TileWarp05<1u>(sh, roots, q, twoQ);
                 }
 #pragma unroll
                 for (u32 i = 0; i < parked; ++i)
@@ -5511,9 +5360,9 @@ namespace osuCrypto::LogVole::gpu
             {
                 if constexpr (DirectLoad)
                 {
-                    nttInverseLog14TileWarp05<0u, true, PairedSuffix, Cached>(
+                    nttInverseLog14TileWarp05<0u, true>(
                         sh, roots, q, twoQ, limbBase, preOp,
-                        preOp == kElemOpNone ? nullptr : preB + limbOff, cache);
+                        preOp == kElemOpNone ? nullptr : preB + limbOff);
                 }
                 else
                 {
@@ -5534,10 +5383,7 @@ namespace osuCrypto::LogVole::gpu
                         }
                     }
                     __syncthreads();
-                    if constexpr (Warp05)
-                        nttInverseLog14TileWarp05<0u>(sh, roots, q, twoQ);
-                    else
-                        nttInverseLog14Tile<0u>(sh, roots, q, twoQ);
+                    nttInverseLog14TileWarp05<0u>(sh, roots, q, twoQ);
                 }
             }
 
@@ -12652,46 +12498,16 @@ namespace osuCrypto::LogVole::gpu
                 {
                     return launchForwardFp52Tail<0u>(rg, data, polyIdx, nullptr, data, polyIdx, polyCount, st);
                 }
-                if (rc.mKernelOptions.mNttLog14H200ForwardWarp712)
-                {
-                    if (rc.mKernelOptions.mNttLog14H200ForwardPairedPrefix)
-                    {
-                        if (!check(cudaFuncSetAttribute(
-                                nttForwardTwoTile16384Rho8Kernel<true, true, 512u>,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                static_cast<int>(shBytes)),
-                                "cudaFuncSetAttribute(forwardLog14Paired512)"))
-                            return false;
-                        nttForwardTwoTile16384Rho8Kernel<true, true, 512u><<<
-                            polyCount * 8u, 512u, shBytes, st>>>(rg, data, polyIdx);
-                        return check(cudaGetLastError(), "nttForwardLog14Paired");
-                    }
-                    if (!check(
-                            cudaFuncSetAttribute(
-                                nttForwardTwoTile16384Rho8Kernel<true>,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                static_cast<int>(shBytes)),
-                            "cudaFuncSetAttribute(forwardTwoTile16384Rho8Warp712)"))
-                        return false;
-                    nttForwardTwoTile16384Rho8Kernel<true><<<
-                        polyCount * 8u, kNttThreads, shBytes, st>>>(
-                        rg, data, polyIdx);
-                }
-                else
-                {
-                    if (!check(
-                            cudaFuncSetAttribute(
-                                nttForwardTwoTile16384Rho8Kernel<false>,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                static_cast<int>(shBytes)),
-                            "cudaFuncSetAttribute(forwardTwoTile16384Rho8)"))
-                        return false;
-                    nttForwardTwoTile16384Rho8Kernel<false><<<
-                        polyCount * 8u, kNttThreads, shBytes, st>>>(
-                        rg, data, polyIdx);
-                }
-                return check(
-                    cudaGetLastError(), "nttForwardTwoTile16384Rho8");
+                if (!check(cudaFuncSetAttribute(
+                        nttForwardTwoTile16384Rho8Kernel<true, 512u>,
+                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+                        static_cast<int>(shBytes)),
+                        "cudaFuncSetAttribute(forwardLog14Paired512)"))
+                    return false;
+                nttForwardTwoTile16384Rho8Kernel<true, 512u><<<
+                    polyCount * 8u, 512u, shBytes, st>>>(rg, data, polyIdx);
+                return check(cudaGetLastError(), "nttForwardLog14Paired");
+
             }
             if (!check(
                     cudaFuncSetAttribute(
@@ -13035,48 +12851,31 @@ namespace osuCrypto::LogVole::gpu
             {
                 return launchForwardFp52Tail<1u>(toDevice(rc), in, inIdx, nullptr, out, outIdx, polyCount, asStream(stream));
             }
-            if (rc.mKernelOptions.mNttLog14H200ForwardWarp712)
+            if (polyCount * rc.mRho >= 2u * rc.mSmCount)
             {
-                if (rc.mKernelOptions.mNttLog14H200ForwardPairedPrefix &&
-                    polyCount * rc.mRho >= 2u * rc.mSmCount)
-                {
-                    if (!check(cudaFuncSetAttribute(
-                            nttForwardFromPlainBroadcast16384Rho8Kernel<true, true, 512u>,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize,
-                            static_cast<int>(shBytes)),
-                            "cudaFuncSetAttribute(forwardPlainLog14Paired512)"))
-                        return false;
-                    nttForwardFromPlainBroadcast16384Rho8Kernel<true, true, 512u><<<
-                        polyCount * 8u, 512u, shBytes, asStream(stream)>>>(
-                        toDevice(rc), in, inIdx, out, outIdx);
-                    return check(cudaGetLastError(), "nttForwardPlainLog14Paired");
-                }
-                if (!check(
-                        cudaFuncSetAttribute(
-                            nttForwardFromPlainBroadcast16384Rho8Kernel<true>,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize,
-                            static_cast<int>(shBytes)),
-                        "cudaFuncSetAttribute(forwardFromPlainBroadcast16384Rho8Warp712)"))
+                if (!check(cudaFuncSetAttribute(
+                        nttForwardFromPlainBroadcast16384Rho8Kernel<true, 512u>,
+                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+                        static_cast<int>(shBytes)),
+                        "cudaFuncSetAttribute(forwardPlainLog14Paired512)"))
                     return false;
-                nttForwardFromPlainBroadcast16384Rho8Kernel<true><<<
-                    polyCount * 8u, kNttThreads, shBytes,
-                    asStream(stream)>>>(
+                nttForwardFromPlainBroadcast16384Rho8Kernel<true, 512u><<<
+                    polyCount * 8u, 512u, shBytes, asStream(stream)>>>(
                     toDevice(rc), in, inIdx, out, outIdx);
+                return check(cudaGetLastError(), "nttForwardPlainLog14Paired");
             }
-            else
-            {
-                if (!check(
-                        cudaFuncSetAttribute(
-                            nttForwardFromPlainBroadcast16384Rho8Kernel<false>,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize,
-                            static_cast<int>(shBytes)),
-                        "cudaFuncSetAttribute(forwardFromPlainBroadcast16384Rho8)"))
-                    return false;
-                nttForwardFromPlainBroadcast16384Rho8Kernel<false><<<
-                    polyCount * 8u, kNttThreads, shBytes,
-                    asStream(stream)>>>(
-                    toDevice(rc), in, inIdx, out, outIdx);
-            }
+            if (!check(
+                    cudaFuncSetAttribute(
+                        nttForwardFromPlainBroadcast16384Rho8Kernel<>,
+                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+                        static_cast<int>(shBytes)),
+                    "cudaFuncSetAttribute(forwardFromPlainBroadcast16384Rho8Warp712)"))
+                return false;
+            nttForwardFromPlainBroadcast16384Rho8Kernel<><<<
+                polyCount * 8u, kNttThreads, shBytes,
+                asStream(stream)>>>(
+                toDevice(rc), in, inIdx, out, outIdx);
+
             return check(
                 cudaGetLastError(),
                 "nttForwardFromPlainBroadcast16384Rho8");
@@ -13282,47 +13081,17 @@ namespace osuCrypto::LogVole::gpu
             {
                 return launchForwardFp52Tail<2u>(rg, in, inIdx, limbSel, out, outIdx, polyCount, asStream(stream));
             }
-            if (rc.mKernelOptions.mNttLog14H200ForwardWarp712)
-            {
-                if (rc.mKernelOptions.mNttLog14H200ForwardPairedPrefix)
-                {
-                    if (!check(cudaFuncSetAttribute(
-                            nttForwardCenteredLimbFrom16384Rho8Kernel<true, true, 512u>,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize,
-                            static_cast<int>(shBytes)),
-                            "cudaFuncSetAttribute(forwardCenteredLog14Paired512)"))
-                        return false;
-                    nttForwardCenteredLimbFrom16384Rho8Kernel<true, true, 512u><<<
-                        polyCount * 8u, 512u, shBytes, asStream(stream)>>>(
-                        rg, in, inIdx, limbSel, out, outIdx);
-                    return check(cudaGetLastError(), "nttForwardCenteredLog14Paired");
-                }
-                if (!check(
-                        cudaFuncSetAttribute(
-                            nttForwardCenteredLimbFrom16384Rho8Kernel<true>,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize,
-                            static_cast<int>(shBytes)),
-                        "cudaFuncSetAttribute(forwardCentered16384Rho8Warp712)"))
-                    return false;
-                nttForwardCenteredLimbFrom16384Rho8Kernel<true><<<
-                    polyCount * 8u, kNttThreads, shBytes,
-                    asStream(stream)>>>(
-                    rg, in, inIdx, limbSel, out, outIdx);
-            }
-            else
-            {
-                if (!check(
-                        cudaFuncSetAttribute(
-                            nttForwardCenteredLimbFrom16384Rho8Kernel<false>,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize,
-                            static_cast<int>(shBytes)),
-                        "cudaFuncSetAttribute(forwardCentered16384Rho8)"))
-                    return false;
-                nttForwardCenteredLimbFrom16384Rho8Kernel<false><<<
-                    polyCount * 8u, kNttThreads, shBytes,
-                    asStream(stream)>>>(
-                    rg, in, inIdx, limbSel, out, outIdx);
-            }
+            if (!check(cudaFuncSetAttribute(
+                    nttForwardCenteredLimbFrom16384Rho8Kernel<true, 512u>,
+                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                    static_cast<int>(shBytes)),
+                    "cudaFuncSetAttribute(forwardCenteredLog14Paired512)"))
+                return false;
+            nttForwardCenteredLimbFrom16384Rho8Kernel<true, 512u><<<
+                polyCount * 8u, 512u, shBytes, asStream(stream)>>>(
+                rg, in, inIdx, limbSel, out, outIdx);
+            return check(cudaGetLastError(), "nttForwardCenteredLog14Paired");
+
         }
         else
         {
@@ -13623,96 +13392,28 @@ namespace osuCrypto::LogVole::gpu
                         rg, data, polyIdx, preOp, preB, postOp, postB);
                     return check(cudaGetLastError(), "inverse FP52 two-tile");
                 }
-                const u32 threads = rc.mKernelOptions.mNttLog14H200InverseThreads;
                 // The direct prefix uses 128-bit input loads. Unaligned
                 // caller-owned arrays retain the scalar shared-input path.
                 const bool alignedInputs =
                     (reinterpret_cast<size_t>(data) & 15u) == 0u &&
                     (preOp == kElemOpNone ||
                      (reinterpret_cast<size_t>(preB) & 15u) == 0u);
-                if (threads == 512u && rc.mKernelOptions.mNttLog14H200InverseWarp05 &&
-                    rc.mKernelOptions.mNttLog14H200InverseDirectLoad && alignedInputs)
+                if (alignedInputs)
                 {
-                    if (rc.mKernelOptions.mNttLog14H200InversePairedSuffix)
-                    {
-                        if (rc.mKernelOptions.mNoGoldH200InverseCachedSuffix)
-                        {
-                            const size_t cachedBytes = shBytes + 1024u * sizeof(ShoupOperand);
-                            if (!check(cudaFuncSetAttribute(
-                                    nttInverseTwoTile16384Rho8Kernel<512u, true, true, true, true>,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(cachedBytes)), "inverse cached suffix shared"))
-                                return false;
-                            nttInverseTwoTile16384Rho8Kernel<512u, true, true, true, true><<<
-                                polyCount * 8u, 512u, cachedBytes, st>>>(
-                                rg, data, polyIdx, preOp, preB, postOp, postB);
-                            return check(cudaGetLastError(), "inverse cached suffix");
-                        }
-                        if (!check(
-                                cudaFuncSetAttribute(
-                                    nttInverseTwoTile16384Rho8Kernel<512u, true, true, true>,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(shBytes)),
-                                "cudaFuncSetAttribute(inverseLog14PairedSuffix)"))
-                            return false;
-                        nttInverseTwoTile16384Rho8Kernel<512u, true, true, true><<<
-                            polyCount * 8u, 512u, shBytes, st>>>(
-                            rg, data, polyIdx, preOp, preB, postOp, postB);
-                        return check(cudaGetLastError(), "nttInverseLog14PairedSuffix");
-                    }
-                    if (!check(
-                            cudaFuncSetAttribute(
-                                nttInverseTwoTile16384Rho8Kernel<512u, true, true>,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                static_cast<int>(shBytes)),
-                            "cudaFuncSetAttribute(inverseLog14DirectLoad)"))
+                    if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Kernel<true>,
+                            cudaFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(shBytes)),
+                            "cudaFuncSetAttribute(inverseLog14PairedSuffix)"))
                         return false;
-                    nttInverseTwoTile16384Rho8Kernel<512u, true, true><<<
-                        polyCount * 8u, 512u, shBytes, st>>>(
+                    nttInverseTwoTile16384Rho8Kernel<true><<<polyCount * 8u, 512u, shBytes, st>>>(
                         rg, data, polyIdx, preOp, preB, postOp, postB);
+                    return check(cudaGetLastError(), "nttInverseLog14PairedSuffix");
                 }
-                else if (threads == 512u)
-                {
-                    if (rc.mKernelOptions.mNttLog14H200InverseWarp05)
-                    {
-                        if (!check(
-                                cudaFuncSetAttribute(
-                                    nttInverseTwoTile16384Rho8Kernel<512u, true>,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(shBytes)),
-                                "cudaFuncSetAttribute(inverseTwoTile16384Rho8x512Warp05)"))
-                            return false;
-                        nttInverseTwoTile16384Rho8Kernel<512u, true><<<
-                            polyCount * 8u, 512u, shBytes, st>>>(
-                            rg, data, polyIdx, preOp, preB, postOp, postB);
-                    }
-                    else
-                    {
-                        if (!check(
-                                cudaFuncSetAttribute(
-                                    nttInverseTwoTile16384Rho8Kernel<512u, false>,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    static_cast<int>(shBytes)),
-                                "cudaFuncSetAttribute(inverseTwoTile16384Rho8x512)"))
-                            return false;
-                        nttInverseTwoTile16384Rho8Kernel<512u, false><<<
-                            polyCount * 8u, 512u, shBytes, st>>>(
-                            rg, data, polyIdx, preOp, preB, postOp, postB);
-                    }
-                }
-                else
-                {
-                    if (!check(
-                            cudaFuncSetAttribute(
-                                nttInverseTwoTile16384Rho8Kernel<1024u, false>,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                static_cast<int>(shBytes)),
-                            "cudaFuncSetAttribute(inverseTwoTile16384Rho8x1024)"))
-                        return false;
-                    nttInverseTwoTile16384Rho8Kernel<1024u, false><<<
-                        polyCount * 8u, 1024u, shBytes, st>>>(
-                        rg, data, polyIdx, preOp, preB, postOp, postB);
-                }
+                if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Kernel<false>,
+                        cudaFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(shBytes)),
+                        "cudaFuncSetAttribute(inverseTwoTile16384Rho8x512Warp05)"))
+                    return false;
+                nttInverseTwoTile16384Rho8Kernel<false><<<polyCount * 8u, 512u, shBytes, st>>>(
+                    rg, data, polyIdx, preOp, preB, postOp, postB);
                 return check(
                     cudaGetLastError(), "nttInverseTwoTile16384Rho8");
             }

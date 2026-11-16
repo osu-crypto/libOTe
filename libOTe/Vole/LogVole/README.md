@@ -1329,3 +1329,17 @@ verified in the SM90 object. Three focused checks passed with zero skips in
 inverse results against CPU transforms with runtime operations and native/null
 root views. H200-only threshold cases were added but were not executed locally.
 No benchmarks were run.
+
+The integer H200 NTT cleanup removes seven tuning selectors while retaining
+paired 512-thread large-batch forward paths, the 1024-thread small plain-broadcast
+path, and aligned direct/paired versus unaligned shared-input inverse paths.
+Generic transforms, FP52 schedules, and their eligibility gates remain intact.
+
+Validation: the Windows VS 14.50 CUDA test target and frontend object build and
+isolated SM90 compile passed. Six retained integer kernel entries and the FP52
+entries were verified in the SM90 object. Three focused checks passed with zero
+skips in 20.72 seconds using `-gpu 1 -lvFactoryFast 1`. The RTX 4060 executed
+53-bit generic forward/centered CPU-oracle parity and inverse Add/Negate parity
+with aligned, one-word-shifted data, and one-word-shifted pre-input views.
+H200 integer execution and the 16384 plain-broadcast path remain conditional
+and were not executed locally. No benchmarks were run.

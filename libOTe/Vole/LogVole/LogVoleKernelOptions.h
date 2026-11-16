@@ -14,18 +14,11 @@ namespace osuCrypto
         bool mNttLog14H200FixedTransforms = true;
         bool mNoGoldH200CombinedAccumulator = true;
         bool mNoGoldH200AccumulatorPseudo52 = true;
-        bool mNoGoldH200InverseCachedSuffix = false;
         bool mNoGoldH200Gadget208 = true;
         bool mNoGoldH200Gadget208Pseudo52 = true;
-        bool mNttLog14H200InverseWarp05 = true;
-        bool mNttLog14H200InverseDirectLoad = true;
-        bool mNttLog14H200InversePairedSuffix = true;
-        bool mNttLog14H200ForwardWarp712 = true;
-        bool mNttLog14H200ForwardPairedPrefix = true;
         bool mNttLog14H200Centered = true;
         std::uint32_t mNttForwardThreads = 1024u;
         std::uint32_t mNttInverseThreads = 1024u;
-        std::uint32_t mNttLog14H200InverseThreads = 512u;
         // Zero inherits mNttInverseThreads.
         std::uint32_t mNttFusedIpThreads = 0u;
         std::uint32_t mCt2PolySeedThreads = 32u;
@@ -99,7 +92,6 @@ namespace osuCrypto
         {
             return (mNttForwardThreads == 256u || mNttForwardThreads == 512u || mNttForwardThreads == 1024u) &&
                 (mNttInverseThreads == 256u || mNttInverseThreads == 512u || mNttInverseThreads == 1024u) &&
-                (mNttLog14H200InverseThreads == 512u || mNttLog14H200InverseThreads == 1024u) &&
                 (mNttFusedIpThreads == 0u || mNttFusedIpThreads == 256u || mNttFusedIpThreads == 512u || mNttFusedIpThreads == 1024u) &&
                 (mCt2PolySeedThreads == 32u || mCt2PolySeedThreads == 64u || mCt2PolySeedThreads == 128u) &&
                 (mRootZetaSampleThreads == 128u || mRootZetaSampleThreads == 256u) &&
@@ -116,18 +108,11 @@ namespace osuCrypto
                 mNttLog14H200FixedTransforms == other.mNttLog14H200FixedTransforms &&
                 mNoGoldH200CombinedAccumulator == other.mNoGoldH200CombinedAccumulator &&
                 mNoGoldH200AccumulatorPseudo52 == other.mNoGoldH200AccumulatorPseudo52 &&
-                mNoGoldH200InverseCachedSuffix == other.mNoGoldH200InverseCachedSuffix &&
                 mNoGoldH200Gadget208 == other.mNoGoldH200Gadget208 &&
                 mNoGoldH200Gadget208Pseudo52 == other.mNoGoldH200Gadget208Pseudo52 &&
-                mNttLog14H200InverseWarp05 == other.mNttLog14H200InverseWarp05 &&
-                mNttLog14H200InverseDirectLoad == other.mNttLog14H200InverseDirectLoad &&
-                mNttLog14H200InversePairedSuffix == other.mNttLog14H200InversePairedSuffix &&
-                mNttLog14H200ForwardWarp712 == other.mNttLog14H200ForwardWarp712 &&
-                mNttLog14H200ForwardPairedPrefix == other.mNttLog14H200ForwardPairedPrefix &&
                 mNttLog14H200Centered == other.mNttLog14H200Centered &&
                 mNttForwardThreads == other.mNttForwardThreads &&
                 mNttInverseThreads == other.mNttInverseThreads &&
-                mNttLog14H200InverseThreads == other.mNttLog14H200InverseThreads &&
                 mNttFusedIpThreads == other.mNttFusedIpThreads &&
                 mCt2PolySeedThreads == other.mCt2PolySeedThreads &&
                 mCt2SplitAes == other.mCt2SplitAes &&
