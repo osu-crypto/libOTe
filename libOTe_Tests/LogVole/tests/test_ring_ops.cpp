@@ -2430,7 +2430,7 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
                 kernel.mNttForwardThreads = 256;
                 kernel.mNttInverseThreads = 256;
                 kernel.mNttLog13InverseThreads = 256;
-                kernel.mNoGoldH200PackedRoots = 0;
+                kernel.mNoGoldH200InversePackedRoots = false;
             }
             else if (variant == 2)
             {
@@ -2439,9 +2439,8 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
                 kernel.mNttLog13SimpleIndex = false;
                 kernel.mNttLog13ForwardWarpStages712 = false;
                 kernel.mNttLog13InverseFusedLastThreeStages = false;
-                kernel.mNoGoldH200ForwardFp52Mode = 0;
                 kernel.mNoGoldH200InverseFp52Threads = 0;
-                kernel.mNoGoldH200PackedRoots = 3;
+                kernel.mNoGoldH200InversePackedRoots = true;
             }
             LOGVOLE_REQUIRE_TRUE(kernel.valid());
             auto factory = std::make_shared<RingContextFactory>(options, nullptr);
@@ -2728,11 +2727,17 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
         ring->rho() == params.mCoeffModulusBits.size());
     auto& stream = operationExecution.mainStream();
     const bool fast = cmd.getOr("lvFactoryFast", 0) != 0;
-    for (std::size_t count : {std::size_t{1}, std::size_t{8}, std::size_t{16}})
+    std::vector<std::size_t> counts{1u, 8u};
+    if (!fast) counts.push_back(16u);
+    const auto view = ring->view(stream);
+    if (view.mH200Shared)
     {
-        // One row and an eight-row batch cover both layouts and warm reuse.
-        // Keep the larger matrix available for an explicitly requested full run.
-        if (fast && count == 16u) continue;
+        const auto count = (2u * view.mSmCount + view.mRho - 1u) / view.mRho;
+        LOGVOLE_REQUIRE_TRUE(count > 0u && count <= 64u);
+        if (std::find(counts.begin(), counts.end(), count) == counts.end()) counts.push_back(count);
+    }
+    for (std::size_t count : counts)
+    {
         std::vector<RnsPoly> original(count), expected(count);
         for (std::size_t i = 0; i < count; ++i)
         {
@@ -2762,6 +2767,60 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(outOfPlace.download(actualOutOfPlace, stream));
             expect_batch_equal(actualInPlace, expected);
             expect_batch_equal(actualOutOfPlace, expected);
+        }
+        // Directly check both broadcast load modes against a CPU transform.
+        // Real H200 owners also include the batch that reaches the FP52 gate.
+        for (bool centered : {false, true})
+        {
+            if (!centered && !gpu::canLaunchNttForwardFromPlainBroadcast(view))
+            {
+                LOGVOLE_REQUIRE_FALSE(view.mH200Shared);
+                continue;
+            }
+            auto source = original;
+            auto broadcast = original;
+            std::vector<std::uint32_t> limbs(count);
+            for (std::size_t p = 0; p < count; ++p)
+            {
+                const auto limb = centered ? static_cast<std::uint32_t>(p % 8u) : 0u;
+                limbs[p] = limb;
+                const auto sourceQ = ringModulusValue(ctx, limb);
+                for (std::size_t c = 0; c < params.mPolyModulusDegree; ++c)
+                {
+                    auto value = source[p].mCoeffs[limb * params.mPolyModulusDegree + c];
+                    if (centered)
+                    {
+                        if (c == 0u) value = sourceQ / 2u;
+                        if (c == 1u) value = sourceQ / 2u + 1u;
+                        if (c == 2u) value = sourceQ - 1u;
+                    }
+                    else value %= view.mMinModulus;
+                    source[p].mCoeffs[limb * params.mPolyModulusDegree + c] = value;
+                    for (unsigned j = 0; j < 8u; ++j)
+                    {
+                        const auto q = ringModulusValue(ctx, j);
+                        broadcast[p].mCoeffs[j * params.mPolyModulusDegree + c] =
+                            centered && value > sourceQ / 2u ? q - (sourceQ - value) : value;
+                    }
+                }
+                LOGVOLE_REQUIRE_TRUE(forwardNtt(broadcast[p], ctx));
+            }
+            LOGVOLE_REQUIRE_TRUE(outOfPlaceInput.upload(source, stream));
+            if (centered)
+            {
+                const auto* selection = stream.uploadIdx(limbs);
+                LOGVOLE_REQUIRE_TRUE(selection);
+                LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardCenteredLimbFrom(view,
+                    outOfPlaceInput.data(stream), nullptr, selection, outOfPlace.data(stream),
+                    nullptr, static_cast<std::uint32_t>(count), stream.raw()));
+            }
+            else
+                LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardFromPlainBroadcast(view,
+                    outOfPlaceInput.data(stream), nullptr, outOfPlace.data(stream), nullptr,
+                    static_cast<std::uint32_t>(count), stream.raw()));
+            std::vector<RnsPoly> actual;
+            LOGVOLE_REQUIRE_TRUE(outOfPlace.download(actual, stream));
+            expect_batch_equal(actual, broadcast);
         }
     }
 #else

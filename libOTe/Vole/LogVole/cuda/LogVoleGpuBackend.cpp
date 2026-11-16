@@ -489,8 +489,11 @@ namespace osuCrypto::LogVole::gpu
         // stage scratch, and the single required q/p/lift/status host record.
         // Its bound is the sum of the previously independent raw arenas plus
         // room for aligned metadata and optional H200 gadget constants.
+        // Other raw geometries retain their existing metadata headroom.
+        const std::size_t packedRootBytes =
+            (n == 16384u && rho == 8u ? 1u : 2u) * sizeof(double);
         const std::size_t ringBytes =
-            words * (2u * sizeof(HostShoupOperand) + 2u * sizeof(double)) + 16384u;
+            words * (2u * sizeof(HostShoupOperand) + packedRootBytes) + 16384u;
         const std::size_t plainBytes =
             static_cast<std::size_t>(n) *
                 (2u * sizeof(HostShoupOperand) + 2u * sizeof(u32)) + 1024u;
@@ -553,13 +556,10 @@ namespace osuCrypto::LogVole::gpu
                 std::all_of(params.mCoeffModulusBits.begin(),
                     params.mCoeffModulusBits.end(),
                     [](int bits) { return bits == 52; });
-            const u32 packedMode = ring->mView.mKernelOptions.mNoGoldH200PackedRoots;
             if (fp52Shape)
             {
-                if (packedMode & 1u)
+                if (ring->mView.mKernelOptions.mNoGoldH200InversePackedRoots)
                     ring->mView.mFp52InvRoots = arena.take<double>(words);
-                if (packedMode & 2u)
-                    ring->mView.mFp52Roots = arena.take<double>(words);
             }
             allocateRawNttView(arena, plain->mView, n, 1u);
             auto* plainScratch = arena.take<u64>(3u);
@@ -1530,7 +1530,10 @@ namespace osuCrypto::LogVole::gpu
         u32 status = ~u32{0};
         RawSetupStream stream(mSetup);
         if (!stream.mStream) return false;
-        RawConstantArena arena(words * (2 * sizeof(HostShoupOperand) + 2 * sizeof(double)) + 16384, stream);
+        // Other raw geometries retain their existing metadata headroom.
+        const std::size_t packedRootBytes =
+            (n == 16384u && rho == 8u ? 1u : 2u) * sizeof(double);
+        RawConstantArena arena(words * (2 * sizeof(HostShoupOperand) + packedRootBytes) + 16384, stream);
         if (!arena) return false;
         allocateRawNttView(arena, mView, n, primes);
         auto* devicePrimes = arena.take<u64>(rho);
@@ -1562,11 +1565,9 @@ namespace osuCrypto::LogVole::gpu
         }
         const bool fp52Shape = h200LazyResourcesDefault() && n == 16384u && rho == 8u &&
             mView.mMinModulus > (u64{1} << 51u) && mView.mMaxModulus < (u64{1} << 52u);
-        const u32 packedMode = mView.mKernelOptions.mNoGoldH200PackedRoots;
         if (fp52Shape)
         {
-            if (packedMode & 1u) mView.mFp52InvRoots = arena.take<double>(words);
-            if (packedMode & 2u) mView.mFp52Roots = arena.take<double>(words);
+            if (mView.mKernelOptions.mNoGoldH200InversePackedRoots) mView.mFp52InvRoots = arena.take<double>(words);
         }
         if (!devicePrimes || !scratch || !deviceStatus ||
             !gpuMemcpyH2D(devicePrimes, mHostModuli.data(), rho * sizeof(u64), stream.mStream) ||
@@ -1732,28 +1733,15 @@ namespace osuCrypto::LogVole::gpu
 
         // Compact inverse twiddles are immutable, prepared once with the ring
         // outside the online query, and never replace the integer fallback.
-        // Forward packing remains opt-in: it did not win at both query sizes.
-        const u32 packedMode = mView.mKernelOptions.mNoGoldH200PackedRoots;
-        if (packedMode && h200LazyResourcesDefault() && n == 16384u && rho == 8u &&
+        if (mView.mKernelOptions.mNoGoldH200InversePackedRoots &&
+            h200LazyResourcesDefault() && n == 16384u && rho == 8u &&
             mView.mMinModulus > (u64{1} << 51u) && mView.mMaxModulus < (u64{1} << 52u))
         {
             compact.resize(roots.size());
-            if (packedMode & 1u)
-            {
-                std::transform(invRoots.begin(), invRoots.end(), compact.begin(),
-                    [](const HostShoupOperand& root) { return static_cast<double>(root.mOperand); });
-                mView.mFp52InvRoots = static_cast<const double*>(uploadVector(compact, mOwned, stream));
-                if (!mView.mFp52InvRoots) return false;
-            }
-            if (packedMode & 2u)
-            {
-                // The same host buffer backs the preceding upload.
-                if ((packedMode & 1u) && !stream.sync()) return false;
-                std::transform(roots.begin(), roots.end(), compact.begin(),
-                    [](const HostShoupOperand& root) { return static_cast<double>(root.mOperand); });
-                mView.mFp52Roots = static_cast<const double*>(uploadVector(compact, mOwned, stream));
-                if (!mView.mFp52Roots) return false;
-            }
+            std::transform(invRoots.begin(), invRoots.end(), compact.begin(),
+                [](const HostShoupOperand& root) { return static_cast<double>(root.mOperand); });
+            mView.mFp52InvRoots = static_cast<const double*>(uploadVector(compact, mOwned, stream));
+            if (!mView.mFp52InvRoots) return false;
         }
 
         mSampleMaxMultiple = static_cast<const u64*>(uploadVector(sampleMax, mOwned, stream));

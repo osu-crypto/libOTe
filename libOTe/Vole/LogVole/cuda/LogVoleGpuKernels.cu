@@ -394,7 +394,6 @@ namespace osuCrypto::LogVole::gpu
                 rawSetupShoup(root, mod);
             static_cast<ShoupOperand*>(const_cast<void*>(rc.mInvRoots))[start + inverse] =
                 rawSetupShoup(invRoot, mod);
-            if (rc.mFp52Roots) const_cast<double*>(rc.mFp52Roots)[start + forward] = static_cast<double>(root);
             if (rc.mFp52InvRoots) const_cast<double*>(rc.mFp52InvRoots)[start + inverse] = static_cast<double>(invRoot);
         }
 
@@ -556,7 +555,7 @@ namespace osuCrypto::LogVole::gpu
             if (!(mode & (inverse ? 1u : 2u)) || !log14H200Shape(rc)) return true;
             const size_t maxWindow = rc.mH200RootL2MaxWindow;
             if (!maxWindow) return true;
-            const double* packed = inverse ? rc.mFp52InvRoots : rc.mFp52Roots;
+            const double* packed = inverse ? rc.mFp52InvRoots : nullptr;
             const void* roots = packed ? static_cast<const void*>(packed) : inverse ? rc.mInvRoots : rc.mRoots;
             const size_t bytes = static_cast<size_t>(rc.mRho) * rc.mN * (packed ? sizeof(double) : sizeof(ShoupOperand));
             if (!roots || bytes > maxWindow) return true;
@@ -6038,7 +6037,7 @@ namespace osuCrypto::LogVole::gpu
         __device__ __forceinline__ void forwardFp52InterleavedTail(
             const double* sh, const Root* roots, const double* cache, u64* dst, double q, double invQ)
         {
-            constexpr u32 groups = Mode == 2u ? 4u : Mode == 4u ? 1u : 2u;
+            constexpr u32 groups = Mode == 2u ? 4u : 2u;
             for (u32 first = threadIdx.x; first < 4096u; first += 512u * groups)
             {
                 double lo[groups], hi[groups];
@@ -6046,11 +6045,6 @@ namespace osuCrypto::LogVole::gpu
                 for (u32 i = 0; i < groups; ++i)
                 {
                     const u32 b = first + i * 512u;
-                    if constexpr (Mode >= 3u)
-                    {
-                        prefetchInverseFp52<false>(roots + 2048u * Factor + (b >> 1u));
-                        prefetchInverseFp52<false>(roots + 4096u * Factor + b);
-                    }
                     const u32 group = b >> 5u, ix = b + (group << 5u);
                     const double r = forwardFp52Root<7u, CacheLog>(roots, cache, 128u * Factor + group);
                     const double u = sh[ix], v = mulModFp52(sh[ix + 32u], r, q, invQ);
@@ -6072,7 +6066,7 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        template<u32 Factor, u32 CacheLog, u32 Unroll, u32 TailMode = 0u, class Root>
+        template<u32 Factor, u32 CacheLog, u32 TailMode, class Root>
         __device__ __forceinline__ void forwardFp52Tile(
             double* sh, const Root* roots, const double* cache, u64* dst, double q, double invQ)
         {
@@ -6088,34 +6082,13 @@ namespace osuCrypto::LogVole::gpu
                 sh[ix + 64u] = subModFp52(u, v, q);
             }
             __syncthreads();
-            if constexpr (TailMode != 0u)
-            {
-                forwardFp52InterleavedTail<Factor, CacheLog, TailMode>(sh, roots, cache, dst, q, invQ);
-            }
-            else
-            {
-#pragma unroll Unroll
-                for (u32 b = threadIdx.x; b < 4096u; b += 512u)
-                {
-                    const u32 group = b >> 5u, ix = b + (group << 5u);
-                    const double r = forwardFp52Root<7u, CacheLog>(roots, cache, 128u * Factor + group);
-                    const double u = sh[ix], v = mulModFp52(sh[ix + 32u], r, q, invQ);
-                    double lo = addModFp52(u, v, q), hi = subModFp52(u, v, q);
-                    forwardFp52Warp<8u, Factor, CacheLog>(lo, hi, roots, cache, b, q, invQ);
-                    forwardFp52Warp<9u, Factor, CacheLog>(lo, hi, roots, cache, b, q, invQ);
-                    forwardFp52Warp<10u, Factor, CacheLog>(lo, hi, roots, cache, b, q, invQ);
-                    forwardFp52Warp<11u, Factor, CacheLog>(lo, hi, roots, cache, b, q, invQ);
-                    forwardFp52Warp<12u, Factor, CacheLog>(lo, hi, roots, cache, b, q, invQ);
-                    dst[b * 2u] = static_cast<u64>(lo);
-                    dst[b * 2u + 1u] = static_cast<u64>(hi);
-                }
-            }
+            forwardFp52InterleavedTail<Factor, CacheLog, TailMode>(sh, roots, cache, dst, q, invQ);
         }
 
-        template<u32 CacheLog, u32 Unroll, u32 InputMode, bool Packed = false, u32 TailMode = 0u>
+        template<u32 InputMode>
         __device__ __forceinline__ void forwardFp52Body(
             double* forwardSh, DeviceRing rg, const u64* input, const u32* inputIdx,
-            const u32* inputLimb, u64* output, const u32* outputIdx, const double* packedRoots = nullptr)
+            const u32* inputLimb, u64* output, const u32* outputIdx)
         {
             static_assert(InputMode <= 2u);
             const u32 limb = blockIdx.x & 7u, slot = blockIdx.x >> 3u;
@@ -6126,14 +6099,11 @@ namespace osuCrypto::LogVole::gpu
                 InputMode == 2u && selected < 8u ? selected : 0u;
             const u64* src = input + (static_cast<size_t>(inPoly) * 8u + sourceLimb) * 16384u;
             u64* base = output + (static_cast<size_t>(outPoly) * 8u + limb) * 16384u;
-            using Root = std::conditional_t<Packed, double, ShoupOperand>;
-            const Root* roots;
-            if constexpr (Packed) roots = packedRoots + static_cast<size_t>(limb) * 16384u;
-            else roots = rg.mRoots + static_cast<size_t>(limb) * 16384u;
+            const ShoupOperand* roots = rg.mRoots + static_cast<size_t>(limb) * 16384u;
             const u64 qi = rg.mMods[limb].mValue, twoQ = qi << 1u;
             const double q = static_cast<double>(qi), invQ = __drcp_rn(q);
             double* cache = forwardSh + 8192u;
-            for (u32 i = threadIdx.x; i < (1u << CacheLog); i += 512u)
+            for (u32 i = threadIdx.x; i < (1u << 12u); i += 512u)
                 cache[i] = loadFp52Root(roots, i);
             __syncthreads();
             const double crossing = cache[1];
@@ -6163,73 +6133,37 @@ namespace osuCrypto::LogVole::gpu
                 hi[i] = subModFp52(u, v, q);
             }
             __syncthreads();
-            // The first half keeps sixteen second-half values live. Give it
-            // a different instruction-level parallelism / register tradeoff.
-            constexpr u32 firstTail = TailMode == 5u ? 1u : TailMode == 6u ? 2u :
-                TailMode == 7u ? 0u : TailMode == 8u ? 2u : TailMode;
-            constexpr u32 secondTail = TailMode == 5u ? 2u : TailMode == 6u ? 1u :
-                TailMode == 7u ? 2u : TailMode == 8u ? 0u : TailMode;
-            forwardFp52Tile<2u, CacheLog, Unroll, firstTail>(forwardSh, roots, cache, base, q, invQ);
+            // The first half keeps sixteen second-half values live. Retain
+            // its four-group tail and the second half's two-group tail.
+            forwardFp52Tile<2u, 12u, 2u>(forwardSh, roots, cache, base, q, invQ);
             __syncthreads();
 #pragma unroll
             for (u32 i = 0u; i < 16u; ++i) forwardSh[threadIdx.x + i * 512u] = hi[i];
             __syncthreads();
-            forwardFp52Tile<3u, CacheLog, Unroll, secondTail>(forwardSh, roots, cache, base + 8192u, q, invQ);
+            forwardFp52Tile<3u, 12u, 1u>(forwardSh, roots, cache, base + 8192u, q, invQ);
         }
 
-        template<u32 CacheLog, u32 Unroll, bool Packed = false>
-        __global__ __launch_bounds__(512, 2)
-        void nttForwardTwoTile16384Rho8Fp52Kernel(DeviceRing rg, u64* data, const u32* polyIdx,
-            const double* packedRoots = nullptr)
-        {
-            extern __shared__ double forwardSh[];
-            forwardFp52Body<CacheLog, Unroll, 0u, Packed>(forwardSh, rg, data, polyIdx, nullptr, data, polyIdx, packedRoots);
-        }
-
-        template<u32 InputMode, bool Packed = false>
-        __global__ __launch_bounds__(512, 2)
-        void nttForwardFrom16384Rho8Fp52Kernel(DeviceRing rg, const u64* input,
-            const u32* inputIdx, const u32* inputLimb, u64* output, const u32* outputIdx, const double* packedRoots = nullptr)
-        {
-            extern __shared__ double forwardSh[];
-            forwardFp52Body<12u, 1u, InputMode, Packed>(forwardSh, rg, input, inputIdx, inputLimb, output, outputIdx, packedRoots);
-        }
-
-        template<u32 InputMode, u32 TailMode>
+        template<u32 InputMode>
         __global__ __launch_bounds__(512, 2)
         void nttForwardTail16384Fp52Kernel(DeviceRing rg, const u64* input,
             const u32* inputIdx, const u32* inputLimb, u64* output, const u32* outputIdx)
         {
             extern __shared__ double tailFpSh[];
-            forwardFp52Body<12u, 1u, InputMode, false, TailMode>(
+            forwardFp52Body<InputMode>(
                 tailFpSh, rg, input, inputIdx, inputLimb, output, outputIdx);
         }
 
         template<u32 InputMode>
-        bool launchForwardFp52Tail(const LogVoleGpuKernelOptions& options, DeviceRing rg, const u64* input, const u32* inputIdx,
+        bool launchForwardFp52Tail(DeviceRing rg, const u64* input, const u32* inputIdx,
             const u32* inputLimb, u64* output, const u32* outputIdx, u32 polyCount, cudaStream_t stream)
         {
-            const auto launch = [&](auto mode) {
-                constexpr u32 m = decltype(mode)::value;
-                constexpr int bytes = 12288u * sizeof(double);
-                if (!check(cudaFuncSetAttribute(nttForwardTail16384Fp52Kernel<InputMode, m>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward tail shared"))
-                    return false;
-                nttForwardTail16384Fp52Kernel<InputMode, m><<<polyCount * 8u, 512u, bytes, stream>>>(
-                    rg, input, inputIdx, inputLimb, output, outputIdx);
-                return check(cudaGetLastError(), "forward FP52 tail");
-            };
-            switch (options.mNoGoldH200ForwardFp52Tail)
-            {
-            case 1u: return launch(std::integral_constant<u32, 1u>{});
-            case 2u: return launch(std::integral_constant<u32, 2u>{});
-            case 3u: return launch(std::integral_constant<u32, 3u>{});
-            case 4u: return launch(std::integral_constant<u32, 4u>{});
-            case 5u: return launch(std::integral_constant<u32, 5u>{});
-            case 6u: return launch(std::integral_constant<u32, 6u>{});
-            case 7u: return launch(std::integral_constant<u32, 7u>{});
-            default: return launch(std::integral_constant<u32, 8u>{});
-            }
+            constexpr int bytes = 12288u * sizeof(double);
+            if (!check(cudaFuncSetAttribute(nttForwardTail16384Fp52Kernel<InputMode>,
+                    cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward tail shared"))
+                return false;
+            nttForwardTail16384Fp52Kernel<InputMode><<<polyCount * 8u, 512u, bytes, stream>>>(
+                rg, input, inputIdx, inputLimb, output, outputIdx);
+            return check(cudaGetLastError(), "forward FP52 tail");
         }
 
         __global__ __launch_bounds__(kNttThreads) void nttInverseTwoTileKernel(
@@ -12826,41 +12760,10 @@ namespace osuCrypto::LogVole::gpu
             if (log14H200Shape(rc) &&
                 rc.mKernelOptions.mNttLog14H200FixedTransforms)
             {
-                const u32 fpMode = rc.mKernelOptions.mNoGoldH200ForwardFp52Mode;
-                if (fpMode && rc.mMinModulus > (u64{1} << 51u) &&
+                if (rc.mMinModulus > (u64{1} << 51u) &&
                     rc.mMinModulus <= rc.mMaxModulus && rc.mMaxModulus < (u64{1} << 52u))
                 {
-                    if (fpMode == 1u && !rc.mFp52Roots && rc.mKernelOptions.mNoGoldH200ForwardFp52Tail)
-                        return launchForwardFp52Tail<0u>(rc.mKernelOptions, rg, data, polyIdx, nullptr, data, polyIdx, polyCount, st);
-                    if (fpMode == 1u && rc.mFp52Roots)
-                    {
-                        constexpr int bytes = 12288u * sizeof(double);
-                        if (!check(cudaFuncSetAttribute(nttForwardTwoTile16384Rho8Fp52Kernel<12u, 1u, true>,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward packed FP52 shared"))
-                            return false;
-                        nttForwardTwoTile16384Rho8Fp52Kernel<12u, 1u, true><<<polyCount * 8u, 512u, bytes, st>>>(
-                            rg, data, polyIdx, rc.mFp52Roots);
-                        return check(cudaGetLastError(), "forward packed FP52");
-                    }
-                    const auto launch = [&](auto cacheLog, auto unroll) {
-                        constexpr u32 c = decltype(cacheLog)::value, u = decltype(unroll)::value;
-                        constexpr int bytes = (8192u + (1u << c)) * sizeof(double);
-                        if (!check(cudaFuncSetAttribute(nttForwardTwoTile16384Rho8Fp52Kernel<c, u>,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward FP52 shared"))
-                            return false;
-                        nttForwardTwoTile16384Rho8Fp52Kernel<c, u><<<polyCount * 8u, 512u, bytes, st>>>(rg, data, polyIdx);
-                        return check(cudaGetLastError(), "forward FP52");
-                    };
-                    using U1 = std::integral_constant<u32, 1u>;
-                    using U4 = std::integral_constant<u32, 4u>;
-                    switch (fpMode)
-                    {
-                        case 2u: return launch(std::integral_constant<u32, 12u>{}, U4{});
-                        case 3u: return launch(std::integral_constant<u32, 11u>{}, U4{});
-                        case 4u: return launch(std::integral_constant<u32, 10u>{}, U4{});
-                        case 5u: return launch(std::integral_constant<u32, 13u>{}, U4{});
-                        default: return launch(std::integral_constant<u32, 12u>{}, U1{});
-                    }
+                    return launchForwardFp52Tail<0u>(rg, data, polyIdx, nullptr, data, polyIdx, polyCount, st);
                 }
                 if (rc.mKernelOptions.mNttLog14H200ForwardWarp712)
                 {
@@ -13238,30 +13141,12 @@ namespace osuCrypto::LogVole::gpu
             rc.mN == 16384u ? 8192u : rc.mN) * sizeof(u64);
         if (log14H200Shape(rc))
         {
-            if (rc.mKernelOptions.mNoGoldH200ForwardFp52Mode && (rc.mKernelOptions.mNoGoldH200ForwardFp52Extra & 1u) &&
-                rc.mKernelOptions.mNttLog14H200FixedTransforms && in != out &&
+            if (rc.mKernelOptions.mNttLog14H200FixedTransforms && in != out &&
                 polyCount * rc.mRho >= 2u * rc.mSmCount &&
                 rc.mMinModulus > (u64{1} << 51u) && rc.mMinModulus <= rc.mMaxModulus &&
                 rc.mMaxModulus < (u64{1} << 52u))
             {
-                constexpr int bytes = 12288u * sizeof(double);
-                if (rc.mFp52Roots)
-                {
-                    if (!check(cudaFuncSetAttribute(nttForwardFrom16384Rho8Fp52Kernel<1u, true>,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward plain packed FP52 shared"))
-                        return false;
-                    nttForwardFrom16384Rho8Fp52Kernel<1u, true><<<polyCount * 8u, 512u, bytes, asStream(stream)>>>(
-                        toDevice(rc), in, inIdx, nullptr, out, outIdx, rc.mFp52Roots);
-                    return check(cudaGetLastError(), "forward plain packed FP52");
-                }
-                if (rc.mKernelOptions.mNoGoldH200ForwardFp52Tail)
-                    return launchForwardFp52Tail<1u>(rc.mKernelOptions, toDevice(rc), in, inIdx, nullptr, out, outIdx, polyCount, asStream(stream));
-                if (!check(cudaFuncSetAttribute(nttForwardFrom16384Rho8Fp52Kernel<1u>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward plain FP52 shared"))
-                    return false;
-                nttForwardFrom16384Rho8Fp52Kernel<1u><<<polyCount * 8u, 512u, bytes, asStream(stream)>>>(
-                    toDevice(rc), in, inIdx, nullptr, out, outIdx);
-                return check(cudaGetLastError(), "forward plain FP52");
+                return launchForwardFp52Tail<1u>(toDevice(rc), in, inIdx, nullptr, out, outIdx, polyCount, asStream(stream));
             }
             if (rc.mKernelOptions.mNttLog14H200ForwardWarp712)
             {
@@ -13505,28 +13390,10 @@ namespace osuCrypto::LogVole::gpu
             rc.mKernelOptions.mNttForwardThreads == kNttThreads && in != out &&
             polyCount * rc.mRho >= 2u * rc.mSmCount)
         {
-            if (rc.mKernelOptions.mNoGoldH200ForwardFp52Mode && (rc.mKernelOptions.mNoGoldH200ForwardFp52Extra & 2u) &&
-                rc.mMinModulus > (u64{1} << 51u) && rc.mMinModulus <= rc.mMaxModulus &&
+            if (rc.mMinModulus > (u64{1} << 51u) && rc.mMinModulus <= rc.mMaxModulus &&
                 rc.mMaxModulus < (u64{1} << 52u))
             {
-                constexpr int bytes = 12288u * sizeof(double);
-                if (rc.mFp52Roots)
-                {
-                    if (!check(cudaFuncSetAttribute(nttForwardFrom16384Rho8Fp52Kernel<2u, true>,
-                            cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward centered packed FP52 shared"))
-                        return false;
-                    nttForwardFrom16384Rho8Fp52Kernel<2u, true><<<polyCount * 8u, 512u, bytes, asStream(stream)>>>(
-                        rg, in, inIdx, limbSel, out, outIdx, rc.mFp52Roots);
-                    return check(cudaGetLastError(), "forward centered packed FP52");
-                }
-                if (rc.mKernelOptions.mNoGoldH200ForwardFp52Tail)
-                    return launchForwardFp52Tail<2u>(rc.mKernelOptions, rg, in, inIdx, limbSel, out, outIdx, polyCount, asStream(stream));
-                if (!check(cudaFuncSetAttribute(nttForwardFrom16384Rho8Fp52Kernel<2u>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward centered FP52 shared"))
-                    return false;
-                nttForwardFrom16384Rho8Fp52Kernel<2u><<<polyCount * 8u, 512u, bytes, asStream(stream)>>>(
-                    rg, in, inIdx, limbSel, out, outIdx);
-                return check(cudaGetLastError(), "forward centered FP52");
+                return launchForwardFp52Tail<2u>(rg, in, inIdx, limbSel, out, outIdx, polyCount, asStream(stream));
             }
             if (rc.mKernelOptions.mNttLog14H200ForwardWarp712)
             {

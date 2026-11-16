@@ -97,7 +97,6 @@ namespace osuCrypto::LogVole::gpu
 
         // Optional exact integer-valued doubles for the H200 FP52 transforms.
         // Packed operands omit the unused Shoup quotient and boundary conversion.
-        const double* mFp52Roots = nullptr;     // [rho][N]
         const double* mFp52InvRoots = nullptr;  // [rho][N]
         // Optional per-ring GPU-prepared q, RN(1/q), and Garner operands.
         const double* mFp52GadgetConstants = nullptr; // [8 + 8 + 64]

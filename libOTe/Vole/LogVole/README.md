@@ -1298,3 +1298,19 @@ Validation: the Windows VS 14.50 CUDA test target and frontend object build and
 isolated SM90 kernel-object compile passed. Two focused checks passed with zero
 skips in 11.58 seconds using `-gpu 1 -lvFactoryFast 1`. H200 runtime execution
 was unavailable locally. No benchmarks were run.
+
+The H200 forward NTT cleanup fixes the production FP52 schedule for in-place,
+plain-broadcast, and centered-limb inputs, removing three tuning selectors and
+opt-in forward root packing. Inverse root packing remains enabled by the
+`mNoGoldH200InversePackedRoots` boolean, with inverse tables and fallbacks intact.
+The 16384/rho8 setup arenas shrink by 1 MiB each; other raw geometries retain
+their existing metadata headroom.
+
+Validation: the Windows VS 14.50 CUDA test target and frontend object build and
+isolated SM90 compile passed; all three retained FP52 input-mode symbols were
+verified in the SM90 object. Three focused checks passed with zero skips in
+15.10 seconds using `-gpu 1 -lvFactoryFast 1`. The RTX 4060 ran in-place,
+out-of-place, and centered generic parity against CPU transforms. The 16384
+plain-broadcast path correctly declined locally; its direct parity and the FP52
+batch-threshold cases require H200 hardware and were not executed. No benchmarks
+were run.

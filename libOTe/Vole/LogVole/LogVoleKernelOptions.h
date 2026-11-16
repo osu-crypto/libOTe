@@ -25,9 +25,6 @@ namespace osuCrypto
         std::uint32_t mNoGoldH200InverseFp52TileMinBlocks = 4294967295u;
         std::uint32_t mNoGoldH200InverseFp52PrefixSchedule = 10u;
         std::uint32_t mNoGoldH200InverseFp52StaticOps = 0u;
-        std::uint32_t mNoGoldH200ForwardFp52Mode = 1u;
-        std::uint32_t mNoGoldH200ForwardFp52Extra = 3u;
-        std::uint32_t mNoGoldH200ForwardFp52Tail = 6u;
         bool mNoGoldH200Gadget208 = true;
         bool mNoGoldH200Gadget208Pseudo52 = true;
         bool mNttLog14H200InverseWarp05 = true;
@@ -104,7 +101,7 @@ namespace osuCrypto
         bool mGadgetGarner = false;
         std::uint32_t mNoGoldH200RootL2Mode = 3u;
         bool mFusedIp = false;
-        std::uint32_t mNoGoldH200PackedRoots = 1;
+        bool mNoGoldH200InversePackedRoots = true;
         std::uint32_t mRootL2MiB = 8;
         std::uint32_t mRootL2HitPercent = 100;
 
@@ -118,9 +115,6 @@ namespace osuCrypto
                 (mNoGoldH200InverseFp52TileMinBlocks == 0u || mNoGoldH200InverseFp52TileMinBlocks == 64u || mNoGoldH200InverseFp52TileMinBlocks == 128u || mNoGoldH200InverseFp52TileMinBlocks == 256u || mNoGoldH200InverseFp52TileMinBlocks == 4294967295u) &&
                 mNoGoldH200InverseFp52PrefixSchedule <= 16u &&
                 mNoGoldH200InverseFp52StaticOps <= 3u &&
-                mNoGoldH200ForwardFp52Mode <= 5u &&
-                mNoGoldH200ForwardFp52Extra <= 3u &&
-                mNoGoldH200ForwardFp52Tail <= 8u &&
                 (mNttForwardThreads == 256u || mNttForwardThreads == 512u || mNttForwardThreads == 1024u) &&
                 (mNttInverseThreads == 256u || mNttInverseThreads == 512u || mNttInverseThreads == 1024u) &&
                 (mNttLog14H200InverseThreads == 512u || mNttLog14H200InverseThreads == 1024u) &&
@@ -130,7 +124,6 @@ namespace osuCrypto
                 (mNttLog13InverseThreads == 256u || mNttLog13InverseThreads == 512u || mNttLog13InverseThreads == 1024u) &&
                 (mNoGoldDenoiseThreads == 128u || mNoGoldDenoiseThreads == 256u || mNoGoldDenoiseThreads == 512u) &&
                 mNoGoldH200RootL2Mode <= 3u &&
-                mNoGoldH200PackedRoots <= 3u &&
                 (mRootL2MiB == 1u || mRootL2MiB == 2u || mRootL2MiB == 4u || mRootL2MiB == 8u || mRootL2MiB == 12u || mRootL2MiB == 16u) &&
                 (mRootL2HitPercent == 25u || mRootL2HitPercent == 50u || mRootL2HitPercent == 75u || mRootL2HitPercent == 100u);
         }
@@ -151,9 +144,6 @@ namespace osuCrypto
                 mNoGoldH200InverseFp52TileMinBlocks == other.mNoGoldH200InverseFp52TileMinBlocks &&
                 mNoGoldH200InverseFp52PrefixSchedule == other.mNoGoldH200InverseFp52PrefixSchedule &&
                 mNoGoldH200InverseFp52StaticOps == other.mNoGoldH200InverseFp52StaticOps &&
-                mNoGoldH200ForwardFp52Mode == other.mNoGoldH200ForwardFp52Mode &&
-                mNoGoldH200ForwardFp52Extra == other.mNoGoldH200ForwardFp52Extra &&
-                mNoGoldH200ForwardFp52Tail == other.mNoGoldH200ForwardFp52Tail &&
                 mNoGoldH200Gadget208 == other.mNoGoldH200Gadget208 &&
                 mNoGoldH200Gadget208Pseudo52 == other.mNoGoldH200Gadget208Pseudo52 &&
                 mNttLog14H200InverseWarp05 == other.mNttLog14H200InverseWarp05 &&
@@ -229,7 +219,7 @@ namespace osuCrypto
                 mGadgetGarner == other.mGadgetGarner &&
                 mNoGoldH200RootL2Mode == other.mNoGoldH200RootL2Mode &&
                 mFusedIp == other.mFusedIp &&
-                mNoGoldH200PackedRoots == other.mNoGoldH200PackedRoots &&
+                mNoGoldH200InversePackedRoots == other.mNoGoldH200InversePackedRoots &&
                 mRootL2MiB == other.mRootL2MiB &&
                 mRootL2HitPercent == other.mRootL2HitPercent;
         }
