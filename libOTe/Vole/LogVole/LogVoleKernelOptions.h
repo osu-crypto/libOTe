@@ -14,17 +14,7 @@ namespace osuCrypto
         bool mNttLog14H200FixedTransforms = true;
         bool mNoGoldH200CombinedAccumulator = true;
         bool mNoGoldH200AccumulatorPseudo52 = true;
-        std::uint32_t mNoGoldH200InverseFp52Threads = 1024u;
-        bool mNoGoldH200InverseFp52CacheRoots = true;
         bool mNoGoldH200InverseCachedSuffix = false;
-        std::uint32_t mNoGoldH200InverseFp52Schedule = 4u;
-        std::uint32_t mNoGoldH200InverseFp52TwoTile = 4u;
-        std::uint32_t mNoGoldH200InverseFp52TileCacheStage = 2u;
-        std::uint32_t mNoGoldH200InverseFp52Tile1024Mode = 2u;
-        // UINT32_MAX selects 64 for hybrid tiles and 0 otherwise.
-        std::uint32_t mNoGoldH200InverseFp52TileMinBlocks = 4294967295u;
-        std::uint32_t mNoGoldH200InverseFp52PrefixSchedule = 10u;
-        std::uint32_t mNoGoldH200InverseFp52StaticOps = 0u;
         bool mNoGoldH200Gadget208 = true;
         bool mNoGoldH200Gadget208Pseudo52 = true;
         bool mNttLog14H200InverseWarp05 = true;
@@ -107,15 +97,7 @@ namespace osuCrypto
 
         bool valid() const noexcept
         {
-            return (mNoGoldH200InverseFp52Threads == 0u || mNoGoldH200InverseFp52Threads == 512u || mNoGoldH200InverseFp52Threads == 1024u) &&
-                mNoGoldH200InverseFp52Schedule <= 5u &&
-                (mNoGoldH200InverseFp52TwoTile == 0u || mNoGoldH200InverseFp52TwoTile == 1u || mNoGoldH200InverseFp52TwoTile == 2u || mNoGoldH200InverseFp52TwoTile == 4u || mNoGoldH200InverseFp52TwoTile == 8u) &&
-                (mNoGoldH200InverseFp52TileCacheStage == 1u || mNoGoldH200InverseFp52TileCacheStage == 2u || mNoGoldH200InverseFp52TileCacheStage == 3u || mNoGoldH200InverseFp52TileCacheStage == 4u || mNoGoldH200InverseFp52TileCacheStage == 5u || mNoGoldH200InverseFp52TileCacheStage == 6u) &&
-                mNoGoldH200InverseFp52Tile1024Mode <= 3u &&
-                (mNoGoldH200InverseFp52TileMinBlocks == 0u || mNoGoldH200InverseFp52TileMinBlocks == 64u || mNoGoldH200InverseFp52TileMinBlocks == 128u || mNoGoldH200InverseFp52TileMinBlocks == 256u || mNoGoldH200InverseFp52TileMinBlocks == 4294967295u) &&
-                mNoGoldH200InverseFp52PrefixSchedule <= 16u &&
-                mNoGoldH200InverseFp52StaticOps <= 3u &&
-                (mNttForwardThreads == 256u || mNttForwardThreads == 512u || mNttForwardThreads == 1024u) &&
+            return (mNttForwardThreads == 256u || mNttForwardThreads == 512u || mNttForwardThreads == 1024u) &&
                 (mNttInverseThreads == 256u || mNttInverseThreads == 512u || mNttInverseThreads == 1024u) &&
                 (mNttLog14H200InverseThreads == 512u || mNttLog14H200InverseThreads == 1024u) &&
                 (mNttFusedIpThreads == 0u || mNttFusedIpThreads == 256u || mNttFusedIpThreads == 512u || mNttFusedIpThreads == 1024u) &&
@@ -134,16 +116,7 @@ namespace osuCrypto
                 mNttLog14H200FixedTransforms == other.mNttLog14H200FixedTransforms &&
                 mNoGoldH200CombinedAccumulator == other.mNoGoldH200CombinedAccumulator &&
                 mNoGoldH200AccumulatorPseudo52 == other.mNoGoldH200AccumulatorPseudo52 &&
-                mNoGoldH200InverseFp52Threads == other.mNoGoldH200InverseFp52Threads &&
-                mNoGoldH200InverseFp52CacheRoots == other.mNoGoldH200InverseFp52CacheRoots &&
                 mNoGoldH200InverseCachedSuffix == other.mNoGoldH200InverseCachedSuffix &&
-                mNoGoldH200InverseFp52Schedule == other.mNoGoldH200InverseFp52Schedule &&
-                mNoGoldH200InverseFp52TwoTile == other.mNoGoldH200InverseFp52TwoTile &&
-                mNoGoldH200InverseFp52TileCacheStage == other.mNoGoldH200InverseFp52TileCacheStage &&
-                mNoGoldH200InverseFp52Tile1024Mode == other.mNoGoldH200InverseFp52Tile1024Mode &&
-                mNoGoldH200InverseFp52TileMinBlocks == other.mNoGoldH200InverseFp52TileMinBlocks &&
-                mNoGoldH200InverseFp52PrefixSchedule == other.mNoGoldH200InverseFp52PrefixSchedule &&
-                mNoGoldH200InverseFp52StaticOps == other.mNoGoldH200InverseFp52StaticOps &&
                 mNoGoldH200Gadget208 == other.mNoGoldH200Gadget208 &&
                 mNoGoldH200Gadget208Pseudo52 == other.mNoGoldH200Gadget208Pseudo52 &&
                 mNttLog14H200InverseWarp05 == other.mNttLog14H200InverseWarp05 &&

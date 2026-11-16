@@ -2439,7 +2439,6 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
                 kernel.mNttLog13SimpleIndex = false;
                 kernel.mNttLog13ForwardWarpStages712 = false;
                 kernel.mNttLog13InverseFusedLastThreeStages = false;
-                kernel.mNoGoldH200InverseFp52Threads = 0;
                 kernel.mNoGoldH200InversePackedRoots = true;
             }
             LOGVOLE_REQUIRE_TRUE(kernel.valid());
@@ -2736,15 +2735,27 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(count > 0u && count <= 64u);
         if (std::find(counts.begin(), counts.end(), count) == counts.end()) counts.push_back(count);
     }
+    const auto forwardCounts = counts;
+    if (view.mH200Shared)
+    {
+        const auto threshold = (2u * view.mSmCount + view.mRho - 1u) / view.mRho;
+        for (std::size_t count : {std::size_t{7}, std::size_t{8},
+                 std::size_t(threshold - 1u), std::size_t(threshold), std::size_t(threshold + 1u)})
+        {
+            LOGVOLE_REQUIRE_TRUE(count > 0u && count <= 64u);
+            if (std::find(counts.begin(), counts.end(), count) == counts.end()) counts.push_back(count);
+        }
+    }
     for (std::size_t count : counts)
     {
+        const bool forwardCase = std::find(forwardCounts.begin(), forwardCounts.end(), count) != forwardCounts.end();
         std::vector<RnsPoly> original(count), expected(count);
         for (std::size_t i = 0; i < count; ++i)
         {
             original[i] = deriveUniformPolyFromNonce(
                 ctx, 0x54574f54u, 0x494c454eu, static_cast<std::uint64_t>(i));
             expected[i] = original[i];
-            LOGVOLE_REQUIRE_TRUE(forwardNtt(expected[i], ctx));
+            if (forwardCase) LOGVOLE_REQUIRE_TRUE(forwardNtt(expected[i], ctx));
         }
 
         gpu::GpuPolyBuffer inPlace(*ring, count, stream);
@@ -2752,75 +2763,130 @@ void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
         gpu::GpuPolyBuffer outOfPlace(*ring, count, stream);
         LOGVOLE_REQUIRE_TRUE(
             inPlace.data(stream) && outOfPlaceInput.data(stream) && outOfPlace.data(stream));
-        for (unsigned iteration = 0; iteration < (fast ? 2u : 4u); ++iteration)
+        if (forwardCase)
         {
-            LOGVOLE_REQUIRE_TRUE(inPlace.upload(original, stream));
-            LOGVOLE_REQUIRE_TRUE(outOfPlaceInput.upload(original, stream));
-            LOGVOLE_REQUIRE_TRUE(gpu::nttForward(
-                *ring, inPlace.data(stream), static_cast<std::uint32_t>(count), stream));
-            LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardFrom(
-                ring->view(stream), outOfPlaceInput.data(stream), nullptr,
-                outOfPlace.data(stream), nullptr, static_cast<std::uint32_t>(count),
-                stream.raw()));
-            std::vector<RnsPoly> actualInPlace, actualOutOfPlace;
-            LOGVOLE_REQUIRE_TRUE(inPlace.download(actualInPlace, stream));
-            LOGVOLE_REQUIRE_TRUE(outOfPlace.download(actualOutOfPlace, stream));
-            expect_batch_equal(actualInPlace, expected);
-            expect_batch_equal(actualOutOfPlace, expected);
-        }
-        // Directly check both broadcast load modes against a CPU transform.
-        // Real H200 owners also include the batch that reaches the FP52 gate.
-        for (bool centered : {false, true})
-        {
-            if (!centered && !gpu::canLaunchNttForwardFromPlainBroadcast(view))
+            for (unsigned iteration = 0; iteration < (fast ? 2u : 4u); ++iteration)
             {
-                LOGVOLE_REQUIRE_FALSE(view.mH200Shared);
-                continue;
+                LOGVOLE_REQUIRE_TRUE(inPlace.upload(original, stream));
+                LOGVOLE_REQUIRE_TRUE(outOfPlaceInput.upload(original, stream));
+                LOGVOLE_REQUIRE_TRUE(gpu::nttForward(
+                    *ring, inPlace.data(stream), static_cast<std::uint32_t>(count), stream));
+                LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardFrom(
+                    ring->view(stream), outOfPlaceInput.data(stream), nullptr,
+                    outOfPlace.data(stream), nullptr, static_cast<std::uint32_t>(count),
+                    stream.raw()));
+                std::vector<RnsPoly> actualInPlace, actualOutOfPlace;
+                LOGVOLE_REQUIRE_TRUE(inPlace.download(actualInPlace, stream));
+                LOGVOLE_REQUIRE_TRUE(outOfPlace.download(actualOutOfPlace, stream));
+                expect_batch_equal(actualInPlace, expected);
+                expect_batch_equal(actualOutOfPlace, expected);
             }
-            auto source = original;
-            auto broadcast = original;
-            std::vector<std::uint32_t> limbs(count);
+            // Directly check both broadcast load modes against a CPU transform.
+            // Real H200 owners also include the batch that reaches the FP52 gate.
+            for (bool centered : {false, true})
+            {
+                if (!centered && !gpu::canLaunchNttForwardFromPlainBroadcast(view))
+                {
+                    LOGVOLE_REQUIRE_FALSE(view.mH200Shared);
+                    continue;
+                }
+                auto source = original;
+                auto broadcast = original;
+                std::vector<std::uint32_t> limbs(count);
+                for (std::size_t p = 0; p < count; ++p)
+                {
+                    const auto limb = centered ? static_cast<std::uint32_t>(p % 8u) : 0u;
+                    limbs[p] = limb;
+                    const auto sourceQ = ringModulusValue(ctx, limb);
+                    for (std::size_t c = 0; c < params.mPolyModulusDegree; ++c)
+                    {
+                        auto value = source[p].mCoeffs[limb * params.mPolyModulusDegree + c];
+                        if (centered)
+                        {
+                            if (c == 0u) value = sourceQ / 2u;
+                            if (c == 1u) value = sourceQ / 2u + 1u;
+                            if (c == 2u) value = sourceQ - 1u;
+                        }
+                        else value %= view.mMinModulus;
+                        source[p].mCoeffs[limb * params.mPolyModulusDegree + c] = value;
+                        for (unsigned j = 0; j < 8u; ++j)
+                        {
+                            const auto q = ringModulusValue(ctx, j);
+                            broadcast[p].mCoeffs[j * params.mPolyModulusDegree + c] =
+                                centered && value > sourceQ / 2u ? q - (sourceQ - value) : value;
+                        }
+                    }
+                    LOGVOLE_REQUIRE_TRUE(forwardNtt(broadcast[p], ctx));
+                }
+                LOGVOLE_REQUIRE_TRUE(outOfPlaceInput.upload(source, stream));
+                if (centered)
+                {
+                    const auto* selection = stream.uploadIdx(limbs);
+                    LOGVOLE_REQUIRE_TRUE(selection);
+                    LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardCenteredLimbFrom(view,
+                        outOfPlaceInput.data(stream), nullptr, selection, outOfPlace.data(stream),
+                        nullptr, static_cast<std::uint32_t>(count), stream.raw()));
+                }
+                else
+                    LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardFromPlainBroadcast(view,
+                        outOfPlaceInput.data(stream), nullptr, outOfPlace.data(stream), nullptr,
+                        static_cast<std::uint32_t>(count), stream.raw()));
+                std::vector<RnsPoly> actual;
+                LOGVOLE_REQUIRE_TRUE(outOfPlace.download(actual, stream));
+                expect_batch_equal(actual, broadcast);
+            }
+        }
+        // Runtime operations stay live in every retained inverse FP52 layout.
+        // Additional threshold batches are inverse-only on real H200 owners.
+        for (unsigned operation = 0; operation < 3u; ++operation)
+        {
+            auto inverseInput = original;
+            for (auto& poly : inverseInput)
+            for (unsigned j = 0; j < 8u; ++j)
+            {
+                const auto q = ringModulusValue(ctx, j);
+                poly.mCoeffs[j * params.mPolyModulusDegree] = q - 1u;
+                poly.mCoeffs[j * params.mPolyModulusDegree + 1u] = q / 2u;
+                poly.mCoeffs[j * params.mPolyModulusDegree + 2u] = q / 2u + 1u;
+            }
+            auto inverseExpected = inverseInput;
             for (std::size_t p = 0; p < count; ++p)
             {
-                const auto limb = centered ? static_cast<std::uint32_t>(p % 8u) : 0u;
-                limbs[p] = limb;
-                const auto sourceQ = ringModulusValue(ctx, limb);
-                for (std::size_t c = 0; c < params.mPolyModulusDegree; ++c)
+                if (operation == 1u)
+                    LOGVOLE_REQUIRE_TRUE(ringAddInplace(inverseExpected[p], original[p], ctx));
+                LOGVOLE_REQUIRE_TRUE(inverseNtt(inverseExpected[p], ctx));
+                for (unsigned j = 0; j < 8u; ++j)
                 {
-                    auto value = source[p].mCoeffs[limb * params.mPolyModulusDegree + c];
-                    if (centered)
+                    const auto q = ringModulusValue(ctx, j);
+                    for (std::size_t c = 0; c < params.mPolyModulusDegree; ++c)
                     {
-                        if (c == 0u) value = sourceQ / 2u;
-                        if (c == 1u) value = sourceQ / 2u + 1u;
-                        if (c == 2u) value = sourceQ - 1u;
-                    }
-                    else value %= view.mMinModulus;
-                    source[p].mCoeffs[limb * params.mPolyModulusDegree + c] = value;
-                    for (unsigned j = 0; j < 8u; ++j)
-                    {
-                        const auto q = ringModulusValue(ctx, j);
-                        broadcast[p].mCoeffs[j * params.mPolyModulusDegree + c] =
-                            centered && value > sourceQ / 2u ? q - (sourceQ - value) : value;
+                        const auto e = j * params.mPolyModulusDegree + c;
+                        auto& value = inverseExpected[p].mCoeffs[e];
+                        if (operation == 1u && value != 0u) value = q - value;
+                        if (operation == 2u) value = (original[p].mCoeffs[e] + q - value) % q;
                     }
                 }
-                LOGVOLE_REQUIRE_TRUE(forwardNtt(broadcast[p], ctx));
             }
-            LOGVOLE_REQUIRE_TRUE(outOfPlaceInput.upload(source, stream));
-            if (centered)
+            LOGVOLE_REQUIRE_TRUE(outOfPlaceInput.upload(original, stream));
+            std::vector<std::uint32_t> reverse(count);
+            for (std::size_t p = 0; p < count; ++p) reverse[p] = static_cast<std::uint32_t>(count - p - 1u);
+            const auto* indices = operation == 2u ? stream.uploadIdx(reverse) : nullptr;
+            LOGVOLE_REQUIRE_TRUE(operation != 2u || indices);
+            for (bool packed : {true, false})
             {
-                const auto* selection = stream.uploadIdx(limbs);
-                LOGVOLE_REQUIRE_TRUE(selection);
-                LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardCenteredLimbFrom(view,
-                    outOfPlaceInput.data(stream), nullptr, selection, outOfPlace.data(stream),
-                    nullptr, static_cast<std::uint32_t>(count), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(inPlace.upload(inverseInput, stream));
+                auto selected = view;
+                if (!packed) selected.mFp52InvRoots = nullptr;
+                const auto pre = operation == 1u ? static_cast<std::uint32_t>(gpu::ElemOp::Add) : gpu::kElemOpNoneHost;
+                const auto post = operation == 1u ? static_cast<std::uint32_t>(gpu::ElemOp::Negate) :
+                    operation == 2u ? static_cast<std::uint32_t>(gpu::ElemOp::ReverseSub) : gpu::kElemOpNoneHost;
+                LOGVOLE_REQUIRE_TRUE(gpu::launchNttInverseFused(selected, inPlace.data(stream),
+                    static_cast<std::uint32_t>(count), indices, pre, outOfPlaceInput.data(stream),
+                    post, outOfPlaceInput.data(stream), stream.raw()));
+                std::vector<RnsPoly> actual;
+                LOGVOLE_REQUIRE_TRUE(inPlace.download(actual, stream));
+                expect_batch_equal(actual, inverseExpected);
             }
-            else
-                LOGVOLE_REQUIRE_TRUE(gpu::launchNttForwardFromPlainBroadcast(view,
-                    outOfPlaceInput.data(stream), nullptr, outOfPlace.data(stream), nullptr,
-                    static_cast<std::uint32_t>(count), stream.raw()));
-            std::vector<RnsPoly> actual;
-            LOGVOLE_REQUIRE_TRUE(outOfPlace.download(actual, stream));
-            expect_batch_equal(actual, broadcast);
         }
     }
 #else

@@ -5653,95 +5653,8 @@ namespace osuCrypto::LogVole::gpu
             __syncthreads();
         }
 
-        // Keep canonical integer-valued doubles throughout the whole transform.
-        // The 128 KiB tile avoids both integer conversions at every butterfly
-        // and the register-parked half. Only exact q<2^52 tuples may enter.
-        template<u32 Threads, bool Cached = false, u32 PrefixUnroll = 1u,
-                 u32 SuffixUnroll = 1u, bool VectorInput = false>
-        __global__ __launch_bounds__(Threads, 1)
-        void nttInverse16384Rho8Fp52Kernel(
-            DeviceRing rg, u64* data, const u32* polyIdx, u32 preOp,
-            const u64* preB, u32 postOp, const u64* postB)
-        {
-            extern __shared__ double fpSh[];
-            const u32 limb = blockIdx.x & 7u, slot = blockIdx.x >> 3u;
-            const u32 poly = polyIdx ? polyIdx[slot] : slot;
-            const size_t off = (static_cast<size_t>(poly) * 8u + limb) * 16384u;
-            const u64 qi = rg.mMods[limb].mValue;
-            const double q = static_cast<double>(qi), invQ = __drcp_rn(q);
-            const ShoupOperand* roots = rg.mInvRoots + static_cast<size_t>(limb) * 16384u;
-            double* cachedRoots = fpSh + 16384u;
-            if constexpr (Cached)
-            {
-                for (u32 i = threadIdx.x; i < 8192u; i += Threads)
-                    cachedRoots[i] = loadFp52Root(roots, 8192u + i);
-                __syncthreads();
-            }
-#pragma unroll PrefixUnroll
-            for (u32 b = threadIdx.x; b < 8192u; b += Threads)
-            {
-                const u32 j = b * 2u;
-                u64 ui, vi;
-                if constexpr (VectorInput)
-                {
-                    const ulonglong2 pair = *reinterpret_cast<const ulonglong2*>(data + off + j);
-                    ui = pair.x;
-                    vi = pair.y;
-                }
-                else
-                {
-                    ui = data[off + j];
-                    vi = data[off + j + 1u];
-                }
-                if (preOp != kElemOpNone)
-                {
-                    ui = preOp == 0u ? addMod(ui, preB[off + j], qi) : subMod(ui, preB[off + j], qi);
-                    vi = preOp == 0u ? addMod(vi, preB[off + j + 1u], qi) : subMod(vi, preB[off + j + 1u], qi);
-                }
-                const double u = static_cast<double>(ui), v = static_cast<double>(vi);
-                const double r = loadFp52Root(roots, 1u + b);
-                double lo = addModFp52(u, v, q), hi = mulModFp52(__dsub_rn(u, v), r, q, invQ);
-                inverseFp52WarpStage<1u, Cached>(lo, hi, roots, cachedRoots, b, q, invQ);
-                inverseFp52WarpStage<2u, Cached>(lo, hi, roots, cachedRoots, b, q, invQ);
-                inverseFp52WarpStage<3u, Cached>(lo, hi, roots, cachedRoots, b, q, invQ);
-                inverseFp52WarpStage<4u, Cached>(lo, hi, roots, cachedRoots, b, q, invQ);
-                inverseFp52WarpStage<5u, Cached>(lo, hi, roots, cachedRoots, b, q, invQ);
-                const u32 output = b + ((b >> 5u) << 5u);
-                fpSh[output] = lo;
-                fpSh[output + 32u] = hi;
-            }
-            __syncthreads();
-            inverseFp52StagePair<6u, Cached, SuffixUnroll>(fpSh, roots, cachedRoots, q, invQ);
-            inverseFp52StagePair<8u, Cached, SuffixUnroll>(fpSh, roots, cachedRoots, q, invQ);
-            inverseFp52StagePair<10u, Cached, SuffixUnroll>(fpSh, roots, cachedRoots, q, invQ);
-            inverseFp52StagePair<12u, Cached, SuffixUnroll>(fpSh, roots, cachedRoots, q, invQ);
-            const double scalar = static_cast<double>(rg.mInvDegree[limb].mOperand);
-            for (u32 j = threadIdx.x; j < 16384u; j += Threads)
-            {
-                u64 x = static_cast<u64>(mulModFp52(fpSh[j], scalar, q, invQ));
-                if (postOp == 2u) x = x == 0u ? 0u : qi - x;
-                else if (postOp == 4u) x = subMod(postB[off + j], x, qi);
-                else if (postOp != kElemOpNone)
-                    x = postOp == 0u ? addMod(x, postB[off + j], qi) : subMod(x, postB[off + j], qi);
-                data[off + j] = x;
-            }
-        }
-
-        template<bool VectorInput>
         __device__ __forceinline__ void loadInverseFp52Pair(const u64* src, u32 j, u64& u, u64& v)
         {
-            if constexpr (VectorInput)
-            {
-                // Generic callers may supply a word-shifted view. Ring offsets
-                // and every pair index preserve the base pointer's alignment.
-                if ((reinterpret_cast<size_t>(src) & 15u) == 0u)
-                {
-                    const ulonglong2 pair = *reinterpret_cast<const ulonglong2*>(src + j);
-                    u = pair.x;
-                    v = pair.y;
-                    return;
-                }
-            }
             u = src[j];
             v = src[j + 1u];
         }
@@ -5764,39 +5677,25 @@ namespace osuCrypto::LogVole::gpu
             else asm volatile("prefetch.global.L1 [%0];" :: "l"(ptr));
         }
 
-        template<u32 TileIdx, u32 CacheStage, u32 Threads, u32 Groups, bool VectorInput,
-                 u32 Prefetch = 0u, class Root>
+        template<u32 TileIdx, u32 CacheStage, u32 Threads, class Root>
         __device__ __forceinline__ void inverseFp52InterleavedPrefix(
             double* sh, const Root* roots, const double* cache,
             const u64* src, const u64* preB, u32 preOp, u64 qi, double q, double invQ)
         {
+            constexpr u32 Groups = 2u;
             static_assert(4096u % (Threads * Groups) == 0u);
             for (u32 first = threadIdx.x; first < 4096u; first += Threads * Groups)
             {
-                if constexpr (Prefetch != 0u)
+                const u32 upcoming = first + Threads * Groups;
+                if (upcoming < 4096u)
                 {
-                    // Modes 1/2/3 fetch next roots/data/both into L1; mode 4
-                    // fetches next roots into L2. Mode 5 fetches current roots
-                    // ahead of input conversion, without extending registers.
-                    // 6: next roots/data in L2; 7/8: two groups ahead in L1/L2;
-                    // 9: next data only in L2.
-                    constexpr bool l2 = Prefetch == 4u || Prefetch == 6u || Prefetch == 8u || Prefetch == 9u;
-                    constexpr u32 distance = Prefetch == 7u || Prefetch == 8u ? 2u : 1u;
-                    const u32 upcoming = Prefetch == 5u ? first : first + Threads * Groups * distance;
-                    if (upcoming < 4096u)
-                    {
 #pragma unroll
-                        for (u32 i = 0; i < Groups; ++i)
-                        {
-                            const u32 b = upcoming + i * Threads;
-                            if constexpr (Prefetch != 2u && Prefetch != 9u)
-                            {
-                                prefetchInverseFp52<l2>(roots + 1u + TileIdx * 4096u + b);
-                                prefetchInverseFp52<l2>(roots + 8193u + TileIdx * 2048u + (b >> 1u));
-                            }
-                            if constexpr (Prefetch == 2u || Prefetch == 3u || Prefetch >= 6u)
-                                prefetchInverseFp52<l2>(src + 2u * b);
-                        }
+                    for (u32 i = 0; i < Groups; ++i)
+                    {
+                        const u32 b = upcoming + i * Threads;
+                        prefetchInverseFp52<false>(roots + 1u + TileIdx * 4096u + b);
+                        prefetchInverseFp52<false>(roots + 8193u + TileIdx * 2048u + (b >> 1u));
+                        prefetchInverseFp52<false>(src + 2u * b);
                     }
                 }
                 double lo[Groups], hi[Groups];
@@ -5805,11 +5704,11 @@ namespace osuCrypto::LogVole::gpu
                 for (u32 i = 0; i < Groups; ++i)
                 {
                     const u32 j = 2u * (first + i * Threads);
-                    loadInverseFp52Pair<VectorInput>(src, j, us[i], vs[i]);
+                    loadInverseFp52Pair(src, j, us[i], vs[i]);
                     if (preOp != kElemOpNone)
                     {
                         u64 bu, bv;
-                        loadInverseFp52Pair<VectorInput>(preB, j, bu, bv);
+                        loadInverseFp52Pair(preB, j, bu, bv);
                         us[i] = preOp == 0u ? addMod(us[i], bu, qi) : subMod(us[i], bu, qi);
                         vs[i] = preOp == 0u ? addMod(vs[i], bv, qi) : subMod(vs[i], bv, qi);
                     }
@@ -5838,36 +5737,28 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        template<u32 TileIdx, u32 Unroll, u32 CacheStage, u32 Threads = 512u,
-                 u32 PrefixSchedule = 0u, class Root>
+        template<u32 TileIdx, u32 CacheStage, u32 Threads, bool InterleavedPrefetch, class Root>
         __device__ __forceinline__ void inverseFp52Tile(
             double* sh, const Root* roots, const double* cache,
             const u64* src, const u64* preB, u32 preOp, u64 qi, double q, double invQ)
         {
-            // Schedules 6/7 interleave only the first tile: its transformed
-            // values are not yet parked in registers, leaving more ILP budget.
-            constexpr u32 prefetch = PrefixSchedule >= 8u ? PrefixSchedule - 7u : 0u;
-            constexpr u32 schedule = prefetch ? 1u : PrefixSchedule >= 6u
-                ? (TileIdx == 1u ? PrefixSchedule - 5u : 0u) : PrefixSchedule;
-            constexpr bool vectorInput = schedule >= 3u;
-            if constexpr (schedule != 0u && schedule != 3u)
+            if constexpr (InterleavedPrefetch)
             {
-                constexpr u32 groups = schedule == 2u || schedule == 5u ? 4u : 2u;
-                inverseFp52InterleavedPrefix<TileIdx, CacheStage, Threads, groups, vectorInput, prefetch>(
+                inverseFp52InterleavedPrefix<TileIdx, CacheStage, Threads>(
                     sh, roots, cache, src, preB, preOp, qi, q, invQ);
             }
             else
             {
-#pragma unroll Unroll
+#pragma unroll 4
                 for (u32 b = threadIdx.x; b < 4096u; b += Threads)
                 {
                     const u32 j = b * 2u;
                     u64 ui, vi;
-                    loadInverseFp52Pair<vectorInput>(src, j, ui, vi);
+                    loadInverseFp52Pair(src, j, ui, vi);
                     if (preOp != kElemOpNone)
                     {
                         u64 bu, bv;
-                        loadInverseFp52Pair<vectorInput>(preB, j, bu, bv);
+                        loadInverseFp52Pair(preB, j, bu, bv);
                         ui = preOp == 0u ? addMod(ui, bu, qi) : subMod(ui, bu, qi);
                         vi = preOp == 0u ? addMod(vi, bv, qi) : subMod(vi, bv, qi);
                     }
@@ -5901,19 +5792,15 @@ namespace osuCrypto::LogVole::gpu
         }
 
 
-        // Two-tile FP64 layout: normally two 512-thread CTAs, a reused 64 KiB
-        // tile, a 32 KiB root cache, and 16 parked doubles per thread. The
-        // optional 1024-thread layout parks eight and tests 32/64 KiB caches.
-        template<u32 Unroll, u32 CacheStage = 2u, bool Packed = false, u32 Threads = 512u,
-                 u32 PrefixSchedule = 0u, u32 StaticOps = 0u>
+        // Two-tile FP64 layout: wide batches use 512 threads, a reused 64 KiB
+        // tile, a 32 KiB root cache, and 16 parked doubles per thread. Narrow
+        // batches use 1024 threads, a 64 KiB root cache, and eight parked doubles.
+        template<u32 CacheStage, bool Packed, u32 Threads, bool InterleavedPrefetch = false>
         __global__ __launch_bounds__(Threads, Threads == 512u ? 2u : 1u)
         void nttInverseTwoTile16384Rho8Fp52Kernel(
-            DeviceRing rg, u64* data, const u32* polyIdx, u32 preOpArg,
-            const u64* preB, u32 postOpArg, const u64* postB, const double* packedRoots = nullptr)
+            DeviceRing rg, u64* data, const u32* polyIdx, u32 preOp,
+            const u64* preB, u32 postOp, const u64* postB, const double* packedRoots = nullptr)
         {
-            const u32 preOp = StaticOps ? kElemOpNone : preOpArg;
-            const u32 postOp = StaticOps == 1u ? kElemOpNone :
-                StaticOps == 2u ? 2u : StaticOps == 3u ? 4u : postOpArg;
             extern __shared__ double tileSh[];
             const u32 limb = blockIdx.x & 7u, slot = blockIdx.x >> 3u;
             const u32 poly = polyIdx ? polyIdx[slot] : slot;
@@ -5931,12 +5818,12 @@ namespace osuCrypto::LogVole::gpu
             __syncthreads();
             constexpr u32 parked = 8192u / Threads;
             double hi[parked];
-            inverseFp52Tile<1u, Unroll, CacheStage, Threads, PrefixSchedule>(tileSh, roots, cache, data + off + 8192u,
+            inverseFp52Tile<1u, CacheStage, Threads, InterleavedPrefetch>(tileSh, roots, cache, data + off + 8192u,
                 preOp == kElemOpNone ? nullptr : preB + off + 8192u, preOp, qi, q, invQ);
 #pragma unroll
             for (u32 i = 0u; i < parked; ++i) hi[i] = tileSh[threadIdx.x + i * Threads];
             __syncthreads();
-            inverseFp52Tile<0u, Unroll, CacheStage, Threads, PrefixSchedule>(tileSh, roots, cache, data + off,
+            inverseFp52Tile<0u, CacheStage, Threads, InterleavedPrefetch>(tileSh, roots, cache, data + off,
                 preOp == kElemOpNone ? nullptr : preB + off, preOp, qi, q, invQ);
             const double scalar = static_cast<double>(rg.mInvDegree[limb].mOperand);
             const double scaledR = static_cast<double>(rg.mScaledInvRoot[limb].mOperand);
@@ -13689,10 +13576,7 @@ namespace osuCrypto::LogVole::gpu
 
         // Two tiles is the case the register-parked variant was written for, and it
         // is the only one the ring degrees in use reach (tiles = n / 8192).
-        const u32 fp1024Min = (rc.mKernelOptions.mNoGoldH200InverseFp52TileMinBlocks == 4294967295u ? (rc.mKernelOptions.mNoGoldH200InverseFp52Tile1024Mode >= 2u ? 64u : 0u) : rc.mKernelOptions.mNoGoldH200InverseFp52TileMinBlocks);
-        const bool narrowFp1024 = fp1024Min && polyCount * rc.mRho >= fp1024Min &&
-            rc.mKernelOptions.mNoGoldH200InverseFp52Tile1024Mode && rc.mKernelOptions.mNoGoldH200InverseFp52Threads &&
-            rc.mKernelOptions.mNoGoldH200InverseFp52TwoTile == 4u && rc.mKernelOptions.mNoGoldH200InverseFp52TileCacheStage <= 2u &&
+        const bool narrowFp1024 = polyCount * rc.mRho >= 64u &&
             ip.mTerms == 0u && log14H200Shape(rc) && rc.mKernelOptions.mNttLog14H200FixedTransforms &&
             rc.mMinModulus > (u64{1} << 51u) && rc.mMinModulus <= rc.mMaxModulus &&
             rc.mMaxModulus < (u64{1} << 52u);
@@ -13702,173 +13586,42 @@ namespace osuCrypto::LogVole::gpu
             if (ip.mTerms == 0u && log14H200Shape(rc) &&
                 rc.mKernelOptions.mNttLog14H200FixedTransforms)
             {
-                const u32 fpThreads = rc.mKernelOptions.mNoGoldH200InverseFp52Threads;
-                if (fpThreads && rc.mMinModulus > (u64{1} << 51u) &&
+                if (rc.mMinModulus > (u64{1} << 51u) &&
                     rc.mMinModulus <= rc.mMaxModulus && rc.mMaxModulus < (u64{1} << 52u))
                 {
-                    const u32 twoTile = rc.mKernelOptions.mNoGoldH200InverseFp52TwoTile;
-                    if (twoTile)
+                    if (polyCount * rc.mRho < (2u * rc.mSmCount))
                     {
-                        const u32 tileMode = rc.mKernelOptions.mNoGoldH200InverseFp52Tile1024Mode;
-                        const bool hybridNarrow = tileMode >= 2u &&
-                            polyCount * rc.mRho < (2u * rc.mSmCount);
-                        const u32 cacheStage = hybridNarrow ? tileMode - 1u :
-                            rc.mKernelOptions.mNoGoldH200InverseFp52TileCacheStage;
-                        if (twoTile == 4u && cacheStage <= 2u && (tileMode == 1u || hybridNarrow))
-                        {
-                            const auto launch1024 = [&](auto stage, auto packed) {
-                                constexpr u32 s = decltype(stage)::value;
-                                constexpr bool p = decltype(packed)::value;
-                                constexpr int bytes = (8192u + (16384u >> s)) * sizeof(double);
-                                if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Fp52Kernel<4u, s, p, 1024u>,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "inverse FP52 tile1024 shared"))
-                                    return false;
-                                nttInverseTwoTile16384Rho8Fp52Kernel<4u, s, p, 1024u><<<polyCount * 8u, 1024u, bytes, st>>>(
-                                    rg, data, polyIdx, preOp, preB, postOp, postB, rc.mFp52InvRoots);
-                                return check(cudaGetLastError(), "inverse FP52 tile1024");
-                            };
-                            const auto byCache = [&](auto packed) {
-                                if (cacheStage == 1u) return launch1024(std::integral_constant<u32, 1u>{}, packed);
-                                return launch1024(std::integral_constant<u32, 2u>{}, packed);
-                            };
-                            return rc.mFp52InvRoots ? byCache(std::true_type{}) : byCache(std::false_type{});
-                        }
-                        if (twoTile == 4u && rc.mKernelOptions.mNoGoldH200InverseFp52TileCacheStage == 2u && rc.mFp52InvRoots)
-                        {
-                            constexpr int bytes = 12288u * sizeof(double);
-                            const u32 prefixSchedule = rc.mKernelOptions.mNoGoldH200InverseFp52PrefixSchedule;
-                            if (rc.mKernelOptions.mNoGoldH200InverseOpTrace)
-                                std::fprintf(stderr, "[inverse-ops] polys=%u pre=%u post=%u indexed=%u\n",
-                                    polyCount, preOp, postOp, polyIdx ? 1u : 0u);
-                            if (prefixSchedule)
-                            {
-                                const u32 staticOps = rc.mKernelOptions.mNoGoldH200InverseFp52StaticOps;
-                                if (prefixSchedule == 1u && staticOps && preOp == kElemOpNone)
-                                {
-                                    const auto launchStatic = [&](auto ops) {
-                                        constexpr u32 o = decltype(ops)::value;
-                                        if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Fp52Kernel<4u, 2u, true, 512u, 1u, o>,
-                                                cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "inverse FP52 static ops shared"))
-                                            return false;
-                                        nttInverseTwoTile16384Rho8Fp52Kernel<4u, 2u, true, 512u, 1u, o><<<polyCount * 8u, 512u, bytes, st>>>(
-                                            rg, data, polyIdx, preOp, preB, postOp, postB, rc.mFp52InvRoots);
-                                        return check(cudaGetLastError(), "inverse FP52 static ops");
-                                    };
-                                    if (staticOps == 2u)
-                                        return launchStatic(std::integral_constant<u32, 4u>{});
-                                    if (postOp == kElemOpNone)
-                                        return launchStatic(std::integral_constant<u32, 1u>{});
-                                    if (staticOps == 3u)
-                                    {
-                                        if (postOp == 2u) return launchStatic(std::integral_constant<u32, 2u>{});
-                                        if (postOp == 4u) return launchStatic(std::integral_constant<u32, 3u>{});
-                                        return launchStatic(std::integral_constant<u32, 4u>{});
-                                    }
-                                }
-                                const auto launchPrefix = [&](auto schedule) {
-                                    constexpr u32 s = decltype(schedule)::value;
-                                    if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Fp52Kernel<4u, 2u, true, 512u, s>,
-                                            cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "inverse FP52 prefix shared"))
-                                        return false;
-                                    nttInverseTwoTile16384Rho8Fp52Kernel<4u, 2u, true, 512u, s><<<polyCount * 8u, 512u, bytes, st>>>(
-                                        rg, data, polyIdx, preOp, preB, postOp, postB, rc.mFp52InvRoots);
-                                    return check(cudaGetLastError(), "inverse FP52 prefix");
-                                };
-                                switch (prefixSchedule)
-                                {
-                                case 1u: return launchPrefix(std::integral_constant<u32, 1u>{});
-                                case 2u: return launchPrefix(std::integral_constant<u32, 2u>{});
-                                case 3u: return launchPrefix(std::integral_constant<u32, 3u>{});
-                                case 4u: return launchPrefix(std::integral_constant<u32, 4u>{});
-                                case 5u: return launchPrefix(std::integral_constant<u32, 5u>{});
-                                case 6u: return launchPrefix(std::integral_constant<u32, 6u>{});
-                                case 8u: return launchPrefix(std::integral_constant<u32, 8u>{});
-                                case 9u: return launchPrefix(std::integral_constant<u32, 9u>{});
-                                case 10u: return launchPrefix(std::integral_constant<u32, 10u>{});
-                                case 11u: return launchPrefix(std::integral_constant<u32, 11u>{});
-                                case 12u: return launchPrefix(std::integral_constant<u32, 12u>{});
-                                case 13u: return launchPrefix(std::integral_constant<u32, 13u>{});
-                                case 14u: return launchPrefix(std::integral_constant<u32, 14u>{});
-                                case 15u: return launchPrefix(std::integral_constant<u32, 15u>{});
-                                case 16u: return launchPrefix(std::integral_constant<u32, 16u>{});
-                                default: return launchPrefix(std::integral_constant<u32, 7u>{});
-                                }
-                            }
-                            if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Fp52Kernel<4u, 2u, true>,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "inverse packed FP52 shared"))
+                        const auto launch1024 = [&](auto packed) {
+                            constexpr bool p = decltype(packed)::value;
+                            constexpr int bytes = 16384u * sizeof(double);
+                            if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Fp52Kernel<1u, p, 1024u>,
+                                    cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "inverse FP52 tile1024 shared"))
                                 return false;
-                            nttInverseTwoTile16384Rho8Fp52Kernel<4u, 2u, true><<<polyCount * 8u, 512u, bytes, st>>>(
+                            nttInverseTwoTile16384Rho8Fp52Kernel<1u, p, 1024u><<<polyCount * 8u, 1024u, bytes, st>>>(
                                 rg, data, polyIdx, preOp, preB, postOp, postB, rc.mFp52InvRoots);
-                            return check(cudaGetLastError(), "inverse packed FP52");
-                        }
-                        const auto launch = [&](auto unroll, auto stage) {
-                            constexpr u32 u = decltype(unroll)::value;
-                            constexpr u32 s = decltype(stage)::value;
-                            constexpr int bytes = (8192u + (16384u >> s)) * sizeof(double);
-                            if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Fp52Kernel<u, s>,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "inverse FP52 two-tile shared"))
-                                return false;
-                            nttInverseTwoTile16384Rho8Fp52Kernel<u, s><<<polyCount * 8u, 512u, bytes, st>>>(
-                                rg, data, polyIdx, preOp, preB, postOp, postB);
-                            return check(cudaGetLastError(), "inverse FP52 two-tile");
+                            return check(cudaGetLastError(), "inverse FP52 tile1024");
                         };
-                        const auto byUnroll = [&](auto stage) {
-                            switch (twoTile)
-                            {
-                                case 2u: return launch(std::integral_constant<u32, 2u>{}, stage);
-                                case 4u: return launch(std::integral_constant<u32, 4u>{}, stage);
-                                case 8u: return launch(std::integral_constant<u32, 8u>{}, stage);
-                                default: return launch(std::integral_constant<u32, 1u>{}, stage);
-                            }
-                        };
-                        switch (rc.mKernelOptions.mNoGoldH200InverseFp52TileCacheStage)
-                        {
-                            case 1u: return byUnroll(std::integral_constant<u32, 1u>{});
-                            case 3u: return byUnroll(std::integral_constant<u32, 3u>{});
-                            case 4u: return byUnroll(std::integral_constant<u32, 4u>{});
-                            case 5u: return byUnroll(std::integral_constant<u32, 5u>{});
-                            case 6u: return byUnroll(std::integral_constant<u32, 6u>{});
-                            default: return byUnroll(std::integral_constant<u32, 2u>{});
-                        }
+                        return rc.mFp52InvRoots ? launch1024(std::true_type{}) : launch1024(std::false_type{});
                     }
-                    const auto launch = [&](auto threads, auto cached, auto unroll, auto suffix, auto vector) {
-                        constexpr u32 t = decltype(threads)::value;
-                        constexpr bool c = decltype(cached)::value;
-                        constexpr u32 u = decltype(unroll)::value;
-                        constexpr u32 s = decltype(suffix)::value;
-                        constexpr bool v = decltype(vector)::value;
-                        constexpr int fpShBytes = (16384u + (c ? 8192u : 0u)) * sizeof(double);
-                        if (!check(cudaFuncSetAttribute(nttInverse16384Rho8Fp52Kernel<t, c, u, s, v>,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize, fpShBytes), "inverseFp52 shared"))
-                            return false;
-                        nttInverse16384Rho8Fp52Kernel<t, c, u, s, v><<<polyCount * 8u, t, fpShBytes, st>>>(
-                            rg, data, polyIdx, preOp, preB, postOp, postB);
-                        return check(cudaGetLastError(), "inverseFp52");
-                    };
-                    using T512 = std::integral_constant<u32, 512u>;
-                    using T1024 = std::integral_constant<u32, 1024u>;
-                    using U1 = std::integral_constant<u32, 1u>;
-                    using U2 = std::integral_constant<u32, 2u>;
-                    using U4 = std::integral_constant<u32, 4u>;
-                    if (rc.mKernelOptions.mNoGoldH200InverseFp52CacheRoots)
+                    constexpr int bytes = 12288u * sizeof(double);
+                    if (rc.mFp52InvRoots)
                     {
-                        if (fpThreads == 512u)
-                            return launch(T512{}, std::true_type{}, U2{}, U1{}, std::false_type{});
-                        switch (rc.mKernelOptions.mNoGoldH200InverseFp52Schedule)
-                        {
-                            case 1u: return launch(T1024{}, std::true_type{}, U2{}, U1{}, std::false_type{});
-                            case 2u: return launch(T1024{}, std::true_type{}, U1{}, U2{}, std::false_type{});
-                            case 3u: return launch(T1024{}, std::true_type{}, U2{}, U2{}, std::false_type{});
-                            case 4u: return launch(T1024{}, std::true_type{}, U4{}, U1{}, std::false_type{});
-                            case 5u:
-                                if ((reinterpret_cast<size_t>(data) & 15u) == 0u)
-                                    return launch(T1024{}, std::true_type{}, U1{}, U1{}, std::true_type{});
-                                break;
-                        }
-                        return launch(T1024{}, std::true_type{}, U1{}, U1{}, std::false_type{});
+                        if (rc.mKernelOptions.mNoGoldH200InverseOpTrace)
+                            std::fprintf(stderr, "[inverse-ops] polys=%u pre=%u post=%u indexed=%u\n",
+                                polyCount, preOp, postOp, polyIdx ? 1u : 0u);
+                        if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Fp52Kernel<2u, true, 512u, true>,
+                                cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "inverse FP52 prefix shared"))
+                            return false;
+                        nttInverseTwoTile16384Rho8Fp52Kernel<2u, true, 512u, true><<<polyCount * 8u, 512u, bytes, st>>>(
+                            rg, data, polyIdx, preOp, preB, postOp, postB, rc.mFp52InvRoots);
+                        return check(cudaGetLastError(), "inverse FP52 prefix");
                     }
-                    return fpThreads == 512u ? launch(T512{}, std::false_type{}, U1{}, U1{}, std::false_type{}) :
-                        launch(T1024{}, std::false_type{}, U1{}, U1{}, std::false_type{});
+                    if (!check(cudaFuncSetAttribute(nttInverseTwoTile16384Rho8Fp52Kernel<2u, false, 512u>,
+                            cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "inverse FP52 two-tile shared"))
+                        return false;
+                    nttInverseTwoTile16384Rho8Fp52Kernel<2u, false, 512u><<<polyCount * 8u, 512u, bytes, st>>>(
+                        rg, data, polyIdx, preOp, preB, postOp, postB);
+                    return check(cudaGetLastError(), "inverse FP52 two-tile");
                 }
                 const u32 threads = rc.mKernelOptions.mNttLog14H200InverseThreads;
                 // The direct prefix uses 128-bit input loads. Unaligned

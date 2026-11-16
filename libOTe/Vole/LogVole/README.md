@@ -1314,3 +1314,18 @@ out-of-place, and centered generic parity against CPU transforms. The 16384
 plain-broadcast path correctly declined locally; its direct parity and the FP52
 batch-threshold cases require H200 hardware and were not executed. No benchmarks
 were run.
+
+The inverse FP52 cleanup removes nine tuning selectors, unused schedules, and
+the single-tile FP52 family. Four production two-tile variants remain: narrow
+1024-thread cache-stage-1 kernels with packed or unpacked roots, and wide
+512-thread cache-stage-2 kernels with packed interleaved prefetch or unpacked
+roots. Admission retains the 64-block or twice-SM-count rule, runtime pre/post
+operations, nullable inverse roots, and the existing generic and integer paths.
+
+Validation: the Windows VS 14.50 CUDA test target and frontend object build and
+isolated SM90 compile passed; all four retained kernel entry symbols were
+verified in the SM90 object. Three focused checks passed with zero skips in
+16.64 seconds using `-gpu 1 -lvFactoryFast 1`. Local RTX 4060 tests checked generic
+inverse results against CPU transforms with runtime operations and native/null
+root views. H200-only threshold cases were added but were not executed locally.
+No benchmarks were run.
