@@ -126,6 +126,7 @@
     X(RingOps, KernelOptions) \
     X(RingOps, NttLog13ForwardParity) \
     X(RingOps, NttLog13InverseParity) \
+    X(RingOps, NttLog13TreeParity) \
     X(RingOps, NttTwoTileInPlaceParity) \
     X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
     X(Core, RootTruncParamsAndKeyReplication) \

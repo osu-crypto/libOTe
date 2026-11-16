@@ -2951,54 +2951,7 @@ namespace osuCrypto::LogVole::gpu
 
 
 
-        // Hot tau=1 shrink tree. The public columns are [0,2] at the leaf and
-        // [1,3] internally. With maxTau=1 the child-node slots are formulaic,
-        // so neither cached index array nor a pointer-hoist barrier is needed.
-        template<bool SimpleIndex>
-        __global__ void nttInverseTreePairNegateKernel(
-            DeviceInverseRho4 iv,
-            u64* out,
-            const u64* publicB,
-            const u64* nodes,
-            u32 depth,
-            u32 nodeCount,
-            u32 publicCol)
-        {
-            extern __shared__ u64 sh[];
-            const u32 limb = blockIdx.x & 3u;
-            const u32 slot = blockIdx.x >> 2u;
-
-            {
-                const u32 nodesAtDepth = 1u << depth;
-                const u32 chunk = slot >> depth;
-                const u32 k = slot & (nodesAtDepth - 1u);
-                const u32 left = (nodesAtDepth << 1u) + (k << 1u) - 1u;
-                const size_t leftSlot =
-                    static_cast<size_t>(chunk) * nodeCount + left;
-                const size_t limbOff = static_cast<size_t>(limb) << 13u;
-                const u64* a0 =
-                    publicB + (static_cast<size_t>(publicCol) << 15u) + limbOff;
-                const u64* a1 =
-                    publicB + (static_cast<size_t>(publicCol + 2u) << 15u) + limbOff;
-                const u64* b0 = nodes + (leftSlot << 15u) + limbOff;
-                const u64* b1 = b0 + (size_t(1) << 15u);
-                const GpuModulus mod = iv.mMods[limb];
-#pragma unroll 1
-                for (u32 t = threadIdx.x; t < 8192u; t += 512u)
-                {
-                    Wide sum = wideMul(a0[t], b0[t]);
-                    sum = wideAdd(sum, wideMul(a1[t], b1[t]));
-                    sh[t] = barrettReduce128(sum.mLo, sum.mHi, mod);
-                }
-            }
-            __syncthreads();
-            nttInverseFixedIpTransform8192<2u, SimpleIndex>(
-                iv, sh, out, nullptr, limb, slot);
-        }
-
-        // Opt-in tree sidecar that computes the two adjacent canonical products
-        // directly in inverse S0. The legacy kernel above remains a separate
-        // specialization so rollback retains its original lifetime and SASS.
+        // Compute the two adjacent canonical products directly in inverse S0.
         template<bool SimpleIndex>
         __global__ __launch_bounds__(512, 3)
         void nttInverseTreePairNegateFusedFirstStageKernel(
@@ -3062,76 +3015,6 @@ namespace osuCrypto::LogVole::gpu
             // S0..S4 are warp-private for the fixed butterfly mapping.
             __syncwarp();
             nttInverseFixedIpTransform8192<2u, SimpleIndex, true>(
-                iv, sh, out, nullptr, limb, slot);
-        }
-
-        // Candidate-only copy of the accepted simple-index/fused-S0 tree
-        // sidecar.  The transform, indexing, roots, lazy ranges and stores are
-        // unchanged; only each exact two-product Barrett reduction is replaced
-        // by the bounded pseudo-Mersenne fold above.
-        __global__ __launch_bounds__(512, 3)
-        void nttInverseTreePairNegateFusedFirstStagePseudo55Kernel(
-            DeviceInverseRho4 iv,
-            u64* out,
-            const u64* publicB,
-            const u64* nodes,
-            u32 depth,
-            u32 nodeCount,
-            u32 publicCol)
-        {
-            extern __shared__ u64 sh[];
-            const u32 limb = blockIdx.x & 3u;
-            const u32 slot = blockIdx.x >> 2u;
-
-            {
-                constexpr u64 kRadix55 = u64{ 1 } << 55u;
-                const u32 nodesAtDepth = 1u << depth;
-                const u32 chunk = slot >> depth;
-                const u32 k = slot & (nodesAtDepth - 1u);
-                const u32 left = (nodesAtDepth << 1u) + (k << 1u) - 1u;
-                const size_t leftSlot =
-                    static_cast<size_t>(chunk) * nodeCount + left;
-                const size_t limbOff = static_cast<size_t>(limb) << 13u;
-                const u64* a0 =
-                    publicB + (static_cast<size_t>(publicCol) << 15u) + limbOff;
-                const u64* a1 =
-                    publicB + (static_cast<size_t>(publicCol + 2u) << 15u) + limbOff;
-                const u64* b0 = nodes + (leftSlot << 15u) + limbOff;
-                const u64* b1 = b0 + (size_t(1) << 15u);
-                const u64 q = iv.mMods[limb].mValue;
-                const u32 c = static_cast<u32>(kRadix55 - q);
-                const u64 twoQ = q << 1u;
-                const ShoupOperand* roots =
-                    iv.mInvRoots + (static_cast<size_t>(limb) << 13u);
-
-#pragma unroll 1
-                for (u32 butterfly = threadIdx.x;
-                     butterfly < 4096u;
-                     butterfly += 512u)
-                {
-                    const u32 ix = butterfly << 1u;
-
-                    Wide sum0 = wideMul(a0[ix], b0[ix]);
-                    sum0 = wideAdd(sum0, wideMul(a1[ix], b1[ix]));
-                    const u64 u =
-                        pointwisePseudo55ReduceWideCanonical<2u>(
-                            sum0, q, c);
-
-                    Wide sum1 = wideMul(a0[ix + 1u], b0[ix + 1u]);
-                    sum1 = wideAdd(
-                        sum1, wideMul(a1[ix + 1u], b1[ix + 1u]));
-                    const u64 v =
-                        pointwisePseudo55ReduceWideCanonical<2u>(
-                            sum1, q, c);
-
-                    sh[ix] = nttGuard(u + v, twoQ);
-                    const ShoupOperand r = roots[1u + butterfly];
-                    sh[ix + 1u] =
-                        mulShoupLazy(u + twoQ - v, r, q);
-                }
-            }
-            __syncwarp();
-            nttInverseFixedIpTransform8192<2u, true, true>(
                 iv, sh, out, nullptr, limb, slot);
         }
 
@@ -11718,20 +11601,6 @@ namespace osuCrypto::LogVole::gpu
                 return false;
             if (!check(
                     cudaFuncSetAttribute(
-                        nttInverseTreePairNegateKernel<false>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseTreePairNegate)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseTreePairNegateKernel<true>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseTreePairNegateSimpleIndex)"))
-                return false;
-            if (!check(
-                    cudaFuncSetAttribute(
                         nttInverseTreePairNegateFusedFirstStageKernel<false>,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(bytes)),
@@ -11805,31 +11674,6 @@ namespace osuCrypto::LogVole::gpu
                     "cudaFuncSetAttribute(inversePostWarpStages05ReverseSub)"))
                 return false;
             state->mNttInversePostWarpStages05SharedConfigured.store(true, std::memory_order_release);
-            return true;
-        }
-
-        // Keep the two tree symbols' attributes independent: a Stage-104
-        // configuration failure must not disable the preceding rollback or any
-        // other pointwise family.
-        bool configurePointwisePseudo55TreeShared(const RingConstView& rc)
-        {
-            auto* state = rc.mKernelInitialization;
-            if (!state) return false;
-            if (state->mPointwisePseudo55TreeSharedConfigured.load(std::memory_order_acquire)) return true;
-            std::unique_lock<std::mutex> lock;
-            bool ready = false;
-            if (!lockKernelInitialization(*state, state->mPointwisePseudo55TreeSharedConfigured, lock, ready)) return false;
-            if (ready) return true;
-            const size_t bytes =
-                static_cast<size_t>(kNttMaxTileLen) * sizeof(u64);
-            if (!check(
-                    cudaFuncSetAttribute(
-                        nttInverseTreePairNegateFusedFirstStagePseudo55Kernel,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(bytes)),
-                    "cudaFuncSetAttribute(inverseTreePairPseudo55)"))
-                return false;
-            state->mPointwisePseudo55TreeSharedConfigured.store(true, std::memory_order_release);
             return true;
         }
 
@@ -13560,84 +13404,54 @@ namespace osuCrypto::LogVole::gpu
         const u32 blocks = outCount * 4u;
         const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
         const DeviceInverseRho4 iv = toDeviceInverseRho4(rc);
-        const bool fusedFirstStage =
-            rc.mKernelOptions.mNttLog13InverseTreeFusedFirstStage;
         const bool simpleIndex = rc.mKernelOptions.mNttLog13SimpleIndex;
-        const bool usePseudo55 = simpleIndex && fusedFirstStage &&
+        const bool usePseudo55 = simpleIndex &&
             pointwisePseudo55ProductionEligible(rc);
         if (usePseudo55)
         {
-            if (rc.mKernelOptions.mNttLog13InverseTreeWarpStages)
+            if (alphaIsTwo)
             {
-                if (alphaIsTwo &&
-                    rc.mKernelOptions.mNttLog13InverseTreeProductWarpStages05)
+                const bool vectorPairAligned =
+                    ((reinterpret_cast<std::uintptr_t>(publicB) |
+                      reinterpret_cast<std::uintptr_t>(nodes)) & 15u) == 0u;
+                if (vectorPairAligned)
                 {
-                    const bool vectorPairAligned =
-                        ((reinterpret_cast<std::uintptr_t>(publicB) |
-                          reinterpret_cast<std::uintptr_t>(nodes)) & 15u) == 0u;
-                    if (vectorPairAligned &&
-                        rc.mKernelOptions.mNttLog13InverseTreeProductWarpVectorPairs)
-                    {
-                        if (!configurePointwisePseudo55TreeProductWarpVectorShared(rc))
-                            return false;
-                        nttInverseTreePairNegateProductWarpStages05VectorPairsPseudo55Kernel<<<
-                            blocks, 512u, shBytes, asStream(stream)>>>(
-                            iv, out, publicB, nodes, depth, nodeCount,
-                            publicCol);
-                        launched = true;
-                        return check(
-                            cudaGetLastError(),
-                            "nttInverseTreePairNegateProductWarpStages05VectorPairsPseudo55");
-                    }
-                    if (!configurePointwisePseudo55TreeProductWarpShared(rc))
+                    if (!configurePointwisePseudo55TreeProductWarpVectorShared(rc))
                         return false;
-                    nttInverseTreePairNegateProductWarpStages05Pseudo55Kernel<<<
+                    nttInverseTreePairNegateProductWarpStages05VectorPairsPseudo55Kernel<<<
                         blocks, 512u, shBytes, asStream(stream)>>>(
                         iv, out, publicB, nodes, depth, nodeCount, publicCol);
                     launched = true;
-                    return check(
-                        cudaGetLastError(),
-                        "nttInverseTreePairNegateProductWarpStages05Pseudo55");
+                    return check(cudaGetLastError(),
+                        "nttInverseTreePairNegateProductWarpStages05VectorPairsPseudo55");
                 }
-                if (!configurePointwisePseudo55TreeWarpShared(rc)) return false;
-                nttInverseTreePairNegateWarpStagesPseudo55Kernel<<<
+                if (!configurePointwisePseudo55TreeProductWarpShared(rc))
+                    return false;
+                nttInverseTreePairNegateProductWarpStages05Pseudo55Kernel<<<
                     blocks, 512u, shBytes, asStream(stream)>>>(
                     iv, out, publicB, nodes, depth, nodeCount, publicCol);
                 launched = true;
-                return check(
-                    cudaGetLastError(),
-                    "nttInverseTreePairNegateWarpStagesPseudo55");
+                return check(cudaGetLastError(),
+                    "nttInverseTreePairNegateProductWarpStages05Pseudo55");
             }
-            if (!configurePointwisePseudo55TreeShared(rc)) return false;
-            nttInverseTreePairNegateFusedFirstStagePseudo55Kernel<<<
+            if (!configurePointwisePseudo55TreeWarpShared(rc)) return false;
+            nttInverseTreePairNegateWarpStagesPseudo55Kernel<<<
                 blocks, 512u, shBytes, asStream(stream)>>>(
                 iv, out, publicB, nodes, depth, nodeCount, publicCol);
             launched = true;
-            return check(
-                cudaGetLastError(),
-                "nttInverseTreePairNegateFusedFirstStagePseudo55");
+            return check(cudaGetLastError(), "nttInverseTreePairNegateWarpStagesPseudo55");
         }
         if (simpleIndex)
         {
-            if (fusedFirstStage)
-                nttInverseTreePairNegateFusedFirstStageKernel<true><<<
-                    blocks, 512u, shBytes, asStream(stream)>>>(
-                    iv, out, publicB, nodes, depth, nodeCount, publicCol);
-            else
-                nttInverseTreePairNegateKernel<true><<<
-                    blocks, 512u, shBytes, asStream(stream)>>>(
-                    iv, out, publicB, nodes, depth, nodeCount, publicCol);
+            nttInverseTreePairNegateFusedFirstStageKernel<true><<<
+                blocks, 512u, shBytes, asStream(stream)>>>(
+                iv, out, publicB, nodes, depth, nodeCount, publicCol);
         }
         else
         {
-            if (fusedFirstStage)
-                nttInverseTreePairNegateFusedFirstStageKernel<false><<<
-                    blocks, 512u, shBytes, asStream(stream)>>>(
-                    iv, out, publicB, nodes, depth, nodeCount, publicCol);
-            else
-                nttInverseTreePairNegateKernel<false><<<
-                    blocks, 512u, shBytes, asStream(stream)>>>(
-                    iv, out, publicB, nodes, depth, nodeCount, publicCol);
+            nttInverseTreePairNegateFusedFirstStageKernel<false><<<
+                blocks, 512u, shBytes, asStream(stream)>>>(
+                iv, out, publicB, nodes, depth, nodeCount, publicCol);
         }
         launched = true;
         return check(cudaGetLastError(), "nttInverseTreePairNegate");

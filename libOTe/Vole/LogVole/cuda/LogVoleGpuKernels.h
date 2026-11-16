@@ -115,7 +115,6 @@ namespace osuCrypto::LogVole::gpu
         int mDevice = -1;
         std::atomic<bool> mSharedConfigured{false};
         std::atomic<bool> mNttInversePostWarpStages05SharedConfigured{false};
-        std::atomic<bool> mPointwisePseudo55TreeSharedConfigured{false};
         std::atomic<bool> mPointwisePseudo55TreeWarpSharedConfigured{false};
         std::atomic<bool> mPointwisePseudo55TreeProductWarpSharedConfigured{false};
         std::atomic<bool> mPointwisePseudo55TreeProductWarpVectorSharedConfigured{false};

@@ -1381,3 +1381,18 @@ compile passed; six hot and eleven fixed inverse entries were verified in the
 SM90 object. Four focused checks passed with zero skips in 29.68 seconds using
 `-gpu 1 -lvFactoryFast 1`. H200 runtime remains untested locally. No benchmarks
 were run.
+
+The log13 tree inverse cleanup removes four dispatch switches and the exclusive
+rollback kernels and initialization state. Five production kernels remain:
+pseudo55 alpha-two vector/scalar product paths, the other-alpha warp path, and
+simple/non-simple generic fused-first-stage paths. Admission and alignment
+fallbacks remain unchanged.
+
+Validation: the direct five-kernel CPU oracle passed on the RTX 4060 before
+pruning in 4.31 seconds. The final Windows VS 14.50 CUDA test target and frontend
+object build and isolated SM90 compile passed; all five retained tree entries
+and absence of the removed rollback entries were verified in the SM90 object.
+Three focused checks passed with zero skips in 57.70 seconds using
+`-gpu 1 -lvFactoryFast 1`, including the direct oracle after pruning. These are
+correctness checks, with no performance claim. H200 runtime remains untested
+locally. No benchmarks were run.

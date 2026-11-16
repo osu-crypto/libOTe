@@ -2940,6 +2940,115 @@ void LogVole_RingOps_NttLog13InverseParity(const oc::CLP& cmd)
 #endif
 }
 
+void LogVole_RingOps_NttLog13TreeParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+    constexpr unsigned count = 64u, nodeCount = 3u;
+    for (int bits : {55, 53})
+    {
+        RingParams params;
+        params.mPolyModulusDegree = 8192u;
+        params.mCoeffModulusBits.resize(4u);
+        std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), bits);
+        RingNttContext cpu;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, cpu));
+        prepareGpuTableOwners(cpu);
+        auto ring = gpu::GpuRing::get(cpu);
+        LOGVOLE_REQUIRE_TRUE(ring);
+        const auto view = ring->view(stream);
+        if (bits == 55)
+            LOGVOLE_REQUIRE_TRUE(view.mMinModulus > (std::uint64_t{1} << 55u) - (std::uint64_t{1} << 21u)
+                && view.mMaxModulus < (std::uint64_t{1} << 55u));
+        else LOGVOLE_REQUIRE_TRUE(view.mMaxModulus < (std::uint64_t{1} << 54u));
+        const unsigned publicCol = bits == 55 ? 0u : 1u;
+        std::vector<RnsPoly> publicB(4u), nodes(count * nodeCount), expected(count);
+        for (unsigned p = 0; p < publicB.size() + nodes.size(); ++p)
+        {
+            auto poly = deriveUniformPolyFromNonce(cpu, 0x54524545u, static_cast<unsigned>(bits), p);
+            for (unsigned j = 0; j < 4u; ++j)
+            {
+                const auto q = ringModulusValue(cpu, j);
+                poly.mCoeffs[j * 8192u] = 0u;
+                poly.mCoeffs[j * 8192u + 1u] = q - 1u;
+                poly.mCoeffs[j * 8192u + 2u] = (p % 2u) == 0u ? 1u : q - 1u;
+            }
+            if (p < publicB.size()) publicB[p] = std::move(poly);
+            else nodes[p - publicB.size()] = std::move(poly);
+        }
+        // Depth zero: each output owns one chunk with left/right nodes 1/2.
+        for (unsigned o = 0; o < count; ++o)
+        {
+            expected[o] = publicB[0];
+            for (unsigned j = 0; j < 4u; ++j)
+            {
+                const auto q = ringModulusValue(cpu, j);
+                const seal::Modulus modulus(q);
+                for (unsigned c = 0; c < 8192u; ++c)
+                {
+                    const auto e = j * 8192u + c;
+                    expected[o].mCoeffs[e] = (seal::util::multiply_uint_mod(
+                        publicB[publicCol].mCoeffs[e], nodes[o * nodeCount + 1u].mCoeffs[e], modulus)
+                        + seal::util::multiply_uint_mod(publicB[publicCol + 2u].mCoeffs[e],
+                            nodes[o * nodeCount + 2u].mCoeffs[e], modulus)) % q;
+                }
+            }
+            LOGVOLE_REQUIRE_TRUE(inverseNtt(expected[o], cpu));
+            for (unsigned j = 0; j < 4u; ++j)
+            for (unsigned c = 0; c < 8192u; ++c)
+            {
+                auto& value = expected[o].mCoeffs[j * 8192u + c];
+                if (value != 0u) value = ringModulusValue(cpu, j) - value;
+            }
+        }
+        // Extra polynomials explicitly own both one-word-shifted input views.
+        gpu::GpuPolyBuffer deviceB(*ring, publicB.size() + 1u, stream);
+        gpu::GpuPolyBuffer deviceNodes(*ring, nodes.size() + 1u, stream);
+        gpu::GpuPolyBuffer output(*ring, count, stream);
+        const auto words = ringPolyCoeffCount(params);
+        bool launched = true;
+        LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseTreePairNegate(view, output.data(stream),
+            deviceB.data(stream), deviceNodes.data(stream), count - 1u, 0u, nodeCount,
+            publicCol, stream.raw(), launched, true));
+        LOGVOLE_REQUIRE_FALSE(launched);
+        LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseTreePairNegate(view, deviceB.data(stream),
+            deviceB.data(stream), deviceNodes.data(stream), count, 0u, nodeCount,
+            publicCol, stream.raw(), launched, true));
+        LOGVOLE_REQUIRE_FALSE(launched);
+        for (unsigned route = 0; route < (bits == 55 ? 4u : 2u); ++route)
+        {
+            const bool shiftB = bits == 55 && route == 1u;
+            const bool shiftNodes = bits == 55 && route == 2u;
+            auto* b = deviceB.data(stream) + (shiftB ? 1u : 0u);
+            auto* n = deviceNodes.data(stream) + (shiftNodes ? 1u : 0u);
+            for (unsigned p = 0; p < publicB.size(); ++p)
+                LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(b + p * words,
+                    publicB[p].mCoeffs.data(), ring->polyBytes(), stream));
+            for (unsigned p = 0; p < nodes.size(); ++p)
+                LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(n + p * words,
+                    nodes[p].mCoeffs.data(), ring->polyBytes(), stream));
+            auto selected = view;
+            if (bits == 53 && route == 1u) selected.mKernelOptions.mNttLog13SimpleIndex = false;
+            // All schedule families implement the same canonical product sum.
+            const bool alphaTwoSchedule = bits != 55 || route != 3u;
+            LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseTreePairNegate(selected,
+                output.data(stream), b, n, count, 0u, nodeCount, publicCol,
+                stream.raw(), launched, alphaTwoSchedule));
+            LOGVOLE_REQUIRE_TRUE(launched);
+            std::vector<RnsPoly> actual;
+            LOGVOLE_REQUIRE_TRUE(output.download(actual, stream));
+            expect_batch_equal(actual, expected);
+        }
+    }
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
 void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)

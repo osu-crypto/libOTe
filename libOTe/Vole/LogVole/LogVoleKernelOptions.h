@@ -33,10 +33,6 @@ namespace osuCrypto
         bool mNttLog13Specialized = true;
         bool mNttLog13SimpleIndex = true;
         bool mNttLog13VectorShoupLoads = true;
-        bool mNttLog13InverseTreeFusedFirstStage = true;
-        bool mNttLog13InverseTreeWarpStages = true;
-        bool mNttLog13InverseTreeProductWarpStages05 = true;
-        bool mNttLog13InverseTreeProductWarpVectorPairs = true;
         bool mNttLog13InverseSpecialized = true;
         bool mNttLog13InverseDirectStore = true;
         bool mNttLog13InverseScatterFixed = true;
@@ -113,10 +109,6 @@ namespace osuCrypto
                 mNttLog13Specialized == other.mNttLog13Specialized &&
                 mNttLog13SimpleIndex == other.mNttLog13SimpleIndex &&
                 mNttLog13VectorShoupLoads == other.mNttLog13VectorShoupLoads &&
-                mNttLog13InverseTreeFusedFirstStage == other.mNttLog13InverseTreeFusedFirstStage &&
-                mNttLog13InverseTreeWarpStages == other.mNttLog13InverseTreeWarpStages &&
-                mNttLog13InverseTreeProductWarpStages05 == other.mNttLog13InverseTreeProductWarpStages05 &&
-                mNttLog13InverseTreeProductWarpVectorPairs == other.mNttLog13InverseTreeProductWarpVectorPairs &&
                 mNttLog13InverseSpecialized == other.mNttLog13InverseSpecialized &&
                 mNttLog13InverseDirectStore == other.mNttLog13InverseDirectStore &&
                 mNttLog13InverseScatterFixed == other.mNttLog13InverseScatterFixed &&
