@@ -1410,3 +1410,17 @@ SM90 compile passed, with retained scatter, sparse, tree, and H200 entries
 verified in the SM90 object. Four focused checks passed with zero skips in
 30.59 seconds using `-gpu 1 -lvFactoryFast 1`. H200 runtime remains untested
 locally. No benchmarks were run.
+
+Common NTT dispatch now uses the established transform widths, inverse block
+threshold, and hardware-selected H200 paths without eight tuning controls.
+Functional geometry, alignment, modulus, and resource fallbacks remain intact.
+Scale/round arithmetic controls remain available; direct scale/NTT/gather
+coverage checks their retained paths against the public CPU unwrap operation,
+including partial two-chunk output and slot-map availability.
+
+Validation: the scale-gather oracle passed on the RTX 4060 before pruning. The
+final Windows VS 14.50 CUDA test target and frontend object build and isolated
+SM90 compile passed, with retained NTT entries verified in the SM90 object.
+Nine focused checks passed with zero skips in 51.23 seconds using
+`-gpu 1 -lvFactoryFast 1`. H200 runtime remains untested locally. No benchmarks
+were run.

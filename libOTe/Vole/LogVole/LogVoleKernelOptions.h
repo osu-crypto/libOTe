@@ -10,17 +10,10 @@ namespace osuCrypto
     struct LogVoleGpuKernelOptions
     {
         bool mNoGoldH200InverseOpTrace = false;
-        bool mNttLog14H200 = true;
-        bool mNttLog14H200FixedTransforms = true;
         bool mNoGoldH200CombinedAccumulator = true;
         bool mNoGoldH200AccumulatorPseudo52 = true;
         bool mNoGoldH200Gadget208 = true;
         bool mNoGoldH200Gadget208Pseudo52 = true;
-        bool mNttLog14H200Centered = true;
-        std::uint32_t mNttForwardThreads = 1024u;
-        std::uint32_t mNttInverseThreads = 1024u;
-        // Zero inherits mNttInverseThreads.
-        std::uint32_t mNttFusedIpThreads = 0u;
         std::uint32_t mCt2PolySeedThreads = 32u;
         bool mCt2SplitAes = true;
         bool mCt2AesSharedSbox = true;
@@ -39,8 +32,6 @@ namespace osuCrypto
         bool mFixedIpWideMuRowReuse = true;
         bool mPointwisePseudo55Reduce = true;
         std::uint32_t mRootZetaSampleThreads = 256u;
-        std::uint32_t mNttLog13InverseThreads = 512u;
-        std::uint32_t mNttLog13InverseMinBlocks = 256u;
         bool mExpandAccumulatorSpecialized = true;
         bool mExpandAccumulatorQ64Complement = true;
         bool mExpandAccumulatorPseudo55 = true;
@@ -71,12 +62,8 @@ namespace osuCrypto
 
         bool valid() const noexcept
         {
-            return (mNttForwardThreads == 256u || mNttForwardThreads == 512u || mNttForwardThreads == 1024u) &&
-                (mNttInverseThreads == 256u || mNttInverseThreads == 512u || mNttInverseThreads == 1024u) &&
-                (mNttFusedIpThreads == 0u || mNttFusedIpThreads == 256u || mNttFusedIpThreads == 512u || mNttFusedIpThreads == 1024u) &&
-                (mCt2PolySeedThreads == 32u || mCt2PolySeedThreads == 64u || mCt2PolySeedThreads == 128u) &&
+            return (mCt2PolySeedThreads == 32u || mCt2PolySeedThreads == 64u || mCt2PolySeedThreads == 128u) &&
                 (mRootZetaSampleThreads == 128u || mRootZetaSampleThreads == 256u) &&
-                (mNttLog13InverseThreads == 256u || mNttLog13InverseThreads == 512u || mNttLog13InverseThreads == 1024u) &&
                 (mNoGoldDenoiseThreads == 128u || mNoGoldDenoiseThreads == 256u || mNoGoldDenoiseThreads == 512u) &&
                 mNoGoldH200RootL2Mode <= 3u &&
                 (mRootL2MiB == 1u || mRootL2MiB == 2u || mRootL2MiB == 4u || mRootL2MiB == 8u || mRootL2MiB == 12u || mRootL2MiB == 16u) &&
@@ -85,16 +72,10 @@ namespace osuCrypto
         bool operator==(const LogVoleGpuKernelOptions& other) const noexcept
         {
             return mNoGoldH200InverseOpTrace == other.mNoGoldH200InverseOpTrace &&
-                mNttLog14H200 == other.mNttLog14H200 &&
-                mNttLog14H200FixedTransforms == other.mNttLog14H200FixedTransforms &&
                 mNoGoldH200CombinedAccumulator == other.mNoGoldH200CombinedAccumulator &&
                 mNoGoldH200AccumulatorPseudo52 == other.mNoGoldH200AccumulatorPseudo52 &&
                 mNoGoldH200Gadget208 == other.mNoGoldH200Gadget208 &&
                 mNoGoldH200Gadget208Pseudo52 == other.mNoGoldH200Gadget208Pseudo52 &&
-                mNttLog14H200Centered == other.mNttLog14H200Centered &&
-                mNttForwardThreads == other.mNttForwardThreads &&
-                mNttInverseThreads == other.mNttInverseThreads &&
-                mNttFusedIpThreads == other.mNttFusedIpThreads &&
                 mCt2PolySeedThreads == other.mCt2PolySeedThreads &&
                 mCt2SplitAes == other.mCt2SplitAes &&
                 mCt2AesSharedSbox == other.mCt2AesSharedSbox &&
@@ -113,8 +94,6 @@ namespace osuCrypto
                 mFixedIpWideMuRowReuse == other.mFixedIpWideMuRowReuse &&
                 mPointwisePseudo55Reduce == other.mPointwisePseudo55Reduce &&
                 mRootZetaSampleThreads == other.mRootZetaSampleThreads &&
-                mNttLog13InverseThreads == other.mNttLog13InverseThreads &&
-                mNttLog13InverseMinBlocks == other.mNttLog13InverseMinBlocks &&
                 mExpandAccumulatorSpecialized == other.mExpandAccumulatorSpecialized &&
                 mExpandAccumulatorQ64Complement == other.mExpandAccumulatorQ64Complement &&
                 mExpandAccumulatorPseudo55 == other.mExpandAccumulatorPseudo55 &&

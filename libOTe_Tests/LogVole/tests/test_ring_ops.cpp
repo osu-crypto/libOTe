@@ -2424,18 +2424,12 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
             auto& kernel = options.mAdvanced.mKernels;
             if (variant == 1)
             {
-                kernel.mNttLog14H200 = false;
                 kernel.mNttLog13Specialized = false;
                 kernel.mNttLog13InverseSpecialized = false;
-                kernel.mNttForwardThreads = 256;
-                kernel.mNttInverseThreads = 256;
-                kernel.mNttLog13InverseThreads = 256;
                 kernel.mNoGoldH200InversePackedRoots = false;
             }
             else if (variant == 2)
             {
-                kernel.mNttForwardThreads = 512;
-                kernel.mNttInverseThreads = 512;
                 kernel.mNttLog13SimpleIndex = false;
                 kernel.mNoGoldH200InversePackedRoots = true;
             }
@@ -2571,7 +2565,7 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
             {
                 const auto view = ring->view(stream);
                 const bool eligible = gpu::canLaunchExpandAccumulatorTau1(view, 16u, 8u, 16u);
-                LOGVOLE_REQUIRE_EQ(eligible, view.mH200Shared && view.mKernelOptions.mNttLog14H200);
+                LOGVOLE_REQUIRE_EQ(eligible, view.mH200Shared);
                 if (eligible)
                 {
                     // One chunk, sixteen rows: the canonical-input bound of
@@ -2691,7 +2685,7 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
         }
     }
     osuCrypto::LogVoleExecutionOptions invalid;
-    invalid.mAdvanced.mKernels.mNttForwardThreads = 3;
+    invalid.mAdvanced.mKernels.mNoGoldDenoiseThreads = 3;
     bool rejected = false;
     try { RingContextFactory owner(invalid); }
     catch (const std::invalid_argument&) { rejected = true; }
@@ -3269,6 +3263,84 @@ void LogVole_RingOps_NttLog13SparseParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(gadget.download(high, stream));
             expect_batch_equal(high, expectedGadget);
         }
+    }
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_RingOps_ScaleNttGatherParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    RingParams params;
+    params.mPolyModulusDegree = 8192u;
+    params.mCoeffModulusBits.resize(4u);
+    std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), 55);
+    ZpCrtContext cpu;
+    LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(params, 54u, cpu));
+    LOGVOLE_REQUIRE_FALSE(cpu.mRing.mExecutionOptions.mUseGpu);
+    std::vector<RnsPoly> input(2u);
+    for (unsigned p = 0; p < input.size(); ++p)
+    {
+        input[p] = deriveUniformPolyFromNonce(cpu.mRing, 0x5343414cu, 0x47415448u, p);
+        for (unsigned j = 0; j < 4u; ++j)
+        {
+            const auto q = ringModulusValue(cpu.mRing, j);
+            input[p].mCoeffs[j * 8192u] = 0u;
+            input[p].mCoeffs[j * 8192u + 1u] = 1u;
+            input[p].mCoeffs[j * 8192u + 2u] = q - 1u;
+            input[p].mCoeffs[j * 8192u + 3u] = q / 2u;
+        }
+    }
+    constexpr std::size_t outCount = 8192u + 17u;
+    macoro::thread_pool executor;
+    std::array<ZpDecodeBuffer, 3> decodeBuffers;
+    AlignedUnVec<std::uint64_t> expected;
+    // Public CPU unwrap performs scale/round, plaintext NTT, and slot decoding.
+    LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(unwrapRingLabelsCrt(executor, decodeBuffers,
+        cpu, input, outCount, true, 1u, expected)));
+    LOGVOLE_REQUIRE_EQ(expected.size(), outCount);
+    prepareGpuTableOwners(cpu.mRing);
+    auto ring = gpu::GpuRing::get(cpu.mRing);
+    LOGVOLE_REQUIRE_TRUE(ring && cpu.mBatchingContext && cpu.mBatchEncoder);
+    auto plain = gpu::GpuPlainNtt::get(*cpu.mBatchingContext, *cpu.mBatchEncoder, cpu.mRing.mResourceScope);
+    LOGVOLE_REQUIRE_TRUE(plain);
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+    gpu::GpuPolyBuffer data(*ring, input.size(), stream), output;
+    LOGVOLE_REQUIRE_TRUE(data.upload(input, stream));
+    LOGVOLE_REQUIRE_TRUE(output.resizeWords(outCount + 1u, 1u, stream));
+    gpu::ScaleRoundConstView constants;
+    LOGVOLE_REQUIRE_TRUE(ring->scaleRoundConstants(cpu.mPlaintextModulus, constants));
+    LOGVOLE_REQUIRE_TRUE(constants.mFastLimbs && plain->slotMap() && plain->inverseSlotMap());
+    const auto view = ring->view(stream), plainView = plain->view(stream);
+    LOGVOLE_REQUIRE_TRUE(view.mMaxModulus < (std::uint64_t{1} << 60u)
+        && cpu.mPlaintextModulus < view.mMinModulus);
+    LOGVOLE_REQUIRE_TRUE(cpu.mPlaintextModulus > (std::uint64_t{1} << 53u)
+        && cpu.mPlaintextModulus < (std::uint64_t{1} << 54u));
+    std::vector<std::uint64_t> actual(outCount + 1u), sentinel(outCount + 1u, cpu.mPlaintextModulus - 1u);
+    for (unsigned route = 0; route < 4u; ++route)
+    {
+        auto selected = view;
+        if (route == 2u) selected.mKernelOptions.mScaleNttForwardGatherHiCarry = false;
+        if (route == 3u) selected.mKernelOptions.mScaleAndRoundFastArithmetic = false;
+        const auto* slotMap = route == 1u ? nullptr : plain->slotMap();
+        LOGVOLE_REQUIRE_TRUE(gpu::canLaunchScaleNttForwardGather(selected, plainView,
+            data.data(stream), 2u, cpu.mPlaintextModulus, constants.mFastLimbs,
+            plain->inverseSlotMap(), plain->slotCount(), output.data(stream), outCount));
+        LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(output.data(stream), sentinel.data(),
+            sentinel.size() * sizeof(std::uint64_t), stream));
+        LOGVOLE_REQUIRE_TRUE(gpu::launchScaleNttForwardGather(selected, plainView,
+            data.data(stream), 2u, cpu.mPlaintextModulus, constants.mFastLimbs,
+            plain->inverseSlotMap(), slotMap, plain->slotCount(), output.data(stream), outCount, stream.raw()));
+        LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(actual.data(), output.data(stream),
+            actual.size() * sizeof(std::uint64_t), stream));
+        LOGVOLE_REQUIRE_TRUE(stream.sync());
+        LOGVOLE_REQUIRE_TRUE(std::equal(expected.begin(), expected.end(), actual.begin()));
+        LOGVOLE_REQUIRE_EQ(actual.back(), sentinel.back());
     }
 #else
     (void)cmd;
