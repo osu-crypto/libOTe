@@ -130,9 +130,9 @@ namespace
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (const auto& poly : batch)
         {
-            for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+            for (std::size_t modIdx = 0; modIdx < ringModulusCount(ctx); ++modIdx)
             {
-                const std::uint64_t mod = ctx.mModuli[modIdx].value();
+                const std::uint64_t mod = ringModulusValue(ctx, modIdx);
                 const std::size_t offset = modIdx * n;
                 for (std::size_t i = 0; i < n; ++i)
                 {
@@ -150,7 +150,9 @@ namespace
     {
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         const std::size_t rho = ctx.mParams.mCoeffModulusBits.size();
-        auto contextData = ctx.mContext->key_context_data();
+        const auto hostContext = getRingHostContext(ctx);
+        LOGVOLE_REQUIRE_TRUE(hostContext != nullptr);
+        auto contextData = hostContext->key_context_data();
         seal::util::RNSBase fullBase(contextData->parms().coeff_modulus(), seal::MemoryManager::GetPool());
 
         auto composedPoly = seal::util::allocate_poly(n, rho, seal::MemoryManager::GetPool());
@@ -271,9 +273,12 @@ namespace
 
 void LogVole_ShrinkExpandCoproto_OfflineAndExpandDeterministicRelation(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     const auto s = sample_batch(ctx, params.mMu, 0x2001u);
 
@@ -295,9 +300,12 @@ void LogVole_ShrinkExpandCoproto_OfflineAndExpandDeterministicRelation(const oc:
 
 void LogVole_ShrinkExpandCoproto_TruncOfflineAndExpandBoundedRelation(const oc::CLP&)
 {
-    const auto params = make_params(true);
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(true), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     const auto s = sample_batch(ctx, params.mMu, 0x2101u);
 
@@ -319,9 +327,12 @@ void LogVole_ShrinkExpandCoproto_TruncOfflineAndExpandBoundedRelation(const oc::
 
 void LogVole_ShrinkExpandCoproto_FullNoiseTolerance(const oc::CLP&)
 {
-    const auto params = make_full_noise_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_full_noise_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     const auto s = sample_batch(ctx, params.mMu, 0x5001u);
 
@@ -343,9 +354,12 @@ void LogVole_ShrinkExpandCoproto_FullNoiseTolerance(const oc::CLP&)
 
 void LogVole_ShrinkExpandCoproto_OfflineStateReuseAcrossQueries(const oc::CLP&)
 {
-    const auto params = make_params();
+    auto testExecution = std::make_shared<osuCrypto::LogVole::ExecutionContext>();
+
+    const auto params = ::tests_libOTe::logvole_test::withExecution(make_params(), testExecution);
     RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+    ::tests_libOTe::logvole_test::bindExecution(ctx, testExecution);
+    LOGVOLE_REQUIRE_TRUE(::tests_libOTe::logvole_test::makeRingNttContext(testExecution, params.mRing, ctx));
 
     const auto s = sample_batch(ctx, params.mMu, 0xA001u);
 

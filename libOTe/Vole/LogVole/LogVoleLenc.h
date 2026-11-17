@@ -10,18 +10,20 @@
 
 namespace osuCrypto::LogVole
 {
-    struct LencLacct
-    {
-        u32 mWidthPadded = 0;
-        u32 mLevels = 0;
-        RingTensor mCt;
-    };
+    // Both layers use the same immutable ciphertext representation. Keeping one
+    // type lets evaluation borrow the offline tensor instead of copying every
+    // polynomial at every online chunk.
+    using LencLacct = ShrinkExpandLacct;
 
     struct LencEncodeOutput
     {
         std::vector<RnsPoly> mR;
         std::vector<RnsPoly> mRNtt;
         LencLacct mLacct;
+        // Internal GPU setup may retain ciphertext coefficients on device.
+        // mLacct keeps its shape; public/default calls return eager host data.
+        std::shared_ptr<const LazyRingTensorHostState> mLazyCt;
+        std::shared_ptr<const LazyLencRandomizerState> mLazyRandomizers;
     };
 
     struct KeyDeriveRequest
@@ -73,6 +75,14 @@ namespace osuCrypto::LogVole
 
     std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau);
 
+    std::shared_ptr<const std::vector<RnsPoly>> sharedLencPublicBNtt(
+        const RingNttContext& ctx, u32 tau);
+
+    // Internal device-resident view of the same deterministic cached batch.
+    // It is exact-role/run/device scoped and does not create a host snapshot.
+    std::shared_ptr<const gpu::RetainedPublicUniform> retainedLencPublicBNtt(
+        const RingNttContext& ctx, u32 tau);
+
     bool prepareKeyDeriveRequest(
         const KeyDeriveReceiverInput& input,
         KeyDeriveRequest& out);
@@ -88,6 +98,9 @@ namespace osuCrypto::LogVole
         const KeyDeriveResponse& response,
         KeyDeriveReceiverOutput& output);
 
+    // Tree widths are powers of two and at least two. Automatic padding adds
+    // a zero leaf for a singleton; an explicit width below two is rejected.
+    // The same convention applies to full/truncated encoding and digests.
     bool buildDigestTree(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& x,
@@ -120,7 +133,8 @@ namespace osuCrypto::LogVole
         u32 requestedWidthPadded = 0,
         bool emitRCoeffDomain = true,
         const std::vector<RnsPoly>* publicBNtt = nullptr,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1,
+        bool deferCiphertextHost = false);
 
     bool lencDigest(
         const RingNttContext& ctx,
@@ -190,7 +204,11 @@ namespace osuCrypto::LogVole
         bool emitRCoeffDomain = true,
         bool leafInputsAreGadget = false,
         const std::vector<RnsPoly>* publicBNtt = nullptr,
-        u32 requestedWorkers = 1);
+        u32 requestedWorkers = 1,
+        bool deferCiphertextHost = false,
+        bool deferRandomizerHost = false,
+        const gpu::DeviceBatch* seedLabelDevice = nullptr,
+        const LazySeedLabelHostState* seedLabelHost = nullptr);
 
     bool lencDigestTrunc(
         const RingNttContext& ctx,
@@ -225,6 +243,21 @@ namespace osuCrypto::LogVole
         u32 plaintextModulusBits,
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
+        u32 requestedWorkers = 1,
+        bool leafInputsAreGadget = false);
+
+    // out -= Eval(tree) in the NTT domain, consuming each existing output row
+    // as the path-product accumulator. out must contain mu canonical NTT
+    // polynomials and must not alias the ciphertext or tree storage.
+    bool lencSubtractEvalTruncNttInplace(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const DigestTree& tree,
+        u32 mu,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out,
         u32 requestedWorkers = 1,
         bool leafInputsAreGadget = false);
 }
