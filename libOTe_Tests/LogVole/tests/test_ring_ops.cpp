@@ -2683,7 +2683,7 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
         }
     }
     osuCrypto::LogVoleExecutionOptions invalid;
-    invalid.mAdvanced.mKernels.mNoGoldDenoiseThreads = 3;
+    invalid.mAdvanced.mKernels.mCt2PolySeedThreads = 3;
     bool rejected = false;
     try { RingContextFactory owner(invalid); }
     catch (const std::invalid_argument&) { rejected = true; }
@@ -3337,6 +3337,184 @@ void LogVole_RingOps_ScaleNttGatherParity(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(stream.sync());
         LOGVOLE_REQUIRE_TRUE(std::equal(expected.begin(), expected.end(), actual.begin()));
         LOGVOLE_REQUIRE_EQ(actual.back(), sentinel.back());
+    }
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_RingOps_DenoiseValidationParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+    struct Shape { unsigned n, rho, bits; };
+    for (const auto shape : std::array<Shape, 4>{{{8192u,4u,55u},{1024u,4u,30u},
+             {1024u,8u,30u},{16384u,8u,52u}}})
+    {
+        RingParams params;
+        params.mPolyModulusDegree = shape.n;
+        params.mCoeffModulusBits.resize(shape.rho);
+        std::fill(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end(), shape.bits);
+        RingNttContext cpu;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, cpu));
+        prepareGpuTableOwners(cpu);
+        auto ring = gpu::GpuRing::get(cpu);
+        LOGVOLE_REQUIRE_TRUE(ring && ring->denoiseReady());
+        const auto view = ring->view(stream);
+        constexpr unsigned outCount = 2u;
+        std::vector<RnsPoly> input(outCount * shape.rho), expected(outCount);
+        for (unsigned p = 0; p < input.size(); ++p)
+        {
+            input[p] = deriveUniformPolyFromNonce(cpu, 0x44454e4fu, shape.n, p);
+            for (unsigned w = 0; w < shape.rho; ++w)
+            {
+                input[p].mCoeffs[w * shape.n] = 0u;
+                input[p].mCoeffs[w * shape.n + 1u] = ringModulusValue(cpu, w) - 1u;
+                for (unsigned c = 17u; c < shape.n; ++c)
+                    input[p].mCoeffs[w * shape.n + c] = input[p].mCoeffs[w * shape.n + c % 17u];
+            }
+        }
+        // Derive exact reciprocal and reduced-CRT constants from host primes.
+        // SEAL multiword arithmetic supplies an independent integer oracle.
+        struct Term { std::uint64_t inverse, projection; std::array<std::uint64_t,3> reciprocal; };
+        std::vector<Term> terms(shape.rho * shape.rho);
+        std::vector<std::uint64_t> lift(shape.rho), inverseLift(shape.rho);
+        auto pool = seal::MemoryPoolHandle::New();
+        for (unsigned j = 0; j < shape.rho; ++j)
+        {
+            const seal::Modulus target(ringModulusValue(cpu,j));
+            lift[j] = 1u;
+            for (unsigned w = 0; w < shape.rho; ++w)
+                if (w != j) lift[j] = seal::util::multiply_uint_mod(lift[j], ringModulusValue(cpu,w) % target.value(), target);
+            LOGVOLE_REQUIRE_TRUE(seal::util::try_invert_uint_mod(lift[j], target, inverseLift[j]));
+            for (unsigned w = 0; w < shape.rho; ++w) if (w != j)
+            {
+                auto& term = terms[j * shape.rho + w];
+                const seal::Modulus source(ringModulusValue(cpu,w));
+                std::uint64_t punctured = 1u;
+                term.projection = 1u;
+                for (unsigned z = 0; z < shape.rho; ++z) if (z != j && z != w)
+                {
+                    punctured = seal::util::multiply_uint_mod(punctured, ringModulusValue(cpu,z) % source.value(), source);
+                    term.projection = seal::util::multiply_uint_mod(term.projection, ringModulusValue(cpu,z) % target.value(), target);
+                }
+                LOGVOLE_REQUIRE_TRUE(seal::util::try_invert_uint_mod(punctured, source, term.inverse));
+                const std::array<std::uint64_t,3> numerator{0u,0u,1u}, denominator{source.value(),0u,0u};
+                std::array<std::uint64_t,3> remainder{};
+                seal::util::divide_uint(numerator.data(), denominator.data(), 3u,
+                    term.reciprocal.data(), remainder.data(), pool);
+            }
+        }
+        std::vector<std::array<std::uint64_t,2>> fractions(input.size() * shape.n);
+        for (unsigned p = 0; p < input.size(); ++p)
+        {
+            const unsigned j = p % shape.rho;
+            const seal::Modulus target(ringModulusValue(cpu,j));
+            if (j == 0u) expected[p / shape.rho].mCoeffs.resize(shape.rho * shape.n);
+            for (unsigned c = 0; c < 17u; ++c)
+            {
+                std::array<std::uint64_t,3> total{0u,std::uint64_t{1} << 63u,0u};
+                std::uint64_t projection = 0u;
+                for (unsigned w = 0; w < shape.rho; ++w) if (w != j)
+                {
+                    const auto& term = terms[j * shape.rho + w];
+                    const seal::Modulus source(ringModulusValue(cpu,w));
+                    const auto x = seal::util::multiply_uint_mod(input[p].mCoeffs[w * shape.n + c], term.inverse, source);
+                    std::array<std::uint64_t,3> product{}, next{};
+                    seal::util::multiply_uint(term.reciprocal.data(), 3u, x, 3u, product.data());
+                    seal::util::add_uint(total.data(), product.data(), 3u, next.data());
+                    total = next;
+                    projection = (projection + seal::util::multiply_uint_mod(x % target.value(), term.projection, target)) % target.value();
+                }
+                fractions[p * shape.n + c] = {total[0], total[1]};
+                const auto alphaTerm = seal::util::multiply_uint_mod(total[2], lift[j], target);
+                const auto e = (projection + target.value() - alphaTerm) % target.value();
+                const auto diff = (input[p].mCoeffs[j * shape.n + c] + target.value() - e) % target.value();
+                expected[p / shape.rho].mCoeffs[j * shape.n + c] = seal::util::multiply_uint_mod(diff, inverseLift[j], target);
+            }
+            for (unsigned c = 17u; c < shape.n; ++c)
+            {
+                fractions[p * shape.n + c] = fractions[p * shape.n + c % 17u];
+                expected[p / shape.rho].mCoeffs[j * shape.n + c] =
+                    expected[p / shape.rho].mCoeffs[j * shape.n + c % 17u];
+            }
+        }
+        gpu::GpuPolyBuffer data(*ring,input.size(),stream), output(*ring,outCount,stream), auxiliary;
+        LOGVOLE_REQUIRE_TRUE(data.upload(input,stream));
+        LOGVOLE_REQUIRE_TRUE(auxiliary.resizeWords(2u * shape.rho + 1u,1u,stream));
+        auto* low = auxiliary.data(stream);
+        auto* high = low + shape.rho;
+        auto* flag = reinterpret_cast<std::uint32_t*>(high + shape.rho);
+        for (bool tables : {true,false})
+        {
+            auto constants = ring->denoiseView();
+            if (!tables)
+            {
+                constants.mCrtInvPuncturedShoup = nullptr;
+                constants.mScaledPuncturedShoup = nullptr;
+                constants.mInvCrtLiftShoup = nullptr;
+            }
+            LOGVOLE_REQUIRE_TRUE(gpu::launchDenoiseComb(view,constants,data.data(stream),output.data(stream),outCount,stream.raw()));
+            std::vector<RnsPoly> actual;
+            LOGVOLE_REQUIRE_TRUE(output.download(actual,stream));
+            expect_batch_equal(actual,expected);
+            for (unsigned marginCase = 0; marginCase < 3u; ++marginCase)
+            {
+                std::vector<std::uint64_t> marginLow(shape.rho,marginCase == 2u ? 1u : 0u);
+                std::vector<std::uint64_t> marginHigh(shape.rho,marginCase == 0u ? 0u : std::uint64_t{1} << 63u);
+                bool failed = false;
+                for (const auto& f : fractions)
+                {
+                    std::array<std::uint64_t,2> negated{}, zero{};
+                    seal::util::sub_uint(zero.data(),f.data(),2u,negated.data());
+                    const std::array<std::uint64_t,2> margin{marginLow[0],marginHigh[0]};
+                    failed |= seal::util::compare_uint(f.data(),margin.data(),2u) < 0
+                        || seal::util::compare_uint(negated.data(),margin.data(),2u) < 0;
+                }
+                LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(low,marginLow.data(),shape.rho*sizeof(std::uint64_t),stream));
+                LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(high,marginHigh.data(),shape.rho*sizeof(std::uint64_t),stream));
+                for (unsigned initial : {0u,1u})
+                {
+                    std::uint32_t failure = initial;
+                    LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(flag,&failure,sizeof(failure),stream));
+                    LOGVOLE_REQUIRE_TRUE(gpu::launchDenoiseCombValidate(view,constants,data.data(stream),output.data(stream),outCount,
+                        low,high,flag,stream.raw()));
+                    LOGVOLE_REQUIRE_TRUE(output.download(actual,stream));
+                    expect_batch_equal(actual,expected);
+                    LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(&failure,flag,sizeof(failure),stream));
+                    LOGVOLE_REQUIRE_TRUE(stream.sync());
+                    LOGVOLE_REQUIRE_EQ(failure, static_cast<unsigned>(initial != 0u || failed));
+                }
+                std::uint32_t failure = 0u;
+                LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(flag,&failure,sizeof(failure),stream));
+                LOGVOLE_REQUIRE_TRUE(gpu::launchValidateGoldenSeed(view,constants,data.data(stream),static_cast<std::uint32_t>(input.size()),shape.rho,
+                    low,high,flag,stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(&failure,flag,sizeof(failure),stream));
+                LOGVOLE_REQUIRE_TRUE(stream.sync());
+                LOGVOLE_REQUIRE_EQ(failure, static_cast<unsigned>(failed));
+            }
+        }
+        // Exact F=2^127 ties: strict margins accept equality and reject +1.
+        // A non-rho-cycle mu also exercises the general target mapping.
+        for (auto& poly : input) std::fill(poly.mCoeffs.begin(),poly.mCoeffs.end(),0u);
+        LOGVOLE_REQUIRE_TRUE(data.upload(input,stream));
+        for (unsigned extra : {0u,1u})
+        {
+            std::vector<std::uint64_t> marginLow(shape.rho,extra), marginHigh(shape.rho,std::uint64_t{1} << 63u);
+            std::uint32_t failure = 0u;
+            LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(low,marginLow.data(),shape.rho*sizeof(std::uint64_t),stream));
+            LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(high,marginHigh.data(),shape.rho*sizeof(std::uint64_t),stream));
+            LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(flag,&failure,sizeof(failure),stream));
+            LOGVOLE_REQUIRE_TRUE(gpu::launchValidateGoldenSeed(view,ring->denoiseView(),data.data(stream),
+                static_cast<std::uint32_t>(input.size()),shape.rho+1u,low,high,flag,stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(&failure,flag,sizeof(failure),stream));
+            LOGVOLE_REQUIRE_TRUE(stream.sync());
+            LOGVOLE_REQUIRE_EQ(failure,extra);
+        }
     }
 #else
     (void)cmd;

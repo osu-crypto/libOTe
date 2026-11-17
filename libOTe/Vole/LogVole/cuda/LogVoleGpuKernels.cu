@@ -8857,7 +8857,7 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        template<u32 Rho, bool ValidateGolden>
+        template<bool ValidateGolden>
         __global__ void denoiseCombSpecializedKernel(
             DeviceRing rg,
             DeviceDenoise dn,
@@ -8868,7 +8868,7 @@ namespace osuCrypto::LogVole::gpu
             const u64* marginHi,
             u32* failFlag)
         {
-            static_assert(Rho == 4u || Rho == 8u);
+            constexpr u32 Rho = 4u;
             const u32 elem = blockIdx.x * blockDim.x + threadIdx.x;
             if (elem >= Rho * rg.mN) return;
             const u32 targetLimb = elem >> rg.mLogN;
@@ -8880,22 +8880,7 @@ namespace osuCrypto::LogVole::gpu
             case 1u: denoiseCombSpecializedTarget<Rho, 1u, ValidateGolden>(dn, in, out, rg.mN, k, outCount, marginLo, marginHi, failFlag); break;
             case 2u: denoiseCombSpecializedTarget<Rho, 2u, ValidateGolden>(dn, in, out, rg.mN, k, outCount, marginLo, marginHi, failFlag); break;
             case 3u: denoiseCombSpecializedTarget<Rho, 3u, ValidateGolden>(dn, in, out, rg.mN, k, outCount, marginLo, marginHi, failFlag); break;
-            case 4u:
-                if constexpr (Rho == 8u)
-                    denoiseCombSpecializedTarget<Rho, 4u, ValidateGolden>(dn, in, out, rg.mN, k, outCount, marginLo, marginHi, failFlag);
-                break;
-            case 5u:
-                if constexpr (Rho == 8u)
-                    denoiseCombSpecializedTarget<Rho, 5u, ValidateGolden>(dn, in, out, rg.mN, k, outCount, marginLo, marginHi, failFlag);
-                break;
-            case 6u:
-                if constexpr (Rho == 8u)
-                    denoiseCombSpecializedTarget<Rho, 6u, ValidateGolden>(dn, in, out, rg.mN, k, outCount, marginLo, marginHi, failFlag);
-                break;
-            case 7u:
-                if constexpr (Rho == 8u)
-                    denoiseCombSpecializedTarget<Rho, 7u, ValidateGolden>(dn, in, out, rg.mN, k, outCount, marginLo, marginHi, failFlag);
-                break;
+
             }
         }
 
@@ -8925,45 +8910,31 @@ namespace osuCrypto::LogVole::gpu
             projected = addMod(projected, mulShoup(reduced, dn.mScaledPuncturedShoup[ci], qj), qj);
         }
 
-        template<u32 Threads, bool Unroll>
-        __global__ __launch_bounds__(Threads) void denoiseNoGoldShoupKernel(
+        __global__ __launch_bounds__(128) void denoiseNoGoldShoupKernel(
             DeviceDenoise dn, const u64* in, u64* out)
         {
-            const u32 k = blockIdx.x * Threads + threadIdx.x;
+            const u32 k = blockIdx.x * 128u + threadIdx.x;
             const u32 logical = blockIdx.y;
             const u32 target = logical & 7u;
             const u64 qj = dn.mQ[target];
             const u64* polyIn = in + (static_cast<size_t>(logical) << 17u);
             u64 fracLo = 0u, fracHi = u64(1) << 63u, alpha = 0u, projected = 0u;
-            if constexpr (Unroll)
-            {
 #pragma unroll
-                for (u32 idx = 0u; idx < 7u; ++idx)
-                    denoiseNoGoldShoupTerm(dn, polyIn, k, target, idx, qj,
-                        fracLo, fracHi, alpha, projected);
-            }
-            else
-            {
-#pragma unroll 1
-                for (u32 idx = 0u; idx < 7u; ++idx)
-                    denoiseNoGoldShoupTerm(dn, polyIn, k, target, idx, qj,
-                        fracLo, fracHi, alpha, projected);
-            }
+            for (u32 idx = 0u; idx < 7u; ++idx)
+                denoiseNoGoldShoupTerm(dn, polyIn, k, target, idx, qj,
+                    fracLo, fracHi, alpha, projected);
+
             const u64 vj = polyIn[static_cast<size_t>(target) * 16384u + k];
             const u64 scaled = mulShoup(vj, dn.mInvCrtLiftShoup[target], qj);
             out[(static_cast<size_t>(logical) << 14u) + k] =
                 addMod(subMod(scaled, projected, qj), alpha, qj);
         }
 
-        template<u32 Threads>
-        void launchNoGoldDenoiseShoup(bool unroll, DeviceDenoise dn,
+        void launchNoGoldDenoiseShoup(DeviceDenoise dn,
             const u64* in, u64* out, u32 outCount, cudaStream_t stream)
         {
-            const dim3 grid(16384u / Threads, outCount * 8u, 1u);
-            if (unroll)
-                denoiseNoGoldShoupKernel<Threads, true><<<grid, Threads, 0u, stream>>>(dn, in, out);
-            else
-                denoiseNoGoldShoupKernel<Threads, false><<<grid, Threads, 0u, stream>>>(dn, in, out);
+            const dim3 grid(16384u / 128u, outCount * 8u, 1u);
+            denoiseNoGoldShoupKernel<<<grid, 128u, 0u, stream>>>(dn, in, out);
         }
 
         constexpr u32 kDenoiseRho4N = 8192u;
@@ -9309,7 +9280,6 @@ namespace osuCrypto::LogVole::gpu
             return lowFail || highFail;
         }
 
-        template<u32 Rho>
         __global__ void validateGoldenSeedSpecializedKernel(
             DeviceRing rg,
             DeviceDenoise dn,
@@ -9319,7 +9289,7 @@ namespace osuCrypto::LogVole::gpu
             const u64* marginHi,
             u32* failFlag)
         {
-            static_assert(Rho == 4u || Rho == 8u);
+            constexpr u32 Rho = 4u;
             const u32 coeff = blockIdx.x * blockDim.x + threadIdx.x;
             if (coeff >= rg.mN) return;
             const size_t perPoly = static_cast<size_t>(Rho) * rg.mN;
@@ -9328,8 +9298,7 @@ namespace osuCrypto::LogVole::gpu
             {
                 if (*failFlag) return;
                 // launchValidateGoldenSeed has already checked mu % rho == 0,
-                // so (o % mu) % rho is exactly o % rho. Both specialized rho
-                // values are powers of two.
+                // so (o % mu) % rho is exactly o % rho for rho=4.
                 const u32 targetLimb = o & (Rho - 1u);
                 const u64* poly = tbk + static_cast<size_t>(o) * perPoly;
                 bool failed = false;
@@ -9351,26 +9320,7 @@ namespace osuCrypto::LogVole::gpu
                     failed = validateGoldenSeedSpecializedTarget<Rho, 3u>(
                         dn, poly, rg.mN, coeff, marginLo, marginHi);
                     break;
-                case 4u:
-                    if constexpr (Rho == 8u)
-                        failed = validateGoldenSeedSpecializedTarget<Rho, 4u>(
-                            dn, poly, rg.mN, coeff, marginLo, marginHi);
-                    break;
-                case 5u:
-                    if constexpr (Rho == 8u)
-                        failed = validateGoldenSeedSpecializedTarget<Rho, 5u>(
-                            dn, poly, rg.mN, coeff, marginLo, marginHi);
-                    break;
-                case 6u:
-                    if constexpr (Rho == 8u)
-                        failed = validateGoldenSeedSpecializedTarget<Rho, 6u>(
-                            dn, poly, rg.mN, coeff, marginLo, marginHi);
-                    break;
-                case 7u:
-                    if constexpr (Rho == 8u)
-                        failed = validateGoldenSeedSpecializedTarget<Rho, 7u>(
-                            dn, poly, rg.mN, coeff, marginLo, marginHi);
-                    break;
+
                 }
                 if (failed)
                 {
@@ -14146,31 +14096,24 @@ namespace osuCrypto::LogVole::gpu
         dn.mInvCrtLiftShoup = static_cast<const ShoupOperand*>(dc.mInvCrtLiftShoup);
         const u32 threads = 256;
         const bool fixedRho4 =
-            rc.mKernelOptions.mDenoiseSpecialized && rc.mRho == 4u && rc.mN == kDenoiseRho4N;
+            rc.mRho == 4u && rc.mN == kDenoiseRho4N;
         const bool nearEqualModuli =
             rc.mMinModulus != 0u && rc.mMaxModulus >= rc.mMinModulus &&
             (rc.mMaxModulus - rc.mMinModulus) < rc.mMinModulus;
-        if (rc.mKernelOptions.mNoGoldDenoiseShoup && log14H200Shape(rc) &&
+        if (log14H200Shape(rc) &&
             nearEqualModuli && rc.mMinModulus > 8u &&
             rc.mMaxModulus < (u64(1) << 62u) && outCount <= 8191u &&
             dn.mCrtInvPuncturedShoup && dn.mScaledPuncturedShoup && dn.mInvCrtLiftShoup)
         {
-            const bool unroll = rc.mKernelOptions.mNoGoldDenoiseUnroll;
-            const u32 block = rc.mKernelOptions.mNoGoldDenoiseThreads;
-            if (block == 128u)
-                launchNoGoldDenoiseShoup<128u>(unroll, dn, in, out, outCount, asStream(stream));
-            else if (block == 512u)
-                launchNoGoldDenoiseShoup<512u>(unroll, dn, in, out, outCount, asStream(stream));
-            else
-                launchNoGoldDenoiseShoup<256u>(unroll, dn, in, out, outCount, asStream(stream));
+            launchNoGoldDenoiseShoup(dn, in, out, outCount, asStream(stream));
             return check(cudaGetLastError(), "denoiseNoGoldShoup");
         }
         const bool useShoup =
-            fixedRho4 && rc.mKernelOptions.mDenoiseShoup && nearEqualModuli &&
+            fixedRho4 && nearEqualModuli &&
             dn.mCrtInvPuncturedShoup && dn.mScaledPuncturedShoup &&
             dn.mInvCrtLiftShoup;
         const bool hotGeometry =
-            fixedRho4 && rc.mKernelOptions.mDenoiseHotGeometry && outCount <= 16383u;
+            fixedRho4 && outCount <= 16383u;
         if (useShoup && hotGeometry)
         {
             denoiseCombRho4FixedKernel<true, true, false><<<
@@ -14192,19 +14135,12 @@ namespace osuCrypto::LogVole::gpu
                 dn, in, out, outCount, nullptr, nullptr, nullptr);
             return check(cudaGetLastError(), "denoiseCombRho4HotGeometry");
         }
-        if (rc.mKernelOptions.mDenoiseSpecialized && rc.mRho == 4u)
+        if (rc.mRho == 4u)
         {
-            denoiseCombSpecializedKernel<4u, false><<<
+            denoiseCombSpecializedKernel<false><<<
                 grid2D(4u * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
                 rg, dn, in, out, outCount, nullptr, nullptr, nullptr);
             return check(cudaGetLastError(), "denoiseCombSpecialized4");
-        }
-        if (rc.mKernelOptions.mDenoiseSpecialized && rc.mKernelOptions.mDenoiseSpecializedRho8 && rc.mRho == 8u)
-        {
-            denoiseCombSpecializedKernel<8u, false><<<
-                grid2D(8u * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
-                rg, dn, in, out, outCount, nullptr, nullptr, nullptr);
-            return check(cudaGetLastError(), "denoiseCombSpecialized8");
         }
         denoiseCombKernel<false><<<
             grid2D(rc.mRho * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
@@ -14243,16 +14179,16 @@ namespace osuCrypto::LogVole::gpu
         dn.mInvCrtLiftShoup = static_cast<const ShoupOperand*>(dc.mInvCrtLiftShoup);
         const u32 threads = 256;
         const bool fixedRho4 =
-            rc.mKernelOptions.mDenoiseSpecialized && rc.mRho == 4u && rc.mN == kDenoiseRho4N;
+            rc.mRho == 4u && rc.mN == kDenoiseRho4N;
         const bool nearEqualModuli =
             rc.mMinModulus != 0u && rc.mMaxModulus >= rc.mMinModulus &&
             (rc.mMaxModulus - rc.mMinModulus) < rc.mMinModulus;
         const bool useShoup =
-            fixedRho4 && rc.mKernelOptions.mDenoiseShoup && nearEqualModuli &&
+            fixedRho4 && nearEqualModuli &&
             dn.mCrtInvPuncturedShoup && dn.mScaledPuncturedShoup &&
             dn.mInvCrtLiftShoup;
         const bool hotGeometry =
-            fixedRho4 && rc.mKernelOptions.mDenoiseHotGeometry && outCount <= 16383u;
+            fixedRho4 && outCount <= 16383u;
         if (useShoup && hotGeometry)
         {
             denoiseCombRho4FixedKernel<true, true, true><<<
@@ -14275,19 +14211,12 @@ namespace osuCrypto::LogVole::gpu
                 dn, in, out, outCount, marginLo, marginHi, failFlag);
             return check(cudaGetLastError(), "denoiseCombValidateRho4HotGeometry");
         }
-        if (rc.mKernelOptions.mDenoiseSpecialized && rc.mRho == 4u)
+        if (rc.mRho == 4u)
         {
-            denoiseCombSpecializedKernel<4u, true><<<
+            denoiseCombSpecializedKernel<true><<<
                 grid2D(4u * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
                 rg, dn, in, out, outCount, marginLo, marginHi, failFlag);
             return check(cudaGetLastError(), "denoiseCombValidateSpecialized4");
-        }
-        if (rc.mKernelOptions.mDenoiseSpecialized && rc.mKernelOptions.mDenoiseSpecializedRho8 && rc.mRho == 8u)
-        {
-            denoiseCombSpecializedKernel<8u, true><<<
-                grid2D(8u * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
-                rg, dn, in, out, outCount, marginLo, marginHi, failFlag);
-            return check(cudaGetLastError(), "denoiseCombValidateSpecialized8");
         }
         denoiseCombKernel<true><<<
             grid2D(rc.mRho * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(
@@ -14325,10 +14254,8 @@ namespace osuCrypto::LogVole::gpu
         dn.mInvCrtLiftShoup = static_cast<const ShoupOperand*>(dc.mInvCrtLiftShoup);
 
         const u32 threads = 256;
-        const bool specialized = rc.mKernelOptions.mDenoiseSpecialized;
         const bool rho4Cycle = rc.mRho == 4u && (mu % 4u) == 0u;
-        const bool rho8Cycle = rc.mRho == 8u && (mu % 8u) == 0u;
-        if (specialized && rc.mKernelOptions.mGoldenValidateShoup && rho4Cycle &&
+        if (rho4Cycle &&
             rc.mN == kDenoiseRho4N && polyCount <= 65535u && dc.mQ &&
             dc.mCrtInvPuncturedShoup && dc.mFracInvLo && dc.mFracInvHi)
         {
@@ -14343,19 +14270,12 @@ namespace osuCrypto::LogVole::gpu
                 gv, tbk, marginLo, marginHi, failFlag);
             return check(cudaGetLastError(), "validateGoldenSeedRho4Shoup");
         }
-        if (specialized && rho4Cycle)
+        if (rho4Cycle)
         {
-            validateGoldenSeedSpecializedKernel<4u><<<
+            validateGoldenSeedSpecializedKernel<<<
                 grid2D(rc.mN, polyCount, threads), threads, 0, asStream(stream)>>>(
                 rg, dn, tbk, polyCount, marginLo, marginHi, failFlag);
             return check(cudaGetLastError(), "validateGoldenSeedSpecialized4");
-        }
-        if (specialized && rc.mKernelOptions.mDenoiseSpecializedRho8 && rho8Cycle)
-        {
-            validateGoldenSeedSpecializedKernel<8u><<<
-                grid2D(rc.mN, polyCount, threads), threads, 0, asStream(stream)>>>(
-                rg, dn, tbk, polyCount, marginLo, marginHi, failFlag);
-            return check(cudaGetLastError(), "validateGoldenSeedSpecialized8");
         }
         validateGoldenSeedKernel<<<grid2D(rc.mN, polyCount, threads), threads, 0, asStream(stream)>>>(
             rg, dn, tbk, polyCount, mu, marginLo, marginHi, failFlag);

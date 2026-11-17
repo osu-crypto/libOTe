@@ -35,14 +35,6 @@ namespace osuCrypto
         bool mExpandAccumulatorPseudo55Dual = true;
         bool mExpandAccumulatorPseudo55DualPackedPairs = true;
         bool mExpandAccumulatorTiled = true;
-        bool mDenoiseSpecialized = true;
-        bool mDenoiseShoup = true;
-        bool mDenoiseHotGeometry = true;
-        bool mGoldenValidateShoup = true;
-        bool mDenoiseSpecializedRho8 = false;
-        bool mNoGoldDenoiseShoup = true;
-        bool mNoGoldDenoiseUnroll = true;
-        std::uint32_t mNoGoldDenoiseThreads = 128u;
         bool mGadgetHi110Specialized = true;
         bool mGadgetHi110CompactCrt = true;
         bool mGadgetHi110Radix55Reduce = true;
@@ -59,7 +51,6 @@ namespace osuCrypto
         {
             return (mCt2PolySeedThreads == 32u || mCt2PolySeedThreads == 64u || mCt2PolySeedThreads == 128u) &&
                 (mRootZetaSampleThreads == 128u || mRootZetaSampleThreads == 256u) &&
-                (mNoGoldDenoiseThreads == 128u || mNoGoldDenoiseThreads == 256u || mNoGoldDenoiseThreads == 512u) &&
                 mNoGoldH200RootL2Mode <= 3u &&
                 (mRootL2MiB == 1u || mRootL2MiB == 2u || mRootL2MiB == 4u || mRootL2MiB == 8u || mRootL2MiB == 12u || mRootL2MiB == 16u) &&
                 (mRootL2HitPercent == 25u || mRootL2HitPercent == 50u || mRootL2HitPercent == 75u || mRootL2HitPercent == 100u);
@@ -92,14 +83,6 @@ namespace osuCrypto
                 mExpandAccumulatorPseudo55Dual == other.mExpandAccumulatorPseudo55Dual &&
                 mExpandAccumulatorPseudo55DualPackedPairs == other.mExpandAccumulatorPseudo55DualPackedPairs &&
                 mExpandAccumulatorTiled == other.mExpandAccumulatorTiled &&
-                mDenoiseSpecialized == other.mDenoiseSpecialized &&
-                mDenoiseShoup == other.mDenoiseShoup &&
-                mDenoiseHotGeometry == other.mDenoiseHotGeometry &&
-                mGoldenValidateShoup == other.mGoldenValidateShoup &&
-                mDenoiseSpecializedRho8 == other.mDenoiseSpecializedRho8 &&
-                mNoGoldDenoiseShoup == other.mNoGoldDenoiseShoup &&
-                mNoGoldDenoiseUnroll == other.mNoGoldDenoiseUnroll &&
-                mNoGoldDenoiseThreads == other.mNoGoldDenoiseThreads &&
                 mGadgetHi110Specialized == other.mGadgetHi110Specialized &&
                 mGadgetHi110CompactCrt == other.mGadgetHi110CompactCrt &&
                 mGadgetHi110Radix55Reduce == other.mGadgetHi110Radix55Reduce &&

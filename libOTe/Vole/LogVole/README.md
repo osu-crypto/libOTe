@@ -1436,3 +1436,18 @@ obsolete alternatives were verified in the SM90 object. All nine focused NTT
 checks passed with zero skips in 55.80 seconds using `-gpu 1 -lvFactoryFast 1`.
 The goal-scope audit found no remaining implementation work for this cleanup.
 H200 runtime remains untested locally. No benchmarks were run.
+
+Denoise and GoldenSeed validation now use their production defaults without
+eight tuning controls. Disabled rho8 specializations and unused NoGolden
+schedules are removed; modulus, geometry, missing-table, and generic fallbacks
+remain. Fractional rounding order, strict validation margins, and failure-flag
+semantics are unchanged.
+
+Validation: an independent SEAL integer oracle checks the exact truncated
+128-bit fractional sum and CRT projection, rather than idealized nearest
+rounding. It passed on the RTX 4060 before and after pruning, including missing
+Shoup tables, strict ties, non-cycle validation, and denoise stores after a prior
+failure. The Windows VS 14.50 CUDA test target and frontend object build and
+isolated SM90 compile passed, with live kernel families verified. Three focused
+checks passed with zero skips in 18.86 seconds using `-gpu 1 -lvFactoryFast 1`.
+H200 runtime remains untested locally. No benchmarks were run.
