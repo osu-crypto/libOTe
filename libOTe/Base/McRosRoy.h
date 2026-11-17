@@ -76,6 +76,152 @@ namespace osuCrypto
 					.mul(scalar).toBytes(result.data());
 				return result;
 			}
+#if defined(_MSC_VER)
+#define LIBOTE_MRR_NOINLINE __declspec(noinline)
+#else
+#define LIBOTE_MRR_NOINLINE __attribute__((noinline))
+#endif
+
+			// Coroutines retain only scalars, encoded bytes and owned vectors.
+			// Keep curve return temporaries, tables and batch scratch on an
+			// ordinary aligned stack, including under sanitizer instrumentation.
+			template<typename PopfFactory>
+			LIBOTE_MRR_NOINLINE void programReceiver(
+				const PopfFactory& popfFactory, span<Ristretto255::Backend::Scalar> sk,
+				const BitVector& choices,
+				span<typename PopfFactory::ConstructedPopf::PopfFunc> sendBuff,
+				PRNG& prng)
+			{
+				using Number = Ristretto255::Backend::Scalar;
+				using Point = Ristretto255::Backend::Point;
+				const u64 n = sk.size();
+				for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
+				{
+					const auto count = std::min<u64>(Ristretto255::Backend::lanes, n - base);
+					std::array<Number, Ristretto255::Backend::lanes> scalars;
+					std::array<u8, Ristretto255::Backend::lanes * Point::fromHashLength> uniform{};
+					for (u64 lane = 0; lane != Ristretto255::Backend::lanes; ++lane)
+					{
+						scalars[lane].randomize(prng);
+						if (lane >= count)
+							continue;
+						sk[base + lane] = scalars[lane];
+						auto factory = popfFactory;
+						mrr::updateIndex(factory, base + lane);
+						auto popf = factory.construct();
+						auto& f = sendBuff[base + lane];
+						popf.batchProgramBegin(f, choices[base + lane], prng);
+						popf.batchHashPoint(f, choices[base + lane],
+							uniform.data() + lane * Point::fromHashLength);
+					}
+
+					const auto encoded = mrr::programPoints(scalars, uniform);
+					for (u64 lane = 0; lane != count; ++lane)
+					{
+						auto factory = popfFactory;
+						mrr::updateIndex(factory, base + lane);
+						auto popf = factory.construct();
+						auto& f = sendBuff[base + lane];
+						std::memcpy(f.t, encoded.data() + lane * Point::size, Point::size);
+						popf.batchProgramEnd(f, choices[base + lane]);
+					}
+				}
+
+			}
+
+			LIBOTE_MRR_NOINLINE inline void deriveReceiver(
+				span<const Ristretto255::Backend::Scalar> sk,
+				const BitVector& choices, span<block> messages, span<const u8> buff)
+			{
+				using Number = Ristretto255::Backend::Scalar;
+				using Point = Ristretto255::Backend::Point;
+				Point A;
+				const u64 n = messages.size();
+				Ristretto255::Backend::init();
+				if (!A.fromBytes(buff.data()))
+					throw std::runtime_error("invalid McRosRoy sender point " LOCATION);
+				const Ristretto255::Backend::FixedPointTable pointTable(A);
+
+				for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
+				{
+					const auto count = std::min<u64>(Ristretto255::Backend::lanes, n - base);
+					std::array<Number, Ristretto255::Backend::lanes> scalars;
+					for (u64 lane = 0; lane != Ristretto255::Backend::lanes; ++lane)
+						scalars[lane] = sk[base];
+					for (u64 lane = 0; lane != count; ++lane)
+						scalars[lane] = sk[base + lane];
+					const auto encoded = mrr::sharedPoints(pointTable, scalars);
+					for (u64 lane = 0; lane != count; ++lane)
+					{
+						RandomOracle ro(sizeof(block));
+						mrr::updateDomain(ro, mrr::kdfDomain);
+						ro.Update(encoded.data() + lane * Point::size, Point::size);
+						mrr::updateIndex(ro, base + lane);
+						mrr::updateBranch(ro, choices[base + lane]);
+						ro.Final(messages[base + lane]);
+					}
+				}
+
+			}
+
+			LIBOTE_MRR_NOINLINE inline void encodeGenerator(
+				const Ristretto255::Backend::Scalar& sk, span<u8> buff)
+			{
+				const auto A = Ristretto255::Backend::Point::mulGenerator(sk);
+				A.toBytes(buff.data());
+			}
+
+			template<typename PopfFactory>
+			LIBOTE_MRR_NOINLINE void deriveSender(
+				const PopfFactory& popfFactory,
+				span<const typename PopfFactory::ConstructedPopf::PopfFunc> recvBuff,
+				const Ristretto255::Backend::Scalar& sk,
+				span<std::array<block, 2>> msg)
+			{
+				using Point = Ristretto255::Backend::Point;
+				const u64 n = msg.size();
+				Ristretto255::Backend::init();
+				for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
+				{
+					const auto count = std::min<u64>(Ristretto255::Backend::lanes, n - base);
+					for (u8 branch = 0; branch != 2; ++branch)
+					{
+						mrr::UniformBatch uniform{};
+						mrr::BatchEncoding encoded{};
+						for (u64 lane = 0; lane != count; ++lane)
+						{
+							auto factory = popfFactory;
+							mrr::updateIndex(factory, base + lane);
+							auto popf = factory.construct();
+							auto f = recvBuff[base + lane];
+							popf.batchEvalBegin(f, branch != 0);
+							std::memcpy(encoded.data() + lane * Point::size, f.t, Point::size);
+							popf.batchHashPoint(f, branch != 0,
+								uniform.data() + lane * Point::fromHashLength);
+						}
+						for (u64 lane = count; lane != Ristretto255::Backend::lanes; ++lane)
+						{
+							std::memcpy(encoded.data() + lane * Point::size,
+								encoded.data(), Point::size);
+							std::memcpy(uniform.data() + lane * Point::fromHashLength,
+								uniform.data(), Point::fromHashLength);
+						}
+						encoded = mrr::evaluatePoints(encoded, uniform, sk);
+						for (u64 lane = 0; lane != count; ++lane)
+						{
+							RandomOracle ro(sizeof(block));
+							mrr::updateDomain(ro, mrr::kdfDomain);
+							ro.Update(encoded.data() + lane * Point::size, Point::size);
+							mrr::updateIndex(ro, base + lane);
+							mrr::updateBranch(ro, branch != 0);
+							ro.Final(msg[base + lane][branch]);
+						}
+					}
+				}
+
+			}
+#undef LIBOTE_MRR_NOINLINE
+
 		}
 
 		// The Popf's PopfFunc must be plain old data, PopfIn must be convertible from an integer, and
@@ -170,7 +316,6 @@ namespace osuCrypto
 			if (messages.size() != choices.size())
 				throw std::invalid_argument(
 					"McRosRoy receiver choices and messages have different sizes");
-			auto A = Point{};
 			auto sk = std::vector<Number>{};
 			auto buff = std::vector<u8>(Point::size);
 			auto sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{ };
@@ -180,65 +325,12 @@ namespace osuCrypto
 			sk.resize(n);
 			sendBuff.resize(n);
 
-			for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
-			{
-				const auto count = std::min<u64>(Ristretto255::Backend::lanes, n - base);
-				std::array<Number, Ristretto255::Backend::lanes> scalars;
-				std::array<u8, Ristretto255::Backend::lanes * Point::fromHashLength> uniform{};
-				for (u64 lane = 0; lane != Ristretto255::Backend::lanes; ++lane)
-				{
-					scalars[lane].randomize(prng);
-					if (lane >= count)
-						continue;
-					sk[base + lane] = scalars[lane];
-					auto factory = popfFactory;
-					mrr::updateIndex(factory, base + lane);
-					auto popf = factory.construct();
-					auto& f = sendBuff[base + lane];
-					popf.batchProgramBegin(f, choices[base + lane], prng);
-					popf.batchHashPoint(f, choices[base + lane],
-						uniform.data() + lane * Point::fromHashLength);
-				}
-
-				const auto encoded = mrr::programPoints(scalars, uniform);
-				for (u64 lane = 0; lane != count; ++lane)
-				{
-					auto factory = popfFactory;
-					mrr::updateIndex(factory, base + lane);
-					auto popf = factory.construct();
-					auto& f = sendBuff[base + lane];
-					std::memcpy(f.t, encoded.data() + lane * Point::size, Point::size);
-					popf.batchProgramEnd(f, choices[base + lane]);
-				}
-			}
+			mrr::programReceiver(popfFactory, sk, choices, {sendBuff.data(), sendBuff.size()}, prng);
 
 			co_await chl.send(std::move(sendBuff));
 
 			co_await chl.recv(buff);
-			Ristretto255::Backend::init();
-			if (!A.fromBytes(buff.data()))
-				throw std::runtime_error("invalid McRosRoy sender point " LOCATION);
-			const Ristretto255::Backend::FixedPointTable pointTable(A);
-
-			for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
-			{
-				const auto count = std::min<u64>(Ristretto255::Backend::lanes, n - base);
-				std::array<Number, Ristretto255::Backend::lanes> scalars;
-				for (u64 lane = 0; lane != Ristretto255::Backend::lanes; ++lane)
-					scalars[lane] = sk[base];
-				for (u64 lane = 0; lane != count; ++lane)
-					scalars[lane] = sk[base + lane];
-				const auto encoded = mrr::sharedPoints(pointTable, scalars);
-				for (u64 lane = 0; lane != count; ++lane)
-				{
-					RandomOracle ro(sizeof(block));
-					mrr::updateDomain(ro, mrr::kdfDomain);
-					ro.Update(encoded.data() + lane * Point::size, Point::size);
-					mrr::updateIndex(ro, base + lane);
-					mrr::updateBranch(ro, choices[base + lane]);
-					ro.Final(messages[base + lane]);
-				}
-			}
+			mrr::deriveReceiver(sk, choices, messages, buff);
 
 			} MACORO_CATCH(eptr) {
 				co_await chl.close();
@@ -255,7 +347,6 @@ namespace osuCrypto
 			MACORO_TRY{
 
 			Ristretto255::Backend::init();
-			auto A = Point{};
 			auto sk = Number{};
 			auto buff = std::vector<u8>(Point::size);
 			auto recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
@@ -264,53 +355,13 @@ namespace osuCrypto
 			if (n == 0)
 				co_return;
 			sk.randomize(prng);
-			A = Point::mulGenerator(sk);
-
-			assert(buff.size() == A.sizeBytes());
-			A.toBytes(buff.data());
+			mrr::encodeGenerator(sk, buff);
 
 			co_await chl.send(std::move(buff));
 
 			recvBuff.resize(n);
 			co_await chl.recv(recvBuff);
-			Ristretto255::Backend::init();
-			for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
-			{
-				const auto count = std::min<u64>(Ristretto255::Backend::lanes, n - base);
-				for (u8 branch = 0; branch != 2; ++branch)
-				{
-					mrr::UniformBatch uniform{};
-					mrr::BatchEncoding encoded{};
-					for (u64 lane = 0; lane != count; ++lane)
-					{
-						auto factory = popfFactory;
-						mrr::updateIndex(factory, base + lane);
-						auto popf = factory.construct();
-						auto f = recvBuff[base + lane];
-						popf.batchEvalBegin(f, branch != 0);
-						std::memcpy(encoded.data() + lane * Point::size, f.t, Point::size);
-						popf.batchHashPoint(f, branch != 0,
-							uniform.data() + lane * Point::fromHashLength);
-					}
-					for (u64 lane = count; lane != Ristretto255::Backend::lanes; ++lane)
-					{
-						std::memcpy(encoded.data() + lane * Point::size,
-							encoded.data(), Point::size);
-						std::memcpy(uniform.data() + lane * Point::fromHashLength,
-							uniform.data(), Point::fromHashLength);
-					}
-					encoded = mrr::evaluatePoints(encoded, uniform, sk);
-					for (u64 lane = 0; lane != count; ++lane)
-					{
-						RandomOracle ro(sizeof(block));
-						mrr::updateDomain(ro, mrr::kdfDomain);
-						ro.Update(encoded.data() + lane * Point::size, Point::size);
-						mrr::updateIndex(ro, base + lane);
-						mrr::updateBranch(ro, branch != 0);
-						ro.Final(msg[base + lane][branch]);
-					}
-				}
-			}
+			mrr::deriveSender(popfFactory, {recvBuff.data(), recvBuff.size()}, sk, msg);
 
 			} MACORO_CATCH(eptr) {
 				co_await chl.close();
