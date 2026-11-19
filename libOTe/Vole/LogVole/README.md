@@ -1467,3 +1467,17 @@ verified in the SM90 object. Three focused checks passed with zero skips in
 compiled but were not runtime-tested: supported factory contexts did not provide
 that modulus domain, and no metadata was fabricated. H200 runtime remains
 untested locally. No benchmarks were run.
+
+Accumulator dispatch now uses its production defaults without ten tuning
+switches. Untiled, non-q64, single-chain wide, and unpacked wide alternatives
+are removed. Required alpha schedules, modulus fallbacks, supported wide tuples,
+generic six-term geometry, H200 admission, and automatic tile counts remain.
+
+Validation: a direct scalar modular oracle passed on the RTX 4060 before and
+after pruning for Golden alpha-two/other-alpha paths, all four wide tuples,
+non-pseudo55 q64 arithmetic, and generic runtime geometry. The Windows VS 14.50
+CUDA test target and frontend object build and isolated SM90 compile passed;
+retained entries and obsolete-family absence were verified in the SM90 object.
+Three focused checks passed with zero skips in 15.38 seconds using
+`-gpu 1 -lvFactoryFast 1`. H200 accumulator execution remains untested locally,
+including its non-pseudo52 fallback. No benchmarks were run.

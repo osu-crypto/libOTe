@@ -2610,19 +2610,14 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
                     const auto* aIndices = stream.uploadIdx(ai);
                     const auto* bIndices = stream.uploadIdx(bi);
                     LOGVOLE_REQUIRE_TRUE(aIndices && bIndices);
-                    for (bool pseudo52 : {true, false})
-                    {
-                        auto selected = view;
-                        selected.mKernelOptions.mNoGoldH200AccumulatorPseudo52 = pseudo52;
-                        LOGVOLE_REQUIRE_TRUE(gpu::launchExpandAccumulatorTau1(selected,
-                            rowDevice.data(stream), inputs.data(stream), rowDevice.data(stream),
-                            inputs.data(stream) + ringPolyCoeffCount(cpu.mParams),
-                            inputs.data(stream), inputs.data(stream), aIndices, bIndices,
-                            16u, 8u, output.data(stream), 16u, stream.raw()));
-                        std::vector<RnsPoly> actual;
-                        LOGVOLE_REQUIRE_TRUE(output.download(actual, stream));
-                        expect_batch_equal(actual, expectedAccumulator);
-                    }
+                    LOGVOLE_REQUIRE_TRUE(gpu::launchExpandAccumulatorTau1(view,
+                        rowDevice.data(stream), inputs.data(stream), rowDevice.data(stream),
+                        inputs.data(stream) + ringPolyCoeffCount(cpu.mParams),
+                        inputs.data(stream), inputs.data(stream), aIndices, bIndices,
+                        16u, 8u, output.data(stream), 16u, stream.raw()));
+                    std::vector<RnsPoly> actual;
+                    LOGVOLE_REQUIRE_TRUE(output.download(actual, stream));
+                    expect_batch_equal(actual, expectedAccumulator);
                 }
             }
             pointwiseChecked[variant] = true;
@@ -3592,6 +3587,108 @@ void LogVole_RingOps_DenoiseValidationParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(stream.sync());
             LOGVOLE_REQUIRE_EQ(failure,extra);
         }
+    }
+#else
+    (void)cmd;
+    LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_RingOps_AccumulatorParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+    struct Shape { unsigned n,bits; };
+    for (const auto shape : std::array<Shape,3>{{{8192u,55u},{8192u,53u},{1024u,30u}}})
+    {
+        RingParams params;
+        params.mPolyModulusDegree = shape.n;
+        params.mCoeffModulusBits.resize(4u);
+        std::fill(params.mCoeffModulusBits.begin(),params.mCoeffModulusBits.end(),shape.bits);
+        RingNttContext cpu;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params,cpu));
+        prepareGpuTableOwners(cpu);
+        auto ring = gpu::GpuRing::get(cpu);
+        LOGVOLE_REQUIRE_TRUE(ring);
+        const auto view = ring->view(stream);
+        if (shape.bits == 55u)
+            LOGVOLE_REQUIRE_TRUE(view.mMinModulus > (std::uint64_t{1}<<55u)-(std::uint64_t{1}<<21u)
+                && view.mMaxModulus < (std::uint64_t{1}<<55u));
+        std::vector<RnsPoly> pool(2u);
+        for (unsigned p = 0; p < pool.size(); ++p)
+        {
+            pool[p] = deriveUniformPolyFromNonce(cpu,0x41434355u,shape.bits,p);
+            for (unsigned j = 0; j < 4u; ++j)
+            {
+                pool[p].mCoeffs[j*shape.n] = 0u;
+                pool[p].mCoeffs[j*shape.n+1u] = ringModulusValue(cpu,j)-1u;
+                for (unsigned c = 17u; c < shape.n; ++c)
+                    pool[p].mCoeffs[j*shape.n+c] = pool[p].mCoeffs[j*shape.n+c%17u];
+            }
+        }
+        struct Tuple { unsigned mu,terms,chunks; };
+        std::vector<Tuple> tuples{{shape.n==1024u?3u:8u,6u,2u}};
+        if (shape.bits == 55u)
+            for (const auto tuple : std::array<Tuple,4>{{{16u,8u,1u},{32u,10u,1u},{64u,12u,1u},{128u,14u,1u}}})
+                tuples.push_back(tuple);
+        gpu::GpuPolyBuffer operands(*ring,2u,stream);
+        LOGVOLE_REQUIRE_TRUE(operands.upload(pool,stream));
+        for (const auto tuple : tuples)
+        {
+            const unsigned count = tuple.mu*tuple.chunks;
+            std::vector<RnsPoly> rows(tuple.mu),expected(count);
+            for (unsigned row = 0; row < tuple.mu; ++row) rows[row] = pool[row%2u];
+            std::vector<std::uint32_t> ai(count*tuple.terms),bi(ai.size());
+            for (unsigned o = 0; o < count; ++o)
+            {
+                const unsigned row = o%tuple.mu, chunk = o/tuple.mu;
+                expected[o] = pool[0];
+                for (unsigned k = 0; k < tuple.terms; ++k)
+                {
+                    ai[o*tuple.terms+k] = (o+k)%2u;
+                    bi[o*tuple.terms+k] = (o+k+1u)%2u;
+                }
+                for (unsigned j = 0; j < 4u; ++j)
+                {
+                    const auto q = ringModulusValue(cpu,j);
+                    const seal::Modulus modulus(q);
+                    for (unsigned c = 0; c < 17u; ++c)
+                    {
+                        const auto e = j*shape.n+c;
+                        auto value = (seal::util::multiply_uint_mod(rows[row].mCoeffs[e],pool[chunk].mCoeffs[e],modulus)+q
+                            -seal::util::multiply_uint_mod(rows[row].mCoeffs[e],pool[1u-chunk].mCoeffs[e],modulus))%q;
+                        for (unsigned k = 0; k < tuple.terms; ++k)
+                            value = (value+seal::util::multiply_uint_mod(pool[ai[o*tuple.terms+k]].mCoeffs[e],
+                                pool[bi[o*tuple.terms+k]].mCoeffs[e],modulus))%q;
+                        expected[o].mCoeffs[e] = value;
+                    }
+                    for (unsigned c = 17u; c < shape.n; ++c)
+                        expected[o].mCoeffs[j*shape.n+c] = expected[o].mCoeffs[j*shape.n+c%17u];
+                }
+            }
+            // u[chunk] and sk[chunk] occupy opposite halves of this pool.
+            std::vector<RnsPoly> keys{pool[1],pool[0]};
+            gpu::GpuPolyBuffer rowDevice(*ring,tuple.mu,stream),keyDevice(*ring,2u,stream),output(*ring,count,stream);
+            LOGVOLE_REQUIRE_TRUE(rowDevice.upload(rows,stream) && keyDevice.upload(keys,stream));
+            const auto* aIndices = stream.uploadIdx(ai);
+            const auto* bIndices = stream.uploadIdx(bi);
+            LOGVOLE_REQUIRE_TRUE(aIndices && bIndices);
+            LOGVOLE_REQUIRE_TRUE(gpu::canLaunchExpandAccumulatorTau1(view,tuple.mu,tuple.terms,count));
+            for (unsigned schedule = 0; schedule < (shape.bits==55u && tuple.mu==8u?2u:1u); ++schedule)
+            {
+                LOGVOLE_REQUIRE_TRUE(gpu::launchExpandAccumulatorTau1(view,rowDevice.data(stream),
+                    operands.data(stream),rowDevice.data(stream),keyDevice.data(stream),operands.data(stream),
+                    operands.data(stream),aIndices,bIndices,tuple.mu,tuple.terms,output.data(stream),count,
+                    stream.raw(),schedule==0u));
+                std::vector<RnsPoly> actual;
+                LOGVOLE_REQUIRE_TRUE(output.download(actual,stream));
+                expect_batch_equal(actual,expected);
+            }
+        }
+        LOGVOLE_REQUIRE_FALSE(gpu::canLaunchExpandAccumulatorTau1(view,16u,9u,16u));
     }
 #else
     (void)cmd;

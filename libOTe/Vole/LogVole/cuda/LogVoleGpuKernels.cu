@@ -6144,81 +6144,8 @@ namespace osuCrypto::LogVole::gpu
         // eight-product arithmetic below are deliberately identical to the generic
         // kernel. Eight resident 256-thread CTAs require at most 32 registers on
         // H200; resource inspection rejects this path if nvcc spills instead.
-        __global__ __launch_bounds__(256, 8) void expandAccumulatorTau1GoldenKernel(
-            DeviceRing rg,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out)
-        {
-            constexpr u32 kN = 8192;
-            constexpr u32 kRho = 4;
-            constexpr u32 kMu = 8;
-            constexpr u32 kTreeTerms = 6;
-            constexpr u32 kTotalTerms = 2 + kTreeTerms;
-            constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-
-            const u32 tile = blockIdx.x;
-            const u32 rowLimb = blockIdx.y;
-            const u32 limb = rowLimb & (kRho - 1u);
-            const u32 row = rowLimb >> 2u;
-            const u32 chunk = blockIdx.z;
-            const u32 o = chunk * kMu + row;
-            const u32 coeff = (tile << 8u) + threadIdx.x;
-            const u32 elem = (limb << 13u) + coeff;
-            const size_t limbBase = static_cast<size_t>(limb) * kN;
-
-            __shared__ const u64* shA[kTotalTerms];
-            __shared__ const u64* shB[kTotalTerms];
-            if (threadIdx.x < kTotalTerms)
-            {
-                const u32 k = threadIdx.x;
-                if (k == 0)
-                {
-                    shA[k] = ct1 + static_cast<size_t>(row) * kPerPoly + limbBase;
-                    shB[k] = uDigits + static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else if (k == 1)
-                {
-                    shA[k] = publicA + static_cast<size_t>(row) * kPerPoly + limbBase;
-                    shB[k] = skNtt + static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else
-                {
-                    const u32 treeK = k - 2u;
-                    const size_t idx = static_cast<size_t>(o) * kTreeTerms + treeK;
-                    shA[k] = lacct + static_cast<size_t>(lacctAIdx[idx]) * kPerPoly + limbBase;
-                    shB[k] = nodes + static_cast<size_t>(lacctBIdx[idx]) * kPerPoly + limbBase;
-                }
-            }
-            __syncthreads();
-
-            const GpuModulus mod = rg.mMods[limb];
-            // Keep the generic kernel's product order exactly: ct1 first, the six
-            // tree terms in index order, then q^2 minus the key product.
-            Wide positiveSum = wideMul(shA[0][coeff], shB[0][coeff]);
-#pragma unroll
-            for (u32 k = 2; k < kTotalTerms; ++k)
-                positiveSum = wideAdd(positiveSum, wideMul(shA[k][coeff], shB[k][coeff]));
-            const Wide keyComplement = wideSub(
-                wideMul(mod.mValue, mod.mValue),
-                wideMul(shA[1][coeff], shB[1][coeff]));
-            const Wide signedSum = wideAdd(positiveSum, keyComplement);
-            const u64 acc = barrettReduce128(signedSum.mLo, signedSum.mHi, mod);
-            out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
-        }
-
-        // Experimental Golden specialization kept separate from the accepted
-        // one above so complement and coefficient tiling can be toggled
-        // independently. Every output retains the accepted kernel's product and
-        // addition order; AdaptiveTiles only changes how many independent
-        // coefficient tiles reuse a block's pointer table.
-        template<bool UseQ64Complement, bool AdaptiveTiles>
+        // Golden Q64-complement specialization with adaptive coefficient tiles.
+        // Every output retains the fixed product and addition order.
         __global__ __launch_bounds__(256, 8)
         void expandAccumulatorTau1GoldenExperimentalKernel(
             DeviceRing rg,
@@ -6249,10 +6176,8 @@ namespace osuCrypto::LogVole::gpu
             // Volatile pointer slots keep the adaptive loop from hoisting all
             // sixteen bases across the back-edge. Each tile reloads the table
             // from shared memory instead of extending pointer lifetimes into
-            // local stack spills under the eight-CTA launch bound. The isolated
-            // complement experiment has no back-edge and retains ordinary slots.
-            using SharedPointer = std::conditional_t<
-                AdaptiveTiles, const u64* volatile, const u64*>;
+            // local stack spills under the eight-CTA launch bound.
+            using SharedPointer = const u64* volatile;
             __shared__ SharedPointer shA[kTotalTerms];
             __shared__ SharedPointer shB[kTotalTerms];
             if (threadIdx.x < kTotalTerms)
@@ -6293,42 +6218,28 @@ namespace osuCrypto::LogVole::gpu
                     positiveSum = wideAdd(positiveSum, wideMul(shA[k][coeff], shB[k][coeff]));
 
                 Wide keyComplement{};
-                if constexpr (UseQ64Complement)
-                {
-                    // The validated coefficient moduli have at most 60 bits.
-                    // q*2^64 is 0 modulo q and larger than the key product, while
-                    // q*2^64 + seven products is below 2^125, so all Wide
-                    // arithmetic here remains exact and non-negative.
-                    keyComplement = wideSub(
-                        Wide{ 0, mod.mValue },
-                        wideMul(shA[1][coeff], shB[1][coeff]));
-                }
-                else
-                {
-                    keyComplement = wideSub(
-                        wideMul(mod.mValue, mod.mValue),
-                        wideMul(shA[1][coeff], shB[1][coeff]));
-                }
+                // The validated coefficient moduli have at most 60 bits.
+                // q*2^64 is 0 modulo q and larger than the key product, while
+                // q*2^64 + seven products is below 2^125, so all Wide
+                // arithmetic here remains exact and non-negative.
+                keyComplement = wideSub(
+                    Wide{ 0, mod.mValue },
+                    wideMul(shA[1][coeff], shB[1][coeff]));
+
                 const Wide signedSum = wideAdd(positiveSum, keyComplement);
                 const u64 acc = barrettReduce128(signedSum.mLo, signedSum.mHi, mod);
                 out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
 
-                if constexpr (!AdaptiveTiles)
-                {
-                    break;
-                }
-                else
-                {
-                    tile += gridDim.x;
-                    if (tile >= 32u) break;
-                }
+                tile += gridDim.x;
+                if (tile >= 32u) break;
+
             }
         }
 
         // Exact production-only specialization of the accepted Q64/tiled
         // accumulator for q = 2^55-c, 0<c<2^21. The product construction and
         // addition order through signedSum are identical to
-        // expandAccumulatorTau1GoldenExperimentalKernel<true,true>; only its
+        // expandAccumulatorTau1GoldenExperimentalKernel; only its
         // final canonical reduction changes.
         //
         // Writing B=2^55 and signedSum=s0+s1*B+s2*B^2 gives s0,s1<B and
@@ -6637,302 +6548,12 @@ namespace osuCrypto::LogVole::gpu
         // value below 2^119+15*2^110<2^120. Its third radix-B digit is therefore
         // below 2^10, so the accepted three-digit pseudo-Mersenne fold below is
         // also exact for every wider tuple.
-        template<u32 Mu, u32 TreeTerms>
-        __global__ __launch_bounds__(256, 8)
-        void expandAccumulatorTau1WidePseudo55Kernel(
-            DeviceRing rg,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out)
-        {
-            static_assert(
-                (Mu == 16u && TreeTerms == 8u) ||
-                (Mu == 32u && TreeTerms == 10u) ||
-                (Mu == 64u && TreeTerms == 12u) ||
-                (Mu == 128u && TreeTerms == 14u));
-            constexpr u32 kN = 8192u;
-            constexpr u32 kRho = 4u;
-            constexpr u32 kTotalTerms = 2u + TreeTerms;
-            constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-            constexpr u64 kRadix55 = u64{ 1 } << 55u;
-            constexpr u64 kMask55 = kRadix55 - 1u;
-
-            const u32 rowLimb = blockIdx.y;
-            const u32 limb = rowLimb & (kRho - 1u);
-            const u32 row = rowLimb >> 2u;
-            const u32 chunk = blockIdx.z;
-            const u32 o = chunk * Mu + row;
-
-            // Volatile shared pointer slots keep the adaptive tile loop from
-            // hoisting as many as thirty-two operand bases into registers. The
-            // rolled tree loop then retains only one pair and one product at a
-            // time under the eight-CTA/32-register launch bound.
-            using SharedPointer = const u64* volatile;
-            __shared__ SharedPointer shA[kTotalTerms];
-            __shared__ SharedPointer shB[kTotalTerms];
-            __shared__ u32 shC;
-            if (threadIdx.x < kTotalTerms)
-            {
-                const u32 k = threadIdx.x;
-                const size_t limbBase = static_cast<size_t>(limb) * kN;
-                if (k == 0u)
-                {
-                    shA[k] = ct1 +
-                        static_cast<size_t>(row) * kPerPoly + limbBase;
-                    shB[k] = uDigits +
-                        static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else if (k == 1u)
-                {
-                    shA[k] = publicA +
-                        static_cast<size_t>(row) * kPerPoly + limbBase;
-                    shB[k] = skNtt +
-                        static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else
-                {
-                    const u32 treeK = k - 2u;
-                    const size_t idx =
-                        static_cast<size_t>(o) * TreeTerms + treeK;
-                    shA[k] = lacct +
-                        static_cast<size_t>(lacctAIdx[idx]) * kPerPoly +
-                        limbBase;
-                    shB[k] = nodes +
-                        static_cast<size_t>(lacctBIdx[idx]) * kPerPoly +
-                        limbBase;
-                }
-            }
-            else if (threadIdx.x == kTotalTerms)
-            {
-                // The host-side pseudo-55 eligibility guard proves this is in
-                // the open interval (0,2^21).
-                shC = static_cast<u32>(
-                    kRadix55 - rg.mMods[limb].mValue);
-            }
-            __syncthreads();
-
-            u32 tile = blockIdx.x;
-            for (;;)
-            {
-                const u32 coeff = (tile << 8u) + threadIdx.x;
-                const u32 elem = (limb << 13u) + coeff;
-
-                Wide positiveSum =
-                    wideMul(shA[0][coeff], shB[0][coeff]);
-#pragma unroll 1
-                for (u32 k = 2u; k < kTotalTerms; ++k)
-                {
-                    positiveSum = wideAdd(
-                        positiveSum,
-                        wideMul(shA[k][coeff], shB[k][coeff]));
-                }
-
-                // Reconstruct q only after the rolled gather so q/c do not
-                // extend their live ranges through all tree products.
-                const u32 c = shC;
-                const u64 q = kRadix55 - static_cast<u64>(c);
-                const Wide keyComplement = wideSub(
-                    Wide{ 0u, q },
-                    wideMul(shA[1][coeff], shB[1][coeff]));
-                const Wide signedSum =
-                    wideAdd(positiveSum, keyComplement);
-
-                const u64 s0 = signedSum.mLo & kMask55;
-                const u64 s1 =
-                    ((signedSum.mLo >> 55u) |
-                     (signedSum.mHi << 9u)) & kMask55;
-                const u32 s2 =
-                    static_cast<u32>(signedSum.mHi >> 46u);
-
-                const u64 p0 =
-                    static_cast<u64>(static_cast<u32>(s1)) * c;
-                const u64 p1 =
-                    static_cast<u64>(static_cast<u32>(s1 >> 32u)) * c;
-                u64 tLo = p0 + (p1 << 32u);
-                u64 tCarry = static_cast<u64>(tLo < p0);
-
-                const u32 s2c = s2 * c;
-                const u64 topFold = static_cast<u64>(s2c) * c;
-                const u64 addend = s0 + topFold;
-                const u64 oldTLo = tLo;
-                tLo += addend;
-                tCarry += static_cast<u64>(tLo < oldTLo);
-                const u64 tHi = (p1 >> 32u) + tCarry;
-
-                const u64 t0 = tLo & kMask55;
-                const u32 t1 = static_cast<u32>(
-                    (tLo >> 55u) | (tHi << 9u));
-                u64 acc = t0 + static_cast<u64>(t1) * c;
-                if (acc >= q) acc -= q;
-
-                out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
-
-                tile += gridDim.x;
-                if (tile >= 32u) break;
-            }
-        }
-
         // Hopper sidecar for the same strict wide tuples as the accepted
         // Stage-99 kernel above. All operands are non-negative and the complete
         // positive sum is below 2^114, so partitioning it into two Wide values
         // and joining them once is exact (and residue-bit-identical) without an
         // intermediate overflow. Pairing tree terms also halves the rolled-loop
         // control work while exposing two independent carry recurrences.
-        template<u32 Mu, u32 TreeTerms>
-        __global__ __launch_bounds__(256, 8)
-        void expandAccumulatorTau1WidePseudo55DualKernel(
-            DeviceRing rg,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out)
-        {
-            static_assert(
-                (Mu == 16u && TreeTerms == 8u) ||
-                (Mu == 32u && TreeTerms == 10u) ||
-                (Mu == 64u && TreeTerms == 12u) ||
-                (Mu == 128u && TreeTerms == 14u));
-            static_assert((TreeTerms & 1u) == 0u);
-            constexpr u32 kN = 8192u;
-            constexpr u32 kRho = 4u;
-            constexpr u32 kTotalTerms = 2u + TreeTerms;
-            constexpr size_t kPerPoly = static_cast<size_t>(kRho) * kN;
-            constexpr u64 kRadix55 = u64{ 1 } << 55u;
-            constexpr u64 kMask55 = kRadix55 - 1u;
-
-            const u32 rowLimb = blockIdx.y;
-            const u32 limb = rowLimb & (kRho - 1u);
-            const u32 row = rowLimb >> 2u;
-            const u32 chunk = blockIdx.z;
-            const u32 o = chunk * Mu + row;
-
-            using SharedPointer = const u64* volatile;
-            __shared__ SharedPointer shA[kTotalTerms];
-            __shared__ SharedPointer shB[kTotalTerms];
-            __shared__ u32 shC;
-            if (threadIdx.x < kTotalTerms)
-            {
-                const u32 k = threadIdx.x;
-                const size_t limbBase = static_cast<size_t>(limb) * kN;
-                if (k == 0u)
-                {
-                    shA[k] = ct1 +
-                        static_cast<size_t>(row) * kPerPoly + limbBase;
-                    shB[k] = uDigits +
-                        static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else if (k == 1u)
-                {
-                    shA[k] = publicA +
-                        static_cast<size_t>(row) * kPerPoly + limbBase;
-                    shB[k] = skNtt +
-                        static_cast<size_t>(chunk) * kPerPoly + limbBase;
-                }
-                else
-                {
-                    const u32 treeK = k - 2u;
-                    const size_t idx =
-                        static_cast<size_t>(o) * TreeTerms + treeK;
-                    shA[k] = lacct +
-                        static_cast<size_t>(lacctAIdx[idx]) * kPerPoly +
-                        limbBase;
-                    shB[k] = nodes +
-                        static_cast<size_t>(lacctBIdx[idx]) * kPerPoly +
-                        limbBase;
-                }
-            }
-            else if (threadIdx.x == kTotalTerms)
-            {
-                shC = static_cast<u32>(
-                    kRadix55 - rg.mMods[limb].mValue);
-            }
-            __syncthreads();
-
-            u32 tile = blockIdx.x;
-            for (;;)
-            {
-                const u32 coeff = (tile << 8u) + threadIdx.x;
-                const u32 elem = (limb << 13u) + coeff;
-
-                // Seed the second chain with tree term zero, then pair all but
-                // the final tree term. The tail leaves their positive-product
-                // counts differing by exactly one.
-                Wide positiveEven =
-                    wideMul(shA[0][coeff], shB[0][coeff]);
-                Wide positiveOdd =
-                    wideMul(shA[2][coeff], shB[2][coeff]);
-#pragma unroll 1
-                for (u32 k = 3u; k + 1u < kTotalTerms; k += 2u)
-                {
-                    positiveEven = wideAdd(
-                        positiveEven,
-                        wideMul(shA[k][coeff], shB[k][coeff]));
-                    positiveOdd = wideAdd(
-                        positiveOdd,
-                        wideMul(shA[k + 1u][coeff], shB[k + 1u][coeff]));
-                }
-                positiveEven = wideAdd(
-                    positiveEven,
-                    wideMul(
-                        shA[kTotalTerms - 1u][coeff],
-                        shB[kTotalTerms - 1u][coeff]));
-                const Wide positiveSum =
-                    wideAdd(positiveEven, positiveOdd);
-
-                const u32 c = shC;
-                const u64 q = kRadix55 - static_cast<u64>(c);
-                const Wide keyComplement = wideSub(
-                    Wide{ 0u, q },
-                    wideMul(shA[1][coeff], shB[1][coeff]));
-                const Wide signedSum =
-                    wideAdd(positiveSum, keyComplement);
-
-                const u64 s0 = signedSum.mLo & kMask55;
-                const u64 s1 =
-                    ((signedSum.mLo >> 55u) |
-                     (signedSum.mHi << 9u)) & kMask55;
-                const u32 s2 =
-                    static_cast<u32>(signedSum.mHi >> 46u);
-
-                const u64 p0 =
-                    static_cast<u64>(static_cast<u32>(s1)) * c;
-                const u64 p1 =
-                    static_cast<u64>(static_cast<u32>(s1 >> 32u)) * c;
-                u64 tLo = p0 + (p1 << 32u);
-                u64 tCarry = static_cast<u64>(tLo < p0);
-
-                const u32 s2c = s2 * c;
-                const u64 topFold = static_cast<u64>(s2c) * c;
-                const u64 addend = s0 + topFold;
-                const u64 oldTLo = tLo;
-                tLo += addend;
-                tCarry += static_cast<u64>(tLo < oldTLo);
-                const u64 tHi = (p1 >> 32u) + tCarry;
-
-                const u64 t0 = tLo & kMask55;
-                const u32 t1 = static_cast<u32>(
-                    (tLo >> 55u) | (tHi << 9u));
-                u64 acc = t0 + static_cast<u64>(t1) * c;
-                if (acc >= q) acc -= q;
-
-                out[static_cast<size_t>(o) * kPerPoly + elem] = acc;
-
-                tile += gridDim.x;
-                if (tile >= 32u) break;
-            }
-        }
-
         __device__ __forceinline__ ulonglong2
         loadSharedAccumulatorPointerPair(const ulonglong2* pair)
         {
@@ -7058,7 +6679,7 @@ namespace osuCrypto::LogVole::gpu
 
         // Packed-pointer successor to the Stage-101 dual-Wide accumulator. The
         // positive products retain exactly the same two carry chains and join
-        // order as expandAccumulatorTau1WidePseudo55DualKernel; only the shared
+        // order of the dual-Wide accumulator; only the shared
         // pointer-table representation changes. Keeping a separate symbol
         // preserves both accepted wide implementations as codegen-stable
         // same-binary rollbacks.
@@ -12445,8 +12066,7 @@ namespace osuCrypto::LogVole::gpu
             u32 treeTerms,
             u32 outCount)
         {
-            return rc.mKernelOptions.mNoGoldH200CombinedAccumulator &&
-                log14H200Shape(rc) && mu == 16u && treeTerms == 8u &&
+            return log14H200Shape(rc) && mu == 16u && treeTerms == 8u &&
                 outCount != 0u && outCount <= 65535u &&
                 (outCount % 16u) == 0u && rc.mMods &&
                 rc.mMinModulus != 0u &&
@@ -12483,8 +12103,7 @@ namespace osuCrypto::LogVole::gpu
             const dim3 grid(automaticTileBlocks, kMu * kRho, chunks);
             constexpr u64 kRadix52 = u64{ 1 } << 52u;
             const bool pseudo52 =
-                rc.mKernelOptions.mNoGoldH200AccumulatorPseudo52 &&
-                rc.mMaxModulus < kRadix52 &&
+                                rc.mMaxModulus < kRadix52 &&
                 rc.mMinModulus > kRadix52 - (u64{ 1 } << 24u);
             if (pseudo52)
             {
@@ -12506,86 +12125,6 @@ namespace osuCrypto::LogVole::gpu
                 pseudo52
                     ? "expandAccumulatorTau1NoGoldH200Pseudo52"
                     : "expandAccumulatorTau1NoGoldH200");
-        }
-
-        template<u32 Mu, u32 TreeTerms>
-        bool launchExpandAccumulatorTau1WidePseudo55Impl(
-            const RingConstView& rc,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out,
-            u32 outCount,
-            void* stream)
-        {
-            static_assert(
-                (Mu == 16u && TreeTerms == 8u) ||
-                (Mu == 32u && TreeTerms == 10u) ||
-                (Mu == 64u && TreeTerms == 12u) ||
-                (Mu == 128u && TreeTerms == 14u));
-            constexpr u32 kThreads = 256u;
-            const u32 chunks = outCount / Mu;
-            const u64 rowLimbPlanes =
-                static_cast<u64>(Mu) * 4u * chunks;
-            const u64 rawTileBlocks = 1024u / rowLimbPlanes;
-            const u32 tileBlocks = rawTileBlocks == 0u
-                ? 1u
-                : (rawTileBlocks > 32u
-                       ? 32u
-                       : static_cast<u32>(rawTileBlocks));
-            const dim3 grid(tileBlocks, Mu * 4u, chunks);
-            expandAccumulatorTau1WidePseudo55Kernel<Mu, TreeTerms><<<
-                grid, kThreads, 0u, asStream(stream)>>>(
-                toDevice(rc), ct1, uDigits, publicA, skNtt, lacct, nodes,
-                lacctAIdx, lacctBIdx, out);
-            return check(
-                cudaGetLastError(),
-                "expandAccumulatorTau1WidePseudo55");
-        }
-
-        template<u32 Mu, u32 TreeTerms>
-        bool launchExpandAccumulatorTau1WidePseudo55DualImpl(
-            const RingConstView& rc,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out,
-            u32 outCount,
-            void* stream)
-        {
-            static_assert(
-                (Mu == 16u && TreeTerms == 8u) ||
-                (Mu == 32u && TreeTerms == 10u) ||
-                (Mu == 64u && TreeTerms == 12u) ||
-                (Mu == 128u && TreeTerms == 14u));
-            constexpr u32 kThreads = 256u;
-            const u32 chunks = outCount / Mu;
-            const u64 rowLimbPlanes =
-                static_cast<u64>(Mu) * 4u * chunks;
-            const u64 rawTileBlocks = 1024u / rowLimbPlanes;
-            const u32 tileBlocks = rawTileBlocks == 0u
-                ? 1u
-                : (rawTileBlocks > 32u
-                       ? 32u
-                       : static_cast<u32>(rawTileBlocks));
-            const dim3 grid(tileBlocks, Mu * 4u, chunks);
-            expandAccumulatorTau1WidePseudo55DualKernel<Mu, TreeTerms><<<
-                grid, kThreads, 0u, asStream(stream)>>>(
-                toDevice(rc), ct1, uDigits, publicA, skNtt, lacct, nodes,
-                lacctAIdx, lacctBIdx, out);
-            return check(
-                cudaGetLastError(),
-                "expandAccumulatorTau1WidePseudo55Dual");
         }
 
         template<u32 Mu, u32 TreeTerms>
@@ -12627,41 +12166,6 @@ namespace osuCrypto::LogVole::gpu
             return check(
                 cudaGetLastError(),
                 "expandAccumulatorTau1WidePseudo55DualPackedPairs");
-        }
-
-        template<u32 Mu, u32 TreeTerms>
-        bool launchExpandAccumulatorTau1WidePseudo55SelectedImpl(
-            const RingConstView& rc,
-            const u64* ct1,
-            const u64* uDigits,
-            const u64* publicA,
-            const u64* skNtt,
-            const u64* lacct,
-            const u64* nodes,
-            const u32* lacctAIdx,
-            const u32* lacctBIdx,
-            u64* out,
-            u32 outCount,
-            void* stream)
-        {
-            if (rc.mKernelOptions.mExpandAccumulatorPseudo55Dual)
-            {
-                if (rc.mKernelOptions.mExpandAccumulatorPseudo55DualPackedPairs)
-                {
-                    return
-                        launchExpandAccumulatorTau1WidePseudo55DualPackedPairsImpl<
-                            Mu, TreeTerms>(
-                            rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                            lacctAIdx, lacctBIdx, out, outCount, stream);
-                }
-                return launchExpandAccumulatorTau1WidePseudo55DualImpl<
-                    Mu, TreeTerms>(
-                    rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                    lacctAIdx, lacctBIdx, out, outCount, stream);
-            }
-            return launchExpandAccumulatorTau1WidePseudo55Impl<Mu, TreeTerms>(
-                rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                lacctAIdx, lacctBIdx, out, outCount, stream);
         }
 
         bool innerProductOuterWideMuStructuralEligible(
@@ -12727,12 +12231,7 @@ namespace osuCrypto::LogVole::gpu
             return true;
         }
 
-        return rc.mKernelOptions.mExpandAccumulatorPseudo55Wide &&
-            rc.mKernelOptions.mExpandAccumulatorSpecialized &&
-            rc.mKernelOptions.mExpandAccumulatorTiled &&
-            rc.mKernelOptions.mExpandAccumulatorQ64Complement &&
-            rc.mKernelOptions.mExpandAccumulatorPseudo55 &&
-            expandAccumulatorWideStructuralEligible(
+        return expandAccumulatorWideStructuralEligible(
                 rc, mu, treeTerms, outCount);
     }
 
@@ -13031,23 +12530,23 @@ namespace osuCrypto::LogVole::gpu
         launched = true;
         if (mu == 16u)
         {
-            return launchExpandAccumulatorTau1WidePseudo55SelectedImpl<16u, 8u>(
+            return launchExpandAccumulatorTau1WidePseudo55DualPackedPairsImpl<16u, 8u>(
                 rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
                 lacctAIdx, lacctBIdx, out, outCount, stream);
         }
         if (mu == 32u)
         {
-            return launchExpandAccumulatorTau1WidePseudo55SelectedImpl<32u, 10u>(
+            return launchExpandAccumulatorTau1WidePseudo55DualPackedPairsImpl<32u, 10u>(
                 rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
                 lacctAIdx, lacctBIdx, out, outCount, stream);
         }
         if (mu == 64u)
         {
-            return launchExpandAccumulatorTau1WidePseudo55SelectedImpl<64u, 12u>(
+            return launchExpandAccumulatorTau1WidePseudo55DualPackedPairsImpl<64u, 12u>(
                 rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
                 lacctAIdx, lacctBIdx, out, outCount, stream);
         }
-        return launchExpandAccumulatorTau1WidePseudo55SelectedImpl<128u, 14u>(
+        return launchExpandAccumulatorTau1WidePseudo55DualPackedPairsImpl<128u, 14u>(
             rc, ct1, uDigits, publicA, skNtt, lacct, nodes,
             lacctAIdx, lacctBIdx, out, outCount, stream);
     }
@@ -13249,83 +12748,54 @@ namespace osuCrypto::LogVole::gpu
         }
         const DeviceRing rg = toDevice(rc);
         constexpr u32 threads = 256;
-        if (rc.mKernelOptions.mExpandAccumulatorSpecialized && rc.mN == 8192u && rc.mRho == 4u &&
+        if (rc.mN == 8192u && rc.mRho == 4u &&
             mu == 8u && treeTerms == 6u && (outCount % 8u) == 0u)
         {
             const u32 chunks = outCount / 8u;
-            const bool useQ64Complement = rc.mKernelOptions.mExpandAccumulatorQ64Complement;
-            if (rc.mKernelOptions.mExpandAccumulatorTiled)
+            // Keep about 1024 CTAs at small chunk counts, then let the larger
+            // grids amortize pointer setup over progressively more of the 32
+            // coefficient tiles per (chunk,row,limb).
+            const u32 tileDenom = 32u * chunks;
+            const u32 rawTileBlocks = 1024u / tileDenom;
+            const u32 tileBlocks = rawTileBlocks == 0u
+                ? 1u
+                : (rawTileBlocks > 32u ? 32u : rawTileBlocks);
+            const dim3 grid(tileBlocks, 8u * 4u, chunks);
+            constexpr u64 kPseudo55Radix = u64{ 1 } << 55u;
+            constexpr u64 kPseudo55MaxC = u64{ 1 } << 21u;
+            // The pseudo-Mersenne proof additionally needs every limb
+            // to satisfy q=2^55-c with 0<c<2^21. Host metadata guards
+            // the whole table before the device reconstructs q from c.
+            if (rc.mMinModulus > kPseudo55Radix - kPseudo55MaxC &&
+                rc.mMaxModulus < kPseudo55Radix)
             {
-                // Keep about 1024 CTAs at small chunk counts, then let the larger
-                // grids amortize pointer setup over progressively more of the 32
-                // coefficient tiles per (chunk,row,limb).
-                const u32 tileDenom = 32u * chunks;
-                const u32 rawTileBlocks = 1024u / tileDenom;
-                const u32 tileBlocks = rawTileBlocks == 0u
-                    ? 1u
-                    : (rawTileBlocks > 32u ? 32u : rawTileBlocks);
-                const dim3 grid(tileBlocks, 8u * 4u, chunks);
-                if (useQ64Complement)
+                if (alphaIsTwo &&
+                    expandAccumulatorGoldenPseudo55StructuralEligible(
+                        rc, mu, treeTerms, outCount))
                 {
-                    constexpr u64 kPseudo55Radix = u64{ 1 } << 55u;
-                    constexpr u64 kPseudo55MaxC = u64{ 1 } << 21u;
-                    // The pseudo-Mersenne proof additionally needs every limb
-                    // to satisfy q=2^55-c with 0<c<2^21. Host metadata guards
-                    // the whole table before the device reconstructs q from c.
-                    if (rc.mKernelOptions.mExpandAccumulatorPseudo55 &&
-                        rc.mMinModulus > kPseudo55Radix - kPseudo55MaxC &&
-                        rc.mMaxModulus < kPseudo55Radix)
-                    {
-                        if (alphaIsTwo &&
-                            rc.mKernelOptions.mExpandAccumulatorGoldenPseudo55Dual &&
-                            expandAccumulatorGoldenPseudo55StructuralEligible(
-                                rc, mu, treeTerms, outCount))
-                        {
-                            expandAccumulatorTau1GoldenPseudo55DualKernel<<<
-                                grid, threads, 0, asStream(stream)>>>(
-                                rg, ct1, uDigits, publicA, skNtt, lacct,
-                                nodes, lacctAIdx, lacctBIdx, out);
-                        }
-                        else
-                        {
-                            expandAccumulatorTau1GoldenPseudo55Kernel<<<
-                                grid, threads, 0, asStream(stream)>>>(
-                                rg, ct1, uDigits, publicA, skNtt, lacct,
-                                nodes, lacctAIdx, lacctBIdx, out);
-                        }
-                    }
-                    else
-                    {
-                        expandAccumulatorTau1GoldenExperimentalKernel<true, true><<<
-                            grid, threads, 0, asStream(stream)>>>(
-                            rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                            lacctAIdx, lacctBIdx, out);
-                    }
+                    expandAccumulatorTau1GoldenPseudo55DualKernel<<<
+                        grid, threads, 0, asStream(stream)>>>(
+                        rg, ct1, uDigits, publicA, skNtt, lacct,
+                        nodes, lacctAIdx, lacctBIdx, out);
                 }
                 else
                 {
-                    expandAccumulatorTau1GoldenExperimentalKernel<false, true><<<
+                    expandAccumulatorTau1GoldenPseudo55Kernel<<<
                         grid, threads, 0, asStream(stream)>>>(
-                        rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
-                        lacctAIdx, lacctBIdx, out);
+                        rg, ct1, uDigits, publicA, skNtt, lacct,
+                        nodes, lacctAIdx, lacctBIdx, out);
                 }
-                return check(cudaGetLastError(), "expandAccumulatorTau1GoldenTiled");
             }
-
-            // x = 32 coefficient tiles; y = 8 rows x 4 limbs; z = chunks.
-            // outCount <= 65535 above also guarantees grid.z is representable.
-            const dim3 grid(8192u / threads, 8u * 4u, chunks);
-            if (useQ64Complement)
+            else
             {
-                expandAccumulatorTau1GoldenExperimentalKernel<true, false><<<
+                expandAccumulatorTau1GoldenExperimentalKernel<<<
                     grid, threads, 0, asStream(stream)>>>(
                     rg, ct1, uDigits, publicA, skNtt, lacct, nodes,
                     lacctAIdx, lacctBIdx, out);
-                return check(cudaGetLastError(), "expandAccumulatorTau1GoldenQ64Complement");
             }
-            expandAccumulatorTau1GoldenKernel<<<grid, threads, 0, asStream(stream)>>>(
-                rg, ct1, uDigits, publicA, skNtt, lacct, nodes, lacctAIdx, lacctBIdx, out);
-            return check(cudaGetLastError(), "expandAccumulatorTau1Golden");
+
+            return check(cudaGetLastError(), "expandAccumulatorTau1GoldenTiled");
+
         }
         expandAccumulatorTau1Kernel<<<
             grid2D(rc.mRho * rc.mN, outCount, threads), threads, 0, asStream(stream)>>>(

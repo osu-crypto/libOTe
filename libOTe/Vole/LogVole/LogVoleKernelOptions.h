@@ -10,8 +10,6 @@ namespace osuCrypto
     struct LogVoleGpuKernelOptions
     {
         bool mNoGoldH200InverseOpTrace = false;
-        bool mNoGoldH200CombinedAccumulator = true;
-        bool mNoGoldH200AccumulatorPseudo52 = true;
         bool mNoGoldH200Gadget208 = true;
         bool mNoGoldH200Gadget208Pseudo52 = true;
         std::uint32_t mCt2PolySeedThreads = 32u;
@@ -21,14 +19,6 @@ namespace osuCrypto
         bool mFixedIpWideMuRowReuse = true;
         bool mPointwisePseudo55Reduce = true;
         std::uint32_t mRootZetaSampleThreads = 256u;
-        bool mExpandAccumulatorSpecialized = true;
-        bool mExpandAccumulatorQ64Complement = true;
-        bool mExpandAccumulatorPseudo55 = true;
-        bool mExpandAccumulatorGoldenPseudo55Dual = true;
-        bool mExpandAccumulatorPseudo55Wide = true;
-        bool mExpandAccumulatorPseudo55Dual = true;
-        bool mExpandAccumulatorPseudo55DualPackedPairs = true;
-        bool mExpandAccumulatorTiled = true;
         bool mGadgetHi110Specialized = true;
         bool mGadgetHi110CompactCrt = true;
         bool mGadgetHi110Radix55Reduce = true;
@@ -52,8 +42,6 @@ namespace osuCrypto
         bool operator==(const LogVoleGpuKernelOptions& other) const noexcept
         {
             return mNoGoldH200InverseOpTrace == other.mNoGoldH200InverseOpTrace &&
-                mNoGoldH200CombinedAccumulator == other.mNoGoldH200CombinedAccumulator &&
-                mNoGoldH200AccumulatorPseudo52 == other.mNoGoldH200AccumulatorPseudo52 &&
                 mNoGoldH200Gadget208 == other.mNoGoldH200Gadget208 &&
                 mNoGoldH200Gadget208Pseudo52 == other.mNoGoldH200Gadget208Pseudo52 &&
                 mCt2PolySeedThreads == other.mCt2PolySeedThreads &&
@@ -63,14 +51,6 @@ namespace osuCrypto
                 mFixedIpWideMuRowReuse == other.mFixedIpWideMuRowReuse &&
                 mPointwisePseudo55Reduce == other.mPointwisePseudo55Reduce &&
                 mRootZetaSampleThreads == other.mRootZetaSampleThreads &&
-                mExpandAccumulatorSpecialized == other.mExpandAccumulatorSpecialized &&
-                mExpandAccumulatorQ64Complement == other.mExpandAccumulatorQ64Complement &&
-                mExpandAccumulatorPseudo55 == other.mExpandAccumulatorPseudo55 &&
-                mExpandAccumulatorGoldenPseudo55Dual == other.mExpandAccumulatorGoldenPseudo55Dual &&
-                mExpandAccumulatorPseudo55Wide == other.mExpandAccumulatorPseudo55Wide &&
-                mExpandAccumulatorPseudo55Dual == other.mExpandAccumulatorPseudo55Dual &&
-                mExpandAccumulatorPseudo55DualPackedPairs == other.mExpandAccumulatorPseudo55DualPackedPairs &&
-                mExpandAccumulatorTiled == other.mExpandAccumulatorTiled &&
                 mGadgetHi110Specialized == other.mGadgetHi110Specialized &&
                 mGadgetHi110CompactCrt == other.mGadgetHi110CompactCrt &&
                 mGadgetHi110Radix55Reduce == other.mGadgetHi110Radix55Reduce &&

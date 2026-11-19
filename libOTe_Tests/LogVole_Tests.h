@@ -131,6 +131,7 @@
     X(RingOps, NttLog13SparseParity) \
     X(RingOps, ScaleNttGatherParity) \
     X(RingOps, DenoiseValidationParity) \
+    X(RingOps, AccumulatorParity) \
     X(RingOps, NttTwoTileInPlaceParity) \
     X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
     X(Core, RootTruncParamsAndKeyReplication) \
