@@ -5,12 +5,11 @@
 namespace osuCrypto {
 namespace detail {
 spin::CodeSpec spinProfile(u64 requested,block seed) {
-    // Turbo SPIN. Under uniform setup its minimum distance exceeds N/10 at
-    // K=2^14,2^16,...,2^26 (Lean-certified; setup-failure margins 64.25 to
-    // 52.32 bits). Small requests share the smallest certified code; others
-    // round up to the next natural size (a multiple of 128), which has no
-    // size-specific certificate. Truncate only after encoding.
-    constexpr u64 minimumK=u64(1)<<14;
+    // Turbo SPIN at every natural size (a positive multiple of 128); requests
+    // round up to the next one. Small requests share K=8192 so the noise
+    // configuration has room for its partitions; this floor is not tied to
+    // any distance certificate. Truncate only after encoding.
+    constexpr u64 minimumK=8192;
     constexpr auto parameters=spin::Parameters::PacketRs8T64;
     const u64 alignment=spin::message_alignment(parameters);
     if(!requested || requested>(u64(1)<<40))

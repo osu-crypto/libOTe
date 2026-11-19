@@ -7,9 +7,10 @@ sender.configure(requested, 2, 1, security, noise, osuCrypto::MultType::Spin);
 receiver.configure(requested, 2, 1, security, noise, osuCrypto::MultType::Spin);
 ```
 
-libOTe uses Turbo SPIN (`spin::Parameters::PacketRs8T64`) and rounds the code
-size up to a multiple of 128. Positive requests below 16384 use that size, the
-smallest certified length; only the requested outputs are returned. Zero requests are rejected. The default `MultType` is unchanged.
+libOTe uses Turbo SPIN (`spin::Parameters::PacketRs8T64`) at every natural
+size: the code size rounds up to the next multiple of 128. Positive requests
+below 8192 use 8192, which leaves the noise configuration room for its
+partitions; only the requested outputs are returned. Zero requests are rejected. The default `MultType` is unchanged.
 Enabling the SPIN dependency does not add a Silent VOLE profile.
 
 ## Dependency
