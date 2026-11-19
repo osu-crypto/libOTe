@@ -1481,3 +1481,18 @@ retained entries and obsolete-family absence were verified in the SM90 object.
 Three focused checks passed with zero skips in 15.38 seconds using
 `-gpu 1 -lvFactoryFast 1`. H200 accumulator execution remains untested locally,
 including its non-pseudo52 fallback. No benchmarks were run.
+
+Gadget decomposition now uses its production defaults without eight tuning
+switches or the general-kernel Garner alternative. All modulus, geometry,
+centering, digit-range, and missing-constant fallbacks remain, along with the
+shared Garner helper and the mandatory sparse consumer contract.
+
+Validation: independent CPU CRT decomposition passed on the RTX 4060 before
+and after pruning for all four dense Hi110 domains and general centered and
+uncentered digit ranges, including CRT and digit boundaries and indexed output.
+The existing sparse-consumer and conditional Hi208 checks also passed. The
+Windows VS 14.50 CUDA test target and frontend object build and isolated SM90
+compile passed; all four dense, four sparse, three Hi208, and eight generic
+entries were verified. Four focused checks passed with zero skips in 43.66
+seconds using `-gpu 1 -lvFactoryFast 1`. H200 runtime remains untested locally.
+No benchmarks were run.

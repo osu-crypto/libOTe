@@ -3696,6 +3696,107 @@ void LogVole_RingOps_AccumulatorParity(const oc::CLP& cmd)
 #endif
 }
 
+void LogVole_RingOps_GadgetParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu",0)==0) { LOGVOLE_SKIP()<<"requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    gpu::GpuExecutionContext execution;
+    auto& stream=execution.mainStream();
+    struct Shape { unsigned n,rho,bits; };
+    for (const auto shape : std::array<Shape,5>{{{8192u,4u,55u},{1024u,4u,55u},
+             {1024u,4u,53u},{1024u,4u,56u},{1024u,3u,30u}}})
+    {
+        RingParams params;
+        params.mPolyModulusDegree=shape.n;
+        params.mCoeffModulusBits.resize(shape.rho);
+        std::fill(params.mCoeffModulusBits.begin(),params.mCoeffModulusBits.end(),shape.bits);
+        RingNttContext cpu;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params,cpu));
+        const auto host=getRingHostContext(cpu);
+        LOGVOLE_REQUIRE_TRUE(host);
+        const auto& base=*host->key_context_data()->rns_tool()->base_q();
+        auto pool=seal::MemoryPoolHandle::New();
+        std::vector<std::uint64_t> integers(shape.n*shape.rho,0u);
+        for (unsigned c=0;c<9u;++c)
+        {
+            auto* value=integers.data()+c*shape.rho;
+            if (c==1u) value[0]=1u;
+            if (c==2u)
+                seal::util::sub_uint(base.base_prod(),shape.rho,std::uint64_t{1},value);
+            if (c>=3u && c<=5u)
+            {
+                seal::util::right_shift_uint(base.base_prod(),1,shape.rho,value);
+                if (c==3u) seal::util::sub_uint(value,shape.rho,std::uint64_t{1},value);
+                if (c==5u) seal::util::add_uint(value,shape.rho,std::uint64_t{1},value);
+            }
+            if (c>=6u)
+            {
+                const unsigned bit=shape.rho==4u?109u:16u;
+                value[bit/64u]=std::uint64_t{1}<<(bit%64u);
+                if (c==6u) seal::util::sub_uint(value,shape.rho,std::uint64_t{1},value);
+                if (c==8u) seal::util::add_uint(value,shape.rho,std::uint64_t{1},value);
+                if (seal::util::compare_uint(value,base.base_prod(),shape.rho)>=0)
+                {
+                    std::vector<std::uint64_t> quotient(shape.rho),remainder(shape.rho);
+                    seal::util::divide_uint(value,base.base_prod(),shape.rho,quotient.data(),remainder.data(),pool);
+                    std::copy(remainder.begin(),remainder.end(),value);
+                }
+            }
+        }
+        base.decompose_array(integers.data(),shape.n,pool);
+        std::vector<RnsPoly> input(2u);
+        for (unsigned p=0;p<2u;++p)
+        {
+            input[p]=deriveUniformPolyFromNonce(cpu,0x47414447u,shape.bits,p);
+            for (unsigned j=0;j<shape.rho;++j)
+            {
+                std::copy_n(integers.data()+j*shape.n,9u,input[p].mCoeffs.data()+j*shape.n);
+                for (unsigned c=17u;c<shape.n;++c)
+                    input[p].mCoeffs[j*shape.n+c]=input[p].mCoeffs[j*shape.n+c%17u];
+            }
+        }
+        prepareGpuTableOwners(cpu);
+        auto ring=gpu::GpuRing::get(cpu);
+        LOGVOLE_REQUIRE_TRUE(ring);
+        const bool general=shape.rho!=4u;
+        const unsigned digitBits=general?17u:110u, levels=general?2u:1u;
+        const std::array<std::uint32_t,2> inIdx{1u,0u};
+        std::vector<std::uint32_t> outIdx(2u*levels);
+        for (unsigned i=0;i<outIdx.size();++i) outIdx[i]=(i+1u)%outIdx.size();
+        gpu::GpuPolyBuffer data(*ring,2u,stream),output(*ring,2u*levels,stream);
+        LOGVOLE_REQUIRE_TRUE(data.upload(input,stream));
+        const auto* sources=stream.uploadIdx(inIdx);
+        const auto* destinations=stream.uploadIdx(outIdx);
+        LOGVOLE_REQUIRE_TRUE(sources && destinations);
+        for (unsigned mode=0;mode<(general?2u:1u);++mode)
+        {
+            const bool centered=mode==0u;
+            std::vector<RnsPoly> expected(2u*levels);
+            for (unsigned o=0;o<2u;++o)
+            {
+                std::vector<RnsPoly> all;
+                // Starting at zero and requesting multiple digits uses the
+                // general CPU CRT/integer decomposition, not the high-digit fast path.
+                LOGVOLE_REQUIRE_TRUE(centered
+                    ?gadgetDecomposeBitsRangeCentered(input[inIdx[o]],digitBits,0u,levels+1u,cpu,all)
+                    :gadgetDecomposeBitsRange(input[inIdx[o]],digitBits,0u,levels+1u,cpu,all));
+                for (unsigned level=0;level<levels;++level)
+                    expected[outIdx[o*levels+level]]=std::move(all[level+1u]);
+            }
+            LOGVOLE_REQUIRE_TRUE(gpu::launchGadgetDecompose(ring->view(stream),data.data(stream),sources,
+                2u,digitBits,1u,levels,centered,output.data(stream),destinations,stream.raw()));
+            std::vector<RnsPoly> actual;
+            LOGVOLE_REQUIRE_TRUE(output.download(actual,stream));
+            expect_batch_equal(actual,expected);
+        }
+    }
+#else
+    (void)cmd;
+    LOGVOLE_SKIP()<<"requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
 void LogVole_RingOps_NttTwoTileInPlaceParity(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)

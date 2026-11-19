@@ -7593,8 +7593,7 @@ namespace osuCrypto::LogVole::gpu
             u32 levels,
             bool centered,
             u64* out,
-            const u32* outIdx,
-            bool garner)
+            const u32* outIdx)
         {
             const u32 n = rg.mN;
             constexpr u32 w = W;
@@ -7616,26 +7615,14 @@ namespace osuCrypto::LogVole::gpu
                 const u32 ii = inIdx ? inIdx[o] : o;
 
                 u64 value[w];
-                if (garner)
-                {
-                    garnerCompose(
-                        in + static_cast<size_t>(ii) * perPoly + coeff,
-                        n,
-                        rg.mMods,
-                        rg.mGarnerInv,
-                        value);
-                }
-                else
-                {
-                    crtCompose(
-                        in + static_cast<size_t>(ii) * perPoly + coeff,
-                        n,
-                        rg.mMods,
-                        rg.mInvPuncturedProd,
-                        rg.mPuncturedProd,
-                        rg.mBaseProd,
-                        value);
-                }
+                crtCompose(
+                    in + static_cast<size_t>(ii) * perPoly + coeff,
+                    n,
+                    rg.mMods,
+                    rg.mInvPuncturedProd,
+                    rg.mPuncturedProd,
+                    rg.mBaseProd,
+                    value);
 
                 if (!centered)
                 {
@@ -12103,7 +12090,7 @@ namespace osuCrypto::LogVole::gpu
             const dim3 grid(automaticTileBlocks, kMu * kRho, chunks);
             constexpr u64 kRadix52 = u64{ 1 } << 52u;
             const bool pseudo52 =
-                                rc.mMaxModulus < kRadix52 &&
+                rc.mMaxModulus < kRadix52 &&
                 rc.mMinModulus > kRadix52 - (u64{ 1 } << 24u);
             if (pseudo52)
             {
@@ -12874,11 +12861,7 @@ namespace osuCrypto::LogVole::gpu
             u32 parentCount,
             const u64* out)
         {
-            return rc.mKernelOptions.mGadgetHi110Specialized &&
-                rc.mKernelOptions.mGadgetHi110CompactCrt &&
-                rc.mKernelOptions.mGadgetHi110Radix55Reduce &&
-                !rc.mKernelOptions.mGadgetGarner &&
-                rc.mN == 8192u && rc.mLogN == 13u && rc.mRho == 4u &&
+            return rc.mN == 8192u && rc.mLogN == 13u && rc.mRho == 4u &&
                 rc.mMinModulus > (u64(1) << 54u) &&
                 rc.mMaxModulus < (u64(1) << 55u) &&
                 rc.mMods && rc.mInvPuncturedProd && rc.mPuncturedProd &&
@@ -12894,9 +12877,8 @@ namespace osuCrypto::LogVole::gpu
         u32 parentCount,
         const u64* out)
     {
-        return rc.mKernelOptions.mGadgetHi110SparsePair &&
-            gadgetDecomposeHi110RecursiveLeafSparsePairEligible(
-                rc, in, parentCount, out);
+        return gadgetDecomposeHi110RecursiveLeafSparsePairEligible(
+            rc, in, parentCount, out);
     }
 
     bool launchGadgetDecomposeHi110RecursiveLeafSparsePair(
@@ -12907,10 +12889,9 @@ namespace osuCrypto::LogVole::gpu
         const u32* outIdx,
         void* stream)
     {
-        // This is the explicit/direct entry point used after protocol preflight
-        // and by the focused oracle. The opt-in toggle belongs to `canLaunch`;
-        // once a no-zero producer has run, re-reading it here must not turn a
-        // mandatory sparse consumer into a soft decline.
+        // This explicit entry point is used after protocol preflight and by the
+        // focused oracle. Once a no-zero producer has run, this mandatory sparse
+        // consumer must not turn into a soft decline.
         if (!gadgetDecomposeHi110RecursiveLeafSparsePairEligible(
                 rc, in, parentCount, out))
             return false;
@@ -12922,7 +12903,6 @@ namespace osuCrypto::LogVole::gpu
         cudaStream_t st = asStream(stream);
 
         const bool pseudo55SecondFold =
-            rc.mKernelOptions.mGadgetHi110Pseudo55SecondFold &&
             gadgetHi110Pseudo55SecondFoldEligible(rc);
         if (pseudo55SecondFold)
         {
@@ -13043,21 +13023,16 @@ namespace osuCrypto::LogVole::gpu
         if (inCount == 0 || levels == 0) return true;
         if (rc.mRho > kMaxWords) return false;
         const DeviceRing rg = toDevice(rc);
-        // LV_GADGET_GARNER=1 composes the coefficient by mixed radix instead of the
-        // punctured-product CRT sum. Both produce the same integer; this exists to
-        // measure the two against each other on one build.
-        const bool garner = rc.mKernelOptions.mGadgetGarner;
         const u32 threads = 128;
         const dim3 grid = grid2D(rc.mN, inCount, threads);
         cudaStream_t st = asStream(stream);
-        if (rc.mKernelOptions.mNoGoldH200Gadget208 && log14H200Shape(rc) &&
+        if (log14H200Shape(rc) &&
             rc.mGarnerInv && rc.mBaseProd && rc.mBaseProdHalf &&
             digitBits == 208u && startLevel == 1u && levels == 1u &&
             centered)
         {
             constexpr u64 kRadix52 = u64{ 1 } << 52u;
             const bool pseudo52 =
-                rc.mKernelOptions.mNoGoldH200Gadget208Pseudo52 &&
                 rc.mMaxModulus < kRadix52 &&
                 rc.mMinModulus > kRadix52 - (u64{ 1 } << 24u);
             if (pseudo52 && rc.mFp52GadgetConstants)
@@ -13084,25 +13059,22 @@ namespace osuCrypto::LogVole::gpu
         // high word to be below the modulus. A balanced 110-bit digit has
         // magnitude at most 2^109, so its high word is at most 2^45. Keep this
         // condition in host dispatch rather than adding a cold reduction branch
-        // to every thread. LV_GADGET_GARNER retains its general mixed-radix body.
-        if (rc.mKernelOptions.mGadgetHi110Specialized && !garner && rc.mRho == 4u &&
+        // to every thread.
+        if (rc.mRho == 4u &&
             digitBits == 110u && startLevel == 1u && levels == 1u && centered &&
             rc.mMinModulus > kGadgetHi110HalfHi)
         {
             // Four moduli below 2^55 give Q<2^220 and three-word punctured
             // products. Keep the bound in host dispatch so the compact kernel's
             // arithmetic contains no runtime guard or divergent fallback.
-            if (rc.mKernelOptions.mGadgetHi110CompactCrt &&
-                rc.mMaxModulus < (u64(1) << 55u))
+            if (rc.mMaxModulus < (u64(1) << 55u))
             {
                 // Radix-55 reduction additionally needs every q to have exactly
                 // 55 bits. The strict lower bound also proves hi55<q for the
                 // balanced 110-bit magnitude consumed by the candidate.
-                if (rc.mKernelOptions.mGadgetHi110Radix55Reduce &&
-                    rc.mMinModulus > (u64(1) << 54u))
+                if (rc.mMinModulus > (u64(1) << 54u))
                 {
                     const bool pseudo55SecondFold =
-                        rc.mKernelOptions.mGadgetHi110Pseudo55SecondFold &&
                         gadgetHi110Pseudo55SecondFoldEligible(rc);
                     if (pseudo55SecondFold)
                     {
@@ -13138,35 +13110,35 @@ namespace osuCrypto::LogVole::gpu
         {
         case 1:
             gadgetDecomposeKernelT<1><<<grid, threads, 0, st>>>(
-                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx, garner);
+                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx);
             break;
         case 2:
             gadgetDecomposeKernelT<2><<<grid, threads, 0, st>>>(
-                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx, garner);
+                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx);
             break;
         case 3:
             gadgetDecomposeKernelT<3><<<grid, threads, 0, st>>>(
-                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx, garner);
+                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx);
             break;
         case 4:
             gadgetDecomposeKernelT<4><<<grid, threads, 0, st>>>(
-                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx, garner);
+                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx);
             break;
         case 5:
             gadgetDecomposeKernelT<5><<<grid, threads, 0, st>>>(
-                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx, garner);
+                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx);
             break;
         case 6:
             gadgetDecomposeKernelT<6><<<grid, threads, 0, st>>>(
-                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx, garner);
+                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx);
             break;
         case 7:
             gadgetDecomposeKernelT<7><<<grid, threads, 0, st>>>(
-                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx, garner);
+                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx);
             break;
         case 8:
             gadgetDecomposeKernelT<8><<<grid, threads, 0, st>>>(
-                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx, garner);
+                rg, in, inIdx, inCount, digitBits, startLevel, levels, centered, out, outIdx);
             break;
         default:
             return false;

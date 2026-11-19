@@ -10,8 +10,6 @@ namespace osuCrypto
     struct LogVoleGpuKernelOptions
     {
         bool mNoGoldH200InverseOpTrace = false;
-        bool mNoGoldH200Gadget208 = true;
-        bool mNoGoldH200Gadget208Pseudo52 = true;
         std::uint32_t mCt2PolySeedThreads = 32u;
         bool mCt2SplitAes = true;
         bool mCt2AesSharedSbox = true;
@@ -19,12 +17,6 @@ namespace osuCrypto
         bool mFixedIpWideMuRowReuse = true;
         bool mPointwisePseudo55Reduce = true;
         std::uint32_t mRootZetaSampleThreads = 256u;
-        bool mGadgetHi110Specialized = true;
-        bool mGadgetHi110CompactCrt = true;
-        bool mGadgetHi110Radix55Reduce = true;
-        bool mGadgetHi110Pseudo55SecondFold = true;
-        bool mGadgetHi110SparsePair = true;
-        bool mGadgetGarner = false;
         std::uint32_t mNoGoldH200RootL2Mode = 3u;
         bool mFusedIp = false;
         bool mNoGoldH200InversePackedRoots = true;
@@ -42,8 +34,6 @@ namespace osuCrypto
         bool operator==(const LogVoleGpuKernelOptions& other) const noexcept
         {
             return mNoGoldH200InverseOpTrace == other.mNoGoldH200InverseOpTrace &&
-                mNoGoldH200Gadget208 == other.mNoGoldH200Gadget208 &&
-                mNoGoldH200Gadget208Pseudo52 == other.mNoGoldH200Gadget208Pseudo52 &&
                 mCt2PolySeedThreads == other.mCt2PolySeedThreads &&
                 mCt2SplitAes == other.mCt2SplitAes &&
                 mCt2AesSharedSbox == other.mCt2AesSharedSbox &&
@@ -51,12 +41,6 @@ namespace osuCrypto
                 mFixedIpWideMuRowReuse == other.mFixedIpWideMuRowReuse &&
                 mPointwisePseudo55Reduce == other.mPointwisePseudo55Reduce &&
                 mRootZetaSampleThreads == other.mRootZetaSampleThreads &&
-                mGadgetHi110Specialized == other.mGadgetHi110Specialized &&
-                mGadgetHi110CompactCrt == other.mGadgetHi110CompactCrt &&
-                mGadgetHi110Radix55Reduce == other.mGadgetHi110Radix55Reduce &&
-                mGadgetHi110Pseudo55SecondFold == other.mGadgetHi110Pseudo55SecondFold &&
-                mGadgetHi110SparsePair == other.mGadgetHi110SparsePair &&
-                mGadgetGarner == other.mGadgetGarner &&
                 mNoGoldH200RootL2Mode == other.mNoGoldH200RootL2Mode &&
                 mFusedIp == other.mFusedIp &&
                 mNoGoldH200InversePackedRoots == other.mNoGoldH200InversePackedRoots &&
