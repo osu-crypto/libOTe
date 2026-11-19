@@ -135,7 +135,7 @@ Dependencies can be managed by cmake/build.py or installed via an external tool.
 
 
 **[SPIN](https://github.com/ladnir/spin_codes) (Silent OT encoder):**
-`ENABLE_SPIN` defaults on with Silent OT or Silent VOLE. Install SPIN 0.2 or
+`ENABLE_SPIN` defaults on with Silent OT or Silent VOLE. Install SPIN 0.3 or
 use `FETCH_SPIN=ON` / `FETCH_AUTO`. Requires CMake 3.20+ and x86-64 with AVX2;
 set `ENABLE_SPIN=OFF` to omit it. See the [usage guide](libOTe/Tools/Spin/README.md).
 

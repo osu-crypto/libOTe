@@ -5,18 +5,20 @@
 namespace osuCrypto {
 namespace detail {
 spin::CodeSpec spinProfile(u64 requested,block seed) {
-    // Small requests share the smallest natural code; truncate only after encoding.
-    constexpr u64 minimumK=8192;
-    // Separate distance certificates at 10%: K16, margin >=49.32 bits.
-    // K18/20/22/24: T128S19, margins >=50.18/50.06/48.39/46.45 bits.
-    // Other natural lengths are allowed without a size-specific certificate.
-    const auto parameters=requested<=(u64(1)<<16)?
-        spin::Parameters::T64S12R2:spin::Parameters::T128S19;
+    // Turbo SPIN. Under uniform setup its minimum distance exceeds N/10 at
+    // K=2^14,2^16,...,2^26 (Lean-certified; setup-failure margins 64.25 to
+    // 52.32 bits). Small requests share the smallest certified code; others
+    // round up to the next natural size (a multiple of 128), which has no
+    // size-specific certificate. Truncate only after encoding.
+    constexpr u64 minimumK=u64(1)<<14;
+    constexpr auto parameters=spin::Parameters::PacketRs8T64;
     const u64 alignment=spin::message_alignment(parameters);
-    const u64 maxK=((u64(1)<<31)-1)/alignment*alignment;
-    if(!requested || requested>maxK)
-        throw std::invalid_argument("SPIN OT request exceeds the routing representation");
-    return {roundUpTo(std::max(requested,minimumK),alignment),parameters,seed.get<u64>(0),seed.get<u64>(1)};
+    if(!requested || requested>(u64(1)<<40))
+        throw std::invalid_argument("SPIN OT request exceeds the largest Turbo code");
+    const u64 k=roundUpTo(std::max(requested,minimumK),alignment);
+    if(!spin::valid_message_size(parameters,k))
+        throw std::invalid_argument("SPIN OT request exceeds the largest Turbo code");
+    return {k,parameters,seed.get<u64>(0),seed.get<u64>(1)};
 }
 }
 
@@ -25,7 +27,7 @@ SdConfig SpinConfigure(u64 secParam,u64 requested,SdNoiseDistribution noise) {
     if(secParam>1024 || (noise!=SdNoiseDistribution::Regular && noise!=SdNoiseDistribution::Stationary))
         throw std::invalid_argument("Invalid SPIN noise configuration");
     // Same effective linear-attack tuning value as BAA. This is not a claim
-    // of 25% minimum distance; the 10% certificates are separate evidence.
+    // of 25% minimum distance; the N/10 certificates are separate evidence.
     constexpr double linearAttackTuning=0.25;
     const double fullEffectiveWeight=std::floor(linearAttackTuning*double(n));
     const double multiplier=noise==SdNoiseDistribution::Regular?2:1;
@@ -52,7 +54,7 @@ static spin::SetupOptions spinSetup(SdNoiseDistribution noise) {
 }
 SpinOtState::SpinOtState(u64 requested,block codeSeed,bool receiver,SdNoiseDistribution noise)
     :seed(codeSeed),code(detail::spinProfile(requested,codeSeed),{},spinSetup(noise)),blocks(code.make_workspace<block>()) {
-    if(receiver) choices.emplace(code.make_workspace<u8>());
+    if(receiver) choices.emplace(code.make_workspace<block>());
 }
 void prepareSpin(std::unique_ptr<SpinOtState>& state,u64 requested,block seed,bool receiver,SdNoiseDistribution noise) {
     const auto spec=detail::spinProfile(requested,seed);
@@ -66,7 +68,12 @@ void prepareSpin(std::unique_ptr<SpinOtState>& state,u64 requested,block seed,bo
 void SpinOtState::transpose(span<block> x) {code.transpose_inplace<block>(x,blocks);}
 void SpinOtState::transpose(span<u8> x) {
     if(!choices) throw std::logic_error("SPIN choice workspace was not prepared");
-    code.transpose_inplace<u8>(x,*choices);
+    // Reuses its capacity across batches; allocates only on first use or growth.
+    choiceLift.resize(x.size());
+    for(u64 i=0;i<x.size();++i) choiceLift[i]=block(0,x[i]);
+    code.transpose_inplace<block>(choiceLift,*choices);
+    // In-place contract: the first K entries receive the result, the rest are unchanged.
+    for(u64 i=0,k=code.messageSize();i<k;++i) x[i]=choiceLift[i].get<u8>(0);
 }
 }
 #endif

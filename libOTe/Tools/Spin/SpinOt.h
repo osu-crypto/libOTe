@@ -1,6 +1,7 @@
 #pragma once
 #include "libOTe/Tools/Spin/SpinCode.h"
 #include "libOTe/TwoChooseOne/ConfigureCode.h"
+#include "cryptoTools/Common/Aligned.h"
 #ifdef ENABLE_SPIN
 #include <memory>
 #include <optional>
@@ -18,7 +19,11 @@ struct SpinOtState {
     block seed;
     SpinCode code;
     SpinCode::Workspace<block> blocks;
-    std::optional<SpinCode::Workspace<u8>> choices;
+    // Separate choice bytes use the native 128-bit transpose: the binary map acts
+    // on each bit lane independently, so each byte travels in the low byte of a
+    // block. Turbo SPIN has no generic-element transpose.
+    std::optional<SpinCode::Workspace<block>> choices;
+    AlignedUnVector<block> choiceLift;
     SpinOtState(u64 requested,block codeSeed,bool receiver,
         SdNoiseDistribution noise=SdNoiseDistribution::Regular);
     void transpose(span<block> x);
