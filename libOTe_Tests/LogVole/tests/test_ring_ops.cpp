@@ -3318,11 +3318,9 @@ void LogVole_RingOps_ScaleNttGatherParity(const oc::CLP& cmd)
     LOGVOLE_REQUIRE_TRUE(cpu.mPlaintextModulus > (std::uint64_t{1} << 53u)
         && cpu.mPlaintextModulus < (std::uint64_t{1} << 54u));
     std::vector<std::uint64_t> actual(outCount + 1u), sentinel(outCount + 1u, cpu.mPlaintextModulus - 1u);
-    for (unsigned route = 0; route < 4u; ++route)
+    for (unsigned route = 0; route < 2u; ++route)
     {
         auto selected = view;
-        if (route == 2u) selected.mKernelOptions.mScaleNttForwardGatherHiCarry = false;
-        if (route == 3u) selected.mKernelOptions.mScaleAndRoundFastArithmetic = false;
         const auto* slotMap = route == 1u ? nullptr : plain->slotMap();
         LOGVOLE_REQUIRE_TRUE(gpu::canLaunchScaleNttForwardGather(selected, plainView,
             data.data(stream), 2u, cpu.mPlaintextModulus, constants.mFastLimbs,
@@ -3337,6 +3335,85 @@ void LogVole_RingOps_ScaleNttGatherParity(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(stream.sync());
         LOGVOLE_REQUIRE_TRUE(std::equal(expected.begin(), expected.end(), actual.begin()));
         LOGVOLE_REQUIRE_EQ(actual.back(), sentinel.back());
+    }
+    // Standalone scaling keeps real missing-table and geometry fallbacks.
+    for (unsigned degree : {8192u,1024u})
+    {
+        RingParams varied = params;
+        varied.mPolyModulusDegree = degree;
+        ZpCrtContext host;
+        LOGVOLE_REQUIRE_TRUE(makeZpCrtContext(varied,54u,host));
+        const auto hostContext = getRingHostContext(host.mRing);
+        LOGVOLE_REQUIRE_TRUE(hostContext);
+        const auto& base = *hostContext->key_context_data()->rns_tool()->base_q();
+        std::vector<RnsPoly> source(2u);
+        for (unsigned p = 0; p < source.size(); ++p)
+        {
+            source[p] = deriveUniformPolyFromNonce(host.mRing,0x53524e44u,degree,p);
+            for (unsigned j = 0; j < 4u; ++j)
+            {
+                const auto q = ringModulusValue(host.mRing,j);
+                source[p].mCoeffs[j*degree] = 0u;
+                source[p].mCoeffs[j*degree+1u] = q-1u;
+                for (unsigned c = 17u; c < degree; ++c)
+                    source[p].mCoeffs[j*degree+c] = source[p].mCoeffs[j*degree+c%17u];
+            }
+        }
+        auto pool = seal::MemoryPoolHandle::New();
+        std::array<std::array<std::uint64_t,3>,4> reciprocals{};
+        for (unsigned j = 0; j < 4u; ++j)
+        {
+            const std::array<std::uint64_t,3> numerator{0u,0u,1u}, denominator{ringModulusValue(host.mRing,j),0u,0u};
+            std::array<std::uint64_t,3> remainder{};
+            seal::util::divide_uint(numerator.data(),denominator.data(),3u,reciprocals[j].data(),remainder.data(),pool);
+        }
+        std::vector<std::uint64_t> scaled(2u*degree);
+        for (unsigned p = 0; p < source.size(); ++p)
+        {
+            for (unsigned c = 0; c < 17u; ++c)
+            {
+                std::array<std::uint64_t,3> fraction{0u,std::uint64_t{1}<<63u,0u};
+                std::uint64_t result = 0u;
+                for (unsigned j = 0; j < 4u; ++j)
+                {
+                    const auto q = ringModulusValue(host.mRing,j);
+                    const seal::Modulus modulus(q);
+                    const auto x = seal::util::multiply_uint_mod(source[p].mCoeffs[j*degree+c],
+                        base.inv_punctured_prod_mod_base_array()[j].operand,modulus);
+                    std::array<std::uint64_t,3> numerator{},quotient{},remainder{},term{},next{};
+                    seal::util::multiply_uint(&x,1u,host.mPlaintextModulus,3u,numerator.data());
+                    const std::array<std::uint64_t,3> denominator{q,0u,0u};
+                    seal::util::divide_uint(numerator.data(),denominator.data(),3u,quotient.data(),remainder.data(),pool);
+                    seal::util::multiply_uint(reciprocals[j].data(),3u,remainder[0],3u,term.data());
+                    seal::util::add_uint(fraction.data(),term.data(),3u,next.data());
+                    fraction = next;
+                    result = (result+quotient[0])%host.mPlaintextModulus;
+                }
+                scaled[p*degree+c] = (result+fraction[2])%host.mPlaintextModulus;
+            }
+            for (unsigned c = 17u; c < degree; ++c) scaled[p*degree+c] = scaled[p*degree+c%17u];
+        }
+        prepareGpuTableOwners(host.mRing);
+        auto tables = gpu::GpuRing::get(host.mRing);
+        LOGVOLE_REQUIRE_TRUE(tables);
+        gpu::ScaleRoundConstView table;
+        LOGVOLE_REQUIRE_TRUE(tables->scaleRoundConstants(host.mPlaintextModulus,table));
+        LOGVOLE_REQUIRE_TRUE(table.mPShoup && table.mFastLimbs && table.mFracLo && table.mFracHi);
+        gpu::GpuPolyBuffer sourceDevice(*tables,2u,stream), destination;
+        LOGVOLE_REQUIRE_TRUE(sourceDevice.upload(source,stream));
+        LOGVOLE_REQUIRE_TRUE(destination.resizeWords(scaled.size()+1u,1u,stream));
+        std::vector<std::uint64_t> observed(scaled.size()+1u), guard(scaled.size()+1u,host.mPlaintextModulus-1u);
+        for (unsigned route = 0; route < 3u; ++route)
+        {
+            LOGVOLE_REQUIRE_TRUE(gpu::uploadFromHost(destination.data(stream),guard.data(),guard.size()*sizeof(std::uint64_t),stream));
+            LOGVOLE_REQUIRE_TRUE(gpu::launchScaleAndRound(tables->view(stream),sourceDevice.data(stream),2u,
+                host.mPlaintextModulus,table.mCrtInvPunctured,table.mQ,route==2u?nullptr:table.mPShoup,
+                table.mFracLo,table.mFracHi,route==1u?nullptr:table.mFastLimbs,destination.data(stream),stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::downloadToHost(observed.data(),destination.data(stream),observed.size()*sizeof(std::uint64_t),stream));
+            LOGVOLE_REQUIRE_TRUE(stream.sync());
+            LOGVOLE_REQUIRE_TRUE(std::equal(scaled.begin(),scaled.end(),observed.begin()));
+            LOGVOLE_REQUIRE_EQ(observed.back(),guard.back());
+        }
     }
 #else
     (void)cmd;

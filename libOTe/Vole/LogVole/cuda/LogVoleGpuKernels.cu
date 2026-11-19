@@ -9492,7 +9492,7 @@ namespace osuCrypto::LogVole::gpu
         // Mirrors the scaleAndRound branch of unwrapRingLabelsCrt: divide each
         // RNS residue by q_i, scale by the plaintext modulus, and round, giving
         // one plaintext coefficient per ring coefficient.
-        template<bool UseShoupQuotient, bool UseFastArithmetic>
+        template<bool UseShoupQuotient>
         __global__ void scaleAndRoundKernel(
             DeviceRing rg,
             const u64* in,
@@ -9541,7 +9541,7 @@ namespace osuCrypto::LogVole::gpu
                     u64 rem = 0;
                     if constexpr (UseShoupQuotient)
                     {
-                        const u64 q = UseFastArithmetic ? mod.mValue : qValues[j];
+                        const u64 q = mod.mValue;
                         quotientLo = mulHi64(x, pShoup[j]);
 
                         // With R=2^64 and s=floor(pR/q), floor(xs/R) is
@@ -9563,7 +9563,7 @@ namespace osuCrypto::LogVole::gpu
                         quotientLo = quotient.mLo;
                     }
 
-                    if constexpr (!UseFastArithmetic)
+                    if constexpr (!UseShoupQuotient)
                     {
                         scaled += quotientLo;
                         if (scaled >= plainModulus) scaled -= plainModulus;
@@ -9571,7 +9571,7 @@ namespace osuCrypto::LogVole::gpu
 
                     unsigned char carry = 0;
                     fracSum = wideAdd(fracSum, wideMulLow(rem, Wide{ fracInvLo[j], fracInvHi[j] }), &carry);
-                    if constexpr (UseFastArithmetic)
+                    if constexpr (UseShoupQuotient)
                     {
                         // scaled and quotientLo are each below p and carry is a
                         // bit, so their sum is below 2p <= 2^64. Defer the only
@@ -9595,7 +9595,6 @@ namespace osuCrypto::LogVole::gpu
         // compact persistent table contains only the seven words consumed per
         // limb. Keeping the rho=4 loop rolled limits live constants and allows
         // eight resident 256-thread CTAs without spills.
-        template<bool UseFastArithmetic>
         __global__ __launch_bounds__(256, 8)
         void scaleAndRoundHotRho4Kernel(
             const u64* __restrict__ in,
@@ -9639,27 +9638,14 @@ namespace osuCrypto::LogVole::gpu
                     ++quotientLo;
                 }
 
-                if constexpr (!UseFastArithmetic)
-                {
-                    scaled += quotientLo;
-                    if (scaled >= plainModulus) scaled -= plainModulus;
-                }
-
                 unsigned char carry = 0;
                 fracSum = wideAdd(
                     fracSum,
                     wideMulLow(rem, Wide{ limb.mFracLo, limb.mFracHi }),
                     &carry);
-                if constexpr (UseFastArithmetic)
-                {
-                    scaled += quotientLo + static_cast<u64>(carry);
-                    if (scaled >= plainModulus) scaled -= plainModulus;
-                }
-                else if (carry)
-                {
-                    ++scaled;
-                    if (scaled == plainModulus) scaled = 0;
-                }
+                scaled += quotientLo + static_cast<u64>(carry);
+                if (scaled >= plainModulus) scaled -= plainModulus;
+
             }
 
             out[static_cast<size_t>(o) * kN + coeff] = scaled;
@@ -9794,7 +9780,6 @@ namespace osuCrypto::LogVole::gpu
             u64 mPlainModulus;
         };
 
-        template<bool UseFastArithmetic>
         __global__ void scaleNttForwardGather8192Rho4Kernel(
             ScaleNttForwardGather8192Args args)
         {
@@ -9839,29 +9824,15 @@ namespace osuCrypto::LogVole::gpu
                             ++quotientLo;
                         }
 
-                        if constexpr (!UseFastArithmetic)
-                        {
-                            scaled += quotientLo;
-                            if (scaled >= args.mPlainModulus)
-                                scaled -= args.mPlainModulus;
-                        }
-
                         unsigned char carry = 0;
                         fracSum = wideAdd(
                             fracSum,
                             wideMulLow(rem, Wide{ limb.mFracLo, limb.mFracHi }),
                             &carry);
-                        if constexpr (UseFastArithmetic)
-                        {
-                            scaled += quotientLo + static_cast<u64>(carry);
-                            if (scaled >= args.mPlainModulus)
-                                scaled -= args.mPlainModulus;
-                        }
-                        else if (carry)
-                        {
-                            ++scaled;
-                            if (scaled == args.mPlainModulus) scaled = 0;
-                        }
+                        scaled += quotientLo + static_cast<u64>(carry);
+                        if (scaled >= args.mPlainModulus)
+                            scaled -= args.mPlainModulus;
+
                     }
                     sh[coeff] = scaled;
                 }
@@ -14380,58 +14351,39 @@ namespace osuCrypto::LogVole::gpu
         if (inCount == 0) return true;
         const DeviceRing rg = toDevice(rc);
         const u32 threads = 256;
-        if (pShoup && rc.mKernelOptions.mScaleAndRoundShoup)
+        if (pShoup)
         {
-            const bool fastArithmetic = rc.mKernelOptions.mScaleAndRoundFastArithmetic;
-            if (fastLimbs && rc.mKernelOptions.mScaleAndRoundHotRho4 && rc.mN == 8192u &&
+            if (fastLimbs && rc.mN == 8192u &&
                 rc.mRho == 4u && inCount <= 65535u)
             {
                 const dim3 grid(8192u / threads, inCount);
-                if (fastArithmetic)
+                // The high-word-first path relies on the production RNS
+                // bound as well as the fixed rho/N geometry above.
+                if (rc.mMaxModulus < (u64(1) << 60))
                 {
-                    // The high-word-first path relies on the production RNS
-                    // bound as well as the fixed rho/N geometry above.
-                    if (rc.mKernelOptions.mScaleAndRoundHotHiCarry &&
-                        rc.mMaxModulus < (u64(1) << 60))
-                    {
-                        scaleAndRoundHotRho4HiCarryKernel<<<
-                            grid, threads, 0, asStream(stream)>>>(
-                            in, plainModulus, fastLimbs, out);
-                    }
-                    else
-                    {
-                        scaleAndRoundHotRho4Kernel<true><<<
-                            grid, threads, 0, asStream(stream)>>>(
-                            in, plainModulus, fastLimbs, out);
-                    }
-                }
-                else
-                {
-                    scaleAndRoundHotRho4Kernel<false><<<
+                    scaleAndRoundHotRho4HiCarryKernel<<<
                         grid, threads, 0, asStream(stream)>>>(
                         in, plainModulus, fastLimbs, out);
                 }
+                else
+                {
+                    scaleAndRoundHotRho4Kernel<<<
+                        grid, threads, 0, asStream(stream)>>>(
+                        in, plainModulus, fastLimbs, out);
+                }
+
                 return check(cudaGetLastError(), "scaleAndRoundHotRho4");
             }
 
-            if (fastArithmetic)
-            {
-                scaleAndRoundKernel<true, true><<<
-                    grid2D(rc.mN, inCount, threads), threads, 0, asStream(stream)>>>(
-                    rg, in, inCount, plainModulus, crtInvPunctured, qValues, pShoup,
-                    fracInvLo, fracInvHi, out);
-            }
-            else
-            {
-                scaleAndRoundKernel<true, false><<<
-                    grid2D(rc.mN, inCount, threads), threads, 0, asStream(stream)>>>(
-                    rg, in, inCount, plainModulus, crtInvPunctured, qValues, pShoup,
-                    fracInvLo, fracInvHi, out);
-            }
+            scaleAndRoundKernel<true><<<
+                grid2D(rc.mN, inCount, threads), threads, 0, asStream(stream)>>>(
+                rg, in, inCount, plainModulus, crtInvPunctured, qValues, pShoup,
+                fracInvLo, fracInvHi, out);
+
         }
         else
         {
-            scaleAndRoundKernel<false, false><<<
+            scaleAndRoundKernel<false><<<
                 grid2D(rc.mN, inCount, threads), threads, 0, asStream(stream)>>>(
                 rg, in, inCount, plainModulus, crtInvPunctured, qValues, pShoup,
                 fracInvLo, fracInvHi, out);
@@ -14462,8 +14414,7 @@ namespace osuCrypto::LogVole::gpu
             plainRc.mMinModulus == plainModulus &&
             plainRc.mMaxModulus == plainModulus &&
             plainModulus < ringRc.mMinModulus &&
-            ringRc.mMaxModulus < (u64(1) << 63u) &&
-            ringRc.mKernelOptions.mScaleAndRoundShoup && ringRc.mKernelOptions.mScaleAndRoundHotRho4;
+            ringRc.mMaxModulus < (u64(1) << 63u);
     }
 
     bool launchScaleNttForwardGather(
@@ -14519,11 +14470,9 @@ namespace osuCrypto::LogVole::gpu
 
         constexpr size_t shBytes = 8192u * sizeof(u64);
         const u32 threads = 1024u;
-        const bool fastArithmetic = ringRc.mKernelOptions.mScaleAndRoundFastArithmetic;
         const bool hiCarry =
-            ringRc.mKernelOptions.mScaleNttForwardGatherHiCarry && fastArithmetic &&
             ringRc.mMaxModulus < (u64(1) << 60u);
-        if (hiCarry && ringRc.mKernelOptions.mScaleNttForwardGatherSlotOwned && slotMap)
+        if (hiCarry && slotMap)
         {
             if (!check(
                     cudaFuncSetAttribute(
@@ -14548,28 +14497,16 @@ namespace osuCrypto::LogVole::gpu
             scaleNttForwardGather8192Rho4HiCarryKernel<<<
                 inCount, threads, shBytes, asStream(stream)>>>(args);
         }
-        else if (fastArithmetic)
-        {
-            if (!check(
-                    cudaFuncSetAttribute(
-                        scaleNttForwardGather8192Rho4Kernel<true>,
-                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                        static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(scaleNttGather8192FastSimpleIndex)"))
-                return false;
-            scaleNttForwardGather8192Rho4Kernel<true><<<
-                inCount, threads, shBytes, asStream(stream)>>>(args);
-        }
         else
         {
             if (!check(
                     cudaFuncSetAttribute(
-                        scaleNttForwardGather8192Rho4Kernel<false>,
+                        scaleNttForwardGather8192Rho4Kernel,
                         cudaFuncAttributeMaxDynamicSharedMemorySize,
                         static_cast<int>(shBytes)),
-                    "cudaFuncSetAttribute(scaleNttGather8192SimpleIndex)"))
+                    "cudaFuncSetAttribute(scaleNttGather8192FastSimpleIndex)"))
                 return false;
-            scaleNttForwardGather8192Rho4Kernel<false><<<
+            scaleNttForwardGather8192Rho4Kernel<<<
                 inCount, threads, shBytes, asStream(stream)>>>(args);
         }
         return check(cudaGetLastError(), "scaleNttForwardGather8192Rho4");

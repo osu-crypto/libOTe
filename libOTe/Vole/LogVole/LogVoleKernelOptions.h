@@ -17,12 +17,6 @@ namespace osuCrypto
         std::uint32_t mCt2PolySeedThreads = 32u;
         bool mCt2SplitAes = true;
         bool mCt2AesSharedSbox = true;
-        bool mScaleAndRoundShoup = true;
-        bool mScaleAndRoundFastArithmetic = true;
-        bool mScaleAndRoundHotRho4 = true;
-        bool mScaleAndRoundHotHiCarry = true;
-        bool mScaleNttForwardGatherHiCarry = true;
-        bool mScaleNttForwardGatherSlotOwned = true;
         bool mFixedIpMuRowReuse = true;
         bool mFixedIpWideMuRowReuse = true;
         bool mPointwisePseudo55Reduce = true;
@@ -65,12 +59,6 @@ namespace osuCrypto
                 mCt2PolySeedThreads == other.mCt2PolySeedThreads &&
                 mCt2SplitAes == other.mCt2SplitAes &&
                 mCt2AesSharedSbox == other.mCt2AesSharedSbox &&
-                mScaleAndRoundShoup == other.mScaleAndRoundShoup &&
-                mScaleAndRoundFastArithmetic == other.mScaleAndRoundFastArithmetic &&
-                mScaleAndRoundHotRho4 == other.mScaleAndRoundHotRho4 &&
-                mScaleAndRoundHotHiCarry == other.mScaleAndRoundHotHiCarry &&
-                mScaleNttForwardGatherHiCarry == other.mScaleNttForwardGatherHiCarry &&
-                mScaleNttForwardGatherSlotOwned == other.mScaleNttForwardGatherSlotOwned &&
                 mFixedIpMuRowReuse == other.mFixedIpMuRowReuse &&
                 mFixedIpWideMuRowReuse == other.mFixedIpWideMuRowReuse &&
                 mPointwisePseudo55Reduce == other.mPointwisePseudo55Reduce &&

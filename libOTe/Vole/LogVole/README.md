@@ -1451,3 +1451,19 @@ failure. The Windows VS 14.50 CUDA test target and frontend object build and
 isolated SM90 compile passed, with live kernel families verified. Three focused
 checks passed with zero skips in 18.86 seconds using `-gpu 1 -lvFactoryFast 1`.
 H200 runtime remains untested locally. No benchmarks were run.
+
+Scale-and-round and fused scale/NTT/gather now use their established defaults
+without six tuning controls. Unreachable slow-arithmetic alternatives are
+removed; actual missing-table, slot-map, modulus, and geometry fallbacks remain.
+Direct coverage checks standalone scaling with an independent SEAL integer
+fraction oracle, alongside the public CPU unwrap oracle for fused gather.
+
+Validation: the RTX 4060 passed the direct tests before and after pruning,
+including missing fast/Shoup tables, N1024/N8192 geometry, partial output, and
+slot-map availability. The Windows VS 14.50 CUDA test target and frontend object
+build and isolated SM90 compile passed; all seven retained scale families were
+verified in the SM90 object. Three focused checks passed with zero skips in
+41.61 seconds using `-gpu 1 -lvFactoryFast 1`. High-modulus fallbacks remain
+compiled but were not runtime-tested: supported factory contexts did not provide
+that modulus domain, and no metadata was fabricated. H200 runtime remains
+untested locally. No benchmarks were run.
