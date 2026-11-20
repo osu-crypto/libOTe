@@ -9,6 +9,7 @@
 #include "coproto/Socket/BufferingSocket.h"
 #include "macoro/when_all.h"
 #include "macoro/sync_wait.h"
+#include "cryptoTools/Crypto/RandomOracle.h"
 #include <algorithm>
 #include <chrono>
 #include <iomanip>
@@ -94,7 +95,13 @@ int spinOtBenchmark(CLP& cmd) {try {
         (regular?spin::SetupMode::Full:spin::SetupMode::BankedHeuristic));
     s.hash(sent,ChoiceBitPacking::True,streaming);r.hash(choices,received,ChoiceBitPacking::True);
     for(u64 i=0;i<k;++i) require(received[i]==sent[i][choices[i]]);
-    if(cmd.isSet("check")) {std::cout<<"SPIN hashed OT correctness: passed\n";return 0;}
+    if(cmd.isSet("check")) {
+        // Fixed seeds: the digest identifies the exact sender and receiver outputs,
+        // so two builds can be compared bit for bit.
+        RandomOracle ro(sizeof(block));
+        ro.Update(sent.data(),sent.size());ro.Update(received.data(),received.size());
+        block digest;ro.Final(digest);
+        std::cout<<"SPIN hashed OT correctness: passed, output digest "<<digest<<"\n";return 0;}
     const auto* ss=sg?sg->mShare.data():nullptr;const auto* rs=rg?rg->mShare.data():nullptr;
     const auto* sw=s.mSpin.get();const auto* rw=r.mSpin.get();
     const auto fixedDescriptor=s.mSpin->code.descriptor();
