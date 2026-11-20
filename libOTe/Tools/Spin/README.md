@@ -15,7 +15,7 @@ Enabling the SPIN dependency does not add a Silent VOLE profile.
 
 ## Dependency
 
-SPIN 0.3 requires CMake 3.20+ and x86-64 with AVX2. `ENABLE_SPIN` defaults on
+SPIN 0.4 (Turbo only) requires CMake 3.20+ and a 64-bit CPU; libOTe uses it on x86-64 with AVX2. `ENABLE_SPIN` defaults on
 with Silent OT or Silent VOLE; explicit `ENABLE_SPIN=OFF` is respected.
 Use an installed package through `CMAKE_PREFIX_PATH`, or let `FETCH_SPIN=ON`
 or `FETCH_AUTO=ON` fetch it. For development, `LIBOTE_SPIN_SOURCE=/path/to/spin`

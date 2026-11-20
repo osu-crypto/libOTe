@@ -3,7 +3,6 @@
 #ifdef ENABLE_SPIN
 #include "libOTe/Tools/CoeffCtx.h"
 #include <spin/Code.h>
-#include <spin/Generic.h>
 #include <spin/PreparedEncoder.h>
 #include <type_traits>
 
@@ -23,47 +22,22 @@ public:
     auto descriptor() const {return mCode.descriptor();}
     const spin::PreparedEncoder& code() const {return mCode;}
 
-    template<class F,class Ctx> class GenericWorkspace {
-        friend class SpinCode;
-        Ctx ctx;
-        spin::GenericTranspose plan;
-        spin::GenericTranspose::Workspace<F> scratch;
-        GenericWorkspace(const spin::PreparedEncoder& code,Ctx c)
-            :ctx(std::move(c)),plan(code.generic_transpose()),scratch(plan.template make_workspace<F>()) {}
-    public:
-        GenericWorkspace(GenericWorkspace&& other)
-            :ctx(std::move(other.ctx)),
-             plan(other.plan),scratch(std::move(other.scratch)) {}
-        GenericWorkspace& operator=(GenericWorkspace&& other) {
-            if(this!=&other) {
-                ctx=std::move(other.ctx);
-                plan=other.plan;scratch=std::move(other.scratch);
-            }
-            return *this;
-        }
-        GenericWorkspace(const GenericWorkspace&)=delete;
-    };
+    // Turbo SPIN transposes 128-bit records only. Other element types and
+    // coefficient contexts are rejected at runtime (std::invalid_argument);
+    // narrower binary values can travel in the low bits of a block.
     template<class F,class Ctx=CoeffCtxGF2>
-    using Workspace = std::conditional_t<native<F,Ctx>,spin::PreparedEncoder::Workspace,GenericWorkspace<F,Ctx>>;
+    using Workspace = spin::PreparedEncoder::Workspace;
 
     template<class F,class Ctx=CoeffCtxGF2> Workspace<F,Ctx> make_workspace(Ctx ctx={}) const {
         if(!ctx.template characteristicTwo<F>())
             throw std::invalid_argument("SPIN requires characteristic-two addition");
         if constexpr(native<F,Ctx>) return mCode.make_workspace();
-        else return GenericWorkspace<F,Ctx>(mCode,std::move(ctx));
+        else throw std::invalid_argument("SPIN transposes 128-bit block records only");
     }
     template<class F,class Ctx=CoeffCtxGF2>
     void transpose_inplace(span<F> buffer,Workspace<F,Ctx>& w) const {
-        if constexpr(native<F,Ctx>)
-            mCode.transpose_inplace<F>(std::span<F>(buffer.data(),buffer.size()),w);
-        else {
-            if(!mCode.owns(w.plan))
-                throw std::invalid_argument("SPIN coefficient workspace belongs to another map");
-            auto plus=[&](const F& a,const F& b) {
-                auto r=w.ctx.template make<F>(); w.ctx.plus(r,a,b); return r;
-            };
-            w.plan.template transpose_inplace<F>(std::span<F>(buffer.data(),buffer.size()),w.scratch,plus);
-        }
+        static_assert(native<F,Ctx>,"SPIN transposes 128-bit block records only");
+        mCode.transpose_inplace<F>(std::span<F>(buffer.data(),buffer.size()),w);
     }
 };
 }
