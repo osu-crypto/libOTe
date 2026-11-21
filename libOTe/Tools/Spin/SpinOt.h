@@ -19,11 +19,11 @@ struct SpinOtState {
     block seed;
     SpinCode code;
     SpinCode::Workspace<block> blocks;
-    // Separate choice bytes use the native 128-bit transpose: the binary map acts
-    // on each bit lane independently, so each byte travels in the low byte of a
-    // block. Turbo SPIN has no generic-element transpose.
-    std::optional<SpinCode::Workspace<block>> choices;
-    AlignedUnVector<block> choiceLift;
+    // Separate choice bytes use SPIN's bit-vector transpose: each byte is eight
+    // bit lanes of the binary map, and only the bit planes present are
+    // transposed (one for 0/1 choices). Packed words are reused across batches.
+    std::optional<spin::PreparedEncoder::BitWorkspace> choices;
+    AlignedUnVector<u64> choiceIn, choiceOut;
     SpinOtState(u64 requested,block codeSeed,bool receiver,
         SdNoiseDistribution noise=SdNoiseDistribution::Regular);
     void transpose(span<block> x);

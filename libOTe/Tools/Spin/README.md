@@ -15,7 +15,7 @@ Enabling the SPIN dependency does not add a Silent VOLE profile.
 
 ## Dependency
 
-SPIN 0.4 (Turbo only) requires CMake 3.20+ and a 64-bit CPU; libOTe uses it on x86-64 with AVX2. `ENABLE_SPIN` defaults on
+SPIN 0.4.1 (Turbo only) requires CMake 3.20+ and a 64-bit CPU; libOTe uses it on x86-64 with AVX2. `ENABLE_SPIN` defaults on
 with Silent OT or Silent VOLE; explicit `ENABLE_SPIN=OFF` is respected.
 Use an installed package through `CMAKE_PREFIX_PATH`, or let `FETCH_SPIN=ON`
 or `FETCH_AUTO=ON` fetch it. For development, `LIBOTE_SPIN_SOURCE=/path/to/spin`
@@ -80,8 +80,11 @@ result and its suffix remains unchanged. Use one workspace per simultaneous call
 `block` with `CoeffCtxGF2` or `CoeffCtxGF128` uses the optimized kernel.
 Turbo SPIN transposes only these 128-bit elements: `make_workspace` rejects other
 types and contexts with `std::invalid_argument`. The map acts on each bit lane
-independently, so narrower values can travel in the low bits of a `block`;
-Silent OT's separate choice bytes use this path. Prime fields are unsupported.
+independently, so narrower values can travel in the low bits of a `block`.
+Prime fields are unsupported. Silent OT's separate choice bits (correlated OT)
+instead use SPIN's bit-vector transpose (`transpose_bits`, SPIN 0.4.1), which
+applies the same map to one bit per position at about a third of the record
+cost at K = 2^18.
 
 ## Profiling
 

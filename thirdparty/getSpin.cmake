@@ -1,5 +1,5 @@
 set(GIT_REPOSITORY https://github.com/ladnir/spin_codes.git)
-set(GIT_TAG "0f0abd80ca239f377c22a53a95930f534e55aa86")
+set(GIT_TAG "cf75e9ec293ba0438402d85f489cc39730210d91")
 set(CLONE_DIR "${OC_THIRDPARTY_CLONE_DIR}/spin")
 set(BUILD_DIR "${CLONE_DIR}/out/build/${OC_CONFIG}")
 set(LOG_FILE "${CMAKE_CURRENT_LIST_DIR}/log-spin.txt")

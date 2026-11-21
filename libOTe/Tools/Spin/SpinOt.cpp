@@ -2,6 +2,10 @@
 #ifdef ENABLE_SPIN
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#if defined(__BMI2__)
+#include <immintrin.h>
+#endif
 namespace osuCrypto {
 namespace detail {
 spin::CodeSpec spinProfile(u64 requested,block seed) {
@@ -53,7 +57,7 @@ static spin::SetupOptions spinSetup(SdNoiseDistribution noise) {
 }
 SpinOtState::SpinOtState(u64 requested,block codeSeed,bool receiver,SdNoiseDistribution noise)
     :seed(codeSeed),code(detail::spinProfile(requested,codeSeed),{},spinSetup(noise)),blocks(code.make_workspace<block>()) {
-    if(receiver) choices.emplace(code.make_workspace<block>());
+    if(receiver) choices.emplace(code.code().make_bit_workspace());
 }
 void prepareSpin(std::unique_ptr<SpinOtState>& state,u64 requested,block seed,bool receiver,SdNoiseDistribution noise) {
     const auto spec=detail::spinProfile(requested,seed);
@@ -65,14 +69,55 @@ void prepareSpin(std::unique_ptr<SpinOtState>& state,u64 requested,block seed,bo
     else {state->code.setCodeSeed(seed);state->seed=seed;}
 }
 void SpinOtState::transpose(span<block> x) {code.transpose_inplace<block>(x,blocks);}
+namespace {
+// Gather bit p of eight bytes into one byte, and spread it back.
+inline u64 gather8(u64 v,unsigned p) {
+#if defined(__BMI2__)
+    return _pext_u64(v,0x0101010101010101ull<<p);
+#else
+    u64 r=0;for(unsigned j=0;j<8;++j) r|=((v>>(8*j+p))&1)<<j;return r;
+#endif
+}
+inline u64 spread8(u64 bits,unsigned p) {
+#if defined(__BMI2__)
+    return _pdep_u64(bits,0x0101010101010101ull)<<p;
+#else
+    u64 r=0;for(unsigned j=0;j<8;++j) r|=((bits>>j)&1)<<(8*j+p);return r;
+#endif
+}
+}
 void SpinOtState::transpose(span<u8> x) {
     if(!choices) throw std::logic_error("SPIN choice workspace was not prepared");
+    const auto& enc=code.code();
+    const u64 n=enc.code_size(),k=enc.message_size(),inWords=n/64,outWords=k/64;
+    if(x.size()!=n) throw std::invalid_argument("SPIN choice transpose needs 2K bytes");
+    // Each byte is eight independent bit lanes of the binary map. Only the bit
+    // planes present are transposed; 0/1 choice bytes need one bit transpose.
+    u8 any=0;
+    for(u64 i=0;i<n;++i) any|=x[i];
+    unsigned planes[8],count=0;
+    for(unsigned p=0;p<8;++p) if((any>>p)&1U) planes[count++]=p;
     // Reuses its capacity across batches; allocates only on first use or growth.
-    choiceLift.resize(x.size());
-    for(u64 i=0;i<x.size();++i) choiceLift[i]=block(0,x[i]);
-    code.transpose_inplace<block>(choiceLift,*choices);
+    choiceIn.resize(count*inWords);choiceOut.resize(count*outWords);
+    for(u64 w=0;w<inWords;++w)
+        for(unsigned c=0;c<8;++c) {
+            u64 v;std::memcpy(&v,x.data()+64*w+8*c,8);
+            for(unsigned q=0;q<count;++q) {
+                auto& word=choiceIn[q*inWords+w];
+                if(!c) word=0;
+                word|=gather8(v,planes[q])<<(8*c);
+            }
+        }
+    for(unsigned q=0;q<count;++q)
+        enc.transpose_bits(span<const u64>(choiceIn.data()+q*inWords,inWords),
+                           span<u64>(choiceOut.data()+q*outWords,outWords),*choices);
     // In-place contract: the first K entries receive the result, the rest are unchanged.
-    for(u64 i=0,k=code.messageSize();i<k;++i) x[i]=choiceLift[i].get<u8>(0);
+    for(u64 i=0;i<k;i+=8) {
+        u64 v=0;
+        for(unsigned q=0;q<count;++q)
+            v|=spread8((choiceOut[q*outWords+i/64]>>(i%64))&255U,planes[q]);
+        std::memcpy(x.data()+i,&v,8);
+    }
 }
 }
 #endif
