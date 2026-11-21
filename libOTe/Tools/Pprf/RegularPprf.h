@@ -143,6 +143,110 @@ namespace osuCrypto
 #undef OC_PPRF_LD
 #undef OC_PPRF_LANES
 
+#ifdef ENABLE_AVX512
+		// 512-bit versions: same values and layout, half the instructions.
+		// A parent (8 lanes) is 2 ZMM; two parents per step keep 4 (internal)
+		// or 8 (leaf) AES chains in flight, enough to fill both AES units.
+		struct alignas(64) ZmmKey
+		{
+			__m512i k[11];
+			explicit ZmmKey(const AES& aes)
+			{
+				for (u64 r = 0; r < 11; ++r)
+					k[r] = _mm512_broadcast_i32x4(aes.mRoundKey[r].mData);
+			}
+		};
+
+		template<u64 NP>
+		OC_FORCEINLINE void internalStep(const ZmmKey& key, const block* in, block* ch,
+			__m512i (&s0)[2], __m512i (&s1)[2])
+		{
+			constexpr u64 C = 2 * NP;
+			__m512i x[C], a[C];
+			for (u64 c = 0; c < C; ++c)
+			{
+				x[c] = _mm512_loadu_si512(in + 4 * c);
+				a[c] = _mm512_xor_si512(x[c], key.k[0]);
+			}
+			for (u64 r = 1; r < 10; ++r)
+				for (u64 c = 0; c < C; ++c)
+					a[c] = _mm512_aesenc_epi128(a[c], key.k[r]);
+			for (u64 c = 0; c < C; ++c)
+			{
+				a[c] = _mm512_aesenclast_epi128(a[c], key.k[10]);
+				const __m512i c0 = _mm512_aesenc_epi128(a[c], x[c]);
+				const __m512i c1 = _mm512_add_epi64(a[c], x[c]);
+				const u64 q = c / 2, v = c % 2; // parent q, lanes 4v..4v+3
+				_mm512_storeu_si512(ch + 16 * q + 4 * v, c0);
+				_mm512_storeu_si512(ch + 16 * q + 8 + 4 * v, c1);
+				s0[v] = _mm512_xor_si512(s0[v], c0);
+				s1[v] = _mm512_xor_si512(s1[v], c1);
+			}
+		}
+
+		OC_FORCEINLINE void internalLevel(const ZmmKey& key,
+			const block* parents, block* children, u64 width, block* sum0, block* sum1)
+		{
+			__m512i s0[2] = { _mm512_loadu_si512(sum0), _mm512_loadu_si512(sum0 + 4) };
+			__m512i s1[2] = { _mm512_loadu_si512(sum1), _mm512_loadu_si512(sum1 + 4) };
+			u64 p = 0;
+			for (; p + 2 <= width; p += 2)
+				internalStep<2>(key, parents + 8 * p, children + 16 * p, s0, s1);
+			if (p < width)
+				internalStep<1>(key, parents + 8 * p, children + 16 * p, s0, s1);
+			_mm512_storeu_si512(sum0, s0[0]); _mm512_storeu_si512(sum0 + 4, s0[1]);
+			_mm512_storeu_si512(sum1, s1[0]); _mm512_storeu_si512(sum1 + 4, s1[1]);
+		}
+
+		template<u64 NP>
+		OC_FORCEINLINE void leafStep(const ZmmKey& k0, const ZmmKey& k1, const block* in, block* o,
+			__m512i (&s0)[2], __m512i (&s1)[2])
+		{
+			constexpr u64 C = 2 * NP;
+			__m512i x[C], a[C], b[C];
+			for (u64 c = 0; c < C; ++c)
+			{
+				x[c] = _mm512_loadu_si512(in + 4 * c);
+				a[c] = _mm512_xor_si512(x[c], k0.k[0]);
+				b[c] = _mm512_xor_si512(x[c], k1.k[0]);
+			}
+			for (u64 r = 1; r < 10; ++r)
+				for (u64 c = 0; c < C; ++c)
+				{
+					a[c] = _mm512_aesenc_epi128(a[c], k0.k[r]);
+					b[c] = _mm512_aesenc_epi128(b[c], k1.k[r]);
+				}
+			for (u64 c = 0; c < C; ++c)
+			{
+				a[c] = _mm512_xor_si512(_mm512_aesenclast_epi128(a[c], k0.k[10]), x[c]);
+				b[c] = _mm512_xor_si512(_mm512_aesenclast_epi128(b[c], k1.k[10]), x[c]);
+				const u64 q = c / 2, v = c % 2;
+				_mm512_storeu_si512(o + 16 * q + 4 * v, a[c]);
+				_mm512_storeu_si512(o + 16 * q + 8 + 4 * v, b[c]);
+				s0[v] = _mm512_xor_si512(s0[v], a[c]);
+				s1[v] = _mm512_xor_si512(s1[v], b[c]);
+			}
+		}
+
+		OC_FORCEINLINE void leafLevel(const ZmmKey& k0, const ZmmKey& k1,
+			const block* parents, block* out, u64 width, block* sum0, block* sum1)
+		{
+			__m512i s0[2] = { _mm512_loadu_si512(sum0), _mm512_loadu_si512(sum0 + 4) };
+			__m512i s1[2] = { _mm512_loadu_si512(sum1), _mm512_loadu_si512(sum1 + 4) };
+			u64 p = 0;
+			for (; p + 2 <= width; p += 2)
+				leafStep<2>(k0, k1, parents + 8 * p, out + 16 * p, s0, s1);
+			if (p < width)
+				leafStep<1>(k0, k1, parents + 8 * p, out + 16 * p, s0, s1);
+			_mm512_storeu_si512(sum0, s0[0]); _mm512_storeu_si512(sum0 + 4, s0[1]);
+			_mm512_storeu_si512(sum1, s1[0]); _mm512_storeu_si512(sum1 + 4, s1[1]);
+		}
+
+		using Key = ZmmKey;
+#else
+		using Key = YmmKey;
+#endif
+
 		// The kernels keep one sum per lane (the 8 subtrees of one tree); the
 		// tree's level sum is their XOR.
 		OC_FORCEINLINE block fold8(const block* s)
@@ -558,7 +662,7 @@ namespace osuCrypto
 					levels[0][0][lane] = current[lane];
 				});
 #ifdef OC_ENABLE_VAES
-				const pprfVaes::YmmKey internalKey(mAesFixedKey);
+				const pprfVaes::Key internalKey(mAesFixedKey);
 #endif
 
 				for (u64 localDepth = 0; localDepth + 1 < levels.size(); ++localDepth)
@@ -570,7 +674,7 @@ namespace osuCrypto
 					const auto width = u64{ 1 } << localDepth;
 #ifdef OC_ENABLE_VAES
 					{
-						alignas(32) std::array<block, 8> laneSums0{}, laneSums1{};
+						alignas(64) std::array<block, 8> laneSums0{}, laneSums1{};
 						pprfVaes::internalLevel(internalKey, parents.data()->data(),
 							children.data()->data(), width, laneSums0.data(), laneSums1.data());
 						leftAccumulator = leftAccumulator ^ pprfVaes::fold8(laneSums0.data());
@@ -675,8 +779,8 @@ namespace osuCrypto
 						block rightAccumulator = ZeroBlock;
 #ifdef OC_ENABLE_VAES
 						{
-							alignas(32) std::array<block, 8> laneSums0{}, laneSums1{};
-							pprfVaes::leafLevel(pprfVaes::YmmKey(gGgmAes[0]), pprfVaes::YmmKey(gGgmAes[1]),
+							alignas(64) std::array<block, 8> laneSums0{}, laneSums1{};
+							pprfVaes::leafLevel(pprfVaes::Key(gGgmAes[0]), pprfVaes::Key(gGgmAes[1]),
 								parents.data()->data(), dest, parents.size(),
 								laneSums0.data(), laneSums1.data());
 							nativeLeaf += 16 * parents.size();
@@ -1114,7 +1218,7 @@ namespace osuCrypto
 					levels[0][0][lane] = current[lane];
 				});
 #ifdef OC_ENABLE_VAES
-				const pprfVaes::YmmKey internalKey(mAesFixedKey);
+				const pprfVaes::Key internalKey(mAesFixedKey);
 #endif
 
 				for (u64 localDepth = 0; localDepth + 1 < levels.size(); ++localDepth)
@@ -1126,7 +1230,7 @@ namespace osuCrypto
 					const auto width = u64{ 1 } << localDepth;
 #ifdef OC_ENABLE_VAES
 					{
-						alignas(32) std::array<block, 8> laneSums0{}, laneSums1{};
+						alignas(64) std::array<block, 8> laneSums0{}, laneSums1{};
 						pprfVaes::internalLevel(internalKey, parents.data()->data(),
 							children.data()->data(), width, laneSums0.data(), laneSums1.data());
 						leftAccumulator = leftAccumulator ^ pprfVaes::fold8(laneSums0.data());
@@ -1252,8 +1356,8 @@ namespace osuCrypto
 						block rightAccumulator = gGgmAes[1].hashBlock(ZeroBlock);
 #ifdef OC_ENABLE_VAES
 						{
-							alignas(32) std::array<block, 8> laneSums0{}, laneSums1{};
-							pprfVaes::leafLevel(pprfVaes::YmmKey(gGgmAes[0]), pprfVaes::YmmKey(gGgmAes[1]),
+							alignas(64) std::array<block, 8> laneSums0{}, laneSums1{};
+							pprfVaes::leafLevel(pprfVaes::Key(gGgmAes[0]), pprfVaes::Key(gGgmAes[1]),
 								parents.data()->data(), dest, parents.size(),
 								laneSums0.data(), laneSums1.data());
 							nativeLeaf += 16 * parents.size();
