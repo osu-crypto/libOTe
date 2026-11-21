@@ -396,6 +396,58 @@ namespace osuCrypto
 		}
 	}
 
+	namespace
+	{
+#ifdef OC_ENABLE_VAES
+		// Hashes OTs [0, n8), n8 a multiple of 8: m[i] = (H(r_i & mask), H((r_i ^ d) & mask))
+		// with H(x) = AES(x) ^ x. Each (x0, x1) pair is built in one YMM register
+		// (broadcast r, xor (0 || delta), and the mask) and the hashed pair is
+		// stored straight to the output, so no stack batch or copy is needed.
+		// Not a coroutine: the aligned key array stays in an ordinary frame.
+		template<bool streaming, bool aligned32>
+		OC_FORCEINLINE void hashSenderVaes(const AES& aes, const block* r,
+			std::array<block, 2>* m, u64 n8, block delta)
+		{
+			alignas(32) __m256i key[11];
+			for (u64 k = 0; k < 11; ++k)
+				key[k] = _mm256_broadcastsi128_si256(aes.mRoundKey[k].mData);
+			const __m256i mask = _mm256_set_epi64x(-1, -2, -1, -2);
+			const __m256i dpair = _mm256_set_m128i(delta.mData, _mm_setzero_si128());
+
+			for (u64 i = 0; i < n8; i += 8)
+			{
+				__m256i x0, x1, x2, x3, x4, x5, x6, x7;
+				__m256i a0, a1, a2, a3, a4, a5, a6, a7;
+#define OC_HASH_LANES(OP) OP(0); OP(1); OP(2); OP(3); OP(4); OP(5); OP(6); OP(7)
+#define OC_HASH_LOAD(j) \
+				x##j = _mm256_and_si256(_mm256_xor_si256( \
+					_mm256_broadcastsi128_si256(_mm_loadu_si128(&r[i + j].mData)), dpair), mask); \
+				a##j = _mm256_xor_si256(x##j, key[0])
+#define OC_HASH_ROUND(j) a##j = _mm256_aesenc_epi128(a##j, key[k])
+#define OC_HASH_STORE(j) \
+				a##j = _mm256_xor_si256(_mm256_aesenclast_epi128(a##j, key[10]), x##j); \
+				if constexpr (streaming && aligned32) \
+					_mm256_stream_si256(reinterpret_cast<__m256i*>(&m[i + j]), a##j); \
+				else if constexpr (streaming) { \
+					_mm_stream_si128(&m[i + j][0].mData, _mm256_castsi256_si128(a##j)); \
+					_mm_stream_si128(&m[i + j][1].mData, _mm256_extracti128_si256(a##j, 1)); \
+				} else \
+					_mm256_storeu_si256(reinterpret_cast<__m256i*>(&m[i + j]), a##j)
+				OC_HASH_LANES(OC_HASH_LOAD);
+				for (u64 k = 1; k < 10; ++k)
+				{
+					OC_HASH_LANES(OC_HASH_ROUND);
+				}
+				OC_HASH_LANES(OC_HASH_STORE);
+#undef OC_HASH_STORE
+#undef OC_HASH_ROUND
+#undef OC_HASH_LOAD
+#undef OC_HASH_LANES
+			}
+		}
+#endif
+	}
+
 	// Hashes the OT messages for security
 	void SilentOtExtSender::hash(
 		span<std::array<block, 2>> messages,
@@ -416,11 +468,16 @@ namespace osuCrypto
 			auto d = *mDelta & mask;
 
 			auto n8 = (u64)messages.size() / 8 * 8;
-			alignas(32) std::array<block, 16> hashBatch;
-
 			std::array<block, 2>* m = messages.data();
 			auto r = mB.data();
 
+#ifdef OC_ENABLE_VAES
+			if ((u64)m % 32 == 0)
+				hashSenderVaes<streaming, true>(mAesFixedKey, r, m, n8, *mDelta);
+			else
+				hashSenderVaes<streaming, false>(mAesFixedKey, r, m, n8, *mDelta);
+#else
+			alignas(32) std::array<block, 16> hashBatch;
 			// Process in blocks of 8 for efficiency
 			for (u64 i = 0; i < n8; i += 8)
 			{
@@ -438,22 +495,11 @@ namespace osuCrypto
 				// std::array<block, 2> output objects.
 				for (u64 j = 0; j < 8; ++j)
 				{
-#ifdef OC_ENABLE_VAES
-					// Pack a complete VAES lane pair. Two separate 16-byte stores
-					// followed by a 32-byte load incur store-forwarding stalls.
-					auto pair = _mm256_set_m128i((r[j] ^ d).mData, r[j].mData);
-					std::memcpy(hashBatch.data() + 2 * j, &pair, sizeof(pair));
-#else
 					hashBatch[2 * j] = r[j];
 					hashBatch[2 * j + 1] = r[j] ^ d;
-#endif
 				}
-#ifdef OC_ENABLE_VAES
-				mAesFixedKey.hashBlocks<16>(hashBatch.data(), hashBatch.data());
-#else
 				mAesFixedKey.hashBlocks<8>(hashBatch.data(), hashBatch.data());
 				mAesFixedKey.hashBlocks<8>(hashBatch.data() + 8, hashBatch.data() + 8);
-#endif
 #ifdef OC_ENABLE_SSE2
 				if constexpr(streaming) {
 					// The API promises 16-byte, not 32-byte, output alignment.
@@ -464,21 +510,17 @@ namespace osuCrypto
 				} else
 #endif
 				{
-#ifdef OC_ENABLE_VAES
-				// Copy object representations rather than flattening nested arrays.
-				std::memcpy(m, hashBatch.data(), sizeof(hashBatch));
-#else
 				for (u64 j = 0; j < 8; ++j)
 				{
 					m[j][0] = hashBatch[2 * j];
 					m[j][1] = hashBatch[2 * j + 1];
 				}
-#endif
 				}
 
 				m += 8;
 				r += 8;
 			}
+#endif
 			
 #ifdef OC_ENABLE_SSE2
 			// Finish streaming stores before cached tail stores (which can share

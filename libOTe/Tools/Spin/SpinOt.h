@@ -1,6 +1,7 @@
 #pragma once
 #include "libOTe/Tools/Spin/SpinCode.h"
 #include "libOTe/TwoChooseOne/ConfigureCode.h"
+#include "cryptoTools/Common/Aligned.h"
 #ifdef ENABLE_SPIN
 #include <memory>
 #include <optional>
@@ -18,7 +19,11 @@ struct SpinOtState {
     block seed;
     SpinCode code;
     SpinCode::Workspace<block> blocks;
-    std::optional<SpinCode::Workspace<u8>> choices;
+    // Separate choice bytes use SPIN's bit-vector transpose: each byte is eight
+    // bit lanes of the binary map, and only the bit planes present are
+    // transposed (one for 0/1 choices). Packed words are reused across batches.
+    std::optional<spin::PreparedEncoder::BitWorkspace> choices;
+    AlignedUnVector<u64> choiceIn, choiceOut;
     SpinOtState(u64 requested,block codeSeed,bool receiver,
         SdNoiseDistribution noise=SdNoiseDistribution::Regular);
     void transpose(span<block> x);

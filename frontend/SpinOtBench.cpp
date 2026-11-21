@@ -9,6 +9,7 @@
 #include "coproto/Socket/BufferingSocket.h"
 #include "macoro/when_all.h"
 #include "macoro/sync_wait.h"
+#include "cryptoTools/Crypto/RandomOracle.h"
 #include <algorithm>
 #include <chrono>
 #include <iomanip>
@@ -61,9 +62,44 @@ static void report(const char* role,u64 k,const std::vector<Sample>& samples,boo
     std::cout<<"]}\n";
 }
 } // namespace
+// -choices: the correlated-OT receiver's choice-bit transpose, the SPIN bit
+// transpose (current) against widening each choice byte to a block and
+// running the 128-bit record transpose (previous). Same binary, same input.
+static int spinChoiceBench(unsigned exponent,unsigned trials) {
+    const u64 k=1ull<<exponent;
+    SpinOtState state(k,block(41,59),true);
+    const u64 n=state.code.code().code_size();
+    std::vector<u8> c(n,0),work(n);
+    PRNG rng(block(5,6));
+    for(u64 i=0;i<n;i+=4096) c[i+rng.get<u64>()%4096%(n-i)]=rng.getBit(); // regular-noise shape
+    AlignedUnVector<block> lift(n);
+    auto widened=[&] {
+        for(u64 i=0;i<n;++i) lift[i]=block(0,work[i]);
+        state.code.transpose_inplace<block>(lift,state.blocks);
+        for(u64 i=0;i<k;++i) work[i]=lift[i].get<u8>(0);
+    };
+    std::copy(c.begin(),c.end(),work.begin());widened();
+    std::vector<u8> want(work.begin(),work.begin()+k);
+    std::copy(c.begin(),c.end(),work.begin());state.transpose(span<u8>(work));
+    require(std::equal(want.begin(),want.end(),work.begin()));
+    auto time=[&](auto&& f) {
+        std::vector<double> t;
+        for(unsigned r=0;r<trials+5;++r) {
+            std::copy(c.begin(),c.end(),work.begin());
+            const auto a=Clock::now();f();const auto b=Clock::now();
+            if(r>=5)t.push_back(ms(a,b));
+        }
+        std::sort(t.begin(),t.end());return t[t.size()/2];
+    };
+    const double bits=time([&]{state.transpose(span<u8>(work));}),old=time(widened);
+    std::cout<<std::setprecision(6)<<"{\"choices\":true,\"K\":"<<k<<",\"bit_transpose_ms\":"<<bits
+        <<",\"widened_record_transpose_ms\":"<<old<<",\"outputs_equal\":true}\n";
+    return 0;
+}
 int spinOtBenchmark(CLP& cmd) {try {
     const unsigned exponent=cmd.getOr<unsigned>("logN",18);
     const unsigned trials=cmd.getOr<unsigned>("trials",31);
+    if(cmd.isSet("choices")) return spinChoiceBench(exponent,trials|1);
     const bool paired=cmd.isSet("paired"),streaming=cmd.isSet("nt"),
         readOutput=cmd.isSet("consume"),regular=cmd.isSet("regular");
     if(exponent<13 || exponent>24 || !trials || !(trials&1))
@@ -94,7 +130,13 @@ int spinOtBenchmark(CLP& cmd) {try {
         (regular?spin::SetupMode::Full:spin::SetupMode::BankedHeuristic));
     s.hash(sent,ChoiceBitPacking::True,streaming);r.hash(choices,received,ChoiceBitPacking::True);
     for(u64 i=0;i<k;++i) require(received[i]==sent[i][choices[i]]);
-    if(cmd.isSet("check")) {std::cout<<"SPIN hashed OT correctness: passed\n";return 0;}
+    if(cmd.isSet("check")) {
+        // Fixed seeds: the digest identifies the exact sender and receiver outputs,
+        // so two builds can be compared bit for bit.
+        RandomOracle ro(sizeof(block));
+        ro.Update(sent.data(),sent.size());ro.Update(received.data(),received.size());
+        block digest;ro.Final(digest);
+        std::cout<<"SPIN hashed OT correctness: passed, output digest "<<digest<<"\n";return 0;}
     const auto* ss=sg?sg->mShare.data():nullptr;const auto* rs=rg?rg->mShare.data():nullptr;
     const auto* sw=s.mSpin.get();const auto* rw=r.mSpin.get();
     const auto fixedDescriptor=s.mSpin->code.descriptor();
