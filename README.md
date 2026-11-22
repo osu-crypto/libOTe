@@ -135,9 +135,10 @@ Dependencies can be managed by cmake/build.py or installed via an external tool.
 
 
 **[SPIN](https://github.com/ladnir/spin_codes) (Silent OT encoder):**
-`ENABLE_SPIN` defaults on with Silent OT or Silent VOLE. Install SPIN 0.4.1 or
-use `FETCH_SPIN=ON` / `FETCH_AUTO`. Requires CMake 3.20+ and x86-64 with AVX2;
-set `ENABLE_SPIN=OFF` to omit it. See the [usage guide](libOTe/Tools/Spin/README.md).
+`ENABLE_SPIN` defaults on with Silent OT or Silent VOLE. Install SPIN 0.4.2 or
+use `FETCH_SPIN=ON` / `FETCH_AUTO`. Requires CMake 3.20+ and a little-endian
+CPU; SPIN selects x86-64, AArch64 (NEON) or portable kernels at runtime.
+Set `ENABLE_SPIN=OFF` to omit it. See the [usage guide](libOTe/Tools/Spin/README.md).
 
 **Enabling/Disabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
  The library can be built with Relic as

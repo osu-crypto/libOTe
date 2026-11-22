@@ -146,7 +146,7 @@ macro(FIND_SPIN)
     else()
         unset(SPIN_DP)
     endif()
-    find_package(spin 0.4.1 CONFIG ${SPIN_DP} ${ARGN})
+    find_package(spin 0.4.2 CONFIG ${SPIN_DP} ${ARGN})
 endmacro()
 
 if(ENABLE_SPIN AND NOT TARGET spin::spin)

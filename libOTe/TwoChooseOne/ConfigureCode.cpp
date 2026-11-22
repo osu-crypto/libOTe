@@ -7,10 +7,40 @@
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
-#include "libOTe/Tools/ExConvCode/ExConvCode.h"
+#include "libOTe/Tools/Spin/SpinCode.h"
 #include <cmath>
 namespace osuCrypto
 {
+#ifdef ENABLE_SPIN
+    // SPIN noise: N = 2K and the fewest partitions (a multiple of 8, at least
+    // 40) whose linear-attack bias reaches secParam. The tuning value 0.25
+    // matches BAA; it is not a claim of 25% minimum distance (Turbo SPIN's
+    // certificates show distance above N/10 at K = 2^14, 2^16, ..., 2^26).
+    SdConfig SpinConfigure(u64 secParam, u64 requestSize, SdNoiseDistribution noiseType)
+    {
+        if (secParam > 1024 ||
+            (noiseType != SdNoiseDistribution::Regular && noiseType != SdNoiseDistribution::Stationary))
+            throw std::invalid_argument("Invalid SPIN noise configuration. " LOCATION);
+        const u64 n = 2 * SpinCode::messageSize(requestSize);
+        const double weight = std::floor(0.25 * double(n));
+        const double multiplier = noiseType == SdNoiseDistribution::Regular ? 2 : 1;
+        const double minimumParts = std::ceil(double(secParam) / -std::log2(1 - multiplier * weight / n));
+        const u64 first = std::max<u64>(40, roundUpTo(u64(minimumParts), 8));
+        const u64 last = std::min<u64>(n / 4, first + 8192);
+        for (u64 parts = first; parts <= last; parts += 8)
+        {
+            // Padding outside the partitions does not count toward the weight.
+            const u64 per = (n / parts) & ~u64(1), active = parts * per;
+            const double effective = weight - double(n - active);
+            if (effective <= 0)
+                continue;
+            const double ratio = effective / double(active);
+            if (ratio < 0.5 && -double(parts) * std::log2(1 - multiplier * ratio) >= secParam)
+                return { n, parts, per };
+        }
+        throw std::invalid_argument("SPIN noise configuration has no supported solution. " LOCATION);
+    }
+#endif
 
     // Parameter selection deliberately combines two different safeguards.
     //

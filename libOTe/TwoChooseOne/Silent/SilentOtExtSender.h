@@ -12,7 +12,7 @@
 #include <libOTe/config.h>
 #ifdef ENABLE_SILENTOT
 #ifdef ENABLE_SPIN
-#include "libOTe/Tools/Spin/SpinOt.h"
+#include "libOTe/Tools/Spin/SpinCode.h"
 #endif
 
 #include <cryptoTools/Common/Defines.h>
@@ -134,9 +134,10 @@ namespace osuCrypto
         // dense vectors from the sparse vectors.
         MultType mLpnMultType = DefaultMultType;
 #ifdef ENABLE_SPIN
-        // Optional preparation after configure(): initialize from
-        // (mRequestNumOts, mCodeSeed, false, mNoiseDist). clear() releases it.
-        std::unique_ptr<SpinOtState> mSpin;
+        // The SPIN encoder, prepared at the first compression. To prepare it
+        // ahead, emplace (mRequestNumOts, mCodeSeed, mNoiseDist) after
+        // configure(). configure() and clear() release it.
+        std::optional<SpinCode> mSpin;
 #endif
 
         // The flag which controls whether the malicious check is performed.

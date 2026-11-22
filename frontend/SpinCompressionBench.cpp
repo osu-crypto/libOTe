@@ -32,7 +32,7 @@ int spinCompressionBenchmark(CLP& cmd) {try {
     SilentOtExtSender s;
     // Hold stationary geometry fixed even when the encoder uses full setup.
     s.configure(k,2,1,SilentSecType::SemiHonest,SdNoiseDistribution::Stationary,MultType::Spin);
-    s.mSpin=std::make_unique<SpinOtState>(k,s.mCodeSeed,false,noise);
+    s.mSpin.emplace(k,s.mCodeSeed,noise);
     s.mB.resize(s.mNoiseVecSize);
     s.mDelta=block(345,679);
     StationaryPprfSender<block,CoeffCtxGF2> leaves;
@@ -59,7 +59,7 @@ int spinCompressionBenchmark(CLP& cmd) {try {
         }
         if(context!="bare") std::fill(s.mB.begin()+active,s.mB.end(),ZeroBlock);
         auto b=Clock::now();
-        prepareSpin(s.mSpin,k,s.mCodeSeed,false,noise);
+        SpinCode::prepare(s.mSpin,k,s.mCodeSeed,noise);
         auto c=Clock::now();
         s.mSpin->transpose(s.mB);
         auto d=Clock::now();
@@ -94,8 +94,7 @@ int spinCompressionBenchmark(CLP& cmd) {try {
             if(messages[i][0]!=s.mB[i] || messages[i][1]!=s.mB[i])
                 throw std::runtime_error("output-store check failed");
     std::cout<<std::setprecision(9)<<"{\"family\":\""<<family<<"\",\"context\":\""<<context
-        <<"\",\"K\":"<<k<<",\"setup_bytes\":"<<s.mSpin->code.code().setup_bytes()
-        <<",\"workspace_bytes\":"<<s.mSpin->blocks.bytes()
+        <<"\",\"K\":"<<k<<",\"setup_bytes\":"<<s.mSpin->encoder().setup_bytes()
         <<",\"stimulus_ms\":"<<median(0)<<",\"prepare_ms\":"<<median(1)
         <<",\"encode_ms\":"<<median(2)<<",\"post_ms\":"<<median(3)
         <<",\"checksum\":"<<(s.mB[0].get<u64>(0)^(output?messages[0][0].get<u64>(0):0))<<",\"samples\":[";

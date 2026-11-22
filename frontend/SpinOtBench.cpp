@@ -62,44 +62,9 @@ static void report(const char* role,u64 k,const std::vector<Sample>& samples,boo
     std::cout<<"]}\n";
 }
 } // namespace
-// -choices: the correlated-OT receiver's choice-bit transpose, the SPIN bit
-// transpose (current) against widening each choice byte to a block and
-// running the 128-bit record transpose (previous). Same binary, same input.
-static int spinChoiceBench(unsigned exponent,unsigned trials) {
-    const u64 k=1ull<<exponent;
-    SpinOtState state(k,block(41,59),true);
-    const u64 n=state.code.code().code_size();
-    std::vector<u8> c(n,0),work(n);
-    PRNG rng(block(5,6));
-    for(u64 i=0;i<n;i+=4096) c[i+rng.get<u64>()%4096%(n-i)]=rng.getBit(); // regular-noise shape
-    AlignedUnVector<block> lift(n);
-    auto widened=[&] {
-        for(u64 i=0;i<n;++i) lift[i]=block(0,work[i]);
-        state.code.transpose_inplace<block>(lift,state.blocks);
-        for(u64 i=0;i<k;++i) work[i]=lift[i].get<u8>(0);
-    };
-    std::copy(c.begin(),c.end(),work.begin());widened();
-    std::vector<u8> want(work.begin(),work.begin()+k);
-    std::copy(c.begin(),c.end(),work.begin());state.transpose(span<u8>(work));
-    require(std::equal(want.begin(),want.end(),work.begin()));
-    auto time=[&](auto&& f) {
-        std::vector<double> t;
-        for(unsigned r=0;r<trials+5;++r) {
-            std::copy(c.begin(),c.end(),work.begin());
-            const auto a=Clock::now();f();const auto b=Clock::now();
-            if(r>=5)t.push_back(ms(a,b));
-        }
-        std::sort(t.begin(),t.end());return t[t.size()/2];
-    };
-    const double bits=time([&]{state.transpose(span<u8>(work));}),old=time(widened);
-    std::cout<<std::setprecision(6)<<"{\"choices\":true,\"K\":"<<k<<",\"bit_transpose_ms\":"<<bits
-        <<",\"widened_record_transpose_ms\":"<<old<<",\"outputs_equal\":true}\n";
-    return 0;
-}
 int spinOtBenchmark(CLP& cmd) {try {
     const unsigned exponent=cmd.getOr<unsigned>("logN",18);
     const unsigned trials=cmd.getOr<unsigned>("trials",31);
-    if(cmd.isSet("choices")) return spinChoiceBench(exponent,trials|1);
     const bool paired=cmd.isSet("paired"),streaming=cmd.isSet("nt"),
         readOutput=cmd.isSet("consume"),regular=cmd.isSet("regular");
     if(exponent<13 || exponent>24 || !trials || !(trials&1))
@@ -111,8 +76,8 @@ int spinOtBenchmark(CLP& cmd) {try {
     const auto noise=regular?SdNoiseDistribution::Regular:SdNoiseDistribution::Stationary;
     s.configure(k,2,1,SilentSecType::SemiHonest,noise,MultType::Spin);
     r.configure(k,2,1,SilentSecType::SemiHonest,noise,MultType::Spin);
-    s.mSpin=std::make_unique<SpinOtState>(k,s.mCodeSeed,false,s.mNoiseDist);
-    r.mSpin=std::make_unique<SpinOtState>(k,r.mCodeSeed,true,r.mNoiseDist);
+    s.mSpin.emplace(k,s.mCodeSeed,s.mNoiseDist);
+    r.mSpin.emplace(k,r.mCodeSeed,r.mNoiseDist);
     s.mB.reserve(s.mNoiseVecSize);r.mA.reserve(r.mNoiseVecSize);
     std::vector<std::array<block,2>> sent(k);std::vector<block> received(k);BitVector choices(k);
     // Untimed initial correctness check. Stationary mode also caches tree seeds;
@@ -126,7 +91,7 @@ int spinOtBenchmark(CLP& cmd) {try {
     auto* sg=regular?nullptr:dynamic_cast<StationaryPprfSender<block,CoeffCtxGF2>*>(&s.gen());
     auto* rg=regular?nullptr:dynamic_cast<StationaryPprfReceiver<block,CoeffCtxGF2>*>(&r.gen());
     require(regular || (sg && rg && sg->mExpanded && rg->mExpanded));
-    require(s.mSpin->code.code().setup_options().mode==
+    require(s.mSpin->encoder().setup_options().mode==
         (regular?spin::SetupMode::Full:spin::SetupMode::BankedHeuristic));
     s.hash(sent,ChoiceBitPacking::True,streaming);r.hash(choices,received,ChoiceBitPacking::True);
     for(u64 i=0;i<k;++i) require(received[i]==sent[i][choices[i]]);
@@ -138,8 +103,7 @@ int spinOtBenchmark(CLP& cmd) {try {
         block digest;ro.Final(digest);
         std::cout<<"SPIN hashed OT correctness: passed, output digest "<<digest<<"\n";return 0;}
     const auto* ss=sg?sg->mShare.data():nullptr;const auto* rs=rg?rg->mShare.data():nullptr;
-    const auto* sw=s.mSpin.get();const auto* rw=r.mSpin.get();
-    const auto fixedDescriptor=s.mSpin->code.descriptor();
+    const auto fixedDescriptor=s.mSpin->encoder().descriptor();
     std::cout<<"{\"geometry\":true,\"K\":"<<k<<",\"N\":"<<s.mNoiseVecSize
         <<",\"noise\":\""<<(regular?"regular":"stationary")<<"\""
         <<",\"partitions\":"<<s.mNumPartitions<<",\"tree_size\":"<<s.mSizePer
@@ -184,8 +148,7 @@ int spinOtBenchmark(CLP& cmd) {try {
         auto wire=sendSocket.getOutbound();require(bool(wire));
         if(!paired) {
             require(s.mCodeSeed==(regular?seed:mAesFixedKey.hashBlock(seed)));
-            require(sw==s.mSpin.get());
-            if(regular) require(s.mSpin->code.descriptor()==fixedDescriptor);
+            if(regular) require(s.mSpin->encoder().descriptor()==fixedDescriptor);
             else require(sg->mExpandCounter==counter+1 && ss==sg->mShare.data());
             if(round>=5)sender.push_back(a);
             continue;
@@ -199,8 +162,7 @@ int spinOtBenchmark(CLP& cmd) {try {
         Sample b{stage(rt,"recver.expand.start","recver.expand.pprf"),
                  stage(rt,"recver.expand.pprf","recver.expand.dualEncode"),ms(encoded,end),ms(begin,end)};
         require(s.mCodeSeed==r.mCodeSeed && s.mCodeSeed==(regular?seed:mAesFixedKey.hashBlock(seed)));
-        require(sw==s.mSpin.get() && rw==r.mSpin.get());
-        if(regular) require(s.mSpin->code.descriptor()==fixedDescriptor && r.mSpin->code.descriptor()==fixedDescriptor);
+        if(regular) require(s.mSpin->encoder().descriptor()==fixedDescriptor && r.mSpin->encoder().descriptor()==fixedDescriptor);
         else {
             require(sg->mExpandCounter==counter+1 && rg->mExpandCounter==sg->mExpandCounter);
             require(ss==sg->mShare.data() && rs==rg->mShare.data());

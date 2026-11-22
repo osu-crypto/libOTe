@@ -725,7 +725,7 @@ namespace osuCrypto
 		{
 #ifdef ENABLE_SPIN
         case MultType::Spin:
-            prepareSpin(mSpin,mRequestNumOts,mCodeSeed,false,mNoiseDist);
+            SpinCode::prepare(mSpin,mRequestNumOts,mCodeSeed,mNoiseDist);
             mSpin->transpose(mB);
             break;
 #endif
