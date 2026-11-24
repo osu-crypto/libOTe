@@ -9,6 +9,7 @@
 #include "coproto/Socket/BufferingSocket.h"
 #include "macoro/when_all.h"
 #include "macoro/sync_wait.h"
+#include "cryptoTools/Crypto/RandomOracle.h"
 #include <algorithm>
 #include <chrono>
 #include <iomanip>
@@ -75,8 +76,8 @@ int spinOtBenchmark(CLP& cmd) {try {
     const auto noise=regular?SdNoiseDistribution::Regular:SdNoiseDistribution::Stationary;
     s.configure(k,2,1,SilentSecType::SemiHonest,noise,MultType::Spin);
     r.configure(k,2,1,SilentSecType::SemiHonest,noise,MultType::Spin);
-    s.mSpin=std::make_unique<SpinOtState>(k,s.mCodeSeed,false,s.mNoiseDist);
-    r.mSpin=std::make_unique<SpinOtState>(k,r.mCodeSeed,true,r.mNoiseDist);
+    s.mSpin.emplace(k,s.mCodeSeed,s.mNoiseDist);
+    r.mSpin.emplace(k,r.mCodeSeed,r.mNoiseDist);
     s.mB.reserve(s.mNoiseVecSize);r.mA.reserve(r.mNoiseVecSize);
     std::vector<std::array<block,2>> sent(k);std::vector<block> received(k);BitVector choices(k);
     // Untimed initial correctness check. Stationary mode also caches tree seeds;
@@ -90,14 +91,19 @@ int spinOtBenchmark(CLP& cmd) {try {
     auto* sg=regular?nullptr:dynamic_cast<StationaryPprfSender<block,CoeffCtxGF2>*>(&s.gen());
     auto* rg=regular?nullptr:dynamic_cast<StationaryPprfReceiver<block,CoeffCtxGF2>*>(&r.gen());
     require(regular || (sg && rg && sg->mExpanded && rg->mExpanded));
-    require(s.mSpin->code.code().setup_options().mode==
+    require(s.mSpin->encoder().setup_options().mode==
         (regular?spin::SetupMode::Full:spin::SetupMode::BankedHeuristic));
     s.hash(sent,ChoiceBitPacking::True,streaming);r.hash(choices,received,ChoiceBitPacking::True);
     for(u64 i=0;i<k;++i) require(received[i]==sent[i][choices[i]]);
-    if(cmd.isSet("check")) {std::cout<<"SPIN hashed OT correctness: passed\n";return 0;}
+    if(cmd.isSet("check")) {
+        // Fixed seeds: the digest identifies the exact sender and receiver outputs,
+        // so two builds can be compared bit for bit.
+        RandomOracle ro(sizeof(block));
+        ro.Update(sent.data(),sent.size());ro.Update(received.data(),received.size());
+        block digest;ro.Final(digest);
+        std::cout<<"SPIN hashed OT correctness: passed, output digest "<<digest<<"\n";return 0;}
     const auto* ss=sg?sg->mShare.data():nullptr;const auto* rs=rg?rg->mShare.data():nullptr;
-    const auto* sw=s.mSpin.get();const auto* rw=r.mSpin.get();
-    const auto fixedDescriptor=s.mSpin->code.descriptor();
+    const auto fixedDescriptor=s.mSpin->encoder().descriptor();
     std::cout<<"{\"geometry\":true,\"K\":"<<k<<",\"N\":"<<s.mNoiseVecSize
         <<",\"noise\":\""<<(regular?"regular":"stationary")<<"\""
         <<",\"partitions\":"<<s.mNumPartitions<<",\"tree_size\":"<<s.mSizePer
@@ -142,8 +148,7 @@ int spinOtBenchmark(CLP& cmd) {try {
         auto wire=sendSocket.getOutbound();require(bool(wire));
         if(!paired) {
             require(s.mCodeSeed==(regular?seed:mAesFixedKey.hashBlock(seed)));
-            require(sw==s.mSpin.get());
-            if(regular) require(s.mSpin->code.descriptor()==fixedDescriptor);
+            if(regular) require(s.mSpin->encoder().descriptor()==fixedDescriptor);
             else require(sg->mExpandCounter==counter+1 && ss==sg->mShare.data());
             if(round>=5)sender.push_back(a);
             continue;
@@ -157,8 +162,7 @@ int spinOtBenchmark(CLP& cmd) {try {
         Sample b{stage(rt,"recver.expand.start","recver.expand.pprf"),
                  stage(rt,"recver.expand.pprf","recver.expand.dualEncode"),ms(encoded,end),ms(begin,end)};
         require(s.mCodeSeed==r.mCodeSeed && s.mCodeSeed==(regular?seed:mAesFixedKey.hashBlock(seed)));
-        require(sw==s.mSpin.get() && rw==r.mSpin.get());
-        if(regular) require(s.mSpin->code.descriptor()==fixedDescriptor && r.mSpin->code.descriptor()==fixedDescriptor);
+        if(regular) require(s.mSpin->encoder().descriptor()==fixedDescriptor && r.mSpin->encoder().descriptor()==fixedDescriptor);
         else {
             require(sg->mExpandCounter==counter+1 && rg->mExpandCounter==sg->mExpandCounter);
             require(ss==sg->mShare.data() && rs==rg->mShare.data());

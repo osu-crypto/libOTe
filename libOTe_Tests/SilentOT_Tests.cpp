@@ -1255,15 +1255,13 @@ void OtExt_Silent_BinaryBAA_Test(const oc::CLP& cmd)
     silentBinaryCodeTest(cmd, MultType::BinaryBAA);
 }
 
-// Silent OT with the SPIN code (MultType::Spin). The default sizes select
-// both SPIN parameter sets silent OT uses (T64S12R2 up to 2^16 OTs, T128S19
-// above). The SPIN encoder itself is tested by the SPIN library.
+// Silent OT with the SPIN code (MultType::Spin): random and correlated OT,
+// regular and stationary noise, at the minimum code size (8193 rounds up to
+// K = 8320) and above. Runs on every CPU; SPIN picks its kernel at runtime.
+// The SPIN encoder itself is tested by the SPIN library.
 void OtExt_Silent_Spin_Test(const oc::CLP& cmd)
 {
 #if defined(ENABLE_SILENTOT) && defined(ENABLE_SPIN)
-    if (!spin::capabilities().avx2)
-        throw UnitTestSkipped("SPIN requires AVX2");
-
     auto sockets = cp::LocalAsyncSocket::makePair();
     std::vector<u64> nn = cmd.getManyOr<u64>("n", { 8193, 65537 });
     bool verbose = cmd.getOr("v", 0) > 1;
@@ -1273,6 +1271,7 @@ void OtExt_Silent_Spin_Test(const oc::CLP& cmd)
 
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
+    for (auto noise : { SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary })
     for (auto n : nn)
     {
         // Random OT.
@@ -1280,8 +1279,8 @@ void OtExt_Silent_Spin_Test(const oc::CLP& cmd)
             std::vector<std::array<block, 2>> msg2(n);
             std::vector<block> msg1(n);
             BitVector choice(n);
-            sender.configure(n, s, threads, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Spin);
-            recver.configure(n, s, threads, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Spin);
+            sender.configure(n, s, threads, SilentSecType::SemiHonest, noise, MultType::Spin);
+            recver.configure(n, s, threads, SilentSecType::SemiHonest, noise, MultType::Spin);
             fakeBase(n, s, threads, prng, recver, sender);
             auto p0 = sender.silentSend(msg2, prng, sockets[0]);
             auto p1 = recver.silentReceive(choice, msg1, prng, sockets[1]);
@@ -1291,8 +1290,8 @@ void OtExt_Silent_Spin_Test(const oc::CLP& cmd)
 
         // Correlated OT.
         {
-            sender.configure(n, s, threads, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Spin);
-            recver.configure(n, s, threads, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, MultType::Spin);
+            sender.configure(n, s, threads, SilentSecType::SemiHonest, noise, MultType::Spin);
+            recver.configure(n, s, threads, SilentSecType::SemiHonest, noise, MultType::Spin);
             auto type = ChoiceBitPacking::False;
             fakeBase(n, s, threads, prng, recver, sender);
             auto delta = *sender.mDelta;

@@ -763,7 +763,7 @@ namespace osuCrypto
 		auto points = getPoints();
 #ifdef ENABLE_SPIN
         if(mLpnMultType==MultType::Spin)
-            prepareSpin(mSpin,mRequestNumOts,mCodeSeed,true,mNoiseDist);
+            SpinCode::prepare(mSpin,mRequestNumOts,mCodeSeed,mNoiseDist);
 #endif
 
 		if (packing == ChoiceBitPacking::True)
@@ -807,7 +807,6 @@ namespace osuCrypto
 			{
 #ifdef ENABLE_SPIN
             case MultType::Spin:
-                if(!mSpin) throw std::logic_error("SPIN is not configured");
                 mSpin->transpose(mA);
                 break;
 #endif
@@ -896,7 +895,6 @@ namespace osuCrypto
 			{
 #ifdef ENABLE_SPIN
             case MultType::Spin:
-                if(!mSpin) throw std::logic_error("SPIN is not configured");
                 mSpin->transpose(mA);
                 mSpin->transpose(mC);
                 break;
