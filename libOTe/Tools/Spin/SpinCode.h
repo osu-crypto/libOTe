@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstring>
 #include <optional>
+#include <variant>
 #include <stdexcept>
 
 namespace osuCrypto {
@@ -32,30 +33,46 @@ public:
         return k;
     }
 
-    SpinCode(u64 requested, block seed, SdNoiseDistribution noise)
-        : mEncoder({ messageSize(requested), parameters, seed.get<u64>(0), seed.get<u64>(1) }, setup(noise))
-        , mBlocks(mEncoder.make_workspace())
+    SpinCode(u64 requested, block seed, SdNoiseDistribution noise,
+        u64 bankSeed = spin::SetupOptions{}.bank_seed)
+        : mEncoder(std::in_place_type<spin::PreparedEncoder>,
+            spin::CodeSpec{ messageSize(requested), parameters, seed.get<u64>(0), seed.get<u64>(1) },
+            spin::SetupOptions{ setup(noise).mode, bankSeed })
+        , mBlocks(encoder().make_workspace())
     {}
 
-    // Reseeds `code` when its size and noise distribution match (no allocation
-    // for stationary noise; a full rebuild of the map for regular noise with a
-    // new seed); otherwise constructs it.
+    // Share a regular map across parties or workers. Each handle owns its scratch.
+    explicit SpinCode(std::shared_ptr<const spin::PreparedEncoder> full)
+        : mEncoder(std::move(full)), mBlocks(checkedFull().make_workspace())
+    {}
+
     static void prepare(std::optional<SpinCode>& code, u64 requested, block seed, SdNoiseDistribution noise) {
+        const spin::CodeSeed next{ seed.get<u64>(0), seed.get<u64>(1) };
         if (code && code->messageSize() == messageSize(requested) &&
-            code->mEncoder.setup_options().mode == setup(noise).mode)
-            code->mEncoder.setCodeSeed({ seed.get<u64>(0), seed.get<u64>(1) });
-        else
-            code.emplace(requested, seed, noise);
+            code->encoder().setup_options().mode == setup(noise).mode) {
+            if (auto* owned = std::get_if<spin::PreparedEncoder>(&code->mEncoder)) {
+                owned->setCodeSeed(next);
+                return;
+            }
+            const auto spec = code->encoder().specification();
+            if (spec.route_seed == next.route && spec.inner_seed == next.inner)
+                return;
+        }
+        code.emplace(requested, seed, noise);
     }
 
-    u64 messageSize() const { return mEncoder.message_size(); }
-    u64 codeSize() const { return mEncoder.code_size(); }
-    const spin::PreparedEncoder& encoder() const { return mEncoder; }
+    u64 messageSize() const { return encoder().message_size(); }
+    u64 codeSize() const { return encoder().code_size(); }
+    const spin::PreparedEncoder& encoder() const {
+        if (const auto* owned = std::get_if<spin::PreparedEncoder>(&mEncoder))
+            return *owned;
+        return *std::get<std::shared_ptr<const spin::PreparedEncoder>>(mEncoder);
+    }
 
     // Transposed encoding in place: x holds 2K blocks; the first K receive the
     // result and the rest are unchanged.
     void transpose(span<block> x) {
-        mEncoder.transpose_inplace<block>(std::span<block>(x.data(), x.size()), mBlocks);
+        encoder().transpose_inplace<block>(std::span<block>(x.data(), x.size()), mBlocks);
     }
 
     // The same map on 2K choice bytes, each 0 or 1 (correlated OT's separate
@@ -66,7 +83,7 @@ public:
         if (x.size() != n)
             throw std::invalid_argument("SPIN choice transpose needs 2K bytes");
         if (!mBits) {
-            mBits.emplace(mEncoder.make_bit_workspace());
+            mBits.emplace(encoder().make_bit_workspace());
             mBitsIn.resize(n / 64);
             mBitsOut.resize(k / 64);
         }
@@ -84,7 +101,7 @@ public:
         }
         if (high)
             throw std::invalid_argument("SPIN choice bytes must be 0 or 1");
-        mEncoder.transpose_bits(std::span<const u64>(mBitsIn.data(), mBitsIn.size()),
+        encoder().transpose_bits(std::span<const u64>(mBitsIn.data(), mBitsIn.size()),
             std::span<u64>(mBitsOut.data(), mBitsOut.size()), *mBits);
         for (u64 i = 0; i < k; i += 8) {
             const u64 bits = (mBitsOut[i / 64] >> (i % 64)) & 255;
@@ -101,7 +118,15 @@ private:
         return { noise == SdNoiseDistribution::Stationary ? spin::SetupMode::BankedHeuristic : spin::SetupMode::Full };
     }
 
-    spin::PreparedEncoder mEncoder;
+    const spin::PreparedEncoder& checkedFull() const {
+        const auto& full = std::get<std::shared_ptr<const spin::PreparedEncoder>>(mEncoder);
+        if (!full || full->setup_options().mode != spin::SetupMode::Full ||
+            full->specification().parameters != parameters)
+            throw std::invalid_argument("SPIN requires a full Turbo encoder");
+        return *full;
+    }
+
+    std::variant<spin::PreparedEncoder, std::shared_ptr<const spin::PreparedEncoder>> mEncoder;
     spin::PreparedEncoder::Workspace mBlocks;
     std::optional<spin::PreparedEncoder::BitWorkspace> mBits;
     AlignedUnVector<u64> mBitsIn, mBitsOut;
