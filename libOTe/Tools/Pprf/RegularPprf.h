@@ -12,6 +12,8 @@
 #include "libOTe/Tools/Coproto.h"
 #include <array>
 #include <cstring>
+#include <iterator>
+#include <memory>
 #include "libOTe/Tools/CoeffCtx.h"
 #include "PprfUtil.h"
 
@@ -199,15 +201,13 @@ namespace osuCrypto
 			_mm512_storeu_si512(sum1, s1[0]); _mm512_storeu_si512(sum1 + 4, s1[1]);
 		}
 
-		template<u64 NP>
-		OC_FORCEINLINE void leafStep(const ZmmKey& k0, const ZmmKey& k1, const block* in, block* o,
-			__m512i (&s0)[2], __m512i (&s1)[2])
+		// Each input is four independent parents. Advance both leaf keys together.
+		template<std::size_t C>
+		OC_FORCEINLINE void hashLeafChains(const ZmmKey& k0, const ZmmKey& k1,
+			const __m512i (&x)[C], __m512i (&a)[C], __m512i (&b)[C])
 		{
-			constexpr u64 C = 2 * NP;
-			__m512i x[C], a[C], b[C];
 			for (u64 c = 0; c < C; ++c)
 			{
-				x[c] = _mm512_loadu_si512(in + 4 * c);
 				a[c] = _mm512_xor_si512(x[c], k0.k[0]);
 				b[c] = _mm512_xor_si512(x[c], k1.k[0]);
 			}
@@ -221,6 +221,20 @@ namespace osuCrypto
 			{
 				a[c] = _mm512_xor_si512(_mm512_aesenclast_epi128(a[c], k0.k[10]), x[c]);
 				b[c] = _mm512_xor_si512(_mm512_aesenclast_epi128(b[c], k1.k[10]), x[c]);
+			}
+		}
+
+		template<u64 NP>
+		OC_FORCEINLINE void leafStep(const ZmmKey& k0, const ZmmKey& k1, const block* in, block* o,
+			__m512i (&s0)[2], __m512i (&s1)[2])
+		{
+			constexpr u64 C = 2 * NP;
+			__m512i x[C], a[C], b[C];
+			for (u64 c = 0; c < C; ++c)
+				x[c] = _mm512_loadu_si512(in + 4 * c);
+			hashLeafChains(k0, k1, x, a, b);
+			for (u64 c = 0; c < C; ++c)
+			{
 				const u64 q = c / 2, v = c % 2;
 				_mm512_storeu_si512(o + 16 * q + 4 * v, a[c]);
 				_mm512_storeu_si512(o + 16 * q + 8 + 4 * v, b[c]);
@@ -241,6 +255,40 @@ namespace osuCrypto
 				leafStep<1>(k0, k1, parents + 8 * p, out + 16 * p, s0, s1);
 			_mm512_storeu_si512(sum0, s0[0]); _mm512_storeu_si512(sum0 + 4, s0[1]);
 			_mm512_storeu_si512(sum1, s1[0]); _mm512_storeu_si512(sum1 + 4, s1[1]);
+		}
+
+		// Both children of a parent have the same live width because the domain is even.
+		// Hash all eight lanes for each correction, then store only the live leaves.
+		template<u64 NP>
+		OC_FORCEINLINE void compactLeafStep(const ZmmKey& k0, const ZmmKey& k1,
+			const AlignedArray<block, 8>* parents, block*& out, u64 firstParent,
+			u64 fullLanes, u64 extraParents, __m512i& sum0, __m512i& sum1)
+		{
+			__m512i x[2 * NP], left[2 * NP], right[2 * NP];
+			for (u64 c = 0; c < 2 * NP; ++c)
+				x[c] = _mm512_loadu_si512(parents[c / 2].data() + 4 * (c % 2));
+			hashLeafChains(k0, k1, x, left, right);
+			for (u64 q = 0; q < NP; ++q)
+			{
+				const u64 live = fullLanes + (firstParent + q < extraParents);
+				assert(live >= 4 && live <= 8);
+				const __mmask8 mask = static_cast<__mmask8>((1u << (2 * (live - 4))) - 1);
+				sum0 = _mm512_ternarylogic_epi64(sum0, left[2 * q], left[2 * q + 1], 0x96);
+				sum1 = _mm512_ternarylogic_epi64(sum1, right[2 * q], right[2 * q + 1], 0x96);
+				_mm512_storeu_si512(out, left[2 * q]);
+				_mm512_mask_storeu_epi64(out + 4, mask, left[2 * q + 1]);
+				out += live;
+				_mm512_storeu_si512(out, right[2 * q]);
+				_mm512_mask_storeu_epi64(out + 4, mask, right[2 * q + 1]);
+				out += live;
+			}
+		}
+
+		OC_FORCEINLINE block fold4(__m512i sum)
+		{
+			alignas(64) block lanes[4];
+			_mm512_store_si512(lanes, sum);
+			return (lanes[0] ^ lanes[1]) ^ (lanes[2] ^ lanes[3]);
 		}
 
 		using Key = ZmmKey;
@@ -409,6 +457,26 @@ namespace osuCrypto
 			const u64 subtreeDomain = 2 * parents.size();
 			const u64 fullLanes = domain / subtreeDomain;
 			const u64 partialSize = domain % subtreeDomain;
+#if defined(OC_ENABLE_VAES) && defined(ENABLE_AVX512)
+			// A context can opt in when block copy is assignment and addition is bitwise XOR.
+			if constexpr (std::contiguous_iterator<Iter> &&
+				requires { requires CoeffCtx::blockCopyIsTrivialAndAdditionIsXor; })
+			{
+				const pprfVaes::ZmmKey k0(gGgmAes[0]), k1(gGgmAes[1]);
+				block* dest = std::to_address(output);
+				__m512i sum0 = _mm512_setzero_si512(), sum1 = _mm512_setzero_si512();
+				u64 p = 0;
+				for (; p + 2 <= parents.size(); p += 2)
+					pprfVaes::compactLeafStep<2>(k0, k1, parents.data() + p, dest,
+						p, fullLanes, partialSize / 2, sum0, sum1);
+				if (p < parents.size())
+					pprfVaes::compactLeafStep<1>(k0, k1, parents.data() + p, dest,
+						p, fullLanes, partialSize / 2, sum0, sum1);
+				leafSums[0] ^= pprfVaes::fold4(sum0);
+				leafSums[1] ^= pprfVaes::fold4(sum1);
+				return dest - std::to_address(output);
+			}
+#endif
 			alignas(64) std::array<block, 8> hashed;
 			u64 written = 0;
 			for (u64 p = 0; p < parents.size(); ++p)

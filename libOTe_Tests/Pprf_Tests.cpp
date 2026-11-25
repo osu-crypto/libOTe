@@ -711,8 +711,47 @@ void HalfTreePprf_test(const oc::CLP& cmd)
 //            verbose);
 //}
 
+namespace
+{
+	struct RawXorTestCtx : CoeffCtxGF2
+	{
+		static constexpr bool blockCopyIsTrivialAndAdditionIsXor = true;
+	};
+
+	void checkCompactXorLeaves()
+	{
+		PRNG prng(CCBlock);
+		RawXorTestCtx ctx;
+		for (u64 domain = 10; domain <= 256; domain += 2)
+		{
+			AlignedUnVector<AlignedArray<block, 8>> parents(pprf::paddedDomain(domain) / 16);
+			std::vector<block> output(domain + 2, CCBlock);
+			std::array<block, 2> sums{prng.get<block>(), prng.get<block>()};
+			auto expectedSums = sums;
+			std::vector<block> expected = output;
+			u64 next = 1;
+			for (u64 p = 0; p < parents.size(); ++p)
+			{
+				prng.get(parents[p].data(), 8);
+				for (u64 side = 0; side < 2; ++side)
+					for (u64 lane = 0; lane < 8; ++lane)
+					{
+						const block h = gGgmAes[side].hashBlock(parents[p][lane]);
+						expectedSums[side] ^= h;
+						if (lane * (2 * parents.size()) + 2 * p + side < domain)
+							expected[next++] = h;
+					}
+			}
+			const auto written = pprf::hashPhysicalBlockLeaves(parents, domain, output.data() + 1, sums, ctx);
+			if (written != domain || sums != expectedSums || output != expected)
+				throw std::runtime_error("Compact XOR leaves disagree with the scalar hashes");
+		}
+	}
+}
+
 void RegularPprf_PhysicalIndex_test(const CLP& cmd)
 {
+	checkCompactXorLeaves();
 	auto f = PprfOutputFormat::ByPhysicalIndex;
 	auto v = cmd.isSet("v");
 	// The physical block path also supports coefficient addition other than XOR.
