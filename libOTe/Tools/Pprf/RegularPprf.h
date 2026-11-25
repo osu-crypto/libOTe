@@ -645,8 +645,10 @@ namespace osuCrypto
 			if constexpr (std::contiguous_iterator<Iter> &&
 				requires { requires CoeffCtx::blockCopyIsTrivialAndAdditionIsXor; })
 			{
-				const auto& k0 = pprfVaes::leafKey<0, CacheLeafKeys>();
-				const auto& k1 = pprfVaes::leafKey<1, CacheLeafKeys>();
+				// The sender and receiver use the same public YMM key schedules.
+				constexpr bool cache = CacheLeafKeys || std::is_same_v<pprfVaes::Key, pprfVaes::YmmKey>;
+				const auto& k0 = pprfVaes::leafKey<0, cache>();
+				const auto& k1 = pprfVaes::leafKey<1, cache>();
 				block* dest = std::to_address(output);
 #ifdef ENABLE_AVX512
 				__m512i sum0 = _mm512_setzero_si512(), sum1 = _mm512_setzero_si512();
