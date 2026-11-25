@@ -107,6 +107,41 @@ static void checkRegularInternalLevel(const AES& aes, const auto& key)
 			throw UnitTestFail("regular PPRF internal correction mismatch");
 	}
 }
+
+template<typename Key>
+static void checkRegularLeafLevel()
+{
+	using Row = AlignedArray<block, 8>;
+	PRNG prng(CCBlock);
+	const Key k0(gGgmAes[0]), k1(gGgmAes[1]);
+	for (u64 width : { 0, 1, 2, 3, 8 })
+	{
+		std::vector<Row> parents(width);
+		for (auto& row : parents)
+			prng.get(row.data(), row.size());
+		// Offset the destination by one block and guard both ends.
+		std::vector<block> leaves(16 * width + 2, AllOneBlock);
+		auto expected = leaves;
+		std::array<Row, 2> sums;
+		for (auto& row : sums)
+			prng.get(row.data(), row.size());
+		auto expectedSums = sums;
+		for (u64 p = 0; p < width; ++p)
+			for (u64 side = 0; side < 2; ++side)
+				for (u64 lane = 0; lane < 8; ++lane)
+				{
+					const auto parent = parents[p][lane];
+					const auto leaf = gGgmAes[side].ecbEncBlock(parent) ^ parent;
+					expected[1 + 16 * p + 8 * side + lane] = leaf;
+					expectedSums[side][lane] ^= leaf;
+				}
+
+		pprfVaes::leafLevel(k0, k1, parents.data(), leaves.data() + 1, width,
+			sums[0].data(), sums[1].data());
+		if (leaves != expected || sums != expectedSums)
+			throw UnitTestFail("regular PPRF leaf or correction mismatch");
+	}
+}
 #endif
 
 void RegularPprf_expandOne_test(const oc::CLP& cmd)
@@ -115,8 +150,10 @@ void RegularPprf_expandOne_test(const oc::CLP& cmd)
 
 #ifdef OC_ENABLE_VAES
 	checkRegularInternalLevel(mAesFixedKey, pprfVaes::YmmKey(mAesFixedKey));
+	checkRegularLeafLevel<pprfVaes::YmmKey>();
 #ifdef ENABLE_AVX512
 	checkRegularInternalLevel(mAesFixedKey, pprfVaes::ZmmKey(mAesFixedKey));
+	checkRegularLeafLevel<pprfVaes::ZmmKey>();
 #endif
 #endif
 

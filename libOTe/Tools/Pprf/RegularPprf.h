@@ -110,14 +110,14 @@ namespace osuCrypto
 		// gGgmAes[keep].hashBlocks<8>. Both keys run interleaved so 8 YMM AES
 		// chains are in flight. sum0/sum1 (8 blocks each) are XOR-accumulated.
 		OC_FORCEINLINE void leafLevel(const YmmKey& k0, const YmmKey& k1,
-			const block* parents, block* out, u64 width, block* sum0, block* sum1)
+			const AlignedArray<block, 8>* parents, block* out, u64 width, block* sum0, block* sum1)
 		{
 #define OC_PPRF_SUM_IN(j) __m256i s0##j = OC_PPRF_LD(sum0, j), s1##j = OC_PPRF_LD(sum1, j)
 			OC_PPRF_LANES(OC_PPRF_SUM_IN);
 #undef OC_PPRF_SUM_IN
 			for (u64 p = 0; p < width; ++p)
 			{
-				const block* in = parents + 8 * p;
+				const block* in = parents[p].data();
 				block* o = out + 16 * p;
 #define OC_PPRF_IN(j) \
 				const __m256i x##j = OC_PPRF_LD(in, j); \
@@ -230,13 +230,14 @@ namespace osuCrypto
 		}
 
 		template<u64 NP>
-		OC_FORCEINLINE void leafStep(const ZmmKey& k0, const ZmmKey& k1, const block* in, block* o,
+		OC_FORCEINLINE void leafStep(const ZmmKey& k0, const ZmmKey& k1,
+			const AlignedArray<block, 8>* parents, block* o,
 			__m512i (&s0)[2], __m512i (&s1)[2])
 		{
 			constexpr u64 C = 2 * NP;
 			__m512i x[C], a[C], b[C];
 			for (u64 c = 0; c < C; ++c)
-				x[c] = _mm512_loadu_si512(in + 4 * c);
+				x[c] = _mm512_loadu_si512(parents[c / 2].data() + 4 * (c % 2));
 			hashLeafChains(k0, k1, x, a, b);
 			for (u64 c = 0; c < C; ++c)
 			{
@@ -249,15 +250,15 @@ namespace osuCrypto
 		}
 
 		OC_FORCEINLINE void leafLevel(const ZmmKey& k0, const ZmmKey& k1,
-			const block* parents, block* out, u64 width, block* sum0, block* sum1)
+			const AlignedArray<block, 8>* parents, block* out, u64 width, block* sum0, block* sum1)
 		{
 			__m512i s0[2] = { _mm512_loadu_si512(sum0), _mm512_loadu_si512(sum0 + 4) };
 			__m512i s1[2] = { _mm512_loadu_si512(sum1), _mm512_loadu_si512(sum1 + 4) };
 			u64 p = 0;
 			for (; p + 2 <= width; p += 2)
-				leafStep<2>(k0, k1, parents + 8 * p, out + 16 * p, s0, s1);
+				leafStep<2>(k0, k1, parents + p, out + 16 * p, s0, s1);
 			if (p < width)
-				leafStep<1>(k0, k1, parents + 8 * p, out + 16 * p, s0, s1);
+				leafStep<1>(k0, k1, parents + p, out + 16 * p, s0, s1);
 			_mm512_storeu_si512(sum0, s0[0]); _mm512_storeu_si512(sum0 + 4, s0[1]);
 			_mm512_storeu_si512(sum1, s1[0]); _mm512_storeu_si512(sum1 + 4, s1[1]);
 		}
@@ -295,22 +296,23 @@ namespace osuCrypto
 			return _mm_xor_si128(_mm256_castsi256_si128(pair), _mm256_extracti128_si256(pair, 1));
 		}
 
-		template<unsigned Side, bool Cache>
-		OC_FORCEINLINE decltype(auto) compactLeafKey()
-		{
-			if constexpr (Cache)
-			{
-				static const ZmmKey key(gGgmAes[Side]);
-				return (key);
-			}
-			else
-				return ZmmKey(gGgmAes[Side]);
-		}
-
 		using Key = ZmmKey;
 #else
 		using Key = YmmKey;
 #endif
+
+		// Broadcast the two public leaf keys once on paths that reuse their schedules.
+		template<unsigned Side, bool Cache>
+		OC_FORCEINLINE decltype(auto) leafKey()
+		{
+			if constexpr (Cache)
+			{
+				static const Key key(gGgmAes[Side]);
+				return (key);
+			}
+			else
+				return Key(gGgmAes[Side]);
+		}
 
 		template<bool TwoBlocks, bool Last = false>
 		OC_FORCEINLINE void leafMaskRound(int rc, __m256i& key, __m256i& pad0, __m256i& pad1)
@@ -381,6 +383,16 @@ namespace osuCrypto
 			return ((s[0] ^ s[1]) ^ (s[2] ^ s[3])) ^ ((s[4] ^ s[5]) ^ (s[6] ^ s[7]));
 #endif
 		}
+		// Keep the full leaf kernel out of the sender and receiver expansion loops.
+		OC_NOINLINE inline std::array<block, 2> fullLeafLevel(
+			span<const AlignedArray<block, 8>> parents, block* dest)
+		{
+			alignas(64) std::array<block, 8> left{}, right{};
+			leafLevel(leafKey<0, true>(), leafKey<1, true>(), parents.data(), dest,
+				parents.size(), left.data(), right.data());
+			return { fold8(left.data()), fold8(right.data()) };
+		}
+
 	}
 #endif
 
@@ -541,8 +553,8 @@ namespace osuCrypto
 			if constexpr (std::contiguous_iterator<Iter> &&
 				requires { requires CoeffCtx::blockCopyIsTrivialAndAdditionIsXor; })
 			{
-				const auto& k0 = pprfVaes::compactLeafKey<0, CacheLeafKeys>();
-				const auto& k1 = pprfVaes::compactLeafKey<1, CacheLeafKeys>();
+				const auto& k0 = pprfVaes::leafKey<0, CacheLeafKeys>();
+				const auto& k1 = pprfVaes::leafKey<1, CacheLeafKeys>();
 				block* dest = std::to_address(output);
 				__m512i sum0 = _mm512_setzero_si512(), sum1 = _mm512_setzero_si512();
 				u64 p = 0;
@@ -1018,15 +1030,10 @@ namespace osuCrypto
 						block leftAccumulator = ZeroBlock;
 						block rightAccumulator = ZeroBlock;
 #ifdef OC_ENABLE_VAES
-						{
-							alignas(64) std::array<block, 8> laneSums0{}, laneSums1{};
-							pprfVaes::leafLevel(pprfVaes::Key(gGgmAes[0]), pprfVaes::Key(gGgmAes[1]),
-								parents.data()->data(), dest, parents.size(),
-								laneSums0.data(), laneSums1.data());
-							nativeLeaf += 16 * parents.size();
-							leftAccumulator = leftAccumulator ^ pprfVaes::fold8(laneSums0.data());
-							rightAccumulator = rightAccumulator ^ pprfVaes::fold8(laneSums1.data());
-						}
+						const auto sums = pprfVaes::fullLeafLevel(parents, dest);
+						leftAccumulator ^= sums[0];
+						rightAccumulator ^= sums[1];
+						nativeLeaf += 16 * parents.size();
 #else
 						for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
 						{
@@ -1606,15 +1613,10 @@ namespace osuCrypto
 						block leftAccumulator = gGgmAes[0].hashBlock(ZeroBlock);
 						block rightAccumulator = gGgmAes[1].hashBlock(ZeroBlock);
 #ifdef OC_ENABLE_VAES
-						{
-							alignas(64) std::array<block, 8> laneSums0{}, laneSums1{};
-							pprfVaes::leafLevel(pprfVaes::Key(gGgmAes[0]), pprfVaes::Key(gGgmAes[1]),
-								parents.data()->data(), dest, parents.size(),
-								laneSums0.data(), laneSums1.data());
-							nativeLeaf += 16 * parents.size();
-							leftAccumulator = leftAccumulator ^ pprfVaes::fold8(laneSums0.data());
-							rightAccumulator = rightAccumulator ^ pprfVaes::fold8(laneSums1.data());
-						}
+						const auto sums = pprfVaes::fullLeafLevel(parents, dest);
+						leftAccumulator ^= sums[0];
+						rightAccumulator ^= sums[1];
+						nativeLeaf += 16 * parents.size();
 #else
 						for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
 						{
