@@ -401,6 +401,64 @@ namespace osuCrypto
 
 #undef REGULAR_PPRF_STORE_HASH
 		}
+
+		template<typename Iter, typename Sums, typename CoeffCtx>
+		OC_FORCEINLINE u64 hashPhysicalBlockLeaves(span<AlignedArray<block, 8>> parents,
+			u64 domain, Iter output, Sums& leafSums, CoeffCtx& ctx)
+		{
+			const u64 subtreeDomain = 2 * parents.size();
+			const u64 fullLanes = domain / subtreeDomain;
+			const u64 partialSize = domain % subtreeDomain;
+			alignas(64) std::array<block, 8> hashed;
+			u64 written = 0;
+			for (u64 p = 0; p < parents.size(); ++p)
+			{
+				for (u64 side = 0; side < 2; ++side)
+				{
+					gGgmAes[side].hashBlocks<8>(parents[p].data(), hashed.data());
+					// All eight subtrees enter the correction sum. Only the live
+					// prefix of this row belongs in the compact physical output.
+					auto& sum = leafSums[side];
+					REGULAR_PPRF_SIMD8(lane, { ctx.plus(sum, sum, hashed[lane]); });
+					const u64 live = fullLanes + (2 * p + side < partialSize);
+					// The domain fills more than half of its padded tree, so each
+					// row has at least four live lanes. Keep these short stores inline.
+					assert(live >= 4 && live <= 8);
+					REGULAR_PPRF_SIMD8(lane, {
+						if (lane < 4 || lane < live)
+							ctx.copy(output[written + lane], hashed[lane]);
+					});
+					written += live;
+				}
+			}
+			return written;
+		}
+
+		OC_FORCEINLINE void xorLeafMask(span<u8> msg, block key, PRNG& otMasker)
+		{
+			if (msg.size() == sizeof(block) || msg.size() == 2 * sizeof(block))
+			{
+				// These are the first one or two counter blocks of the OT masker's stream.
+				const AES aes(key);
+				const block counters[2]{block(0, 0), block(0, 1)};
+				block pads[2];
+				if (msg.size() == 2 * sizeof(block))
+					aes.ecbEncBlocks<2>(counters, pads);
+				else
+					pads[0] = aes.ecbEncBlock(counters[0]);
+				for (u64 i = 0; i < msg.size() / sizeof(block); ++i)
+				{
+					block value;
+					std::memcpy(&value, msg.data() + i * sizeof(block), sizeof(block));
+					value ^= pads[i];
+					std::memcpy(msg.data() + i * sizeof(block), &value, sizeof(block));
+				}
+				return;
+			}
+			otMasker.SetSeed(key, divCeil(msg.size(), sizeof(block)));
+			for (u64 i = 0; i < msg.size(); ++i)
+				msg[i] ^= otMasker.get<u8>();
+		}
 	}
 
 
@@ -745,9 +803,13 @@ namespace osuCrypto
 			{
 				auto parents = levels.back();
 				auto generateGeneric = [&] {
+					if constexpr (std::is_same_v<F, block> && Format == PprfOutputFormat::ByPhysicalIndex)
+					{
+						nativeLeaf = pprf::hashPhysicalBlockLeaves(parents, mDomain,
+							output.begin() + treeIdx * mDomain, leafSums, ctx);
+						return;
+					}
 					alignas(64) std::array<block, 8> hashed;
-					const u64 fullLanes = mDomain / subtreeDomain;
-					const u64 partialSize = mDomain % subtreeDomain;
 					for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
 					{
 						for (u64 side = 0; side < 2; ++side)
@@ -755,23 +817,11 @@ namespace osuCrypto
 							gGgmAes[side].hashBlocks<8>(
 								parents[parentIdx].data(), hashed.data());
 							const auto localLeaf = 2 * parentIdx + side;
-							if constexpr (std::is_same_v<F, block> && Format == PprfOutputFormat::ByPhysicalIndex)
-							{
-								// Physical order visits one local leaf across eight subtrees.
-								// All hashes enter the sum, but only the live prefix is emitted.
-								auto& sum = leafSums[side];
-								REGULAR_PPRF_SIMD8(lane, { ctx.plus(sum, sum, hashed[lane]); });
-								const u64 live = fullLanes + (localLeaf < partialSize);
-								for (u64 lane = 0; lane < live; ++lane)
-									ctx.copy(output[treeIdx * mDomain + nativeLeaf + lane], hashed[lane]);
-								nativeLeaf += live;
-							}
-							else
-							{
-								REGULAR_PPRF_SIMD8(lane, {
-									addLeaf(side, hashed[lane], lane * subtreeDomain + localLeaf);
-								});
-							}
+							REGULAR_PPRF_SIMD8(lane, {
+								addLeaf(
+									side, hashed[lane],
+									lane * subtreeDomain + localLeaf);
+							});
 						}
 					}
 				};
@@ -857,30 +907,7 @@ namespace osuCrypto
 					0, count * ctx.template byteSize<F>());
 				leafMsgs = leafMsgs.subspan(msg.size());
 				ctx.serialize(leafOts.begin(), leafOts.begin() + count, msg.begin());
-				if (msg.size() == sizeof(block) || msg.size() == 2 * sizeof(block))
-				{
-					// These are the first one or two counter blocks of the OT masker's stream.
-					const AES aes(mBaseOTs(treeIdx, 0)[1 ^ choice]);
-					const block counters[2]{block(0, 0), block(0, 1)};
-					block pads[2];
-					if (msg.size() == 2 * sizeof(block))
-						aes.ecbEncBlocks<2>(counters, pads);
-					else
-						pads[0] = aes.ecbEncBlock(counters[0]);
-					for (u64 i = 0; i < msg.size() / sizeof(block); ++i)
-					{
-						block value;
-						std::memcpy(&value, msg.data() + i * sizeof(block), sizeof(block));
-						value ^= pads[i];
-						std::memcpy(msg.data() + i * sizeof(block), &value, sizeof(block));
-					}
-					continue;
-				}
-				otMasker.SetSeed(
-					mBaseOTs(treeIdx, 0)[1 ^ choice],
-					divCeil(msg.size(), sizeof(block)));
-				for (u64 i = 0; i < msg.size(); ++i)
-					msg[i] ^= otMasker.get<u8>();
+				pprf::xorLeafMask(msg, mBaseOTs(treeIdx, 0)[1 ^ choice], otMasker);
 			}
 			assert(leafMsgs.empty());
 		}
@@ -1355,6 +1382,12 @@ namespace osuCrypto
 			{
 				auto parents = levels.back();
 				auto generateGeneric = [&] {
+					if constexpr (std::is_same_v<F, block> && Format == PprfOutputFormat::ByPhysicalIndex)
+					{
+						nativeLeaf = pprf::hashPhysicalBlockLeaves(parents, mDomain,
+							output.begin() + treeIdx * mDomain, leafSums, ctx);
+						return;
+					}
 					std::array<block, 8> hashed;
 					for (u64 parentIdx = 0; parentIdx < parents.size(); ++parentIdx)
 					{
@@ -1432,11 +1465,8 @@ namespace osuCrypto
 			const auto valueCount = 1 + u64(programPuncturedPoint);
 			const auto valueBytes = valueCount * ctx.template byteSize<F>();
 			auto selected = leafMsgs.subspan(inactiveSide * valueBytes, valueBytes);
-			PRNG otMasker(
-				mBaseOTs(treeIdx, 0),
-				divCeil(selected.size(), sizeof(block)));
-			for (u64 i = 0; i < selected.size(); ++i)
-				selected[i] ^= otMasker.get<u8>();
+			PRNG otMasker;
+			pprf::xorLeafMask(selected, mBaseOTs(treeIdx, 0), otMasker);
 
 			auto leafOts = ctx.template makeVec<F>(valueCount);
 			ctx.deserialize(selected.begin(), selected.end(), leafOts.begin());
