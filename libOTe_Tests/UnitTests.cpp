@@ -248,6 +248,7 @@ namespace tests_libOTe
 			tc.add("DotExt_Kos_Check_Test                   ", DotExt_Kos_Check_Test);
 			tc.add("DotExt_Kos_SplitDelta_Test              ", DotExt_Kos_SplitDelta_Test);
 			tc.add("DotExt_Kos_MapReuse_Test                ", DotExt_Kos_MapReuse_Test);
+			tc.add("OtExt_Silent_receiverHash_Test          ", OtExt_Silent_receiverHash_Test);
 			tc.add("OtExt_Silent_random_Test                ", OtExt_Silent_random_Test);
 			tc.add("OtExt_Silent_correlated_Test            ", OtExt_Silent_correlated_Test);
 			tc.add("OtExt_Silent_inplace_Test               ", OtExt_Silent_inplace_Test);

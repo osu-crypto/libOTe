@@ -893,6 +893,44 @@ namespace {
 // Silent OT Extension tests
 //=================================================================================================
 
+void OtExt_Silent_receiverHash_Test(const CLP&)
+{
+#ifdef ENABLE_SILENTOT
+    PRNG prng(block(42, 19));
+    SilentOtExtReceiver receiver;
+    const block mask = AllOneBlock ^ OneBlock;
+    std::array<block, 50> raw;
+    prng.get(raw.data(), raw.size());
+
+    // Cross three 16-OT batches and cover every 8-OT and scalar tail.
+    for (u64 n = 0; n <= raw.size(); ++n)
+    {
+        receiver.mRequestNumOts = n;
+        receiver.mA.resize(n);
+        alignas(32) std::array<block, 54> storage;
+        for (u64 layout = 0; layout < 3; ++layout)
+        {
+            std::copy_n(raw.begin(), n, receiver.mA.begin());
+            storage.fill(AllOneBlock);
+            // Test 32-byte alignment, 16-byte-only alignment, and in-place output.
+            block* out = layout == 2 ? receiver.mA.data() : storage.data() + 2 + layout;
+            BitVector choices(n);
+            receiver.hash(choices, span<block>(out, n), ChoiceBitPacking::True);
+            for (u64 i = 0; i < n; ++i)
+            {
+                if (choices[i] != raw[i].testc(OneBlock) ||
+                    out[i] != mAesFixedKey.hashBlock(raw[i] & mask))
+                    throw RTE_LOC;
+            }
+            if (layout != 2 && (out[-1] != AllOneBlock || out[n] != AllOneBlock))
+                throw RTE_LOC;
+        }
+    }
+#else
+    throw UnitTestSkipped("Silent OT disabled");
+#endif
+}
+
 void OtExt_Silent_random_Test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
