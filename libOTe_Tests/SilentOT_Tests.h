@@ -10,6 +10,7 @@
 #include <cryptoTools/Common/CLP.h>
 
 
+void OtExt_Silent_receiverHash_Test(const oc::CLP& cmd);
 void OtExt_Silent_random_Test(const oc::CLP& cmd);
 void OtExt_Silent_correlated_Test(const oc::CLP& cmd);
 void OtExt_Silent_inplace_Test(const oc::CLP& cmd);

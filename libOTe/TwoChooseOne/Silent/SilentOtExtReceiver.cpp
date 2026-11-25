@@ -663,6 +663,53 @@ namespace osuCrypto
 			throw RTE_LOC;
 	}
 
+
+#ifdef OC_ENABLE_VAES
+	namespace
+	{
+		// Each YMM register holds two received blocks. Extract their choice bits,
+		// clear those bits and compute AES(x) ^ x before writing either message.
+		OC_FORCEINLINE void hashReceiverVaes(const AES& aes, const block* input,
+			block* output, u8* choices, u64 count)
+		{
+			alignas(32) __m256i key[11];
+			for (u64 k = 0; k < 11; ++k)
+				key[k] = _mm256_broadcastsi128_si256(aes.mRoundKey[k].mData);
+			const auto mask = _mm256_set_epi64x(-1, -2, -1, -2);
+
+			for (u64 i = 0; i < count; i += 16)
+			{
+				__m256i x0, x1, x2, x3, x4, x5, x6, x7;
+				__m256i a0, a1, a2, a3, a4, a5, a6, a7;
+				u32 bits = 0;
+#define OC_RECV_LANES(OP) OP(0); OP(1); OP(2); OP(3); OP(4); OP(5); OP(6); OP(7)
+#define OC_RECV_LOAD(j) do { \
+				const auto raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(input + i + 2*j)); \
+				const auto signs = _mm256_movemask_pd(_mm256_castsi256_pd(_mm256_slli_epi64(raw, 63))); \
+				bits |= u32((signs & 1) | ((signs >> 1) & 2)) << (2*j); \
+				x##j = _mm256_and_si256(raw, mask); \
+				a##j = _mm256_xor_si256(x##j, key[0]); \
+			} while (false)
+#define OC_RECV_ROUND(j) a##j = _mm256_aesenc_epi128(a##j, key[k])
+#define OC_RECV_STORE(j) _mm256_storeu_si256(reinterpret_cast<__m256i*>(output + i + 2*j), \
+				_mm256_xor_si256(_mm256_aesenclast_epi128(a##j, key[10]), x##j))
+				OC_RECV_LANES(OC_RECV_LOAD);
+				choices[i / 8] = u8(bits);
+				choices[i / 8 + 1] = u8(bits >> 8);
+				for (u64 k = 1; k < 10; ++k)
+				{
+					OC_RECV_LANES(OC_RECV_ROUND);
+				}
+				OC_RECV_LANES(OC_RECV_STORE);
+#undef OC_RECV_STORE
+#undef OC_RECV_ROUND
+#undef OC_RECV_LOAD
+#undef OC_RECV_LANES
+			}
+		}
+	}
+#endif
+
 	// Hashes the OT messages for security and extracts choice bits
 	void SilentOtExtReceiver::hash(
 		BitVector& choices,
@@ -676,7 +723,7 @@ namespace osuCrypto
 		if ((u64)mA.size() != mRequestNumOts)
 			throw std::logic_error("Silent OT receiver hash state is not ready. " LOCATION);
 
-		auto cIter = choices.begin();
+		u64 i = 0;
 		auto n8 = mRequestNumOts / 8 * 8;
 		auto m = messages.data();
 		auto r = mA.data();
@@ -686,8 +733,17 @@ namespace osuCrypto
 			// Mask to clear the least significant bit (used for choice bit)
 			block mask = OneBlock ^ AllOneBlock;
 
+#ifdef OC_ENABLE_VAES
+			i = mRequestNumOts / 16 * 16;
+			if (i)
+			{
+				hashReceiverVaes(mAesFixedKey, r, m, choices.data(), i);
+				m += i;
+				r += i;
+			}
+#endif
 			// Process in blocks of 8 for efficiency
-			for (u64 i = 0; i < n8; i += 8)
+			for (; i < n8; i += 8)
 			{
 				// Extract the choice bits from the LSB of each block
 				u32 b0 = r[0].testc(OneBlock);
@@ -728,21 +784,11 @@ namespace osuCrypto
 			}
 
 			// Process any remaining messages
-			cIter = cIter + n8;
-			for (u64 i = n8; i < (u64)messages.size(); ++i)
+			for (; i < mRequestNumOts; ++i)
 			{
-				auto m = &messages[i];
-				auto r = &mA[i];
-
-				// Clear the LSB which contained the choice bit
-				m[0] = r[0] & mask;
-
-				// Hash the message for security
-				m[0] = mAesFixedKey.hashBlock(m[0]);
-
-				// Extract the choice bit
-				*cIter = r[0].testc(OneBlock);
-				++cIter;
+				const block raw = mA[i];
+				choices[i] = raw.testc(OneBlock);
+				messages[i] = mAesFixedKey.hashBlock(raw & mask);
 			}
 		}
 		else
