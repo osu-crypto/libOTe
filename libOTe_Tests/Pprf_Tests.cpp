@@ -74,13 +74,15 @@ static void checkRegularInternalLevel(const AES& aes, const auto& key)
 {
 	using Row = AlignedArray<block, 8>;
 	PRNG prng(CCBlock);
-	for (u64 width : { 1, 2, 3, 4, 8 })
+	for (u64 width : { 0, 1, 2, 3, 4, 8, 17 })
 	{
 		std::vector<Row> parents(width), children(2 * width);
 		Row left, right;
 		prng.get(left.data(), left.size());
 		prng.get(right.data(), right.size());
 		Row expectedLeft = left, expectedRight = right;
+		const block initialLeft = pprfVaes::fold8(left.data());
+		const block initialRight = pprfVaes::fold8(right.data());
 		for (auto& row : parents)
 			prng.get(row.data(), row.size());
 		pprfVaes::internalLevel(key, parents.data(), children.data(), width, left.data(), right.data());
@@ -105,6 +107,13 @@ static void checkRegularInternalLevel(const AES& aes, const auto& key)
 		if (left != expectedLeft || right != expectedRight ||
 			pprfVaes::fold8(left.data()) != leftSum || pprfVaes::fold8(right.data()) != rightSum)
 			throw UnitTestFail("regular PPRF internal correction mismatch");
+		if constexpr (std::is_same_v<std::remove_cvref_t<decltype(key)>, pprfVaes::Key>)
+		{
+			std::vector<Row> actual(children.size());
+			const auto sums = pprfVaes::internalLevelSums(key, parents.data(), actual.data(), width);
+			if (actual != children || sums[0] != (initialLeft ^ leftSum) || sums[1] != (initialRight ^ rightSum))
+				throw UnitTestFail("regular PPRF reduced level mismatch");
+		}
 	}
 }
 
