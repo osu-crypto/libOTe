@@ -1309,8 +1309,17 @@ namespace osuCrypto
 				zeroAes.add_epi64(ZeroBlock)
 			};
 
+			// The root is the missing parent. Its two generated children cancel
+			// the inactive offsets, leaving the OT correction as the sibling seed.
+			if (mDepth > 1)
+			{
+				const auto sibling = (point >> (mDepth - 1)) ^ 1;
+				current[sibling] = (*theirSumsIter)[sibling] ^ mBaseOTs(treeIdx, mDepth - 1);
+				++theirSumsIter;
+			}
+
 			const auto topInternalDepth = std::min<u64>(3, mDepth - 1);
-			for (u64 d = 0; d < topInternalDepth; ++d)
+			for (u64 d = 1; d < topInternalDepth; ++d)
 			{
 				block leftAccumulator = inactiveInternal[0];
 				block rightAccumulator = inactiveInternal[1];
@@ -1397,8 +1406,18 @@ namespace osuCrypto
 			}
 			assert(theirSumsIter == theirSums.end());
 
-			auto leafSums = ctx.template makeVec<F>(2);
-			auto zero = ctx.template makeVec<F>(1);
+			// Standard block vectors can use fixed, aligned storage for these
+			// one- and two-element buffers. Preserve context-owned storage otherwise.
+			auto leafBuffer = [&](span<block> storage) {
+				if constexpr (std::is_same_v<F, block> && std::is_same_v<VecF, AlignedUnVector<block>>)
+					return storage;
+				else
+					return ctx.template makeVec<F>(storage.size());
+			};
+			AlignedArray<block, 2> sumStorage, otStorage;
+			AlignedArray<block, 1> zeroStorage;
+			auto leafSums = leafBuffer(sumStorage);
+			auto zero = leafBuffer(zeroStorage);
 			ctx.zero(zero.begin(), zero.end());
 			for (u64 side = 0; side < 2; ++side)
 			{
@@ -1536,7 +1555,7 @@ namespace osuCrypto
 			PRNG otMasker;
 			pprf::xorLeafMask(selected, mBaseOTs(treeIdx, 0), otMasker);
 
-			auto leafOts = ctx.template makeVec<F>(valueCount);
+			auto leafOts = leafBuffer({ otStorage.data(), valueCount });
 			ctx.deserialize(selected.begin(), selected.end(), leafOts.begin());
 			if (programPuncturedPoint)
 			{
