@@ -74,6 +74,26 @@ void RegularPprf_expandOne_test(const oc::CLP& cmd)
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
 
 
+	// Check both serialized choices, including the one the receiver never opens.
+	PRNG prng(CCBlock);
+	for (const u64 bytes : { 16, 32 })
+	{
+		for (const u64 offset : { 0, 1, 15 })
+		{
+			std::array<block, 2> keys;
+			prng.get(keys.data(), keys.size());
+			std::array<u8, 80> actual;
+			prng.get(actual.data(), actual.size());
+			auto expected = actual;
+			PRNG masker;
+			for (u64 choice = 0; choice < 2; ++choice)
+				pprf::xorLeafMask({ expected.data() + offset + choice * bytes, bytes }, keys[1 ^ choice], masker);
+			pprf::xorSenderLeafMasks({ actual.data() + offset, 2 * bytes }, bytes, keys);
+			if (actual != expected)
+				throw RTE_LOC;
+		}
+	}
+
 	for (u64 domain : { 2, 128, 4522}) for (bool program : {true, false})
 	{
 

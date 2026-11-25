@@ -10,6 +10,7 @@
 #include "cryptoTools/Common/Range.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/Coproto.h"
+#include "libOTe/Tools/CompilerHints.h"
 #include <array>
 #include <cstring>
 #include <iterator>
@@ -291,10 +292,81 @@ namespace osuCrypto
 			return (lanes[0] ^ lanes[1]) ^ (lanes[2] ^ lanes[3]);
 		}
 
+		template<unsigned Side, bool Cache>
+		OC_FORCEINLINE decltype(auto) compactLeafKey()
+		{
+			if constexpr (Cache)
+			{
+				static const ZmmKey key(gGgmAes[Side]);
+				return (key);
+			}
+			else
+				return ZmmKey(gGgmAes[Side]);
+		}
+
 		using Key = ZmmKey;
 #else
 		using Key = YmmKey;
 #endif
+
+		template<bool TwoBlocks, bool Last = false>
+		OC_FORCEINLINE void leafMaskRound(int rc, __m256i& key, __m256i& pad0, __m256i& pad1)
+		{
+			// Repeat RotWord(w3) in every column. ShiftRows then preserves
+			// the repeated word while AESENCLAST applies the AES S-box.
+			const auto word = _mm256_shuffle_epi8(key, _mm256_set1_epi32(0x0c0f0e0d));
+			const auto subWord = _mm256_aesenclast_epi128(word, _mm256_set1_epi32(rc));
+			// Inclusive XOR prefix of the four key words, then add the schedule word.
+			key = _mm256_xor_si256(key, _mm256_slli_si256(key, 4));
+			key = _mm256_xor_si256(subWord, _mm256_xor_si256(key, _mm256_slli_si256(key, 8)));
+			if constexpr (Last)
+			{
+				pad0 = _mm256_aesenclast_epi128(pad0, key);
+				if constexpr (TwoBlocks)
+					pad1 = _mm256_aesenclast_epi128(pad1, key);
+			}
+			else
+			{
+				pad0 = _mm256_aesenc_epi128(pad0, key);
+				if constexpr (TwoBlocks)
+					pad1 = _mm256_aesenc_epi128(pad1, key);
+			}
+		}
+
+		// One OT mask key per 128-bit lane. Encrypt counters 0 and, for a
+		// two-block message, 1 while advancing both AES-128 key schedules.
+		template<bool TwoBlocks>
+		OC_FORCEINLINE void xorLeafMaskPair(u8* messages, const std::array<block, 2>& keys)
+		{
+			auto key = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(keys.data()));
+			auto pad0 = key;
+			auto pad1 = _mm256_xor_si256(key, _mm256_setr_epi64x(1, 0, 1, 0));
+			leafMaskRound<TwoBlocks>(0x01, key, pad0, pad1);
+			leafMaskRound<TwoBlocks>(0x02, key, pad0, pad1);
+			leafMaskRound<TwoBlocks>(0x04, key, pad0, pad1);
+			leafMaskRound<TwoBlocks>(0x08, key, pad0, pad1);
+			leafMaskRound<TwoBlocks>(0x10, key, pad0, pad1);
+			leafMaskRound<TwoBlocks>(0x20, key, pad0, pad1);
+			leafMaskRound<TwoBlocks>(0x40, key, pad0, pad1);
+			leafMaskRound<TwoBlocks>(0x80, key, pad0, pad1);
+			leafMaskRound<TwoBlocks>(0x1b, key, pad0, pad1);
+			leafMaskRound<TwoBlocks, true>(0x36, key, pad0, pad1);
+
+			// Choice zero uses key one. Store counters in order within each choice.
+			auto dest = reinterpret_cast<__m256i*>(messages);
+			if constexpr (TwoBlocks)
+			{
+				const auto first = _mm256_permute2x128_si256(pad0, pad1, 0x31);
+				const auto second = _mm256_permute2x128_si256(pad0, pad1, 0x20);
+				_mm256_storeu_si256(dest, _mm256_xor_si256(_mm256_loadu_si256(dest), first));
+				_mm256_storeu_si256(dest + 1, _mm256_xor_si256(_mm256_loadu_si256(dest + 1), second));
+			}
+			else
+			{
+				const auto pads = _mm256_permute2x128_si256(pad0, pad0, 0x01);
+				_mm256_storeu_si256(dest, _mm256_xor_si256(_mm256_loadu_si256(dest), pads));
+			}
+		}
 
 		// The kernels keep one sum per lane (the 8 subtrees of one tree); the
 		// tree's level sum is their XOR.
@@ -450,7 +522,7 @@ namespace osuCrypto
 #undef REGULAR_PPRF_STORE_HASH
 		}
 
-		template<typename Iter, typename Sums, typename CoeffCtx>
+		template<bool CacheLeafKeys = false, typename Iter, typename Sums, typename CoeffCtx>
 		OC_FORCEINLINE u64 hashPhysicalBlockLeaves(span<AlignedArray<block, 8>> parents,
 			u64 domain, Iter output, Sums& leafSums, CoeffCtx& ctx)
 		{
@@ -462,7 +534,8 @@ namespace osuCrypto
 			if constexpr (std::contiguous_iterator<Iter> &&
 				requires { requires CoeffCtx::blockCopyIsTrivialAndAdditionIsXor; })
 			{
-				const pprfVaes::ZmmKey k0(gGgmAes[0]), k1(gGgmAes[1]);
+				const auto& k0 = pprfVaes::compactLeafKey<0, CacheLeafKeys>();
+				const auto& k1 = pprfVaes::compactLeafKey<1, CacheLeafKeys>();
 				block* dest = std::to_address(output);
 				__m512i sum0 = _mm512_setzero_si512(), sum1 = _mm512_setzero_si512();
 				u64 p = 0;
@@ -502,6 +575,16 @@ namespace osuCrypto
 			return written;
 		}
 
+		template<typename F, typename CoeffCtx>
+		OC_FORCEINLINE auto leafBuffer(CoeffCtx& ctx, span<block> storage)
+		{
+			using VecF = typename CoeffCtx::template Vec<F>;
+			if constexpr (std::is_same_v<F, block> && std::is_same_v<VecF, AlignedUnVector<block>>)
+				return storage;
+			else
+				return ctx.template makeVec<F>(storage.size());
+		}
+
 		OC_FORCEINLINE void xorLeafMask(span<u8> msg, block key, PRNG& otMasker)
 		{
 			if (msg.size() == sizeof(block) || msg.size() == 2 * sizeof(block))
@@ -526,6 +609,20 @@ namespace osuCrypto
 			otMasker.SetSeed(key, divCeil(msg.size(), sizeof(block)));
 			for (u64 i = 0; i < msg.size(); ++i)
 				msg[i] ^= otMasker.get<u8>();
+		}
+
+		OC_FORCEINLINE void xorSenderLeafMasks(span<u8> msgs, u64 messageBytes, const std::array<block, 2>& keys)
+		{
+			assert(msgs.size() == 2 * messageBytes);
+#ifdef OC_ENABLE_VAES
+			if (messageBytes == sizeof(block))
+				return pprfVaes::xorLeafMaskPair<false>(msgs.data(), keys);
+			if (messageBytes == 2 * sizeof(block))
+				return pprfVaes::xorLeafMaskPair<true>(msgs.data(), keys);
+#endif
+			PRNG otMasker;
+			xorLeafMask(msgs.subspan(0, messageBytes), keys[1], otMasker);
+			xorLeafMask(msgs.subspan(messageBytes, messageBytes), keys[0], otMasker);
 		}
 	}
 
@@ -739,8 +836,9 @@ namespace osuCrypto
 			mPntCount = 0;
 		}
 
+		// Keep the aligned tree and leaf scratch out of the calling coroutine.
 		template<PprfOutputFormat Format>
-		void expandOne(
+		OC_NOINLINE void expandOne(
 			block root,
 			u64 treeIdx,
 			bool programPuncturedPoint,
@@ -829,7 +927,8 @@ namespace osuCrypto
 			}
 			assert(encSumIter == encSums.end());
 
-			auto leafSums = ctx.template makeVec<F>(2);
+			AlignedArray<block, 2> sumStorage;
+			auto leafSums = pprf::leafBuffer<F>(ctx, sumStorage);
 			ctx.zero(leafSums.begin(), leafSums.end());
 			const auto padded = pprf::paddedDomain(mDomain);
 			const auto subtreeDomain = mDepth > 3 ? padded / 8 : padded;
@@ -873,7 +972,8 @@ namespace osuCrypto
 				auto generateGeneric = [&] {
 					if constexpr (std::is_same_v<F, block> && Format == PprfOutputFormat::ByPhysicalIndex)
 					{
-						nativeLeaf = pprf::hashPhysicalBlockLeaves(parents, mDomain,
+						// Reuse the public broadcast schedules across sender trees.
+						nativeLeaf = pprf::hashPhysicalBlockLeaves<true>(parents, mDomain,
 							output.begin() + treeIdx * mDomain, leafSums, ctx);
 						return;
 					}
@@ -948,8 +1048,10 @@ namespace osuCrypto
 			}
 			assert(nativeLeaf == mDomain);
 
-			auto leafOts = ctx.template makeVec<F>(2);
-			PRNG otMasker;
+			AlignedArray<block, 2> otStorage;
+			auto leafOts = pprf::leafBuffer<F>(ctx, otStorage);
+			const auto count = 1 + u64(programPuncturedPoint);
+			const auto messageBytes = count * ctx.template byteSize<F>();
 			for (u64 choice = 0; choice < 2; ++choice)
 			{
 				if (programPuncturedPoint)
@@ -970,14 +1072,10 @@ namespace osuCrypto
 					ctx.copy(leafOts[0], leafSums[choice]);
 				}
 
-				const auto count = 1 + u64(programPuncturedPoint);
-				auto msg = leafMsgs.subspan(
-					0, count * ctx.template byteSize<F>());
-				leafMsgs = leafMsgs.subspan(msg.size());
+				auto msg = leafMsgs.subspan(choice * messageBytes, messageBytes);
 				ctx.serialize(leafOts.begin(), leafOts.begin() + count, msg.begin());
-				pprf::xorLeafMask(msg, mBaseOTs(treeIdx, 0)[1 ^ choice], otMasker);
 			}
-			assert(leafMsgs.empty());
+			pprf::xorSenderLeafMasks(leafMsgs, messageBytes, mBaseOTs(treeIdx, 0));
 		}
 
 
@@ -1406,18 +1504,10 @@ namespace osuCrypto
 			}
 			assert(theirSumsIter == theirSums.end());
 
-			// Standard block vectors can use fixed, aligned storage for these
-			// one- and two-element buffers. Preserve context-owned storage otherwise.
-			auto leafBuffer = [&](span<block> storage) {
-				if constexpr (std::is_same_v<F, block> && std::is_same_v<VecF, AlignedUnVector<block>>)
-					return storage;
-				else
-					return ctx.template makeVec<F>(storage.size());
-			};
 			AlignedArray<block, 2> sumStorage, otStorage;
 			AlignedArray<block, 1> zeroStorage;
-			auto leafSums = leafBuffer(sumStorage);
-			auto zero = leafBuffer(zeroStorage);
+			auto leafSums = pprf::leafBuffer<F>(ctx, sumStorage);
+			auto zero = pprf::leafBuffer<F>(ctx, zeroStorage);
 			ctx.zero(zero.begin(), zero.end());
 			for (u64 side = 0; side < 2; ++side)
 			{
@@ -1555,7 +1645,7 @@ namespace osuCrypto
 			PRNG otMasker;
 			pprf::xorLeafMask(selected, mBaseOTs(treeIdx, 0), otMasker);
 
-			auto leafOts = leafBuffer({ otStorage.data(), valueCount });
+			auto leafOts = pprf::leafBuffer<F>(ctx, { otStorage.data(), valueCount });
 			ctx.deserialize(selected.begin(), selected.end(), leafOts.begin());
 			if (programPuncturedPoint)
 			{
