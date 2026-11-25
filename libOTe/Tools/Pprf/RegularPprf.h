@@ -299,6 +299,61 @@ namespace osuCrypto
 		using Key = ZmmKey;
 #else
 		using Key = YmmKey;
+
+		OC_FORCEINLINE void storeCompactRow(block* out, u64 live, const __m256i (&row)[4])
+		{
+			assert(live >= 4 && live <= 8);
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(out), row[0]);
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 2), row[1]);
+			if (live >= 6)
+			{
+				_mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 4), row[2]);
+				if (live == 8)
+					_mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 6), row[3]);
+				else if (live == 7)
+					_mm_storeu_si128(reinterpret_cast<__m128i*>(out + 6), _mm256_castsi256_si128(row[3]));
+			}
+			else if (live == 5)
+				_mm_storeu_si128(reinterpret_cast<__m128i*>(out + 4), _mm256_castsi256_si128(row[2]));
+		}
+
+		// Eight independent AES chains cover both children of one eight-lane row.
+		// All lanes contribute to the correction, including those outside the domain.
+		OC_FORCEINLINE void compactLeafStep(const YmmKey& k0, const YmmKey& k1,
+			const block* parents, block*& out, u64 live, __m256i& sum0, __m256i& sum1)
+		{
+			__m256i x[4], left[4], right[4];
+			for (u64 c = 0; c < 4; ++c)
+			{
+				x[c] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(parents + 2 * c));
+				left[c] = _mm256_xor_si256(x[c], k0.k[0]);
+				right[c] = _mm256_xor_si256(x[c], k1.k[0]);
+			}
+			for (u64 r = 1; r < 10; ++r)
+				for (u64 c = 0; c < 4; ++c)
+				{
+					left[c] = _mm256_aesenc_epi128(left[c], k0.k[r]);
+					right[c] = _mm256_aesenc_epi128(right[c], k1.k[r]);
+				}
+			for (u64 c = 0; c < 4; ++c)
+			{
+				left[c] = _mm256_xor_si256(_mm256_aesenclast_epi128(left[c], k0.k[10]), x[c]);
+				right[c] = _mm256_xor_si256(_mm256_aesenclast_epi128(right[c], k1.k[10]), x[c]);
+			}
+			auto fold = [](const __m256i (&v)[4]) {
+				return _mm256_xor_si256(_mm256_xor_si256(v[0], v[1]), _mm256_xor_si256(v[2], v[3]));
+			};
+			sum0 = _mm256_xor_si256(sum0, fold(left));
+			sum1 = _mm256_xor_si256(sum1, fold(right));
+			storeCompactRow(out, live, left);
+			storeCompactRow(out + live, live, right);
+			out += 2 * live;
+		}
+
+		OC_FORCEINLINE block fold2(__m256i sum)
+		{
+			return _mm_xor_si128(_mm256_castsi256_si128(sum), _mm256_extracti128_si256(sum, 1));
+		}
 #endif
 
 		// Broadcast the two public leaf keys once on paths that reuse their schedules.
@@ -548,7 +603,7 @@ namespace osuCrypto
 			const u64 subtreeDomain = 2 * parents.size();
 			const u64 fullLanes = domain / subtreeDomain;
 			const u64 partialSize = domain % subtreeDomain;
-#if defined(OC_ENABLE_VAES) && defined(ENABLE_AVX512)
+#ifdef OC_ENABLE_VAES
 			// A context can opt in when block copy is assignment and addition is bitwise XOR.
 			if constexpr (std::contiguous_iterator<Iter> &&
 				requires { requires CoeffCtx::blockCopyIsTrivialAndAdditionIsXor; })
@@ -556,6 +611,7 @@ namespace osuCrypto
 				const auto& k0 = pprfVaes::leafKey<0, CacheLeafKeys>();
 				const auto& k1 = pprfVaes::leafKey<1, CacheLeafKeys>();
 				block* dest = std::to_address(output);
+#ifdef ENABLE_AVX512
 				__m512i sum0 = _mm512_setzero_si512(), sum1 = _mm512_setzero_si512();
 				u64 p = 0;
 				for (; p + 2 <= parents.size(); p += 2)
@@ -566,6 +622,14 @@ namespace osuCrypto
 						p, fullLanes, partialSize / 2, sum0, sum1);
 				leafSums[0] ^= pprfVaes::fold4(sum0);
 				leafSums[1] ^= pprfVaes::fold4(sum1);
+#else
+				__m256i sum0 = _mm256_setzero_si256(), sum1 = _mm256_setzero_si256();
+				for (u64 p = 0; p < parents.size(); ++p)
+					pprfVaes::compactLeafStep(k0, k1, parents[p].data(), dest,
+						fullLanes + (p < partialSize / 2), sum0, sum1);
+				leafSums[0] ^= pprfVaes::fold2(sum0);
+				leafSums[1] ^= pprfVaes::fold2(sum1);
+#endif
 				return dest - std::to_address(output);
 			}
 #endif

@@ -821,6 +821,7 @@ namespace
 		static constexpr bool blockCopyIsTrivialAndAdditionIsXor = true;
 	};
 
+	template<bool Sender>
 	void checkCompactXorLeaves()
 	{
 		PRNG prng(CCBlock);
@@ -845,7 +846,7 @@ namespace
 							expected[next++] = h;
 					}
 			}
-			const auto written = pprf::hashPhysicalBlockLeaves(parents, domain, output.data() + 1, sums, ctx);
+			const auto written = pprf::hashPhysicalBlockLeaves<Sender>(parents, domain, output.data() + 1, sums, ctx);
 			if (written != domain || sums != expectedSums || output != expected)
 				throw std::runtime_error("Compact XOR leaves disagree with the scalar hashes");
 		}
@@ -854,7 +855,8 @@ namespace
 
 void RegularPprf_PhysicalIndex_test(const CLP& cmd)
 {
-	checkCompactXorLeaves();
+	checkCompactXorLeaves<true>();
+	checkCompactXorLeaves<false>();
 	auto f = PprfOutputFormat::ByPhysicalIndex;
 	auto v = cmd.isSet("v");
 	// The physical block path also supports coefficient addition other than XOR.
