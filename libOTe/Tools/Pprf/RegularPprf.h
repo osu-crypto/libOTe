@@ -821,7 +821,7 @@ namespace osuCrypto
 			if (baseOtCount() != static_cast<u64>(baseMessages.size()))
 				throw RTE_LOC;
 
-			mBaseOTs.resize(mPntCount, mDepth);
+			mBaseOTs.resize(mPntCount, mDepth, AllocType::Uninitialized);
 			for (u64 i = 0; i < static_cast<u64>(mBaseOTs.size()); ++i)
 				mBaseOTs(i) = baseMessages[i];
 		}
@@ -1393,7 +1393,7 @@ namespace osuCrypto
 			if (baseOtCount() != static_cast<u64>(baseMessages.size()))
 				throw RTE_LOC;
 
-			mBaseOTs.resize(mPntCount, mDepth);
+			mBaseOTs.resize(mPntCount, mDepth, AllocType::Uninitialized);
 			memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
 		}
 
