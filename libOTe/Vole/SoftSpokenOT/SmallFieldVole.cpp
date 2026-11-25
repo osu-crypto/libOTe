@@ -186,12 +186,14 @@ namespace osuCrypto
 			state[i] = _mm256_aesenclast_epi128(state[i], raw[i]);
 	}
 
-	static OC_FORCEINLINE void generateFourTwoBitSenders(
+	template<unsigned count>
+	static OC_FORCEINLINE void generateTwoBitSenders256(
 		const block* seeds, block index, const AES& aes, block* outU, block* outV)
 	{
-		__m256i state[8];
+		static_assert(count == 2 || count == 4);
+		__m256i state[2 * count];
 		hashTwoBitSeeds256(seeds, index, aes, state);
-		for (unsigned i = 0; i < 4; i += 2)
+		for (unsigned i = 0; i < count; i += 2)
 		{
 			__m256i partial[2];
 			for (unsigned j = 0; j < 2; ++j)
@@ -241,8 +243,12 @@ namespace osuCrypto
 #elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
 			if constexpr (fieldBitsConst == 2)
 			{
-				for (; This.mNumVoles - nVole >= 4; nVole += 4, seeds += 16, outU += 4, outV += 8)
-					generateFourTwoBitSenders(seeds, blockIdxBlock, aes, outU, outV);
+				// The generic sender writes complete pairs, so three remaining VOLEs occupy four slots.
+				for (; nVole + 3 <= This.mNumVoles; nVole += 4, seeds += 16, outU += 4, outV += 8)
+					generateTwoBitSenders256<4>(seeds, blockIdxBlock, aes, outU, outV);
+				if (nVole < This.mNumVoles)
+					generateTwoBitSenders256<2>(seeds, blockIdxBlock, aes, outU, outV);
+				return;
 			}
 #endif
 			for (; nVole < This.mNumVoles; nVole += volePerSuperBlk)
@@ -541,6 +547,8 @@ namespace osuCrypto
 		assert(mNumVoles <= mNumVolesPadded);
 		mSeeds.resize(mNumVolesPadded * fieldSize());
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
+		if (mFieldBits <= superBlkShift)
+			std::fill(mSeeds.begin() + numSeeds, mSeeds.end(), ZeroBlock);
 	}
 
 	u64 computeNumVolesPadded(u64 fieldBits, u64 numVoles)

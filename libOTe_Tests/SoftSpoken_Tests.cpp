@@ -34,13 +34,18 @@ namespace tests_libOTe
     static void twoBitSenderHashTest()
     {
         PRNG prng(block(184, 731));
-        for (u64 count : {1, 2, 7, 8, 9, 15, 16, 17, 63, 64, 65})
+        for (u64 count : {1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 63, 64, 65})
         {
             SmallFieldVoleSender sender;
             sender.init(2, count, false);
             std::vector<block> seeds(4 * count);
             prng.get(seeds.data(), seeds.size());
+            sender.mSeeds.resize(4 * sender.uPadded());
+            std::fill(sender.mSeeds.begin(), sender.mSeeds.end(), AllOneBlock);
             sender.setSeed(seeds);
+            for (u64 i = seeds.size(); i < sender.mSeeds.size(); ++i)
+                if (sender.mSeeds[i] != ZeroBlock)
+                    throw UnitTestFail("Uninitialized small-field VOLE sender padding");
             // Offset both outputs by a block to exercise unaligned SIMD stores.
             AlignedUnVector<block> u(sender.uPadded() + 1), v(sender.vPadded() + 1);
             for (u64 index : std::array<u64, 4>{0, 1, 1ull << 53, ~0ull})
