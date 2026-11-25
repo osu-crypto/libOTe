@@ -30,11 +30,44 @@ namespace tests_libOTe
 
 
 
+#ifdef ENABLE_SOFTSPOKEN_OT
+    static void twoBitSenderHashTest()
+    {
+        PRNG prng(block(184, 731));
+        for (u64 count : {1, 2, 7, 8, 9, 15, 16, 17, 63, 64, 65})
+        {
+            SmallFieldVoleSender sender;
+            sender.init(2, count, false);
+            std::vector<block> seeds(4 * count);
+            prng.get(seeds.data(), seeds.size());
+            sender.setSeed(seeds);
+            // Offset both outputs by a block to exercise unaligned SIMD stores.
+            AlignedUnVector<block> u(sender.uPadded() + 1), v(sender.vPadded() + 1);
+            for (u64 index : std::array<u64, 4>{0, 1, 1ull << 53, ~0ull})
+            {
+                const AES aes(prng.get<block>());
+                sender.generate(index, aes, u.data() + 1, v.data() + 1);
+                for (u64 i = 0; i < count; ++i)
+                {
+                    std::array<block, 4> h;
+                    for (u64 j = 0; j < 4; ++j)
+                        h[j] = aes.hashBlock(seeds[4 * i + j] ^ toBlock(index));
+                    if (u[i + 1] != (h[0] ^ h[1] ^ h[2] ^ h[3]) ||
+                        v[2 * i + 1] != (h[1] ^ h[3]) ||
+                        v[2 * i + 2] != (h[2] ^ h[3]))
+                        throw UnitTestFail("Two-bit VOLE sender hash mismatch");
+                }
+            }
+        }
+    }
+#endif
+
     void Vole_SoftSpokenSmall_Test(const oc::CLP& cmd)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
         //throw RTE_LOC;
         tests::xorReduction();
+        twoBitSenderHashTest();
 
         const bool print = cmd.isSet("v");
 

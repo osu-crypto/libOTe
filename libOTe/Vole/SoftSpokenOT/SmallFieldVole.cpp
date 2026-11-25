@@ -98,6 +98,60 @@ namespace osuCrypto
 
 	}
 
+
+#if defined(OC_ENABLE_VAES) && defined(__AVX512F__) && defined(__VAES__)
+	// Each ZMM holds the four 128-bit hashes for one two-bit VOLE.
+	static OC_FORCEINLINE __m512i storeTwoBitV(const __m512i a, const __m512i b, block* outV)
+	{
+		// For each VOLE, v[0] = h1 ^ h3 and v[1] = h2 ^ h3.
+		const auto middle = _mm512_shuffle_i32x4(a, b, _MM_SHUFFLE(2, 1, 2, 1));
+		const auto last = _mm512_shuffle_i32x4(a, b, _MM_SHUFFLE(3, 3, 3, 3));
+		_mm512_storeu_si512(outV, _mm512_xor_si512(middle, last));
+
+		// Keep h0 ^ h1 and h2 ^ h3 for the final reduction to u.
+		const auto even = _mm512_shuffle_i32x4(a, b, _MM_SHUFFLE(2, 0, 2, 0));
+		const auto odd = _mm512_shuffle_i32x4(a, b, _MM_SHUFFLE(3, 1, 3, 1));
+		return _mm512_xor_si512(even, odd);
+	}
+
+	static OC_FORCEINLINE void generateEightTwoBitSenders(
+		const block* seeds, block index, const AES& aes, block* outU, block* outV)
+	{
+		const auto tweak = _mm512_broadcast_i32x4(index.mData);
+		const auto first = _mm512_xor_si512(tweak, _mm512_broadcast_i32x4(aes.mRoundKey[0].mData));
+		__m512i raw[8], state[8];
+#pragma GCC unroll 8
+		for (unsigned i = 0; i < 8; ++i)
+		{
+			raw[i] = _mm512_loadu_si512(seeds + 4 * i);
+			state[i] = _mm512_xor_si512(raw[i], first);
+		}
+#pragma GCC unroll 9
+		for (unsigned round = 1; round < 10; ++round)
+		{
+			const auto key = _mm512_broadcast_i32x4(aes.mRoundKey[round].mData);
+#pragma GCC unroll 8
+			for (unsigned i = 0; i < 8; ++i)
+				state[i] = _mm512_aesenc_epi128(state[i], key);
+		}
+		// Each output XORs two or four hashes. Both the final round key and
+		// the block index in the feed-forward cancel. Use the last round's
+		// XOR for the per-lane seed that remains.
+#pragma GCC unroll 8
+		for (unsigned i = 0; i < 8; ++i)
+			state[i] = _mm512_aesenclast_epi128(state[i], raw[i]);
+#pragma GCC unroll 2
+		for (unsigned i = 0; i < 8; i += 4)
+		{
+			const auto ab = storeTwoBitV(state[i], state[i + 1], outV + 2 * i);
+			const auto cd = storeTwoBitV(state[i + 2], state[i + 3], outV + 2 * i + 4);
+			const auto even = _mm512_shuffle_i32x4(ab, cd, _MM_SHUFFLE(2, 0, 2, 0));
+			const auto odd = _mm512_shuffle_i32x4(ab, cd, _MM_SHUFFLE(3, 1, 3, 1));
+			_mm512_storeu_si512(outU + i, _mm512_xor_si512(even, odd));
+		}
+	}
+#endif
+
 	template<u64 fieldBitsConst>
 	OC_FORCEINLINE void generateSenderImpl(
 		const SmallFieldVoleSender& This,
@@ -120,7 +174,15 @@ namespace osuCrypto
 				UNREACHABLE();
 
 			const u64 volePerSuperBlk = superBlkSize / fieldSize;
-			for (u64 nVole = 0; nVole < This.mNumVoles; nVole += volePerSuperBlk)
+			u64 nVole = 0;
+#if defined(OC_ENABLE_VAES) && defined(__AVX512F__) && defined(__VAES__)
+			if constexpr (fieldBitsConst == 2)
+			{
+				for (; nVole + 8 <= This.mNumVoles; nVole += 8, seeds += 32, outU += 8, outV += 16)
+					generateEightTwoBitSenders(seeds, blockIdxBlock, aes, outU, outV);
+			}
+#endif
+			for (; nVole < This.mNumVoles; nVole += volePerSuperBlk)
 			{
 				// TODO: Try combining the block index into the AES key. It gives the same PRG, but
 				// might be faster.
