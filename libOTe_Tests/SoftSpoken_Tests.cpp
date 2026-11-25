@@ -60,6 +60,45 @@ namespace tests_libOTe
             }
         }
     }
+    static void twoBitReceiverHashTest()
+    {
+        PRNG prng(block(137, 54));
+        for (u64 count : {1, 3, 11, 12, 13, 23, 24, 25, 63, 64, 65})
+        {
+            SmallFieldVoleReceiver receiver;
+            receiver.init(2, count, false);
+            std::vector<block> base(2 * count), seeds(3 * count);
+            BitVector delta(2 * count);
+            delta.randomize(prng);
+            prng.get(base.data(), base.size());
+            prng.get(seeds.data(), seeds.size());
+            AlignedUnVector<block> w(receiver.wPadded() + 1), c(receiver.uPadded() + 1);
+            prng.get(c.data(), c.size());
+            for (bool corrected : {false, true})
+            {
+                if (corrected)
+                    receiver.setBaseOts(base, delta);
+                receiver.setSeeds(seeds);
+                for (u64 index : std::array<u64, 4>{0, 1, 1ull << 53, ~0ull})
+                {
+                    const AES aes(prng.get<block>());
+                    receiver.generate(index, aes, w.data() + 1, corrected ? c.data() + 1 : nullptr);
+                    for (u64 i = 0; i < count; ++i)
+                    {
+                        const auto h2 = aes.hashBlock(seeds[3 * i + 2] ^ toBlock(index));
+                        for (u64 j = 0; j < 2; ++j)
+                        {
+                            auto expected = aes.hashBlock(seeds[3 * i + j] ^ toBlock(index)) ^ h2;
+                            if (corrected && delta[2 * i + j])
+                                expected ^= c[i + 1];
+                            if (expected != w[2 * i + j + 1])
+                                throw UnitTestFail("Two-bit VOLE receiver hash mismatch");
+                        }
+                    }
+                }
+            }
+        }
+    }
 #endif
 
     void Vole_SoftSpokenSmall_Test(const oc::CLP& cmd)
@@ -68,6 +107,7 @@ namespace tests_libOTe
         //throw RTE_LOC;
         tests::xorReduction();
         twoBitSenderHashTest();
+        twoBitReceiverHashTest();
 
         const bool print = cmd.isSet("v");
 
