@@ -852,6 +852,28 @@ namespace tests_libOTe
         PRNG prng0(block(4234335, 3445235));
         PRNG prng1(block(42348345, 989835));
 
+        // Compare both sender messages to scalar AES, including partial batches
+        // and odd low bits that the SoftSpoken hash must preserve.
+        {
+            PRNG random(block(7, 91));
+            AES aes(random.get<block>());
+            const auto delta = random.get<block>() | OneBlock;
+            std::array<block, 17> input;
+            random.get(input.data(), input.size());
+            for (u64 n = 0; n <= input.size(); ++n)
+            {
+                using Pair = std::array<block, 2>;
+                std::array<Pair, 19> out;
+                out.fill(Pair{AllOneBlock, AllOneBlock});
+                auto expected = out;
+                for (u64 i = 0; i < n; ++i)
+                    expected[i + 1] = {aes.hashBlock(input[i]), aes.hashBlock(input[i] ^ delta)};
+                SoftSpokenShOtSender<>::xorAndHashMessages(n, delta, out.data() + 1, input.data(), aes);
+                if (out != expected)
+                    throw UnitTestFail("SoftSpoken sender pair hash mismatch");
+            }
+        }
+
         auto nnumOTs = cmd.getManyOr<u64>("n", { { 10, 100, 9733 } });
 
         for (auto random : { false, true })
