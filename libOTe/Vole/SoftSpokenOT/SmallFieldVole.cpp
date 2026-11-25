@@ -447,7 +447,8 @@ namespace osuCrypto
 #elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
 			if constexpr (fieldBitsConst == 2)
 			{
-				for (; This.mNumVoles - nVole >= 6; nVole += 6, seeds += 18, outW += 12)
+				// Four or five remaining VOLEs occupy two complete padded triples.
+				for (; nVole + 4 <= This.mNumVoles; nVole += 6, seeds += 18, outW += 12)
 				{
 					if (correctionPresent)
 					{

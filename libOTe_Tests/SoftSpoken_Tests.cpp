@@ -68,7 +68,7 @@ namespace tests_libOTe
     static void twoBitReceiverHashTest()
     {
         PRNG prng(block(137, 54));
-        for (u64 count : {1, 3, 11, 12, 13, 23, 24, 25, 63, 64, 65})
+        for (u64 count : {1, 3, 4, 5, 6, 11, 12, 13, 23, 24, 25, 63, 64, 65})
         {
             SmallFieldVoleReceiver receiver;
             receiver.init(2, count, false);
