@@ -348,6 +348,31 @@ namespace osuCrypto
 			_mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 2 * i), w);
 		}
 	}
+#elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
+	template<bool corrected>
+	static OC_FORCEINLINE void generateSixTwoBitReceivers(const block* seeds, block index,
+		const AES& aes, const u8* delta, const block* correction, block* out)
+	{
+		__m256i state[9];
+		hashTwoBitSeeds256(seeds, index, aes, state);
+		for (unsigned i = 0; i < 3; ++i)
+		{
+			// Two triples occupy [a0 a1], [a2 b0], [b1 b2].
+			const auto x = state[3 * i], y = state[3 * i + 1], z = state[3 * i + 2];
+			auto a = _mm256_xor_si256(x, _mm256_permute2x128_si256(y, y, 0x00));
+			auto b = _mm256_xor_si256(_mm256_permute2x128_si256(y, z, 0x21),
+				_mm256_permute2x128_si256(z, z, 0x11));
+			if constexpr (corrected)
+			{
+				const auto maskA = _mm256_set_m128i(_mm_set1_epi8(delta[4 * i + 1]), _mm_set1_epi8(delta[4 * i]));
+				const auto maskB = _mm256_set_m128i(_mm_set1_epi8(delta[4 * i + 3]), _mm_set1_epi8(delta[4 * i + 2]));
+				a = _mm256_xor_si256(a, _mm256_and_si256(maskA, _mm256_broadcastsi128_si256(correction[2 * i].mData)));
+				b = _mm256_xor_si256(b, _mm256_and_si256(maskB, _mm256_broadcastsi128_si256(correction[2 * i + 1].mData)));
+			}
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 4 * i), a);
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 4 * i + 2), b);
+		}
+	}
 #endif
 
 	template<u64 fieldBitsConst>
@@ -412,6 +437,21 @@ namespace osuCrypto
 					}
 				}
 				return;
+			}
+#elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
+			if constexpr (fieldBitsConst == 2)
+			{
+				for (; This.mNumVoles - nVole >= 6; nVole += 6, seeds += 18, outW += 12)
+				{
+					if (correctionPresent)
+					{
+						generateSixTwoBitReceivers<true>(seeds, blockIdxBlock, aes, deltaPtr, correction, outW);
+						deltaPtr += 12;
+						correction += 6;
+					}
+					else
+						generateSixTwoBitReceivers<false>(seeds, blockIdxBlock, aes, nullptr, nullptr, outW);
+				}
 			}
 #endif
 			for (; nVole < This.mNumVoles; nVole += volePerSuperBlk)
