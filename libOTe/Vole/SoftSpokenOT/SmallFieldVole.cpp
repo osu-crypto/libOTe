@@ -161,6 +161,52 @@ namespace osuCrypto
 			_mm512_storeu_si512(outU + i, _mm512_xor_si512(even, odd));
 		}
 	}
+#elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
+	// Two seeds per YMM. The common last-round key and index cancel in
+	// the even-weight reductions, just as they do in the 512-bit kernel.
+	template<unsigned lanes>
+	static OC_FORCEINLINE void hashTwoBitSeeds256(const block* seeds, block index,
+		const AES& aes, __m256i (&state)[lanes])
+	{
+		const auto first = _mm256_broadcastsi128_si256((index ^ aes.mRoundKey[0]).mData);
+		__m256i raw[lanes];
+		for (unsigned i = 0; i < lanes; ++i)
+		{
+			raw[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(seeds + 2 * i));
+			state[i] = _mm256_xor_si256(raw[i], first);
+		}
+#pragma GCC unroll 9
+		for (unsigned round = 1; round < 10; ++round)
+		{
+			const auto key = _mm256_broadcastsi128_si256(aes.mRoundKey[round].mData);
+			for (auto& v : state)
+				v = _mm256_aesenc_epi128(v, key);
+		}
+		for (unsigned i = 0; i < lanes; ++i)
+			state[i] = _mm256_aesenclast_epi128(state[i], raw[i]);
+	}
+
+	static OC_FORCEINLINE void generateFourTwoBitSenders(
+		const block* seeds, block index, const AES& aes, block* outU, block* outV)
+	{
+		__m256i state[8];
+		hashTwoBitSeeds256(seeds, index, aes, state);
+		for (unsigned i = 0; i < 4; i += 2)
+		{
+			__m256i partial[2];
+			for (unsigned j = 0; j < 2; ++j)
+			{
+				const auto a = state[2 * (i + j)], b = state[2 * (i + j) + 1];
+				const auto middle = _mm256_permute2x128_si256(a, b, 0x21);
+				const auto last = _mm256_permute2x128_si256(b, b, 0x11);
+				_mm256_storeu_si256(reinterpret_cast<__m256i*>(outV + 2 * (i + j)), _mm256_xor_si256(middle, last));
+				partial[j] = _mm256_xor_si256(a, b);
+			}
+			const auto even = _mm256_permute2x128_si256(partial[0], partial[1], 0x20);
+			const auto odd = _mm256_permute2x128_si256(partial[0], partial[1], 0x31);
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(outU + i), _mm256_xor_si256(even, odd));
+		}
+	}
 #endif
 
 	template<u64 fieldBitsConst>
@@ -191,6 +237,12 @@ namespace osuCrypto
 			{
 				for (; nVole + 8 <= This.mNumVoles; nVole += 8, seeds += 32, outU += 8, outV += 16)
 					generateEightTwoBitSenders(seeds, blockIdxBlock, aes, outU, outV);
+			}
+#elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
+			if constexpr (fieldBitsConst == 2)
+			{
+				for (; This.mNumVoles - nVole >= 4; nVole += 4, seeds += 16, outU += 4, outV += 8)
+					generateFourTwoBitSenders(seeds, blockIdxBlock, aes, outU, outV);
 			}
 #endif
 			for (; nVole < This.mNumVoles; nVole += volePerSuperBlk)
