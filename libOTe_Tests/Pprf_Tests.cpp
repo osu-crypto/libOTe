@@ -861,7 +861,8 @@ void RegularPprf_PhysicalIndex_test(const CLP& cmd)
 	auto v = cmd.isSet("v");
 	// The physical block path also supports coefficient addition other than XOR.
 	for (bool program : {false, true})
-		RegularPprf_test_impl<block, CoeffCtxInteger>(210, 9, program, f, false, v);
+		for (bool eager : {false, true})
+			RegularPprf_test_impl<block, CoeffCtxInteger>(210, 17, program, f, eager, v);
 	for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true, false }) for (auto e : { true, false })
 	{
 		RegularPprf_test_impl<u64, CoeffCtxInteger>(d, n, p, f, e, v);

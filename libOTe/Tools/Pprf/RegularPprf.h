@@ -840,7 +840,15 @@ namespace osuCrypto
 						encPerTree, count, programPuncturedPoint,
 						buff, encSums, leafMsgs, ctx);
 
-					for (u64 j = 0; j < count; ++j)
+					u64 j = 0;
+					if (oFormat == PprfOutputFormat::ByPhysicalIndex && mDepth > 3)
+					{
+						for (; j + 8 <= count; j += 8)
+							expandPhysicalEight(seed, batch + j, programPuncturedPoint, levels,
+								output, callbackLeaves, encSums.subspan(j * encPerTree, 8 * encPerTree),
+								leafMsgs.subspan(j * leafPerTree, 8 * leafPerTree), ctx);
+					}
+					for (; j < count; ++j)
 					{
 						const auto tree = batch + j;
 						const auto root = mAesFixedKey.ecbEncBlock(seed ^ block(tree));
@@ -963,6 +971,68 @@ namespace osuCrypto
 				current = next;
 			}
 
+			expandFromTop<Format>(current.data(), treeIdx, programPuncturedPoint, levels,
+				output, callbackLeaves, encSums.subspan(topInternalDepth), leafMsgs, ctx);
+		}
+
+	private:
+		// Each row is one tree. Encrypt eight independent parents at a time,
+		// preserving both the child order and the separate correction for each row.
+		template<u64 Depth>
+		void expandTopLevel(u64 firstTree, const block* parents, block* children,
+			span<std::array<block, 2>> encSums) const
+		{
+			constexpr u64 width = u64{1} << Depth;
+			constexpr u64 rows = 8 / width;
+			for (u64 t = 0; t < 8; t += rows)
+			{
+				block encrypted[8];
+				mAesFixedKey.ecbEncBlocks<8>(parents + t * width, encrypted);
+				for (u64 row = 0; row < rows; ++row)
+				{
+					block leftSum = ZeroBlock, rightSum = ZeroBlock;
+					for (u64 k = 0; k < width; ++k)
+					{
+						const u64 i = (t + row) * width + k;
+						const auto aes = encrypted[row * width + k];
+						const auto left = AES::roundEnc(aes, parents[i]);
+						const auto right = aes.add_epi64(parents[i]);
+						children[2 * i] = left;
+						children[2 * i + 1] = right;
+						leftSum ^= left;
+						rightSum ^= right;
+					}
+					const auto& ots = mBaseOTs(firstTree + t + row, mDepth - 1 - Depth);
+					encSums[(t + row) * (mDepth - 1) + Depth] = {leftSum ^ ots[1], rightSum ^ ots[0]};
+				}
+			}
+		}
+
+		OC_NOINLINE void expandPhysicalEight(block seed, u64 firstTree, bool program,
+			span<span<AlignedArray<block, 8>>> levels, VecF& output, VecF& callbackLeaves,
+			span<std::array<block, 2>> encSums, span<u8> leafMsgs, CoeffCtx& ctx)
+		{
+			block seeds[8], roots[8], pairs[16], quads[32], tops[64];
+			for (u64 t = 0; t < 8; ++t)
+				seeds[t] = seed ^ block(firstTree + t);
+			mAesFixedKey.ecbEncBlocks<8>(seeds, roots);
+			expandTopLevel<0>(firstTree, roots, pairs, encSums);
+			expandTopLevel<1>(firstTree, pairs, quads, encSums);
+			expandTopLevel<2>(firstTree, quads, tops, encSums);
+			const u64 sumsPerTree = mDepth - 1, bytesPerTree = leafMsgs.size() / 8;
+			for (u64 t = 0; t < 8; ++t)
+				expandFromTop<PprfOutputFormat::ByPhysicalIndex>(tops + 8 * t, firstTree + t,
+					program, levels, output, callbackLeaves,
+					encSums.subspan(t * sumsPerTree + 3, sumsPerTree - 3),
+					leafMsgs.subspan(t * bytesPerTree, bytesPerTree), ctx);
+		}
+
+		template<PprfOutputFormat Format>
+		OC_NOINLINE void expandFromTop(const block* current, u64 treeIdx, bool programPuncturedPoint,
+			span<span<AlignedArray<block, 8>>> levels, VecF& output, VecF& callbackLeaves,
+			span<std::array<block, 2>> encSums, span<u8> leafMsgs, CoeffCtx& ctx)
+		{
+			auto encSumIter = encSums.begin();
 			if (mDepth > 3)
 			{
 				assert(levels.size() == mDepth - 3);
