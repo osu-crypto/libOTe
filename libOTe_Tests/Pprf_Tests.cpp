@@ -69,10 +69,56 @@ void RegularPprf_expandOne_test_impl(u64 domain, bool program)
 	}
 }
 
+#ifdef OC_ENABLE_VAES
+static void checkRegularInternalLevel(const AES& aes, const auto& key)
+{
+	using Row = AlignedArray<block, 8>;
+	PRNG prng(CCBlock);
+	for (u64 width : { 1, 2, 3, 4, 8 })
+	{
+		std::vector<Row> parents(width), children(2 * width);
+		Row left, right;
+		prng.get(left.data(), left.size());
+		prng.get(right.data(), right.size());
+		Row expectedLeft = left, expectedRight = right;
+		for (auto& row : parents)
+			prng.get(row.data(), row.size());
+		pprfVaes::internalLevel(key, parents.data(), children.data(), width, left.data(), right.data());
+		for (u64 p = 0; p < width; ++p)
+			for (u64 lane = 0; lane < 8; ++lane)
+			{
+				const auto parent = parents[p][lane];
+				const auto encrypted = aes.ecbEncBlock(parent);
+				const auto l = AES::roundEnc(encrypted, parent);
+				const auto r = encrypted.add_epi64(parent);
+				if (children[2 * p][lane] != l || children[2 * p + 1][lane] != r)
+					throw UnitTestFail("regular PPRF internal child mismatch");
+				expectedLeft[lane] ^= l;
+				expectedRight[lane] ^= r;
+			}
+		block leftSum = ZeroBlock, rightSum = ZeroBlock;
+		for (u64 lane = 0; lane < 8; ++lane)
+		{
+			leftSum ^= expectedLeft[lane];
+			rightSum ^= expectedRight[lane];
+		}
+		if (left != expectedLeft || right != expectedRight ||
+			pprfVaes::fold8(left.data()) != leftSum || pprfVaes::fold8(right.data()) != rightSum)
+			throw UnitTestFail("regular PPRF internal correction mismatch");
+	}
+}
+#endif
+
 void RegularPprf_expandOne_test(const oc::CLP& cmd)
 {
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
 
+#ifdef OC_ENABLE_VAES
+	checkRegularInternalLevel(mAesFixedKey, pprfVaes::YmmKey(mAesFixedKey));
+#ifdef ENABLE_AVX512
+	checkRegularInternalLevel(mAesFixedKey, pprfVaes::ZmmKey(mAesFixedKey));
+#endif
+#endif
 
 	// Check both serialized choices, including the one the receiver never opens.
 	PRNG prng(CCBlock);

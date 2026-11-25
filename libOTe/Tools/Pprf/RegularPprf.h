@@ -67,15 +67,17 @@ namespace osuCrypto
 		// The level sums stay in registers; sum0/sum1 (8 blocks each) are
 		// read on entry and written on exit.
 		OC_FORCEINLINE void internalLevel(const YmmKey& key,
-			const block* parents, block* children, u64 width, block* sum0, block* sum1)
+			const AlignedArray<block, 8>* parents, AlignedArray<block, 8>* children,
+			u64 width, block* sum0, block* sum1)
 		{
 #define OC_PPRF_SUM_IN(j) __m256i s0##j = OC_PPRF_LD(sum0, j), s1##j = OC_PPRF_LD(sum1, j)
 			OC_PPRF_LANES(OC_PPRF_SUM_IN);
 #undef OC_PPRF_SUM_IN
 			for (u64 p = 0; p < width; ++p)
 			{
-				const block* in = parents + 8 * p;
-				block* ch = children + 16 * p;
+				const block* in = parents[p].data();
+				block* left = children[2 * p].data();
+				block* right = children[2 * p + 1].data();
 #define OC_PPRF_IN(j) const __m256i x##j = OC_PPRF_LD(in, j); __m256i a##j = _mm256_xor_si256(x##j, key.k[0])
 				OC_PPRF_LANES(OC_PPRF_IN);
 #undef OC_PPRF_IN
@@ -90,8 +92,8 @@ namespace osuCrypto
 				{ \
 					const __m256i c0 = _mm256_aesenc_epi128(a##j, x##j); \
 					const __m256i c1 = _mm256_add_epi64(a##j, x##j); \
-					OC_PPRF_ST(ch, j, c0); \
-					OC_PPRF_ST(ch + 8, j, c1); \
+					OC_PPRF_ST(left, j, c0); \
+					OC_PPRF_ST(right, j, c1); \
 					s0##j = _mm256_xor_si256(s0##j, c0); \
 					s1##j = _mm256_xor_si256(s1##j, c1); \
 				}
@@ -162,14 +164,15 @@ namespace osuCrypto
 		};
 
 		template<u64 NP>
-		OC_FORCEINLINE void internalStep(const ZmmKey& key, const block* in, block* ch,
+		OC_FORCEINLINE void internalStep(const ZmmKey& key,
+			const AlignedArray<block, 8>* parents, AlignedArray<block, 8>* children,
 			__m512i (&s0)[2], __m512i (&s1)[2])
 		{
 			constexpr u64 C = 2 * NP;
 			__m512i x[C], a[C];
 			for (u64 c = 0; c < C; ++c)
 			{
-				x[c] = _mm512_loadu_si512(in + 4 * c);
+				x[c] = _mm512_loadu_si512(parents[c / 2].data() + 4 * (c % 2));
 				a[c] = _mm512_xor_si512(x[c], key.k[0]);
 			}
 			for (u64 r = 1; r < 10; ++r)
@@ -181,23 +184,24 @@ namespace osuCrypto
 				const __m512i c0 = _mm512_aesenc_epi128(a[c], x[c]);
 				const __m512i c1 = _mm512_add_epi64(a[c], x[c]);
 				const u64 q = c / 2, v = c % 2; // parent q, lanes 4v..4v+3
-				_mm512_storeu_si512(ch + 16 * q + 4 * v, c0);
-				_mm512_storeu_si512(ch + 16 * q + 8 + 4 * v, c1);
+				_mm512_storeu_si512(children[2 * q].data() + 4 * v, c0);
+				_mm512_storeu_si512(children[2 * q + 1].data() + 4 * v, c1);
 				s0[v] = _mm512_xor_si512(s0[v], c0);
 				s1[v] = _mm512_xor_si512(s1[v], c1);
 			}
 		}
 
 		OC_FORCEINLINE void internalLevel(const ZmmKey& key,
-			const block* parents, block* children, u64 width, block* sum0, block* sum1)
+			const AlignedArray<block, 8>* parents, AlignedArray<block, 8>* children,
+			u64 width, block* sum0, block* sum1)
 		{
 			__m512i s0[2] = { _mm512_loadu_si512(sum0), _mm512_loadu_si512(sum0 + 4) };
 			__m512i s1[2] = { _mm512_loadu_si512(sum1), _mm512_loadu_si512(sum1 + 4) };
 			u64 p = 0;
 			for (; p + 2 <= width; p += 2)
-				internalStep<2>(key, parents + 8 * p, children + 16 * p, s0, s1);
+				internalStep<2>(key, parents + p, children + 2 * p, s0, s1);
 			if (p < width)
-				internalStep<1>(key, parents + 8 * p, children + 16 * p, s0, s1);
+				internalStep<1>(key, parents + p, children + 2 * p, s0, s1);
 			_mm512_storeu_si512(sum0, s0[0]); _mm512_storeu_si512(sum0 + 4, s0[1]);
 			_mm512_storeu_si512(sum1, s1[0]); _mm512_storeu_si512(sum1 + 4, s1[1]);
 		}
@@ -287,9 +291,8 @@ namespace osuCrypto
 
 		OC_FORCEINLINE block fold4(__m512i sum)
 		{
-			alignas(64) block lanes[4];
-			_mm512_store_si512(lanes, sum);
-			return (lanes[0] ^ lanes[1]) ^ (lanes[2] ^ lanes[3]);
+			const auto pair = _mm256_xor_si256(_mm512_castsi512_si256(sum), _mm512_extracti64x4_epi64(sum, 1));
+			return _mm_xor_si128(_mm256_castsi256_si128(pair), _mm256_extracti128_si256(pair, 1));
 		}
 
 		template<unsigned Side, bool Cache>
@@ -372,7 +375,11 @@ namespace osuCrypto
 		// tree's level sum is their XOR.
 		OC_FORCEINLINE block fold8(const block* s)
 		{
+#ifdef ENABLE_AVX512
+			return fold4(_mm512_xor_si512(_mm512_loadu_si512(s), _mm512_loadu_si512(s + 4)));
+#else
 			return ((s[0] ^ s[1]) ^ (s[2] ^ s[3])) ^ ((s[4] ^ s[5]) ^ (s[6] ^ s[7]));
+#endif
 		}
 	}
 #endif
@@ -900,8 +907,8 @@ namespace osuCrypto
 #ifdef OC_ENABLE_VAES
 					{
 						alignas(64) std::array<block, 8> laneSums0{}, laneSums1{};
-						pprfVaes::internalLevel(internalKey, parents.data()->data(),
-							children.data()->data(), width, laneSums0.data(), laneSums1.data());
+						pprfVaes::internalLevel(internalKey, parents.data(), children.data(),
+							width, laneSums0.data(), laneSums1.data());
 						leftAccumulator = leftAccumulator ^ pprfVaes::fold8(laneSums0.data());
 						rightAccumulator = rightAccumulator ^ pprfVaes::fold8(laneSums1.data());
 					}
@@ -1467,8 +1474,8 @@ namespace osuCrypto
 #ifdef OC_ENABLE_VAES
 					{
 						alignas(64) std::array<block, 8> laneSums0{}, laneSums1{};
-						pprfVaes::internalLevel(internalKey, parents.data()->data(),
-							children.data()->data(), width, laneSums0.data(), laneSums1.data());
+						pprfVaes::internalLevel(internalKey, parents.data(), children.data(),
+							width, laneSums0.data(), laneSums1.data());
 						leftAccumulator = leftAccumulator ^ pprfVaes::fold8(laneSums0.data());
 						rightAccumulator = rightAccumulator ^ pprfVaes::fold8(laneSums1.data());
 					}
