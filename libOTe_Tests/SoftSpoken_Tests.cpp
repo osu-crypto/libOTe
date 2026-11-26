@@ -30,11 +30,89 @@ namespace tests_libOTe
 
 
 
+#ifdef ENABLE_SOFTSPOKEN_OT
+    static void twoBitSenderHashTest()
+    {
+        PRNG prng(block(184, 731));
+        for (u64 count : {1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 63, 64, 65})
+        {
+            SmallFieldVoleSender sender;
+            sender.init(2, count, false);
+            std::vector<block> seeds(4 * count);
+            prng.get(seeds.data(), seeds.size());
+            sender.mSeeds.resize(4 * sender.uPadded());
+            std::fill(sender.mSeeds.begin(), sender.mSeeds.end(), AllOneBlock);
+            sender.setSeed(seeds);
+            for (u64 i = seeds.size(); i < sender.mSeeds.size(); ++i)
+                if (sender.mSeeds[i] != ZeroBlock)
+                    throw UnitTestFail("Uninitialized small-field VOLE sender padding");
+            // Offset both outputs by a block to exercise unaligned SIMD stores.
+            AlignedUnVector<block> u(sender.uPadded() + 1), v(sender.vPadded() + 1);
+            for (u64 index : std::array<u64, 4>{0, 1, 1ull << 53, ~0ull})
+            {
+                const AES aes(prng.get<block>());
+                sender.generate(index, aes, u.data() + 1, v.data() + 1);
+                for (u64 i = 0; i < count; ++i)
+                {
+                    std::array<block, 4> h;
+                    for (u64 j = 0; j < 4; ++j)
+                        h[j] = aes.hashBlock(seeds[4 * i + j] ^ toBlock(index));
+                    if (u[i + 1] != (h[0] ^ h[1] ^ h[2] ^ h[3]) ||
+                        v[2 * i + 1] != (h[1] ^ h[3]) ||
+                        v[2 * i + 2] != (h[2] ^ h[3]))
+                        throw UnitTestFail("Two-bit VOLE sender hash mismatch");
+                }
+            }
+        }
+    }
+    static void twoBitReceiverHashTest()
+    {
+        PRNG prng(block(137, 54));
+        for (u64 count : {1, 3, 4, 5, 6, 11, 12, 13, 23, 24, 25, 63, 64, 65})
+        {
+            SmallFieldVoleReceiver receiver;
+            receiver.init(2, count, false);
+            std::vector<block> base(2 * count), seeds(3 * count);
+            BitVector delta(2 * count);
+            delta.randomize(prng);
+            prng.get(base.data(), base.size());
+            prng.get(seeds.data(), seeds.size());
+            AlignedUnVector<block> w(receiver.wPadded() + 1), c(receiver.uPadded() + 1);
+            prng.get(c.data(), c.size());
+            for (bool corrected : {false, true})
+            {
+                if (corrected)
+                    receiver.setBaseOts(base, delta);
+                receiver.setSeeds(seeds);
+                for (u64 index : std::array<u64, 4>{0, 1, 1ull << 53, ~0ull})
+                {
+                    const AES aes(prng.get<block>());
+                    receiver.generate(index, aes, w.data() + 1, corrected ? c.data() + 1 : nullptr);
+                    for (u64 i = 0; i < count; ++i)
+                    {
+                        const auto h2 = aes.hashBlock(seeds[3 * i + 2] ^ toBlock(index));
+                        for (u64 j = 0; j < 2; ++j)
+                        {
+                            auto expected = aes.hashBlock(seeds[3 * i + j] ^ toBlock(index)) ^ h2;
+                            if (corrected && delta[2 * i + j])
+                                expected ^= c[i + 1];
+                            if (expected != w[2 * i + j + 1])
+                                throw UnitTestFail("Two-bit VOLE receiver hash mismatch");
+                        }
+                    }
+                }
+            }
+        }
+    }
+#endif
+
     void Vole_SoftSpokenSmall_Test(const oc::CLP& cmd)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
         //throw RTE_LOC;
         tests::xorReduction();
+        twoBitSenderHashTest();
+        twoBitReceiverHashTest();
 
         const bool print = cmd.isSet("v");
 
@@ -778,6 +856,28 @@ namespace tests_libOTe
 
         PRNG prng0(block(4234335, 3445235));
         PRNG prng1(block(42348345, 989835));
+
+        // Compare both sender messages to scalar AES, including partial batches
+        // and odd low bits that the SoftSpoken hash must preserve.
+        {
+            PRNG random(block(7, 91));
+            AES aes(random.get<block>());
+            const auto delta = random.get<block>() | OneBlock;
+            std::array<block, 17> input;
+            random.get(input.data(), input.size());
+            for (u64 n = 0; n <= input.size(); ++n)
+            {
+                using Pair = std::array<block, 2>;
+                std::array<Pair, 19> out;
+                out.fill(Pair{AllOneBlock, AllOneBlock});
+                auto expected = out;
+                for (u64 i = 0; i < n; ++i)
+                    expected[i + 1] = {aes.hashBlock(input[i]), aes.hashBlock(input[i] ^ delta)};
+                SoftSpokenShOtSender<>::xorAndHashMessages(n, delta, out.data() + 1, input.data(), aes);
+                if (out != expected)
+                    throw UnitTestFail("SoftSpoken sender pair hash mismatch");
+            }
+        }
 
         auto nnumOTs = cmd.getManyOr<u64>("n", { { 10, 100, 9733 } });
 

@@ -69,10 +69,122 @@ void RegularPprf_expandOne_test_impl(u64 domain, bool program)
 	}
 }
 
+#ifdef OC_ENABLE_VAES
+static void checkRegularInternalLevel(const AES& aes, const auto& key)
+{
+	using Row = AlignedArray<block, 8>;
+	PRNG prng(CCBlock);
+	for (u64 width : { 0, 1, 2, 3, 4, 8, 17 })
+	{
+		std::vector<Row> parents(width), children(2 * width);
+		Row left, right;
+		prng.get(left.data(), left.size());
+		prng.get(right.data(), right.size());
+		Row expectedLeft = left, expectedRight = right;
+		const block initialLeft = pprfVaes::fold8(left.data());
+		const block initialRight = pprfVaes::fold8(right.data());
+		for (auto& row : parents)
+			prng.get(row.data(), row.size());
+		pprfVaes::internalLevel(key, parents.data(), children.data(), width, left.data(), right.data());
+		for (u64 p = 0; p < width; ++p)
+			for (u64 lane = 0; lane < 8; ++lane)
+			{
+				const auto parent = parents[p][lane];
+				const auto encrypted = aes.ecbEncBlock(parent);
+				const auto l = AES::roundEnc(encrypted, parent);
+				const auto r = encrypted.add_epi64(parent);
+				if (children[2 * p][lane] != l || children[2 * p + 1][lane] != r)
+					throw UnitTestFail("regular PPRF internal child mismatch");
+				expectedLeft[lane] ^= l;
+				expectedRight[lane] ^= r;
+			}
+		block leftSum = ZeroBlock, rightSum = ZeroBlock;
+		for (u64 lane = 0; lane < 8; ++lane)
+		{
+			leftSum ^= expectedLeft[lane];
+			rightSum ^= expectedRight[lane];
+		}
+		if (left != expectedLeft || right != expectedRight ||
+			pprfVaes::fold8(left.data()) != leftSum || pprfVaes::fold8(right.data()) != rightSum)
+			throw UnitTestFail("regular PPRF internal correction mismatch");
+		if constexpr (std::is_same_v<std::remove_cvref_t<decltype(key)>, pprfVaes::Key>)
+		{
+			std::vector<Row> actual(children.size());
+			const auto sums = pprfVaes::internalLevelSums(key, parents.data(), actual.data(), width);
+			if (actual != children || sums[0] != (initialLeft ^ leftSum) || sums[1] != (initialRight ^ rightSum))
+				throw UnitTestFail("regular PPRF reduced level mismatch");
+		}
+	}
+}
+
+template<typename Key>
+static void checkRegularLeafLevel()
+{
+	using Row = AlignedArray<block, 8>;
+	PRNG prng(CCBlock);
+	const Key k0(gGgmAes[0]), k1(gGgmAes[1]);
+	for (u64 width : { 0, 1, 2, 3, 8 })
+	{
+		std::vector<Row> parents(width);
+		for (auto& row : parents)
+			prng.get(row.data(), row.size());
+		// Offset the destination by one block and guard both ends.
+		std::vector<block> leaves(16 * width + 2, AllOneBlock);
+		auto expected = leaves;
+		std::array<Row, 2> sums;
+		for (auto& row : sums)
+			prng.get(row.data(), row.size());
+		auto expectedSums = sums;
+		for (u64 p = 0; p < width; ++p)
+			for (u64 side = 0; side < 2; ++side)
+				for (u64 lane = 0; lane < 8; ++lane)
+				{
+					const auto parent = parents[p][lane];
+					const auto leaf = gGgmAes[side].ecbEncBlock(parent) ^ parent;
+					expected[1 + 16 * p + 8 * side + lane] = leaf;
+					expectedSums[side][lane] ^= leaf;
+				}
+
+		pprfVaes::leafLevel(k0, k1, parents.data(), leaves.data() + 1, width,
+			sums[0].data(), sums[1].data());
+		if (leaves != expected || sums != expectedSums)
+			throw UnitTestFail("regular PPRF leaf or correction mismatch");
+	}
+}
+#endif
+
 void RegularPprf_expandOne_test(const oc::CLP& cmd)
 {
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
 
+#ifdef OC_ENABLE_VAES
+	checkRegularInternalLevel(mAesFixedKey, pprfVaes::YmmKey(mAesFixedKey));
+	checkRegularLeafLevel<pprfVaes::YmmKey>();
+#ifdef ENABLE_AVX512
+	checkRegularInternalLevel(mAesFixedKey, pprfVaes::ZmmKey(mAesFixedKey));
+	checkRegularLeafLevel<pprfVaes::ZmmKey>();
+#endif
+#endif
+
+	// Check both serialized choices, including the one the receiver never opens.
+	PRNG prng(CCBlock);
+	for (const u64 bytes : { 16, 32 })
+	{
+		for (const u64 offset : { 0, 1, 15 })
+		{
+			std::array<block, 2> keys;
+			prng.get(keys.data(), keys.size());
+			std::array<u8, 80> actual;
+			prng.get(actual.data(), actual.size());
+			auto expected = actual;
+			PRNG masker;
+			for (u64 choice = 0; choice < 2; ++choice)
+				pprf::xorLeafMask({ expected.data() + offset + choice * bytes, bytes }, keys[1 ^ choice], masker);
+			pprf::xorSenderLeafMasks({ actual.data() + offset, 2 * bytes }, bytes, keys);
+			if (actual != expected)
+				throw RTE_LOC;
+		}
+	}
 
 	for (u64 domain : { 2, 128, 4522}) for (bool program : {true, false})
 	{
@@ -711,10 +823,55 @@ void HalfTreePprf_test(const oc::CLP& cmd)
 //            verbose);
 //}
 
+namespace
+{
+	struct RawXorTestCtx : CoeffCtxGF2
+	{
+		static constexpr bool blockCopyIsTrivialAndAdditionIsXor = true;
+	};
+
+	template<bool Sender>
+	void checkCompactXorLeaves()
+	{
+		PRNG prng(CCBlock);
+		RawXorTestCtx ctx;
+		for (u64 domain = 10; domain <= 256; domain += 2)
+		{
+			AlignedUnVector<AlignedArray<block, 8>> parents(pprf::paddedDomain(domain) / 16);
+			std::vector<block> output(domain + 2, CCBlock);
+			std::array<block, 2> sums{prng.get<block>(), prng.get<block>()};
+			auto expectedSums = sums;
+			std::vector<block> expected = output;
+			u64 next = 1;
+			for (u64 p = 0; p < parents.size(); ++p)
+			{
+				prng.get(parents[p].data(), 8);
+				for (u64 side = 0; side < 2; ++side)
+					for (u64 lane = 0; lane < 8; ++lane)
+					{
+						const block h = gGgmAes[side].hashBlock(parents[p][lane]);
+						expectedSums[side] ^= h;
+						if (lane * (2 * parents.size()) + 2 * p + side < domain)
+							expected[next++] = h;
+					}
+			}
+			const auto written = pprf::hashPhysicalBlockLeaves<Sender>(parents, domain, output.data() + 1, sums, ctx);
+			if (written != domain || sums != expectedSums || output != expected)
+				throw std::runtime_error("Compact XOR leaves disagree with the scalar hashes");
+		}
+	}
+}
+
 void RegularPprf_PhysicalIndex_test(const CLP& cmd)
 {
+	checkCompactXorLeaves<true>();
+	checkCompactXorLeaves<false>();
 	auto f = PprfOutputFormat::ByPhysicalIndex;
 	auto v = cmd.isSet("v");
+	// The physical block path also supports coefficient addition other than XOR.
+	for (bool program : {false, true})
+		for (bool eager : {false, true})
+			RegularPprf_test_impl<block, CoeffCtxInteger>(210, 17, program, f, eager, v);
 	for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true, false }) for (auto e : { true, false })
 	{
 		RegularPprf_test_impl<u64, CoeffCtxInteger>(d, n, p, f, e, v);

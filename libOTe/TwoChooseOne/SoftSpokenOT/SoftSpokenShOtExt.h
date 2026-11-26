@@ -20,6 +20,13 @@
 
 namespace osuCrypto
 {
+#ifdef OC_ENABLE_VAES
+	namespace details
+	{
+		void softSpokenHashPairs(u64 count, block delta, std::array<block, 2>* out,
+			const block* in, const osuCrypto::AES& aes);
+	}
+#endif
 
 	// Pseudorandomly generate a stream of AES round keys.
 	struct AESStream
@@ -306,6 +313,15 @@ namespace osuCrypto
 			u64 numUsed, block deltaBlock, std::array<block, 2>* messagesOut,
 			const block* messagesIn, Enc& enc)
 		{
+#ifdef OC_ENABLE_VAES
+			if constexpr (std::is_same_v<std::remove_cv_t<Enc>, AES>)
+			{
+				const u64 tail = numUsed % 8;
+				if (numUsed >= 8)
+					details::softSpokenHashPairs(numUsed - tail, deltaBlock, messagesOut + tail, messagesIn + tail, enc);
+				numUsed = tail;
+			}
+#endif
 			// Loop backwards, similarly to DotSemiHonest.
 			u64 i = numUsed;
 			while (i >= superBlkSize / 2)

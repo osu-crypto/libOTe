@@ -2,9 +2,25 @@
 #ifdef ENABLE_SOFTSPOKEN_OT
 
 #include "libOTe/Vole/SoftSpokenOT/SubspaceVoleMaliciousLeaky.h"
+#include "libOTe/Tools/CompilerHints.h"
+#include "libOTe/Tools/OtPairHashVaes.h"
 
 namespace osuCrypto
 {
+#ifdef OC_ENABLE_VAES
+	OC_NOINLINE void details::softSpokenHashPairs(u64 count, block delta, std::array<block, 2>* out,
+		const block* in, const osuCrypto::AES& aes)
+	{
+		// Work backwards so input can occupy the first half of the output.
+		assert(count % 8 == 0);
+		const OtPairHashVaes hash(aes, delta);
+		while (count)
+		{
+			count -= 8;
+			hash.hashEight<false>(in + count, out + count);
+		}
+	}
+#endif
 
 	template<typename SubspaceVole>
 	const u64 SoftSpokenShOtSender<SubspaceVole>::commSize;

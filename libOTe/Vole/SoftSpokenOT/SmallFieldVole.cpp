@@ -98,6 +98,119 @@ namespace osuCrypto
 
 	}
 
+
+#if defined(OC_ENABLE_VAES) && defined(__AVX512F__) && defined(__VAES__)
+	// Each ZMM holds the four 128-bit hashes for one two-bit VOLE.
+	static OC_FORCEINLINE __m512i storeTwoBitV(const __m512i a, const __m512i b, block* outV)
+	{
+		// For each VOLE, v[0] = h1 ^ h3 and v[1] = h2 ^ h3.
+		const auto middle = _mm512_shuffle_i32x4(a, b, _MM_SHUFFLE(2, 1, 2, 1));
+		const auto last = _mm512_shuffle_i32x4(a, b, _MM_SHUFFLE(3, 3, 3, 3));
+		_mm512_storeu_si512(outV, _mm512_xor_si512(middle, last));
+
+		// Keep h0 ^ h1 and h2 ^ h3 for the final reduction to u.
+		const auto even = _mm512_shuffle_i32x4(a, b, _MM_SHUFFLE(2, 0, 2, 0));
+		const auto odd = _mm512_shuffle_i32x4(a, b, _MM_SHUFFLE(3, 1, 3, 1));
+		return _mm512_xor_si512(even, odd);
+	}
+
+	// All two-bit outputs XOR an even number of Davies-Meyer hashes. The
+	// common final-round key and index cancel. AESENCLAST folds in each seed.
+	template<unsigned stride, unsigned lanes>
+	static OC_FORCEINLINE void hashTwoBitSeeds(const block* seeds, block index,
+		const AES& aes, __m512i (&state)[lanes])
+	{
+		static_assert(stride == 3 || stride == 4);
+		const auto tweak = _mm512_broadcast_i32x4(index.mData);
+		const auto first = _mm512_xor_si512(tweak, _mm512_broadcast_i32x4(aes.mRoundKey[0].mData));
+		__m512i raw[lanes];
+#pragma GCC unroll 9
+		for (unsigned i = 0; i < lanes; ++i)
+		{
+			if constexpr (stride == 4)
+				raw[i] = _mm512_loadu_si512(seeds + 4 * i);
+			else
+				raw[i] = _mm512_maskz_loadu_epi64(0x3f, seeds + 3 * i);
+			state[i] = _mm512_xor_si512(raw[i], first);
+		}
+#pragma GCC unroll 9
+		for (unsigned round = 1; round < 10; ++round)
+		{
+			const auto key = _mm512_broadcast_i32x4(aes.mRoundKey[round].mData);
+#pragma GCC unroll 9
+			for (unsigned i = 0; i < lanes; ++i)
+				state[i] = _mm512_aesenc_epi128(state[i], key);
+		}
+#pragma GCC unroll 9
+		for (unsigned i = 0; i < lanes; ++i)
+			state[i] = _mm512_aesenclast_epi128(state[i], raw[i]);
+	}
+
+	static OC_FORCEINLINE void generateEightTwoBitSenders(
+		const block* seeds, block index, const AES& aes, block* outU, block* outV)
+	{
+		__m512i state[8];
+		hashTwoBitSeeds<4>(seeds, index, aes, state);
+#pragma GCC unroll 2
+		for (unsigned i = 0; i < 8; i += 4)
+		{
+			const auto ab = storeTwoBitV(state[i], state[i + 1], outV + 2 * i);
+			const auto cd = storeTwoBitV(state[i + 2], state[i + 3], outV + 2 * i + 4);
+			const auto even = _mm512_shuffle_i32x4(ab, cd, _MM_SHUFFLE(2, 0, 2, 0));
+			const auto odd = _mm512_shuffle_i32x4(ab, cd, _MM_SHUFFLE(3, 1, 3, 1));
+			_mm512_storeu_si512(outU + i, _mm512_xor_si512(even, odd));
+		}
+	}
+#elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
+	// Two seeds per YMM. The common last-round key and index cancel in
+	// the even-weight reductions, just as they do in the 512-bit kernel.
+	template<unsigned lanes>
+	static OC_FORCEINLINE void hashTwoBitSeeds256(const block* seeds, block index,
+		const AES& aes, __m256i (&state)[lanes])
+	{
+		const auto first = _mm256_broadcastsi128_si256((index ^ aes.mRoundKey[0]).mData);
+		__m256i raw[lanes];
+		for (unsigned i = 0; i < lanes; ++i)
+		{
+			raw[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(seeds + 2 * i));
+			state[i] = _mm256_xor_si256(raw[i], first);
+		}
+#pragma GCC unroll 9
+		for (unsigned round = 1; round < 10; ++round)
+		{
+			const auto key = _mm256_broadcastsi128_si256(aes.mRoundKey[round].mData);
+			for (auto& v : state)
+				v = _mm256_aesenc_epi128(v, key);
+		}
+		for (unsigned i = 0; i < lanes; ++i)
+			state[i] = _mm256_aesenclast_epi128(state[i], raw[i]);
+	}
+
+	template<unsigned count>
+	static OC_FORCEINLINE void generateTwoBitSenders256(
+		const block* seeds, block index, const AES& aes, block* outU, block* outV)
+	{
+		static_assert(count == 2 || count == 4);
+		__m256i state[2 * count];
+		hashTwoBitSeeds256(seeds, index, aes, state);
+		for (unsigned i = 0; i < count; i += 2)
+		{
+			__m256i partial[2];
+			for (unsigned j = 0; j < 2; ++j)
+			{
+				const auto a = state[2 * (i + j)], b = state[2 * (i + j) + 1];
+				const auto middle = _mm256_permute2x128_si256(a, b, 0x21);
+				const auto last = _mm256_permute2x128_si256(b, b, 0x11);
+				_mm256_storeu_si256(reinterpret_cast<__m256i*>(outV + 2 * (i + j)), _mm256_xor_si256(middle, last));
+				partial[j] = _mm256_xor_si256(a, b);
+			}
+			const auto even = _mm256_permute2x128_si256(partial[0], partial[1], 0x20);
+			const auto odd = _mm256_permute2x128_si256(partial[0], partial[1], 0x31);
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(outU + i), _mm256_xor_si256(even, odd));
+		}
+	}
+#endif
+
 	template<u64 fieldBitsConst>
 	OC_FORCEINLINE void generateSenderImpl(
 		const SmallFieldVoleSender& This,
@@ -120,7 +233,25 @@ namespace osuCrypto
 				UNREACHABLE();
 
 			const u64 volePerSuperBlk = superBlkSize / fieldSize;
-			for (u64 nVole = 0; nVole < This.mNumVoles; nVole += volePerSuperBlk)
+			u64 nVole = 0;
+#if defined(OC_ENABLE_VAES) && defined(__AVX512F__) && defined(__VAES__)
+			if constexpr (fieldBitsConst == 2)
+			{
+				for (; nVole + 8 <= This.mNumVoles; nVole += 8, seeds += 32, outU += 8, outV += 16)
+					generateEightTwoBitSenders(seeds, blockIdxBlock, aes, outU, outV);
+			}
+#elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
+			if constexpr (fieldBitsConst == 2)
+			{
+				// The generic sender writes complete pairs, so three remaining VOLEs occupy four slots.
+				for (; nVole + 3 <= This.mNumVoles; nVole += 4, seeds += 16, outU += 4, outV += 8)
+					generateTwoBitSenders256<4>(seeds, blockIdxBlock, aes, outU, outV);
+				if (nVole < This.mNumVoles)
+					generateTwoBitSenders256<2>(seeds, blockIdxBlock, aes, outU, outV);
+				return;
+			}
+#endif
+			for (; nVole < This.mNumVoles; nVole += volePerSuperBlk)
 			{
 				// TODO: Try combining the block index into the AES key. It gives the same PRG, but
 				// might be faster.
@@ -164,6 +295,92 @@ namespace osuCrypto
 		}
 	}
 
+#if defined(OC_ENABLE_VAES) && defined(__AVX512F__) && defined(__VAES__)
+	// Three registers hold the seed triples of four consecutive VOLEs:
+	// [a0 a1 a2 b0], [b1 b2 c0 c1], [c2 d0 d1 d2].
+	template<bool corrected>
+	static OC_FORCEINLINE void storeFourTwoBitW(__m512i x, __m512i y, __m512i z,
+		const u8* delta, const block* correction, block* out)
+	{
+		const auto ab = _mm512_permutex2var_epi64(x, _mm512_setr_epi64(0, 1, 2, 3, 6, 7, 8, 9), y);
+		const auto cd = _mm512_shuffle_i32x4(y, z, _MM_SHUFFLE(2, 1, 3, 2));
+		auto wAB = _mm512_xor_si512(ab, _mm512_shuffle_i32x4(x, y, _MM_SHUFFLE(1, 1, 2, 2)));
+		auto wCD = _mm512_xor_si512(cd, _mm512_shuffle_i32x4(z, z, _MM_SHUFFLE(3, 3, 0, 0)));
+		if constexpr (corrected)
+		{
+			// Each delta bit selects both 64-bit halves of one output block.
+			const auto bytes = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(delta));
+			const unsigned mask = _mm_movemask_epi8(_mm_unpacklo_epi8(bytes, bytes));
+			const auto c = _mm512_loadu_si512(correction);
+			wAB = _mm512_mask_xor_epi64(wAB, __mmask8(mask), wAB,
+				_mm512_shuffle_i32x4(c, c, _MM_SHUFFLE(1, 1, 0, 0)));
+			wCD = _mm512_mask_xor_epi64(wCD, __mmask8(mask >> 8), wCD,
+				_mm512_shuffle_i32x4(c, c, _MM_SHUFFLE(3, 3, 2, 2)));
+		}
+		_mm512_storeu_si512(out, wAB);
+		_mm512_storeu_si512(out + 4, wCD);
+	}
+
+	template<bool corrected>
+	static OC_FORCEINLINE void generateTwelveTwoBitReceivers(const block* seeds, block index,
+		const AES& aes, const u8* delta, const block* correction, block* out)
+	{
+		__m512i state[9];
+		hashTwoBitSeeds<4>(seeds, index, aes, state);
+#pragma GCC unroll 3
+		for (unsigned i = 0; i < 3; ++i)
+			storeFourTwoBitW<corrected>(state[3 * i], state[3 * i + 1], state[3 * i + 2],
+				corrected ? delta + 8 * i : nullptr, corrected ? correction + 4 * i : nullptr, out + 8 * i);
+	}
+
+	// The existing receiver generates complete groups of three, including its
+	// final padded outputs. Load exactly three seeds per VOLE in the remainder.
+	static OC_FORCEINLINE void generateThreeTwoBitReceivers(const block* seeds, block index,
+		const AES& aes, const u8* delta, const block* correction, block* out)
+	{
+		__m512i state[3];
+		hashTwoBitSeeds<3>(seeds, index, aes, state);
+#pragma GCC unroll 3
+		for (unsigned i = 0; i < 3; ++i)
+		{
+			const auto h2 = _mm512_shuffle_i32x4(state[i], state[i], _MM_SHUFFLE(2, 2, 2, 2));
+			auto w = _mm512_castsi512_si256(_mm512_xor_si512(state[i], h2));
+			if (correction)
+			{
+				const auto masks = _mm256_set_m128i(_mm_set1_epi8(delta[2 * i + 1]), _mm_set1_epi8(delta[2 * i]));
+				const auto c = _mm256_broadcastsi128_si256(correction[i].mData);
+				w = _mm256_xor_si256(w, _mm256_and_si256(masks, c));
+			}
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 2 * i), w);
+		}
+	}
+#elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
+	template<bool corrected>
+	static OC_FORCEINLINE void generateSixTwoBitReceivers(const block* seeds, block index,
+		const AES& aes, const u8* delta, const block* correction, block* out)
+	{
+		__m256i state[9];
+		hashTwoBitSeeds256(seeds, index, aes, state);
+		for (unsigned i = 0; i < 3; ++i)
+		{
+			// Two triples occupy [a0 a1], [a2 b0], [b1 b2].
+			const auto x = state[3 * i], y = state[3 * i + 1], z = state[3 * i + 2];
+			auto a = _mm256_xor_si256(x, _mm256_permute2x128_si256(y, y, 0x00));
+			auto b = _mm256_xor_si256(_mm256_permute2x128_si256(y, z, 0x21),
+				_mm256_permute2x128_si256(z, z, 0x11));
+			if constexpr (corrected)
+			{
+				const auto maskA = _mm256_set_m128i(_mm_set1_epi8(delta[4 * i + 1]), _mm_set1_epi8(delta[4 * i]));
+				const auto maskB = _mm256_set_m128i(_mm_set1_epi8(delta[4 * i + 3]), _mm_set1_epi8(delta[4 * i + 2]));
+				a = _mm256_xor_si256(a, _mm256_and_si256(maskA, _mm256_broadcastsi128_si256(correction[2 * i].mData)));
+				b = _mm256_xor_si256(b, _mm256_and_si256(maskB, _mm256_broadcastsi128_si256(correction[2 * i + 1].mData)));
+			}
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 4 * i), a);
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 4 * i + 2), b);
+		}
+	}
+#endif
+
 	template<u64 fieldBitsConst>
 	OC_FORCEINLINE void generateReceiverImpl(
 		const SmallFieldVoleReceiver& This,
@@ -201,8 +418,50 @@ namespace osuCrypto
 			constexpr u64 aesPerSuperBlk = aesPerVole * volePerSuperBlk;
 			constexpr u64 fieldsPerSuperBlk = volePerSuperBlk << fieldBits_;
 
-			for (u64 nVole = 0; nVole < This.mNumVoles; nVole += volePerSuperBlk,
-				deltaPtr += fieldBits * volePerSuperBlk)
+			u64 nVole = 0;
+#if defined(OC_ENABLE_VAES) && defined(__AVX512F__) && defined(__VAES__)
+			if constexpr (fieldBitsConst == 2)
+			{
+				for (; nVole + 12 <= This.mNumVoles; nVole += 12, seeds += 36, outW += 24)
+				{
+					if (correctionPresent)
+					{
+						generateTwelveTwoBitReceivers<true>(seeds, blockIdxBlock, aes, deltaPtr, correction, outW);
+						correction += 12;
+						deltaPtr += 24;
+					}
+					else
+						generateTwelveTwoBitReceivers<false>(seeds, blockIdxBlock, aes, deltaPtr, nullptr, outW);
+				}
+				for (; nVole < This.mNumVoles; nVole += 3, seeds += 9, outW += 6)
+				{
+					generateThreeTwoBitReceivers(seeds, blockIdxBlock, aes, deltaPtr, correction, outW);
+					if (correctionPresent)
+					{
+						correction += 3;
+						deltaPtr += 6;
+					}
+				}
+				return;
+			}
+#elif defined(OC_ENABLE_VAES) && defined(__AVX2__) && defined(__VAES__)
+			if constexpr (fieldBitsConst == 2)
+			{
+				// Four or five remaining VOLEs occupy two complete padded triples.
+				for (; nVole + 4 <= This.mNumVoles; nVole += 6, seeds += 18, outW += 12)
+				{
+					if (correctionPresent)
+					{
+						generateSixTwoBitReceivers<true>(seeds, blockIdxBlock, aes, deltaPtr, correction, outW);
+						deltaPtr += 12;
+						correction += 6;
+					}
+					else
+						generateSixTwoBitReceivers<false>(seeds, blockIdxBlock, aes, nullptr, nullptr, outW);
+				}
+			}
+#endif
+			for (; nVole < This.mNumVoles; nVole += volePerSuperBlk)
 			{
 				block input[aesPerSuperBlk], hashes[aesPerSuperBlk], xorHashes[fieldsPerSuperBlk];
 				for (u64 i = 0; i < aesPerSuperBlk; ++i, ++seeds)
@@ -229,7 +488,10 @@ namespace osuCrypto
 							*outW = xorHashes[i * fieldSize + j + 1];
 
 				if (correctionPresent)
+				{
 					correction += volePerSuperBlk;
+					deltaPtr += fieldBits * volePerSuperBlk;
+				}
 			}
 		}
 		else
@@ -286,6 +548,8 @@ namespace osuCrypto
 		assert(mNumVoles <= mNumVolesPadded);
 		mSeeds.resize(mNumVolesPadded * fieldSize());
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
+		if (mFieldBits <= superBlkShift)
+			std::fill(mSeeds.begin() + numSeeds, mSeeds.end(), ZeroBlock);
 	}
 
 	u64 computeNumVolesPadded(u64 fieldBits, u64 numVoles)
@@ -342,6 +606,7 @@ namespace osuCrypto
 		mDeltaUnpacked.resize(wPadded());
 		for (u64 i = 0; i < mDelta.size(); ++i)
 			mDeltaUnpacked[i] = -(u8)mDelta[i];
+		std::fill(mDeltaUnpacked.begin() + mDelta.size(), mDeltaUnpacked.end(), u8{0});
 	}
 
 	void SmallFieldVoleReceiver::setSeeds(span<const block> seeds_) 
@@ -353,6 +618,9 @@ namespace osuCrypto
 		assert(mNumVoles <= mNumVolesPadded);
 		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
+		// Packed generation reads complete seed groups, including a partial final group.
+		if (mFieldBits <= superBlkShift)
+			std::fill(mSeeds.begin() + numSeeds, mSeeds.end(), ZeroBlock);
 		mConsistencyFailed = false;
 	}
 
