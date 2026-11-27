@@ -661,6 +661,23 @@ namespace osuCrypto::LogVole
             return {};
         }
 
+        bool createRingCoeffModuli(const RingParams& params, std::vector<seal::Modulus>& moduli)
+        {
+            if (!validateRingParams(params)) return false;
+
+            try
+            {
+                std::vector<int> coeffModulusBits(
+                    params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end());
+                moduli = seal::CoeffModulus::Create(params.mPolyModulusDegree, std::move(coeffModulusBits));
+            }
+            catch (const std::exception&)
+            {
+                return false;
+            }
+            return moduli.size() == params.mCoeffModulusBits.size();
+        }
+
         bool validateLightweightRingContext(const RingNttContext& ctx)
         {
             if (!ctx.mGpuLightweight || ctx.mContext || !ctx.mHostContextCache ||
@@ -751,6 +768,21 @@ namespace osuCrypto::LogVole
             unordered_map<RingContextCacheKey, std::weak_ptr<const RingNttContext>, RingContextCacheKeyHash>;
 
         bool makeRingNttContextUncached(const RingParams& params, bool expandModChain, RingNttContext& out, HostStepProfiler* profile);
+    }
+
+    std::span<const u64> detail::resolveRingModuli(const RingParams& params, std::span<u64> scratch)
+    {
+        const auto production = productionRingModuli(params);
+        if (!production.empty()) return production;
+
+        // CoeffModulus::Create enforces SEAL's ring bounds and generates the
+        // distinct NTT primes. SEAL preserves that ordered list at key level.
+        if (params.mCoeffModulusBits.size() > scratch.size()) return {};
+        std::vector<seal::Modulus> moduli;
+        if (!createRingCoeffModuli(params, moduli)) return {};
+        std::transform(moduli.begin(), moduli.end(), scratch.begin(),
+            [](const seal::Modulus& modulus) { return modulus.value(); });
+        return scratch.first(moduli.size());
     }
 
     struct RingContextFactory::Impl
@@ -1135,28 +1167,10 @@ namespace osuCrypto::LogVole
     bool makeRingNttContextUncached(const RingParams& params, bool expandModChain, RingNttContext& out, HostStepProfiler* profile)
     {
         HostStep contextStep(profile, "setup: ring context build");
-        if (!validateRingParams(params))
-        {
-            return false;
-        }
-
         std::vector<seal::Modulus> moduli;
-        try
         {
             HostStep primesStep(profile, "setup: ring modulus generation");
-            std::vector<int> coeffModulusBits(
-                params.mCoeffModulusBits.begin(),
-                params.mCoeffModulusBits.end());
-            moduli = seal::CoeffModulus::Create(params.mPolyModulusDegree, coeffModulusBits);
-        }
-        catch (const std::exception&)
-        {
-            return false;
-        }
-
-        if (moduli.size() != params.mCoeffModulusBits.size())
-        {
-            return false;
+            if (!createRingCoeffModuli(params, moduli)) return false;
         }
 
         seal::EncryptionParameters parms(seal::scheme_type::ckks);

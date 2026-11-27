@@ -3583,6 +3583,95 @@ void LogVole_Core_RootFinalizePrefetchExactAndCleanup(const oc::CLP& cmd)
 #endif
 }
 
+void LogVole_Core_Ct2SeedBudgets(const oc::CLP&)
+{
+    CivoleParams golden, noGolden;
+    LOGVOLE_REQUIRE_TRUE(makeCivoleParams(CivoleSetting::GoldenSeed, golden));
+    LOGVOLE_REQUIRE_TRUE(makeNoGoldenSeedCivoleParams(noGolden));
+    Params mixed = make_golden_params();
+    assignValues<int>(mixed.mShrinkExpand.mRing.mCoeffModulusBits, { 52, 54, 55, 52, 53, 54, 53 });
+
+    for (Params params : {golden.mLogVole, noGolden.mLogVole, mixed})
+    {
+        params.mW = params.mShrinkExpand.mMu;
+        const auto& ring = params.mShrinkExpand.mRing;
+        const auto moduli = seal::CoeffModulus::Create(ring.mPolyModulusDegree,
+            std::vector<int>(ring.mCoeffModulusBits.begin(), ring.mCoeffModulusBits.end()));
+        std::array<std::uint64_t, SEAL_COEFF_MOD_COUNT_MAX> scratch;
+        const auto resolved = detail::resolveRingModuli(ring, scratch);
+        LOGVOLE_REQUIRE_EQ(resolved.size(), moduli.size());
+        for (std::size_t j = 0; j < moduli.size(); ++j)
+            LOGVOLE_REQUIRE_EQ(resolved[j], moduli[j].value());
+
+        const double log2B = noiseBoundLog2(params);
+        // Replicate the legacy budget calculation over the ordered moduli that
+        // the CPU SEAL context received, including the order of summation.
+        double expected = std::numeric_limits<double>::infinity();
+        double minLog2Delta = std::numeric_limits<double>::infinity();
+        for (std::size_t j = 0; j < moduli.size(); ++j)
+        {
+            double log2DeltaJ = 0.0;
+            for (std::size_t w = 0; w < moduli.size(); ++w)
+                if (w != j) log2DeltaJ += std::log2(static_cast<double>(moduli[w].value()));
+            expected = std::min(expected, log2DeltaJ - (log2B + 1.0));
+            minLog2Delta = std::min(minLog2Delta, log2DeltaJ);
+        }
+        LOGVOLE_REQUIRE_EQ(noGoldenSeedFailureBits(params), expected);
+        LOGVOLE_REQUIRE_TRUE(std::isfinite(expected) && expected > 0.0);
+        params.mCt2StatBits = static_cast<std::uint32_t>(std::floor(expected));
+        LOGVOLE_REQUIRE_TRUE(validateNoGoldenSeedBudget(params));
+        ++params.mCt2StatBits;
+        LOGVOLE_REQUIRE_FALSE(validateNoGoldenSeedBudget(params));
+
+        const auto mu = params.mShrinkExpand.mMu;
+        for (const auto width : {mu, mu + 1, 1u << 20})
+        {
+            params.mW = width;
+            const auto sampledPolyCount = static_cast<std::uint64_t>((width + mu - 1) / mu) * mu;
+            const double log2SampledCoeffCount =
+                std::log2(static_cast<double>(ring.mPolyModulusDegree)) +
+                std::log2(static_cast<double>(sampledPolyCount));
+            const double log2Noise = noiseBoundLog2(params);
+            const bool canSearch = log2Noise <= minLog2Delta - 1.0 &&
+                1.0 + log2Noise + log2SampledCoeffCount - minLog2Delta <= std::log2(std::log(100.0));
+            LOGVOLE_REQUIRE_EQ(validateGoldenSeedSearch(params), canSearch);
+        }
+        params.mW = 0;
+        LOGVOLE_REQUIRE_FALSE(validateGoldenSeedSearch(params));
+    }
+
+    const auto rejects = [](const Params& params) {
+        LOGVOLE_REQUIRE_EQ(noGoldenSeedFailureBits(params), -std::numeric_limits<double>::infinity());
+        LOGVOLE_REQUIRE_FALSE(validateNoGoldenSeedBudget(params));
+        LOGVOLE_REQUIRE_FALSE(validateGoldenSeedSearch(params));
+    };
+    for (const auto degree : {512u, 1025u, 2u * SEAL_POLY_MOD_DEGREE_MAX})
+    {
+        Params invalid = mixed;
+        invalid.mShrinkExpand.mRing.mPolyModulusDegree = degree;
+        rejects(invalid);
+    }
+    for (const auto bits : {1, 2, 61})
+    {
+        Params invalid = mixed;
+        invalid.mShrinkExpand.mRing.mCoeffModulusBits[0] = bits;
+        rejects(invalid);
+    }
+    for (const auto count : {0, SEAL_COEFF_MOD_COUNT_MAX + 1})
+    {
+        Params invalid = mixed;
+        resizeFill<int>(invalid.mShrinkExpand.mRing.mCoeffModulusBits, count, 54);
+        if (count != 0) invalid.mShrinkExpand.mMu = static_cast<std::uint32_t>(count);
+        rejects(invalid);
+    }
+    Params invalid = mixed;
+    ++invalid.mShrinkExpand.mMu;
+    rejects(invalid);
+    invalid = mixed;
+    invalid.mShrinkExpand.mTau = 0;
+    rejects(invalid);
+}
+
 void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& cmd)
 {
     const auto identityService = ProtocolCacheService::create();

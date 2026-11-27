@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <array>
 #include <ranges>
 #include <atomic>
 #include <cmath>
@@ -336,9 +337,9 @@ namespace osuCrypto::LogVole
             return log2B;
         }
 
-        bool validateGoldenSeedSearchBudget(const Params& params, const RingNttContext& ctx)
+        template<typename ModulusAt>
+        bool validateGoldenSeedSearchBudget(const Params& params, std::size_t rho, ModulusAt modulusAt)
         {
-            const std::size_t rho = ringModulusCount(ctx);
             if (!validatePlaintextTargetLimbLayout(params, rho))
             {
                 return false;
@@ -369,7 +370,7 @@ namespace osuCrypto::LogVole
                 {
                     if (w != j)
                     {
-                        log2DeltaJ += safeLog2(static_cast<double>(ringModulusValue(ctx, w)));
+                        log2DeltaJ += safeLog2(static_cast<double>(modulusAt(w)));
                     }
                 }
 
@@ -386,6 +387,12 @@ namespace osuCrypto::LogVole
             return std::isfinite(log2RetryExponent) && log2RetryExponent <= log2RetryBudget;
         }
 
+        bool validateGoldenSeedSearchBudget(const Params& params, const RingNttContext& ctx)
+        {
+            return validateGoldenSeedSearchBudget(params, ringModulusCount(ctx),
+                [&ctx](std::size_t limb) { return ringModulusValue(ctx, limb); });
+        }
+
         // Ct2SeedMode::PublicSeed feasibility. With no grinding, a sampled ct2
         // coefficient is bad exactly when its CRT lift lands in a window of length
         // 2B inside a Delta_j-sized residue interval, which for a random-oracle
@@ -396,9 +403,9 @@ namespace osuCrypto::LogVole
         // -log2 of the worst-case probability that a sampled ct2 coefficient is
         // bad, i.e. min_j (log2(Delta_j) - log2(2B)). Returns -inf when the noise
         // bound or the limb layout is unusable.
-        double noGoldenSeedFailureBitsImpl(const Params& params, const RingNttContext& ctx)
+        double noGoldenSeedFailureBitsImpl(const Params& params, std::span<const u64> moduli)
         {
-            const std::size_t rho = ringModulusCount(ctx);
+            const std::size_t rho = moduli.size();
             if (!validatePlaintextTargetLimbLayout(params, rho))
             {
                 return -std::numeric_limits<double>::infinity();
@@ -418,7 +425,7 @@ namespace osuCrypto::LogVole
                 {
                     if (w != j)
                     {
-                        log2DeltaJ += safeLog2(static_cast<double>(ringModulusValue(ctx, w)));
+                        log2DeltaJ += safeLog2(static_cast<double>(moduli[w]));
                     }
                 }
 
@@ -429,13 +436,6 @@ namespace osuCrypto::LogVole
                 worst = std::min(worst, log2DeltaJ - (log2B + 1.0));
             }
             return worst;
-        }
-
-        bool validateNoGoldenSeedBudgetImpl(const Params& params, const RingNttContext& ctx)
-        {
-            const double failureBits = noGoldenSeedFailureBitsImpl(params, ctx);
-            return std::isfinite(failureBits) &&
-                   failureBits >= static_cast<double>(params.mCt2StatBits);
         }
 
         struct RoundingCheckConstants
@@ -6648,8 +6648,10 @@ namespace osuCrypto::LogVole
 
     bool validateGoldenSeedSearch(const Params& params)
     {
-        RingNttContext ctx{};
-        return makeRingNttContext(params.mShrinkExpand.mRing, ctx) && validateGoldenSeedSearchBudget(params, ctx);
+        std::array<u64, SEAL_COEFF_MOD_COUNT_MAX> scratch;
+        const auto moduli = detail::resolveRingModuli(params.mShrinkExpand.mRing, scratch);
+        return validateGoldenSeedSearchBudget(params, moduli.size(),
+            [moduli](std::size_t limb) { return moduli[limb]; });
     }
 
     double noiseBoundLog2(const Params& params)
@@ -6779,18 +6781,16 @@ namespace osuCrypto::LogVole
 
     bool validateNoGoldenSeedBudget(const Params& params)
     {
-        RingNttContext ctx{};
-        return makeRingNttContext(params.mShrinkExpand.mRing, ctx) && validateNoGoldenSeedBudgetImpl(params, ctx);
+        const double failureBits = noGoldenSeedFailureBits(params);
+        return std::isfinite(failureBits) &&
+               failureBits >= static_cast<double>(params.mCt2StatBits);
     }
 
     double noGoldenSeedFailureBits(const Params& params)
     {
-        RingNttContext ctx{};
-        if (!makeRingNttContext(params.mShrinkExpand.mRing, ctx))
-        {
-            return -std::numeric_limits<double>::infinity();
-        }
-        return noGoldenSeedFailureBitsImpl(params, ctx);
+        std::array<u64, SEAL_COEFF_MOD_COUNT_MAX> scratch;
+        const auto moduli = detail::resolveRingModuli(params.mShrinkExpand.mRing, scratch);
+        return noGoldenSeedFailureBitsImpl(params, moduli);
     }
 
     bool makeEffectiveTruncParams(const Params& params, Params& out)

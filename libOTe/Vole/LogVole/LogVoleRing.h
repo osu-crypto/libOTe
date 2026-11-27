@@ -257,6 +257,13 @@ namespace osuCrypto::LogVole
     }
 
     bool validateRingParams(const RingParams& params);
+
+    namespace detail
+    {
+        // Returns the ordered SEAL coefficient moduli in static storage or in
+        // scratch. The result may borrow scratch and is empty on failure.
+        std::span<const u64> resolveRingModuli(const RingParams& params, std::span<u64> scratch);
+    }
     // Metadata access never constructs SEAL objects or touches the GPU.
     std::size_t ringModulusCount(const RingNttContext& ctx);
     u64 ringModulusValue(const RingNttContext& ctx, std::size_t limb);

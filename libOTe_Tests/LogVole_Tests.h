@@ -8,6 +8,7 @@
     X(Modes, InteractiveNoGolden) \
     X(Modes, NonInteractive) \
     X(Modes, ProtocolOptions) \
+    X(Core, Ct2SeedBudgets) \
     X(Garbled, LayoutAndValidation) \
     X(Garbled, SequentialRelation) \
     X(Garbled, GpuPackingMatchesCrt) \
