@@ -13,20 +13,23 @@ import run_gpu_ab as runner
 
 
 FOOTER = (
-    "LogVole local n:\x1b[32m    16\x1b[0m pbits:55 p:18014398509481993 "
-    "online-bytes:553 ||   220 ms\x1b[0m\n"
+    "LogVole local n:\x1b[32m    16\x1b[0m pbits:55 p:18014398508400641 "
+    "online-bytes:1048664   ||   1055 ms\x1b[0m\n"
 )
 
 
 class RunnerTests(unittest.TestCase):
     def test_footer(self):
         self.assertEqual(runner.parse_footer(FOOTER, 16), {
-            "n": 16, "pbits": 55, "prime": 18014398509481993,
-            "online_bytes": 553, "frontend_ms": 220,
+            "n": 16, "pbits": 55, "prime": 18014398508400641,
+            "online_bytes": 1048664, "frontend_ms": 1055,
         })
         invalid = (
-            "", FOOTER + FOOTER, FOOTER.replace("220 ms", "oops ms"),
-            FOOTER.replace("pbits:55", "pbits:56"),
+            "", FOOTER + FOOTER, FOOTER.replace("1055 ms", "oops ms"),
+            FOOTER.replace("pbits:55", "pbits:0"),
+            FOOTER.replace("pbits:55", "pbits:65"),
+            FOOTER.replace("p:18014398508400641", "p:1"),
+            FOOTER.replace("p:18014398508400641", f"p:{1 << 64}"),
         )
         for footer in invalid:
             with self.subTest(footer=footer), self.assertRaises(ValueError):
@@ -87,8 +90,8 @@ class RunnerTests(unittest.TestCase):
                     else:
                         for label in ("baseline", "candidate"):
                             self.assertEqual(report["summaries"]["golden"][label], {
-                                "samples": 2, "median_frontend_ms": 220,
-                                "min_frontend_ms": 220, "max_frontend_ms": 220,
+                                "samples": 2, "median_frontend_ms": 1055,
+                                "min_frontend_ms": 1055, "max_frontend_ms": 1055,
                             })
 
 

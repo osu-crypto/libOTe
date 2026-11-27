@@ -33,8 +33,11 @@ def parse_footer(output, request_size):
     if match is None:
         raise ValueError("expected one complete LogVole local timing footer")
     values = {key: int(value) for key, value in match.groupdict().items()}
-    if values["n"] != request_size or values["prime"].bit_length() != values["pbits"]:
-        raise ValueError("frontend reported an unexpected output count or prime")
+    # The footer prints the configured bit count. The ring can select a
+    # smaller batching prime to fit under its minimum coefficient modulus.
+    if (values["n"] != request_size or not 1 <= values["pbits"] <= 64
+            or not 2 <= values["prime"] < (1 << 64)):
+        raise ValueError("frontend reported an unexpected output count, bit count, or prime")
     return values
 
 
