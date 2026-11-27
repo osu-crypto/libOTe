@@ -3737,19 +3737,46 @@ void LogVole_Core_NoGoldenSeedRootFinalizePrefetchTwoQueryExact(const oc::CLP& c
     // Decode an independently owned Root frame as the copied TCP receiver does.
     // Its coefficient tensors remain encoded until the receiver device chain
     // consumes them; no sender cache or host polynomial is shared with it.
-    RootOfflineMessage wireRoot{};
+    ReceiverState receiver{};
+    receiver.mParams = params;
+    receiver.mShrinkExpandState = std::move(seReceiver);
+    auto rootPayload = encode(offlineMessage, 4, {}, true);
+    const auto bStarBytes = static_cast<std::size_t>(offlineMessage.mRandomizerWidth) *
+        ringPolyCoeffCount(trunc.mRing) * sizeof(oc::u64);
+    LOGVOLE_REQUIRE_TRUE(bStarBytes >= sizeof(oc::u64) && bStarBytes <= rootPayload.size());
+    const auto bStarOffset = rootPayload.size() - bStarBytes;
+    oc::u64 firstBStarWord = 0;
+    for (std::size_t byte = 0; byte < sizeof(oc::u64); ++byte)
+        firstBStarWord |= static_cast<oc::u64>(rootPayload[bStarOffset + byte]) << (8 * byte);
+    const auto modulus = ringModulusValue(ctx, 0);
+    LOGVOLE_REQUIRE_TRUE(firstBStarWord < modulus);
+    for (const auto replacement : {(firstBStarWord + 1) % modulus, firstBStarWord + modulus})
     {
-        auto rootPayload = encode(offlineMessage, 4, {}, true);
+        auto tamperedPayload = rootPayload;
+        for (std::size_t byte = 0; byte < sizeof(oc::u64); ++byte)
+            tamperedPayload[bStarOffset + byte] = static_cast<oc::u8>(replacement >> (8 * byte));
+        RootOfflineMessage rejectedRoot{};
         LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
-            std::move(rootPayload), wireRoot, 4, {}, true));
+            std::move(tamperedPayload), rejectedRoot, 4, {}, true));
+        const auto bStarOwner = rejectedRoot.mOwnedPublicBStarWire;
+        LOGVOLE_REQUIRE_TRUE(bStarOwner != nullptr);
+        LOGVOLE_REQUIRE_FALSE(finalizeRootOfflineReceiver(
+            receiver, std::move(rejectedRoot), receiverScope));
+        LOGVOLE_EXPECT_TRUE(rejectedRoot.mOwnedPublicBStarWire == bStarOwner);
+        LOGVOLE_EXPECT_TRUE(rejectedRoot.mPublicBStarNtt.empty());
+        LOGVOLE_EXPECT_TRUE(!receiver.mRootCtRWire && !receiver.mRootLacctLeftWire &&
+                            !receiver.mRootTopCtWire && !receiver.mRootPublicBStarWire);
+        LOGVOLE_EXPECT_TRUE(receiver.mRootCtRRt.mPolys.empty() &&
+                            receiver.mRootPublicBStarNtt.empty());
+        LOGVOLE_EXPECT_EQ(receiver.mRootRandomizerWidth, 0u);
     }
+    RootOfflineMessage wireRoot{};
+    LOGVOLE_REQUIRE_TRUE(decodeRootOfflineForTransport(
+        std::move(rootPayload), wireRoot, 4, {}, true));
     LOGVOLE_REQUIRE_TRUE(wireRoot.mOwnedCtRWire != nullptr);
     LOGVOLE_REQUIRE_TRUE(wireRoot.mOwnedPublicBStarWire != nullptr);
     LOGVOLE_REQUIRE_TRUE(wireRoot.mCtR.mPolys.empty());
     LOGVOLE_REQUIRE_TRUE(wireRoot.mPublicBStarNtt.empty());
-    ReceiverState receiver{};
-    receiver.mParams = params;
-    receiver.mShrinkExpandState = std::move(seReceiver);
     LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(
         receiver, std::move(wireRoot), receiverScope));
     LOGVOLE_REQUIRE_TRUE(receiver.mRootCtRWire != nullptr);

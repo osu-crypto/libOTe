@@ -2128,7 +2128,7 @@ namespace osuCrypto::LogVole
         for (std::size_t i = 0; i < seeds.size(); ++i)
         {
             out[i] = sampleUniformPolyFromSeed(ctx, seeds[i], stats);
-            if (actualNtt) (void)forwardNttCanonical(out[i], ctx, stats);
+            if (actualNtt && !forwardNttCanonical(out[i], ctx, stats)) return {};
         }
         return out;
     }
@@ -2339,7 +2339,7 @@ namespace osuCrypto::LogVole
         for (u32 i = 0; i < count; ++i)
         {
             out[i] = deriveUniformPolyFromNonce(ctx, nonce, domainTag, i, stats);
-            if (actualNtt) (void)forwardNttCanonical(out[i], ctx, stats);
+            if (actualNtt && !forwardNttCanonical(out[i], ctx, stats)) return {};
         }
         return out;
     }

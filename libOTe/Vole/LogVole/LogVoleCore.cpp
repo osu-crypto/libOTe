@@ -2693,13 +2693,29 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        // BStar is a fixed public matrix, not a sender-chosen root key.
-        // Check its canonical NTT representation before admitting any root
-        // state. Compare owned wire bytes directly to preserve deferred storage.
+        // Check the fixed public BStar in canonical NTT form before admitting
+        // root state. Compare owned wire bytes directly to preserve deferred storage.
+        std::vector<RnsPoly> expectedBStarNtt;
+#if defined(ENABLE_LOGVOLE_CUDA)
+        if (setupBatchNttEnabled(state.mParams.mShrinkExpand.mGpuSetup, ctx) &&
+            gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)))
+        {
+            expectedBStarNtt = deriveUniformPolyBatchFromNonce(
+                ctx, kRootBStarPublicNonce, kRootBStarPublicDomain,
+                randomizer, true, scope, nullptr);
+            if (expectedBStarNtt.size() != randomizer) return false;
+        }
+#endif
         for (u32 idx = 0; idx < randomizer; ++idx)
         {
-            const auto expected = deriveUniformPolyFromNonceNtt(
-                ctx, kRootBStarPublicNonce, kRootBStarPublicDomain, idx, nullptr);
+            RnsPoly expectedHost;
+            if (expectedBStarNtt.empty())
+            {
+                expectedHost = deriveUniformPolyFromNonce(
+                    ctx, kRootBStarPublicNonce, kRootBStarPublicDomain, idx, nullptr);
+                if (!forwardNttCanonical(expectedHost, ctx, nullptr)) return false;
+            }
+            const auto& expected = expectedBStarNtt.empty() ? expectedHost : expectedBStarNtt[idx];
             if (expected.mCoeffs.size() != rootPolyWords) return false;
             if (ownedPublicBStarWire)
             {
