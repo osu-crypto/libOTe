@@ -16,6 +16,16 @@ git -C ../libOTe-gpu-baseline rev-parse HEAD
 
 Use the same host compiler, CUDA toolkit, generator, dependency revisions, and flags for both worktrees. Pin dependency revisions before configuring. Automatic fetch can update dependencies. Keep writable dependency clones and installation prefixes separate for the two worktrees. A shared installed package can supply read-only inputs through an explicit find hint such as `SEAL_DIR`.
 
+| Dependency | Revision used for the comparison |
+| --- | --- |
+| cryptoTools | `3e69c5b9ac0f0c43d0fd1c9e1b886a3ea8df8979`, recorded by both libOTe revisions |
+| coproto | `ded64cbc51c041ee534e5c34a5a81135af455ce7` |
+| macoro | `feea851f3bda2bdc80993252144fd38a46acca85` |
+| function2 | `02ca99831de59c7c3a4b834789260253cace0ced`, pinned by coproto |
+| SEAL | `206648d0e4634e5c61dcf9370676630268290b59` (4.1.1), pinned by libOTe |
+
+Pass the macoro revision explicitly. It supplies the coroutine APIs used by this source. The commit is available on the upstream branch `codex/macoro-scope-lifetime`. If using a prepopulated dependency cache, fetch that branch into each clone before configuring and verify the pinned commit is available. [macoro commit](https://github.com/ladnir/macoro/commit/feea851f3bda2bdc80993252144fd38a46acca85)
+
 The local validation configuration uses Release, Ninja, `FETCH_AUTO=ON`, and `ENABLE_BOOST=OFF`. Windows uses an x64 developer shell for the selected MSVC. Linux uses the compiler selected for NVCC. Set `CMAKE_CUDA_COMPILER` and `CMAKE_CUDA_HOST_COMPILER` at initial configure if the intended versions need explicit paths. Select architecture 89 for an RTX 4090 or 4060 and 90 for an H200.
 
 From the candidate worktree, record the absolute path to its CMake launcher include. Pass that same path when configuring both worktrees. The target compiles the unmodified `frontend/ExampleLogVole.cpp` in each revision and links it to that revision's library.
@@ -33,6 +43,9 @@ DEPS="$(pwd)/out/install/gpu-validation"
 BUILD="$(pwd)/out/build/gpu-validation"
 cmake -S . -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release "-DLIBOTE_BUILD_DIR=$BUILD" \
   -DFETCH_AUTO=ON -DENABLE_BOOST=OFF -DENABLE_LOGVOLE=ON -DENABLE_LOGVOLE_CUDA=ON \
+  -DOC_ENABLE_AVX512_IFMA=OFF \
+  -DCOPROTO_GIT_TAG=ded64cbc51c041ee534e5c34a5a81135af455ce7 \
+  -DMACORO_GIT_TAG=feea851f3bda2bdc80993252144fd38a46acca85 \
   -DCMAKE_CUDA_ARCHITECTURES=89 "-DCMAKE_PROJECT_INCLUDE=$BENCH_INCLUDE" \
   "-DCMAKE_INSTALL_PREFIX=$DEPS" "-DOC_THIRDPARTY_INSTALL_PREFIX=$DEPS" \
   "-DOC_THIRDPARTY_HINT=$DEPS" "-DOC_THIRDPARTY_CLONE_DIR=$(pwd)/out"
@@ -86,7 +99,7 @@ python libOTe_Tests/LogVole/run_gpu_ab.py \
 
 Set `HOST_COMPILER_VERSION`, `CUDA_TOOLKIT_VERSION`, and `CUDA_ARCH` to the build values before running. The 16-output run checks the workflow. For timing, use a new output directory with `--n 65539 --threads 2 --warmup-blocks 1 --blocks 3`. Assess a larger H200 request, such as 262144 outputs, after exact checks pass and capacity is established. Use a separate comparison for each workload. Never run two benchmarks at the same time, including across Windows, WSL, or remote hosts. Schedule sanitizer runs and profilers outside timing.
 
-The runner preserves the frontend logs and `report.json`. The parsed frontend time covers local offline setup, online evaluation, and relation verification. It is an end-to-end measurement. Use a separate trace for kernel time or copy overlap. Report mode, size, host and GPU identity, both revisions, clock and power settings, driver and toolchain versions, raw samples, and median and range for each revision.
+The runner preserves the frontend logs and `report.json`. Use the plaintext bit count and prime reported by each run. The NoGoldenSeed modes select 52 bits. The parsed frontend time covers local offline setup, online evaluation, and relation verification. It is an end-to-end measurement. Use a separate trace for kernel time or copy overlap. Report mode, size, host and GPU identity, both revisions, clock and power settings, driver and toolchain versions, raw samples, and median and range for each revision.
 
 ## Report
 
