@@ -11934,12 +11934,6 @@ namespace osuCrypto::LogVole::gpu
                 rc.mMinModulus <= rc.mMaxModulus;
         }
 
-        bool pointwisePseudo55ProductionEligible(const RingConstView& rc)
-        {
-            return rc.mKernelOptions.mPointwisePseudo55Reduce &&
-                pointwisePseudo55ShapeEligible(rc);
-        }
-
         bool expandAccumulatorGoldenPseudo55StructuralEligible(
             const RingConstView& rc,
             u32 mu,
@@ -12160,7 +12154,7 @@ namespace osuCrypto::LogVole::gpu
         bool& launched)
     {
         launched = false;
-        if (!rc.mKernelOptions.mFixedIpMuRowReuse || (mu != 8u && mu != 16u) ||
+        if ((mu != 8u && mu != 16u) ||
             rc.mN != 8192u || rc.mLogN != 13u || rc.mRho != 4u || !rc.mMods ||
             chunkCount < 8u || chunkCount > 65535u ||
             !publicA || !skNtt || !out || publicA == skNtt ||
@@ -12170,8 +12164,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         const dim3 grid(32u, 4u, chunkCount);
-        const bool usePseudo55 =
-            pointwisePseudo55ProductionEligible(rc);
+        const bool usePseudo55 = pointwisePseudo55ShapeEligible(rc);
         if (mu == 8u)
         {
             if (usePseudo55)
@@ -12212,9 +12205,7 @@ namespace osuCrypto::LogVole::gpu
         bool& launched)
     {
         launched = false;
-        if (!rc.mKernelOptions.mFixedIpWideMuRowReuse ||
-            !pointwisePseudo55ProductionEligible(rc) ||
-            !innerProductOuterWideMuStructuralEligible(rc, mu, chunkCount) ||
+        if (!innerProductOuterWideMuStructuralEligible(rc, mu, chunkCount) ||
             !publicA || !skNtt || !out || publicA == skNtt ||
             out == publicA || out == skNtt)
         {
@@ -12277,7 +12268,7 @@ namespace osuCrypto::LogVole::gpu
         const u32 blocks = outCount * 4u;
         const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
         const DeviceInverseRho4 iv = toDeviceInverseRho4(rc);
-        const bool usePseudo55 = pointwisePseudo55ProductionEligible(rc);
+        const bool usePseudo55 = pointwisePseudo55ShapeEligible(rc);
         if (usePseudo55)
         {
             if (alphaIsTwo)
@@ -12385,8 +12376,7 @@ namespace osuCrypto::LogVole::gpu
 
         constexpr u32 threads = 512u;
         const size_t shBytes = static_cast<size_t>(8192u) * sizeof(u64);
-        const bool usePseudo55 =
-            pointwisePseudo55ProductionEligible(rc);
+        const bool usePseudo55 = pointwisePseudo55ShapeEligible(rc);
         if (usePseudo55)
         {
             if (!configurePointwisePseudo55SparseShared(rc)) return false;
@@ -12498,7 +12488,7 @@ namespace osuCrypto::LogVole::gpu
             out != aBase && out != bBase;
         const dim3 grid = grid2D(rc.mRho * rc.mN, outCount, threads);
         const bool usePseudo55 =
-            fixedGeometry && pointwisePseudo55ProductionEligible(rc);
+            fixedGeometry && pointwisePseudo55ShapeEligible(rc);
         if (fixedGeometry)
         {
             if (log14H200Shape(rc) && rc.mMods &&

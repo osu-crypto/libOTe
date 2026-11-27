@@ -1523,3 +1523,17 @@ The new parity test passed on the RTX 4060 before and after pruning. The
 Windows VS 14.50 CUDA test target and frontend object built successfully, and
 the two focused checks passed in 10.66 seconds with zero skips. The SM90 build
 and Linux checks are pending final validation.
+
+Pointwise dispatch uses the established narrow and wide row-reuse paths and
+the existing pseudo-55 modulus gate. Removing three tuning selectors leaves
+the kernel bodies and geometry, alias, and modulus checks in place.
+
+The direct SEAL oracle matched all five eligible widths at 55 bits and both
+narrow Barrett widths at 53 bits on the RTX 4060. The test checks dispatch
+declines and reads back at most 32 MiB at a time. The Windows VS 14.50 CUDA
+test, lifetime, and benchmark targets built successfully. Three focused
+checks passed with zero skips in 18.63 seconds before pruning and 12.74
+seconds afterward. The baseline exercised the generic sparse no-zero kernel
+by disabling pseudo-55 dispatch on 55-bit inputs. The candidate retains
+that kernel for moduli outside the pseudo-55 window, which the final runtime
+fixture did not exercise.

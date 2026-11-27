@@ -2669,6 +2669,131 @@ void LogVole_RingOps_NttRoundTrip(const oc::CLP& cmd)
 #endif
 }
 
+void LogVole_RingOps_PointwiseOuterParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    using oc::u32;
+    using oc::u64;
+    constexpr u32 n = 8192u, rho = 4u, chunks = 8u, maxMu = 128u, period = 17u;
+    constexpr u32 polyWords = n * rho;
+    constexpr u64 canary = ~u64(0);
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+
+    for (const int bits : {55, 53})
+    {
+        RingParams params;
+        params.mPolyModulusDegree = n;
+        resizeFill<int>(params.mCoeffModulusBits, rho, bits);
+        RingNttContext cpu;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, cpu));
+        prepareGpuTableOwners(cpu);
+        auto ring = gpu::GpuRing::get(cpu);
+        LOGVOLE_REQUIRE_TRUE(ring);
+        const auto view = ring->view(stream);
+        constexpr u64 radix55 = u64(1) << 55u;
+        LOGVOLE_REQUIRE_EQ(view.mMinModulus > radix55 - (u64(1) << 21u) &&
+            view.mMaxModulus < radix55, bits == 55);
+        std::vector<seal::Modulus> moduli;
+        for (u32 limb = 0; limb < rho; ++limb) moduli.emplace_back(ringModulusValue(cpu, limb));
+
+        const auto makeInputs = [&](u32 count, u32 domain) {
+            std::vector<RnsPoly> polys(count);
+            for (u32 p = 0; p < count; ++p)
+            {
+                auto& coeffs = polys[p].mCoeffs;
+                coeffs.resize(polyWords);
+                for (u32 limb = 0; limb < rho; ++limb)
+                {
+                    const u64 q = moduli[limb].value();
+                    std::array<u64, period> pattern;
+                    for (u32 i = 0; i < period; ++i)
+                    {
+                        const u32 k = (i + p + domain) % period;
+                        const u64 counter = 1u + k + period * (p + count * (limb + rho * domain));
+                        pattern[i] = k == 0u ? 0u : k == 1u ? q - 1u :
+                            (counter * 0xF1357AEA2E62A9C5ull) % q;
+                    }
+                    for (u32 c = 0; c < n; ++c) coeffs[limb * n + c] = pattern[c % period];
+                }
+            }
+            return polys;
+        };
+        const auto publicA = makeInputs(maxMu, 0u);
+        const auto sk = makeInputs(chunks, 1u);
+        std::vector<u64> actual(maxMu * polyWords);
+        std::array<u64, 2> guard{};
+        gpu::GpuPolyBuffer publicDevice(*ring, maxMu, stream), skDevice(*ring, chunks, stream);
+        gpu::GpuPolyBuffer output(*ring, chunks * maxMu + 1u, stream);
+        gpu::StreamDrain drain{stream};
+        LOGVOLE_REQUIRE_TRUE(publicDevice.upload(publicA, stream) && skDevice.upload(sk, stream));
+        const auto* a = publicDevice.data(stream);
+        const auto* b = skDevice.data(stream);
+        auto* out = output.data(stream);
+
+        // Read and check all coefficients one chunk at a time. The mu=128
+        // dispatch writes 256 MiB, but verification needs only 32 MiB at once.
+        for (const u32 mu : {8u, 16u, 32u, 64u, 128u})
+        {
+            const bool wide = mu >= 32u;
+            const auto launch = wide ? gpu::tryLaunchInnerProductOuterWideMuRowReuse :
+                gpu::tryLaunchInnerProductOuterMuRowReuse;
+            const auto decline = [&](const u64* x, const u64* y, u64* dst, u32 rows, u32 count) {
+                bool launched = true;
+                LOGVOLE_REQUIRE_TRUE(launch(view, x, y, dst, rows, count, stream.raw(), launched));
+                LOGVOLE_REQUIRE_FALSE(launched) << " bits " << bits << " mu " << rows << " chunks " << count;
+            };
+            auto* tail = output.poly(chunks * mu, stream);
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(out, chunks * mu * polyWords * sizeof(u64), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(out, &canary, sizeof(canary), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(tail, &canary, sizeof(canary), stream.raw()));
+            decline(a, b, out, mu, chunks - 1u);
+            decline(a, b, out, wide ? 17u : 7u, chunks);
+            decline(out, b, out, mu, chunks);
+            decline(a, out, out, mu, chunks);
+            decline(a, a, out, mu, chunks);
+            if (wide && bits != 55) decline(a, b, out, mu, chunks);
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(&guard[0], out, sizeof(u64), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(&guard[1], tail, sizeof(u64), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(stream.sync());
+            LOGVOLE_REQUIRE_EQ(guard[0], canary);
+            LOGVOLE_REQUIRE_EQ(guard[1], canary);
+            if (wide && bits != 55) continue;
+
+            bool launched = false;
+            LOGVOLE_REQUIRE_TRUE(launch(view, a, b, out, mu, chunks, stream.raw(), launched));
+            LOGVOLE_REQUIRE_TRUE(launched);
+            for (u32 chunk = 0; chunk < chunks; ++chunk)
+            {
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(actual.data(), output.poly(chunk * mu, stream),
+                    mu * polyWords * sizeof(u64), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(stream.sync());
+                for (u32 row = 0; row < mu; ++row)
+                for (u32 limb = 0; limb < rho; ++limb)
+                {
+                    std::array<u64, period> expected;
+                    for (u32 i = 0; i < period; ++i)
+                        expected[i] = seal::util::multiply_uint_mod(publicA[row].mCoeffs[limb * n + i],
+                            sk[chunk].mCoeffs[limb * n + i], moduli[limb]);
+                    const auto* rowOut = actual.data() + (row * rho + limb) * n;
+                    u32 c = 0;
+                    while (c < n && rowOut[c] == expected[c % period]) ++c;
+                    LOGVOLE_REQUIRE_TRUE(c == n) << " bits " << bits << " mu " << mu << " chunk " << chunk
+                        << " row " << row << " limb " << limb << " coefficient " << c;
+                }
+            }
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(&guard[1], tail, sizeof(u64), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(stream.sync());
+            LOGVOLE_REQUIRE_EQ(guard[1], canary);
+        }
+    }
+#else
+    LOGVOLE_SKIP() << "requires CUDA build";
+#endif
+}
+
 void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
 {
 #if defined(ENABLE_LOGVOLE_CUDA)
@@ -2692,21 +2817,13 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
                 LOGVOLE_REQUIRE_TRUE(forwardNttCanonical(expected[i], cpu));
             }
         }
-        std::array<RingNttContext, 3> owners;
+        std::array<RingNttContext, 2> owners;
         for (unsigned variant = 0; variant < owners.size(); ++variant)
         {
             osuCrypto::LogVoleExecutionOptions options;
             options.mUseGpu = true;
             auto& kernel = options.mAdvanced.mKernels;
-            if (variant == 1)
-            {
-                kernel.mNoGoldH200InversePackedRoots = false;
-            }
-            else if (variant == 2)
-            {
-                kernel.mPointwisePseudo55Reduce = false;
-                kernel.mNoGoldH200InversePackedRoots = true;
-            }
+            kernel.mNoGoldH200InversePackedRoots = variant == 0;
             LOGVOLE_REQUIRE_TRUE(kernel.valid());
             auto factory = std::make_shared<RingContextFactory>(options, nullptr);
             LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, owners[variant], factory));
@@ -2722,8 +2839,8 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
 
         // Alternate live owners, then return to the first: no first-use latch
         // may choose the other owner's configuration or device table layout.
-        std::array<bool, 3> pointwiseChecked{};
-        for (unsigned variant : {1u, 0u, 2u, 1u, 0u})
+        std::array<bool, 2> pointwiseChecked{};
+        for (unsigned variant : {1u, 0u, 1u, 0u})
         {
             auto& ctx = owners[variant];
             auto ring = gpu::GpuRing::get(ctx);
@@ -3490,29 +3607,27 @@ void LogVole_RingOps_NttLog13SparseParity(const oc::CLP& cmd)
         nodes.data(stream), b.poly(0u, stream), b.poly(1u, stream), packed.data(stream),
         output.data(stream), logicalCount - 8u, stream.raw(), declined));
     LOGVOLE_REQUIRE_FALSE(declined);
-    for (unsigned route = 0; route < 3u; ++route)
+    for (const bool noZero : {false, true})
     {
-        auto selected = view;
-        if (route == 2u) selected.mKernelOptions.mPointwisePseudo55Reduce = false;
         LOGVOLE_REQUIRE_TRUE(output.upload(sentinel, stream));
         bool launched = false;
-        if (route == 0u)
-            LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseRecursiveLeafSparseNegate(selected,
+        if (!noZero)
+            LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseRecursiveLeafSparseNegate(view,
                 nodes.data(stream), b.poly(0u, stream), b.poly(1u, stream), packed.data(stream),
                 output.data(stream), logicalCount, stream.raw(), launched));
         else
         {
             // Commit the mandatory sparse consumer before leaving zero limbs
             // unmaterialized. No dense consumer reads this sentinel-filled view.
-            LOGVOLE_REQUIRE_TRUE(gpu::canLaunchGadgetDecomposeHi110RecursiveLeafSparsePair(selected,
+            LOGVOLE_REQUIRE_TRUE(gpu::canLaunchGadgetDecomposeHi110RecursiveLeafSparsePair(view,
                 output.data(stream), parentCount, gadget.data(stream)));
-            LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseRecursiveLeafSparseNegateNoZero(selected,
+            LOGVOLE_REQUIRE_TRUE(gpu::tryLaunchNttInverseRecursiveLeafSparseNegateNoZero(view,
                 nodes.data(stream), b.poly(0u, stream), b.poly(1u, stream), packed.data(stream),
                 output.data(stream), logicalCount, stream.raw(), launched));
         }
         LOGVOLE_REQUIRE_TRUE(launched);
         auto selectedExpected = expected;
-        if (route != 0u)
+        if (noZero)
             for (unsigned parent = 0; parent < parentCount; ++parent)
             for (unsigned j = 0; j < 4u; ++j)
                 if (j / 2u != parent % 2u)
@@ -3522,9 +3637,9 @@ void LogVole_RingOps_NttLog13SparseParity(const oc::CLP& cmd)
         LOGVOLE_REQUIRE_TRUE(output.download(actual, stream) && packed.download(actualPacked, stream));
         expect_batch_equal(actual, selectedExpected);
         expect_batch_equal(actualPacked, digits);
-        if (route != 0u)
+        if (noZero)
         {
-            LOGVOLE_REQUIRE_TRUE(gpu::launchGadgetDecomposeHi110RecursiveLeafSparsePair(selected,
+            LOGVOLE_REQUIRE_TRUE(gpu::launchGadgetDecomposeHi110RecursiveLeafSparsePair(view,
                 output.data(stream), parentCount, gadget.data(stream), nullptr, stream.raw()));
             std::vector<RnsPoly> high;
             LOGVOLE_REQUIRE_TRUE(gadget.download(high, stream));

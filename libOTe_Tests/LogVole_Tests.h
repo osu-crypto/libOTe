@@ -126,6 +126,7 @@
     X(Core, RepOfflineSenderInputGammaOneRepeats) \
     X(Core, SeedLabelSampleCt2FromSeedDeterministic) \
     X(RingOps, KernelOptions) \
+    X(RingOps, PointwiseOuterParity) \
     X(RingOps, NttLog13ForwardParity) \
     X(RingOps, NttLog13InverseParity) \
     X(RingOps, NttLog13TreeParity) \

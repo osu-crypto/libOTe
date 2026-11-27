@@ -10,9 +10,6 @@ namespace osuCrypto
     struct LogVoleGpuKernelOptions
     {
         bool mNoGoldH200InverseOpTrace = false;
-        bool mFixedIpMuRowReuse = true;
-        bool mFixedIpWideMuRowReuse = true;
-        bool mPointwisePseudo55Reduce = true;
         std::uint32_t mNoGoldH200RootL2Mode = 3u;
         bool mFusedIp = false;
         bool mNoGoldH200InversePackedRoots = true;
@@ -28,9 +25,6 @@ namespace osuCrypto
         bool operator==(const LogVoleGpuKernelOptions& other) const noexcept
         {
             return mNoGoldH200InverseOpTrace == other.mNoGoldH200InverseOpTrace &&
-                mFixedIpMuRowReuse == other.mFixedIpMuRowReuse &&
-                mFixedIpWideMuRowReuse == other.mFixedIpWideMuRowReuse &&
-                mPointwisePseudo55Reduce == other.mPointwisePseudo55Reduce &&
                 mNoGoldH200RootL2Mode == other.mNoGoldH200RootL2Mode &&
                 mFusedIp == other.mFusedIp &&
                 mNoGoldH200InversePackedRoots == other.mNoGoldH200InversePackedRoots &&
