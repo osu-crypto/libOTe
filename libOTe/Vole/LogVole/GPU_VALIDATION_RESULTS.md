@@ -90,6 +90,31 @@ Changes are relative to the original. The process wall clock includes launch, fr
 
 Local raw reports and logs are under `out/review/ab-original-{smoke,65539}-{windows,linux}`. The matching `*-launchers.json` and `*-environment.json` files record binary hashes and environment checks. The matching `*-{before,after}-telemetry.log` files capture the GPU state outside the timing runs. Both production runs started at 64 °C and 210 MHz and ended at 66 °C and 1470 MHz in those snapshots. The reports measure the full local protocol on this GPU and build configuration. Attributing the differences to individual kernels or implementation changes requires phase timings and dispatch traces.
 
+## Windows interactive NoGoldenSeed phase diagnosis
+
+A follow-up repeated the Windows case with confirmed AC power. The workload was `-logvole -n 65539 -t 2 -gpu 1 -nogold 1 -noninteractive 0 -p 55 -delta 7`. The original revision and Windows compatibility patch are the same as above. Separate diagnostic copies of the two frontends linked the existing release libraries and added steady-clock measurements around the joined offline call, online preparation, joined online call, and full relation check. The three sequential paired runs used original/candidate, candidate/original, and original/candidate order. Windows reported AC power before and after each process. WMI reported AC power and charging before and after each pair. All runs verified the VOLE relation and reported 65539 outputs, modulus setting 52, prime `2251799813554177`, and 4194360 online bytes.
+
+| Phase | Original median (ms) | Candidate median (ms) |
+| --- | ---: | ---: |
+| Offline | 1322.17 | 4593.16 |
+| Online preparation | 0.0631 | 0.0509 |
+| Online | 52.5014 | 62.7117 |
+| Relation check | 0.2753 | 0.2578 |
+| Whole frontend | 1375 | 4655 |
+| Process wall | 1565.56 | 4848.04 |
+
+In a separate AC pair, diagnostic builds also timed the synchronous budget checks and ring-context constructors. The offline phase took 1384.59 ms in the original and 4384.53 ms in the candidate. Both runs passed the same relation and contract checks.
+
+| Non-overlapping timed scope | Original (ms) | Candidate (ms) |
+| --- | ---: | ---: |
+| Sender correctness-budget check | 0.075 | 1286.386 |
+| Receiver correctness-budget check | 0.033 | 1282.966 |
+| Host fallback materialization | 509.617 (one) | 1025.532 (two) |
+
+The candidate’s sender and receiver both call `validateCt2SeedMode` in `LogVole.cpp`. The check reaches `validateNoGoldenSeedBudget` in `LogVoleCore.cpp`, which calls `makeRingNttContext` without a factory. The default factory in `LogVoleRing.cpp` has GPU execution disabled and expands the full modulus chain. Each call constructs a new degree-16384, eight-limb CPU SEAL context. The two constructors took 1285.568 ms and 1282.198 ms, nested within the budget checks above. The original budget checks used lightweight GPU ring metadata and recorded zero uncached SEAL constructors. The additional 514.818 ms host fallback occurs during receiver root setup, where `finalizeRootOfflineReceiverImpl` checks the canonical fixed public BStar tensor. Its call to `deriveUniformPolyFromNonceNtt` uses the host NTT, which materializes the lightweight ring’s lazy SEAL context. This verification must be preserved. Together these non-overlapping scopes added 3085.159 ms against the measured 2999.94 ms offline increase. The remainder of offline work was about 85 ms faster in this instrumented pair.
+
+Local evidence is in `out/review/windows-phase-probe`, including AC samples, raw host-step and direct timings, instrumentation diffs, and compile/link commands. The earlier Windows A/B and Nsight traces may have been on battery power. The diagnosis above uses only the confirmed-AC measurements. The direct probes linked separate, instrumented copies of `LogVole.cpp` and `LogVoleRing.cpp` before the existing libraries. No production source or binary was changed. The archive at `out/review/windows-nogold-phase-evidence.zip` includes raw data, SHA-256 hashes of the source, library and launcher artifacts, and the commands to reproduce the probes.
+
 ## WSL LeakSanitizer result
 
 The earlier instrumented WSL candidate executables linked with host LeakSanitizer. All 68 functional test executions passed their assertions in 74.42 s. Fifteen of 18 processes exited with status 23 after LeakSanitizer reported a 40-byte allocation in `/usr/lib/wsl/lib/libcuda.so.1` at offset `0x1c982`, build ID `40086cd1e9cdd1a51c0a6012766358f78c33662b`. Three focused CPU processes completed 16 test executions without a LeakSanitizer report.
