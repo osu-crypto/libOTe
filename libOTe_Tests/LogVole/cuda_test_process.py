@@ -1,7 +1,33 @@
 """Run a bounded test command; retire its process tree on timeout or interruption."""
+import argparse
 import os
+import re
 import signal
 import subprocess
+
+
+def positive_seconds(value):
+    try:
+        seconds = int(value)
+    except ValueError:
+        seconds = 0
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("expected a positive number of seconds")
+    return seconds
+
+
+def all_selected_tests_passed(output, expected):
+    summaries = re.findall(r"All Passed \((-?\d+)\)", output)
+    return (expected > 0 and summaries == [str(expected)]
+            and not re.search(r"skipped (?:\(|-)", output, re.IGNORECASE))
+
+
+def sanitizer_reports_no_errors_or_leaks(output):
+    leaks = re.findall(r"LEAK SUMMARY:[ \t]*([^\r\n]*)", output)
+    errors = re.findall(r"ERROR SUMMARY:[ \t]*([^\r\n]*)", output)
+    return bool(leaks and errors
+                and all(summary.strip() == "0 bytes leaked in 0 allocations" for summary in leaks)
+                and all(summary.strip() == "0 errors" for summary in errors))
 
 
 def _kill_tree(process):

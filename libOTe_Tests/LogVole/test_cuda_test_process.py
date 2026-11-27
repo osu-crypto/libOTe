@@ -2,6 +2,7 @@
 
 Run directly with Python; no CUDA device or third-party test package is needed.
 """
+import argparse
 import ctypes
 import os
 from pathlib import Path
@@ -9,7 +10,8 @@ import sys
 import tempfile
 import unittest
 
-from cuda_test_process import run_bounded
+from cuda_test_process import (all_selected_tests_passed, positive_seconds, run_bounded,
+                               sanitizer_reports_no_errors_or_leaks)
 
 
 def process_running(pid):
@@ -43,6 +45,30 @@ def process_running(pid):
 
 
 class ProcessOwnershipTests(unittest.TestCase):
+    def test_selection_summary_requires_every_test(self):
+        self.assertTrue(all_selected_tests_passed("\x1b[32m    All Passed (2)\n", 2))
+        for output in ("All Passed (0)", "All Passed (-1)", "All Passed (1)", "Passed (2)",
+                       "All Passed (2)\nAll Passed (1)",
+                       "All Passed (2)\n skipped (1)", "Skipped - unavailable\nAll Passed (2)"):
+            self.assertFalse(all_selected_tests_passed(output, 2))
+        self.assertFalse(all_selected_tests_passed("All Passed (0)", 0))
+
+    def test_every_sanitizer_summary_must_be_clean(self):
+        leaks = "========= LEAK SUMMARY: 0 bytes leaked in 0 allocations\n"
+        errors = "========= ERROR SUMMARY: 0 errors\n"
+        self.assertTrue(sanitizer_reports_no_errors_or_leaks(leaks + errors))
+        self.assertFalse(sanitizer_reports_no_errors_or_leaks(errors))
+        self.assertFalse(sanitizer_reports_no_errors_or_leaks(leaks))
+        for summary in ("LEAK SUMMARY: 8 bytes leaked in 1 allocations", "ERROR SUMMARY: 1 error",
+                        "LEAK SUMMARY: -1 bytes leaked in 0 allocations", "ERROR SUMMARY: -1 errors"):
+            self.assertFalse(sanitizer_reports_no_errors_or_leaks(leaks + errors + summary))
+
+    def test_time_budget_must_be_positive_seconds(self):
+        self.assertEqual(positive_seconds("90"), 90)
+        for value in ("0", "-1", "no", "1.5"):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                positive_seconds(value)
+
     def test_exit_status_is_preserved(self):
         with tempfile.TemporaryFile(mode="w+") as log:
             for code in (0, 7):

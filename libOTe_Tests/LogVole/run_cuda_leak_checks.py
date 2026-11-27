@@ -11,7 +11,8 @@ import pathlib
 import shutil
 import time
 
-from cuda_test_process import run_bounded
+from cuda_test_process import (all_selected_tests_passed, positive_seconds, run_bounded,
+                               sanitizer_reports_no_errors_or_leaks)
 
 
 def main():
@@ -22,6 +23,8 @@ def main():
                         help="explicit-owner test binary (defaults to a sibling of executable)")
     parser.add_argument("--log-dir", type=pathlib.Path,
                         default=pathlib.Path("out/logvole-cuda-leaks"))
+    parser.add_argument("--suite-timeout", type=positive_seconds, default=90, metavar="SECONDS")
+    parser.add_argument("--job-timeout", type=positive_seconds, default=40, metavar="SECONDS")
     args = parser.parse_args()
     executable = args.executable.resolve(strict=True)
     lifetime = (args.lifetime_executable or executable.with_name(
@@ -69,7 +72,7 @@ def main():
         if name == "root-prefetch":
             command += ["-root_finalize_priority_prefetch", "1"]
         tick = time.monotonic()
-        remaining = 90 - (tick - started)
+        remaining = args.suite_timeout - (tick - started)
         if remaining <= 0:
             results.append(dict(name=name, exit_code=124))
             break
@@ -78,13 +81,13 @@ def main():
             log.write(repr(command) + "\n")
             log.flush()
             code = run_bounded(command, stdout=log,
-                               timeout=min(40, remaining), env=environment)
+                               timeout=min(args.job_timeout, remaining), env=environment)
         output = log_path.read_text(errors="replace")
-        clean = ("LEAK SUMMARY: 0 bytes leaked in 0 allocations" in output
-                 and "ERROR SUMMARY: 0 errors" in output
-                 and "skipped" not in output.lower())
+        clean = sanitizer_reports_no_errors_or_leaks(output) and "skipped" not in output.lower()
         if tests is None:
             clean = clean and "CUDA owned lifetime checks passed" in output
+        else:
+            clean = clean and all_selected_tests_passed(output, len(tests))
         results.append(dict(name=name, exit_code=code, clean=clean,
                             seconds=round(time.monotonic() - tick, 2)))
         print(json.dumps(results[-1]), flush=True)
