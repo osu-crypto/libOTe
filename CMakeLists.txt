@@ -101,6 +101,25 @@ add_subdirectory(cryptoTools)
 include(cmake/buildOptions.cmake)
 include(cmake/libOTeDepHelper.cmake)
 
+# CUDA is an optional LogVole backend. Leave other languages and targets alone.
+if(ENABLE_LOGVOLE_CUDA)
+    if(NOT ENABLE_LOGVOLE)
+        message(FATAL_ERROR "ENABLE_LOGVOLE_CUDA requires ENABLE_LOGVOLE=ON")
+    endif()
+    if(CMAKE_VERSION VERSION_LESS 3.18)
+        message(FATAL_ERROR "The LogVole CUDA backend requires CMake 3.18 or newer")
+    endif()
+    if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
+        set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}" CACHE FILEPATH "CUDA host compiler")
+    endif()
+    # Respect the normal CMake architecture selection (including user presets).
+    if(LOGVOLE_CUDA_ARCH AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES "${LOGVOLE_CUDA_ARCH}")
+    endif()
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+endif()
+
 
 
 
