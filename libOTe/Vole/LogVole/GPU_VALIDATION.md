@@ -6,6 +6,21 @@ Run the checks in order on each host. An RTX 4090 validates SM89 runtime. An H20
 
 Use `ff8a006a` as the baseline for the GPU pruning series. Record the full baseline and candidate commit IDs. Use separate worktrees and build directories. The candidate checkout contains the current tests and A/B runner.
 
+The local handoff includes `libOTe.bundle` and `cryptoTools.bundle`. The first contains the candidate branch and baseline history. The second supplies the pinned cryptoTools revision required by both worktrees. For a checkout from those bundles, use absolute paths to the received files.
+
+```sh
+git clone --branch codex/pr195-cuda-stress /path/to/libOTe.bundle libOTe-gpu-candidate
+cd libOTe-gpu-candidate
+git worktree add --detach ../libOTe-gpu-baseline ff8a006a
+CRYPTO_BUNDLE=/path/to/cryptoTools.bundle
+git -c protocol.file.allow=always -c "submodule.cryptoTools.url=$CRYPTO_BUNDLE" submodule update --init --recursive
+git -C ../libOTe-gpu-baseline -c protocol.file.allow=always -c "submodule.cryptoTools.url=$CRYPTO_BUNDLE" submodule update --init --recursive
+git rev-parse HEAD
+git -C ../libOTe-gpu-baseline rev-parse HEAD
+```
+
+For a candidate checkout with access to the pinned submodule revision through its configured repository, initialize both worktrees directly.
+
 ```sh
 git worktree add --detach ../libOTe-gpu-baseline ff8a006a
 git -C ../libOTe-gpu-baseline submodule update --init --recursive
@@ -99,8 +114,10 @@ python libOTe_Tests/LogVole/run_gpu_ab.py \
 
 Set `HOST_COMPILER_VERSION`, `CUDA_TOOLKIT_VERSION`, and `CUDA_ARCH` to the build values before running. The 16-output run checks the workflow. For timing, use a new output directory with `--n 65539 --threads 2 --warmup-blocks 1 --blocks 3`. Assess a larger H200 request, such as 262144 outputs, after exact checks pass and capacity is established. Use a separate comparison for each workload. Never run two benchmarks at the same time, including across Windows, WSL, or remote hosts. Schedule sanitizer runs and profilers outside timing.
 
-The runner preserves the frontend logs and `report.json`. Use the plaintext bit count and prime reported by each run. The NoGoldenSeed modes select 52 bits. The parsed frontend time covers local offline setup, online evaluation, and relation verification. It is an end-to-end measurement. Use a separate trace for kernel time or copy overlap. Report mode, size, host and GPU identity, both revisions, clock and power settings, driver and toolchain versions, raw samples, and median and range for each revision.
+The runner preserves the frontend logs and `report.json`. The footer's `pbits` field reports the plaintext modulus setting. Record it alongside the selected prime, whose integer bit length can differ. The NoGoldenSeed modes select the 52-bit setting. The parsed frontend time covers local offline setup, online evaluation, and relation verification. It is an end-to-end measurement. Use a separate trace for kernel time or copy overlap. Report mode, size, host and GPU identity, both revisions, clock and power settings, driver and toolchain versions, raw samples, and median and range for each revision.
 
 ## Report
 
 Keep separate results for Windows SM89, Linux SM89, SM90 compile coverage, and actual H200 runtime. For each runtime record, include the direct and protocol test counts, strict leak result, and any A/B result. Attach H200 dispatch evidence to the corresponding test or workload. Record pending runtime checks as pending until the target hardware executes them.
+
+The [local RTX 4060 results](GPU_VALIDATION_RESULTS.md) include the WSL LeakSanitizer diagnostic and its reproducer.
