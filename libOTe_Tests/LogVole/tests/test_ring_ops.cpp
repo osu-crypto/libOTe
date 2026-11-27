@@ -23,6 +23,7 @@
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 #include "cryptoTools/Common/CLP.h"
+#include "cryptoTools/Crypto/RandomOracle.h"
 #include "seal/util/ntt.h"
 #include "seal/util/rns.h"
 #include "seal/util/rlwe.h"
@@ -1026,6 +1027,151 @@ void LogVole_RingOps_GpuMemoryPoolLifecycle(const oc::CLP& cmd)
 #else
     (void)cmd;
     LOGVOLE_SKIP() << "requires ENABLE_LOGVOLE_CUDA";
+#endif
+}
+
+void LogVole_RingOps_GpuCt2SeedAesParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    using oc::block;
+    using oc::u32;
+    using oc::u64;
+
+    const auto params = make_small_params();
+    const u64 modulusCount = params.mCoeffModulusBits.size();
+    constexpr u64 ct2Domain = 0xC720AA55ull;
+    constexpr u64 directDomain = 0x12345678ABCDEF01ull;
+    constexpr u64 sid = 0x89ABCDEF01234567ull;
+    constexpr u64 instanceBase = 0xFFFFFFFFull;
+    constexpr std::array<oc::u8, 17> seedBytes = {
+        0x31, 0x26, 0x8A, 0x01, 0xAA, 0x74, 0x42, 0xDE, 0x09,
+        0xA1, 0x27, 0x00, 0xF9, 0x83, 0x11, 0x53, 0x42};
+    const auto seed = std::span(seedBytes).first<16>();
+    RnsPoly digest;
+    digest.mCoeffs.resize(ringPolyCoeffCount(params));
+    for (std::size_t i = 0; i < digest.mCoeffs.size(); ++i)
+        digest.mCoeffs[i] = 31 * i + 7;
+    const block digestHash = hashSeedDigest(digest);
+
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+    constexpr u64 canary = 0xA5FE829C01D3B476ull;
+    // Below, at, and above the 32-row shared-S-box boundary. The last two
+    // shapes also check that each chunk starts its row index at zero.
+    for (const auto [chunks, mu] : std::array<std::pair<u32, u32>, 3>{{{31, 1}, {8, 4}, {11, 3}}})
+    {
+        const u32 total = chunks * mu;
+        std::array<u64, 9> prefix = {0x4C4F47564F4C4354ull, sid, mu, 0, seed.size()};
+        std::memcpy(&prefix[5], &digestHash, sizeof(digestHash));
+        std::memcpy(&prefix[7], seed.data(), seed.size());
+        std::vector<block> chunkSeeds(chunks);
+        for (u32 c = 0; c < chunks; ++c)
+            chunkSeeds[c] = deriveSeedInstanceBlockFromDigestHash(seed, sid, digestHash, instanceBase + c, mu);
+
+        std::vector<u64> blank(8 * total + 8, canary), actual(blank.size());
+        gpu::OwnedGpuBuffer prefixDevice(stream.allocationOwner(), sizeof(prefix));
+        gpu::OwnedGpuBuffer seedsDevice(stream.allocationOwner(), chunks * sizeof(block));
+        gpu::OwnedGpuBuffer ct2Scratch(stream.allocationOwner(), chunks * sizeof(block));
+        gpu::OwnedGpuBuffer output(stream.allocationOwner(), blank.size() * sizeof(u64));
+        gpu::OwnedGpuBuffer keys(stream.allocationOwner(), total * 176u);
+        gpu::StreamDrain drain{stream};
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(prefixDevice.data(), prefix.data(), prefixDevice.size(), stream.raw()));
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(seedsDevice.data(), chunkSeeds.data(), seedsDevice.size(), stream.raw()));
+
+        const auto resetOutput = [&] {
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(output.data(), blank.data(), output.size(), stream.raw()));
+        };
+        const auto readOutput = [&] {
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(actual.data(), output.data(), output.size(), stream.raw()));
+            LOGVOLE_REQUIRE_TRUE(stream.sync());
+        };
+        const auto checkOutput = [&](u64 domain) {
+            readOutput();
+            for (u32 c = 0; c < chunks; ++c)
+            {
+                for (u32 row = 0; row < mu; ++row)
+                {
+                    // Same random-oracle field widths and AES stream as the
+                    // CPU sampler's conversion to a 512-bit SEAL seed.
+                    block polySeed;
+                    oc::RandomOracle ro(sizeof(polySeed));
+                    constexpr u64 label = 0x4C4F47564F4C5059ull;
+                    ro.Update(label);
+                    ro.Update(chunkSeeds[c]);
+                    ro.Update(domain);
+                    ro.Update(row);
+                    ro.Update(params.mPolyModulusDegree);
+                    ro.Update(modulusCount);
+                    ro.Final(polySeed);
+                    oc::PRNG prng(polySeed);
+                    std::array<u64, 8> expected;
+                    prng.get(expected.data(), expected.size());
+                    const auto offset = 8 * (c * mu + row);
+                    LOGVOLE_REQUIRE_TRUE(std::equal(expected.begin(), expected.end(), actual.begin() + offset))
+                        << " domain " << domain << " total " << total << " chunk " << c << " row " << row;
+                }
+            }
+            LOGVOLE_REQUIRE_TRUE(std::equal(actual.begin() + 8 * total, actual.end(), blank.begin() + 8 * total));
+        };
+        const auto launchDirect = [&](u32 count, u32 rows, unsigned char* roundKeys) {
+            return gpu::launchPolySeeds(static_cast<const u64*>(seedsDevice.data()), count, rows,
+                directDomain, params.mPolyModulusDegree, modulusCount, static_cast<u64*>(output.data()),
+                roundKeys, stream.raw());
+        };
+        const auto launchCt2 = [&](u32 count, u32 rows, unsigned char* roundKeys) {
+            return gpu::launchCt2Seeds(static_cast<const u64*>(prefixDevice.data()), instanceBase,
+                count, rows, ct2Domain, params.mPolyModulusDegree, modulusCount,
+                static_cast<u64*>(ct2Scratch.data()), static_cast<u64*>(output.data()), roundKeys, stream.raw());
+        };
+        resetOutput();
+        LOGVOLE_REQUIRE_TRUE(launchDirect(0, mu, nullptr));
+        LOGVOLE_REQUIRE_TRUE(launchDirect(chunks, 0, nullptr));
+        LOGVOLE_REQUIRE_FALSE(launchDirect(chunks, mu, nullptr));
+        readOutput();
+        LOGVOLE_REQUIRE_TRUE(actual == blank);
+        LOGVOLE_REQUIRE_TRUE(launchDirect(chunks, mu, static_cast<unsigned char*>(keys.data())));
+        checkOutput(directDomain);
+
+        resetOutput();
+        LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(ct2Scratch.data(), ct2Scratch.size(), stream.raw()));
+        LOGVOLE_REQUIRE_TRUE(launchCt2(chunks, mu, static_cast<unsigned char*>(keys.data())));
+        checkOutput(ct2Domain);
+
+        resetOutput();
+        LOGVOLE_REQUIRE_TRUE(launchCt2(0, mu, nullptr));
+        LOGVOLE_REQUIRE_TRUE(launchCt2(chunks, 0, nullptr));
+        LOGVOLE_REQUIRE_FALSE(launchCt2(chunks, mu, nullptr));
+        readOutput();
+        LOGVOLE_REQUIRE_TRUE(actual == blank);
+    }
+
+    oc::LogVoleExecutionOptions gpuOptions;
+    gpuOptions.mUseGpu = true;
+    RingNttContext gpuContext;
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, gpuContext,
+        std::make_shared<RingContextFactory>(gpuOptions, nullptr)));
+    const auto cpuContext = cpuReferenceContext(gpuContext);
+    LOGVOLE_REQUIRE_FALSE(cpuContext.mExecutionOptions.mUseGpu);
+    LOGVOLE_REQUIRE_FALSE(gpu::enabled(cpuContext));
+    constexpr u32 chunks = 11, mu = 3;
+    // The 17-byte seed uses host seed derivation and the same GPU sampler.
+    for (const std::span<const oc::u8> input : {std::span<const oc::u8>(seed), std::span<const oc::u8>(seedBytes)})
+    {
+        std::vector<RnsPoly> actual;
+        LOGVOLE_REQUIRE_TRUE(gpu::ct2BatchForTest(gpuContext, mu, input, sid, digest, instanceBase, chunks, actual));
+        LOGVOLE_REQUIRE_EQ(actual.size(), chunks * mu);
+        std::vector<RnsPoly> expected;
+        for (u32 c = 0; c < chunks; ++c)
+        {
+            LOGVOLE_REQUIRE_TRUE(buildHashedCt2(cpuContext, mu, input, sid, digest, instanceBase + c, expected));
+            for (u32 row = 0; row < mu; ++row)
+                expect_poly_equal(actual[c * mu + row], expected[row]);
+        }
+    }
+#else
+    LOGVOLE_SKIP() << "requires CUDA build";
 #endif
 }
 
@@ -2678,7 +2824,7 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
         }
     }
     osuCrypto::LogVoleExecutionOptions invalid;
-    invalid.mAdvanced.mKernels.mCt2PolySeedThreads = 3;
+    invalid.mAdvanced.mKernels.mRootZetaSampleThreads = 3;
     bool rejected = false;
     try { RingContextFactory owner(invalid); }
     catch (const std::invalid_argument&) { rejected = true; }

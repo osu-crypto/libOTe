@@ -34,6 +34,7 @@ def main():
         "RingOps_PartyCachesDoNotAlias", "RingOps_ScalarUploadLifetimeAndRoleSwitch",
         "RingOps_GpuBufferResizeBounds", "RingOps_GpuMemoryPoolLifecycle", "RingOps_UniformSamplerScratchOwnership", "RingOps_GpuStreamStagingLifetime", "Encoding_PinnedWireBufferOwnership", "Encoding_RootResidentWireExact",
         "RingOps_GaussianPrefixBatchParity", "NativeSealBundle_ProductionConfigureUsesDeviceAndFreshRuns",
+        "RingOps_GpuCt2SeedAesParity",
         "Civole_RejectsZeroDelta", "Civole_RejectsPeerOfflineWidth",
         "Civole_StateMachineAutoOfflineSequentialSids",
         "KeyDeriveCoproto_OversizedFramesRejectedBeforeAllocation",

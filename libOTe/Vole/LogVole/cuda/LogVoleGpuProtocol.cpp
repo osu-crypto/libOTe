@@ -2438,7 +2438,7 @@ namespace osuCrypto::LogVole::gpu
         bool ok = dst.resize(*ring, count, stream) &&
                   scratch.uploadPrefix(seedWords, 2u, stream.raw()) &&
                   launchPolySeeds(
-                      ring->kernelOptions(), scratch.mPrefix, 1, count, domainTag, ctx.mParams.mPolyModulusDegree,
+                      scratch.mPrefix, 1, count, domainTag, ctx.mParams.mPolyModulusDegree,
                       static_cast<u64>(ctx.mParams.mCoeffModulusBits.size()), scratch.mSeeds,
                       scratch.mRoundKeys,
                       stream.raw()) &&
@@ -6112,7 +6112,7 @@ namespace osuCrypto::LogVole::gpu
                     return false;
 
                 if (!launchCt2Seeds(
-                        ring.kernelOptions(), scratch.mPrefix, instanceBase, chunkCount, mu, kCt2DomainTag,
+                        scratch.mPrefix, instanceBase, chunkCount, mu, kCt2DomainTag,
                         params.mPolyModulusDegree,
                         static_cast<u64>(params.mCoeffModulusBits.size()), scratch.mCt2Seeds,
                         scratch.mSeeds, scratch.mRoundKeys, stream.raw()))

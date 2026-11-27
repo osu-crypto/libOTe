@@ -10432,39 +10432,6 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Mirrors sealSeedFromBlock(polySeed): the first 64 bytes of
-        // PRNG(polySeed), i.e. AES_polySeed(0..3).
-        __device__ inline void sealSeedFromBlock(u64 lo, u64 hi, u64* out8)
-        {
-            unsigned char key[16];
-#pragma unroll
-            for (u32 i = 0; i < 8; ++i)
-            {
-                key[i] = static_cast<unsigned char>(lo >> (8 * i));
-                key[8 + i] = static_cast<unsigned char>(hi >> (8 * i));
-            }
-            unsigned char rk[176];
-            aes128Expand(key, rk);
-#pragma unroll
-            for (u32 j = 0; j < 4; ++j)
-            {
-                unsigned char s[16];
-#pragma unroll
-                for (u32 i = 0; i < 16; ++i) s[i] = 0;
-                s[0] = static_cast<unsigned char>(j);   // block(j): low 64 bits, little endian
-                aes128Encrypt(rk, s);
-                u64 w0 = 0, w1 = 0;
-#pragma unroll
-                for (u32 i = 0; i < 8; ++i)
-                {
-                    w0 |= static_cast<u64>(s[i]) << (8 * i);
-                    w1 |= static_cast<u64>(s[8 + i]) << (8 * i);
-                }
-                out8[2 * j + 0] = w0;
-                out8[2 * j + 1] = w1;
-            }
-        }
-
         // Phase 1 of the ct2 seed derivation: one thread per chunk computes
         //   deriveSeedInstanceBlockFromDigestHash(seed, sid, digestHash,
         //                                         instanceBase + c, mu)
@@ -10511,41 +10478,6 @@ namespace osuCrypto::LogVole::gpu
         //   polySeed = Blake2b-16(label | ct2Seed | domainTag | index(u32)
         //                         | polyModulusDegree(u32) | modulusCount)
         //   sealSeed = first 64 bytes of PRNG(polySeed)
-        __global__ __launch_bounds__(128) void ct2PolySeedKernel(
-            const u64* __restrict__ ct2Seeds,
-            u32 mu,
-            u64 domainTag,
-            u32 polyModulusDegree,
-            u64 modulusCount,
-            u32 total,
-            u64* __restrict__ out)            // [total][8]
-        {
-            const u32 gid = blockIdx.x * blockDim.x + threadIdx.x;
-            if (gid >= total) return;
-            const u32 c = gid / mu;
-            const u32 index = gid - c * mu;
-
-            u64 h[8];
-            h[0] = kBlake2bIV[0] ^ roParamWord0(16);
-#pragma unroll
-            for (u32 i = 1; i < 8; ++i) h[i] = kBlake2bIV[i];
-
-            constexpr u64 label = 0x4C4F47564F4C5059ull;
-            u64 m[16];
-            m[0] = label;
-            m[1] = ct2Seeds[2 * c + 0];
-            m[2] = ct2Seeds[2 * c + 1];
-            m[3] = domainTag;
-            // index (u32) then polyModulusDegree (u32) pack into one word.
-            m[4] = static_cast<u64>(index) | (static_cast<u64>(polyModulusDegree) << 32);
-            m[5] = modulusCount;
-#pragma unroll
-            for (u32 j = 6; j < 16; ++j) m[j] = 0;
-            blake2bCompress(h, m, 48ull, 0ull, ~u64(0));
-
-            sealSeedFromBlock(h[0], h[1], out + static_cast<size_t>(gid) * 8);
-        }
-
         __global__ __launch_bounds__(128) void ct2PolySeedExpandKernel(
             const u64* __restrict__ ct2Seeds,
             u32 mu,
@@ -10579,12 +10511,6 @@ namespace osuCrypto::LogVole::gpu
 
             aes128ExpandToGlobal(h[0], h[1], roundKeys + static_cast<size_t>(gid) * 176);
         }
-
-
-
-
-
-
 
         __global__ __launch_bounds__(128) void ct2PolySeedEncryptKernel(
             const unsigned char* __restrict__ roundKeys,
@@ -14118,7 +14044,7 @@ namespace osuCrypto::LogVole::gpu
     }
 
     bool launchPolySeeds(
-        const LogVoleGpuKernelOptions& options, const u64* seeds,
+        const u64* seeds,
         u32 seedCount,
         u32 perSeedCount,
         u64 domainTag,
@@ -14130,41 +14056,28 @@ namespace osuCrypto::LogVole::gpu
     {
         if (seedCount == 0 || perSeedCount == 0) return true;
         const u32 total = seedCount * perSeedCount;
-        const u32 threads = options.mCt2PolySeedThreads;
+        constexpr u32 threads = 32u;
         const u32 blocks = (total + threads - 1u) / threads;
 
-        if (options.mCt2SplitAes)
-        {
-            if (!roundKeys) return false;
-            ct2PolySeedExpandKernel<<<blocks, threads, 0, asStream(stream)>>>(
-                seeds, perSeedCount, domainTag, polyModulusDegree,
-                modulusCount, total, roundKeys);
-            if (!check(
-                    cudaGetLastError(),
-                    "polySeedExpand"))
-            {
-                return false;
-            }
-            constexpr u32 encryptThreads = 128;
-            const u32 encryptTotal = total * 4u;
-            const u32 encryptBlocks = (encryptTotal + encryptThreads - 1u) / encryptThreads;
-            if (options.mCt2AesSharedSbox && total >= 32u &&
-                (total & 31u) == 0u)
-            {
-                ct2PolySeedEncryptSharedSboxKernel<<<
-                    encryptBlocks, encryptThreads, 0, asStream(stream)>>>(
-                    roundKeys, total, outSeeds);
-                return check(
-                    cudaGetLastError(), "polySeedEncryptSharedSbox");
-            }
-            ct2PolySeedEncryptKernel<<<encryptBlocks, encryptThreads, 0, asStream(stream)>>>(
-                roundKeys, total, outSeeds);
-            return check(cudaGetLastError(), "polySeedEncrypt");
-        }
+        if (!roundKeys) return false;
+        ct2PolySeedExpandKernel<<<blocks, threads, 0, asStream(stream)>>>(
+            seeds, perSeedCount, domainTag, polyModulusDegree,
+            modulusCount, total, roundKeys);
+        if (!check(cudaGetLastError(), "polySeedExpand")) return false;
 
-        ct2PolySeedKernel<<<blocks, threads, 0, asStream(stream)>>>(
-            seeds, perSeedCount, domainTag, polyModulusDegree, modulusCount, total, outSeeds);
-        return check(cudaGetLastError(), "polySeeds");
+        constexpr u32 encryptThreads = 128;
+        const u32 encryptTotal = total * 4u;
+        const u32 encryptBlocks = (encryptTotal + encryptThreads - 1u) / encryptThreads;
+        if (total >= 32u && (total & 31u) == 0u)
+        {
+            ct2PolySeedEncryptSharedSboxKernel<<<
+                encryptBlocks, encryptThreads, 0, asStream(stream)>>>(
+                roundKeys, total, outSeeds);
+            return check(cudaGetLastError(), "polySeedEncryptSharedSbox");
+        }
+        ct2PolySeedEncryptKernel<<<encryptBlocks, encryptThreads, 0, asStream(stream)>>>(
+            roundKeys, total, outSeeds);
+        return check(cudaGetLastError(), "polySeedEncrypt");
     }
 
     bool launchRootZetaRho8(
@@ -14199,7 +14112,7 @@ namespace osuCrypto::LogVole::gpu
 
 
     bool launchCt2Seeds(
-        const LogVoleGpuKernelOptions& options, const u64* prefix,
+        const u64* prefix,
         u64 instanceBase,
         u32 chunkCount,
         u32 mu,
@@ -14222,7 +14135,7 @@ namespace osuCrypto::LogVole::gpu
             if (!check(cudaGetLastError(), "ct2InstanceSeed")) return false;
         }
         return launchPolySeeds(
-            options, ct2Scratch, chunkCount, mu, domainTag, polyModulusDegree, modulusCount, outSeeds,
+            ct2Scratch, chunkCount, mu, domainTag, polyModulusDegree, modulusCount, outSeeds,
             roundKeyScratch, stream);
     }
 

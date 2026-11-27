@@ -10,9 +10,6 @@ namespace osuCrypto
     struct LogVoleGpuKernelOptions
     {
         bool mNoGoldH200InverseOpTrace = false;
-        std::uint32_t mCt2PolySeedThreads = 32u;
-        bool mCt2SplitAes = true;
-        bool mCt2AesSharedSbox = true;
         bool mFixedIpMuRowReuse = true;
         bool mFixedIpWideMuRowReuse = true;
         bool mPointwisePseudo55Reduce = true;
@@ -25,8 +22,7 @@ namespace osuCrypto
 
         bool valid() const noexcept
         {
-            return (mCt2PolySeedThreads == 32u || mCt2PolySeedThreads == 64u || mCt2PolySeedThreads == 128u) &&
-                (mRootZetaSampleThreads == 128u || mRootZetaSampleThreads == 256u) &&
+            return (mRootZetaSampleThreads == 128u || mRootZetaSampleThreads == 256u) &&
                 mNoGoldH200RootL2Mode <= 3u &&
                 (mRootL2MiB == 1u || mRootL2MiB == 2u || mRootL2MiB == 4u || mRootL2MiB == 8u || mRootL2MiB == 12u || mRootL2MiB == 16u) &&
                 (mRootL2HitPercent == 25u || mRootL2HitPercent == 50u || mRootL2HitPercent == 75u || mRootL2HitPercent == 100u);
@@ -34,9 +30,6 @@ namespace osuCrypto
         bool operator==(const LogVoleGpuKernelOptions& other) const noexcept
         {
             return mNoGoldH200InverseOpTrace == other.mNoGoldH200InverseOpTrace &&
-                mCt2PolySeedThreads == other.mCt2PolySeedThreads &&
-                mCt2SplitAes == other.mCt2SplitAes &&
-                mCt2AesSharedSbox == other.mCt2AesSharedSbox &&
                 mFixedIpMuRowReuse == other.mFixedIpMuRowReuse &&
                 mFixedIpWideMuRowReuse == other.mFixedIpWideMuRowReuse &&
                 mPointwisePseudo55Reduce == other.mPointwisePseudo55Reduce &&

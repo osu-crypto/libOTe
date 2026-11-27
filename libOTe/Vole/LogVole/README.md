@@ -1496,3 +1496,19 @@ compile passed; all four dense, four sparse, three Hi208, and eight generic
 entries were verified. Four focused checks passed with zero skips in 43.66
 seconds using `-gpu 1 -lvFactoryFast 1`. H200 runtime remains untested locally.
 No benchmarks were run.
+
+CT2 and public polynomial seed derivation use the established split AES
+schedule with 32-thread key expansion and 128-thread encryption. Encryption
+uses the shared S-box for row counts that are positive multiples of 32 and
+the ordinary encryption kernel for partial blocks. This removes three tuning
+selectors and the monolithic kernel. CT2 seed lengths other than 16 bytes
+still use host seed derivation before GPU sampling.
+
+Exact CPU/GPU seed parity passed on the RTX 4060 before and after pruning for
+totals of 31, 32, and 33 rows. The test covers chunk-major indexing, missing
+round-key scratch, output bounds, and polynomial parity for 16- and 17-byte
+seeds. The Windows VS 14.50 CUDA test target, frontend object, isolated SM90
+kernel compile, and kernel options check passed. The no-golden two-query
+protocol check passed in isolation after an allocation failure during a
+concurrent SM90 compile. H200 hardware execution remains untested locally.
+No benchmarks were run.

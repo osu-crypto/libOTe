@@ -1048,9 +1048,10 @@ namespace osuCrypto::LogVole::gpu
     //   label, sid, fallbackNonce, -, seedSize, digestHash.lo, digestHash.hi,
     //   seed[0], seed[1]
     // and requires the golden seed to be 16 bytes. `ct2Scratch` needs
-    // 2*chunkCount u64, `outSeeds` needs 8*chunkCount*mu u64.
+    // 2*chunkCount u64, `outSeeds` needs 8*chunkCount*mu u64, and
+    // `roundKeyScratch` needs 176*chunkCount*mu bytes.
     bool launchCt2Seeds(
-        const LogVoleGpuKernelOptions& options, const u64* prefix,
+        const u64* prefix,
         u64 instanceBase,
         u32 chunkCount,
         u32 mu,
@@ -1066,9 +1067,10 @@ namespace osuCrypto::LogVole::gpu
     // and each index in [0, perSeedCount), derive
     //   sealSeedFromBlock(RO(label | seed | domainTag | index | N | rho))
     // which is exactly deriveUniformPolyFromSeed's seed derivation. `outSeeds`
-    // needs 8 * seedCount * perSeedCount u64.
+    // needs 8 * seedCount * perSeedCount u64, and `roundKeyScratch` needs
+    // 176 * seedCount * perSeedCount bytes.
     bool launchPolySeeds(
-        const LogVoleGpuKernelOptions& options, const u64* seeds,
+        const u64* seeds,
         u32 seedCount,
         u32 perSeedCount,
         u64 domainTag,

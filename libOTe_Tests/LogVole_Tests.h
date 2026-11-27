@@ -100,6 +100,7 @@
     X(RingOps, ScalarUploadLifetimeAndRoleSwitch) \
     X(RingOps, GpuMemoryPoolLifecycle) \
     X(RingOps, UniformSamplerScratchOwnership) \
+    X(RingOps, GpuCt2SeedAesParity) \
     X(RingOps, GpuStreamStagingLifetime) \
     X(RingOps, GpuBufferResizeBounds) \
     X(RingOps, GpuImmediateErrors) \
