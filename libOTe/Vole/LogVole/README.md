@@ -1512,3 +1512,14 @@ kernel compile, and kernel options check passed. The no-golden two-query
 protocol check passed in isolation after an allocation failure during a
 concurrent SM90 compile. H200 hardware execution remains untested locally.
 No benchmarks were run.
+
+Root Zeta sampling uses 256 threads per block for both rho4 and rho8. The
+rho4 launch now uses that width directly. Exact CPU AES-CTR and SEAL arithmetic
+matched both GPU samplers with two and three ranges per polynomial, including
+partial final ranges and ordered repair after a forced first rejection. The
+test checks rejection flags and canaries after the outputs and flags.
+
+The new parity test passed on the RTX 4060 before and after pruning. The
+Windows VS 14.50 CUDA test target and frontend object built successfully, and
+the two focused checks passed in 10.66 seconds with zero skips. The SM90 build
+and Linux checks are pending final validation.

@@ -13,7 +13,6 @@ namespace osuCrypto
         bool mFixedIpMuRowReuse = true;
         bool mFixedIpWideMuRowReuse = true;
         bool mPointwisePseudo55Reduce = true;
-        std::uint32_t mRootZetaSampleThreads = 256u;
         std::uint32_t mNoGoldH200RootL2Mode = 3u;
         bool mFusedIp = false;
         bool mNoGoldH200InversePackedRoots = true;
@@ -22,8 +21,7 @@ namespace osuCrypto
 
         bool valid() const noexcept
         {
-            return (mRootZetaSampleThreads == 128u || mRootZetaSampleThreads == 256u) &&
-                mNoGoldH200RootL2Mode <= 3u &&
+            return mNoGoldH200RootL2Mode <= 3u &&
                 (mRootL2MiB == 1u || mRootL2MiB == 2u || mRootL2MiB == 4u || mRootL2MiB == 8u || mRootL2MiB == 12u || mRootL2MiB == 16u) &&
                 (mRootL2HitPercent == 25u || mRootL2HitPercent == 50u || mRootL2HitPercent == 75u || mRootL2HitPercent == 100u);
         }
@@ -33,7 +31,6 @@ namespace osuCrypto
                 mFixedIpMuRowReuse == other.mFixedIpMuRowReuse &&
                 mFixedIpWideMuRowReuse == other.mFixedIpWideMuRowReuse &&
                 mPointwisePseudo55Reduce == other.mPointwisePseudo55Reduce &&
-                mRootZetaSampleThreads == other.mRootZetaSampleThreads &&
                 mNoGoldH200RootL2Mode == other.mNoGoldH200RootL2Mode &&
                 mFusedIp == other.mFusedIp &&
                 mNoGoldH200InversePackedRoots == other.mNoGoldH200InversePackedRoots &&

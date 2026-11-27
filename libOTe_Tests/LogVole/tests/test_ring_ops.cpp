@@ -27,6 +27,8 @@
 #include "seal/util/ntt.h"
 #include "seal/util/rns.h"
 #include "seal/util/rlwe.h"
+#include "seal/util/uintarith.h"
+#include "seal/util/uintarithsmallmod.h"
 
 #include <algorithm>
 #include <array>
@@ -1168,6 +1170,134 @@ void LogVole_RingOps_GpuCt2SeedAesParity(const oc::CLP& cmd)
             LOGVOLE_REQUIRE_TRUE(buildHashedCt2(cpuContext, mu, input, sid, digest, instanceBase + c, expected));
             for (u32 row = 0; row < mu; ++row)
                 expect_poly_equal(actual[c * mu + row], expected[row]);
+        }
+    }
+#else
+    LOGVOLE_SKIP() << "requires CUDA build";
+#endif
+}
+
+void LogVole_RingOps_RootZetaParity(const oc::CLP& cmd)
+{
+#if defined(ENABLE_LOGVOLE_CUDA)
+    if (cmd.getOr("gpu", 0) == 0) { LOGVOLE_SKIP() << "requires -gpu 1"; return; }
+    LOGVOLE_REQUIRE_TRUE(gpu::available());
+    using oc::u32;
+    using oc::u64;
+    constexpr u32 polys = 3;
+    constexpr u64 canary = ~u64(0);
+    constexpr u32 flagCanary = ~u32(0);
+    gpu::GpuExecutionContext execution;
+    auto& stream = execution.mainStream();
+
+    for (const bool eightLimbs : {false, true})
+    {
+        const u32 n = eightLimbs ? 16384u : 8192u;
+        const u32 rho = eightLimbs ? 8u : 4u;
+        const u32 gadgetBits = eightLimbs ? 208u : 110u;
+        const u32 drawWords = (gadgetBits + 1u + 63u) / 64u;
+        const u32 etaTopBits = gadgetBits % 64u;
+        std::array<u64, 4> eta;
+        eta.fill(canary);
+        eta[drawWords - 1u] = (u64(1) << etaTopBits) - 1u;
+        auto drawMask = eta;
+        drawMask[drawWords - 1u] = (u64(1) << (etaTopBits + 1u)) - 1u;
+
+        RingParams params;
+        params.mPolyModulusDegree = n;
+        resizeFill<int>(params.mCoeffModulusBits, rho, eightLimbs ? 52 : 55);
+        RingNttContext ctx;
+        LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+        prepareGpuTableOwners(ctx);
+        auto ring = gpu::GpuRing::get(ctx);
+        LOGVOLE_REQUIRE_TRUE(ring);
+        std::vector<seal::Modulus> moduli;
+        for (u32 limb = 0; limb < rho; ++limb)
+            moduli.emplace_back(ringModulusValue(ctx, limb));
+
+        const u32 words = polys * rho * n;
+        const std::vector<u64> blank(words + 8, canary);
+        std::vector<u64> actual(blank.size()), expected(words);
+        // Two ranges divide N evenly. Three ranges leave a partial final
+        // range and a partial sample block, including on the rho8 path.
+        for (const u32 ranges : {2u, 3u})
+        {
+            const u32 tasks = polys * ranges;
+            const u32 rangeCoeffs = (n + ranges - 1u) / ranges;
+            std::vector<oc::block> seeds(tasks);
+            for (u32 task = 0; task < tasks; ++task)
+                seeds[task] = oc::block(0x87392161DE45DC0Aull + task, 0x125EC04053A27FEBull + rho * 31u + task);
+            const std::vector<u32> blankFlags(tasks + 1, flagCanary);
+            std::vector<u32> flags(blankFlags.size()), expectedFlags(blankFlags.size());
+            gpu::OwnedGpuBuffer seedDevice(stream.allocationOwner(), tasks * sizeof(oc::block));
+            gpu::OwnedGpuBuffer keys(stream.allocationOwner(), tasks * 176u);
+            gpu::OwnedGpuBuffer rejects(stream.allocationOwner(), flags.size() * sizeof(u32));
+            gpu::OwnedGpuBuffer output(stream.allocationOwner(), blank.size() * sizeof(u64));
+            gpu::StreamDrain drain{stream};
+            LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(seedDevice.data(), seeds.data(), seedDevice.size(), stream.raw()));
+
+            for (const bool force : {false, true})
+            {
+                expectedFlags = blankFlags;
+                for (u32 task = 0; task < tasks; ++task)
+                {
+                    const u32 poly = task / ranges;
+                    const u32 begin = (task % ranges) * rangeCoeffs;
+                    const u32 end = std::min(begin + rangeCoeffs, n);
+                    expectedFlags[task] = rangeCoeffs;
+                    oc::PRNG source(seeds[task]);
+                    bool forceCandidate = force && task == 0;
+                    for (u32 coeff = begin; coeff < end; ++coeff)
+                    {
+                        std::array<u64, 4> raw, magnitude;
+                        for (;;)
+                        {
+                            // A rho8 rejection consumes both AES blocks in the draw.
+                            source.get(raw.data(), drawWords);
+                            raw[drawWords - 1u] &= drawMask[drawWords - 1u];
+                            const bool rejected = forceCandidate ||
+                                std::equal(raw.data(), raw.data() + drawWords, drawMask.data());
+                            forceCandidate = false;
+                            if (!rejected) break;
+                            expectedFlags[task] = std::min(expectedFlags[task], coeff - begin);
+                        }
+                        const bool negative = !seal::util::is_greater_than_uint(raw.data(), eta.data(), drawWords);
+                        const auto& high = negative ? eta : raw;
+                        const auto& low = negative ? raw : eta;
+                        seal::util::sub_uint(high.data(), low.data(), drawWords, magnitude.data());
+                        for (u32 limb = 0; limb < rho; ++limb)
+                        {
+                            const auto& modulus = moduli[limb];
+                            const u64 reduced = seal::util::modulo_uint(magnitude.data(), drawWords, modulus);
+                            expected[(poly * rho + limb) * n + coeff] =
+                                (negative && reduced != 0) ? modulus.value() - reduced : reduced;
+                        }
+                    }
+                }
+
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(output.data(), blank.data(), output.size(), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyH2D(rejects.data(), blankFlags.data(), rejects.size(), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemsetZero(keys.data(), keys.size(), stream.raw()));
+                const auto launch = eightLimbs ? gpu::launchRootZetaRho8 : gpu::launchRootZetaRho4;
+                LOGVOLE_REQUIRE_TRUE(launch(ring->view(stream), static_cast<const u64*>(seedDevice.data()),
+                    static_cast<unsigned char*>(keys.data()), static_cast<u32*>(rejects.data()),
+                    static_cast<u64*>(output.data()), ranges, force, stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(actual.data(), output.data(), output.size(), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(gpu::gpuMemcpyD2H(flags.data(), rejects.data(), rejects.size(), stream.raw()));
+                LOGVOLE_REQUIRE_TRUE(stream.sync());
+                LOGVOLE_REQUIRE_TRUE(flags == expectedFlags) << " rho " << rho << " ranges " << ranges << " force " << force;
+                for (u32 row = 0; row < polys * rho; ++row)
+                {
+                    const auto first = actual.begin() + row * n;
+                    const auto last = first + n;
+                    const u64 modulus = moduli[row % rho].value();
+                    LOGVOLE_REQUIRE_TRUE(std::all_of(first, last, [modulus](u64 x) { return x < modulus; }));
+                    const auto mismatch = std::mismatch(first, last, expected.begin() + row * n);
+                    LOGVOLE_REQUIRE_TRUE(mismatch.first == last) << " rho " << rho << " ranges " << ranges
+                        << " force " << force << " row " << row << " coefficient " << (mismatch.first - first);
+                }
+                LOGVOLE_REQUIRE_TRUE(std::equal(actual.begin() + words, actual.end(), blank.begin() + words));
+            }
         }
     }
 #else
@@ -2824,7 +2954,7 @@ void LogVole_RingOps_KernelOptions(const oc::CLP& cmd)
         }
     }
     osuCrypto::LogVoleExecutionOptions invalid;
-    invalid.mAdvanced.mKernels.mRootZetaSampleThreads = 3;
+    invalid.mAdvanced.mKernels.mRootL2HitPercent = 3;
     bool rejected = false;
     try { RingContextFactory owner(invalid); }
     catch (const std::invalid_argument&) { rejected = true; }

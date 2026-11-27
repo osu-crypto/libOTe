@@ -14026,7 +14026,7 @@ namespace osuCrypto::LogVole::gpu
             taskSeeds, roundKeys, firstReject, tasks, rangeCoeffs);
         if (!check(cudaGetLastError(), "rootZetaExpandKeys")) return false;
 
-        const u32 sampleThreads = rc.mKernelOptions.mRootZetaSampleThreads;
+        constexpr u32 sampleThreads = 256u;
         const dim3 sampleBlocks(
             (rangeCoeffs + sampleThreads - 1u) / sampleThreads, tasks);
         rootZetaSampleRho4Kernel<<<sampleBlocks, sampleThreads, 0, st>>>(
