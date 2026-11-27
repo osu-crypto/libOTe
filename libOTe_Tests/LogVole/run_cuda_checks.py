@@ -34,6 +34,7 @@ def main():
         "Cpu_ResamplingOverwritesPreviousQuery", "Cpu_ParallelFailureJoinsChildren",
         "Cpu_PreparedExecutionLifetime",
         "Cpu_ZkArithmeticMatchesReference", "Cpu_ZkProofMatchesReference",
+        "Core_Ct2SeedBudgets",
         "Cpu_GpuZkMatMulSeededInputsMatchReference",
         "Cpu_GpuZkBufferOwnership", "Core_LeafGoldenSeedGpuParity",
         "RingOps_PartyCachesDoNotAlias", "RingOps_ScalarUploadLifetimeAndRoleSwitch",

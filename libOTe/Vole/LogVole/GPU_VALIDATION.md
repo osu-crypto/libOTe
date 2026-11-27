@@ -4,14 +4,14 @@ Run the checks in order on each host. An RTX 4090 validates SM89 runtime. An H20
 
 ## Build two revisions
 
-Use `ff8a006a` as the baseline for the GPU pruning series. Record the full baseline and candidate commit IDs. Use separate worktrees and build directories. The candidate checkout contains the current tests and A/B runner.
+Use `b80413b5` for the full comparison against the original LogVole PR. Use `ff8a006a` when measuring the GPU pruning series alone. Record the full baseline and candidate commit IDs. Use separate worktrees and build directories. The candidate checkout contains the current tests and A/B runner.
 
-The local handoff includes `libOTe.bundle` and `cryptoTools.bundle`. The first contains the candidate branch and baseline history. The second supplies the pinned cryptoTools revision required by both worktrees. For a checkout from those bundles, use absolute paths to the received files.
+The local handoff includes `libOTe.bundle` and `cryptoTools.bundle`. The first contains the candidate branch and baseline history. The second supplies the cryptoTools revisions pinned by those checkouts. Use absolute paths to the received files.
 
 ```sh
 git clone --branch codex/pr195-cuda-stress /path/to/libOTe.bundle libOTe-gpu-candidate
 cd libOTe-gpu-candidate
-git worktree add --detach ../libOTe-gpu-baseline ff8a006a
+git worktree add --detach ../libOTe-gpu-baseline b80413b5
 CRYPTO_BUNDLE=/path/to/cryptoTools.bundle
 git -c protocol.file.allow=always -c "submodule.cryptoTools.url=$CRYPTO_BUNDLE" submodule update --init --recursive
 git -C ../libOTe-gpu-baseline -c protocol.file.allow=always -c "submodule.cryptoTools.url=$CRYPTO_BUNDLE" submodule update --init --recursive
@@ -22,18 +22,18 @@ git -C ../libOTe-gpu-baseline rev-parse HEAD
 For a candidate checkout with access to the pinned submodule revision through its configured repository, initialize both worktrees directly.
 
 ```sh
-git worktree add --detach ../libOTe-gpu-baseline ff8a006a
+git worktree add --detach ../libOTe-gpu-baseline b80413b5
 git -C ../libOTe-gpu-baseline submodule update --init --recursive
 git submodule update --init --recursive
 git rev-parse HEAD
 git -C ../libOTe-gpu-baseline rev-parse HEAD
 ```
 
-Use the same host compiler, CUDA toolkit, generator, dependency revisions, and flags for both worktrees. Pin dependency revisions before configuring. Automatic fetch can update dependencies. Keep writable dependency clones and installation prefixes separate for the two worktrees. A shared installed package can supply read-only inputs through an explicit find hint such as `SEAL_DIR`.
+On Windows, apply the [original baseline compatibility patch](../../../libOTe_Tests/LogVole/original_b80413b5_windows_compat.patch) to the `b80413b5` worktree and add `-Xcompiler=/Zc:preprocessor` to its CUDA flags before building. On Linux, use the original source unchanged. Match the host compiler, CUDA toolkit, generator, target architecture, and build configuration between worktrees. Honor each checkout's cryptoTools submodule pin. Pin other dependencies before configuring because automatic fetch can update them. Keep writable dependency clones and installation prefixes separate for the two worktrees. A shared installed package can supply read-only inputs through an explicit find hint such as `SEAL_DIR`.
 
 | Dependency | Revision used for the comparison |
 | --- | --- |
-| cryptoTools | `3e69c5b9ac0f0c43d0fd1c9e1b886a3ea8df8979`, recorded by both libOTe revisions |
+| cryptoTools | Original `b80413b5` pins `cc54d946a7643795b5f523fe235392de8271a5b3`. The candidate and pruning reference `ff8a006a` pin `3e69c5b9ac0f0c43d0fd1c9e1b886a3ea8df8979`. |
 | coproto | `ded64cbc51c041ee534e5c34a5a81135af455ce7` |
 | macoro | `feea851f3bda2bdc80993252144fd38a46acca85` |
 | function2 | `02ca99831de59c7c3a4b834789260253cace0ced`, pinned by coproto |
@@ -67,7 +67,9 @@ cmake -S . -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release "-DLIBOTE_BUILD_DIR=$
 cmake --build "$BUILD" --target logvole_gpu_bench logvole_cuda_tests logvole_cuda_lifetime_tests --parallel 2
 ```
 
-Record the resolved dependency revisions from each worktree. For local checkouts, use `git -C <dependency checkout> rev-parse HEAD` for `cryptoTools`, `out/coproto`, `out/macoro`, and `out/function2`. Record the version and provenance of SEAL and any preinstalled dependencies. Confirm both manifests match before timing.
+Match actual CPU IFMA eligibility between builds. In the local tests, the original MSVC path had no IFMA dispatch and the WSL CPU lacked IFMA. On a capable GNU host where the original auto-dispatches to IFMA, enable the candidate's `OC_ENABLE_AVX512_IFMA` to match, or record the mismatch explicitly.
+
+Record the resolved dependency revisions from each worktree. For local checkouts, use `git -C <dependency checkout> rev-parse HEAD` for `cryptoTools`, `out/coproto`, `out/macoro`, and `out/function2`. Record the version and provenance of SEAL and any preinstalled dependencies. Confirm the manifests match apart from the expected per-revision cryptoTools pins before timing.
 
 On machines with limited host memory, reduce build parallelism. Finish compilation before launching GPU validation or profiling. Retain the dependency manifest, build log, and `CMakeCache.txt` from each worktree.
 

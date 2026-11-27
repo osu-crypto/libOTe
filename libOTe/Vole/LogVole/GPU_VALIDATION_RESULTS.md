@@ -1,6 +1,6 @@
 # Local LogVole GPU validation results
 
-The candidate production source is `f4d60193fcae7b90f079ec578d4e2d8f9a5ae61b`. The A/B baseline is `ff8a006a740b11d92f41cd68eee875aa80e99224`. Subsequent handoff and test-runner commits leave the candidate library and example source at the tested revision. See the [validation commands](GPU_VALIDATION.md) for the dependency revisions and build configuration.
+The latest tested production source is `b544cf71ceae0d800d936dd263e6eb331bc57831`. See the [final AC comparison](#final-ac-comparison-against-the-original-logvole-pr) for the results against original revision `b80413b5`. The earlier validation and timing sections below record historical runs. The historical pruning comparison used candidate `f4d60193fcae7b90f079ec578d4e2d8f9a5ae61b` and reference `ff8a006a740b11d92f41cd68eee875aa80e99224`. See the [validation commands](GPU_VALIDATION.md) for dependency revisions and build configuration.
 
 Windows and Ubuntu 24.04 under WSL2 used the same NVIDIA GeForce RTX 4060 Laptop GPU, compute capability 8.9, with Windows driver 610.60. Both builds used Ninja, Release, and architecture 89. Windows used MSVC 19.50.35740 with toolset 14.50.35717 and NVCC 13.2.78. WSL used GNU C++ 13.3.0 and NVCC 13.2.51.
 
@@ -114,6 +114,48 @@ In a separate AC pair, diagnostic builds also timed the synchronous budget check
 The candidate’s sender and receiver both call `validateCt2SeedMode` in `LogVole.cpp`. The check reaches `validateNoGoldenSeedBudget` in `LogVoleCore.cpp`, which calls `makeRingNttContext` without a factory. The default factory in `LogVoleRing.cpp` has GPU execution disabled and expands the full modulus chain. Each call constructs a new degree-16384, eight-limb CPU SEAL context. The two constructors took 1285.568 ms and 1282.198 ms, nested within the budget checks above. The original budget checks used lightweight GPU ring metadata and recorded zero uncached SEAL constructors. The additional 514.818 ms host fallback occurs during receiver root setup, where `finalizeRootOfflineReceiverImpl` checks the canonical fixed public BStar tensor. Its call to `deriveUniformPolyFromNonceNtt` uses the host NTT, which materializes the lightweight ring’s lazy SEAL context. This verification must be preserved. Together these non-overlapping scopes added 3085.159 ms against the measured 2999.94 ms offline increase. The remainder of offline work was about 85 ms faster in this instrumented pair.
 
 Local evidence is in `out/review/windows-phase-probe`, including AC samples, raw host-step and direct timings, instrumentation diffs, and compile/link commands. The earlier Windows A/B and Nsight traces may have been on battery power. The diagnosis above uses only the confirmed-AC measurements. The direct probes linked separate, instrumented copies of `LogVole.cpp` and `LogVoleRing.cpp` before the existing libraries. No production source or binary was changed. The archive at `out/review/windows-nogold-phase-evidence.zip` includes raw data, SHA-256 hashes of the source, library and launcher artifacts, and the commands to reproduce the probes.
+
+## Final AC comparison against the original LogVole PR
+
+Production revision `b544cf71ceae0d800d936dd263e6eb331bc57831` includes the seed-budget metadata change (`24b86bf9`) and batched receiver BStar verification (`b544cf71`). Seed-budget validation resolves the ordered SEAL moduli without constructing NTT tables. Receiver root setup independently derives canonical BStar with the existing AES sampler and NTT batch, then compares every word before admitting root state. The CPU path uses a checked transform one row at a time.
+
+Windows and native Linux binaries under Ubuntu 24.04 WSL2 ran on the same RTX 4060 Laptop GPU (SM89), using Release builds with CPU IFMA disabled. Windows used MSVC 19.50.35740, toolset 14.50.35717, and NVCC 13.2.78. WSL used GCC 13.3.0 and NVCC 13.2.51. The original reference was `b80413b5c882ea571e9fc2a30bd85f54acb39455`, built from unchanged source on WSL and with the Windows compatibility patch and CUDA host flag described above on Windows. The original pins cryptoTools at `cc54d946a7643795b5f523fe235392de8271a5b3`. The candidate pins `3e69c5b9ac0f0c43d0fd1c9e1b886a3ea8df8979`.
+
+The local workload used `-logvole -n 65539 -t 2 -gpu 1 -p 55 -delta 7` with the corresponding mode flags. Each all-mode run used one ABBA warmup and three measured blocks (ABBA, BAAB, ABBA) per mode, for six measured samples per revision and mode. The separate WSL interactive NoGoldenSeed confirmation used one ABBA warmup and four alternating measured blocks, for eight measured samples per revision. All 116 trials ran serially and verified the VOLE relation. All 238 power readings, sampled around each trial and each run, recorded AC connected and battery saver off. Candidate and original output footers agreed in all trials.
+
+| Mode | Output count | Reported modulus setting | Prime | Online bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Interactive GoldenSeed | 65539 | 55 | 18014398508400641 | 1048664 |
+| Interactive NoGoldenSeed | 65539 | 52 | 2251799813554177 | 4194360 |
+| Noninteractive NoGoldenSeed | 65539 | 52 | 2251799813554177 | 2097176 |
+
+The frontend timer covers offline setup, online execution, and relation verification. Wall time covers the entire process launch. Values are medians and observed ranges in milliseconds. Changes are relative to the original.
+
+| Run | Mode | Original frontend | Candidate frontend | Change | Original wall | Candidate wall | Change |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Windows | GoldenSeed | 567 [554–577] | 462 [431–525] | −18.52% | 741.89 [712.89–766.15] | 628.83 [571.21–712.73] | −15.24% |
+| Windows | Interactive NoGoldenSeed | 1527.5 [1496–1555] | 1461.5 [1434–1527] | −4.32% | 1759.88 [1739.57–1787.15] | 1660.18 [1620.42–1776.43] | −5.67% |
+| Windows | Noninteractive NoGoldenSeed | 1955 [1902–2092] | 1934 [1874–2005] | −1.07% | 2143.48 [2093.00–2278.48] | 2105.43 [2087.04–2188.75] | −1.78% |
+| WSL | GoldenSeed | 723.5 [522–867] | 546.5 [496–588] | −24.46% | 1245.67 [867.05–1572.59] | 1019.02 [868.75–1070.09] | −18.19% |
+| WSL | Interactive NoGoldenSeed | 1205.5 [939–1413] | 1125.5 [950–1374] | −6.64% | 1723.60 [1369.56–1924.72] | 1572.16 [1369.36–1824.79] | −8.79% |
+| WSL | Noninteractive NoGoldenSeed | 1342.5 [961–1491] | 1216.5 [941–1328] | −9.39% | 1847.64 [1418.58–2024.74] | 1722.24 [1320.13–1872.93] | −6.79% |
+| WSL confirmation | Interactive NoGoldenSeed | 976 [940–1117] | 948.5 [892–982] | −2.82% | 1395.29 [1319.19–1620.97] | 1369.68 [1319.49–1421.30] | −1.84% |
+
+| Run | Mode | Frontend block median changes | Wall block median changes |
+| --- | --- | --- | --- |
+| Windows | GoldenSeed | −20.07%, −9.56%, −22.02% | −16.55%, −7.18%, −19.61% |
+| Windows | Interactive NoGoldenSeed | −5.34%, −1.63%, −3.71% | −6.72%, −3.71%, −3.39% |
+| Windows | Noninteractive NoGoldenSeed | −3.50%, −2.71%, +2.60% | −3.39%, −2.72%, +1.45% |
+| WSL | GoldenSeed | −23.25%, −25.09%, −17.94% | −20.64%, −22.23%, −6.66% |
+| WSL | Interactive NoGoldenSeed | −6.20%, +23.59%, −26.59% | −5.98%, +16.83%, −25.24% |
+| WSL | Noninteractive NoGoldenSeed | +4.83%, −22.14%, −8.72% | +6.54%, −19.06%, −6.47% |
+| WSL confirmation | Interactive NoGoldenSeed | −1.69%, −3.32%, −12.06%, −1.83% | +1.90%, −5.30%, −8.44%, −1.68% |
+
+The candidate had lower overall medians in every mode on this GPU. Windows noninteractive results were close and mixed by block. The WSL interactive NoGoldenSeed confirmation had lower frontend medians in all four blocks, with a smaller overall difference than in the all-mode run. The confirmation is reported separately. Runtime validation on RTX 4090 and H200 remains pending.
+
+On each platform, three CPU checks passed (seed-budget arithmetic, GoldenSeed feasibility, and shrink-expand parameter validation) along with three GPU root checks (setup shape and two prefetch cases). The GPU NoGoldenSeed case rejected both a changed canonical BStar word and its noncanonical modulus-shifted encoding, then accepted the original frame on the same receiver. Full Compute Sanitizer memcheck of that test reported zero errors and zero leaked bytes on each platform. The native WSL build took 313.21 s and the complete focused check command took 17.36 s.
+
+Under `out/review/`, the final raw run prefixes are `ab-fixed-b544cf71ceae-windows-ac-1`, `ab-fixed-b544cf71ceae-linux-ac-1`, and `ab-fixed-b544cf71ceae-linux-ac-nogold-1`. Each includes a report and raw logs, with matching power and launcher manifests beside it. The test evidence uses the `budget-metadata`, `bstar-reuse`, and `ab-fixed-b544cf71ceae-linux-verification` prefixes. The handoff archive includes these records.
 
 ## WSL LeakSanitizer result
 
