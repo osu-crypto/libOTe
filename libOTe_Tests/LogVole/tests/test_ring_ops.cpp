@@ -5834,8 +5834,10 @@ void LogVole_RingOps_GaussianResidentBatchParity(const oc::CLP& cmd)
                 auto cpuContext = cpuReferenceContext(ctx);
                 const auto retainedOwner = device;
                 std::vector<std::uint64_t> replayHost{marker};
-                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(materializePolyErrorCompactBatchForSetup(setupResources.executor, setupResources.results,
-                    replayHost, device, sigma, 19.2, seeds, cpuContext, 4, active)));
+                constexpr std::uint32_t replayWorkers = 4;
+                std::array<std::uint8_t, replayWorkers> replayResults{};
+                LOGVOLE_REQUIRE_TRUE(macoro::sync_wait(materializePolyErrorCompactBatchForSetup(setupResources.executor, replayResults,
+                    replayHost, device, sigma, 19.2, seeds, cpuContext, replayWorkers, active)));
                 LOGVOLE_REQUIRE_TRUE(replayHost == expected && device == retainedOwner);
             }
             LOGVOLE_REQUIRE_FALSE(gpu::sampleGaussianCompactResidentDevice(gpu::contextSampleStream(ctx), seeds, 0u, sigma, 19.2, ringModulusValue(ctx, 0), direct, 0, {}, ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures));

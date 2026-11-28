@@ -5,6 +5,8 @@
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuGaussianMath.cuh"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <cfenv>
 #include <cmath>
@@ -90,16 +92,37 @@ namespace osuCrypto::LogVole::gpu
             if (!logarithm || !dladdr(logarithm, &info) || !info.dli_fbase)
                 return false;
             const auto* base = static_cast<const u8*>(info.dli_fbase);
-            if (reinterpret_cast<std::uintptr_t>(logarithm) - reinterpret_cast<std::uintptr_t>(base) != 0x356f0)
+            const void* finiteLog = dlvsym(RTLD_DEFAULT, "__log_finite", "GLIBC_2.15");
+            Dl_info finiteInfo{};
+            if (!finiteLog || !dladdr(finiteLog, &finiteInfo) || finiteInfo.dli_fbase != base)
                 return false;
-            auto* finiteLog = dlvsym(RTLD_DEFAULT, "__log_finite", "GLIBC_2.15");
-            if (!finiteLog || reinterpret_cast<std::uintptr_t>(finiteLog) - reinterpret_cast<std::uintptr_t>(base) != 0x69610)
-                return false;
+            struct LogFingerprint
+            {
+                std::uintptr_t mLogOffset;
+                std::uintptr_t mFiniteLogOffset;
+                std::array<u8, 20> mBuildId;
+            };
+            // Both FMA implementations match the CUDA helper over the positive
+            // normal radii admitted by the polar sampler.
+            constexpr std::array<LogFingerprint, 2> fingerprints{{
+                {0x356f0, 0x69610, {0x0f,0x68,0xdf,0x2e,0xcc,0x3b,0xf9,0x01,0x98,0x4f,
+                    0xb2,0x85,0x21,0x90,0x26,0xd6,0x73,0x56,0xbc,0x58}},
+                // glibc-2.34-283.el9_8.x86_64
+                {0x357f0, 0x6ff70, {0x25,0xc2,0xa6,0x50,0xe3,0xe6,0xc2,0xf3,0x25,0xc8,
+                    0xad,0x80,0x3d,0xbb,0x58,0xb3,0x13,0x89,0x9c,0x93}},
+            }};
+            const auto baseAddress = reinterpret_cast<std::uintptr_t>(base);
+            const auto logOffset = reinterpret_cast<std::uintptr_t>(logarithm) - baseAddress;
+            const auto finiteLogOffset = reinterpret_cast<std::uintptr_t>(finiteLog) - baseAddress;
+            const auto fingerprint = std::find_if(fingerprints.begin(), fingerprints.end(),
+                [=](const LogFingerprint& known) {
+                    return logOffset == known.mLogOffset && finiteLogOffset == known.mFiniteLogOffset;
+                });
+            if (fingerprint == fingerprints.end()) return false;
+            const auto& buildId = fingerprint->mBuildId;
             const auto* header = reinterpret_cast<const ElfW(Ehdr)*>(base);
             if (std::memcmp(header->e_ident, ELFMAG, SELFMAG) != 0) return false;
             const auto* programs = reinterpret_cast<const ElfW(Phdr)*>(base + header->e_phoff);
-            constexpr u8 buildId[] = {0x0f,0x68,0xdf,0x2e,0xcc,0x3b,0xf9,0x01,0x98,0x4f,
-                0xb2,0x85,0x21,0x90,0x26,0xd6,0x73,0x56,0xbc,0x58};
             for (unsigned i = 0; i < header->e_phnum; ++i)
             {
                 if (programs[i].p_type != PT_NOTE) continue;
@@ -114,8 +137,8 @@ namespace osuCrypto::LogVole::gpu
                     if (nameSize > static_cast<std::size_t>(end - cursor) ||
                         dataSize > static_cast<std::size_t>(end - cursor) - nameSize) break;
                     if (note->n_type == NT_GNU_BUILD_ID && note->n_namesz == 4 &&
-                        std::memcmp(cursor, "GNU", 4) == 0 && note->n_descsz == sizeof(buildId) &&
-                        std::memcmp(cursor + nameSize, buildId, sizeof(buildId)) == 0)
+                        std::memcmp(cursor, "GNU", 4) == 0 && note->n_descsz == buildId.size() &&
+                        std::memcmp(cursor + nameSize, buildId.data(), buildId.size()) == 0)
                         return true;
                     cursor += nameSize + dataSize;
                 }
