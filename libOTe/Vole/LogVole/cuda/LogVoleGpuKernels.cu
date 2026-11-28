@@ -10799,6 +10799,10 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
+        // No canonical residue is this large. The sampler's ordered repair
+        // removes every marker before a consumer can read the output.
+        constexpr u64 kUniformRejectedWord = ~u64{0};
+
         template<bool Uniform, u32 Threads = 128u>
         __global__ __launch_bounds__(Threads) void aesPrngStreamKernel(
             const unsigned char* roundKeys, u64* out, u32 words, u32 count,
@@ -10840,8 +10844,11 @@ namespace osuCrypto::LogVole::gpu
                         {
                             const u32 limb = static_cast<u32>(index) >> ring.mLogN;
                             if (value >= maxMultiple[limb])
+                            {
                                 atomicExch(rejectEpochs + poly, rejectEpoch);
-                            value = barrettReduce64(value, ring.mMods[limb]);
+                                value = kUniformRejectedWord;
+                            }
+                            else value = barrettReduce64(value, ring.mMods[limb]);
                         }
                         out[destination * words + index] = value;
                     }
@@ -10894,20 +10901,28 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Regenerate initial candidates cooperatively; only replacement draw
-        // consumption is serial. This avoids a full-polynomial scalar replay.
+        // Find the marked positions cooperatively. One lane consumes tail
+        // draws in increasing coefficient order, exactly as in SEAL.
         __global__ __launch_bounds__(128) void aesUniformRepairKernel(
             DeviceRing ring, const unsigned char* roundKeys, const u64* maxMultiple,
             u64* out, const u32* outIdx, u32 count, const u32* rejectEpochs, u32 epoch)
         {
             __shared__ uint4 key[11];
             __shared__ AesPrngTables<1> tables;
-            __shared__ u64 candidates[256];
-            prepareAesPrngTables(tables);
+            constexpr u32 threads = 128u;
+            constexpr u32 warpWidth = 32u;
+            constexpr u32 wordsPerTile = 2u * threads;
+            __shared__ u32 rejectedMasks[wordsPerTile / warpWidth];
+            bool tablesReady = false;
             const u64 words = static_cast<u64>(ring.mN) * ring.mRho;
             for (u64 poly = blockIdx.x; poly < count; poly += gridDim.x)
             {
                 if (rejectEpochs[poly] != epoch) continue;
+                if (!tablesReady)
+                {
+                    prepareAesPrngTables(tables);
+                    tablesReady = true;
+                }
                 if (threadIdx.x < 11)
                     key[threadIdx.x] =
                         reinterpret_cast<const uint4*>(roundKeys + 176u * poly)[threadIdx.x];
@@ -10915,35 +10930,44 @@ namespace osuCrypto::LogVole::gpu
                 u64 cursor = words;
                 u64 cachedCounter = ~u64(0), tailLo = 0, tailHi = 0;
                 const u64 destination = outIdx ? outIdx[poly] : poly;
-                for (u64 base = 0; base < words; base += 256u)
+                u64* coefficients = out + destination * words;
+                for (u64 base = 0; base < words; base += wordsPerTile)
                 {
-                    u64 lo, hi;
-                    aesPrngPair(key, tables, (base >> 1u) + threadIdx.x, lo, hi);
-                    candidates[2u * threadIdx.x] = lo;
-                    candidates[2u * threadIdx.x + 1u] = hi;
+#pragma unroll
+                    for (u32 half = 0; half < 2u; ++half)
+                    {
+                        const u64 index = base + half * threads + threadIdx.x;
+                        const u32 mask = __ballot_sync(0xffffffffu,
+                            index < words && coefficients[index] == kUniformRejectedWord);
+                        if (threadIdx.x % warpWidth == 0u)
+                            rejectedMasks[(half * threads + threadIdx.x) / warpWidth] = mask;
+                    }
                     __syncthreads();
                     if (threadIdx.x == 0)
                     {
-                        const u32 active = static_cast<u32>(words - base < 256u ? words - base : 256u);
-                        for (u32 i = 0; i < active; ++i)
+                        for (u32 slice = 0; slice < wordsPerTile / warpWidth; ++slice)
                         {
-                            const u64 index = base + i;
-                            const u32 limb = static_cast<u32>(index) >> ring.mLogN;
-                            const u64 limit = maxMultiple[limb];
-                            if (candidates[i] < limit) continue;
-                            u64 value;
-                            do
+                            u32 mask = rejectedMasks[slice];
+                            while (mask)
                             {
-                                const u64 counter = cursor >> 1u;
-                                if (counter != cachedCounter)
+                                const u64 index = base + slice * warpWidth + __ffs(mask) - 1u;
+                                const u32 limb = static_cast<u32>(index) >> ring.mLogN;
+                                const u64 limit = maxMultiple[limb];
+                                u64 value;
+                                do
                                 {
-                                    aesPrngPair(key, tables, counter, tailLo, tailHi);
-                                    cachedCounter = counter;
-                                }
-                                value = cursor & 1u ? tailHi : tailLo;
-                                ++cursor;
-                            } while (value >= limit);
-                            out[destination * words + index] = barrettReduce64(value, ring.mMods[limb]);
+                                    const u64 counter = cursor >> 1u;
+                                    if (counter != cachedCounter)
+                                    {
+                                        aesPrngPair(key, tables, counter, tailLo, tailHi);
+                                        cachedCounter = counter;
+                                    }
+                                    value = cursor & 1u ? tailHi : tailLo;
+                                    ++cursor;
+                                } while (value >= limit);
+                                coefficients[index] = barrettReduce64(value, ring.mMods[limb]);
+                                mask &= mask - 1u;
+                            }
                         }
                     }
                     __syncthreads();
