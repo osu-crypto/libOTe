@@ -4086,10 +4086,13 @@ namespace osuCrypto::LogVole::gpu
         const bool contiguous = xDev && !recursiveHiInput && width == muHi &&
                                 xCount >= static_cast<std::size_t>(chunkCount) * muHi;
 
-        // For the wide H200 shape, a short final chunk can read the same
-        // limb-zero input directly. Only the absent leaf outputs need padding.
-        const bool partialPlainChunk = !recursiveHiInput && width == muHi &&
-            ring->n() == 16384u && rho == 8u && xCount % width != 0u;
+        // A short final chunk can read a packed broadcast directly. Only the
+        // absent leaf outputs need padding. Keep the existing wide full-stride
+        // route as well.
+        const bool packedPlainBroadcast = inputPlainBroadcastSingleLimb &&
+            xDev->mImpl->mBuf.polyWords() == ring->n();
+        const bool partialPlainChunk = !recursiveHiInput && width == muHi && xCount % width != 0u &&
+            (packedPlainBroadcast || (ring->n() == 16384u && rho == 8u));
         const bool singleLimbIdentityEligible = inputPlainBroadcastSingleLimb &&
             (contiguous || partialPlainChunk) && xDev->mImpl->mBuf.count() >= xCount &&
             identityLeafEnabled(ring->executionOptions().mAdvanced.mProtocol) && !leafInputsAreGadget &&
@@ -8303,7 +8306,8 @@ namespace osuCrypto::LogVole::gpu
         // Preserve an explicitly reserved first-query buffer's full stride.
         const bool packedBroadcast = packReceiverBroadcast && singleLimbWrap &&
             !firstQueryAllocations && scope.mRole == ProtocolCacheRole::Receiver &&
-            n == 16384u && rho == 8u && zp.mRing.mGpuExecution->isH200();
+            ((n == 8192u && rho == 4u) || (n == 16384u && rho == 8u)) &&
+            zp.mRing.mGpuExecution->isH200();
         const u32 storageRho = packedBroadcast ? 1u : rho;
         const bool reservedWrap = !multiplyByDelta && !padValue &&
             takeReceiverFirstQueryWrap(

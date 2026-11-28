@@ -1677,7 +1677,8 @@ namespace osuCrypto::LogVole::gpu
             const u64* input,
             const u32* inputIdx,
             u64* output,
-            const u32* outputIdx)
+            const u32* outputIdx,
+            u32 inputRho)
         {
             extern __shared__ u64 sh[];
             constexpr u32 n = 8192u;
@@ -1689,7 +1690,7 @@ namespace osuCrypto::LogVole::gpu
             const u32 inPoly = inputIdx ? inputIdx[batchSlot] : batchSlot;
             const u32 outPoly = outputIdx ? outputIdx[batchSlot] : batchSlot;
             const u64* src = input +
-                (static_cast<size_t>(inPoly) * rho) * n;
+                static_cast<size_t>(inPoly) * inputRho * n;
             u64* dst = output +
                 (static_cast<size_t>(outPoly) * rho + limb) * n;
             const ShoupOperand* roots =
@@ -4510,7 +4511,8 @@ namespace osuCrypto::LogVole::gpu
             u64 padValue,
             const u32* __restrict__ inverseSlotMap,
             u64* __restrict__ out,
-            bool garbledInput)
+            bool garbledInput,
+            u32 storageRho)
         {
             extern __shared__ u64 sh[];
 
@@ -4555,7 +4557,7 @@ namespace osuCrypto::LogVole::gpu
             const ShoupOperand scalar = iv.mInvDegree[0];
             const ShoupOperand scaledR = iv.mScaledInvRoot[0];
             u64* const outBase =
-                out + static_cast<size_t>(chunk) * 4u * static_cast<size_t>(n);
+                out + static_cast<size_t>(chunk) * storageRho * static_cast<size_t>(n);
             for (u32 j = threadIdx.x; j < half; j += blockDim.x)
             {
                 const u64 u = nttGuard(sh[j], twoQ);
@@ -11777,7 +11779,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (polyCount == 0u) return true;
         if (!canLaunchNttForwardFromPlainBroadcast(rc) || !in || !out ||
-            (inputRho != rc.mRho && (inputRho != 1u || !log14H200Shape(rc) || in == out)) ||
+            (inputRho != rc.mRho && (inputRho != 1u || in == out)) ||
             !configureShared(rc))
             return false;
         if (!configureH200RootPersistence(rc, stream, false)) return false;
@@ -11826,7 +11828,7 @@ namespace osuCrypto::LogVole::gpu
 
         nttForwardFromPlainBroadcastWarpStages7128192Rho4Kernel<<<
             polyCount * 4u, kNttThreads, shBytes, asStream(stream)>>>(
-            toDevice(rc), in, inIdx, out, outIdx);
+            toDevice(rc), in, inIdx, out, outIdx, inputRho);
         return check(cudaGetLastError(), "nttForwardFromPlainBroadcastWarpStages712");
     }
 
@@ -12020,7 +12022,7 @@ namespace osuCrypto::LogVole::gpu
     {
         if (chunkCount == 0u) return true;
         if (!canLaunchNttInverseScatterSingleLimb(plainRc, ringRc) ||
-            (storageRho != ringRc.mRho && (storageRho != 1u || !log14H200Shape(ringRc))) ||
+            (storageRho != ringRc.mRho && storageRho != 1u) ||
             !labels || !inverseSlotMap || !out ||
             labelCount > static_cast<u64>(chunkCount) * plainRc.mN ||
             !configureShared(plainRc))
@@ -12055,7 +12057,7 @@ namespace osuCrypto::LogVole::gpu
         nttInverseScatterSingleLimb8192Rho4Kernel<<<
             chunkCount, kNttThreads, shBytes, asStream(stream)>>>(
             toDeviceInverseRho4(plainRc), labels, labelCount, padValue,
-            inverseSlotMap, out, garbledInput);
+            inverseSlotMap, out, garbledInput, storageRho);
         return check(
             cudaGetLastError(), "nttInverseScatterSingleLimb8192Rho4");
     }
