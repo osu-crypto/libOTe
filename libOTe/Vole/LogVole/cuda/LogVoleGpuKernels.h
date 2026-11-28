@@ -215,6 +215,9 @@ namespace osuCrypto::LogVole::gpu
         const u32* outIdx,
         u32 polyCount,
         void* stream);
+    bool launchNttForwardFromPlainBroadcast(
+        const RingConstView& rc, const u64* in, const u32* inIdx,
+        u64* out, const u32* outIdx, u32 polyCount, void* stream, u32 inputRho);
 
     // Fuses the exact recursive dHat round trip into an out-of-place NTT load.
     // For output i, inIdx[i] selects a full-RNS high digit and limbSel[i]
@@ -973,12 +976,19 @@ namespace osuCrypto::LogVole::gpu
         u64* out,
         void* stream,
         bool garbledInput = false);
+    bool launchNttInverseScatterSingleLimb(
+        const RingConstView& plainRc, const RingConstView& ringRc, const u64* labels,
+        u64 labelCount, u64 padValue, const u32* inverseSlotMap, u32 chunkCount,
+        u64* out, void* stream, bool garbledInput, u32 storageRho);
 
     // Restore the ordinary full-RNS logical representation in place when a
     // single-limb plaintext broadcast reaches a consumer other than the exact
     // identity-forward path.
     bool launchMaterializePlainBroadcast(
         const RingConstView& rc, u64* data, u32 polyCount, void* stream);
+    // Out-of-place expansion from N words to rho*N words per polynomial.
+    bool launchMaterializePlainBroadcast(
+        const RingConstView& rc, const u64* input, u64* output, u32 polyCount, void* stream);
 
     // Mirrors encodeSlotsToRingCrt: broadcast n plaintext coefficients to all
     // rho limbs of an RnsPoly. liftModQ == null copies; otherwise each limb is

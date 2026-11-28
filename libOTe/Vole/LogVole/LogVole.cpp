@@ -2551,11 +2551,12 @@ namespace osuCrypto::LogVole
                     options.mGarbledInput,
                     firstQueryAllocationBound ? firstQueryGpuAllocations.get() : nullptr,
                     firstQueryAllocationBound ? &state : nullptr,
-                    firstQueryAllocationBound ? sid : 0, queryScope);
+                    firstQueryAllocationBound ? sid : 0, queryScope, true);
             }
             else
             {
-                dev = gpu::wrapLabelsDevice(ctx, x, false, 0, paddedSize, options.mGarbledInput, queryScope);
+                dev = gpu::wrapLabelsDevice(ctx, x, false, 0, paddedSize,
+                    options.mGarbledInput, queryScope, true);
             }
             if (dev)
             {

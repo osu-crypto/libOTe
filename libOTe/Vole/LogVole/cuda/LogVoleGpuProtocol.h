@@ -1039,6 +1039,13 @@ namespace osuCrypto::LogVole::gpu
         u64 padChunks,
         bool garbledInput = false, ProtocolCacheScopeView scope = {});
 
+    // Internal receiver input whose first shrink understands packed broadcast
+    // storage. Generic callers use the full-stride overload above.
+    DeviceBatchPtr wrapLabelsDevice(
+        const ZpCrtContext& ctx, std::span<const u64> labels, bool multiplyByDelta,
+        u64 padValue, u64 padChunks, bool garbledInput, ProtocolCacheScopeView scope,
+        bool packReceiverBroadcast);
+
     // Same, for a caller whose scalars are already in device memory - the case a
     // GPU pipeline is in, where the previous stage produced x on the device.
     // Removes the only input-sized PCIe transfer a query makes.
@@ -1052,6 +1059,12 @@ namespace osuCrypto::LogVole::gpu
         bool garbledInput = false,
         ReceiverFirstQueryAllocations* firstQueryAllocations = nullptr,
         const void* firstQueryOwner = nullptr, u64 firstQuerySid = 0, ProtocolCacheScopeView scope = {});
+    DeviceBatchPtr wrapDeviceLabels(
+        const ZpCrtContext& ctx, const DeviceScalars& labels, u64 labelCount,
+        bool multiplyByDelta, u64 padValue, u64 padChunks, bool garbledInput,
+        ReceiverFirstQueryAllocations* firstQueryAllocations,
+        const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope,
+        bool packReceiverBroadcast);
 
     // Prepare one setup key polynomial with the ordinary plaintext encoder and
     // CRT-lift arithmetic on GPU. Exactly one of a nonzero scalar, a full slot

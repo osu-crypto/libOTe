@@ -2103,7 +2103,8 @@ namespace osuCrypto::LogVole::gpu
             const u64* input,
             const u32* inputIdx,
             u64* output,
-            const u32* outputIdx)
+            const u32* outputIdx,
+            u32 inputRho)
         {
             extern __shared__ u64 sh[];
             constexpr u32 n = 16384u;
@@ -2117,7 +2118,7 @@ namespace osuCrypto::LogVole::gpu
             const u32 inPoly = inputIdx ? inputIdx[batchSlot] : batchSlot;
             const u32 outPoly = outputIdx ? outputIdx[batchSlot] : batchSlot;
             const u64* src = input +
-                static_cast<size_t>(inPoly) * rho * n;
+                static_cast<size_t>(inPoly) * inputRho * n;
             u64* dst = output +
                 (static_cast<size_t>(outPoly) * rho + limb) * n;
             const ShoupOperand* roots =
@@ -4569,7 +4570,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         __global__ void materializePlainBroadcastKernel(
-            u64* data, u32 polyCount, u32 n, u32 rho)
+            const u64* input, u64* output, u32 polyCount, u32 n, u32 rho)
         {
             const size_t linear =
                 static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -4577,9 +4578,10 @@ namespace osuCrypto::LogVole::gpu
             if (linear >= count) return;
             const size_t poly = linear / n;
             const size_t coeff = linear - poly * n;
-            u64* const base = data + poly * rho * n;
-            const u64 value = base[coeff];
-            for (u32 limb = 1u; limb < rho; ++limb)
+            u64* const base = output + poly * rho * n;
+            const bool packed = input != output;
+            const u64 value = packed ? input[linear] : base[coeff];
+            for (u32 limb = packed ? 0u : 1u; limb < rho; ++limb)
                 base[static_cast<size_t>(limb) * n + coeff] = value;
         }
 
@@ -5345,7 +5347,7 @@ namespace osuCrypto::LogVole::gpu
         template<u32 InputMode>
         __device__ __forceinline__ void forwardFp52Body(
             double* forwardSh, DeviceRing rg, const u64* input, const u32* inputIdx,
-            const u32* inputLimb, u64* output, const u32* outputIdx)
+            const u32* inputLimb, u64* output, const u32* outputIdx, u32 inputRho)
         {
             static_assert(InputMode <= 2u);
             const u32 limb = blockIdx.x & 7u, slot = blockIdx.x >> 3u;
@@ -5354,7 +5356,8 @@ namespace osuCrypto::LogVole::gpu
             const u32 selected = InputMode == 2u && inputLimb ? inputLimb[slot] : 8u;
             const u32 sourceLimb = InputMode == 0u ? limb :
                 InputMode == 2u && selected < 8u ? selected : 0u;
-            const u64* src = input + (static_cast<size_t>(inPoly) * 8u + sourceLimb) * 16384u;
+            const u32 storageRho = InputMode == 1u ? inputRho : 8u;
+            const u64* src = input + (static_cast<size_t>(inPoly) * storageRho + sourceLimb) * 16384u;
             u64* base = output + (static_cast<size_t>(outPoly) * 8u + limb) * 16384u;
             const ShoupOperand* roots = rg.mRoots + static_cast<size_t>(limb) * 16384u;
             const u64 qi = rg.mMods[limb].mValue, twoQ = qi << 1u;
@@ -5403,23 +5406,24 @@ namespace osuCrypto::LogVole::gpu
         template<u32 InputMode>
         __global__ __launch_bounds__(512, 2)
         void nttForwardTail16384Fp52Kernel(DeviceRing rg, const u64* input,
-            const u32* inputIdx, const u32* inputLimb, u64* output, const u32* outputIdx)
+            const u32* inputIdx, const u32* inputLimb, u64* output, const u32* outputIdx, u32 inputRho)
         {
             extern __shared__ double tailFpSh[];
             forwardFp52Body<InputMode>(
-                tailFpSh, rg, input, inputIdx, inputLimb, output, outputIdx);
+                tailFpSh, rg, input, inputIdx, inputLimb, output, outputIdx, inputRho);
         }
 
         template<u32 InputMode>
         bool launchForwardFp52Tail(DeviceRing rg, const u64* input, const u32* inputIdx,
-            const u32* inputLimb, u64* output, const u32* outputIdx, u32 polyCount, cudaStream_t stream)
+            const u32* inputLimb, u64* output, const u32* outputIdx, u32 polyCount,
+            cudaStream_t stream, u32 inputRho = 8u)
         {
             constexpr int bytes = 12288u * sizeof(double);
             if (!check(cudaFuncSetAttribute(nttForwardTail16384Fp52Kernel<InputMode>,
                     cudaFuncAttributeMaxDynamicSharedMemorySize, bytes), "forward tail shared"))
                 return false;
             nttForwardTail16384Fp52Kernel<InputMode><<<polyCount * 8u, 512u, bytes, stream>>>(
-                rg, input, inputIdx, inputLimb, output, outputIdx);
+                rg, input, inputIdx, inputLimb, output, outputIdx, inputRho);
             return check(cudaGetLastError(), "forward FP52 tail");
         }
 
@@ -11758,8 +11762,22 @@ namespace osuCrypto::LogVole::gpu
         u32 polyCount,
         void* stream)
     {
+        return launchNttForwardFromPlainBroadcast(rc, in, inIdx, out, outIdx, polyCount, stream, rc.mRho);
+    }
+
+    bool launchNttForwardFromPlainBroadcast(
+        const RingConstView& rc,
+        const u64* in,
+        const u32* inIdx,
+        u64* out,
+        const u32* outIdx,
+        u32 polyCount,
+        void* stream,
+        u32 inputRho)
+    {
         if (polyCount == 0u) return true;
         if (!canLaunchNttForwardFromPlainBroadcast(rc) || !in || !out ||
+            (inputRho != rc.mRho && (inputRho != 1u || !log14H200Shape(rc) || in == out)) ||
             !configureShared(rc))
             return false;
         if (!configureH200RootPersistence(rc, stream, false)) return false;
@@ -11773,7 +11791,8 @@ namespace osuCrypto::LogVole::gpu
                 rc.mMinModulus > (u64{1} << 51u) && rc.mMinModulus <= rc.mMaxModulus &&
                 rc.mMaxModulus < (u64{1} << 52u))
             {
-                return launchForwardFp52Tail<1u>(toDevice(rc), in, inIdx, nullptr, out, outIdx, polyCount, asStream(stream));
+                return launchForwardFp52Tail<1u>(toDevice(rc), in, inIdx, nullptr, out, outIdx,
+                    polyCount, asStream(stream), inputRho);
             }
             if (polyCount * rc.mRho >= 2u * rc.mSmCount)
             {
@@ -11785,7 +11804,7 @@ namespace osuCrypto::LogVole::gpu
                     return false;
                 nttForwardFromPlainBroadcast16384Rho8Kernel<true, 512u><<<
                     polyCount * 8u, 512u, shBytes, asStream(stream)>>>(
-                    toDevice(rc), in, inIdx, out, outIdx);
+                    toDevice(rc), in, inIdx, out, outIdx, inputRho);
                 return check(cudaGetLastError(), "nttForwardPlainLog14Paired");
             }
             if (!check(
@@ -11798,7 +11817,7 @@ namespace osuCrypto::LogVole::gpu
             nttForwardFromPlainBroadcast16384Rho8Kernel<><<<
                 polyCount * 8u, kNttThreads, shBytes,
                 asStream(stream)>>>(
-                toDevice(rc), in, inIdx, out, outIdx);
+                toDevice(rc), in, inIdx, out, outIdx, inputRho);
 
             return check(
                 cudaGetLastError(),
@@ -11982,8 +12001,26 @@ namespace osuCrypto::LogVole::gpu
         void* stream,
         bool garbledInput)
     {
+        return launchNttInverseScatterSingleLimb(plainRc, ringRc, labels, labelCount, padValue,
+            inverseSlotMap, chunkCount, out, stream, garbledInput, ringRc.mRho);
+    }
+
+    bool launchNttInverseScatterSingleLimb(
+        const RingConstView& plainRc,
+        const RingConstView& ringRc,
+        const u64* labels,
+        u64 labelCount,
+        u64 padValue,
+        const u32* inverseSlotMap,
+        u32 chunkCount,
+        u64* out,
+        void* stream,
+        bool garbledInput,
+        u32 storageRho)
+    {
         if (chunkCount == 0u) return true;
         if (!canLaunchNttInverseScatterSingleLimb(plainRc, ringRc) ||
+            (storageRho != ringRc.mRho && (storageRho != 1u || !log14H200Shape(ringRc))) ||
             !labels || !inverseSlotMap || !out ||
             labelCount > static_cast<u64>(chunkCount) * plainRc.mN ||
             !configureShared(plainRc))
@@ -12002,7 +12039,7 @@ namespace osuCrypto::LogVole::gpu
             nttInverseScatterBroadcastKernel<<<
                 chunkCount, kNttThreads, shBytes, asStream(stream)>>>(
                 toDevice(plainRc), labels, labelCount, padValue,
-                inverseSlotMap, ringRc.mRho, 1u, out, garbledInput);
+                inverseSlotMap, storageRho, 1u, out, garbledInput);
             return check(
                 cudaGetLastError(),
                 "nttInverseScatterSingleLimb16384Rho8");
@@ -12026,15 +12063,21 @@ namespace osuCrypto::LogVole::gpu
     bool launchMaterializePlainBroadcast(
         const RingConstView& rc, u64* data, u32 polyCount, void* stream)
     {
+        return launchMaterializePlainBroadcast(rc, data, data, polyCount, stream);
+    }
+
+    bool launchMaterializePlainBroadcast(
+        const RingConstView& rc, const u64* input, u64* output, u32 polyCount, void* stream)
+    {
         if (polyCount == 0u) return true;
-        if (!data || rc.mN == 0u || rc.mRho == 0u) return false;
+        if (!input || !output || rc.mN == 0u || rc.mRho == 0u) return false;
         constexpr u32 threads = 256u;
         const u64 count = static_cast<u64>(polyCount) * rc.mN;
         const u64 blocks = (count + threads - 1u) / threads;
         if (blocks > std::numeric_limits<u32>::max()) return false;
         materializePlainBroadcastKernel<<<
             static_cast<u32>(blocks), threads, 0, asStream(stream)>>>(
-            data, polyCount, rc.mN, rc.mRho);
+            input, output, polyCount, rc.mN, rc.mRho);
         return check(cudaGetLastError(), "materializePlainBroadcast");
     }
 

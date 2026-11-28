@@ -1602,9 +1602,9 @@ namespace osuCrypto::LogVole::gpu
         // provenance enables an exact identity-gadget fast path; arbitrary uploads
         // and all derived ring batches deliberately leave it zero.
         u32 mPlainBroadcastBits = 0;
-        // True only when the logical broadcast above is physically present in
-        // limb 0 and limbs 1..3 must either be broadcast on the identity-forward
-        // load or materialized before another consumer observes the batch.
+        // The logical broadcast is physically present only in limb 0. Its
+        // stride is mBuf.polyWords(), which may be the degree for a packed
+        // receiver input. Other consumers first restore the full-RNS layout.
         bool mPlainBroadcastSingleLimb = false;
         // Provenance for a synchronized, device-generated fresh Root key.
         // Unlike an optional host mirror, this may be its only materialization.
@@ -2752,10 +2752,21 @@ namespace osuCrypto::LogVole::gpu
         if (!impl.mRing || impl.mBuf.empty() ||
             impl.mBuf.count() > std::numeric_limits<u32>::max())
             return false;
-        if (!launchMaterializePlainBroadcast(
-                impl.mRing->view(stream), impl.mBuf.data(stream),
-                static_cast<u32>(impl.mBuf.count()),
-                stream.raw()))
+        auto& ring = *impl.mRing;
+        const auto count = static_cast<u32>(impl.mBuf.count());
+        if (impl.mBuf.polyWords() == ring.n())
+        {
+            GpuPolyBuffer result;
+            if (!result.resize(ring, count, stream) ||
+                !launchMaterializePlainBroadcast(ring.view(stream), impl.mBuf.data(stream),
+                    result.data(stream), count, stream.raw())) return false;
+            // The old compact allocation retires on this stream after the
+            // broadcast has stopped reading it.
+            impl.mBuf = std::move(result);
+        }
+        else if (impl.mBuf.polyWords() != ring.polyWords() ||
+            !launchMaterializePlainBroadcast(ring.view(stream), impl.mBuf.data(stream),
+                count, stream.raw()))
             return false;
         // The queued broadcast precedes every subsequent consumer on this
         // stream, so the ordinary full-RNS logical representation is restored.
@@ -4402,7 +4413,8 @@ namespace osuCrypto::LogVole::gpu
                     ? launchNttForwardFromPlainBroadcast(
                           ring->view(stream), impl->mXSrc, dSrc,
                           impl->mNodes.data(stream), dDst,
-                          static_cast<u32>(leafCount), stream.raw())
+                          static_cast<u32>(leafCount), stream.raw(),
+                          static_cast<u32>(xDev->mImpl->mBuf.polyWords() / ring->n()))
                     : launchNttForwardFrom(
                           ring->view(stream), impl->mXSrc, dSrc,
                           impl->mNodes.data(stream), dDst,
@@ -8213,7 +8225,8 @@ namespace osuCrypto::LogVole::gpu
             u64 padChunks,
             bool garbledInput,
             ReceiverFirstQueryAllocations* firstQueryAllocations,
-            const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope)
+            const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope,
+            bool packReceiverBroadcast)
     {
         if (!enabled(zp.mRing) || !scalars || labelCount == 0) return nullptr;
         auto ring = GpuRing::get(zp.mRing);
@@ -8242,7 +8255,7 @@ namespace osuCrypto::LogVole::gpu
                     static_cast<u32>(chunkCount), repeated->data(), repeatStream.raw()))
                 return nullptr;
             return wrapScalarsOnDevice(zp, repeated->data(), chunkCount * slots,
-                false, 0, padChunks, false, nullptr, nullptr, 0, scope);
+                false, 0, padChunks, false, nullptr, nullptr, 0, scope, packReceiverBroadcast);
         }
 
         auto& stream = contextStream(zp.mRing);
@@ -8278,17 +8291,6 @@ namespace osuCrypto::LogVole::gpu
         out->mImpl->mRing = ring;
         if (!multiplyByDelta)
             out->mImpl->mPlainBroadcastBits = bitWidth(zp.mPlaintextModulus - 1u);
-        const bool reservedWrap = !multiplyByDelta && !padValue &&
-            takeReceiverFirstQueryWrap(
-                firstQueryAllocations, *ring, zp.mRing.mParams,
-                labelCount, static_cast<std::size_t>(total), garbledInput,
-                firstQueryOwner, firstQuerySid, out->mImpl->mBuf, stream, scope);
-        if (!reservedWrap && !out->mImpl->mBuf.resize(
-                *ring, static_cast<std::size_t>(total), stream)) return nullptr;
-        // Chunks past the real input are all-zero ring elements, matching the
-        // explicit padding in civoleReceiverSetX.
-        if (total > chunkCount && !out->mImpl->mBuf.zero(stream)) return nullptr;
-
         const auto chunks = static_cast<u32>(chunkCount);
         const bool fusedWrap =
             fusedWrapEnabled(zp.mRing.mExecutionOptions.mAdvanced.mProtocol) && !multiplyByDelta &&
@@ -8298,6 +8300,22 @@ namespace osuCrypto::LogVole::gpu
             canLaunchNttInverseScatterSingleLimb(
                 plain->view(stream), ring->view(stream));
         out->mImpl->mPlainBroadcastSingleLimb = singleLimbWrap;
+        // Preserve an explicitly reserved first-query buffer's full stride.
+        const bool packedBroadcast = packReceiverBroadcast && singleLimbWrap &&
+            !firstQueryAllocations && scope.mRole == ProtocolCacheRole::Receiver &&
+            n == 16384u && rho == 8u && zp.mRing.mGpuExecution->isH200();
+        const u32 storageRho = packedBroadcast ? 1u : rho;
+        const bool reservedWrap = !multiplyByDelta && !padValue &&
+            takeReceiverFirstQueryWrap(
+                firstQueryAllocations, *ring, zp.mRing.mParams,
+                labelCount, static_cast<std::size_t>(total), garbledInput,
+                firstQueryOwner, firstQuerySid, out->mImpl->mBuf, stream, scope);
+        if (!reservedWrap && !out->mImpl->mBuf.resizeWords(
+                static_cast<std::size_t>(n) * storageRho, static_cast<std::size_t>(total), stream))
+            return nullptr;
+        // Chunks past the real input are all-zero ring elements, matching the
+        // explicit padding in civoleReceiverSetX.
+        if (total > chunkCount && !out->mImpl->mBuf.zero(stream)) return nullptr;
 
         // The fused path consumes scalars directly and writes the ring batch, so
         // only the exact legacy path needs the N-word-per-chunk plaintext scratch.
@@ -8320,7 +8338,7 @@ namespace osuCrypto::LogVole::gpu
                     ? launchNttInverseScatterSingleLimb(
                           plain->view(stream), ring->view(stream), scalars, labelCount,
                           padValue, plain->inverseSlotMap(), chunks,
-                          out->mImpl->mBuf.data(stream), stream.raw(), garbledInput)
+                          out->mImpl->mBuf.data(stream), stream.raw(), garbledInput, storageRho)
                     : launchNttInverseScatterBroadcast(
                           plain->view(stream), ring->view(stream), scalars, labelCount,
                           padValue, plain->inverseSlotMap(), chunks,
@@ -8351,6 +8369,17 @@ namespace osuCrypto::LogVole::gpu
         u64 padChunks,
         bool garbledInput, ProtocolCacheScopeView scope)
     {
+        return wrapLabelsDevice(zp, labels, multiplyByDelta, padValue, padChunks, garbledInput, scope, false);
+    }
+
+    DeviceBatchPtr wrapLabelsDevice(
+        const ZpCrtContext& zp,
+        std::span<const u64> labels,
+        bool multiplyByDelta,
+        u64 padValue,
+        u64 padChunks,
+        bool garbledInput, ProtocolCacheScopeView scope, bool packReceiverBroadcast)
+    {
         AutoTimer timer(timingCounter(timingStats(zp.mRing), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(zp.mRing) || labels.empty()) return nullptr;
 
@@ -8367,7 +8396,7 @@ namespace osuCrypto::LogVole::gpu
         DeviceBatchPtr out = ok
             ? wrapScalarsOnDevice(
                   zp, scalars, labels.size(), multiplyByDelta, padValue, padChunks,
-                  garbledInput, nullptr, nullptr, 0, scope)
+                  garbledInput, nullptr, nullptr, 0, scope, packReceiverBroadcast)
             : nullptr;
         // Stream ordered, like the scratch frees inside the helper.
         return out;
@@ -8384,6 +8413,22 @@ namespace osuCrypto::LogVole::gpu
         ReceiverFirstQueryAllocations* firstQueryAllocations,
         const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope)
     {
+        return wrapDeviceLabels(zp, labels, labelCount, multiplyByDelta, padValue, padChunks,
+            garbledInput, firstQueryAllocations, firstQueryOwner, firstQuerySid, scope, false);
+    }
+
+    DeviceBatchPtr wrapDeviceLabels(
+        const ZpCrtContext& zp,
+        const DeviceScalars& labels,
+        u64 labelCount,
+        bool multiplyByDelta,
+        u64 padValue,
+        u64 padChunks,
+        bool garbledInput,
+        ReceiverFirstQueryAllocations* firstQueryAllocations,
+        const void* firstQueryOwner, u64 firstQuerySid, ProtocolCacheScopeView scope,
+        bool packReceiverBroadcast)
+    {
         AutoTimer timer(timingCounter(timingStats(zp.mRing), &TimingStats::mGpuMiscTimeUs));
         if (!enabled(zp.mRing) || labels.empty()) return nullptr;
         const std::size_t count = labelCount
@@ -8395,7 +8440,7 @@ namespace osuCrypto::LogVole::gpu
         return wrapScalarsOnDevice(
             zp, labels.data(), count, multiplyByDelta, padValue, padChunks,
             garbledInput, firstQueryAllocations,
-            firstQueryOwner, firstQuerySid, scope);
+            firstQueryOwner, firstQuerySid, scope, packReceiverBroadcast);
     }
 
     DeviceBatchPtr wrapSetupDeltaResident(const ZpCrtContext& ctx, u64 delta,
