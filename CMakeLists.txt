@@ -93,6 +93,10 @@ endif()
 
 # Apply before creating dependency targets: coroutine transfers also occur there.
 include(cmake/asanWorkaround.cmake)
+# LogVole uses macoro's scoped coroutine algorithms.
+if((NOT DEFINED ENABLE_LOGVOLE OR ENABLE_LOGVOLE) AND NOT DEFINED MACORO_GIT_TAG)
+    set(MACORO_GIT_TAG feea851f3bda2bdc80993252144fd38a46acca85)
+endif()
 add_subdirectory(cryptoTools)
 
 #############################################
