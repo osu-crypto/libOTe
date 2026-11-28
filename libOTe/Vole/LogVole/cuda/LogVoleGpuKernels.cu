@@ -11033,28 +11033,20 @@ namespace osuCrypto::LogVole::gpu
             const u64* __restrict__ seed, u64* __restrict__ out,
             u64 count, u64 modulus)
         {
-            __shared__ unsigned char roundKeys[176];
-            __shared__ unsigned char sbox[256];
-            sbox[threadIdx.x] = kAesSbox[threadIdx.x];
+            constexpr u32 bankCopies = 32;
+            __shared__ uint4 roundKeys[11];
+            __shared__ AesPrngTables<bankCopies> tables;
+            prepareAesPrngTables(tables);
             if (threadIdx.x == 0)
-                aes128Expand(reinterpret_cast<const unsigned char*>(seed), roundKeys);
+                aes128Expand(reinterpret_cast<const unsigned char*>(seed),
+                    reinterpret_cast<unsigned char*>(roundKeys));
             __syncthreads();
             const u64 blocks = (count >> 1u) + (count & 1u);
             for (u64 counter = static_cast<u64>(blockIdx.x) * blockDim.x + threadIdx.x;
                  counter < blocks; counter += static_cast<u64>(gridDim.x) * blockDim.x)
             {
-                unsigned char state[16]{};
-#pragma unroll
-                for (u32 i = 0; i < 8; ++i)
-                    state[i] = static_cast<unsigned char>(counter >> (8u * i));
-                aes128EncryptSharedSbox(roundKeys, state, sbox);
-                u64 lo = 0, hi = 0;
-#pragma unroll
-                for (u32 i = 0; i < 8; ++i)
-                {
-                    lo |= static_cast<u64>(state[i]) << (8u * i);
-                    hi |= static_cast<u64>(state[8u + i]) << (8u * i);
-                }
+                u64 lo, hi;
+                aesPrngPair(roundKeys, tables, counter, lo, hi);
                 out[2u * counter] = lo % modulus;
                 if (2u * counter + 1u < count) out[2u * counter + 1u] = hi % modulus;
             }
