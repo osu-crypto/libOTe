@@ -83,7 +83,7 @@ namespace osuCrypto::LogVole
 #if defined(__linux__) && defined(ENABLE_LOGVOLE_CUDA) && defined(MADV_HUGEPAGE)
         if (!options.mHugePages || !useGpu || buffer.size() < (std::size_t{8} << 20))
             return;
-        if (buffer.memory() && buffer.memory()->contains(buffer.data(), buffer.size())) return;
+        if (buffer.memory() && buffer.memory()->isPinned(buffer.data(), buffer.size())) return;
         constexpr std::uintptr_t alignment = std::uintptr_t{2} << 20;
         const auto first = reinterpret_cast<std::uintptr_t>(buffer.data());
         if (first > std::numeric_limits<std::uintptr_t>::max() - buffer.size()) return;
