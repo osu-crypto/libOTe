@@ -3193,11 +3193,57 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
+        // Adjacent stages share a four-value ownership group. Carry the first
+        // stage directly into the second, eliminating one shared round trip
+        // and one CTA barrier without changing the lazy-reduction order.
+        template<u32 Stage, u32 Tiles, u32 TileIdx>
+        __device__ __forceinline__ void nttInverseTile8192StagePair(
+            u64* sh, const ShoupOperand* roots, u64 q, u64 twoQ)
+        {
+            static_assert(Stage >= 6u && Stage <= 11u);
+            static_assert((Tiles == 1u || Tiles == 2u) && TileIdx < Tiles);
+            static_assert(Tiles == 2u || Stage < 11u); // log13 ends in its scaled stage
+            constexpr u32 gap = 1u << Stage;
+            constexpr u32 m = 8192u >> (Stage + 1u);
+            constexpr u32 degree = 8192u * Tiles;
+            constexpr u32 rootBase = degree - 2u * Tiles * m + 1u + TileIdx * m;
+            constexpr u32 nextRootBase = degree - Tiles * m + 1u + TileIdx * (m >> 1u);
+            for (u32 j = threadIdx.x; j < 2048u; j += blockDim.x)
+            {
+                // j < 2048 makes the last group's index identically zero.
+                // Expose it explicitly so the final twiddles stay uniform.
+                const u32 group = Stage == 11u ? 0u : j >> Stage;
+                const u32 ix = j + (group << Stage) * 3u;
+                u64 lo0, hi0, lo1, hi1;
+                {
+                    const u64 u = sh[ix], v = sh[ix + gap];
+                    const ShoupOperand r = nttLoadShoup<true>(roots + rootBase + group * 2u);
+                    lo0 = nttGuard(u + v, twoQ);
+                    hi0 = mulShoupLazy(u + twoQ - v, r, q);
+                }
+                {
+                    const u64 u = sh[ix + 2u * gap], v = sh[ix + 3u * gap];
+                    const ShoupOperand r = nttLoadShoup<true>(roots + rootBase + group * 2u + 1u);
+                    lo1 = nttGuard(u + v, twoQ);
+                    hi1 = mulShoupLazy(u + twoQ - v, r, q);
+                }
+                const ShoupOperand r = nttLoadShoup<true>(roots + nextRootBase + group);
+                sh[ix] = nttGuard(lo0 + lo1, twoQ);
+                sh[ix + 2u * gap] = mulShoupLazy(lo0 + twoQ - lo1, r, q);
+                sh[ix + gap] = nttGuard(hi0 + hi1, twoQ);
+                sh[ix + 3u * gap] = mulShoupLazy(hi0 + twoQ - hi1, r, q);
+            }
+            __syncthreads();
+        }
+
+        // The first six inverse stages operate entirely inside 64-value warp
+        // tiles. Hold each S0 pair in registers through S5, publish only the S5
+        // layout, then finish S6..S12 with either single or paired stages.
         // Stage-110 alpha=2 sidecar. Each lane owns one aligned S0 input pair.
         // The eight butterfly iterations per lane are independent 64-word warp
         // tiles, so S1--S5 need only xor shuffles. Publishing the simple-index
-        // S5 pair once gives the accepted S6--S9 suffix and fused S10--S12 tail
-        // exactly the shared layout they already consume.
+        // S5 pair once feeds paired S6--S9 and the original fused S10--S12
+        // post-operation tail.
         template<u32 PostOp>
         __device__ __forceinline__ void nttInversePostWarpStages05Body8192(
             DeviceInverseRho4 iv,
@@ -3250,10 +3296,8 @@ namespace osuCrypto::LogVole::gpu
             }
             __syncthreads();
 
-            nttInverseStage8192<6u, true, true>(sh, roots, q, twoQ);
-            nttInverseStage8192<7u, true, true>(sh, roots, q, twoQ);
-            nttInverseStage8192<8u, true, true>(sh, roots, q, twoQ);
-            nttInverseStage8192<9u, true, true>(sh, roots, q, twoQ);
+            nttInverseTile8192StagePair<6u, 1u, 0u>(sh, roots, q, twoQ);
+            nttInverseTile8192StagePair<8u, 1u, 0u>(sh, roots, q, twoQ);
 
             const u64* b = nullptr;
             if constexpr (PostOp == 0u || PostOp == 4u)
@@ -4678,53 +4722,6 @@ namespace osuCrypto::LogVole::gpu
             hi = mulShoupLazy(u + twoQ - v, r, q);
         }
 
-        // Adjacent stages share a four-value ownership group. Carry the first
-        // stage directly into the second, eliminating one shared round trip
-        // and one CTA barrier without changing the lazy-reduction order.
-        template<u32 Stage, u32 TileIdx>
-        __device__ __forceinline__ void nttInverseLog14TileStagePair(
-            u64* sh, const ShoupOperand* roots, u64 q, u64 twoQ)
-        {
-            static_assert(Stage >= 6u && Stage <= 11u && TileIdx < 2u);
-            constexpr u32 gap = 1u << Stage;
-            constexpr u32 m = 8192u >> (Stage + 1u);
-            constexpr u32 rootBase = 16384u - 4u * m + 1u + TileIdx * m;
-            constexpr u32 nextRootBase =
-                16384u - 2u * m + 1u + TileIdx * (m >> 1u);
-            for (u32 j = threadIdx.x; j < 2048u; j += blockDim.x)
-            {
-                // j < 2048 makes the last group's index identically zero.
-                // Expose it explicitly so the final twiddles stay uniform.
-                const u32 group = Stage == 11u ? 0u : j >> Stage;
-                const u32 ix = j + (group << Stage) * 3u;
-                u64 lo0, hi0, lo1, hi1;
-                {
-                    const u64 u = sh[ix], v = sh[ix + gap];
-                    const ShoupOperand r = inverseLog14Root(
-                        roots, rootBase + group * 2u);
-                    lo0 = nttGuard(u + v, twoQ);
-                    hi0 = mulShoupLazy(u + twoQ - v, r, q);
-                }
-                {
-                    const u64 u = sh[ix + 2u * gap], v = sh[ix + 3u * gap];
-                    const ShoupOperand r = inverseLog14Root(
-                        roots, rootBase + group * 2u + 1u);
-                    lo1 = nttGuard(u + v, twoQ);
-                    hi1 = mulShoupLazy(u + twoQ - v, r, q);
-                }
-                const ShoupOperand r = inverseLog14Root(
-                    roots, nextRootBase + group);
-                sh[ix] = nttGuard(lo0 + lo1, twoQ);
-                sh[ix + 2u * gap] = mulShoupLazy(lo0 + twoQ - lo1, r, q);
-                sh[ix + gap] = nttGuard(hi0 + hi1, twoQ);
-                sh[ix + 3u * gap] = mulShoupLazy(hi0 + twoQ - hi1, r, q);
-            }
-            __syncthreads();
-        }
-
-        // The first six inverse stages operate entirely inside 64-value warp
-        // tiles. Hold each S0 pair in registers through S5, publish only the S5
-        // layout, then finish S6..S12 with either single or paired stages.
         template<u32 TileIdx, bool DirectLoad = false>
         __device__ __forceinline__ void nttInverseLog14TileWarp05(
             u64* sh,
@@ -4794,9 +4791,9 @@ namespace osuCrypto::LogVole::gpu
                 sh, roots, q, twoQ);
             if constexpr (DirectLoad)
             {
-                nttInverseLog14TileStagePair<7u, TileIdx>(sh, roots, q, twoQ);
-                nttInverseLog14TileStagePair<9u, TileIdx>(sh, roots, q, twoQ);
-                nttInverseLog14TileStagePair<11u, TileIdx>(sh, roots, q, twoQ);
+                nttInverseTile8192StagePair<7u, 2u, TileIdx>(sh, roots, q, twoQ);
+                nttInverseTile8192StagePair<9u, 2u, TileIdx>(sh, roots, q, twoQ);
+                nttInverseTile8192StagePair<11u, 2u, TileIdx>(sh, roots, q, twoQ);
             }
             else
             {
