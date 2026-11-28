@@ -25,6 +25,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 
@@ -2321,6 +2322,44 @@ namespace osuCrypto::LogVole::gpu
         }
         out = std::move(next);
         return true;
+    }
+
+    std::optional<bool> compareReceivedRootBStarWire(const RingNttContext& ctx,
+        u32 count, ConstWireView encoded, ProtocolCacheScopeView scope)
+    {
+        if constexpr (std::endian::native != std::endian::little) return std::nullopt;
+        if (scope.mRole != ProtocolCacheRole::Receiver ||
+            ctx.mExecutionOptions.mAdvanced.mProtocol.mFailures.mRootBStarDevice ||
+            encoded.empty() || encoded.size() % sizeof(u64) != 0 ||
+            encoded.size() / sizeof(u64) > std::numeric_limits<u32>::max() ||
+            encoded.size() > std::numeric_limits<std::size_t>::max() - sizeof(u32))
+            return std::nullopt;
+
+        RetainedPublicUniformPtr expected;
+        if (!retainUniformPolyBatchFromNonce(ctx, kRootBStarNonce, kRootBStarDomain,
+                count, true, expected, scope) || !expected ||
+            !retainedPublicUniformMatches(ctx, *expected, count, true, scope) ||
+            expected->mImpl->mValues.bytes() != encoded.size())
+            return std::nullopt;
+
+        HostStep step(hostProfiler(ctx), "setup root: compare BStar on device");
+        auto& stream = contextSampleStream(ctx);
+        auto receive = tryAllocateGpuBuffer(stream, encoded.size() + sizeof(u32));
+        if (!receive) return std::nullopt;
+        auto* mismatch = reinterpret_cast<u32*>(
+            static_cast<u8*>(receive.data()) + encoded.size());
+        u32 hostMismatch = 0;
+        // The received frame stays alive through this drain. Decode no host
+        // polynomial and leave the existing Root-frame registration policy in place.
+        StreamDrain drain{stream};
+        if (!gpuMemcpyH2D(receive.data(), encoded.data(), encoded.size(), stream.raw()) ||
+            !gpuMemsetZero(mismatch, sizeof(u32), stream.raw()) ||
+            !launchCompareExactWords(expected->mImpl->mValues.data(stream),
+                static_cast<const u64*>(receive.data()),
+                static_cast<u32>(encoded.size() / sizeof(u64)), mismatch, stream.raw()) ||
+            !gpuMemcpyD2H(&hostMismatch, mismatch, sizeof(hostMismatch), stream.raw()) ||
+            !drain.sync()) return std::nullopt;
+        return hostMismatch == 0;
     }
 
     DeviceBatchPtr sampleRootSecretUniformToDevice(

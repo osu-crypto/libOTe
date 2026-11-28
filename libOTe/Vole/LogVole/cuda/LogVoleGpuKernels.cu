@@ -11277,6 +11277,17 @@ namespace osuCrypto::LogVole::gpu
             return true;
         }
 
+        __global__ void compareExactWordsKernel(const u64* expected, const u64* actual,
+            u32 count, u32* mismatch)
+        {
+            bool differs = false;
+            for (u64 i = static_cast<u64>(blockIdx.x) * blockDim.x + threadIdx.x;
+                 i < count; i += static_cast<u64>(gridDim.x) * blockDim.x)
+                differs |= expected[i] != actual[i];
+            if (__syncthreads_or(differs) && threadIdx.x == 0)
+                atomicExch(mismatch, 1u);
+        }
+
         u32 log2Exact(u32 value)
         {
             u32 bits = 0;
@@ -11286,6 +11297,17 @@ namespace osuCrypto::LogVole::gpu
     }
 
     // ---- public host API --------------------------------------------------
+
+    bool launchCompareExactWords(const u64* expected, const u64* actual,
+        u32 count, u32* mismatch, void* stream)
+    {
+        if (!count || !expected || !actual || !mismatch) return false;
+        constexpr u32 threads = 256;
+        const u32 blocks = std::min<u32>(256, 1 + (count - 1) / threads);
+        compareExactWordsKernel<<<blocks, threads, 0, asStream(stream)>>>(
+            expected, actual, count, mismatch);
+        return check(cudaGetLastError(), "compareExactWordsKernel");
+    }
 
     bool gpuDeviceAvailable()
     {

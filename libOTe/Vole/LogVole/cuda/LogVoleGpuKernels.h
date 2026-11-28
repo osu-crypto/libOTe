@@ -148,6 +148,9 @@ namespace osuCrypto::LogVole::gpu
     bool gpuMemcpyD2H(void* dst, const void* src, std::size_t bytes, void* stream);
     bool gpuMemcpyD2D(void* dst, const void* src, std::size_t bytes, void* stream);
     bool gpuMemsetZero(void* dst, std::size_t bytes, void* stream);
+    // The caller zeros the aligned device flag and keeps it disjoint from both inputs.
+    bool launchCompareExactWords(const u64* expected, const u64* actual,
+        u32 count, u32* mismatch, void* stream);
 
     // ---- events ------------------------------------------------------------
     // Just enough to overlap two independent kernel chains on separate streams

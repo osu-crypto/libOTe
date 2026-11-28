@@ -14,10 +14,12 @@
 // and produces bit-identical results.
 
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
+#include "libOTe/Vole/LogVole/LogVoleWireMemory.h"
 #include "libOTe/Vole/LogVole/cuda/LogVoleGpuMemory.h"
 
 #include <memory>
 #include <array>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -352,6 +354,11 @@ namespace osuCrypto::LogVole::gpu
         u32 polyCount, CpuBenchmarkState cpuBenchmark = {}, ProtocolCacheScopeView scope = {});
     bool rootErrorBatchMatches(const RingNttContext& ctx,
         const DeviceBatch& source, std::size_t expectedCount, ProtocolCacheScopeView scope);
+    // A decline leaves exact verification to the host. A completed comparison
+    // returns equality or inequality for the original canonical wire bytes.
+    std::optional<bool> compareReceivedRootBStarWire(const RingNttContext& ctx,
+        u32 count, ConstWireView encoded, ProtocolCacheScopeView scope);
+
     // Private sender Root uniform secret. This form never enters the public
     // uniform retention registry and is completed before it crosses streams.
     DeviceBatchPtr sampleRootSecretUniformToDevice(

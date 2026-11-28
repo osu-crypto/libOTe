@@ -2696,17 +2696,31 @@ namespace osuCrypto::LogVole
         // Check the fixed public BStar in canonical NTT form before admitting
         // root state. Compare owned wire bytes directly to preserve deferred storage.
         std::vector<RnsPoly> expectedBStarNtt;
+        bool comparedOnDevice = false;
 #if defined(ENABLE_LOGVOLE_CUDA)
         if (setupBatchNttEnabled(state.mParams.mShrinkExpand.mGpuSetup, ctx) &&
             gpu::setupUniformSamplingEnabled(ctx.mExecutionOptions, gpu::enabled(ctx)))
         {
-            expectedBStarNtt = deriveUniformPolyBatchFromNonce(
-                ctx, kRootBStarPublicNonce, kRootBStarPublicDomain,
-                randomizer, true, scope, nullptr);
-            if (expectedBStarNtt.size() != randomizer) return false;
+            if (ownedPublicBStarWire)
+            {
+                const auto verified = gpu::compareReceivedRootBStarWire(
+                    ctx, randomizer, publicBStarWireBytes, scope);
+                if (verified.has_value())
+                {
+                    if (!*verified) return false;
+                    comparedOnDevice = true;
+                }
+            }
+            if (!comparedOnDevice)
+            {
+                expectedBStarNtt = deriveUniformPolyBatchFromNonce(
+                    ctx, kRootBStarPublicNonce, kRootBStarPublicDomain,
+                    randomizer, true, scope, nullptr);
+                if (expectedBStarNtt.size() != randomizer) return false;
+            }
         }
 #endif
-        for (u32 idx = 0; idx < randomizer; ++idx)
+        for (u32 idx = 0; !comparedOnDevice && idx < randomizer; ++idx)
         {
             RnsPoly expectedHost;
             if (expectedBStarNtt.empty())
