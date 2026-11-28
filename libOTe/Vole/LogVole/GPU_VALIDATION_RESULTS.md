@@ -8,11 +8,11 @@ Windows and Ubuntu 24.04 under WSL2 used the same NVIDIA GeForce RTX 4060 Laptop
 | --- | --- | --- |
 | Candidate build of focused test, lifetime, and A/B targets | Passed in 200.12 s | Passed in 897.51 s. The uninstrumented executables relinked in 26.09 s. |
 | Release functional suite with kernel parity | 18 jobs, 68 test executions, 0 skips, 189.90 s | 18 jobs, 68 test executions, 0 skips, 53.74 s |
-| Compute Sanitizer memcheck and full leak check | 9 groups, 23 test executions plus the lifetime executable, 122.89 s | 9 groups, 23 test executions plus the lifetime executable, 37.42 s |
+| Compute Sanitizer memcheck and full leak check | 9 groups, 24 test executions plus the lifetime executable, 122.89 s | 9 groups, 24 test executions plus the lifetime executable, 37.42 s |
 
 Each Compute Sanitizer group reported zero errors, leaked bytes, leaked allocations, and skipped tests. Timings include the respective process wrappers. Local raw logs and summaries are under `out/review/gpu-final-functional-windows`, `gpu-final-functional-release-linux`, `gpu-final-leaks-windows`, and `gpu-final-leaks-release-linux`.
 
-The isolated Windows CUDA object compile for `compute_90,sm_90` passed in 63.10 s. `cuobjdump` found all four CT2 entries, six Root zeta entries, all seven outer-product reuse instantiations, and the expected H200 FP52 transform, indexed product, accumulator, and gadget entries. The monolithic CT2 entry was absent. The command, log, object, and symbol listing share the prefix `out/review/gpu-pruning-final-sm90`. These are compile results. RTX 4090 runtime, H200 runtime, and traces of H200-specific dispatch are pending.
+The isolated Windows CUDA object compile for `compute_90,sm_90` passed in 63.10 s. `cuobjdump` found all four CT2 entries, six Root zeta entries, all seven outer-product reuse instantiations, and the expected H200 FP52 transform, indexed product, accumulator, and gadget entries. The monolithic CT2 entry was absent. The command, log, object, and symbol listing share the prefix `out/review/gpu-pruning-final-sm90`. These are compile results. H200 runtime and traces of H200-specific dispatch are pending.
 
 ## Serial A/B on the RTX 4060
 
@@ -151,11 +151,39 @@ The frontend timer covers offline setup, online execution, and relation verifica
 | WSL | Noninteractive NoGoldenSeed | +4.83%, −22.14%, −8.72% | +6.54%, −19.06%, −6.47% |
 | WSL confirmation | Interactive NoGoldenSeed | −1.69%, −3.32%, −12.06%, −1.83% | +1.90%, −5.30%, −8.44%, −1.68% |
 
-The candidate had lower overall medians in every mode on this GPU. Windows noninteractive results were close and mixed by block. The WSL interactive NoGoldenSeed confirmation had lower frontend medians in all four blocks, with a smaller overall difference than in the all-mode run. The confirmation is reported separately. Runtime validation on RTX 4090 and H200 remains pending.
+The candidate had lower overall medians in every mode on this GPU. Windows noninteractive results were close and mixed by block. The WSL interactive NoGoldenSeed confirmation had lower frontend medians in all four blocks, with a smaller overall difference than in the all-mode run. The confirmation is reported separately.
 
 On each platform, three CPU checks passed (seed-budget arithmetic, GoldenSeed feasibility, and shrink-expand parameter validation) along with three GPU root checks (setup shape and two prefetch cases). The GPU NoGoldenSeed case rejected both a changed canonical BStar word and its noncanonical modulus-shifted encoding, then accepted the original frame on the same receiver. Full Compute Sanitizer memcheck of that test reported zero errors and zero leaked bytes on each platform. The native WSL build took 313.21 s and the complete focused check command took 17.36 s.
 
 Under `out/review/`, the final raw run prefixes are `ab-fixed-b544cf71ceae-windows-ac-1`, `ab-fixed-b544cf71ceae-linux-ac-1`, and `ab-fixed-b544cf71ceae-linux-ac-nogold-1`. Each includes a report and raw logs, with matching power and launcher manifests beside it. The test evidence uses the `budget-metadata`, `bstar-reuse`, and `ab-fixed-b544cf71ceae-linux-verification` prefixes. The handoff archive includes these records.
+
+## RTX 4090 runtime and serial A/B on Vast
+
+The native Linux container exposed one RTX 4090 with 24 GiB, compute capability 8.9, and driver 615.71.09. The AMD EPYC 7742 supports AVX2 and lacks IFMA. The container could see 128 logical CPUs and had a cgroup quota of 15.36 CPUs. Before and after the production run, the cgroup throttling count stayed at 2. GPU telemetry snapshots recorded the same device UUID and 415 W power limit, with no compute processes listed. Both launchers inherited the same CUDA device environment without LogVole tuning overrides.
+
+Both builds used Ninja, Release, GCC 13.3.0, NVCC 13.2.86, and SM89 code. The original checkout was pristine `b80413b5c882ea571e9fc2a30bd85f54acb39455` with cryptoTools `cc54d946a7643795b5f523fe235392de8271a5b3`. The candidate checkout was `8c371f9e85c6a39b7f5eb79076f266836430ea58` with production code at `b544cf71ceae0d800d936dd263e6eb331bc57831` and cryptoTools `3e69c5b9ac0f0c43d0fd1c9e1b886a3ea8df8979`. Both executables resolved the same CUDA runtime library and used the same SEAL 4.1.1 archive, the same coproto, macoro, and function2 pins listed in the [validation guide](GPU_VALIDATION.md), and libdivide `66190e9daa603cabe95d99f09fb79b5c186d0417`. The build records include executable hashes and resolved dependencies.
+
+The candidate passed 69 functional test selections in 18 groups in 45.01 s, plus three focused CPU budget/parameter tests and three GPU root tests. Compute Sanitizer 2026.1.1 memcheck with full leak checking passed 24 test executions plus the lifetime executable across nine groups (51.49 s summed group time), with zero errors, leaks, or skips.
+
+The smoke comparison used `n=16`, one thread, and one ABBA block per mode. The production comparison used `n=65539`, two threads, and one ABBA warmup followed by ABBA, BAAB, and ABBA measured blocks per mode. All 60 trials ran serially, verified their VOLE relation, and matched the expected output count, modulus setting, prime, and online-byte count for the mode. Production medians and observed ranges are in milliseconds, with six measured samples per revision and mode.
+
+| Mode | Original frontend | Candidate frontend | Change | Original wall | Candidate wall | Change |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Interactive GoldenSeed | 529 [528–541] | 375.5 [372–385] | −29.02% | 866.24 [865.78–866.51] | 665.53 [665.30–715.78] | −23.17% |
+| Interactive NoGoldenSeed | 917.5 [911–927] | 892.5 [881–909] | −2.72% | 1317.32 [1317.14–1317.47] | 1266.94 [1217.17–1267.16] | −3.82% |
+| Noninteractive NoGoldenSeed | 956 [929–973] | 936 [917–981] | −2.09% | 1367.37 [1317.47–1419.20] | 1317.25 [1267.76–1367.45] | −3.67% |
+
+| Mode | Frontend block median changes | Wall block median changes |
+| --- | --- | --- |
+| Interactive GoldenSeed | −29.70%, −29.84%, −28.03% | −23.17%, −23.18%, −20.25% |
+| Interactive NoGoldenSeed | −2.72%, −1.36%, −3.86% | −3.83%, −3.83%, −5.70% |
+| Noninteractive NoGoldenSeed | −2.14%, −3.57%, +1.23% | −5.37%, −3.70%, −1.83% |
+
+The frontend timer covers offline setup, online execution, and relation verification. Whole-process wall measurements also include process startup and teardown and have visible granularity from POSIX process-wait polling. The noninteractive frontend ranges overlap and its last block was slower. The two NoGoldenSeed median changes describe this workload on this host.
+
+Separate candidate traces collected after timing recorded `nttForwardWarpStages7128192Rho4Kernel` and `nttForwardCenteredLimbFromWarpStages7128192Rho4Kernel` for GoldenSeed's specialized log13 forward NTT. Interactive NoGoldenSeed recorded generic `nttForwardKernel`, `nttForwardCrossKernel`, `nttInverseKernel`, and `nttInverseFinalKernel` launches. H200 and RTX 5090 runtime were outside this run.
+
+The raw reports, build manifests, scripts, and separate traces are under `out/review/4090-vast-8c371f9e/`. The evidence archive SHA-256 is `06044255b43b249c1c6f7c3a1e77cdc652a2ec88c2ab7cb4f9de52e10517b495`.
 
 ## WSL LeakSanitizer result
 
