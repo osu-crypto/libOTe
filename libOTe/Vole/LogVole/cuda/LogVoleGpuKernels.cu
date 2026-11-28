@@ -1989,14 +1989,14 @@ namespace osuCrypto::LogVole::gpu
             hi = u + twoQ - v;
         }
 
-        template<u32 RootFactor>
+        template<u32 RootFactor, class Store>
         __device__ __forceinline__ void
-        nttForwardLog14WarpStages712Store(
+        nttForwardLog14WarpStages712(
             const u64* sh,
             const ShoupOperand* roots,
             u64 q,
             u64 twoQ,
-            u64* dst)
+            const Store& store)
         {
             constexpr u32 s7Gap = 32u;
             constexpr u32 s7RootBase = 128u * RootFactor;
@@ -2029,13 +2029,65 @@ namespace osuCrypto::LogVole::gpu
                 if (lo >= q) lo -= q;
                 if (hi >= twoQ) hi -= twoQ;
                 if (hi >= q) hi -= q;
-                const u32 output = butterfly << 1u;
-                asm volatile(
-                    "st.global.v2.u64 [%0], {%1, %2};"
-                    :
-                    : "l"(dst + output), "l"(lo), "l"(hi)
-                    : "memory");
+                store(butterfly << 1u, lo, hi);
             }
+        }
+
+        template<u32 RootFactor>
+        __device__ __forceinline__ void nttForwardLog14WarpStages712Store(
+            const u64* sh, const ShoupOperand* roots, u64 q, u64 twoQ, u64* dst)
+        {
+            nttForwardLog14WarpStages712<RootFactor>(sh, roots, q, twoQ,
+                [=](u32 index, u64 lo, u64 hi) {
+                    asm volatile(
+                        "st.global.v2.u64 [%0], {%1, %2};"
+                        :
+                        : "l"(dst + index), "l"(lo), "l"(hi)
+                        : "memory");
+                });
+        }
+
+        // Plaintext unwrap has a separate input and output. Like generic
+        // gather, each tile loads the two crossing operands from the original
+        // polynomial and publishes its half without a separate crossing pass.
+        __global__ __launch_bounds__(512u, 2)
+        void nttForwardGatherPlainLog14PairedKernel(
+            DeviceRing rg, const u64* input, const u32* inverseSlotMap,
+            u64* out, u64 outCount)
+        {
+            extern __shared__ u64 sh[];
+            constexpr u32 tileLen = 8192u;
+            const u32 tile = blockIdx.x & 1u;
+            const u32 tileOffset = tile * tileLen;
+            const u64 polyOffset = static_cast<u64>(blockIdx.x >> 1u) * 2u * tileLen;
+            const u64* src = input + polyOffset;
+            const ShoupOperand* roots = rg.mRoots;
+            const u64 q = rg.mMods[0].mValue;
+            const u64 twoQ = q << 1u;
+
+            const ShoupOperand crossing = nttLoadShoup<true>(roots + 1u);
+            for (u32 j = threadIdx.x; j < tileLen; j += blockDim.x)
+            {
+                const u64 u = nttGuard(src[j], twoQ);
+                const u64 v = mulShoupLazy(src[j + tileLen], crossing, q);
+                sh[j] = tile == 0u ? u + v : u + twoQ - v;
+            }
+            __syncthreads();
+
+            const auto store = [=](u32 index, u64 lo, u64 hi) {
+                const u32 coefficient = tileOffset + index;
+                const u64 lowSlot = polyOffset + inverseSlotMap[coefficient];
+                const u64 highSlot = polyOffset + inverseSlotMap[coefficient + 1u];
+                if (lowSlot < outCount) out[lowSlot] = lo;
+                if (highSlot < outCount) out[highSlot] = hi;
+            };
+            const auto transform = [&](auto tag) {
+                constexpr u32 factor = decltype(tag)::value;
+                nttForwardLog14TilePrefix06<factor, true>(sh, roots, q, twoQ);
+                nttForwardLog14WarpStages712<factor>(sh, roots, q, twoQ, store);
+            };
+            if (tile == 0u) transform(std::integral_constant<u32, 2u>{});
+            else transform(std::integral_constant<u32, 3u>{});
         }
 
         // H200 no-golden-seed input specialization. The wrapped canonical
@@ -11565,6 +11617,32 @@ namespace osuCrypto::LogVole::gpu
         const size_t shBytes = static_cast<size_t>(rc.mN >> logTiles) * sizeof(u64);
         const DeviceRing rg = toDevice(rc);
         const auto st = asStream(stream);
+
+        if (rc.mH200Shared && rc.mN == 16384u && rc.mLogN == 14u &&
+            tiles == 2u && rc.mMods && rc.mRoots &&
+            !(reinterpret_cast<std::uintptr_t>(rc.mRoots) & 15u) &&
+            polyCount <= 0x7fffffffu / 2u)
+        {
+            const auto inputAddress = reinterpret_cast<std::uintptr_t>(data);
+            const auto outputAddress = reinterpret_cast<std::uintptr_t>(out);
+            const u64 inputBytes = static_cast<u64>(polyCount) * rc.mN * sizeof(u64);
+            const u64 outputBytes = outCount * sizeof(u64);
+            const bool separate = inputAddress <= outputAddress
+                ? outputAddress - inputAddress >= inputBytes
+                : inputAddress - outputAddress >= outputBytes;
+            if (separate)
+            {
+                if (!check(cudaFuncSetAttribute(
+                        nttForwardGatherPlainLog14PairedKernel,
+                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+                        static_cast<int>(shBytes)),
+                        "cudaFuncSetAttribute(forwardGatherPlainLog14Paired)"))
+                    return false;
+                nttForwardGatherPlainLog14PairedKernel<<<polyCount * 2u, 512u, shBytes, st>>>(
+                    rg, data, inverseSlotMap, out, outCount);
+                return check(cudaGetLastError(), "nttForwardGatherPlainLog14Paired");
+            }
+        }
 
         // For degrees above one shared-memory tile, preserve the exact crossing
         // stages in coefficient storage. The tile-local transform then owns each
