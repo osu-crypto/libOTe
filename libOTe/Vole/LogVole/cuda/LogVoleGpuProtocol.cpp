@@ -3972,7 +3972,7 @@ namespace osuCrypto::LogVole::gpu
         auto ring = cache->mRing;
         const u32 rho = ring->rho();
 
-        const u32 chunkCount = (xCount + muHi - 1u) / muHi;
+        const u32 chunkCount = xCount / muHi + (xCount % muHi != 0u);
         if (chunkCount == 0) return bail(state.mRingFactoryOwner, "no chunks");
 
         const u32 width = ov.mWidthPadded ? ov.mWidthPadded : state.mLacct.mWidthPadded;
@@ -4036,8 +4036,12 @@ namespace osuCrypto::LogVole::gpu
         const bool contiguous = xDev && !recursiveHiInput && width == muHi &&
                                 xCount >= static_cast<std::size_t>(chunkCount) * muHi;
 
-        const bool singleLimbIdentityEligible =
-            inputPlainBroadcastSingleLimb && contiguous &&
+        // For the wide H200 shape, a short final chunk can read the same
+        // limb-zero input directly. Only the absent leaf outputs need padding.
+        const bool partialPlainChunk = !recursiveHiInput && width == muHi &&
+            ring->n() == 16384u && rho == 8u && xCount % width != 0u;
+        const bool singleLimbIdentityEligible = inputPlainBroadcastSingleLimb &&
+            (contiguous || partialPlainChunk) && xDev->mImpl->mBuf.count() >= xCount &&
             identityLeafEnabled(ring->executionOptions().mAdvanced.mProtocol) && !leafInputsAreGadget &&
             tauLeafCount == 1u && inputPlainBroadcastBits != 0u &&
             inputPlainBroadcastBits <= state.mParams.mGadgetLogBase &&
@@ -4090,7 +4094,7 @@ namespace osuCrypto::LogVole::gpu
                     dAll + idxCount, xCount, stream.raw()))
                 return false;
         }
-        else if (contiguous)
+        else if (contiguous || singleLimbIdentityEligible)
         {
             impl->mXSrc = xDev->mImpl->mBuf.data(stream);
         }
@@ -4298,20 +4302,22 @@ namespace osuCrypto::LogVole::gpu
             }
             else
             {
-            const std::size_t dstCount = srcCount * tauLeafCount;
+            const std::size_t leafCount = singleLimbIdentityEligible ? xCount : srcCount;
+            const std::size_t dstCount = leafCount * tauLeafCount;
             const u64 geo = idxKey(scope.mRole,
-                0x1EAFull, chunkCount, width, tauLeafCount, rho, nodeCount, maxTau);
+                0x1EAFull, chunkCount, width, tauLeafCount, rho, nodeCount, maxTau, leafCount);
             const u32* dAll = cachedIdx(
-                geo, 2 * srcCount + dstCount, stream, [&](std::vector<u32>& v)
+                geo, 2 * leafCount + dstCount, stream, [&](std::vector<u32>& v)
             {
                 u32* srcIdx = v.data();
-                u32* dstIdx = srcIdx + srcCount;
+                u32* dstIdx = srcIdx + leafCount;
                 u32* limbSel = dstIdx + dstCount;
                 for (u32 c = 0; c < chunkCount; ++c)
                 {
                     for (u32 leaf = 0; leaf < width; ++leaf)
                     {
                         const std::size_t slot = static_cast<std::size_t>(c) * width + leaf;
+                        if (slot >= leafCount) break;
                         srcIdx[slot] = static_cast<u32>(slot);
                         limbSel[slot] = leaf % rho;
                         for (u32 d = 0; d < tauLeafCount; ++d)
@@ -4324,8 +4330,22 @@ namespace osuCrypto::LogVole::gpu
             });
             if (!dAll) return false;
             const u32* dSrc = dAll;
-            const u32* dDst = dSrc + srcCount;
+            const u32* dDst = dSrc + leafCount;
             const u32* dLimb = dDst + dstCount;
+
+            if (leafCount < srcCount)
+            {
+                // width == muHi, so all missing leaves are at the end of the
+                // final chunk. Zero their node storage directly. The separate
+                // zero-node sentinel follows this range and is already clear.
+                const u32 firstMissingLeaf = xCount % width;
+                const std::size_t firstMissingNode =
+                    impl->nodeSlot(chunkCount - 1u, width - 1u + firstMissingLeaf, 0u);
+                const std::size_t missingBytes =
+                    (impl->nodeDataCount() - firstMissingNode) * ring->polyBytes();
+                if (!gpuMemsetZero(impl->mNodes.poly(firstMissingNode, stream),
+                        missingBytes, stream.raw())) return false;
+            }
 
             bool leafNttDone = false;
             if (identityLeafEnabled(ring->executionOptions().mAdvanced.mProtocol) && !impl->mLeafInputsAreGadget && tauLeafCount == 1u &&
@@ -4343,7 +4363,7 @@ namespace osuCrypto::LogVole::gpu
                     ? launchNttForwardFromPlainBroadcast(
                           ring->view(stream), impl->mXSrc, dSrc,
                           impl->mNodes.data(stream), dDst,
-                          static_cast<u32>(srcCount), stream.raw())
+                          static_cast<u32>(leafCount), stream.raw())
                     : launchNttForwardFrom(
                           ring->view(stream), impl->mXSrc, dSrc,
                           impl->mNodes.data(stream), dDst,
