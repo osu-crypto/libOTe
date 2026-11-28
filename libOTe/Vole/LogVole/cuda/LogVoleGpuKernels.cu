@@ -10700,7 +10700,7 @@ namespace osuCrypto::LogVole::gpu
         __global__ __launch_bounds__(128) void aesPrngStreamKernel(
             const unsigned char* roundKeys, u64* out, u32 words, u32 count,
             DeviceRing ring, const u64* maxMultiple, const u32* outIdx,
-            u32* rejectEpochs, u32 rejectEpoch)
+            u32* rejectEpochs, u32 rejectEpoch, u32 countersPerTile)
         {
             __shared__ uint4 key[11];
             // Store a copy of each table word in every 4-byte shared bank.
@@ -10708,6 +10708,10 @@ namespace osuCrypto::LogVole::gpu
             // of the AES state byte. The final round still uses the byte S-box.
             __shared__ AesPrngTables<32> tables;
             prepareAesPrngTables(tables);
+            const u64 counterCount = (static_cast<u64>(words) + 1u) / 2u;
+            const u64 firstCounter = Uniform ? static_cast<u64>(blockIdx.y) * countersPerTile : 0u;
+            const u64 tileEnd = firstCounter + countersPerTile;
+            const u64 lastCounter = Uniform && tileEnd < counterCount ? tileEnd : counterCount;
             for (u64 poly = blockIdx.x; poly < count; poly += gridDim.x)
             {
                 if (threadIdx.x < 11)
@@ -10715,8 +10719,7 @@ namespace osuCrypto::LogVole::gpu
                         reinterpret_cast<const uint4*>(roundKeys + 176u * poly)[threadIdx.x];
                 __syncthreads();
                 const u64 destination = Uniform && outIdx ? outIdx[poly] : poly;
-                const u64 blocks = (static_cast<u64>(words) + 1u) / 2u;
-                for (u64 counter = threadIdx.x; counter < blocks; counter += blockDim.x)
+                for (u64 counter = firstCounter + threadIdx.x; counter < lastCounter; counter += blockDim.x)
                 {
                     u64 values[2];
                     aesPrngPair(key, tables, counter, values[0], values[1]);
@@ -14037,7 +14040,7 @@ namespace osuCrypto::LogVole::gpu
         if (!out || !words || count > std::numeric_limits<std::size_t>::max() / sizeof(u64) / words ||
             !prepareAesPrngKeys(seeds, count, keys, capacity, stream)) return false;
         aesPrngStreamKernel<false><<<std::min(count, 65535u), 128, 0, asStream(stream)>>>(
-            keys, out, words, count, DeviceRing{}, nullptr, nullptr, nullptr, 0);
+            keys, out, words, count, DeviceRing{}, nullptr, nullptr, nullptr, 0, 0);
         return check(cudaGetLastError(), "aesPrngStream");
     }
 
@@ -14053,12 +14056,20 @@ namespace osuCrypto::LogVole::gpu
             words > std::numeric_limits<u32>::max() ||
             count > std::numeric_limits<std::size_t>::max() / sizeof(u64) / words ||
             !prepareAesPrngKeys(seeds, count, keys, capacity, stream)) return false;
-        const auto grid = std::min(count, 65535u);
+        const auto polyBlocks = std::min(count, 65535u);
         const auto ring = toDevice(rc);
-        aesPrngStreamKernel<true><<<grid, 128, 0, asStream(stream)>>>(
-            keys, out, static_cast<u32>(words), count, ring, maxMultiple, outIdx, rejectEpochs, rejectEpoch);
+        const u64 counterCount = (words + 1u) / 2u;
+        constexpr u64 countersPerTargetTile = 2048u;
+        constexpr u64 targetBlocks = 2048u;
+        const u64 availableTiles = (counterCount + countersPerTargetTile - 1u) / countersPerTargetTile;
+        const u64 neededTiles = (targetBlocks + polyBlocks - 1u) / polyBlocks;
+        const auto tiles = static_cast<u32>(std::min(availableTiles, neededTiles));
+        const auto countersPerTile = static_cast<u32>((counterCount + tiles - 1u) / tiles);
+        aesPrngStreamKernel<true><<<dim3(polyBlocks, tiles), 128, 0, asStream(stream)>>>(
+            keys, out, static_cast<u32>(words), count, ring, maxMultiple, outIdx,
+            rejectEpochs, rejectEpoch, countersPerTile);
         if (!check(cudaGetLastError(), "aesUniform")) return false;
-        aesUniformRepairKernel<<<grid, 128, 0, asStream(stream)>>>(
+        aesUniformRepairKernel<<<polyBlocks, 128, 0, asStream(stream)>>>(
             ring, keys, maxMultiple, out, outIdx, count, rejectEpochs, rejectEpoch);
         return check(cudaGetLastError(), "aesUniformRepair");
     }
