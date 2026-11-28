@@ -10625,22 +10625,75 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
+        template<u32 BankCopies>
+        struct alignas(16) AesPrngTables
+        {
+            unsigned char sbox[256];
+            u32 mix[256 * BankCopies];
+        };
+
+        template<u32 BankCopies>
+        __device__ __forceinline__ void prepareAesPrngTables(AesPrngTables<BankCopies>& tables)
+        {
+            if (threadIdx.x < 16)
+                reinterpret_cast<uint4*>(tables.sbox)[threadIdx.x] =
+                    reinterpret_cast<const uint4*>(kAesSbox)[threadIdx.x];
+            __syncthreads();
+            for (u32 i = threadIdx.x; i < 256u * BankCopies; i += blockDim.x)
+            {
+                const u32 s = tables.sbox[i / BankCopies];
+                const u32 twice = xtime(static_cast<unsigned char>(s));
+                // MixColumns contribution of the first byte in a little-endian column.
+                tables.mix[i] = twice | (s << 8u) | (s << 16u) | ((twice ^ s) << 24u);
+            }
+        }
+
+        template<u32 BankCopies>
+        __device__ __forceinline__ u32 aesPrngRoundColumn(
+            u32 a, u32 b, u32 c, u32 d, const u32* table)
+        {
+            const u32 second = table[((b >> 8u) & 255u) * BankCopies];
+            const u32 third = table[((c >> 16u) & 255u) * BankCopies];
+            const u32 fourth = table[(d >> 24u) * BankCopies];
+            return table[(a & 255u) * BankCopies] ^ __funnelshift_l(second, second, 8u) ^
+                __funnelshift_l(third, third, 16u) ^ __funnelshift_l(fourth, fourth, 24u);
+        }
+
+        __device__ __forceinline__ u32 aesPrngFinalColumn(
+            u32 a, u32 b, u32 c, u32 d, const unsigned char* sbox)
+        {
+            return static_cast<u32>(sbox[a & 255u]) |
+                (static_cast<u32>(sbox[(b >> 8u) & 255u]) << 8u) |
+                (static_cast<u32>(sbox[(c >> 16u) & 255u]) << 16u) |
+                (static_cast<u32>(sbox[d >> 24u]) << 24u);
+        }
+
+        template<u32 BankCopies>
         __device__ __forceinline__ void aesPrngPair(
-            const unsigned char* roundKeys, const unsigned char* sbox,
+            const uint4* roundKeys, const AesPrngTables<BankCopies>& tables,
             u64 counter, u64& lo, u64& hi)
         {
-            unsigned char state[16]{};
-#pragma unroll
-            for (u32 i = 0; i < 8; ++i)
-                state[i] = static_cast<unsigned char>(counter >> (8u * i));
-            aes128EncryptSharedSbox(roundKeys, state, sbox);
-            lo = hi = 0;
-#pragma unroll
-            for (u32 i = 0; i < 8; ++i)
+            const u32* mix = tables.mix + (threadIdx.x & (BankCopies - 1u));
+            const uint4 initial = roundKeys[0];
+            uint4 state = make_uint4(static_cast<u32>(counter) ^ initial.x,
+                static_cast<u32>(counter >> 32u) ^ initial.y, initial.z, initial.w);
+            for (u32 round = 1; round < 10u; ++round)
             {
-                lo |= static_cast<u64>(state[i]) << (8u * i);
-                hi |= static_cast<u64>(state[8u + i]) << (8u * i);
+                const uint4 key = roundKeys[round];
+                // The column order incorporates ShiftRows before MixColumns.
+                state = make_uint4(
+                    aesPrngRoundColumn<BankCopies>(state.x, state.y, state.z, state.w, mix) ^ key.x,
+                    aesPrngRoundColumn<BankCopies>(state.y, state.z, state.w, state.x, mix) ^ key.y,
+                    aesPrngRoundColumn<BankCopies>(state.z, state.w, state.x, state.y, mix) ^ key.z,
+                    aesPrngRoundColumn<BankCopies>(state.w, state.x, state.y, state.z, mix) ^ key.w);
             }
+            const uint4 key = roundKeys[10];
+            const u32 x = aesPrngFinalColumn(state.x, state.y, state.z, state.w, tables.sbox) ^ key.x;
+            const u32 y = aesPrngFinalColumn(state.y, state.z, state.w, state.x, tables.sbox) ^ key.y;
+            const u32 z = aesPrngFinalColumn(state.z, state.w, state.x, state.y, tables.sbox) ^ key.z;
+            const u32 w = aesPrngFinalColumn(state.w, state.x, state.y, state.z, tables.sbox) ^ key.w;
+            lo = static_cast<u64>(x) | (static_cast<u64>(y) << 32u);
+            hi = static_cast<u64>(z) | (static_cast<u64>(w) << 32u);
         }
 
         template<bool Uniform>
@@ -10649,15 +10702,16 @@ namespace osuCrypto::LogVole::gpu
             DeviceRing ring, const u64* maxMultiple, const u32* outIdx,
             u32* rejectEpochs, u32 rejectEpoch)
         {
-            __shared__ __align__(16) unsigned char key[176];
-            __shared__ __align__(16) unsigned char sbox[256];
-            if (threadIdx.x < 16)
-                reinterpret_cast<uint4*>(sbox)[threadIdx.x] =
-                    reinterpret_cast<const uint4*>(kAesSbox)[threadIdx.x];
+            __shared__ uint4 key[11];
+            // Store a copy of each table word in every 4-byte shared bank.
+            // For a warp's lookup, each lane selects its own bank regardless
+            // of the AES state byte. The final round still uses the byte S-box.
+            __shared__ AesPrngTables<32> tables;
+            prepareAesPrngTables(tables);
             for (u64 poly = blockIdx.x; poly < count; poly += gridDim.x)
             {
                 if (threadIdx.x < 11)
-                    reinterpret_cast<uint4*>(key)[threadIdx.x] =
+                    key[threadIdx.x] =
                         reinterpret_cast<const uint4*>(roundKeys + 176u * poly)[threadIdx.x];
                 __syncthreads();
                 const u64 destination = Uniform && outIdx ? outIdx[poly] : poly;
@@ -10665,7 +10719,7 @@ namespace osuCrypto::LogVole::gpu
                 for (u64 counter = threadIdx.x; counter < blocks; counter += blockDim.x)
                 {
                     u64 values[2];
-                    aesPrngPair(key, sbox, counter, values[0], values[1]);
+                    aesPrngPair(key, tables, counter, values[0], values[1]);
 #pragma unroll
                     for (u32 half = 0; half < 2; ++half)
                     {
@@ -10692,19 +10746,16 @@ namespace osuCrypto::LogVole::gpu
             DeviceRing ring, const unsigned char* roundKeys, const u64* maxMultiple,
             u64* out, const u32* outIdx, u32 count, const u32* rejectEpochs, u32 epoch)
         {
-            __shared__ __align__(16) unsigned char key[176];
-            __shared__ __align__(16) unsigned char sbox[256];
+            __shared__ uint4 key[11];
+            __shared__ AesPrngTables<1> tables;
             __shared__ u64 candidates[256];
-            if (threadIdx.x < 16)
-                reinterpret_cast<uint4*>(sbox)[threadIdx.x] =
-                    reinterpret_cast<const uint4*>(kAesSbox)[threadIdx.x];
-            __syncthreads();
+            prepareAesPrngTables(tables);
             const u64 words = static_cast<u64>(ring.mN) * ring.mRho;
             for (u64 poly = blockIdx.x; poly < count; poly += gridDim.x)
             {
                 if (rejectEpochs[poly] != epoch) continue;
                 if (threadIdx.x < 11)
-                    reinterpret_cast<uint4*>(key)[threadIdx.x] =
+                    key[threadIdx.x] =
                         reinterpret_cast<const uint4*>(roundKeys + 176u * poly)[threadIdx.x];
                 __syncthreads();
                 u64 cursor = words;
@@ -10713,7 +10764,7 @@ namespace osuCrypto::LogVole::gpu
                 for (u64 base = 0; base < words; base += 256u)
                 {
                     u64 lo, hi;
-                    aesPrngPair(key, sbox, (base >> 1u) + threadIdx.x, lo, hi);
+                    aesPrngPair(key, tables, (base >> 1u) + threadIdx.x, lo, hi);
                     candidates[2u * threadIdx.x] = lo;
                     candidates[2u * threadIdx.x + 1u] = hi;
                     __syncthreads();
@@ -10732,7 +10783,7 @@ namespace osuCrypto::LogVole::gpu
                                 const u64 counter = cursor >> 1u;
                                 if (counter != cachedCounter)
                                 {
-                                    aesPrngPair(key, sbox, counter, tailLo, tailHi);
+                                    aesPrngPair(key, tables, counter, tailLo, tailHi);
                                     cachedCounter = counter;
                                 }
                                 value = cursor & 1u ? tailHi : tailLo;
