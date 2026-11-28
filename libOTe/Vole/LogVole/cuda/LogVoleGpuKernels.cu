@@ -110,6 +110,7 @@ namespace osuCrypto::LogVole::gpu
             return mod;
         }
 
+        // A full warp searches consecutive candidates in SEAL's descending order.
         __device__ u64 rawSetupSealPrimeAtRank(u32 n, int bits, u32 rank)
         {
             if (bits < 2 || bits > 60 || !n || n > 131072u) return 0;
@@ -119,15 +120,22 @@ namespace osuCrypto::LogVole::gpu
             // SEAL get_primes scans from the largest qualifying 1 mod 2N
             // candidate downward. CoeffModulus::Create takes each equal-bit
             // group's primes in reverse order, hence rank from the bottom.
+            const u64 offset = threadIdx.x * factor;
+            const u64 stride = 32u * factor;
             while (candidate > lower)
             {
-                if (candidate > factor && rawSetupIsPrime(rawSetupModulus(candidate)))
+                const u64 local = candidate > offset ? candidate - offset : 0u;
+                u32 found = __ballot_sync(~u32{0}, local > lower && local > factor &&
+                    rawSetupIsPrime(rawSetupModulus(local)));
+                const u32 matches = __popc(found);
+                if (rank < matches)
                 {
-                    if (!rank) return candidate;
-                    --rank;
+                    for (u32 i = 0; i < rank; ++i) found &= found - 1u;
+                    return candidate - static_cast<u64>(__ffs(found) - 1) * factor;
                 }
-                if (candidate <= factor) break;
-                candidate -= factor;
+                rank -= matches;
+                if (candidate <= stride) break;
+                candidate -= stride;
             }
             return 0;
         }
@@ -135,14 +143,16 @@ namespace osuCrypto::LogVole::gpu
         __global__ void rawSetupSelectSealCoeffKernel(u32 n, const int* bits,
             u32 rho, u64* primes, u32* status)
         {
-            const u32 j = threadIdx.x;
-            if (j >= rho) return;
+            const u32 j = blockIdx.x;
             u32 laterSame = 0;
             for (u32 k = j + 1u; k < rho; ++k)
                 laterSame += static_cast<u32>(bits[k] == bits[j]);
             const u64 q = rawSetupSealPrimeAtRank(n, bits[j], laterSame);
-            primes[j] = q;
-            if (!q) atomicOr(status, 1u);
+            if (threadIdx.x == 0)
+            {
+                primes[j] = q;
+                if (!q) atomicOr(status, 1u);
+            }
         }
 
         struct RawSetupWidths
@@ -153,20 +163,21 @@ namespace osuCrypto::LogVole::gpu
         __global__ void rawSetupSelectSealCoeffValueKernel(u32 n, RawSetupWidths widths,
             u32 rho, u64* primes, u32* status)
         {
-            const u32 j = threadIdx.x;
-            if (j >= rho) return;
+            const u32 j = blockIdx.x;
             u32 laterSame = 0;
             for (u32 k = j + 1u; k < rho; ++k)
                 laterSame += static_cast<u32>(widths.mBits[k] == widths.mBits[j]);
             const u64 q = rawSetupSealPrimeAtRank(n, widths.mBits[j], laterSame);
-            primes[j] = q;
-            if (!q) atomicOr(status, 1u);
+            if (threadIdx.x == 0)
+            {
+                primes[j] = q;
+                if (!q) atomicOr(status, 1u);
+            }
         }
 
         __global__ void rawSetupSelectSealPlainKernel(u32 n, u32 requestedBits,
             u64 minimumQ, u64* prime, u32* selectedBits, u32* status)
         {
-            if (threadIdx.x) return;
             // SEAL rejects widths above 60 in PlainModulus::Batching; the
             // caller catches that and continues to the next smaller width.
             for (int bits = static_cast<int>(min(requestedBits, 60u)); bits >= 2; --bits)
@@ -174,14 +185,20 @@ namespace osuCrypto::LogVole::gpu
                 const u64 candidate = rawSetupSealPrimeAtRank(n, bits, 0u);
                 if (candidate && candidate < minimumQ)
                 {
-                    *prime = candidate;
-                    *selectedBits = static_cast<u32>(bits);
+                    if (threadIdx.x == 0)
+                    {
+                        *prime = candidate;
+                        *selectedBits = static_cast<u32>(bits);
+                    }
                     return;
                 }
             }
-            *prime = 0;
-            *selectedBits = 0;
-            atomicOr(status, 1u);
+            if (threadIdx.x == 0)
+            {
+                *prime = 0;
+                *selectedBits = 0;
+                atomicOr(status, 1u);
+            }
         }
 
         __global__ void rawSetupSelectSealPlainFromQKernel(u32 n, u32 requestedBits,
@@ -189,12 +206,14 @@ namespace osuCrypto::LogVole::gpu
             const u32* ringStatus,
             u64* prime, u32* selectedBits, u32* status)
         {
-            if (threadIdx.x) return;
-            *prime = 0;
-            *selectedBits = 0;
+            if (threadIdx.x == 0)
+            {
+                *prime = 0;
+                *selectedBits = 0;
+            }
             if (*coefficientStatus || *ringStatus)
             {
-                atomicOr(status, 1u);
+                if (threadIdx.x == 0) atomicOr(status, 1u);
                 return;
             }
             u64 minimumQ = ~u64{0};
@@ -203,7 +222,7 @@ namespace osuCrypto::LogVole::gpu
                 const u64 q = orderedQ[j];
                 if (q <= 2u * n || q >= (u64{1} << 60))
                 {
-                    atomicOr(status, 2u);
+                    if (threadIdx.x == 0) atomicOr(status, 2u);
                     return;
                 }
                 minimumQ = min(minimumQ, q);
@@ -213,12 +232,15 @@ namespace osuCrypto::LogVole::gpu
                 const u64 candidate = rawSetupSealPrimeAtRank(n, bits, 0u);
                 if (candidate && candidate < minimumQ)
                 {
-                    *prime = candidate;
-                    *selectedBits = static_cast<u32>(bits);
+                    if (threadIdx.x == 0)
+                    {
+                        *prime = candidate;
+                        *selectedBits = static_cast<u32>(bits);
+                    }
                     return;
                 }
             }
-            atomicOr(status, 4u);
+            if (threadIdx.x == 0) atomicOr(status, 4u);
         }
 
         __global__ void rawSetupPlaintextLiftKernel(RingDeviceConstView rc,
@@ -13259,7 +13281,7 @@ namespace osuCrypto::LogVole::gpu
             !rho || rho > kMaxRawSetupWords || !bits || !orderedPrimes || !status) return false;
         if (!check(cudaMemsetAsync(status, 0, sizeof(u32), asStream(stream)),
             "rawSealCoeffStatus")) return false;
-        rawSetupSelectSealCoeffKernel<<<1, 32, 0, asStream(stream)>>>(
+        rawSetupSelectSealCoeffKernel<<<rho, 32, 0, asStream(stream)>>>(
             n, bits, rho, orderedPrimes, status);
         return check(cudaGetLastError(), "rawSealCoeffSelect");
     }
@@ -13332,7 +13354,7 @@ namespace osuCrypto::LogVole::gpu
         const auto cudaStream = asStream(stream);
         if (!check(cudaMemsetAsync(fiveStatuses, 0, 5u * sizeof(u32), cudaStream),
             "nativeSealBundleStatus")) return false;
-        rawSetupSelectSealCoeffValueKernel<<<1, 32, 0, cudaStream>>>(
+        rawSetupSelectSealCoeffValueKernel<<<rho, 32, 0, cudaStream>>>(
             n, widths, rho, orderedQ, fiveStatuses);
         if (!check(cudaGetLastError(), "nativeSealBundleCoeffSelect")) return false;
         rawSetupModuliKernel<<<1, 32, 0, cudaStream>>>(
