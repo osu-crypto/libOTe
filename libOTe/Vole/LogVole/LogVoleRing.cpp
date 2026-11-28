@@ -48,10 +48,22 @@ namespace osuCrypto::LogVole
 {
     struct RingHostContextCache
     {
-        RingParams mParams;
-        std::shared_ptr<const RingModulusMetadata> mRawModuli;
-        ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
-        bool mExpandModChain = false;
+        RingHostContextCache(const RingParams& params,
+            std::shared_ptr<const RingModulusMetadata> rawModuli,
+            ProtocolCacheRole role, bool expandModChain)
+            : mParams(params)
+            , mRawModuli(std::move(rawModuli))
+            , mRole(role)
+            , mExpandModChain(expandModChain)
+            , mModuli(mRawModuli->mValues.begin(), mRawModuli->mValues.end())
+        {
+        }
+
+        const RingParams mParams;
+        const std::shared_ptr<const RingModulusMetadata> mRawModuli;
+        const ProtocolCacheRole mRole;
+        const bool mExpandModChain;
+        const std::vector<seal::Modulus> mModuli;
         std::once_flag mOnce;
         std::shared_ptr<seal::SEALContext> mContext;
     };
@@ -186,23 +198,20 @@ namespace osuCrypto::LogVole
         template<bool Add = false, typename Engine>
         void samplePolyNormal(
             Engine& engine,
-            const seal::EncryptionParameters& parms,
+            std::size_t coeffCount,
+            std::span<const seal::Modulus> coeffModulus,
             u64* destination,
             double noiseStandardDeviation,
-            double noiseMaxDeviation,
-            bool firstLimbOnly = false)
+            double noiseMaxDeviation)
         {
-            const auto& coeffModulus = parms.coeff_modulus();
-            const std::size_t coeffModulusSize = firstLimbOnly ? 1u : coeffModulus.size();
-            const std::size_t coeffCount = parms.poly_modulus_degree();
             seal::util::ClippedNormalDistribution dist(0, noiseStandardDeviation, noiseMaxDeviation);
 
             SEAL_ITERATE(seal::util::iter(destination), coeffCount, [&](auto& I) {
                 const i64 noise = static_cast<i64>(dist(engine));
                 const u64 flag = static_cast<u64>(-static_cast<i64>(noise < 0));
                 SEAL_ITERATE(
-                    seal::util::iter(seal::util::StrideIter<u64*>(&I, coeffCount), coeffModulus),
-                    coeffModulusSize,
+                    seal::util::iter(seal::util::StrideIter<u64*>(&I, coeffCount), coeffModulus.data()),
+                    coeffModulus.size(),
                     [&](auto J) {
                         auto& value = *::std::get<0>(J);
                         const auto& modulus = ::std::get<1>(J);
@@ -892,11 +901,8 @@ namespace osuCrypto::LogVole
             metadata->mBitCounts.assign(params.mCoeffModulusBits.begin(), params.mCoeffModulusBits.end());
             built.mRawModuli = std::move(metadata);
             built.mGpuLightweight = true;
-            built.mHostContextCache = std::make_shared<RingHostContextCache>();
-            built.mHostContextCache->mParams = params;
-            built.mHostContextCache->mRawModuli = built.mRawModuli;
-            built.mHostContextCache->mRole = key.mRole;
-            built.mHostContextCache->mExpandModChain = key.mExpandModChain;
+            built.mHostContextCache = std::make_shared<RingHostContextCache>(
+                params, built.mRawModuli, key.mRole, key.mExpandModChain);
         }
         else if (!makeRingNttContextUncached(params, key.mExpandModChain, built, hostProfiler()))
         {
@@ -1022,11 +1028,8 @@ namespace osuCrypto::LogVole
         metadata->mDynamicGpuCertificate = std::move(certificate);
         built.mRawModuli = std::move(metadata);
         built.mGpuLightweight = true;
-        built.mHostContextCache = std::make_shared<RingHostContextCache>();
-        built.mHostContextCache->mParams = params;
-        built.mHostContextCache->mRawModuli = built.mRawModuli;
-        built.mHostContextCache->mRole = built.mResourceScope.mRole;
-        built.mHostContextCache->mExpandModChain = false;
+        built.mHostContextCache = std::make_shared<RingHostContextCache>(
+            params, built.mRawModuli, built.mResourceScope.mRole, false);
         if (!validateRingContextMetadata(built)) return false;
         out = std::move(built);
         return true;
@@ -1132,17 +1135,14 @@ namespace osuCrypto::LogVole
         {
             std::call_once(ctx.mHostContextCache->mOnce, [&] {
                 HostStep fallbackStep(hostProfiler(ctx), "setup: ring host fallback materialization");
-                std::vector<seal::Modulus> moduli;
-                moduli.reserve(cache.mRawModuli->mValues.size());
-                for (u64 prime : cache.mRawModuli->mValues) moduli.emplace_back(prime);
                 seal::EncryptionParameters parms(seal::scheme_type::ckks);
                 parms.set_poly_modulus_degree(cache.mParams.mPolyModulusDegree);
-                parms.set_coeff_modulus(moduli);
+                parms.set_coeff_modulus(cache.mModuli);
                 parms.set_random_generator(detail::makeAesPrngFactory());
                 auto host = std::make_shared<seal::SEALContext>(
                     parms, cache.mExpandModChain, seal::sec_level_type::none);
                 if (!host->key_context_data() ||
-                    host->key_context_data()->parms().coeff_modulus() != moduli)
+                    host->key_context_data()->parms().coeff_modulus() != cache.mModuli)
                     throw std::runtime_error("lightweight ring host fallback parameters changed");
                 ctx.mHostContextCache->mContext = std::move(host);
             });
@@ -1157,9 +1157,8 @@ namespace osuCrypto::LogVole
     std::span<const seal::Modulus> getRingHostModuli(const RingNttContext& ctx)
     {
         if (!ctx.mGpuLightweight) return ctx.mModuli;
-        const auto host = getRingHostContext(ctx);
-        if (host && host->key_context_data()) return host->key_context_data()->parms().coeff_modulus();
-        return {};
+        if (!validateLightweightRingContext(ctx)) return {};
+        return ctx.mHostContextCache->mModuli;
     }
 
     namespace
@@ -2514,14 +2513,15 @@ namespace osuCrypto::LogVole
         std::span<u64> limb0, double noiseStandardDeviation, double noiseMaxDeviation,
         const seal::prng_seed_type& seed, const RingNttContext& ctx, PendingRingOpsStats* stats)
     {
+        const auto degree = ctx.mParams.mPolyModulusDegree;
         if (!canSamplePolyErrorCompact(ctx, noiseStandardDeviation, noiseMaxDeviation) ||
-            limb0.size() != ctx.mParams.mPolyModulusDegree) return false;
-        const auto hostContext = getRingHostContext(ctx);
-        if (!hostContext || !hostContext->key_context_data()) return false;
+            limb0.size() != degree) return false;
+        const auto moduli = getRingHostModuli(ctx);
+        if (moduli.empty()) return false;
         PRNG prng(detail::aesPrngKey(seed));
         AesNormalEngine engine{prng};
-        samplePolyNormal(engine, hostContext->key_context_data()->parms(),
-            limb0.data(), noiseStandardDeviation, noiseMaxDeviation, true);
+        samplePolyNormal(engine, degree, moduli.first(1), limb0.data(),
+            noiseStandardDeviation, noiseMaxDeviation);
         bumpRingStat(RingOp::ErrorAdd, stats);
         return true;
     }
@@ -2708,12 +2708,12 @@ namespace osuCrypto::LogVole
                 if (!devicePrefixes)
                     return samplePolyErrorCompactFromSeed(destination, noiseStandardDeviation,
                                                           noiseMaxDeviation, seeds[row], ctx, stats);
+                const auto moduli = getRingHostModuli(ctx);
+                if (moduli.empty()) return false;
                 PRNG prng(detail::aesPrngKey(seeds[row]));
                 GaussianPrefixEngine source(prng, prefixes.subspan(task * wordsPerPrefix, wordsPerPrefix));
-                const auto hostContext = getRingHostContext(ctx);
-                if (!hostContext || !hostContext->key_context_data()) return false;
-                samplePolyNormal(source, hostContext->key_context_data()->parms(), destination.data(),
-                                 noiseStandardDeviation, noiseMaxDeviation, true);
+                samplePolyNormal(source, n, moduli.first(1), destination.data(),
+                                 noiseStandardDeviation, noiseMaxDeviation);
                 bumpRingStat(RingOp::ErrorAdd, stats);
                 return true;
             };
@@ -3077,7 +3077,8 @@ namespace osuCrypto::LogVole
         AesNormalEngine engine{prng};
         // Apply each sampled error directly. This keeps the coefficient/limb
         // traversal and removes the full-RNS temporary and SEAL TLS pool borrow.
-        samplePolyNormal<true>(engine, hostContext->key_context_data()->parms(),
+        const auto& parms = hostContext->key_context_data()->parms();
+        samplePolyNormal<true>(engine, parms.poly_modulus_degree(), parms.coeff_modulus(),
             poly.mCoeffs.data(), noiseStandardDeviation, noiseMaxDeviation);
 
         bumpRingStat(RingOp::ErrorAdd, stats);
