@@ -10707,7 +10707,7 @@ namespace osuCrypto::LogVole::gpu
         }
 
         template<u32 Row>
-        __device__ __forceinline__ u32 aesPrngFirstRoundConstant(u32 column, const unsigned char* sbox)
+        __device__ __forceinline__ u32 aesPrngColumnContribution(u32 column, const unsigned char* sbox)
         {
             const u32 mix = aesPrngMixWord(sbox[(column >> (8u * Row)) & 255u]);
             return __funnelshift_l(mix, mix, 8u * Row);
@@ -10719,25 +10719,88 @@ namespace osuCrypto::LogVole::gpu
             // ShiftRows places the counter-dependent byte of each column at
             // rows 0, 3, 2 and 1. Fold the other three rows into the round key.
             return make_uint4(
-                key.x ^ aesPrngFirstRoundConstant<1>(initial.y, sbox) ^
-                    aesPrngFirstRoundConstant<2>(initial.z, sbox) ^ aesPrngFirstRoundConstant<3>(initial.w, sbox),
-                key.y ^ aesPrngFirstRoundConstant<0>(initial.y, sbox) ^
-                    aesPrngFirstRoundConstant<1>(initial.z, sbox) ^ aesPrngFirstRoundConstant<2>(initial.w, sbox),
-                key.z ^ aesPrngFirstRoundConstant<0>(initial.z, sbox) ^
-                    aesPrngFirstRoundConstant<1>(initial.w, sbox) ^ aesPrngFirstRoundConstant<3>(initial.y, sbox),
-                key.w ^ aesPrngFirstRoundConstant<0>(initial.w, sbox) ^
-                    aesPrngFirstRoundConstant<2>(initial.y, sbox) ^ aesPrngFirstRoundConstant<3>(initial.z, sbox));
+                key.x ^ aesPrngColumnContribution<1>(initial.y, sbox) ^
+                    aesPrngColumnContribution<2>(initial.z, sbox) ^ aesPrngColumnContribution<3>(initial.w, sbox),
+                key.y ^ aesPrngColumnContribution<0>(initial.y, sbox) ^
+                    aesPrngColumnContribution<1>(initial.z, sbox) ^ aesPrngColumnContribution<2>(initial.w, sbox),
+                key.z ^ aesPrngColumnContribution<0>(initial.z, sbox) ^
+                    aesPrngColumnContribution<1>(initial.w, sbox) ^ aesPrngColumnContribution<3>(initial.y, sbox),
+                key.w ^ aesPrngColumnContribution<0>(initial.w, sbox) ^
+                    aesPrngColumnContribution<2>(initial.y, sbox) ^ aesPrngColumnContribution<3>(initial.z, sbox));
         }
 
         template<u32 Row, u32 BankCopies>
-        __device__ __forceinline__ u32 aesPrngFirstRoundVariable(u32 column, const u32* table)
+        __device__ __forceinline__ u32 aesPrngTableContribution(u32 column, const u32* table)
         {
             const u32 mix = table[((column >> (8u * Row)) & 255u) * BankCopies];
             return __funnelshift_l(mix, mix, 8u * Row);
         }
 
-        template<bool Uniform>
-        __global__ __launch_bounds__(128) void aesPrngStreamKernel(
+        struct AesPrngSecondRoundTable
+        {
+            // Consecutive low counter bytes visit distinct banks in each row.
+            // The upper byte is normally uniform within a warp and broadcasts.
+            u32 columns[4][256];
+
+            __device__ __forceinline__ void store(u32 index, uint4 value)
+            {
+                columns[0][index] = value.x;
+                columns[1][index] = value.y;
+                columns[2][index] = value.z;
+                columns[3][index] = value.w;
+            }
+
+            __device__ __forceinline__ uint4 load(u32 index) const
+            {
+                return make_uint4(columns[0][index], columns[1][index],
+                    columns[2][index], columns[3][index]);
+            }
+        };
+
+        __device__ __forceinline__ uint4 aesPrngXorColumns(uint4 a, uint4 b)
+        {
+            return make_uint4(a.x ^ b.x, a.y ^ b.y, a.z ^ b.z, a.w ^ b.w);
+        }
+
+        template<u32 Column, u32 BankCopies>
+        __device__ __forceinline__ uint4 aesPrngNextRoundContribution(u32 column, const u32* mix)
+        {
+            // In output column c, ShiftRows selects row (Column - c) mod 4
+            // from this input column. MixColumns combines these by XOR.
+            return make_uint4(
+                aesPrngTableContribution<Column, BankCopies>(column, mix),
+                aesPrngTableContribution<(Column + 3u) % 4u, BankCopies>(column, mix),
+                aesPrngTableContribution<(Column + 2u) % 4u, BankCopies>(column, mix),
+                aesPrngTableContribution<(Column + 1u) % 4u, BankCopies>(column, mix));
+        }
+
+        template<u32 BankCopies>
+        __device__ __forceinline__ void prepareAesPrngSecondRound(
+            AesPrngSecondRoundTable& low, AesPrngSecondRoundTable& high,
+            u32 upperCounter, u32 firstColumnKey, uint4 invariant,
+            uint4 roundKey, const u32* mix)
+        {
+            const u32 upperColumn = upperCounter ^ firstColumnKey;
+            const u32 y = invariant.y ^ aesPrngTableContribution<3, BankCopies>(upperColumn, mix);
+            const u32 z = invariant.z ^ aesPrngTableContribution<2, BankCopies>(upperColumn, mix);
+            const uint4 fixed = aesPrngXorColumns(roundKey,
+                aesPrngXorColumns(aesPrngNextRoundContribution<1, BankCopies>(y, mix),
+                    aesPrngNextRoundContribution<2, BankCopies>(z, mix)));
+
+            for (u32 byte = threadIdx.x; byte < 256u; byte += blockDim.x)
+            {
+                const u32 x = invariant.x ^
+                    aesPrngTableContribution<0, BankCopies>(firstColumnKey ^ byte, mix);
+                const u32 w = invariant.w ^
+                    aesPrngTableContribution<1, BankCopies>(firstColumnKey ^ (byte << 8u), mix);
+                low.store(byte, aesPrngNextRoundContribution<0, BankCopies>(x, mix));
+                high.store(byte, aesPrngXorColumns(fixed,
+                    aesPrngNextRoundContribution<3, BankCopies>(w, mix)));
+            }
+        }
+
+        template<bool Uniform, u32 Threads = 128u>
+        __global__ __launch_bounds__(Threads) void aesPrngStreamKernel(
             const unsigned char* roundKeys, u64* out, u32 words, u32 count,
             DeviceRing ring, const u64* maxMultiple, const u32* outIdx,
             u32* rejectEpochs, u32 rejectEpoch, u32 countersPerTile)
@@ -10766,18 +10829,7 @@ namespace osuCrypto::LogVole::gpu
                 const u64 destination = Uniform && outIdx ? outIdx[poly] : poly;
                 const uint4 invariant = firstRound;
                 const u32 firstColumnKey = key[0].x;
-                for (u64 counter = firstCounter + threadIdx.x; counter < lastCounter; counter += blockDim.x)
-                {
-                    // words is u32, so these counter blocks always fit in the
-                    // first AES column. Repair still accepts full u64 counters.
-                    const u32 column = static_cast<u32>(counter) ^ firstColumnKey;
-                    const uint4 state = make_uint4(
-                        invariant.x ^ aesPrngFirstRoundVariable<0, bankCopies>(column, mix),
-                        invariant.y ^ aesPrngFirstRoundVariable<3, bankCopies>(column, mix),
-                        invariant.z ^ aesPrngFirstRoundVariable<2, bankCopies>(column, mix),
-                        invariant.w ^ aesPrngFirstRoundVariable<1, bankCopies>(column, mix));
-                    u64 values[2];
-                    aesPrngFinish<2, bankCopies>(key, tables.sbox, mix, state, values[0], values[1]);
+                const auto store = [&](u64 counter, const u64 (&values)[2]) {
 #pragma unroll
                     for (u32 half = 0; half < 2; ++half)
                     {
@@ -10792,6 +10844,50 @@ namespace osuCrypto::LogVole::gpu
                             value = barrettReduce64(value, ring.mMods[limb]);
                         }
                         out[destination * words + index] = value;
+                    }
+                };
+                if constexpr (Uniform)
+                {
+                    __shared__ AesPrngSecondRoundTable secondRound[2];
+                    for (u64 group = firstCounter; group < lastCounter;)
+                    {
+                        // Both production rings fit in one group. Larger
+                        // direct requests update the fixed upper bytes at
+                        // their exact 16-bit counter boundaries.
+                        const u64 upperCounter = group & ~u64{0xffffu};
+                        const u64 boundary = upperCounter + 0x10000u;
+                        const u64 groupEnd = lastCounter < boundary ? lastCounter : boundary;
+                        prepareAesPrngSecondRound<bankCopies>(secondRound[0], secondRound[1],
+                            static_cast<u32>(upperCounter), firstColumnKey, invariant, key[2], mix);
+                        __syncthreads();
+                        for (u64 counter = group + threadIdx.x; counter < groupEnd; counter += blockDim.x)
+                        {
+                            const uint4 state = aesPrngXorColumns(
+                                secondRound[0].load(static_cast<u32>(counter) & 255u),
+                                secondRound[1].load((static_cast<u32>(counter) >> 8u) & 255u));
+                            u64 values[2];
+                            aesPrngFinish<3, bankCopies>(key, tables.sbox, mix, state, values[0], values[1]);
+                            store(counter, values);
+                        }
+                        __syncthreads();
+                        group = groupEnd;
+                    }
+                }
+                else
+                {
+                    for (u64 counter = firstCounter + threadIdx.x; counter < lastCounter; counter += blockDim.x)
+                    {
+                        // words is u32, so generation counters fit in the
+                        // first AES column. Repair still accepts u64 counters.
+                        const u32 column = static_cast<u32>(counter) ^ firstColumnKey;
+                        const uint4 state = make_uint4(
+                            invariant.x ^ aesPrngTableContribution<0, bankCopies>(column, mix),
+                            invariant.y ^ aesPrngTableContribution<3, bankCopies>(column, mix),
+                            invariant.z ^ aesPrngTableContribution<2, bankCopies>(column, mix),
+                            invariant.w ^ aesPrngTableContribution<1, bankCopies>(column, mix));
+                        u64 values[2];
+                        aesPrngFinish<2, bankCopies>(key, tables.sbox, mix, state, values[0], values[1]);
+                        store(counter, values);
                     }
                 }
                 __syncthreads();
@@ -14120,7 +14216,8 @@ namespace osuCrypto::LogVole::gpu
         const u64 neededTiles = (targetBlocks + polyBlocks - 1u) / polyBlocks;
         const auto tiles = static_cast<u32>(std::min(availableTiles, neededTiles));
         const auto countersPerTile = static_cast<u32>((counterCount + tiles - 1u) / tiles);
-        aesPrngStreamKernel<true><<<dim3(polyBlocks, tiles), 128, 0, asStream(stream)>>>(
+        constexpr u32 threads = 256u;
+        aesPrngStreamKernel<true, threads><<<dim3(polyBlocks, tiles), threads, 0, asStream(stream)>>>(
             keys, out, static_cast<u32>(words), count, ring, maxMultiple, outIdx,
             rejectEpochs, rejectEpoch, countersPerTile);
         if (!check(cudaGetLastError(), "aesUniform")) return false;
