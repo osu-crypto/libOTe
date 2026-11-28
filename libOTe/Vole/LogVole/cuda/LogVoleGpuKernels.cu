@@ -1629,7 +1629,58 @@ namespace osuCrypto::LogVole::gpu
             }
         }
 
-        // Fixed-log13 forward with warp-local S7..S12.
+        // Two descending-gap stages share four values. Keep the first stage's
+        // two butterfly results in registers until the second stage publishes
+        // them, retaining every original guard and lazy Shoup multiplication.
+        // RootFactor is 1 for a full 8192 transform and 2 or 3 for an
+        // 8192 tile following the 16384 crossing stage.
+        template<u32 Stage, u32 RootFactor>
+        __device__ __forceinline__ void nttForwardTile8192StagePair(
+            u64* sh, const ShoupOperand* roots, u64 q, u64 twoQ)
+        {
+            static_assert(Stage <= 5u);
+            static_assert(RootFactor >= 1u && RootFactor <= 3u);
+            constexpr u32 logGap = 11u - Stage;
+            constexpr u32 gap = 1u << logGap;
+            constexpr u32 rootBase = (1u << Stage) * RootFactor;
+            for (u32 j = threadIdx.x; j < 2048u; j += blockDim.x)
+            {
+                const u32 group = Stage == 0u ? 0u : j >> logGap;
+                const u32 ix = j + (group << logGap) * 3u;
+                u64 lo0, hi0, lo1, hi1;
+                {
+                    const ShoupOperand r = nttLoadShoup<true>(
+                        roots + rootBase + group);
+                    const u64 u0 = nttGuard(sh[ix], twoQ);
+                    const u64 v0 = mulShoupLazy(sh[ix + 2u * gap], r, q);
+                    lo0 = u0 + v0;
+                    hi0 = u0 + twoQ - v0;
+                    const u64 u1 = nttGuard(sh[ix + gap], twoQ);
+                    const u64 v1 = mulShoupLazy(sh[ix + 3u * gap], r, q);
+                    lo1 = u1 + v1;
+                    hi1 = u1 + twoQ - v1;
+                }
+                {
+                    const ShoupOperand r = nttLoadShoup<true>(
+                        roots + 2u * rootBase + 2u * group);
+                    const u64 u = nttGuard(lo0, twoQ);
+                    const u64 v = mulShoupLazy(lo1, r, q);
+                    sh[ix] = u + v;
+                    sh[ix + gap] = u + twoQ - v;
+                }
+                {
+                    const ShoupOperand r = nttLoadShoup<true>(
+                        roots + 2u * rootBase + 2u * group + 1u);
+                    const u64 u = nttGuard(hi0, twoQ);
+                    const u64 v = mulShoupLazy(hi1, r, q);
+                    sh[ix + 2u * gap] = u + v;
+                    sh[ix + 3u * gap] = u + twoQ - v;
+                }
+            }
+            __syncthreads();
+        }
+
+        // Fixed-log13 forward with paired S1..S6 and warp-local S7..S12.
         __global__ __launch_bounds__(kNttThreads, 2)
         void nttForwardWarpStages7128192Rho4Kernel(
             DeviceRing rg,
@@ -1661,12 +1712,9 @@ namespace osuCrypto::LogVole::gpu
             }
             __syncthreads();
 
-            nttForwardStage8192<1u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<2u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<3u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<4u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<5u, true, true>(sh, roots, q, twoQ);
-            nttForwardStage8192<6u, true, true>(sh, roots, q, twoQ);
+            nttForwardTile8192StagePair<1u, 1u>(sh, roots, q, twoQ);
+            nttForwardTile8192StagePair<3u, 1u>(sh, roots, q, twoQ);
+            nttForwardTile8192StagePair<5u, 1u>(sh, roots, q, twoQ);
             nttForwardWarpStages712Store8192(
                 sh, roots, q, twoQ, dst);
         }
@@ -1887,55 +1935,6 @@ namespace osuCrypto::LogVole::gpu
                 __syncthreads();
         }
 
-        // Two descending-gap stages share four values. Keep the first stage's
-        // two butterfly results in registers until the second stage publishes
-        // them, retaining every original guard and lazy Shoup multiplication.
-        template<u32 Stage, u32 RootFactor>
-        __device__ __forceinline__ void nttForwardLog14TileStagePair(
-            u64* sh, const ShoupOperand* roots, u64 q, u64 twoQ)
-        {
-            static_assert(Stage <= 5u);
-            static_assert(RootFactor == 2u || RootFactor == 3u);
-            constexpr u32 logGap = 11u - Stage;
-            constexpr u32 gap = 1u << logGap;
-            constexpr u32 rootBase = (1u << Stage) * RootFactor;
-            for (u32 j = threadIdx.x; j < 2048u; j += blockDim.x)
-            {
-                const u32 group = Stage == 0u ? 0u : j >> logGap;
-                const u32 ix = j + (group << logGap) * 3u;
-                u64 lo0, hi0, lo1, hi1;
-                {
-                    const ShoupOperand r = nttLoadShoup<true>(
-                        roots + rootBase + group);
-                    const u64 u0 = nttGuard(sh[ix], twoQ);
-                    const u64 v0 = mulShoupLazy(sh[ix + 2u * gap], r, q);
-                    lo0 = u0 + v0;
-                    hi0 = u0 + twoQ - v0;
-                    const u64 u1 = nttGuard(sh[ix + gap], twoQ);
-                    const u64 v1 = mulShoupLazy(sh[ix + 3u * gap], r, q);
-                    lo1 = u1 + v1;
-                    hi1 = u1 + twoQ - v1;
-                }
-                {
-                    const ShoupOperand r = nttLoadShoup<true>(
-                        roots + 2u * rootBase + 2u * group);
-                    const u64 u = nttGuard(lo0, twoQ);
-                    const u64 v = mulShoupLazy(lo1, r, q);
-                    sh[ix] = u + v;
-                    sh[ix + gap] = u + twoQ - v;
-                }
-                {
-                    const ShoupOperand r = nttLoadShoup<true>(
-                        roots + 2u * rootBase + 2u * group + 1u);
-                    const u64 u = nttGuard(hi0, twoQ);
-                    const u64 v = mulShoupLazy(hi1, r, q);
-                    sh[ix + 2u * gap] = u + v;
-                    sh[ix + 3u * gap] = u + twoQ - v;
-                }
-            }
-            __syncthreads();
-        }
-
         template<u32 RootFactor, bool PairedPrefix = false>
         __device__ __forceinline__ void nttForwardLog14TilePrefix06(
             u64* sh,
@@ -1945,9 +1944,9 @@ namespace osuCrypto::LogVole::gpu
         {
             if constexpr (PairedPrefix)
             {
-                nttForwardLog14TileStagePair<0u, RootFactor>(sh, roots, q, twoQ);
-                nttForwardLog14TileStagePair<2u, RootFactor>(sh, roots, q, twoQ);
-                nttForwardLog14TileStagePair<4u, RootFactor>(sh, roots, q, twoQ);
+                nttForwardTile8192StagePair<0u, RootFactor>(sh, roots, q, twoQ);
+                nttForwardTile8192StagePair<2u, RootFactor>(sh, roots, q, twoQ);
+                nttForwardTile8192StagePair<4u, RootFactor>(sh, roots, q, twoQ);
             }
             else
             {
